@@ -24,6 +24,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = []
 deep-link-dev = []
+# Bundle OpenSSL from source instead of linking against the system libssl.
+# Activated by the release workflow on Linux + macOS so produced binaries
+# don't depend on the runner's libssl version (and so the macOS x86_64 cross
+# build on the arm64 runner finds the right OpenSSL for the target).
+# Off by default to keep local dev incremental builds fast and avoid the
+# Perl/CMake prerequisites the vendored build needs — on Windows this feature
+# is a no-op since openssl-sys isn't in the dep graph (native-tls uses
+# Schannel, libgit2 uses WinHTTP).
+vendored-openssl = ["dep:openssl-sys"]
 
 # Release profile — tuned for shipping a desktop binary, not for build speed.
 # `lto = "thin"` keeps link times reasonable while still inlining across
@@ -230,3 +239,14 @@ windows-sys = { version = "0.52", features = [
   "Win32_System_Diagnostics_ToolHelp",  # EcoQoS — apply throttling to child processes (WebView2 renderers)
   "Win32_Storage_FileSystem",           # FilePickerModal — GetLogicalDrives (enumerate drive letters)
 ] }
+
+# Optional, target-gated openssl-sys. Activated by the `vendored-openssl`
+# Cargo feature (see `[features]`). Listed here under `cfg(not(windows))`
+# so enabling the feature on Windows is a true no-op — neither the dep nor
+# the OpenSSL source compile run, and Windows builds never require Perl.
+# When the feature IS active (Linux + macOS release CI), Cargo feature
+# unification propagates `vendored` to every other consumer of openssl-sys
+# in the dep graph (git2, libssh2-sys, reqwest's native-tls on Linux), so
+# OpenSSL is built from source for the right target.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+openssl-sys = { version = "0.9", features = ["vendored"], optional = true }
