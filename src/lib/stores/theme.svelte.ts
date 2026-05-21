@@ -130,7 +130,25 @@ async function init() {
       applyAndBroadcast('plugin');
     },
   );
+  // Marketplace install/uninstall (and any other backend-side write to the
+  // themes dir) emits this — pull the fresh list so the TitleBar dropdown
+  // and Theme Editor see the new entry without a restart.
+  await listen('arbor://themes-changed', () => {
+    void refresh();
+  });
   _ready = true;
+}
+
+/** Re-read custom themes from disk. If the currently active theme was
+ *  removed while we weren't looking, fall back to the default. */
+async function refresh() {
+  try {
+    _custom = await listCustomThemes();
+  } catch {
+    return;
+  }
+  const stillExists = [...BUILT_IN, ..._custom].some(t => t.id === _activeId);
+  if (!stillExists) await setActive('dark');
 }
 
 async function setActive(id: string) {
@@ -283,6 +301,7 @@ export const themeStore = {
   get useThemeFonts() { return _useThemeFonts; },
   setUseThemeFonts,
   init,
+  refresh,
   setActive,
   preview,
   revertPreview,
