@@ -1,0 +1,18 @@
+name        = "jira-linker"
+version     = "0.1.0"
+description = "Detects JIRA issue keys in commit messages and enriches the graph"
+author      = "Nightprint Studio"
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+git = "read"
+
+# NOTE: settings panel migration to `arbor.ui.settings.panel(...)` is pending.
+# Until the migration lands, `jira:configure` is still callable directly but
+# the gear icon in the Plugin Manager will only show after the plugin
+# registers a panel through the new API.
+
+[hooks]
+on_plugin_load = true
+on_commit      = true

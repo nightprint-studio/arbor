@@ -1,0 +1,42 @@
+<h1>Panel Demo</h1>
+<p>
+  Minimal proof-of-concept for the <strong>right-side ActivityBar</strong> and
+  the <code>arbor.ui.add_sidebar</code> + <code>arbor.ui.set_panel_content</code>
+  API. When the plugin is enabled, Arbor reveals the right-side icon rail
+  with two entries:
+</p>
+<ul>
+  <li><strong>🧩 Panel Demo</strong> — right sidebar (top area).
+    Opens a panel with a heading, a counter that proves the
+    <code>panel:open:&lt;id&gt;</code> hook re-fires on every reopen, a list of
+    clickable actions, and a footer button.</li>
+  <li><strong>📋 Panel Demo — bottom</strong> — right bottom area.
+    Opens the <em>unique</em> bottom panel; clicking it while Stage / Terminal /
+    Pipelines is open swaps the content (same slot).</li>
+</ul>
+
+<h2>What this plugin demonstrates</h2>
+<ul>
+  <li><code>arbor.ui.add_sidebar({id, side, position, ...})</code> — declare a
+    right-side entry. <code>side="right"</code> + <code>position="top"</code>
+    puts the icon in the top group; <code>position="bottom"</code> routes to
+    the shared bottom panel slot.</li>
+  <li><code>panel:open:&lt;id&gt;</code> — lifecycle hook fired every time the
+    user opens the panel. The plugin is expected to respond with
+    <code>arbor.ui.set_panel_content</code>.</li>
+  <li><code>arbor.ui.set_panel_content(id, {title, nodes, actions?})</code> —
+    pushes form-DSL content into the panel. Supported node types in the
+    lightweight sidebar renderer: <code>heading</code>, <code>label</code>,
+    <code>paragraph</code>, <code>divider</code>, <code>button</code>,
+    <code>list</code>, <code>section</code>.</li>
+  <li>Permission surface — zero. The plugin declares
+    <code>git_read = false</code>, <code>git_write = false</code>,
+    <code>filesystem = "none"</code>.</li>
+</ul>
+
+<h2>Uninstall</h2>
+<p>
+  Disable or delete the plugin folder to remove both icons. The right
+  ActivityBar auto-hides when no plugin is contributing — the layout falls
+  back to the classic IntelliJ-left-only style.
+</p>

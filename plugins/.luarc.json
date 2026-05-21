@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/lua-language-server/master/doc/luarc.schema.json",
+  "runtime": {
+    "version": "Lua 5.4"
+  },
+  "workspace": {
+    "library": ["."],
+    "ignoreDir": [
+      "**/.arbor",
+      "**/node_modules"
+    ]
+  },
+  "diagnostics": {
+    "globals": ["arbor"],
+    "disable": ["lowercase-global"]
+  },
+  "completion": {
+    "callSnippet": "Both"
+  },
+  "hint": {
+    "enable": true,
+    "paramName": "All",
+    "paramType": true,
+    "returnType": true
+  }
+}

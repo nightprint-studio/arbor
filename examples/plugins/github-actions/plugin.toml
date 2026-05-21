@@ -1,0 +1,16 @@
+name        = "github-actions"
+version     = "0.1.0"
+description = "Shows GitHub Actions CI status for commits in the graph"
+author      = "Nightprint Studio"
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+network = ["api.github.com"]
+git     = "read"
+
+
+[hooks]
+on_commit   = true
+on_checkout = true
+on_fetch    = true

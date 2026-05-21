@@ -1,0 +1,16 @@
+name        = "branch-stats"
+version     = "1.0.0"
+description = "Logs branch lifecycle events to the Arbor console — a minimal working example."
+author      = "You"
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+git = "read"
+
+
+[hooks]
+on_plugin_load = true
+on_checkout    = true
+on_commit      = true
+on_fetch       = true

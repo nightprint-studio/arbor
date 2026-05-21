@@ -1,0 +1,43 @@
+<h1>GitHub Actions</h1>
+<p>Overlays GitHub Actions CI status on commits in the graph. After every fetch, the plugin queries the GitHub Checks API and caches the run result per commit SHA — so you can see at a glance whether a build passed or failed without leaving Arbor.</p>
+
+<h2>What it does</h2>
+<ul>
+  <li>Parses the active repository's remote URL to extract the <code>owner/repo</code> slug (supports HTTPS and SSH remotes)</li>
+  <li>Maintains an in-memory cache of <code>oid → { status, updated_at }</code></li>
+  <li>Invalidates the cache entry for the latest commit on every <code>on_commit</code> event, so the new run is picked up on the next fetch</li>
+  <li>Refreshes CI statuses from the GitHub Checks API on <code>on_fetch</code></li>
+</ul>
+
+<h2>Requirements</h2>
+<table class="shortcuts-table">
+  <thead><tr><th>Permission</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>network = ["api.github.com"]</code></td><td>Queries the GitHub Checks / Commit Statuses API to fetch CI run results</td></tr>
+    <tr><td><code>git_read = true</code></td><td>Reads the active repository path and remote URL</td></tr>
+  </tbody>
+</table>
+
+<h2>Hooks</h2>
+<table class="shortcuts-table">
+  <thead><tr><th>Hook</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><code>on_commit</code></td><td>Clears the cache for the new commit OID so the next fetch picks it up</td></tr>
+    <tr><td><code>on_checkout</code></td><td>Logs the branch switch for debugging</td></tr>
+    <tr><td><code>on_fetch</code></td><td>Batch-requests the latest CI statuses from the GitHub API and updates the cache</td></tr>
+  </tbody>
+</table>
+
+<h2>Supported remote formats</h2>
+<pre><code># HTTPS
+https://github.com/owner/repo.git
+
+# SSH
+git@github.com:owner/repo.git</code></pre>
+<p>Non-GitHub remotes are silently ignored — the plugin does nothing for GitLab, Bitbucket, or self-hosted repositories.</p>
+
+<h2>Notes</h2>
+<ul>
+  <li>No API token is configured — requests are unauthenticated and subject to GitHub's rate limits (60 req/hour per IP). For private repositories or high-volume use, a future settings form will let you provide a Personal Access Token.</li>
+  <li>The cache is in-memory only and is cleared when Arbor is restarted.</li>
+</ul>

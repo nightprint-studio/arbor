@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/sumneko/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.4",
+  "diagnostics.globals": ["arbor"],
+  "workspace.library": ["sdk.d.lua"],
+  "workspace.checkThirdParty": false,
+  "telemetry.enable": false
+}

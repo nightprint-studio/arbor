@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!--
+    IntelliJ-inspired (Arbor palette) — "Two-Branch Merge"
+    JetBrains-style corner wedges, but using Arbor's signature blue → cyan → teal → green
+    palette. The "A" is replaced by two git lanes (left foot + right foot) that
+    curve upward, are connected mid-air by a short bridge, and then merge at the
+    apex HEAD commit.
+  -->
+  <defs>
+    <linearGradient id="ar-bg" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#1b2847"/>
+      <stop offset="55%"  stop-color="#121a33"/>
+      <stop offset="100%" stop-color="#0a1020"/>
+    </linearGradient>
+
+    <!-- Corner wedges in Arbor colors -->
+    <linearGradient id="ar-blue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#2f6de8"/>
+      <stop offset="100%" stop-color="#9cd6ff"/>
+    </linearGradient>
+    <linearGradient id="ar-cyan" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#88f0e2"/>
+      <stop offset="100%" stop-color="#3fd6c9"/>
+    </linearGradient>
+    <linearGradient id="ar-teal" x1="1" y1="1" x2="0" y2="0">
+      <stop offset="0%"  stop-color="#1aa79a"/>
+      <stop offset="100%" stop-color="#3fd6c9"/>
+    </linearGradient>
+    <linearGradient id="ar-green" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#27b05a"/>
+      <stop offset="100%" stop-color="#65f18a"/>
+    </linearGradient>
+
+    <!-- Branch lane gradients (match Arbor's existing legs) -->
+    <linearGradient id="ar-laneL" x1="150" y1="430" x2="256" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#2f6de8"/>
+      <stop offset="55%"  stop-color="#4f9bff"/>
+      <stop offset="100%" stop-color="#9cd6ff"/>
+    </linearGradient>
+    <linearGradient id="ar-laneR" x1="362" y1="430" x2="256" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#1aa79a"/>
+      <stop offset="55%"  stop-color="#3fd6c9"/>
+      <stop offset="100%" stop-color="#88f0e2"/>
+    </linearGradient>
+    <linearGradient id="ar-bridge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#27b05a"/>
+      <stop offset="50%"  stop-color="#65f18a"/>
+      <stop offset="100%" stop-color="#2bb878"/>
+    </linearGradient>
+
+    <!-- Apex glow -->
+    <radialGradient id="ar-apex" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="45%"  stop-color="#d8e8ff"/>
+      <stop offset="100%" stop-color="#6ea8ff"/>
+    </radialGradient>
+
+    <filter id="ar-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="ar-apexGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="12" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <clipPath id="ar-card">
+    <rect x="0" y="0" width="512" height="512" rx="112" ry="112"/>
+  </clipPath>
+
+  <!-- Backdrop -->
+  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="url(#ar-bg)"/>
+
+  <!-- Corner wedges -->
+  <g clip-path="url(#ar-card)">
+    <polygon points="0,0 260,0 0,260"           fill="url(#ar-blue)"/>
+    <polygon points="512,0 512,260 252,0"        fill="url(#ar-cyan)"/>
+    <polygon points="0,512 0,252 260,512"        fill="url(#ar-teal)"/>
+    <polygon points="512,512 252,512 512,252"    fill="url(#ar-green)"/>
+
+    <!-- Inner dark inset (letterbox) -->
+    <rect x="68" y="68" width="376" height="376" rx="56" ry="56" fill="#0e1424"/>
+
+    <!-- Subtle inner bevel on inset -->
+    <rect x="68" y="68" width="376" height="80" rx="56" ry="56" fill="#ffffff" fill-opacity="0.04"/>
+  </g>
+
+  <!--
+    Two branches converging into the apex HEAD.
+    Left lane:  foot (150, 420) → curves up and inward → apex (256, 110)
+    Right lane: foot (362, 420) → curves up and inward → apex (256, 110)
+    Bridge:    connector between lanes at y ≈ 300 (a small merge/cherry-pick).
+  -->
+
+  <g filter="url(#ar-glow)">
+    <!-- Left lane -->
+    <path d="M 150 420
+             C 168 340, 200 268, 256 110"
+          fill="none"
+          stroke="url(#ar-laneL)"
+          stroke-width="44"
+          stroke-linecap="round"/>
+
+    <!-- Right lane -->
+    <path d="M 362 420
+             C 344 340, 312 268, 256 110"
+          fill="none"
+          stroke="url(#ar-laneR)"
+          stroke-width="44"
+          stroke-linecap="round"/>
+
+    <!-- Bridge: short connector that "links" the two branches -->
+    <path d="M 198 296 Q 256 318 314 296"
+          fill="none"
+          stroke="url(#ar-bridge)"
+          stroke-width="22"
+          stroke-linecap="round"/>
+  </g>
+
+  <!-- Commit nodes on the lanes -->
+  <g fill="#0e1424">
+    <!-- Foot commits -->
+    <circle cx="150" cy="420" r="18" stroke="#6fb3ff" stroke-width="6" filter="url(#ar-glow)"/>
+    <circle cx="362" cy="420" r="18" stroke="#4fe0d0" stroke-width="6" filter="url(#ar-glow)"/>
+    <!-- Bridge endpoint commits -->
+    <circle cx="198" cy="296" r="11" stroke="#7cf59e" stroke-width="5"/>
+    <circle cx="314" cy="296" r="11" stroke="#7cf59e" stroke-width="5"/>
+  </g>
+
+  <!-- Bridge midpoint accent -->
+  <circle cx="256" cy="310" r="7" fill="#b8f3c8" opacity="0.95"/>
+
+  <!-- Apex HEAD commit -->
+  <g filter="url(#ar-apexGlow)">
+    <circle cx="256" cy="110" r="30" fill="#1a2a55" stroke="#b8d0ff" stroke-width="8"/>
+    <circle cx="256" cy="110" r="14" fill="url(#ar-apex)"/>
+  </g>
+</svg>

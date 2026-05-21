@@ -1,0 +1,169 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0). Must already exist.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: ''
+            asset_suffix: linux-x64
+          - os: windows-latest
+            target: ''
+            asset_suffix: windows-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset_suffix: macos-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset_suffix: macos-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF##*/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build + bundle (tauri-action)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseName: 'Arbor ${{ steps.tag.outputs.name }}'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+
+      # ─── Portable: Windows ────────────────────────────────────────────────
+      - name: Build portable (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          npx tauri build --no-bundle
+          $tag = "${{ steps.tag.outputs.name }}"
+          $zip = "arbor-$tag-${{ matrix.asset_suffix }}-portable.zip"
+          Compress-Archive -Path "src-tauri/target/release/arbor.exe" -DestinationPath $zip
+          gh release upload $tag $zip --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ─── Portable: Linux (binary + icon + .desktop + install.sh) ──────────
+      - name: Build portable (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        shell: bash
+        run: |
+          npx tauri build --no-bundle
+          TAG="${{ steps.tag.outputs.name }}"
+          STAGE="arbor-portable"
+          rm -rf "$STAGE" && mkdir "$STAGE"
+
+          cp src-tauri/target/release/arbor "$STAGE/arbor"
+          cp src-tauri/icons/icon.png "$STAGE/arbor.png"
+
+          cat > "$STAGE/arbor.desktop" <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=Arbor
+          GenericName=Git Client
+          Comment=Git client with CI/CD, security dashboards, and Lua plugins
+          Exec=@INSTALL_DIR@/arbor
+          Icon=arbor
+          Terminal=false
+          Categories=Development;RevisionControl;
+          StartupWMClass=Arbor
+          DESKTOP
+
+          cat > "$STAGE/install.sh" <<'INSTALL'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          HERE="$(cd "$(dirname "$0")" && pwd)"
+          BIN_DIR="$HOME/.local/bin"
+          ICON_DIR="$HOME/.local/share/icons/hicolor/512x512/apps"
+          APP_DIR="$HOME/.local/share/applications"
+          mkdir -p "$BIN_DIR" "$ICON_DIR" "$APP_DIR"
+          install -m 755 "$HERE/arbor"     "$BIN_DIR/arbor"
+          install -m 644 "$HERE/arbor.png" "$ICON_DIR/arbor.png"
+          sed "s|@INSTALL_DIR@|$BIN_DIR|g" "$HERE/arbor.desktop" > "$APP_DIR/arbor.desktop"
+          update-desktop-database "$APP_DIR" 2>/dev/null || true
+          gtk-update-icon-cache -q -t -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+          echo "Arbor installed to $BIN_DIR/arbor"
+          echo "Run with: arbor   (ensure $BIN_DIR is on your PATH)"
+          INSTALL
+          chmod +x "$STAGE/install.sh"
+
+          cat > "$STAGE/README.txt" <<'README'
+          Arbor — portable Linux build
+          ────────────────────────────
+          Run directly:
+              ./arbor
+          Or integrate into the desktop (~/.local, no sudo):
+              ./install.sh
+
+          Runtime requirements:
+              libwebkit2gtk-4.1, libgtk-3, libayatana-appindicator3, librsvg2
+          README
+
+          TARBALL="arbor-$TAG-${{ matrix.asset_suffix }}-portable.tar.gz"
+          tar czf "$TARBALL" "$STAGE"
+          gh release upload "$TAG" "$TARBALL" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "Draft release created for tag. Review and publish from the GitHub Releases page."

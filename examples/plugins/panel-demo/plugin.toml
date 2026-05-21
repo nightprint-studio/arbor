@@ -1,0 +1,12 @@
+﻿name        = "panel-demo"
+version     = "1.0.0"
+description = "Proof-of-concept of the right-side ActivityBar + arbor.ui.add_sidebar / set_panel_content API."
+author      = "Nightprint Studio"
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+# No host capabilities needed — panel demo is purely UI.
+
+[hooks]
+on_plugin_load = true

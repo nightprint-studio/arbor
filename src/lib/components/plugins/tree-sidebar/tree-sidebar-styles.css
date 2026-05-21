@@ -1,0 +1,216 @@
+/*
+  Plugin tree sidebar styles — extracted from PluginTreeSidebar.svelte during
+  the Phase 4 god-object refactor. Selectors that previously used `:global()`
+  to reach into child component DOM (Tree, PanelShell) are written plain here
+  — everything in a `.css` file is global. Class names stay the same so the
+  sub-components (PluginTreeNode / Toolbar / Footer) just need to attach the
+  expected class names to their roots and the styling applies as before.
+*/
+
+/* Outer wrapper. In sidebar mode it's a transparent passthrough
+   (PanelShell self-sizes to 100% as before); in bottom-mode the
+   `.bottom-stack` modifier turns it into a flex column so the
+   BottomPanelHeader stays at 34px and the PanelShell body fills
+   the remainder. */
+.plugin-tree-root {
+  height: 100%;
+  width: 100%;
+}
+.plugin-tree-root.bottom-stack {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.plugin-tree-root.bottom-stack .panel-shell {
+  flex: 1;
+  min-height: 0;
+}
+
+.toolbar-divider {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--border-subtle);
+}
+
+/* ── Search row ──────────────────────────────────────────────────────────
+   Same dimensions as the search inputs in the branches sidebar so the
+   visual rhythm stays consistent across all sidebars. */
+.plugin-tree-search-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 10px;
+  background: var(--bg-base);
+  transition: border-color var(--transition-fast);
+}
+.plugin-tree-search-row .search-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.plugin-tree-search-row.focused .search-icon { color: var(--accent); }
+
+.plugin-tree-search-row input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-ui-sans);
+  font-size: 11px;
+  padding: 2px 0;
+  min-width: 0;
+}
+.plugin-tree-search-row input::placeholder { color: var(--text-muted); }
+
+.plugin-tree-search-row .search-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.plugin-tree-search-row .search-clear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* Remote-mode indicator: the input gets a faint left accent so it's clear
+   at a glance that Enter triggers a backend round-trip, not a local
+   refilter. */
+.plugin-tree-search-row.remote-mode {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.plugin-tree-search-row .search-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.plugin-tree-search-row .search-mode-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
+.plugin-tree-search-row .search-mode-toggle.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+
+.plugin-tree-search-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-base));
+  border-top: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+.plugin-tree-search-hint .hint-action {
+  margin-left: auto;
+  background: var(--accent);
+  color: var(--accent-fg, white);
+  border: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  cursor: pointer;
+}
+.plugin-tree-search-hint .hint-action:hover { filter: brightness(1.1); }
+.plugin-tree-search-hint .hint-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.plugin-tree-search-hint .hint-dismiss:hover { color: var(--text-primary); }
+
+/* ── Multi-selection ───────────────────────────────────────────────────────
+   Rows in the selected set get an accent tint. Tree's own single-selection
+   uses `selectedId` and renders the canonical highlight via its internal
+   styles — we layer this class on top so a row can be both "current" AND
+   "in the multi set". The class lands on a child of a generic component
+   (Tree), but since this CSS is global it reaches anywhere. */
+.tree-row.tree-row-multi {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.tree-row.tree-row-multi:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ── Decorator badges ──────────────────────────────────────────────────── */
+.dec-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.dec-badge {
+  font-family: var(--font-code);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.dec-badge-muted   { color: var(--text-muted);   background: var(--bg-overlay); }
+.dec-badge-info    { color: var(--text-secondary); background: var(--bg-elevated); }
+.dec-badge-accent  { color: var(--accent);       background: var(--accent-subtle); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.dec-badge-success { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
+.dec-badge-warning { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); border-color: color-mix(in srgb, var(--warning) 30%, transparent); }
+.dec-badge-error   { color: var(--error);   background: color-mix(in srgb, var(--error) 14%, transparent);   border-color: color-mix(in srgb, var(--error) 30%, transparent); }
+
+/* ── Footer row ──────────────────────────────────────────────────────────
+   Compact, single-row; auto-overflow scrolls horizontally so a busy
+   footer never pushes the body up. */
+.footer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.footer-row::-webkit-scrollbar { display: none; }
+
+.footer-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.footer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-ui-sans);
+  font-size: 11px;
+  padding: 2px 6px;
+  transition: background var(--transition-fast), color var(--transition-fast),
+              border-color var(--transition-fast);
+}
+.footer-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+.footer-btn.accent      { color: var(--accent); }
+.footer-btn.accent:hover { color: var(--accent-hover); }
+.footer-btn:disabled    { opacity: 0.4; cursor: not-allowed; }

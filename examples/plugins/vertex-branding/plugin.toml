@@ -1,0 +1,18 @@
+name        = "vertex-branding"
+version     = "1.0.0"
+description = "Sample enterprise-branding plugin: replaces the Arbor app mark, the OS window icon and the accent palette with the (fictional) Vertex Systems identity."
+author      = "Vertex Systems"
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+# No permissions required:
+#   • arbor.ui.{set,clear}_branding and {set,clear}_theme_tokens are
+#     unrestricted UI APIs (same trust model as arbor.notify);
+#   • SVG and window-icon paths are read server-side by set_branding
+#     (svg_path / window_icon_path), so the plugin never touches the fs
+#     itself and doesn't need a read permission.
+
+[hooks]
+on_plugin_load   = true
+on_plugin_unload = true

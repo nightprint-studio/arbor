@@ -1,0 +1,94 @@
+<h1>vertex-branding</h1>
+<p>
+  Sample <strong>enterprise-branding</strong> plugin. Demonstrates every
+  runtime branding surface Arbor exposes by re-skinning the app with the
+  (fictional) <em>Vertex Systems</em> identity. Disabling the plugin
+  reverts every change — nothing is persisted to disk.
+</p>
+
+<h2>What gets re-skinned</h2>
+<ul>
+  <li>
+    <strong>App mark</strong> (in-app SVG): the rounded V logo paints in the
+    title-bar slot left of the hamburger, in the welcome screen hero, in the
+    About modal header — and is embedded by the HTML stats exporter so any
+    report you generate stays co-branded.
+  </li>
+  <li>
+    <strong>OS window icon</strong> (raster): the same mark, exported as
+    <code>assets/vertex.png</code>, is handed to the OS via Tauri's
+    <code>WebviewWindow::set_icon</code>. Updates the taskbar entry and the
+    Alt-Tab thumbnail on Windows / Linux. macOS dock icons come from
+    <code>Info.plist</code> and require a build-time swap, so this field is a
+    no-op on macOS — the in-app mark still applies.
+  </li>
+  <li>
+    <strong>Accent palette</strong>: a CSS-variable overlay is layered on
+    top of the active theme via <code>arbor.ui.set_theme_tokens</code>.
+    Switching themes (dark ⇆ light) keeps the orange accent — the
+    overlay is reapplied on every theme change.
+  </li>
+</ul>
+
+<h2>Setup</h2>
+<ol>
+  <li>
+    Generate <code>assets/vertex.png</code> from <code>assets/vertex.svg</code>.
+    Any vector tool works — Inkscape, Illustrator, online converters, or
+    one-liner CLI tools (e.g. <code>magick vertex.svg -resize 256x256
+    vertex.png</code>). 256×256 is a sensible target for taskbar icons; on
+    Windows you can also ship a multi-resolution <code>.ico</code> and point
+    <code>window_icon_path</code> there instead.
+  </li>
+  <li>Enable the plugin in the Plugin Manager.</li>
+  <li>
+    A toast confirms the switch. Pop the title-bar palette and the welcome
+    screen open — both should be Vertex orange.
+  </li>
+</ol>
+
+<p>
+  If the PNG is missing when the plugin loads, the SVG mark is still
+  applied and a warning is recorded in the Plugin Logs panel. Drop the
+  PNG in place and reload the plugin to pick up the window-icon swap.
+</p>
+
+<h2>Files</h2>
+<table class="shortcuts-table">
+  <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>plugin.toml</code></td><td>Manifest. Declares the two lifecycle hooks and zero permissions — the branding APIs are unrestricted.</td></tr>
+    <tr><td><code>main.lua</code></td><td>Embeds the SVG inline, builds the absolute icon path from <code>arbor.meta.plugin_dir()</code>, and applies / clears the overrides on the lifecycle hooks.</td></tr>
+    <tr><td><code>assets/vertex.svg</code></td><td>Source artwork. Single source of truth — the Lua file's inline copy is regenerated from this. Used to produce the PNG.</td></tr>
+    <tr><td><code>assets/vertex.png</code></td><td>Raster window icon (you generate this from the SVG).</td></tr>
+  </tbody>
+</table>
+
+<h2>Permissions</h2>
+<p>
+  None. <code>set_branding</code> / <code>clear_branding</code> /
+  <code>set_theme_tokens</code> / <code>clear_theme_tokens</code> are
+  unrestricted UI APIs (same trust model as <code>arbor.notify</code>),
+  the SVG is inlined in <code>main.lua</code> so no <code>arbor.fs.read</code>
+  is needed, and the PNG path is loaded server-side by the backend
+  through Tauri's image API — outside the plugin's filesystem sandbox.
+</p>
+
+<h2>Adapting it for your own brand</h2>
+<ol>
+  <li>
+    Replace the <code>VERTEX_SVG</code> long-string in <code>main.lua</code>
+    with your own inline SVG. Keep <code>viewBox="0 0 512 512"</code> for a
+    square mark; non-square marks render fine but center themselves in the
+    in-app slots.
+  </li>
+  <li>
+    Drop your raster icon at <code>assets/&lt;your-name&gt;.png</code> (or
+    <code>.ico</code>) and update <code>ICON_PATH</code> accordingly.
+  </li>
+  <li>
+    Tune the <code>THEME_OVERLAY</code> table. Any CSS variable defined by
+    Arbor's design system can be overridden — see the <em>Themes &amp;
+    Presets</em> docs page for the full list.
+  </li>
+</ol>

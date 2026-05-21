@@ -1,0 +1,232 @@
+[package]
+name        = "arbor"
+version     = "0.1.0"
+description = "Arbor — Git GUI Client"
+authors     = ["Nightprint Studio"]
+edition     = "2021"
+rust-version = "1.80"
+license     = "GPL-3.0-only"
+
+[lib]
+name = "arbor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# ── Cargo features ──────────────────────────────────────────────────────────
+# `deep-link-dev` toggles activation of BOTH the deep-link plugin and its
+# `single-instance` companion in **debug** builds.  Release builds always
+# enable them (see the `cfg(any(not(debug_assertions), feature = ...))`
+# guards in lib.rs), independent of this feature — so removing it from
+# `default` does NOT affect packaged builds.
+#
+# Default-OFF for dev: opt in with `cargo tauri dev --features deep-link-dev`.
+# Release builds always activate the deep-link plugin (see the
+# `cfg(any(not(debug_assertions), feature = ...))` guards in lib.rs).
+[features]
+default = []
+deep-link-dev = []
+
+# Release profile — tuned for shipping a desktop binary, not for build speed.
+# `lto = "thin"` keeps link times reasonable while still inlining across
+# crates; `codegen-units = 1` lets the optimiser see the full crate at once.
+#
+# NOTE — `panic = "unwind"` + `strip = false` + `debug = 1` are NOT the
+# typical "shipping" choices but are deliberate here: setting them to the
+# usual aggressive `panic = "abort"` + `strip = true` (no `debug`) makes the
+# release binary crash silently at startup on at least one supported
+# environment.  We never bisected which of the three is the real culprit —
+# possibly an interaction between a vendored native dep (libgit2 or Lua),
+# LTO, and stripped panic landing pads.  Until that's diagnosed:
+#   · keep panic = "unwind" so any panic prints a message before death,
+#   · keep strip = false so backtraces resolve to symbol names,
+#   · keep debug = 1 (line tables only) so stack traces include file:line.
+# The binary is somewhat larger than a fully-stripped build but starts up
+# correctly. Revisit once a reproducer for the silent crash exists.
+[profile.release]
+opt-level     = "s"
+lto           = "thin"
+codegen-units = 1
+strip         = "debuginfo"
+panic         = "unwind"
+debug         = 1
+
+[build-dependencies]
+tauri-build = { version = "2.6.1", features = [] }
+
+[dependencies]
+# --- Tauri ---
+tauri             = { version = "2.11.0", features = ["tray-icon", "image-png", "image-ico"] }
+tauri-plugin-opener       = "2.5.4"
+tauri-plugin-notification = "2.3.3"
+# Deep-link `arbor://…` URL handling.  The `deep-link` feature of the
+# single-instance plugin makes the second invocation forward its argv to
+# the running instance (so opening a link never spawns a duplicate).
+# Always pulled in — actual activation is `cfg`-gated in lib.rs (release
+# always on; debug only with the `deep-link-dev` Cargo feature).
+tauri-plugin-deep-link        = "2"
+tauri-plugin-single-instance  = { version = "2", features = ["deep-link"] }
+
+# --- Git ---
+git2    = { version = "0.20.4", features = ["vendored-libgit2"] }
+similar = { version = "2",    features = ["text", "unicode", "bytes", "inline"] }
+
+# --- Plugin system ---
+mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send"] }
+
+# --- Async ---
+tokio        = { version = "1", features = ["full"] }
+# Used for `StreamExt::next()` when streaming HTTP bodies (e.g. attachment downloads).
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Required by `git_provider::GitProvider` trait — async fns in traits via macro.
+async-trait  = "0.1"
+
+# --- Auth / HTTP ---
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "stream"] }
+
+# --- Serialization ---
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+# SIMD-accelerated JSON parser. Used ONLY by the json_studio plugin namespace
+# (`plugin/api/ns/json_studio.rs`) for parsing multi-MB documents into a lazy
+# tree the JSON Studio modal navigates without blocking the UI. Earmarked to
+# be removed once the JSON Studio plugin is migrated to the WASM plugin
+# runtime — the dep moves into the plugin's own WASM module.
+# See: memory/project_json_studio_plugin.md
+simd-json       = "0.13"
+# RFC 9535 JSONPath engine — powers the JSON Studio query bar (filters,
+# slices, multi-select, regex match/search). Same WASM-migration earmark
+# as simd-json above.
+serde_json_path = "0.7"
+# JSONC (JSON with comments) parser with byte-range AST — JSON Studio's
+# editable doc model since Phase 3.b. Parses in strict-JSON mode for `.json`
+# files; the same AST flips to relaxed mode (comments + trailing commas) in
+# Phase 3.d for `.jsonc`. We use it strictly for the AST + byte ranges that
+# drive position-preserving splice mutations — pure-data parses still go
+# through `simd-json` (read-only views, multi-MB streaming) above.
+jsonc-parser = { version = "0.32", features = ["serde"] }
+# RON Studio originally pulled in the `ron` crate for parsing, but
+# `ron::Value` officially doesn't support enums ("Value does not store
+# them" per its own docs) — variant tags are dropped. Since RON's main
+# appeal is tagged enums (`element: Dark`, `variant: Action(..)`) we
+# ship a small custom AST parser in `src/ron_studio/ast.rs` instead,
+# which preserves variant tags. The `ron` crate is therefore NOT a host
+# dependency.
+# Rust source parser used by RON Studio's "Load schema from .rs" feature
+# (`ron_studio/schema.rs`) — walks an entire crate from its Cargo.toml,
+# extracts struct/enum definitions, resolves `mod`/`use`/aliases, and
+# computes the reachable type closure from a chosen root type. `extra-traits`
+# enables `PartialEq`/`Eq`/`Hash` on AST nodes which simplifies cycle
+# detection during BFS. No native deps.
+syn = { version = "2", features = ["full", "extra-traits", "parsing"] }
+# Pretty-printer for `syn` AST → readable Rust source. Used by RON Studio's
+# "View implementation" feature so the user can see the actual definition
+# of a struct/enum referenced anywhere in their RON file.
+prettyplease = "0.2"
+quote = "1"
+# Encoding-aware decode/encode for legacy text files in conflict resolution
+# (windows-1252 / Latin-1 sources still common in older Java codebases on
+# Windows). Round-trips bytes ↔ String preserving the original encoding.
+encoding_rs = "0.8"
+# Structured file edits exposed as `arbor.fs.json_set / yaml_set / toml_set /
+# xml_set` for plugins that need reliable cross-platform config editing
+# inside a LuaOp pipeline step (see src/plugin/api.rs + src/pipeline).
+# Also used by `yaml_studio` for the JSON projection (tree / JSONPath
+# query): multi-doc streams parse via `serde_yaml_ng::Deserializer` and
+# project to `serde_json::Value`. Editing / save goes through
+# `yaml_edit` below, NOT through this crate — `serde_yaml_ng` would lose
+# comments and reformat on round-trip. Maintained fork of the archived
+# `serde_yaml` (replaces the unmaintained/unsound `serde_yml` + `libyml`
+# stack flagged by GHSA-hhw4-xg65-fp2x / GHSA-gfxp-f68g-8x78).
+serde_yaml_ng = "0.10"
+# `yaml_edit` — lossless YAML AST built on rowan (same syntax-tree
+# engine used by rust-analyzer + `toml_edit`). Used by `yaml_studio`
+# (Phase 5.b) as the source-of-truth for the editable Studio modal:
+# mutations clone the `Document`, set/insert/remove on the typed
+# wrappers, and re-emit through `Display`. Comments, whitespace,
+# quote style, anchors, and tags survive the round-trip.
+yaml-edit = "0.2"
+quick-xml  = { version = "0.36", features = ["serialize"] }
+base64     = "0.22"
+sha2       = "0.10"
+
+# --- Config / paths ---
+dirs   = "6.0.0"
+toml   = "0.8"
+# `toml_edit` — lossless TOML AST that preserves comments / whitespace /
+# inline-vs-block formatting natively. Used by `toml_studio` (Phase 4)
+# for the editable Studio modal. The `toml` crate at 0.8 internally
+# uses `toml_edit ~0.22`, so pinning the same major aligns the version
+# in `Cargo.lock`.
+toml_edit = "0.22"
+semver = "1"
+
+# --- Scheduling ---
+# 6-field Spring-style cron expressions (sec min hour day month day-of-week)
+# parsed by `arbor.scheduler.register` triggers in plugin Lua.
+cron = "0.13"
+
+# --- File watch ---
+notify = "6"
+
+# --- Error handling ---
+thiserror = "2"
+
+# --- Logging ---
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# --- Terminal / PTY ---
+portable-pty = "0.8"
+
+# --- Misc ---
+# zip — used by plugin import/export (template bundles + sideload installs).
+zip          = "2"
+# sevenz-rust2 — pure-Rust 7z reader. Used to extract the PortableGit
+# `.7z.exe` self-extracting archive without launching its bundled 7-Zip GUI
+# (which would pop a visible "extracting…" dialog the user mistakes for a
+# Git-for-Windows installer). See `git_cli::download_portable`.
+sevenz-rust2 = "0.17"
+uuid     = { version = "1", features = ["v4"] }
+chrono   = { version = "0.4", features = ["serde"] }
+libc     = "0.2"
+regex    = "1"
+# HTML sanitizer for issue tracker rendered descriptions/comments (Jira renderedFields).
+ammonia  = "4"
+
+# --- Cloud storage (cloud-storage plugin) ---
+# opendal — unified object-store client. Used ONLY by the cloud-storage plugin
+# namespace (`plugin/api/ns/cloud.rs`) and `src/cloud/*`. Same WASM-migration
+# earmark as simd-json: when the WASM plugin runtime lands, this whole module
+# (host commands + namespace + crates) is deleted and the plugin gets its own
+# WASM module that bundles opendal.  See: memory/project_cloud_storage_plugin.md
+#
+# Service-account JWT signing is handled by opendal internally; the user
+# OAuth flow uses the existing `oauth2` crate, and ADC/gcloud-CLI token
+# refresh uses the existing `reqwest` — so opendal is the only new dep.
+opendal = { version = "0.56", default-features = false, features = [
+  "services-gcs",
+  "services-s3",
+  "services-azblob",
+  # opendal-core's internal reqwest 0.13 is independent of our top-level
+  # reqwest 0.12 (different major → no feature unification). Without an
+  # explicit TLS feature here that reqwest gets no TLS backend at all, so
+  # every HTTPS call (notably reqsign's GCS / Azure / S3 OAuth token
+  # exchange) fails at request-signing time. opendal 0.56 only exposes
+  # `reqwest-rustls-tls` (no native-tls passthrough), so we use that.
+  "reqwest-rustls-tls",
+] }
+# opendal 0.56 transitively pulls jsonwebtoken 10 (replacing the vulnerable
+# jsonwebtoken 9, GHSA-h395-gr6q-cpjc / CVE-2026-25537). jsonwebtoken 10
+# switched its default crypto backend from `ring` to `aws-lc-rs`, which
+# compiles `aws-lc-sys` — and on Windows that build runs NASM + CMake unless
+# we opt in to the pre-built NASM object files. Enable that feature here so
+# the toolchain prereqs don't grow.
+aws-lc-sys = { version = "0.41", features = ["prebuilt-nasm"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+  "Win32_Foundation",                   # BOOL, HANDLE, CloseHandle — base types
+  "Win32_System_Threading",             # EcoQoS — SetProcessInformation, SetPriorityClass
+  "Win32_System_Diagnostics_ToolHelp",  # EcoQoS — apply throttling to child processes (WebView2 renderers)
+  "Win32_Storage_FileSystem",           # FilePickerModal — GetLogicalDrives (enumerate drive letters)
+] }

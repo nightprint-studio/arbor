@@ -1,0 +1,62 @@
+<h1>Arbor Showcase</h1>
+<p>A comprehensive reference plugin that exercises <strong>every Arbor plugin API surface</strong> in one place. Use it to verify that the plugin system is working correctly, or as a living example when building your own plugins.</p>
+
+<h2>What it does</h2>
+<ul>
+  <li>Tracks a persistent <strong>load counter</strong> in global settings — incremented every time Arbor starts</li>
+  <li>Adds a <strong>sidebar panel toggle</strong> ("Showcase") in the Activity Bar; opening the panel shows a preferences form</li>
+  <li>Adds a <strong>quick action button</strong> (⚡) in the Activity Bar bottom section</li>
+  <li>Adds context-menu items on <strong>commits</strong> and <strong>branches</strong></li>
+  <li>Adds an <strong>"Open Showcase Panel"</strong> entry to the hamburger menu</li>
+  <li>Reacts to <code>on_commit</code>, <code>on_push</code>, <code>on_checkout</code>, <code>on_fetch</code>, and <code>on_repo_open</code> with toasts and log entries</li>
+  <li>Runs a <strong>background scheduler</strong> every 60 seconds that logs a tick and optionally sends a persistent notification</li>
+</ul>
+
+<h2>Requirements</h2>
+<table class="shortcuts-table">
+  <thead><tr><th>Permission</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>filesystem = "sandbox"</code></td><td>Demonstrates <code>arbor.fs.*</code> read/write within the active repo directory</td></tr>
+    <tr><td><code>network = ["api.github.com"]</code></td><td>Reserved for future showcase of the network API; not used in current version</td></tr>
+    <tr><td><code>git_read = true</code></td><td>Reads current repo path and branch from hook context</td></tr>
+  </tbody>
+</table>
+
+<h2>Hooks demonstrated</h2>
+<table class="shortcuts-table">
+  <thead><tr><th>Hook</th><th>What the showcase does</th></tr></thead>
+  <tbody>
+    <tr><td><code>on_plugin_load</code></td><td>Increments the persistent load counter; logs api_version + app_version</td></tr>
+    <tr><td><code>on_repo_open</code></td><td>Shows a "Repository opened (load #N)" toast</td></tr>
+    <tr><td><code>on_commit</code></td><td>Shows a "Commit detected!" toast and logs the OID</td></tr>
+    <tr><td><code>on_push</code></td><td>Shows a "Push detected!" toast and logs remote + branch</td></tr>
+    <tr><td><code>on_checkout</code></td><td>Shows a "Branch checkout detected!" toast and logs the new branch</td></tr>
+    <tr><td><code>on_fetch</code></td><td>Shows a "Fetch detected!" toast and logs the remote</td></tr>
+    <tr><td>schedule (<code>showcase:tick</code>)</td><td>Logs a tick count every 60 s; sends a persistent notification when enabled</td></tr>
+  </tbody>
+</table>
+
+<h2>Settings</h2>
+<p>Open <strong>Plugin Manager → gear icon</strong> or the sidebar Showcase panel to adjust:</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>Your name</td><td>(empty)</td><td>Stored in global settings for demonstration of text persistence</td></tr>
+    <tr><td>Enable scheduled notifications</td><td>✓ on</td><td>When on, each 60-second scheduler tick sends a persistent notification to the bell overlay</td></tr>
+    <tr><td>Custom Labels</td><td>(empty)</td><td>Key-value pair list — demonstrates the <code>kv_list</code> form field type</td></tr>
+  </tbody>
+</table>
+
+<h2>Sidebar panel</h2>
+<p>Click the <strong>⚡ Showcase</strong> icon in the Activity Bar to open the preferences form directly in a modal. The form demonstrates three layout sections and multiple field types including <code>text</code>, <code>select</code>, and <code>checkbox</code>.</p>
+
+<h2>Using this as a template</h2>
+<p>Every Arbor plugin API feature used in <code>main.lua</code> is annotated with a comment. Search for the API call you want to use and copy the surrounding pattern:</p>
+<pre><code>arbor.ui.add_sidebar()        ← activity bar sidebar toggle (left or right rail)
+arbor.ui.add_context_menu_item()← commit / branch context menu
+arbor.ui.add_menu_item()       ← hamburger menu entry
+arbor.ui.form()              ← modal input form
+arbor.notify{ ... }          ← persistent notification
+arbor.settings.global.*      ← cross-session key-value storage
+arbor.job.spawn()            ← background process with streaming output
+arbor.scheduler.register()   ← Spring-style background scheduler (fixed_rate / fixed_delay / cron)</code></pre>

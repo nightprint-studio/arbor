@@ -1,0 +1,581 @@
+/*
+  Pipeline editor styles — extracted from PluginPipelineEditor.svelte during
+  the Phase 4 god-object refactor. All selectors are scoped under `.pe-*`
+  prefixes so they live happily in the global stylesheet (imported once by
+  the dispatcher). Selectors that previously used `:global(...)` to reach
+  through component boundaries are written plain here — everything is global
+  in a `.css` file.
+*/
+
+.pe-root {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+/* Columns are borderless; the only visible separators are vertical dividers
+   between them (border-right on the first two) and the horizontal divider
+   between each column's header and its body (on .pe-search / .pe-col-header). */
+.pe-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.pe-col-palette  { width: 230px; flex-shrink: 0; border-right: 1px solid var(--border-subtle); }
+.pe-col-sequence { flex: 1 1 auto; min-width: 280px; border-right: 1px solid var(--border-subtle); }
+.pe-col-detail   { width: 320px; flex-shrink: 0; }
+
+/* ── Shared column header ─────────────────────────────────────────── */
+.pe-col-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  min-height: 34px;
+}
+.pe-col-title {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.pe-col-spacer { flex: 1; }
+
+.pe-head-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.pe-head-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ── Palette ──────────────────────────────────────────────────────── */
+.pe-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  position: relative;
+}
+.pe-search svg.pe-search-icon {
+  position: absolute;
+  left: 17px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.pe-search input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 5px 8px 5px 24px;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-family: var(--font-ui-sans);
+}
+.pe-search input:focus { outline: none; border-color: var(--border-focus); }
+.pe-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.pe-search-clear:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.pe-palette-body {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  padding: 4px 6px 8px 6px;
+}
+.pe-empty, .pe-muted {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  text-align: center;
+  padding: 8px 10px;
+  margin: 0;
+}
+.pe-cat {
+  margin: 0 0 8px 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 4px 4px 5px 4px;
+}
+/* Style the shared Collapsible's header to match our category chrome.
+   Scoped under .pe-cat so other Collapsibles (if-block branches) keep
+   their own styling. */
+.pe-cat .collapsible-header {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: var(--font-ui-sans);
+  /* Divider under the category title — same pattern used elsewhere in the
+     app (e.g. Settings sections). --border (not --border-subtle) so the
+     separator actually reads against the card's bg-elevated. */
+  padding: 5px 6px;
+  margin: 0 0 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.pe-cat .collapsible-header:hover { color: var(--text-primary); }
+/* When the category is collapsed, drop the bottom rule + margin so the next
+   category sits right under it — keeps the palette dense. */
+.pe-cat .collapsible:not(.open) .collapsible-header {
+  margin-bottom: 0;
+  border-bottom: none;
+}
+.pe-cat-label { flex: 0 1 auto; }
+.pe-cat-count {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.pe-cat-body {
+  display: flex;
+  flex-direction: column;
+}
+.pe-op {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-ui-sans);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.pe-op:hover { background: var(--bg-hover); color: var(--text-primary); }
+.pe-op svg { flex-shrink: 0; color: var(--cat-color, var(--text-muted)); }
+/* On hover the icon keeps its category colour but gets a touch brighter. */
+.pe-op:hover svg { filter: brightness(1.15); }
+.pe-op-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Sequence ─────────────────────────────────────────────────────── */
+.pe-seq-body {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  padding: 6px 10px 10px 10px;
+}
+.pe-seq-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 14px;
+  text-align: center;
+}
+.pe-seq-empty p { margin: 0; font-size: 12.5px; }
+.pe-seq-empty .pe-muted { font-size: 11.5px; }
+
+.pe-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--font-ui-sans);
+  margin-top: 6px;
+}
+.pe-btn-primary:hover { background: var(--accent-hover); }
+
+.pe-stage {
+  margin-bottom: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+.pe-stage-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.pe-stage-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-overlay);
+  border-bottom: 1px solid var(--border-subtle);
+  min-height: 32px;
+  cursor: pointer;
+  user-select: none;
+}
+.pe-stage-header:hover { background: var(--bg-hover); }
+.pe-stage-selected > .pe-stage-header {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-overlay));
+}
+.pe-stage-idx {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.pe-stage-header svg.pe-stage-mode { color: var(--text-muted); flex-shrink: 0; }
+.pe-stage-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pe-stage-count {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.pe-stage-empty {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.pe-step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pe-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  min-height: 28px;
+  border-left: 2px solid transparent;
+  font-size: 12px;
+}
+.pe-step-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 5px 10px 5px 28px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pe-step:hover {
+  background: var(--bg-hover);
+}
+.pe-step-selected {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-left-color: var(--accent);
+}
+.pe-step-selected:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.pe-step svg.pe-step-icon {
+  color: var(--cat-color, var(--text-muted));
+  flex-shrink: 0;
+}
+/* Selected step: the left accent bar + background already carry the
+   selection state; we just brighten the category-coloured icon so it
+   still reads as the op's category, not as "selected accent blue". */
+.pe-step-selected svg.pe-step-icon { filter: brightness(1.2); }
+.pe-step-name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.pe-step-kind {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.pe-step-flag {
+  font-size: 10px;
+  color: var(--warning, #d19a66);
+}
+
+/* ── Row inline actions (hover reveal) ────────────────────────────── */
+.pe-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  flex-shrink: 0;
+}
+.pe-stage-header .pe-row-actions,
+.pe-step:hover  .pe-row-actions,
+.pe-step-selected .pe-row-actions {
+  opacity: 1;
+}
+.pe-row-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px; height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.pe-row-actions button:hover { background: var(--bg-overlay); color: var(--text-primary); }
+.pe-row-act-danger:hover { color: var(--error, #e06c75) !important; }
+
+/* ── Detail pane ──────────────────────────────────────────────────── */
+.pe-detail-body {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  padding: 12px 14px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pe-detail-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+
+/* ── Drill-down breadcrumb ─────────────────────────────────────────── */
+.pe-head-back {
+  margin-right: 2px;
+}
+.pe-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  font-family: var(--font-ui-sans);
+}
+.pe-bc-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: inherit;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pe-bc-crumb:hover { background: var(--bg-hover); color: var(--text-primary); }
+.pe-bc-current {
+  color: var(--text-primary);
+  font-weight: 500;
+  padding: 3px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pe-breadcrumb svg.pe-bc-sep { color: var(--text-muted); flex-shrink: 0; }
+
+/* ── Step row extras (summary line + drill button) ────────────────── */
+.pe-step-summary {
+  margin-left: 6px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+  font-family: var(--font-ui-sans);
+}
+.pe-step-has-body { border-left: 2px solid var(--cat-color, var(--accent)); }
+.pe-step-enter:hover { color: var(--accent); }
+
+/* ── If-block branches (inline collapsible subgroups) ────────────────── */
+.pe-branches {
+  list-style: none;
+  margin: 4px 0 6px 18px;     /* indent under the parent if-block step */
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pe-branch {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  overflow: hidden;
+}
+.pe-branch-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+/* Style the shared Collapsible's header to match our branch chrome.
+   Scoped to .pe-branch so we don't bleed into other Collapsibles. */
+.pe-branch .collapsible-header {
+  padding: 4px 8px;
+  background: var(--bg-overlay);
+  border-bottom: 1px solid var(--border-subtle);
+  min-height: 26px;
+}
+.pe-branch .collapsible:not(.open) .collapsible-header {
+  border-bottom: none;
+}
+.pe-branch .collapsible-header:hover { background: var(--bg-hover); }
+.pe-branch-active .collapsible-header {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-overlay));
+}
+.pe-branch-header-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.pe-branch-rm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.pe-branch-rm:hover { background: var(--bg-hover); color: var(--error, #e06c75) !important; }
+.pe-branch-label {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: lowercase;
+  font-variant-numeric: tabular-nums;
+}
+.pe-branch-label-else {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-base));
+  border-color: var(--accent);
+}
+.pe-branch-expr {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  color: var(--text-primary);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 11px;
+}
+.pe-branch-expr:focus { outline: none; border-color: var(--border-focus); }
+.pe-branch-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+.pe-branch-actions { gap: 2px; }
+.pe-branch-list {
+  margin: 4px 6px 6px 18px !important;   /* indent further than parent */
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pe-branch-empty {
+  list-style: none;
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+.pe-branch-add-row {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0 0 18px;
+}
+.pe-branch-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  cursor: pointer;
+  font-family: var(--font-ui-sans);
+}
+.pe-branch-add-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}

@@ -1,0 +1,2034 @@
+  /* Modal-chrome rules (.pf-modal / .pf-plugin-tag / .pf-title-text /
+     .pf-desc) live in PluginFormModal.svelte — the renderer is chrome-free. */
+
+  /* ── Body ─────────────────────────────────────────────────────────────────── */
+
+  .pf-body {
+    overflow-y: auto;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    /* Fills remaining height between header and footer; scrolls when content overflows */
+    flex: 1 1 0;
+    min-height: 0;
+    /* The canvas bg matches the app body so modals read as a dedicated
+       surface without an extra tonal layer. Cards inside get their own
+       `--bg-elevated` fill which provides the visual contrast. */
+    background: var(--bg-base);
+  }
+
+  /* ── Fields ───────────────────────────────────────────────────────────────── */
+
+  .pf-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .pf-label {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  .pf-required { color: var(--error); margin-left: 2px; }
+
+  .pf-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-top: 1px;
+  }
+
+  .pf-input.pf-select-trigger {
+    background: var(--bg-input) !important;
+  }
+  .pf-input,
+  .pf-select {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    padding: 7px 10px;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .pf-input:focus,
+  .pf-select:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+  /* Scope to real text inputs / textareas only — `:read-only` also matches
+     non-editable elements like <button> in modern browsers, which would
+     otherwise override the dropdown trigger's --bg-input with --bg-elevated. */
+  input.pf-input:read-only,
+  textarea.pf-input:read-only { opacity: 0.55; cursor: default; background: var(--bg-elevated); }
+  .pf-textarea        { resize: vertical; min-height: 72px; line-height: 1.55; }
+  /* `.pf-input-number` removed — numeric fields now render the shared
+     <NumberStepper> widget which carries its own dimensions (full-width
+     in form columns, fixed 80 px when `narrow`). */
+
+  /* Select / multiselect trigger — reuses .pf-input visuals + adds flex layout
+     with a chevron on the right. */
+  .pf-select-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .pf-select-trigger:disabled { cursor: not-allowed; opacity: 0.55; }
+  .pf-select-trigger-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pf-select-trigger-empty .pf-select-trigger-label { color: var(--text-muted); }
+
+  /* ── Range ────────────────────────────────────────────────────────────────── */
+
+  .pf-range-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .pf-range {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: pointer;
+    height: 4px;
+  }
+  .pf-range:disabled { opacity: 0.5; cursor: default; }
+
+  .pf-range-value {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    min-width: 40px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+
+  /* ── Checkbox — rendered as a toggle switch ──────────────────────────────── */
+
+  .pf-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  /* Scope the toggle styling to direct-child checkboxes so `.pf-list-cb`
+     (checkboxes inside table cells) and other contexts keep native chrome. */
+  .pf-checkbox-row > input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 30px;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    border-radius: 999px;
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+  }
+  .pf-checkbox-row > input[type="checkbox"]::after {
+    content: "";
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    background: var(--text-muted);
+    transition: transform var(--transition-fast), background var(--transition-fast);
+  }
+  .pf-checkbox-row > input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .pf-checkbox-row > input[type="checkbox"]:checked::after {
+    transform: translateX(14px);
+    background: var(--text-on-accent);
+  }
+  .pf-checkbox-row > input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+  }
+  .pf-checkbox-row > input[type="checkbox"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .pf-checkbox-label {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    line-height: 1.4;
+  }
+
+  /* ── Radio / Toggle ───────────────────────────────────────────────────────── */
+  /* Radio fields render via the shared RadioGroup component; no extra CSS. */
+
+  .pf-toggle-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ── Color ────────────────────────────────────────────────────────────────── */
+
+  .pf-color-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .pf-color-swatch {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    background: var(--bg-input);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .pf-color-swatch:disabled { opacity: 0.5; cursor: default; }
+  .pf-color-hex { flex: 1; }
+
+  /* ── Container / Row ──────────────────────────────────────────────────────── */
+
+  /* Fully styled via inline style — base class just ensures correct box model */
+  .pf-container,
+  .pf-row { min-width: 0; }
+
+  /* ── Section ──────────────────────────────────────────────────────────────── */
+
+  .pf-section {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-elevated);
+    flex-shrink: 0;
+  }
+
+  .pf-section-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 13px;
+    background: color-mix(in srgb, var(--bg-overlay) 50%, transparent);
+    border: none;
+    border-bottom: 1px solid var(--border-subtle);
+    width: 100%;
+    text-align: left;
+    cursor: default;
+    color: var(--text-primary);
+  }
+  .pf-section-collapsible         { cursor: pointer; }
+  .pf-section-collapsible:hover   { background: var(--bg-hover); }
+
+  .pf-section-title {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    letter-spacing: 0.1px;
+  }
+
+  /* ChevronRight is rendered as Svelte component; its class is on the SVG element */
+  .pf-chevron {
+    transition: transform var(--transition-fast);
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transform: rotate(0deg);
+  }
+  .pf-chevron-open {
+    transform: rotate(90deg);
+  }
+
+  .pf-section-desc {
+    margin: 0;
+    padding: 8px 12px 2px;
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  .pf-section-body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--bg-elevated);
+  }
+
+  /* ── Separator ────────────────────────────────────────────────────────────── */
+
+  .pf-separator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+  }
+  .pf-separator::before,
+  .pf-separator::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .pf-separator-label { flex-shrink: 0; }
+
+  /* ── Paragraph ────────────────────────────────────────────────────────────── */
+
+  .pf-paragraph {
+    margin: 0;
+    line-height: 1.5;
+    font-size: var(--font-size-sm);
+  }
+  .pf-paragraph-normal  { color: var(--text-primary); }
+  .pf-paragraph-muted   { color: var(--text-muted); }
+  .pf-paragraph-heading { font-weight: 700; font-size: var(--font-size-md); color: var(--text-primary); }
+  .pf-paragraph-caption { font-size: 11px; color: var(--text-muted); }
+
+  /* ── Alert / Code ─────────────────────────────────────────────────────────── */
+  /* Alert nodes render via the shared Alert component; no extra CSS. */
+
+  .pf-code-wrap {
+    position: relative;
+  }
+  .pf-code {
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--bg-code, var(--bg-surface));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
+    overflow-x: auto;
+    line-height: 1.5;
+    white-space: pre;
+  }
+  .pf-code-wrap:has(.pf-code-copy) .pf-code { padding-right: 36px; }
+  .pf-code-copy {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: var(--bg-overlay, var(--bg-elevated));
+    color: var(--text-muted);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--transition-fast),
+                background var(--transition-fast),
+                color var(--transition-fast);
+  }
+  .pf-code-wrap:hover .pf-code-copy,
+  .pf-code-copy:focus-visible { opacity: 1; }
+  .pf-code-copy:hover {
+    background: var(--bg-hover);
+    color: var(--accent);
+  }
+
+  /* ── Footer ───────────────────────────────────────────────────────────────── */
+
+  .btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 14px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    border: none;
+    transition: background var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+
+  /* ── Inline action buttons (button node type) ─────────────────────────────── */
+
+  .pf-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 13px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  }
+  .pf-action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Click-to-copy link — looks like a subdued link, the trailing Copy glyph
+     signals the action. Kept inline-flex so plugins can drop it alongside
+     buttons in a row without alignment drift. */
+  .pf-copy-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px dashed transparent;
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    cursor: pointer;
+    font-family: var(--font-ui-sans);
+    font-size: 12px;
+    text-align: left;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+  }
+  .pf-copy-link:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-subtle);
+  }
+  .pf-copy-link:active { background: var(--accent-subtle); }
+  .pf-copy-link-mono .pf-copy-link-text {
+    font-family: var(--font-code);
+    font-size: 11px;
+    color: var(--text-primary);
+  }
+  .pf-copy-link-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .pf-copy-link .pf-copy-link-glyph {
+    color: var(--text-muted);
+    flex-shrink: 0;
+    opacity: 0.6;
+    transition: opacity var(--transition-fast), color var(--transition-fast);
+  }
+  .pf-copy-link:hover .pf-copy-link-glyph {
+    color: var(--accent);
+    opacity: 1;
+  }
+
+  /* Status icon — semantic colors that map to CSS variables so theme
+     switching reflects here too. Spinning animation is applied by adding
+     `Loader2` as the icon name (handled via plain CSS keyframes). */
+  .pf-status-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+  }
+  .pf-status-icon-default { color: var(--text-primary); }
+  .pf-status-icon-muted   { color: var(--text-muted); }
+  .pf-status-icon-info    { color: var(--accent); }
+  .pf-status-icon-success { color: var(--success); }
+  .pf-status-icon-warning { color: var(--warning); }
+  .pf-status-icon-danger  { color: var(--error); }
+  .pf-status-icon svg[class*="lucide-loader"] { animation: pf-spin 1s linear infinite; }
+  @keyframes pf-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+  .pf-action-default {
+    background: var(--bg-base);
+    color: var(--text-secondary);
+  }
+  .pf-action-default:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+
+  .pf-action-primary {
+    background: var(--accent);
+    color: var(--text-on-accent);
+    border-color: var(--accent);
+    font-weight: 500;
+  }
+  .pf-action-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+  .pf-action-danger {
+    background: transparent;
+    color: var(--error);
+    border-color: color-mix(in srgb, var(--error) 40%, transparent);
+  }
+  .pf-action-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--error) 10%, transparent);
+    border-color: var(--error);
+  }
+
+  .pf-action-ghost {
+    background: transparent;
+    color: var(--text-muted);
+    border-color: transparent;
+  }
+  .pf-action-ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+
+  /* Tight palette-row variant: full-width left-aligned clickable entry for
+     lists of picks (profile palette, op catalog, …). Flush to the card
+     body, transparent at rest, subtle hover — matches the profile editor's
+     Regole op-palette rows so both modals read as the same surface.
+     Opt in with `class = "pal-row"` + `variant = "ghost"` from Lua. */
+  .pf-action-btn.pal-row {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 4px 8px;
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 400;
+    gap: 7px;
+    min-height: 26px;
+  }
+  .pf-action-btn.pal-row:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: transparent;
+    color: var(--text-primary);
+  }
+  .pf-action-btn.pal-row svg {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .pf-action-btn.pal-row:hover svg { color: var(--accent); }
+
+  .pf-btn-spin {
+    display: flex;
+    align-items: center;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── kv_list ──────────────────────────────────────────────────────────────── */
+
+  /* ── List widgets (kv_list + table) — shared styling ───────────────────── */
+  /* Both widgets share the same visual frame:
+     · bordered rounded card on bg-base
+     · header row (table only — kv_list has no labels)
+     · body rows with subtle hover, inline trash-icon remove
+     · empty-state placeholder when there are zero rows
+     · bottom Add button rendered as a dashed full-width drop zone, IntelliJ
+       style — visually inviting at any list length, doesn't sit alone as a
+       lonely ghost link when the list is empty. */
+
+  .pf-list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-base);
+    padding: 4px;
+    gap: 2px;
+  }
+  .pf-list-empty { gap: 0; }
+
+  .pf-list-header {
+    display: grid;
+    gap: 6px;
+    padding: 5px 6px 7px;
+    border-bottom: 1px solid var(--border-subtle);
+    margin-bottom: 2px;
+  }
+  .pf-list-th {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+
+  .pf-list-row {
+    display: grid;
+    gap: 6px;
+    align-items: center;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
+  }
+  .pf-list-row:hover { background: var(--bg-hover); }
+
+  /* kv_list rows are flex (key = value × delete) instead of grid because
+     the `=` separator collapses to its content width and the two inputs
+     share the remaining space proportionally. */
+  .pf-list-row-kv {
+    display: flex;
+    gap: 6px;
+  }
+  .pf-list-cell-key { flex: 1 1 40%; min-width: 0; }
+  .pf-list-cell-val { flex: 1 1 55%; min-width: 0; }
+
+  .pf-list-eq {
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    user-select: none;
+    font-weight: 500;
+    align-self: center;
+  }
+
+  .pf-list-cell { padding: 4px 7px; font-size: 12px; }
+  .pf-list-cb   { accent-color: var(--accent); justify-self: center; }
+
+  .pf-list-empty-state {
+    padding: 14px 8px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    user-select: none;
+  }
+
+  .pf-list-del {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .pf-list-del:hover {
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+    color: var(--error);
+  }
+  .pf-list-row:hover .pf-list-del { color: var(--text-secondary); }
+
+  /* IntelliJ-style "drop zone" Add button — full width, dashed outline,
+     centred Plus + label. Hover fills the dashed area with a soft accent
+     wash so it reads as "drop a new row in here". A small top margin
+     separates it from the last row when the list isn't empty. */
+  .pf-list-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 8px 12px;
+    margin-top: 4px;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-family: var(--font-ui-sans);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--transition-fast),
+                border-color var(--transition-fast),
+                color var(--transition-fast);
+  }
+  .pf-list-add:hover {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+    border-style: solid;
+    color: var(--accent);
+  }
+  .pf-list-add:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  /* When the list is empty, drop the row→add gap so the Add button sits
+     right under the empty-state placeholder without a stray spacer. */
+  .pf-list-empty .pf-list-add { margin-top: 0; }
+
+  /* ── Validation ───────────────────────────────────────────────────────────── */
+
+  .pf-input-error {
+    border-color: var(--error) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--error) 18%, transparent) !important;
+  }
+
+  .pf-validation-error {
+    font-size: 11px;
+    color: var(--error);
+    line-height: 1.4;
+    margin-top: 1px;
+  }
+
+  /* ── Divider ──────────────────────────────────────────────────────────────── */
+
+  .pf-divider {
+    border: none;
+    border-top: 1px solid var(--border-subtle);
+    margin: 4px 0;
+  }
+
+  /* ── Date / datetime / time ──────────────────────────────────────────────── */
+
+  .pf-input-datetime {
+    max-width: 240px;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Calendar icon styling in Chromium — match surrounding theme */
+  .pf-input-datetime::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.6;
+    filter: invert(0.9);
+  }
+  .pf-input-datetime::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+
+  /* ── Tabs ─────────────────────────────────────────────────────────────────── */
+
+  .pf-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    /* Stretch to fill whatever vertical space the parent gives us so that
+       tabs containing a pipeline_editor (or any other flex-stretching node)
+       can actually expand instead of collapsing to their content height. */
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* The tab strip is now rendered by the shared <Tabs variant="underline">
+     widget — only the panel container styles below remain owned here. */
+
+  .pf-tabpanel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    /* Active tabpanel fills the remaining height of .pf-tabs and scrolls its
+       own content when it overflows. Children with `flex: 1` (e.g. a
+       pipeline_editor) stretch to this height instead of hugging content. */
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 14px 16px 16px;
+  }
+  /* Full-bleed variant — the tab ships its own internal spacing and wants to
+     fill the panel edge-to-edge (used by `pipeline_editor`, which has its
+     own divided columns). */
+  .pf-tabpanel-flush {
+    gap: 0;
+    padding: 0;
+  }
+  /* Keep inactive tabs in the DOM — their fields still collect values and
+     validation rules apply — but hide them visually. */
+  .pf-tabpanel-hidden {
+    display: none;
+  }
+
+  /* ── File picker field ───────────────────────────────────────────────────── */
+
+  .pf-file-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .pf-file-path  { flex: 1; min-width: 0; }
+  .pf-file-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 11px;
+    background: var(--bg-base);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .pf-file-btn:hover:not(:disabled)  { background: var(--bg-hover); color: var(--text-primary); }
+  .pf-file-btn:disabled              { opacity: 0.45; cursor: default; }
+  .pf-file-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .pf-file-clear:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+    color: var(--error);
+  }
+
+  /* ── Autocomplete field ──────────────────────────────────────────────────── */
+
+  .pf-auto  { position: relative; }
+  .pf-auto-menu {
+    position: absolute;
+    left: 0; right: 0; top: 100%;
+    margin-top: 2px;
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 30;
+    padding: 3px;
+  }
+  .pf-auto-group {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 6px 8px 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+  .pf-auto-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 6px 9px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    text-align: left;
+    transition: background var(--transition-fast);
+  }
+  .pf-auto-item.active,
+  .pf-auto-item:hover { background: var(--bg-hover); }
+  .pf-auto-label { flex: 1; }
+  .pf-auto-value {
+    font-family: var(--font-code);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* ── Tags / chips field ──────────────────────────────────────────────────── */
+
+  .pf-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding: 5px 7px;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    min-height: 32px;
+    align-items: center;
+  }
+  .pf-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px 2px 8px;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  .pf-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .pf-chip-x:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+  .pf-chip-input {
+    flex: 1;
+    min-width: 100px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    padding: 3px 4px;
+    outline: none;
+  }
+
+  /* ── Tree selector ───────────────────────────────────────────────────────── */
+
+  .pf-tree {
+    /* Plain / flush by default — blends with its container. Opt-in to the
+       legacy bordered look via `bordered = true` on the FormFieldTree. */
+    display: flex;
+    flex-direction: column;
+  }
+  .pf-tree-bordered {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-base);
+    padding: 4px 2px;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .pf-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    min-height: 24px;
+  }
+  .pf-tree-chev {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+  }
+  .pf-tree-chev:hover { background: var(--bg-hover); }
+  .pf-tree-chev-spacer { display: inline-block; width: 16px; flex-shrink: 0; }
+  .pf-chev-collapsed { transform: rotate(-90deg); transition: transform var(--transition-fast); }
+  .pf-tree-icon { color: var(--text-muted); flex-shrink: 0; }
+  .pf-tree-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 3px 6px;
+    color: var(--text-primary);
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    min-width: 0;
+  }
+  .pf-tree-label:hover:not(:disabled) { background: var(--bg-hover); }
+  .pf-tree-label-group { color: var(--text-muted); font-weight: 600; cursor: default; }
+  .pf-tree-label-selected {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .pf-tree-cb {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-base);
+    color: var(--text-on-accent);
+    flex-shrink: 0;
+  }
+  .pf-tree-cb.checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  /* (Legacy `.pf-table-*` and `.pf-kv-*` rules were folded into `.pf-list-*`
+     above — both widgets share the same chrome now.) */
+
+  /* ── Wizard ──────────────────────────────────────────────────────────────── */
+
+  .pf-wizard {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .pf-wizard-steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0 10px;
+    margin: 0;
+    list-style: none;
+    border-bottom: 1px solid var(--border-subtle);
+    overflow-x: auto;
+  }
+  .pf-wizard-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+    white-space: nowrap;
+  }
+  .pf-wizard-step-active { color: var(--text-primary); font-weight: 600; }
+  .pf-wizard-step-done   { color: color-mix(in srgb, var(--accent) 80%, var(--text-secondary)); }
+
+  .pf-wizard-step-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    font-size: 10px;
+    font-weight: 600;
+    color: inherit;
+    flex-shrink: 0;
+  }
+  .pf-wizard-step-active .pf-wizard-step-badge {
+    background: var(--accent);
+    color: var(--text-on-accent);
+    border-color: var(--accent);
+  }
+  .pf-wizard-step-done .pf-wizard-step-badge {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--accent);
+  }
+
+  .pf-wizard-sep {
+    width: 20px;
+    height: 1px;
+    background: var(--border);
+    margin: 0 4px;
+  }
+
+  .pf-wizard-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+  .pf-wizard-panel-hidden { display: none; }
+
+  /* ── Sidebar layout ───────────────────────────────────────────────────────── */
+
+  .pf-sidebar-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .pf-sidebar-nav {
+    width: 240px;
+    flex-shrink: 0;
+    background: var(--bg-base);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+  }
+  .pf-sidebar-nav-hassearch { padding-top: 0; }
+
+  .pf-nav-headline {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-secondary);
+    padding: 10px 14px 4px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+
+  .pf-nav-search {
+    position: relative;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .pf-nav-search-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-ui-sans);
+    font-size: 12px;
+    padding: 5px 22px 5px 9px;
+    outline: none;
+    transition: border-color var(--transition-fast);
+  }
+  .pf-nav-search-input:focus { border-color: var(--accent); }
+  .pf-nav-search-input::placeholder { color: var(--text-disabled); }
+  .pf-nav-search-clear {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: var(--text-disabled);
+    cursor: pointer;
+    padding: 2px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 3px;
+  }
+  .pf-nav-search-clear:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+  .pf-nav-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 0 8px;
+  }
+
+  .pf-nav-group {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--text-disabled);
+    padding: 6px 14px 4px;
+    margin-top: 4px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .pf-nav-group:first-child { margin-top: 0; border-top: none; }
+
+  .pf-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px 5px 14px;
+    font-size: 12px;
+    font-weight: 450;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+    font-family: var(--font-ui-sans);
+    min-width: 0;
+  }
+  .pf-nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .pf-nav-active {
+    background: var(--accent-subtle) !important;
+    color: var(--accent) !important;
+    font-weight: 500;
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  .pf-nav-label-block {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+    line-height: 1.25;
+  }
+  .pf-nav-label-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pf-nav-meta {
+    font-size: 10px;
+    color: var(--text-disabled);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pf-nav-active .pf-nav-meta {
+    color: color-mix(in srgb, var(--accent) 60%, var(--text-disabled));
+  }
+
+  .pf-nav-badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 999px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+    color: var(--text-secondary);
+  }
+  .pf-nav-badge[data-kind="info"]    { background: color-mix(in srgb, var(--accent) 14%, transparent);  color: var(--accent); }
+  .pf-nav-badge[data-kind="success"] { background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
+  .pf-nav-badge[data-kind="warning"] { background: color-mix(in srgb, var(--warning) 16%, transparent); color: var(--warning); }
+  .pf-nav-badge[data-kind="error"]   { background: color-mix(in srgb, var(--error) 16%, transparent);   color: var(--error); }
+  .pf-nav-badge[data-kind="accent"]  { background: color-mix(in srgb, var(--accent) 18%, transparent);  color: var(--accent); }
+
+  .pf-nav-chev { margin-left: 2px; opacity: 0.5; flex-shrink: 0; }
+  .pf-nav-icon { opacity: 0.85; flex-shrink: 0; }
+
+  .pf-nav-empty {
+    padding: 16px 14px;
+    color: var(--text-disabled);
+    font-size: 11px;
+    text-align: center;
+    font-style: italic;
+  }
+
+  .pf-nav-footline {
+    font-size: 10px;
+    color: var(--text-disabled);
+    padding: 6px 14px 8px;
+    border-top: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+    text-align: center;
+  }
+
+  .pf-sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 22px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: var(--bg-elevated);
+  }
+  .pf-sidebar-content-flush { padding: 0; gap: 0; }
+
+  /* ── Cards (used in sidebar mode sections) ───────────────────────────────── */
+
+  .pf-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    /* Cards sit on the modal canvas (`--bg-base`), so they use `--bg-elevated`
+       to read as a raised surface with a clear tonal separation. */
+    background: var(--bg-elevated);
+    /* no overflow:hidden — lets dropdowns / popovers escape and
+       avoids collapsing the parent's scroll when content grows */
+  }
+
+  .pf-card-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-overlay);
+    padding: 8px 14px;
+    /* --border (not --border-subtle) so the title/body divider actually
+       reads on top of the card's bg-overlay fill. */
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    gap: 8px;
+  }
+  .pf-card-title-clickable {
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--transition-fast);
+  }
+  .pf-card-title-clickable:hover { background: var(--bg-hover); }
+  /* When collapsed the card body is hidden, so the title shouldn't look like
+     it has a divider pointing to invisible content. */
+  .pf-card-collapsed .pf-card-title {
+    border-bottom-color: transparent;
+    border-radius: var(--radius-md);
+  }
+
+  .pf-card-title-text {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+  }
+
+  .pf-card-title-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .pf-counter {
+    font-size: 10px;
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    padding: 1px 7px;
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-family: var(--font-code);
+  }
+
+  .pf-ghost-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .pf-ghost-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .pf-ghost-icon:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+  .pf-ghost-icon-danger:hover { color: var(--error); border-color: var(--error); }
+
+  .pf-card-body {
+    padding: 14px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+  }
+  .pf-card-body > .pf-field .pf-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.15px;
+    color: var(--text-secondary);
+  }
+
+  /* Compact variant for dense lists (palette, catalog, flat menus). Apply
+     via `class = "pf-card-compact"` on the section. Reduces padding + gap
+     to match the profile editor's op-palette category density. */
+  .pf-card.pf-card-compact .pf-card-body {
+    padding: 4px 4px 6px;
+    gap: 1px;
+  }
+
+  /* ── Card rows ────────────────────────────────────────────────────────────── */
+
+  .pf-card-row {
+    display: flex;
+    align-items: flex-start;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    gap: 12px;
+    transition: background var(--transition-fast);
+  }
+  .pf-card-row:last-child { border-bottom: none; }
+  .pf-card-row:hover { background: rgba(255, 255, 255, 0.015); }
+
+  .pf-row-label { flex: 0 0 165px; }
+  .pf-row-label-title {
+    font-size: 12px;
+    font-weight: 450;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .pf-row-label-desc {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-top: 2px;
+  }
+  .pf-row-ctrl {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  /* Tighter field spacing inside card rows */
+  .pf-row-ctrl .pf-field { margin: 0; }
+  .pf-row-ctrl .pf-label { display: none; }
+  .pf-row-ctrl .pf-input { font-size: 11.5px; }
+
+  /* ── Config list ──────────────────────────────────────────────────────────── */
+
+  .pf-cfg-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background var(--transition-fast);
+  }
+  .pf-cfg-item:last-child { border-bottom: none; }
+  .pf-cfg-item:hover { background: rgba(255, 255, 255, 0.018); }
+  .pf-cfg-active { background: var(--accent-subtle) !important; }
+  .pf-cfg-clickable { cursor: pointer; }
+  .pf-cfg-clickable:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+  .pf-cfg-icon { color: var(--text-muted); flex-shrink: 0; }
+  .pf-cfg-active .pf-cfg-icon { color: var(--accent); }
+
+  .pf-cfg-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--border);
+    border: 1.5px solid var(--border-subtle);
+    transition: background var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .pf-cfg-active .pf-cfg-dot {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+
+  .pf-cfg-name { font-size: 12px; color: var(--text-primary); flex: 1; }
+
+  .pf-cfg-tag {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+  .pf-cfg-tag-neutral { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-subtle); }
+  .pf-cfg-tag-ok      { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); border: 1px solid color-mix(in srgb, var(--success) 30%, transparent); }
+  .pf-cfg-tag-accent  { background: var(--accent-subtle); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .pf-cfg-tag-dev     { background: var(--accent-subtle); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+  .pf-cfg-tag-prod    { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent); }
+  .pf-cfg-tag-test    { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); border: 1px solid color-mix(in srgb, var(--success) 25%, transparent); }
+
+  .pf-cfg-actions { display: flex; gap: 3px; opacity: 0; transition: opacity var(--transition-fast); }
+  .pf-cfg-item:hover .pf-cfg-actions { opacity: 1; }
+
+  .pf-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .pf-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .pf-icon-btn-danger:hover { color: var(--error) !important; }
+
+  /* ── Suggest grid ─────────────────────────────────────────────────────────── */
+
+  .pf-suggest-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pf-suggest-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border-right: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background var(--transition-fast);
+  }
+  .pf-suggest-item:hover { background: rgba(255, 255, 255, 0.015); }
+  .pf-suggest-item:nth-child(2n) { border-right: none; }
+  .pf-suggest-item:nth-last-child(-n+2) { border-bottom: none; }
+
+  .pf-suggest-name { font-size: 11px; font-weight: 500; color: var(--text-primary); }
+  .pf-suggest-cmd  { font-size: 10px; font-family: var(--font-code); color: var(--text-muted); }
+
+  .pf-suggest-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--accent);
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-family: var(--font-ui-sans);
+  }
+  .pf-suggest-add:hover { text-decoration: underline; }
+
+  /* ── Tree layout (2-col nav / content) ───────────────────────────────────── */
+
+  .pf-tree-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    align-items: stretch;
+    background: var(--bg-elevated);
+    gap: 4px;
+    padding: 0 4px;
+  }
+
+  /* ── Pipeline editor host wrapper ────────────────────────────────────────── */
+  .pf-pipeline-editor-host {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+  .pf-tl-nav {
+    position: relative;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    overflow: hidden;           /* children clip during width animation */
+    min-height: 0;
+    /* Animate WIDTH on state change — a single element reflow-friendly
+       transition. Duration pulled from `animStore.dPanel` via the inline
+       `--pf-tl-anim` var so the user's animation-speed setting applies
+       (Fast / Normal / Slow / Disabled = 0ms — CSS treats 0ms as instant). */
+    width: var(--pf-tl-nav-w, 240px);
+    transition: width var(--pf-tl-anim, 180ms) cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .pf-tl-nav.pf-tl-nav-collapsed {
+    /* 34px fits the 26px round toggle with 4px gutter on each side, so the
+       button stays visually centered when the rail is collapsed. */
+    width: 34px;
+  }
+
+  /* Scrollable inner body — scroll lives here (not on the <aside>) so the
+     outer element can animate `width` with `overflow: hidden` without
+     clipping a scrollbar mid-transition. */
+  .pf-tl-nav-body {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    opacity: 1;
+    transition: opacity calc(var(--pf-tl-anim, 180ms) * 0.6) ease;
+  }
+  .pf-tl-nav-collapsed .pf-tl-nav-body {
+    opacity: 0;
+    /* Prevent stale hover/click targets while the aside shrinks. */
+    pointer-events: none;
+  }
+  .pf-tl-nav-body > * { margin: 0; }
+  /* First direct child (usually the plugin's toolbar row) gets a separator
+     below and enough right-padding to clear the floating toggle button. */
+  .pf-tl-nav-body > .pf-row:first-of-type {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 6px 40px 6px 8px;
+  }
+
+  /* Optional rail footer — pinned at the bottom of the <aside>, sits outside
+     the scrollable body so a long tree won't push it out of view. */
+  .pf-tl-nav-footer {
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-subtle);
+    padding: 4px 6px;
+    background: var(--bg-base);
+  }
+  .pf-tl-nav-footer > * { margin: 0; }
+  .pf-tl-nav-collapsed .pf-tl-nav-footer {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* ── Collapsible sidebar toggle — round, floating top-right ─────────────── */
+  .pf-tl-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px; height: 26px;
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+  }
+  .pf-tl-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .pf-tl-toggle:active { transform: scale(0.94); }
+  .pf-tl-toggle-float {
+    position: absolute;
+    top: 6px;
+    right: 4px;
+    z-index: 2;
+  }
+  /* .pf-tl-rail / .pf-tl-toggle-rail removed — the collapsed state is now
+     the same <aside> at 34px width (see .pf-tl-nav-collapsed). */
+
+  .pf-tl-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    /* A small inset on all four sides keeps children (cards, tabs, alerts)
+       from touching the rounded border, which was visually jarring when the
+       modal body bg matched the content bg. Tabs that need edge-to-edge
+       layout opt in with `.pf-tabpanel-flush`. */
+    padding: 6px 4px;
+    overflow-y: auto;
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+  }
+
+  /* Settings panel variant — the orchestrator tags its tree_layout with
+     `pf-settings-layout` so the right pane gets generous breathing room.
+     Source-export and other tree_layout consumers keep the tighter default. */
+  .pf-tree-layout.pf-settings-layout > .pf-tl-content {
+    padding: 18px 22px;
+    gap: 16px;
+  }
+  .pf-tree-layout.pf-settings-layout > .pf-tl-nav {
+    padding: 10px 6px;
+  }
+
+  /* ── Utility panel classes for plugin authors ──────────────────────────── */
+  /* Apply via `class = "pf-panel"` on any container to get a rounded, bordered
+     card that matches the rest of the design system.  Variants:
+     - pf-panel       : full-width card with padding (default)
+     - pf-panel-sm    : same but slimmer padding (8px) for dense lists
+     - pf-panel-flush : no internal padding (caller sets its own)
+     - pf-panel-quiet : subtle bg-base (same as canvas) for secondary panels
+     - pf-panel-scroll: caps height with overflow-y: auto + min-height: 0
+  */
+  .pf-panel {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 12px 14px;
+  }
+  .pf-panel-sm   { padding: 8px 10px; }
+  .pf-panel-flush{ padding: 0; }
+  .pf-panel-quiet{ background: var(--bg-base); }
+  .pf-panel-scroll {
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .pf-panel-stretch {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+  /* Category caption used by operation palettes — subdued, compact. */
+  .pf-cat-heading {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    padding: 8px 4px 4px 4px;
+    margin: 0;
+    font-weight: 600;
+  }
+  /* Op tile — full-row ghost button with left icon + truncated label. */
+  .pf-op-tile {
+    justify-content: flex-start !important;
+    text-align: left !important;
+    padding: 6px 8px !important;
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+    border-radius: 6px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .pf-op-tile:hover {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
+  }
+
+  /* When a tree_layout is the sole root of a form, the body collapses its
+     padding so the split reaches the modal edges. */
+  .pf-body-flush {
+    padding: 0 !important;
+    gap: 0 !important;
+    background: var(--bg-base);
+  }
+
+  /* ── Tree item extras: description + tag pill ────────────────────────────── */
+
+  .pf-tree-label-text {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+  }
+  .pf-tree-desc {
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.2;
+  }
+  .pf-tree-tag {
+    margin-left: 6px;
+    flex-shrink: 0;
+  }
+
+  /* ── Icon-only buttons (used in toolbars) ────────────────────────────────── */
+
+  .pf-action-icon-only {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    min-width: 0;
+  }
+
+  /* Give all pf-action-btn a flex layout so icon + label space correctly */
+  .pf-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pf-action-btn > svg { flex-shrink: 0; }
+
+  /* ── Menu button (dropdown trigger) ──────────────────────────────────────── */
+
+  .pf-menu-btn-open { background: var(--bg-hover) !important; }
+  .pf-menu-btn-chev { margin-left: 2px; opacity: 0.6; }
+
+  .pf-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    z-index: 1500;
+  }
+
+  .pf-menu-dropdown {
+    position: fixed;
+    z-index: 1501;
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 180px;
+    max-width: 320px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .pf-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-ui-sans);
+    text-align: left;
+    transition: background var(--transition-fast);
+  }
+  .pf-menu-item:hover:not(:disabled) { background: var(--bg-hover); }
+  .pf-menu-item:disabled { opacity: 0.5; cursor: default; }
+  .pf-menu-item-danger         { color: var(--error); }
+  .pf-menu-item-danger:hover   { background: color-mix(in srgb, var(--error) 15%, transparent); }
+
+  .pf-menu-icon { flex-shrink: 0; color: var(--text-secondary); }
+  .pf-menu-icon-spacer  { width: 12px; flex-shrink: 0; }
+  .pf-menu-label        { flex: 1; }
+
+  .pf-menu-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 2px;
+  }
+  .pf-menu-heading {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 6px 10px 2px;
+  }
+
+  /* ── Component card variant ──────────────────────────────────────────────── */
+  /* IntelliJ-style data card: status dot + dim namespace prefix + bright type
+     name. Default body padding is tighter than the standard card. */
+  .pf-card-component {
+    background: var(--bg-elevated);
+    border-color: var(--border);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  }
+  .pf-card-component .pf-card-title {
+    background: var(--bg-overlay);
+    padding: 6px 10px;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    gap: 6px;
+  }
+  .pf-card-component .pf-card-title-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    letter-spacing: 0.1px;
+  }
+  .pf-card-title-ns {
+    color: var(--text-disabled);
+    font-weight: 400;
+  }
+  .pf-card-title-name {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+  .pf-card-subtitle {
+    color: var(--text-disabled);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    padding: 6px 12px 0;
+    border-bottom: 1px dashed var(--border-subtle);
+    margin-bottom: 6px;
+    word-break: break-all;
+  }
+  .pf-card-component .pf-card-body {
+    padding: 8px 10px 10px;
+    gap: 4px;
+  }
+  .pf-card-component.pf-card-collapsed { box-shadow: none; }
+
+  /* Status dot — small pill at the very start of a card title */
+  .pf-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-disabled);
+    flex-shrink: 0;
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 20%, transparent);
+  }
+  .pf-status-dot[data-tone="success"] { background: var(--success); }
+  .pf-status-dot[data-tone="info"]    { background: var(--info); }
+  .pf-status-dot[data-tone="warning"] { background: var(--warning); }
+  .pf-status-dot[data-tone="error"]   { background: var(--error); }
+  .pf-status-dot[data-tone="accent"]  { background: var(--accent); }
+  .pf-status-dot[data-tone="muted"]   { background: var(--text-disabled); }
+
+  /* Headless card — no title bar; the body fills the whole card. The
+     card border + bg stay so the dense grid still reads as a "panel",
+     just without an empty title strip on top. */
+  .pf-card-headless > .pf-card-body {
+    border-radius: var(--radius-md);
+  }
+
+  /* Dense body — two-column grid that collapses to a single column on
+     narrow widths. Each direct child becomes a grid cell. */
+  .pf-card-body-dense {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    align-items: start;
+    column-gap: 16px;
+    row-gap: 2px;
+  }
+  /* Sections / dividers / alerts inside a dense card span the full grid
+     so they keep their natural full-width look. */
+  .pf-card-body-dense > .pf-section,
+  .pf-card-body-dense > .pf-card,
+  .pf-card-body-dense > .pf-divider,
+  .pf-card-body-dense > .pf-alert,
+  .pf-card-body-dense > .pf-row,
+  .pf-card-body-dense > .pf-card-subtitle {
+    grid-column: 1 / -1;
+  }
+  /* Nested struct sections inside a dense card body — flatten the visual
+     chrome so deeply nested values don't drown in card-inside-card noise.
+     Border is dropped to a 2px accent strip on the left, header is a
+     small uppercase label, body inherits the same dense 2-col grid as
+     the outer card. */
+  .pf-card-body-dense > .pf-section {
+    border: none;
+    border-left: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-radius: 0;
+    background: transparent;
+    margin: 4px 0 4px 2px;
+  }
+  .pf-card-body-dense > .pf-section > .pf-section-header {
+    background: transparent;
+    border: none;
+    padding: 4px 0 4px 10px;
+  }
+  .pf-card-body-dense > .pf-section > .pf-section-header .pf-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-secondary);
+  }
+  .pf-card-body-dense > .pf-section > div > .pf-section-body {
+    padding: 0 0 0 10px;
+    gap: 0;
+    background: transparent;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    column-gap: 14px;
+    row-gap: 0;
+  }
+  .pf-card-body-dense > .pf-section > div > .pf-section-body > .pf-section,
+  .pf-card-body-dense > .pf-section > div > .pf-section-body > .pf-card,
+  .pf-card-body-dense > .pf-section > div > .pf-section-body > .pf-divider {
+    grid-column: 1 / -1;
+  }
+
+  /* ── Compact field rows ──────────────────────────────────────────────────── */
+  /* `label · control · pill` grid. Used in inspector data cards to keep
+     dozens of fields scannable. */
+  .pf-field-compact {
+    display: grid;
+    grid-template-columns: minmax(80px, max-content) 1fr auto;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+    padding: 3px 0;
+    min-height: 22px;
+  }
+  .pf-field-compact > .pf-label {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .pf-field-compact > .pf-validation-error,
+  .pf-field-compact > .pf-hint {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+  /* Highlight a recently-changed field with a left strip + soft tint. */
+  .pf-field-highlight {
+    box-shadow: inset 2px 0 0 var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-radius: 3px;
+    padding-left: 6px;
+  }
+
+  /* Plain (non-card) chip bar wrapper — no padding override needed; the
+     widget owns its inner spacing. Just here so plugins can target it
+     from CSS overrides if needed. */
+  .pf-chipbar {
+    padding: 2px 0;
+  }
+
+  /* ── Plugin-emitted leaf nodes (type="field") ────────────────────────── */
+  .pf-readonly-value {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-primary);
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    padding: 2px 8px;
+    min-height: 18px;
+    display: inline-flex;
+    align-items: center;
+    overflow-x: auto;
+    white-space: nowrap;
+    max-width: 100%;
+    line-height: 1.2;
+  }
+
+  /* ── Vec / Quat editor ───────────────────────────────────────────────── */
+  .pf-vec-axes {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 4px;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  .pf-vec-axis {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg-base);
+    overflow: hidden;
+    min-width: 0;
+  }
+  .pf-vec-axis-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    flex-shrink: 0;
+    font-family: var(--font-ui-sans);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: var(--text-on-accent, #fff);
+    background: var(--accent);
+  }
+  .pf-vec-axis[data-axis="x"] .pf-vec-axis-label { background: #c0463b; }
+  .pf-vec-axis[data-axis="y"] .pf-vec-axis-label { background: #5fa84b; }
+  .pf-vec-axis[data-axis="z"] .pf-vec-axis-label { background: #3c7fb4; }
+  .pf-vec-axis[data-axis="w"] .pf-vec-axis-label { background: #8a8a8a; }
+  .pf-vec-axis-input {
+    width: 64px;
+    min-width: 0;
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-feature-settings: "tnum";
+    text-align: right;
+    outline: none;
+    -moz-appearance: textfield;
+  }
+  .pf-vec-axis-input::-webkit-outer-spin-button,
+  .pf-vec-axis-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .pf-vec-axis-input:focus { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .pf-vec-axis-input:read-only { color: var(--text-secondary); cursor: default; }
+
+  .pf-field-vec.pf-field-compact > .pf-vec-axes {
+    /* In compact 3-col grid the vec sits in the control column */
+    justify-self: stretch;
+  }

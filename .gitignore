@@ -1,0 +1,47 @@
+# ── Editors & IDEs ────────────────────────────────────────────────────────────
+# Keep extensions.json (recommended extensions for contributors), ignore the rest.
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.iml
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+.claude/
+
+# ── Arbor app data (per-repo config, not source) ──────────────────────────────
+.arbor/
+
+# ── Arbor plugins (root files like sdk.d.lua / .luarc.json stay tracked;
+#     individual plugin folders are user/marketplace installs, not source) ────
+plugins/*/
+
+# ── Node / SvelteKit ──────────────────────────────────────────────────────────
+node_modules/
+/build
+/.svelte-kit
+/package
+.env
+.env.*
+!.env.example
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+# Standardised on yarn — package-lock.json is ignored to avoid divergence between lockfiles.
+package-lock.json
+
+# ── Rust / Cargo ──────────────────────────────────────────────────────────────
+src-tauri/target/
+src-tauri/gen/schemas
+
+# ── Tauri ─────────────────────────────────────────────────────────────────────
+# Desktop bundles produced by `cargo tauri build`
+src-tauri/target/release/bundle/
+
+# ── Logs & misc ───────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+*.pem
+
+# ── OS artefacts ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini

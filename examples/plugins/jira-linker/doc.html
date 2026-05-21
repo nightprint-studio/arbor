@@ -1,0 +1,43 @@
+<h1>JIRA Linker</h1>
+<p>Automatically detects <strong>JIRA issue keys</strong> (e.g. <code>PROJ-1234</code>, <code>AUTH-42</code>) in commit messages and builds an in-memory index so you can query which issues a commit is related to — without leaving Arbor.</p>
+
+<h2>What it does</h2>
+<ul>
+  <li>On every commit, scans the commit message for patterns matching <code>[A-Z][A-Z0-9]+-[0-9]+</code> (standard JIRA key format)</li>
+  <li>Maintains an in-memory index of <code>commit OID → list of issue keys</code></li>
+  <li>Adds <strong>"Show JIRA Issues"</strong> to the commit right-click context menu — shows all detected keys for that commit in a toast</li>
+  <li>Fully offline — no network requests are made; all matching happens locally in Lua</li>
+</ul>
+
+<h2>Requirements</h2>
+<table class="shortcuts-table">
+  <thead><tr><th>Permission</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>git_read = true</code></td><td>Reads commit messages and OIDs from hook context</td></tr>
+  </tbody>
+</table>
+<p>No network or filesystem permissions are needed — everything runs locally.</p>
+
+<h2>Detected key format</h2>
+<p>JIRA keys follow the pattern: <strong>one or more uppercase letters + dash + one or more digits</strong>.</p>
+<pre><code>feat(AUTH-12): add OAuth login     → detects AUTH-12
+fix PROJ-99 and CORE-7             → detects PROJ-99, CORE-7
+Merge pull request for BACKEND-301 → detects BACKEND-301</code></pre>
+
+<h2>Context menu</h2>
+<p>Right-click any commit → <strong>Show JIRA Issues</strong> to see the detected issue keys for that commit. If no keys were found the plugin shows an "No JIRA keys found" info toast.</p>
+
+<h2>Settings</h2>
+<p>Open <strong>Plugin Manager → gear icon</strong> next to JIRA Linker to configure:</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Setting</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>JIRA Base URL</td><td>Your JIRA instance root, e.g. <code>https://yourcompany.atlassian.net</code>. Used to construct issue deep-links in future versions of the plugin.</td></tr>
+  </tbody>
+</table>
+
+<h2>Notes</h2>
+<ul>
+  <li>The index is in-memory only and is rebuilt as you make commits. Historical commits are not scanned automatically — open each one and run "Show JIRA Issues" from the context menu.</li>
+  <li>Duplicate keys in the same commit message are deduplicated automatically.</li>
+</ul>

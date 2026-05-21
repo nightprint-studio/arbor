@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Arbor",
+  "version": "0.1.0",
+  "identifier": "studio.nightprint.arbor",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Arbor",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": false,
+        "maximized": true,
+        "shadow": true,
+        "transparent": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,InterestFeedContentSuggestions,WebRTC,AutofillServerCommunication"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["arbor"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "Nightprint Studio",
+    "copyright": "© 2026 Nightprint Studio",
+    "category": "DeveloperTool",
+    "shortDescription": "A Git client with native CI/CD, security dashboards, and Lua plugins.",
+    "longDescription": "Arbor is a desktop Git client built on Tauri, Rust, and Svelte. It handles the everyday Git workflow and adds CI/CD integrations, security dashboards, pull/merge request review, multi-repo workspaces, and a sandboxed Lua plugin runtime.",
+    "homepage": "https://github.com/nightprint-studio/arbor",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

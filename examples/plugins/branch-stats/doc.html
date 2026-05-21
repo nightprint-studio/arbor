@@ -1,0 +1,47 @@
+<h1>Branch Stats</h1>
+<p>A minimal, fully-commented reference plugin that demonstrates the Arbor plugin API. It logs branch lifecycle events to the Arbor console, registers UI elements across multiple surfaces, and shows a commit annotation form — all in a single easy-to-read file.</p>
+
+<h2>What it does</h2>
+<ul>
+  <li>Logs every <strong>commit</strong>, <strong>checkout</strong>, and <strong>fetch</strong> event to the Arbor plugin log</li>
+  <li>Shows a toast on commit and fetch events as a simple confirmation</li>
+  <li>Adds a <strong>sidebar panel toggle</strong> ("Branch Stats") in the Activity Bar top section</li>
+  <li>Adds <strong>"Inspect Commit"</strong> to the commit right-click context menu — opens a form where you can add a personal note, a tag, and a bookmark flag to any commit</li>
+  <li>Adds <strong>"Branch Stats: Run Report"</strong> to the hamburger menu</li>
+</ul>
+
+<h2>Requirements</h2>
+<table class="shortcuts-table">
+  <thead><tr><th>Permission</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>git_read = true</code></td><td>Reads branch and commit information from hook context</td></tr>
+  </tbody>
+</table>
+<p>No network or filesystem access is needed.</p>
+
+<h2>Hooks</h2>
+<table class="shortcuts-table">
+  <thead><tr><th>Hook</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><code>on_plugin_load</code></td><td>Logs a "ready" message with the API version</td></tr>
+    <tr><td><code>on_commit</code></td><td>Logs commit OID + branch; shows a success toast</td></tr>
+    <tr><td><code>on_checkout</code></td><td>Logs the new and previous branch name</td></tr>
+    <tr><td><code>on_fetch</code></td><td>Shows an info toast confirming the fetch</td></tr>
+  </tbody>
+</table>
+
+<h2>Inspect Commit form</h2>
+<p>Right-click a commit → <strong>Inspect Commit</strong> to open a form with three fields:</p>
+<ul>
+  <li><strong>Note</strong> — free-text note about the commit</li>
+  <li><strong>Tag</strong> — a short label (e.g. "performance", "fix", "refactor")</li>
+  <li><strong>Bookmark</strong> — checkbox to bookmark the commit</li>
+</ul>
+<p>Submitting saves the note to the plugin log. This is a demonstration of the form API and <code>state</code> echo — in a production plugin the data would be persisted with <code>arbor.settings.project.set()</code>.</p>
+
+<h2>Use as a starting point</h2>
+<p>Branch Stats is intentionally simple. Clone it as a starting point for your own plugin:</p>
+<pre><code>plugins/
+  my-plugin/
+    plugin.toml   ← copy from branch-stats/plugin.toml, change name
+    main.lua      ← copy from branch-stats/main.lua, adapt hooks</code></pre>

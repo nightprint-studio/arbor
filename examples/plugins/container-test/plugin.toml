@@ -1,0 +1,8 @@
+name        = "container-test"
+version     = "0.1.0"
+description = "Test plugin for the Phase 2 ContributableModal — registers a container with 2 categories and 3 sections"
+author      = "Arbor"
+arbor_api   = 1
+
+[permissions]
+# No host capabilities needed — on_save handlers just log via arbor.log.

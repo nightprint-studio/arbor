@@ -1,0 +1,25 @@
+name        = "arbor-showcase"
+version     = "1.0.0"
+description = "Showcase plugin — demonstrates every Arbor plugin API surface."
+author      = "Nightprint Studio"
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+network = ["api.github.com"]
+fs      = "write"   # sandboxed to the active repo (default scope)
+git     = "read"
+
+# Settings UI pending migration to `arbor.ui.settings.panel(...)`.
+
+[hooks]
+on_plugin_load = true
+on_commit      = true
+on_push        = true
+on_checkout    = true
+on_fetch       = true
+on_repo_open   = true
+
+[scheduler]
+# Background schedule data lives in main.lua via arbor.scheduler.register.
+enabled = true

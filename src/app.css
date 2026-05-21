@@ -1,0 +1,785 @@
+/* ================================================================
+   ARBOR — Design System
+   Theme colors are injected at runtime by themeStore (src/lib/stores/theme.svelte.ts).
+   Built-in themes: dark.json, light.json  — custom themes in ~/.config/arbor/themes/
+   ================================================================ */
+
+/* ---- Reset ---- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+
+/* ---- Design Tokens ---- */
+:root {
+  /* ── Theme-injected color vars (dark defaults for FOUC prevention) ──────
+     All vars below are overwritten by themeStore.init() before first paint.
+     The dark-theme fallbacks prevent a flash of unstyled content on load.  */
+
+  /* Backgrounds */
+  --bg-base:         #1e1f22;
+  --bg-elevated:     #2b2d30;
+  --bg-overlay:      #3c3f41;
+  --bg-hover:        #313436;
+  --bg-selected:     #2d4b72;
+  --bg-input:        #1a1b1e;
+  /* Modal body background — a tone between `--bg-base` (app canvas) and
+     `--bg-elevated` (cards), so modals visibly detach from what's behind
+     them without losing the card chrome contrast. Plugins should reach for
+     this token before hardcoding colors inside form payloads. */
+  --bg-modal:        #23252a;
+
+  /* Borders */
+  --border:          #404348;
+  --border-focus:    #4d78cc;
+  --border-subtle:   #2e3035;
+
+  /* Text */
+  --text-primary:    #dfe1e5;
+  --text-secondary:  #9da0a8;
+  --text-disabled:   #5c5f66;
+  --text-muted:      #7a7d85;
+  --text-on-accent:  #fff;
+
+  /* Accents */
+  --accent:          #3d7fff;
+  --accent-hover:    #5590ff;
+  --accent-active:   #3d68bc;
+  --accent-subtle:   rgba(77, 120, 204, 0.15);
+
+  /* Semantic colors */
+  --success:         #4dc94d;
+  --success-subtle:  rgba(95, 173, 86, 0.12);
+  --warning:         #ffb52a;
+  --warning-subtle:  rgba(226, 163, 53, 0.12);
+  --error:           #c75450;
+  --error-subtle:    rgba(199, 84, 80, 0.12);
+  --info:            #4d78cc;
+  --info-subtle:     rgba(77, 120, 204, 0.12);
+
+  /* Diff */
+  --diff-add-bg:     rgba(95, 173, 86, 0.10);
+  --diff-add-line:   rgba(95, 173, 86, 0.25);
+  --diff-del-bg:     rgba(199, 84, 80, 0.10);
+  --diff-del-line:   rgba(199, 84, 80, 0.25);
+  --diff-ctx-bg:     transparent;
+
+  /* Graph lanes */
+  --graph-lane-0:    #3d7fff;
+  --graph-lane-1:    #ff8c00;
+  --graph-lane-2:    #4db84d;
+  --graph-lane-3:    #b06fd4;
+  --graph-lane-4:    #ff4444;
+  --graph-lane-5:    #00d4cc;
+  --graph-lane-6:    #ffcc00;
+  --graph-lane-7:    #ff7040;
+  --graph-lane-8:    #4dd9d0;
+  --graph-lane-9:    #9ab0cc;
+
+  /* Graph visual intensity — per-theme overrides in the *.json theme files
+     Light themes should drop these toward 0 so the neon halo/glow effects
+     don't bleed against a white background. */
+  --graph-glow-intensity: 1;
+  --graph-halo-intensity: 1;
+  --graph-row-bg-opacity: 0.7;
+
+  /* Workspace palette — 12 indexed colours for the workspace dot / label.
+     Per-theme overrides live in the *.json theme files; these are dark-theme
+     defaults suitable as a FOUC fallback. */
+  --ws-color-0:  #3d7fff;
+  --ws-color-1:  #ff8c00;
+  --ws-color-2:  #4db84d;
+  --ws-color-3:  #b06fd4;
+  --ws-color-4:  #ff5a5a;
+  --ws-color-5:  #00d4cc;
+  --ws-color-6:  #ffcc00;
+  --ws-color-7:  #ff7040;
+  --ws-color-8:  #4dd9d0;
+  --ws-color-9:  #9ab0cc;
+  --ws-color-10: #e85da1;
+  --ws-color-11: #7eae2a;
+  /* Matching foreground colour for text on top of a ws-color background. */
+  --ws-color-fg: #0b0d10;
+
+  /* Shadows */
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:    0 4px 12px rgba(0,0,0,0.5);
+  --shadow-lg:    0 8px 24px rgba(0,0,0,0.6);
+  --shadow-popup: 0 6px 20px rgba(0,0,0,0.7), 0 0 0 1px var(--border);
+
+  /* Scrollbar colors */
+  --scrollbar-thumb:       #4a4d52;
+  --scrollbar-thumb-hover: #6a6d72;
+
+  /* Section semantic colors */
+  --color-stash:     #e2a335;
+  --color-tag:       #c678dd;
+  --color-submodule: #5fb760;
+  --color-bisect:    #e05252;
+  --color-workspace: #a855f7;
+  --color-reflog:    #7fb4ca;
+
+  /* File status colors */
+  --color-file-added:     #4dc94d;
+  --color-file-modified:  #ffb52a;
+  --color-file-deleted:   #c75450;
+  --color-file-renamed:   #7ba4e0;
+  --color-file-untracked: #8fc87a;
+
+  /* Severity (security findings) — solid colour + alpha-12 background.
+     Used by SecurityPanel counters, detail modal pills, and the StatusBar
+     quick overlay. Order: Critical / High / Medium / Low / Info / Unknown. */
+  --severity-critical:    #d04545;
+  --severity-high:        #e87b3a;
+  --severity-medium:      #d6a93a;
+  --severity-low:         #d6c93a;
+  --severity-info:        #4a8cd6;
+  --severity-unknown:     #8a8a8a;
+  --severity-critical-bg: rgba(208, 69, 69, 0.12);
+  --severity-high-bg:     rgba(232, 123, 58, 0.12);
+  --severity-medium-bg:   rgba(214, 169, 58, 0.12);
+  --severity-low-bg:      rgba(214, 201, 58, 0.12);
+  --severity-info-bg:     rgba(74, 140, 214, 0.12);
+  --severity-unknown-bg:  rgba(138, 138, 138, 0.12);
+
+  /* Terminal palette */
+  --terminal-bg:             #1e1f22;
+  --terminal-fg:             #bcbec4;
+  --terminal-cursor:         #6b9bda;
+  --terminal-black:          #2b2d30;
+  --terminal-red:            #c74c50;
+  --terminal-green:          #5fad56;
+  --terminal-yellow:         #e2a335;
+  --terminal-blue:           #6b9bda;
+  --terminal-magenta:        #c77dbc;
+  --terminal-cyan:           #3eadb5;
+  --terminal-white:          #bcbec4;
+  --terminal-bright-black:   #7a7e85;
+  --terminal-bright-red:     #f28b82;
+  --terminal-bright-green:   #a8cc8c;
+  --terminal-bright-yellow:  #ffd586;
+  --terminal-bright-blue:    #8ab4f8;
+  --terminal-bright-magenta: #d7aefb;
+  --terminal-bright-cyan:    #78d9ec;
+  --terminal-bright-white:   #e3e5e8;
+
+  /* ── Theme-overridable structural vars ───────────────────────────────── */
+  /* These have sensible defaults here, but every theme JSON can override
+     them. Keeping the defaults at :root means imported themes that don't
+     declare the new keys still render correctly. */
+
+  /* Typography — themes can publish a preferred font via --theme-font-ui /
+     --theme-font-code. The store mirrors those into --theme-font-ui-active
+     only when the user opts into "Use theme fonts" (so the override is
+     never imposed). The fallback chain below is what runs otherwise. */
+  --font-ui:      'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  --font-ui-sans: var(--theme-font-ui-active, 'Segoe UI'), 'Inter', system-ui, -apple-system, sans-serif;
+  --font-code:    var(--theme-font-code-active, 'JetBrains Mono'), 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  --font-scale: 1;
+  --font-size-xs:   calc(11px * var(--font-scale));
+  --font-size-sm:   calc(12px * var(--font-scale));
+  --font-size-md:   calc(13px * var(--font-scale));
+  --font-size-lg:   calc(14px * var(--font-scale));
+
+  /* Radius — themes can override to characterise their look (sharp Solarized
+     vs rounded Catppuccin etc.). --radius-xl is fixed (large modal corners). */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  /* Scrollbar geometry */
+  --scrollbar-width:  6px;
+  --scrollbar-radius: 999px;
+
+  /* Selection saturation multiplier — themes can dial selections up (Dracula
+     1.2-1.4) or down (light pastels ~0.7). Value 1 is neutral. */
+  --selection-strength: 1;
+
+  /* Spacing */
+  --space-1:  2px;
+  --space-2:  4px;
+  --space-3:  6px;
+  --space-4:  8px;
+  --space-5:  12px;
+  --space-6:  16px;
+  --space-7:  24px;
+  --space-8:  32px;
+
+  /* Animation system — durations overridden at runtime by animStore */
+  --anim-dur-fast:    80ms;
+  --anim-dur-base:    150ms;
+  --anim-dur-slow:    250ms;
+  --anim-dur-panel:   200ms;
+  --anim-dur-overlay: 140ms;
+  --anim-easing-spring: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --transition-fast:   var(--anim-dur-fast)  ease;
+  --transition-base:   var(--anim-dur-base)  ease;
+  --transition-slow:   var(--anim-dur-slow)  ease;
+
+  /* Scrollbar size — kept for backwards compat; new code should use
+     --scrollbar-width which is the themable variant. */
+  --scrollbar-size: var(--scrollbar-width);
+
+  /* ── Brand colours (ABSOLUTE — do NOT theme) ────────────────────────────
+     Third-party brands own their visual identity (GitHub dark grey, GitLab
+     orange, Jira blue, …). These tokens MUST stay fixed across every
+     theme — a GitLab logo on a teal-or-pink background is a brand
+     violation, not a theme tweak.
+     Important corollary: when these are used as `background` for a tile,
+     the foreground (icon glyph) MUST be hard-coded white (#fff) too, not
+     `var(--text-on-accent)` — the latter is a theme token and may resolve
+     to a dark colour in light themes, killing contrast on the absolute
+     brand fill. See `shared/ui/BrandTile.svelte` for the canonical tile.
+  */
+  --brand-github:        #24292e;
+  --brand-github-green:  #238636;
+  --brand-gitlab:        #fc6d26;
+  --brand-linear:        #5e6ad2;
+  --brand-jira:          #0052cc;
+  --brand-jira-hover:    #003e99;
+
+  /* Z-index hierarchy.
+     Tooltip MUST sit above every interactive surface (modals, popovers,
+     dialogs, menus) — it's a non-blocking annotation that can attach to
+     triggers anywhere in the stack, including buttons inside a modal. */
+  --z-base:        1;
+  --z-above:       10;
+  --z-dropdown:    100;
+  --z-sticky:      200;
+  --z-backdrop:    299;
+  --z-modal-bg:    500;
+  --z-modal:       600;
+  --z-popover:     700;
+  --z-dialog:      800;
+  /* File/folder pickers float above the standard modal layer so they can
+     be invoked FROM another modal (clone-destination, save-as, …) without
+     getting stuck behind their caller. Stays below tooltips. */
+  --z-modal-picker: 1500;
+  /* Context menus must sit ABOVE every modal layer (incl. picker) so a
+     right-click inside a file picker / save-as dialog isn't swallowed by
+     the modal that opened it. Stays below tooltips. */
+  --z-menu:        2000;
+  --z-tooltip:     10000;
+  --z-top:         99999;
+}
+
+/* ---- Base ---- */
+body {
+  /* Use proportional UI font as the global default; code/diff views
+     override with var(--font-code) / var(--font-ui) explicitly. */
+  font-family: var(--font-ui-sans);
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+/* ---- Scrollbars ---- */
+::-webkit-scrollbar { width: var(--scrollbar-width); height: var(--scrollbar-width); }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--scrollbar-radius);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* ---- Focus ---- */
+:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---- Utility classes ---- */
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flex { display: flex; }
+.flex-col { display: flex; flex-direction: column; }
+.items-center { align-items: center; }
+.gap-1 { gap: var(--space-2); }
+.gap-2 { gap: var(--space-4); }
+.gap-3 { gap: var(--space-5); }
+.text-muted { color: var(--text-muted); }
+.text-secondary { color: var(--text-secondary); }
+.text-xs { font-size: var(--font-size-xs); }
+.text-sm { font-size: var(--font-size-sm); }
+
+/* ---- Buttons ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font-ui-sans);
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  white-space: nowrap;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--accent);
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-primary:active { background: var(--accent-active); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: transparent;
+}
+.btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.btn-danger {
+  background: transparent;
+  color: var(--error);
+  border-color: transparent;
+}
+.btn-danger:hover { background: var(--error-subtle); border-color: var(--error); }
+
+/* ---- Mac-style close button (red dot) ---- */
+.mac-close-btn {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #ff5f57;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: filter var(--transition-fast);
+}
+.mac-close-btn:hover  { filter: brightness(0.8); }
+.mac-close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- Inputs ---- */
+.input {
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui-sans);
+  font-size: var(--font-size-sm);
+  transition: border-color var(--transition-fast);
+}
+.input:focus { border-color: var(--border-focus); outline: none; }
+.input::placeholder { color: var(--text-disabled); }
+
+/* ---- Number inputs (global) ----
+   The browser's native spinner arrows (`::-webkit-(inner|outer)-spin-button`
+   and Firefox's number-step UI) are visually inconsistent with Arbor's
+   design system: they paint outside the rounded border, ignore the dark
+   theme tokens, and on narrow inputs (≤80 px) they crowd the value
+   column so badly that adjacent siblings — typically a "Reset to N"
+   button in the same flex row — look like they overlap the input.
+
+   Suppress them globally for every `<input type="number">`. Users keep
+   keyboard typing and ↑/↓ arrow-key increment/decrement (which the
+   element honours natively even with the controls hidden). Sections
+   that want explicit +/- buttons can build them in markup; relying on
+   the browser-native spinners is no longer the design-system default. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+/* ---- Labels / Badges ---- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 7px;
+  height: 17px;
+  line-height: 17px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.1px;
+}
+.badge-branch   { background: color-mix(in srgb, var(--graph-lane-0) 28%, transparent); color: var(--graph-lane-0); border: 1px solid color-mix(in srgb, var(--graph-lane-0) 55%, transparent); font-weight: 600; letter-spacing: 0.3px; padding: 0 8px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--graph-lane-0) 12%, transparent); }
+.badge-remote   { background: color-mix(in srgb, var(--graph-lane-1) 20%, transparent); color: var(--graph-lane-1); border: 1px solid color-mix(in srgb, var(--graph-lane-1) 40%, transparent); }
+.badge-tag      { background: color-mix(in srgb, var(--color-tag) 18%, transparent); color: var(--color-tag); border: 1px solid color-mix(in srgb, var(--color-tag) 38%, transparent); border-radius: 3px; }
+.badge-head     { background: color-mix(in srgb, var(--success) 30%, transparent);   color: var(--success);   border: 1px solid color-mix(in srgb, var(--success) 60%, transparent); font-weight: 600; letter-spacing: 0.3px; padding: 0 8px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 15%, transparent); }
+
+/* ---- Dividers ---- */
+.divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 0;
+}
+.divider-v {
+  width: 1px;
+  background: var(--border-subtle);
+  align-self: stretch;
+}
+
+/* ---- Resize handle ---- */
+.resize-handle {
+  flex-shrink: 0;
+  background: transparent;
+  transition: background var(--transition-base);
+  position: relative;
+  z-index: 10;
+}
+.resize-handle:hover, .resize-handle.active { background: var(--accent); opacity: 0.7; }
+.resize-handle-h { width: 3px; cursor: col-resize; }
+.resize-handle-v { height: 3px; cursor: row-resize; }
+
+/* ---- Code / diff text ---- */
+code, pre, .code { font-family: var(--font-code); }
+
+/* ---- Selection ---- */
+::selection {
+  /* Selection background derives from --accent. The 35% baseline opacity is
+     scaled by the theme's --selection-strength (1 = neutral, <1 softer,
+     >1 punchier). Color stays explicit so high-contrast themes keep
+     legibility on selected glyphs. */
+  background: color-mix(in srgb, var(--accent) calc(35% * var(--selection-strength, 1)), transparent);
+  color: var(--text-primary);
+}
+
+/* ---- Modal chrome tokens ----
+   Shared padding values for every modal header / footer bar. Use these
+   instead of hard-coding numbers so dialogs feel consistent across the
+   app. Bg + border are included via the --modal-chrome-* tokens so a
+   single change in app.css re-skins every dialog that follows the
+   convention.
+*/
+:root {
+  --modal-header-padding: 10px 14px;
+  --modal-footer-padding: 7px 14px;
+  --modal-chrome-bg:      var(--bg-elevated);
+  --modal-chrome-border:  var(--border-subtle);
+}
+
+/* ---- Checkbox (global baseline) ----
+   Applies to every `<input type="checkbox">` unless a component overrides
+   with higher specificity (e.g. `.toggle input`, `.pf-checkbox-row > input`
+   which render as toggle switches). Keep this in sync with the radio
+   style below.
+
+   Exact pixel sizes (not em) so the checkbox doesn't shrink/grow with the
+   surrounding text — crucial for dense list rows.
+*/
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-input);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  vertical-align: middle;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+input[type="checkbox"]:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+/* Checkmark — drawn with a rotated rectangle border, sharper than a
+   unicode glyph and colour-agnostic via currentColor fallback. */
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 3.5px;
+  top: 0.5px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--text-on-accent);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+/* Indeterminate state — shown when JS sets el.indeterminate=true.
+   A centered horizontal dash reads as "mixed" across the web. */
+input[type="checkbox"]:indeterminate {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type="checkbox"]:indeterminate::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 4.25px;
+  width: 7px;
+  height: 2px;
+  background: var(--text-on-accent);
+  border-radius: 1px;
+  transform: none;
+  border: none;
+}
+input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+input[type="checkbox"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- Radio (global baseline) ----
+   Mirrors the checkbox with a round shape + inset dot when checked. */
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-input);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  vertical-align: middle;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+input[type="radio"]:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+input[type="radio"]:checked {
+  border-color: var(--accent);
+}
+input[type="radio"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+}
+input[type="radio"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+input[type="radio"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- Animations ---- */
+@keyframes spin       { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes fadeIn     { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp    { from { opacity: 0; transform: translateY(24px); }  to { opacity: 1; transform: translateY(0); } }
+@keyframes slideDown  { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideRight { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes slideLeft  { from { opacity: 0; transform: translateX(20px); }  to { opacity: 1; transform: translateX(0); } }
+@keyframes scaleIn    { from { opacity: 0; transform: scale(0.90); }       to { opacity: 1; transform: scale(1); } }
+@keyframes ansi-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* ---- Additional button variants ---- */
+.btn-secondary {
+  background: var(--bg-overlay);
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.btn-secondary:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ---- Icon-only button (24×24, no background) ---- */
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  flex-shrink: 0;
+}
+.btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn-icon.danger:hover { color: var(--error); }
+
+/* ---- Spin utility ---- */
+.spin { animation: spin 1.2s linear infinite; }
+
+/* ---- Shared log-line highlight tokens ----
+   Produced by `src/lib/utils/log-highlight.ts` (escapeHtml +
+   highlightLogBody) and emitted via `<LogStream lineHtml=…>`. Used by
+   PluginLogsPanel (Lua/plugin log stream) and PipelineRunDetailModal
+   (per-step output). Living in app.css keeps both surfaces in lockstep
+   without :global() trickery in every consumer. */
+.log-tok-time   { color: var(--text-disabled); }
+.log-tok-lvl    { font-weight: 700; letter-spacing: 0.04em; }
+.log-tok-lvl-debug { color: var(--text-muted); }
+.log-tok-lvl-info  { color: var(--accent); }
+.log-tok-lvl-warn  { color: var(--warning, #d8a13a); }
+.log-tok-lvl-error { color: var(--error); }
+.log-tok-plugin { color: var(--text-primary); font-weight: 600; }
+.log-tok-run    { color: var(--accent); font-family: var(--font-code); font-size: 0.92em; }
+.log-tok-str    { color: var(--diff-add-fg, #98c379); }
+.log-tok-num    { color: #c8a45c; }
+.log-tok-key    { color: var(--accent); }
+.log-tok-tag    { color: var(--text-muted); }
+
+/* ---- Overlay backdrop (transparent click-catcher) ----
+   z-index just below `.overlay-panel`; both sit ABOVE the bottom-right
+   toast/notification stack (z=800) so transient notifications generated
+   while the user interacts with a Jobs / Notifications overlay don't
+   paint on top of the cards being clicked. */
+.overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 849;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+
+/* ---- Overlay panel (floating popup, e.g. above statusbar) ---- */
+.overlay-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 32px;
+  z-index: 850;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+  animation: slideUp var(--anim-dur-overlay) var(--anim-easing-spring);
+  font-family: var(--font-ui-sans);
+}
+
+/* ---- Overlay header (title bar inside an overlay panel) ---- */
+.overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.overlay-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ---- Empty state (centered placeholder in lists/panels) ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 24px;
+  color: var(--text-disabled);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+/* ---- Modal backdrop (dark, high z-index) ---- */
+/* `backdrop-filter: blur()` was removed here — see Modal.svelte for the
+   full rationale. Same fix applied wherever the property appears. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 1000;
+}
+
+/* ---- Form field label ---- */
+.field-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ---- Inline error message ---- */
+.inline-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--error);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+/* ---- PrismJS theme override ----
+   Each token maps to a `--syntax-*` theme variable so highlighting follows
+   the active palette. Fallbacks reproduce the original JetBrains-ish dark
+   defaults for any preset that hasn't declared the new tokens yet. */
+.token.comment, .token.prolog, .token.doctype, .token.cdata { color: var(--syntax-comment, #7a7d85); font-style: italic; }
+.token.string, .token.attr-value { color: var(--syntax-string, #6a9956); }
+.token.keyword, .token.selector, .token.important { color: var(--syntax-keyword, #cc7832); }
+.token.function, .token.attr-name { color: var(--syntax-function, #ffc66d); }
+.token.number, .token.boolean, .token.constant { color: var(--syntax-number, #9876aa); }
+.token.operator { color: var(--text-secondary); }
+.token.class-name, .token.type { color: var(--syntax-type, #4d78cc); }
+.token.punctuation { color: var(--text-muted); }
+.token.null      { color: var(--text-muted); }
+/* Markup (HTML / XML / SVG) — Prism wraps the entire tag construct in
+   `.token.tag` and nests an inner `.token.tag` for the bare element
+   name.  Without this rule pom.xml-style files render almost entirely
+   in the body text colour, which the user (rightly) flagged as
+   "no highlight" in the conflict-resolver preview. */
+.token.tag                          { color: var(--syntax-type,     #4d78cc); }
+.token.tag .token.punctuation       { color: var(--text-muted); }
+.token.tag .token.attr-name         { color: var(--syntax-function, #ffc66d); }
+.token.tag .token.attr-value        { color: var(--syntax-string,   #6a9956); }
+.token.tag .token.attr-value .token.punctuation { color: var(--text-muted); }
+.token.namespace                    { color: var(--syntax-keyword,  #cc7832); }
+.token.entity                       { color: var(--syntax-number,   #9876aa); }
+
+/* YAML — the Prism yaml grammar emits `.token.key` for map keys
+   (`name:` left side), `.token.anchor` / `.token.alias` for `&foo` /
+   `*foo`, and `.token.directive` for `%YAML 1.2`.  Without these
+   rules a typical `.yml` rendered mostly in body colour because only
+   string/number/boolean/comment had CSS hooks. */
+.token.key                          { color: var(--syntax-function, #ffc66d); }
+.token.anchor, .token.alias         { color: var(--syntax-keyword,  #cc7832); }
+.token.directive                    { color: var(--syntax-keyword,  #cc7832); font-weight: 600; }
+
+/* JSON property keys coloured by VALUE kind — matches the tree view's
+   colouring scheme (key orange when the value is a container, green
+   when string, purple when numeric/bool, muted when null). Only the
+   hand-rolled JSON tokenizer emits these classes; everywhere else a
+   `.token.property` token keeps its default text-primary colour. */
+.token.property-object,
+.token.property-array   { color: var(--syntax-keyword, #cc7832); font-weight: 600; }
+.token.property-string  { color: var(--syntax-string,  #6a9956); }
+.token.property-number,
+.token.property-boolean { color: var(--syntax-number,  #9876aa); }
+.token.property-null    { color: var(--text-muted); }
