@@ -12,6 +12,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - `Ctrl+Shift+Enter` in the commit message field commits and pushes in one step.
 - The Commit split-button menu now shows shortcut hints and tinted icons next
   to each option, matching the graph context menu.
+- Appearance setting to switch the title-bar window controls between the
+  Mac-inspired coloured trio (default) and a flat Windows-/IntelliJ-style set;
+  the same switch also restyles the close button in modal and panel headers.
 
 ### Fixed
 

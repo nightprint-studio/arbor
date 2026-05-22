@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityBarConfig, CacheConfig, DiffConfig, GraphConfig, MrConfig, PipelinesConfig } from '$lib/types/config';
+import type { ActivityBarConfig, AppearanceConfig, CacheConfig, DiffConfig, GraphConfig, MrConfig, PipelinesConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
 export type { TicketLinksRepoConfig };
@@ -60,6 +60,14 @@ export const getMrConfig = () =>
 
 export const setMrConfig = (config: MrConfig) =>
   invoke<void>('set_mr_config', { config });
+
+// ── Appearance preferences (window control style, …) ─────────────────────────
+
+export const getAppearanceConfig = () =>
+  invoke<AppearanceConfig>('get_appearance_config');
+
+export const setAppearanceConfig = (config: AppearanceConfig) =>
+  invoke<void>('set_appearance_config', { config });
 
 // ── Recent repos (persisted in config.toml via backend) ──────────────────────
 

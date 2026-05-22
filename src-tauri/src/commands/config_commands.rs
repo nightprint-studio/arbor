@@ -1,7 +1,7 @@
 use tauri::State;
 use crate::error::AppError;
 use crate::config::repo_config::{RepoConfig, load as load_repo_config, save as save_repo_config};
-use crate::config::app_config::{self, ActivityBarConfig, CacheConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, PipelinesConfig, RecoveryConfig, StudioSettings};
+use crate::config::app_config::{self, ActivityBarConfig, AppearanceConfig, CacheConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, PipelinesConfig, RecoveryConfig, StudioSettings};
 use crate::AppState;
 
 // Cap the persisted recent-repo list. With WelcomeScreen showing 6 and the
@@ -392,6 +392,26 @@ pub fn set_mr_config(
 ) -> Result<(), AppError> {
     let mut cfg = state.lock_config()?;
     cfg.mr = config;
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Return the current appearance preferences (window control style, …).
+#[tauri::command]
+pub fn get_appearance_config(state: State<'_, AppState>) -> Result<AppearanceConfig, AppError> {
+    let config = state.lock_config()?;
+    Ok(config.appearance.clone())
+}
+
+/// Persist updated appearance preferences to disk.
+#[tauri::command]
+pub fn set_appearance_config(
+    state: State<'_, AppState>,
+    config: AppearanceConfig,
+) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    cfg.appearance = config;
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))

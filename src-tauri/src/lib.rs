@@ -823,6 +823,9 @@ pub fn run() {
             // MR/PR Activity timeline defaults
             commands::config_commands::get_mr_config,
             commands::config_commands::set_mr_config,
+            // Appearance preferences (window control style, …)
+            commands::config_commands::get_appearance_config,
+            commands::config_commands::set_appearance_config,
             // Activity bar config
             commands::config_commands::get_activity_bar_config,
             commands::config_commands::set_activity_bar_config,

@@ -341,7 +341,14 @@ body {
 }
 .btn-danger:hover { background: var(--error-subtle); border-color: var(--error); }
 
-/* ---- Mac-style close button (red dot) ---- */
+/* ---- Mac-style close button (red dot) ────────────────────────────────
+   Default look — small coloured circle in modal / panel headers. Behavior
+   swaps to a flat IntelliJ-style X glyph when the user picks the Windows
+   variant in Appearance settings; the swap is driven by an attribute on
+   the <html> element so the 15+ existing callsites don't need to change.
+   The button itself has no children (callers just set aria-label) — both
+   variants draw their visual via pseudo-elements / background.
+   ──────────────────────────────────────────────────────────────────── */
 .mac-close-btn {
   width: 13px;
   height: 13px;
@@ -351,10 +358,44 @@ body {
   cursor: pointer;
   flex-shrink: 0;
   padding: 0;
-  transition: filter var(--transition-fast);
+  transition: filter var(--transition-fast),
+              background var(--transition-fast),
+              color var(--transition-fast);
 }
 .mac-close-btn:hover  { filter: brightness(0.8); }
 .mac-close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Windows / IntelliJ variant — bigger, flat, glyph drawn via two rotated
+   pseudo-elements so no markup changes are needed. Red flash on hover for
+   the conventional close affordance. */
+[data-window-controls="windows"] .mac-close-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  position: relative;
+  filter: none;
+}
+[data-window-controls="windows"] .mac-close-btn::before,
+[data-window-controls="windows"] .mac-close-btn::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 50%;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+  pointer-events: none;
+}
+[data-window-controls="windows"] .mac-close-btn::before { transform: translateY(-50%) rotate(45deg); }
+[data-window-controls="windows"] .mac-close-btn::after  { transform: translateY(-50%) rotate(-45deg); }
+[data-window-controls="windows"] .mac-close-btn:hover {
+  background: #e81123;
+  color: #ffffff;
+  filter: none;
+}
 
 /* ---- Inputs ---- */
 .input {

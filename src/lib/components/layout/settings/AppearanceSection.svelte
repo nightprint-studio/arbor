@@ -1,8 +1,11 @@
 <script lang="ts">
   import { Palette } from 'lucide-svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
+  import { appearanceStore } from '$lib/stores/appearance.svelte';
+  import type { WindowControlsStyle } from '$lib/types/config';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
+  import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   let { onOpenThemeEditor }: { onOpenThemeEditor: () => void } = $props();
@@ -19,6 +22,11 @@
   function isPreset(p: number) {
     return Math.abs(fontScale - p) < 0.005;
   }
+
+  const WC_OPTIONS = [
+    { value: 'mac',     label: 'Mac-inspired',  description: 'Coloured trio (close/min/max).' },
+    { value: 'windows', label: 'Windows',       description: 'Flat rectangular controls.'    },
+  ];
 </script>
 
 <SectionHeader title="Appearance" description="Customize the look and feel of the interface." />
@@ -32,6 +40,16 @@
         Open Theme Editor
       </button>
     </div>
+  </FormRow>
+
+  <FormRow label="Window controls" description="Style of the close/minimize/maximize buttons in the title bar. Position and size stay the same.">
+    <RadioGroup
+      value={appearanceStore.windowControlsStyle}
+      options={WC_OPTIONS}
+      appearance="segment"
+      size="sm"
+      onchange={(v) => appearanceStore.setWindowControlsStyle(v as WindowControlsStyle)}
+    />
   </FormRow>
 
   <FormRow label="Font scale" description="Scales all UI text proportionally">

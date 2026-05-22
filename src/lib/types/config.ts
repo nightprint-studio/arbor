@@ -79,6 +79,15 @@ export interface PipelinesConfig {
   max_concurrent_runs: number;
 }
 
+export type WindowControlsStyle = 'mac' | 'windows';
+
+/** Visual tweaks that don't belong to theme or layout — currently only the
+ *  window-control button style. Position and dimensions of the controls are
+ *  intentionally fixed regardless of style. */
+export interface AppearanceConfig {
+  window_controls_style: WindowControlsStyle;
+}
+
 export interface AppConfig {
   theme: ThemeConfig;
   layout: LayoutConfig;
@@ -88,4 +97,5 @@ export interface AppConfig {
   cache: CacheConfig;
   activity_bar: ActivityBarConfig;
   mr: MrConfig;
+  appearance: AppearanceConfig;
 }

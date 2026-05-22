@@ -148,6 +148,7 @@
   import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
   import { jobsStore } from '$lib/stores/jobs.svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
+  import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { terminalStore } from '$lib/stores/terminal.svelte';
   import { pipelinesStore } from '$lib/stores/pipelines.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
@@ -533,6 +534,10 @@
   // ~/.config/arbor/config.toml. Defaults are applied immediately so first
   // paint isn't blocked; this just refreshes them once disk values are read.
   onMount(() => { void diffStore.loadConfig(); });
+
+  // Same flow for appearance (window control style): defaults render now,
+  // disk values overwrite once read.
+  onMount(() => { void appearanceStore.loadConfig(); });
 
   // Initialise the data cache and run one-time IDE detection at startup.
   onMount(async () => {

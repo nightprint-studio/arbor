@@ -93,6 +93,31 @@ pub struct AppConfig {
     /// Marketplace catalog auto-refresh policy.
     #[serde(default)]
     pub marketplace: MarketplaceConfig,
+    /// Visual appearance preferences (window control style, …).
+    #[serde(default)]
+    pub appearance: AppearanceConfig,
+}
+
+/// User-facing visual tweaks. Theme/font live in their own slots (theme is a
+/// separate persisted store, font scale is layout-adjacent) — this struct is
+/// for the smaller switches that don't belong anywhere else.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppearanceConfig {
+    /// Style of the close/minimize/maximize buttons in the title bar.
+    /// `"mac"` (default) — the rounded coloured trio drawn at the right of
+    /// the title bar; `"windows"` — flat rectangular controls in the same
+    /// position and dimensions. Position is intentionally fixed regardless
+    /// of style.
+    #[serde(default = "default_window_controls_style")]
+    pub window_controls_style: String,
+}
+
+fn default_window_controls_style() -> String { "mac".into() }
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        Self { window_controls_style: default_window_controls_style() }
+    }
 }
 
 /// Marketplace catalog auto-refresh settings.
@@ -690,6 +715,7 @@ impl Default for AppConfig {
             deep_link: crate::deep_link::DeepLinkConfig::default(),
             studio: StudioSettings::default(),
             marketplace: MarketplaceConfig::default(),
+            appearance: AppearanceConfig::default(),
         }
     }
 }
