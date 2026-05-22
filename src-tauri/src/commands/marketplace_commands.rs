@@ -214,9 +214,10 @@ pub fn marketplace_uninstall_plugin(
 
 #[tauri::command]
 pub fn marketplace_set_plugin_enabled(
-    state:   State<'_, AppState>,
-    name:    String,
-    enabled: bool,
+    app_handle: tauri::AppHandle,
+    state:      State<'_, AppState>,
+    name:       String,
+    enabled:    bool,
 ) -> Result<MarketplacePlugin> {
     // Mirror the change through the host so the live VM picks it up. Both
     // sides cascade — disabling a plugin disables every transitively-required
@@ -239,6 +240,14 @@ pub fn marketplace_set_plugin_enabled(
             marketplace::installs::set_plugin_enabled(other, enabled);
         }
     }
+
+    // Notify every listener (Plugin Manager, contribution store, sidebar
+    // panels…) that plugin state changed. Without this, a toggle from the
+    // marketplace silently desyncs the Plugin Manager if it's open in the
+    // background — the user would have to close + reopen the panel to see
+    // the new state. Install / uninstall already emit via `reload_plugin_host`;
+    // toggle skips the host reload, so it needs its own explicit emit.
+    let _ = app_handle.emit("arbor://plugins-reloaded", ());
 
     lock(&state)?
         .catalog()

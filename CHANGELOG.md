@@ -62,6 +62,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Enabling or disabling a plugin from the Marketplace detail pane now refreshes
+  the Plugin Manager if it's open in the background, instead of leaving its
+  rows out of sync until reopened.
 - Pressing Escape on a file/folder picker opened from inside another modal
   (Theme Editor, Add Worktree, Clone Repository, Studio export, …) now closes
   only the picker, leaving the underlying modal open.
