@@ -44,6 +44,7 @@
   import '$lib/utils/prism-shared';
   import '$lib/utils/prism-languages/ron';
   import Modal from './Modal.svelte';
+  import ConfirmModal from './ConfirmModal.svelte';
   import FilePickerModal from './FilePickerModal.svelte';
   import { type MenuItem } from './ContextMenu.svelte';
   import { type RowSnippetCtx } from './ui/Tree.svelte';
@@ -1848,30 +1849,23 @@
   // ── Format + Convert actions ───────────────────────────────────────────
   let actionBusy = $state(false);
   let actionError = $state<string | null>(null);
-  async function runFormat() {
-    const id = ronStudioStore.docId;
-    if (!id) return;
-    if (!confirm('Format will re-emit the document through the RON serialiser.\n\nThis drops comments and any custom whitespace. Continue?')) return;
-    actionBusy = true; actionError = null;
-    try {
-      const out = await RON.format(id);
-      await ronStudioStore.setText(out);
-      syncTextFromStore();
-      void treePane?.reloadTree();
-      bumpDiffRefresh();
-    } catch (e) {
-      actionError = String(e);
-    } finally {
-      actionBusy = false;
-    }
+  let pendingAction = $state<'format' | 'tojson' | null>(null);
+  function runFormat() {
+    if (!ronStudioStore.docId) return;
+    pendingAction = 'format';
   }
-  async function runToJson() {
+  function runToJson() {
+    if (!ronStudioStore.docId) return;
+    pendingAction = 'tojson';
+  }
+  async function performPendingAction() {
+    const which = pendingAction;
+    pendingAction = null;
     const id = ronStudioStore.docId;
-    if (!id) return;
-    if (!confirm('Convert the document to JSON?\n\nThis replaces the current text with the JSON equivalent (comments are lost; struct names become string keys).')) return;
+    if (!which || !id) return;
     actionBusy = true; actionError = null;
     try {
-      const out = await RON.toJson(id);
+      const out = which === 'format' ? await RON.format(id) : await RON.toJson(id);
       await ronStudioStore.setText(out);
       syncTextFromStore();
       void treePane?.reloadTree();
@@ -3196,6 +3190,28 @@
     {/if}
   {/snippet}
 </StudioModal>
+
+{#if pendingAction === 'format'}
+  <ConfirmModal
+    title="Format document"
+    message="Format will re-emit the document through the RON serialiser."
+    detail="This drops comments and any custom whitespace. Continue?"
+    variant="warning"
+    confirmLabel="Format"
+    onCancel={() => pendingAction = null}
+    onConfirm={performPendingAction}
+  />
+{:else if pendingAction === 'tojson'}
+  <ConfirmModal
+    title="Convert to JSON"
+    message="Convert the document to JSON?"
+    detail="This replaces the current text with the JSON equivalent (comments are lost; struct names become string keys)."
+    variant="warning"
+    confirmLabel="Convert"
+    onCancel={() => pendingAction = null}
+    onConfirm={performPendingAction}
+  />
+{/if}
 
 <style>
   /* ── Header bits (rendered straight inside Modal.svelte's

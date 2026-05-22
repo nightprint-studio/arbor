@@ -25,6 +25,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   Mac-inspired coloured trio (default) and a flat Windows-/IntelliJ-style set;
   the same switch also restyles the close button in modal and panel headers.
 
+### Changed
+
+- Command Palette: *Delete Tag* is now two commands — *Delete Tag (local)* and
+  *Delete Tag (local + origin)* — and both open the same scope-aware confirm
+  modal used by the sidebar, replacing the native browser confirm.
+- All remaining native `confirm()` prompts are gone: Delete Branch, Drop Stash,
+  Reset Hard, Discard All, Undo Last Commit, Unlink Worktree, Delete Theme,
+  Delete Worktree Link, Remove Alias Group, Clear Pipeline Logs and the RON
+  Studio Format / Convert-to-JSON actions now use the themed in-app confirm
+  modal with Enter-to-confirm.
+
 ### Fixed
 
 - Opening Settings, Docs, About or any of the Studio modals from a cold start

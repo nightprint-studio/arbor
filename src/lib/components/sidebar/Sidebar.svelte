@@ -16,7 +16,7 @@
   import { repoStore } from '$lib/stores/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { bisectStore } from '$lib/stores/bisect.svelte';
-  import { deleteTag } from '$lib/ipc/branch';
+  import { executeTagDelete as runTagDelete } from '$lib/utils/tag-delete';
   import { getStatus } from '$lib/ipc/stage';
   import { listSubmodules } from '$lib/ipc/submodule';
   import { cacheStore } from '$lib/stores/cache.svelte';
@@ -160,34 +160,7 @@
     if (!tab || !pendingTagDelete) return;
     const { name, scope } = pendingTagDelete;
     pendingTagDelete = null;
-
-    if (scope === 'local') {
-      try {
-        await deleteTag(tab.id, name);
-        await localTagTracker.markPushed(tab.id, name).catch(() => {});
-        uiStore.showToast(`Tag "${name}" eliminato in locale`, 'success');
-        await loadSidebarData(tab.id);
-        graphStore.refresh();
-      } catch (err) { uiStore.showToast(`${err}`, 'error'); }
-      return;
-    }
-
-    // scope === 'remote' → push delete refspec, then drop the local ref.
-    try {
-      await pushBranch(tab.id, 'origin', `:refs/tags/${name}`);
-    } catch (err) {
-      uiStore.showToast(`Delete su origin fallito: ${err}`, 'error');
-      return;
-    }
-    try {
-      await deleteTag(tab.id, name);
-      await localTagTracker.markPushed(tab.id, name).catch(() => {});
-      uiStore.showToast(`Tag "${name}" eliminato in locale e su origin`, 'success');
-      await loadSidebarData(tab.id);
-      graphStore.refresh();
-    } catch (err) {
-      uiStore.showToast(`Origin pulito ma delete locale fallito: ${err}`, 'warning');
-    }
+    await runTagDelete(tab.id, name, scope);
   }
 
   async function handleRefresh() {

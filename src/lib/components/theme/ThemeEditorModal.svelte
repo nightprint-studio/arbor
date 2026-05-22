@@ -5,6 +5,7 @@
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { themeStore, type ImportResult } from '$lib/stores/theme.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { notificationsStore } from '$lib/stores/notifications.svelte';
@@ -275,8 +276,12 @@
     uiStore.showToast('Theme cloned', 'success');
   }
 
-  async function deleteTheme(id: string) {
-    if (!confirm('Delete this theme?')) return;
+  let pendingDeleteThemeId = $state<string | null>(null);
+  function deleteTheme(id: string) { pendingDeleteThemeId = id; }
+  async function performDeleteTheme() {
+    const id = pendingDeleteThemeId;
+    pendingDeleteThemeId = null;
+    if (!id) return;
     await themeStore.deleteCustom(id);
     selectedId = themeStore.activeId;
   }
@@ -666,6 +671,18 @@
     </div>
   </div>
 </Modal>
+
+{#if pendingDeleteThemeId}
+  <ConfirmModal
+    title="Delete theme"
+    message="Delete this theme?"
+    detail="The active theme will fall back to the default if it was the one being deleted."
+    variant="danger"
+    confirmLabel="Delete"
+    onCancel={() => pendingDeleteThemeId = null}
+    onConfirm={performDeleteTheme}
+  />
+{/if}
 
 <!-- ── In-app pickers ──────────────────────────────────────────────────── -->
 {#if showImportPicker}

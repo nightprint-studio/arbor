@@ -110,6 +110,8 @@
   import { listen } from '@tauri-apps/api/event';
   import IssuesSidebar from '../issues/IssuesSidebar.svelte';
   import BranchRenameModal from '../sidebar/BranchRenameModal.svelte';
+  import DeleteTagModal from '../sidebar/DeleteTagModal.svelte';
+  import { executeTagDelete as runTagDelete } from '$lib/utils/tag-delete';
   import type { BranchInfo } from '$lib/types/git';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
@@ -1500,6 +1502,20 @@
   // Rename-branch modal state (driven by palette event)
   let renameBranchTarget = $state<BranchInfo | null>(null);
 
+  // Tag-delete modal state (driven by palette event — sidebar handles its
+  // own modal locally for the context-menu flow).
+  let pendingTagDelete = $state<{ tabId: string; name: string; scope: 'local' | 'remote' } | null>(null);
+  $effect(() => {
+    function onDeleteTag(e: Event) {
+      const d = (e as CustomEvent<{ tabId: string; name: string; scope: 'local' | 'remote' }>).detail;
+      if (d?.tabId && d.name && (d.scope === 'local' || d.scope === 'remote')) {
+        pendingTagDelete = { tabId: d.tabId, name: d.name, scope: d.scope };
+      }
+    }
+    window.addEventListener('arbor:delete-tag', onDeleteTag);
+    return () => window.removeEventListener('arbor:delete-tag', onDeleteTag);
+  });
+
   // Global Git Blame modal — driven by the `arbor:show-blame` event so any
   // surface (Command Palette, plugin, future quick-action menus) can ask
   // for a blame without forcing a particular sidebar open.
@@ -1939,6 +1955,20 @@
       branch={renameBranchTarget}
       onClose={() => renameBranchTarget = null}
       onRenamed={() => { const tid = tabsStore.activeTabId; if (tid) cacheStore.invalidate(tid); graphStore.refresh(); }}
+    />
+  {/if}
+
+  <!-- Delete tag modal (triggered by palette via arbor:delete-tag) -->
+  {#if pendingTagDelete}
+    <DeleteTagModal
+      tagName={pendingTagDelete.name}
+      scope={pendingTagDelete.scope}
+      onCancel={() => pendingTagDelete = null}
+      onConfirm={async () => {
+        const p = pendingTagDelete!;
+        pendingTagDelete = null;
+        await runTagDelete(p.tabId, p.name, p.scope);
+      }}
     />
   {/if}
 

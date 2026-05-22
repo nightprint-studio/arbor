@@ -5,6 +5,7 @@
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import LogStream from '$lib/components/shared/ui/LogStream.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { pluginLogsStore, NON_PIPELINE_SENTINEL } from '$lib/stores/pluginLogs.svelte';
   import type { PluginLogEntry, PluginLogLevel } from '$lib/types/plugin-logs';
   import { renderStructuredLogLine, formatLogTime, shortRunId } from '$lib/utils/log-highlight';
@@ -140,10 +141,12 @@
     return f === null ? true : f.has(key);
   }
 
-  function confirmClearPipeline(name: string) {
-    if (window.confirm(`Remove all log entries from pipeline '${name}'?`)) {
-      pluginLogsStore.clearByPipeline(name);
-    }
+  let pendingClearPipeline = $state<string | null>(null);
+  function confirmClearPipeline(name: string) { pendingClearPipeline = name; }
+  function performClearPipeline() {
+    const n = pendingClearPipeline;
+    pendingClearPipeline = null;
+    if (n) pluginLogsStore.clearByPipeline(n);
   }
 
   // True when the buffer holds at least one entry without a pipeline tag —
@@ -434,6 +437,17 @@
     />
   </div>
 </div>
+
+{#if pendingClearPipeline}
+  <ConfirmModal
+    title="Clear pipeline logs"
+    message={`Remove all log entries from pipeline '${pendingClearPipeline}'?`}
+    variant="danger"
+    confirmLabel="Clear"
+    onCancel={() => pendingClearPipeline = null}
+    onConfirm={performClearPipeline}
+  />
+{/if}
 
 <style>
   .pl-action-btn {

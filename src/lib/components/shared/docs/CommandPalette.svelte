@@ -59,7 +59,7 @@
   <li><strong>Navigate</strong> — <em>Go to Commit</em>, <em>Go to Tag</em>, <em>Blame File</em>, <em>Show Commits Touching File</em></li>
   <li><strong>Commit</strong> — <em>Cherry-pick</em>, <em>Revert Commit</em>, <em>Reset Soft / Mixed / Hard</em>, <em>Create Branch Here</em>, <em>Create Tag</em> (Enter on empty input tags HEAD), <em>Copy Commit SHA</em></li>
   <li><strong>Stash</strong> — <em>Apply Stash</em>, <em>Pop Stash</em>, <em>Drop Stash</em></li>
-  <li><strong>Tag</strong> — <em>Delete Tag</em>, <em>Push Tag</em></li>
+  <li><strong>Tag</strong> — <em>Delete Tag (local)</em>, <em>Delete Tag (local + origin)</em>, <em>Push Tag</em></li>
   <li><strong>Remote</strong> — <em>Fetch from Remote</em>, <em>Pull from Remote</em>, <em>Push Branch to Remote</em></li>
   <li><strong>Tabs</strong> — <em>Switch Tab</em>, <em>Close Tab</em></li>
   <li><strong>Repository</strong> — <em>Open Recent Repository</em></li>
@@ -128,7 +128,8 @@
     <tr><td><code>Apply Stash</code></td><td><code>apply</code></td><td>stash</td><td>Applies a stash without dropping it</td></tr>
     <tr><td><code>Pop Stash</code></td><td><code>pop</code></td><td>stash</td><td>Applies and drops the stash</td></tr>
     <tr><td><code>Drop Stash</code></td><td><code>drop</code></td><td>stash</td><td>Deletes the stash (with confirm)</td></tr>
-    <tr><td><code>Delete Tag</code></td><td><code>delt</code>, <code>rmt</code></td><td>tag</td><td>Removes the local tag (with confirm)</td></tr>
+    <tr><td><code>Delete Tag (local)</code></td><td><code>delt</code>, <code>rmt</code></td><td>tag</td><td>Removes the tag from this repo only (confirm modal)</td></tr>
+    <tr><td><code>Delete Tag (local + origin)</code></td><td><code>delto</code>, <code>rmto</code></td><td>tag</td><td>Pushes a delete refspec to <code>origin</code> and removes the local ref (confirm modal)</td></tr>
     <tr><td><code>Push Tag</code></td><td><code>pusht</code></td><td>tag</td><td>Pushes <code>refs/tags/&lt;name&gt;</code> to origin</td></tr>
     <tr><td><code>Fetch from Remote</code></td><td><code>fr</code></td><td>remote</td><td>Fetches refs from a specific remote</td></tr>
     <tr><td><code>Pull from Remote</code></td><td><code>pr</code></td><td>remote</td><td>Pulls current branch from the chosen remote</td></tr>
@@ -198,10 +199,10 @@
 <h2>Destructive actions &amp; confirmations</h2>
 <p>A handful of commands require explicit confirmation because they cannot be undone or affect stashed work:</p>
 <ul>
-  <li><em>Delete Branch</em>, <em>Delete Tag</em>, <em>Drop Stash</em> — native <code>confirm()</code> prompt</li>
-  <li><em>Reset Hard</em> — lists the target SHA in the prompt</li>
-  <li><em>Discard All Changes</em> — same</li>
-  <li><em>Undo Last Commit</em> — shows the parent SHA that HEAD will move to</li>
+  <li><em>Delete Branch</em>, <em>Drop Stash</em>, <em>Unlink from "&lt;link&gt;"</em>, <em>Discard All Changes</em> — themed confirm modal with Enter-to-confirm</li>
+  <li><em>Delete Tag (local)</em> and <em>Delete Tag (local + origin)</em> — confirm modal that spells out the scope</li>
+  <li><em>Reset Hard</em> — confirm modal that lists the target SHA being reset to</li>
+  <li><em>Undo Last Commit</em> — confirm modal that shows the parent SHA HEAD will move to</li>
 </ul>
 
 <h2>Open With — launching an IDE</h2>
