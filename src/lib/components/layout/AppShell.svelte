@@ -1097,6 +1097,7 @@
         createWorkspaceOpen ||
         workspaceManagerOpen ||
         uiStore.repoBrowserOpen ||
+        uiStore.marketplaceOpen ||
         statsOverlayOpen ||
         themeEditorOpen ||
         uiStore.recentQuickSwitchOpen ||
@@ -1148,8 +1149,6 @@
           // Manager, Docs, etc.
           'plugin_logs',
           'toggle_bottom_panel',
-          // Repo creation modals are global — fine to fire from any panel.
-          'open_repo', 'clone_repo', 'init_repo',
           // Layout focus cycling is global by design.
           'cycle_focus', 'cycle_focus_reverse',
         ]);
