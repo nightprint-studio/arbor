@@ -7,6 +7,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- `Ctrl+Shift+Enter` in the commit message field commits and pushes in one step.
+- The Commit split-button menu now shows shortcut hints and tinted icons next
+  to each option, matching the graph context menu.
+
 ### Fixed
 
 - MR / PR sidebar no longer shows a raw 404 when the remote has pull/merge requests

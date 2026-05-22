@@ -134,6 +134,7 @@
   <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
   <tbody>
     <tr><td><Kbd action="commit" size="sm" /></td><td>Commit (when focus is in message field)</td></tr>
+    <tr><td><Kbd action="commit_and_push" size="sm" /></td><td>Commit and push current branch in one go</td></tr>
   </tbody>
 </table>
 

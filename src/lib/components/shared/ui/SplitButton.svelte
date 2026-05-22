@@ -11,8 +11,15 @@
     label: string;
     /** Svelte component (e.g. a Lucide icon) rendered at size 14. */
     icon?: any;
+    /** Optional CSS colour applied to the icon (tints only the glyph). */
+    iconColor?: string;
     description?: string;
     disabled?: boolean;
+    /** Built-in keybinding action id — renders an inline kbd hint on the right
+     *  that tracks user remaps via keybindingsStore. */
+    action?: string;
+    /** Pre-formatted shortcut fallback when `action` is not a built-in id. */
+    shortcut?: string;
     /** Treat this entry as a non-clickable group header (separator with label). */
     group?: boolean;
   }
@@ -85,7 +92,10 @@
             id: opt.id,
             label: opt.label,
             icon: opt.icon,
-            description: opt.description,
+            iconColor: opt.iconColor,
+            subtitle: opt.description,
+            action: opt.action,
+            shortcut: opt.shortcut,
             disabled: opt.disabled,
             onclick: () => onselect?.(opt.id),
           } as DropdownItem),

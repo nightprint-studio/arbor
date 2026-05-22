@@ -93,6 +93,9 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   new_branch:     { key: 'b',     alt: true,   shift: true,  description: 'Create new branch',     group: 'Git' },
   stash:          { key: 'h',     ctrl: true,  shift: true,  description: 'Stash changes',         group: 'Git' },
   commit:         { key: 'Enter', ctrl: true,                description: 'Commit staged changes', group: 'Git' },
+  // Pairs with `commit` (Ctrl+Enter): same chord with Shift commits and pushes
+  // in one go. Only meaningful while the commit message field has focus.
+  commit_and_push: { key: 'Enter', ctrl: true, shift: true,  description: 'Commit staged changes and push', group: 'Git' },
   stage_all:      { key: 'a',     ctrl: true,  shift: true,  description: 'Stage all changes',     group: 'Git' },
   unstage_all:    { key: 'u',     ctrl: true,  shift: true,  description: 'Unstage all changes',   group: 'Git' },
 

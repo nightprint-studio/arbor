@@ -6,12 +6,22 @@
         label:     string;
         /** Lucide-style component rendered at size 14. */
         icon?:     any;
+        /** Optional CSS colour applied to the icon (any CSS colour or
+         *  `var(--token)`). Matches the same option on ContextMenu — useful
+         *  for split-button menus that mirror a right-click menu's palette. */
+        iconColor?: string;
         /** If provided, shown as a 22px avatar circle (icon is ignored). */
         avatarUrl?: string;
         /** Second line below the label in smaller text. */
         subtitle?: string;
         /** Right-aligned muted text (counts, dates, …). */
         meta?:     string;
+        /** Built-in keybinding action id (e.g. 'commit') — resolved live via
+         *  keybindingsStore so user remaps flow through. Preferred over
+         *  `shortcut`. Rendered as an inline kbd hint on the right. */
+        action?:   string;
+        /** Pre-formatted shortcut fallback when `action` is not a known id. */
+        shortcut?: string;
         /** Single-mode: shows a check on the right. Multi-mode: drives the checkbox state. */
         active?:   boolean;
         disabled?: boolean;
@@ -37,6 +47,7 @@
   import { cubicOut } from 'svelte/easing';
   import { Search, ChevronDown, ChevronRight, Check, Loader } from 'lucide-svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import Kbd from './Kbd.svelte';
 
   type Ctx        = { open: boolean; toggle: () => void; close: () => void };
   type ContentCtx = { filter: string; close: () => void; reposition: () => void };
@@ -371,13 +382,22 @@
       <img class="dd-avatar" src={item.avatarUrl} alt="" />
     {:else if item.icon}
       {@const ItemIcon = item.icon}
-      <ItemIcon size={14} class="dd-icon" />
+      {#if item.iconColor}
+        <span class="dd-icon-tint" style="color:{item.iconColor}"><ItemIcon size={14} /></span>
+      {:else}
+        <ItemIcon size={14} class="dd-icon" />
+      {/if}
     {/if}
     <span class="dd-item-body">
       <span class="dd-item-label">{item.label}</span>
       {#if item.subtitle}<span class="dd-item-sub">{item.subtitle}</span>{/if}
     </span>
     {#if item.meta}<span class="dd-item-meta">{item.meta}</span>{/if}
+    {#if item.action}
+      <span class="dd-shortcut"><Kbd action={item.action} variant="inline" /></span>
+    {:else if item.shortcut}
+      <span class="dd-shortcut"><Kbd label={item.shortcut} variant="inline" /></span>
+    {/if}
     {#if item.active && selectionMode !== 'multiple'}<Check size={11} class="dd-check" />{/if}
   </button>
 {/snippet}
@@ -678,6 +698,16 @@
   }
   :global(.dd-icon)  { flex-shrink: 0; color: var(--text-muted); }
   :global(.dd-check) { color: var(--accent); flex-shrink: 0; }
+  /* Per-item icon tint (set via iconColor). The wrapping span owns the
+     colour so we don't fight the `:global(.dd-icon)` muted default; the
+     lucide glyph inside paints in currentColor. */
+  .dd-icon-tint {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  /* Right-aligned inline kbd hint (mirrors ContextMenu's .shortcut-slot). */
+  .dd-shortcut { margin-left: 8px; flex-shrink: 0; }
 
   .dd-item-body {
     flex: 1;
