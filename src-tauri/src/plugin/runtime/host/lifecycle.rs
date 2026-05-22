@@ -12,7 +12,7 @@ use super::PluginHost;
 use crate::plugin::runtime::consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION};
 use crate::plugin::runtime::loaded::{DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter};
 use crate::plugin::runtime::manifest::{
-    PluginManifest, discover_plugins, load_plugin_states, plugin_dir,
+    PluginManifest, discover_plugins_detailed, load_plugin_states, plugin_dir,
     save_plugin_states, topo_sort_manifests,
 };
 use crate::plugin::runtime::manifest::deps::PluginLoadFailure;
@@ -70,7 +70,32 @@ impl PluginHost {
         self.unload_all();
 
         let states = load_plugin_states();
-        let all_manifests = discover_plugins()?;
+        let (all_manifests, bad_manifests) = discover_plugins_detailed()?;
+
+        // Surface manifest parse failures the same way we surface load
+        // failures: list them in the Plugin Manager AND drop a line in the
+        // Plugin Logs panel so the author isn't left guessing why their
+        // plugin folder is being ignored.
+        for bad in bad_manifests {
+            tracing::warn!(
+                "plugin folder '{}' skipped: manifest parse error — {}",
+                bad.folder_name, bad.error
+            );
+            self.load_failures.retain(|f| f.name != bad.folder_name);
+            self.load_failures.push(PluginLoadFailure {
+                name:        bad.folder_name.clone(),
+                version:     String::new(),
+                description: String::new(),
+                author:      String::new(),
+                error:       format!("plugin.toml parse error: {}", bad.error),
+            });
+            if let Some(ref h) = self.app_handle {
+                crate::plugin_logs::record(
+                    h, "error", &bad.folder_name,
+                    format!("plugin.toml parse error: {}", bad.error),
+                );
+            }
+        }
 
         // Sort topologically so dependencies are loaded before dependents.
         let (sorted, cycle_names) = topo_sort_manifests(all_manifests);

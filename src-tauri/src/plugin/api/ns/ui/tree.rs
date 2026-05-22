@@ -69,14 +69,22 @@ fn install_set(ctx: &ApiCtx, lua: &Lua, tree_table: &Table) -> Result<()> {
                 match serde_json::from_value(arr.clone()) {
                     Ok(v)  => v,
                     Err(e) => {
+                        let preview = {
+                            let s = arr.to_string();
+                            if s.len() > 400 { format!("{}…", &s[..400]) } else { s }
+                        };
                         tracing::warn!(target: "plugin",
                             "[{}] arbor.ui.tree.set('{}'): breadcrumb deserialization failed: {} (input: {})",
-                            pname, sidebar_id, e,
-                            {
-                                let s = arr.to_string();
-                                if s.len() > 400 { format!("{}…", &s[..400]) } else { s }
-                            }
+                            pname, sidebar_id, e, preview,
                         );
+                        if let Some(ref h) = handle {
+                            crate::plugin_logs::record(
+                                h, "error", &pname,
+                                format!(
+                                    "arbor.ui.tree.set('{sidebar_id}'): breadcrumb deserialization failed: {e}"
+                                ),
+                            );
+                        }
                         Vec::new()
                     }
                 }
@@ -99,15 +107,23 @@ fn install_set(ctx: &ApiCtx, lua: &Lua, tree_table: &Table) -> Result<()> {
             match serde_json::from_value(nodes_json_array.clone()) {
                 Ok(v) => v,
                 Err(e) => {
+                    // Truncate the input so we don't flood logs on huge trees.
+                    let preview = {
+                        let s = nodes_json_array.to_string();
+                        if s.len() > 400 { format!("{}…", &s[..400]) } else { s }
+                    };
                     tracing::warn!(target: "plugin",
                         "[{}] arbor.ui.tree.set('{}'): nodes deserialization failed: {} (input: {})",
-                        pname, sidebar_id, e,
-                        // Truncate the input so we don't flood logs on huge trees.
-                        {
-                            let s = nodes_json_array.to_string();
-                            if s.len() > 400 { format!("{}…", &s[..400]) } else { s }
-                        }
+                        pname, sidebar_id, e, preview,
                     );
+                    if let Some(ref h) = handle {
+                        crate::plugin_logs::record(
+                            h, "error", &pname,
+                            format!(
+                                "arbor.ui.tree.set('{sidebar_id}'): nodes deserialization failed: {e}"
+                            ),
+                        );
+                    }
                     Vec::new()
                 }
             };

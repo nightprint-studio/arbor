@@ -106,9 +106,27 @@ fn default_entry() -> String { "main.lua".to_string() }
 // Discovery
 // ---------------------------------------------------------------------------
 
+/// A plugin folder whose `plugin.toml` could not be parsed. Kept separate
+/// from `PluginManifest` because we don't have a typed manifest to attach
+/// the error to — the folder name is the best stand-in for the plugin name.
+#[derive(Debug, Clone)]
+pub struct ManifestParseFailure {
+    pub folder_name: String,
+    pub path:        PathBuf,
+    pub error:       String,
+}
+
 pub fn discover_plugins() -> Result<Vec<PluginManifest>> {
+    Ok(discover_plugins_detailed()?.0)
+}
+
+/// Same as `discover_plugins`, but also returns the list of folders whose
+/// manifest failed to parse. The caller (PluginHost::reload) uses it to
+/// surface those failures in the Plugin Logs panel and the Plugin Manager.
+pub fn discover_plugins_detailed() -> Result<(Vec<PluginManifest>, Vec<ManifestParseFailure>)> {
     let host_os = current_os();
     let mut manifests: Vec<PluginManifest> = Vec::new();
+    let mut bad: Vec<ManifestParseFailure> = Vec::new();
     let mut seen_names: HashSet<String> = HashSet::new();
 
     // Two roots, scanned in order so dev / hand-installed plugins win on
@@ -147,11 +165,22 @@ pub fn discover_plugins() -> Result<Vec<PluginManifest>> {
                     }
                     manifests.push(m);
                 }
-                Err(e) => tracing::warn!("bad manifest at {toml_path:?}: {e}"),
+                Err(e) => {
+                    tracing::warn!("bad manifest at {toml_path:?}: {e}");
+                    let folder_name = path.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("<unknown>")
+                        .to_string();
+                    bad.push(ManifestParseFailure {
+                        folder_name,
+                        path: path.clone(),
+                        error: e.to_string(),
+                    });
+                }
             }
         }
     }
-    Ok(manifests)
+    Ok((manifests, bad))
 }
 
 fn read_manifest(toml_path: &std::path::Path, dir: &std::path::Path) -> Result<PluginManifest> {
