@@ -56,6 +56,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Restored Unicode glyphs (em-dashes, arrows, box-drawing characters, bullets) in
   the Docs panel pages and exported Markdown / HTML docs, which had been corrupted
   by a previous round-trip through Windows-1252.
+- Clone Repository: the folder-picker button in the Base folder field is now
+  reachable via Tab, so the dialog can be filled in entirely from the keyboard.
 - Docs Markdown export now preserves inline `<code>` and other formatting inside
   table cells and headings; previously e.g. a table row referencing `<h1>` would
   render as a bare HTML tag (and be stripped by GitHub's renderer) instead of as
