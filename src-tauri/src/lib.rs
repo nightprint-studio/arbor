@@ -745,6 +745,7 @@ pub fn run() {
             // Plugins
             commands::plugin_commands::list_plugins,
             commands::plugin_commands::get_plugin_directory,
+            commands::plugin_commands::get_installed_plugin_path,
             commands::plugin_commands::get_plugins_enabled,
             commands::plugin_commands::set_plugins_enabled,
             commands::plugin_commands::reload_plugins,

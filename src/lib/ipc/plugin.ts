@@ -216,3 +216,12 @@ export const importPluginZip = (zipBytes: Uint8Array) =>
 /** Install a plugin zip by absolute path — backend reads the file itself. */
 export const importPluginZipFromPath = (path: string) =>
   invoke<ImportPluginResult>('import_plugin_zip_from_path', { path });
+
+/**
+ * Resolve the on-disk folder of a discovered plugin by name. Errors when no
+ * installed plugin matches. The folder name on disk can differ from the
+ * manifest's `name` (zip imports preserve the archive root), so this is the
+ * only reliable way to map name → path from the FE.
+ */
+export const getInstalledPluginPath = (name: string) =>
+  invoke<string>('get_installed_plugin_path', { name });

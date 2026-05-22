@@ -8,7 +8,7 @@
    * permission-confirm dialog land in later phases (see project plan).
    */
   import { onMount, untrack } from 'svelte';
-  import { Package, Palette, Search, Filter as FilterIcon, Globe, Shield, Tag, X, Plus, Upload, ExternalLink, Check, CheckCircle2, FolderGit2, GitBranch, ChevronRight, ChevronDown, Trash2, Eye, Pin, Store, RefreshCw, Link as LinkIcon, FlaskConical, PowerOff } from 'lucide-svelte';
+  import { Package, Palette, Search, Filter as FilterIcon, Globe, Shield, Tag, X, Plus, Upload, ExternalLink, Check, CheckCircle2, FolderGit2, FolderOpen, GitBranch, ChevronRight, ChevronDown, Trash2, Eye, Pin, Store, RefreshCw, Link as LinkIcon, FlaskConical, PowerOff, Power } from 'lucide-svelte';
   import Modal           from '$lib/components/shared/Modal.svelte';
   import ModalHeader     from '$lib/components/shared/ModalHeader.svelte';
   import Tabs, { type TabItem }       from '$lib/components/shared/ui/Tabs.svelte';
@@ -24,9 +24,11 @@
   import ModalFooter     from '$lib/components/shared/ModalFooter.svelte';
   import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
   import MarketplaceInstallConfirm from './MarketplaceInstallConfirm.svelte';
+  import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
+  import { openUrl, openPath } from '@tauri-apps/plugin-opener';
   import { tooltip }     from '$lib/actions/tooltip';
   import { uiStore }     from '$lib/stores/ui.svelte';
-  import { importPluginZipFromPath, reloadPlugins, pluginEnablePreview, pluginDisablePreview } from '$lib/ipc/plugin';
+  import { importPluginZipFromPath, reloadPlugins, pluginEnablePreview, pluginDisablePreview, getInstalledPluginPath } from '$lib/ipc/plugin';
   import PluginUninstallConfirmModal from './PluginUninstallConfirmModal.svelte';
   import PluginDisableConfirmModal   from './PluginDisableConfirmModal.svelte';
   import PluginEnableConfirmModal    from './PluginEnableConfirmModal.svelte';
@@ -707,6 +709,120 @@
     }
   }
 
+  // ── Context menu ─────────────────────────────────────────────────────────
+  // Right-click on a row opens an actions menu mirroring the buttons in the
+  // detail pane. Selecting an item also marks the row as selected so the
+  // detail pane is in sync.
+  type RowCtx =
+    | { x: number; y: number; kind: 'plugin'; plugin: MarketplacePlugin }
+    | { x: number; y: number; kind: 'theme';  theme:  MarketplaceTheme  };
+  let rowCtx = $state<RowCtx | null>(null);
+
+  function openPluginCtx(e: MouseEvent, p: MarketplacePlugin) {
+    e.preventDefault();
+    e.stopPropagation();
+    selected = p.name;
+    rowCtx = { x: e.clientX, y: e.clientY, kind: 'plugin', plugin: p };
+  }
+  function openThemeCtx(e: MouseEvent, t: MarketplaceTheme) {
+    e.preventDefault();
+    e.stopPropagation();
+    selected = t.id;
+    rowCtx = { x: e.clientX, y: e.clientY, kind: 'theme', theme: t };
+  }
+
+  function pluginCtxItems(p: MarketplacePlugin): MenuItem[] {
+    const items: MenuItem[] = [];
+    if (p.installed) {
+      if (p.enabled) {
+        items.push({ id: 'disable', label: 'Disable', icon: PowerOff, iconColor: 'var(--text-muted)' });
+      } else {
+        items.push({ id: 'enable',  label: 'Enable',  icon: Power,    iconColor: 'var(--success)' });
+      }
+      if (p.update_available) {
+        items.push({
+          id: 'update',
+          label: `Update to v${p.update_available}`,
+          icon: RefreshCw,
+          iconColor: 'var(--accent)',
+        });
+      }
+      items.push({ id: 'sep1', label: '', separator: true });
+      items.push({ id: 'uninstall', label: 'Uninstall', icon: Trash2, danger: true });
+    } else {
+      items.push({ id: 'install', label: 'Install', icon: Plus, iconColor: 'var(--accent)' });
+    }
+    items.push({ id: 'sep2', label: '', separator: true });
+    if (p.homepage) {
+      items.push({ id: 'homepage', label: 'Open homepage', icon: ExternalLink });
+    }
+    // Local plugins (zip sideload, dev folder) have no remote repo to open —
+    // reveal their on-disk folder instead. For community/custom we still
+    // surface the repo link even when installed, since the source-of-truth
+    // lives upstream.
+    if (p.source === 'local' && p.installed) {
+      items.push({ id: 'explorer', label: 'Open in Explorer', icon: FolderOpen });
+    } else {
+      items.push({ id: 'repo', label: 'Open repository', icon: FolderGit2 });
+    }
+    if (p.source === 'custom') {
+      items.push({ id: 'sep3', label: '', separator: true });
+      items.push({ id: 'remove_source', label: 'Remove custom source', icon: X, danger: true });
+    }
+    return items;
+  }
+
+  function themeCtxItems(t: MarketplaceTheme): MenuItem[] {
+    const items: MenuItem[] = [];
+    if (t.installed) {
+      items.push({ id: 'uninstall_theme', label: 'Remove', icon: Trash2, danger: true });
+    } else {
+      items.push({ id: 'install_theme', label: 'Install', icon: Plus, iconColor: 'var(--accent)' });
+    }
+    items.push({ id: 'sep1', label: '', separator: true });
+    items.push({ id: 'repo', label: 'Open repository', icon: FolderGit2 });
+    return items;
+  }
+
+  /** Reveal the plugin's on-disk folder in Explorer/Finder. Path is resolved
+   *  via a backend command because the folder name can differ from the
+   *  manifest's `name` (zip imports preserve the archive root). */
+  async function revealPluginFolder(p: MarketplacePlugin) {
+    try {
+      const dir = await getInstalledPluginPath(p.name);
+      await openPath(dir);
+    } catch (err) {
+      uiStore.showToast(`Could not open plugin folder: ${err}`, 'error');
+    }
+  }
+
+  async function handleRowCtxSelect(id: string) {
+    const ctx = rowCtx;
+    rowCtx = null;
+    if (!ctx) return;
+    if (ctx.kind === 'plugin') {
+      const p = ctx.plugin;
+      switch (id) {
+        case 'install':
+        case 'update':       installPlugin(p);                       return;
+        case 'uninstall':    await uninstallPlugin(p);               return;
+        case 'enable':       await togglePluginEnabled(p, true);     return;
+        case 'disable':      await togglePluginEnabled(p, false);    return;
+        case 'homepage':     if (p.homepage) openUrl(p.homepage).catch(() => {}); return;
+        case 'repo':         openUrl(p.entry.repo).catch(() => {}); return;
+        case 'explorer':     await revealPluginFolder(p);            return;
+        case 'remove_source':await removeCustomSource(p);            return;
+      }
+    } else {
+      const t = ctx.theme;
+      switch (id) {
+        case 'install_theme':   await installTheme(t);   return;
+        case 'uninstall_theme': await uninstallTheme(t); return;
+        case 'repo':            openUrl(t.entry.repo).catch(() => {}); return;
+      }
+    }
+  }
+
   // ── UI helpers ───────────────────────────────────────────────────────────
   function permissionChips(p: MarketplacePlugin): { icon: typeof Globe; label: string; tone: 'safe' | 'warn' | 'danger' }[] {
     const out: { icon: typeof Globe; label: string; tone: 'safe' | 'warn' | 'danger' }[] = [];
@@ -957,7 +1073,8 @@
               {@const installedDisabled = p.installed && p.enabled === false}
               <button class="mk-row" class:selected={selected === p.name}
                       class:installed-disabled={installedDisabled}
-                      onclick={() => (selected = p.name)}>
+                      onclick={() => (selected = p.name)}
+                      oncontextmenu={(e) => openPluginCtx(e, p)}>
                 {#if p.icon}
                   {#if isInlineSvg(p.icon)}
                     <span class="mk-icon-art mk-icon-art-sm" class:dim={!p.installed || installedDisabled} aria-hidden="true">{@html p.icon}</span>
@@ -1043,7 +1160,8 @@
             {#each filteredThemes as t (t.id)}
               {@const SrcIcon = sourceIcon(t.source)}
               <button class="mk-row mk-theme-row" class:selected={selected === t.id}
-                      onclick={() => (selected = t.id)}>
+                      onclick={() => (selected = t.id)}
+                      oncontextmenu={(e) => openThemeCtx(e, t)}>
                 <div class="mk-theme-swatch" style="background: {t.preview.bg}; color: {t.preview.fg};">
                   <span class="mk-theme-letter" style="color: {t.preview.fg};">Aa</span>
                   <span class="mk-swatch-dot" style="background: {t.preview.accent};"></span>
@@ -1680,6 +1798,16 @@
     extensions={['zip']}
     onConfirm={runZipImport}
     onCancel={() => { zipPickerOpen = false; }}
+  />
+{/if}
+
+{#if rowCtx}
+  <ContextMenu
+    x={rowCtx.x}
+    y={rowCtx.y}
+    items={rowCtx.kind === 'plugin' ? pluginCtxItems(rowCtx.plugin) : themeCtxItems(rowCtx.theme)}
+    onSelect={handleRowCtxSelect}
+    onClose={() => (rowCtx = null)}
   />
 {/if}
 

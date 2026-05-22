@@ -100,6 +100,20 @@ pub fn get_plugin_directory() -> Result<String, AppError> {
     Ok(dir.to_string_lossy().to_string())
 }
 
+/// Resolve the on-disk folder of a discovered plugin by name. Walks the same
+/// discovery roots as the host (`plugin_dir()` first, then the marketplace
+/// install dir) and returns the directory whose manifest claims `name`. The
+/// folder name on disk can differ from the manifest's `name` (e.g. zip imports
+/// preserve the archive root), so the FE can't construct the path itself.
+#[tauri::command]
+pub fn get_installed_plugin_path(name: String) -> Result<String, AppError> {
+    let manifests = crate::plugin::runtime::discover_plugins()?;
+    let m = manifests.into_iter()
+        .find(|m| m.name == name)
+        .ok_or_else(|| AppError::Other(format!("plugin '{name}' is not installed")))?;
+    Ok(m.dir.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 pub fn reload_plugins(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
     // Cancel all running plugin jobs before reloading so stale processes don't linger.
