@@ -18,7 +18,7 @@
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import FilterButton from '$lib/components/shared/ui/FilterButton.svelte';
-  import BrandTile from '$lib/components/shared/ui/BrandTile.svelte';
+  import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
   import IssueDetailModal from './IssueDetailModal.svelte';
   import CreateIssueModal from './CreateIssueModal.svelte';
   import IssueContextMenu from './IssueContextMenu.svelte';

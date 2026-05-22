@@ -8,7 +8,7 @@
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { pluginStore }        from '$lib/stores/plugin.svelte';
   import { firePluginAction } from '$lib/ipc/plugin';
-  import Kbd from '$lib/components/shared/ui/Kbd.svelte';
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
 
   let { onOpen, onClone, onInit }: { onOpen: () => void; onClone: () => void; onInit: () => void } = $props();

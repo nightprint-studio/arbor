@@ -11,7 +11,7 @@
   import { issuesStore } from '$lib/stores/issues.svelte';
   import { mrStore } from '$lib/stores/mr.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
-  import BrandIcon from '$lib/components/shared/ui/BrandIcon.svelte';
+  import BrandIcon from '$lib/components/shared/internal/BrandIcon.svelte';
   import type { ActivityBarEntry, ComboOption } from '$lib/types/plugin';
   import { ACTIVITY_BAR_POINT, parseActivityBarEntry } from '$lib/contributions/activity-bar';
   import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';

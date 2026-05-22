@@ -47,7 +47,11 @@
   import { cubicOut } from 'svelte/easing';
   import { Search, ChevronDown, ChevronRight, Check, Loader } from 'lucide-svelte';
   import { animStore } from '$lib/stores/animations.svelte';
-  import Kbd from './Kbd.svelte';
+  // NOTE: Kbd lives in shared/internal/ because its `action=` mode reaches
+  // into Arbor's keybindings store. Dropdown uses it only as an optional
+  // right-aligned shortcut hint, so the leak across the ui/internal boundary
+  // is contained to this single import — see CLAUDE.md tier convention.
+  import Kbd from '../internal/Kbd.svelte';
 
   type Ctx        = { open: boolean; toggle: () => void; close: () => void };
   type ContentCtx = { filter: string; close: () => void; reposition: () => void };
@@ -460,6 +464,16 @@
   class="dd-root {rootClass}"
   class:dd-rel={position === 'absolute'}
   bind:this={anchorEl}
+  onkeydown={(e) => {
+    // WAI-ARIA combobox pattern: ArrowDown (or Alt+ArrowDown) on the focused
+    // trigger opens the menu and lands on the first item. Enter / Space are
+    // already handled natively by the trigger <button>. Only react when the
+    // menu is closed — once open, the document-level key handler takes over.
+    if (!open && (e.key === 'ArrowDown' || (e.altKey && e.key === 'ArrowDown'))) {
+      e.preventDefault();
+      toggle();
+    }
+  }}
 >
   {@render trigger({ open, toggle, close })}
 

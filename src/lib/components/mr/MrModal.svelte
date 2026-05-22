@@ -8,7 +8,7 @@
     Link2, Wand2,
   } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
-  import BrandIcon from '$lib/components/shared/ui/BrandIcon.svelte';
+  import BrandIcon from '$lib/components/shared/internal/BrandIcon.svelte';
   import { mrStore } from '$lib/stores/mr.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
   import {

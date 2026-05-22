@@ -27,7 +27,7 @@
   import { fade } from 'svelte/transition';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { invoke } from '@tauri-apps/api/core';
-  import ArborLogo from './ui/ArborLogo.svelte';
+  import ArborLogo from './internal/ArborLogo.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
 

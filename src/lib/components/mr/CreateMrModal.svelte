@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { GitPullRequest, ChevronDown, Wand2, Info } from 'lucide-svelte';
+  import { GitPullRequest, Wand2, Info } from 'lucide-svelte';
   import { onMount } from 'svelte';
   import { createMr, getMrCapabilities } from '$lib/ipc/mr';
   import { listLocalBranches, listRemoteBranches } from '$lib/ipc/branch';
@@ -10,12 +10,11 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
-  import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
-  import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import BranchSelect from '$lib/components/shared/internal/BranchSelect.svelte';
 
   let { onClose, onCreated, currentBranch = '', initialTargetBranch = '', initialTitle = '' }: {
     onClose:              () => void;
@@ -82,29 +81,6 @@
     targetBranch.trim().length > 0 &&
     sourceBranch !== targetBranch
   );
-
-  function buildBranchItems(current: string, setter: (v: string) => void): DropdownItem[] {
-    const items: DropdownItem[] = allBranches.map(b => ({
-      kind:    'item',
-      id:      b,
-      label:   b,
-      active:  current === b,
-      onclick: () => setter(b),
-    }));
-    // Surface a sticky entry for an externally-supplied value not in the list.
-    if (current && !allBranches.includes(current)) {
-      items.unshift({
-        kind:    'item',
-        id:      current,
-        label:   current,
-        active:  true,
-        onclick: () => setter(current),
-      });
-    }
-    return items;
-  }
-  const sourceItems = $derived(buildBranchItems(sourceBranch, v => sourceBranch = v));
-  const targetItems = $derived(buildBranchItems(targetBranch, v => targetBranch = v));
 
   onMount(async () => {
     // Probe auto-merge support in parallel; never throws (backend swallows errors).
@@ -208,31 +184,11 @@
     <div class="field-row">
       <div class="field-branch">
         <FormField label="Source branch" required>
-        <div class="select-wrap">
-          <Dropdown
-            position="fixed"
-            direction="down"
-            matchTriggerWidth
-            searchable={allBranches.length > 12}
-            searchPlaceholder="Filter branches…"
-            items={sourceItems}
+          <BranchSelect
+            bind:value={sourceBranch}
+            branches={allBranches}
             loading={branchesLoading}
-          >
-            {#snippet trigger({ open, toggle })}
-              <button
-                class="field-select"
-                onclick={toggle}
-                disabled={branchesLoading}
-                type="button"
-                aria-haspopup="listbox"
-                aria-expanded={open}
-              >
-                <span class="field-select-label">{branchesLoading ? 'Loading…' : (sourceBranch || '— pick a branch —')}</span>
-                <ChevronDown size={12} />
-              </button>
-            {/snippet}
-          </Dropdown>
-        </div>
+          />
         </FormField>
       </div>
 
@@ -240,31 +196,11 @@
 
       <div class="field-branch">
         <FormField label="Target branch" required error={!!sourceBranch && !!targetBranch && sourceBranch === targetBranch ? 'Source and target must be different' : null}>
-        <div class="select-wrap">
-          <Dropdown
-            position="fixed"
-            direction="down"
-            matchTriggerWidth
-            searchable={allBranches.length > 12}
-            searchPlaceholder="Filter branches…"
-            items={targetItems}
+          <BranchSelect
+            bind:value={targetBranch}
+            branches={allBranches}
             loading={branchesLoading}
-          >
-            {#snippet trigger({ open, toggle })}
-              <button
-                class="field-select"
-                onclick={toggle}
-                disabled={branchesLoading}
-                type="button"
-                aria-haspopup="listbox"
-                aria-expanded={open}
-              >
-                <span class="field-select-label">{branchesLoading ? 'Loading…' : (targetBranch || '— pick a branch —')}</span>
-                <ChevronDown size={12} />
-              </button>
-            {/snippet}
-          </Dropdown>
-        </div>
+          />
         </FormField>
       </div>
     </div>
@@ -419,39 +355,6 @@
     color: var(--text-muted);
     padding-top: 22px;
     flex-shrink: 0;
-  }
-
-  /* ── Select ───────────────────────────────────────────────────────────────── */
-  .select-wrap { display: flex; align-items: center; }
-  .select-wrap :global(.dd-root) { width: 100%; }
-  .field-select {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    color: var(--text-primary);
-    font-family: var(--font-code);
-    font-size: 11px;
-    padding: 7px 10px;
-    outline: none;
-    cursor: pointer;
-    text-align: left;
-    transition: border-color var(--transition-fast);
-  }
-  .field-select:hover,
-  .field-select[aria-expanded='true'] { border-color: var(--accent); }
-  .field-select:focus-visible { border-color: var(--border-focus); }
-  .field-select:disabled { opacity: 0.5; cursor: default; }
-  .field-select-label {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   /* ── Checkboxes group ─────────────────────────────────────────────────────── */

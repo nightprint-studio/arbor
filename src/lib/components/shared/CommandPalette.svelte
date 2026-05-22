@@ -55,7 +55,7 @@
   import type { Issue } from '$lib/types/issues';
   import { issuesStore } from '$lib/stores/issues.svelte';
   import { getBranchPolicy, assertBranchNameAllowed, type BranchPolicy } from '$lib/utils/branch-policy';
-  import Kbd from '$lib/components/shared/ui/Kbd.svelte';
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { shortcutFor } from '$lib/utils/shortcut';
   import { tooltip } from '$lib/actions/tooltip';

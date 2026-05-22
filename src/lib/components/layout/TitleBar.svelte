@@ -8,8 +8,8 @@
   import MenuBar from './MenuBar.svelte';
   import Contribution from '$lib/components/shared/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
-  import ArborLogo    from '$lib/components/shared/ui/ArborLogo.svelte';
-  import Kbd          from '$lib/components/shared/ui/Kbd.svelte';
+  import ArborLogo    from '$lib/components/shared/internal/ArborLogo.svelte';
+  import Kbd          from '$lib/components/shared/internal/Kbd.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   // Title bar buttons sit at the very top — tooltips fly downward away from
   // the bar, never above (they'd be clipped by the window edge).

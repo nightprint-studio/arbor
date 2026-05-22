@@ -3,7 +3,7 @@
     CheckCircle2, Loader2, XCircle, Copy,
     ChevronDown, Eye, EyeOff, ExternalLink,
   } from 'lucide-svelte';
-  import BrandTile from '$lib/components/shared/ui/BrandTile.svelte';
+  import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { listen } from '@tauri-apps/api/event';
   import {

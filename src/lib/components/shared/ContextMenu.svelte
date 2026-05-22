@@ -3,7 +3,7 @@
   import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
-  import Kbd from '$lib/components/shared/ui/Kbd.svelte';
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
 
   export interface MenuItem {
     id: string;

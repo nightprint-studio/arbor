@@ -229,7 +229,7 @@ html, body { height: 100%; overflow: hidden; }
      the foreground (icon glyph) MUST be hard-coded white (#fff) too, not
      `var(--text-on-accent)` — the latter is a theme token and may resolve
      to a dark colour in light themes, killing contrast on the absolute
-     brand fill. See `shared/ui/BrandTile.svelte` for the canonical tile.
+     brand fill. See `shared/internal/BrandTile.svelte` for the canonical tile.
   */
   --brand-github:        #24292e;
   --brand-github-green:  #238636;

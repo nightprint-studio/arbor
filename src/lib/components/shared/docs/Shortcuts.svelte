@@ -1,7 +1,7 @@
 <script lang="ts">
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { pluginStore }       from '$lib/stores/plugin.svelte';
-  import Kbd                   from '$lib/components/shared/ui/Kbd.svelte';
+  import Kbd                   from '$lib/components/shared/internal/Kbd.svelte';
   import type { Keybinding }   from '$lib/utils/keybindings';
 
   type PluginKb = {

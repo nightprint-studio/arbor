@@ -6,7 +6,7 @@
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalSidebarToggle from '$lib/components/shared/ui/ModalSidebarToggle.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
-  import EncodingPill from '$lib/components/shared/ui/EncodingPill.svelte';
+  import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
   import { encodingOverrides } from '$lib/stores/encodingOverrides.svelte';
   import {
     AlertTriangle, CheckCircle2, GitMerge, Archive, XCircle,

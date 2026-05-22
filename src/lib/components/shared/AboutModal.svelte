@@ -3,7 +3,7 @@
   import { openUrl } from '@tauri-apps/plugin-opener';
   import Modal from './Modal.svelte';
   import ModalHeader from './ModalHeader.svelte';
-  import ArborLogo from './ui/ArborLogo.svelte';
+  import ArborLogo from './internal/ArborLogo.svelte';
   import { getAppInfo, type AppInfo } from '$lib/ipc/app';
   import { tooltip } from '$lib/actions/tooltip';
 

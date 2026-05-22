@@ -25,8 +25,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - Dropdowns now play nicely with keyboard-only use: Tab while a menu is open
   closes it and moves focus to the next field, Escape restores focus to the
-  trigger, and the Create PR / MR branch selects show a visible focus ring
-  when reached with Tab.
+  trigger, ArrowDown (or Alt+ArrowDown) on a focused trigger opens the menu
+  and lands on the first item, and the Create PR / MR branch selects show
+  a visible focus ring when reached with Tab.
 - MR / PR sidebar no longer shows a raw 404 when the remote has pull/merge requests
   disabled — the sidebar, Command Palette entries, and `arbor://mr/open/<n>` deep link
   all gracefully report the feature as unavailable.

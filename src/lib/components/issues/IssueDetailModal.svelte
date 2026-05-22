@@ -6,7 +6,7 @@
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
-  import BrandTile, { type Brand } from '$lib/components/shared/ui/BrandTile.svelte';
+  import BrandTile, { type Brand } from '$lib/components/shared/internal/BrandTile.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import { renderMarkdown } from '$lib/utils/markdown';
   import { htmlToText, installListAwareCopy } from '$lib/utils/html-to-text';

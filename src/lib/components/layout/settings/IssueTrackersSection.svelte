@@ -14,8 +14,8 @@
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import BrandTile from '$lib/components/shared/ui/BrandTile.svelte';
-  import ProviderUserBadge from '$lib/components/shared/ui/ProviderUserBadge.svelte';
+  import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
+  import ProviderUserBadge from '$lib/components/shared/internal/ProviderUserBadge.svelte';
 
   type ConnState  = 'checking' | 'disconnected' | 'connecting' | 'connected';
   type AuthMethod = 'oauth' | 'pat' | 'basic';

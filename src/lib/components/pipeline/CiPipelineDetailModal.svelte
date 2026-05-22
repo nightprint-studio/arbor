@@ -5,7 +5,7 @@
     ChevronRight, Link2,
   } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
-  import BrandIcon from '$lib/components/shared/ui/BrandIcon.svelte';
+  import BrandIcon from '$lib/components/shared/internal/BrandIcon.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { fetchCiJobs } from '$lib/ipc/pipeline';
   import type { CiRun, CiJob } from '$lib/types/pipeline';

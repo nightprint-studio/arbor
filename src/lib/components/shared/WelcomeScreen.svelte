@@ -15,8 +15,8 @@
   import FilePickerModal from './FilePickerModal.svelte';
   import Contribution    from './Contribution.svelte';
   import PluginIcon      from '$lib/components/plugins/PluginIcon.svelte';
-  import ArborLogo       from './ui/ArborLogo.svelte';
-  import Kbd             from './ui/Kbd.svelte';
+  import ArborLogo       from './internal/ArborLogo.svelte';
+  import Kbd             from './internal/Kbd.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   import { tooltip } from '$lib/actions/tooltip';
 

@@ -3,8 +3,8 @@
     CheckCircle2, Loader2, XCircle, Copy,
     ChevronDown, ChevronRight, Eye, EyeOff, ExternalLink, Settings2,
   } from 'lucide-svelte';
-  import BrandTile from '$lib/components/shared/ui/BrandTile.svelte';
-  import ProviderUserBadge from '$lib/components/shared/ui/ProviderUserBadge.svelte';
+  import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
+  import ProviderUserBadge from '$lib/components/shared/internal/ProviderUserBadge.svelte';
   import OAuthAdvancedPanel from '$lib/components/shared/OAuthAdvancedPanel.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { listen } from '@tauri-apps/api/event';
