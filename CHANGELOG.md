@@ -9,6 +9,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- F6 / Shift+F6 cycles focus across the main layout zones — titlebar, tabs,
+  activity bars, sidebar, graph, bottom panel, status bar — so the whole UI
+  is reachable from the keyboard. Zones that aren't currently visible are
+  skipped automatically.
 - File / folder picker: F6 (Shift+F6 reverse) cycles focus between the file
   list, the sidebar locations and the address bar, and Arrow Up / Down walks
   the sidebar once focused there — keyboard-only navigation of the picker is

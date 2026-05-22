@@ -69,6 +69,7 @@
     <tr><td><Kbd action="close_tab" size="sm" /></td><td>Close active tab</td></tr>
     <tr><td><Kbd action="jump_to_head" size="sm" /></td><td>Jump to HEAD commit in graph</td></tr>
     <tr><td><Kbd action="focus_graph" size="sm" /></td><td>Focus the commit graph (enables the arrow / Page / Home / End nav below)</td></tr>
+    <tr><td><Kbd action="cycle_focus" size="sm" /> / <Kbd action="cycle_focus_reverse" size="sm" /></td><td>Cycle focus across layout zones — titlebar, tabs, activity bars, sidebar, graph, bottom panel, status bar (skips zones that aren't visible)</td></tr>
     <tr><td><Kbd action="search" size="sm" /></td><td>Search commits (message / author / SHA)</td></tr>
   </tbody>
 </table>

@@ -1150,6 +1150,8 @@
           'toggle_bottom_panel',
           // Repo creation modals are global — fine to fire from any panel.
           'open_repo', 'clone_repo', 'init_repo',
+          // Layout focus cycling is global by design.
+          'cycle_focus', 'cycle_focus_reverse',
         ]);
         if (!ALLOWED_OFF_GRAPH.has(action)) return;
       }
@@ -1195,6 +1197,8 @@
         case 'stash':            window.dispatchEvent(new CustomEvent('arbor:stash')); break;
         case 'jump_to_head':     window.dispatchEvent(new CustomEvent('arbor:jump-to-head')); break;
         case 'focus_graph':      window.dispatchEvent(new CustomEvent('arbor:focus-graph')); break;
+        case 'cycle_focus':         cycleFocus(1);  break;
+        case 'cycle_focus_reverse': cycleFocus(-1); break;
         case 'next_chunk':       window.dispatchEvent(new CustomEvent('arbor:next-chunk')); break;
         case 'prev_chunk':       window.dispatchEvent(new CustomEvent('arbor:prev-chunk')); break;
         case 'open_recent':      uiStore.toggleRecentQuickSwitch(); break;
@@ -1206,6 +1210,60 @@
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
   });
+
+  // ── Layout-zone focus cycling (F6 / Shift+F6) ──────────────────────────────
+  // Lets the user move focus across the major UI regions from the keyboard
+  // without dedicated shortcuts for each one. The order roughly mirrors the
+  // visual flow: top bar → tabs → left rails → sidebar → graph → bottom
+  // panel → right rails → status bar. Zones whose root element isn't in the
+  // DOM (collapsed sidebar / hidden bottom panel / …) are skipped.
+  type FocusZone = { name: string; selector: string };
+  const FOCUS_ZONES: FocusZone[] = [
+    { name: 'titlebar',       selector: '.titlebar' },
+    { name: 'tabs',           selector: '.tabbar-wrap' },
+    { name: 'activity-left',  selector: '.activity-bar[data-side="left"]' },
+    { name: 'sidebar',        selector: '.sidebar-wrap' },
+    { name: 'graph',          selector: '.graph-area' },
+    { name: 'bottom',         selector: '.bottom-wrap' },
+    { name: 'right-sidebar',  selector: '.right-sidebar-wrap' },
+    { name: 'activity-right', selector: '.activity-bar[data-side="right"]' },
+    { name: 'statusbar',      selector: '.statusbar' },
+  ];
+  const FOCUSABLE_SEL =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),' +
+    ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  function focusZone(zone: FocusZone): boolean {
+    // Graph uses its existing event hook so the scrollEl gets focus (which
+    // is what enables the arrow / Page / Home / End graph navigation).
+    if (zone.name === 'graph') {
+      window.dispatchEvent(new CustomEvent('arbor:focus-graph'));
+      return true;
+    }
+    const root = document.querySelector<HTMLElement>(zone.selector);
+    if (!root) return false;
+    const focusable = root.querySelector<HTMLElement>(FOCUSABLE_SEL);
+    if (focusable) { focusable.focus(); return true; }
+    // No natural focusable inside — focus the wrapper itself.
+    if (root.tabIndex < 0) root.tabIndex = -1;
+    root.focus();
+    return true;
+  }
+
+  function cycleFocus(direction: 1 | -1) {
+    const zones = FOCUS_ZONES.filter(z => document.querySelector(z.selector) !== null);
+    if (zones.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    let currentIdx = -1;
+    for (let i = 0; i < zones.length; i++) {
+      const el = document.querySelector(zones[i].selector);
+      if (el && active && el.contains(active)) { currentIdx = i; break; }
+    }
+    const nextIdx = currentIdx === -1
+      ? (direction === 1 ? 0 : zones.length - 1)
+      : (currentIdx + direction + zones.length) % zones.length;
+    focusZone(zones[nextIdx]);
+  }
 
   async function openNewTerminal() {
     // Ensure terminal panel is visible

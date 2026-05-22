@@ -40,7 +40,12 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // numbered scheme and the mnemonic is well-established.
   toggle_mr_sidebar:  { key: 'm',     ctrl: true,  shift: true,  description: 'Toggle Pull / Merge Requests sidebar', group: 'Sidebar Sections' },
   focus_graph:        { key: 'g',     alt: true,                 description: 'Focus commit graph',         group: 'Navigation' },
-  focus_sidebar:      { key: 's',     alt: true,                 description: 'Focus sidebar',              group: 'Navigation' },
+  // F6 cycles focus across the major layout zones (titlebar, tabs, activity
+  // bars, sidebar, graph, bottom panel, status bar) so the whole UI is
+  // reachable from the keyboard without dedicated per-zone shortcuts.
+  // Mirrors the same chord already used by FilePickerModal.
+  cycle_focus:         { key: 'F6',                              description: 'Cycle focus to next panel',     group: 'Navigation' },
+  cycle_focus_reverse: { key: 'F6',                shift: true,  description: 'Cycle focus to previous panel', group: 'Navigation' },
   // Workspace-aware project pickers (pre-fill the command palette).
   open_project:       { key: 'n',     ctrl: true,                description: 'Open project in workspace',  group: 'Navigation' },
   open_from_workspace:{ key: 'n',     ctrl: true,  shift: true,  description: 'Open project from another workspace', group: 'Navigation' },
