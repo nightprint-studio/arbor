@@ -9,6 +9,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Command Palette: new *View MR / PR Detail* verb opens the pull / merge
+  request detail modal. The autocomplete fetches MRs across all states (open,
+  merged, closed) lazily on first use and caches the result per tab —
+  independent from the sidebar's state filter — with a spinner shown while it
+  loads.
 - `Ctrl+Shift+Enter` in the commit message field commits and pushes in one step.
 - The Commit split-button menu now shows shortcut hints and tinted icons next
   to each option, matching the graph context menu.

@@ -56,6 +56,7 @@
   import { issuesStore } from '$lib/stores/issues.svelte';
   import { getBranchPolicy, assertBranchNameAllowed, type BranchPolicy } from '$lib/utils/branch-policy';
   import Kbd from '$lib/components/shared/ui/Kbd.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { shortcutFor } from '$lib/utils/shortcut';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -157,6 +158,7 @@
     }
     if (v.targetKind === 'worktree')     void ensureWorktrees();
     if (v.targetKind === 'project-file') void ensureProjectFiles();
+    if (v.targetKind === 'mr')           void ensureMrList();
     tick().then(() => {
       inputEl?.focus();
       if (inputEl) inputEl.selectionStart = inputEl.selectionEnd = query.length;
@@ -822,6 +824,20 @@
     projectFilesLoaded = true;
   }
 
+  /// Lazy MR-list fetch driven by entering an `mr` target-kind verb. Uses
+  /// `mrStore.loadAll` (open + merged + closed in a single list) rather than
+  /// `mrStore.load`, which is bound to the sidebar's `stateFilter` and would
+  /// only surface open MRs in the palette autocomplete. The underlying
+  /// `cacheStore.loadMrList(tabId, 'all')` is cached per tab, so a second
+  /// visit short-circuits. The MR target section renders a spinner while
+  /// `mrStore.allLoading` is true.
+  async function ensureMrList() {
+    const tabId = tabsStore.activeTabId;
+    if (!tabId) return;
+    if (mrStore.mrFeature?.enabled === false) return;
+    try { await mrStore.loadAll(tabId); } catch { /* surfaced via mrStore.error */ }
+  }
+
   /// One-shot fetch of the worktree list for the active tab. Mirrors
   /// `ensureProjectFiles` — cached for the lifetime of the palette open.
   async function ensureWorktrees() {
@@ -1373,6 +1389,14 @@
         onClose();
       },
     },
+    // ── Merge Requests ─────────────────────────────────────────────────────
+    { id: 'mr-detail', title: 'View MR / PR Detail', subtitle: 'Open the pull / merge request detail modal', icon: 'GitPullRequest', aliases: ['mr', 'mrd', 'prd', 'mr-detail', 'pr-detail', 'view-mr', 'view-pr', 'open-mr', 'open-pr'], targetKind: 'mr', group: 'Merge Requests',
+      run: (target) => {
+        const mr = target as MergeRequest;
+        onClose();
+        tick().then(() => window.dispatchEvent(new CustomEvent('arbor:open-mr-detail', { detail: { mr } })));
+      },
+    },
     { id: 'link-mr', title: 'Copy arbor:// Link to MR', subtitle: 'Build an arbor:// link to a pull / merge request', icon: 'Link2', aliases: ['linkmr', 'dl-mr'], targetKind: 'mr', group: 'Deep Links',
       run: async (target) => {
         const mr = target as MergeRequest;
@@ -1412,6 +1436,16 @@
   }
 
   const sections = $derived<PaletteSection[]>(buildSections(query));
+
+  /// True while the targets for the currently-selected verb are being fetched
+  /// (MR list today; future async target sources can plug in the same way).
+  /// Drives the centred spinner in the results area so users don't see an
+  /// empty "No merge requests available" message before the cache warms up.
+  const targetsLoading = $derived.by(() => {
+    if (!selectedVerb) return false;
+    if (selectedVerb.targetKind === 'mr') return mrStore.allLoading;
+    return false;
+  });
 
   function buildSections(raw: string): PaletteSection[] {
     // Phase 2 — a verb chip is set: show only matching targets.
@@ -1723,14 +1757,14 @@
     }
 
     if (verb.targetKind === 'mr') {
-      const items: PaletteItem[] = mrStore.mrs
+      const items: PaletteItem[] = mrStore.allMrs
         .map(mr => ({
           id:       `target:${verb.id}:${mr.number}`,
           kind:     'mr' as PaletteItemKind,
           icon:     'GitPullRequest',
           title:    `#${mr.number} ${mr.title}`,
           subtitle: `${mr.state} · ${mr.sourceBranch} → ${mr.targetBranch}`,
-          score:    score(`#${mr.number} ${mr.title} ${mr.sourceBranch}`, q),
+          score:    score(`#${mr.number} ${mr.title} ${mr.sourceBranch} ${mr.state}`, q),
           action:   () => executeVerb(verb, mr),
         }))
         .filter(i => i.score > 0)
@@ -2155,10 +2189,10 @@
   onMount(() => {
     inputEl?.focus();
     loadBranchesAndStatus();
-    // Kick off MR list load if a repo is open — the mrStore short-circuits
-    // when no GitHub/GitLab provider is configured, so this is cheap.
+    // MR list is loaded lazily on demand — only when the user enters a verb
+    // whose `targetKind === 'mr'` (see `ensureMrList`). The list is cached
+    // per tab in `cacheStore`, so the second visit is instant.
     const tabId = tabsStore.activeTabId;
-    if (tabId && mrStore.mrs.length === 0) mrStore.load(tabId).catch(() => {});
     // Resolve branch-creation policy + warm the issues cache when a ticket
     // tracker is configured. Both are best-effort: failures don't block the
     // palette and just leave the suggestions section empty.
@@ -2296,7 +2330,11 @@
 
     <!-- Results -->
     <div class="palette-results" bind:this={listEl}>
-      {#if flatItems.length === 0 && !loading}
+      {#if flatItems.length === 0 && targetsLoading}
+        <div class="loading">
+          <Spinner size="md" label={`Loading ${selectedVerb ? TARGET_KIND_LABEL[selectedVerb.targetKind] : 'data'}…`} />
+        </div>
+      {:else if flatItems.length === 0 && !loading}
         <div class="empty">
           {#if selectedVerb}
             {#if query.trim()}
@@ -2518,6 +2556,15 @@
   .empty {
     padding: 32px 20px;
     text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .loading {
+    padding: 32px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     color: var(--text-muted);
     font-size: 13px;
   }

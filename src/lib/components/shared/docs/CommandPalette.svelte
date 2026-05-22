@@ -63,7 +63,7 @@
   <li><strong>Remote</strong> — <em>Fetch from Remote</em>, <em>Pull from Remote</em>, <em>Push Branch to Remote</em></li>
   <li><strong>Tabs</strong> — <em>Switch Tab</em>, <em>Close Tab</em></li>
   <li><strong>Repository</strong> — <em>Open Recent Repository</em></li>
-  <li><strong>Merge Requests</strong> — <em>Open Pull / Merge Request</em> (opens the create MR/PR modal)</li>
+  <li><strong>Merge Requests</strong> — <em>View MR / PR Detail</em> (opens the detail modal for a pull / merge request), <em>Open Pull / Merge Request</em> (opens the create MR/PR modal)</li>
   <li><strong>Appearance</strong> — <em>Switch Theme</em></li>
   <li><strong>Repository actions (leaves)</strong> — Open / Init / Clone / Reload Repository</li>
   <li><strong>Workspaces</strong> — <em>Switch Workspace</em>, <em>Open Project</em>, <em>Open from Workspace</em>, Manage Workspaces, Create Workspace</li>
@@ -156,6 +156,16 @@
   </tbody>
 </table>
 <p>Both verbs lazy-load the worktree list the first time they activate, then cache it for the lifetime of the palette open.</p>
+
+<h3>Merge Request verbs</h3>
+<table class="shortcuts-table">
+  <thead><tr><th>Command</th><th>Aliases</th><th>Target</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>View MR / PR Detail</code></td><td><code>mr</code>, <code>mrd</code>, <code>prd</code>, <code>mr-detail</code>, <code>pr-detail</code>, <code>view-mr</code>, <code>view-pr</code>, <code>open-mr</code>, <code>open-pr</code></td><td>mr</td><td>Opens the pull / merge request detail modal — same view you get from clicking a row in the MR sidebar</td></tr>
+    <tr><td><code>Open Pull / Merge Request</code></td><td>—</td><td>—</td><td>Leaf action in the <strong>Merge Requests</strong> group — opens the create MR/PR modal</td></tr>
+  </tbody>
+</table>
+<p>The MR list is fetched lazily the first time you enter an <code>mr</code>-target verb. It pulls <strong>all states</strong> in one shot — open, merged and closed — so the autocomplete can find an MR regardless of what filter the sidebar is showing, and is cached per repo tab so subsequent visits are instant. While the list is still loading a spinner is shown in the results area; refreshing the sidebar (force-refresh) also invalidates this cache so the next palette open re-fetches. Both verbs are hidden when the active repo's provider has pull / merge requests disabled (archived repo, fork mirror, branch-protection blocking PRs, …).</p>
 
 <h3>Deep Link verbs</h3>
 <p>Build a shareable <code>arbor://</code> URL and copy it to the clipboard. The active tab's first remote is embedded as <code>?url=</code>, so the link resolves on any machine that has access to the same remote. If the repository has no remote configured, the palette toasts a warning rather than producing a non-shareable link — see the <em>Deep Links</em> doc page for the full URL schema.</p>

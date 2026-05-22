@@ -15,6 +15,14 @@ function createMrStore() {
   let detail        = $state<MrDetail | null>(null);
   let detailLoading = $state(false);
   let detailError   = $state<string | null>(null);
+  /// Separate cache for "all states" — populated by `loadAll` and consumed
+  /// by surfaces (like the Command Palette autocomplete) that need to see
+  /// merged + closed + open in a single list without changing the sidebar's
+  /// `stateFilter`. Keyed implicitly to the most recently loaded tab; cleared
+  /// on `clearAll()` (called from cache invalidation paths).
+  let allMrs        = $state<MergeRequest[]>([]);
+  let allLoading    = $state(false);
+  let allLoadedTab  = $state<string | null>(null);
   /**
    * undefined = not yet checked
    * null      = checked, no GitHub/GitLab remote found
@@ -49,6 +57,10 @@ function createMrStore() {
     if (filter) stateFilter = filter;
     const myVersion       = ++loadVersion;
     const requestedFilter = stateFilter;
+    // A force-refresh from the sidebar should also invalidate the "all
+    // states" cache used by the Command Palette autocomplete — otherwise
+    // the palette keeps showing the stale list until the next tab change.
+    if (force) { allLoadedTab = null; }
 
     loading   = true;
     error     = null;
@@ -104,6 +116,53 @@ function createMrStore() {
     mrs = result ?? [];
   }
 
+  /// Load (or return from cache) the MR list across *all* states — open +
+  /// merged + closed in a single list. Independent from `load()` / `mrs` /
+  /// `stateFilter` so the sidebar's filter selection isn't disturbed when a
+  /// different surface (e.g. the Command Palette MR autocomplete) needs the
+  /// full set. Runs the same provider + feature gates as `load()` so a repo
+  /// without a configured GitHub/GitLab remote, or with MR/PRs disabled,
+  /// resolves to an empty list rather than surfacing a raw error.
+  async function loadAll(tabId: string, force = false) {
+    if (allLoading) return;
+    // Treat any prior load for the same tab as "cached" — even an empty
+    // result counts (no token, archived repo, …) so we don't hammer the
+    // network every time the user opens the palette on such a repo.
+    if (!force && allLoadedTab === tabId) return;
+
+    allLoading = true;
+    try {
+      // Provider must exist and have a token, otherwise we'd hit a guaranteed
+      // failure path inside `cacheStore.loadMrList`. Mirrors `load()`'s gate.
+      const info = await detectProvider(tabId);
+      if (!info || !info.has_token) {
+        allMrs       = [];
+        allLoadedTab = tabId;
+        return;
+      }
+      const feature = await cacheStore.loadMrFeature(tabId, force);
+      mrFeature = feature;
+      if (!feature.enabled) {
+        allMrs       = [];
+        allLoadedTab = tabId;
+        return;
+      }
+      const list = await cacheStore.loadMrList(tabId, 'all', force).catch(() => [] as MergeRequest[]);
+      allMrs       = list;
+      allLoadedTab = tabId;
+    } finally {
+      allLoading = false;
+    }
+  }
+
+  /// Drop the cached "all states" list — used when the active tab changes so
+  /// the next consumer (Command Palette) does a fresh fetch instead of
+  /// showing the previous tab's MRs.
+  function clearAll() {
+    allMrs       = [];
+    allLoadedTab = null;
+  }
+
   async function loadDetail(tabId: string, number: number) {
     activeNumber = number;
     detail       = null;
@@ -138,7 +197,12 @@ function createMrStore() {
     get provider()      { return provider; },
     get providerInfo()  { return providerInfo; },
     get mrFeature()     { return mrFeature; },
+    get allMrs()        { return allMrs; },
+    get allLoading()    { return allLoading; },
+    get allLoadedTab()  { return allLoadedTab; },
     load,
+    loadAll,
+    clearAll,
     loadDetail,
     clearDetail,
     setFilter,
