@@ -240,6 +240,7 @@
     'action:stage':              'stage_view',
     'action:settings':           'settings',
     'action:plugins':            'plugins',
+    'action:marketplace':        'open_marketplace',
     'action:docs':               'toggle_docs',
     'action:jump-head':          'jump_to_head',
     // Sidebar / bottom section toggles — auto-generated `action:show-<id>` rows
@@ -556,6 +557,9 @@
       { id: 'action:plugins',      kind: 'action', icon: 'Plug',      group: 'System',
         title: 'Plugin Manager',
         action: () => { uiStore.setPanel('plugins'); onClose(); } },
+      { id: 'action:marketplace',  kind: 'action', icon: 'Store',     group: 'System',
+        title: 'Plugin Marketplace', subtitle: 'Browse and install plugins & themes',
+        action: () => { uiStore.openMarketplace(); onClose(); } },
       { id: 'action:reload-plugins', kind: 'action', icon: 'RefreshCw', group: 'System',
         title: 'Reload Plugins',
         action: () => reloadAllPlugins() },

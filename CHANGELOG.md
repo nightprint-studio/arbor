@@ -9,6 +9,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Plugin Marketplace is now reachable directly from the Command Palette and via
+  the new Alt+Shift+M shortcut — no need to open Plugin Manager first.
 - Workspace Manager: Arrow Up / Down navigates groups, workspaces and repo
   rows; Space expands or collapses the focused row; Enter on a repo row opens
   it. Arrow Down from the search box jumps into the list.

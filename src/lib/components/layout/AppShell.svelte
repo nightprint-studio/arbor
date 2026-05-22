@@ -1140,7 +1140,7 @@
       // back to the graph first.
       if (uiStore.activePanel !== 'graph') {
         const ALLOWED_OFF_GRAPH = new Set([
-          'settings', 'plugins', 'toggle_docs',
+          'settings', 'plugins', 'open_marketplace', 'toggle_docs',
           'command_palette', 'open_project', 'open_from_workspace',
           'next_tab', 'prev_tab', 'close_tab',
           // Bottom-panel toggles are independent from the active main panel —
@@ -1179,6 +1179,7 @@
         case 'toggle_pipelines_panel':  uiStore.toggleBottomSectionIfVisible('pipelines'); break;
         case 'settings':         uiStore.setPanel(uiStore.activePanel === 'settings' ? 'graph' : 'settings'); break;
         case 'plugins':          uiStore.setPanel(uiStore.activePanel === 'plugins'  ? 'graph' : 'plugins');  break;
+        case 'open_marketplace': uiStore.marketplaceOpen ? uiStore.closeMarketplace() : uiStore.openMarketplace(); break;
         case 'command_palette':      uiStore.toggleCommandPalette(); break;
         case 'open_project':         uiStore.openCommandPaletteWithVerb('open-project'); break;
         case 'open_from_workspace':  uiStore.openCommandPaletteWithVerb('open-from-workspace'); break;
@@ -2267,6 +2268,16 @@
       onClose={() => containerStore.close()}
     />
   {/if}
+
+  <!-- Modal: Plugin Marketplace — mounted globally so the open_marketplace
+       shortcut and the Command Palette can reach it without having to open
+       the Plugin Manager first. Lazy-loaded: drags in the registry catalog,
+       install-confirm and a heap of icons that aren't needed at startup. -->
+  <Lazy
+    gate={uiStore.marketplaceOpen}
+    loader={() => import('../plugins/MarketplaceModal.svelte')}
+    onClose={() => uiStore.closeMarketplace()}
+  />
 
   <!-- Modal: Linked Worktrees (cross-project sync) -->
   <WorktreeLinkManagerModal />

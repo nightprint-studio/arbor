@@ -58,6 +58,10 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   command_palette: { key: 'k',   ctrl: true,                description: 'Command palette',       group: 'Panels' },
   settings:       { key: ',',     ctrl: true,                description: 'Open settings',         group: 'Panels' },
   plugins:        { key: 'x',     ctrl: true,  shift: true,  description: 'Open Plugin Manager',   group: 'Panels' },
+  // Sibling of `plugins` (Ctrl+Shift+X). Marketplace is global — reachable
+  // from any panel — so it gets an Alt+Shift+M binding, symmetric with
+  // Alt+Shift+W (Workspace Manager). Avoids the Ctrl+Alt+letter AltGr trap.
+  open_marketplace: { key: 'm',                 shift: true, alt: true, description: 'Open Plugin Marketplace', group: 'Panels' },
   stage_view:     { key: 's',     ctrl: true,  shift: true,  description: 'Toggle stage area',     group: 'Panels' },
   toggle_docs:    { key: 'F1',                               description: 'Toggle documentation',  group: 'Panels' },
   // Avoid Ctrl+Alt+letter — on Italian / German / French / Spanish keyboards

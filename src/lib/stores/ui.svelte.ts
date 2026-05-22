@@ -154,6 +154,11 @@ function createUiStore() {
   let addToLinkModalOpen      = $state(false);
   /** RepoRegistry UUID of the repo offered for "add to link" — drives AddToWorktreeLinkModal. */
   let addToLinkRepoId         = $state<string | null>(null);
+  /** True while the global MarketplaceModal is mounted (rendered in AppShell).
+   *  Driven by the Plugin Manager "Browse" button, the Command Palette and the
+   *  open_marketplace shortcut — so the modal is reachable without first
+   *  opening Plugin Manager. */
+  let marketplaceOpen         = $state(false);
 
   let appFocused        = $state(true);   // tracks window focus / visibility
 
@@ -456,6 +461,8 @@ function createUiStore() {
     addToLinkModalOpen = false;
     addToLinkRepoId    = null;
   }
+  function openMarketplace()  { marketplaceOpen = true; }
+  function closeMarketplace() { marketplaceOpen = false; }
 
   return {
     get sidebarWidth()           { return sidebarWidth; },
@@ -496,8 +503,10 @@ function createUiStore() {
     get linkManagerInitialId()    { return linkManagerInitialId; },
     get addToLinkModalOpen()      { return addToLinkModalOpen; },
     get addToLinkRepoId()         { return addToLinkRepoId; },
+    get marketplaceOpen()         { return marketplaceOpen; },
     openLinkManager, closeLinkManager,
     openAddToLink, closeAddToLink,
+    openMarketplace, closeMarketplace,
     setPanel, setSidebarWidth, setRightSidebarWidth, setBottomHeight,
     setAppFocused,
     setActiveSidebarSection, toggleSidebarSection, toggleSidebarVisibility,

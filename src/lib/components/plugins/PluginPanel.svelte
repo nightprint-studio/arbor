@@ -10,7 +10,6 @@
   import PluginUninstallConfirmModal   from './PluginUninstallConfirmModal.svelte';
   import PluginExportTemplateModal     from './PluginExportTemplateModal.svelte';
   import PluginInfoModal               from './PluginInfoModal.svelte';
-  import MarketplaceModal              from './MarketplaceModal.svelte';
   import type { PluginInfo } from '$lib/types/plugin';
   import {
     reloadPlugins, listPluginInfo, pluginDependents, deletePlugin,
@@ -175,9 +174,6 @@
   let depGraphOpen   = $state(false);
   /** True while the Export Template modal is open. */
   let exportTemplateOpen = $state(false);
-  /** True while the Marketplace modal is open. Owns plugin discovery from the
-   *  arbor-registry, custom git URLs, and .zip sideload. */
-  let marketplaceOpen = $state(false);
 
   async function togglePlugin(name: string) {
     const info = pluginInfos.find(p => p.name === name);
@@ -359,7 +355,7 @@
         <span class="ps-count">{pluginInfos.length}</span>
       {/if}
       {#snippet actions()}
-        <button class="ps-btn ps-btn-marketplace" use:tooltip={'Browse marketplace — discover plugins & themes'} disabled={!systemEnabled} onclick={() => { marketplaceOpen = true; }}>
+        <button class="ps-btn ps-btn-marketplace" use:tooltip={'Browse marketplace — discover plugins & themes'} disabled={!systemEnabled} onclick={() => uiStore.openMarketplace()}>
           <Store size={13} />
           <span class="ps-btn-label">Browse</span>
         </button>
@@ -745,12 +741,6 @@
 {#if exportTemplateOpen}
   <PluginExportTemplateModal
     onClose={() => { exportTemplateOpen = false; }}
-  />
-{/if}
-
-{#if marketplaceOpen}
-  <MarketplaceModal
-    onClose={() => { marketplaceOpen = false; }}
   />
 {/if}
 

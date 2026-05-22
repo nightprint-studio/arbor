@@ -107,6 +107,8 @@
     <tr><td><Kbd action="stage_view" size="sm" /></td><td>Toggle Stage area</td></tr>
     <tr><td><Kbd action="toggle_terminal" size="sm" /></td><td>Toggle terminal panel</td></tr>
     <tr><td><Kbd action="new_terminal" size="sm" /></td><td>Open new terminal tab</td></tr>
+    <tr><td><Kbd action="plugins" size="sm" /></td><td>Open Plugin Manager</td></tr>
+    <tr><td><Kbd action="open_marketplace" size="sm" /></td><td>Open Plugin Marketplace</td></tr>
     <tr><td><Kbd action="plugin_logs" size="sm" /></td><td>Toggle Plugin Logs console</td></tr>
     <tr><td><Kbd action="toggle_keystrokes" size="sm" /></td><td>Toggle the <em>Keyboard Inputs</em> overlay (demos, screencasts) — works even inside modals</td></tr>
   </tbody>
