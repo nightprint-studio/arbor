@@ -9,6 +9,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Keyboard-only navigation in the commit graph: Arrow Up / Down follow the
+  current lane (same branch column), Arrow Left / Right hop to the nearest
+  sibling lane, PageUp / PageDown jump a viewport, Home / End jump to the
+  newest / oldest loaded commit. Alt+G pulls focus into the graph viewport.
 - Command Palette: new *View MR / PR Detail* verb opens the pull / merge
   request detail modal. The autocomplete fetches MRs across all states (open,
   merged, closed) lazily on first use and caches the result per tab —

@@ -68,7 +68,24 @@
     <tr><td><Kbd action="prev_tab" size="sm" /></td><td>Previous tab</td></tr>
     <tr><td><Kbd action="close_tab" size="sm" /></td><td>Close active tab</td></tr>
     <tr><td><Kbd action="jump_to_head" size="sm" /></td><td>Jump to HEAD commit in graph</td></tr>
+    <tr><td><Kbd action="focus_graph" size="sm" /></td><td>Focus the commit graph (enables the arrow / Page / Home / End nav below)</td></tr>
     <tr><td><Kbd action="search" size="sm" /></td><td>Search commits (message / author / SHA)</td></tr>
+  </tbody>
+</table>
+
+<h2>Commit graph (keyboard navigation)</h2>
+<p class="hint">
+  These keys work while the graph viewport has focus — click it once, press <Kbd action="focus_graph" size="sm" />,
+  or Tab into it. The selected commit auto-scrolls into view and drives the Detail panel.
+  Arrow keys are topology-aware: vertical arrows stay on the current branch line, horizontal arrows hop to a sibling.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Previous / next commit on the <em>same lane</em> (visual branch column); falls back to one row when the lane ends</td></tr>
+    <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Hop to the nearest occupied lane on the left / right (closest commit by row)</td></tr>
+    <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>Jump one viewport up / down (linear, ignores lanes)</td></tr>
+    <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Select the newest / oldest loaded commit</td></tr>
   </tbody>
 </table>
 

@@ -818,6 +818,116 @@
     // which also avoids the parallel fetch we used to issue here.
   }
 
+  // ── Keyboard navigation (graph viewport must have focus) ────────────────
+  // Bare Arrow / Page / Home / End move the selection through the commit list.
+  // Selection follows the active search filter implicitly — we walk all nodes
+  // since rendering already shows all nodes (search just highlights matches).
+  function isRowFullyVisible(row: number): boolean {
+    const el = scrollEl;
+    if (!el) return false;
+    const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const yMid = nodeY(row) + padTop;
+    const top = el.scrollTop;
+    const bottom = top + viewportH;
+    const margin = ROW_HEIGHT;
+    return (yMid - ROW_HEIGHT / 2) >= (top + margin)
+        && (yMid + ROW_HEIGHT / 2) <= (bottom - margin);
+  }
+
+  function ensureRowVisible(row: number) {
+    if (!scrollEl) return;
+    if (isRowFullyVisible(row)) return;
+    scrollEl.scrollTo({ top: centerScrollTop(nodeY(row)), behavior: 'smooth' });
+  }
+
+  // Walk along the anchor's lane (= same column in the graph — gitk's lane
+  // reuse means this maps to "stay on the visual branch line" rather than to
+  // git's branch refs, which matches what the user sees on screen).  Falls
+  // back to a single-row step when the lane has no more commits in the
+  // requested direction, so the keys never feel "stuck" at branch tips.
+  function moveAlongLane(idx: number, dir: 1 | -1, nodes: CommitNode[]): number {
+    const last = nodes.length - 1;
+    const cur = nodes[idx];
+    for (let i = idx + dir; i >= 0 && i <= last; i += dir) {
+      if (nodes[i].lane === cur.lane) return i;
+    }
+    const fb = idx + dir;
+    return (fb >= 0 && fb <= last) ? fb : idx;
+  }
+
+  // Find the nearest occupied lane on the requested side (← / →) within a
+  // bounded window around the anchor, then return the commit on that lane
+  // whose row is closest to the current one.  Window cap keeps the scan
+  // O(WINDOW) even on 100k-commit repos.
+  function moveAcrossLane(idx: number, dir: 1 | -1, nodes: CommitNode[]): number {
+    const last = nodes.length - 1;
+    const cur = nodes[idx];
+    const WINDOW = 300;
+    const lo = Math.max(0, idx - WINDOW);
+    const hi = Math.min(last, idx + WINDOW);
+    const closestPerLane = new Map<number, { idx: number; dist: number }>();
+    for (let i = lo; i <= hi; i++) {
+      const n = nodes[i];
+      if (dir === 1  && n.lane <= cur.lane) continue;
+      if (dir === -1 && n.lane >= cur.lane) continue;
+      const d = Math.abs(i - idx);
+      const ex = closestPerLane.get(n.lane);
+      if (!ex || d < ex.dist) closestPerLane.set(n.lane, { idx: i, dist: d });
+    }
+    if (closestPerLane.size === 0) return idx;
+    let bestLane = -1;
+    for (const lane of closestPerLane.keys()) {
+      if (bestLane === -1 || Math.abs(lane - cur.lane) < Math.abs(bestLane - cur.lane)) {
+        bestLane = lane;
+      }
+    }
+    return closestPerLane.get(bestLane)!.idx;
+  }
+
+  function handleGraphKeydown(e: KeyboardEvent) {
+    // Bare keys only — modifier chords (Ctrl+Home, …) belong to AppShell.
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (!data || data.nodes.length === 0) return;
+
+    const nodes = data.nodes;
+    const last  = nodes.length - 1;
+    const currentIdx = graphStore.selectedOid
+      ? nodes.findIndex(n => n.oid === graphStore.selectedOid)
+      : -1;
+    const headIdx = nodes.findIndex(n => n.is_head);
+    // Anchor: current selection → HEAD → top.
+    const anchor = currentIdx >= 0 ? currentIdx : (headIdx >= 0 ? headIdx : 0);
+    // Page = rows that fully fit, minus one for context overlap.
+    const pageSize = Math.max(1, Math.floor(viewportH / ROW_HEIGHT) - 1);
+
+    let target = -1;
+    switch (e.key) {
+      // Topology nav — ↑ / ↓ follow the current lane (visual branch line),
+      // ← / → hop to the nearest occupied lane on that side.
+      case 'ArrowDown':  target = moveAlongLane(anchor,  1, nodes); break;
+      case 'ArrowUp':    target = moveAlongLane(anchor, -1, nodes); break;
+      case 'ArrowRight': target = moveAcrossLane(anchor,  1, nodes); break;
+      case 'ArrowLeft':  target = moveAcrossLane(anchor, -1, nodes); break;
+      // Linear nav — Page / Home / End walk the row list, ignoring lanes.
+      case 'PageDown':   target = Math.min(last, anchor + pageSize); break;
+      case 'PageUp':     target = Math.max(0,    anchor - pageSize); break;
+      case 'Home':       target = 0; break;
+      case 'End':        target = last; break;
+      default: return;
+    }
+
+    e.preventDefault();
+    if (target === currentIdx) {
+      // Hit the edge of the list / lane — at least keep the row on screen.
+      ensureRowVisible(anchor);
+      return;
+    }
+    const node = nodes[target];
+    if (!node) return;
+    void handleSelectCommit(node);
+    ensureRowVisible(target);
+  }
+
   function handleContextMenu(e: MouseEvent, node: CommitNode) {
     e.preventDefault();
     e.stopPropagation(); // don't bubble to scroll-area background handler
@@ -947,6 +1057,14 @@
     function onJumpToHead() { graphStore.scrollToHead(); }
     window.addEventListener('arbor:jump-to-head', onJumpToHead);
     return () => window.removeEventListener('arbor:jump-to-head', onJumpToHead);
+  });
+
+  // Listen for focus-graph keybinding event — pulls focus into the scroll
+  // area so the bare Arrow / Page / Home / End keys start driving navigation.
+  $effect(() => {
+    function onFocusGraph() { scrollEl?.focus(); }
+    window.addEventListener('arbor:focus-graph', onFocusGraph);
+    return () => window.removeEventListener('arbor:focus-graph', onFocusGraph);
   });
 
   // Navigate to a specific commit OID — fired by Command Palette (tags, commits)
@@ -1290,7 +1408,9 @@
   {/if}
 
   <!-- Virtual scroll area -->
-  <div class="scroll-area" role="presentation" bind:this={scrollEl} onscroll={handleScroll} oncontextmenu={handleBgContextMenu}>
+  <div class="scroll-area" role="region" aria-label="Commit graph" tabindex="0"
+       bind:this={scrollEl} onscroll={handleScroll} onkeydown={handleGraphKeydown}
+       oncontextmenu={handleBgContextMenu}>
     {#if graphStore.isLoading}
       <div class="center-msg">
         <div class="spinner"></div>
@@ -1887,6 +2007,16 @@
     position: relative;
     padding-left: 8px;
     padding-top: .5em;
+  }
+
+  /* Hide the default outline (mouse focus) but keep a visible ring when the
+     user reaches the graph viewport via Tab or Alt+G — required so the
+     keyboard-only nav (Arrows / Page / Home / End) is discoverable. The inset
+     offset keeps the ring inside the panel's rounded corners. */
+  .scroll-area:focus { outline: none; }
+  .scroll-area:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .graph-body {

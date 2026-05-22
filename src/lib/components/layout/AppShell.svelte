@@ -1194,6 +1194,7 @@
         case 'new_branch':       window.dispatchEvent(new CustomEvent('arbor:new-branch')); break;
         case 'stash':            window.dispatchEvent(new CustomEvent('arbor:stash')); break;
         case 'jump_to_head':     window.dispatchEvent(new CustomEvent('arbor:jump-to-head')); break;
+        case 'focus_graph':      window.dispatchEvent(new CustomEvent('arbor:focus-graph')); break;
         case 'next_chunk':       window.dispatchEvent(new CustomEvent('arbor:next-chunk')); break;
         case 'prev_chunk':       window.dispatchEvent(new CustomEvent('arbor:prev-chunk')); break;
         case 'open_recent':      uiStore.toggleRecentQuickSwitch(); break;
