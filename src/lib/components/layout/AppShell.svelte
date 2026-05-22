@@ -1043,20 +1043,18 @@
   $effect(() => {
     function onKeydown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        // Close topmost modal first (recent > palette > plugin form > panel > search)
-        if (openPickerOpen)                  { e.preventDefault(); openPickerOpen = false; return; }
-        if (cloneModalOpen)                  { e.preventDefault(); cloneModalOpen = false; return; }
-        if (createWorkspaceOpen)             { e.preventDefault(); createWorkspaceOpen = false; return; }
-        if (workspaceManagerOpen)            { e.preventDefault(); workspaceManagerOpen = false; return; }
-        if (uiStore.repoBrowserOpen)         { e.preventDefault(); uiStore.closeRepoBrowser(); return; }
-        if (statsOverlayOpen)                { e.preventDefault(); statsOverlayOpen = false; return; }
-        if (themeEditorOpen)                 { e.preventDefault(); themeEditorOpen = false; return; }
+        // If any Modal-component-based modal is mounted, let its own ESC
+        // handler (Modal.svelte → onClose) close the topmost one. Touching
+        // our state flags here would close BOTH the topmost AND the
+        // underlying modal (e.g. ESC on a FilePicker opened from inside
+        // ThemeEditor would also close the editor). Modal already routes
+        // ESC only to the topmost via its modalStack guard.
+        if (hasOpenModal()) return;
+        // Below: overlays that do NOT use Modal (command palette, recent
+        // quick switch, plugin form host, search bar) still need an ESC
+        // fallback here.
         if (uiStore.recentQuickSwitchOpen)  { e.preventDefault(); uiStore.setRecentQuickSwitchOpen(false); return; }
         if (uiStore.commandPaletteOpen)     { e.preventDefault(); uiStore.setCommandPaletteOpen(false); return; }
-        if (jsonStudioStore.open)           { e.preventDefault(); jsonStudioStore.closeDoc();          return; }
-        if (ronStudioStore.open)            { e.preventDefault(); ronStudioStore.closeDoc();           return; }
-        if (tomlStudioStore.open)           { e.preventDefault(); tomlStudioStore.closeDoc();          return; }
-        if (yamlStudioStore.open)           { e.preventDefault(); yamlStudioStore.closeDoc();          return; }
         if (pluginStore.pendingForm)        { e.preventDefault(); pluginStore.clearPendingForm(); return; }
         if (uiStore.searchVisible)          { e.preventDefault(); uiStore.setSearchVisible(false); return; }
         // Panel-level fallback: only fire when no Modal is mounted.

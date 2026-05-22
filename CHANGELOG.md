@@ -42,6 +42,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Pressing Escape on a file/folder picker opened from inside another modal
+  (Theme Editor, Add Worktree, Clone Repository, Studio export, …) now closes
+  only the picker, leaving the underlying modal open.
 - Opening Settings, Docs, About or any of the Studio modals from a cold start
   now shows a backdrop with a spinner while the underlying module loads,
   instead of leaving the click feeling dropped.
