@@ -445,6 +445,7 @@
   }
   .field-select:hover,
   .field-select[aria-expanded='true'] { border-color: var(--accent); }
+  .field-select:focus-visible { border-color: var(--border-focus); }
   .field-select:disabled { opacity: 0.5; cursor: default; }
   .field-select-label {
     flex: 1;

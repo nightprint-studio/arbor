@@ -236,15 +236,26 @@
     });
   }
 
-  function close() { open = false; }
+  /** Move focus back to the trigger element when the menu closes via
+   *  keyboard (Escape / Enter selection). Without this the focus is
+   *  orphaned on `<body>` and Tab restarts the tab cycle from scratch. */
+  function focusTrigger() {
+    const t = (anchorEl?.firstElementChild as HTMLElement | null) ?? null;
+    if (t && typeof t.focus === 'function') t.focus();
+  }
+
+  function close(restoreFocus = false) {
+    open = false;
+    if (restoreFocus) focusTrigger();
+  }
 
   function reposition() { if (position === 'fixed') computeFixed(); }
 
   // ── Item selection ────────────────────────────────────────────────────────
-  function pickItem(item: Extract<DropdownItem, { kind: 'item' }>) {
+  function pickItem(item: Extract<DropdownItem, { kind: 'item' }>, viaKeyboard = false) {
     if (item.disabled) return;
     item.onclick();
-    if (effectiveCloseOnSelect) close();
+    if (effectiveCloseOnSelect) close(viaKeyboard);
   }
 
   function toggleGroup(id: string) {
@@ -268,7 +279,11 @@
       if (!menuEl?.contains(t) && !anchorEl?.contains(t)) close();
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.stopPropagation(); close(); return; }
+      if (e.key === 'Escape') { e.stopPropagation(); close(true); return; }
+      // Tab moves focus out of the menu — close without preventDefault so
+      // the browser advances focus to the next tabstop naturally. Without
+      // this the menu lingered open behind the next field.
+      if (e.key === 'Tab') { close(false); return; }
       const max = navigableItems.length;
       if (max === 0) return;
       if (e.key === 'ArrowDown') {
@@ -286,7 +301,7 @@
       } else if (e.key === 'Enter') {
         if (focusedIdx >= 0 && focusedIdx < max) {
           e.preventDefault();
-          pickItem(navigableItems[focusedIdx]);
+          pickItem(navigableItems[focusedIdx], true);
         }
       }
     }
