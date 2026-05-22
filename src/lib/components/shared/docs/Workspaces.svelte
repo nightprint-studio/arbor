@@ -41,6 +41,14 @@
   <li>Use the management modal to rename, reorder, move repos between workspaces, or delete workspaces you don't need any more. Deleting a workspace never removes the repos themselves.</li>
 </ol>
 
+<p>
+  Inside the management modal, <strong>Arrow Up / Down</strong> navigates
+  groups, workspaces and (when expanded) repo rows; <strong>Space</strong>
+  expands or collapses the focused group or workspace; <strong>Enter</strong>
+  on a repo row opens it. <strong>Arrow Down</strong> from the search box
+  drops focus into the list.
+</p>
+
 <h2>Groups (optional)</h2>
 <p>
   Groups are a purely visual organisation aid — they let you nest several

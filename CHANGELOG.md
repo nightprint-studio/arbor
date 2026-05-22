@@ -9,6 +9,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Workspace Manager: Arrow Up / Down navigates groups, workspaces and repo
+  rows; Space expands or collapses the focused row; Enter on a repo row opens
+  it. Arrow Down from the search box jumps into the list.
 - F6 / Shift+F6 cycles focus across the main layout zones — titlebar, tabs,
   activity bars, sidebar, graph, bottom panel, status bar — so the whole UI
   is reachable from the keyboard. Zones that aren't currently visible are
