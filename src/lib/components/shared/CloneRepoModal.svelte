@@ -554,8 +554,6 @@
     border-radius: var(--radius-sm);
   }
 
-  :global(.spin) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   .inline-error {
     display: flex;

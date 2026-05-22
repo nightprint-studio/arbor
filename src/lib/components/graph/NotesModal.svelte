@@ -700,6 +700,4 @@
 
   /* ── Animations ── */
   @keyframes fadeIn  { from { opacity: 0 } to { opacity: 1 } }
-  :global(.spin) { animation: spin 800ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

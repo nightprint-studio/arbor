@@ -477,11 +477,6 @@
   :global(.accent)    { color: var(--accent);  }
   :global(.spin-icon) { animation: spin 1s linear infinite; }
 
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-  }
-
   .job-info { flex: 1; min-width: 0; }
 
   .job-name {

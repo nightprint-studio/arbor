@@ -9,6 +9,7 @@
     type DeviceFlowInfo,
   } from '$lib/ipc/auth';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -69,8 +70,7 @@
 
   function copyGhCode() {
     if (!ghDeviceInfo) return;
-    navigator.clipboard.writeText(ghDeviceInfo.user_code).catch(() => {});
-    uiStore.showToast('Code copied to clipboard', 'success');
+    void copyToClipboard(ghDeviceInfo.user_code, { successToast: 'Code copied to clipboard' });
   }
 
   function openGhVerification() {

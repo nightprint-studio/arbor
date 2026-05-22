@@ -11,6 +11,7 @@
   import { hunkLineKeys, buildStagePatch, buildUnstagePatch } from '$lib/utils/patch-builder';
   import { computeChunkAnchors, totalDiffLines, type ChunkAnchor } from '$lib/utils/diff-chunks';
   import { tooltipForAction, shortcutFor } from '$lib/utils/shortcut';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
   /**
@@ -151,11 +152,12 @@
         .filter(l => l.kind !== 'removed')
         .map(l => l.content.replace(/\n$/, ''))
     );
-    navigator.clipboard.writeText(lines.join('\n')).then(() => {
-      copyDone = true;
-      uiStore.showToast('Code copied', 'success');
-      setTimeout(() => { copyDone = false; }, 1500);
-    }).catch(() => uiStore.showToast('Copy failed', 'error'));
+    copyToClipboard(lines.join('\n'), { successToast: 'Code copied', errorToast: 'Copy failed' }).then(ok => {
+      if (ok) {
+        copyDone = true;
+        setTimeout(() => { copyDone = false; }, 1500);
+      }
+    });
   }
 
   // ── Chunk navigation ──────────────────────────────────────────────────────

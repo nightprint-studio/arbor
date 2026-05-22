@@ -1,6 +1,7 @@
 <script lang="ts">
   import { GitBranch, Globe, Archive, Tag, RefreshCw, GitCommitHorizontal, FileDiff, Layers, Trash2, Copy, GitMerge, AlertTriangle, Search as SearchIcon, Upload } from 'lucide-svelte';
   import { pushBranch } from '$lib/ipc/remote';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { localTagTracker } from '$lib/stores/local-tags.svelte';
   import RepoActions from './RepoActions.svelte';
   import BranchTree from './BranchTree.svelte';
@@ -131,10 +132,7 @@
     const { name } = tagCtxMenu;
     tagCtxMenu = null;
     if (id === 'copy') {
-      try {
-        await navigator.clipboard.writeText(name);
-        uiStore.showToast(`Copied "${name}"`, 'info');
-      } catch { uiStore.showToast('Copy failed', 'error'); }
+      await copyToClipboard(name, { successToast: `Copied "${name}"`, errorToast: 'Copy failed' });
       return;
     }
     if (id === 'push') {
@@ -532,8 +530,6 @@
   }
   .cleanup-btn:hover { color: var(--error, #c75450); background: rgba(199,84,80,0.12); }
 
-  :global(.spin) { animation: spin 0.9s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
   /* ── Working tree changes banner — card style ── */
   .changes-banner {

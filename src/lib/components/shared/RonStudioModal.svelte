@@ -86,6 +86,7 @@
   import Icon from '@iconify/svelte';
   import ronIcon from '@iconify-icons/vscode-icons/file-type-ron';
   import { tooltip } from '$lib/actions/tooltip';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { ronStudioStore } from '$lib/stores/ron-studio.svelte';
   import { ronStudioWorkspaceStore } from '$lib/stores/ron-studio-workspace.svelte';
   import { studioStore } from '$lib/stores/studio.svelte';
@@ -177,13 +178,11 @@
   }
 
   async function copyValue() {
-    if (valueText != null) {
-      try { await navigator.clipboard.writeText(valueText); } catch {}
-    }
+    if (valueText != null) await copyToClipboard(valueText);
   }
   async function copyPathOf(n: TNode) {
     const p = n.path.length === 0 ? '$' : '$.' + n.path.join('.');
-    try { await navigator.clipboard.writeText(p); } catch {}
+    await copyToClipboard(p);
   }
 
   // ── Query bar ────────────────────────────────────────────────────────────
@@ -1675,7 +1674,7 @@
     if (!id) return;
     try {
       const text = await RON.getValue(id, node.path);
-      await navigator.clipboard.writeText(text);
+      await copyToClipboard(text);
     } catch (e) {
       console.warn('ron-studio: copy value failed', e);
     }

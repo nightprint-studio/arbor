@@ -6,6 +6,7 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import type { JobInfo } from '$lib/types/jobs';
   import { stripAnsi } from '$lib/utils/ansi-to-html';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
   const job = $derived<JobInfo | undefined>(
@@ -51,7 +52,7 @@
   async function copyOutput() {
     if (!lines.length) return;
     const text = lines.map(l => stripAnsi(l)).join('\n');
-    await navigator.clipboard.writeText(text);
+    await copyToClipboard(text);
     copied = true;
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copied = false; }, 1800);

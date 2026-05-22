@@ -1024,6 +1024,4 @@
   }
   .state-sub  { font-size: 11px; color: var(--text-muted); max-width: 480px; line-height: 1.5; }
   .state-error { color: var(--error); }
-  .state :global(.spin) { animation: spin 1s linear infinite; color: var(--accent); }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

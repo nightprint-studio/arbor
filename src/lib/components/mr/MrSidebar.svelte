@@ -601,6 +601,4 @@
   }
   .mr-label-more { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
 
-  :global(.spin) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

@@ -13,6 +13,7 @@
   import Contribution from '$lib/components/shared/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
   const activeTab = $derived(tabsStore.activeTab);
@@ -101,12 +102,9 @@
   // user has flipped the "Show hidden" toggle on the Jobs panels.
   const totalJobs    = $derived(jobsStore.runningCount + jobsStore.finishedCount);
 
-  async function copyToClipboard(text: string, kind: 'branch' | 'tag') {
-    try {
-      await navigator.clipboard.writeText(text);
+  async function copyRefName(text: string, kind: 'branch' | 'tag') {
+    if (await copyToClipboard(text, { errorToast: 'Copy failed' })) {
       uiStore.showToast(`Copied ${kind} "${text}"`, 'info', 1800);
-    } catch {
-      uiStore.showToast('Copy failed', 'error');
     }
   }
 
@@ -147,7 +145,7 @@
     {@const branchName = status?.current_branch ?? activeTab.currentBranch ?? 'detached'}
     <button
       class="status-chip chip-branch"
-      onclick={() => copyToClipboard(branchName, 'branch')}
+      onclick={() => copyRefName(branchName, 'branch')}
       use:tooltip={'Click to copy branch name'}
     >
       <GitBranch size={13} />
@@ -189,7 +187,7 @@
     {#if repoStore.nearestTag}
       <button
         class="status-chip chip-tag"
-        onclick={() => copyToClipboard(repoStore.nearestTag!, 'tag')}
+        onclick={() => copyRefName(repoStore.nearestTag!, 'tag')}
         use:tooltip={'Click to copy tag name'}
       >
         <Tag size={12} />
@@ -297,10 +295,7 @@
     <button
       class="repo-path"
       use:tooltip={{ content: 'Copy path', description: activeTab.path }}
-      onclick={async () => {
-        await navigator.clipboard.writeText(activeTab.path);
-        uiStore.showToast('Path copied', 'info');
-      }}
+      onclick={() => copyToClipboard(activeTab.path, { successToast: 'Path copied' })}
     >{activeTab.path}</button>
 
     <!-- Open in browser button -->
@@ -645,8 +640,6 @@
     color: var(--success);
   }
 
-  :global(.spin) { animation: spin 1s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
   /* ── Notifications badge ────────────────────────────────────────────────── */
   .notif-badge {

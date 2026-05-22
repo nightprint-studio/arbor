@@ -870,7 +870,6 @@
   }
 
   :global(.spinning) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* ── Body / List ─────────────────────────────────────────────────── */
   /* Modal-body is the scrollable card; this just lays out the plugin rows. */

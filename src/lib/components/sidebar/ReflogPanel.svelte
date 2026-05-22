@@ -20,6 +20,7 @@
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { ReflogEntry, RecoveryEntry, RecoveryKind, RecoveryRestorePreview } from '$lib/types/git';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -285,8 +286,7 @@
     } else if (id === 'branch') {
       window.dispatchEvent(new CustomEvent('arbor:new-branch-from', { detail: { oid: entry.id } }));
     } else if (id === 'copy') {
-      try { await navigator.clipboard.writeText(entry.id); } catch { /* ignore */ }
-      uiStore.showToast('Hash copied', 'success');
+      await copyToClipboard(entry.id, { successToast: 'Hash copied' });
     }
   }
 
@@ -993,6 +993,4 @@
   .error-msg { color: var(--color-error, #e06c75); }
 
   /* ── Spinner ─────────────────────────────────────────────────────────────── */
-  :global(.spin) { animation: spin 1s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 </style>

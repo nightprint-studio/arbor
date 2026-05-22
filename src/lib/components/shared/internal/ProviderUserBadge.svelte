@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Check, Copy } from 'lucide-svelte';
-  import { uiStore } from '$lib/stores/ui.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
@@ -28,14 +28,10 @@
 
   async function copy(text: string, key: CopyKey) {
     if (!copyable || !text) return;
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyToClipboard(text, { successToast: 'Copied to clipboard', errorToast: true })) {
       copiedKey = key;
-      uiStore.showToast('Copied to clipboard', 'success');
       if (copyTimer) clearTimeout(copyTimer);
       copyTimer = setTimeout(() => { copiedKey = null; }, 1400);
-    } catch (e) {
-      uiStore.showToast(`Copy failed: ${e}`, 'error');
     }
   }
 

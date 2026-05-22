@@ -13,6 +13,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Copy, FolderOpen, Replace, AlertTriangle } from 'lucide-svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import Modal from '../Modal.svelte';
   import Alert from '../ui/Alert.svelte';
   import Button from '../ui/Button.svelte';
@@ -84,12 +85,11 @@
   onMount(() => { void runConvert(); });
 
   async function copyText() {
-    try {
-      await navigator.clipboard.writeText(convertedText);
+    if (await copyToClipboard(convertedText)) {
       copyDone = true;
       setTimeout(() => { copyDone = false; }, 1600);
-    } catch (e: any) {
-      error = `Copy failed: ${e?.message ?? e}`;
+    } else {
+      error = 'Copy failed';
     }
   }
 

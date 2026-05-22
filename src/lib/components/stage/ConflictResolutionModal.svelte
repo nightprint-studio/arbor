@@ -3846,7 +3846,6 @@
   }
   .mode-merge .spinner { border-top-color: var(--accent); }
   .mode-stash .spinner { border-top-color: var(--warning); }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* ── Conflict navigation bar ─────────────────────────────────────────── */
   .conflict-nav {

@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import { Copy, Check } from 'lucide-svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip as tooltipAction } from '$lib/actions/tooltip';
 
   interface Props {
@@ -48,16 +49,22 @@
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   async function doCopy() {
+    let text: string;
     try {
-      const text = typeof value === 'function' ? await value() : value;
-      await navigator.clipboard.writeText(text);
+      text = typeof value === 'function' ? await value() : value;
+    } catch (err) {
+      if (showErrorToast) uiStore.showToast(`Copy failed: ${err}`, 'error');
+      return;
+    }
+    const ok = await copyToClipboard(text, {
+      successToast: toastSuccess,
+      errorToast: showErrorToast,
+    });
+    if (ok) {
       copied = true;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => { copied = false; }, feedbackMs);
-      if (toastSuccess) uiStore.showToast(toastSuccess, 'success');
       oncopied?.(text);
-    } catch (err) {
-      if (showErrorToast) uiStore.showToast(`Copy failed: ${err}`, 'error');
     }
   }
 

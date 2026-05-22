@@ -23,6 +23,7 @@
   import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { highlightCode } from '$lib/utils/highlight';
 
   import Alert     from '$lib/components/shared/ui/Alert.svelte';
@@ -219,14 +220,7 @@
     class="pf-copy-link {cln.font === 'mono' ? 'pf-copy-link-mono' : ''} {(node as any).class ?? ''}"
     style={(node as any).style}
     use:tooltip={cln.tooltip ?? 'Click to copy'}
-    onclick={async () => {
-      try {
-        await navigator.clipboard.writeText(cln.text ?? '');
-        uiStore.showToast(cln.toast ?? 'Copied to clipboard', 'success');
-      } catch (err) {
-        uiStore.showToast(`Clipboard failed: ${err}`, 'error');
-      }
-    }}
+    onclick={() => copyToClipboard(cln.text ?? '', { successToast: cln.toast ?? 'Copied to clipboard', errorToast: true })}
   >
     <span class="pf-copy-link-text">{cln.text ?? ''}</span>
     <Copy size={11} class="pf-copy-link-glyph" />
@@ -281,14 +275,7 @@
         class="pf-code-copy"
         use:tooltip={'Copy to clipboard'}
         aria-label="Copy"
-        onclick={async () => {
-          try {
-            await navigator.clipboard.writeText(cdn.text ?? '');
-            uiStore.showToast(cdn.toast ?? 'Copied to clipboard', 'success');
-          } catch (err) {
-            uiStore.showToast(`Clipboard failed: ${err}`, 'error');
-          }
-        }}
+        onclick={() => copyToClipboard(cdn.text ?? '', { successToast: cdn.toast ?? 'Copied to clipboard', errorToast: true })}
       ><Copy size={12} /></button>
     {/if}
   </div>

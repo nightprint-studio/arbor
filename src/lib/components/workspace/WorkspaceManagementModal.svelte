@@ -10,6 +10,7 @@
   import Modal from '../shared/Modal.svelte';
   import ModalHeader from '../shared/ModalHeader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { animStore } from '$lib/stores/animations.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
@@ -258,8 +259,9 @@
   }
 
   async function copyUrl(entry: RepoRegistryEntry) {
-    await navigator.clipboard.writeText(entry.remote_url ?? entry.path);
-    uiStore.showToast(entry.remote_url ? 'Remote URL copied' : 'Path copied', 'info');
+    await copyToClipboard(entry.remote_url ?? entry.path, {
+      successToast: entry.remote_url ? 'Remote URL copied' : 'Path copied',
+    });
   }
 
   // ── Move-to-workspace popover ───────────────────────────────────────
@@ -348,8 +350,7 @@
     try {
       const payload = await exportWorkspace(ws.id);
       const text = JSON.stringify(payload, null, 2);
-      await navigator.clipboard.writeText(text);
-      uiStore.showToast(`Workspace JSON copied to clipboard`, 'success');
+      await copyToClipboard(text, { successToast: 'Workspace JSON copied to clipboard', errorToast: true });
     } catch (e) { uiStore.showToast(`Export failed: ${e}`, 'error'); }
   }
 
@@ -1362,8 +1363,6 @@
   .icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
   .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  :global(.spin) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   .popover-backdrop {
     position: fixed;

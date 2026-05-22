@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { setupTauriListeners } from '$lib/utils/tauri-listeners';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { coalesceLatestByKey } from '$lib/utils/coalesce';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -939,8 +940,7 @@
         }
       } else {
         // GitHub / GitLab — no native detail view yet, copy ID as fallback.
-        await navigator.clipboard.writeText(ticketId).catch(() => {});
-        uiStore.showToast(`${ticketId} copied to clipboard`, 'info');
+        await copyToClipboard(ticketId, { successToast: `${ticketId} copied to clipboard` });
       }
     }
     window.addEventListener('arbor:view-issue', handleViewIssue);
@@ -1342,12 +1342,10 @@
         event: 'plugin:ui-clipboard-write',
         handler: async (e: { payload: { plugin: string; text: string; toast?: string } }) => {
           const { text, toast } = e.payload;
-          try {
-            await navigator.clipboard.writeText(text);
-            uiStore.showToast(toast ?? 'Copied to clipboard', 'success');
-          } catch (err) {
-            uiStore.showToast(`Clipboard failed: ${err}`, 'error');
-          }
+          await copyToClipboard(text, {
+            successToast: toast ?? 'Copied to clipboard',
+            errorToast: true,
+          });
         },
       },
       {

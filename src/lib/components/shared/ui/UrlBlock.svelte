@@ -14,6 +14,7 @@
    * `copyable` adds a small copy-to-clipboard button on the right.
    */
   import { Copy, Check } from 'lucide-svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
   let {
@@ -29,11 +30,10 @@
   let copied = $state(false);
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
+    if (await copyToClipboard(value)) {
       copied = true;
       setTimeout(() => { copied = false; }, 1200);
-    } catch { /* no-op — clipboard may be blocked */ }
+    }
   }
 </script>
 

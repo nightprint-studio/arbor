@@ -57,6 +57,7 @@
   import Spinner from '../ui/Spinner.svelte';
   import { BookOpen, Copy, AlertCircle, Link as LinkIcon } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import Prism from 'prismjs';
   // Ensure prism-rust + prism-json are loaded (prism-shared imports both).
   import '$lib/utils/prism-shared';
@@ -89,7 +90,7 @@
 
   async function copyAll(): Promise<void> {
     if (!viewSource) return;
-    try { await navigator.clipboard.writeText(viewSource.source); } catch { /* ignore */ }
+    await copyToClipboard(viewSource.source);
   }
 </script>
 

@@ -15,6 +15,7 @@
     type DeviceFlowInfo, type ProviderUser,
   } from '$lib/ipc/auth';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -122,8 +123,7 @@
 
   function copyGhDeviceCode() {
     if (!ghDeviceInfo) return;
-    navigator.clipboard.writeText(ghDeviceInfo.user_code).catch(() => {});
-    uiStore.showToast('Code copied to clipboard', 'success');
+    void copyToClipboard(ghDeviceInfo.user_code, { successToast: 'Code copied to clipboard' });
   }
 
   function openGhVerification() {
@@ -230,10 +230,6 @@
     uiStore.showToast('GitLab disconnected', 'info');
   }
 
-  function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text).catch(() => {});
-    uiStore.showToast('Copied to clipboard', 'success');
-  }
 </script>
 
 <div class="backdrop-listener" role="presentation" onclick={closeDropdowns}></div>

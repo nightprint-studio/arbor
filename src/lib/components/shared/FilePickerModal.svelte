@@ -2407,6 +2407,4 @@
   }
   :global(.delete-icon) { color: var(--error); flex-shrink: 0; }
   .delete-confirm strong { color: var(--text-primary); }
-  :global(.spin) { animation: spin 0.75s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

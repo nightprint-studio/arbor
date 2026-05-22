@@ -8,6 +8,7 @@
     Link2, Wand2,
   } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import BrandIcon from '$lib/components/shared/internal/BrandIcon.svelte';
   import { mrStore } from '$lib/stores/mr.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
@@ -775,23 +776,13 @@
         type="button"
         class="modal-title modal-title-btn"
         use:tooltip={'Click to copy title'}
-        onclick={async () => {
-          try {
-            await navigator.clipboard.writeText(detailMr.title);
-            uiStore.showToast('Title copied', 'success');
-          } catch (e) { uiStore.showToast(`Copy failed: ${e}`, 'error'); }
-        }}
+        onclick={() => copyToClipboard(detailMr.title, { successToast: 'Title copied', errorToast: true })}
       >{detailMr.title}</button>
       <button
         type="button"
         class="modal-num modal-num-btn"
         use:tooltip={'Click to copy'}
-        onclick={async () => {
-          try {
-            await navigator.clipboard.writeText(`#${mr.number}`);
-            uiStore.showToast(`Copied #${mr.number}`, 'success');
-          } catch (e) { uiStore.showToast(`Copy failed: ${e}`, 'error'); }
-        }}
+        onclick={() => copyToClipboard(`#${mr.number}`, { successToast: `Copied #${mr.number}`, errorToast: true })}
       >#{mr.number}</button>
 
       {#snippet actions()}
@@ -2210,8 +2201,6 @@
   .md-opt strong { font-size:12px;color:var(--text-primary);font-weight:600; }
   .md-opt span   { font-size:11px;color:var(--text-muted); }
 
-  :global(.spin) { animation:spin 1s linear infinite; }
-  @keyframes spin { to{transform:rotate(360deg)} }
 
   /* ── CI tab ─────────────────────────────────────────────────────────────── */
   .ci-pane {

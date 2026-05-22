@@ -971,15 +971,6 @@
     width: 800px; /* give it a real width so components render correctly */
   }
 
-  /* Spinning loader */
-  :global(.spin) {
-    animation: spin 1s linear infinite;
-  }
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-  }
-
   /* ── Body: nav + content ───────────────────────────────────────
      Mirrors the conflict modal layout: bg-elevated reveals as a 4px
      gap around floating bg-base panel cards (sidebar + content). */

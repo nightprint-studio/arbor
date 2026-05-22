@@ -523,6 +523,4 @@
   .btn-ghost { background: transparent; color: var(--text-secondary); }
   .btn-ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
 
-  :global(.spin) { animation: spin 0.8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

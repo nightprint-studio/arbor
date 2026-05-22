@@ -1298,6 +1298,4 @@
   }
   .is-footer-logout:hover { background: var(--bg-hover); color: var(--error); }
 
-  :global(.spin) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

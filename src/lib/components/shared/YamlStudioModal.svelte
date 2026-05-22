@@ -74,6 +74,7 @@
   import StudioConvertPreviewModal from './studio/StudioConvertPreviewModal.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { tooltip } from '$lib/actions/tooltip';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { yamlStudioStore, type YamlNodeKind } from '$lib/stores/yaml-studio.svelte';
   import { studioStore } from '$lib/stores/studio.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
@@ -823,16 +824,11 @@
   // Inspector → Tree adapters ──────────────────────────────────────────
   async function copyPathOf(node: TNode): Promise<void> {
     const text = node.path.length === 0 ? '$' : '$.' + node.path.join('.');
-    try {
-      await navigator.clipboard.writeText(text);
-      uiStore.showToast('Path copied', 'success');
-    } catch (err) {
-      uiStore.showToast(`Copy failed: ${err}`, 'error');
-    }
+    await copyToClipboard(text, { successToast: 'Path copied', errorToast: true });
   }
   async function copyValue(): Promise<void> {
     if (valueText == null) return;
-    try { await navigator.clipboard.writeText(valueText); } catch {}
+    await copyToClipboard(valueText);
   }
   async function inspectorAddField(parent: TNode, name: string): Promise<void> {
     await addFieldAction(parent, name);
@@ -1088,7 +1084,7 @@
       case 'copy-value':   {
         try {
           const v = await YAML_BE.getValue(yamlStudioStore.docId!, node.path);
-          await navigator.clipboard.writeText(v);
+          await copyToClipboard(v);
         } catch { /* ignore */ }
         break;
       }

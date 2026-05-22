@@ -668,7 +668,6 @@
   }
 
   :global(.spinning) { animation: spin 1s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
   /* ── RepoAction combo widget (JetBrains run style) ──
      The dropdown chrome is provided by the shared <Dropdown> widget; only the

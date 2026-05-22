@@ -36,6 +36,7 @@
   import { firePluginAction } from '$lib/ipc/plugin';
   import { PANEL_CONTENT_POINT, findPanelContent } from '$lib/contributions/panel-content';
   import { setupTauriListeners } from '$lib/utils/tauri-listeners';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import PluginIcon from './PluginIcon.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
 
@@ -105,11 +106,10 @@
   // ── Per-code-block copy flash ────────────────────────────────────────
   let copiedKey = $state<string | null>(null);
   async function copyCode(key: string, text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyToClipboard(text)) {
       copiedKey = key;
       setTimeout(() => { if (copiedKey === key) copiedKey = null; }, 1200);
-    } catch { /* clipboard rejected — silently no-op */ }
+    }
   }
 
   // ── Editable `field` nodes ───────────────────────────────────────────

@@ -33,6 +33,7 @@
     Link as LinkIcon, Trash2, PencilRuler,
   } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import Dropdown, { type DropdownItem } from '../ui/Dropdown.svelte';
   import type {
     StudioBackend, StudioFormat, StudioQueryHit,
@@ -462,7 +463,7 @@
 
   async function copyHitPath(hit: StudioQueryHit<TKind>) {
     const p = hit.path.length === 0 ? '$' : '$.' + hit.path.join('.');
-    try { await navigator.clipboard.writeText(p); } catch { /* ignore */ }
+    await copyToClipboard(p);
   }
 
   // History dropdown items — rebuilt on every recent-list change.

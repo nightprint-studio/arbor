@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Tag, GitBranch } from 'lucide-svelte';
   import { laneColor } from '$lib/utils/graph-renderer';
-  import { uiStore } from '$lib/stores/ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import type { RefLabel } from '$lib/types/git';
 
   let { ref, colorIndex }: { ref: RefLabel; colorIndex?: number } = $props();
@@ -16,12 +16,7 @@
     // Don't hijack ctx-menu / middle-click handlers higher up.
     if (e.button !== 0) return;
     e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(ref.name);
-      uiStore.showToast(`Copied "${ref.name}"`, 'info');
-    } catch {
-      uiStore.showToast('Copy failed', 'error');
-    }
+    await copyToClipboard(ref.name, { successToast: `Copied "${ref.name}"`, errorToast: 'Copy failed' });
   }
 
   // `is_current` from the backend means "this ref's target OID equals HEAD's

@@ -911,6 +911,4 @@
   }
   .nodev-hint { color: var(--text-muted) !important; font-size: 10.5px !important; }
 
-  :global(.spin) { animation: spin 0.9s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 </style>

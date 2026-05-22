@@ -19,6 +19,7 @@
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { relativeTime } from '$lib/utils/diff-formatter';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import type { Issue, IssueStatus, IssueAttachment } from '$lib/types/issues';
   import type { LinkedCommitRef } from '$lib/types/git';
@@ -144,10 +145,10 @@
   async function createBranch() {
     try {
       const name = await linearBranchNameForIssue(liveIssue);
-      await navigator.clipboard.writeText(name);
-      branchCopied = true;
-      uiStore.showToast(`Branch name copied: ${name}`, 'success');
-      setTimeout(() => { branchCopied = false; }, 2000);
+      if (await copyToClipboard(name, { successToast: `Branch name copied: ${name}`, errorToast: true })) {
+        branchCopied = true;
+        setTimeout(() => { branchCopied = false; }, 2000);
+      }
     } catch (e) {
       uiStore.showToast(String(e), 'error');
     }
@@ -286,12 +287,7 @@
         type="button"
         class="modal-identifier modal-identifier-btn"
         use:tooltip={'Click to copy'}
-        onclick={async () => {
-          try {
-            await navigator.clipboard.writeText(liveIssue.identifier);
-            uiStore.showToast(`Copied ${liveIssue.identifier}`, 'success');
-          } catch (e) { uiStore.showToast(`Copy failed: ${e}`, 'error'); }
-        }}
+        onclick={() => copyToClipboard(liveIssue.identifier, { successToast: `Copied ${liveIssue.identifier}`, errorToast: true })}
       >{liveIssue.identifier}</button>
       {#if liveIssue.team}
         <span class="modal-team">{liveIssue.team.name}</span>
@@ -1511,8 +1507,6 @@
     box-shadow: none;
   }
 
-  :global(.spin) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* ── Attachments ─────────────────────────────────────────────────────────── */
   .attachments-section {

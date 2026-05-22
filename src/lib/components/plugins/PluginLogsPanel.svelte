@@ -9,6 +9,7 @@
   import { pluginLogsStore, NON_PIPELINE_SENTINEL } from '$lib/stores/pluginLogs.svelte';
   import type { PluginLogEntry, PluginLogLevel } from '$lib/types/plugin-logs';
   import { renderStructuredLogLine, formatLogTime, shortRunId } from '$lib/utils/log-highlight';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
   const LEVELS: PluginLogLevel[] = ['debug', 'info', 'warn', 'error'];
@@ -245,7 +246,7 @@
     // formatLine here avoids amortising it on every keystroke / filter
     // change in the steady-state render path.
     const text = filtered.map(formatLine).join('\n');
-    await navigator.clipboard.writeText(text);
+    await copyToClipboard(text);
     copied = true;
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copied = false; }, 1800);

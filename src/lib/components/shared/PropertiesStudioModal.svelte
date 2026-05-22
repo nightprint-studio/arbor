@@ -69,6 +69,7 @@
   import StudioBulkEditModal from './studio/StudioBulkEditModal.svelte';
   import StudioViewSourceModal from './studio/StudioViewSourceModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { propertiesStudioStore, type PropertiesNodeKind } from '$lib/stores/properties-studio.svelte';
   import { studioStore } from '$lib/stores/studio.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
@@ -716,16 +717,11 @@
     // actual flat .properties key the user wants on the clipboard.
     const segs = node.path.filter(s => s !== '$value');
     const text = segs.length === 0 ? '$' : '$.' + segs.join('.');
-    try {
-      await navigator.clipboard.writeText(text);
-      uiStore.showToast('Path copied', 'success');
-    } catch (err) {
-      uiStore.showToast(`Copy failed: ${err}`, 'error');
-    }
+    await copyToClipboard(text, { successToast: 'Path copied', errorToast: true });
   }
   async function copyValue(): Promise<void> {
     if (valueText == null) return;
-    try { await navigator.clipboard.writeText(valueText); } catch { /* ignore */ }
+    await copyToClipboard(valueText);
   }
   async function inspectorAddField(parent: TNode, name: string): Promise<void> {
     await addFieldAction(parent, name);
@@ -981,7 +977,7 @@
       case 'copy-value':   {
         try {
           const v = await PROPS_BE.getValue(propertiesStudioStore.docId!, node.path);
-          await navigator.clipboard.writeText(v);
+          await copyToClipboard(v);
         } catch { /* ignore */ }
         break;
       }

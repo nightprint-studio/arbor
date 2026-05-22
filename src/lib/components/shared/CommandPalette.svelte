@@ -10,6 +10,7 @@
   // duplicate per-component map allowed (PLUGIN_ICONS is the single source).
   import { Zap, Search, ChevronRight } from 'lucide-svelte';
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { invoke } from '@tauri-apps/api/core';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { contributionStore } from '$lib/stores/contribution.svelte';
@@ -598,12 +599,10 @@
   // ── Action helpers ─────────────────────────────────────────────────────────
 
   async function copyText(text: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      uiStore.showToast(`${label} copied`, 'success', 1800);
-    } catch {
-      uiStore.showToast(`Failed to copy ${label.toLowerCase()}`, 'error');
-    }
+    await copyToClipboard(text, {
+      successToast: `${label} copied`,
+      errorToast: `Failed to copy ${label.toLowerCase()}`,
+    });
     onClose();
   }
 

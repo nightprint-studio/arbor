@@ -722,7 +722,5 @@
     white-space: nowrap;
   }
 
-  :global(.spin) { animation: spin 0.9s linear infinite; }
-  @keyframes spin   { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 </style>

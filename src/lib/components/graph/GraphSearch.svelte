@@ -187,5 +187,4 @@
     display: block;
   }
 
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

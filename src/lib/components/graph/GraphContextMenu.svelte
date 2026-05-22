@@ -5,6 +5,7 @@
     Search, Check, X, SkipForward, Link2,
   } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import ContextMenu, { type MenuItem } from '../shared/ContextMenu.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -202,16 +203,13 @@
         }
 
         case 'copy-sha':
-          await navigator.clipboard.writeText(node.oid);
-          uiStore.showToast('SHA copied', 'info');
+          await copyToClipboard(node.oid, { successToast: 'SHA copied' });
           break;
         case 'copy-short':
-          await navigator.clipboard.writeText(node.short_oid);
-          uiStore.showToast('Short SHA copied', 'info');
+          await copyToClipboard(node.short_oid, { successToast: 'Short SHA copied' });
           break;
         case 'copy-message':
-          await navigator.clipboard.writeText(node.summary);
-          uiStore.showToast('Message copied', 'info');
+          await copyToClipboard(node.summary, { successToast: 'Message copied' });
           break;
 
         case 'open-browser':
