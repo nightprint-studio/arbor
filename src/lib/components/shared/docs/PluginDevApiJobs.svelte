@@ -2,15 +2,15 @@
   import { highlight } from '$lib/utils/diff-formatter';
 </script>
 
-<h1>Plugin Development â€” API: Jobs &amp; Integrations</h1>
+<h1>Plugin Development — API: Jobs &amp; Integrations</h1>
 <p>APIs for running background processes, defining pipelines, executing blocking shell commands, and interacting with the issue tracker.</p>
 
-<h2>arbor.job â€” background jobs</h2>
+<h2>arbor.job — background jobs</h2>
 <p>Use <code>arbor.job</code> for long-running or async work. The job runs in a separate OS thread; output is streamed line-by-line to the Jobs panel. Use <code>arbor.terminal.exec()</code> only for short blocking commands.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Function</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>arbor.job.spawn(config)</code></td><td>Launch a background job. Returns <code>(JobHandle, nil)</code> on success or <code>(nil, err)</code> on a spawn failure (lock / app-handle). The handle is a Promise with extra <code>.id</code> and <code>:cancel()</code> â€” it resolves with the on-done context on success and rejects with it on failure. Config: <code>name</code>, <code>command</code>, <code>cwd?</code>, <code>env?</code>, <code>category?</code> (groups jobs into collapsible sections in the overlay), <code>hidden?</code> (boolean â€” when true the job is excluded from the default Jobs panel listing and the status-bar running badge; revealed by the &quot;Show hidden&quot; toggle), <code>on_done_action?</code> (string â€” sugar), <code>on_done?</code> (function â€” sugar)</td></tr>
+    <tr><td><code>arbor.job.spawn(config)</code></td><td>Launch a background job. Returns <code>(JobHandle, nil)</code> on success or <code>(nil, err)</code> on a spawn failure (lock / app-handle). The handle is a Promise with extra <code>.id</code> and <code>:cancel()</code> — it resolves with the on-done context on success and rejects with it on failure. Config: <code>name</code>, <code>command</code>, <code>cwd?</code>, <code>env?</code>, <code>category?</code> (groups jobs into collapsible sections in the overlay), <code>hidden?</code> (boolean — when true the job is excluded from the default Jobs panel listing and the status-bar running badge; revealed by the &quot;Show hidden&quot; toggle), <code>on_done_action?</code> (string — sugar), <code>on_done?</code> (function — sugar)</td></tr>
     <tr><td><code>arbor.job.list()</code></td><td>Returns a Lua table of all job records</td></tr>
     <tr><td><code>arbor.job.cancel(job_id)</code></td><td>Kill a running job (SIGTERM / taskkill /T). No-op if the job has already finished.</td></tr>
   </tbody>
@@ -26,10 +26,10 @@ if err then
   return
 end
 arbor.log.info("started job " .. job.id)
-job:ok(function(ctx)  arbor.notify{ message = "Build succeeded âœ“", level = "success" } end)
+job:ok(function(ctx)  arbor.notify{ message = "Build succeeded ✓", level = "success" } end)
    :err(function(ctx) arbor.notify{ message = "Build failed (exit " .. (ctx.exit_code or -1) .. ")", level = "error" } end)
 
--- on_done / on_done_action stay as zucchero â€” they fire alongside the promise.
+-- on_done / on_done_action stay as zucchero — they fire alongside the promise.
 arbor.job.spawn({
   name           = "Cargo build",
   command        = "cargo build --release",
@@ -72,7 +72,7 @@ arbor.async.run(function()
   arbor.job.spawn({ name = "Tests", command = "make test" })
 end)`, '.lua')}</pre>
 
-<h2>arbor.pipeline â€” pipelines</h2>
+<h2>arbor.pipeline — pipelines</h2>
 <p>Define and run multi-stage command pipelines. Results appear in the Pipelines panel (Workflow icon in the Activity Bar). No special permissions required.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Function</th><th>Description</th></tr></thead>
@@ -84,8 +84,8 @@ end)`, '.lua')}</pre>
   </tbody>
 </table>
 
-<h2>arbor.http â€” native HTTP client</h2>
-<p>Asynchronous HTTP via the bundled <code>reqwest</code> client â€” no shell-out, no background job, no <code>curl</code> dependency. The callback fires when the response (or an error) arrives.</p>
+<h2>arbor.http — native HTTP client</h2>
+<p>Asynchronous HTTP via the bundled <code>reqwest</code> client — no shell-out, no background job, no <code>curl</code> dependency. The callback fires when the response (or an error) arrives.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Function</th><th>Description</th></tr></thead>
   <tbody>
@@ -95,7 +95,7 @@ end)`, '.lua')}</pre>
 </table>
 <p>
   Requires the <code>network</code> permission. Set it to a list of allowed
-  hostnames in <code>plugin.toml</code> â€” exact match or registrable suffix
+  hostnames in <code>plugin.toml</code> — exact match or registrable suffix
   (<code>"maven.org"</code> permits <code>search.maven.org</code> and itself).
   Use <code>["*"]</code> to allow any host (avoid unless strictly necessary).
 </p>
@@ -122,8 +122,8 @@ arbor.http.get(
   function(r) ... end
 )`, '.lua')}</pre>
 
-<h2>arbor.terminal.exec â€” blocking shell</h2>
-<p>Requires the <code>terminal</code> permission. Always blocks the calling Lua coroutine â€” use <code>arbor.job.spawn</code> for anything that may take more than a second.</p>
+<h2>arbor.terminal.exec — blocking shell</h2>
+<p>Requires the <code>terminal</code> permission. Always blocks the calling Lua coroutine — use <code>arbor.job.spawn</code> for anything that may take more than a second.</p>
 <pre class="language-lua">{@html highlight(`local r, err = arbor.terminal.exec{ command = "git status --short", cwd = arbor.repo.current() }
 if err then
   arbor.log.error("exec failed: " .. err)
@@ -133,17 +133,17 @@ end
 -- r.stdout    : string
 -- r.stderr    : string`, '.lua')}</pre>
 
-<h2>arbor.issues â€” issue tracker</h2>
-<p>Provides synchronous Lua wrappers around the Linear and Jira APIs. The active provider for each repo is resolved transparently â€” the same code works for both trackers. Requires <code>issues = "read"</code> or <code>issues = "write"</code> in <code>[permissions]</code>.</p>
+<h2>arbor.issues — issue tracker</h2>
+<p>Provides synchronous Lua wrappers around the Linear and Jira APIs. The active provider for each repo is resolved transparently — the same code works for both trackers. Requires <code>issues = "read"</code> or <code>issues = "write"</code> in <code>[permissions]</code>.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Function</th><th>Permission</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>arbor.issues.search(filters?)</code></td><td><code>issues = "read"</code></td><td><strong>Linear-only.</strong> Search issues. Returns an array of issue tables. All filter fields are optional. Pass a number or identifier (e.g. <code>"ENG-42"</code>) in <code>query</code> to find by id. There is no <code>identifier</code> filter â€” use <code>arbor.issues.lookup</code> for exact-id resolution that also routes to Jira when the active repo is bound to it.</td></tr>
+    <tr><td><code>arbor.issues.search(filters?)</code></td><td><code>issues = "read"</code></td><td><strong>Linear-only.</strong> Search issues. Returns an array of issue tables. All filter fields are optional. Pass a number or identifier (e.g. <code>"ENG-42"</code>) in <code>query</code> to find by id. There is no <code>identifier</code> filter — use <code>arbor.issues.lookup</code> for exact-id resolution that also routes to Jira when the active repo is bound to it.</td></tr>
     <tr><td><code>arbor.issues.get(id)</code></td><td><code>issues = "read"</code></td><td><strong>Linear-only.</strong> Fetch by Linear UUID (NOT the human identifier). For "ENG-42"-style lookups use <code>arbor.issues.lookup</code>.</td></tr>
     <tr><td><code>arbor.issues.lookup(identifier)</code></td><td><code>issues = "read"</code></td><td>Routes by the active repo's <code>issue_tracker</code> config (<code>linear</code> or <code>jira</code>). Returns the matching issue table, <code>nil</code> on miss / unconfigured tracker, or <code>(nil, err)</code> on auth failure. Linear: candidates are filtered to the exact identifier match; Jira: hands the key straight to <code>GET /issue/&#123;key&#125;</code>. Use this whenever you have a human key like <code>"PROJ-123"</code>.</td></tr>
     <tr><td><code>arbor.issues.transition(id, status_id)</code></td><td><code>issues = "write"</code></td><td>Move an issue to a new workflow state. Returns updated issue.</td></tr>
     <tr><td><code>arbor.issues.comment(issue_id, body)</code></td><td><code>issues = "write"</code></td><td>Add a comment. Returns the new comment table.</td></tr>
-    <tr><td><code>arbor.issues.branch_name(issue)</code></td><td>â€”</td><td>Pure-computation helper: generates a git branch slug from an issue table.</td></tr>
+    <tr><td><code>arbor.issues.branch_name(issue)</code></td><td>—</td><td>Pure-computation helper: generates a git branch slug from an issue table.</td></tr>
   </tbody>
 </table>
 <pre class="language-lua">{@html highlight(`local issues = arbor.issues.search({
@@ -160,23 +160,23 @@ for _, issue in ipairs(issues) do
   print(issue.identifier, issue.title, issue.status.name)
 end
 
--- Transition issue (Jira resolves status ID â†’ workflow transition automatically)
+-- Transition issue (Jira resolves status ID → workflow transition automatically)
 arbor.issues.transition(issue.id, status_id)
 
 -- Add a comment
-arbor.issues.comment(issue.id, "Deployed to staging âœ“")
+arbor.issues.comment(issue.id, "Deployed to staging ✓")
 
 -- Branch name slug
 local branch = arbor.issues.branch_name(issue)
 -- Linear: "arb-123-fix-login-bug"
 -- Jira:   "proj-456-fix-login-bug"`, '.lua')}</pre>
 
-<h2>arbor.cloud â€” object storage (cloud-storage plugin)</h2>
+<h2>arbor.cloud — object storage (cloud-storage plugin)</h2>
 <p>Lua surface exposed by the bundled <strong>cloud-storage</strong> plugin. The plugin itself owns the UI (sidebar tree, config form, transfer dialogs); these APIs let other plugins talk to GCS / S3 / Azure Blob through the same opendal-backed host commands. v1 only exposes GCS in the connection form, but every namespace function accepts the multi-provider <code>CloudConnection</code> shape so adding S3 / Azure later is a frontend-only change.</p>
 <p><em>Earmarked for WASM migration:</em> when the WASM plugin runtime lands, these calls plus the host crate (<code>opendal</code>) move into the cloud-storage plugin's own WASM crate. The Lua surface is designed to stay backwards-compatible across that move.</p>
 
 <h3>Connection envelope</h3>
-<p>Every operation takes a <code>conn</code> table â€” the cloud-storage plugin builds this from its own settings, other plugins can build it manually:</p>
+<p>Every operation takes a <code>conn</code> table — the cloud-storage plugin builds this from its own settings, other plugins can build it manually:</p>
 <pre class="language-lua">{@html highlight(`local conn = {
   provider   = "gcs",                      -- "gcs" | "s3" | "azblob"
   config_id  = "cfg_abc",                  -- opaque id used for keyring scoping
@@ -195,8 +195,8 @@ local branch = arbor.issues.branch_name(issue)
   <thead><tr><th>Function</th><th>Description</th></tr></thead>
   <tbody>
     <tr><td><code>arbor.cloud.test_connection&#123; conn, bucket? &#125;</code></td><td>Probes auth + bucket reachability. Returns <code>(report, nil)</code> where <code>report = &#123; ok, error?, auth_method?, identity? &#125;</code>.</td></tr>
-    <tr><td><code>arbor.cloud.list&#123; conn, bucket, prefix?, limit? &#125;</code></td><td>Folder-style listing (non-recursive). Returns <code>&#123; items: CloudObject[], truncated &#125;</code>. Default limit is 200. <em>Prefer <code>list_stream</code> for interactive UI</em> â€” this command blocks until the full listing arrives.</td></tr>
-    <tr><td><code>arbor.cloud.list_stream&#123; conn, bucket, prefix?, stream_id &#125;</code></td><td>Streaming list â€” fires opendal in the background and delivers batches of ~1000 entries to the cloud-storage plugin via the <code>cloud-storage:list-chunk</code> hook (payload: <code>&#123; stream_id, items, done, truncated?, error? &#125;</code>). Hard-capped at 20 000 entries to avoid runaway memory on huge prefixes. The caller chooses the <code>stream_id</code> (typically a monotonic counter) and uses it to filter stale chunks when re-navigating.</td></tr>
+    <tr><td><code>arbor.cloud.list&#123; conn, bucket, prefix?, limit? &#125;</code></td><td>Folder-style listing (non-recursive). Returns <code>&#123; items: CloudObject[], truncated &#125;</code>. Default limit is 200. <em>Prefer <code>list_stream</code> for interactive UI</em> — this command blocks until the full listing arrives.</td></tr>
+    <tr><td><code>arbor.cloud.list_stream&#123; conn, bucket, prefix?, stream_id &#125;</code></td><td>Streaming list — fires opendal in the background and delivers batches of ~1000 entries to the cloud-storage plugin via the <code>cloud-storage:list-chunk</code> hook (payload: <code>&#123; stream_id, items, done, truncated?, error? &#125;</code>). Hard-capped at 20 000 entries to avoid runaway memory on huge prefixes. The caller chooses the <code>stream_id</code> (typically a monotonic counter) and uses it to filter stale chunks when re-navigating.</td></tr>
     <tr><td><code>arbor.cloud.search_stream&#123; conn, bucket, root_prefix?, pattern, stream_id &#125;</code></td><td>Recursive wildcard search under <code>root_prefix</code> (default: bucket root). Pattern grammar: <code>*</code> = same-segment, <code>**</code> = cross-segment, <code>?</code> = one non-separator. The backend extracts the literal prefix to scope opendal's listing as tight as possible, then regex-filters the rest. Results delivered to the same <code>cloud-storage:list-chunk</code> hook with <code>kind = "search"</code> in the payload (plus <code>scanned</code> count, <code>matched</code> count, <code>truncated</code> flag). Hard-capped at 5000 matches.</td></tr>
     <tr><td><code>arbor.cloud.cancel(stream_id)</code></td><td>Flip the cooperative-cancel flag for a running <code>list_stream</code> (or transfer job). The next batch boundary breaks the loop; no further chunks are emitted.</td></tr>
     <tr><td><code>arbor.cloud.stat&#123; conn, bucket, path &#125;</code></td><td>Fetch metadata for one object: <code>&#123; path, is_dir, size?, etag?, content_type?, last_modified? &#125;</code>.</td></tr>
@@ -222,7 +222,7 @@ local branch = arbor.issues.branch_name(issue)
 end)`, 'lua')}</pre>
 <p>Completion fires <code>cloud-storage:job-done</code> with <code>&#123; job_id, ok, error? &#125;</code>; OAuth flows fire <code>cloud-storage:oauth-done</code> with <code>&#123; ok, error?, secret_ref? &#125;</code>.</p>
 
-<h3>Example â€” list a bucket and stream a download</h3>
+<h3>Example — list a bucket and stream a download</h3>
 <pre class="language-lua">{@html highlight(`local conn = {
   provider  = "gcs",
   config_id = "cfg_abc",

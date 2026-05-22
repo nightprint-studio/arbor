@@ -2,13 +2,13 @@
   import { highlight } from '$lib/utils/diff-formatter';
 </script>
 
-<h1>Plugin Development â€” API: Core</h1>
+<h1>Plugin Development — API: Core</h1>
 <p>Core Lua APIs available to all plugins. No special permissions required unless noted.</p>
 
 <h2>Calling convention</h2>
 <p>The <code>arbor.*</code> API uses two consistent conventions throughout:</p>
 <ul>
-  <li><strong>Errors as tuples</strong>. Any function that can fail at runtime (I/O, parse, network, git, registry) returns <code>(value, nil)</code> on success and <code>(nil, err_string)</code> on failure. Callers that don't care about the error simply read the first return value; callers that do care can check the second. Programming errors (permission denied, missing required argument, wrong Lua type) still raise â€” those are bugs to fix in the plugin, not recoverable failure modes.</li>
+  <li><strong>Errors as tuples</strong>. Any function that can fail at runtime (I/O, parse, network, git, registry) returns <code>(value, nil)</code> on success and <code>(nil, err_string)</code> on failure. Callers that don't care about the error simply read the first return value; callers that do care can check the second. Programming errors (permission denied, missing required argument, wrong Lua type) still raise — those are bugs to fix in the plugin, not recoverable failure modes.</li>
   <li><strong>Table arguments for &gt; 2 args or any optional arg</strong>. Functions like <code>arbor.fs.move&#123; src, dest, overwrite? &#125;</code>, <code>arbor.terminal.exec&#123; command, cwd? &#125;</code>, <code>arbor.text.replace&#123; content, pattern, replacement, plain? &#125;</code> take a single config table. This keeps call sites readable when fields are added later. Single-mandatory-arg functions (<code>arbor.fs.read(path)</code>, <code>arbor.repo.remote(name)</code>) stay positional; <code>arbor.events.emit(name, payload)</code> is also positional as a hot-path exception.</li>
 </ul>
 <pre class="language-lua">{@html highlight(`-- Tuple return: ignore the error or branch on it
@@ -21,7 +21,7 @@ local ok, err = arbor.fs.move{ src = a, dest = b, overwrite = true }
 if not ok then arbor.log.warn("move failed: " .. err) end`, '.lua')}</pre>
 
 
-<h2>arbor.log â€” logging</h2>
+<h2>arbor.log — logging</h2>
 <pre class="language-lua">{@html highlight(`arbor.log.debug("detailed trace")
 arbor.log.info("something happened")
 arbor.log.warn("unexpected state: " .. tostring(val))
@@ -30,8 +30,8 @@ arbor.log.error("fatal: " .. err)
 
 <p>
   Every call is also pushed to an in-memory ring buffer (last 5 000 entries)
-  and surfaced in the <strong>Plugin Logs</strong> bottom panel â€”
-  <em>Tools â†’ Plugin Logs</em> in the main menu, or <kbd>Alt+Shift+L</kbd>.
+  and surfaced in the <strong>Plugin Logs</strong> bottom panel —
+  <em>Tools → Plugin Logs</em> in the main menu, or <kbd>Alt+Shift+L</kbd>.
   Disabled plugins do not log: their entries are dropped at the API boundary,
   and plugins disabled at startup never get a Lua VM in the first place.
 </p>
@@ -43,42 +43,42 @@ arbor.log.error("fatal: " .. err)
 </p>
 <ul>
   <li>
-    <strong>Multi-select plugin filter</strong> â€” a Filter dropdown with one
+    <strong>Multi-select plugin filter</strong> — a Filter dropdown with one
     checkbox per plugin that has logged anything this session. Includes
     <em>All plugins</em> / <em>None</em> shortcuts and a header summary
     (<em>"compile-action +2"</em>) when more than one is active.
   </li>
   <li>
-    <strong>Per-level toggles</strong> â€” independent buttons for
+    <strong>Per-level toggles</strong> — independent buttons for
     <code>debug</code> / <code>info</code> / <code>warn</code> /
     <code>error</code>. Off levels are excluded from the visible list and
     the line counter.
   </li>
   <li>
-    <strong>Free-text search</strong> â€” case-insensitive substring match
+    <strong>Free-text search</strong> — case-insensitive substring match
     across the whole formatted line (timestamp, level, plugin, message).
     The search field highlights matches inline.
   </li>
   <li>
-    <strong>Pipeline tagging</strong> â€” log lines mirrored from a pipeline
+    <strong>Pipeline tagging</strong> — log lines mirrored from a pipeline
     step's captured stdout/stderr carry the pipeline name and run id. A
     dedicated <em>Pipeline</em> selector in the filter dropdown lets you
     isolate one run; <em>Clear pipeline logs</em> wipes only those entries
     and leaves your direct <code>arbor.log.*</code> output intact.
   </li>
   <li>
-    <strong>Structured highlighting</strong> â€” recognised tokens
+    <strong>Structured highlighting</strong> — recognised tokens
     (timestamps, run ids, exit codes, paths) get their own colour so a
     scrolling stream stays scannable. Severity tints follow the global
     palette (info / warn / error).
   </li>
   <li>
-    <strong>Auto-scroll &amp; jump-to-latest</strong> â€” the panel pins the
+    <strong>Auto-scroll &amp; jump-to-latest</strong> — the panel pins the
     view to the newest line; scrolling up pauses auto-follow and reveals a
     pill that snaps back to the bottom on click.
   </li>
   <li>
-    <strong>Copy &amp; Clear</strong> â€” Copy serialises the currently
+    <strong>Copy &amp; Clear</strong> — Copy serialises the currently
     visible (i.e. filtered) lines to the clipboard as plain text. Clear
     drops every entry from the buffer.
   </li>
@@ -89,11 +89,11 @@ arbor.log.error("fatal: " .. err)
   <code>arbor.fs.append</code>.
 </p>
 
-<h2>arbor.settings â€” persistence</h2>
+<h2>arbor.settings — persistence</h2>
 <p>Settings are split into two scopes:</p>
 <ul>
-  <li><strong>global</strong> â€” stored in <code>~/.config/arbor/plugin_data/&lt;name&gt;/global.json</code> â€” independent of the active repo</li>
-  <li><strong>project</strong> â€” stored in <code>&lt;repo&gt;/.arbor/plugins/&lt;name&gt;/project.json</code> â€” per-repository; raises a Lua error if no repo is open</li>
+  <li><strong>global</strong> — stored in <code>~/.config/arbor/plugin_data/&lt;name&gt;/global.json</code> — independent of the active repo</li>
+  <li><strong>project</strong> — stored in <code>&lt;repo&gt;/.arbor/plugins/&lt;name&gt;/project.json</code> — per-repository; raises a Lua error if no repo is open</li>
 </ul>
 <pre class="language-lua">{@html highlight(`-- Global settings
 arbor.settings.global.set("api_key", "secret")
@@ -106,15 +106,15 @@ arbor.settings.project.set("profile", "prod")
 local p = arbor.settings.project.get("profile")
 local all_proj = arbor.settings.project.get_all()`, '.lua')}</pre>
 
-<h2>arbor.json â€” encode / decode</h2>
+<h2>arbor.json — encode / decode</h2>
 <pre class="language-lua">{@html highlight(`local s, err = arbor.json.encode({ key = "val", n = 42 })
 -- s = '{"key":"val","n":42}'   err = nil on success
 
 local t, err = arbor.json.decode('{"a":1}')
 -- t.a == 1   err = nil on success`, '.lua')}</pre>
 
-<h2>arbor.json_studio â€” open the JSON inspector</h2>
-<p>One-call API that opens a host-rendered modal: lazy virtualised tree, JSONPath query, syntax-highlighted text view. Pass <code>text</code> or <code>path</code>. Backed by simd-json on the host so multi-megabyte payloads stay responsive. Earmarked to migrate to a self-contained WASM plugin once that runtime lands â€” the API will not change.</p>
+<h2>arbor.json_studio — open the JSON inspector</h2>
+<p>One-call API that opens a host-rendered modal: lazy virtualised tree, JSONPath query, syntax-highlighted text view. Pass <code>text</code> or <code>path</code>. Backed by simd-json on the host so multi-megabyte payloads stay responsive. Earmarked to migrate to a self-contained WASM plugin once that runtime lands — the API will not change.</p>
 <pre class="language-lua">{@html highlight(`-- Open from disk (host reads the file)
 arbor.json_studio.open({ path = "/abs/data.json" })
 
@@ -132,10 +132,10 @@ arbor.json_studio.open({
 --   $.books[?@.price < 10 && @.in_stock]
 --   $..*[?match(@.email, ".*@.*")]   -- regex (RFC function)
 --   $[?length(@.tags) > 2]           -- length() / count()
--- Plus shorthands: bare "foo" â†’ $..foo, ".foo" â†’ $.foo, etc.`, '.lua')}</pre>
+-- Plus shorthands: bare "foo" → $..foo, ".foo" → $.foo, etc.`, '.lua')}</pre>
 
-<h2>arbor.fs â€” filesystem</h2>
-<p>Requires the <code>fs</code> permission: <code>"read"</code> for read-only ops, <code>"write"</code> for read+write. The <code>fs_scope</code> field controls path bounds â€” empty (default) sandboxes to the active repo; <code>["*"]</code> grants unrestricted access; any other list extends the active-repo sandbox with those absolute paths. All read/write functions return <code>result, nil</code> on success or <code>nil, err</code> on failure.</p>
+<h2>arbor.fs — filesystem</h2>
+<p>Requires the <code>fs</code> permission: <code>"read"</code> for read-only ops, <code>"write"</code> for read+write. The <code>fs_scope</code> field controls path bounds — empty (default) sandboxes to the active repo; <code>["*"]</code> grants unrestricted access; any other list extends the active-repo sandbox with those absolute paths. All read/write functions return <code>result, nil</code> on success or <code>nil, err</code> on failure.</p>
 <pre class="language-lua">{@html highlight(`local content, err = arbor.fs.read("/path/to/file.txt")
 local ok,      err = arbor.fs.write("/path/to/out.txt", content)
 local entries      = arbor.fs.list("/path/to/dir")  -- array of {name, is_file, is_dir}
@@ -148,7 +148,7 @@ arbor.fs.copy("/path/to/app.war", "/opt/tomcat/webapps/")
 -- delete(path): removes a file or a directory tree
 arbor.fs.delete("/path/to/old.war")`, '.lua')}</pre>
 
-<h2>arbor.repo â€” repository info</h2>
+<h2>arbor.repo — repository info</h2>
 <p>Read functions require <code>git = "read"</code> (or higher). <code>fetch_active_tab</code> and <code>clone</code> require <code>git = "write"</code> (or higher).</p>
 <pre class="language-lua">{@html highlight(`local path     = arbor.repo.current()           -- active repo path, or nil
 local branch   = arbor.repo.branch()            -- current branch name
@@ -157,7 +157,7 @@ local remote   = arbor.repo.remote("origin")    -- URL of the named remote, or n
 
 -- Fetch origin for the currently active tab (the tab the user is looking at).
 -- Returns true on success, false when silently skipped (no active tab, no
--- origin remote, or network failure â€” no error is raised either way).
+-- origin remote, or network failure — no error is raised either way).
 -- After a successful fetch, emits "arbor://graph-refresh" so the frontend
 -- reloads the commit graph and remote branch list automatically.
 -- Ideal for use inside a focus-gated scheduler (only_when_focused = true).
@@ -182,10 +182,10 @@ local commits, err = arbor.repo.commits({
 -- Useful for housekeeping plugins (e.g. proposing .gitignore entries).
 local paths = arbor.repo.untracked()           -- ["target/foo.bin", ".env", ...]`, '.lua')}</pre>
 
-<h3>arbor.repo.clone â€” background clone</h3>
+<h3>arbor.repo.clone — background clone</h3>
 <p>
   Clone a remote repository into a local directory. The clone runs in a
-  background <strong>Job</strong> â€” progress streams into the Jobs overlay and
+  background <strong>Job</strong> — progress streams into the Jobs overlay and
   Job Output panel exactly like <code>arbor.job.spawn</code> results, with
   live cancel support. Uses the system <code>git</code> binary so SSH keys and
   credential helpers (including the Arbor keyring) work transparently.
@@ -209,7 +209,7 @@ local paths = arbor.repo.untracked()           -- ["target/foo.bin", ".env", ...
   end,
 })   -- requires git = "write" (or higher)`, '.lua')}</pre>
 
-<h2>arbor.workspace â€” workspace and repo-registry queries</h2>
+<h2>arbor.workspace — workspace and repo-registry queries</h2>
 <p>
   Read-only APIs for inspecting the user's workspaces and the central repo
   registry. No special permissions required. The mutating <code>switch()</code>
@@ -230,7 +230,7 @@ local repo = arbor.workspace.repo(repo_id)       -- {id, path, display_name, rem
 -- Activate a different workspace (swaps the tab set on the UI side).
 local ok = arbor.workspace.switch(ws_id)         -- returns bool`, '.lua')}</pre>
 
-<h2>arbor.tabs â€” programmatic tab control</h2>
+<h2>arbor.tabs — programmatic tab control</h2>
 <p>
   Open a registered repository as an Arbor tab. The repo must already be
   in the registry (added via the workspace UI or auto-registered via
@@ -239,7 +239,7 @@ local ok = arbor.workspace.switch(ws_id)         -- returns bool`, '.lua')}</pre
 </p>
 <pre class="language-lua">{@html highlight(`local ok, err = arbor.tabs.open_repo(repo_id)   -- (true, nil) | (false, err)`, '.lua')}</pre>
 
-<h2>arbor.mr / arbor.ci â€” git provider MRs &amp; CI (credential-blind)</h2>
+<h2>arbor.mr / arbor.ci — git provider MRs &amp; CI (credential-blind)</h2>
 <p>
   Read-only access to merge requests and CI runs hosted on the git
   provider behind a registered repository. Permission gate:
@@ -253,7 +253,7 @@ local ok = arbor.workspace.switch(ws_id)         -- returns bool`, '.lua')}</pre
 local me = arbor.mr.current_user({ repo_id = entry.id })   -- { id, login, name, ... }
 
 -- List my open MRs across one repo. Use the literal "current_user"
--- sentinel to mean "the authenticated user on THIS provider" â€” the host
+-- sentinel to mean "the authenticated user on THIS provider" — the host
 -- resolves it for you, the plugin never has to know the actual login.
 local mrs, err = arbor.mr.list({
   repo_id = entry.id,        -- workspace registry id; default: active repo
@@ -272,13 +272,13 @@ local runs, err = arbor.ci.runs({
 -- Each run: { id, name, status, branch, commit_sha, web_url, created_at,
 --             provider, duration_secs }`, '.lua')}</pre>
 
-<h2>arbor.security â€” vulnerability dashboard (credential-blind)</h2>
+<h2>arbor.security — vulnerability dashboard (credential-blind)</h2>
 <p>
   Read-only access to GitLab Vulnerability Reports and GitHub
   GHAS / Dependabot / Secret-Scanning posture data. Same permission
   gate (<code>provider = "read"</code>) and same <code>repo_id</code>
   resolution as <code>arbor.mr</code> / <code>arbor.ci</code>. Default
-  state filter is active-only (Detected + Confirmed) â€” pass
+  state filter is active-only (Detected + Confirmed) — pass
   <code>states</code> explicitly for closed findings or both.
 </p>
 <pre class="language-lua">{@html highlight(`-- Cheap probe (does the provider expose a dashboard for this repo?)
@@ -295,7 +295,7 @@ local sum = arbor.security.summary({
 -- sum.time_series     : { points = [...], range_days } | nil
 -- sum.web_url         : provider-native dashboard URL
 
--- Findings list â€” defaults to active scope.
+-- Findings list — defaults to active scope.
 local list = arbor.security.findings({
   repo_id    = entry.id,
   severities = {"critical", "high"},      -- optional
@@ -306,7 +306,7 @@ local list = arbor.security.findings({
 -- Each: { id, severity, state, title, description?, scanner?, report_type?,
 --         file_path?, start_line?, web_url?, created_at, age_days, identifiers, provider }`, '.lua')}</pre>
 
-<h2>arbor.meta â€” plugin identity &amp; environment</h2>
+<h2>arbor.meta — plugin identity &amp; environment</h2>
 <pre class="language-lua">{@html highlight(`arbor.meta.plugin_name()              -- "my-plugin"
 arbor.meta.api_version()              -- 1  (Arbor plugin API integer)
 arbor.meta.app_version()              -- "0.9.0"  (Arbor app semver string)
@@ -315,7 +315,7 @@ arbor.meta.os()                       -- "windows" | "macos" | "linux"
 arbor.meta.plugin_loaded("other")     -- true / false (live + enabled check)`, '.lua')}</pre>
 <p>
   <code>plugin_loaded(name)</code> is a synchronous check against the host's
-  plugin registry â€” use it to branch on whether a sibling plugin is active
+  plugin registry — use it to branch on whether a sibling plugin is active
   right now without going through the async, fire-and-forget
   <code>arbor.service.call</code> path (which races against startup and can
   silently no-op on host mutex contention).
@@ -327,7 +327,7 @@ local ext    = is_win and ".bat" or ".sh"
 -- e.g. build the Tomcat catalina script path:
 local bin = tomcat_home .. sep .. "bin" .. sep .. "catalina" .. ext`, '.lua')}</pre>
 
-<h2>arbor.timer â€” deferred / recurring execution</h2>
+<h2>arbor.timer — deferred / recurring execution</h2>
 <pre class="language-lua">{@html highlight(`-- Fire once after delay_ms milliseconds
 local id = arbor.timer.after(500, function()
   arbor.log.info("fired after 500ms")
@@ -339,9 +339,9 @@ local id2 = arbor.timer.every(5000, function()
 end)
 
 arbor.timer.cancel(id)   -- cancel a timer by its id`, '.lua')}</pre>
-<p><strong>Tip:</strong> prefer <code>arbor.scheduler.register</code> (below) for recurring tasks â€” its triggers are richer (cron, fixed_delay, focus gate) and the registrations are shown in the Plugin Manager so users can stop/start each one individually.</p>
+<p><strong>Tip:</strong> prefer <code>arbor.scheduler.register</code> (below) for recurring tasks — its triggers are richer (cron, fixed_delay, focus gate) and the registrations are shown in the Plugin Manager so users can stop/start each one individually.</p>
 
-<h2>arbor.scheduler â€” Spring-style background schedules</h2>
+<h2>arbor.scheduler — Spring-style background schedules</h2>
 <p>
   Opt the plugin into the scheduler with <code>[scheduler] enabled = true</code>
   in <code>plugin.toml</code>, then declare every concrete schedule from
@@ -352,11 +352,11 @@ arbor.timer.cancel(id)   -- cancel a timer by its id`, '.lua')}</pre>
 <table class="shortcuts-table">
   <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
   <tbody>
-    <tr><td><code>action</code></td><td>String â€” required. Plugin action name fired each tick (subscribe with <code>arbor.events.on(action, fn)</code>).</td></tr>
+    <tr><td><code>action</code></td><td>String — required. Plugin action name fired each tick (subscribe with <code>arbor.events.on(action, fn)</code>).</td></tr>
     <tr><td><code>fixed_rate</code></td><td>Duration. Fire every N regardless of how long the previous handler took. Next fire = previous start + N.</td></tr>
     <tr><td><code>fixed_delay</code></td><td>Duration. Wait N <em>after</em> the previous handler returned. Next fire = previous end + N. Use this when overlap would be harmful.</td></tr>
-    <tr><td><code>cron</code></td><td>6-field Spring cron â€” <code>second minute hour day-of-month month day-of-week</code>. Anchored to the wall clock, not to "now + N".</td></tr>
-    <tr><td><code>initial_delay</code></td><td>Optional duration. Wait this long before the first fire (fixed_rate / fixed_delay only â€” cron always uses the next matching instant).</td></tr>
+    <tr><td><code>cron</code></td><td>6-field Spring cron — <code>second minute hour day-of-month month day-of-week</code>. Anchored to the wall clock, not to "now + N".</td></tr>
+    <tr><td><code>initial_delay</code></td><td>Optional duration. Wait this long before the first fire (fixed_rate / fixed_delay only — cron always uses the next matching instant).</td></tr>
     <tr><td><code>on_load</code></td><td>Optional bool. Also fire once immediately at plugin load, in addition to the normal cadence. Default <code>false</code>.</td></tr>
     <tr><td><code>only_when_focused</code></td><td>Optional bool. Skip firing while the app window is unfocused or minimised. The clock keeps ticking; a missed tick is simply dropped. Default <code>false</code>.</td></tr>
   </tbody>
@@ -377,7 +377,7 @@ arbor.scheduler.register({
   on_load    = true,                -- also fire once at plugin load
 })
 
--- Fixed-delay: 30 s AFTER the previous fetch finishes â€” prevents overlap
+-- Fixed-delay: 30 s AFTER the previous fetch finishes — prevents overlap
 -- when the network is slow.
 arbor.scheduler.register({
   action            = "my_plugin:slow_poll",
@@ -397,22 +397,22 @@ arbor.events.on("my_plugin:refresh", function(_ctx)
 end)`, '.lua')}</pre>
 <p>
   Re-calling <code>register</code> with the same <code>action</code> replaces
-  the previous entry â€” handy for plugins that recompute cadence from settings.
+  the previous entry — handy for plugins that recompute cadence from settings.
   Inspect the current set with <code>arbor.scheduler.list()</code>; users can
   also stop/start individual entries from the Plugin Manager.
 </p>
 
 <h2>Built-in utility modules</h2>
-<p>These are available via <code>require()</code> inside any plugin without adding files â€” they are pre-loaded by the sandbox.</p>
+<p>These are available via <code>require()</code> inside any plugin without adding files — they are pre-loaded by the sandbox.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Module</th><th>Key exports</th></tr></thead>
   <tbody>
-    <tr><td><code>arbor.schema</code></td><td><code>validate(data, rules)</code> â†’ ok, errors Â· <code>check(data, rules)</code> â†’ bool (shows toast on first error)</td></tr>
-    <tr><td><code>arbor.async</code></td><td><code>Promise</code> Â· <code>run(fn)</code> Â· <code>await(p)</code> Â· <code>debounce(fn, delay_ms)</code> Â· <code>throttle(fn, interval_ms)</code></td></tr>
-    <tr><td><code>arbor.event</code></td><td><code>on(event, fn)</code> Â· <code>off(event, fn?)</code> Â· <code>emit(event, payload)</code> â€” in-process pub/sub between plugin modules</td></tr>
+    <tr><td><code>arbor.schema</code></td><td><code>validate(data, rules)</code> → ok, errors · <code>check(data, rules)</code> → bool (shows toast on first error)</td></tr>
+    <tr><td><code>arbor.async</code></td><td><code>Promise</code> · <code>run(fn)</code> · <code>await(p)</code> · <code>debounce(fn, delay_ms)</code> · <code>throttle(fn, interval_ms)</code></td></tr>
+    <tr><td><code>arbor.event</code></td><td><code>on(event, fn)</code> · <code>off(event, fn?)</code> · <code>emit(event, payload)</code> — in-process pub/sub between plugin modules</td></tr>
   </tbody>
 </table>
-<pre class="language-lua">{@html highlight(`-- arbor.schema â€” validate form submissions
+<pre class="language-lua">{@html highlight(`-- arbor.schema — validate form submissions
 local schema = require("arbor.schema")
 arbor.events.on("my_plugin:save", function(ctx)
   if not schema.check(ctx, {
@@ -423,7 +423,7 @@ arbor.events.on("my_plugin:save", function(ctx)
   -- ... proceed with save ...
 end)
 
--- arbor.async â€” promises + debounce
+-- arbor.async — promises + debounce
 local async   = require("arbor.async")
 local refresh = async.debounce(function()
   -- called at most once per 200ms after the last trigger
@@ -434,7 +434,7 @@ arbor.service.call("compile-action.resolve_java_home", {})
   :ok(function(r)  arbor.log.info("JAVA_HOME = " .. (r.java_home or "")) end)
   :err(function(e) arbor.log.warn("svc " .. e.kind .. ": " .. e.message) end)
 
--- Sequential await inside async.run â€” yields the coroutine until each promise settles.
+-- Sequential await inside async.run — yields the coroutine until each promise settles.
 async.run(function()
   local ok, err = arbor.async.await(arbor.ui.confirm{ message = "Proceed?" })
   if err or not ok then return end
@@ -443,7 +443,7 @@ async.run(function()
   arbor.log.info(r)
 end)
 
--- arbor.event â€” decouple modules
+-- arbor.event — decouple modules
 local ev = require("arbor.event")
 ev.on("config_changed", function(payload)
   -- payload.repo, etc.

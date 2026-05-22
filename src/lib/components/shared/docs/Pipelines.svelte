@@ -14,9 +14,9 @@
 <table class="shortcuts-table">
   <thead><tr><th>Colour</th><th>Meaning</th></tr></thead>
   <tbody>
-    <tr><td>Green</td><td>Success â€” step / stage / run completed with exit code 0</td></tr>
-    <tr><td>Red</td><td>Failed â€” non-zero exit code (pipeline stops unless <code>allow_failure = true</code>)</td></tr>
-    <tr><td>Blue (accent)</td><td>Running â€” currently executing</td></tr>
+    <tr><td>Green</td><td>Success — step / stage / run completed with exit code 0</td></tr>
+    <tr><td>Red</td><td>Failed — non-zero exit code (pipeline stops unless <code>allow_failure = true</code>)</td></tr>
+    <tr><td>Blue (accent)</td><td>Running — currently executing</td></tr>
     <tr><td>Grey</td><td>Pending / Cancelled</td></tr>
   </tbody>
 </table>
@@ -25,11 +25,11 @@
 <p>Click any step node in the graph to expand an output pane at the bottom of the detail area. It shows captured <code>stdout</code> and <code>stderr</code> (stderr lines are highlighted in red). Up to 1 000 lines are retained per step.</p>
 
 <h2>Cancellation</h2>
-<p>Click the <strong>Ã—</strong> button next to a running run in the run list, or call <code>arbor.pipeline.cancel(run_id)</code> from Lua. Cancellation stops the pipeline after the <em>current step</em> finishes â€” it does not kill a running process mid-execution. A run that's still <em>queued</em> behind the global concurrency cap can also be cancelled the same way: it ends in <code>cancelled</code> without ever transitioning through <code>running</code>.</p>
+<p>Click the <strong>×</strong> button next to a running run in the run list, or call <code>arbor.pipeline.cancel(run_id)</code> from Lua. Cancellation stops the pipeline after the <em>current step</em> finishes — it does not kill a running process mid-execution. A run that's still <em>queued</em> behind the global concurrency cap can also be cancelled the same way: it ends in <code>cancelled</code> without ever transitioning through <code>running</code>.</p>
 
 <h2>Global concurrency cap</h2>
 <p>Arbor caps the number of pipeline runs that may be <code>running</code> simultaneously across <em>all</em> plugins. Additional runs queue up in <code>pending</code> state with a <strong>Queued</strong> badge in the Pipelines panel and start as soon as a slot frees up.</p>
-<p>Edit the cap from <strong>Settings â†’ Tools â†’ Pipelines</strong> â€” changes apply within ~250 ms (no restart). The value is also persisted in <code>~/.config/arbor/config.toml</code>:</p>
+<p>Edit the cap from <strong>Settings → Tools → Pipelines</strong> — changes apply within ~250 ms (no restart). The value is also persisted in <code>~/.config/arbor/config.toml</code>:</p>
 <pre class="language-toml"><code>{@html highlight(`[pipelines]
 # Max concurrent pipeline runs. 0 = unlimited.
 max_concurrent_runs = 4`, 'toml')}</code></pre>
@@ -38,7 +38,7 @@ max_concurrent_runs = 4`, 'toml')}</code></pre>
   <li>The cap applies only to <em>local</em> pipelines (this orchestrator). CI/CD runs on GitHub Actions / GitLab CI are scheduled by the provider and ignore this setting.</li>
   <li>The per-stage <code>max_parallel</code> still applies <em>inside</em> a single run (parallel steps within one stage); the global cap controls how many runs may overlap.</li>
   <li>The <code>lock_key</code> collision rule is unchanged: trying to start a second run for a busy lock fails immediately, regardless of how much queue room there is.</li>
-  <li><code>0</code> means unlimited â€” the orchestrator never queues. Useful for benchmarks but a burst of pipelines (sequence runs, group dashboards, large fan-outs) can saturate disk I/O and the libgit2 packfile readers; the Settings page surfaces a warning when this mode is selected.</li>
+  <li><code>0</code> means unlimited — the orchestrator never queues. Useful for benchmarks but a burst of pipelines (sequence runs, group dashboards, large fan-outs) can saturate disk I/O and the libgit2 packfile readers; the Settings page surfaces a warning when this mode is selected.</li>
 </ul>
 
 <h2>Defining pipelines from a plugin</h2>
@@ -47,7 +47,7 @@ max_concurrent_runs = 4`, 'toml')}</code></pre>
   id          = "build",
   name        = "Build & Test",
   description = "Compile, lint and run unit tests",
-  icon        = "ðŸ”¨",   -- optional emoji shown in the sidebar
+  icon        = "🔨",   -- optional emoji shown in the sidebar
   silent      = false,  -- optional, default false. When true, the host
                         -- skips the automatic "started" toast and the
                         -- "succeeded/failed/cancelled" bell notification
@@ -113,12 +113,12 @@ end`, '.lua')}</code></pre>
 the user doesn't have to keep the Pipelines panel open:</p>
 <ul>
   <li>A <strong>transient toast</strong> when the run transitions to <code>running</code> ("Pipeline X started"), with an inline <em>Open</em> button that deep-links to the run's detail modal.</li>
-  <li>A <strong>persistent bell notification</strong> when the run reaches a terminal state â€” <code>success</code>, <code>failed</code> or <code>cancelled</code>. Click <em>Open</em> to jump straight to the graph + step output.</li>
+  <li>A <strong>persistent bell notification</strong> when the run reaches a terminal state — <code>success</code>, <code>failed</code> or <code>cancelled</code>. Click <em>Open</em> to jump straight to the graph + step output.</li>
 </ul>
 <p>Silence both surfaces for a given pipeline by passing <code>silent = true</code> to
 <code>arbor.pipeline.define</code>, or override per run with
 <code>arbor.pipeline.run&#123; silent = true &#125;</code>. Plugins that already raise
-their own lifecycle messages (build started/finished, deploy succeeded, â€¦)
+their own lifecycle messages (build started/finished, deploy succeeded, …)
 should mark their pipelines silent to avoid duplicated cards.</p>
 
 <h2>Pipeline hooks</h2>
@@ -153,7 +153,7 @@ arbor.events.on("on_pipeline_done", function(ctx)
   if ctx.status == "success" then
     arbor.notify{ title = "Pipeline done", message = ctx.pipeline_id .. " succeeded", level = "success" }
   else
-    arbor.notify{ title = "Pipeline failed", message = ctx.pipeline_id .. " â€” status: " .. ctx.status, level = "error" }
+    arbor.notify{ title = "Pipeline failed", message = ctx.pipeline_id .. " — status: " .. ctx.status, level = "error" }
   end
 end)`, '.lua')}</code></pre>
 
@@ -170,16 +170,16 @@ end)`, '.lua')}</code></pre>
 </table>
 
 <h2>Permissions</h2>
-<p>No special permissions are required to define or trigger pipelines â€” any plugin can call <code>arbor.pipeline.define()</code> and <code>arbor.pipeline.run()</code>. The commands run under the same OS user as Arbor itself. To execute shell commands within a step, the plugin does <em>not</em> need <code>terminal</code> permissions (those apply only to <code>arbor.terminal.exec</code>).</p>
+<p>No special permissions are required to define or trigger pipelines — any plugin can call <code>arbor.pipeline.define()</code> and <code>arbor.pipeline.run()</code>. The commands run under the same OS user as Arbor itself. To execute shell commands within a step, the plugin does <em>not</em> need <code>terminal</code> permissions (those apply only to <code>arbor.terminal.exec</code>).</p>
 
 <h2>GitHub Actions &amp; GitLab CI</h2>
 <p>The <strong>CI / CD</strong> tab in the Pipelines panel connects to GitHub Actions or GitLab CI and shows real pipeline runs fetched directly from the API. This works for any repository whose remote URL points to <code>github.com</code> or a GitLab instance.</p>
 
 <h3>Authentication</h3>
-<p>An OAuth token is required. Connect your account in <strong>Settings â†’ Authentication</strong> before using the CI tab:</p>
+<p>An OAuth token is required. Connect your account in <strong>Settings → Authentication</strong> before using the CI tab:</p>
 <ul>
-  <li><strong>GitHub Actions</strong> â€” connect your GitHub account via Device Flow. Arbor requests the <code>repo</code> + <code>read:user</code> scopes.</li>
-  <li><strong>GitLab CI</strong> â€” connect via GitLab Device Flow. Arbor requests the <code>api</code> + <code>read_user</code> scopes. Self-hosted instances use a host-based credential stored with <strong>Settings â†’ Credentials</strong>.</li>
+  <li><strong>GitHub Actions</strong> — connect your GitHub account via Device Flow. Arbor requests the <code>repo</code> + <code>read:user</code> scopes.</li>
+  <li><strong>GitLab CI</strong> — connect via GitLab Device Flow. Arbor requests the <code>api</code> + <code>read_user</code> scopes. Self-hosted instances use a host-based credential stored with <strong>Settings → Credentials</strong>.</li>
 </ul>
 <p>If no token is found, the CI tab shows a banner directing you to Settings rather than an error.</p>
 
@@ -198,7 +198,7 @@ end)`, '.lua')}</code></pre>
 <p>Clicking a run opens a full-screen modal showing:</p>
 <ul>
   <li>Header: provider icon, run name, branch/commit/duration chips, status badge.</li>
-  <li>A <strong>stage/job graph</strong> â€” horizontal columns, one per stage (GitLab) or "Jobs" (GitHub). Each column lists job cards with their status icon, name, and duration. Clicking a job card opens its log page in the browser.</li>
+  <li>A <strong>stage/job graph</strong> — horizontal columns, one per stage (GitLab) or "Jobs" (GitHub). Each column lists job cards with their status icon, name, and duration. Clicking a job card opens its log page in the browser.</li>
   <li>Jobs with <code>allow_failure: true</code> are shown slightly dimmed with an <strong>!</strong> badge when they fail.</li>
   <li><strong>Re-run</strong> and <strong>Open in browser</strong> buttons in the modal header.</li>
 </ul>
@@ -207,22 +207,22 @@ end)`, '.lua')}</code></pre>
 <h3>Creating a new pipeline run</h3>
 <p>Click the <strong>Run</strong> button in the CI / CD header (only visible when a token is configured) to open the <em>New Pipeline Run</em> modal:</p>
 <ul>
-  <li><strong>Branch</strong> â€” dropdown pre-filled with the current HEAD branch. All local branches are listed.</li>
-  <li><strong>Workflow</strong> (GitHub only) â€” dropdown listing active workflows that have <code>on: workflow_dispatch</code> configured. If no dispatch-enabled workflows are found, a hint is shown.</li>
-  <li><strong>Variables</strong> â€” dynamic key/value table. Add as many variables as needed; blank-key rows are ignored on submit. For GitLab these become <code>env_var</code> variables; for GitHub they become <code>workflow_dispatch</code> inputs.</li>
+  <li><strong>Branch</strong> — dropdown pre-filled with the current HEAD branch. All local branches are listed.</li>
+  <li><strong>Workflow</strong> (GitHub only) — dropdown listing active workflows that have <code>on: workflow_dispatch</code> configured. If no dispatch-enabled workflows are found, a hint is shown.</li>
+  <li><strong>Variables</strong> — dynamic key/value table. Add as many variables as needed; blank-key rows are ignored on submit. For GitLab these become <code>env_var</code> variables; for GitHub they become <code>workflow_dispatch</code> inputs.</li>
 </ul>
 <p>After clicking <strong>Run Pipeline</strong>:</p>
 <ul>
-  <li><strong>GitLab</strong> â€” the new pipeline is created synchronously and the run list refreshes immediately.</li>
-  <li><strong>GitHub</strong> â€” a <code>workflow_dispatch</code> event is fired (HTTP 204). GitHub queues the run asynchronously, so the list refreshes automatically after a 3-second delay.</li>
+  <li><strong>GitLab</strong> — the new pipeline is created synchronously and the run list refreshes immediately.</li>
+  <li><strong>GitHub</strong> — a <code>workflow_dispatch</code> event is fired (HTTP 204). GitHub queues the run asynchronously, so the list refreshes automatically after a 3-second delay.</li>
 </ul>
 
 <h3>What you can do</h3>
 <table class="shortcuts-table">
   <thead><tr><th>Action</th><th>How</th></tr></thead>
   <tbody>
-    <tr><td>View recent runs</td><td>Switch to the <strong>CI / CD</strong> tab â€” the last 30 runs are fetched automatically</td></tr>
-    <tr><td>Create a new run</td><td>Click the <strong>Run</strong> button in the CI header â€” opens branch/variable picker</td></tr>
+    <tr><td>View recent runs</td><td>Switch to the <strong>CI / CD</strong> tab — the last 30 runs are fetched automatically</td></tr>
+    <tr><td>Create a new run</td><td>Click the <strong>Run</strong> button in the CI header — opens branch/variable picker</td></tr>
     <tr><td>Refresh the list</td><td>Click the <RefreshCw size={11} /> button in the panel header</td></tr>
     <tr><td>View stage/job graph</td><td>Click any run card to open the detail modal</td></tr>
     <tr><td>Re-trigger a run</td><td>Click <RotateCcw size={11} /> in the run card or inside the detail modal</td></tr>
@@ -235,13 +235,13 @@ end)`, '.lua')}</code></pre>
 <table class="shortcuts-table">
   <thead><tr><th>Arbor status</th><th>GitHub</th><th>GitLab</th></tr></thead>
   <tbody>
-    <tr><td>âœ… Passed</td><td><code>completed / success</code></td><td><code>success</code>, <code>passed</code></td></tr>
-    <tr><td>âŒ Failed</td><td><code>completed / failure</code>, <code>timed_out</code></td><td><code>failed</code></td></tr>
-    <tr><td>â³ Running</td><td><code>in_progress</code>, <code>queued</code></td><td><code>running</code></td></tr>
-    <tr><td>â­• Cancelled</td><td><code>completed / cancelled</code>, <code>skipped</code></td><td><code>canceled</code>, <code>skipped</code></td></tr>
-    <tr><td>ðŸ”µ Pending</td><td><code>waiting</code>, <code>requested</code></td><td><code>pending</code>, <code>created</code>, <code>scheduled</code></td></tr>
+    <tr><td>✅ Passed</td><td><code>completed / success</code></td><td><code>success</code>, <code>passed</code></td></tr>
+    <tr><td>❌ Failed</td><td><code>completed / failure</code>, <code>timed_out</code></td><td><code>failed</code></td></tr>
+    <tr><td>⏳ Running</td><td><code>in_progress</code>, <code>queued</code></td><td><code>running</code></td></tr>
+    <tr><td>⭕ Cancelled</td><td><code>completed / cancelled</code>, <code>skipped</code></td><td><code>canceled</code>, <code>skipped</code></td></tr>
+    <tr><td>🔵 Pending</td><td><code>waiting</code>, <code>requested</code></td><td><code>pending</code>, <code>created</code>, <code>scheduled</code></td></tr>
   </tbody>
 </table>
 
 <h3>Self-hosted GitLab</h3>
-<p>Self-hosted GitLab instances are auto-detected from the remote URL (any host containing <code>gitlab.</code>). Store a personal access token via <strong>Settings â†’ Credentials</strong> using the instance hostname as the key. Arbor will use that token for all API calls to that host.</p>
+<p>Self-hosted GitLab instances are auto-detected from the remote URL (any host containing <code>gitlab.</code>). Store a personal access token via <strong>Settings → Credentials</strong> using the instance hostname as the key. Arbor will use that token for all API calls to that host.</p>

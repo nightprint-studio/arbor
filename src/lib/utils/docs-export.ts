@@ -46,6 +46,17 @@ function inlineToMd(node: Node): string {
   }
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+// Render an element's children as inline markdown, preserving `<code>`,
+// `<strong>`, etc. Use this instead of `textContent` for any context (headers,
+// table cells, list items) where inline formatting matters — `textContent`
+// silently strips entity-encoded angle brackets (`<code>&lt;h1&gt;</code>`
+// becomes the literal `<h1>`, which markdown then interprets as HTML).
+function inlineChildren(el: Element): string {
+  return Array.from(el.childNodes).map(inlineToMd).join('');
+}
+
 // ── Table ────────────────────────────────────────────────────────────────────
 
 function tableToMd(table: HTMLTableElement): string {
@@ -54,7 +65,7 @@ function tableToMd(table: HTMLTableElement): string {
 
   const cellText = (row: HTMLTableRowElement) =>
     Array.from(row.querySelectorAll('th, td')).map(
-      cell => (cell.textContent ?? '').trim().replace(/\|/g, '\\|'),
+      cell => inlineChildren(cell).trim().replace(/\s+/g, ' ').replace(/\|/g, '\\|'),
     );
 
   const headers = cellText(rows[0] as HTMLTableRowElement);
@@ -75,10 +86,10 @@ function blockToMd(el: HTMLElement, listDepth = 0): string {
   const tag = el.tagName.toLowerCase();
 
   switch (tag) {
-    case 'h1': return `# ${el.textContent?.trim() ?? ''}\n\n`;
-    case 'h2': return `## ${el.textContent?.trim() ?? ''}\n\n`;
-    case 'h3': return `### ${el.textContent?.trim() ?? ''}\n\n`;
-    case 'h4': return `#### ${el.textContent?.trim() ?? ''}\n\n`;
+    case 'h1': return `# ${inlineChildren(el).trim()}\n\n`;
+    case 'h2': return `## ${inlineChildren(el).trim()}\n\n`;
+    case 'h3': return `### ${inlineChildren(el).trim()}\n\n`;
+    case 'h4': return `#### ${inlineChildren(el).trim()}\n\n`;
 
     case 'p': {
       const text = Array.from(el.childNodes).map(inlineToMd).join('').trim();

@@ -22,6 +22,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   errors from hook handlers and service callbacks, `arbor.ui.tree.set` payload
   validation errors, and malformed `plugin.toml` manifests (the broken folder also
   shows up as a "Failed to load" entry in the Plugin Manager).
+- Restored Unicode glyphs (em-dashes, arrows, box-drawing characters, bullets) in
+  the Docs panel pages and exported Markdown / HTML docs, which had been corrupted
+  by a previous round-trip through Windows-1252.
+- Docs Markdown export now preserves inline `<code>` and other formatting inside
+  table cells and headings; previously e.g. a table row referencing `<h1>` would
+  render as a bare HTML tag (and be stripped by GitHub's renderer) instead of as
+  inline code.
 
 ## [0.1.0] — 2026-05-21
 

@@ -52,15 +52,15 @@
 - [API — Jobs](#api-jobs)
 - [API — Toolchains](#api-toolchains)
 - [Plugins](#plugins)
-  - [bevy-brp](#plugin-bevy-brp)
+  - [cipher-studio](#plugin-cipher-studio)
   - [ron-studio](#plugin-ron-studio)
   - [compile-action](#plugin-compile-action)
-  - [cloud-storage](#plugin-cloud-storage)
-  - [json-studio](#plugin-json-studio)
-  - [source-export](#plugin-source-export)
-  - [cipher-studio](#plugin-cipher-studio)
   - [chunk-merger-bin](#plugin-chunk-merger-bin)
+  - [bevy-brp](#plugin-bevy-brp)
+  - [source-export](#plugin-source-export)
+  - [json-studio](#plugin-json-studio)
   - [number-studio](#plugin-number-studio)
+  - [cloud-storage](#plugin-cloud-storage)
   - [deps-explorer](#plugin-deps-explorer)
   - [run-action](#plugin-run-action)
   - [run-monitor](#plugin-run-monitor)
@@ -94,10 +94,10 @@ Open multiple repositories simultaneously in separate tabs.
 
 | Action | Shortcut |
 | --- | --- |
-| Next tab | Ctrl+Tab |
-| Previous tab | Ctrl+Shift+Tab |
-| Close tab | Ctrl+W |
-| Recent repos quick-switch | Ctrl+R |
+| Next tab | `Ctrl+Tab` |
+| Previous tab | `Ctrl+Shift+Tab` |
+| Close tab | `Ctrl+W` |
+| Recent repos quick-switch | `Ctrl+R` |
 
 Right-click any tab for more options: reveal in explorer, copy path, rename, close others.
 
@@ -118,11 +118,11 @@ Press `Ctrl+K` to open the Command Palette — a unified search overlay for acti
 
 # Initialize Repository
 
-When you open a folder that isn't a git repository, Arbor detects this automatically and offers to initialize one â€” no need to run `git init` in a terminal.
+When you open a folder that isn't a git repository, Arbor detects this automatically and offers to initialize one — no need to run `git init` in a terminal.
 
 ## The flow
 
-1. Either open the hamburger menu and pick **Initialize Repositoryâ€¦**, or press `Ctrl+O` and select any folder without a `.git` directory
+1. Either open the hamburger menu and pick **Initialize Repository…**, or press `Ctrl+O` and select any folder without a `.git` directory
 2. The **Initialize Repository** dialog opens automatically
 3. Configure options across three tabs: **Project**, **Files**, **Remote**
 4. Click **Initialize Repository** or press `Ctrl+Enter`
@@ -132,16 +132,16 @@ The menu entry routes you straight into the dialog regardless of whether the fol
 
 ## Project tab
 
-- **Description** â€” stored in `.git/description` and added to the README if enabled
-- **Default branch** â€” choose `main`, `master`, `develop`, or a custom name
-- **Initial commit** â€” stages all created files and makes the first commit automatically
-- **Author name / email** â€” pre-filled from the global git config (`user.name` / `user.email`)
+- **Description** — stored in `.git/description` and added to the README if enabled
+- **Default branch** — choose `main`, `master`, `develop`, or a custom name
+- **Initial commit** — stages all created files and makes the first commit automatically
+- **Author name / email** — pre-filled from the global git config (`user.name` / `user.email`)
 
 ## Files tab
 
 - **README.md** — Generated with the repo name as H1 and the description as body text.
 - **.gitignore** — Pick from built-in templates: Rust, Node/JS/TS, Python, Go, Java, C, C++, .NET/C#, Swift, Ruby, PHP, Unity.
-- **LICENSE** — MIT, Apache 2.0, GPL 3, LGPL 3, AGPL 3, BSD 2/3-Clause, ISC, MPL 2.0 â€” filled with your name and the current year.
+- **LICENSE** — MIT, Apache 2.0, GPL 3, LGPL 3, AGPL 3, BSD 2/3-Clause, ISC, MPL 2.0 — filled with your name and the current year.
 
 ## Remote tab
 
@@ -149,14 +149,14 @@ Optionally create and link a remote repository at init time:
 
 | Option | What happens |
 | --- | --- |
-| None | Local repo only â€” add a remote later |
-| GitHub | Creates the repo via the GitHub API and adds it as origin. Requires a GitHub token in Settings â†’ Credentials. |
-| GitLab | Creates the project via the GitLab API. Supports organizations/groups. Requires a GitLab token. |
-| Custom URL | Adds any URL as origin without an API call (Gitea, Forgejo, self-hosted instances). |
+| **None** | Local repo only — add a remote later |
+| **GitHub** | Creates the repo via the GitHub API and adds it as `origin`. Requires a GitHub token in Settings → Credentials. |
+| **GitLab** | Creates the project via the GitLab API. Supports organizations/groups. Requires a GitLab token. |
+| **Custom URL** | Adds any URL as `origin` without an API call (Gitea, Forgejo, self-hosted instances). |
 
 > **API failure is non-fatal** If the provider API call fails, the local repository is still initialized. Arbor shows an error toast but the repo opens normally.
 
-## Plugin hook: on_repo_init
+## Plugin hook: `on_repo_init`
 
 Fires after a repository is successfully initialized and opened. Declare in `plugin.toml`:
 
@@ -287,9 +287,9 @@ Each workspace header carries a small toolbar of bulk actions. They all
 
 | Action | What it does |
 | --- | --- |
-| Fetch all | Runs git fetch on every member's preferred remote (origin first, then the first one configured). Never modifies the workdir. |
-| Pull all | Fetch + fast-forward / merge per member. Skips repos in detached HEAD; surfaces conflicts with a distinct row badge so you know which projects need attention. |
-| Tag all | Opens a modal to create the same tag (lightweight or annotated) at the current HEAD of every member, with optional push. See below. |
+| **Fetch all** | Runs `git fetch` on every member's preferred remote (origin first, then the first one configured). Never modifies the workdir. |
+| **Pull all** | Fetch + fast-forward / merge per member. Skips repos in detached HEAD; surfaces conflicts with a distinct row badge so you know which projects need attention. |
+| **Tag all** | Opens a modal to create the same tag (lightweight or annotated) at the current HEAD of every member, with optional push. See below. |
 
 ## Tag all (release)
 
@@ -330,9 +330,9 @@ A workspace lists **root repositories**, not the individual
 
 | Shortcut | Verb | Description |
 | --- | --- | --- |
-| Ctrl+N | Open Project | Fuzzy-open any repo from the active workspace (plus Scratch). |
-| Ctrl+Shift+N | Open from Workspace | Fuzzy-open a repo from any other workspace as a cross-workspace tab. |
-| Ctrl+K | Switch Workspace | Type switch workspace and pick a target. Saves the current snapshot, restores the target's. |
+| `Ctrl+N` | Open Project | Fuzzy-open any repo from the active workspace (plus Scratch). |
+| `Ctrl+Shift+N` | Open from Workspace | Fuzzy-open a repo from any *other* workspace as a cross-workspace tab. |
+| `Ctrl+K` | Switch Workspace | Type *switch workspace* and pick a target. Saves the current snapshot, restores the target's. |
 
 > **Not to be confused with…** Git *worktrees* are an unrelated feature that share history but check out different branches — see the *Worktrees* documentation. Arbor workspaces are a UI-level grouping with no git-level counterpart.
 
@@ -395,7 +395,7 @@ Once a link has performed at least one sync, the graph toolbar shows a **link ba
 | Member already on the target branch | Skipped silently — no work to do. |
 | Member is not currently open as a tab | Repo is opened in the background just for the checkout, no UI tab is added. |
 | Concurrent sync on the same link | Serialised by an in-progress guard; recursive triggers are suppressed. |
-| Tab swaps to a different worktree (e.g. via the Worktrees sidebar) | The badge follows the new path.  If the new worktree is not in any link, the badge disappears. |
+| Tab swaps to a different worktree (e.g. via the Worktrees sidebar) | The badge follows the new path. If the new worktree is not in any link, the badge disappears. |
 | Checkout from the integrated terminal | Not intercepted — only checkouts via the Arbor UI / Lua API propagate. |
 
 ## Plugin API
@@ -405,18 +405,18 @@ Plugins can introspect links and toggle sync via the `arbor.linked_worktrees` ta
 
 | Function | Returns | Notes |
 | --- | --- | --- |
-| arbor.linked_worktrees.list() | array of {id, name, sync_enabled, member_count} | Sorted by name. |
-| arbor.linked_worktrees.get(id) | full WorktreeLink table or nil | Includes members + alias groups. |
-| arbor.linked_worktrees.set_sync_enabled(id, enabled) | bool (true on success) | Persisted immediately. |
+| `arbor.linked_worktrees.list()` | array of `{id, name, sync_enabled, member_count}` | Sorted by name. |
+| `arbor.linked_worktrees.get(id)` | full `WorktreeLink` table or nil | Includes members + alias groups. |
+| `arbor.linked_worktrees.set_sync_enabled(id, enabled)` | bool (true on success) | Persisted immediately. |
 
 ## Hooks
 
 | Hook | Context | Fires when |
 | --- | --- | --- |
-| "on_worktree_link_sync_started" | {link_id, link_name, initiator_repo_id, target_branch} | Just before propagation begins. |
-| "on_worktree_link_sync_done" | {link_id, link_name, target_branch, results: [...]} | After every member has been processed.  Each result has repo_id and a status table tagged by kind. |
-| "on_worktree_link_member_added" | {link_id, repo_id} | User added a worktree to a link. |
-| "on_worktree_link_member_removed" | {link_id, repo_id} | User removed a worktree from a link. |
+| `"on_worktree_link_sync_started"` | `{link_id, link_name, initiator_repo_id, target_branch}` | Just before propagation begins. |
+| `"on_worktree_link_sync_done"` | `{link_id, link_name, target_branch, results: [...]}` | After every member has been processed. Each result has `repo_id` and a `status` table tagged by `kind`. |
+| `"on_worktree_link_member_added"` | `{link_id, repo_id}` | User added a worktree to a link. |
+| `"on_worktree_link_member_removed"` | `{link_id, repo_id}` | User removed a worktree from a link. |
 
 ## Command Palette
 
@@ -501,8 +501,8 @@ Supported languages: C, C#, C++, Clojure, Crystal, CSS, Dart, Dockerfile, Elixir
 
 | Provider | Requirements |
 | --- | --- |
-| GitHub | Personal access token with repo scope (Settings → Git & Integrations → GitHub) |
-| GitLab | Personal access token with read_api + read_repository scopes; supports self-hosted instances |
+| GitHub | Personal access token with `repo` scope (Settings → Git & Integrations → GitHub) |
+| GitLab | Personal access token with `read_api` + `read_repository` scopes; supports self-hosted instances |
 
 ---
 
@@ -517,10 +517,10 @@ The commit graph renders your entire repository history as SVG lanes with virtua
 | Select commit & load diff | Click any row |
 | Context menu | Right-click any row |
 | Load more history | Scroll to the bottom — loads automatically (when pagination is on) |
-| Search commits | Ctrl+F — message, author name, or SHA |
-| Next search match | Enter while search is open (or the ▼ button) |
-| Previous search match | Shift+Enter while search is open (or the ▲ button) |
-| Jump to HEAD | Ctrl+Home or the ↑ button in the toolbar |
+| Search commits | `Ctrl+F` — message, author name, or SHA |
+| Next search match | `Enter` while search is open (or the ▼ button) |
+| Previous search match | `Shift+Enter` while search is open (or the ▲ button) |
+| Jump to HEAD | `Ctrl+Home` or the ↑ button in the toolbar |
 
 ## Commit node indicators
 
@@ -1044,8 +1044,8 @@ Click the **pencil icon** on a stash row (visible on hover) or use the right-cli
 
 | Key | Action |
 | --- | --- |
-| Enter | Confirm rename |
-| Escape | Cancel without saving |
+| `Enter` | Confirm rename |
+| `Escape` | Cancel without saving |
 
 ### Dropping a stash
 
@@ -1081,8 +1081,8 @@ Each row shows two lines on the left and a set of badges on the right:
 
 | Element | Description |
 | --- | --- |
-| Name | Submodule name in primary text. A • dot indicates a dirty working directory (uncommitted changes inside the submodule). |
-| Path | Relative path from the parent repo root, shown in a smaller monospace font. |
+| **Name** | Submodule name in primary text. A • dot indicates a dirty working directory (uncommitted changes inside the submodule). |
+| **Path** | Relative path from the parent repo root, shown in a smaller monospace font. |
 | Branch badge | Pill showing the current branch name. If the submodule is in detached HEAD state, the short commit hash is shown in an amber badge instead. |
 | ↑N Ahead | Number of commits the submodule is ahead of its remote tracking branch (green). |
 | ↓N Behind | Number of commits the submodule is behind its remote tracking branch (amber). |
@@ -1105,11 +1105,11 @@ Right-click any row to open the context menu.
 
 | Action | Git equivalent |
 | --- | --- |
-| Fetch | git fetch inside the submodule directory |
-| Pull | git pull inside the submodule directory |
-| Push | git push inside the submodule directory |
-| Checkout Branch… | Opens the Checkout Branch modal (see below) |
-| Open as Tab | Opens the submodule as a new tab in Arbor |
+| **Fetch** | `git fetch` inside the submodule directory |
+| **Pull** | `git pull` inside the submodule directory |
+| **Push** | `git push` inside the submodule directory |
+| **Checkout Branch…** | Opens the *Checkout Branch* modal (see below) |
+| **Open as Tab** | Opens the submodule as a new tab in Arbor |
 
 All sync operations (Fetch / Pull / Push) are disabled for uninitialised submodules. After each operation the sidebar data refreshes automatically. Errors (e.g. merge conflicts on pull, rejected push) are shown as toast notifications containing the raw `git` output.
 
@@ -1143,7 +1143,7 @@ git submodule update --init --recursive
 
 # Git Flow
 
-Arbor includes a built-in Git Flow implementation based on the **Vincent Driessen branching model** â€” structured workflows for feature, release, and hotfix branches, with optional PR/MR integration and ticket-based branch naming.
+Arbor includes a built-in Git Flow implementation based on the **Vincent Driessen branching model** — structured workflows for feature, release, and hotfix branches, with optional PR/MR integration and ticket-based branch naming.
 
 ## Opening the Git Flow panel
 
@@ -1153,39 +1153,39 @@ Click the **Git Merge** icon (second icon) in the Activity Bar to open the Git F
 
 If the repository has never been initialized with Git Flow, the panel shows an **Initialize** button. This creates the `develop` branch (if it doesn't exist) and records the prefix configuration. Branch prefixes default to:
 
-### Non-standard flow (no develop)
+### Non-standard flow (no `develop`)
 
-Arbor works with repositories that **don't follow the standard `main`/`develop` split**. When `main` exists but `develop` doesn't, the panel is fully usable and you can still create feature/release branches â€” they are created from `main` instead of `develop`, and finishing them merges back into `main`.
+Arbor works with repositories that **don't follow the standard `main`/`develop` split**. When `main` exists but `develop` doesn't, the panel is fully usable and you can still create feature/release branches — they are created from `main` instead of `develop`, and finishing them merges back into `main`.
 
 - A yellow **"Non-standard flow"** banner is shown at the top of the panel in this mode. It carries an **Initialise** shortcut that creates the missing `develop` branch from `main` if you want to switch to the full Git Flow.
-- The **first time** you start a feature or release in this mode for a given project, a confirmation dialog explains that the branch will be cut from `main`. Confirming the dialog stores an acknowledgement per project â€” subsequent starts go through silently.
+- The **first time** you start a feature or release in this mode for a given project, a confirmation dialog explains that the branch will be cut from `main`. Confirming the dialog stores an acknowledgement per project — subsequent starts go through silently.
 - A toast after the start reminds you which base branch was used (e.g. *"feature 'foo' started from main"*).
 - If neither `main` nor `develop` exists, the panel falls back to the standard "create main" flow before anything else can be done.
 
 | Branch type | Default prefix |
 | --- | --- |
-| feature | feature/ |
-| release | release/ |
-| hotfix | hotfix/ |
-| bugfix | bugfix/ |
-| support | support/ |
+| feature | `feature/` |
+| release | `release/` |
+| hotfix | `hotfix/` |
+| bugfix | `bugfix/` |
+| support | `support/` |
 
 ## Workflows
 
 ### Feature branches
 
-- **Start** â€” creates `feature/<name>` from `develop` (or from `main` if `develop` doesn't exist) and checks it out
-- **Finish** â€” merges feature branch into `develop` with `--no-ff` (or into `main` when `develop` is missing); optionally deletes the branch after
+- **Start** — creates `feature/<name>` from `develop` (or from `main` if `develop` doesn't exist) and checks it out
+- **Finish** — merges feature branch into `develop` with `--no-ff` (or into `main` when `develop` is missing); optionally deletes the branch after
 
 ### Release branches
 
-- **Start** â€” creates `release/<version>` from `develop` (falls back to `main` when `develop` is missing)
-- **Finish** â€” merges into `main` and, when present, into `develop`; optionally creates a version tag
+- **Start** — creates `release/<version>` from `develop` (falls back to `main` when `develop` is missing)
+- **Finish** — merges into `main` and, when present, into `develop`; optionally creates a version tag
 
 ### Hotfix branches
 
-- **Start** â€” creates `hotfix/<name>` from `main` (the production branch)
-- **Finish** â€” merges into both `main` and `develop`; optionally creates a tag
+- **Start** — creates `hotfix/<name>` from `main` (the production branch)
+- **Finish** — merges into both `main` and `develop`; optionally creates a tag
 
 ## PR / MR integration
 
@@ -1193,24 +1193,24 @@ Arbor supports both local merges and Pull / Merge Request workflows. The behavio
 
 | Setting | What it does |
 | --- | --- |
-| finish.feature_use_pr | Force PR/MR â€” feature finish always pushes the branch and opens the PR/MR form (no local merge) |
-| finish.feature_pr_default | When not forced, sets the default action for the primary Finish button. false (default) = merge locally; true = open PR/MR |
-| finish.release_use_pr | Force PR/MR on release finish |
-| finish.release_pr_default | Default primary button action for release finish |
-| finish.hotfix_use_pr | Force PR/MR on hotfix finish |
-| finish.hotfix_pr_default | Default primary button action for hotfix finish |
+| `finish.feature_use_pr` | **Force** PR/MR — feature finish always pushes the branch and opens the PR/MR form (no local merge) |
+| `finish.feature_pr_default` | When not forced, sets the **default action** for the primary Finish button. `false` (default) = merge locally; `true` = open PR/MR |
+| `finish.release_use_pr` | **Force** PR/MR on release finish |
+| `finish.release_pr_default` | Default primary button action for release finish |
+| `finish.hotfix_use_pr` | **Force** PR/MR on hotfix finish |
+| `finish.hotfix_pr_default` | Default primary button action for hotfix finish |
 
-When a finish type is **not** forced, the Finish button becomes a **split button**: the primary click uses the configured default, and the chevron `â–¾` lets you choose between "Finish normally (merge locally)" and "Finish with PR/MR" for that individual operation.
+When a finish type is **not** forced, the Finish button becomes a **split button**: the primary click uses the configured default, and the chevron `▾` lets you choose between "Finish normally (merge locally)" and "Finish with PR/MR" for that individual operation.
 
-Configure in **Settings â†’ Git Flow**. Each setting can be overridden per project.
+Configure in **Settings → Git Flow**. Each setting can be overridden per project.
 
 ## Ticket-based branch naming
 
-When an issue tracker is configured for the project (see **Settings â†’ Repository â†’ Issue Tracker**), the "Start Feature" form shows a **Ticket** field with a picker button. Clicking it opens a full-screen modal with the same search and filter interface as the Issues sidebar â€” search bar, status / project / milestone / assignee chips â€” and issue cards with colored status icons, labels, and assignees.
+When an issue tracker is configured for the project (see **Settings → Repository → Issue Tracker**), the "Start Feature" form shows a **Ticket** field with a picker button. Clicking it opens a full-screen modal with the same search and filter interface as the Issues sidebar — search bar, status / project / milestone / assignee chips — and issue cards with colored status icons, labels, and assignees.
 
 Selecting a ticket closes the modal and auto-fills the branch name field with the ticket identifier, producing branches like `feature/ABO-123`.
 
-- The ticket picker is available **by default** whenever a tracker is configured â€” no flag required.
+- The ticket picker is available **by default** whenever a tracker is configured — no flag required.
 - Enable `require_ticket_branch` to make ticket selection **mandatory** (the branch name field must be filled from a ticket).
 - If `require_ticket_branch` is on but no issue tracker is configured for the project, a warning is shown and the branch name can be typed freely.
 - Currently supported tracker: **Linear**. Jira coming soon.
@@ -1219,10 +1219,10 @@ Selecting a ticket closes the modal and auto-fills the branch name field with th
 
 Git Flow settings are stored in two layers:
 
-- **Global** â€” in `~/.config/arbor/config.toml` under `[gitflow]` â€” applies to all repositories
-- **Per-repo** â€” in `<repo>/.arbor/config.toml` under `[gitflow]` â€” overrides the global config for that repo only
+- **Global** — in `~/.config/arbor/config.toml` under `[gitflow]` — applies to all repositories
+- **Per-repo** — in `<repo>/.arbor/config.toml` under `[gitflow]` — overrides the global config for that repo only
 
-Both layers are editable from **Settings â†’ Git Flow**.
+Both layers are editable from **Settings → Git Flow**.
 
 ```toml
 [gitflow]
@@ -1257,13 +1257,13 @@ Plugins can react to every Git Flow operation. Declare the hooks in `[hooks]` an
 
 | Hook constant | TOML key | Context fields |
 | --- | --- | --- |
-| FLOW_INIT | on_flow_init | repo |
-| FLOW_FEATURE_START | on_flow_feature_start | repo, name, branch, base_branch |
-| FLOW_FEATURE_FINISH | on_flow_feature_finish | repo, name, branch |
-| FLOW_RELEASE_START | on_flow_release_start | repo, version, branch, base_branch |
-| FLOW_RELEASE_FINISH | on_flow_release_finish | repo, version, branch |
-| FLOW_HOTFIX_START | on_flow_hotfix_start | repo, name, branch, base_branch |
-| FLOW_HOTFIX_FINISH | on_flow_hotfix_finish | repo, name, branch |
+| `FLOW_INIT` | `on_flow_init` | repo |
+| `FLOW_FEATURE_START` | `on_flow_feature_start` | repo, name, branch, base_branch |
+| `FLOW_FEATURE_FINISH` | `on_flow_feature_finish` | repo, name, branch |
+| `FLOW_RELEASE_START` | `on_flow_release_start` | repo, version, branch, base_branch |
+| `FLOW_RELEASE_FINISH` | `on_flow_release_finish` | repo, version, branch |
+| `FLOW_HOTFIX_START` | `on_flow_hotfix_start` | repo, name, branch, base_branch |
+| `FLOW_HOTFIX_FINISH` | `on_flow_hotfix_finish` | repo, name, branch |
 
 ```lua
 -- plugin.toml [hooks] section
@@ -1286,28 +1286,28 @@ end)
 
 # Ticket Links
 
-Arbor can associate commits with tickets from your issue tracker â€” automatically
+Arbor can associate commits with tickets from your issue tracker — automatically
     by parsing commit messages and branch names, or manually via right-click.
     Linked tickets appear as small chips on each graph row and in the commit detail panel.
 
 ## How it works
 
-- **Auto-detect (message)** â€” Arbor scans each visible commit message for
-      ticket IDs matching the configured tracker pattern (e.g. `ENG-123` for Linear, `#456` for GitHub / GitLab). Results are cached in memory â€” no re-scan on scroll.
-- **Auto-detect (branch)** â€” Branch names pointing to a commit are also scanned
+- **Auto-detect (message)** — Arbor scans each visible commit message for
+      ticket IDs matching the configured tracker pattern (e.g. `ENG-123` for Linear, `#456` for GitHub / GitLab). Results are cached in memory — no re-scan on scroll.
+- **Auto-detect (branch)** — Branch names pointing to a commit are also scanned
       (e.g. `feature/ENG-123-login-flow`).
-- **Manual link** â€” Right-click a commit â†’ *Link to ticketâ€¦* to open the
+- **Manual link** — Right-click a commit → *Link to ticket…* to open the
       ticket picker and create a persistent association stored in the backing store.
 
 ## Storage backends
 
-Manual links can be stored in one of two backends. The backend is exclusive â€”
+Manual links can be stored in one of two backends. The backend is exclusive —
     only one is active per repository at a time (no mixed reads).
 
 | Backend | Location | Distributed on push? |
 | --- | --- | --- |
-| git_notes (default) | refs/notes/arbor/tickets in the git object store | Only if you configure the push refspec (see below) |
-| links_toml | .arbor/links.toml in the repository root | Yes, if you commit and push the file |
+| `git_notes` *(default)* | `refs/notes/arbor/tickets` in the git object store | Only if you configure the push refspec (see below) |
+| `links_toml` | `.arbor/links.toml` in the repository root | Yes, if you commit and push the file |
 
 ## Configuration
 
@@ -1315,30 +1315,30 @@ Global defaults live in `~/.config/arbor/config.toml`.
     Per-repository overrides go in `.arbor/config.toml` inside the repo.
     Project settings take precedence.
 
-### Global config (~/.config/arbor/config.toml)
+### Global config (`~/.config/arbor/config.toml`)
 
 ```toml
 [ticket_links]
-enabled    = true          # master switch (also in Settings â†’ Graph)
+enabled    = true          # master switch (also in Settings → Graph)
 storage    = "git_notes"   # "git_notes" | "links_toml"
 auto_parse = true          # parse commit messages + branch names
 warn_push  = true          # warn when notes push refspec is missing
 ```
 
-### Per-repo config (.arbor/config.toml)
+### Per-repo config (`.arbor/config.toml`)
 
 ```toml
 [ticket_links]
 storage        = "links_toml"      # override the global backend for this repo
 tracker        = "linear"          # "linear" | "jira" | "github" | "gitlab"
 auto_parse     = true
-custom_pattern = "\\b(MYCO-\\d+)\\b"  # optional â€” overrides the tracker default
+custom_pattern = "\\b(MYCO-\\d+)\\b"  # optional — overrides the tracker default
 ```
 
-`custom_pattern` can also be set via **Settings â†’ Repository â†’ Ticket Links** without editing the TOML file manually. The value must be a valid Rust regex with exactly
-    one capture group â€” the captured text becomes the ticket ID.
+`custom_pattern` can also be set via **Settings → Repository → Ticket Links** without editing the TOML file manually. The value must be a valid Rust regex with exactly
+    one capture group — the captured text becomes the ticket ID.
 
-**Tip:** `tracker` can also be set via the existing `issue_tracker` field in `.arbor/config.toml` â€” the
+**Tip:** `tracker` can also be set via the existing `issue_tracker` field in `.arbor/config.toml` — the
     ticket-links system inherits it as a fallback.
 
 ## Sharing git notes with teammates
@@ -1356,29 +1356,29 @@ Arbor will warn you after a push if this refspec is not yet configured.
 
 ## UI elements
 
-- **Graph chips** â€” Colored pill badges on each row.
+- **Graph chips** — Colored pill badges on each row.
       Color indicates the tracker: purple = Linear / Jira, grey = GitHub, orange = GitLab.
-      Click to open the issue detail. Hover a manually-added chip to reveal the âœ• remove button.
-- **Commit detail panel** â€” "Tickets" row below the commit body
-      showing all linked tickets. Manual links have an âœ• button to remove them.
-- **Right-click â†’ Link to ticketâ€¦** â€” Opens the ticket picker
+      Click to open the issue detail. Hover a manually-added chip to reveal the ✕ remove button.
+- **Commit detail panel** — "Tickets" row below the commit body
+      showing all linked tickets. Manual links have an ✕ button to remove them.
+- **Right-click → Link to ticket…** — Opens the ticket picker
       to create a manual association.
-- **Issue detail â†’ Linked Commits** â€” When viewing a ticket in the
+- **Issue detail → Linked Commits** — When viewing a ticket in the
       issues sidebar, a *Linked Commits* section loads lazily and shows every
       commit associated with that ticket (both auto-detected and manual). Each entry
       displays the short SHA, summary, author, date, and branch chips (when the
       commit is already in the graph cache). Click any entry to navigate directly to
       that commit in the graph.
-- **Settings â†’ Graph â†’ Ticket link chips** â€” Toggle to disable the
+- **Settings → Graph → Ticket link chips** — Toggle to disable the
       feature entirely if you experience scroll slowdowns on very large repos.
 
-## Reverse lookup: ticket â†’ commits
+## Reverse lookup: ticket → commits
 
 The *Linked Commits* section in the issue detail provides full reverse lookup:
 
-- **Manual links (git notes)** â€” All notes under `refs/notes/arbor/tickets` are scanned.
-- **Manual links (links.toml)** â€” The full `.arbor/links.toml` file is read (served from cache when warm).
-- **Auto-detected** â€” Commits already scrolled into view whose
+- **Manual links (git notes)** — All notes under `refs/notes/arbor/tickets` are scanned.
+- **Manual links (links.toml)** — The full `.arbor/links.toml` file is read (served from cache when warm).
+- **Auto-detected** — Commits already scrolled into view whose
       message or branch name matched the ticket ID are included. Commits not yet
       loaded in the graph are not covered by auto-detection (scroll more of the
       graph to widen the search).
@@ -1387,13 +1387,13 @@ The *Linked Commits* section in the issue detail provides full reverse lookup:
 
 | Tracker | Default pattern | Example |
 | --- | --- | --- |
-| Linear | [A-Z][A-Z0-9]*-\d+ | ENG-123, PROJ-42 |
-| Jira | [A-Z][A-Z0-9]*-\d+ | PROJ-456, ABC-7 |
-| GitHub | #\d+ | #456, fixes #789 |
-| GitLab | #\d+ | #123 |
+| Linear | `[A-Z][A-Z0-9]*-\d+` | `ENG-123`, `PROJ-42` |
+| Jira | `[A-Z][A-Z0-9]*-\d+` | `PROJ-456`, `ABC-7` |
+| GitHub | `#\d+` | `#456`, `fixes #789` |
+| GitLab | `#\d+` | `#123` |
 
 Any tracker's default pattern can be overridden with a **custom regex** per repository.
-    Set it in **Settings â†’ Repository â†’ Ticket Links** or directly in `.arbor/config.toml`:
+    Set it in **Settings → Repository → Ticket Links** or directly in `.arbor/config.toml`:
 
 ```toml
 [ticket_links]
@@ -1401,7 +1401,7 @@ tracker        = "jira"
 custom_pattern = "\\b(MYCO-\\d+)\\b"   # must have exactly one capture group
 ```
 
-When `custom_pattern` is set it takes full precedence â€” the tracker default is ignored.
+When `custom_pattern` is set it takes full precedence — the tracker default is ignored.
     The captured text (group 1) becomes the ticket ID stored and displayed on the chip.
     Invalid regex is silently ignored and the tracker default is used instead.
 
@@ -1444,16 +1444,16 @@ When the modal opens, Arbor checks each note against its remote tracking ref (`r
 
 Use the **refresh** icon on each note to re-check its remote status after a push.
 
-### Plugin API — arbor.notes
+### Plugin API — `arbor.notes`
 
 Requires `git = "read"` for read operations, `git = "write"` for write operations.
 
 | Function | Description |
 | --- | --- |
-| arbor.notes.list(commit_oid) | Returns an array of { namespace, content, created_at, remote_status } for the active tab's commit. created_at is a Unix timestamp (seconds). |
-| arbor.notes.get(commit_oid, namespace) | Returns the note content string, or nil if no note exists. |
-| arbor.notes.set{ commit_oid, namespace, content } | Create or overwrite a note. Returns (true, nil) on success, (false, err) on git failure. Fires on_note_saved hook. |
-| arbor.notes.delete(commit_oid, namespace) | Delete a note. Fires on_note_deleted hook. |
+| `arbor.notes.list(commit_oid)` | Returns an array of `{ namespace, content, created_at, remote_status }` for the active tab's commit. `created_at` is a Unix timestamp (seconds). |
+| `arbor.notes.get(commit_oid, namespace)` | Returns the note content string, or `nil` if no note exists. |
+| `arbor.notes.set{ commit_oid, namespace, content }` | Create or overwrite a note. Returns `(true, nil)` on success, `(false, err)` on git failure. Fires `on_note_saved` hook. |
+| `arbor.notes.delete(commit_oid, namespace)` | Delete a note. Fires `on_note_deleted` hook. |
 
 #### Example
 
@@ -1472,8 +1472,8 @@ end)
 
 | Hook | Context fields |
 | --- | --- |
-| on_note_saved | tab_id, commit_oid, namespace |
-| on_note_deleted | tab_id, commit_oid, namespace |
+| `on_note_saved` | `tab_id`, `commit_oid`, `namespace` |
+| `on_note_deleted` | `tab_id`, `commit_oid`, `namespace` |
 
 ### Plugin Manifest
 
@@ -1503,9 +1503,9 @@ Expand the **Worktrees** section in the left sidebar (Layers icon).
 
 | Badge | Meaning |
 | --- | --- |
-| 🏠 Home | Main worktree — the directory where .git/ lives. Cannot be removed. |
-| ⊙ CircleDot | Currently open in the active tab. |
-| 🔒 Lock | Locked via git worktree lock — cannot be pruned accidentally. |
+| 🏠 *Home* | Main worktree — the directory where `.git/` lives. Cannot be removed. |
+| ⊙ *CircleDot* | Currently open in the active tab. |
+| 🔒 *Lock* | Locked via `git worktree lock` — cannot be pruned accidentally. |
 
 ## Adding a worktree
 
@@ -1547,16 +1547,16 @@ Arbor inspects each worktree directory for build-system markers to assign a proj
 
 | Emoji | Type | Detected by |
 | --- | --- | --- |
-| 🦀 | Rust | Cargo.toml |
-| 🟩 | Node.js | package.json |
-| ☕ | Java (Maven) | pom.xml |
-| ☕ | Java (Gradle) | build.gradle / build.gradle.kts |
-| 🐹 | Go | go.mod |
-| 🐍 | Python | pyproject.toml, setup.py, or requirements.txt |
-| 🔷 | .NET | *.csproj or *.sln |
-| ⚙️ | C++ | CMakeLists.txt or Makefile |
-| 💎 | Ruby | Gemfile |
-| 🐘 | PHP | composer.json |
+| 🦀 | Rust | `Cargo.toml` |
+| 🟩 | Node.js | `package.json` |
+| ☕ | Java (Maven) | `pom.xml` |
+| ☕ | Java (Gradle) | `build.gradle` / `build.gradle.kts` |
+| 🐹 | Go | `go.mod` |
+| 🐍 | Python | `pyproject.toml`, `setup.py`, or `requirements.txt` |
+| 🔷 | .NET | `*.csproj` or `*.sln` |
+| ⚙️ | C++ | `CMakeLists.txt` or `Makefile` |
+| 💎 | Ruby | `Gemfile` |
+| 🐘 | PHP | `composer.json` |
 
 ## IDE integration
 
@@ -1586,7 +1586,7 @@ Click the **Files** icon in the Activity Bar (folder icon) to toggle the File Tr
 | Filter graph by file | Click a file row (click again to clear) |
 | Context menu | Right-click any file row |
 | Search files | Type in the search box at the top of the panel |
-| Refresh | Click the ↺ refresh button in the panel toolbar |
+| Refresh | Click the **↺** refresh button in the panel toolbar |
 
 ## File & folder icons
 
@@ -1659,7 +1659,7 @@ The Git Blame modal shows the full content of a file annotated line-by-line with
 | --- | --- |
 | Highlight all lines from the same commit | Hover any line — all lines sharing the same OID are highlighted |
 | Navigate to commit in graph | Click the SHA chip — the graph scrolls to that commit and the modal closes |
-| Close modal | Escape or click the backdrop |
+| Close modal | `Escape` or click the backdrop |
 
 > **Under the hood** — blame is computed by the Rust backend via `git2::Repository::blame_file()` and returned as a flat array of `BlameLine` structs (one per source line). Each `BlameLine` carries: `line_no`, `content`, `commit_oid`, `short_oid`, `author_name`, `author_email`, `timestamp`, `summary`, and a `is_group_start` flag set when the commit OID changes from the previous line.
 
@@ -1678,10 +1678,10 @@ Click the **History** icon (clock arrow) in the Activity Bar to toggle the Reflo
 
 | Element | Meaning |
 | --- | --- |
-| HEAD@{n} badge | Position in the reflog — HEAD@{0} is the most recent |
-| Hash chip (accent color) | 7-character short OID of the commit HEAD moved to |
+| `HEAD@{n}` badge | Position in the reflog — `HEAD@{0}` is the most recent |
+| Hash chip (accent color) | 7-character short OID of the commit HEAD moved *to* |
 | Action badge | Type of operation that moved HEAD (see below) |
-| Message | Git's description of the operation, e.g. checkout: moving from main to feature/x |
+| Message | Git's description of the operation, e.g. *checkout: moving from main to feature/x* |
 | Relative time | When the operation occurred; hover for the full date/time |
 
 ## Action types
@@ -1722,12 +1722,12 @@ The backend reads the reflog via `git2::Repository::reflog("HEAD")` and returns 
 
 | Field | Type | Description |
 | --- | --- | --- |
-| index | usize | Position in reflog (HEAD@{index}) |
-| id | String | Full OID HEAD moved to |
-| id_old | String | Full OID HEAD moved from |
-| message | String | Git's reflog message |
-| committer_name | String | Name from the reflog signature |
-| committer_time | i64 | Unix timestamp of the operation |
+| `index` | `usize` | Position in reflog (`HEAD@{index}`) |
+| `id` | `String` | Full OID HEAD moved *to* |
+| `id_old` | `String` | Full OID HEAD moved *from* |
+| `message` | `String` | Git's reflog message |
+| `committer_name` | `String` | Name from the reflog signature |
+| `committer_time` | `i64` | Unix timestamp of the operation |
 
 ---
 
@@ -1760,10 +1760,10 @@ Click the **History** icon (clock-arrow) in the Activity Bar to open the Reflog
 
 | Element | Meaning |
 | --- | --- |
-| shield badge + kind label | Type of operation that triggered the snapshot (Checkout, Reset·hard, Discard, etc.) |
-| Summary line | Human-readable description, e.g. checkout branch 'feature/x' |
+| `shield` badge + kind label | Type of operation that triggered the snapshot (Checkout, Reset·hard, Discard, etc.) |
+| Summary line | Human-readable description, e.g. *checkout branch 'feature/x'* |
 | Relative time | When the snapshot was taken; hover for the full date/time |
-| File-warning icon | Some files were too large or had denied extensions and were logged but not preserved |
+| File-warning icon | Some files were too large or had denied extensions and were *logged but not preserved* |
 | Consumed badge | Entry has been restored; the pinning ref has been removed |
 
 ## Preview & Restore
@@ -1792,10 +1792,10 @@ Entries older than the configured **retention period** (default: **30 days**)
 
 |  | Reflog | Recovery Journal |
 | --- | --- | --- |
-| What it tracks | Every position of HEAD — commits, checkouts, merges, rebases | Working-tree + index snapshots before destructive ops |
-| Uncommitted work | Not preserved — only the committed state | Fully preserved (working dir + staged changes) |
-| Managed by | Git itself | Arbor exclusively |
-| When to use | Recover a lost commit after reset or force-push | Recover uncommitted work after a discard or checkout |
+| **What it tracks** | Every position of HEAD — commits, checkouts, merges, rebases | Working-tree + index snapshots before destructive ops |
+| **Uncommitted work** | Not preserved — only the committed state | Fully preserved (working dir + staged changes) |
+| **Managed by** | Git itself | Arbor exclusively |
+| **When to use** | Recover a lost *commit* after reset or force-push | Recover *uncommitted* work after a discard or checkout |
 
 ## Settings
 
@@ -1803,9 +1803,9 @@ Configure the journal in **Settings → Performance → Recovery**:
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| Max file size | 2 MB | Files larger than this limit are logged in the journal but their content is not preserved in the snapshot. |
+| Max file size | 2 MB | Files larger than this limit are *logged* in the journal but their content is not preserved in the snapshot. |
 | Retention period | 30 days | Snapshots older than this are pruned on next load. Matches git's default unreachable-object expiry. |
-| Denied extensions | zip, mp4, exe, dll, jar, psd, … | Files with these extensions are never content-preserved — only logged. Avoids bloating .git with build artifacts and binaries. |
+| Denied extensions | zip, mp4, exe, dll, jar, psd, … | Files with these extensions are never content-preserved — only logged. Avoids bloating `.git` with build artifacts and binaries. |
 
 ## Under the hood
 
@@ -1829,15 +1829,15 @@ Each line is a self-contained JSON object with the fields below.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| id | u64 | Monotonically-increasing unique identifier |
-| created_at | i64 | Unix timestamp of snapshot creation |
-| kind | string | One of: reset_hard, checkout, discard, stash_force_apply, stash_drop, pull, other |
-| summary | string | Human-readable description of the triggering operation |
-| snapshot_oid | string | Full OID of the stash-create commit (null if snapshot was skipped) |
-| head_oid | string | OID of HEAD at snapshot time |
-| head_branch | string \| null | Branch name at snapshot time (null for detached HEAD) |
-| consumed | bool | True after the entry has been successfully restored |
-| skipped_files | array | Files that were logged but not preserved (too large or denied extension) |
+| `id` | `u64` | Monotonically-increasing unique identifier |
+| `created_at` | `i64` | Unix timestamp of snapshot creation |
+| `kind` | `string` | One of: `reset_hard`, `checkout`, `discard`, `stash_force_apply`, `stash_drop`, `pull`, `other` |
+| `summary` | `string` | Human-readable description of the triggering operation |
+| `snapshot_oid` | `string` | Full OID of the stash-create commit (null if snapshot was skipped) |
+| `head_oid` | `string` | OID of HEAD at snapshot time |
+| `head_branch` | `string \| null` | Branch name at snapshot time (null for detached HEAD) |
+| `consumed` | `bool` | True after the entry has been successfully restored |
+| `skipped_files` | `array` | Files that were logged but not preserved (too large or denied extension) |
 
 ---
 
@@ -1854,10 +1854,10 @@ one of four states:
 
 | Status | Meaning | Typical cause |
 | --- | --- | --- |
-| ok | Path exists and is a valid git repo | Normal case |
-| missing | Path doesn't exist, but at least one ancestor does | Folder deleted or moved |
-| unreachable | Neither the path nor any ancestor can be stat-ed | Drive unmounted, network share offline, VPN disconnected |
-| not_a_repo | Path exists but is not a git repo | .git/ deleted or repo moved out |
+| `ok` | Path exists and is a valid git repo | Normal case |
+| `missing` | Path doesn't exist, but at least one ancestor does | Folder deleted or moved |
+| `unreachable` | Neither the path nor any ancestor can be stat-ed | Drive unmounted, network share offline, VPN disconnected |
+| `not_a_repo` | Path exists but is not a git repo | `.git/` deleted or repo moved out |
 
 Anything other than `ok` places the tab into **tombstone** state — the tab still appears in the
 title bar with a warning glyph, and clicking it opens the locate UI instead of trying to read git2.
@@ -1888,9 +1888,9 @@ You can also bulk-clean every dead recent in **Settings → Git → Missing Proj
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| auto_prune_recents | off | Silently drop missing entries from the Recent list at load time. When off, they're shown with the missing badge so you can act per-entry. |
-| confirm_before_remove | on | Require a second click on the tombstone screen's "Remove" button before deregistering. |
-| revalidate_on_focus | on | Re-classify tombstoned tabs whenever the app regains focus. |
+| `auto_prune_recents` | off | Silently drop missing entries from the Recent list at load time. When off, they're shown with the missing badge so you can act per-entry. |
+| `confirm_before_remove` | on | Require a second click on the tombstone screen's "Remove" button before deregistering. |
+| `revalidate_on_focus` | on | Re-classify tombstoned tabs whenever the app regains focus. |
 
 ## Plugin hooks
 
@@ -1993,10 +1993,10 @@ Unix. Use your package manager:
 
 | Platform | Command |
 | --- | --- |
-| macOS | brew install git |
-| Debian / Ubuntu | sudo apt install git |
-| Fedora / RHEL | sudo dnf install git |
-| Arch | sudo pacman -S git |
+| macOS | `brew install git` |
+| Debian / Ubuntu | `sudo apt install git` |
+| Fedora / RHEL | `sudo dnf install git` |
+| Arch | `sudo pacman -S git` |
 
 Then click **Auto-detect** in the modal (or in **Settings → Git → Git Executable**).
 
@@ -2040,7 +2040,7 @@ In practice this means:
 
 > **libgit2 vs CLI.** Network operations done through libgit2 (the main repo's *fetch* and *push*) have always used Arbor's stored credentials. This page is about the CLI shell-outs, which historically deferred to the OS helper — they now align with libgit2's behaviour.
 
-## Plugins should not shell out to git
+## Plugins should not shell out to `git`
 
 > **For plugin authors.** `arbor.terminal.exec("git ...")` uses the system `PATH`, NOT the binary configured here. That means a plugin that shells out to `git` directly will silently bypass the user's choice — it can run a different version, miss the bundled portable copy entirely, or fail on machines where Arbor's PortableGit is the only git available. Use the built-in APIs instead (`arbor.repo.fetch_active_tab`, `arbor.repo.clone`, …). If the operation you need isn't exposed, file an issue rather than working around it with a raw shell call — Arbor doesn't auto-rewrite plugin commands by design, since that would change their semantics behind the author's back.
 
@@ -2078,9 +2078,9 @@ The banner changes appearance based on the current state:
 
 | State | What you see |
 | --- | --- |
-| Waiting for good | Gray banner — "right-click a known good commit in the graph". No midpoint is shown yet. |
-| Midpoint ready | Accent banner — shows the next commit hash and approximate remaining steps. Action buttons: Checkout, Good, Bad, Skip, Undo, Save & Pause, Reset. |
-| Result found | Red banner — "First bad commit found" with the culprit hash (click to scroll to it in the graph). The session is auto-saved. |
+| **Waiting for good** | Gray banner — "right-click a known good commit in the graph". No midpoint is shown yet. |
+| **Midpoint ready** | Accent banner — shows the next commit hash and approximate remaining steps. Action buttons: *Checkout, Good, Bad, Skip, Undo, Save & Pause, Reset*. |
+| **Result found** | Red banner — "First bad commit found" with the culprit hash (click to scroll to it in the graph). The session is auto-saved. |
 
 ## Action buttons
 
@@ -2097,10 +2097,10 @@ Commits involved in the bisect session are highlighted with colored rings in the
 
 | Ring | Meaning |
 | --- | --- |
-| ■ Red solid | Marked as Bad. All bad commits keep their ring throughout the session. |
-| ■ Green solid | Marked as Good. |
-| ■ Orange dashed (pulsing) | Current midpoint — next commit to test. |
-| ■ Red double-glow (pulsing) | Result — the first bad commit found. |
+| ■ Red solid | Marked as **Bad**. All bad commits keep their ring throughout the session. |
+| ■ Green solid | Marked as **Good**. |
+| ■ Orange dashed (pulsing) | Current midpoint — **next commit to test**. |
+| ■ Red double-glow (pulsing) | **Result** — the first bad commit found. |
 
 ## Bisect sessions
 
@@ -2109,10 +2109,10 @@ Sessions are stored under `.arbor/bisect/<id>/session.json` inside your reposito
 
 | Action | Description |
 | --- | --- |
-| ▶ Play | Replays all marks from the session. For paused sessions this restores the midpoint and scrolls to it. For completed sessions it reloads the result state and rings into the graph. |
-| ⌖ Go to result | Scrolls the graph to the result commit (completed sessions only). |
-| ✎ Rename | Click the pencil icon and type a new name. Press Enter or click away to confirm, Escape to cancel. |
-| ✕ Delete | Removes the session directory permanently. |
+| **▶ Play** | Replays all marks from the session. For paused sessions this restores the midpoint and scrolls to it. For completed sessions it reloads the result state and rings into the graph. |
+| **⌖ Go to result** | Scrolls the graph to the result commit (completed sessions only). |
+| **✎ Rename** | Click the pencil icon and type a new name. Press Enter or click away to confirm, Escape to cancel. |
+| **✕ Delete** | Removes the session directory permanently. |
 
 > **Auto-save on result** — when bisect finds the culprit commit, the session is saved automatically with a name like *"Found: abc1234 — commit message"*. You never lose a completed bisect result.
 
@@ -2122,9 +2122,9 @@ The backend runs `git bisect start --no-checkout` and manages `BISECT_HEAD` dire
 
 | File | Content |
 | --- | --- |
-| .git/BISECT_HEAD | Current midpoint OID (set by git after range is established) |
-| .git/BISECT_LOG | Ordered list of git bisect good/bad/skip commands — parsed to reconstruct all marks |
-| .arbor/bisect/<id>/session.json | Persisted session: id, name, status, bad/good hashes, result, timestamps |
+| `.git/BISECT_HEAD` | Current midpoint OID (set by git after range is established) |
+| `.git/BISECT_LOG` | Ordered list of `git bisect good/bad/skip` commands — parsed to reconstruct all marks |
+| `.arbor/bisect/<id>/session.json` | Persisted session: id, name, status, bad/good hashes, result, timestamps |
 
 ---
 
@@ -2222,11 +2222,11 @@ Arbor includes a built-in multi-tab terminal emulator powered by **xterm.js** an
 
 | Action | How |
 | --- | --- |
-| Toggle terminal panel | Ctrl+` or the terminal icon in the Activity Bar |
-| Open a new tab immediately | Ctrl+Shift+` |
-| New tab in default shell | Click + in the terminal tab bar |
-| Pick a shell from the list | Click the ▾ dropdown next to + |
-| Close tab | Click × on the tab, or type exit in the shell |
+| Toggle terminal panel | `Ctrl+`` or the terminal icon in the Activity Bar |
+| Open a new tab immediately | `Ctrl+Shift+`` |
+| New tab in default shell | Click **+** in the terminal tab bar |
+| Pick a shell from the list | Click the **▾** dropdown next to **+** |
+| Close tab | Click **×** on the tab, or type `exit` in the shell |
 
 ## Shell picker
 
@@ -2243,21 +2243,21 @@ Arbor probes for the following shells at startup. Anything missing from `PATH` i
 
 | Shell | Default executable | Platform |
 | --- | --- | --- |
-| Command Prompt | cmd.exe | Windows |
-| Windows PowerShell | powershell.exe | Windows |
-| PowerShell 7+ | pwsh | Any |
-| Bash | bash | Any |
-| Git Bash | bash.exe (Git for Windows) | Windows |
-| WSL | wsl.exe | Windows |
-| MSYS2 | msys2_shell.cmd | Windows |
-| Cygwin | Cygwin.bat | Windows |
-| Zsh | zsh | Linux / macOS |
-| Fish | fish | Any |
-| Nushell | nu | Any |
-| Xonsh | xonsh | Any |
-| Elvish | elvish | Any |
-| tcsh | tcsh | Linux / macOS |
-| sh | sh | Linux / macOS |
+| Command Prompt | `cmd.exe` | Windows |
+| Windows PowerShell | `powershell.exe` | Windows |
+| PowerShell 7+ | `pwsh` | Any |
+| Bash | `bash` | Any |
+| Git Bash | `bash.exe` (Git for Windows) | Windows |
+| WSL | `wsl.exe` | Windows |
+| MSYS2 | `msys2_shell.cmd` | Windows |
+| Cygwin | `Cygwin.bat` | Windows |
+| Zsh | `zsh` | Linux / macOS |
+| Fish | `fish` | Any |
+| Nushell | `nu` | Any |
+| Xonsh | `xonsh` | Any |
+| Elvish | `elvish` | Any |
+| tcsh | `tcsh` | Linux / macOS |
+| sh | `sh` | Linux / macOS |
 
 Anything not in this list can still be reached as a **custom terminal** (see **Settings → Terminals**).
 
@@ -2289,59 +2289,59 @@ Drag the divider between the commit graph and the terminal panel to resize. Heig
 
 # Command Palette
 
-The Command Palette (`Ctrl+K`) is a strictly **verb-first** launcher: you always pick an action first, then (when the action takes a target) refine to a specific branch / tag / commit / file. Ambiguity is removed by design â€” the palette always shows what will happen on `Enter`.
+The Command Palette (`Ctrl+K`) is a strictly **verb-first** launcher: you always pick an action first, then (when the action takes a target) refine to a specific branch / tag / commit / file. Ambiguity is removed by design — the palette always shows what will happen on `Enter`.
 
 ## Opening & navigating
 
 | Key | Action |
 | --- | --- |
-| Ctrl+K | Open / close the palette |
-| â†‘ / â†“ | Move selection up / down |
-| Enter | Pick the highlighted command (Phase 1) or run it on the highlighted target (Phase 2) |
-| Tab | Accept ghost-text autocompletion |
-| Backspace | On empty input, in Phase 2: remove the verb chip and go back to Phase 1 |
-| Esc | Close the palette |
+| `Ctrl+K` | Open / close the palette |
+| `↑` / `↓` | Move selection up / down |
+| `Enter` | Pick the highlighted command (Phase 1) or run it on the highlighted target (Phase 2) |
+| `Tab` | Accept ghost-text autocompletion |
+| `Backspace` | *On empty input, in Phase 2*: remove the verb chip and go back to Phase 1 |
+| `Esc` | Close the palette |
 
 ## Two phases: pick a command, then a target
 
 The palette is a two-step flow. In **Phase 1** you autocomplete a command; in **Phase 2** the command becomes a chip at the left of the input, and the list filters to the targets for that command.
 
-### Phase 1 â€” Commands
+### Phase 1 — Commands
 
 With an empty input the list shows every runnable command, grouped by category. Verbs (which open a target picker) always come first; leaf actions follow, grouped by area:
 
-- **Branch** â€” *Checkout*, *Merge*, *Delete Branch*, *Rename Branch*, *Push Branch*, *Focus Branch in Graph*
-- **Navigate** â€” *Go to Commit*, *Go to Tag*, *Blame File*, *Show Commits Touching File*
-- **Commit** â€” *Cherry-pick*, *Revert Commit*, *Reset Soft / Mixed / Hard*, *Create Branch Here*, *Create Tag* (Enter on empty input tags HEAD), *Copy Commit SHA*
-- **Stash** â€” *Apply Stash*, *Pop Stash*, *Drop Stash*
-- **Tag** â€” *Delete Tag*, *Push Tag*
-- **Remote** â€” *Fetch from Remote*, *Pull from Remote*, *Push Branch to Remote*
-- **Tabs** â€” *Switch Tab*, *Close Tab*
-- **Repository** â€” *Open Recent Repository*
-- **Merge Requests** â€” *Open Pull / Merge Request* (opens the create MR/PR modal)
-- **Appearance** â€” *Switch Theme*
-- **Repository actions (leaves)** â€” Open / Init / Clone / Reload Repository
-- **Workspaces** â€” *Switch Workspace*, *Open Project*, *Open from Workspace*, Manage Workspaces, Create Workspace
-- **Worktrees** â€” *Worktree Info*, *Switch Worktree*
-- **Deep Links** â€” *Copy arbor:// Link to Commit / Checkout Branch / Branch Worktree / MR* (the *Open Repository* link is a leaf action under **Copy**)
-- **Linked Worktrees** â€” Manage Linked Worktrees, Link this Worktreeâ€¦, Unlink from "<link>", Enable / Disable Sync for "<link>" (latter four shown only when applicable to the current repo)
-- **Tabs (leaves)** â€” Close Current Tab, Next / Previous Tab
-- **Git (leaves)** â€” Pull, Push, Fetch All Remotes, New Branch, Stash Changes
-- **Stage & Commit** â€” Commit, Amend Last Commit, Stage All, Unstage All, Discard All, Undo Last Commit
-- **Rebase / Merge** â€” Continue / Skip / Abort Rebase, Abort Merge (visible only while the repo is in that state)
-- **Panels** â€” Toggle Stage / Detail / Terminal / Jobs / Notifications / Sidebar; Show Branches / Git Flow / MRs / Issues / Files / Reflog / Stats / Pipelines
-- **Copy** â€” Copy Current Branch Name, Copy Current SHA, Copy `origin` URL, *Copy arbor:// Link to Open Repository*
-- **System** â€” Settings, Plugin Manager, Reload Plugins, Documentation, About Arbor
-- **Submodules** â€” Update All Submodules
-- **Navigation** â€” Jump to HEAD, Open in IDE
-- **Open With** â€” one entry per detected / custom IDE (only when a repo is open)
-- **Plugin Commands** â€” registered via `arbor.command.register()`
+- **Branch** — *Checkout*, *Merge*, *Delete Branch*, *Rename Branch*, *Push Branch*, *Focus Branch in Graph*
+- **Navigate** — *Go to Commit*, *Go to Tag*, *Blame File*, *Show Commits Touching File*
+- **Commit** — *Cherry-pick*, *Revert Commit*, *Reset Soft / Mixed / Hard*, *Create Branch Here*, *Create Tag* (Enter on empty input tags HEAD), *Copy Commit SHA*
+- **Stash** — *Apply Stash*, *Pop Stash*, *Drop Stash*
+- **Tag** — *Delete Tag*, *Push Tag*
+- **Remote** — *Fetch from Remote*, *Pull from Remote*, *Push Branch to Remote*
+- **Tabs** — *Switch Tab*, *Close Tab*
+- **Repository** — *Open Recent Repository*
+- **Merge Requests** — *Open Pull / Merge Request* (opens the create MR/PR modal)
+- **Appearance** — *Switch Theme*
+- **Repository actions (leaves)** — Open / Init / Clone / Reload Repository
+- **Workspaces** — *Switch Workspace*, *Open Project*, *Open from Workspace*, Manage Workspaces, Create Workspace
+- **Worktrees** — *Worktree Info*, *Switch Worktree*
+- **Deep Links** — *Copy arbor:// Link to Commit / Checkout Branch / Branch Worktree / MR* (the *Open Repository* link is a leaf action under **Copy**)
+- **Linked Worktrees** — Manage Linked Worktrees, Link this Worktree…, Unlink from "<link>", Enable / Disable Sync for "<link>" (latter four shown only when applicable to the current repo)
+- **Tabs (leaves)** — Close Current Tab, Next / Previous Tab
+- **Git (leaves)** — Pull, Push, Fetch All Remotes, New Branch, Stash Changes
+- **Stage & Commit** — Commit, Amend Last Commit, Stage All, Unstage All, Discard All, Undo Last Commit
+- **Rebase / Merge** — Continue / Skip / Abort Rebase, Abort Merge (visible only while the repo is in that state)
+- **Panels** — Toggle Stage / Detail / Terminal / Jobs / Notifications / Sidebar; Show Branches / Git Flow / MRs / Issues / Files / Reflog / Stats / Pipelines
+- **Copy** — Copy Current Branch Name, Copy Current SHA, Copy `origin` URL, *Copy arbor:// Link to Open Repository*
+- **System** — Settings, Plugin Manager, Reload Plugins, Documentation, About Arbor
+- **Submodules** — Update All Submodules
+- **Navigation** — Jump to HEAD, Open in IDE
+- **Open With** — one entry per detected / custom IDE (only when a repo is open)
+- **Plugin Commands** — registered via `arbor.command.register()`
 
-Verb commands show a `â€º` chevron on the right to indicate they open a target picker. Leaf commands execute immediately. Conditional leaves (e.g. *Continue Rebase*, *Unstage All*) only show when the action is applicable.
+Verb commands show a `›` chevron on the right to indicate they open a target picker. Leaf commands execute immediately. Conditional leaves (e.g. *Continue Rebase*, *Unstage All*) only show when the action is applicable.
 
-### Phase 2 â€” Target picker
+### Phase 2 — Target picker
 
-Selecting a verb inserts a coloured chip at the start of the input (e.g. `âŒ¥ Checkout â€º`) and the list becomes the verb's target set. The input placeholder flips to match the verb's target â€” *"Filter branchesâ€¦"*, *"Filter stashesâ€¦"*, *"Filter remotesâ€¦"*, etc. `Enter` runs the verb on the highlighted row; clicking the chip (or `Backspace` on empty input) removes it and returns to Phase 1.
+Selecting a verb inserts a coloured chip at the start of the input (e.g. `⌥ Checkout ›`) and the list becomes the verb's target set. The input placeholder flips to match the verb's target — *"Filter branches…"*, *"Filter stashes…"*, *"Filter remotes…"*, etc. `Enter` runs the verb on the highlighted row; clicking the chip (or `Backspace` on empty input) removes it and returns to Phase 1.
 
 Target kinds: `branch`, `tag`, `commit`, `file`, `stash`, `remote`, `tab`, `recent` (repository), `mr`, `theme`, `worktree`.
 
@@ -2351,87 +2351,87 @@ Target kinds: `branch`, `tag`, `commit`, `file`, `stash`, `remote`, `tab`, `rece
 
 | Command | Aliases | What it does |
 | --- | --- | --- |
-| Checkout | co, switch, sw, ck | Checks out the branch; opens the conflict modal if the workdir is dirty |
-| Merge | â€” | Merges the branch into HEAD |
-| Delete Branch | del, rm, delb | Removes the local branch (with confirm) |
-| Rename Branch | ren, mv | Opens the branch-rename modal with remote-rename toggle |
-| Push Branch | pushb | Pushes refs/heads/<branch> to origin |
-| Focus Branch in Graph | focus, goto, go, show | Centers the graph on the branch HEAD |
+| `Checkout` | `co`, `switch`, `sw`, `ck` | Checks out the branch; opens the conflict modal if the workdir is dirty |
+| `Merge` | — | Merges the branch into HEAD |
+| `Delete Branch` | `del`, `rm`, `delb` | Removes the local branch (with confirm) |
+| `Rename Branch` | `ren`, `mv` | Opens the branch-rename modal with remote-rename toggle |
+| `Push Branch` | `pushb` | Pushes `refs/heads/<branch>` to `origin` |
+| `Focus Branch in Graph` | `focus`, `goto`, `go`, `show` | Centers the graph on the branch HEAD |
 
 ### Navigation & Commit verbs
 
 | Command | Aliases | Target | What it does |
 | --- | --- | --- | --- |
-| Go to Tag | tag, tags | tag | Centers the graph on the tag target |
-| Go to Commit | commit, commits | commit | Full-text commit search (summary, author, hash) â€” min. 2 characters |
-| Blame File | blame, annotate | project-file | Opens the Git Blame modal for any file in the project â€” does not touch the File Tree sidebar |
-| Show Commits Touching File | file-history, log-file, history | project-file | Filters the graph by a file picked from the full project â€” does not open the File Tree sidebar |
-| Cherry-pick | cp, pick | commit | Applies the commit onto HEAD; routes to Stage on conflicts |
-| Revert Commit | rv | commit | Creates a new commit that undoes the target |
-| Reset Soft | rs | commit | Move HEAD only; keep index and workdir |
-| Reset Mixed | â€” | commit | Move HEAD + reset index; keep workdir |
-| Reset Hard | rh | commit | Destructive â€” requires confirmation. Resets HEAD, index and workdir |
-| Create Branch Here | bf | commit | Opens the new-branch modal pre-seeded at the commit |
-| Create Tag | th, tag-here, create-tag | commit | Top entry here (selected by default â€” Enter creates a tag at HEAD); type a commit term to pre-seed the modal elsewhere |
-| Copy Commit SHA | sha | commit | Copies the full OID to the clipboard |
+| `Go to Tag` | `tag`, `tags` | tag | Centers the graph on the tag target |
+| `Go to Commit` | `commit`, `commits` | commit | Full-text commit search (summary, author, hash) — min. 2 characters |
+| `Blame File` | `blame`, `annotate` | project-file | Opens the Git Blame modal for any file in the project — does *not* touch the File Tree sidebar |
+| `Show Commits Touching File` | `file-history`, `log-file`, `history` | project-file | Filters the graph by a file picked from the full project — does *not* open the File Tree sidebar |
+| `Cherry-pick` | `cp`, `pick` | commit | Applies the commit onto HEAD; routes to Stage on conflicts |
+| `Revert Commit` | `rv` | commit | Creates a new commit that undoes the target |
+| `Reset Soft` | `rs` | commit | Move HEAD only; keep index and workdir |
+| `Reset Mixed` | — | commit | Move HEAD + reset index; keep workdir |
+| `Reset Hard` | `rh` | commit | **Destructive** — requires confirmation. Resets HEAD, index and workdir |
+| `Create Branch Here` | `bf` | commit | Opens the new-branch modal pre-seeded at the commit |
+| `Create Tag` | `th`, `tag-here`, `create-tag` | commit | Top entry `here` (selected by default — Enter creates a tag at HEAD); type a commit term to pre-seed the modal elsewhere |
+| `Copy Commit SHA` | `sha` | commit | Copies the full OID to the clipboard |
 
 ### Stash / Tag / Remote verbs
 
 | Command | Aliases | Target | What it does |
 | --- | --- | --- | --- |
-| Apply Stash | apply | stash | Applies a stash without dropping it |
-| Pop Stash | pop | stash | Applies and drops the stash |
-| Drop Stash | drop | stash | Deletes the stash (with confirm) |
-| Delete Tag | delt, rmt | tag | Removes the local tag (with confirm) |
-| Push Tag | pusht | tag | Pushes refs/tags/<name> to origin |
-| Fetch from Remote | fr | remote | Fetches refs from a specific remote |
-| Pull from Remote | pr | remote | Pulls current branch from the chosen remote |
-| Push Branch to Remote | ptr | remote | Pushes the current branch to the chosen remote |
+| `Apply Stash` | `apply` | stash | Applies a stash without dropping it |
+| `Pop Stash` | `pop` | stash | Applies and drops the stash |
+| `Drop Stash` | `drop` | stash | Deletes the stash (with confirm) |
+| `Delete Tag` | `delt`, `rmt` | tag | Removes the local tag (with confirm) |
+| `Push Tag` | `pusht` | tag | Pushes `refs/tags/<name>` to origin |
+| `Fetch from Remote` | `fr` | remote | Fetches refs from a specific remote |
+| `Pull from Remote` | `pr` | remote | Pulls current branch from the chosen remote |
+| `Push Branch to Remote` | `ptr` | remote | Pushes the current branch to the chosen remote |
 
 ### Tabs / Repository / Theme verbs
 
 | Command | Aliases | Target | What it does |
 | --- | --- | --- | --- |
-| Switch Tab | tab | tab | Activates the selected repo tab |
-| Close Tab | closet | tab | Closes the selected repo tab |
-| Open Recent Repository | recent, open | recent | Opens one of the recently-used repositories in a new tab |
-| Switch Theme | theme, colors | theme | Applies a built-in or custom theme (persists across restarts) |
+| `Switch Tab` | `tab` | tab | Activates the selected repo tab |
+| `Close Tab` | `closet` | tab | Closes the selected repo tab |
+| `Open Recent Repository` | `recent`, `open` | recent | Opens one of the recently-used repositories in a new tab |
+| `Switch Theme` | `theme`, `colors` | theme | Applies a built-in or custom theme (persists across restarts) |
 
 ### Worktree verbs
 
 | Command | Aliases | Target | What it does |
 | --- | --- | --- | --- |
-| Worktree Info | wt, wtinfo, worktree | worktree | Opens the info panel for any worktree of the active project â€” same modal as the sidebar list, but reachable without expanding the Worktrees section |
-| Switch Worktree | wts, switch-wt | worktree | Swaps the active tab's context to the chosen worktree (or focuses an existing tab on that path) â€” same logic as double-clicking a row in the sidebar |
+| `Worktree Info` | `wt`, `wtinfo`, `worktree` | worktree | Opens the info panel for any worktree of the active project — same modal as the sidebar list, but reachable without expanding the *Worktrees* section |
+| `Switch Worktree` | `wts`, `switch-wt` | worktree | Swaps the active tab's context to the chosen worktree (or focuses an existing tab on that path) — same logic as double-clicking a row in the sidebar |
 
 Both verbs lazy-load the worktree list the first time they activate, then cache it for the lifetime of the palette open.
 
 ### Deep Link verbs
 
-Build a shareable `arbor://` URL and copy it to the clipboard. The active tab's first remote is embedded as `?url=`, so the link resolves on any machine that has access to the same remote. If the repository has no remote configured, the palette toasts a warning rather than producing a non-shareable link â€” see the *Deep Links* doc page for the full URL schema.
+Build a shareable `arbor://` URL and copy it to the clipboard. The active tab's first remote is embedded as `?url=`, so the link resolves on any machine that has access to the same remote. If the repository has no remote configured, the palette toasts a warning rather than producing a non-shareable link — see the *Deep Links* doc page for the full URL schema.
 
 | Command | Aliases | Target | Produces |
 | --- | --- | --- | --- |
-| Copy arbor:// Link to Commit | linkc, dl-commit | commit | arbor://commit/<sha>?url=<remote> |
-| Copy arbor:// Link to Checkout Branch | linkb, dl-checkout | branch | arbor://branch/<name>?url=<remote>&checkout=1 |
-| Copy arbor:// Link to Branch Worktree | linkw, dl-worktree | branch | arbor://branch/<name>?url=<remote>&worktree=1 |
-| Copy arbor:// Link to MR | linkmr, dl-mr | mr | arbor://mr/open/<number>?url=<remote> |
+| `Copy arbor:// Link to Commit` | `linkc`, `dl-commit` | commit | `arbor://commit/<sha>?url=<remote>` |
+| `Copy arbor:// Link to Checkout Branch` | `linkb`, `dl-checkout` | branch | `arbor://branch/<name>?url=<remote>&checkout=1` |
+| `Copy arbor:// Link to Branch Worktree` | `linkw`, `dl-worktree` | branch | `arbor://branch/<name>?url=<remote>&worktree=1` |
+| `Copy arbor:// Link to MR` | `linkmr`, `dl-mr` | mr | `arbor://mr/open/<number>?url=<remote>` |
 
 The *Open Repository* variant has no target, so it lives as a leaf entry under **Copy** (*Copy arbor:// Link to Open Repository*) and produces `arbor://repo/open?url=<remote>`.
 
 ## Auto-promote shortcut
 
-Typing a verb name (or any alias) followed by a space â€” or a colon â€” promotes it to a chip immediately and keeps whatever you typed after as the target filter. This lets power users skip the list entirely:
+Typing a verb name (or any alias) followed by a space — or a colon — promotes it to a chip immediately and keeps whatever you typed after as the target filter. This lets power users skip the list entirely:
 
-- `co main` â†’ chip `Checkout`, filter *main*
-- `merge develop` â†’ chip `Merge`, filter *develop*
-- `tag:v1` â†’ chip `Go to Tag`, filter *v1*
-- `rm feature/old` â†’ chip `Delete Branch`, filter *feature/old*
-- `cp fix` â†’ chip `Cherry-pick`, filter commits containing *fix*
-- `apply WIP` â†’ chip `Apply Stash`, filter stashes containing *WIP*
-- `tab:docs` â†’ chip `Switch Tab`, filter tabs whose name contains *docs*
-- `wt feature/api` â†’ chip `Worktree Info`, filter worktrees whose branch contains *feature/api*
-- `linkc bug-fix` â†’ chip `Copy arbor:// Link to Commit`, filter commits matching *bug-fix*
+- `co main` → chip `Checkout`, filter *main*
+- `merge develop` → chip `Merge`, filter *develop*
+- `tag:v1` → chip `Go to Tag`, filter *v1*
+- `rm feature/old` → chip `Delete Branch`, filter *feature/old*
+- `cp fix` → chip `Cherry-pick`, filter commits containing *fix*
+- `apply WIP` → chip `Apply Stash`, filter stashes containing *WIP*
+- `tab:docs` → chip `Switch Tab`, filter tabs whose name contains *docs*
+- `wt feature/api` → chip `Worktree Info`, filter worktrees whose branch contains *feature/api*
+- `linkc bug-fix` → chip `Copy arbor:// Link to Commit`, filter commits matching *bug-fix*
 
 The verb chip is always visible, so there is no hidden state: the palette shows exactly what `Enter` will do.
 
@@ -2439,18 +2439,18 @@ The verb chip is always visible, so there is no hidden state: the palette shows 
 
 A handful of commands require explicit confirmation because they cannot be undone or affect stashed work:
 
-- *Delete Branch*, *Delete Tag*, *Drop Stash* â€” native `confirm()` prompt
-- *Reset Hard* â€” lists the target SHA in the prompt
-- *Discard All Changes* â€” same
-- *Undo Last Commit* â€” shows the parent SHA that HEAD will move to
+- *Delete Branch*, *Delete Tag*, *Drop Stash* — native `confirm()` prompt
+- *Reset Hard* — lists the target SHA in the prompt
+- *Discard All Changes* — same
+- *Undo Last Commit* — shows the parent SHA that HEAD will move to
 
-## Open With â€” launching an IDE
+## Open With — launching an IDE
 
-The **Open With** section is populated from your IDE configuration in *Settings â†’ IDE Integration*:
+The **Open With** section is populated from your IDE configuration in *Settings → IDE Integration*:
 
 - All built-in IDEs detected at startup (or with a custom *executable path* set) are listed automatically
 - Custom IDEs added in settings appear alongside the built-ins
-- The IDE is launched **detached** â€” closing Arbor does not close the IDE
+- The IDE is launched **detached** — closing Arbor does not close the IDE
 
 For a quick one-click launch with your default IDE, use the *Open in IDE* entry in the **Actions** section. For a specific IDE, pick from **Open With**.
 
@@ -2462,12 +2462,12 @@ As you type, the palette shows a dimmed ghost suffix in the input box when the f
 
 Each item is assigned a score based on how well its title and subtitle match the query:
 
-- Exact match â†’ 100
-- Prefix match â†’ 85
-- Word-boundary match â†’ 70
-- Substring match â†’ 55
-- Fuzzy (all characters present in order) â†’ 30
-- No match â†’ hidden
+- Exact match → 100
+- Prefix match → 85
+- Word-boundary match → 70
+- Substring match → 55
+- Fuzzy (all characters present in order) → 30
+- No match → hidden
 
 Sections with no matching items are hidden entirely.
 
@@ -2479,24 +2479,24 @@ Currently registered by enabled plugins:
 
 | Title | Description | Plugin | Action |
 | --- | --- | --- | --- |
-| Cipher Studio: open… | Encode / decode text with classical ciphers and old-school encodings. | cipher-studio | command:open |
-| Cloud Storage · Manage connections… | Open the connections manager (add / edit / delete). | cloud-storage | command:manage-connections |
-| Cloud Storage · Sync down (cloud → local) | Mirror a remote prefix onto a local folder. | cloud-storage | command:sync-down |
-| Cloud Storage · Sync up (local → cloud) | Mirror a local folder onto a remote prefix. | cloud-storage | command:sync-up |
-| Workspace Security Dashboard | Aggregate severity counts, risk and findings across the active workspace. | group-security-dashboard | command:open_active |
-| Open JSON / JSONC file in Studio… | Pick a .json or .jsonc file and explore it as a lazy tree (or pretty-printed text) with JSONPath query. Files larger than 1 MB open in stream mode (navigation-only). | json-studio | command:open-file |
-| Paste JSON in Studio… | Paste a JSON document and open it in the Studio modal. | json-studio | command:paste |
-| Number Studio: open… | Convert integers between numeral systems (bases, Roman, Chinese, Devanagari, …). | number-studio | command:open |
-| Open .properties file in Studio… | Pick a .properties file and explore it as a lazy dotted-key tree with JSONPath query, lossless edit and cross-refs. | properties-studio | command:open-file |
-| Paste .properties in Studio… | Paste a .properties document and open it in the Studio modal. | properties-studio | command:paste |
-| Open RON file in Studio… | Pick a .ron file and explore it as a tree, edit text directly, diff against the original, save in place, or convert to JSON. | ron-studio | command:open-file |
-| Paste RON in Studio… | Paste a RON document and open it in the Studio modal. | ron-studio | command:paste |
-| Open TOML file in Studio… | Pick a .toml file and explore it as a lazy tree with JSONPath query. Edits are lossless — comments and formatting survive a round-trip. | toml-studio | command:open-file |
-| Paste TOML in Studio… | Paste a TOML document and open it in the Studio modal. | toml-studio | command:paste |
-| Open YAML file in Studio… | Pick a .yaml / .yml file and explore it as a lazy tree with JSONPath query. Read-only in Phase 5.a. | yaml-studio | command:open-file |
-| Paste YAML in Studio… | Paste a YAML document and open it in the Studio modal. | yaml-studio | command:paste |
+| Cipher Studio: open… | Encode / decode text with classical ciphers and old-school encodings. | `cipher-studio` | `command:open` |
+| Cloud Storage · Manage connections… | Open the connections manager (add / edit / delete). | `cloud-storage` | `command:manage-connections` |
+| Cloud Storage · Sync down (cloud → local) | Mirror a remote prefix onto a local folder. | `cloud-storage` | `command:sync-down` |
+| Cloud Storage · Sync up (local → cloud) | Mirror a local folder onto a remote prefix. | `cloud-storage` | `command:sync-up` |
+| Workspace Security Dashboard | Aggregate severity counts, risk and findings across the active workspace. | `group-security-dashboard` | `command:open_active` |
+| Open JSON / JSONC file in Studio… | Pick a .json or .jsonc file and explore it as a lazy tree (or pretty-printed text) with JSONPath query. Files larger than 1 MB open in stream mode (navigation-only). | `json-studio` | `command:open-file` |
+| Paste JSON in Studio… | Paste a JSON document and open it in the Studio modal. | `json-studio` | `command:paste` |
+| Number Studio: open… | Convert integers between numeral systems (bases, Roman, Chinese, Devanagari, …). | `number-studio` | `command:open` |
+| Open .properties file in Studio… | Pick a .properties file and explore it as a lazy dotted-key tree with JSONPath query, lossless edit and cross-refs. | `properties-studio` | `command:open-file` |
+| Paste .properties in Studio… | Paste a .properties document and open it in the Studio modal. | `properties-studio` | `command:paste` |
+| Open RON file in Studio… | Pick a .ron file and explore it as a tree, edit text directly, diff against the original, save in place, or convert to JSON. | `ron-studio` | `command:open-file` |
+| Paste RON in Studio… | Paste a RON document and open it in the Studio modal. | `ron-studio` | `command:paste` |
+| Open TOML file in Studio… | Pick a .toml file and explore it as a lazy tree with JSONPath query. Edits are lossless — comments and formatting survive a round-trip. | `toml-studio` | `command:open-file` |
+| Paste TOML in Studio… | Paste a TOML document and open it in the Studio modal. | `toml-studio` | `command:paste` |
+| Open YAML file in Studio… | Pick a .yaml / .yml file and explore it as a lazy tree with JSONPath query. Read-only in Phase 5.a. | `yaml-studio` | `command:open-file` |
+| Paste YAML in Studio… | Paste a YAML document and open it in the Studio modal. | `yaml-studio` | `command:paste` |
 
-## Plugin API â€” arbor.command
+## Plugin API — `arbor.command`
 
 Plugins can register and remove command palette entries at runtime using `arbor.command.register()` and `arbor.command.unregister()`. Call `register` during `on_plugin_load` so the commands are available as soon as the plugin loads.
 
@@ -2524,15 +2524,15 @@ arbor.command.unregister("run-tests")
 
 | Field | Type | Description |
 | --- | --- | --- |
-| id | string | Unique identifier within the plugin. Used as the action name command:<id>. |
-| title | string | Display title shown in the palette. |
-| description | string? | Subtitle shown below the title (e.g. short description or plugin name). |
-| icon | string? | Lucide icon name (e.g. "Play", "GitBranch", "Settings"). Defaults to "Zap" if omitted. |
-| group | string? | Optional category label; currently used for internal grouping only. |
+| `id` | string | Unique identifier within the plugin. Used as the action name `command:<id>`. |
+| `title` | string | Display title shown in the palette. |
+| `description` | string? | Subtitle shown below the title (e.g. short description or plugin name). |
+| `icon` | string? | Lucide icon name (e.g. `"Play"`, `"GitBranch"`, `"Settings"`). Defaults to `"Zap"` if omitted. |
+| `group` | string? | Optional category label; currently used for internal grouping only. |
 
 ### Hook convention
 
-When the user selects a plugin command the palette fires `fire_plugin_action(plugin_name, "command:<id>", "{}")`. Register the handler with `arbor.events.on("command:<id>", fn)` â€” the same mechanism used for activity-bar actions and keybindings.
+When the user selects a plugin command the palette fires `fire_plugin_action(plugin_name, "command:<id>", "{}")`. Register the handler with `arbor.events.on("command:<id>", fn)` — the same mechanism used for activity-bar actions and keybindings.
 
 ### Full example
 
@@ -2583,28 +2583,28 @@ Arbor is designed to be fully keyboard-navigable. Most actions have a default sh
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+ O | Open repository |
-| Ctrl+ Shift+ O | Clone repository |
-| Ctrl+ Shift+ I | Initialize repository in folder |
-| Ctrl+ R | Recent repos quick-switch |
-| Ctrl+ Shift+ R | Browse remote repositories (GitHub / GitLab) |
-| Ctrl+ K | Open Command Palette |
-| Ctrl+ N | Open project in active workspace |
-| Ctrl+ Shift+ N | Open project from another workspace (cross-WS tab) |
-| Alt+ Shift+ W | Open Workspace Manager |
-| Ctrl+ , | Open Settings |
-| F1 | Toggle Documentation |
-| Escape | Close current panel / search / modal |
+| `Ctrl`+ `O` | Open repository |
+| `Ctrl`+ `Shift`+ `O` | Clone repository |
+| `Ctrl`+ `Shift`+ `I` | Initialize repository in folder |
+| `Ctrl`+ `R` | Recent repos quick-switch |
+| `Ctrl`+ `Shift`+ `R` | Browse remote repositories (GitHub / GitLab) |
+| `Ctrl`+ `K` | Open Command Palette |
+| `Ctrl`+ `N` | Open project in active workspace |
+| `Ctrl`+ `Shift`+ `N` | Open project from another workspace (cross-WS tab) |
+| `Alt`+ `Shift`+ `W` | Open Workspace Manager |
+| `Ctrl`+ `,` | Open Settings |
+| `F1` | Toggle Documentation |
+| `Escape` | Close current panel / search / modal |
 
 ## Tabs & navigation
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+ Tab | Next tab |
-| Ctrl+ Shift+ Tab | Previous tab |
-| Ctrl+ W | Close active tab |
-| Ctrl+ Home | Jump to HEAD commit in graph |
-| Ctrl+ F | Search commits (message / author / SHA) |
+| `Ctrl`+ `Tab` | Next tab |
+| `Ctrl`+ `Shift`+ `Tab` | Previous tab |
+| `Ctrl`+ `W` | Close active tab |
+| `Ctrl`+ `Home` | Jump to HEAD commit in graph |
+| `Ctrl`+ `F` | Search commits (message / author / SHA) |
 
 ## Panels
 
@@ -2614,14 +2614,14 @@ Arbor is designed to be fully keyboard-navigable. Most actions have a default sh
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+ B | Toggle left sidebar visibility |
-| Ctrl+ Shift+ B | Toggle right sidebar visibility |
-| Ctrl+ J | Toggle bottom panel visibility |
-| Ctrl+ Shift+ S | Toggle Stage area |
-| Ctrl+ ` | Toggle terminal panel |
-| Ctrl+ Shift+ ` | Open new terminal tab |
-| Alt+ Shift+ L | Toggle Plugin Logs console |
-| Alt+ Shift+ K | Toggle the Keyboard Inputs overlay (demos, screencasts) — works even inside modals |
+| `Ctrl`+ `B` | Toggle left sidebar visibility |
+| `Ctrl`+ `Shift`+ `B` | Toggle right sidebar visibility |
+| `Ctrl`+ `J` | Toggle bottom panel visibility |
+| `Ctrl`+ `Shift`+ `S` | Toggle Stage area |
+| `Ctrl`+ ``` | Toggle terminal panel |
+| `Ctrl`+ `Shift`+ ``` | Open new terminal tab |
+| `Alt`+ `Shift`+ `L` | Toggle Plugin Logs console |
+| `Alt`+ `Shift`+ `K` | Toggle the *Keyboard Inputs* overlay (demos, screencasts) — works even inside modals |
 
 ## Sidebar Sections
 
@@ -2630,43 +2630,44 @@ IntelliJ-style numbered tool-window shortcuts. Each shortcut is silently a no-op
 
 | Shortcut | Action |
 | --- | --- |
-| Alt+ Shift+ 1 | Toggle Branches & Stashes |
-| Alt+ Shift+ 2 | Toggle File Tree |
-| Alt+ Shift+ 3 | Toggle Git Flow |
-| Alt+ Shift+ 4 | Toggle Issues (Linear / Jira) |
-| Alt+ Shift+ 5 | Toggle Pipelines panel |
-| Alt+ Shift+ 6 | Toggle Reflog |
-| Alt+ Shift+ 7 | Toggle Repository Statistics |
-| Alt+ Shift+ 8 | Toggle Security / Vulnerability Dashboard |
-| Ctrl+ Shift+ M | Toggle Pull / Merge Requests |
+| `Alt`+ `Shift`+ `1` | Toggle Branches & Stashes |
+| `Alt`+ `Shift`+ `2` | Toggle File Tree |
+| `Alt`+ `Shift`+ `3` | Toggle Git Flow |
+| `Alt`+ `Shift`+ `4` | Toggle Issues (Linear / Jira) |
+| `Alt`+ `Shift`+ `5` | Toggle Pipelines panel |
+| `Alt`+ `Shift`+ `6` | Toggle Reflog |
+| `Alt`+ `Shift`+ `7` | Toggle Repository Statistics |
+| `Alt`+ `Shift`+ `8` | Toggle Security / Vulnerability Dashboard |
+| `Ctrl`+ `Shift`+ `M` | Toggle Pull / Merge Requests |
 
 ## Git
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+ Shift+ F | Fetch all remotes |
-| F5 | Refresh graph (same as the fetch button in the status bar) |
-| Ctrl+ Shift+ L | Pull current branch |
-| Ctrl+ Shift+ P | Push current branch |
-| Alt+ Shift+ B | Create new branch |
-| Ctrl+ Shift+ H | Stash changes |
-| Ctrl+ Shift+ A | Stage all changes |
-| Ctrl+ Shift+ U | Unstage all changes |
+| `Ctrl`+ `Shift`+ `F` | Fetch all remotes |
+| `F5` | Refresh graph (same as the fetch button in the status bar) |
+| `Ctrl`+ `Shift`+ `L` | Pull current branch |
+| `Ctrl`+ `Shift`+ `P` | Push current branch |
+| `Alt`+ `Shift`+ `B` | Create new branch |
+| `Ctrl`+ `Shift`+ `H` | Stash changes |
+| `Ctrl`+ `Shift`+ `A` | Stage all changes |
+| `Ctrl`+ `Shift`+ `U` | Unstage all changes |
 
 ## Stage area
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+ Enter | Commit (when focus is in message field) |
+| `Ctrl`+ `Enter` | Commit (when focus is in message field) |
+| `Ctrl`+ `Shift`+ `Enter` | Commit and push current branch in one go |
 
 ## Diff viewer
 
 | Shortcut | Action |
 | --- | --- |
-| F3 | Jump to next change chunk |
-| Shift+ F3 | Jump to previous change chunk |
-| Alt+ 1 | Split view |
-| Alt+ 2 | Unified view |
+| `F3` | Jump to next change chunk |
+| `Shift`+ `F3` | Jump to previous change chunk |
+| `Alt`+ `1` | Split view |
+| `Alt`+ `2` | Unified view |
 
 ## File / Folder picker
 
@@ -2676,19 +2677,19 @@ Shortcuts available inside the file/folder picker dialog (Open, Clone destinatio
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl+L | Edit the path directly (address bar) — type with ghost-text autocompletion |
-| Tab in address bar | Accept the ghost-text autocomplete suggestion |
-| Ctrl+N | Create a new file in the current folder |
-| Ctrl+Shift+N | Create a new folder in the current folder |
-| Ctrl+ B | Collapse / expand the picker sidebar (same global shortcut) |
-| Alt+← / Alt+→ | Back / Forward through navigation history |
-| Backspace | Go up one folder |
-| ↑ / ↓ | Move selection in the file list |
-| F2 | Rename the selected entry |
-| Delete | Delete the selected entry (asks for confirmation) |
-| Enter | Open folder · open file · confirm pick · confirm delete |
+| `Ctrl`+`L` | Edit the path directly (address bar) — type with ghost-text autocompletion |
+| `Tab` in address bar | Accept the ghost-text autocomplete suggestion |
+| `Ctrl`+`N` | Create a new file in the current folder |
+| `Ctrl`+`Shift`+`N` | Create a new folder in the current folder |
+| `Ctrl`+ `B` | Collapse / expand the picker sidebar (same global shortcut) |
+| `Alt`+`←` / `Alt`+`→` | Back / Forward through navigation history |
+| `Backspace` | Go up one folder |
+| `↑` / `↓` | Move selection in the file list |
+| `F2` | Rename the selected entry |
+| `Delete` | Delete the selected entry (asks for confirmation) |
+| `Enter` | Open folder · open file · confirm pick · confirm delete |
 | Type any letter | Type-ahead — keystrokes route into the filter field automatically |
-| ↓ in filter field | Jump focus to the first matching entry |
+| `↓` in filter field | Jump focus to the first matching entry |
 
 ## Context menus
 
@@ -2722,12 +2723,12 @@ Currently registered by enabled plugins:
 
 | Shortcut | Action | Plugin |
 | --- | --- | --- |
-| Ctrl+ F9 | Build selected configuration | compile-action |
-| Shift+ F9 | Debug selected application configuration | run-action |
-| Ctrl+ Shift+ F9 | Debug Tomcat without building (catalina + JPDA) | run-action |
-| Shift+ F10 | Run selected application configuration | run-action |
-| Ctrl+ Shift+ F10 | Start Tomcat without building (no debug) | run-action |
-| Ctrl+ Shift+ E | Source Export: edit configurations | source-export |
+| `Ctrl`+ `F9` | Build selected configuration | `compile-action` |
+| `Shift`+ `F9` | Debug selected application configuration | `run-action` |
+| `Ctrl`+ `Shift`+ `F9` | Debug Tomcat without building (catalina + JPDA) | `run-action` |
+| `Shift`+ `F10` | Run selected application configuration | `run-action` |
+| `Ctrl`+ `Shift`+ `F10` | Start Tomcat without building (no debug) | `run-action` |
+| `Ctrl`+ `Shift`+ `E` | Source Export: edit configurations | `source-export` |
 
 ---
 
@@ -2925,9 +2926,9 @@ The compile-action plugin uses all three patterns: pressing **F5** while a build
 
 | Function | Description |
 | --- | --- |
-| arbor.job.spawn(config) | Launch a background job. Returns (JobHandle, nil) on success or (nil, err) on a spawn-side failure. The handle is a Promise (:ok / :err) with extra .id and :cancel(). Config: name, command, cwd?, env?, category? (string), hidden? (boolean — hide from Jobs panels and badge by default), on_done? (callback — sugar), on_done_action? (hook name — sugar) |
-| arbor.job.cancel(job_id) | Kill a running job (SIGTERM / taskkill /T). No-op if already finished. Useful to stop long-running processes (servers, watchers) before re-launching them. |
-| arbor.job.list() | Returns a Lua table of all job records with fields: id, name, status, started_at |
+| `arbor.job.spawn(config)` | Launch a background job. Returns `(JobHandle, nil)` on success or `(nil, err)` on a spawn-side failure. The handle is a Promise (`:ok / :err`) with extra `.id` and `:cancel()`. Config: `name`, `command`, `cwd?`, `env?`, `category?` (string), `hidden?` (boolean — hide from Jobs panels and badge by default), `on_done?` (callback — sugar), `on_done_action?` (hook name — sugar) |
+| `arbor.job.cancel(job_id)` | Kill a running job (SIGTERM / taskkill /T). No-op if already finished. Useful to stop long-running processes (servers, watchers) before re-launching them. |
+| `arbor.job.list()` | Returns a Lua table of all job records with fields: `id`, `name`, `status`, `started_at` |
 
 See the **Plugin Development** section for full examples.
 
@@ -2960,11 +2961,11 @@ Plugins can attach a click action to a notification.  Built-in action kinds:
 
 | Kind | Required fields | Effect |
 | --- | --- | --- |
-| open-link-manager | label, link_id | Opens the Linked Worktrees manager pre-selected on that link. |
-| open-tab-by-repo-id | label, repo_id | Activates the matching open tab; no-op if not currently open. |
-| open-url | label, url | Opens the URL in the user's default browser. Use open-path instead for local files (file:// URLs are silently ignored by the opener plugin). |
-| open-path | label, path, reveal? | Hands the path to the OS' default handler (folder → Explorer/Finder, file → default editor). Set reveal = true to open the file's parent folder instead — the cross-platform "reveal in Explorer". |
-| plugin-action | label, plugin, action, ctx? | Fires arbor.events.on(action, …) in the named plugin with the optional ctx table — round-trip back to a plugin handler from the click. |
+| `open-link-manager` | `label`, `link_id` | Opens the Linked Worktrees manager pre-selected on that link. |
+| `open-tab-by-repo-id` | `label`, `repo_id` | Activates the matching open tab; no-op if not currently open. |
+| `open-url` | `label`, `url` | Opens the URL in the user's default **browser**. Use `open-path` instead for local files (`file://` URLs are silently ignored by the opener plugin). |
+| `open-path` | `label`, `path`, `reveal?` | Hands the path to the OS' default handler (folder → Explorer/Finder, file → default editor). Set `reveal = true` to open the file's parent folder instead — the cross-platform "reveal in Explorer". |
+| `plugin-action` | `label`, `plugin`, `action`, `ctx?` | Fires `arbor.events.on(action, …)` in the named plugin with the optional `ctx` table — round-trip back to a plugin handler from the click. |
 
 ## Plugin API
 
@@ -2983,26 +2984,26 @@ See the **Plugin Development** section for the full API reference.
 
 ---
 
-# Pipelines â€” Plugin Pipelines
+# Pipelines — Plugin Pipelines
 
 Arbor's pipeline system lets plugins define and run multi-stage CI/CD-style workflows directly inside the app. Each pipeline is a sequence of **stages**, each containing one or more **steps** (shell commands). Progress is shown in a live node graph.
 
 ## Opening the Pipelines panel
 
-Click the **Workflow** icon in the Activity Bar (bottom group). Toggle the panel to show/hide it as a resizable bottom section. The two sub-views (**Local Pipelines** â€” plugin-defined â€” and **CI / CD** â€” GitHub Actions / GitLab CI) are inline tabs in the panel header next to the title.
+Click the **Workflow** icon in the Activity Bar (bottom group). Toggle the panel to show/hide it as a resizable bottom section. The two sub-views (**Local Pipelines** — plugin-defined — and **CI / CD** — GitHub Actions / GitLab CI) are inline tabs in the panel header next to the title.
 
 ## Panel layout
 
 The Local Pipelines tab is a two-column IntelliJ-style Run window:
 
-- **Left toolbar** (36 px column) â€” global pipeline-level actions:
+- **Left toolbar** (36 px column) — global pipeline-level actions:
     a primary **Run** button that re-launches the most recently
     launched pipeline (sticky), then icon-only **Stop all running**, **Resume last failed**, and **Clear history** (terminal runs only). To launch a different pipeline, right-click one
-    of its run cards in the list â€” the context menu has a Run entry that
+    of its run cards in the list — the context menu has a Run entry that
     fires the same routed launch flow. Plugins can contribute additional
     toolbar buttons via the `arbor:pipelines:toolbar` contribution
     point.
-- **Right column** â€” a filter row with a multi-select dropdown
+- **Right column** — a filter row with a multi-select dropdown
     (*All pipelines* by default) and a live run-count summary, then the
     scrollable run list below it. Each card shows status pill, duration, the
     pipeline-definition badge (with an **orphan** tag when the
@@ -3010,19 +3011,19 @@ The Local Pipelines tab is a two-column IntelliJ-style Run window:
 
 ## Running a pipeline
 
-Click the **Run** icon in the left toolbar to replay the most recently launched pipeline. To run a different one, right-click any of its existing run cards in the list and pick **Run â€œâ€¦â€** from the context menu â€” the menu's other entries (Open detail, Cancel, Resume, Discard) mirror the row's hover buttons. The orchestrator spawns a background thread that executes each step sequentially. The node graph updates in real time with status colours:
+Click the **Run** icon in the left toolbar to replay the most recently launched pipeline. To run a different one, right-click any of its existing run cards in the list and pick **Run “…”** from the context menu — the menu's other entries (Open detail, Cancel, Resume, Discard) mirror the row's hover buttons. The orchestrator spawns a background thread that executes each step sequentially. The node graph updates in real time with status colours:
 
 **Self-contained replay vs. plugin-routed launch.** A
   pipeline def with non-empty `stages` is treated as
   self-contained: every step has its command / op / cwd already resolved
-  (variable substitution baked in by whatever flow produced it â€” combo
-  button, sequence runner, â€¦), so Play replays it directly via `arbor.pipeline.run` without involving the owning plugin.
+  (variable substitution baked in by whatever flow produced it — combo
+  button, sequence runner, …), so Play replays it directly via `arbor.pipeline.run` without involving the owning plugin.
   This means a def compiled in a previous tab keeps replaying correctly
   from the panel even after the user switches repos.
 
 A def with empty `stages` is a *stub* the plugin
   registered upfront so the panel has something to show on first open.
-  Stubs cannot be replayed verbatim â€” Play asks the owning plugin to
+  Stubs cannot be replayed verbatim — Play asks the owning plugin to
   materialise stages via the `on_pipeline_run_request` hook
   (typically by compiling a profile or resolving a build configuration)
   and the plugin then calls `arbor.pipeline.run` itself. If a
@@ -3031,9 +3032,9 @@ A def with empty `stages` is a *stub* the plugin
 
 | Colour | Meaning |
 | --- | --- |
-| Green | Success â€” step / stage / run completed with exit code 0 |
-| Red | Failed â€” non-zero exit code (pipeline stops unless allow_failure = true) |
-| Blue (accent) | Running â€” currently executing |
+| Green | Success — step / stage / run completed with exit code 0 |
+| Red | Failed — non-zero exit code (pipeline stops unless `allow_failure = true`) |
+| Blue (accent) | Running — currently executing |
 | Grey | Pending / Cancelled |
 
 ## Viewing step output
@@ -3042,22 +3043,22 @@ Click any step node in the graph to expand an output pane at the bottom of the d
 
 ## Cancellation, resume and discard
 
-The cancel/resume/discard affordances live in two places: per-card icon buttons on the right of each run row (cancel for running, resume for failed, trash for terminal), and the bulk equivalents in the left toolbar (**Stop all running**, **Resume last failed**, **Clear history**). All of them are also reachable from Lua via `arbor.pipeline.cancel(run_id)`, `arbor.pipeline.resume(run_id)` and `arbor.pipeline.discard(run_id)`. Cancellation stops the pipeline after the *current step* finishes â€” it does not kill a running process mid-execution.
+The cancel/resume/discard affordances live in two places: per-card icon buttons on the right of each run row (cancel for running, resume for failed, trash for terminal), and the bulk equivalents in the left toolbar (**Stop all running**, **Resume last failed**, **Clear history**). All of them are also reachable from Lua via `arbor.pipeline.cancel(run_id)`, `arbor.pipeline.resume(run_id)` and `arbor.pipeline.discard(run_id)`. Cancellation stops the pipeline after the *current step* finishes — it does not kill a running process mid-execution.
 
 When a step fails (non-zero exit code, `allow_failure=false`), the
   run enters status `failed` but remains **resumable**:
   its output, log buffer and a `resume_cursor` pointing at the exact
   failing steps are persisted to disk. Call `arbor.pipeline.resume(run_id)` (or use the Resume button in the
-  UI) to restart the run from that cursor â€” already-successful steps are
+  UI) to restart the run from that cursor — already-successful steps are
   skipped, only the failed ones are re-executed. A resume requires the
   pipeline's lock to be free.
 
 Use `arbor.pipeline.discard(run_id)` to drop a terminal run
-  permanently (removes the persisted JSON file). Discard refuses to act on a `running` run â€” cancel it first.
+  permanently (removes the persisted JSON file). Discard refuses to act on a `running` run — cancel it first.
 
 ## Concurrency & locking
 
-Every pipeline has a `lock_key` (default `"<plugin>:<id>"`). Only one run per lock key may be in `running` state at a time â€” a second attempt fails immediately with
+Every pipeline has a `lock_key` (default `"<plugin>:<id>"`). Only one run per lock key may be in `running` state at a time — a second attempt fails immediately with
   a descriptive log entry. **Terminal runs (failed / cancelled / success)
   do NOT hold the lock**: they remain resumable but a new run of the same
   pipeline can start freely. When another run is active, a resume of an older
@@ -3065,7 +3066,7 @@ Every pipeline has a `lock_key` (default `"<plugin>:<id>"`). Only one run per lo
 
 You can check lock state with `local owner = arbor.pipeline.is_locked(lock_key)` which returns
   the `run_id` currently holding the lock, or `nil` when
-  free. Override the default key by passing `lock_key = "..."` to `arbor.pipeline.define` â€” useful when different pipelines compete
+  free. Override the default key by passing `lock_key = "..."` to `arbor.pipeline.define` — useful when different pipelines compete
   for the same external resource (e.g. a deploy target).
 
 ## Parallel steps inside a stage
@@ -3080,16 +3081,16 @@ Stages are always executed **sequentially** (top-to-bottom), but
 
 The orchestrator auto-logs pipeline / stage / step lifecycle events. Each
   run has its own capped log buffer (5 000 entries) plus a live stream via the `arbor://pipeline-log` event. Events are filtered by the run's
-  configured `log_level` (default `info`) â€” set `log_level = "debug"` on `arbor.pipeline.define` to
+  configured `log_level` (default `info`) — set `log_level = "debug"` on `arbor.pipeline.define` to
   also capture the per-line step output and resolved parameters. Available
   levels: `debug`, `info`, `warn`, `error`.
 
 ## Defining pipelines from a plugin
 
-Two equivalent shapes â€” pick whichever reads better for your case:
+Two equivalent shapes — pick whichever reads better for your case:
 
-- `arbor.pipeline.define(table)` â€” declarative table config (good when you build the pipeline programmatically from data).
-- `arbor.pipeline("id"):...:commit()` â€” chainable builder (good for static, hand-written pipelines). Compiles down to the same table on `:commit()`.
+- `arbor.pipeline.define(table)` — declarative table config (good when you build the pipeline programmatically from data).
+- `arbor.pipeline("id"):...:commit()` — chainable builder (good for static, hand-written pipelines). Compiles down to the same table on `:commit()`.
 
 ### Builder DSL
 
@@ -3108,7 +3109,7 @@ arbor.pipeline("build")
   :commit()
 ```
 
-Builder methods: `:name` Â· `:description` Â· `:icon` Â· `:lock` (alias `:lock_key`) Â· `:log_level` Â· `:stage(name|cfg)` Â· `:mode` Â· `:max_parallel` Â· `:run(op, params)` Â· `:shell(cmd|cfg)` Â· `:step(cfg)` Â· `:commit()`.
+Builder methods: `:name` · `:description` · `:icon` · `:lock` (alias `:lock_key`) · `:log_level` · `:stage(name|cfg)` · `:mode` · `:max_parallel` · `:run(op, params)` · `:shell(cmd|cfg)` · `:step(cfg)` · `:commit()`.
   Steps go to the most recently opened stage; `:run` takes `(op_name, params)` or a single `{op, params, plugin?, id?, name?, allow_failure?}` table; `:shell` takes a string or a `{command, cwd?, ...}` table.
   Step ids default to `s1`, `s2`, ... when omitted.
 
@@ -3121,7 +3122,7 @@ arbor.pipeline.define({
   id          = "build",
   name        = "Build & Test",
   description = "Compile, lint and run unit tests",
-  icon        = "ðŸ”¨",
+  icon        = "🔨",
   log_level   = "info",              -- debug | info | warn | error
   lock_key    = "my-plugin:build",   -- optional; default "<plugin>:<id>"
   stages = {
@@ -3192,7 +3193,7 @@ local def = arbor.pipeline.get("build")
 if def then arbor.log.info("currently named: " .. def.name) end
 ```
 
-## Toolbar contribution (arbor:pipelines:toolbar)
+## Toolbar contribution (`arbor:pipelines:toolbar`)
 
 Plugins can add extra icon-only buttons to the panel's left toolbar.
   Contribute to `arbor:pipelines:toolbar` with a payload describing
@@ -3214,7 +3215,7 @@ arbor.contribute("arbor:pipelines:toolbar", {
   },
   action = function(ctx)
     -- Your plugin's logic here. The toolbar is non-modal, so prefer
-    -- a notify+job pattern (toasting "Startedâ€¦") over a blocking call.
+    -- a notify+job pattern (toasting "Started…") over a blocking call.
   end,
 })
 ```
@@ -3229,10 +3230,10 @@ Declare hooks in `[hooks]` in your `plugin.toml` and register handlers with `arb
 
 | Constant | TOML key | Context fields |
 | --- | --- | --- |
-| "on_pipeline_run_request" | on_pipeline_run_request | pipeline_id, tab_id? â€” fired on the def's owning plugin when the user presses Play on a stub def (empty stages). Defs with non-empty stages are replayed directly without invoking this hook. The handler must compile stages and call arbor.pipeline.run itself. |
-| "on_pipeline_started" | on_pipeline_started | run_id, pipeline_id, plugin |
-| "on_pipeline_step_done" | on_pipeline_step_done | run_id, pipeline_id, plugin, stage_id, step_id, step_name, status, exit_code |
-| "on_pipeline_done" | on_pipeline_done | run_id, pipeline_id, plugin, status |
+| `"on_pipeline_run_request"` | `on_pipeline_run_request` | `pipeline_id, tab_id?` — fired on the def's owning plugin when the user presses Play on a *stub* def (empty `stages`). Defs with non-empty stages are replayed directly without invoking this hook. The handler must compile stages and call `arbor.pipeline.run` itself. |
+| `"on_pipeline_started"` | `on_pipeline_started` | `run_id, pipeline_id, plugin` |
+| `"on_pipeline_step_done"` | `on_pipeline_step_done` | `run_id, pipeline_id, plugin, stage_id, step_id, step_name, status, exit_code` |
+| `"on_pipeline_done"` | `on_pipeline_done` | `run_id, pipeline_id, plugin, status` |
 
 ```lua
 -- Map the panel's Play click back into the plugin's own launch flow.
@@ -3260,7 +3261,7 @@ arbor.events.on("on_pipeline_done", function(ctx)
   if ctx.status == "success" then
     arbor.notify{ title = "Pipeline done", message = ctx.pipeline_id .. " succeeded", level = "success" }
   else
-    arbor.notify{ title = "Pipeline failed", message = ctx.pipeline_id .. " â€” status: " .. ctx.status, level = "error" }
+    arbor.notify{ title = "Pipeline failed", message = ctx.pipeline_id .. " — status: " .. ctx.status, level = "error" }
   end
 end)
 ```
@@ -3269,75 +3270,75 @@ end)
 
 | Field | Type | Description |
 | --- | --- | --- |
-| id | string | Unique pipeline identifier within the plugin |
-| name | string | Human-readable label |
-| description | string? | Tooltip on the Run dropdown entry and the per-card definition badge |
-| icon | string? | Emoji or icon identifier |
-| lock_key | string? | Concurrency key. Default "<plugin>:<id>" |
-| log_level | string? | debug \| info (default) \| warn \| error |
-| stages | array | Array of StageDef |
+| `id` | string | Unique pipeline identifier within the plugin |
+| `name` | string | Human-readable label |
+| `description` | string? | Tooltip on the Run dropdown entry and the per-card definition badge |
+| `icon` | string? | Emoji or icon identifier |
+| `lock_key` | string? | Concurrency key. Default `"<plugin>:<id>"` |
+| `log_level` | string? | `debug` \| `info` (default) \| `warn` \| `error` |
+| `stages` | array | Array of `StageDef` |
 
 ## Stage options
 
 | Field | Type | Description |
 | --- | --- | --- |
-| id | string | Unique stage identifier within the pipeline |
-| name | string | Label |
-| mode | string? | sequential (default) \| parallel |
-| max_parallel | integer? | Cap concurrency when mode=parallel. Omit = unlimited |
-| steps | array | Array of StepDef |
+| `id` | string | Unique stage identifier within the pipeline |
+| `name` | string | Label |
+| `mode` | string? | `sequential` (default) \| `parallel` |
+| `max_parallel` | integer? | Cap concurrency when `mode=parallel`. Omit = unlimited |
+| `steps` | array | Array of `StepDef` |
 
 ## Step options
 
 A step is one of four **kinds**, picked by which field is set
-  (precedence top-to-bottom): `if_block` â†’ `builtin` â†’ `lua_op` â†’ `command`. The
+  (precedence top-to-bottom): `if_block` → `builtin` → `lua_op` → `command`. The
   remaining fields (cwd / env / allow_failure / capture) apply across kinds.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| id | string | Unique step identifier within the stage |
-| name | string | Human-readable label shown in the graph node |
-| command | string? | Shell command (run via sh -c / cmd /C). ${var} references are resolved before the process spawns. |
-| lua_op | table? | Invoke a plugin-registered Lua handler instead of spawning a shell. Shape: { op = "name", params = {...}, plugin? = "..." }. ${var} in params string fields is resolved before dispatch. |
-| builtin | table? | Run a built-in op (file_exists / file_read / env / json_get / path_join / set_var / echo / match). See the dedicated section below. Resolved by the runtime â€” no shell, no Lua VM. |
-| if_block | table? | Conditional control step. Evaluates each branch's condition in order and runs the chosen branch's nested steps. See If / elif / else blocks. |
-| cwd | string? | Working directory. nil = active repo root. ${var} resolved. |
-| env | table? | Extra env vars for shell steps. ${var} resolved per value. |
-| allow_failure | bool | If true, the stage continues even if this step fails. Default: false |
-| capture | table? | After the step finishes, extract a value from its outcome and store it in the run's variable bag. See Variables & capture. |
+| `id` | string | Unique step identifier within the stage |
+| `name` | string | Human-readable label shown in the graph node |
+| `command` | string? | Shell command (run via `sh -c` / `cmd /C`). `${var}` references are resolved before the process spawns. |
+| `lua_op` | table? | Invoke a plugin-registered Lua handler instead of spawning a shell. Shape: `{ op = "name", params = {...}, plugin? = "..." }`. `${var}` in `params` string fields is resolved before dispatch. |
+| `builtin` | table? | Run a built-in op (file_exists / file_read / env / json_get / path_join / set_var / echo / match). See the dedicated section below. Resolved by the runtime — no shell, no Lua VM. |
+| `if_block` | table? | Conditional control step. Evaluates each branch's condition in order and runs the chosen branch's nested steps. See *If / elif / else blocks*. |
+| `cwd` | string? | Working directory. `nil` = active repo root. `${var}` resolved. |
+| `env` | table? | Extra env vars for shell steps. `${var}` resolved per value. |
+| `allow_failure` | bool | If `true`, the stage continues even if this step fails. Default: `false` |
+| `capture` | table? | After the step finishes, extract a value from its outcome and store it in the run's variable bag. See *Variables & capture*. |
 
 ## Variables & capture
 
 Every pipeline run owns a typed **variable bag** (empty at
   start). Steps populate it via `capture`; later steps
-  reference its values via `${var}` syntax in any string field â€” `command`, `cwd`, `env` values, `lua_op.params`, `builtin` params, and `if_block` conditions all run through the same resolver
+  reference its values via `${var}` syntax in any string field — `command`, `cwd`, `env` values, `lua_op.params`, `builtin` params, and `if_block` conditions all run through the same resolver
   before they execute. `$$` escapes a literal `$`; `${name:-fallback}` supplies a default for missing names.
 
 A `capture` spec has three pieces:
 
-- `var` â€” name to store under (no `$` prefix).
-- `source` â€” what part of the step's outcome to capture: `"stdout"` (default), `"stderr"`, `"exit_code"`, `"success"` (boolean: exit_code == 0),
-    or `"return_value"` (Lua/builtin's typed return â€” falls back
+- `var` — name to store under (no `$` prefix).
+- `source` — what part of the step's outcome to capture: `"stdout"` (default), `"stderr"`, `"exit_code"`, `"success"` (boolean: exit_code == 0),
+    or `"return_value"` (Lua/builtin's typed return — falls back
     to stdout for shell steps).
-- `transforms` â€” optional ordered list of *declarative
+- `transforms` — optional ordered list of *declarative
     transforms* applied left-to-right to massage the captured value
     before storing it.
 
 | Transform | Effect |
 | --- | --- |
-| { kind="trim" } | Strip leading/trailing whitespace |
-| { kind="lower" } Â· { kind="upper" } | ASCII case folding |
-| { kind="lines" } | Split a string on \n â†’ list (drops trailing empty lines) |
-| { kind="split", sep="," } | Split on a literal separator â†’ list |
-| { kind="join", sep=", " } | Join a list with sep â†’ string |
-| { kind="first" } Â· { kind="last" } Â· { kind="nth", n=2 } | Index a list (negative n counts from end) |
-| { kind="regex", pattern="v(\\d+)", group=1 } | Match a regex; with group returns that captured group |
-| { kind="matches_bool", pattern="^OK" } | Same as regex but returns a boolean |
-| { kind="json_parse" } Â· { kind="json_get", path="a.b.0" } | Parse a JSON string; walk a dotted path |
-| { kind="to_bool" } Â· { kind="to_number" } | Coerce to boolean / number (null on failure) |
-| { kind="default", value="N/A" } | Replace empty / null with a fallback string |
+| `{ kind="trim" }` | Strip leading/trailing whitespace |
+| `{ kind="lower" }` · `{ kind="upper" }` | ASCII case folding |
+| `{ kind="lines" }` | Split a string on `\n` → list (drops trailing empty lines) |
+| `{ kind="split", sep="," }` | Split on a literal separator → list |
+| `{ kind="join", sep=", " }` | Join a list with `sep` → string |
+| `{ kind="first" }` · `{ kind="last" }` · `{ kind="nth", n=2 }` | Index a list (negative `n` counts from end) |
+| `{ kind="regex", pattern="v(\\d+)", group=1 }` | Match a regex; with `group` returns that captured group |
+| `{ kind="matches_bool", pattern="^OK" }` | Same as `regex` but returns a boolean |
+| `{ kind="json_parse" }` · `{ kind="json_get", path="a.b.0" }` | Parse a JSON string; walk a dotted path |
+| `{ kind="to_bool" }` · `{ kind="to_number" }` | Coerce to boolean / number (`null` on failure) |
+| `{ kind="default", value="N/A" }` | Replace empty / null with a fallback string |
 
-Failures inside a transform chain don't fail the step â€” the variable
+Failures inside a transform chain don't fail the step — the variable
   becomes `null` and the trace is logged. Use the run log
   panel (debug level) to see each transform's input/output preview.
 
@@ -3366,21 +3367,21 @@ Failures inside a transform chain don't fail the step â€” the variable
 ## Built-in ops
 
 Built-in ops are tiny side-effect-free helpers the runtime executes
-  directly â€” no shell, no Lua VM. Use them mostly to seed the variable
+  directly — no shell, no Lua VM. Use them mostly to seed the variable
   bag (with `capture`) so `if_block` conditions
   and later steps can branch on file presence, environment vars,
   parsed JSON fields, and so on.
 
 | Kind | Fields | Returns |
 | --- | --- | --- |
-| file_exists | path | bool |
-| file_read | path, max_bytes? | string (file contents) |
-| env | name, default? | string (env var or default) |
-| json_get | source (JSON string), path | typed value at the dotted path |
-| path_join | parts (array of strings) | string |
-| set_var | value (any JSON) | the value verbatim â€” pair with capture.var |
-| echo | message | string (also written to the run log) |
-| match | target, pattern? (substring) or regex? | bool |
+| `file_exists` | `path` | `bool` |
+| `file_read` | `path`, `max_bytes?` | `string` (file contents) |
+| `env` | `name`, `default?` | `string` (env var or default) |
+| `json_get` | `source` (JSON string), `path` | typed value at the dotted path |
+| `path_join` | `parts` (array of strings) | `string` |
+| `set_var` | `value` (any JSON) | the value verbatim — pair with `capture.var` |
+| `echo` | `message` | `string` (also written to the run log) |
+| `match` | `target`, `pattern?` (substring) or `regex?` | `bool` |
 
 ```lua
 -- Capture whether 'docker-compose.yml' exists into a flag.
@@ -3401,19 +3402,19 @@ An `if_block` step is a *control step*: instead of
   (`StepRun.children`) and the picked branch label
   (`"if"`, `"elif #1"`, `"else"`) lands in `StepRun.branch`. The step's overall status is `success` when every chosen child succeeded (honoring `allow_failure`) and `failed` otherwise.
 
-Conditions are **structured values** â€” there's no DSL or
+Conditions are **structured values** — there's no DSL or
   parser. Each leaf is a small object with a `kind` tag and
   the operands it needs. Operands are `${var}`-resolved before
   comparison.
 
 | Kind | Fields | Notes |
 | --- | --- | --- |
-| compare | left, op, right | op âˆˆ eq, ne, i_eq, contains, starts_with, ends_with, matches (right = regex), gt/lt/gte/lte (numeric) |
-| truthy | value | True for non-empty / non-zero / non-"false". A bare "${var}" reference uses the variable's typed truthiness. |
-| defined | var | True when the variable is present and not null. |
-| empty | value | True when the resolved value is the empty string. |
-| all_of Â· any_of Â· not | conditions / condition | Logical combinators. |
-| always Â· never | â€” | Constants. always is the natural condition for the catch-all else branch (or just leave else_steps set). |
+| `compare` | `left`, `op`, `right` | `op` ∈ `eq`, `ne`, `i_eq`, `contains`, `starts_with`, `ends_with`, `matches` (right = regex), `gt`/`lt`/`gte`/`lte` (numeric) |
+| `truthy` | `value` | True for non-empty / non-zero / non-"false". A bare `"${var}"` reference uses the variable's typed truthiness. |
+| `defined` | `var` | True when the variable is present and not `null`. |
+| `empty` | `value` | True when the resolved value is the empty string. |
+| `all_of` · `any_of` · `not` | `conditions` / `condition` | Logical combinators. |
+| `always` · `never` | — | Constants. `always` is the natural condition for the catch-all `else` branch (or just leave `else_steps` set). |
 
 ```lua
 -- Build differently depending on whether a 'pom.xml' is present.
@@ -3445,13 +3446,13 @@ Conditions are **structured values** â€” there's no DSL or
 }
 ```
 
-Nested `if_block` steps inside a branch's `steps` work â€” drilling deep is supported, the run viewer shows the
+Nested `if_block` steps inside a branch's `steps` work — drilling deep is supported, the run viewer shows the
   parent/child tree, and resume from a failure re-runs the entire
   parent `if_block` (re-evaluating the condition on the
   fresh variable bag).
 
 **Pipeline editor.** The generic `PluginPipelineEditor` component supports drilling into an
-  if-block step via the small "open" arrow on its row â€” the breadcrumb
+  if-block step via the small "open" arrow on its row — the breadcrumb
   above the sequence column tracks the path and lets the user pop back
   with one click. Plugins drive this by implementing the `enter_step` action (push current location onto a stack,
   re-emit a filtered `stages` list and a `breadcrumb`)
@@ -3491,31 +3492,31 @@ arbor.pipeline.define({
 
 Handler return shapes (all accepted):
 
-- `nil` / `true` â†’ exit_code = 0 (success)
-- `false` â†’ exit_code = 1
-- `<number>` â†’ that exit code
-- `<string>` â†’ stdout, exit_code = 0
-- `{ exit_code?, stdout?, stderr? }` â†’ structured
+- `nil` / `true` → exit_code = 0 (success)
+- `false` → exit_code = 1
+- `<number>` → that exit code
+- `<string>` → stdout, exit_code = 0
+- `{ exit_code?, stdout?, stderr? }` → structured
 
 Raising an error fails the step with the message captured in stdout/stderr.
 
-## Built-in op catalog (arbor.core.*)
+## Built-in op catalog (`arbor.core.*`)
 
 Two ready-made op modules ship inside every plugin sandbox: structured
-  edits and assertions. They cover the bulk of pipeline plumbing â€” opt in
+  edits and assertions. They cover the bulk of pipeline plumbing — opt in
   per module; each one a plugin doesn't `require` stays unloaded.
   File / text ops aren't shipped here: they're trivial wrappers over `arbor.fs` / `arbor.text`, so plugins keep a local
   copy when they need them (see `plugins/source-export/pipeline_ops/` for the canonical reference).
 
 | Module | Ops |
 | --- | --- |
-| arbor.core.edit | json_edit, yaml_edit, toml_edit, xml_edit |
-| arbor.core.assert | assert_file_exists, assert_file_not_contains, assert_glob_matches, assert_version_bump |
+| `arbor.core.edit` | `json_edit`, `yaml_edit`, `toml_edit`, `xml_edit` |
+| `arbor.core.assert` | `assert_file_exists`, `assert_file_not_contains`, `assert_glob_matches`, `assert_version_bump` |
 
 Every op has the signature `function(params, ctx) -> { exit_code, stdout, stderr? }` and logs structured trace lines on stdout (`[op_name] key = value`)
   that the pipeline panel renders verbatim.
 
-Two usage patterns â€” pick whichever fits:
+Two usage patterns — pick whichever fits:
 
 ```lua
 -- Pattern 1: register every op in the module so pipeline
@@ -3538,7 +3539,7 @@ arbor.pipeline.define({
 local assert_glob_matches = require("arbor.core.assert").assert_glob_matches
 arbor.pipeline.register_op("assert_glob_matches", assert_glob_matches)
 
--- Plugin-local op for everything else â€” wrap arbor.fs / arbor.text directly:
+-- Plugin-local op for everything else — wrap arbor.fs / arbor.text directly:
 arbor.pipeline.register_op("delete_war", function(params, ctx)
   local p = arbor.fs.join(ctx.cwd, params.path)
   if arbor.fs.exists(p) then arbor.fs.delete(p) end
@@ -3557,10 +3558,10 @@ Rust-backed helpers available from inside a LuaOp handler (or anywhere else
 
 | Function | Backend | Path syntax |
 | --- | --- | --- |
-| arbor.fs.json_set{ path, jpath, value, pretty? } | serde_json | $.foo.bar, foo.bar, items.0.name, servers[1].host |
-| arbor.fs.yaml_set{ path, ypath, value } | serde_yaml â†’ json walker | dotted path, same as JSON |
-| arbor.fs.toml_set{ path, tpath, value } | toml crate | dotted path; comments are NOT preserved on rewrite |
-| arbor.fs.xml_set{ path, xpath, value } | quick-xml | minimal XPath: /a/b/c, //c, /a/@attr, /a/b[@k='v']/c |
+| `arbor.fs.json_set{ path, jpath, value, pretty? }` | `serde_json` | `$.foo.bar`, `foo.bar`, `items.0.name`, `servers[1].host` |
+| `arbor.fs.yaml_set{ path, ypath, value }` | `serde_yaml` → json walker | dotted path, same as JSON |
+| `arbor.fs.toml_set{ path, tpath, value }` | `toml` crate | dotted path; comments are NOT preserved on rewrite |
+| `arbor.fs.xml_set{ path, xpath, value }` | `quick-xml` | minimal XPath: `/a/b/c`, `//c`, `/a/@attr`, `/a/b[@k='v']/c` |
 
 Intermediate nodes are auto-created for missing keys. `value` can
   be any serialisable Lua value (string / number / boolean / table) for JSON /
@@ -3574,7 +3575,7 @@ Subscribe to `arbor://pipeline-log` from the frontend (or via `arbor.events.on` 
 
 ## Permissions
 
-No special permissions are required to define or trigger pipelines â€” any plugin can call `arbor.pipeline.define()` and `arbor.pipeline.run()`. The commands run under the same OS user as Arbor itself. Plugins do *not* need the `terminal` permission for pipeline steps (that applies only to `arbor.terminal.exec`).
+No special permissions are required to define or trigger pipelines — any plugin can call `arbor.pipeline.define()` and `arbor.pipeline.run()`. The commands run under the same OS user as Arbor itself. Plugins do *not* need the `terminal` permission for pipeline steps (that applies only to `arbor.terminal.exec`).
 
 ---
 
@@ -3611,13 +3612,13 @@ Click the **Share2** icon in the RepoActions bar (the split
 
 | Field | Meaning |
 | --- | --- |
-| branch_src | Branch / tag to clone from (empty = current HEAD). Autocomplete from local branches + tags. |
-| branch_dest | Destination branch (optional). Placeholder for a git_push step. |
-| remote_url | Destination remote URL (optional). |
-| auto_clone | When true (default), prepend an auto-clone stage: git clone $SOURCE_PATH $OUTPUT_PATH before any user step. |
-| log_level | debug / info / warn / error. Debug prints every resolved command before execution. |
-| variables | User-defined $KEY / ${KEY} placeholders usable inside any string field. |
-| stages | Ordered list of groups; each group has a mode (sequential / parallel) and a list of steps. |
+| `branch_src` | Branch / tag to clone from (empty = current HEAD). Autocomplete from local branches + tags. |
+| `branch_dest` | Destination branch (optional). Placeholder for a `git_push` step. |
+| `remote_url` | Destination remote URL (optional). |
+| `auto_clone` | When true (default), prepend an auto-clone stage: `git clone $SOURCE_PATH $OUTPUT_PATH` before any user step. |
+| `log_level` | `debug` / `info` / `warn` / `error`. Debug prints every resolved command before execution. |
+| `variables` | User-defined `$KEY` / `${KEY}` placeholders usable inside any string field. |
+| `stages` | Ordered list of groups; each group has a `mode` (`sequential` / `parallel`) and a list of steps. |
 
 ## Variable expansion syntax
 
@@ -3628,11 +3629,11 @@ Any string field in any step parameter runs through the expander before
 
 | Form | Meaning |
 | --- | --- |
-| $NAME | Greedy match on [A-Za-z0-9_]. Unresolved → left as-is for debuggability. |
-| ${NAME} | Explicit brace form — required when the var is followed by letters / underscore (${FOO}bar vs $FOObar). |
-| ${NAME:default} | Fallback when NAME is unset OR empty (bash ${VAR:-default} semantics). The default runs verbatim to the next } — it can contain : (URLs, paths); nesting is not supported. |
-| ${NAME:} | Default is an empty string — forces empty when unset. |
-| $$ | Literal $ escape. |
+| `$NAME` | Greedy match on `[A-Za-z0-9_]`. Unresolved → left as-is for debuggability. |
+| `${NAME}` | Explicit brace form — required when the var is followed by letters / underscore (`${FOO}bar` vs `$FOObar`). |
+| `${NAME:default}` | Fallback when `NAME` is *unset OR empty* (bash `${VAR:-default}` semantics). The default runs verbatim to the next `}` — it can contain `:` (URLs, paths); nesting is not supported. |
+| `${NAME:}` | Default is an empty string — forces empty when unset. |
+| `$$` | Literal `$` escape. |
 
 The expansion applies to the profile's `branch_src` too — you
   can write `${RELEASE_BRANCH:main}` and have the auto-clone
@@ -3644,15 +3645,15 @@ Always available inside any string field (override user vars on name collision):
 
 | Name | Value |
 | --- | --- |
-| $SOURCE_PATH | Absolute path of the active repo (cloned as the source). |
-| $OUTPUT_PATH | Absolute path of the auto-clone destination. This is the default cwd of every step. |
-| $BRANCH_SRC | Resolved source branch / tag. |
-| $BRANCH_DEST | Destination branch from the profile (may be empty). |
-| $PROFILE | Profile name. |
-| $RUN_ID | Unique id for this run (stable across retry/resume). |
-| $TIMESTAMP | ms since epoch at run start. |
-| $COMMIT_SHA | HEAD sha of the source, if known. |
-| $REPO_NAME | Source folder's basename. |
+| `$SOURCE_PATH` | Absolute path of the active repo (cloned as the source). |
+| `$OUTPUT_PATH` | Absolute path of the auto-clone destination. This is the default `cwd` of every step. |
+| `$BRANCH_SRC` | Resolved source branch / tag. |
+| `$BRANCH_DEST` | Destination branch from the profile (may be empty). |
+| `$PROFILE` | Profile name. |
+| `$RUN_ID` | Unique id for this run (stable across retry/resume). |
+| `$TIMESTAMP` | ms since epoch at run start. |
+| `$COMMIT_SHA` | HEAD sha of the source, if known. |
+| `$REPO_NAME` | Source folder's basename. |
 
 ## Sequences (cross-repo meta-runs)
 
@@ -3717,29 +3718,29 @@ Sequences are **global** (stored in `~/.config/arbor/plugin_data/source-export/g
 
 | Op | Purpose |
 | --- | --- |
-| create_file | Write a new file with literal content (multi-line safe via base64). |
-| touch_file | Create an empty file, or update mtime if already present. |
-| copy_file | Copy file or directory to a new location. |
-| move_file | Move / rename. |
-| delete_file | Delete one or more exact paths. |
-| delete_pattern | Delete by glob pattern. Windows limitation: patterns are reduced to basenames (**/*.tmp → *.tmp) because PS -Include matches basenames only. Scope via the step's cwd or split into multiple steps. |
-| append_file | Append content to an existing file (multi-line safe). |
-| prepend_file | Prepend content (e.g. license headers). |
+| `create_file` | Write a new file with literal content (multi-line safe via base64). |
+| `touch_file` | Create an empty file, or update mtime if already present. |
+| `copy_file` | Copy file or directory to a new location. |
+| `move_file` | Move / rename. |
+| `delete_file` | Delete one or more exact paths. |
+| `delete_pattern` | Delete by glob pattern. Windows limitation: patterns are reduced to basenames (`**/*.tmp` → `*.tmp`) because PS `-Include` matches basenames only. Scope via the step's `cwd` or split into multiple steps. |
+| `append_file` | Append content to an existing file (multi-line safe). |
+| `prepend_file` | Prepend content (e.g. license headers). |
 
 ### Content
 
 | Op | Purpose |
 | --- | --- |
-| replace_in_file | Find & replace inside one file. plain = literal, else regex. Multi-line find/replace are base64-encoded so quoting and newlines round-trip intact. |
-| replace_on_glob | Same, applied to every file matching a glob. Logs every file it mutates. |
-| insert_at_anchor | Insert a block before/after the first line matching a regex anchor. |
-| properties_edit | Upsert key=value entries in a Java .properties file. Existing keys are replaced in place; missing ones appended. |
-| env_merge | Same, for .env files. |
-| template_render | Render a .tmpl file by substituting {{VAR}} placeholders with profile + built-in variables. Writes the output to a new path. |
-| json_edit | Set a value at a dotted path ($.database.host). Parsed & written via serde_json (native LuaOp — cross-platform, no PowerShell). Value is parsed as JSON when possible (42, true, "x", {"y":1}), otherwise stored as string. |
-| yaml_edit | Dotted-path set on YAML files via serde_yaml. Intermediate maps are auto-created, and scalars are parsed with JSON semantics so numbers / booleans / nested objects round-trip correctly. |
-| toml_edit | Dotted-path set on TOML files via the toml crate. Same semantics as json_edit / yaml_edit. |
-| xml_edit | Set InnerText on a node, or value on an attribute via a minimal XPath subset (//foo/@attr, /root/child[@k='v']). Native LuaOp powered by quick-xml — no PowerShell, Unix friendly. |
+| `replace_in_file` | Find & replace inside one file. `plain` = literal, else regex. Multi-line find/replace are base64-encoded so quoting and newlines round-trip intact. |
+| `replace_on_glob` | Same, applied to every file matching a glob. Logs every file it mutates. |
+| `insert_at_anchor` | Insert a block before/after the first line matching a regex anchor. |
+| `properties_edit` | Upsert `key=value` entries in a Java `.properties` file. Existing keys are replaced in place; missing ones appended. |
+| `env_merge` | Same, for `.env` files. |
+| `template_render` | Render a `.tmpl` file by substituting `{{VAR}}` placeholders with profile + built-in variables. Writes the output to a new path. |
+| `json_edit` | Set a value at a dotted path (`$.database.host`). Parsed & written via `serde_json` (native LuaOp — cross-platform, no PowerShell). Value is parsed as JSON when possible (`42`, `true`, `"x"`, `{"y":1}`), otherwise stored as string. |
+| `yaml_edit` | Dotted-path set on YAML files via `serde_yaml`. Intermediate maps are auto-created, and scalars are parsed with JSON semantics so numbers / booleans / nested objects round-trip correctly. |
+| `toml_edit` | Dotted-path set on TOML files via the `toml` crate. Same semantics as json_edit / yaml_edit. |
+| `xml_edit` | Set `InnerText` on a node, or value on an attribute via a minimal XPath subset (`//foo/@attr`, `/root/child[@k='v']`). Native LuaOp powered by `quick-xml` — no PowerShell, Unix friendly. |
 
 ### Git
 
@@ -3751,37 +3752,37 @@ Sequences are **global** (stored in `~/.config/arbor/plugin_data/source-export/g
 
 | Op | Behaviour |
 | --- | --- |
-| mvn_set_version | mvn versions:set -DnewVersion=… -DgenerateBackupPoms=false. Prefers local mvnw wrapper when present. |
-| mvn_deploy | mvn deploy [-P<profile>] <extra>. Again prefers mvnw. |
-| gradle_task | gradlew <tasks> when the wrapper exists, else gradle. |
-| gradle_offline | gradlew dependencies --refresh-dependencies then copies ~/.gradle/caches to dest. Basic implementation — production-grade offline bundles usually need extra config. |
-| npm_install | npm ci (strict lockfile). |
-| pnpm_install | pnpm install --frozen-lockfile. |
-| npm_pack | npm pack. |
-| m2_offline_ju | Runs the external ju tool (path set in plugin settings) to extract Maven dependencies into an offline m2. |
-| docker_build | docker build -t <tag> -f <dockerfile> <context>. |
-| docker_push | docker push <tag>. |
+| `mvn_set_version` | `mvn versions:set -DnewVersion=… -DgenerateBackupPoms=false`. Prefers local `mvnw` wrapper when present. |
+| `mvn_deploy` | `mvn deploy [-P<profile>] <extra>`. Again prefers `mvnw`. |
+| `gradle_task` | `gradlew <tasks>` when the wrapper exists, else `gradle`. |
+| `gradle_offline` | `gradlew dependencies --refresh-dependencies` then copies `~/.gradle/caches` to `dest`. Basic implementation — production-grade offline bundles usually need extra config. |
+| `npm_install` | `npm ci` (strict lockfile). |
+| `pnpm_install` | `pnpm install --frozen-lockfile`. |
+| `npm_pack` | `npm pack`. |
+| `m2_offline_ju` | Runs the external `ju` tool (path set in plugin settings) to extract Maven dependencies into an offline m2. |
+| `docker_build` | `docker build -t <tag> -f <dockerfile> <context>`. |
+| `docker_push` | `docker push <tag>`. |
 
 ### Validation
 
 | Op | Check |
 | --- | --- |
-| assert_file_exists | File must exist. NOT toggle inverts — file must NOT exist. |
-| assert_cmd_exit_zero | Command must exit 0. NOT toggle — must exit non-zero. |
-| assert_env_set | Env var must be defined. NOT — must NOT be defined. |
-| assert_branch_clean | Working copy must have no uncommitted changes. NOT — must be dirty. |
-| assert_file_not_contains | Pattern must NOT appear. NOT — pattern MUST appear. |
-| assert_glob_matches | Number of files matching the glob must be within [min, max] (max empty = unlimited). |
-| assert_version_bump | Current version in pom.xml / package.json / Cargo.toml must be less than new_version (semver-ish comparison; prerelease tags ignored). |
+| `assert_file_exists` | File must exist. **NOT** toggle inverts — file must NOT exist. |
+| `assert_cmd_exit_zero` | Command must exit 0. NOT toggle — must exit non-zero. |
+| `assert_env_set` | Env var must be defined. NOT — must NOT be defined. |
+| `assert_branch_clean` | Working copy must have no uncommitted changes. NOT — must be dirty. |
+| `assert_file_not_contains` | Pattern must NOT appear. NOT — pattern MUST appear. |
+| `assert_glob_matches` | Number of files matching the glob must be within `[min, max]` (max empty = unlimited). |
+| `assert_version_bump` | Current version in `pom.xml` / `package.json` / `Cargo.toml` must be *less than* `new_version` (semver-ish comparison; prerelease tags ignored). |
 
 ### Execution & Flow
 
 | Op | Behaviour |
 | --- | --- |
-| shell_command | Arbitrary shell one-liner. Variables are expanded before execution. |
-| log_message | Print a log line at a given level. |
-| notify_toast | Surface a toast via echo [NOTIFY] …. |
-| set_variable | Compile-time rebind: mutates ctx.vars so every subsequent step's command uses the new value. Note: it can't capture another step's stdout — use static values or previously-set vars in value. |
+| `shell_command` | Arbitrary shell one-liner. Variables are expanded before execution. |
+| `log_message` | Print a log line at a given level. |
+| `notify_toast` | Surface a toast via `echo [NOTIFY] …`. |
+| `set_variable` | **Compile-time** rebind: mutates `ctx.vars` so every subsequent step's command uses the new value. Note: it can't capture another step's stdout — use static values or previously-set vars in `value`. |
 
 ## Not implemented (yet)
 
@@ -3810,8 +3811,8 @@ The 22 generic LuaOp ops live in the `arbor.core.*` built-in
 
 | Kind | Category | Who runs it |
 | --- | --- | --- |
-| LuaOp | create_file · touch_file · copy_file · move_file · delete_file · delete_pattern · append_file · prepend_file · replace_in_file · replace_on_glob · properties_edit · env_merge · template_render · insert_at_anchor · json_edit · yaml_edit · toml_edit · xml_edit · assert_file_exists · assert_file_not_contains · assert_glob_matches · assert_version_bump | In-process via arbor.pipeline.register_op handlers from arbor.core.{file,content,edit,assert} |
-| Shell | shell_command · log_message · notify_toast · git_* · mvn_* · gradle_* · npm_* · pnpm_* · docker_* · m2_offline_ju · assert_cmd_exit_zero · assert_env_set · assert_branch_clean · set_variable (log-only stub) | Spawned process via cmd /C / sh -c |
+| LuaOp | create_file · touch_file · copy_file · move_file · delete_file · delete_pattern · append_file · prepend_file · replace_in_file · replace_on_glob · properties_edit · env_merge · template_render · insert_at_anchor · json_edit · yaml_edit · toml_edit · xml_edit · assert_file_exists · assert_file_not_contains · assert_glob_matches · assert_version_bump | In-process via `arbor.pipeline.register_op` handlers from `arbor.core.{file,content,edit,assert}` |
+| Shell | shell_command · log_message · notify_toast · git_* · mvn_* · gradle_* · npm_* · pnpm_* · docker_* · m2_offline_ju · assert_cmd_exit_zero · assert_env_set · assert_branch_clean · set_variable (log-only stub) | Spawned process via `cmd /C` / `sh -c` |
 
 ## Safety guarantees
 
@@ -3888,23 +3889,23 @@ After clicking **Run Pipeline**:
 
 | Action | How |
 | --- | --- |
-| View recent runs | Switch to the CI / CD tab — the last 30 runs are fetched automatically |
-| Create a new run | Click the Run button in the CI header — opens branch/variable picker |
-| Refresh the list | Click the  button in the panel header |
+| View recent runs | Switch to the **CI / CD** tab — the last 30 runs are fetched automatically |
+| Create a new run | Click the **Run** button in the CI header — opens branch/variable picker |
+| Refresh the list | Click the button in the panel header |
 | View stage/job graph | Click any run card to open the detail modal |
-| Re-trigger a run | Click  in the run card or inside the detail modal |
-| Open run in browser | Click  in the run card or modal header |
+| Re-trigger a run | Click in the run card or inside the detail modal |
+| Open run in browser | Click in the run card or modal header |
 | Open a specific job's logs | Click a job card inside the detail modal |
 
 ## Run status mapping
 
 | Arbor status | GitHub | GitLab |
 | --- | --- | --- |
-| ✅ Passed | completed / success | success, passed |
-| ❌ Failed | completed / failure, timed_out | failed |
-| ⏳ Running | in_progress, queued | running |
-| ⭕ Cancelled | completed / cancelled, skipped | canceled, skipped |
-| 🔵 Pending | waiting, requested | pending, created, scheduled |
+| ✅ Passed | `completed / success` | `success`, `passed` |
+| ❌ Failed | `completed / failure`, `timed_out` | `failed` |
+| ⏳ Running | `in_progress`, `queued` | `running` |
+| ⭕ Cancelled | `completed / cancelled`, `skipped` | `canceled`, `skipped` |
+| 🔵 Pending | `waiting`, `requested` | `pending`, `created`, `scheduled` |
 
 ## Self-hosted GitLab
 
@@ -3914,20 +3915,20 @@ Self-hosted GitLab instances are auto-detected from the remote URL (any host con
 
 # Pull / Merge Requests
 
-Browse, review, and merge GitHub Pull Requests and GitLab Merge Requests from the sidebar. Reuses the same OAuth tokens as the CI/CD panel â€” no separate setup.
+Browse, review, and merge GitHub Pull Requests and GitLab Merge Requests from the sidebar. Reuses the same OAuth tokens as the CI/CD panel — no separate setup.
 
-- **Pull Requests** — Merge Â· Squash Â· Rebase Â· CI checks panel Â· Reopen.
-- **Merge Requests** — Default strategy Â· Self-hosted instances supported Â· Reopen.
+- **Pull Requests** — Merge · Squash · Rebase · CI checks panel · Reopen.
+- **Merge Requests** — Default strategy · Self-hosted instances supported · Reopen.
 
 ## Authentication
 
-Connect your accounts in **Settings â†’ Git & Integrations**. The same tokens used for CI/CD are reused â€” no extra setup. Click the **GitPullRequest** icon in the Activity Bar to open the sidebar.
+Connect your accounts in **Settings → Git & Integrations**. The same tokens used for CI/CD are reused — no extra setup. Click the **GitPullRequest** icon in the Activity Bar to open the sidebar.
 
 ## Sidebar
 
-- **Search bar**Client-side fuzzy filter over the loaded list â€” matches title, `#number`, source/target branches, author display name & login, and label names. Clear with the **Ã—** button. The query resets on tab switch.
-- **Filter tabs**Switch between *Open* and *Merged* PRs/MRs. Backend reload â€” the search bar then narrows whichever set is loaded.
-- **Row content**Status icon Â· title Â· number Â· source â†’ target Â· author Â· time-ago Â· comment count Â· labels.
+- **Search bar**Client-side fuzzy filter over the loaded list — matches title, `#number`, source/target branches, author display name & login, and label names. Clear with the **×** button. The query resets on tab switch.
+- **Filter tabs**Switch between *Open* and *Merged* PRs/MRs. Backend reload — the search bar then narrows whichever set is loaded.
+- **Row content**Status icon · title · number · source → target · author · time-ago · comment count · labels.
 - **Click row**Opens the detail modal.
 - **Header +**Create a new PR/MR.
 - **Refresh**Reload the list from the API.
@@ -3936,40 +3937,40 @@ Connect your accounts in **Settings â†’ Git & Integrations**. The same toke
 
 Four tabs across the top: **Overview**, **CI**, **Files**, **Commits**. Press `Esc` to close. The header has a **refresh** button that reloads detail + list + every tab that's already been opened.
 
-- **Header** — State badge (Open / Merged / Closed) Â· Draft flag Â· title Â· branches Â· author Â· time-ago Â· labels Â· refresh Â· open in browser.
-- **Overview** — Markdown description Â· CI Checks summary (when available) Â· Assignees Â· Reviewers Â· Activity timeline.
+- **Header** — State badge (Open / Merged / Closed) · Draft flag · title · branches · author · time-ago · labels · refresh · open in browser.
+- **Overview** — Markdown description · CI Checks summary (when available) · Assignees · Reviewers · Activity timeline.
 
 #### Markdown rendering
 
 PR/MR bodies, descriptions, and comments share a single sanitised renderer. Dependabot, ReleaseDrafter, and other bots that pack large amounts of structure into the body render correctly now:
 
 - **Inline HTML safelist**`<details>` / `<summary>` (collapsible cards with a chevron), `<p>`, `<blockquote>`, `<code>`, `<ul>` / `<ol>`, `<table>` and friends survive verbatim. Scripts, styles, iframes, event handlers, and raw `<a>` tags are stripped or rewritten.
-- **Fence language auto-detect**fenced blocks without an explicit language (````` without a tag) are sniffed (*Rust, TOML, JSON, YAML, bash, TS/JS, markup*) and highlighted deterministically â€” no more wall-of-grey for bot-generated diffs.
+- **Fence language auto-detect**fenced blocks without an explicit language (````` without a tag) are sniffed (*Rust, TOML, JSON, YAML, bash, TS/JS, markup*) and highlighted deterministically — no more wall-of-grey for bot-generated diffs.
 - **Markdown also applies to inline contexts**same renderer is wired into the Issues detail modal so Linear / Jira (when ADF returns markdown) get the same treatment.
 
-- **CI** — Pipeline runs targeting the source branch â€” status pill, duration, retrigger, click to open the stage/job graph.
+- **CI** — Pipeline runs targeting the source branch — status pill, duration, retrigger, click to open the stage/job graph.
 - **Files / Commits** — Per-file diff view and commit-by-commit drill-down with syntax highlighting.
-- **Actions** — Merge (split button) Â· Reopen (merged) Â· Close (with confirmation dialog).
+- **Actions** — Merge (split button) · Reopen (merged) · Close (with confirmation dialog).
 
 ### Activity timeline
 
-The Overview tab renders comments and timeline events on a GitLab-style vertical rail. Three filter chips at the top toggle each category â€” counts always reflect what's loaded, regardless of visibility:
+The Overview tab renders comments and timeline events on a GitLab-style vertical rail. Three filter chips at the top toggle each category — counts always reflect what's loaded, regardless of visibility:
 
 | Field | Value |
 | --- | --- |
-| Comments | Human-authored comments â€” large avatar nodes, accent-blue strip on the left edge of each card. Body rendered as Markdown (headings, lists, fenced code blocks with Prism syntax highlighting, blockquotes, links). |
+| Comments | Human-authored comments — large avatar nodes, accent-blue strip on the left edge of each card. Body rendered as Markdown (headings, lists, fenced code blocks with Prism syntax highlighting, blockquotes, links). |
 | Bots *2* | Comments from automated accounts. Heuristic: GitHub login ending with `[bot]` or `github-actions`; GitLab login/name containing "bot". Bot cards get a soft yellow tint and full-height accent strip; the rail node is dashed-bordered yellow. |
 | Activity *4* | System events: state changes (closed/merged/reopened/draft toggles), label edits, assignments, review requests, force-pushes, renames. Compact one-line rows with kind-colored icon nodes (state=red/purple/green by sub-type, commit=purple, label=blue, assign=green, review=orange, rename=yellow). |
 
 #### Sanitisation
 
 - **HTML comments stripped**`<!-- policy_violation_comment -->` and other invisible markers (used by the GitLab Security Bot, dependabot, etc.) are removed before rendering, so they no longer surface as literal text.
-- **Emoji shortcodes**`:warning:` â†’ âš ï¸, `:white_check_mark:` â†’ âœ…, `:x:` â†’ âŒ, etc. ~90 shortcodes resolved (covers GitHub, GitLab and the common ecosystem aliases). Unknown shortcodes are left intact.
-- **Activity body trimming**GitLab system notes that ship with an HTML expansion ("added 83 commits`<ul>â€¦</ul>`") are truncated at the first tag â€” the timeline shows just the human-readable lede.
+- **Emoji shortcodes**`:warning:` → ⚠️, `:white_check_mark:` → ✅, `:x:` → ❌, etc. ~90 shortcodes resolved (covers GitHub, GitLab and the common ecosystem aliases). Unknown shortcodes are left intact.
+- **Activity body trimming**GitLab system notes that ship with an HTML expansion ("added 83 commits`<ul>…</ul>`") are truncated at the first tag — the timeline shows just the human-readable lede.
 
 #### Default visibility
 
-Configure which chips start visible from **Settings â†’ Access â†’ Merge Requests**. Defaults are stored in `~/.config/arbor/config.toml` under `[mr]`:
+Configure which chips start visible from **Settings → Access → Merge Requests**. Defaults are stored in `~/.config/arbor/config.toml` under `[mr]`:
 
 ```toml
 [mr]
@@ -3978,11 +3979,11 @@ default_show_bots     = true
 default_show_activity = true
 ```
 
-Toggling a chip inside an open modal is session-only â€” it never writes back to the config. Use Settings to change the global default.
+Toggling a chip inside an open modal is session-only — it never writes back to the config. Use Settings to change the global default.
 
 ### Closing a PR / MR
 
-The **Close** button (visible when the PR/MR is open) asks for explicit confirmation in a centred dialog before sending the close request â€” no more "I clicked it thinking I was closing the modal" mistakes. The dialog spells out which number is about to be closed.
+The **Close** button (visible when the PR/MR is open) asks for explicit confirmation in a centred dialog before sending the close request — no more "I clicked it thinking I was closing the modal" mistakes. The dialog spells out which number is about to be closed.
 
 ### CI tab
 
@@ -3995,9 +3996,9 @@ Reuses the same GitHub Actions / GitLab CI integration as the **Pipelines** pane
 | PR HEAD pill | The run whose commit SHA matches the current PR head is marked with an accent *PR HEAD* pill and an accent border, so the run that built the latest push stands out. |
 | Re-trigger | Per-row button. Calls `POST /actions/runs/{id}/rerun` on GitHub or `POST /pipelines/{id}/retry` on GitLab, then reloads the list. |
 | Open in browser | Per-row link to the run's web page on the provider. |
-| Detail modal | Click a card to open the full stage / job graph â€” same modal used from the Pipelines panel. The provider icon is brand-tinted (orange for GitLab); stages render left-to-right in execution order; `Esc` closes. |
+| Detail modal | Click a card to open the full stage / job graph — same modal used from the Pipelines panel. The provider icon is brand-tinted (orange for GitLab); stages render left-to-right in execution order; `Esc` closes. |
 
-> ℹ Authentication is shared with the CI/CD panel â€” connect your GitHub or GitLab account once in **Settings â†’ Authentication** and the CI tab picks the same token up. Self-hosted GitLab instances are supported.
+> ℹ Authentication is shared with the CI/CD panel — connect your GitHub or GitLab account once in **Settings → Authentication** and the CI tab picks the same token up. Self-hosted GitLab instances are supported.
 
 #### How runs are discovered
 
@@ -4005,8 +4006,8 @@ Both providers can attach pipeline runs to a PR/MR via paths a plain branch filt
 
 | Field | Value |
 | --- | --- |
-| GitHub | **Branch query**`GET /actions/runs?branch={source_branch}` â€” push and `pull_request` runs whose `head_branch` matches. **Head-SHA query**`GET /actions/runs?head_sha={head_sha}` â€” fork PRs, `pull_request_target` workflows, and `workflow_dispatch` runs pinned to the SHA. These don't always tag the source branch on the run. |
-| GitLab | **Detached MR pipelines**`GET /merge_requests/:iid/pipelines` â€” required for pipelines whose `ref` is `refs/merge-requests/{iid}/head`. These are the ones GitLab shows at the top of the MR page as *"Merge request pipeline #..."* and would otherwise be invisible to a plain branch filter. **Branch pipelines**`GET /pipelines?ref={source_branch}` â€” regular pushes to the source branch. |
+| GitHub | **Branch query**`GET /actions/runs?branch={source_branch}` — push and `pull_request` runs whose `head_branch` matches. **Head-SHA query**`GET /actions/runs?head_sha={head_sha}` — fork PRs, `pull_request_target` workflows, and `workflow_dispatch` runs pinned to the SHA. These don't always tag the source branch on the run. |
+| GitLab | **Detached MR pipelines**`GET /merge_requests/:iid/pipelines` — required for pipelines whose `ref` is `refs/merge-requests/{iid}/head`. These are the ones GitLab shows at the top of the MR page as *"Merge request pipeline #..."* and would otherwise be invisible to a plain branch filter. **Branch pipelines**`GET /pipelines?ref={source_branch}` — regular pushes to the source branch. |
 
 ### Merge options
 
@@ -4033,7 +4034,7 @@ Two checkboxes sit next to the split button and apply to whichever strategy you 
 
 When **Delete branch** is ticked, Arbor only removes the local copy of the source branch after all these conditions are met:
 
-- **Branch exists locally**Nothing to do if you never had it â€” the step is a no-op.
+- **Branch exists locally**Nothing to do if you never had it — the step is a no-op.
 - **No worktree is using it**A linked worktree holding the branch blocks deletion. Arbor notifies with the worktree path so you can remove it first.
 - **HEAD switched away**If the source branch is the current branch, Arbor checks out the target before deleting. A dirty workdir or a missing local target aborts the cleanup with a warning.
 
@@ -4052,7 +4053,7 @@ Click **+** in the sidebar header.
 | Labels | Comma-separated label names. |
 | Draft | Mark the PR/MR as a draft / work in progress. |
 | Auto-merge | Arm the platform's auto-merge when the PR/MR is opened. The platform
-    merges once required checks pass â€” GitHub uses *auto-merge* (requires branch protection on the target branch), GitLab uses *merge
+    merges once required checks pass — GitHub uses *auto-merge* (requires branch protection on the target branch), GitLab uses *merge
     when pipeline succeeds*. If it can't be armed, a notification is
     posted in the bell; the PR/MR itself is still created. |
 
@@ -4062,25 +4063,25 @@ Merge strategy and source-branch deletion are chosen at merge time from the deta
 
 | Feature | GitHub | GitLab |
 | --- | --- | --- |
-| List open / closed / merged | âœ“ | âœ“ |
-| Sidebar search (client-side) | âœ“ | âœ“ |
-| Markdown description & comments | âœ“ | âœ“ |
-| Emoji shortcodes (:warning: â†’ âš ï¸) | âœ“ | âœ“ |
-| Activity timeline (state / labels / assigns / â€¦) | âœ“ via /events | âœ“ via system notes |
-| Bot detection (filterable) | âœ“ [bot] suffix | âœ“ name heuristic |
-| Create PR / MR | âœ“ | âœ“ |
-| Auto-merge on creation | âœ“ branch protection req. | âœ“ merge-when-pipeline-succeeds |
-| Merge | âœ“ merge / squash / rebase | âœ“ merge / squash |
-| Delete source branch on merge | âœ“ | âœ“ |
-| Close (with confirmation) / Reopen | âœ“ | âœ“ |
-| Add comment | âœ“ | âœ“ |
-| Draft / WIP flag | âœ“ | âœ“ |
-| Labels | âœ“ | âœ“ |
-| Assignees / Reviewers | âœ“ | âœ“ |
-| CI checks summary (Overview) | when available | â€” |
-| Pipeline runs tab (filtered by source branch) | âœ“ | âœ“ |
-| Re-trigger run from PR/MR | âœ“ | âœ“ |
-| Self-hosted instance | â€” | âœ“ |
+| List open / closed / merged | ✓ | ✓ |
+| Sidebar search (client-side) | ✓ | ✓ |
+| Markdown description & comments | ✓ | ✓ |
+| Emoji shortcodes (`:warning:` → ⚠️) | ✓ | ✓ |
+| Activity timeline (state / labels / assigns / …) | ✓ *via /events* | ✓ *via system notes* |
+| Bot detection (filterable) | ✓ *[bot] suffix* | ✓ *name heuristic* |
+| Create PR / MR | ✓ | ✓ |
+| Auto-merge on creation | ✓ *branch protection req.* | ✓ merge-when-pipeline-succeeds |
+| Merge | ✓ merge / squash / rebase | ✓ merge / squash |
+| Delete source branch on merge | ✓ | ✓ |
+| Close (with confirmation) / Reopen | ✓ | ✓ |
+| Add comment | ✓ | ✓ |
+| Draft / WIP flag | ✓ | ✓ |
+| Labels | ✓ | ✓ |
+| Assignees / Reviewers | ✓ | ✓ |
+| CI checks summary (Overview) | when available | — |
+| Pipeline runs tab (filtered by source branch) | ✓ | ✓ |
+| Re-trigger run from PR/MR | ✓ | ✓ |
+| Self-hosted instance | — | ✓ |
 
 ## Plugin hooks
 
@@ -4108,38 +4109,38 @@ end)
 
 | Hook | Constant | Context |
 | --- | --- | --- |
-| on_mr_opened | hooks.MR_OPENED | number, title, source_branch, target_branch, author, provider, web_url |
-| on_mr_merged | hooks.MR_MERGED | number, provider |
-| on_mr_updated | hooks.MR_UPDATED | number, provider future use |
+| `on_mr_opened` | `hooks.MR_OPENED` | `number, title, source_branch, target_branch, author, provider, web_url` |
+| `on_mr_merged` | `hooks.MR_MERGED` | `number, provider` |
+| `on_mr_updated` | `hooks.MR_UPDATED` | `number, provider` `future use` |
 
 ---
 
-# Issues â€” Linear & Jira
+# Issues — Linear & Jira
 
 Browse, filter, and act on issues directly from the sidebar without switching context. Each repository can independently use either tracker.
 
-- **OAuth Â· Personal API Key** — Full read/write access. Attach issues to branches, transition statuses, post comments from plugins.
-- **Cloud Â· Data Center Â· Server** — Email + API token, PAT for DC/Server, OAuth 2.0 (3LO) for Cloud. Self-signed certs accepted.
+- **OAuth · Personal API Key** — Full read/write access. Attach issues to branches, transition statuses, post comments from plugins.
+- **Cloud · Data Center · Server** — Email + API token, PAT for DC/Server, OAuth 2.0 (3LO) for Cloud. Self-signed certs accepted.
 
 ## Setup
 
-Open the **Issues** sidebar and pick a tracker â€” or configure credentials in **Settings â†’ Git & Integrations â†’ Issue Trackers**. Each repository stores its own selection.
+Open the **Issues** sidebar and pick a tracker — or configure credentials in **Settings → Git & Integrations → Issue Trackers**. Each repository stores its own selection.
 
-### OAuth Recommended
+### OAuth `Recommended`
 
-1. Register a **Public OAuth application** at `linear.app â†’ Settings â†’ API â†’ OAuth applications`
+1. Register a **Public OAuth application** at `linear.app → Settings → API → OAuth applications`
 2. Add `http://127.0.0.1:7729/callback` as the redirect URI
-3. Click **Connect â†’ OAuth** in settings and approve in the browser
+3. Click **Connect → OAuth** in settings and approve in the browser
 4. Arbor completes the PKCE flow and stores the token in the OS keychain
 
 ### Personal API Key
 
-1. Generate a key at `linear.app â†’ Settings â†’ API â†’ Personal API keys`
-2. Click **Connect â–¾ â†’ Personal API Key** and paste the `lin_api_â€¦` token
+1. Generate a key at `linear.app → Settings → API → Personal API keys`
+2. Click **Connect ▾ → Personal API Key** and paste the `lin_api_…` token
 
-### API Token â€” Jira Cloud Recommended
+### API Token — Jira Cloud `Recommended`
 
-Generate an API token at `id.atlassian.com â†’ Security â†’ API tokens`, then click **Connect â†’ API Token** and fill in:
+Generate an API token at `id.atlassian.com → Security → API tokens`, then click **Connect → API Token** and fill in:
 
 | Field | Value |
 | --- | --- |
@@ -4147,44 +4148,44 @@ Generate an API token at `id.atlassian.com â†’ Security â†’ API tokens
 | Email | Your Atlassian account email |
 | API token | The token just generated |
 
-### Personal Access Token â€” Data Center / Server
+### Personal Access Token — Data Center / Server
 
-Generate a PAT at `Jira â†’ Profile â†’ Personal Access Tokens`. Use the **API Token** form with the full hostname as the subdomain (e.g. `jira.internal.example.com`) plus email and PAT.
+Generate a PAT at `Jira → Profile → Personal Access Tokens`. Use the **API Token** form with the full hostname as the subdomain (e.g. `jira.internal.example.com`) plus email and PAT.
 
 > ℹ Arbor automatically accepts self-signed or internal-CA certificates common in on-premise Jira installations.
 
-### OAuth 2.0 (3LO) â€” Jira Cloud only
+### OAuth 2.0 (3LO) — Jira Cloud only
 
-Click **Connect â–¾ â†’ OAuth 2.0** and follow the browser prompt. Arbor auto-discovers your site and stores access + refresh tokens in the OS keychain. Token refresh is transparent.
+Click **Connect ▾ → OAuth 2.0** and follow the browser prompt. Arbor auto-discovers your site and stores access + refresh tokens in the OS keychain. Token refresh is transparent.
 
 ### Jira compatibility matrix
 
 | Edition | Auth | API | Notes |
 | --- | --- | --- | --- |
-| Cloud *.atlassian.net | Token Â· OAuth 2.0 | v3 | Full feature set |
-| Data Center â‰¥ 8.4 | Email + PAT | v2 | Self-signed certs OK |
-| Server / DC < 8.4 | Email + PAT | v2 | Uses /project endpoint |
+| Cloud `*.atlassian.net` | Token · OAuth 2.0 | v3 | Full feature set |
+| Data Center ≥ 8.4 | Email + PAT | v2 | Self-signed certs OK |
+| Server / DC < 8.4 | Email + PAT | v2 | Uses `/project` endpoint |
 
 ## Sidebar
 
 Same UI for both providers. Filters combine freely.
 
-- **Search** Debounced 350 ms. Two modes: `PROJ-42` **Default** â€” matches the ticket code *and* any text that mentions it. Free-form text (e.g. `login bug`) falls back to text matching across title / description / comments. `~PROJ-42` **Text-only** â€” the `~` prefix bypasses the code lookup. Finds only descriptions / comments / titles that *mention* `PROJ-42`, never the ticket whose key is `PROJ-42`. Useful for tracing references without the noise of the ticket card on top. On Jira the text side searches `summary + description + comments` (the JQL `text ~` operator). On Linear it searches `title` only â€” the GraphQL filter doesn't expose body / comment search.
+- **Search** Debounced 350 ms. Two modes: `PROJ-42` **Default** — matches the ticket code *and* any text that mentions it. Free-form text (e.g. `login bug`) falls back to text matching across title / description / comments. `~PROJ-42` **Text-only** — the `~` prefix bypasses the code lookup. Finds only descriptions / comments / titles that *mention* `PROJ-42`, never the ticket whose key is `PROJ-42`. Useful for tracing references without the noise of the ticket card on top. On Jira the text side searches `summary + description + comments` (the JQL `text ~` operator). On Linear it searches `title` only — the GraphQL filter doesn't expose body / comment search.
 - **Me**Show only issues assigned to you.
 - **Status**Multi-select grouped by type: backlog / unstarted / started / completed / cancelled. Falls back to statuses derived from loaded issues when the API returns none.
 - **Team / Project**Linear team or Jira project. Search box appears when more than 5 options exist. Jira fetches all paginated pages alphabetically.
-- **Issue Type**Jira only. Multi-select by type (Bug, Story, Task, Epic, Sub-taskâ€¦) with per-type colour indicators.
+- **Issue Type**Jira only. Multi-select by type (Bug, Story, Task, Epic, Sub-task…) with per-type colour indicators.
 - **Milestone**Linear project milestone or Jira fix version.
 - **Sprint / Cycle**Jira active sprint or Linear cycle.
 - **+**Open the Create Issue form.
 
 ### Issue card
 
-Priority emoji Â· Identifier (`ARB-123`) Â· Title Â· Labels Â· Status badge Â· Assignee avatar Â· Time-ago Â· Comment count. **Click** opens the detail modal, **right-click** the context menu.
+Priority emoji · Identifier (`ARB-123`) · Title · Labels · Status badge · Assignee avatar · Time-ago · Comment count. **Click** opens the detail modal, **right-click** the context menu.
 
 ### Ticket picker
 
-Appears when creating a branch via GitFlow or the graph context menu. Uses the active repo's tracker automatically â€” no need to open the sidebar first. Same filters as the sidebar; selecting an issue populates the branch name.
+Appears when creating a branch via GitFlow or the graph context menu. Uses the active repo's tracker automatically — no need to open the sidebar first. Same filters as the sidebar; selecting an issue populates the branch name.
 
 ## Detail modal
 
@@ -4192,43 +4193,43 @@ Click an issue card to open the full detail view: metadata sidebar, description,
 
 ### Description & comments rendering
 
-Bodies are rendered with full styling â€” headings, lists, code blocks, tables, blockquotes, panels, mentions, status lozenges:
+Bodies are rendered with full styling — headings, lists, code blocks, tables, blockquotes, panels, mentions, status lozenges:
 
 - **Linear**Markdown rendered in-app via the shared sanitised renderer (same used by PR/MR bodies). Inline HTML safelist supports collapsible `<details>` / `<summary>`, tables, blockquotes and code; fenced blocks without an explicit language are auto-detected (Rust, TOML, JSON, YAML, bash, TS/JS, markup) and highlighted with Prism.
-- **Jira**Server-rendered HTML via `expand=renderedFields` (covers ADF on Cloud and wiki markup on Server / Data Center). HTML is sanitized with `ammonia` before display â€” scripts, iframes, event handlers and inline styles are stripped; `class` survives so syntax highlighting and panel chrome land correctly.
+- **Jira**Server-rendered HTML via `expand=renderedFields` (covers ADF on Cloud and wiki markup on Server / Data Center). HTML is sanitized with `ammonia` before display — scripts, iframes, event handlers and inline styles are stripped; `class` survives so syntax highlighting and panel chrome land correctly.
 
 ### Attachments
 
 Jira issues with attached files show a grid of cards between the description and the linked commits. Each card has a type-aware icon (image / video / audio / pdf / archive / text / generic), filename, size, and MIME type.
 
-- **Click to download**Opens Arbor's in-app save picker with the original filename pre-filled. The fetch only starts after you confirm a destination â€” cancelling the picker is a true no-op.
-- **Authenticated & streamed**The download runs on the Tokio runtime off the UI thread, and the body is streamed chunk-by-chunk straight to disk â€” no whole-file buffering in RAM, no UI freeze.
+- **Click to download**Opens Arbor's in-app save picker with the original filename pre-filled. The fetch only starts after you confirm a destination — cancelling the picker is a true no-op.
+- **Authenticated & streamed**The download runs on the Tokio runtime off the UI thread, and the body is streamed chunk-by-chunk straight to disk — no whole-file buffering in RAM, no UI freeze.
 - **Host-locked**The backend rejects download URLs whose host doesn't match the configured Jira instance, so the IPC command can't be coerced into acting as a generic authenticated proxy.
-- **Status feedback**The card icon becomes a spinner while downloading and a green âœ“ on success; failures show a red border and a toast.
+- **Status feedback**The card icon becomes a spinner while downloading and a green ✓ on success; failures show a red border and a toast.
 
 ## Jira field mapping
 
 | Arbor concept | Jira field | Notes |
 | --- | --- | --- |
-| Teams | Projects | Project key used for JQL (project = "KEY") |
+| Teams | Projects | Project key used for JQL (`project = "KEY"`) |
 | Issue Type | Issue Type | Bug / Story / Task / Epic / Sub-task; colour per type |
-| Status | Status | Status category â†’ type (unstarted / started / completed) |
+| Status | Status | Status category → type (unstarted / started / completed) |
 | Labels | Labels | Plain strings; colour deterministic |
-| Priority | Priority | Highest â†’ Urgent, High, Medium, Low/Lowest |
+| Priority | Priority | Highest → Urgent, High, Medium, Low/Lowest |
 | Cycle | Sprint | Active sprints via Agile API (Jira Software only) |
 | Milestone | Fix Version | First fix version on the issue |
-| Estimate | Story Points | customfield_10016 |
+| Estimate | Story Points | `customfield_10016` |
 
 ## Create Issue
 
-Two-column form â€” title/description left, metadata right.
+Two-column form — title/description left, metadata right.
 
-- **Linear fields** — Team Â· Status Â· Priority Â· Project Â· Milestone Â· Assignee (self) Â· Labels Â· Due date Â· Estimate.
-- **Jira fields** — Project Req Â· Issue Type (default: Task) Â· Priority Â· Labels Â· Assignee (self) Â· Fix Version Â· Due date Â· Story Points.
+- **Linear fields** — Team · Status · Priority · Project · Milestone · Assignee (self) · Labels · Due date · Estimate.
+- **Jira fields** — Project Req · Issue Type (default: Task) · Priority · Labels · Assignee (self) · Fix Version · Due date · Story Points.
 
-## Plugin API â€” arbor.issues
+## Plugin API — `arbor.issues`
 
-Works identically for Linear and Jira â€” the active provider for each repo is resolved transparently.
+Works identically for Linear and Jira — the active provider for each repo is resolved transparently.
 
 | Field | Value |
 | --- | --- |
@@ -4250,11 +4251,11 @@ for _, issue in ipairs(issues) do
   print(issue.identifier, issue.title, issue.status.name)
 end
 
--- Transition issue (Jira resolves status ID â†’ workflow transition automatically)
+-- Transition issue (Jira resolves status ID → workflow transition automatically)
 arbor.issues.transition(issue.id, status_id)
 
 -- Add a comment
-arbor.issues.comment(issue.id, "Deployed to staging âœ“")
+arbor.issues.comment(issue.id, "Deployed to staging ✓")
 
 -- Branch name slug
 local branch = arbor.issues.branch_name(issue)
@@ -4266,8 +4267,8 @@ local branch = arbor.issues.branch_name(issue)
 
 | Constant | Event | Context fields |
 | --- | --- | --- |
-| hooks.ISSUE_LINKED | on_issue_linked | issue_id, identifier, sha, branch |
-| hooks.ISSUE_TRANSITIONED | on_issue_transitioned | issue_id, identifier, from_status, to_status |
+| `hooks.ISSUE_LINKED` | `on_issue_linked` | `issue_id`, `identifier`, `sha`, `branch` |
+| `hooks.ISSUE_TRANSITIONED` | `on_issue_transitioned` | `issue_id`, `identifier`, `from_status`, `to_status` |
 
 ---
 
@@ -4275,15 +4276,15 @@ local branch = arbor.issues.branch_name(issue)
 
 GitLab- and GitHub-native security posture inside Arbor: severity counters,
   risk score, vulnerabilities-over-time chart, and a virtualized findings
-  modal â€” gated automatically per repo so it shows up only where the provider
+  modal — gated automatically per repo so it shows up only where the provider
   has data.
 
-- **Vulnerability Report** — GraphQL: severity counts Â· time series Â· risk score Â· per-finding metadata. Ultimate-only fields degrade gracefully.
-- **GHAS Â· Dependabot Â· Secret Scanning** — Three REST sources merged into one finding list. Time series unavailable (GitHub doesn't expose it).
+- **Vulnerability Report** — GraphQL: severity counts · time series · risk score · per-finding metadata. Ultimate-only fields degrade gracefully.
+- **GHAS · Dependabot · Secret Scanning** — Three REST sources merged into one finding list. Time series unavailable (GitHub doesn't expose it).
 
 ## Authentication & visibility
 
-No extra setup â€” the same OAuth token used by the MR/CI panels is reused.
+No extra setup — the same OAuth token used by the MR/CI panels is reused.
   When the active tab's repo has a remote on a supported host, Arbor fires
   a lightweight provider probe (`supports_security`); the
   Activity Bar icon and the StatusBar chip become live as soon as it
@@ -4296,10 +4297,10 @@ Click the **ShieldAlert** icon in the left Activity Bar
   (top group, after Branches). The icon is always rendered; the panel
   itself decides what to show:
 
-- **Probing**Spinner + "Checking providerâ€¦" while the support probe is in flight.
+- **Probing**Spinner + "Checking provider…" while the support probe is in flight.
 - **Not available**Static copy explaining likely causes (no GitHub/GitLab remote, missing token, plan without scanning), with a Re-check button.
 - **Loading summary**Standard spinner for the headline fetch.
-- **Loaded**Filter bar Â· 6 severity counter cards Â· risk-score gauge + vulns-over-time chart Â· truncation note when the cap is hit.
+- **Loaded**Filter bar · 6 severity counter cards · risk-score gauge + vulns-over-time chart · truncation note when the cap is hit.
 
 ## Headline counters
 
@@ -4315,35 +4316,35 @@ The dashboard **always excludes resolved and dismissed findings**.
 
 ## Risk score & time series
 
-The risk gauge renders a 0â€“100 score with bands (Low / Medium / High /
-  Critical). The score is a host-side heuristic `(criticalÃ—10 + highÃ—5 + mediumÃ—2 + lowÃ—0.5)` capped at 100.
+The risk gauge renders a 0–100 score with bands (Low / Medium / High /
+  Critical). The score is a host-side heuristic `(critical×10 + high×5 + medium×2 + low×0.5)` capped at 100.
 
 The vulnerabilities-over-time chart pulls 30/60/90 day windows.
   GitLab Ultimate exposes `vulnerabilitiesCountByDay`; GitHub
   doesn't, so the chart is hidden on GitHub repos.
 
 When the panel is narrow, the gauge and chart automatically stack
-  vertically â€” the layout uses a CSS container query, so it tracks the
+  vertically — the layout uses a CSS container query, so it tracks the
   panel width rather than the viewport.
 
 ## Detail modal
 
 Opened from a counter card click. Layout:
 
-- **Header**Shield icon Â· risk pill Â· "Open in <provider>" external link.
-- **Tabs**Per-severity strip (`All | Critical | High | â€¦`) â€” counts dynamic, zero tabs disabled.
+- **Header**Shield icon · risk pill · "Open in <provider>" external link.
+- **Tabs**Per-severity strip (`All | Critical | High | …`) — counts dynamic, zero tabs disabled.
 - **Scope toggle**Two-button segmented control beside the tabs: `Active` (default) shows Detected + Confirmed, `Closed` shows Resolved + Dismissed. Persisted in `localStorage`.
-- **Progress bar**Indeterminate sliding bar at the top of the list region â€” shows during fetches AND during tab/scope swaps to mask the DOM-thrash on large severities.
-- **Virtualized list**Each row is a fixed 64px so the list can render 300+ findings as ~20 DOM nodes. Severity desc â†’ age desc sort.
+- **Progress bar**Indeterminate sliding bar at the top of the list region — shows during fetches AND during tab/scope swaps to mask the DOM-thrash on large severities.
+- **Virtualized list**Each row is a fixed 64px so the list can render 300+ findings as ~20 DOM nodes. Severity desc → age desc sort.
 - **Footer**"*Showing N of M findings*" plus a truncation hint when the host-side cap kicked in.
 
 ### Finding-detail modal
 
 Click any row in the list to open a dedicated **per-finding** modal that lifts the full payload above the aggregate view. Layout:
 
-- **Header**Severity chip Â· title Â· CVE / report-type chips Â· "Open in <provider>".
+- **Header**Severity chip · title · CVE / report-type chips · "Open in <provider>".
 - **Remediation** Prominent *"How to fix"* block when the provider exposes one.
-      GitLab â†’ `Vulnerability.solution` as-is. GitHub Dependabot â†’
+      GitLab → `Vulnerability.solution` as-is. GitHub Dependabot →
       synthetic hint built from `first_patched_version`: *"Upgrade `pkg` to `X` or later (vulnerable range: `R`)"*.
       Markdown-rendered, so links and code-fences in vendor advisories render
       correctly.
@@ -4352,7 +4353,7 @@ Click any row in the list to open a dedicated **per-finding** modal that lifts t
 
 ### Active vs Closed scope
 
-The toggle *only* affects the modal â€” the dashboard's counter
+The toggle *only* affects the modal — the dashboard's counter
   grid, gauge, chart, and the StatusBar chip always stay on the active
   scope. Switching to `Closed` refetches with `state: [RESOLVED, DISMISSED]` and lets you audit the
   finding hygiene without polluting the headline numbers.
@@ -4363,15 +4364,15 @@ Above the counter grid:
 
 - **Search**Host-side substring match on title + file path. 250 ms debounce.
 - **Severity multiselect**Narrows counters, chart, and the modal list.
-- **Type multiselect**Auto-populates from the loaded findings â€” `sast`, `dependency_scanning`, `secret_detection`, â€¦ etc.
-- **Clear**Resets severity / type / search but *preserves the state scope* â€” the user's scope choice is treated as a view mode, not a narrowing filter.
+- **Type multiselect**Auto-populates from the loaded findings — `sast`, `dependency_scanning`, `secret_detection`, … etc.
+- **Clear**Resets severity / type / search but *preserves the state scope* — the user's scope choice is treated as a view mode, not a narrowing filter.
 
 ## StatusBar chip
 
 Left side of the footer, right after the branch chip. Shield icon with
   a corner badge showing the total active finding count
   (`99+` when capped). Tooltip carries the per-severity
-  breakdown. Click â†’ floating Quick Overlay anchored to the left of the
+  breakdown. Click → floating Quick Overlay anchored to the left of the
   footer with the full severity rundown plus *Open dashboard* / *Open in provider* shortcuts.
 
 ## Caching
@@ -4379,16 +4380,16 @@ Left side of the footer, right after the branch chip. Shield icon with
 The store dedupes concurrent IPC calls and persists the user-facing knobs:
 
 - **Probe cache**Per-tab support result kept in memory for the session. Refreshing the panel invalidates it.
-- **In-flight dedup**`loadSummary` / `loadFindings` share a single Promise per tab â€” the AppShell pre-load and the panel mount fetch can fire concurrently without racing each other into a stuck loading state.
+- **In-flight dedup**`loadSummary` / `loadFindings` share a single Promise per tab — the AppShell pre-load and the panel mount fetch can fire concurrently without racing each other into a stuck loading state.
 - **localStorage**Range (30/60/90), severity filter, report-type filter, state scope.
 
 ## Lua API
 
 Plugins read posture data via `arbor.security.*`. The token
-  never leaves the host â€” provider permission gate is the same `provider = "read"` flag used by `arbor.mr.*` and `arbor.ci.*`.
+  never leaves the host — provider permission gate is the same `provider = "read"` flag used by `arbor.mr.*` and `arbor.ci.*`.
 
 ```lua
--- Cheap probe â€” false for tokenless repos / providers without a dashboard
+-- Cheap probe — false for tokenless repos / providers without a dashboard
 local ok, err = arbor.security.supports({ repo_id = "myrepo" })
 
 -- Headline summary (active findings only). Same shape the panel renders.
@@ -4415,9 +4416,9 @@ for _, f in ipairs(list) do
   -- f.solution is non-nil on GitLab and on GitHub Dependabot (synthetic
   -- "Upgrade ... to X" hint from first_patched_version). On code-scanning
   -- and secret-scanning it stays nil.
-  arbor.log.info("[%s] %s â€” %s%s",
+  arbor.log.info("[%s] %s — %s%s",
                  f.severity, f.title, f.web_url or "no url",
-                 f.solution and (" Â· fix: " .. f.solution) or "")
+                 f.solution and (" · fix: " .. f.solution) or "")
 end
 ```
 
@@ -4434,14 +4435,14 @@ Two hooks contribute to the `security` category:
 | `on_security_finding_state_changed` | A plugin-cooperation channel: when a plugin observes a finding moving
     between active and closed states (e.g. a periodic rescan), it can
     emit this hook so other plugins can react. The host itself does NOT
-    emit it on every fetch â€” keeps the channel signal-only.
+    emit it on every fetch — keeps the channel signal-only.
     Payload: `{ tab_id, finding_id, severity, from_state?, to_state, title?, web_url? }`. |
 
 ### Example: notify on new Critical findings
 
 ```lua
 -- plugins/security-watch/main.lua
-local last_critical = {}   -- repo_id â†’ previous critical count
+local last_critical = {}   -- repo_id → previous critical count
 
 arbor.events.on("on_security_summary_loaded", function(ctx)
   local prev = last_critical[ctx.tab_id] or 0
@@ -4449,7 +4450,7 @@ arbor.events.on("on_security_summary_loaded", function(ctx)
   if now > prev then
     arbor.notify({
       title   = "New critical vulnerabilities",
-      message = string.format("%s: %d new (was %d) â€” open the dashboard.",
+      message = string.format("%s: %d new (was %d) — open the dashboard.",
                               ctx.tab_id, now - prev, prev),
       level   = "warning",
     })
@@ -4472,15 +4473,15 @@ provider = "read"   # read-only access to MR/CI/security
 
 | Capability | GitLab | GitHub |
 | --- | --- | --- |
-| Dashboard probe | GraphQL (vulnerabilitySeveritiesCount + vulnerabilities) | REST x3 (code-scanning Â· dependabot Â· secret-scanning) |
+| Dashboard probe | GraphQL (`vulnerabilitySeveritiesCount` + `vulnerabilities`) | REST x3 (code-scanning · dependabot · secret-scanning) |
 | Severity counts | Server-side, state-filtered | Computed host-side from open alerts |
-| Time series | Ultimate-only via vulnerabilitiesCountByDay | Not exposed â†’ chart hidden |
+| Time series | Ultimate-only via `vulnerabilitiesCountByDay` | Not exposed → chart hidden |
 | Risk score | Heuristic (host-side) | Heuristic (host-side) |
 | Self-hosted | Host-keyed PAT in keychain | n/a |
 
 ---
 
-# Deep Links (arbor://)
+# Deep Links (`arbor://`)
 
 Arbor registers the `arbor://` URI scheme on your OS so links shared by colleagues,
   CI bots, browser extensions, or desktop shortcuts can drop you straight into the right place
@@ -4498,12 +4499,12 @@ Every URL identifies the **repository** with a `?url=` query parameter
 
 | URL | Action |
 | --- | --- |
-| arbor://repo/open?url=<url> | Open the repository (or clone it) |
-| arbor://commit/<sha>?url=<url> | Switch to the repo and jump to a commit in the graph |
-| arbor://branch/<name>?url=<url>&checkout=1 | Stash-safe checkout of the named branch |
-| arbor://branch/<name>?url=<url>&worktree=1 | Open the "Add worktree" dialog pre-filled with the branch |
-| arbor://mr/open/<number>?url=<url> | Open the merge / pull request detail modal |
-| arbor://pipeline/<run-id>?url=<url> | Open the CI pipeline run detail modal |
+| `arbor://repo/open?url=<url>` | Open the repository (or clone it) |
+| `arbor://commit/<sha>?url=<url>` | Switch to the repo and jump to a commit in the graph |
+| `arbor://branch/<name>?url=<url>&checkout=1` | Stash-safe checkout of the named branch |
+| `arbor://branch/<name>?url=<url>&worktree=1` | Open the "Add worktree" dialog pre-filled with the branch |
+| `arbor://mr/open/<number>?url=<url>` | Open the merge / pull request detail modal |
+| `arbor://pipeline/<run-id>?url=<url>` | Open the CI pipeline run detail modal |
 
 ## Generating links from inside Arbor
 
@@ -5237,14 +5238,14 @@ The toggle is global and persisted; turning it off (default) restores the
 
 ---
 
-# Plugin Development â€” Basics
+# Plugin Development — Basics
 
 Arbor embeds **Lua 5.4** via the `mlua` crate. Plugins live in `plugins/<name>/` next to the executable and need only a `plugin.toml` manifest plus an entry-point Lua file.
 
 | Field | Value |
 | --- | --- |
-| Runtime | Lua 5.4 (vendored) â€” no system Lua needed |
-| Manifest | `plugin.toml` â€” required |
+| Runtime | Lua 5.4 (vendored) — no system Lua needed |
+| Manifest | `plugin.toml` — required |
 | Entry point | `main.lua` by default; override with `entry` |
 | API version | Declare minimum required via `arbor_api` |
 | Sandbox | `require()` scoped to the plugin dir; dangerous stdlib removed |
@@ -5254,50 +5255,50 @@ Arbor embeds **Lua 5.4** via the `mlua` crate. Plugins live in `plugins/<name>/`
 ```
 plugins/
   my-plugin/
-    plugin.toml       â† manifest (required)
-    main.lua          â† entry point (default; override with entry = "â€¦")
-    doc.html          â† optional: HTML docs shown in this panel under Plugins
-    lib/utils.lua     â† require("lib.utils") works inside the plugin sandbox
+    plugin.toml       ← manifest (required)
+    main.lua          ← entry point (default; override with entry = "…")
+    doc.html          ← optional: HTML docs shown in this panel under Plugins
+    lib/utils.lua     ← require("lib.utils") works inside the plugin sandbox
     config/
-      global.lua      â† optional sub-modules
+      global.lua      ← optional sub-modules
 ```
 
 ## Installing & sharing plugins
 
-Open the **Plugin Manager** (Activity Bar â†’ puzzle icon) â€” the top-right toolbar exposes two shortcuts that avoid hand-editing files on disk:
+Open the **Plugin Manager** (Activity Bar → puzzle icon) — the top-right toolbar exposes two shortcuts that avoid hand-editing files on disk:
 
-- **Import from .zip** — The Upload icon opens a file picker; pick a plugin archive and Arbor extracts it into plugins/<name>/, then reloads. The zip must contain a top-level plugin.toml (either at the archive root or inside a single wrapping folder). Existing folders with the same name are refused â€” delete the old copy first. Imported plugins land disabled by default â€” review the manifest's [permissions], then click the Power icon on the plugin card to enable.
-- **Export Template wizard** — The Wand icon opens a 4-step wizard (Identity â†’ Permissions â†’ Hooks â†’ Recipes) that scaffolds a starter plugin and saves it as a zip. Each toggled recipe (command palette entry, keybinding, settings panel, modal form, toolbar action, sidebar, notification, background job, scheduler, HTTP) injects a canonical Lua snippet into main.lua. The bundle ships with sdk.d.lua + .luarc.json so lua-language-server provides arbor.* autocomplete in any editor.
+- **Import from .zip** — The Upload icon opens a file picker; pick a plugin archive and Arbor extracts it into plugins/<name>/, then reloads. The zip must contain a top-level plugin.toml (either at the archive root or inside a single wrapping folder). Existing folders with the same name are refused — delete the old copy first. Imported plugins land disabled by default — review the manifest's [permissions], then click the Power icon on the plugin card to enable.
+- **Export Template wizard** — The Wand icon opens a 4-step wizard (Identity → Permissions → Hooks → Recipes) that scaffolds a starter plugin and saves it as a zip. Each toggled recipe (command palette entry, keybinding, settings panel, modal form, toolbar action, sidebar, notification, background job, scheduler, HTTP) injects a canonical Lua snippet into main.lua. The bundle ships with sdk.d.lua + .luarc.json so lua-language-server provides arbor.* autocomplete in any editor.
 
-> ℹ Once exported, unzip into `plugins/<name>/` and click **Reload** in the Plugin Manager â€” or hand the zip to another user and have them *Import* it.
+> ℹ Once exported, unzip into `plugins/<name>/` and click **Reload** in the Plugin Manager — or hand the zip to another user and have them *Import* it.
 
 ## Managing installed plugins
 
-The Plugin Manager lists every plugin discovered in `plugins/`. Each row exposes a fixed action column on the right (left â†’ right):
+The Plugin Manager lists every plugin discovered in `plugins/`. Each row exposes a fixed action column on the right (left → right):
 
 | Icon | Action | Behaviour |
 | --- | --- | --- |
-| âš™ï¸ Settings | Open the plugin's settings panel | Visible only when the plugin registered a settings container via arbor.ui.settings.panel(...). Disabled while the plugin is off. |
-| â„¹ï¸ Info | Open the Plugin Info modal | Detailed read-out of identity, permissions, hooks, schedulers + maintenance actions (see below). |
-| ðŸ—‘ Uninstall | Permanently remove the plugin | Deletes the plugins/<name>/ folder, the global plugin_data/<name>/ store, every per-repo .arbor/plugins/<name>/, and the persisted enable-state. Shows a cascade-warning modal if other enabled plugins still depend on it. |
-| â» Power | Enable / Disable | Persisted across restarts. Disabling stops every scheduler, fires on_plugin_unload, and closes any sidebar / panel that the plugin owned. Re-enabling reloads the plugin and re-fires on_plugin_load. |
+| ⚙️ **Settings** | Open the plugin's settings panel | Visible only when the plugin registered a settings container via `arbor.ui.settings.panel(...)`. Disabled while the plugin is off. |
+| ℹ️ **Info** | Open the *Plugin Info* modal | Detailed read-out of identity, permissions, hooks, schedulers + maintenance actions (see below). |
+| 🗑 **Uninstall** | Permanently remove the plugin | Deletes the `plugins/<name>/` folder, the global `plugin_data/<name>/` store, every per-repo `.arbor/plugins/<name>/`, and the persisted enable-state. Shows a cascade-warning modal if other enabled plugins still depend on it. |
+| ⏻ **Power** | Enable / Disable | Persisted across restarts. Disabling stops every scheduler, fires `on_plugin_unload`, and closes any sidebar / panel that the plugin owned. Re-enabling reloads the plugin and re-fires `on_plugin_load`. |
 
 ### Master kill-switch
 
-The toggle at the top of the modal â€” *Abilita gestione plugin* â€” is the **master kill-switch**. While it is off, the runtime is empty: nothing is loaded at startup, no schedulers fire, the contribution registry is wiped, and the per-plugin list is hidden until the switch is flipped back on. Useful for diagnosing whether a misbehaving plugin is the cause of an issue.
+The toggle at the top of the modal — *Abilita gestione plugin* — is the **master kill-switch**. While it is off, the runtime is empty: nothing is loaded at startup, no schedulers fire, the contribution registry is wiped, and the per-plugin list is hidden until the switch is flipped back on. Useful for diagnosing whether a misbehaving plugin is the cause of an issue.
 
 ### Plugin Info modal
 
 Opened from the **Info** icon. Six grouped sections:
 
 - **Identity** — Name, version, author, license, declared arbor_api, repository link (clickable, opens in the system browser) and keyword chips.
-- **Schedulers** — One row per arbor.scheduler.register call with the action name, trigger summary (every 5m, cron(â€¦), â€¦) and a per-action toggle. The header row exposes Enable all / Disable all bulk buttons. Toggling a single schedule calls start_plugin_scheduler / stop_plugin_scheduler on the backend; the change is in-memory only â€” restarting Arbor re-applies the manifest defaults.
-- **Permissions** — Coloured pills (safe / warn / danger) for filesystem scope, network allow-list, git capability tier and terminal access â€” same chips shown when reviewing imported plugins.
+- **Schedulers** — One row per arbor.scheduler.register call with the action name, trigger summary (every 5m, cron(…), …) and a per-action toggle. The header row exposes Enable all / Disable all bulk buttons. Toggling a single schedule calls start_plugin_scheduler / stop_plugin_scheduler on the backend; the change is in-memory only — restarting Arbor re-applies the manifest defaults.
+- **Permissions** — Coloured pills (safe / warn / danger) for filesystem scope, network allow-list, git capability tier and terminal access — same chips shown when reviewing imported plugins.
 - **Hooks** — Lists every [hooks] entry the manifest opted into so reviewers can see at a glance which lifecycle events the plugin observes.
-- **Maintenance Â· Open settings** — Shortcut to the plugin's settings container without first closing the modal. Disabled when the plugin is off or hasn't registered one.
-- **Maintenance Â· Clear settings cache** — Two-step destructive button (first click arms it red, second click confirms). Wipes every persisted setting written by this plugin (global + per-repo) â€” the plugin's own folder and code stay untouched. Use after schema breaking changes or to reset a misbehaving config.
+- **Maintenance · Open settings** — Shortcut to the plugin's settings container without first closing the modal. Disabled when the plugin is off or hasn't registered one.
+- **Maintenance · Clear settings cache** — Two-step destructive button (first click arms it red, second click confirms). Wipes every persisted setting written by this plugin (global + per-repo) — the plugin's own folder and code stay untouched. Use after schema breaking changes or to reset a misbehaving config.
 
-> ℹ The Info modal stays in sync with backend events â€” reloading plugins or toggling the master switch refreshes its content automatically.
+> ℹ The Info modal stays in sync with backend events — reloading plugins or toggling the master switch refreshes its content automatically.
 
 ## plugin.toml
 
@@ -5312,7 +5313,7 @@ repository  = "https://github.com/you/my-plugin"
 keywords          = ["git", "tool"]
 min_arbor_version = "0.1.0"  # optional; rejects plugin on older builds (semver)
 arbor_api         = 1        # minimum Arbor plugin API version required
-os                = []       # ["windows", "linux", "macos"] â€” empty = cross-platform
+os                = []       # ["windows", "linux", "macos"] — empty = cross-platform
 entry             = "main.lua" # default; can be changed
 doc_file          = "doc.html" # optional: HTML file shown in the Docs panel
 
@@ -5327,8 +5328,8 @@ terminal             = "none"      # none | commands | any
 terminal_scope       = []          # allowed command basenames when terminal = "commands"
 # env_read accepts: true (all vars) | false (no os.getenv) | allowlist of names
 env_read             = ["PATH", "JAVA_HOME"]
-# service_call         = false    # arbor.service.call â€” invoke services from other plugins
-# service_export       = false    # arbor.service.export â€” expose callable services
+# service_call         = false    # arbor.service.call — invoke services from other plugins
+# service_export       = false    # arbor.service.export — expose callable services
 # settings_read_others = false    # arbor.settings.read other plugins' globals
 
 [hooks]
@@ -5353,32 +5354,32 @@ on_stash_pop     = true
 on_rebase_start  = true
 on_rebase_abort  = true
 
-# Background scheduler â€” opt-in only. Schedule data (action, trigger,
-# focus gating, â€¦) is declared from main.lua via arbor.scheduler.register.
+# Background scheduler — opt-in only. Schedule data (action, trigger,
+# focus gating, …) is declared from main.lua via arbor.scheduler.register.
 [scheduler]
 enabled = true
 
 # Settings UI is no longer declared in plugin.toml. Plugins register a
-# panel at runtime via `arbor.ui.settings.panel(...)` â€” see Plugin
-# Development â†’ API: UI for the contribution-based settings model.
+# panel at runtime via `arbor.ui.settings.panel(...)` — see Plugin
+# Development → API: UI for the contribution-based settings model.
 ```
 
 ## Plugin documentation (doc.html)
 
-Set `doc_file = "doc.html"` in your manifest to expose plugin-specific documentation under the **Plugins** group in the left nav. Plain HTML â€” styles from the host docs apply automatically.
+Set `doc_file = "doc.html"` in your manifest to expose plugin-specific documentation under the **Plugins** group in the left nav. Plain HTML — styles from the host docs apply automatically.
 
 ### Supported elements
 
 | Tag | Renders as |
 | --- | --- |
-| <h1> | Section title (large, bottom border) |
-| <h2> | Sub-heading (small caps, accent) |
-| <h3> / <h4> | Tertiary / quaternary heading |
-| <p> Â· <ul> Â· <ol> | Body text and lists |
-| <strong> | Bold, primary text colour |
-| <code> Â· <pre><code> | Inline / block monospace |
-| <kbd> | Keyboard key chip |
-| <table> | Styled data table |
+| `<h1>` | Section title (large, bottom border) |
+| `<h2>` | Sub-heading (small caps, accent) |
+| `<h3>` / `<h4>` | Tertiary / quaternary heading |
+| `<p>` · `<ul>` · `<ol>` | Body text and lists |
+| `<strong>` | Bold, primary text colour |
+| `<code>` · `<pre><code>` | Inline / block monospace |
+| `<kbd>` | Keyboard key chip |
+| `<table>` | Styled data table |
 
 > ℹ CSS variables like `var(--accent)`, `var(--text-secondary)`, `var(--bg-overlay)` are available for custom inline styling.
 
@@ -5389,8 +5390,8 @@ Set `doc_file = "doc.html"` in your manifest to expose plugin-specific documenta
 
 <h2>Getting Started</h2>
 <ol>
-  <li>Open a repo â€” the plugin activates automatically.</li>
-  <li>Click <strong>â–¶</strong> in the Activity Bar to run.</li>
+  <li>Open a repo — the plugin activates automatically.</li>
+  <li>Click <strong>▶</strong> in the Activity Bar to run.</li>
 </ol>
 
 <h2>Permissions</h2>
@@ -5405,20 +5406,20 @@ Set `doc_file = "doc.html"` in your manifest to expose plugin-specific documenta
 ## main.lua skeleton
 
 ```lua
--- main.lua â€” thin wiring file
+-- main.lua — thin wiring file
 -- Register UI elements, subscribe to hooks. Keep logic in sub-modules.
 
 local state = require("state")        -- sub-module inside this plugin dir
 
--- â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Lifecycle ──────────────────────────────────────────────────────────────────
 -- on_plugin_load fires once AFTER main.lua finishes executing.
 -- Ideal for one-time initialisation (load settings, register combos, etc.)
 arbor.events.on("on_plugin_load", function(ctx)
-  arbor.log.info("loaded â€” api_version=" .. ctx.api_version)
+  arbor.log.info("loaded — api_version=" .. ctx.api_version)
   state.init()
 end)
 
--- â”€â”€ Hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Hooks ──────────────────────────────────────────────────────────────────────
 arbor.events.on("on_repo_open", function(ctx)
   state.set_repo(ctx.repo)
   arbor.log.debug("repo_open: " .. ctx.repo)
@@ -5429,39 +5430,39 @@ arbor.events.on("on_commit", function(ctx)
 end)
 
 arbor.events.on("on_branch_rename", function(ctx)
-  -- ctx.tab_id   : string  â€” the repository tab
-  -- ctx.old_name : string  â€” previous branch name
-  -- ctx.new_name : string  â€” new branch name
+  -- ctx.tab_id   : string  — the repository tab
+  -- ctx.old_name : string  — previous branch name
+  -- ctx.new_name : string  — new branch name
   arbor.log.info("Branch renamed: " .. ctx.old_name .. " -> " .. ctx.new_name)
 end)
 
--- â”€â”€ UI registrations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── UI registrations ───────────────────────────────────────────────────────────
 arbor.ui.add_context_menu_item({ target = "commit", label = "Inspect", action = "my_plugin:inspect", icon = "Search" })
 ```
 
 ## require() sandbox
 
-`require()` inside a plugin is sandboxed to the plugin directory. Dots in the module name are converted to path separators (`require("lib.utils")` â†’ `plugins/my-plugin/lib/utils.lua`). Path traversal attempts (`../`) raise a Lua error. Standard Lua packages (`string`, `table`, `math`, `os`) are always available.
+`require()` inside a plugin is sandboxed to the plugin directory. Dots in the module name are converted to path separators (`require("lib.utils")` → `plugins/my-plugin/lib/utils.lua`). Path traversal attempts (`../`) raise a Lua error. Standard Lua packages (`string`, `table`, `math`, `os`) are always available.
 
 ## Multi-file plugin layout (recommended)
 
 ```
 plugins/compile-action/
   plugin.toml
-  main.lua              â† thin wiring: require sub-modules, register hooks/UI
-  state.lua             â† shared mutable state (current repo, running job IDs)
-  detect.lua            â† project type auto-detection (Maven/Gradle/npm/â€¦)
-  defaults.lua          â† default build configs per project type
-  run_defaults.lua      â† default run configs per project type
+  main.lua              ← thin wiring: require sub-modules, register hooks/UI
+  state.lua             ← shared mutable state (current repo, running job IDs)
+  detect.lua            ← project type auto-detection (Maven/Gradle/npm/…)
+  defaults.lua          ← default build configs per project type
+  run_defaults.lua      ← default run configs per project type
   config/
-    global.lua          â† global build settings CRUD + form
-    project.lua         â† per-repo build settings CRUD + form
-    run_global.lua      â† global run settings CRUD + form (+ auto_stop global default)
-    run_project.lua     â† per-repo run settings CRUD + form (+ tomcat_home, auto_stop override)
-    jdk.lua             â† JDK registry (shared by build + run)
+    global.lua          ← global build settings CRUD + form
+    project.lua         ← per-repo build settings CRUD + form
+    run_global.lua      ← global run settings CRUD + form (+ auto_stop global default)
+    run_project.lua     ← per-repo run settings CRUD + form (+ tomcat_home, auto_stop override)
+    jdk.lua             ← JDK registry (shared by build + run)
   ui/
-    combo.lua           â† build combo (Hammer icon)
-    run_combo.lua       â† run combo (Play icon)
+    combo.lua           ← build combo (Hammer icon)
+    run_combo.lua       ← run combo (Play icon)
 ```
 
 ```lua
@@ -5471,8 +5472,8 @@ local combo     = require("ui.combo")
 local run_combo = require("ui.run_combo")
 
 arbor.events.on("on_plugin_load", function(ctx)
-  combo.register()      -- ðŸ”¨ Build combo (right)
-  run_combo.register()  -- â–¶  Run combo (left)
+  combo.register()      -- 🔨 Build combo (right)
+  run_combo.register()  -- ▶  Run combo (left)
 
   arbor.keybinding.register({ key = "F9", action = "compile:run", description = "Build selected" })
   arbor.keybinding.register({ key = "F5", action = "run:run",     description = "Run selected"   })
@@ -5506,59 +5507,59 @@ Accepted semver operators: `=`, `>`, `>=`, `<`, `<=`, `~`, `^`, plus exact versi
 ### Load ordering & errors
 
 - **Topo-sort**At startup all manifests are topologically sorted so each plugin loads *after* its dependencies. Cycles are rejected with a descriptive error; involved plugins show greyed-out in the Plugin Manager.
-- **Unmet dep**Missing or version-mismatched dependency â†’ plugin skipped, red banner on the card.
-- **Optional**`optional = true` downgrades the error to a log warning. Your plugin still loads â€” guard calls that depend on the other plugin's presence.
+- **Unmet dep**Missing or version-mismatched dependency → plugin skipped, red banner on the card.
+- **Optional**`optional = true` downgrades the error to a log warning. Your plugin still loads — guard calls that depend on the other plugin's presence.
 
 ### Dependency graph & cascade warnings
 
 The Plugin Manager exposes a **Network** icon opening the *Plugin Dependency Graph* modal. Each plugin row reveals:
 
 - **Depends on** — Plugins your plugin declares, with version requirements and optional/unmet tags.
-- **Required by** — Plugins that currently depend on yours â€” follow arrows backward to see who'd break if you disabled it.
+- **Required by** — Plugins that currently depend on yours — follow arrows backward to see who'd break if you disabled it.
 
 > ℹ Disabling a plugin that others require shows a **cascade-warning** modal listing affected dependents; explicit confirmation is required.
 
 ## Permissions reference
 
-Declared once in `[permissions]` of `plugin.toml`. Capability is enforced at Lua call-time â€” trying to use a disabled API raises a runtime error.
+Declared once in `[permissions]` of `plugin.toml`. Capability is enforced at Lua call-time — trying to use a disabled API raises a runtime error.
 
 | Key | Value | Enables |
 | --- | --- | --- |
-| network | string[] | Allowed hostnames for arbor.http.get. Exact match or registrable suffix ("maven.org" permits repo1.maven.org and itself). Use ["*"] for any host. Empty list = no network. |
-| fs | "none" default | No arbor.fs.* access |
-| "read" | Read-only filesystem ops (read / list / glob / exists / is_file / is_dir) |
-| "write" | Read + write (write / append / touch / move / delete / copy / json_set / yaml_set / toml_set) |
-| fs_scope | [] default | Sandboxed to the active repo's directory. Use ["*"] instead when the plugin writes to user-picked paths via arbor.ui.pick_file{ mode = "save" } â€” the sandbox would otherwise reject anything outside the repo (e.g. ~/Downloads/foo.md). |
-| ["*"] | Unrestricted â€” any path on disk |
-| ["/abs/path", â€¦] | Allow these absolute paths in addition to the active repo |
-| git | "none" default | No arbor.repo.* / arbor.notes.* access |
-| "read" | arbor.repo.current / branch / is_dirty / remote / branches / tags + arbor.notes.list / get |
-| "write" | Read + non-destructive writes (fetch_active_tab, clone, notes.set / delete) |
-| "history_rewrite" | Write + destructive history ops (rebase, reset --hard, force-push, amend, filter-branch). Granted separately because these can permanently destroy work. |
-| issues | "none" default | No arbor.issues.* access |
-| "read" | arbor.issues.search(), arbor.issues.get() |
-| "write" | Read + arbor.issues.transition(), arbor.issues.comment() |
-| provider | "none" default | No arbor.mr.* / arbor.ci.* access |
-| "read" | arbor.mr.list, arbor.mr.current_user, arbor.ci.runs â€” credential-blind: tokens stay in the OS keyring |
-| "write" | Reserved for future MR/CI mutations (create / comment / retrigger) |
-| toolchain | "none" default | No arbor.toolchain.* access |
-| "read" | list, active, env, detect |
-| "write" | Read + add, remove, set_active |
-| terminal | "none" default | No arbor.terminal.exec() |
-| "any" | Any command allowed |
-| "commands" | Only basenames listed in terminal_scope allowed |
-| env_read | true default | os.getenv() reads any environment variable |
-| false | os.getenv is removed from the sandbox |
-| ["PATH", "JAVA_HOME"] | Allowlist â€” only listed names return a value, others return nil |
-| service_export | bool | arbor.service.export / unexport / list_own â€” expose callable services |
-| service_call | bool | arbor.service.call / list â€” invoke services from other plugins |
-| settings_read_others | bool | arbor.settings.read(plugin, key) â€” read other plugins' globals (own settings always readable) |
+| `network` | string[] | Allowed hostnames for `arbor.http.get`. Exact match or registrable suffix (`"maven.org"` permits `repo1.maven.org` and itself). Use `["*"]` for any host. Empty list = no network. |
+| `fs` | `"none"` `default` | No `arbor.fs.*` access |
+| `"read"` | Read-only filesystem ops (`read / list / glob / exists / is_file / is_dir`) |
+| `"write"` | Read + write (`write / append / touch / move / delete / copy / json_set / yaml_set / toml_set`) |
+| `fs_scope` | `[]` `default` | Sandboxed to the active repo's directory. **Use `["*"]` instead when the plugin writes to user-picked paths via `arbor.ui.pick_file{ mode = "save" }`** — the sandbox would otherwise reject anything outside the repo (e.g. `~/Downloads/foo.md`). |
+| `["*"]` | Unrestricted — any path on disk |
+| `["/abs/path", …]` | Allow these absolute paths in addition to the active repo |
+| `git` | `"none"` `default` | No `arbor.repo.*` / `arbor.notes.*` access |
+| `"read"` | `arbor.repo.current / branch / is_dirty / remote / branches / tags` + `arbor.notes.list / get` |
+| `"write"` | Read + non-destructive writes (`fetch_active_tab`, `clone`, `notes.set / delete`) |
+| `"history_rewrite"` | Write + destructive history ops (rebase, `reset --hard`, force-push, amend, filter-branch). Granted separately because these can permanently destroy work. |
+| `issues` | `"none"` `default` | No `arbor.issues.*` access |
+| `"read"` | `arbor.issues.search()`, `arbor.issues.get()` |
+| `"write"` | Read + `arbor.issues.transition()`, `arbor.issues.comment()` |
+| `provider` | `"none"` `default` | No `arbor.mr.*` / `arbor.ci.*` access |
+| `"read"` | `arbor.mr.list`, `arbor.mr.current_user`, `arbor.ci.runs` — credential-blind: tokens stay in the OS keyring |
+| `"write"` | Reserved for future MR/CI mutations (create / comment / retrigger) |
+| `toolchain` | `"none"` `default` | No `arbor.toolchain.*` access |
+| `"read"` | `list`, `active`, `env`, `detect` |
+| `"write"` | Read + `add`, `remove`, `set_active` |
+| `terminal` | `"none"` `default` | No `arbor.terminal.exec()` |
+| `"any"` | Any command allowed |
+| `"commands"` | Only basenames listed in `terminal_scope` allowed |
+| `env_read` | `true` `default` | `os.getenv()` reads any environment variable |
+| `false` | `os.getenv` is removed from the sandbox |
+| `["PATH", "JAVA_HOME"]` | Allowlist — only listed names return a value, others return `nil` |
+| `service_export` | bool | `arbor.service.export / unexport / list_own` — expose callable services |
+| `service_call` | bool | `arbor.service.call / list` — invoke services from other plugins |
+| `settings_read_others` | bool | `arbor.settings.read(plugin, key)` — read other plugins' globals (own settings always readable) |
 
-> **Sandbox hardening** These Lua functions are removed from the sandbox: `os.execute`, `os.exit`, `os.remove`, `os.rename`, `io.*`, `load`, `loadfile`, `dofile`. The `terminal` permission is captured at plugin load time â€” it cannot be escalated by overwriting a Lua global.
+> **Sandbox hardening** These Lua functions are removed from the sandbox: `os.execute`, `os.exit`, `os.remove`, `os.rename`, `io.*`, `load`, `loadfile`, `dofile`. The `terminal` permission is captured at plugin load time — it cannot be escalated by overwriting a Lua global.
 
 ---
 
-# Plugin Development â€” Hooks & Events
+# Plugin Development — Hooks & Events
 
 Declare which hooks your plugin subscribes to via boolean flags in `[hooks]`.
   Register handlers in Lua with `arbor.events.on("hook_name", fn)`. The full
@@ -5570,13 +5571,13 @@ Declare which hooks your plugin subscribes to via boolean flags in `[hooks]`.
 -- arbor.notify level
 "info" | "success" | "warning" | "error"     -- default "info"
 
--- arbor.log.LEVELS â€” autocomplete-friendly aliases for the bare strings
+-- arbor.log.LEVELS — autocomplete-friendly aliases for the bare strings
 arbor.log.LEVELS.DEBUG  -- "debug"
 arbor.log.LEVELS.INFO   -- "info"
 arbor.log.LEVELS.WARN   -- "warn"
 arbor.log.LEVELS.ERROR  -- "error"
 
--- Manifest enum strings (used only inside plugin.toml â€” not at runtime)
+-- Manifest enum strings (used only inside plugin.toml — not at runtime)
 -- terminal: "none" | "commands" | "any"
 -- fs:       "none" | "read" | "write"
 -- git:      "none" | "read" | "write" | "history_rewrite"
@@ -5587,73 +5588,73 @@ arbor.log.LEVELS.ERROR  -- "error"
 
 | Hook (TOML key & event name) | Context fields |
 | --- | --- |
-| â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_plugin_load | plugin_name, dir, api_version |
-| on_repo_open | tab_id, path, name |
-| on_repo_close | tab_id, path, name |
-| on_repo_init | path, name, default_branch, provider, remote_url, has_readme, license, gitignore |
-| on_repo_deregistered | repo_id, path, name, reason |
-| on_project_missing | repo_id, path, name, reason ("missing" \| "unreachable" \| "not_a_repo") |
-| on_project_relocated | repo_id, old_path, new_path, name, remote_url |
-| on_tab_switch | tab_id |
-| â”€â”€ Git operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_pre_commit | tab_id, message, amend â€” vetoable (return a string to block) |
-| on_commit | tab_id, oid, message, amend |
-| on_push | tab_id, remote, refspec, force |
-| on_pull | tab_id, remote |
-| on_fetch | tab_id, remote |
-| on_checkout | tab_id, branch or oid (detached) |
-| â”€â”€ Branch / tag â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_branch_create | tab_id, name, from_oid |
-| on_branch_delete | tab_id, name or names[] (bulk delete) |
-| on_branch_rename | tab_id, old_name, new_name |
-| on_tag_create | tab_id, name, oid, annotated |
-| on_tag_delete | tab_id, name |
-| â”€â”€ Stash â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_stash_push | tab_id, index, message, include_untracked |
-| on_stash_pop | tab_id, index, drop (true=pop, false=apply) |
-| â”€â”€ Rebase â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_rebase_start | tab_id, base, action_count |
-| on_rebase_abort | tab_id |
-| â”€â”€ Git Flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_flow_init | tab_id |
-| on_flow_feature_start | tab_id, name |
-| on_flow_feature_finish | tab_id, name |
-| on_flow_release_start | tab_id, version |
-| on_flow_release_finish | tab_id, version |
-| on_flow_hotfix_start | tab_id, name |
-| on_flow_hotfix_finish | tab_id, name |
-| â”€â”€ Pipelines â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_pipeline_run_request | pipeline_id, tab_id? â€” fired only when the user presses Play on a stub def (empty stages); defs with non-empty stages are replayed directly. Handler must compile stages and call arbor.pipeline.run |
-| on_pipeline_started | run_id, pipeline_id, plugin |
-| on_pipeline_step_done | run_id, stage, step, exit_code |
-| on_pipeline_done | run_id, plugin, status |
-| â”€â”€ Merge Requests / Pull Requests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_mr_opened | number, title, source_branch, target_branch, provider |
-| on_mr_merged | number, provider |
-| on_mr_updated | number, provider |
-| â”€â”€ Issues â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_issue_linked | issue_id, identifier, sha, branch |
-| on_issue_transitioned | issue_id, identifier, from_status, to_status |
-| â”€â”€ Git notes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_note_saved | tab_id, commit_oid, namespace, plugin? (set when fired from Lua) |
-| on_note_deleted | tab_id, commit_oid, namespace, plugin? (set when fired from Lua) |
-| â”€â”€ Workspaces â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_workspace_created | id, name, color_idx, group_id, repo_ids, repo_count |
-| on_workspace_updated | id, name, color_idx, group_id, repo_ids, repo_count |
-| on_workspace_deleted | id, name, color_idx, group_id, repo_ids, repo_count |
-| on_workspace_switched | id, name, color_idx, repo_ids, from_id? (previous workspace) |
-| on_workspace_repo_added | workspace_id, repo_id |
-| on_workspace_repo_removed | workspace_id, repo_id |
-| â”€â”€ Security â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_security_summary_loaded | tab_id, provider, counts, total, risk_label?, web_url? (counts are active-only) |
-| on_security_finding_state_changed | tab_id, finding_id, severity, from_state?, to_state, title?, web_url? (plugin-cooperation channel) |
-| â”€â”€ Theme / branding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| on_theme_changed | theme_id, theme_name, vars (merged effective stylesheet), source ("user"\|"plugin"\|"init") |
-| â”€â”€ Schedulers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ |
-| arbor.scheduler.register (action name) | Spring-style triggers: fixed_rate / fixed_delay / cron. Manifest opt-in: [scheduler] enabled = true |
+| ── Lifecycle ───────────────────────────────────────────────────────────────── |
+| `on_plugin_load` | plugin_name, dir, api_version |
+| `on_repo_open` | tab_id, path, name |
+| `on_repo_close` | tab_id, path, name |
+| `on_repo_init` | path, name, default_branch, provider, remote_url, has_readme, license, gitignore |
+| `on_repo_deregistered` | repo_id, path, name, reason |
+| `on_project_missing` | repo_id, path, name, reason ("missing" \| "unreachable" \| "not_a_repo") |
+| `on_project_relocated` | repo_id, old_path, new_path, name, remote_url |
+| `on_tab_switch` | tab_id |
+| ── Git operations ──────────────────────────────────────────────────────────── |
+| `on_pre_commit` | tab_id, message, amend — **vetoable** (return a string to block) |
+| `on_commit` | tab_id, oid, message, amend |
+| `on_push` | tab_id, remote, refspec, force |
+| `on_pull` | tab_id, remote |
+| `on_fetch` | tab_id, remote |
+| `on_checkout` | tab_id, branch *or* oid (detached) |
+| ── Branch / tag ────────────────────────────────────────────────────────────── |
+| `on_branch_create` | tab_id, name, from_oid |
+| `on_branch_delete` | tab_id, name *or* names[] (bulk delete) |
+| `on_branch_rename` | tab_id, old_name, new_name |
+| `on_tag_create` | tab_id, name, oid, annotated |
+| `on_tag_delete` | tab_id, name |
+| ── Stash ───────────────────────────────────────────────────────────────────── |
+| `on_stash_push` | tab_id, index, message, include_untracked |
+| `on_stash_pop` | tab_id, index, drop (true=pop, false=apply) |
+| ── Rebase ──────────────────────────────────────────────────────────────────── |
+| `on_rebase_start` | tab_id, base, action_count |
+| `on_rebase_abort` | tab_id |
+| ── Git Flow ────────────────────────────────────────────────────────────────── |
+| `on_flow_init` | tab_id |
+| `on_flow_feature_start` | tab_id, name |
+| `on_flow_feature_finish` | tab_id, name |
+| `on_flow_release_start` | tab_id, version |
+| `on_flow_release_finish` | tab_id, version |
+| `on_flow_hotfix_start` | tab_id, name |
+| `on_flow_hotfix_finish` | tab_id, name |
+| ── Pipelines ───────────────────────────────────────────────────────────────── |
+| `on_pipeline_run_request` | pipeline_id, tab_id? — fired only when the user presses Play on a *stub* def (empty `stages`); defs with non-empty stages are replayed directly. Handler must compile stages and call `arbor.pipeline.run` |
+| `on_pipeline_started` | run_id, pipeline_id, plugin |
+| `on_pipeline_step_done` | run_id, stage, step, exit_code |
+| `on_pipeline_done` | run_id, plugin, status |
+| ── Merge Requests / Pull Requests ──────────────────────────────────────────── |
+| `on_mr_opened` | number, title, source_branch, target_branch, provider |
+| `on_mr_merged` | number, provider |
+| `on_mr_updated` | number, provider |
+| ── Issues ──────────────────────────────────────────────────────────────────── |
+| `on_issue_linked` | issue_id, identifier, sha, branch |
+| `on_issue_transitioned` | issue_id, identifier, from_status, to_status |
+| ── Git notes ───────────────────────────────────────────────────────────────── |
+| `on_note_saved` | tab_id, commit_oid, namespace, plugin? (set when fired from Lua) |
+| `on_note_deleted` | tab_id, commit_oid, namespace, plugin? (set when fired from Lua) |
+| ── Workspaces ──────────────────────────────────────────────────────────────── |
+| `on_workspace_created` | id, name, color_idx, group_id, repo_ids, repo_count |
+| `on_workspace_updated` | id, name, color_idx, group_id, repo_ids, repo_count |
+| `on_workspace_deleted` | id, name, color_idx, group_id, repo_ids, repo_count |
+| `on_workspace_switched` | id, name, color_idx, repo_ids, from_id? (previous workspace) |
+| `on_workspace_repo_added` | workspace_id, repo_id |
+| `on_workspace_repo_removed` | workspace_id, repo_id |
+| ── Security ────────────────────────────────────────────────────────────────── |
+| `on_security_summary_loaded` | tab_id, provider, counts, total, risk_label?, web_url? (counts are active-only) |
+| `on_security_finding_state_changed` | tab_id, finding_id, severity, from_state?, to_state, title?, web_url? (plugin-cooperation channel) |
+| ── Theme / branding ────────────────────────────────────────────────────────── |
+| `on_theme_changed` | theme_id, theme_name, vars (merged effective stylesheet), source ("user"\|"plugin"\|"init") |
+| ── Schedulers ──────────────────────────────────────────────────────────────── |
+| `arbor.scheduler.register` (action name) | Spring-style triggers: `fixed_rate` / `fixed_delay` / `cron`. Manifest opt-in: `[scheduler] enabled = true` |
 
-## Vetoable hooks â€” on_pre_commit
+## Vetoable hooks — `on_pre_commit`
 
 A small set of hooks runs *before* the host operation and lets
   any handler abort it. Today only `on_pre_commit` uses this
@@ -5674,18 +5675,18 @@ arbor.events.on("on_pre_commit", function(ctx)
   if #ctx.message > 200 then
     return "Subject too long: " .. #ctx.message .. " chars (max 200)."
   end
-  -- nothing returned â†’ commit proceeds
+  -- nothing returned → commit proceeds
 end)
 ```
 
-## arbor.events â€” subscribe and emit
+## arbor.events — subscribe and emit
 
-One namespace for both built-in lifecycle hooks (`on_repo_open`, `on_commit`, â€¦) and plugin-defined events. Subscribers don't have to distinguish the two: every event flows through the same `arbor.events.on(name, fn)`.
+One namespace for both built-in lifecycle hooks (`on_repo_open`, `on_commit`, …) and plugin-defined events. Subscribers don't have to distinguish the two: every event flows through the same `arbor.events.on(name, fn)`.
 
-**Naming rule for plugin events:** events are always published under the *publisher's* plugin name. If you call `arbor.events.emit("build-done", ...)` from the plugin `compile-action`, Arbor dispatches `compile-action:build-done` to every subscriber. If you include a colon yourself, the prefix must match your own plugin name â€” otherwise a runtime error is raised (this prevents one plugin from spoofing another's events).
+**Naming rule for plugin events:** events are always published under the *publisher's* plugin name. If you call `arbor.events.emit("build-done", ...)` from the plugin `compile-action`, Arbor dispatches `compile-action:build-done` to every subscriber. If you include a colon yourself, the prefix must match your own plugin name — otherwise a runtime error is raised (this prevents one plugin from spoofing another's events).
 
 ```lua
--- â”€â”€ Publisher: plugins/compile-action/main.lua â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Publisher: plugins/compile-action/main.lua ─────────────────────────────────
 arbor.events.on("compile:run", function(_)
   local job, err = arbor.job.spawn({
     name    = "Build",
@@ -5697,7 +5698,7 @@ arbor.events.on("compile:run", function(_)
      :err(function(r) arbor.events.emit("build-done", { success = false, exit_code = (r and r.exit_code) or -1, repo = arbor.repo.current() }) end)
 end)
 
--- â”€â”€ Subscriber: plugins/auto-notify/main.lua â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Subscriber: plugins/auto-notify/main.lua ──────────────────────────────────
 arbor.events.on("compile-action:build-done", function(ctx)
   if ctx.success then
     arbor.notify{ title = "Build OK", message = "Finished cleanly", level = "success" }
@@ -5709,9 +5710,9 @@ end)
 
 Payloads are serialised to JSON once on the emitting side and delivered as native Lua tables to every subscriber.
 
-**Delivery is asynchronous.** `emit` dispatches on a background thread so it can safely be called from inside a hook handler (where the plugin host mutex is already held). Don't assume subscribers have run by the time `emit` returns â€” if you need to react to completion, have the subscriber emit its own follow-up event.
+**Delivery is asynchronous.** `emit` dispatches on a background thread so it can safely be called from inside a hook handler (where the plugin host mutex is already held). Don't assume subscribers have run by the time `emit` returns — if you need to react to completion, have the subscriber emit its own follow-up event.
 
-### arbor.service â€” cross-plugin RPC
+### arbor.service — cross-plugin RPC
 
 Where `arbor.events.emit` is fire-and-forget, `arbor.service` is
   request / response. A plugin exports named functions; other plugins call them
@@ -5721,13 +5722,13 @@ Where `arbor.events.emit` is fire-and-forget, `arbor.service` is
 
 ```lua
 -- Provider: plugins/greeter/main.lua ------------------------------------------
--- manifest.toml â†’ [permissions] service_export = true
+-- manifest.toml → [permissions] service_export = true
 arbor.service.export("greet", function(args)
   return "hello " .. (args.name or "world")
 end)
 
 -- Consumer: plugins/caller/main.lua --------------------------------------------
--- manifest.toml â†’ [permissions] service_call = true
+-- manifest.toml → [permissions] service_call = true
 arbor.service.call("greeter.greet", { name = "Arbor" })
   :ok(function(r) arbor.log.info(r) end)                  -- "hello Arbor"
   :err(function(e) arbor.log.warn(e.kind .. ": " .. e.message) end)
@@ -5744,9 +5745,9 @@ end)
 
 The promise rejects with a table `{ kind, message }`; `kind` is one of:
 
-- `not_found` â€” the target plugin isn't loaded, or the requested method isn't registered
-- `plugin_disabled` â€” the target plugin is installed but disabled in the Plugin Manager
-- `handler_error` â€” the provider's handler raised while executing (message carries the Lua error)
+- `not_found` — the target plugin isn't loaded, or the requested method isn't registered
+- `plugin_disabled` — the target plugin is installed but disabled in the Plugin Manager
+- `handler_error` — the provider's handler raised while executing (message carries the Lua error)
 
 An optional third `cb` argument still works as zucchero: it fires alongside
   the promise with `(ok, value_or_err)`. Omit it (and the promise) entirely for
@@ -5759,11 +5760,11 @@ arbor.service.list()        -- every "<plugin>.<method>" exported by any enabled
 arbor.service.list_own()    -- only the services this plugin has exported
 ```
 
-> **Delivery semantics** Each call spawns a short-lived worker thread that acquires the plugin host mutex, runs the target handler, then invokes the caller's callback â€” in that order, under the same lock. The callback executes on the worker thread, so don't assume Svelte-side state is in any particular state; prefer to `arbor.events.emit` a follow-up event for UI reactions.
+> **Delivery semantics** Each call spawns a short-lived worker thread that acquires the plugin host mutex, runs the target handler, then invokes the caller's callback — in that order, under the same lock. The callback executes on the worker thread, so don't assume Svelte-side state is in any particular state; prefer to `arbor.events.emit` a follow-up event for UI reactions.
 
 ### Wildcard subscriptions
 
-The event name passed to `arbor.events.on` may contain one or more `*` characters. Each `*` matches any sequence of characters â€” including empty strings and colon / dot separators â€” with no segment boundaries. Literal strings without `*` still require an exact match.
+The event name passed to `arbor.events.on` may contain one or more `*` characters. Each `*` matches any sequence of characters — including empty strings and colon / dot separators — with no segment boundaries. Literal strings without `*` still require an exact match.
 
 ```lua
 -- Debug: log every event fired anywhere
@@ -5773,16 +5774,16 @@ end)
 
 -- Listen to all events from one plugin
 arbor.events.on("compile-action:*", function(ctx)
-  -- matches "compile-action:build-done", "compile-action:started", â€¦
+  -- matches "compile-action:build-done", "compile-action:started", …
 end)
 
 -- Match a suffix
 arbor.events.on("*:build-done", function(ctx) ... end)
 ```
 
-> **Note** A plugin with at least one wildcard subscription bypasses the manifest hook filter â€” it will receive all built-in lifecycle hooks too (`on_commit`, `on_repo_open`, â€¦) even if they aren't declared under `[hooks]`. Handlers must tolerate varied payload shapes.
+> **Note** A plugin with at least one wildcard subscription bypasses the manifest hook filter — it will receive all built-in lifecycle hooks too (`on_commit`, `on_repo_open`, …) even if they aren't declared under `[hooks]`. Handlers must tolerate varied payload shapes.
 
-### Discovering hooks at runtime â€” arbor.hooks
+### Discovering hooks at runtime — `arbor.hooks`
 
 Every built-in hook ships with a machine-readable schema describing the `ctx` table its handlers receive. Use it to generate docs, build
   validators, or pick the right hook to subscribe to without leaving your editor.
@@ -5798,21 +5799,21 @@ local d = arbor.hooks.describe("on_repo_open")
 -- d = {
 --   name        = "on_repo_open",
 --   category    = "repo",
---   description = "Fired when the user opens a repo â€¦",
+--   description = "Fired when the user opens a repo …",
 --   ctx = {
---     { name="tab_id", type="string", required=true, description="â€¦" },
---     { name="path",   type="string", required=true, description="â€¦" },
---     { name="name",   type="string", required=true, description="â€¦" },
+--     { name="tab_id", type="string", required=true, description="…" },
+--     { name="path",   type="string", required=true, description="…" },
+--     { name="name",   type="string", required=true, description="…" },
 --   },
 -- }
 ```
 
 Action hooks fired via `arbor.events.emit`, `arbor.command.register`,
-  or `arbor.job.spawn{on_done=â€¦}` are *not* in the catalog â€” they're plugin-defined. `describe()` returns `nil` for those.
+  or `arbor.job.spawn{on_done=…}` are *not* in the catalog — they're plugin-defined. `describe()` returns `nil` for those.
 
 ---
 
-# Plugin Development â€” API: Core
+# Plugin Development — API: Core
 
 Core Lua APIs available to all plugins. No special permissions required unless noted.
 
@@ -5820,7 +5821,7 @@ Core Lua APIs available to all plugins. No special permissions required unless n
 
 The `arbor.*` API uses two consistent conventions throughout:
 
-- **Errors as tuples**. Any function that can fail at runtime (I/O, parse, network, git, registry) returns `(value, nil)` on success and `(nil, err_string)` on failure. Callers that don't care about the error simply read the first return value; callers that do care can check the second. Programming errors (permission denied, missing required argument, wrong Lua type) still raise â€” those are bugs to fix in the plugin, not recoverable failure modes.
+- **Errors as tuples**. Any function that can fail at runtime (I/O, parse, network, git, registry) returns `(value, nil)` on success and `(nil, err_string)` on failure. Callers that don't care about the error simply read the first return value; callers that do care can check the second. Programming errors (permission denied, missing required argument, wrong Lua type) still raise — those are bugs to fix in the plugin, not recoverable failure modes.
 - **Table arguments for > 2 args or any optional arg**. Functions like `arbor.fs.move{ src, dest, overwrite? }`, `arbor.terminal.exec{ command, cwd? }`, `arbor.text.replace{ content, pattern, replacement, plain? }` take a single config table. This keeps call sites readable when fields are added later. Single-mandatory-arg functions (`arbor.fs.read(path)`, `arbor.repo.remote(name)`) stay positional; `arbor.events.emit(name, payload)` is also positional as a hot-path exception.
 
 ```lua
@@ -5834,7 +5835,7 @@ local ok, err = arbor.fs.move{ src = a, dest = b, overwrite = true }
 if not ok then arbor.log.warn("move failed: " .. err) end
 ```
 
-## arbor.log â€” logging
+## arbor.log — logging
 
 ```lua
 arbor.log.debug("detailed trace")
@@ -5845,7 +5846,7 @@ arbor.log.error("fatal: " .. err)
 ```
 
 Every call is also pushed to an in-memory ring buffer (last 5 000 entries)
-  and surfaced in the **Plugin Logs** bottom panel â€” *Tools â†’ Plugin Logs* in the main menu, or `Alt+Shift+L`.
+  and surfaced in the **Plugin Logs** bottom panel — *Tools → Plugin Logs* in the main menu, or `Alt+Shift+L`.
   Disabled plugins do not log: their entries are dropped at the API boundary,
   and plugins disabled at startup never get a Lua VM in the first place.
 
@@ -5854,39 +5855,39 @@ Every call is also pushed to an in-memory ring buffer (last 5 000 entries)
 The panel streams new lines in real time and is the canonical place to
   triage plugin behaviour without leaving Arbor.
 
-- **Multi-select plugin filter** â€” a Filter dropdown with one
+- **Multi-select plugin filter** — a Filter dropdown with one
     checkbox per plugin that has logged anything this session. Includes *All plugins* / *None* shortcuts and a header summary
     (*"compile-action +2"*) when more than one is active.
-- **Per-level toggles** â€” independent buttons for `debug` / `info` / `warn` / `error`. Off levels are excluded from the visible list and
+- **Per-level toggles** — independent buttons for `debug` / `info` / `warn` / `error`. Off levels are excluded from the visible list and
     the line counter.
-- **Free-text search** â€” case-insensitive substring match
+- **Free-text search** — case-insensitive substring match
     across the whole formatted line (timestamp, level, plugin, message).
     The search field highlights matches inline.
-- **Pipeline tagging** â€” log lines mirrored from a pipeline
+- **Pipeline tagging** — log lines mirrored from a pipeline
     step's captured stdout/stderr carry the pipeline name and run id. A
     dedicated *Pipeline* selector in the filter dropdown lets you
     isolate one run; *Clear pipeline logs* wipes only those entries
     and leaves your direct `arbor.log.*` output intact.
-- **Structured highlighting** â€” recognised tokens
+- **Structured highlighting** — recognised tokens
     (timestamps, run ids, exit codes, paths) get their own colour so a
     scrolling stream stays scannable. Severity tints follow the global
     palette (info / warn / error).
-- **Auto-scroll & jump-to-latest** â€” the panel pins the
+- **Auto-scroll & jump-to-latest** — the panel pins the
     view to the newest line; scrolling up pauses auto-follow and reveals a
     pill that snaps back to the bottom on click.
-- **Copy & Clear** â€” Copy serialises the currently
+- **Copy & Clear** — Copy serialises the currently
     visible (i.e. filtered) lines to the clipboard as plain text. Clear
     drops every entry from the buffer.
 
 The 5 000-entry cap evicts oldest-first. If you need durable
   per-plugin retention, write to your own log file via `arbor.fs.append`.
 
-## arbor.settings â€” persistence
+## arbor.settings — persistence
 
 Settings are split into two scopes:
 
-- **global** â€” stored in `~/.config/arbor/plugin_data/<name>/global.json` â€” independent of the active repo
-- **project** â€” stored in `<repo>/.arbor/plugins/<name>/project.json` â€” per-repository; raises a Lua error if no repo is open
+- **global** — stored in `~/.config/arbor/plugin_data/<name>/global.json` — independent of the active repo
+- **project** — stored in `<repo>/.arbor/plugins/<name>/project.json` — per-repository; raises a Lua error if no repo is open
 
 ```lua
 -- Global settings
@@ -5901,7 +5902,7 @@ local p = arbor.settings.project.get("profile")
 local all_proj = arbor.settings.project.get_all()
 ```
 
-## arbor.json â€” encode / decode
+## arbor.json — encode / decode
 
 ```lua
 local s, err = arbor.json.encode({ key = "val", n = 42 })
@@ -5911,9 +5912,9 @@ local t, err = arbor.json.decode('{"a":1}')
 -- t.a == 1   err = nil on success
 ```
 
-## arbor.json_studio â€” open the JSON inspector
+## arbor.json_studio — open the JSON inspector
 
-One-call API that opens a host-rendered modal: lazy virtualised tree, JSONPath query, syntax-highlighted text view. Pass `text` or `path`. Backed by simd-json on the host so multi-megabyte payloads stay responsive. Earmarked to migrate to a self-contained WASM plugin once that runtime lands â€” the API will not change.
+One-call API that opens a host-rendered modal: lazy virtualised tree, JSONPath query, syntax-highlighted text view. Pass `text` or `path`. Backed by simd-json on the host so multi-megabyte payloads stay responsive. Earmarked to migrate to a self-contained WASM plugin once that runtime lands — the API will not change.
 
 ```lua
 -- Open from disk (host reads the file)
@@ -5933,12 +5934,12 @@ arbor.json_studio.open({
 --   $.books[?@.price < 10 && @.in_stock]
 --   $..*[?match(@.email, ".*@.*")]   -- regex (RFC function)
 --   $[?length(@.tags) > 2]           -- length() / count()
--- Plus shorthands: bare "foo" â†’ $..foo, ".foo" â†’ $.foo, etc.
+-- Plus shorthands: bare "foo" → $..foo, ".foo" → $.foo, etc.
 ```
 
-## arbor.fs â€” filesystem
+## arbor.fs — filesystem
 
-Requires the `fs` permission: `"read"` for read-only ops, `"write"` for read+write. The `fs_scope` field controls path bounds â€” empty (default) sandboxes to the active repo; `["*"]` grants unrestricted access; any other list extends the active-repo sandbox with those absolute paths. All read/write functions return `result, nil` on success or `nil, err` on failure.
+Requires the `fs` permission: `"read"` for read-only ops, `"write"` for read+write. The `fs_scope` field controls path bounds — empty (default) sandboxes to the active repo; `["*"]` grants unrestricted access; any other list extends the active-repo sandbox with those absolute paths. All read/write functions return `result, nil` on success or `nil, err` on failure.
 
 ```lua
 local content, err = arbor.fs.read("/path/to/file.txt")
@@ -5954,7 +5955,7 @@ arbor.fs.copy("/path/to/app.war", "/opt/tomcat/webapps/")
 arbor.fs.delete("/path/to/old.war")
 ```
 
-## arbor.repo â€” repository info
+## arbor.repo — repository info
 
 Read functions require `git = "read"` (or higher). `fetch_active_tab` and `clone` require `git = "write"` (or higher).
 
@@ -5966,7 +5967,7 @@ local remote   = arbor.repo.remote("origin")    -- URL of the named remote, or n
 
 -- Fetch origin for the currently active tab (the tab the user is looking at).
 -- Returns true on success, false when silently skipped (no active tab, no
--- origin remote, or network failure â€” no error is raised either way).
+-- origin remote, or network failure — no error is raised either way).
 -- After a successful fetch, emits "arbor://graph-refresh" so the frontend
 -- reloads the commit graph and remote branch list automatically.
 -- Ideal for use inside a focus-gated scheduler (only_when_focused = true).
@@ -5992,10 +5993,10 @@ local commits, err = arbor.repo.commits({
 local paths = arbor.repo.untracked()           -- ["target/foo.bin", ".env", ...]
 ```
 
-### arbor.repo.clone â€” background clone
+### arbor.repo.clone — background clone
 
 Clone a remote repository into a local directory. The clone runs in a
-  background **Job** â€” progress streams into the Jobs overlay and
+  background **Job** — progress streams into the Jobs overlay and
   Job Output panel exactly like `arbor.job.spawn` results, with
   live cancel support. Uses the system `git` binary so SSH keys and
   credential helpers (including the Arbor keyring) work transparently.
@@ -6022,7 +6023,7 @@ local job_id = arbor.repo.clone({
 })   -- requires git = "write" (or higher)
 ```
 
-## arbor.workspace â€” workspace and repo-registry queries
+## arbor.workspace — workspace and repo-registry queries
 
 Read-only APIs for inspecting the user's workspaces and the central repo
   registry. No special permissions required. The mutating `switch()` call emits `arbor://workspace-switched` and fires the `on_workspace_switched` hook so other plugins can react.
@@ -6043,7 +6044,7 @@ local repo = arbor.workspace.repo(repo_id)       -- {id, path, display_name, rem
 local ok = arbor.workspace.switch(ws_id)         -- returns bool
 ```
 
-## arbor.tabs â€” programmatic tab control
+## arbor.tabs — programmatic tab control
 
 Open a registered repository as an Arbor tab. The repo must already be
   in the registry (added via the workspace UI or auto-registered via `arbor.workspace.list_repos`). If a tab for that repo is
@@ -6053,7 +6054,7 @@ Open a registered repository as an Arbor tab. The repo must already be
 local ok, err = arbor.tabs.open_repo(repo_id)   -- (true, nil) | (false, err)
 ```
 
-## arbor.mr / arbor.ci â€” git provider MRs & CI (credential-blind)
+## arbor.mr / arbor.ci — git provider MRs & CI (credential-blind)
 
 Read-only access to merge requests and CI runs hosted on the git
   provider behind a registered repository. Permission gate: `provider = "read"`. The OAuth token never leaves the OS
@@ -6066,7 +6067,7 @@ Read-only access to merge requests and CI runs hosted on the git
 local me = arbor.mr.current_user({ repo_id = entry.id })   -- { id, login, name, ... }
 
 -- List my open MRs across one repo. Use the literal "current_user"
--- sentinel to mean "the authenticated user on THIS provider" â€” the host
+-- sentinel to mean "the authenticated user on THIS provider" — the host
 -- resolves it for you, the plugin never has to know the actual login.
 local mrs, err = arbor.mr.list({
   repo_id = entry.id,        -- workspace registry id; default: active repo
@@ -6086,12 +6087,12 @@ local runs, err = arbor.ci.runs({
 --             provider, duration_secs }
 ```
 
-## arbor.security â€” vulnerability dashboard (credential-blind)
+## arbor.security — vulnerability dashboard (credential-blind)
 
 Read-only access to GitLab Vulnerability Reports and GitHub
   GHAS / Dependabot / Secret-Scanning posture data. Same permission
   gate (`provider = "read"`) and same `repo_id` resolution as `arbor.mr` / `arbor.ci`. Default
-  state filter is active-only (Detected + Confirmed) â€” pass `states` explicitly for closed findings or both.
+  state filter is active-only (Detected + Confirmed) — pass `states` explicitly for closed findings or both.
 
 ```lua
 -- Cheap probe (does the provider expose a dashboard for this repo?)
@@ -6108,7 +6109,7 @@ local sum = arbor.security.summary({
 -- sum.time_series     : { points = [...], range_days } | nil
 -- sum.web_url         : provider-native dashboard URL
 
--- Findings list â€” defaults to active scope.
+-- Findings list — defaults to active scope.
 local list = arbor.security.findings({
   repo_id    = entry.id,
   severities = {"critical", "high"},      -- optional
@@ -6120,7 +6121,7 @@ local list = arbor.security.findings({
 --         file_path?, start_line?, web_url?, created_at, age_days, identifiers, provider }
 ```
 
-## arbor.meta â€” plugin identity & environment
+## arbor.meta — plugin identity & environment
 
 ```lua
 arbor.meta.plugin_name()              -- "my-plugin"
@@ -6132,7 +6133,7 @@ arbor.meta.plugin_loaded("other")     -- true / false (live + enabled check)
 ```
 
 `plugin_loaded(name)` is a synchronous check against the host's
-  plugin registry â€” use it to branch on whether a sibling plugin is active
+  plugin registry — use it to branch on whether a sibling plugin is active
   right now without going through the async, fire-and-forget `arbor.service.call` path (which races against startup and can
   silently no-op on host mutex contention).
 
@@ -6146,7 +6147,7 @@ local ext    = is_win and ".bat" or ".sh"
 local bin = tomcat_home .. sep .. "bin" .. sep .. "catalina" .. ext
 ```
 
-## arbor.timer â€” deferred / recurring execution
+## arbor.timer — deferred / recurring execution
 
 ```lua
 -- Fire once after delay_ms milliseconds
@@ -6162,21 +6163,21 @@ end)
 arbor.timer.cancel(id)   -- cancel a timer by its id
 ```
 
-**Tip:** prefer `arbor.scheduler.register` (below) for recurring tasks â€” its triggers are richer (cron, fixed_delay, focus gate) and the registrations are shown in the Plugin Manager so users can stop/start each one individually.
+**Tip:** prefer `arbor.scheduler.register` (below) for recurring tasks — its triggers are richer (cron, fixed_delay, focus gate) and the registrations are shown in the Plugin Manager so users can stop/start each one individually.
 
-## arbor.scheduler â€” Spring-style background schedules
+## arbor.scheduler — Spring-style background schedules
 
 Opt the plugin into the scheduler with `[scheduler] enabled = true` in `plugin.toml`, then declare every concrete schedule from `main.lua`. Triggers are modelled on Spring's `@Scheduled` annotation: pick exactly one of `fixed_rate`, `fixed_delay`, or `cron`.
 
 | Field | Meaning |
 | --- | --- |
-| action | String â€” required. Plugin action name fired each tick (subscribe with arbor.events.on(action, fn)). |
-| fixed_rate | Duration. Fire every N regardless of how long the previous handler took. Next fire = previous start + N. |
-| fixed_delay | Duration. Wait N after the previous handler returned. Next fire = previous end + N. Use this when overlap would be harmful. |
-| cron | 6-field Spring cron â€” second minute hour day-of-month month day-of-week. Anchored to the wall clock, not to "now + N". |
-| initial_delay | Optional duration. Wait this long before the first fire (fixed_rate / fixed_delay only â€” cron always uses the next matching instant). |
-| on_load | Optional bool. Also fire once immediately at plugin load, in addition to the normal cadence. Default false. |
-| only_when_focused | Optional bool. Skip firing while the app window is unfocused or minimised. The clock keeps ticking; a missed tick is simply dropped. Default false. |
+| `action` | String — required. Plugin action name fired each tick (subscribe with `arbor.events.on(action, fn)`). |
+| `fixed_rate` | Duration. Fire every N regardless of how long the previous handler took. Next fire = previous start + N. |
+| `fixed_delay` | Duration. Wait N *after* the previous handler returned. Next fire = previous end + N. Use this when overlap would be harmful. |
+| `cron` | 6-field Spring cron — `second minute hour day-of-month month day-of-week`. Anchored to the wall clock, not to "now + N". |
+| `initial_delay` | Optional duration. Wait this long before the first fire (fixed_rate / fixed_delay only — cron always uses the next matching instant). |
+| `on_load` | Optional bool. Also fire once immediately at plugin load, in addition to the normal cadence. Default `false`. |
+| `only_when_focused` | Optional bool. Skip firing while the app window is unfocused or minimised. The clock keeps ticking; a missed tick is simply dropped. Default `false`. |
 
 Durations accept bare numbers (seconds), suffix form (`"30s"`, `"5m"`, `"2h"`, `"1d"`), or ISO-8601
   (`"PT30S"`, `"PT1H30M"`).
@@ -6193,7 +6194,7 @@ arbor.scheduler.register({
   on_load    = true,                -- also fire once at plugin load
 })
 
--- Fixed-delay: 30 s AFTER the previous fetch finishes â€” prevents overlap
+-- Fixed-delay: 30 s AFTER the previous fetch finishes — prevents overlap
 -- when the network is slow.
 arbor.scheduler.register({
   action            = "my_plugin:slow_poll",
@@ -6214,22 +6215,22 @@ end)
 ```
 
 Re-calling `register` with the same `action` replaces
-  the previous entry â€” handy for plugins that recompute cadence from settings.
+  the previous entry — handy for plugins that recompute cadence from settings.
   Inspect the current set with `arbor.scheduler.list()`; users can
   also stop/start individual entries from the Plugin Manager.
 
 ## Built-in utility modules
 
-These are available via `require()` inside any plugin without adding files â€” they are pre-loaded by the sandbox.
+These are available via `require()` inside any plugin without adding files — they are pre-loaded by the sandbox.
 
 | Module | Key exports |
 | --- | --- |
-| arbor.schema | validate(data, rules) â†’ ok, errors Â· check(data, rules) â†’ bool (shows toast on first error) |
-| arbor.async | Promise Â· run(fn) Â· await(p) Â· debounce(fn, delay_ms) Â· throttle(fn, interval_ms) |
-| arbor.event | on(event, fn) Â· off(event, fn?) Â· emit(event, payload) â€” in-process pub/sub between plugin modules |
+| `arbor.schema` | `validate(data, rules)` → ok, errors · `check(data, rules)` → bool (shows toast on first error) |
+| `arbor.async` | `Promise` · `run(fn)` · `await(p)` · `debounce(fn, delay_ms)` · `throttle(fn, interval_ms)` |
+| `arbor.event` | `on(event, fn)` · `off(event, fn?)` · `emit(event, payload)` — in-process pub/sub between plugin modules |
 
 ```lua
--- arbor.schema â€” validate form submissions
+-- arbor.schema — validate form submissions
 local schema = require("arbor.schema")
 arbor.events.on("my_plugin:save", function(ctx)
   if not schema.check(ctx, {
@@ -6240,7 +6241,7 @@ arbor.events.on("my_plugin:save", function(ctx)
   -- ... proceed with save ...
 end)
 
--- arbor.async â€” promises + debounce
+-- arbor.async — promises + debounce
 local async   = require("arbor.async")
 local refresh = async.debounce(function()
   -- called at most once per 200ms after the last trigger
@@ -6251,7 +6252,7 @@ arbor.service.call("compile-action.resolve_java_home", {})
   :ok(function(r)  arbor.log.info("JAVA_HOME = " .. (r.java_home or "")) end)
   :err(function(e) arbor.log.warn("svc " .. e.kind .. ": " .. e.message) end)
 
--- Sequential await inside async.run â€” yields the coroutine until each promise settles.
+-- Sequential await inside async.run — yields the coroutine until each promise settles.
 async.run(function()
   local ok, err = arbor.async.await(arbor.ui.confirm{ message = "Proceed?" })
   if err or not ok then return end
@@ -6260,7 +6261,7 @@ async.run(function()
   arbor.log.info(r)
 end)
 
--- arbor.event â€” decouple modules
+-- arbor.event — decouple modules
 local ev = require("arbor.event")
 ev.on("config_changed", function(payload)
   -- payload.repo, etc.
@@ -6270,69 +6271,69 @@ ev.emit("config_changed", { repo = arbor.repo.current() })
 
 ---
 
-# Plugin Development â€” API: UI
+# Plugin Development — API: UI
 
 APIs for interacting with the Arbor user interface: notifications, forms, activity bar entries, keyboard shortcuts, and the command palette.
 
-## arbor.ui â€” user interface
+## arbor.ui — user interface
 
 | Function | Description |
 | --- | --- |
-| arbor.notify{ message, title?, level?, action? } | Add a persistent notification to the in-app notification center. level: "info" \| "success" \| "warning" \| "error" (default "info"). See the arbor.notify section below. |
-| arbor.ui.form(config) | Display an input form modal; submitting fires submit_action |
-| arbor.ui.confirm{ message, confirm_label?, confirm_variant?, state? } | Confirmation dialog. Returns a Promise that resolves with true on confirm and false on cancel. confirm_variant: "primary" \| "danger" \| "ghost". |
-| arbor.ui.pick_file(opts) | Native file/folder picker. Fires opts.action with { path, ...opts.extra } on confirm; empty path on cancel. opts.mode: "file" (default), "folder", "save". Optional: title, extensions, initial_path. |
-| arbor.ui.add_sidebar(opts) | Register a plugin panel attached to an ActivityBar icon. Accepts side: "left"\|"right" (default "right"), position: "top"\|"bottom" (default "top"), and kind: "form"\|"tree" (default "form"). Form panels respond to panel:open:<id> with set_panel_content; tree panels push nodes via tree.set and accept cross-plugin contributions â€” see the Tree sidebars section below. |
-| arbor.ui.set_panel_content(id, body) | Push form-DSL content ({title, nodes, actions?}) into a registered panel. Call from the panel:open:<id> handler, or any time underlying state changes. |
-| arbor.ui.tree.set(sidebar_id, body) | Push a tree snapshot into a kind="tree" sidebar. body is {title?, breadcrumb?, nodes} or a bare nodes array. breadcrumb is an optional list of segments {label, icon?, action?, data?, badge?, tooltip?} rendered as a clickable trail above the tree â€” segments with empty action are non-interactive (the current location). Triggers a re-render on the frontend. Multi-selection: tree sidebars now support Ctrl/Cmd+click toggle and Shift+click range. Context-menu items can scope themselves via when.multi: true = only in multi-select, false = single-row only, omitted = both. Action handlers receive ctx.node_ids[] and ctx.nodes[] (single-row contexts get a 1-element array; ctx.node_id and ctx.data stay populated for backward compat). |
-| arbor.ui.tree.get(sidebar_id) | Read the snapshot you most recently set, or nil. Useful when merging incremental updates without keeping a parallel cache. |
-| arbor.ui.contribute(point, item) | Push an item into a contribution point owned by another plugin. item = {id, payload, priority?, when?, disabled?, group?}. Re-contributing with the same id replaces the previous payload (idempotent). when / disabled / group live at the top level â€” placing them inside payload still works but logs a deprecation warn. |
-| arbor.ui.unregister_contribution(point, item_id) | Remove a contribution your plugin previously pushed. |
-| arbor.ui.contribution_point(config) | Declare a contribution point owned by your plugin. config = {name, description?, schema?}. Informational â€” listed in list_contribution_points; payloads are NOT validated at runtime. |
-| arbor.ui.list_contributions(point) | Read the merged list of contributions for a point (sorted by priority). Lets a host plugin fold contributions into its own snapshot. |
-| arbor.ui.container.register(opts) | Declare an aggregated modal. opts = {id, title, kind?, layout?, width?, height?, submit_label?, cancel_label?, on_load?, on_save?}. width / height in px reference a 1920Ã—1080 window and scale linearly with the actual viewport (so "960px" means "half the viewport"). Body is built from <plugin>::<id>:category + <plugin>::<id>:section contributions. |
-| arbor.ui.container.open(key) Â· close(key) | Show / hide a registered container by its "<plugin>::<id>" key. |
-| arbor.ui.settings.panel(config) | Sugar over container.register: same shape, but forces kind = "modal" + layout = "tree_nav" and binds the sub-points to the conventional <plugin>:settings:{category,section} naming. The gear in Plugin Manager appears whenever a plugin owns at least one container. |
-| arbor.ui.settings.open(plugin_name, panel_id) | Open a registered settings panel programmatically. Same effect as the user clicking the gear icon. |
-| arbor.ui.settings.close() | Close the currently open settings panel. |
-| arbor.ui.icon.register(config) | Register a custom SVG icon, namespaced as plugin:<your_plugin>:<id>. Reference it from any icon field. Wiped on plugin reload / disable. |
-| arbor.ui.add_graph_combo(opts) | Register a split button (run + dropdown). target: "activity_bar" (default) or "repo_actions" |
-| arbor.ui.set_combo_options{ id, options, selected? } | Dynamically update a combo's option list (call from on_repo_open to refresh per-repo). Optional selected adopts a pick if it appears in options. Thin sugar over contribute_patch("arbor:activitybar", id, {options=â€¦}). |
-| arbor.ui.set_autocomplete_options(id, opts) | Reply with fresh suggestions for an autocomplete field using source_action. Call inside the handler registered for that action. |
-| arbor.ui.form.set_options(name, opts) | Swap the option list of a select / radio / autocomplete field in the currently-open form |
-| arbor.ui.form.set_disabled(name, bool) | Disable or re-enable a field in the currently-open form |
-| arbor.ui.form.set_value(name, v) | Programmatically set a field's value in the currently-open form |
-| arbor.ui.form.replace(cfg) | Swap the whole node tree of the open form in-place, preserving field values by name. See Dynamic form updates. |
-| arbor.ui.form.set_loading(arg) | Toggle the loading overlay without re-rendering the form. arg can be true / false, a label string (implies true), or { loading, label }. Cheap â€” use it for per-step progress ticks during a fan-out loop. |
-| arbor.ui.form.close() | Programmatically dismiss the currently-open form. Pair with keep_open = true on the form config when submit launches a follow-up flow (file picker, second form): the modal stays mounted while the secondary flow is up, and you call close() once it completes. |
-| arbor.ui.operation.start{â€¦} | Push a progress card into the operations overlay (same widget used by Pull / Fetch-all / Pull-all). Config: {id, title, subtitle?, steps[{key,label}], current?}. The id is plugin-scoped server-side â€” collisions across plugins are impossible. |
-| arbor.ui.operation.set_current(id, step_key, detail?) | Move the active-step pointer; auto-completes earlier rows and leaves later ones pending. |
-| arbor.ui.operation.update_step(id, step_key, {status?, detail?}) | Patch a single row. status: "pending"\|"completed"\|"skipped"\|"error". Avoid setting "active" here â€” use set_current instead (sticky active = forever spinner). |
-| arbor.ui.operation.finish(id, {summary?, error?}) | Close the card. It lingers a few seconds with the summary or error, then auto-dismisses. |
-| arbor.ui.add_separator() | Insert a horizontal separator in the activity bar after the last registered item |
-| arbor.ui.add_context_menu_item(opts) | Add item to the commit/branch/file context menu |
-| arbor.ui.add_menu_item(opts) | Add item to the hamburger menu |
-| arbor.ui.add_toolbar_action(opts) | Add an inline action button to one of Arbor's toolbars. target: "diff", "status-bar:left", "status-bar:right", "title-bar:left", "title-bar:right", "commit-detail", "commit-form". Unknown targets pass through verbatim â€” usable for plugin-owned custom toolbars. |
-| arbor.ui.open_path(path) | Hand a file/folder to the OS default handler (Explorer on Windows, Finder on macOS, xdg-open on Linux). Used to expose "Open in file manager" affordances on artefact folders. |
-| arbor.ui.copy_to_clipboard{ text, toast? } | Copy text to the system clipboard via the webview; optional toast overrides the success message ("Copied to clipboard" by default). For one-shot copies driven by the user clicking a value, prefer the copy_link DSL node â€” it runs entirely client-side with no plugin hop. |
-| arbor.ui.show_pipeline_run(run_id) | Deep-link to a pipeline run: opens a standalone detail modal (graph + output log) on top of whatever is currently visible. No-op on empty run_id. Use it to jump from a plugin's own UI (sidebar, history modal, â€¦) to the canonical run view without opening the bottom Pipelines panel. |
-| arbor.ui.set_branding{ svg? \| svg_path?, window_icon_path? } | Replace the default Arbor app mark. Pass either svg (inline markup) or svg_path (absolute path read off disk by the host â€” no fs.read perm needed) to paint the in-app surfaces (title-bar slot, welcome screen, About modal, HTML stats export). window_icon_path is an absolute path to a raster image (PNG / ICO) handed to the OS window-icon API â€” taskbar / Alt-Tab / window chrome on Windows & Linux. At least one field is required; missing fields don't reset their counterpart. RAM-only â€” see the Branding & theme section below. |
-| arbor.ui.clear_branding() | Restore both the bundled SVG mark and the bundled window icon. No-op when the current override belongs to another plugin. |
-| arbor.ui.set_theme_tokens{ vars } | Layer a CSS-variable overlay on top of the active theme. vars is a "--name" = "value" table (every key must start with --). Overlays survive theme switches; they vanish on plugin reload or clear_theme_tokens. |
-| arbor.ui.clear_theme_tokens() | Drop this plugin's overlay; other plugins' overlays remain. |
+| `arbor.notify{ message, title?, level?, action? }` | Add a persistent notification to the in-app notification center. `level`: `"info" \| "success" \| "warning" \| "error"` (default `"info"`). See the *arbor.notify* section below. |
+| `arbor.ui.form(config)` | Display an input form modal; submitting fires `submit_action` |
+| `arbor.ui.confirm{ message, confirm_label?, confirm_variant?, state? }` | Confirmation dialog. Returns a Promise that resolves with `true` on confirm and `false` on cancel. `confirm_variant`: `"primary" \| "danger" \| "ghost"`. |
+| `arbor.ui.pick_file(opts)` | Native file/folder picker. Fires `opts.action` with `{ path, ...opts.extra }` on confirm; empty `path` on cancel. `opts.mode`: `"file"` (default), `"folder"`, `"save"`. Optional: `title`, `extensions`, `initial_path`. |
+| `arbor.ui.add_sidebar(opts)` | Register a plugin panel attached to an ActivityBar icon. Accepts `side: "left"\|"right"` (default "right"), `position: "top"\|"bottom"` (default "top"), and `kind: "form"\|"tree"` (default "form"). Form panels respond to `panel:open:<id>` with `set_panel_content`; tree panels push nodes via `tree.set` and accept cross-plugin contributions — see the *Tree sidebars* section below. |
+| `arbor.ui.set_panel_content(id, body)` | Push form-DSL content (`{title, nodes, actions?}`) into a registered panel. Call from the `panel:open:<id>` handler, or any time underlying state changes. |
+| `arbor.ui.tree.set(sidebar_id, body)` | Push a tree snapshot into a `kind="tree"` sidebar. `body` is `{title?, breadcrumb?, nodes}` or a bare nodes array. `breadcrumb` is an optional list of segments `{label, icon?, action?, data?, badge?, tooltip?}` rendered as a clickable trail above the tree — segments with empty `action` are non-interactive (the current location). Triggers a re-render on the frontend. **Multi-selection:** tree sidebars now support Ctrl/Cmd+click toggle and Shift+click range. Context-menu items can scope themselves via `when.multi`: `true` = only in multi-select, `false` = single-row only, omitted = both. Action handlers receive `ctx.node_ids[]` and `ctx.nodes[]` (single-row contexts get a 1-element array; `ctx.node_id` and `ctx.data` stay populated for backward compat). |
+| `arbor.ui.tree.get(sidebar_id)` | Read the snapshot you most recently set, or `nil`. Useful when merging incremental updates without keeping a parallel cache. |
+| `arbor.ui.contribute(point, item)` | Push an item into a contribution point owned by another plugin. `item = {id, payload, priority?, when?, disabled?, group?}`. Re-contributing with the same id replaces the previous payload (idempotent). `when` / `disabled` / `group` live at the top level — placing them inside `payload` still works but logs a deprecation warn. |
+| `arbor.ui.unregister_contribution(point, item_id)` | Remove a contribution your plugin previously pushed. |
+| `arbor.ui.contribution_point(config)` | Declare a contribution point owned by your plugin. `config = {name, description?, schema?}`. Informational — listed in `list_contribution_points`; payloads are NOT validated at runtime. |
+| `arbor.ui.list_contributions(point)` | Read the merged list of contributions for a point (sorted by `priority`). Lets a host plugin fold contributions into its own snapshot. |
+| `arbor.ui.container.register(opts)` | Declare an aggregated modal. `opts = {id, title, kind?, layout?, width?, height?, submit_label?, cancel_label?, on_load?, on_save?}`. `width` / `height` in `px` reference a 1920×1080 window and scale linearly with the actual viewport (so `"960px"` means "half the viewport"). Body is built from `<plugin>::<id>:category` + `<plugin>::<id>:section` contributions. |
+| `arbor.ui.container.open(key)` · `close(key)` | Show / hide a registered container by its `"<plugin>::<id>"` key. |
+| `arbor.ui.settings.panel(config)` | Sugar over `container.register`: same shape, but forces `kind = "modal"` + `layout = "tree_nav"` and binds the sub-points to the conventional `<plugin>:settings:{category,section}` naming. The gear in Plugin Manager appears whenever a plugin owns at least one container. |
+| `arbor.ui.settings.open(plugin_name, panel_id)` | Open a registered settings panel programmatically. Same effect as the user clicking the gear icon. |
+| `arbor.ui.settings.close()` | Close the currently open settings panel. |
+| `arbor.ui.icon.register(config)` | Register a custom SVG icon, namespaced as `plugin:<your_plugin>:<id>`. Reference it from any `icon` field. Wiped on plugin reload / disable. |
+| `arbor.ui.add_graph_combo(opts)` | Register a split button (run + dropdown). `target`: "activity_bar" (default) or "repo_actions" |
+| `arbor.ui.set_combo_options{ id, options, selected? }` | Dynamically update a combo's option list (call from `on_repo_open` to refresh per-repo). Optional `selected` adopts a pick if it appears in `options`. Thin sugar over `contribute_patch("arbor:activitybar", id, {options=…})`. |
+| `arbor.ui.set_autocomplete_options(id, opts)` | Reply with fresh suggestions for an autocomplete field using `source_action`. Call inside the handler registered for that action. |
+| `arbor.ui.form.set_options(name, opts)` | Swap the option list of a select / radio / autocomplete field in the currently-open form |
+| `arbor.ui.form.set_disabled(name, bool)` | Disable or re-enable a field in the currently-open form |
+| `arbor.ui.form.set_value(name, v)` | Programmatically set a field's value in the currently-open form |
+| `arbor.ui.form.replace(cfg)` | Swap the whole node tree of the open form in-place, preserving field values by `name`. See *Dynamic form updates*. |
+| `arbor.ui.form.set_loading(arg)` | Toggle the loading overlay without re-rendering the form. `arg` can be `true` / `false`, a label string (implies `true`), or `{ loading, label }`. Cheap — use it for per-step progress ticks during a fan-out loop. |
+| `arbor.ui.form.close()` | Programmatically dismiss the currently-open form. Pair with `keep_open = true` on the form config when submit launches a follow-up flow (file picker, second form): the modal stays mounted while the secondary flow is up, and you call `close()` once it completes. |
+| `arbor.ui.operation.start{…}` | Push a progress card into the operations overlay (same widget used by Pull / Fetch-all / Pull-all). Config: `{id, title, subtitle?, steps[{key,label}], current?}`. The id is plugin-scoped server-side — collisions across plugins are impossible. |
+| `arbor.ui.operation.set_current(id, step_key, detail?)` | Move the active-step pointer; auto-completes earlier rows and leaves later ones pending. |
+| `arbor.ui.operation.update_step(id, step_key, {status?, detail?})` | Patch a single row. `status`: `"pending"\|"completed"\|"skipped"\|"error"`. Avoid setting `"active"` here — use `set_current` instead (sticky active = forever spinner). |
+| `arbor.ui.operation.finish(id, {summary?, error?})` | Close the card. It lingers a few seconds with the summary or error, then auto-dismisses. |
+| `arbor.ui.add_separator()` | Insert a horizontal separator in the activity bar after the last registered item |
+| `arbor.ui.add_context_menu_item(opts)` | Add item to the commit/branch/file context menu |
+| `arbor.ui.add_menu_item(opts)` | Add item to the hamburger menu |
+| `arbor.ui.add_toolbar_action(opts)` | Add an inline action button to one of Arbor's toolbars. `target`: `"diff"`, `"status-bar:left"`, `"status-bar:right"`, `"title-bar:left"`, `"title-bar:right"`, `"commit-detail"`, `"commit-form"`. Unknown targets pass through verbatim — usable for plugin-owned custom toolbars. |
+| `arbor.ui.open_path(path)` | Hand a file/folder to the OS default handler (Explorer on Windows, Finder on macOS, xdg-open on Linux). Used to expose "Open in file manager" affordances on artefact folders. |
+| `arbor.ui.copy_to_clipboard{ text, toast? }` | Copy `text` to the system clipboard via the webview; optional `toast` overrides the success message ("Copied to clipboard" by default). For one-shot copies driven by the user clicking a value, prefer the `copy_link` DSL node — it runs entirely client-side with no plugin hop. |
+| `arbor.ui.show_pipeline_run(run_id)` | Deep-link to a pipeline run: opens a standalone detail modal (graph + output log) on top of whatever is currently visible. No-op on empty `run_id`. Use it to jump from a plugin's own UI (sidebar, history modal, …) to the canonical run view without opening the bottom Pipelines panel. |
+| `arbor.ui.set_branding{ svg? \| svg_path?, window_icon_path? }` | Replace the default Arbor app mark. Pass either `svg` (inline markup) *or* `svg_path` (absolute path read off disk by the host — no `fs.read` perm needed) to paint the in-app surfaces (title-bar slot, welcome screen, About modal, HTML stats export). `window_icon_path` is an absolute path to a **raster** image (PNG / ICO) handed to the OS window-icon API — taskbar / Alt-Tab / window chrome on Windows & Linux. At least one field is required; missing fields don't reset their counterpart. RAM-only — see the *Branding & theme* section below. |
+| `arbor.ui.clear_branding()` | Restore both the bundled SVG mark and the bundled window icon. No-op when the current override belongs to another plugin. |
+| `arbor.ui.set_theme_tokens{ vars }` | Layer a CSS-variable overlay on top of the active theme. `vars` is a `"--name" = "value"` table (every key must start with `--`). Overlays survive theme switches; they vanish on plugin reload or `clear_theme_tokens`. |
+| `arbor.ui.clear_theme_tokens()` | Drop this plugin's overlay; other plugins' overlays remain. |
 
 ## The unified contribution model
 
 Every `add*` / `set*` / `register` call above is sugar
-  on top of `arbor.ui.contribute(point, item)`. Each surface â€” context menu,
-  command palette, keybindings, sidebars, activity bar, icons, tree state, panel content â€”
+  on top of `arbor.ui.contribute(point, item)`. Each surface — context menu,
+  command palette, keybindings, sidebars, activity bar, icons, tree state, panel content —
   is exposed as a **well-known contribution point**. Plugins may use the sugar
   API or call `contribute` directly; the result is the same.
 
-The frontend reads a single canonical store (`list_plugin_contributions(point)`) and listens to `arbor://contributions-changed` to refresh. Render-time iteration goes through one host-side primitive (`<Contribution point=â€¦>`) that filters out items from disabled plugins, applies `when` / `disabled` automatically, wraps each snippet in an error boundary, and exposes a `fire(extra?)` helper.
+The frontend reads a single canonical store (`list_plugin_contributions(point)`) and listens to `arbor://contributions-changed` to refresh. Render-time iteration goes through one host-side primitive (`<Contribution point=…>`) that filters out items from disabled plugins, applies `when` / `disabled` automatically, wraps each snippet in an error boundary, and exposes a `fire(extra?)` helper.
 
 **Top-level fields.** `when`, `disabled`, `group` are typed top-level fields on the
-  contribution item â€” not magic keys inside `payload`. `when` takes `{kind?: string|string[], data_field?: {key, value}}` and is
+  contribution item — not magic keys inside `payload`. `when` takes `{kind?: string|string[], data_field?: {key, value}}` and is
   matched against the renderer's context. `disabled = true` hides the item
   without unregistering it. `group` is a free-form bucket label consumers can
   use to render section headers.
@@ -6343,34 +6344,34 @@ The frontend reads a single canonical store (`list_plugin_contributions(point)`)
   before it reaches the registry. Plugin-defined points (anything that doesn't
   start with `arbor:`) are not validated.
 
-### Sugar APIs â†” contribution points
+### Sugar APIs ↔ contribution points
 
 | Built-in point | Sugar API | Payload |
 | --- | --- | --- |
-| arbor:context-menu:<target> | add_context_menu_item | {target, label, action, icon?} |
-| arbor:menu | add_menu_item | {label, action, icon?} |
-| arbor:sidebar | add_sidebar | {action, label, icon?, side, position, kind, â€¦} |
-| arbor:activitybar | add_graph_combo Â· add_separator | {kind: "combo"\|"separator", target, â€¦} |
-| arbor:diff-toolbararbor:status-bar:<side>arbor:title-bar:<side>arbor:commit-detail:actionarbor:commit-form:action | add_toolbar_action (single sugar, target selects) | {label?, icon?, action, tooltip?, color?} |
-| arbor:command-palette | arbor.command.register | {title, description?, icon?, group?} |
-| arbor:keybinding | arbor.keybinding.register | {key, ctrl?, shift?, alt?, action, description?} |
-| arbor:icon | arbor.ui.icon.register | {svg} |
-| arbor:tree-state | arbor.ui.tree.set | {title?, nodes[], version} â€” replace-by-id |
-| arbor:panel-content | arbor.ui.set_panel_content | {title?, nodes, actions?} â€” replace-by-id |
-| <plugin>::<id>:category<plugin>::<id>:section | arbor.ui.container.register + arbor.ui.contribute | Aggregated modal (containers). See Containers below. |
+| `arbor:context-menu:<target>` | `add_context_menu_item` | `{target, label, action, icon?}` |
+| `arbor:menu` | `add_menu_item` | `{label, action, icon?}` |
+| `arbor:sidebar` | `add_sidebar` | `{action, label, icon?, side, position, kind, …}` |
+| `arbor:activitybar` | `add_graph_combo` · `add_separator` | `{kind: "combo"\|"separator", target, …}` |
+| `arbor:diff-toolbar` `arbor:status-bar:<side>` `arbor:title-bar:<side>` `arbor:commit-detail:action` `arbor:commit-form:action` | `add_toolbar_action` (single sugar, `target` selects) | `{label?, icon?, action, tooltip?, color?}` |
+| `arbor:command-palette` | `arbor.command.register` | `{title, description?, icon?, group?}` |
+| `arbor:keybinding` | `arbor.keybinding.register` | `{key, ctrl?, shift?, alt?, action, description?}` |
+| `arbor:icon` | `arbor.ui.icon.register` | `{svg}` |
+| `arbor:tree-state` | `arbor.ui.tree.set` | `{title?, nodes[], version}` — replace-by-id |
+| `arbor:panel-content` | `arbor.ui.set_panel_content` | `{title?, nodes, actions?}` — replace-by-id |
+| `<plugin>::<id>:category` `<plugin>::<id>:section` | `arbor.ui.container.register` + `arbor.ui.contribute` | Aggregated modal (containers). See *Containers* below. |
 
 Context menus are split **per target** so consumers subscribe only to
-  the slot they care about. Use `add_context_menu_item({target = "commit", â€¦})` â€” the dual-write derives the point name as `arbor:context-menu:commit`.
+  the slot they care about. Use `add_context_menu_item({target = "commit", …})` — the dual-write derives the point name as `arbor:context-menu:commit`.
   Known targets: `commit`, `branch`, `tag`, `stash`, `file`, `remote`, `submodule`, `worktree`, `line`, `hunk`, `tab`, plus any plugin-defined string.
 
 Re-contributing with the same `(plugin, point, id)` replaces the previous payload,
   so the sugar APIs that update state at runtime (`set_combo_options`, `tree.set`, `set_panel_content`) work naturally. Use a stable `id` to keep updates idempotent.
 
 When you only want to update *some* fields of an item without re-specifying
-  the whole payload, use `arbor.ui.contribute_patch(point, id, partial)` â€”
+  the whole payload, use `arbor.ui.contribute_patch(point, id, partial)` —
   it shallow-merges `partial` into the existing payload and writes back. `set_combo_options` is a thin sugar over this primitive.
 
-### Toolbar action points (covered by add_toolbar_action)
+### Toolbar action points (covered by `add_toolbar_action`)
 
 Inline action buttons on Arbor's toolbars all share one sugar: `arbor.ui.add_toolbar_action({id, target, action, label?, icon?, tooltip?, color?})`.
   The `target` short-name selects which toolbar; the renderer ignores
@@ -6378,30 +6379,30 @@ Inline action buttons on Arbor's toolbars all share one sugar: `arbor.ui.add_too
 
 | target | Point | Where it renders |
 | --- | --- | --- |
-| "status-bar:left" | arbor:status-bar:left | StatusBar, after the built-in indicators (branch / change pills). |
-| "status-bar:right" | arbor:status-bar:right | StatusBar, before jobs / notifications / version (always visible). |
-| "title-bar:left" | arbor:title-bar:left | TitleBar, after the workspace dropdown. |
-| "title-bar:right" | arbor:title-bar:right | TitleBar, before docs / theme / settings. |
-| "diff" | arbor:diff-toolbar | DiffViewer header â€” next to Copy / Maximize. |
-| "commit-detail" | arbor:commit-detail:action | CommitDetailPanel â€” action row below the body. Fired with the commit oid. |
-| "commit-form" | arbor:commit-form:action | CommitForm â€” between the Amend toggle and the Commit split button. |
-| "workspace-row" | arbor:workspace-row | WorkspaceManagementModal â€” per-workspace action toolbar (after Edit / Export / Delete). Fired with {workspace_id, workspace_name, repo_count}. |
-| <custom> | verbatim | Any other string passes through unchanged â€” use this to target your own plugin's toolbars without a separate sugar. |
+| `"status-bar:left"` | `arbor:status-bar:left` | StatusBar, after the built-in indicators (branch / change pills). |
+| `"status-bar:right"` | `arbor:status-bar:right` | StatusBar, before jobs / notifications / version (always visible). |
+| `"title-bar:left"` | `arbor:title-bar:left` | TitleBar, after the workspace dropdown. |
+| `"title-bar:right"` | `arbor:title-bar:right` | TitleBar, before docs / theme / settings. |
+| `"diff"` | `arbor:diff-toolbar` | DiffViewer header — next to Copy / Maximize. |
+| `"commit-detail"` | `arbor:commit-detail:action` | CommitDetailPanel — action row below the body. Fired with the commit oid. |
+| `"commit-form"` | `arbor:commit-form:action` | CommitForm — between the Amend toggle and the Commit split button. |
+| `"workspace-row"` | `arbor:workspace-row` | WorkspaceManagementModal — per-workspace action toolbar (after Edit / Export / Delete). Fired with `{workspace_id, workspace_name, repo_count}`. |
+| `<custom>` | verbatim | Any other string passes through unchanged — use this to target your own plugin's toolbars without a separate sugar. |
 
-### Decorator points (no sugar yet â€” use arbor.ui.contribute)
+### Decorator points (no sugar yet — use `arbor.ui.contribute`)
 
 | Point | Where it renders | Payload |
 | --- | --- | --- |
-| arbor:branch-decorator | BranchTree â€” badge next to a branch row. branch_pattern filters which branches. | {branch_pattern?, label?, icon?, color?, tooltip?} |
-| arbor:file-decorator | FileDiffList / FileTree â€” badge next to a file path. | {path_pattern?, label?, icon?, color?, tooltip?} |
-| arbor:welcome-action | WelcomeScreen â€” quick-action card. | {title, description?, icon?, action} |
-| arbor:pipelines:toolbar | PipelinesPanel â€” extra icon-only buttons in the left vertical toolbar (Local Pipelines tab), after the built-in Run / Stop / Resume / Clear cluster. | {icon, tooltip?, label?, accent?, success?, danger?, divider_before?, disabled?} |
+| `arbor:branch-decorator` | BranchTree — badge next to a branch row. `branch_pattern` filters which branches. | `{branch_pattern?, label?, icon?, color?, tooltip?}` |
+| `arbor:file-decorator` | FileDiffList / FileTree — badge next to a file path. | `{path_pattern?, label?, icon?, color?, tooltip?}` |
+| `arbor:welcome-action` | WelcomeScreen — quick-action card. | `{title, description?, icon?, action}` |
+| `arbor:pipelines:toolbar` | PipelinesPanel — extra icon-only buttons in the left vertical toolbar (Local Pipelines tab), after the built-in Run / Stop / Resume / Clear cluster. | `{icon, tooltip?, label?, accent?, success?, danger?, divider_before?, disabled?}` |
 
 Some decorator points may not yet have a built-in consumer in your version
-  of Arbor â€” they are declared up-front so plugins can start contributing
+  of Arbor — they are declared up-front so plugins can start contributing
   without API churn.
 
-### Toolbar action â€” example
+### Toolbar action — example
 
 ```lua
 -- Status bar pill that opens the build settings on click.
@@ -6445,27 +6446,27 @@ Plugins can swap the app mark and overlay extra CSS variables on top of the
 `arbor.ui.set_branding` covers two surfaces and the plugin
   picks which to override per call:
 
-- `svg` â€” inline SVG markup (the string must start with `<svg`). Paints every in-app surface that shows the
+- `svg` — inline SVG markup (the string must start with `<svg`). Paints every in-app surface that shows the
     Arbor identity (title bar, welcome screen, About modal) *and* is embedded by the HTML stats exporter so co-branded reports stay
     consistent without a second round-trip through the plugin.
-- `svg_path` â€” alternative to `svg`: absolute
+- `svg_path` — alternative to `svg`: absolute
     path to an `.svg` file the host reads off disk. Use this
     when you'd rather ship the artwork as a sibling asset
-    (`assets/logo.svg`) than embed it as a long string in `main.lua`. Same trust model as `window_icon_path` â€”
+    (`assets/logo.svg`) than embed it as a long string in `main.lua`. Same trust model as `window_icon_path` —
     no `fs.read` permission is required since the read happens
     server-side. Mutually exclusive with `svg`.
-- `window_icon_path` â€” absolute path to a **raster** image (PNG or ICO; SVG is rejected because the OS window-icon API
+- `window_icon_path` — absolute path to a **raster** image (PNG or ICO; SVG is rejected because the OS window-icon API
     needs a rasterised buffer and Arbor doesn't bundle a renderer). Used
     for the OS-level icon: taskbar, Alt-Tab list and window chrome on
     Windows / Linux. macOS dock icons come from `Info.plist` and require a build-time swap, so this field is a no-op there.
 
-Either field can be supplied alone â€” a follow-up call that only sets `window_icon_path` swaps the icon without touching the SVG,
+Either field can be supplied alone — a follow-up call that only sets `window_icon_path` swaps the icon without touching the SVG,
   and vice-versa. `arbor.ui.clear_branding()` drops both at
   once and restores the bundled assets.
 
 ```lua
 -- Replace the Arbor mark + the OS window icon for this session.
--- Hand the host an absolute path â€” no fs.read permission needed.
+-- Hand the host an absolute path — no fs.read permission needed.
 local dir = arbor.meta.plugin_dir()
 arbor.ui.set_branding{
   svg_path         = dir .. "/assets/acme.svg",
@@ -6473,7 +6474,7 @@ arbor.ui.set_branding{
 }
 
 -- Or embed the markup inline (handy for tiny marks):
--- arbor.ui.set_branding{ svg = "<svg â€¦>â€¦</svg>" }
+-- arbor.ui.set_branding{ svg = "<svg …>…</svg>" }
 
 -- Later: swap only the OS icon (e.g. tint based on environment).
 arbor.ui.set_branding{ window_icon_path = dir .. "/assets/acme-prod.ico" }
@@ -6516,21 +6517,21 @@ end)
 arbor.ui.clear_theme_tokens()
 ```
 
-## arbor.notify â€” persistent notifications
+## arbor.notify — persistent notifications
 
-Adds a notification to the in-app notification center (bell icon in the status bar). Notifications persist until the user explicitly dismisses them. An optional `action` table renders a click button on the notification that triggers a built-in side-effect. Boundary validation: `message` must be a non-empty string and `level` (when supplied) must be one of `"info"|"success"|"warning"|"error"` â€” invalid input raises a Lua error.
+Adds a notification to the in-app notification center (bell icon in the status bar). Notifications persist until the user explicitly dismisses them. An optional `action` table renders a click button on the notification that triggers a built-in side-effect. Boundary validation: `message` must be a non-empty string and `level` (when supplied) must be one of `"info"|"success"|"warning"|"error"` — invalid input raises a Lua error.
 
 ```lua
 -- arbor.notify{ message, title?, level?, action? }
 -- level: "info" | "success" | "warning" | "error"  (default "info")
 
 arbor.notify{ title = "Build succeeded", message = "Release build completed", level = "success" }
-arbor.notify{ title = "Build failed",    message = "Exited with code 2 â€” see Jobs panel", level = "error" }
+arbor.notify{ title = "Build failed",    message = "Exited with code 2 — see Jobs panel", level = "error" }
 arbor.notify{ message = "Config reloaded" }    -- title-less, defaults to "info"
 
 -- With a click action: button shown in the overlay; clicking runs the
 -- associated side-effect and dismisses the notification.
-arbor.notify{ title = "Sync Â· MyLink", message = "Checked out develop on 2 worktrees",
+arbor.notify{ title = "Sync · MyLink", message = "Checked out develop on 2 worktrees",
               level = "success",
               action = { kind = "open-link-manager", label = "View link", link_id = "..." } }
 
@@ -6540,10 +6541,10 @@ arbor.notify{ title = "Repo updated", message = "main pulled 3 commits", level =
 
 **Action kinds**:
 
-- `open-link-manager` â€” needs `label`, `link_id`; opens the Linked Worktrees manager pre-selected on that link.
-- `open-tab-by-repo-id` â€” needs `label`, `repo_id`; activates the matching open tab (no-op if not currently open).
+- `open-link-manager` — needs `label`, `link_id`; opens the Linked Worktrees manager pre-selected on that link.
+- `open-tab-by-repo-id` — needs `label`, `repo_id`; activates the matching open tab (no-op if not currently open).
 
-## arbor.command â€” command palette entries
+## arbor.command — command palette entries
 
 Register items that appear in the Command Palette (`Ctrl+K`). Each entry fires the action `command:<id>` on the plugin when selected.
 
@@ -6565,7 +6566,7 @@ end)
 arbor.command.unregister("my-action")
 ```
 
-## arbor.contribution â€” registry introspection
+## arbor.contribution — registry introspection
 
 Read-only access to the unified contribution registry. A plugin can list every
   contribution registered against a point and every point that's been declared.
@@ -6575,8 +6576,8 @@ Read-only access to the unified contribution registry. A plugin can list every
 
 | API | Description |
 | --- | --- |
-| arbor.contribution.list(point) | Items contributed to point, sorted by priority. Each item: {plugin_name, item_id, payload, priority, when?, disabled?, group?}. payload is a Lua table. |
-| arbor.contribution.list_points() | Every declared contribution point: {plugin_name, name, description?, schema?}. |
+| `arbor.contribution.list(point)` | Items contributed to `point`, sorted by `priority`. Each item: `{plugin_name, item_id, payload, priority, when?, disabled?, group?}`. `payload` is a Lua table. |
+| `arbor.contribution.list_points()` | Every declared contribution point: `{plugin_name, name, description?, schema?}`. |
 
 ```lua
 -- Skip the manual entry if another plugin already
@@ -6588,7 +6589,7 @@ for _, c in ipairs(existing or {}) do
 end
 if not taken then
   arbor.ui.contribute("compile-action:builds:context_menu", {
-    id = "manual-remove", payload = { label = "Removeâ€¦", action = "remove" },
+    id = "manual-remove", payload = { label = "Remove…", action = "remove" },
   })
 end
 ```
@@ -6596,9 +6597,9 @@ end
 Reads only: there is no `subscribe`. Plugins that need to react to
   contribution changes can listen to the `arbor://contributions-changed` Tauri event via the standard hook mechanism.
 
-## arbor.keybinding â€” plugin keyboard shortcuts
+## arbor.keybinding — plugin keyboard shortcuts
 
-Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the **Plugins** group in **Settings â†’ Keybindings** (read-only).
+Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the **Plugins** group in **Settings → Keybindings** (read-only).
 
 ```lua
 -- Call once during on_plugin_load.
@@ -6625,12 +6626,12 @@ end)
 
 **Note:** plugin keybindings take priority over unbound app keys when the shortcut matches. They do *not* override user-customised app keybindings.
 
-Registered shortcuts surface automatically in **Settings â†’ Keybindings** (read-only "Plugins" section) and the **Shortcuts** documentation page.
+Registered shortcuts surface automatically in **Settings → Keybindings** (read-only "Plugins" section) and the **Shortcuts** documentation page.
   No extra UI wiring is required from the plugin side.
 
 ## Combo Button
 
-A split widget: a primary action button (icon only) on the left and a dropdown arrow on the right. `run_icon` accepts any Lucide icon name â€” common choices: `"Play"` (â–¶), `"Hammer"` (ðŸ”¨), `"Wrench"`, `"Zap"`.
+A split widget: a primary action button (icon only) on the left and a dropdown arrow on the right. `run_icon` accepts any Lucide icon name — common choices: `"Play"` (▶), `"Hammer"` (🔨), `"Wrench"`, `"Zap"`.
   You can register **multiple combos** from the same plugin; they appear in
   registration order within the target area.
 
@@ -6650,8 +6651,8 @@ arbor.events.on("on_repo_open", function(ctx)
   arbor.ui.set_combo_options{
     id = "my_plugin:run",
     options = {
-      { value = "dev",  label = "Run Â· dev",  group = "Project" },
-      { value = "prod", label = "Run Â· prod", group = "Project" },
+      { value = "dev",  label = "Run · dev",  group = "Project" },
+      { value = "prod", label = "Run · prod", group = "Project" },
     },
   }
 end)
@@ -6667,7 +6668,7 @@ end)
 
 Mark an option with `action = true` to make it behave like *"New Workspace"* in the workspace dropdown: clicking it fires the
   combo's `run_action` directly (so the plugin can open a modal or
-  settings form) and does **not** become the persisted selection â€”
+  settings form) and does **not** become the persisted selection —
   the previously selected config stays active in the run button. Action options
   render in a visually separated footer below a divider.
 
@@ -6675,12 +6676,12 @@ Mark an option with `action = true` to make it behave like *"New Workspace"* in 
 arbor.ui.set_combo_options{
   id = "my_plugin:run",
   options = {
-    { value = "dev",               label = "Run Â· dev",          group = "Project" },
-    { value = "prod",              label = "Run Â· prod",         group = "Project" },
+    { value = "dev",               label = "Run · dev",          group = "Project" },
+    { value = "prod",              label = "Run · prod",         group = "Project" },
 
     -- Footer: open modals without changing the selection
-    { value = "__new_config__",    label = "âŠ• New configurationâ€¦", action = true },
-    { value = "__settings__",      label = "âš™ Run settingsâ€¦",      action = true },
+    { value = "__new_config__",    label = "⊕ New configuration…", action = true },
+    { value = "__settings__",      label = "⚙ Run settings…",      action = true },
   },
 }
 
@@ -6698,11 +6699,11 @@ Each combo option supports the following extra fields (all optional, additive
 
 | Field | Type | Effect |
 | --- | --- | --- |
-| icon | string (Lucide name) | Small icon rendered before the label. |
-| subtitle | string | Caption shown below the label in muted text. |
-| meta | string | Right-aligned tabular text (counts, durations, â€¦). |
-| disabled | boolean | Renders the option dimmed and prevents selection. |
-| group | string | Group label â€” consecutive options sharing a group are bucketed under a header. |
+| `icon` | string (Lucide name) | Small icon rendered before the label. |
+| `subtitle` | string | Caption shown below the label in muted text. |
+| `meta` | string | Right-aligned tabular text (counts, durations, …). |
+| `disabled` | boolean | Renders the option dimmed and prevents selection. |
+| `group` | string | Group label — consecutive options sharing a group are bucketed under a header. |
 
 ```lua
 arbor.ui.set_combo_options{
@@ -6720,43 +6721,43 @@ arbor.ui.set_combo_options{
 ## Sidebar Panels (add_sidebar)
 
 Register a plugin panel attached to an ActivityBar icon. By default the
-  icon appears on the **right** ActivityBar â€” a dedicated
+  icon appears on the **right** ActivityBar — a dedicated
   plugin-expansion rail, visually identical to the left but dedicated to
   plugins. The left bar is reserved for built-in Arbor sections, though
   plugins may also target `side="left"` when it makes sense.
 
 The right ActivityBar is **completely hidden** when no plugin
-  has registered a right-side entry â€” the layout falls back to the classic
+  has registered a right-side entry — the layout falls back to the classic
   single-bar style.
 
 | Field | Values | Default |
 | --- | --- | --- |
-| id | string (unique per plugin) | â€” required â€” |
-| side | "left" \| "right" | "right" |
-| position | "top" (side panel) \| "bottom" (shared bottom slot) | "top" |
-| icon | Lucide icon name or single-char emoji | â€” generic icon â€” |
-| label / tooltip | string | falls back to id |
+| `id` | string (unique per plugin) | — required — |
+| `side` | `"left"` \| `"right"` | `"right"` |
+| `position` | `"top"` (side panel) \| `"bottom"` (shared bottom slot) | `"top"` |
+| `icon` | Lucide icon name or single-char emoji | — generic icon — |
+| `label` / `tooltip` | string | falls back to `id` |
 
 The **bottom slot is unique**: clicking a plugin-bottom icon
   overrides whichever panel was open (stage / detail / terminal / jobs /
-  pipelines / another plugin) â€” only ONE bottom panel is visible at any
+  pipelines / another plugin) — only ONE bottom panel is visible at any
   time, regardless of which ActivityBar fired the click.
 
-Every bottom panel â€” built-in or plugin-contributed â€” wears the same
+Every bottom panel — built-in or plugin-contributed — wears the same
   standardized header chrome: a 34-px bar on `--bg-base` with the
   panel title on the left, optional inline content, plugin/built-in
   toolbar actions on the right, and a red dot close button at the very end
   (the same widget used by modal headers). For plugin-bottom panels the
-  title comes from `arbor.ui.set_panel_content(id, {title, â€¦})`;
+  title comes from `arbor.ui.set_panel_content(id, {title, …})`;
   the close button is wired automatically and clears the active bottom
-  section. You don't render this chrome yourself â€” only the body content.
+  section. You don't render this chrome yourself — only the body content.
 
 ```lua
 -- Register the panels once at plugin load.
 arbor.events.on("on_plugin_load", function()
   arbor.ui.add_sidebar({
     id       = "overview",
-    icon     = "ðŸ§©",
+    icon     = "🧩",
     label    = "Panel Demo",
     tooltip  = "Right-side demo panel",
     side     = "right",
@@ -6765,8 +6766,8 @@ arbor.events.on("on_plugin_load", function()
 
   arbor.ui.add_sidebar({
     id       = "runtime",
-    icon     = "ðŸ“‹",
-    label    = "Demo â€” bottom",
+    icon     = "📋",
+    label    = "Demo — bottom",
     side     = "right",
     position = "bottom",      -- unique bottom slot
   })
@@ -6781,8 +6782,8 @@ arbor.events.on("panel:open:overview", function(_ctx)
       { type = "label",   text = "Content pushed live by the plugin." },
       { type = "divider" },
       { type = "list", items = {
-          { id = "a", icon = "âœ“", label = "Action A", action = "demo:act-a" },
-          { id = "b", icon = "â†»", label = "Refresh",  action = "demo:refresh" },
+          { id = "a", icon = "✓", label = "Action A", action = "demo:act-a" },
+          { id = "b", icon = "↻", label = "Refresh",  action = "demo:refresh" },
       }},
     },
     actions = {
@@ -6794,18 +6795,18 @@ end)
 
 ### Supported form-DSL nodes in sidebars
 
-The sidebar renderer is intentionally lightweight â€” it handles the shapes
-  common to dashboards and launchers. Rich editing (`tree_layout`, `pipeline_editor`, wizards) still belongs in modals opened via `arbor.ui.form`. Nodes are rendered **recursively** â€” a `section` can contain `list`, `row`,
+The sidebar renderer is intentionally lightweight — it handles the shapes
+  common to dashboards and launchers. Rich editing (`tree_layout`, `pipeline_editor`, wizards) still belongs in modals opened via `arbor.ui.form`. Nodes are rendered **recursively** — a `section` can contain `list`, `row`,
   nested `section`, etc. at arbitrary depth.
 
-- `heading` â€” `{ type="heading", text="â€¦" }`
-- `label` / `paragraph` â€” plain text (sidebar uses the `text` field, not `content`)
-- `divider` â€” horizontal rule
-- `button` â€” `{ type="button", label?, icon?, icon_only?, variant?, disabled?, tooltip?, action, id }`. Variants: `default` / `ghost` / `primary` / `danger`. `icon_only = true` renders a square 24Ã—24 button.
-- `row` â€” `{ type="row", gap?, children[] }`. Inline flex, wraps when narrow. Use to lay out inline icon-button toolbars.
-- `list` â€” `{ type="list", items=[{id,label,icon?,detail?,action?}â€¦] }`. A per-item `action` fires when the row is clicked; the row receives `{id, value, label}` in the action context.
-- `section` â€” grouped container with optional `title` and nested `nodes`. Children render through the full node renderer, so every node type above is available inside.
-- `card_item` â€” MR/Reflog-style list row. Fields: `id`, `icon`, `icon_variant` (accent/success/warning/danger), `title`, `subtitle`, `badge` (small chip, top-right of title), `meta` (`[{text, variant}]` chips below), `action` (primary click on the whole row), `actions` (`[{icon, tooltip, variant, action, extra}]` hover-revealed icon buttons on the right), `tooltip`. Use for dense clickable lists that also need secondary per-row actions.
+- `heading` — `{ type="heading", text="…" }`
+- `label` / `paragraph` — plain text (sidebar uses the `text` field, not `content`)
+- `divider` — horizontal rule
+- `button` — `{ type="button", label?, icon?, icon_only?, variant?, disabled?, tooltip?, action, id }`. Variants: `default` / `ghost` / `primary` / `danger`. `icon_only = true` renders a square 24×24 button.
+- `row` — `{ type="row", gap?, children[] }`. Inline flex, wraps when narrow. Use to lay out inline icon-button toolbars.
+- `list` — `{ type="list", items=[{id,label,icon?,detail?,action?}…] }`. A per-item `action` fires when the row is clicked; the row receives `{id, value, label}` in the action context.
+- `section` — grouped container with optional `title` and nested `nodes`. Children render through the full node renderer, so every node type above is available inside.
+- `card_item` — MR/Reflog-style list row. Fields: `id`, `icon`, `icon_variant` (accent/success/warning/danger), `title`, `subtitle`, `badge` (small chip, top-right of title), `meta` (`[{text, variant}]` chips below), `action` (primary click on the whole row), `actions` (`[{icon, tooltip, variant, action, extra}]` hover-revealed icon buttons on the right), `tooltip`. Use for dense clickable lists that also need secondary per-row actions.
 
 ```lua
 -- Example: a sequences-like list where primary click runs, secondary
@@ -6835,7 +6836,7 @@ arbor.ui.set_panel_content("my_panel", {
 })
 ```
 
-`set_panel_content` also accepts a top-level `actions = [{label, action, icon?}â€¦]` array that renders as full-width footer buttons below the body.
+`set_panel_content` also accepts a top-level `actions = [{label, action, icon?}…]` array that renders as full-width footer buttons below the body.
 
 ## Tree-kind sidebars (contribution model)
 
@@ -6854,7 +6855,7 @@ arbor.ui.add_sidebar({
   icon        = "Hammer",
   side        = "right",
   position    = "top",
-  kind        = "tree",            -- â† opt into the tree renderer
+  kind        = "tree",            -- ← opt into the tree renderer
 })
 ```
 
@@ -6885,18 +6886,18 @@ Call `arbor.ui.tree.set(sidebar_id, body)` on every state change
 ### 3. Declare contribution points
 
 Convention: name points `<plugin>:<sidebar_id>:<slot>`.
-  The frontend reads the following slots automatically â€” declare them so
+  The frontend reads the following slots automatically — declare them so
   consumers (and the docs) know they exist:
 
 | Slot | Renders | Payload shape |
 | --- | --- | --- |
-| toolbar | Buttons in the panel header | {icon, tooltip, action, accent?, success?, danger?, divider_before?, disabled?} |
-| tree.section | Top-level section appended to the tree | {section = <TreeNode>} |
-| node_action | Hover-revealed icon button on each row | {icon, tooltip, action, accent?\|success?\|danger?, when?} |
-| node_decorator | Always-on badge / icon between label and actions | {icon?, badge?, badge_kind?, tooltip?, when?} |
-| context_menu | Right-click menu items | {label, action, danger?, separator?, when?} |
-| dependency_provider | Auto-injects "Show dependencies" in the right-click menu when the node matches | {label, action, when?} â€” handler writes results via tree.set(request_id, â€¦) |
-| footer | Items in the panel footer | {kind="text"\|"button", icon?, label?, action?, badge?} |
+| `toolbar` | Buttons in the panel header | `{icon, tooltip, action, accent?, success?, danger?, divider_before?, disabled?}` |
+| `tree.section` | Top-level section appended to the tree | `{section = <TreeNode>}` |
+| `node_action` | Hover-revealed icon button on each row | `{icon, tooltip, action, accent?\|success?\|danger?, when?}` |
+| `node_decorator` | Always-on badge / icon between label and actions | `{icon?, badge?, badge_kind?, tooltip?, when?}` |
+| `context_menu` | Right-click menu items | `{label, action, danger?, separator?, when?}` |
+| `dependency_provider` | Auto-injects "Show dependencies" in the right-click menu when the node matches | `{label, action, when?}` — handler writes results via `tree.set(request_id, …)` |
+| `footer` | Items in the panel footer | `{kind="text"\|"button", icon?, label?, action?, badge?}` |
 
 The `when` filter narrows a contribution to specific nodes: `{kind = "module"}`, `{kind = ["module","runnable"]}`,
   or `{kind = "module", data_field = {key = "template_id", value = "maven"}}`.
@@ -6912,7 +6913,7 @@ arbor.ui.contribute(POINT, {
   id       = "update-deps",
   priority = 50,                              -- lower renders first
   payload  = {
-    label  = "Update dependencies (latest releases)â€¦",
+    label  = "Update dependencies (latest releases)…",
     action = "maven-update-deps:update",
     when   = { kind = "module",
                data_field = { key = "template_id", value = "maven" } },
@@ -6927,7 +6928,7 @@ end)
 ```
 
 Re-call `arbor.ui.contribute` with the same `id` to
-  replace the previous payload â€” useful when your contribution depends on the
+  replace the previous payload — useful when your contribution depends on the
   active repo (e.g. a tree section whose contents change per tab). Use `arbor.ui.unregister_contribution(point, id)` to remove it.
 
 ### Custom icons
@@ -6955,7 +6956,7 @@ icon = "plugin:my-plugin:my-logo"
 Right-clicking a tree row auto-injects a *Show dependencies* entry
   whenever a `dependency_provider` contribution matches the node
   (via its `when` filter). Selecting it opens the `DependencyTreeModal` and fires the provider's `action` with `{request_id, node_id, data}`.
-  The provider's job is to populate `arbor.ui.tree.set(request_id, {title, nodes})` â€” the modal subscribes to that snapshot id and renders the result.
+  The provider's job is to populate `arbor.ui.tree.set(request_id, {title, nodes})` — the modal subscribes to that snapshot id and renders the result.
 
 ### Dependency Explorer modal (deps-explorer plugin)
 
@@ -6966,20 +6967,20 @@ Same transport, richer UI: the `deps-explorer` plugin opens an
   modal up; subsequent updates with the
   same id patch the open modal reactively (used to attach Maven Central
   latest-version data after the initial tree lands). The pattern is reusable
-  for any plugin that wants a dedicated modal â€” pick a unique sidebar-id
+  for any plugin that wants a dedicated modal — pick a unique sidebar-id
   prefix for the plugin and add a small store + listener.
 
 ```lua
 -- Open the modal immediately with a "loading" snapshot.
 local sid = "deps:" .. request_id
 arbor.ui.tree.set(sid, &#123;
-  title = "Resolvingâ€¦",
+  title = "Resolving…",
   nodes = &#123;&#125;,
 &#125;)
 
 -- Heavy work in the background; on done, push the real tree.
 arbor.job.spawn(&#123;
-  command = "mvn -B dependency:tree -DoutputFile=â€¦",
+  command = "mvn -B dependency:tree -DoutputFile=…",
   on_done = function(jc)
     local nodes = parse_tree(arbor.fs.read(out_file))
     arbor.ui.tree.set(sid, &#123; title = "Maven dependencies", nodes = nodes &#125;)
@@ -6989,7 +6990,7 @@ arbor.job.spawn(&#123;
 
 ## Containers (aggregated modals)
 
-A **container** is an aggregated UI surface â€” currently a modal â€”
+A **container** is an aggregated UI surface — currently a modal —
   whose body is built from cross-plugin contributions. The host registers the
   container; anyone (the host or a third party) contributes *categories* (left sidebar entries) and *sections* (right pane cards). Each section
   is rendered as its own `FormNodeRenderer` and saves in parallel.
@@ -6998,14 +6999,14 @@ Two layers compose every container:
 
 | API | Purpose |
 | --- | --- |
-| arbor.ui.container.register(opts) | Declare the container shell. Returns immediately; the modal opens lazily on open(). |
-| arbor.ui.container.open(key) | Show the modal. key is the canonical "<plugin>::<id>" id. |
-| arbor.ui.container.close(key) | Dismiss it. Mismatched keys are ignored so a plugin can't close another's modal. |
-| arbor.ui.contribute("<plugin>::<id>:category", item) | Add a sidebar entry. Payload: {label, icon?, description?, priority?}. |
-| arbor.ui.contribute("<plugin>::<id>:section", item) | Add a section card. Payload: {category, label?, icon?, nodes, on_save?, state?, priority?}. |
+| `arbor.ui.container.register(opts)` | Declare the container shell. Returns immediately; the modal opens lazily on `open()`. |
+| `arbor.ui.container.open(key)` | Show the modal. `key` is the canonical `"<plugin>::<id>"` id. |
+| `arbor.ui.container.close(key)` | Dismiss it. Mismatched keys are ignored so a plugin can't close another's modal. |
+| `arbor.ui.contribute("<plugin>::<id>:category", item)` | Add a sidebar entry. Payload: `{label, icon?, description?, priority?}`. |
+| `arbor.ui.contribute("<plugin>::<id>:section", item)` | Add a section card. Payload: `{category, label?, icon?, nodes, on_save?, state?, priority?}`. |
 
 `register` accepts `{id, title, kind?, layout?, width?, submit_label?, cancel_label?, on_save?, on_load?}`. `on_load` fires **once when the modal opens**, before
-  categories/sections are read â€” use it to re-contribute fresh state. The
+  categories/sections are read — use it to re-contribute fresh state. The
   contribution registry is reactive, so contributions arriving from `on_load` appear without a second round-trip.
 
 Save semantics are **parallel best-effort**: each section's `on_save` fires concurrently (Promise.allSettled), failures are
@@ -7015,7 +7016,7 @@ Save semantics are **parallel best-effort**: each section's `on_save` fires conc
   prevented by a backend rewrite: every form-DSL field name is silently
   prefixed with `<contributing-plugin>::` when the section
   is contributed, and the prefix is stripped from each plugin's slice on
-  save. Plugin code never sees the namespaced names â€” the rewrite is
+  save. Plugin code never sees the namespaced names — the rewrite is
   transparent. Collisions across sections of the *same* plugin
   still overwrite by last-writer (use unique field names within your own
   sections).
@@ -7025,8 +7026,8 @@ Save semantics are **parallel best-effort**: each section's `on_save` fires conc
 ```lua
 arbor.ui.container.register({
   id            = "main",
-  title         = "My Plugin â€” Settings",
-  width         = "960px",  -- referenced to a 1920Ã—1080 viewport,
+  title         = "My Plugin — Settings",
+  width         = "960px",  -- referenced to a 1920×1080 viewport,
   height        = "680px",  -- scales linearly with the actual window
   submit_label  = "Save All",
   on_load       = "my_plugin:refresh",
@@ -7051,21 +7052,21 @@ arbor.ui.contribute("my-plugin::main:section", {
 arbor.ui.container.open("my-plugin::main")
 ```
 
-## Plugin settings â€” sugar over containers
+## Plugin settings — sugar over containers
 
 `arbor.ui.settings.*` is sugar over the container API for the
   conventional "plugin settings" surface. The wrapper:
 
 - Registers a container with `kind = "modal"`, `layout = "tree_nav"`.
-- Forces the category / section sub-points to the historical naming `<plugin>:settings:category` and `<plugin>:settings:section` (single colon between `plugin` and `settings`) â€” so plugins extending a
+- Forces the category / section sub-points to the historical naming `<plugin>:settings:category` and `<plugin>:settings:section` (single colon between `plugin` and `settings`) — so plugins extending a
       host's settings panel use the natural compact name.
-- Discovers panels via the container registry â€” the gear icon in Plugin
+- Discovers panels via the container registry — the gear icon in Plugin
       Manager appears whenever a plugin owns at least one container.
 
 | Point | Payload shape |
 | --- | --- |
-| <host>:settings:category | {label, icon?, description?, priority?} â€” sidebar entry. |
-| <host>:settings:section | {category, label?, icon?, nodes, on_save?, priority?} â€” content card. category selects which sidebar entry the card belongs to. |
+| `<host>:settings:category` | `{label, icon?, description?, priority?}` — sidebar entry. |
+| `<host>:settings:section` | `{category, label?, icon?, nodes, on_save?, priority?}` — content card. `category` selects which sidebar entry the card belongs to. |
 
 Anyone can contribute to either point. External plugins can (a) add a new
   sidebar entry, (b) drop a card into an existing entry, or (c) replace an
@@ -7077,7 +7078,7 @@ Anyone can contribute to either point. External plugins can (a) add a new
 -- Once at PLUGIN_LOAD. All calls are idempotent.
 arbor.ui.settings.panel({
   id           = "main",
-  title        = "My Plugin â€” Settings",
+  title        = "My Plugin — Settings",
   width        = "960px",
   on_load      = "my_plugin:settings_refresh",  -- host pre-open hook
   on_save      = nil,                            -- per-section saves are enough
@@ -7161,7 +7162,7 @@ arbor.ui.contribute("my-plugin:settings:category", {
   payload = { label = "Extras", icon = "Plus", priority = 50 },
 })
 
--- And a card under it. The card header shows "Extras Â· extras-plugin"
+-- And a card under it. The card header shows "Extras · extras-plugin"
 -- so the user can see who injected it.
 arbor.ui.contribute("my-plugin:settings:section", {
   id = "extras-flags",
@@ -7201,71 +7202,71 @@ The Plugin Manager also exposes a **Clear cache** button
 
 | type | Key fields | Notes |
 | --- | --- | --- |
-| text | name, label, placeholder, default, pattern, pattern_hint, readonly | Also: password, email, url |
-| textarea | name, label, placeholder, default, rows |  |
-| number | name, label, default, min, max, step |  |
-| range | name, label, default, min, max, step, show_value, value_format | value_format: "{v}ms" |
-| checkbox | name, label, default |  |
-| toggle | name, label?, description?, default, size (sm/md/lg) | iOS-style switch. Use for "feature on/off"; use checkbox for "I agree" |
-| select | name, label, default, options[] | options: value+label+disabled? |
-| radio | name, label, default, options[], inline | options: value+label+description? |
-| color | name, label, default (#rrggbb) |  |
-| kv_list | name, label, key_placeholder, value_placeholder, default | Submitted as JSON object |
-| section | title, description, children[], collapsible, collapsed | Layout only |
-| container | children[], columns, gap | CSS grid |
-| row | children[], gap, align, wrap | Flexbox row |
-| separator | label? | Labelled divider line |
-| divider | â€” | Plain <hr> |
-| paragraph | content, variant (normal/muted/heading/caption) |  |
-| label | text, variant | Static text alias |
-| alert | text, variant (info/warning/error/success) |  |
-| code | text, language?, copy?, toast? | Read-only monospace block. When language matches a Prism grammar ("json", "rust", "yaml", â€¦) the block is syntax-highlighted using the same Prism setup as the diff viewer. copy: true shows a floating Copy button; toast overrides the success toast. |
-| icon | icon (Lucide name), variant (default/muted/info/success/warning/danger), size, tooltip, class, style | Inline Lucide glyph for status dots / badges. Loader2 auto-spins via CSS. |
-| copy_link | text, toast?, tooltip?, font (normal/"mono"), class, style | Click-to-copy pseudo-link with a subtle Copy glyph on the right. Calls navigator.clipboard directly â€” no plugin action hop. Ideal for paths, IDs, URLs. |
-| button | label?, action, variant (default/primary/danger/ghost), close_after, disabled, icon, icon_only, tooltip, extra, class | Inline action; icon is a Lucide name, icon_only renders without label, extra merges into the action payload. Pass class = "pal-row" for a tight flush-left catalog-row style. |
-| menu_button | label?, icon, icon_only, tooltip, show_chevron, options[] | Opens a dropdown menu. Each option: { label?, icon?, action?, extra?, variant?, disabled?, heading?, separator? } |
-| date | name, label, default, min, max, readonly, required | Submits ISO "YYYY-MM-DD" |
-| datetime | name, label, default, min, max, readonly, required | Submits "YYYY-MM-DDTHH:MM" (local, no TZ) |
-| time | name, label, default, min, max, readonly, required | Submits "HH:MM" |
-| switch | field, cases, default | Renders one branch based on another field's value |
-| tabs | tabs[], default_tab | Tab strip; all fields inside always collected for submit |
-| wizard | steps[], start_step, next_label, back_label | Multi-step form with Back/Next footer |
-| file | name, label, pick_mode, extensions, placeholder | Opens FilePickerModal â€” submits path string |
-| autocomplete | name, id, options?, source_action?, debounce_ms, free_form | Static or dynamic suggestions |
-| tags | name, default, suggestions, max | Submits string[] |
-| tree | name, nodes[], multi, expanded, bordered, max_height | Hierarchical selector. Nodes: value, label, icon?, group?, tag?, tag_variant?, description?, children? |
-| table | name, columns[], min_rows, max_rows, add_label | Submits Array<Record> |
-| tree_layout | nav_children[], content_children[], nav_width | 2-col split (nav + content). Typical use: tree on the left, form cards on the right gated with show_if |
-| section | title, description, children[], collapsible, collapsed, card, count, add_action, header_actions[], class | card = true renders with dark title bar + counter pill + optional + button. collapsible = true toggles the body. header_actions: { icon, tooltip, action, extra, disabled, variant }[] â€” icon buttons in the header; variant = "danger" applies the red hover. class = "pf-card-compact" tightens body padding for dense list-mode cards. |
-| card_row | label, description, children[] | Two-column label + controls row inside a section card |
-| form_field | label?, optional_text?, required?, description?, hint?, error?, icon?, actions[]?, children[], for? | Vertical labeled wrapper â€” same look as the host's <FormField> widget. Wrap any nodes with the standard arbor field chrome (label on top, content below, optional hint/error/right-aligned actions). icon is a Lucide name; actions render right-aligned on the label row (typically button nodes). |
-| cfg_list | items[] | Item rows with active dot + tags + hover edit/delete. Item: { id, label, active?, tags?, edit_action?, delete_action? } |
-| suggest_grid | items[] | 2-col grid of suggestion cards. Item: { name, cmd?, tag?, action? } |
-| counter_grid | items[], min_width?, gap?, padding?, actions.select? | Responsive KPI tile grid. Item: { key, label, value, hint?, color?, icon?, empty? }. actions.select fires { key } when a non-empty tile is clicked. color accepts any CSS expression â€” "var(--severity-high)", "#f97316". |
-| score_gauge | value, min, max, segments[], label, size, value_color | Semi-circle gauge for a bounded value. Segment: { from, to, color }. size: "sm" \| "md" \| "lg" (default "md"). Display only. |
-| time_series_chart | series[], x_kind, height, show_legend, y_include_zero | Multi-series line chart with hover tooltip + legend. Series: { id, label, color, points: [{ x, y }] }. With x_kind = "time" (default), x is an ISO-8601 string; with "linear" it's a number. |
-| data_table | columns[], rows[], row_key?, height?, initial_sort?, empty?, actions.row_click? | Sortable / clickable table. Column: { key, label, width?, align?, kind?, color?, sortable? } with kind âˆˆ { "text", "code", "pill", "datetime", "age" }. Row colour override: _<key>_color. actions.row_click fires { row_id, row }. |
-| filter_bar | name?, default?, search?, filters[], padding?, actions.change? | Search input + N chip dropdowns. Filter: { id, label, icon?, options[{ value, label, color? }], mode?, searchable?, wide? } with mode âˆˆ { "single", "multi" } (default "multi"). When name is set the value { search, filters: { [id]: string[] } } is collected into form values; actions.change fires { value } on every keystroke / chip toggle. Set search = nil to omit the search input. |
+| `text` | name, label, placeholder, default, pattern, pattern_hint, readonly | Also: password, email, url |
+| `textarea` | name, label, placeholder, default, rows |  |
+| `number` | name, label, default, min, max, step |  |
+| `range` | name, label, default, min, max, step, show_value, value_format | value_format: "{v}ms" |
+| `checkbox` | name, label, default |  |
+| `toggle` | name, label?, description?, default, size (sm/md/lg) | iOS-style switch. Use for "feature on/off"; use `checkbox` for "I agree" |
+| `select` | name, label, default, options[] | options: value+label+disabled? |
+| `radio` | name, label, default, options[], inline | options: value+label+description? |
+| `color` | name, label, default (#rrggbb) |  |
+| `kv_list` | name, label, key_placeholder, value_placeholder, default | Submitted as JSON object |
+| `section` | title, description, children[], collapsible, collapsed | Layout only |
+| `container` | children[], columns, gap | CSS grid |
+| `row` | children[], gap, align, wrap | Flexbox row |
+| `separator` | label? | Labelled divider line |
+| `divider` | — | Plain <hr> |
+| `paragraph` | content, variant (normal/muted/heading/caption) |  |
+| `label` | text, variant | Static text alias |
+| `alert` | text, variant (info/warning/error/success) |  |
+| `code` | text, language?, copy?, toast? | Read-only monospace block. When `language` matches a Prism grammar (`"json"`, `"rust"`, `"yaml"`, …) the block is syntax-highlighted using the same Prism setup as the diff viewer. `copy: true` shows a floating Copy button; `toast` overrides the success toast. |
+| `icon` | icon (Lucide name), variant (default/muted/info/success/warning/danger), size, tooltip, class, style | Inline Lucide glyph for status dots / badges. `Loader2` auto-spins via CSS. |
+| `copy_link` | text, toast?, tooltip?, font (normal/"mono"), class, style | Click-to-copy pseudo-link with a subtle `Copy` glyph on the right. Calls `navigator.clipboard` directly — no plugin action hop. Ideal for paths, IDs, URLs. |
+| `button` | label?, action, variant (default/primary/danger/ghost), close_after, disabled, icon, icon_only, tooltip, extra, class | Inline action; `icon` is a Lucide name, `icon_only` renders without label, `extra` merges into the action payload. Pass `class = "pal-row"` for a tight flush-left catalog-row style. |
+| `menu_button` | label?, icon, icon_only, tooltip, show_chevron, options[] | Opens a dropdown menu. Each option: `{ label?, icon?, action?, extra?, variant?, disabled?, heading?, separator? }` |
+| `date` | name, label, default, min, max, readonly, required | Submits ISO "YYYY-MM-DD" |
+| `datetime` | name, label, default, min, max, readonly, required | Submits "YYYY-MM-DDTHH:MM" (local, no TZ) |
+| `time` | name, label, default, min, max, readonly, required | Submits "HH:MM" |
+| `switch` | field, cases, default | Renders one branch based on another field's value |
+| `tabs` | tabs[], default_tab | Tab strip; all fields inside always collected for submit |
+| `wizard` | steps[], start_step, next_label, back_label | Multi-step form with Back/Next footer |
+| `file` | name, label, pick_mode, extensions, placeholder | Opens FilePickerModal — submits path string |
+| `autocomplete` | name, id, options?, source_action?, debounce_ms, free_form | Static or dynamic suggestions |
+| `tags` | name, default, suggestions, max | Submits `string[]` |
+| `tree` | name, nodes[], multi, expanded, bordered, max_height | Hierarchical selector. Nodes: `value, label, icon?, group?, tag?, tag_variant?, description?, children?` |
+| `table` | name, columns[], min_rows, max_rows, add_label | Submits `Array<Record>` |
+| `tree_layout` | nav_children[], content_children[], nav_width | 2-col split (nav + content). Typical use: tree on the left, form cards on the right gated with `show_if` |
+| `section` | title, description, children[], collapsible, collapsed, card, count, add_action, header_actions[], class | `card = true` renders with dark title bar + counter pill + optional + button. `collapsible = true` toggles the body. `header_actions`: `{ icon, tooltip, action, extra, disabled, variant }[]` — icon buttons in the header; `variant = "danger"` applies the red hover. `class = "pf-card-compact"` tightens body padding for dense list-mode cards. |
+| `card_row` | label, description, children[] | Two-column label + controls row inside a `section` card |
+| `form_field` | label?, optional_text?, required?, description?, hint?, error?, icon?, actions[]?, children[], for? | Vertical labeled wrapper — same look as the host's `<FormField>` widget. Wrap any nodes with the standard arbor field chrome (label on top, content below, optional hint/error/right-aligned actions). `icon` is a Lucide name; `actions` render right-aligned on the label row (typically `button` nodes). |
+| `cfg_list` | items[] | Item rows with active dot + tags + hover edit/delete. Item: `{ id, label, active?, tags?, edit_action?, delete_action? }` |
+| `suggest_grid` | items[] | 2-col grid of suggestion cards. Item: `{ name, cmd?, tag?, action? }` |
+| `counter_grid` | items[], min_width?, gap?, padding?, actions.select? | Responsive KPI tile grid. Item: `{ key, label, value, hint?, color?, icon?, empty? }`. `actions.select` fires `{ key }` when a non-empty tile is clicked. `color` accepts any CSS expression — `"var(--severity-high)"`, `"#f97316"`. |
+| `score_gauge` | value, min, max, segments[], label, size, value_color | Semi-circle gauge for a bounded value. Segment: `{ from, to, color }`. `size`: `"sm" \| "md" \| "lg"` (default `"md"`). Display only. |
+| `time_series_chart` | series[], x_kind, height, show_legend, y_include_zero | Multi-series line chart with hover tooltip + legend. Series: `{ id, label, color, points: [{ x, y }] }`. With `x_kind = "time"` (default), `x` is an ISO-8601 string; with `"linear"` it's a number. |
+| `data_table` | columns[], rows[], row_key?, height?, initial_sort?, empty?, actions.row_click? | Sortable / clickable table. Column: `{ key, label, width?, align?, kind?, color?, sortable? }` with `kind ∈ { "text", "code", "pill", "datetime", "age" }`. Row colour override: `_<key>_color`. `actions.row_click` fires `{ row_id, row }`. |
+| `filter_bar` | name?, default?, search?, filters[], padding?, actions.change? | Search input + N chip dropdowns. Filter: `{ id, label, icon?, options[{ value, label, color? }], mode?, searchable?, wide? }` with `mode ∈ { "single", "multi" }` (default `"multi"`). When `name` is set the value `{ search, filters: { [id]: string[] } }` is collected into form values; `actions.change` fires `{ value }` on every keystroke / chip toggle. Set `search = nil` to omit the search input. |
 
 Top-level `arbor.ui.form(config)` options: `title`, `description`, `submit_label`, `submit_action`, `cancel_label`, `cancel_action`, `hide_submit`, `hide_cancel`, `width`, `height`, `sidebar` (two-column nav layout when the root is a `tabs` node), `state`, `css`, `loading`.
 
 `loading = true` renders a translucent overlay with a centered
-  spinner above the form body â€” use it while the plugin fans out to the
+  spinner above the form body — use it while the plugin fans out to the
   network after opening the modal (e.g. fetching per-repo data before the
   dashboard has anything to draw). Toggle it live by passing `loading` alongside `nodes` to `arbor.ui.form.replace`: `arbor.ui.form.replace({ loading = false, nodes = ... })`.
 
 `hide_submit` / `hide_cancel` drop the matching footer
-  button entirely â€” useful for read-only modals (show one single *Close* button) or confirmation dialogs where only Submit makes
+  button entirely — useful for read-only modals (show one single *Close* button) or confirmation dialogs where only Submit makes
   sense. Keyboard Escape still closes the modal regardless of which buttons
   are visible.
 
-## Builder DSL â€” chainable form construction
+## Builder DSL — chainable form construction
 
 As an alternative to the table-config call, `arbor.ui.form()` (no
   argument) and `arbor.ui.form("id")` return a chainable `FormBuilder`. Every method returns the builder itself, so you can
   pipe a form together one node at a time and finalise with `:open()`.
   Calling `arbor.ui.form(table)` with a config table still works
-  exactly as before â€” the builder is purely sugar.
+  exactly as before — the builder is purely sugar.
 
 ```lua
 arbor.ui.form()
@@ -7280,38 +7281,38 @@ arbor.ui.form()
   :open()
 ```
 
-Each field method takes `(name, opts?)` or a single `{name = ..., ...}` table. Sections auto-close on the next `:section()` call, so flat layouts read naturally; use `:end_section()` to drop back to the top level explicitly. `:field(node)` is the escape hatch â€” push any node table that
+Each field method takes `(name, opts?)` or a single `{name = ..., ...}` table. Sections auto-close on the next `:section()` call, so flat layouts read naturally; use `:end_section()` to drop back to the top level explicitly. `:field(node)` is the escape hatch — push any node table that
   the field helpers don't cover (`tabs`, `tree_layout`, `cfg_list`, etc.).
 
 | Method | Effect |
 | --- | --- |
-| :title(s) Â· :description(s) | Modal header |
-| :submit(action) Â· :submit(label, action) | Sets submit_action (and submit_label when both args supplied) |
-| :on_submit(action) | Sets submit_action only |
-| :cancel(action) Â· :cancel({label, action}) | Cancel action / label |
-| :on_cancel(action) | Sets cancel_action only |
-| :state(t) | Echo state forwarded back in the submit ctx |
-| :section(title\|cfg) Â· :end_section() | Open / close a flat section. Re-calling :section() auto-closes the previous one. |
-| :text Â· :textarea Â· :password Â· :number | Input fields. Args: (name, opts?) or {name=..., ...} |
-| :select Â· :radio Â· :checkbox Â· :toggle Â· :kv_list | Choice / boolean / kv inputs |
-| :divider() Â· :label(text\|cfg) Â· :paragraph(s) Â· :heading(s) | Static layout nodes |
-| :button(cfg) | Push a button node ({label, icon, action, variant}) |
-| :form_field(label\|cfg, cfg?) | Push a form_field wrapper. Two call shapes: :form_field({label="â€¦", required=true, children={â€¦}}) or :form_field("Label", {children={â€¦}, hint="â€¦"}). |
-| :field(node) | Escape hatch â€” push any node table verbatim |
-| :open() | Compile to a config and emit the form modal |
+| `:title(s)` · `:description(s)` | Modal header |
+| `:submit(action)` · `:submit(label, action)` | Sets `submit_action` (and `submit_label` when both args supplied) |
+| `:on_submit(action)` | Sets `submit_action` only |
+| `:cancel(action)` · `:cancel({label, action})` | Cancel action / label |
+| `:on_cancel(action)` | Sets `cancel_action` only |
+| `:state(t)` | Echo state forwarded back in the submit ctx |
+| `:section(title\|cfg)` · `:end_section()` | Open / close a flat section. Re-calling `:section()` auto-closes the previous one. |
+| `:text` · `:textarea` · `:password` · `:number` | Input fields. Args: `(name, opts?)` or `{name=..., ...}` |
+| `:select` · `:radio` · `:checkbox` · `:toggle` · `:kv_list` | Choice / boolean / kv inputs |
+| `:divider()` · `:label(text\|cfg)` · `:paragraph(s)` · `:heading(s)` | Static layout nodes |
+| `:button(cfg)` | Push a button node (`{label, icon, action, variant}`) |
+| `:form_field(label\|cfg, cfg?)` | Push a `form_field` wrapper. Two call shapes: `:form_field({label="…", required=true, children={…}})` or `:form_field("Label", {children={…}, hint="…"})`. |
+| `:field(node)` | Escape hatch — push any node table verbatim |
+| `:open()` | Compile to a config and emit the form modal |
 
 ## File / folder picker field
 
 Opens the standard Arbor file picker as a modal on top of the plugin form. `pick_mode` controls behaviour:
 
-- `"file"` â€” select an existing file (default)
-- `"folder"` â€” select an existing directory
-- `"save"` â€” pick a destination path (typing a new filename is allowed)
+- `"file"` — select an existing file (default)
+- `"folder"` — select an existing directory
+- `"save"` — pick a destination path (typing a new filename is allowed)
 
 ```lua
 { type = "file", name = "output",  label = "Output path",
   pick_mode = "save", extensions = { "pdf" },
-  placeholder = "Choose a fileâ€¦" }
+  placeholder = "Choose a file…" }
 
 { type = "file", name = "repo_dir", label = "Repository root",
   pick_mode = "folder" }
@@ -7354,16 +7355,16 @@ Multi-value free-form input. Press `Enter` or `,` to commit a tag; `Backspace` w
 
 ## Tree selector field
 
-Hierarchical picker for one value (`multi = false`, default) or many (`multi = true` â€” submitted as `string[]`). Set `group = true` on a node to make it a non-selectable header (still expandable and clickable-to-toggle). Each node supports:
+Hierarchical picker for one value (`multi = false`, default) or many (`multi = true` — submitted as `string[]`). Set `group = true` on a node to make it a non-selectable header (still expandable and clickable-to-toggle). Each node supports:
 
-- `value`, `label` â€” required
-- `icon` â€” Lucide name shown before the label
-- `tag` â€” small colored pill after the label (e.g. `"Tomcat"`)
-- `tag_variant` â€” `neutral | ok | warn | error | accent | dev | prod | test`
-- `description` â€” dim subtitle under the label
-- `children` â€” nested array of same shape
+- `value`, `label` — required
+- `icon` — Lucide name shown before the label
+- `tag` — small colored pill after the label (e.g. `"Tomcat"`)
+- `tag_variant` — `neutral | ok | warn | error | accent | dev | prod | test`
+- `description` — dim subtitle under the label
+- `children` — nested array of same shape
 
-The tree itself is **flush by default** (no border, no background, no max-height) so it blends into its container â€” ideal inside a `tree_layout` nav. Opt in to the legacy bordered look via `bordered = true` and optionally cap scroll with `max_height`.
+The tree itself is **flush by default** (no border, no background, no max-height) so it blends into its container — ideal inside a `tree_layout` nav. Opt in to the legacy bordered look via `bordered = true` and optionally cap scroll with `max_height`.
 
 ```lua
 { type = "tree", name = "sel_cfg", expanded = true, default = "cfg-1",
@@ -7390,8 +7391,8 @@ The tree itself is **flush by default** (no border, no background, no max-height
 `form_field` wraps any nodes with the same chrome host modals use
   for native form fields: label on top, content below, optional description
   between, hint or error underneath, leading icon, and right-aligned actions on
-  the label row. The built-in input types (`text`, `select`, â€¦)
-  already render their own label â€” reach for `form_field` when you
+  the label row. The built-in input types (`text`, `select`, …)
+  already render their own label — reach for `form_field` when you
   need to label non-field content (`button`, `copy_link`,
   a row of mixed controls), enrich a single field with affordances the type
   doesn't expose (icon, action button next to the label), or surface a
@@ -7490,10 +7491,10 @@ arbor.ui.form({
 
 When a `tree_layout` is the sole root of a form, the body automatically strips its padding so the split reaches the modal edges (IntelliJ look). Combine with an always-unique `id` on each node to keep Svelte's diff efficient across `arbor.ui.form.replace(...)` calls.
 
-## Dashboard widgets â€” generic, reusable
+## Dashboard widgets — generic, reusable
 
 Four leaf nodes turn the host's dashboard primitives into form-renderable
-  layout. They are **generic** â€” no domain coupling â€” so any plugin
+  layout. They are **generic** — no domain coupling — so any plugin
   can compose its own dashboard by combining counter tiles, a gauge, a time-series
   chart, and a sortable table without writing custom Svelte.
 
@@ -7514,7 +7515,7 @@ Responsive grid of KPI tiles. Each tile shows a label, a primary value,
       color = "var(--severity-critical)" },
     { key = "wip",     label = "In progress",    value = 12, hint = "median 3.2d",
       color = "var(--accent)"          },
-    { key = "done",    label = "Closed today",   value = 0,  hint = "â€”" }, -- empty
+    { key = "done",    label = "Closed today",   value = 0,  hint = "—" }, -- empty
   },
 }
 ```
@@ -7522,7 +7523,7 @@ Responsive grid of KPI tiles. Each tile shows a label, a primary value,
 ### score_gauge
 
 Semi-circle gauge for a single bounded value. Coloured `segments` define the band palette; the needle rotates to the interpolated value.
-  Display only â€” no actions.
+  Display only — no actions.
 
 ```lua
 { type = "score_gauge",
@@ -7567,7 +7568,7 @@ Multi-series line chart with hover-tooltip and an interactive legend. Each
 ### data_table
 
 Sortable, optionally clickable table. Columns control rendering via `kind`: `text` (default), `code` (monospace), `pill` (coloured chip), `datetime` (locale string), `age` (compact d/mo/y). `color` on the column tints the
-  cell â€” for `pill` kind it sets the chip background, for any other
+  cell — for `pill` kind it sets the chip background, for any other
   kind it tints the text (zeros and empty cells stay un-tinted, so a "0
   critical" reading doesn't shout in red). A per-row override `_<column.key>_color` takes precedence. Sorting is
   client-side on the column's `sortable` flag. Row click fires `actions.row_click` with `{ row_id, row }`.
@@ -7605,7 +7606,7 @@ Pairs naturally with `data_table`: a search input plus N chip
 { type    = "filter_bar",
   name    = "dash_filter",
   default = { search = "", filters = {} },
-  search  = { placeholder = "Search title or fileâ€¦" },
+  search  = { placeholder = "Search title or file…" },
   actions = { change = "dash:filter_changed" },
   filters = {
     { id = "severity", label = "Severity", icon = "ShieldAlert",
@@ -7627,7 +7628,7 @@ Set `search = nil` to omit the search input and render a chip-only
   bar. Filters default to multi-select; pass `mode = "single"` on a
   filter to make it radio-like (selecting one option clears the others).
 
-All five widgets are pure leaf nodes â€” they never collect form values
+All five widgets are pure leaf nodes — they never collect form values
   beyond the optional `filter_bar.name`, so they can drop anywhere a
   layout node fits (inside `tabs`, gated by `show_if`,
   etc.). For interactive dashboards, pair them with `arbor.ui.form.replace` to push fresh data without unmounting the
@@ -7674,7 +7675,7 @@ Editable grid with one row per entry. Submitted as `Array<Record>` keyed by `col
 
 ## Wizard multi-step form
 
-Split a long form into sequential steps. Arbor replaces the Submit button with `Back` / `Next` while stepping through, and re-enables Submit on the final step. All fields across every step are collected for the final payload â€” moving between steps never loses values.
+Split a long form into sequential steps. Arbor replaces the Submit button with `Back` / `Next` while stepping through, and re-enables Submit on the final step. All fields across every step are collected for the final payload — moving between steps never loses values.
 
 ```lua
 arbor.ui.form({
@@ -7743,14 +7744,14 @@ end)
 
 In addition to `value` / `label`, the `select` and `multiselect` field types accept **group headers**, **separators**, and per-item visual extras
   (`icon`, `description`, `meta`, `disabled`). Plain strings and
-  the legacy `{ value, label }` shape continue to work â€” these entries are purely additive.
+  the legacy `{ value, label }` shape continue to work — these entries are purely additive.
 
 | Entry shape | Effect |
 | --- | --- |
-| "plain-string" | Auto-expanded to { value = s, label = capitalised(s) }. |
-| { value, label, icon?, description?, meta?, disabled? } | Selectable item. icon is a Lucide name, description renders as a small caption under the label, meta as muted right-aligned text. |
-| { group, items } | Group header â€” items is a nested option list. Optional collapsible = true, default_collapsed = true. |
-| { separator = true, label? } | Decorative separator strip. With a label the strip becomes an uppercase section title. |
+| `"plain-string"` | Auto-expanded to `{ value = s, label = capitalised(s) }`. |
+| `{ value, label, icon?, description?, meta?, disabled? }` | Selectable item. `icon` is a Lucide name, `description` renders as a small caption under the label, `meta` as muted right-aligned text. |
+| `{ group, items }` | Group header — `items` is a nested option list. Optional `collapsible = true`, `default_collapsed = true`. |
+| `{ separator = true, label? }` | Decorative separator strip. With a `label` the strip becomes an uppercase section title. |
 
 ```lua
 { type = "select", name = "config", label = "Run config",
@@ -7793,18 +7794,18 @@ end)
 ```
 
 Both `select` and `multiselect` support full keyboard
-  navigation (`â†‘` `â†“` to move, `Enter` to pick, `Home`/`End`, `Esc` to close) and an optional
+  navigation (`↑` `↓` to move, `Enter` to pick, `Home`/`End`, `Esc` to close) and an optional
   search input that filters by label and description.
 
 ## Date / datetime / time fields
 
-Native HTML5 pickers wired into the form. Values are submitted as plain strings â€” plugins parse them as needed:
+Native HTML5 pickers wired into the form. Values are submitted as plain strings — plugins parse them as needed:
 
 | type | Submitted format | Example |
 | --- | --- | --- |
-| date | ISO 8601 date | "2026-04-20" |
-| datetime | Local datetime, no timezone suffix | "2026-04-20T14:30" |
-| time | 24-hour time | "14:30" |
+| `date` | ISO 8601 date | `"2026-04-20"` |
+| `datetime` | Local datetime, no timezone suffix | `"2026-04-20T14:30"` |
+| `time` | 24-hour time | `"14:30"` |
 
 ```lua
 arbor.ui.form({
@@ -7828,7 +7829,7 @@ end)
 ## Switch / case form nodes
 
 `switch` branches the form on the current value of another field.
-  Use it instead of repeating a `show_if` cascade when several mutually exclusive fields share a controlling value â€” easier to read and cheaper to maintain.
+  Use it instead of repeating a `show_if` cascade when several mutually exclusive fields share a controlling value — easier to read and cheaper to maintain.
 
 ```lua
 arbor.ui.form({
@@ -7861,7 +7862,7 @@ Fields inside every case are **initialised at form-open time**, so switching bra
 **Equivalent using show_if (for comparison):**
 
 ```lua
--- Verbose alternative â€” one show_if per field per branch.
+-- Verbose alternative — one show_if per field per branch.
 { type = "text", name = "maven_goals", show_if = { field = "build_type", eq = "maven"  } },
 { type = "text", name = "gradle_tasks", show_if = { field = "build_type", eq = "gradle" } },
 -- ... and so on for every field in every branch.
@@ -7869,7 +7870,7 @@ Fields inside every case are **initialised at form-open time**, so switching bra
 
 ## Tabs form node
 
-Group related fields into `Tab` panels. The strip appears at the top; clicking a tab swaps the visible content. *All* fields in every tab are always collected on submit â€” inactive tabs are hidden with CSS, not removed from the DOM â€” so you can freely split a large form without worrying about losing values.
+Group related fields into `Tab` panels. The strip appears at the top; clicking a tab swaps the visible content. *All* fields in every tab are always collected on submit — inactive tabs are hidden with CSS, not removed from the DOM — so you can freely split a large form without worrying about losing values.
 
 ```lua
 arbor.ui.form({
@@ -7894,7 +7895,7 @@ Supported `icon` names (Lucide): `Settings`, `Wrench`, `Cog`, `Bell`, `Folder`, 
 
 ## Dynamic form updates
 
-While a form is open, the plugin can mutate individual fields from any handler (button action, bus event, timer, etc.). Calls route via the `plugin:form-update` Tauri event and are applied only if the currently-open form belongs to the caller plugin â€” cross-plugin updates are silently ignored.
+While a form is open, the plugin can mutate individual fields from any handler (button action, bus event, timer, etc.). Calls route via the `plugin:form-update` Tauri event and are applied only if the currently-open form belongs to the caller plugin — cross-plugin updates are silently ignored.
 
 ```lua
 arbor.ui.form({
@@ -7903,7 +7904,7 @@ arbor.ui.form({
   nodes = {
     { type = "select", name = "env",    label = "Environment",
       options = { "dev", "staging", "prod" } },
-    { type = "select", name = "region", label = "Region", options = { "loadingâ€¦" } },
+    { type = "select", name = "region", label = "Region", options = { "loading…" } },
     { type = "button", label = "Refresh regions", variant = "ghost",
       action = "deploy:refresh" },
   },
@@ -7920,22 +7921,22 @@ end)
 
 | Helper | Applies to | Notes |
 | --- | --- | --- |
-| setOptions(name, opts) | select, radio, autocomplete | Accepts the same options format as at open time (strings or full tables) |
-| setDisabled(name, bool) | text, textarea, number, range, date/time, select, radio, checkbox | OR'd with the field's own readonly flag |
-| setValue(name, v) | all value-bearing fields | Also clears the field's inline validation error |
-| replace(cfg) | whole form | Swaps the root nodes tree in-place â€” no close+reopen flicker. See below. |
+| `setOptions(name, opts)` | select, radio, autocomplete | Accepts the same `options` format as at open time (strings or full tables) |
+| `setDisabled(name, bool)` | text, textarea, number, range, date/time, select, radio, checkbox | OR'd with the field's own `readonly` flag |
+| `setValue(name, v)` | all value-bearing fields | Also clears the field's inline validation error |
+| `replace(cfg)` | whole form | Swaps the root `nodes` tree in-place — no close+reopen flicker. See below. |
 
 > **Note** `arbor.ui.form` is both a function (open a form) and a table of helpers. The `__call` metamethod preserves the original `arbor.ui.form(config)` syntax.
 
-### arbor.ui.form.replace â€” in-place structural swap
+### arbor.ui.form.replace — in-place structural swap
 
-Rebuilds the currently-open form from a new `nodes` tree without unmounting the modal. Field values whose `name` still exists are preserved; new fields get their declared defaults; gone fields are discarded. Ideal for IntelliJ-style tree modals where `+` / `âˆ’` / duplicate must update the nav & content without a flicker.
+Rebuilds the currently-open form from a new `nodes` tree without unmounting the modal. Field values whose `name` still exists are preserved; new fields get their declared defaults; gone fields are discarded. Ideal for IntelliJ-style tree modals where `+` / `−` / duplicate must update the nav & content without a flicker.
 
 ```lua
 -- Payload shape:
 --   nodes       = { ... new top-level nodes (same shape as arbor.ui.form.nodes) ... }
---   state       = { ... optional â€” replaces the echoed opaque state ... }
---   set_values  = { field_name = value, ... }  -- optional â€” applied AFTER rebuild
+--   state       = { ... optional — replaces the echoed opaque state ... }
+--   set_values  = { field_name = value, ... }  -- optional — applied AFTER rebuild
 
 arbor.events.on("my_plugin:new", function(ctx)
   -- 1) persist pending edits (if any) from ctx.
@@ -7957,14 +7958,14 @@ end)
 
 State preservation rules during a replace:
 
-- **Values**: by field `name` â€” present in both â†’ kept; new â†’ default; gone â†’ dropped
-- **Collapse / tabs / wizard**: by node `id` â€” present â†’ kept; new â†’ declared collapsed/default
-- **Tree expansion**: keyed by `field::value` â€” never cleared
+- **Values**: by field `name` — present in both → kept; new → default; gone → dropped
+- **Collapse / tabs / wizard**: by node `id` — present → kept; new → declared collapsed/default
+- **Tree expansion**: keyed by `field::value` — never cleared
 - **Validation errors**: referencing a gone field are dropped
 
 Assign **stable `id`** values to your root container (and to sections you'll add/remove) so Svelte's `{#each}` diff reuses the DOM across replaces instead of remounting the subtree.
 
-## Form state â€” opaque context echo
+## Form state — opaque context echo
 
 Pass a `state` table to `form` to carry server-side context that isn't rendered in the UI but is echoed back unchanged in every `ctx` payload (submit, button actions, cancel).
 
@@ -7987,19 +7988,19 @@ end)
 
 ---
 
-# Plugin Development â€” API: Jobs & Integrations
+# Plugin Development — API: Jobs & Integrations
 
 APIs for running background processes, defining pipelines, executing blocking shell commands, and interacting with the issue tracker.
 
-## arbor.job â€” background jobs
+## arbor.job — background jobs
 
 Use `arbor.job` for long-running or async work. The job runs in a separate OS thread; output is streamed line-by-line to the Jobs panel. Use `arbor.terminal.exec()` only for short blocking commands.
 
 | Function | Description |
 | --- | --- |
-| arbor.job.spawn(config) | Launch a background job. Returns (JobHandle, nil) on success or (nil, err) on a spawn failure (lock / app-handle). The handle is a Promise with extra .id and :cancel() â€” it resolves with the on-done context on success and rejects with it on failure. Config: name, command, cwd?, env?, category? (groups jobs into collapsible sections in the overlay), hidden? (boolean â€” when true the job is excluded from the default Jobs panel listing and the status-bar running badge; revealed by the "Show hidden" toggle), on_done_action? (string â€” sugar), on_done? (function â€” sugar) |
-| arbor.job.list() | Returns a Lua table of all job records |
-| arbor.job.cancel(job_id) | Kill a running job (SIGTERM / taskkill /T). No-op if the job has already finished. |
+| `arbor.job.spawn(config)` | Launch a background job. Returns `(JobHandle, nil)` on success or `(nil, err)` on a spawn failure (lock / app-handle). The handle is a Promise with extra `.id` and `:cancel()` — it resolves with the on-done context on success and rejects with it on failure. Config: `name`, `command`, `cwd?`, `env?`, `category?` (groups jobs into collapsible sections in the overlay), `hidden?` (boolean — when true the job is excluded from the default Jobs panel listing and the status-bar running badge; revealed by the "Show hidden" toggle), `on_done_action?` (string — sugar), `on_done?` (function — sugar) |
+| `arbor.job.list()` | Returns a Lua table of all job records |
+| `arbor.job.cancel(job_id)` | Kill a running job (SIGTERM / taskkill /T). No-op if the job has already finished. |
 
 ```lua
 -- Promise-style: chain :ok / :err on the returned handle.
@@ -8013,10 +8014,10 @@ if err then
   return
 end
 arbor.log.info("started job " .. job.id)
-job:ok(function(ctx)  arbor.notify{ message = "Build succeeded âœ“", level = "success" } end)
+job:ok(function(ctx)  arbor.notify{ message = "Build succeeded ✓", level = "success" } end)
    :err(function(ctx) arbor.notify{ message = "Build failed (exit " .. (ctx.exit_code or -1) .. ")", level = "error" } end)
 
--- on_done / on_done_action stay as zucchero â€” they fire alongside the promise.
+-- on_done / on_done_action stay as zucchero — they fire alongside the promise.
 arbor.job.spawn({
   name           = "Cargo build",
   command        = "cargo build --release",
@@ -8060,28 +8061,28 @@ arbor.async.run(function()
 end)
 ```
 
-## arbor.pipeline â€” pipelines
+## arbor.pipeline — pipelines
 
 Define and run multi-stage command pipelines. Results appear in the Pipelines panel (Workflow icon in the Activity Bar). No special permissions required.
 
 | Function | Description |
 | --- | --- |
-| arbor.pipeline.define(config) | Register a pipeline. Config: id, name, description?, icon?, stages[] (each with id, name, steps[]) |
-| arbor.pipeline.run{ pipeline_id, cwd? } | Start a pipeline run. Returns (run_id, nil) on success, (nil, err) on failure. Optional cwd overrides the default repo-root working directory |
-| arbor.pipeline.cancel(run_id) | Cancel a running pipeline (stops after the current step) |
-| arbor.pipeline.list() | Return all pipeline definitions registered by this plugin |
+| `arbor.pipeline.define(config)` | Register a pipeline. Config: `id`, `name`, `description?`, `icon?`, `stages[]` (each with `id`, `name`, `steps[]`) |
+| `arbor.pipeline.run{ pipeline_id, cwd? }` | Start a pipeline run. Returns `(run_id, nil)` on success, `(nil, err)` on failure. Optional `cwd` overrides the default repo-root working directory |
+| `arbor.pipeline.cancel(run_id)` | Cancel a running pipeline (stops after the current step) |
+| `arbor.pipeline.list()` | Return all pipeline definitions registered by this plugin |
 
-## arbor.http â€” native HTTP client
+## arbor.http — native HTTP client
 
-Asynchronous HTTP via the bundled `reqwest` client â€” no shell-out, no background job, no `curl` dependency. The callback fires when the response (or an error) arrives.
+Asynchronous HTTP via the bundled `reqwest` client — no shell-out, no background job, no `curl` dependency. The callback fires when the response (or an error) arrives.
 
 | Function | Description |
 | --- | --- |
-| arbor.http.get(url, callback) | GET url. callback(response) receives { ok, status, body, error? }. |
-| arbor.http.get(url, opts, callback) | Same with options: { headers = {...}, timeout_ms = 10000 }. |
+| `arbor.http.get(url, callback)` | GET `url`. `callback(response)` receives `{ ok, status, body, error? }`. |
+| `arbor.http.get(url, opts, callback)` | Same with options: `{ headers = {...}, timeout_ms = 10000 }`. |
 
 Requires the `network` permission. Set it to a list of allowed
-  hostnames in `plugin.toml` â€” exact match or registrable suffix
+  hostnames in `plugin.toml` — exact match or registrable suffix
   (`"maven.org"` permits `search.maven.org` and itself).
   Use `["*"]` to allow any host (avoid unless strictly necessary).
 
@@ -8113,9 +8114,9 @@ arbor.http.get(
 )
 ```
 
-## arbor.terminal.exec â€” blocking shell
+## arbor.terminal.exec — blocking shell
 
-Requires the `terminal` permission. Always blocks the calling Lua coroutine â€” use `arbor.job.spawn` for anything that may take more than a second.
+Requires the `terminal` permission. Always blocks the calling Lua coroutine — use `arbor.job.spawn` for anything that may take more than a second.
 
 ```lua
 local r, err = arbor.terminal.exec{ command = "git status --short", cwd = arbor.repo.current() }
@@ -8128,18 +8129,18 @@ end
 -- r.stderr    : string
 ```
 
-## arbor.issues â€” issue tracker
+## arbor.issues — issue tracker
 
-Provides synchronous Lua wrappers around the Linear and Jira APIs. The active provider for each repo is resolved transparently â€” the same code works for both trackers. Requires `issues = "read"` or `issues = "write"` in `[permissions]`.
+Provides synchronous Lua wrappers around the Linear and Jira APIs. The active provider for each repo is resolved transparently — the same code works for both trackers. Requires `issues = "read"` or `issues = "write"` in `[permissions]`.
 
 | Function | Permission | Description |
 | --- | --- | --- |
-| arbor.issues.search(filters?) | issues = "read" | Linear-only. Search issues. Returns an array of issue tables. All filter fields are optional. Pass a number or identifier (e.g. "ENG-42") in query to find by id. There is no identifier filter â€” use arbor.issues.lookup for exact-id resolution that also routes to Jira when the active repo is bound to it. |
-| arbor.issues.get(id) | issues = "read" | Linear-only. Fetch by Linear UUID (NOT the human identifier). For "ENG-42"-style lookups use arbor.issues.lookup. |
-| arbor.issues.lookup(identifier) | issues = "read" | Routes by the active repo's issue_tracker config (linear or jira). Returns the matching issue table, nil on miss / unconfigured tracker, or (nil, err) on auth failure. Linear: candidates are filtered to the exact identifier match; Jira: hands the key straight to GET /issue/{key}. Use this whenever you have a human key like "PROJ-123". |
-| arbor.issues.transition(id, status_id) | issues = "write" | Move an issue to a new workflow state. Returns updated issue. |
-| arbor.issues.comment(issue_id, body) | issues = "write" | Add a comment. Returns the new comment table. |
-| arbor.issues.branch_name(issue) | â€” | Pure-computation helper: generates a git branch slug from an issue table. |
+| `arbor.issues.search(filters?)` | `issues = "read"` | **Linear-only.** Search issues. Returns an array of issue tables. All filter fields are optional. Pass a number or identifier (e.g. `"ENG-42"`) in `query` to find by id. There is no `identifier` filter — use `arbor.issues.lookup` for exact-id resolution that also routes to Jira when the active repo is bound to it. |
+| `arbor.issues.get(id)` | `issues = "read"` | **Linear-only.** Fetch by Linear UUID (NOT the human identifier). For "ENG-42"-style lookups use `arbor.issues.lookup`. |
+| `arbor.issues.lookup(identifier)` | `issues = "read"` | Routes by the active repo's `issue_tracker` config (`linear` or `jira`). Returns the matching issue table, `nil` on miss / unconfigured tracker, or `(nil, err)` on auth failure. Linear: candidates are filtered to the exact identifier match; Jira: hands the key straight to `GET /issue/{key}`. Use this whenever you have a human key like `"PROJ-123"`. |
+| `arbor.issues.transition(id, status_id)` | `issues = "write"` | Move an issue to a new workflow state. Returns updated issue. |
+| `arbor.issues.comment(issue_id, body)` | `issues = "write"` | Add a comment. Returns the new comment table. |
+| `arbor.issues.branch_name(issue)` | — | Pure-computation helper: generates a git branch slug from an issue table. |
 
 ```lua
 local issues = arbor.issues.search({
@@ -8156,11 +8157,11 @@ for _, issue in ipairs(issues) do
   print(issue.identifier, issue.title, issue.status.name)
 end
 
--- Transition issue (Jira resolves status ID â†’ workflow transition automatically)
+-- Transition issue (Jira resolves status ID → workflow transition automatically)
 arbor.issues.transition(issue.id, status_id)
 
 -- Add a comment
-arbor.issues.comment(issue.id, "Deployed to staging âœ“")
+arbor.issues.comment(issue.id, "Deployed to staging ✓")
 
 -- Branch name slug
 local branch = arbor.issues.branch_name(issue)
@@ -8168,7 +8169,7 @@ local branch = arbor.issues.branch_name(issue)
 -- Jira:   "proj-456-fix-login-bug"
 ```
 
-## arbor.cloud â€” object storage (cloud-storage plugin)
+## arbor.cloud — object storage (cloud-storage plugin)
 
 Lua surface exposed by the bundled **cloud-storage** plugin. The plugin itself owns the UI (sidebar tree, config form, transfer dialogs); these APIs let other plugins talk to GCS / S3 / Azure Blob through the same opendal-backed host commands. v1 only exposes GCS in the connection form, but every namespace function accepts the multi-provider `CloudConnection` shape so adding S3 / Azure later is a frontend-only change.
 
@@ -8176,7 +8177,7 @@ Lua surface exposed by the bundled **cloud-storage** plugin. The plugin itself o
 
 ### Connection envelope
 
-Every operation takes a `conn` table â€” the cloud-storage plugin builds this from its own settings, other plugins can build it manually:
+Every operation takes a `conn` table — the cloud-storage plugin builds this from its own settings, other plugins can build it manually:
 
 ```lua
 local conn = {
@@ -8196,21 +8197,21 @@ local conn = {
 
 | Function | Description |
 | --- | --- |
-| arbor.cloud.test_connection{ conn, bucket? } | Probes auth + bucket reachability. Returns (report, nil) where report = { ok, error?, auth_method?, identity? }. |
-| arbor.cloud.list{ conn, bucket, prefix?, limit? } | Folder-style listing (non-recursive). Returns { items: CloudObject[], truncated }. Default limit is 200. Prefer list_stream for interactive UI â€” this command blocks until the full listing arrives. |
-| arbor.cloud.list_stream{ conn, bucket, prefix?, stream_id } | Streaming list â€” fires opendal in the background and delivers batches of ~1000 entries to the cloud-storage plugin via the cloud-storage:list-chunk hook (payload: { stream_id, items, done, truncated?, error? }). Hard-capped at 20 000 entries to avoid runaway memory on huge prefixes. The caller chooses the stream_id (typically a monotonic counter) and uses it to filter stale chunks when re-navigating. |
-| arbor.cloud.search_stream{ conn, bucket, root_prefix?, pattern, stream_id } | Recursive wildcard search under root_prefix (default: bucket root). Pattern grammar: * = same-segment, ** = cross-segment, ? = one non-separator. The backend extracts the literal prefix to scope opendal's listing as tight as possible, then regex-filters the rest. Results delivered to the same cloud-storage:list-chunk hook with kind = "search" in the payload (plus scanned count, matched count, truncated flag). Hard-capped at 5000 matches. |
-| arbor.cloud.cancel(stream_id) | Flip the cooperative-cancel flag for a running list_stream (or transfer job). The next batch boundary breaks the loop; no further chunks are emitted. |
-| arbor.cloud.stat{ conn, bucket, path } | Fetch metadata for one object: { path, is_dir, size?, etag?, content_type?, last_modified? }. |
-| arbor.cloud.delete{ conn, bucket, path, recursive? } | Delete an object or, with recursive = true, every object under a prefix. |
-| arbor.cloud.copy{ conn, bucket, src, dst } | Server-side object copy within a bucket. |
-| arbor.cloud.download{ conn, bucket, path, ["local"] } | Stream an object to disk. Returns a (job_id, nil) tuple; progress is surfaced via arbor://cloud-progress + the JobOutputPanel. |
-| arbor.cloud.upload{ conn, bucket, path, ["local"], overwrite? } | Stream a local file up. Same progress events as download. |
-| arbor.cloud.sync{ conn, bucket, remote_prefix, ["local"], direction = "up"\|"down", delete? } | Recursive directory sync. With delete = true the destination is mirrored exactly; off, it's a merge. |
-| arbor.cloud.secret_set(ref, value) | Write a secret string to the OS keychain under the cloud-storage namespace. |
-| arbor.cloud.secret_exists(ref) | Check whether a secret is present without exposing its value. |
-| arbor.cloud.secret_delete(ref) | Remove a secret. |
-| arbor.cloud.oauth_start{ secret_ref, client_id, client_secret? } | Kick off the Google installed-app OAuth flow on loopback 127.0.0.1:7732. Returns the authorization URL; the host emits arbor://cloud-oauth-done {ok, error?} when the user finishes. |
+| `arbor.cloud.test_connection{ conn, bucket? }` | Probes auth + bucket reachability. Returns `(report, nil)` where `report = { ok, error?, auth_method?, identity? }`. |
+| `arbor.cloud.list{ conn, bucket, prefix?, limit? }` | Folder-style listing (non-recursive). Returns `{ items: CloudObject[], truncated }`. Default limit is 200. *Prefer `list_stream` for interactive UI* — this command blocks until the full listing arrives. |
+| `arbor.cloud.list_stream{ conn, bucket, prefix?, stream_id }` | Streaming list — fires opendal in the background and delivers batches of ~1000 entries to the cloud-storage plugin via the `cloud-storage:list-chunk` hook (payload: `{ stream_id, items, done, truncated?, error? }`). Hard-capped at 20 000 entries to avoid runaway memory on huge prefixes. The caller chooses the `stream_id` (typically a monotonic counter) and uses it to filter stale chunks when re-navigating. |
+| `arbor.cloud.search_stream{ conn, bucket, root_prefix?, pattern, stream_id }` | Recursive wildcard search under `root_prefix` (default: bucket root). Pattern grammar: `*` = same-segment, `**` = cross-segment, `?` = one non-separator. The backend extracts the literal prefix to scope opendal's listing as tight as possible, then regex-filters the rest. Results delivered to the same `cloud-storage:list-chunk` hook with `kind = "search"` in the payload (plus `scanned` count, `matched` count, `truncated` flag). Hard-capped at 5000 matches. |
+| `arbor.cloud.cancel(stream_id)` | Flip the cooperative-cancel flag for a running `list_stream` (or transfer job). The next batch boundary breaks the loop; no further chunks are emitted. |
+| `arbor.cloud.stat{ conn, bucket, path }` | Fetch metadata for one object: `{ path, is_dir, size?, etag?, content_type?, last_modified? }`. |
+| `arbor.cloud.delete{ conn, bucket, path, recursive? }` | Delete an object or, with `recursive = true`, every object under a prefix. |
+| `arbor.cloud.copy{ conn, bucket, src, dst }` | Server-side object copy within a bucket. |
+| `arbor.cloud.download{ conn, bucket, path, ["local"] }` | Stream an object to disk. Returns a `(job_id, nil)` tuple; progress is surfaced via `arbor://cloud-progress` + the JobOutputPanel. |
+| `arbor.cloud.upload{ conn, bucket, path, ["local"], overwrite? }` | Stream a local file up. Same progress events as `download`. |
+| `arbor.cloud.sync{ conn, bucket, remote_prefix, ["local"], direction = "up"\|"down", delete? }` | Recursive directory sync. With `delete = true` the destination is mirrored exactly; off, it's a merge. |
+| `arbor.cloud.secret_set(ref, value)` | Write a secret string to the OS keychain under the cloud-storage namespace. |
+| `arbor.cloud.secret_exists(ref)` | Check whether a secret is present without exposing its value. |
+| `arbor.cloud.secret_delete(ref)` | Remove a secret. |
+| `arbor.cloud.oauth_start{ secret_ref, client_id, client_secret? }` | Kick off the Google installed-app OAuth flow on loopback `127.0.0.1:7732`. Returns the authorization URL; the host emits `arbor://cloud-oauth-done {ok, error?}` when the user finishes. |
 
 ### Progress hook
 
@@ -8227,7 +8228,7 @@ end)
 
 Completion fires `cloud-storage:job-done` with `{ job_id, ok, error? }`; OAuth flows fire `cloud-storage:oauth-done` with `{ ok, error?, secret_ref? }`.
 
-### Example â€” list a bucket and stream a download
+### Example — list a bucket and stream a download
 
 ```lua
 local conn = {
@@ -8253,24 +8254,24 @@ if err then arbor.notify&#123; message = err, level = "error" &#125; end
 
 ---
 
-# Plugin Development â€” Toolchains
+# Plugin Development — Toolchains
 
-The toolchain API manages versioned runtime installations (JDKs, Node.js, Rust toolchains). Entries are stored per-kind at `~/.config/arbor/toolchains/<kind>.json`. One entry per kind can be marked *active* â€” it is used automatically when no more specific selection is set.
+The toolchain API manages versioned runtime installations (JDKs, Node.js, Rust toolchains). Entries are stored per-kind at `~/.config/arbor/toolchains/<kind>.json`. One entry per kind can be marked *active* — it is used automatically when no more specific selection is set.
 
 ## Sharing settings between plugins
 
 Two complementary mechanisms cover cross-plugin settings access:
 
-- **Cross-plugin reads** â€” declare `settings_read_others = true` in `[permissions]` and call `arbor.settings.read("other-plugin", "key")` / `arbor.settings.read_project(...)`.
-- **Cross-plugin writes** â€” the target plugin opts in by exposing a service via `arbor.service.export({ name = ..., handler = ... })`; the caller invokes it through `arbor.service.call`. Writing without consent is not supported.
-- **Shared settings UI** â€” a member plugin can contribute sections to another plugin's settings panel via `arbor.ui.contribute("<owner>:settings:section", ...)`. Each plugin still owns its own settings store.
+- **Cross-plugin reads** — declare `settings_read_others = true` in `[permissions]` and call `arbor.settings.read("other-plugin", "key")` / `arbor.settings.read_project(...)`.
+- **Cross-plugin writes** — the target plugin opts in by exposing a service via `arbor.service.export({ name = ..., handler = ... })`; the caller invokes it through `arbor.service.call`. Writing without consent is not supported.
+- **Shared settings UI** — a member plugin can contribute sections to another plugin's settings panel via `arbor.ui.contribute("<owner>:settings:section", ...)`. Each plugin still owns its own settings store.
 
-## arbor.toolchain â€” runtime toolchains
+## arbor.toolchain — runtime toolchains
 
 ### Permissions required
 
-- `toolchain = "read"` â€” for `list`, `active`, `env`, `detect`
-- `toolchain = "write"` â€” for `add`, `remove`, `set_active` (implies read)
+- `toolchain = "read"` — for `list`, `active`, `env`, `detect`
+- `toolchain = "write"` — for `add`, `remove`, `set_active` (implies read)
 
 ```toml
 # plugin.toml
@@ -8280,13 +8281,13 @@ toolchain = "write"
 
 | Function | Description |
 | --- | --- |
-| arbor.toolchain.list(kind) | Returns all entries for kind as a Lua table. Each entry: { id, label, path, version?, active, env? } |
-| arbor.toolchain.active(kind) | Returns the active entry for kind, or nil |
-| arbor.toolchain.env{ kind, id? } | Returns an env table for the given entry (e.g. { JAVA_HOME = "..." }). Uses the active entry when id is omitted |
-| arbor.toolchain.detect(kind) | Auto-detects installed toolchains of this kind and returns candidate entries |
-| arbor.toolchain.add(kind, entry) | Register a new entry. Entry must have at least id, label, path |
-| arbor.toolchain.remove(kind, id) | Remove an entry by id |
-| arbor.toolchain.set_active(kind, id) | Mark an entry as the active one for its kind |
+| `arbor.toolchain.list(kind)` | Returns all entries for `kind` as a Lua table. Each entry: `{ id, label, path, version?, active, env? }` |
+| `arbor.toolchain.active(kind)` | Returns the active entry for `kind`, or `nil` |
+| `arbor.toolchain.env{ kind, id? }` | Returns an env table for the given entry (e.g. `{ JAVA_HOME = "..." }`). Uses the active entry when `id` is omitted |
+| `arbor.toolchain.detect(kind)` | Auto-detects installed toolchains of this kind and returns candidate entries |
+| `arbor.toolchain.add(kind, entry)` | Register a new entry. Entry must have at least `id`, `label`, `path` |
+| `arbor.toolchain.remove(kind, id)` | Remove an entry by id |
+| `arbor.toolchain.set_active(kind, id)` | Mark an entry as the active one for its kind |
 
 Supported kind values: `"jdk"`, `"node"`, `"rust"`. Custom kinds are stored but have no built-in detection or env injection.
 
@@ -8342,11 +8343,338 @@ arbor.events.on("my_plugin:set_profile", function(ctx)
 end)
 ```
 
-Semantic `color` values: `"dev"` â†’ green, `"prod"` â†’ red, `"test"` â†’ accent blue, `"none"` â†’ muted. Any other value falls back to the default accent style.
+Semantic `color` values: `"dev"` → green, `"prod"` → red, `"test"` → accent blue, `"none"` → muted. Any other value falls back to the default accent style.
 
 ---
 
 ## Plugins
+
+### cipher-studio
+
+## Cipher Studio
+
+Encode and decode text with classical ciphers and old-school encodings.
+  No AES / GCM / PGP — this plugin is for ROT13-era fun, CTF warmups and
+  quick decoding of suspicious-looking strings.
+
+### How to use
+
+1. Open the Command Palette and run **Cipher Studio: open…**.
+2. Pick an algorithm from the dropdown (grouped by family).
+3. Type a key in the *Key / parameter* box if the algorithm needs one
+      — the hint below the algorithm name tells you whether a key is required
+      and what shape it takes.
+4. Paste your text in the **Input** area, hit **Encode** or **Decode**,
+      result lands in **Output**.
+5. **Swap** moves Output back to Input; **Use output as input** chains
+      multiple algorithms (e.g. Base64 → ROT13 → Hex).
+
+### Algorithm catalog
+
+#### Encoding (reversible, no key)
+
+- **Base64** — standard RFC 4648.
+- **Base32** — RFC 4648 alphabet.
+- **Base16 / Hex** — uppercase hex.
+- **Binary** — 8-bit groups separated by spaces.
+- **Octal** — 3-digit groups separated by spaces.
+- **Decimal ASCII** — space-separated code points.
+- **URL** — percent-encoding.
+- **HTML entities** — `&#NN;` form.
+- **Unicode escape** — `\uXXXX` form.
+- **Morse** — letters / digits / common punctuation; `/` = word separator.
+- **A1Z26** — A=1, B=2, … Z=26.
+- **Reverse** — string reversed character-wise.
+
+#### Substitution ciphers
+
+- **ROT13** — Caesar with shift 13. Encode == Decode.
+- **ROT47** — like ROT13 but across all printable ASCII (33–126).
+- **ROT5** — only digits, shift 5.
+- **ROT18** — ROT13 on letters + ROT5 on digits.
+- **Caesar** — generic Caesar; key = shift (integer, default 3).
+- **Atbash** — A↔Z, B↔Y, … self-inverse.
+- **Affine** — `E(x) = a·x + b mod 26`; key = `a,b` (a coprime with 26).
+- **Vigenère** — repeating-keyword Caesar; key = word.
+- **Beaufort** — Vigenère variant `E(x) = k − x mod 26`; self-inverse.
+- **Autokey** — Vigenère where the plaintext extends the key.
+
+#### Steganographic
+
+- **Bacon** — each letter → 5-bit A/B group. 26-letter variant.
+
+#### Transposition
+
+- **Rail fence** — zig-zag over N rails; key = rails (integer ≥ 2).
+- **Columnar** — write plaintext in rows under a keyword, read columns
+      in keyword-letter order; key = keyword.
+- **Scytale** — wrap text around a rod of given diameter; key = rod size.
+
+#### Grids
+
+- **Polybius** — 5×5 letter grid (I/J merged); pairs of digits.
+- **Nihilist** — Polybius coordinates + Vigenère-style numeric sum; key = word.
+
+#### Bonus
+
+- **Playfair** — 5×5 keyed grid on digrams; key = keyword.
+- **Bifid** — Polybius + transposition of coordinates.
+- **XOR** — bytewise XOR with repeating key; output as hex.
+
+### Notes
+
+- All algorithms are pure-Lua — no Rust dependencies were added to the
+      Arbor host. Each lives in `plugins/cipher-studio/algos/<id>.lua`
+      and can be hacked / extended without touching the runtime.
+- Classical ciphers preserve only letters; punctuation and whitespace pass
+      through unchanged (with the exceptions noted above).
+- **Do not use these for actual security**. They're all broken — that's
+      the point.
+
+---
+
+### ron-studio
+
+# RON Studio
+
+IntelliJ-style viewer and editor for [Rusty Object Notation](https://github.com/ron-rs/ron) documents. Designed for the things `cat` and a plain editor can't easily do: walk the structural tree, validate against a Rust schema you load from your own crate, diff against the original on disk, save in place or fork via Save As, and convert to / from JSON.
+
+## How to open a document
+
+- **Open RON file in Studio…** — pick a `.ron` file from disk.
+- **Paste RON in Studio…** — paste any RON text into a textarea.
+
+Both commands appear in the Command Palette (`Ctrl`+`K`) under the “RON Studio” group.
+
+## The modal
+
+Four views over the same parsed document, switched via the toolbar:
+
+- **Tree** — structural navigation with type badges (`Struct`, `Map`, `List`, `Option`, `Char`, primitives). Lazy: only expanded nodes are pulled over IPC. Click a node to inspect its value.
+- **Text** — primary edit surface. A plain editable text view with RON-aware syntax highlighting. Comments and exact formatting are preserved on save.
+- **Diff** — side-by-side comparison of the original loaded text against the current edit state. Use `F3` / `Shift+F3` or the prev/next chevrons in the toolbar to jump between chunks, just like the stage panel's diff.
+- **Errors** — when parsing fails, this view shows the location and message reported by the `ron` parser.
+
+## Editing model
+
+The Text view is the source of truth. Every keystroke triggers a debounced re-parse; the tree updates live. The Save and Save As actions write exactly what's in the textarea, so anything you typed — comments included — is preserved verbatim.
+
+**Format** and **RON ↔ JSON** normalise the text through the parser and serialiser. They warn before running because the round-trip drops comments and any custom formatting. They never touch the file on disk until you click Save.
+
+## Save / Save As
+
+The Save button in the header writes the current Text view content back to the file that was opened. The dropdown next to it (**▾**) exposes Save As — pick a new path; the document then tracks the new location so subsequent Save clicks write there.
+
+When the document was opened via *Paste*, Save is disabled (there's no source path); use Save As to commit the buffer to disk.
+
+## Schema loaded from Rust sources
+
+The schema panel lets you pick any `.rs` file from your project. RON Studio walks up to the enclosing `Cargo.toml` and then descends through every `mod` declaration from `lib.rs`/`main.rs` to index every `struct`, `enum` and `type` alias in the crate.
+
+You then choose a **root type** from the dropdown (populated with the public/private types defined in the file you picked). The closure of types reachable from that root is computed and used to:
+
+- Annotate tree rows with real Rust types (you'll see `u16`, `Option<Vec<Server>>`, etc., not just “Number”).
+- Highlight unknown fields and variants the RON file uses but the schema doesn't define.
+- List schema fields that the document is missing (and whether they have `#[serde(default)]`).
+
+### What works (best-effort)
+
+- Cross-file resolution through `mod` declarations, including `#[path = "..."]`.
+- `use` aliases (including `as` renames) and `pub use` re-exports.
+- Standard generics: `Option<T>`, `Vec<T>`, `HashMap<K, V>`, `BTreeMap`, tuples, fixed-size arrays.
+- Transparent wrappers: `Box`, `Rc`, `Arc`, `Cell`, `RefCell`, `Mutex`, `RwLock`.
+- Common `#[serde(...)]` attributes: `rename`, `default`, `skip_serializing_if`, `flatten`.
+
+### Honest limits
+
+- Types from other crates surface as `External(path)` — the rest of the schema still works; that single branch just isn't validated.
+- Macro-generated types are invisible to the parser; they appear as `Unknown`.
+- `#[cfg(...)]` is ignored: everything is indexed regardless of features.
+- Generics that aren't instantiated at the root (`Foo<T>` with a free parameter) are reported as unresolved — pick a concrete root type.
+
+## Lua API
+
+```
+arbor.ron_studio.open{ path = "/abs/path/to/config.ron" }
+arbor.ron_studio.open{ text = '(name: "x", port: 8080)', title = "scratch" }
+```
+
+That's the entire surface. Everything else is driven from the modal.
+
+## Earmarks
+
+Like the JSON Studio and cloud-storage plugins, RON Studio relies on Rust crates pulled into the Arbor host: `ron` for parsing/serialising and `syn` for walking Rust sources. The team's direction is to migrate these heavy plugins to a subprocess-based runtime so the host stops accreting dependencies — when that lands, this plugin moves out as a self-contained binary.
+
+---
+
+### compile-action
+
+# compile-action
+
+Build runner. Auto-detects the project type and lets you compile/package it
+  directly from the Activity Bar — no terminal required. Output streams in
+  real time to the built-in Jobs panel.
+
+The sibling **run-action** plugin handles launching your
+  application and depends on this plugin for the build step.
+
+## Getting Started
+
+Open a repository. The plugin scans the working directory on every repo open
+  and tab switch, detects the build system automatically, and adds a
+  **Build** combo button to the **RepoActions** row
+  (just below the branch name in the sidebar).
+
+1. Open a repo — the combo appears with a default build config selected.
+2. Click the **🔨** icon to build the selected config.
+3. Click the **▾** dropdown arrow to switch configuration.
+4. Watch output in the **Job Output Panel** (status-bar badge → ↗).
+
+Keyboard shortcut: `Ctrl`+`F9` triggers the selected build configuration.
+
+## Build & Run sidebar
+
+An IntelliJ-style tree sidebar registered on the **right**
+  ActivityBar (Hammer icon, "Build & Run"). The body shows two top-level
+  groups for the active repo:
+
+- **Build configurations** — every saved build config from
+      *project* + *global* storage, icon per template
+      (`Hammer` for Maven/Gradle, `Box` for Cargo,
+      `Package` for npm, `Wrench` for Make). The
+      currently-selected config carries a `default` badge. Click
+      a row to run it; double-click and Enter trigger
+      `compile:run`.
+- The detected toolchain section — Maven, Cargo, Gradle, npm or Make
+      with their canonical lifecycle / tasks / scripts. Multi-module projects
+      are walked recursively: parent + children for Maven
+      (`<modules>` in pom.xml), workspace members for Cargo
+      (`[workspace] members`, including `"crates/*"`
+      style globs — expanded by listing the directory and keeping subdirs
+      that contain a `Cargo.toml`), npm `workspaces`.
+      Each module exposes its own Lifecycle / Tasks / Scripts subsection.
+
+The header has a search field and toolbar buttons populated by
+  contributions — `compile-action` ships *Refresh project
+  tree*, *New run configuration…*, *Settings*; other
+  plugins (e.g. `run-action`) contribute their own buttons via
+  the contribution model documented in *Plugin Development → API: UI →
+  Tree-kind sidebars*.
+
+### Contribution points exposed by this plugin
+
+| Point | Used by | Purpose |
+| --- | --- | --- |
+| `compile-action:compile:toolbar` | Any plugin | Buttons in the sidebar header. |
+| `compile-action:compile:tree.section` | e.g. `run-action` for "Run configurations" | Top-level section nodes appended to the tree. |
+| `compile-action:compile:node_action` | e.g. `run-action`, `maven-update-deps` | Hover-revealed icon buttons per row, filtered by node `kind` / `data`. |
+| `compile-action:compile:node_decorator` | Any plugin | Always-visible badge / icon decorators per row. |
+| `compile-action:compile:context_menu` | e.g. `maven-update-deps` | Right-click menu items per row. |
+| `compile-action:compile:dependency_provider` | e.g. `maven-update-deps` | Adds *Show dependencies* to the right-click menu and provides the modal's tree. |
+| `compile-action:compile:footer` | Any plugin | Items in the sidebar footer. |
+
+## Supported templates
+
+Each build configuration is backed by a *template*. The template declares
+  the editable fields (goals, profiles, toolchain, env, …) and generates the
+  final command string on save.
+
+| Template | Template-specific fields | Toolchain |
+| --- | --- | --- |
+| `maven` | goals, profiles, skip_tests | JDK |
+| `gradle` | tasks, refresh_deps, init_script | JDK |
+| `cargo` | subcommand, features, release, target, backtrace | Rust |
+| `npm` | package_manager (npm / yarn / pnpm), script | Node.js |
+| `make` | target | — |
+
+Detection seeds a starter set on first repo open: `pom.xml` → 5 Maven
+  configs, `build.gradle(.kts)` → 3 Gradle, `Cargo.toml` →
+  5 Cargo, `package.json` → 3 npm, `Makefile` → 3 Make,
+  `src-tauri/tauri.conf.json` → Cargo + frontend set, `go.mod`
+  → single Make-style entry.
+
+## Build Configurations modal
+
+Opens from the combo's **⚙ Project settings** entry. The modal
+  uses an IntelliJ-style tree layout: templates group the configs on the left,
+  the selected config's editor appears on the right. A toolbar at the top of
+  the nav provides `+▾` (new from template), `−` (remove) and
+  `📋` (duplicate). Add / remove / duplicate update the tree and
+  content *in place* — no modal flicker.
+
+Each config stores `toolchain_id` (optional pin to a specific
+  JDK / Node / Rust registered in **Plugin Preferences**). When
+  empty, the active toolchain for the template kind is used; when set, its env
+  (e.g. `JAVA_HOME`) is injected. Explicit keys in the config's
+  `env` map always win.
+
+## JDK / Node / Rust toolchains
+
+Register installations in **Plugin Preferences** (gear icon in
+  the Plugin Manager). The "Detection" card auto-discovers JDK via
+  `JAVA_HOME`, Node from `PATH`, Rust from
+  `~/.cargo/bin/cargo`. The active entry per kind is the default
+  when no `toolchain_id` is pinned on the config.
+
+## Exposed services
+
+These services can be consumed by other plugins via `arbor.service.call`:
+
+- `compile-action.spawn_build({ repo_path, build_id? })` — starts a build.
+    Returns `{ ok, build_cfg, job_id, java_home, already_running? }`.
+    If a build is already running for the repo, reuses it (`already_running = true`).
+- `compile-action.get_build_config({ id })` → full config table or `nil`.
+- `compile-action.list_build_configs()` → `{ project, global }`.
+- `compile-action.get_selected_build_id()` → `{ id }`.
+- `compile-action.is_building({ repo_path })` → `{ building, job_id? }`.
+- `compile-action.resolve_java_home({ build_id? })` →
+    `{ ok, java_home, build_id, template_id }` or
+    `{ ok = false, error }` when the active build isn't a JVM
+    template. Mirrors the same toolchain rules `spawn_build`
+    uses (per-config `toolchain_id` → active JDK fallback) so
+    callers like `deps-explorer` can run `mvn` /
+    `gradle` under the JDK the user actually selected.
+
+## Plugin events
+
+Emitted via `arbor.events.emit`:
+
+- `compile-action:build-started` —
+    `{ repo_path, build_cfg, job_id }`
+- `compile-action:build-done` —
+    `{ repo_path, success, cancelled, exit_code, build_cfg, job_id, java_home }`
+
+---
+
+### chunk-merger-bin
+
+## Chunk Merger — Binary concatenation
+
+Companion plugin to **Cloud Storage**. Reassembles a remote object that was previously uploaded in multiple parts by concatenating the downloaded chunks *byte-for-byte* in the order chosen by the user (or by last-modified date in the *auto* mode).
+
+### When this handler fits
+
+- Split archives (`foo.tar.gz.001`, `foo.tar.gz.002`, …) where every part is a raw byte slice of the final file.
+- Manually-chunked uploads produced by a pipeline that just sliced a single blob into N parts.
+- Any concatenation-safe format (HLS `.ts` playlists, log roll-ups, raw binary streams).
+
+### When it does NOT fit
+
+- ZIP / 7z / RAR multi-volume archives — those need the original tool to reopen the catalog.
+- Video / audio container muxing (MP4, MKV, WebM) — needs `ffmpeg -c copy` or similar.
+- Any format where the parts are independent files that must be merged structurally, not bytewise.
+
+If multiple chunk-handler plugins are installed, the cloud-storage sidebar prompts you to pick one each time you run *Download chunks…*. Install handlers tailored to your specific format alongside this one — they coexist.
+
+### Cancellation
+
+The Stop button on the OperationsOverlay card aborts the operation cooperatively: the handler checks the shared cancel flag (`arbor.cloud.is_cancelled`) before touching the filesystem, so an early cancel never produces a partial output file. Cancelling *during* the host-side concat is bounded by the chunk size opendal uses internally and resolves on the next chunk boundary.
+
+### Cleanup
+
+On success, cloud-storage deletes the per-stream temp directory (`<output>.chunks/`) and the chunk files inside it. On failure the temp directory is preserved so you can inspect the partial state or retry without re-downloading.
+
+---
 
 ### bevy-brp
 
@@ -8660,420 +8988,6 @@ BRP is unauthenticated and exposes `world.spawn_entity`,
 
 ---
 
-### ron-studio
-
-# RON Studio
-
-IntelliJ-style viewer and editor for [Rusty Object Notation](https://github.com/ron-rs/ron) documents. Designed for the things `cat` and a plain editor can't easily do: walk the structural tree, validate against a Rust schema you load from your own crate, diff against the original on disk, save in place or fork via Save As, and convert to / from JSON.
-
-## How to open a document
-
-- **Open RON file in Studio…** — pick a `.ron` file from disk.
-- **Paste RON in Studio…** — paste any RON text into a textarea.
-
-Both commands appear in the Command Palette (`Ctrl`+`K`) under the “RON Studio” group.
-
-## The modal
-
-Four views over the same parsed document, switched via the toolbar:
-
-- **Tree** — structural navigation with type badges (`Struct`, `Map`, `List`, `Option`, `Char`, primitives). Lazy: only expanded nodes are pulled over IPC. Click a node to inspect its value.
-- **Text** — primary edit surface. A plain editable text view with RON-aware syntax highlighting. Comments and exact formatting are preserved on save.
-- **Diff** — side-by-side comparison of the original loaded text against the current edit state. Use `F3` / `Shift+F3` or the prev/next chevrons in the toolbar to jump between chunks, just like the stage panel's diff.
-- **Errors** — when parsing fails, this view shows the location and message reported by the `ron` parser.
-
-## Editing model
-
-The Text view is the source of truth. Every keystroke triggers a debounced re-parse; the tree updates live. The Save and Save As actions write exactly what's in the textarea, so anything you typed — comments included — is preserved verbatim.
-
-**Format** and **RON ↔ JSON** normalise the text through the parser and serialiser. They warn before running because the round-trip drops comments and any custom formatting. They never touch the file on disk until you click Save.
-
-## Save / Save As
-
-The Save button in the header writes the current Text view content back to the file that was opened. The dropdown next to it (**▾**) exposes Save As — pick a new path; the document then tracks the new location so subsequent Save clicks write there.
-
-When the document was opened via *Paste*, Save is disabled (there's no source path); use Save As to commit the buffer to disk.
-
-## Schema loaded from Rust sources
-
-The schema panel lets you pick any `.rs` file from your project. RON Studio walks up to the enclosing `Cargo.toml` and then descends through every `mod` declaration from `lib.rs`/`main.rs` to index every `struct`, `enum` and `type` alias in the crate.
-
-You then choose a **root type** from the dropdown (populated with the public/private types defined in the file you picked). The closure of types reachable from that root is computed and used to:
-
-- Annotate tree rows with real Rust types (you'll see `u16`, `Option<Vec<Server>>`, etc., not just “Number”).
-- Highlight unknown fields and variants the RON file uses but the schema doesn't define.
-- List schema fields that the document is missing (and whether they have `#[serde(default)]`).
-
-### What works (best-effort)
-
-- Cross-file resolution through `mod` declarations, including `#[path = "..."]`.
-- `use` aliases (including `as` renames) and `pub use` re-exports.
-- Standard generics: `Option<T>`, `Vec<T>`, `HashMap<K, V>`, `BTreeMap`, tuples, fixed-size arrays.
-- Transparent wrappers: `Box`, `Rc`, `Arc`, `Cell`, `RefCell`, `Mutex`, `RwLock`.
-- Common `#[serde(...)]` attributes: `rename`, `default`, `skip_serializing_if`, `flatten`.
-
-### Honest limits
-
-- Types from other crates surface as `External(path)` — the rest of the schema still works; that single branch just isn't validated.
-- Macro-generated types are invisible to the parser; they appear as `Unknown`.
-- `#[cfg(...)]` is ignored: everything is indexed regardless of features.
-- Generics that aren't instantiated at the root (`Foo<T>` with a free parameter) are reported as unresolved — pick a concrete root type.
-
-## Lua API
-
-```
-arbor.ron_studio.open{ path = "/abs/path/to/config.ron" }
-arbor.ron_studio.open{ text = '(name: "x", port: 8080)', title = "scratch" }
-```
-
-That's the entire surface. Everything else is driven from the modal.
-
-## Earmarks
-
-Like the JSON Studio and cloud-storage plugins, RON Studio relies on Rust crates pulled into the Arbor host: `ron` for parsing/serialising and `syn` for walking Rust sources. The team's direction is to migrate these heavy plugins to a subprocess-based runtime so the host stops accreting dependencies — when that lands, this plugin moves out as a self-contained binary.
-
----
-
-### compile-action
-
-# compile-action
-
-Build runner. Auto-detects the project type and lets you compile/package it
-  directly from the Activity Bar — no terminal required. Output streams in
-  real time to the built-in Jobs panel.
-
-The sibling **run-action** plugin handles launching your
-  application and depends on this plugin for the build step.
-
-## Getting Started
-
-Open a repository. The plugin scans the working directory on every repo open
-  and tab switch, detects the build system automatically, and adds a
-  **Build** combo button to the **RepoActions** row
-  (just below the branch name in the sidebar).
-
-1. Open a repo — the combo appears with a default build config selected.
-2. Click the **🔨** icon to build the selected config.
-3. Click the **▾** dropdown arrow to switch configuration.
-4. Watch output in the **Job Output Panel** (status-bar badge → ↗).
-
-Keyboard shortcut: `Ctrl`+`F9` triggers the selected build configuration.
-
-## Build & Run sidebar
-
-An IntelliJ-style tree sidebar registered on the **right**
-  ActivityBar (Hammer icon, "Build & Run"). The body shows two top-level
-  groups for the active repo:
-
-- **Build configurations** — every saved build config from
-      *project* + *global* storage, icon per template
-      (`Hammer` for Maven/Gradle, `Box` for Cargo,
-      `Package` for npm, `Wrench` for Make). The
-      currently-selected config carries a `default` badge. Click
-      a row to run it; double-click and Enter trigger
-      `compile:run`.
-- The detected toolchain section — Maven, Cargo, Gradle, npm or Make
-      with their canonical lifecycle / tasks / scripts. Multi-module projects
-      are walked recursively: parent + children for Maven
-      (`<modules>` in pom.xml), workspace members for Cargo
-      (`[workspace] members`, including `"crates/*"`
-      style globs — expanded by listing the directory and keeping subdirs
-      that contain a `Cargo.toml`), npm `workspaces`.
-      Each module exposes its own Lifecycle / Tasks / Scripts subsection.
-
-The header has a search field and toolbar buttons populated by
-  contributions — `compile-action` ships *Refresh project
-  tree*, *New run configuration…*, *Settings*; other
-  plugins (e.g. `run-action`) contribute their own buttons via
-  the contribution model documented in *Plugin Development → API: UI →
-  Tree-kind sidebars*.
-
-### Contribution points exposed by this plugin
-
-| Point | Used by | Purpose |
-| --- | --- | --- |
-| compile-action:compile:toolbar | Any plugin | Buttons in the sidebar header. |
-| compile-action:compile:tree.section | e.g. run-action for "Run configurations" | Top-level section nodes appended to the tree. |
-| compile-action:compile:node_action | e.g. run-action, maven-update-deps | Hover-revealed icon buttons per row, filtered by node kind / data. |
-| compile-action:compile:node_decorator | Any plugin | Always-visible badge / icon decorators per row. |
-| compile-action:compile:context_menu | e.g. maven-update-deps | Right-click menu items per row. |
-| compile-action:compile:dependency_provider | e.g. maven-update-deps | Adds Show dependencies to the right-click menu and provides the modal's tree. |
-| compile-action:compile:footer | Any plugin | Items in the sidebar footer. |
-
-## Supported templates
-
-Each build configuration is backed by a *template*. The template declares
-  the editable fields (goals, profiles, toolchain, env, …) and generates the
-  final command string on save.
-
-| Template | Template-specific fields | Toolchain |
-| --- | --- | --- |
-| maven | goals, profiles, skip_tests | JDK |
-| gradle | tasks, refresh_deps, init_script | JDK |
-| cargo | subcommand, features, release, target, backtrace | Rust |
-| npm | package_manager (npm / yarn / pnpm), script | Node.js |
-| make | target | — |
-
-Detection seeds a starter set on first repo open: `pom.xml` → 5 Maven
-  configs, `build.gradle(.kts)` → 3 Gradle, `Cargo.toml` →
-  5 Cargo, `package.json` → 3 npm, `Makefile` → 3 Make,
-  `src-tauri/tauri.conf.json` → Cargo + frontend set, `go.mod`
-  → single Make-style entry.
-
-## Build Configurations modal
-
-Opens from the combo's **⚙ Project settings** entry. The modal
-  uses an IntelliJ-style tree layout: templates group the configs on the left,
-  the selected config's editor appears on the right. A toolbar at the top of
-  the nav provides `+▾` (new from template), `−` (remove) and
-  `📋` (duplicate). Add / remove / duplicate update the tree and
-  content *in place* — no modal flicker.
-
-Each config stores `toolchain_id` (optional pin to a specific
-  JDK / Node / Rust registered in **Plugin Preferences**). When
-  empty, the active toolchain for the template kind is used; when set, its env
-  (e.g. `JAVA_HOME`) is injected. Explicit keys in the config's
-  `env` map always win.
-
-## JDK / Node / Rust toolchains
-
-Register installations in **Plugin Preferences** (gear icon in
-  the Plugin Manager). The "Detection" card auto-discovers JDK via
-  `JAVA_HOME`, Node from `PATH`, Rust from
-  `~/.cargo/bin/cargo`. The active entry per kind is the default
-  when no `toolchain_id` is pinned on the config.
-
-## Exposed services
-
-These services can be consumed by other plugins via `arbor.service.call`:
-
-- `compile-action.spawn_build({ repo_path, build_id? })` — starts a build.
-    Returns `{ ok, build_cfg, job_id, java_home, already_running? }`.
-    If a build is already running for the repo, reuses it (`already_running = true`).
-- `compile-action.get_build_config({ id })` → full config table or `nil`.
-- `compile-action.list_build_configs()` → `{ project, global }`.
-- `compile-action.get_selected_build_id()` → `{ id }`.
-- `compile-action.is_building({ repo_path })` → `{ building, job_id? }`.
-- `compile-action.resolve_java_home({ build_id? })` →
-    `{ ok, java_home, build_id, template_id }` or
-    `{ ok = false, error }` when the active build isn't a JVM
-    template. Mirrors the same toolchain rules `spawn_build`
-    uses (per-config `toolchain_id` → active JDK fallback) so
-    callers like `deps-explorer` can run `mvn` /
-    `gradle` under the JDK the user actually selected.
-
-## Plugin events
-
-Emitted via `arbor.events.emit`:
-
-- `compile-action:build-started` —
-    `{ repo_path, build_cfg, job_id }`
-- `compile-action:build-done` —
-    `{ repo_path, success, cancelled, exit_code, build_cfg, job_id, java_home }`
-
----
-
-### cloud-storage
-
-## Cloud Storage
-
-Browse, upload, download and synchronise objects between Arbor and the cloud. Backed by [Apache OpenDAL](https://opendal.apache.org/), with first-class support for **Google Cloud Storage**, **Amazon S3 (and S3-compatible services like R2 / MinIO)**, and **Azure Blob Storage**.
-
-### Setting up a connection
-
-Click the **Cloud** icon in the right activity bar to open the sidebar, then click the **Manage connections** button (gear icon) in the toolbar. A two-pane modal opens — left rail groups every saved connection by provider, right pane edits the selected one. Click **+ Add Google Cloud Storage** to create a new connection draft. The same modal also exposes *edit* (just click a row) and *delete* (hover, click trash). Click **Save** at the bottom to commit all pending changes, **Close** to discard them. You can also reach it from the Command Palette via *Cloud Storage · Manage connections…*.
-
-For each connection you set:
-
-- **Name** — a friendly label shown in the picker.
-- **Provider** — currently only GCS is selectable.
-- **Default bucket** — shown when the sidebar first opens. You can still browse other buckets at runtime by editing the connection.
-- **Project id** — optional. Most object ops don't need it.
-- **Authentication** — pick one of five methods:
-
-| Method | When to use | What we persist |
-| --- | --- | --- |
-| Service account file | Most common for CI / server roles. Download the JSON key from the GCP console once. | Just the path to the file. The key itself stays on disk. |
-| Service account inline | You want to roam between machines and prefer the key in your keyring. | The JSON content goes to the OS keychain (cloud-storage / gcs/<config-id>). |
-| Application Default Credentials (ADC) | You already ran gcloud auth application-default login or set GOOGLE_APPLICATION_CREDENTIALS. | Nothing — the file is discovered fresh on every connect. |
-| gcloud CLI | You have the Google Cloud SDK installed and just want to ride your gcloud session. | Nothing — the CLI is spawned on every connect for a fresh access token. |
-| OAuth user | End-user accounts where you can't issue a service account. Register a Desktop OAuth client in GCP. | Refresh token JSON in the keychain (cloud-storage / gcs/<config-id>/oauth). Access tokens are refreshed automatically. |
-
-Use **Test connection** at the bottom of the form to validate auth and bucket reachability before saving — the report names the auth method and (when known) the service-account email or user identity behind the token.
-
-### Browsing
-
-- **Double-click a folder** to navigate into it; the header row shows the breadcrumb of clickable chips.
-- **Double-click an object** to download — you'll be asked where to save it locally.
-- **Type a path directly**: click the pencil icon at the right of the breadcrumb (or double-click anywhere on the breadcrumb band) to flip into edit mode, type something like `data/2024/chunks/` and press `Enter`. If the prefix has no objects, a non-blocking warning notification surfaces so you can tell a typo from "empty folder".
-- **Listings are capped** by the *Max entries per folder* preference (Settings → Cloud Storage → Browser). The sidebar warns you if more exist; refine the breadcrumb or use Remote search.
-- **Right-click any row** for the per-item context menu.
-
-### Uploading
-
-1. Click the **↑** button in the sidebar toolbar.
-2. Pick a local file in the native picker.
-3. Confirm the target key (prefilled with the current breadcrumb + filename) and whether to overwrite if it exists.
-
-The upload streams in 256 KiB chunks; the Jobs overlay shows live progress, throughput and ETA. Cancel from there at any time and the transfer aborts on the next chunk boundary.
-
-### Recursive sync
-
-From the Command Palette (`Ctrl+K`):
-
-- **Cloud Storage · Sync down** — pulls a remote prefix into a local folder.
-- **Cloud Storage · Sync up** — pushes a local folder under a remote prefix.
-
-Both flows ask you to confirm the remote prefix and offer an optional **Delete files at the destination that don't exist at the source** checkbox. With that on, the sync is a mirror (matches one side exactly); off, it's a merge.
-
-### Background jobs
-
-Every upload, download and sync registers a job in the Arbor Jobs registry. The status bar's spinner counts them; click it to open the floating overlay with per-job cancel buttons. The Job Output panel shows a line-per-chunk progress feed (current bytes, throughput) so you can watch large transfers without leaving Arbor.
-
-### Security notes
-
-- Secrets that don't fit in plain plugin settings (inline SA JSON, OAuth refresh tokens) live exclusively in your OS keychain under the service name `arbor-cloud-storage`. They are never written to disk by this plugin and never appear in exported settings.
-- The OAuth flow uses installed-app PKCE with a loopback listener on **127.0.0.1:7732**. Make sure no other service is listening on that port while you authorize.
-- Service-account JSON pasted into the inline form is wiped from the textarea on save and never re-displayed.
-
-### Wildcard search
-
-The search row at the top of the sidebar has two modes — toggle between them with the filter/globe icon on the right of the input:
-
-- **Local** (default) — substring filter on rows already loaded; cheap, no network.
-- **Remote** — input shows an accent stripe; Enter runs a wildcard search against the bucket, scoped to the current breadcrumb folder. If you start typing `*` or `?` while still in Local mode, a one-time hint appears with a *Search remote* button that promotes the query for you.
-
-Pattern semantics:
-
-| Pattern | Meaning |
-| --- | --- |
-| * | matches any sequence of characters — including /, so it walks across sub-folders |
-| ** | alias of * (kept for users coming from Ant/gitignore-style globs) |
-| ? | matches exactly one non-separator char |
-
-Examples:
-
-- `*/0` — every object whose path ends in `/0` at any depth
-- `data/2024/*/chunk_*` — every `chunk_*` file anywhere under `data/2024/`
-- `*error.log` — every `error.log` anywhere under the search scope
-- `*.bak` — every `.bak` file under the current folder (or bucket if scope = entire)
-
-The matcher is permissive on purpose: a single `*` walks the whole sub-tree, so `chunk_*` finds chunks in any nested folder under the current breadcrumb — you rarely need `**`.
-
-**Scope:** by default the search runs under the current breadcrumb folder. Switch to "Entire bucket" only when needed — recursive listing of a large bucket can take seconds or minutes.
-
-Results render as a flat list (full paths) in the sidebar. Double-click downloads; right-click works as on regular file rows (multi-select supported — useful for picking N chunks scattered across folders and feeding them to *Download chunks (custom order)*). Click the *clear ✕* chip in the breadcrumb to exit search mode and go back to browsing.
-
-The result list is capped at 5000 matches; if you hit the cap, refine the pattern to narrow the scope.
-
-### Bulk operations & chunk-merge
-
-Select multiple files in the sidebar (`Ctrl`+click, `Shift`+click for ranges, `Esc` to clear). The context menu switches to bulk mode:
-
-- **Download files…** — pick a local folder; every selected object is downloaded in parallel (capped at *parallel downloads*, set in Settings → Cloud Storage → Preferences, default 4). A floating progress modal shows per-file bars, aggregate throughput and ETA, and has a Cancel button that aborts at the next chunk boundary.
-- **Delete files…** — confirms once for the whole batch, deletes each object, refreshes the listing.
-
-When at least one **chunk-merger plugin** is installed, two extra entries appear:
-
-- **Download chunks (auto-order by date)** — sorts the selected objects by last-modified ascending, downloads them to a temp dir (`<output>.chunks/`), then hands the local paths to the chunk-handler plugin which writes the merged output. Tie-break is alphabetic on path when timestamps match.
-- **Download chunks (custom order…)** — opens a drag-reorder picker so you can place the parts manually. Same flow as above once you click Continue.
-
-The progress modal switches to a "Merge" phase once the downloads finish; the chunk-handler can push a per-step note (e.g. *Concatenating 2/3…*) through `arbor.cloud.report_progress`.
-
-### Extending the plugin (chunk-merger contributions)
-
-The plugin exposes one contribution point: `cloud-storage:cloud:chunk-handlers`. A handler plugin contributes a record and exports a service:
-
-```
-arbor.ui.contribute("cloud-storage:cloud:chunk-handlers", {
-  id = "binary-concat",
-  payload = {
-    label   = "Binary concatenation",
-    icon    = "Combine",
-    service = "my-chunk-plugin.merge",
-  },
-})
-
-arbor.service.export("merge", function(args)
-  -- args.stream_id    : string (also used for arbor.cloud.is_cancelled checks)
-  -- args.inputs       : [string]  local paths in the chosen order
-  -- args.output       : string    user-picked target path
-  -- args.source_paths : [string]  original remote paths (for logging)
-  -- args.tempdir      : string    where `inputs` live (cleaned up on ok)
-  local ok, err = arbor.cloud.concat_files{ inputs = args.inputs, output = args.output }
-  return ok and { ok = true } or { ok = false, error = tostring(err) }
-end)
-```
-
-If more than one chunk-handler plugin is installed, the user is prompted to pick one each time. The contribution registry is re-scanned every time the sidebar opens, so installing or disabling a handler is reflected on the next visit.
-
-### Heads-up — early version
-
-This plugin currently ships with its heavy dependencies (opendal) bundled directly in the Arbor host binary, the same way **JSON Studio** does. When the WASM plugin runtime lands, the entire host-side cloud module is deleted and the plugin gains its own WASM crate. The Lua surface (`arbor.cloud.*`) is designed to stay backwards-compatible across that migration, but the in-process Tauri commands (`cloud_list`, `cloud_download`, …) will go away.
-
----
-
-### json-studio
-
-## JSON Studio
-
-An IntelliJ-style inspector for JSON documents — lazy tree view, JSONPath query, and a syntax-highlighted text view, all in one modal. Designed to stay responsive on multi-megabyte payloads (parse runs through `simd-json` on the host).
-
-### Opening a document
-
-From the Command Palette (`Ctrl+K`):
-
-- **Open JSON file in Studio…** — file picker, scoped to common JSON extensions.
-- **Paste JSON in Studio…** — small form with a textarea, useful for ad-hoc inspection of API responses copied from the browser.
-
-### Inside the modal
-
-- **Tree view** — every container is loaded lazily. Click a row's chevron to expand; clicking the row itself selects the node and shows its full value in the right-hand strip. Built on the same virtualised tree the file panel uses, so 100k+ keys still scroll smoothly.
-- **Text view** — pretty-printed JSON, syntax-highlighted via Prism. Read-only; use the Copy button in the header to grab the formatted text.
-- **Query bar** — full [RFC 9535 JSONPath](https://datatracker.ietf.org/doc/rfc9535/) via `serde_json_path`. Type and the modal queries on the fly; click a hit to jump to that node in the tree.
-    
-      **Basics:** `$`, `$.foo.bar`, `$.arr[0]`, `$.arr[*]`, `$..key`
-      **Filters:** `$.users[?@.age > 30]`, `$.users[?@.role == "admin"]`, `$.books[?@.price < 10 && @.in_stock]`
-      **Existence / negation:** `$.users[?@.banned]`, `$.users[?!@.deleted]`
-      **Slice:** `$.arr[1:5]`, `$.arr[::-1]` (reverse)
-      **Multi-select:** `$[0, 2, 4]`, `$["foo","bar"]`
-      **Functions:** `length(@)`, `count(@.tags[*])`, `match(@.email, ".*@.*")`, `search(@.text, "TODO")`
-      **Combine:** `$..book[?@.price < 10].title` — recursive descent → filter → property
-    
-
-    **Common recipe — "find X anywhere where some descendant has Y == Z":**
-    `$..*[?@.Y == "Z"].X`
-    Example — given a survey where each question has a `controlType` and a `questionCode`, but nested at varying depths, get the codes of all printpdf questions:
-    `$..*[?@.controlType == "printpdf"].questionCode`
-    The `$..*` part is the key: `..` walks every descendant, `*` matches at every level. Just `$.foo[?...]` would only filter direct children of `foo`.
-    **Shorthands** (typed as you'd think, rewritten before parsing):
-    
-      `foo` → `$..foo` (find `foo` anywhere)
-      `.foo` / `[0]` → auto-prefix `$`
-      `users[?@.x]` → `$.users[?@.x]`
-    
-    Results are capped at 500 hits — refine the expression for narrower results.
-
-### Plugin authors
-
-The Lua API is intentionally minimal — one call:
-
-```
-arbor.json_studio.open{
-  text  = "{\"hello\":\"world\"}",  -- OR
-  path  = "/abs/path/to/data.json",
-  title = "scratch",                -- optional; defaults to filename or "JSON Studio"
-}
-```
-
-Pass either `text` or `path`. The modal opens immediately; parsing happens asynchronously on the host. Only one document is held at a time — opening a second one closes the first.
-
-### Roadmap
-
-This plugin is the reference case for the planned WASM plugin runtime. Today the JSON parser lives in arbor's Rust core because pure-Lua parsing is too slow for multi-MB payloads; once WASM lands the parser will move into the plugin's own module and the host will lose all JSON-specific code. None of that affects the API above — `arbor.json_studio.open` stays the same.
-
----
-
 ### source-export
 
 Source Export
@@ -9146,15 +9060,15 @@ Every step can reference built-in variables (always available) or user
 
 | Variable | Meaning |
 | --- | --- |
-| $SOURCE_PATH | Active Arbor repo (or the CLI-supplied cwd) |
-| $OUTPUT_PATH | <settings.output_folder>/<profile>_<timestamp> |
-| $BRANCH_SRC | Source branch of the profile (or the active branch) |
-| $BRANCH_DEST | Destination branch (optional; empty when unset) |
-| $PROFILE | Profile name |
-| $RUN_ID | Current run id |
-| $TIMESTAMP | Unix seconds at run start |
-| $COMMIT_SHA | Head SHA of the source repo at run start |
-| $REPO_NAME | Tail folder name of the source repo |
+| `$SOURCE_PATH` | Active Arbor repo (or the CLI-supplied cwd) |
+| `$OUTPUT_PATH` | `<settings.output_folder>/<profile>_<timestamp>` |
+| `$BRANCH_SRC` | Source branch of the profile (or the active branch) |
+| `$BRANCH_DEST` | Destination branch (optional; empty when unset) |
+| `$PROFILE` | Profile name |
+| `$RUN_ID` | Current run id |
+| `$TIMESTAMP` | Unix seconds at run start |
+| `$COMMIT_SHA` | Head SHA of the source repo at run start |
+| `$REPO_NAME` | Tail folder name of the source repo |
 
 ## Operation catalog
 
@@ -9171,13 +9085,13 @@ Every string field in every step parameter goes through the expander.
 
 | Form | Meaning |
 | --- | --- |
-| $NAME | Greedy match [A-Za-z0-9_]. Unresolved → left literal for debuggability. |
-| ${NAME} | Explicit brace form — required when NAME is followed by letters/underscore. |
-| ${NAME:default} | Fallback when NAME is unset or empty (bash :- semantics). Default runs verbatim to the next }; splitting uses only the first : so URLs/paths with colons in the default are fine. |
-| ${NAME:} | Empty default — forces empty string when NAME is unset. |
-| ${env:NAME} | System env var lookup (os.getenv). Useful to reference user-level paths like ${env:JAVA_HOME_11} without baking them into the saved profile. |
-| ${env:NAME:default} | Same with fallback when the system env var is unset or empty. |
-| $$ | Literal $ escape. |
+| `$NAME` | Greedy match `[A-Za-z0-9_]`. Unresolved → left literal for debuggability. |
+| `${NAME}` | Explicit brace form — required when NAME is followed by letters/underscore. |
+| `${NAME:default}` | Fallback when NAME is unset *or* empty (bash `:-` semantics). Default runs verbatim to the next `}`; splitting uses only the first `:` so URLs/paths with colons in the default are fine. |
+| `${NAME:}` | Empty default — forces empty string when NAME is unset. |
+| `${env:NAME}` | System env var lookup (`os.getenv`). Useful to reference user-level paths like `${env:JAVA_HOME_11}` without baking them into the saved profile. |
+| `${env:NAME:default}` | Same with fallback when the system env var is unset or empty. |
+| `$$` | Literal `$` escape. |
 
 ## Environment overrides
 
@@ -9291,117 +9205,64 @@ Sequences are GLOBAL (stored in
 
 ---
 
-### cipher-studio
+### json-studio
 
-## Cipher Studio
+## JSON Studio
 
-Encode and decode text with classical ciphers and old-school encodings.
-  No AES / GCM / PGP — this plugin is for ROT13-era fun, CTF warmups and
-  quick decoding of suspicious-looking strings.
+An IntelliJ-style inspector for JSON documents — lazy tree view, JSONPath query, and a syntax-highlighted text view, all in one modal. Designed to stay responsive on multi-megabyte payloads (parse runs through `simd-json` on the host).
 
-### How to use
+### Opening a document
 
-1. Open the Command Palette and run **Cipher Studio: open…**.
-2. Pick an algorithm from the dropdown (grouped by family).
-3. Type a key in the *Key / parameter* box if the algorithm needs one
-      — the hint below the algorithm name tells you whether a key is required
-      and what shape it takes.
-4. Paste your text in the **Input** area, hit **Encode** or **Decode**,
-      result lands in **Output**.
-5. **Swap** moves Output back to Input; **Use output as input** chains
-      multiple algorithms (e.g. Base64 → ROT13 → Hex).
+From the Command Palette (`Ctrl+K`):
 
-### Algorithm catalog
+- **Open JSON file in Studio…** — file picker, scoped to common JSON extensions.
+- **Paste JSON in Studio…** — small form with a textarea, useful for ad-hoc inspection of API responses copied from the browser.
 
-#### Encoding (reversible, no key)
+### Inside the modal
 
-- **Base64** — standard RFC 4648.
-- **Base32** — RFC 4648 alphabet.
-- **Base16 / Hex** — uppercase hex.
-- **Binary** — 8-bit groups separated by spaces.
-- **Octal** — 3-digit groups separated by spaces.
-- **Decimal ASCII** — space-separated code points.
-- **URL** — percent-encoding.
-- **HTML entities** — `&#NN;` form.
-- **Unicode escape** — `\uXXXX` form.
-- **Morse** — letters / digits / common punctuation; `/` = word separator.
-- **A1Z26** — A=1, B=2, … Z=26.
-- **Reverse** — string reversed character-wise.
+- **Tree view** — every container is loaded lazily. Click a row's chevron to expand; clicking the row itself selects the node and shows its full value in the right-hand strip. Built on the same virtualised tree the file panel uses, so 100k+ keys still scroll smoothly.
+- **Text view** — pretty-printed JSON, syntax-highlighted via Prism. Read-only; use the Copy button in the header to grab the formatted text.
+- **Query bar** — full [RFC 9535 JSONPath](https://datatracker.ietf.org/doc/rfc9535/) via `serde_json_path`. Type and the modal queries on the fly; click a hit to jump to that node in the tree.
+    
+      **Basics:** `$`, `$.foo.bar`, `$.arr[0]`, `$.arr[*]`, `$..key`
+      **Filters:** `$.users[?@.age > 30]`, `$.users[?@.role == "admin"]`, `$.books[?@.price < 10 && @.in_stock]`
+      **Existence / negation:** `$.users[?@.banned]`, `$.users[?!@.deleted]`
+      **Slice:** `$.arr[1:5]`, `$.arr[::-1]` (reverse)
+      **Multi-select:** `$[0, 2, 4]`, `$["foo","bar"]`
+      **Functions:** `length(@)`, `count(@.tags[*])`, `match(@.email, ".*@.*")`, `search(@.text, "TODO")`
+      **Combine:** `$..book[?@.price < 10].title` — recursive descent → filter → property
+    
 
-#### Substitution ciphers
+    **Common recipe — "find X anywhere where some descendant has Y == Z":**
+    `$..*[?@.Y == "Z"].X`
+    Example — given a survey where each question has a `controlType` and a `questionCode`, but nested at varying depths, get the codes of all printpdf questions:
+    `$..*[?@.controlType == "printpdf"].questionCode`
+    The `$..*` part is the key: `..` walks every descendant, `*` matches at every level. Just `$.foo[?...]` would only filter direct children of `foo`.
+    **Shorthands** (typed as you'd think, rewritten before parsing):
+    
+      `foo` → `$..foo` (find `foo` anywhere)
+      `.foo` / `[0]` → auto-prefix `$`
+      `users[?@.x]` → `$.users[?@.x]`
+    
+    Results are capped at 500 hits — refine the expression for narrower results.
 
-- **ROT13** — Caesar with shift 13. Encode == Decode.
-- **ROT47** — like ROT13 but across all printable ASCII (33–126).
-- **ROT5** — only digits, shift 5.
-- **ROT18** — ROT13 on letters + ROT5 on digits.
-- **Caesar** — generic Caesar; key = shift (integer, default 3).
-- **Atbash** — A↔Z, B↔Y, … self-inverse.
-- **Affine** — `E(x) = a·x + b mod 26`; key = `a,b` (a coprime with 26).
-- **Vigenère** — repeating-keyword Caesar; key = word.
-- **Beaufort** — Vigenère variant `E(x) = k − x mod 26`; self-inverse.
-- **Autokey** — Vigenère where the plaintext extends the key.
+### Plugin authors
 
-#### Steganographic
+The Lua API is intentionally minimal — one call:
 
-- **Bacon** — each letter → 5-bit A/B group. 26-letter variant.
+```
+arbor.json_studio.open{
+  text  = "{\"hello\":\"world\"}",  -- OR
+  path  = "/abs/path/to/data.json",
+  title = "scratch",                -- optional; defaults to filename or "JSON Studio"
+}
+```
 
-#### Transposition
+Pass either `text` or `path`. The modal opens immediately; parsing happens asynchronously on the host. Only one document is held at a time — opening a second one closes the first.
 
-- **Rail fence** — zig-zag over N rails; key = rails (integer ≥ 2).
-- **Columnar** — write plaintext in rows under a keyword, read columns
-      in keyword-letter order; key = keyword.
-- **Scytale** — wrap text around a rod of given diameter; key = rod size.
+### Roadmap
 
-#### Grids
-
-- **Polybius** — 5×5 letter grid (I/J merged); pairs of digits.
-- **Nihilist** — Polybius coordinates + Vigenère-style numeric sum; key = word.
-
-#### Bonus
-
-- **Playfair** — 5×5 keyed grid on digrams; key = keyword.
-- **Bifid** — Polybius + transposition of coordinates.
-- **XOR** — bytewise XOR with repeating key; output as hex.
-
-### Notes
-
-- All algorithms are pure-Lua — no Rust dependencies were added to the
-      Arbor host. Each lives in `plugins/cipher-studio/algos/<id>.lua`
-      and can be hacked / extended without touching the runtime.
-- Classical ciphers preserve only letters; punctuation and whitespace pass
-      through unchanged (with the exceptions noted above).
-- **Do not use these for actual security**. They're all broken — that's
-      the point.
-
----
-
-### chunk-merger-bin
-
-## Chunk Merger — Binary concatenation
-
-Companion plugin to **Cloud Storage**. Reassembles a remote object that was previously uploaded in multiple parts by concatenating the downloaded chunks *byte-for-byte* in the order chosen by the user (or by last-modified date in the *auto* mode).
-
-### When this handler fits
-
-- Split archives (`foo.tar.gz.001`, `foo.tar.gz.002`, …) where every part is a raw byte slice of the final file.
-- Manually-chunked uploads produced by a pipeline that just sliced a single blob into N parts.
-- Any concatenation-safe format (HLS `.ts` playlists, log roll-ups, raw binary streams).
-
-### When it does NOT fit
-
-- ZIP / 7z / RAR multi-volume archives — those need the original tool to reopen the catalog.
-- Video / audio container muxing (MP4, MKV, WebM) — needs `ffmpeg -c copy` or similar.
-- Any format where the parts are independent files that must be merged structurally, not bytewise.
-
-If multiple chunk-handler plugins are installed, the cloud-storage sidebar prompts you to pick one each time you run *Download chunks…*. Install handlers tailored to your specific format alongside this one — they coexist.
-
-### Cancellation
-
-The Stop button on the OperationsOverlay card aborts the operation cooperatively: the handler checks the shared cancel flag (`arbor.cloud.is_cancelled`) before touching the filesystem, so an early cancel never produces a partial output file. Cancelling *during* the host-side concat is bounded by the chunk size opendal uses internally and resolves on the next chunk boundary.
-
-### Cleanup
-
-On success, cloud-storage deletes the per-stream temp directory (`<output>.chunks/`) and the chunk files inside it. On failure the temp directory is preserved so you can inspect the partial state or retry without re-downloading.
+This plugin is the reference case for the planned WASM plugin runtime. Today the JSON parser lives in arbor's Rust core because pure-Lua parsing is too slow for multi-MB payloads; once WASM lands the parser will move into the plugin's own module and the host will lose all JSON-specific code. None of that affects the API above — `arbor.json_studio.open` stays the same.
 
 ---
 
@@ -9536,6 +9397,146 @@ Then add the `id` to `ALGO_IDS` in
 
 ---
 
+### cloud-storage
+
+## Cloud Storage
+
+Browse, upload, download and synchronise objects between Arbor and the cloud. Backed by [Apache OpenDAL](https://opendal.apache.org/), with first-class support for **Google Cloud Storage**, **Amazon S3 (and S3-compatible services like R2 / MinIO)**, and **Azure Blob Storage**.
+
+### Setting up a connection
+
+Click the **Cloud** icon in the right activity bar to open the sidebar, then click the **Manage connections** button (gear icon) in the toolbar. A two-pane modal opens — left rail groups every saved connection by provider, right pane edits the selected one. Click **+ Add Google Cloud Storage** to create a new connection draft. The same modal also exposes *edit* (just click a row) and *delete* (hover, click trash). Click **Save** at the bottom to commit all pending changes, **Close** to discard them. You can also reach it from the Command Palette via *Cloud Storage · Manage connections…*.
+
+For each connection you set:
+
+- **Name** — a friendly label shown in the picker.
+- **Provider** — currently only GCS is selectable.
+- **Default bucket** — shown when the sidebar first opens. You can still browse other buckets at runtime by editing the connection.
+- **Project id** — optional. Most object ops don't need it.
+- **Authentication** — pick one of five methods:
+
+| Method | When to use | What we persist |
+| --- | --- | --- |
+| **Service account file** | Most common for CI / server roles. Download the JSON key from the GCP console once. | Just the path to the file. The key itself stays on disk. |
+| **Service account inline** | You want to roam between machines and prefer the key in your keyring. | The JSON content goes to the OS keychain (`cloud-storage / gcs/<config-id>`). |
+| **Application Default Credentials (ADC)** | You already ran `gcloud auth application-default login` or set `GOOGLE_APPLICATION_CREDENTIALS`. | Nothing — the file is discovered fresh on every connect. |
+| **gcloud CLI** | You have the Google Cloud SDK installed and just want to ride your `gcloud` session. | Nothing — the CLI is spawned on every connect for a fresh access token. |
+| **OAuth user** | End-user accounts where you can't issue a service account. Register a Desktop OAuth client in GCP. | Refresh token JSON in the keychain (`cloud-storage / gcs/<config-id>/oauth`). Access tokens are refreshed automatically. |
+
+Use **Test connection** at the bottom of the form to validate auth and bucket reachability before saving — the report names the auth method and (when known) the service-account email or user identity behind the token.
+
+### Browsing
+
+- **Double-click a folder** to navigate into it; the header row shows the breadcrumb of clickable chips.
+- **Double-click an object** to download — you'll be asked where to save it locally.
+- **Type a path directly**: click the pencil icon at the right of the breadcrumb (or double-click anywhere on the breadcrumb band) to flip into edit mode, type something like `data/2024/chunks/` and press `Enter`. If the prefix has no objects, a non-blocking warning notification surfaces so you can tell a typo from "empty folder".
+- **Listings are capped** by the *Max entries per folder* preference (Settings → Cloud Storage → Browser). The sidebar warns you if more exist; refine the breadcrumb or use Remote search.
+- **Right-click any row** for the per-item context menu.
+
+### Uploading
+
+1. Click the **↑** button in the sidebar toolbar.
+2. Pick a local file in the native picker.
+3. Confirm the target key (prefilled with the current breadcrumb + filename) and whether to overwrite if it exists.
+
+The upload streams in 256 KiB chunks; the Jobs overlay shows live progress, throughput and ETA. Cancel from there at any time and the transfer aborts on the next chunk boundary.
+
+### Recursive sync
+
+From the Command Palette (`Ctrl+K`):
+
+- **Cloud Storage · Sync down** — pulls a remote prefix into a local folder.
+- **Cloud Storage · Sync up** — pushes a local folder under a remote prefix.
+
+Both flows ask you to confirm the remote prefix and offer an optional **Delete files at the destination that don't exist at the source** checkbox. With that on, the sync is a mirror (matches one side exactly); off, it's a merge.
+
+### Background jobs
+
+Every upload, download and sync registers a job in the Arbor Jobs registry. The status bar's spinner counts them; click it to open the floating overlay with per-job cancel buttons. The Job Output panel shows a line-per-chunk progress feed (current bytes, throughput) so you can watch large transfers without leaving Arbor.
+
+### Security notes
+
+- Secrets that don't fit in plain plugin settings (inline SA JSON, OAuth refresh tokens) live exclusively in your OS keychain under the service name `arbor-cloud-storage`. They are never written to disk by this plugin and never appear in exported settings.
+- The OAuth flow uses installed-app PKCE with a loopback listener on **127.0.0.1:7732**. Make sure no other service is listening on that port while you authorize.
+- Service-account JSON pasted into the inline form is wiped from the textarea on save and never re-displayed.
+
+### Wildcard search
+
+The search row at the top of the sidebar has two modes — toggle between them with the filter/globe icon on the right of the input:
+
+- **Local** (default) — substring filter on rows already loaded; cheap, no network.
+- **Remote** — input shows an accent stripe; Enter runs a wildcard search against the bucket, scoped to the current breadcrumb folder. If you start typing `*` or `?` while still in Local mode, a one-time hint appears with a *Search remote* button that promotes the query for you.
+
+Pattern semantics:
+
+| Pattern | Meaning |
+| --- | --- |
+| `*` | matches any sequence of characters — including `/`, so it walks across sub-folders |
+| `**` | alias of `*` (kept for users coming from Ant/gitignore-style globs) |
+| `?` | matches exactly one non-separator char |
+
+Examples:
+
+- `*/0` — every object whose path ends in `/0` at any depth
+- `data/2024/*/chunk_*` — every `chunk_*` file anywhere under `data/2024/`
+- `*error.log` — every `error.log` anywhere under the search scope
+- `*.bak` — every `.bak` file under the current folder (or bucket if scope = entire)
+
+The matcher is permissive on purpose: a single `*` walks the whole sub-tree, so `chunk_*` finds chunks in any nested folder under the current breadcrumb — you rarely need `**`.
+
+**Scope:** by default the search runs under the current breadcrumb folder. Switch to "Entire bucket" only when needed — recursive listing of a large bucket can take seconds or minutes.
+
+Results render as a flat list (full paths) in the sidebar. Double-click downloads; right-click works as on regular file rows (multi-select supported — useful for picking N chunks scattered across folders and feeding them to *Download chunks (custom order)*). Click the *clear ✕* chip in the breadcrumb to exit search mode and go back to browsing.
+
+The result list is capped at 5000 matches; if you hit the cap, refine the pattern to narrow the scope.
+
+### Bulk operations & chunk-merge
+
+Select multiple files in the sidebar (`Ctrl`+click, `Shift`+click for ranges, `Esc` to clear). The context menu switches to bulk mode:
+
+- **Download files…** — pick a local folder; every selected object is downloaded in parallel (capped at *parallel downloads*, set in Settings → Cloud Storage → Preferences, default 4). A floating progress modal shows per-file bars, aggregate throughput and ETA, and has a Cancel button that aborts at the next chunk boundary.
+- **Delete files…** — confirms once for the whole batch, deletes each object, refreshes the listing.
+
+When at least one **chunk-merger plugin** is installed, two extra entries appear:
+
+- **Download chunks (auto-order by date)** — sorts the selected objects by last-modified ascending, downloads them to a temp dir (`<output>.chunks/`), then hands the local paths to the chunk-handler plugin which writes the merged output. Tie-break is alphabetic on path when timestamps match.
+- **Download chunks (custom order…)** — opens a drag-reorder picker so you can place the parts manually. Same flow as above once you click Continue.
+
+The progress modal switches to a "Merge" phase once the downloads finish; the chunk-handler can push a per-step note (e.g. *Concatenating 2/3…*) through `arbor.cloud.report_progress`.
+
+### Extending the plugin (chunk-merger contributions)
+
+The plugin exposes one contribution point: `cloud-storage:cloud:chunk-handlers`. A handler plugin contributes a record and exports a service:
+
+```
+arbor.ui.contribute("cloud-storage:cloud:chunk-handlers", {
+  id = "binary-concat",
+  payload = {
+    label   = "Binary concatenation",
+    icon    = "Combine",
+    service = "my-chunk-plugin.merge",
+  },
+})
+
+arbor.service.export("merge", function(args)
+  -- args.stream_id    : string (also used for arbor.cloud.is_cancelled checks)
+  -- args.inputs       : [string]  local paths in the chosen order
+  -- args.output       : string    user-picked target path
+  -- args.source_paths : [string]  original remote paths (for logging)
+  -- args.tempdir      : string    where `inputs` live (cleaned up on ok)
+  local ok, err = arbor.cloud.concat_files{ inputs = args.inputs, output = args.output }
+  return ok and { ok = true } or { ok = false, error = tostring(err) }
+end)
+```
+
+If more than one chunk-handler plugin is installed, the user is prompted to pick one each time. The contribution registry is re-scanned every time the sidebar opens, so installing or disabling a handler is reflected on the next visit.
+
+### Heads-up — early version
+
+This plugin currently ships with its heavy dependencies (opendal) bundled directly in the Arbor host binary, the same way **JSON Studio** does. When the WASM plugin runtime lands, the entire host-side cloud module is deleted and the plugin gains its own WASM crate. The Lua surface (`arbor.cloud.*`) is designed to stay backwards-compatible across that migration, but the in-process Tauri commands (`cloud_list`, `cloud_download`, …) will go away.
+
+---
+
 ### deps-explorer
 
 # Dependency Explorer
@@ -9578,10 +9579,10 @@ Two-pane modal modeled after IntelliJ's *Resolved Dependencies*
 
 | Toolchain | Command | Latest-version registry |
 | --- | --- | --- |
-| Maven | mvn -B -f <pom> dependency:tree -DoutputType=text -DoutputFile=… | Maven Central maven-metadata.xml |
-| Gradle | gradle dependencies --configuration runtimeClasspath (uses ./gradlew when present) | Maven Central maven-metadata.xml |
-| Cargo | cargo tree --workspace --charset ascii --color never --offline --frozen --manifest-path <Cargo.toml> (auto-fallback to non-offline run when the local registry cache is missing deps) | crates.io /api/v1/crates/<name> |
-| npm / pnpm | npm ls --all --json or pnpm list --depth=Infinity --json | npm registry /<pkg>/latest |
+| Maven | `mvn -B -f <pom> dependency:tree -DoutputType=text -DoutputFile=…` | Maven Central `maven-metadata.xml` |
+| Gradle | `gradle dependencies --configuration runtimeClasspath` (uses `./gradlew` when present) | Maven Central `maven-metadata.xml` |
+| Cargo | `cargo tree --workspace --charset ascii --color never --offline --frozen --manifest-path <Cargo.toml>` (auto-fallback to non-offline run when the local registry cache is missing deps) | crates.io `/api/v1/crates/<name>` |
+| npm / pnpm | `npm ls --all --json` or `pnpm list --depth=Infinity --json` | npm registry `/<pkg>/latest` |
 
 Cargo workspaces are fully supported: when the manifest declares a
   `[workspace]`, every member crate gets its own tree wrapped
@@ -9616,9 +9617,9 @@ After the dependency tree lands, the plugin fetches the latest published
 
 | Ecosystem | Endpoint | Field consumed |
 | --- | --- | --- |
-| Maven / Gradle | https://repo1.maven.org/maven2/<group/with/slashes>/<artifact>/maven-metadata.xml | <latest> with fallback to <release> |
-| npm | https://registry.npmjs.org/<pkg>/latest | version |
-| Cargo | https://crates.io/api/v1/crates/<name> | crate.max_stable_version with fallback to max_version |
+| Maven / Gradle | `https://repo1.maven.org/maven2/<group/with/slashes>/<artifact>/maven-metadata.xml` | `<latest>` with fallback to `<release>` |
+| npm | `https://registry.npmjs.org/<pkg>/latest` | `version` |
+| Cargo | `https://crates.io/api/v1/crates/<name>` | `crate.max_stable_version` with fallback to `max_version` |
 
 Each backend keeps its own settings-backed cache. Found versions live for
   7 days; HTTP 404s ("not in this registry" — common for internal Maven
@@ -9755,11 +9756,11 @@ Each run configuration is backed by a *template*. The template
 
 | Template | Template-specific fields | Debug |
 | --- | --- | --- |
-| simple_java | jar_path, main_class, vm_args | JDWP agent flag |
-| spring | tool (maven / gradle), active_profile, extra_args, vm_args | JDWP via -Dspring-boot.run.jvmArguments (maven) or JAVA_OPTS (gradle) |
-| tomcat | tomcat_home, war_relative_path, vm_args | JPDA (catalina jpda run + JPDA_ADDRESS) |
-| cargo | bin, features, release, args | — |
-| npm | package_manager, script, args | NODE_OPTIONS=--inspect |
+| `simple_java` | jar_path, main_class, vm_args | JDWP agent flag |
+| `spring` | tool (maven / gradle), active_profile, extra_args, vm_args | JDWP via `-Dspring-boot.run.jvmArguments` (maven) or `JAVA_OPTS` (gradle) |
+| `tomcat` | tomcat_home, war_relative_path, vm_args | JPDA (`catalina jpda run` + `JPDA_ADDRESS`) |
+| `cargo` | bin, features, release, args | — |
+| `npm` | package_manager, script, args | `NODE_OPTIONS=--inspect` |
 
 All Java templates expose a `debug_port` field (empty = disabled);
   npm exposes the same for Node inspector. The plugin composes the correct
@@ -9794,11 +9795,11 @@ Opened from the combo's **⚙ Run settings** entry. IntelliJ-style
 
 | Shortcut | Action |
 | --- | --- |
-| Shift+F10 | Run the selected configuration (debug agent forced off). |
-| Shift+F9 | Debug the selected configuration (debug agent forced on, default port if unset). |
-| Ctrl+Shift+F10 | Tomcat only — start catalina against the existing WAR (skip build & deploy). |
+| `Shift`+`F10` | Run the selected configuration (debug agent forced off). |
+| `Shift`+`F9` | Debug the selected configuration (debug agent forced on, default port if unset). |
+| `Ctrl`+`Shift`+`F10` | Tomcat only — start `catalina` against the existing WAR (skip build & deploy). |
 
-#### Relationship with compile-action
+#### Relationship with `compile-action`
 
 `run-action` declares `compile-action` as a hard
   dependency and uses two cross-plugin APIs:
