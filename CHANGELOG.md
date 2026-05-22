@@ -23,6 +23,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Opening Settings, Docs, About or any of the Studio modals from a cold start
+  now shows a backdrop with a spinner while the underlying module loads,
+  instead of leaving the click feeling dropped.
 - Dropdowns now play nicely with keyboard-only use: Tab while a menu is open
   closes it and moves focus to the next field, Escape restores focus to the
   trigger, ArrowDown (or Alt+ArrowDown) on a focused trigger opens the menu
