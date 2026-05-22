@@ -71,7 +71,11 @@ function createPluginStore() {
     saveDisabled(next);
   }
 
-  /** Toggle a plugin enabled/disabled. Optimistic UI + backend sync. */
+  /** Toggle a plugin enabled/disabled. Optimistic UI + backend sync.
+   *  The backend now performs a dependency cascade, so the returned list
+   *  may include more than the requested plugin — we reconcile the local
+   *  `disabledPlugins` set with that list so dependents picked up by the
+   *  cascade stay in sync without an extra round-trip. */
   async function togglePlugin(name: string) {
     const willEnable = disabledPlugins.has(name);
     const next = new Set(disabledPlugins);
@@ -80,9 +84,27 @@ function createPluginStore() {
     disabledPlugins = next;
     saveDisabled(next);
     try {
-      if (willEnable) await enablePlugin(name);
-      else await disablePlugin(name);
-    } catch { /* backend unavailable — local state already updated */ }
+      const touched = willEnable
+        ? await enablePlugin(name)
+        : await disablePlugin(name);
+      if (touched.length > 0) {
+        const reconciled = new Set(next);
+        for (const n of touched) {
+          if (willEnable) reconciled.delete(n);
+          else reconciled.add(n);
+        }
+        disabledPlugins = reconciled;
+        saveDisabled(reconciled);
+      }
+    } catch {
+      // Backend refused (e.g. enable blocker) — roll back the optimistic flip.
+      const rollback = new Set(disabledPlugins);
+      if (willEnable) rollback.add(name);
+      else rollback.delete(name);
+      disabledPlugins = rollback;
+      saveDisabled(rollback);
+      throw new Error('toggle-failed');
+    }
   }
 
   function isEnabled(name: string): boolean {

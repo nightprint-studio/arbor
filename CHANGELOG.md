@@ -38,6 +38,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Plugin enable / disable / uninstall now cascades along required dependencies.
+  Disabling a plugin asks for confirmation and turns off every transitively-
+  required dependent (leaves first); enabling a plugin with required deps off
+  asks to turn them on first, and is refused when a required dep is missing or
+  unloadable. Uninstalling a plugin disables its dependents so they don't keep
+  running against a vanished service. The Plugin Manager's expanded detail row
+  now shows "Depends on" and "Required by".
+- Marketplace install now resolves transitive required dependencies against
+  the catalog: the confirm modal lists "Will also install: …" and downloads
+  the cascade in dep-first order. Required deps that aren't in the catalog
+  block the install with an explicit error.
 - Command Palette: *Delete Tag* is now two commands — *Delete Tag (local)* and
   *Delete Tag (local + origin)* — and both open the same scope-aware confirm
   modal used by the sidebar, replacing the native browser confirm.

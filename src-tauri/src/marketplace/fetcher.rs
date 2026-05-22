@@ -247,6 +247,7 @@ async fn fetch_plugin(
         doc,
         update_available:  None,
         installed_version: None,
+        dependencies: manifest.dependencies,
     })
 }
 

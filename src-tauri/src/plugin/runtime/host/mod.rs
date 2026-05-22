@@ -6,6 +6,7 @@
 //! `hooks`, `service`, `pipeline_op`, `introspection`. The scheduler thread
 //! spawn helper is kept in `super::scheduler` next to its loop function.
 
+pub mod dep_cascade;
 pub mod hooks;
 pub mod introspection;
 pub mod lifecycle;

@@ -8,7 +8,7 @@
    * permission-confirm dialog land in later phases (see project plan).
    */
   import { onMount, untrack } from 'svelte';
-  import { Package, Palette, Search, Filter as FilterIcon, Globe, Shield, Tag, X, Plus, Upload, ExternalLink, Check, CheckCircle2, FolderGit2, GitBranch, ChevronRight, ChevronDown, Trash2, Eye, Pin, Store, RefreshCw, Link as LinkIcon, FlaskConical } from 'lucide-svelte';
+  import { Package, Palette, Search, Filter as FilterIcon, Globe, Shield, Tag, X, Plus, Upload, ExternalLink, Check, CheckCircle2, FolderGit2, GitBranch, ChevronRight, ChevronDown, Trash2, Eye, Pin, Store, RefreshCw, Link as LinkIcon, FlaskConical, PowerOff } from 'lucide-svelte';
   import Modal           from '$lib/components/shared/Modal.svelte';
   import ModalHeader     from '$lib/components/shared/ModalHeader.svelte';
   import Tabs, { type TabItem }       from '$lib/components/shared/ui/Tabs.svelte';
@@ -26,7 +26,11 @@
   import MarketplaceInstallConfirm from './MarketplaceInstallConfirm.svelte';
   import { tooltip }     from '$lib/actions/tooltip';
   import { uiStore }     from '$lib/stores/ui.svelte';
-  import { importPluginZipFromPath, reloadPlugins } from '$lib/ipc/plugin';
+  import { importPluginZipFromPath, reloadPlugins, pluginEnablePreview, pluginDisablePreview } from '$lib/ipc/plugin';
+  import PluginUninstallConfirmModal from './PluginUninstallConfirmModal.svelte';
+  import PluginDisableConfirmModal   from './PluginDisableConfirmModal.svelte';
+  import PluginEnableConfirmModal    from './PluginEnableConfirmModal.svelte';
+  import type { EnableBlocker } from '$lib/ipc/plugin';
   import {
     listInstalled, fetchRegistry, refreshRegistry,
     installPlugin    as ipcInstallPlugin,
@@ -79,6 +83,12 @@
   let zipPickerOpen = $state(false);
   /** Plugin currently awaiting permission confirmation before install. */
   let confirmInstall = $state<MarketplacePlugin | null>(null);
+  /** Resolved dep cascade for the plugin pending install: plugins that exist
+   *  in the catalog but aren't on disk yet, dep-first order. */
+  let confirmPendingDeps = $state<MarketplacePlugin[]>([]);
+  /** Required deps that aren't in the catalog at all — surfaced as a hard
+   *  error in the confirm modal so the user knows to install them manually. */
+  let confirmMissingDeps = $state<{ name: string; version: string }[]>([]);
 
   // ── Registry load state ──────────────────────────────────────────────────
   // The modal NEVER blocks on the registry fetch. We render whatever we know
@@ -264,25 +274,89 @@
     themes = themes.map(t => (t.id === updated.id ? updated : t));
   }
 
+  /**
+   * Resolve the transitive required-dep cascade for an install request.
+   * Walks `plugin.dependencies` against the in-memory catalog and partitions
+   * each required dep into:
+   *   • already installed   → skip (the host treats it as satisfied)
+   *   • in catalog, missing → `pending` (we'll install before the target)
+   *   • not in catalog      → `missing` (hard error — manual install needed)
+   *
+   * Optional deps don't participate: the plugin will still load without them.
+   * Returns deps in dep-first topological order so the caller can install
+   * sequentially without leaving a half-broken graph if one step fails.
+   */
+  function resolveInstallCascade(target: MarketplacePlugin): {
+    pending: MarketplacePlugin[];
+    missing: { name: string; version: string }[];
+  } {
+    const byName = new Map(plugins.map(p => [p.name, p]));
+    const pending: MarketplacePlugin[] = [];
+    const missing: { name: string; version: string }[] = [];
+    const seen = new Set<string>([target.name]);
+
+    function walk(node: MarketplacePlugin) {
+      for (const d of node.dependencies ?? []) {
+        if (d.optional) continue;
+        if (seen.has(d.name)) continue;
+        seen.add(d.name);
+        const candidate = byName.get(d.name);
+        if (!candidate) {
+          missing.push({ name: d.name, version: d.version });
+          continue;
+        }
+        if (candidate.installed) continue; // already on disk
+        // Recurse so deps of deps are installed first.
+        walk(candidate);
+        pending.push(candidate);
+      }
+    }
+
+    walk(target);
+    return { pending, missing };
+  }
+
   /** Entry point from the row / detail Install buttons — opens the
    *  permission confirmation modal first. The actual install runs through
    *  `runInstall` once the user confirms. */
   function installPlugin(p: MarketplacePlugin) {
     if (busyId) return;
+    const { pending, missing } = resolveInstallCascade(p);
+    confirmPendingDeps = pending;
+    confirmMissingDeps = missing;
     confirmInstall = p;
   }
 
+  /** Install a single plugin via the existing IPC + patch the catalog row.
+   *  Throws on failure so the caller's cascade can abort cleanly. */
+  async function installOne(p: MarketplacePlugin): Promise<void> {
+    const updated = await ipcInstallPlugin(p.name);
+    patchPlugin(updated);
+  }
+
   async function runInstall(p: MarketplacePlugin) {
+    const deps = confirmPendingDeps.slice();
     confirmInstall = null;
+    confirmPendingDeps = [];
+    confirmMissingDeps = [];
     if (busyId) return;
     busyId = p.name;
     try {
-      const updated = await ipcInstallPlugin(p.name);
-      patchPlugin(updated);
+      // Install transitive required deps first (already topologically ordered
+      // by `resolveInstallCascade`). A failure here aborts the target install
+      // so we don't end up with a half-broken graph.
+      for (const dep of deps) {
+        await installOne(dep);
+      }
+      await installOne(p);
+      const total = deps.length + 1;
       uiStore.showToast(
-        `Installed "${p.name}" — enable it from the detail pane when ready.`,
+        total > 1
+          ? `Installed "${p.name}" + ${deps.length} required ${deps.length === 1 ? 'dependency' : 'dependencies'} — enable from the detail pane when ready.`
+          : `Installed "${p.name}" — enable it from the detail pane when ready.`,
         'success',
       );
+      return;
     } catch (err) {
       uiStore.showToast(`Install failed: ${err}`, 'error');
     } finally {
@@ -290,12 +364,45 @@
     }
   }
 
+  /** Entry point from the row / detail Uninstall buttons — opens the
+   *  uninstall confirmation modal first (which lists dependents the
+   *  backend will cascade-disable). The actual uninstall runs through
+   *  `runUninstall` once the user confirms. */
+  let pendingUninstall = $state<{ plugin: MarketplacePlugin; dependents: string[] } | null>(null);
+
   async function uninstallPlugin(p: MarketplacePlugin) {
     if (busyId) return;
+    let deps: string[] = [];
+    try {
+      // Look up the FULL transitive cascade — the same set the backend will
+      // disable when uninstalling. `pluginDisablePreview` ends with the
+      // target itself; strip it so the modal lists only the dependents.
+      // Failure here is non-fatal — we still open the modal so the user
+      // can confirm even without a dependent list.
+      const cascade = await pluginDisablePreview(p.name);
+      deps = cascade.filter(n => n !== p.name);
+    } catch { /* non-fatal */ }
+    pendingUninstall = { plugin: p, dependents: deps };
+  }
+
+  async function runUninstall() {
+    if (!pendingUninstall || busyId) return;
+    const p = pendingUninstall.plugin;
+    // `dependents` was resolved up front in `uninstallPlugin` — the backend
+    // cascade-disables exactly that set. Patch them locally to avoid a full
+    // registry re-fetch (visible lag in the sidebar otherwise).
+    const cascaded = pendingUninstall.dependents.slice();
+    pendingUninstall = null;
     busyId = p.name;
     try {
       const updated = await ipcUninstallPlugin(p.name);
       patchPlugin(updated);
+      if (cascaded.length > 0) {
+        const set = new Set(cascaded);
+        plugins = plugins.map(x =>
+          set.has(x.name) ? { ...x, enabled: false } : x,
+        );
+      }
       uiStore.showToast(`Uninstalled "${p.name}".`, 'success');
     } catch (err) {
       uiStore.showToast(`Uninstall failed: ${err}`, 'error');
@@ -308,18 +415,80 @@
    *  toggling the per-row switch in the Plugin Manager. The backend mirrors
    *  the change in its own state; Phase 3 will also drive the live plugin
    *  host via `pluginStore.togglePlugin`. */
+  /** Confirm modals for cascade-aware toggles inside the marketplace — same
+   *  UX as the Plugin Manager so users can't be surprised by a hidden
+   *  cascade. Each holds the resolved plan + (for enable) blocker list. */
+  let pendingDisable = $state<{ plugin: string; cascade: string[] } | null>(null);
+  let pendingEnable  = $state<{ plugin: string; cascade: string[]; blockers: EnableBlocker[] } | null>(null);
+  /** Tick incremented when a cascade-confirm modal is cancelled. The Toggle
+   *  in the detail pane keys off this so its internal `bind:checked` resets
+   *  to the (unchanged) `p.enabled` prop — without this, the visual switch
+   *  stays in the just-clicked position even though the backend never ran. */
+  let toggleResetTick = $state(0);
+
   async function togglePluginEnabled(p: MarketplacePlugin, next: boolean) {
     if (!p.installed) return;
+
+    // Preview the cascade first so the user sees what the toggle will actually
+    // affect before anything changes on disk. Both preview IPCs are host-local
+    // (no network), so the lookup stays instant. A non-trivial cascade or any
+    // enable blocker → open the confirm modal; otherwise the toggle goes
+    // straight to the backend.
     try {
-      const updated = await ipcSetPluginEnabled(p.name, next);
+      if (next) {
+        const preview = await pluginEnablePreview(p.name);
+        if (preview.blockers.length > 0 || preview.plan.length > 1) {
+          pendingEnable = {
+            plugin:   p.name,
+            cascade:  preview.plan,
+            blockers: preview.blockers,
+          };
+          return;
+        }
+      } else {
+        const cascade = await pluginDisablePreview(p.name);
+        if (cascade.length > 1) {
+          pendingDisable = { plugin: p.name, cascade };
+          return;
+        }
+      }
+    } catch { /* fall through to direct toggle on preview failure */ }
+
+    await runTogglePluginEnabled(p.name, next);
+  }
+
+  /** Carry out the toggle once the user has either confirmed the cascade or
+   *  the cascade was trivial enough to skip the modal. Patches the affected
+   *  rows locally — no registry re-fetch — so the sidebar stays smooth. */
+  async function runTogglePluginEnabled(name: string, next: boolean) {
+    let cascaded: string[] = [];
+    try {
+      if (next) {
+        const preview = await pluginEnablePreview(name);
+        cascaded = preview.plan.filter(n => n !== name);
+      } else {
+        const list = await pluginDisablePreview(name);
+        cascaded = list.filter(n => n !== name);
+      }
+    } catch { /* non-fatal — we'll still update the target */ }
+
+    try {
+      const updated = await ipcSetPluginEnabled(name, next);
       patchPlugin(updated);
+      if (cascaded.length > 0) {
+        const set = new Set(cascaded);
+        plugins = plugins.map(x =>
+          set.has(x.name) ? { ...x, enabled: next } : x,
+        );
+      }
       uiStore.showToast(
-        next ? `Enabled "${p.name}".` : `Disabled "${p.name}".`,
+        next ? `Enabled "${name}".` : `Disabled "${name}".`,
         'success',
       );
     } catch (err) {
-      uiStore.showToast(`Could not toggle "${p.name}": ${err}`, 'error');
-      // Re-sync local state from server in case the optimistic toggle was wrong.
+      uiStore.showToast(`Could not toggle "${name}": ${err}`, 'error');
+      // Re-sync from server only when the optimistic toggle was wrong — that's
+      // the one path where a stale local state is worse than the brief flicker.
       void loadRegistry();
     }
   }
@@ -785,24 +954,29 @@
           {:else}
             {#each filteredPlugins as p (p.name)}
               {@const SrcIcon = sourceIcon(p.source)}
+              {@const installedDisabled = p.installed && p.enabled === false}
               <button class="mk-row" class:selected={selected === p.name}
+                      class:installed-disabled={installedDisabled}
                       onclick={() => (selected = p.name)}>
                 {#if p.icon}
                   {#if isInlineSvg(p.icon)}
-                    <span class="mk-icon-art mk-icon-art-sm" class:dim={!p.installed} aria-hidden="true">{@html p.icon}</span>
+                    <span class="mk-icon-art mk-icon-art-sm" class:dim={!p.installed || installedDisabled} aria-hidden="true">{@html p.icon}</span>
                   {:else}
-                    <img class="mk-icon-art mk-icon-art-sm" class:dim={!p.installed} src={p.icon} alt="" />
+                    <img class="mk-icon-art mk-icon-art-sm" class:dim={!p.installed || installedDisabled} src={p.icon} alt="" />
                   {/if}
                 {:else}
                   <!-- Same chrome as the Plugin Manager row (PluginPanel) so the
-                       two surfaces look like one product. No greyed-out variant
-                       for uninstalled — the row's "Install" button + missing
-                       "Installed" pill already signal availability. -->
-                  <Monogram name={p.name} initials={p.name[0].toUpperCase()}
-                            color="var(--accent-subtle)"
-                            fg="var(--accent)"
-                            size={42}
-                            class="mk-card-icon" />
+                       two surfaces look like one product. The monogram is dimmed
+                       when the plugin is installed but disabled, mirroring the
+                       Plugin Manager's opacity treatment. -->
+                  <span class="mk-monogram-wrap" class:dim={installedDisabled}>
+                    <Monogram name={p.name} initials={p.name[0].toUpperCase()}
+                              color="var(--accent-subtle)"
+                              fg="var(--accent)"
+                              size={42}
+                              disabled={installedDisabled}
+                              class="mk-card-icon" />
+                  </span>
                 {/if}
                 <div class="mk-card-body">
                   <div class="mk-card-top">
@@ -820,10 +994,17 @@
                         <SrcIcon size={12} />
                       </span>
                       {#if p.installed}
-                        <span class="mk-rowicon mk-rowicon-installed"
-                              use:tooltip={'Installed'}>
-                          <CheckCircle2 size={12} />
-                        </span>
+                        {#if installedDisabled}
+                          <span class="mk-rowicon mk-rowicon-off"
+                                use:tooltip={'Installed but disabled — flip the toggle in the detail pane to activate'}>
+                            <PowerOff size={12} />
+                          </span>
+                        {:else}
+                          <span class="mk-rowicon mk-rowicon-installed"
+                                use:tooltip={'Installed and enabled'}>
+                            <CheckCircle2 size={12} />
+                          </span>
+                        {/if}
                       {/if}
                       {#if p.update_available}
                         <span class="mk-rowicon mk-rowicon-update"
@@ -996,13 +1177,21 @@
           <div class="mk-detail-actions">
             {#if p.installed}
               <div class="mk-enable-toggle">
-                <Toggle
-                  checked={p.enabled ?? false}
-                  size="md"
-                  label={p.enabled ? 'Enabled' : 'Disabled'}
-                  labelPosition="before"
-                  onchange={(v) => togglePluginEnabled(p, v)}
-                />
+                <!-- `{#key}` forces a Toggle remount when the user cancels a
+                     cascade-confirm modal. Without this the underlying
+                     <input bind:checked> keeps its just-clicked DOM state
+                     because the parent prop (`p.enabled`) never changed —
+                     and the switch visually stays on while the backend is
+                     still off. -->
+                {#key toggleResetTick}
+                  <Toggle
+                    checked={p.enabled ?? false}
+                    size="md"
+                    label={p.enabled ? 'Enabled' : 'Disabled'}
+                    labelPosition="before"
+                    onchange={(v) => togglePluginEnabled(p, v)}
+                  />
+                {/key}
               </div>
               {#if p.update_available}
                 <span use:tooltip={`Re-install at v${p.update_available}`}>
@@ -1436,8 +1625,51 @@
 {#if confirmInstall}
   <MarketplaceInstallConfirm
     plugin={confirmInstall}
-    onCancel={() => (confirmInstall = null)}
-    onConfirm={() => { const p = confirmInstall!; confirmInstall = null; void runInstall(p); }}
+    pendingDeps={confirmPendingDeps}
+    missingDeps={confirmMissingDeps}
+    onCancel={() => {
+      confirmInstall = null;
+      confirmPendingDeps = [];
+      confirmMissingDeps = [];
+    }}
+    onConfirm={() => { const p = confirmInstall!; void runInstall(p); }}
+  />
+{/if}
+
+{#if pendingUninstall}
+  <PluginUninstallConfirmModal
+    pluginName={pendingUninstall.plugin.name}
+    dependents={pendingUninstall.dependents}
+    busy={busyId === pendingUninstall.plugin.name}
+    onConfirm={runUninstall}
+    onCancel={() => { if (busyId === null) pendingUninstall = null; }}
+  />
+{/if}
+
+{#if pendingDisable}
+  <PluginDisableConfirmModal
+    pluginName={pendingDisable.plugin}
+    cascade={pendingDisable.cascade}
+    onConfirm={() => {
+      const n = pendingDisable!.plugin;
+      pendingDisable = null;
+      void runTogglePluginEnabled(n, false);
+    }}
+    onCancel={() => { pendingDisable = null; toggleResetTick++; }}
+  />
+{/if}
+
+{#if pendingEnable}
+  <PluginEnableConfirmModal
+    pluginName={pendingEnable.plugin}
+    cascade={pendingEnable.cascade}
+    blockers={pendingEnable.blockers}
+    onConfirm={() => {
+      const n = pendingEnable!.plugin;
+      pendingEnable = null;
+      void runTogglePluginEnabled(n, true);
+    }}
+    onCancel={() => { pendingEnable = null; toggleResetTick++; }}
   />
 {/if}
 
@@ -1687,11 +1919,29 @@
     line-height: 0;
   }
   .mk-rowicon-installed    { color: var(--success);     }
+  .mk-rowicon-off          { color: var(--text-muted);  }
   .mk-rowicon-update       { color: var(--color-stash); }
   .mk-rowicon-experimental { color: var(--warning);     }
   .mk-rowicon-community    { color: var(--accent);      }
   .mk-rowicon-custom       { color: var(--warning);     }
   .mk-rowicon-local        { color: var(--info);        }
+
+  /* Installed-but-disabled rows: subtle text/name dim so the user can
+     immediately tell at a glance which plugins are inert. Keeping it
+     subtle so disabled rows still read; the dedicated PowerOff icon
+     above does the heavy lifting for unambiguous status. */
+  .mk-row.installed-disabled .mk-card-name,
+  .mk-row.installed-disabled .mk-card-desc {
+    color: var(--text-muted);
+  }
+  .mk-row.installed-disabled .mk-card-version {
+    opacity: 0.7;
+  }
+  .mk-monogram-wrap.dim {
+    opacity: 0.55;
+    filter: saturate(0.55);
+    transition: opacity var(--transition-fast), filter var(--transition-fast);
+  }
   .mk-row :global(.mk-card-chev) {
     flex-shrink: 0;
     color: var(--text-disabled);

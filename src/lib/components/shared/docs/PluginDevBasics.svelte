@@ -280,8 +280,8 @@ optional = true`, 'toml')}</pre>
   <li><strong>Optional</strong><code>optional = true</code> downgrades the error to a log warning. Your plugin still loads — guard calls that depend on the other plugin's presence.</li>
 </ul>
 
-<h3>Dependency graph &amp; cascade warnings</h3>
-<p>The Plugin Manager exposes a <strong>Network</strong> icon opening the <em>Plugin Dependency Graph</em> modal. Each plugin row reveals:</p>
+<h3>Dependency graph &amp; cascade</h3>
+<p>The Plugin Manager exposes a <strong>Network</strong> icon opening the <em>Plugin Dependency Graph</em> modal. Each plugin's expanded detail row also exposes:</p>
 <div class="feature-grid two-col">
   <div class="feature-card">
     <div class="fc-title">Depends on</div>
@@ -289,10 +289,16 @@ optional = true`, 'toml')}</pre>
   </div>
   <div class="feature-card">
     <div class="fc-title">Required by</div>
-    <div class="fc-desc">Plugins that currently depend on yours — follow arrows backward to see who'd break if you disabled it.</div>
+    <div class="fc-desc">Plugins currently installed (loaded or dormant) that declare yours as a required dep.</div>
   </div>
 </div>
-<div class="hint">Disabling a plugin that others require shows a <strong>cascade-warning</strong> modal listing affected dependents; explicit confirmation is required.</div>
+<p>Enable / disable / uninstall actions cascade along the required-dependency edges. Optional deps don't participate.</p>
+<ul class="prop-list">
+  <li><strong>Disable</strong>Disabling a plugin first asks for confirmation, then disables every transitively-required dependent (leaves first). Re-enabling the target later does NOT auto-re-enable the dependents — flip them back on individually when you're ready.</li>
+  <li><strong>Enable</strong>Enabling a plugin whose required deps are off asks for confirmation, then turns them on in topological order before the target. When a required dep is missing or unloadable, the action is refused and the modal lists the blockers.</li>
+  <li><strong>Uninstall</strong>Uninstalling a plugin first disables every dependent (they stay installed) so they don't keep running against a vanished service / hook target.</li>
+  <li><strong>Marketplace install</strong>Installing a plugin from the Marketplace pre-resolves its required deps against the catalog. The confirm modal shows "Will also install: …" so the cascade is downloaded in dep-first order; deps not present in the catalog block the install with a clear error.</li>
+</ul>
 
 <h2>Permissions reference</h2>
 <p>Declared once in <code>[permissions]</code> of <code>plugin.toml</code>. Capability is enforced at Lua call-time — trying to use a disabled API raises a runtime error.</p>

@@ -6,12 +6,18 @@
   import { RefreshCw, ChevronDown, ChevronRight, Package, Power, Globe, HardDrive, GitBranch, Zap, TerminalSquare, Settings, Info, Trash, AlertTriangle, Network, FolderOpen, Wand2, Store } from 'lucide-svelte';
   import PluginDepGraphModal           from './PluginDepGraphModal.svelte';
   import PluginDisableConfirmModal     from './PluginDisableConfirmModal.svelte';
+  import PluginEnableConfirmModal      from './PluginEnableConfirmModal.svelte';
   import PluginUninstallConfirmModal   from './PluginUninstallConfirmModal.svelte';
   import PluginExportTemplateModal     from './PluginExportTemplateModal.svelte';
   import PluginInfoModal               from './PluginInfoModal.svelte';
   import MarketplaceModal              from './MarketplaceModal.svelte';
   import type { PluginInfo } from '$lib/types/plugin';
-  import { reloadPlugins, listPluginInfo, pluginDependents, deletePlugin, getPluginsEnabled, setPluginsEnabled } from '$lib/ipc/plugin';
+  import {
+    reloadPlugins, listPluginInfo, pluginDependents, deletePlugin,
+    pluginEnablePreview, pluginDisablePreview,
+    getPluginsEnabled, setPluginsEnabled,
+    type EnableBlocker,
+  } from '$lib/ipc/plugin';
   import { listMarketplaceInstalledNames } from '$lib/ipc/marketplace';
   import { tooltip } from '$lib/actions/tooltip';
   import { invoke } from '@tauri-apps/api/core';
@@ -88,6 +94,7 @@
         uiStore.closePluginSections();
         selected = null;
         pendingDisable = null;
+        pendingEnable = null;
         pendingUninstall = null;
         infoOpenFor = null;
         uiStore.showToast('Plugin system disabled', 'success');
@@ -154,10 +161,16 @@
     }
   }
 
-  // ── Disable-with-dependents confirmation ──────────────────────────────────
+  // ── Disable / enable cascade confirmations ────────────────────────────────
 
-  /** When non-null, PluginDisableConfirmModal is shown and holds the list of dependents. */
-  let pendingDisable = $state<{ plugin: string; dependents: string[] } | null>(null);
+  /** When non-null, PluginDisableConfirmModal is shown with the cascade plan
+   *  (leaves-first, target last) returned by `plugin_disable_preview`. */
+  let pendingDisable = $state<{ plugin: string; cascade: string[] } | null>(null);
+  /** When non-null, PluginEnableConfirmModal is shown. `cascade` is the plan
+   *  (deps first, target last); `blockers` is non-empty when required deps
+   *  are missing/unloadable, in which case the modal switches to its
+   *  "cannot enable" variant. */
+  let pendingEnable  = $state<{ plugin: string; cascade: string[]; blockers: EnableBlocker[] } | null>(null);
   /** True while the Plugin Dependency Graph modal is open. */
   let depGraphOpen   = $state(false);
   /** True while the Export Template modal is open. */
@@ -168,13 +181,31 @@
 
   async function togglePlugin(name: string) {
     const info = pluginInfos.find(p => p.name === name);
-    // On disable, check if any enabled plugin depends on this one and, if so,
-    // show a confirmation modal instead of immediately disabling.
-    if (info && info.enabled) {
+    if (!info) return;
+
+    if (info.enabled) {
+      // Disable flow — preview the cascade so the modal can list every
+      // dependent that will be turned off alongside the explicit click.
       try {
-        const deps = await pluginDependents(name);
-        if (deps.length > 0) {
-          pendingDisable = { plugin: name, dependents: deps };
+        const cascade = await pluginDisablePreview(name);
+        // cascade always ends with `name`. Anything before it is a transitively-
+        // required dependent — surface those in a confirm modal.
+        if (cascade.length > 1) {
+          pendingDisable = { plugin: name, cascade };
+          return;
+        }
+      } catch { /* fall through to direct toggle on error */ }
+    } else {
+      // Enable flow — preview blockers AND cascade. Open the modal when
+      // either is non-empty so the user knows what's happening.
+      try {
+        const preview = await pluginEnablePreview(name);
+        if (preview.blockers.length > 0 || preview.plan.length > 1) {
+          pendingEnable = {
+            plugin:   name,
+            cascade:  preview.plan,
+            blockers: preview.blockers,
+          };
           return;
         }
       } catch { /* fall through to direct toggle on error */ }
@@ -185,7 +216,15 @@
   async function performToggle(name: string) {
     try {
       const wasEnabled = pluginInfos.find(p => p.name === name)?.enabled ?? false;
-      await pluginStore.togglePlugin(name);
+      try {
+        await pluginStore.togglePlugin(name);
+      } catch (err) {
+        // Toggle failed (e.g. enable blocker the user dismissed). The store
+        // already rolled back its optimistic state — surface a toast and
+        // bail before the list refresh below repaints with stale info.
+        uiStore.showToast(`${err instanceof Error ? err.message : err}`, 'error');
+        return;
+      }
       pluginInfos = (await listPluginInfo())
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -553,6 +592,26 @@
                       {plugin.schedulers_running}/{plugin.scheduler_count} running
                     </span>
                   {/if}
+
+                  {#if plugin.dependencies && plugin.dependencies.length > 0}
+                    <span class="detail-label">Depends on</span>
+                    <span class="dep-chip-row">
+                      {#each plugin.dependencies as d (d.name)}
+                        <span class="dep-chip" class:optional={d.optional}>
+                          {d.name}{d.version ? ` ${d.version}` : ''}{d.optional ? ' (optional)' : ''}
+                        </span>
+                      {/each}
+                    </span>
+                  {/if}
+
+                  {#if plugin.required_by && plugin.required_by.length > 0}
+                    <span class="detail-label">Required by</span>
+                    <span class="dep-chip-row">
+                      {#each plugin.required_by as n (n)}
+                        <span class="dep-chip">{n}</span>
+                      {/each}
+                    </span>
+                  {/if}
                 </div>
 
                 <!-- Permissions -->
@@ -698,13 +757,27 @@
 {#if pendingDisable}
   <PluginDisableConfirmModal
     pluginName={pendingDisable.plugin}
-    dependents={pendingDisable.dependents}
+    cascade={pendingDisable.cascade}
     onConfirm={() => {
       const n = pendingDisable!.plugin;
       pendingDisable = null;
       performToggle(n);
     }}
     onCancel={() => { pendingDisable = null; }}
+  />
+{/if}
+
+{#if pendingEnable}
+  <PluginEnableConfirmModal
+    pluginName={pendingEnable.plugin}
+    cascade={pendingEnable.cascade}
+    blockers={pendingEnable.blockers}
+    onConfirm={() => {
+      const n = pendingEnable!.plugin;
+      pendingEnable = null;
+      performToggle(n);
+    }}
+    onCancel={() => { pendingEnable = null; }}
   />
 {/if}
 
@@ -998,6 +1071,22 @@
     font-size: var(--font-size-xs);
   }
   .detail-label { color: var(--text-muted); }
+
+  /* Inline list of dep chips inside the detail grid. Wraps on overflow so
+     long dependency chains don't push the layout. */
+  .dep-chip-row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .dep-chip {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--bg-overlay);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+  }
+  .dep-chip.optional {
+    color: var(--text-muted);
+    font-style: italic;
+  }
 
   .inline-code {
     background: var(--bg-overlay);

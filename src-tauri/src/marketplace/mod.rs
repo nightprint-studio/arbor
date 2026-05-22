@@ -251,6 +251,8 @@ fn newer_version(installed: &str, catalog: &str) -> Option<String> {
 /// surface dev / hand-copied plugins (or marketplace plugins after install)
 /// when no remote catalog entry matches the name.
 fn local_plugin_entry(m: crate::plugin::runtime::PluginManifest, enabled: bool) -> MarketplacePlugin {
+    let dependencies = m.dependencies.clone();
+    let repository_for_entry = m.repository.clone().unwrap_or_default();
     MarketplacePlugin {
         name:        m.name,
         version:     m.version.clone(),
@@ -258,7 +260,7 @@ fn local_plugin_entry(m: crate::plugin::runtime::PluginManifest, enabled: bool) 
         author:      m.author,
         category:    m.category,
         tags:        if m.keywords.is_empty() { None } else { Some(m.keywords) },
-        repository:  m.repository.clone(),
+        repository:  m.repository,
         homepage:    m.homepage,
         min_arbor_version: m.min_arbor_version,
         icon:        None,
@@ -268,7 +270,7 @@ fn local_plugin_entry(m: crate::plugin::runtime::PluginManifest, enabled: bool) 
         installed:   true,
         enabled:     Some(enabled),
         entry: RegistryEntry {
-            repo:       m.repository.unwrap_or_default(),
+            repo:       repository_for_entry,
             r#ref:      None,
             subpath:    None,
             source:     MarketplaceSource::Local,
@@ -278,6 +280,7 @@ fn local_plugin_entry(m: crate::plugin::runtime::PluginManifest, enabled: bool) 
         doc:               None,
         update_available:  None,
         installed_version: Some(m.version),
+        dependencies,
     }
 }
 
@@ -367,6 +370,7 @@ fn installed_plugin_to_marketplace(i: &installs::InstalledPlugin) -> Marketplace
         doc:         None,
         update_available:  None,
         installed_version: Some(i.version.clone()),
+        dependencies: Vec::new(),
     }
 }
 

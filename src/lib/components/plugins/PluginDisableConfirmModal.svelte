@@ -4,20 +4,29 @@
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
 
+  /**
+   * Cascade-disable confirmation. `pluginName` is the user-initiated target,
+   * `cascade` is the full leaves-first list returned by `plugin_disable_preview`
+   * (which already includes `pluginName` as its last element). We render the
+   * dependents on their own so the user sees what extra plugins will be
+   * disabled alongside the explicit click.
+   */
   let {
     pluginName,
-    dependents,
+    cascade,
     onConfirm,
     onCancel,
   }: {
-    pluginName:  string;
-    dependents:  string[];
-    onConfirm:   () => void;
-    onCancel:    () => void;
+    pluginName: string;
+    cascade:    string[];
+    onConfirm:  () => void;
+    onCancel:   () => void;
   } = $props();
+
+  const dependents = $derived(cascade.filter(n => n !== pluginName));
 </script>
 
-<Modal onClose={onCancel} ariaLabel="Disable plugin?">
+<Modal onClose={onCancel} width="520px" height="auto" ariaLabel="Disable plugin?">
   {#snippet header()}
     <ModalHeader onClose={onCancel}>
       <span class="dc-icon"><AlertTriangle size={14} /></span>
@@ -29,7 +38,8 @@
     <p>
       <strong>{pluginName}</strong> is required by
       {dependents.length === 1 ? '1 other enabled plugin' : `${dependents.length} other enabled plugins`}.
-      Disabling it may break their functionality until you re-enable it.
+      They will be disabled along with it so they don't keep running against a
+      missing dependency.
     </p>
 
     <ul class="dc-list">
@@ -38,12 +48,17 @@
       {/each}
     </ul>
 
-    <p class="dc-hint">You can disable the dependents first, or proceed anyway.</p>
+    <p class="dc-hint">
+      Re-enabling <strong>{pluginName}</strong> later won't automatically
+      re-enable these — flip them back on individually when you're ready.
+    </p>
   </div>
 
   {#snippet footer()}
     <Button variant="secondary" onclick={onCancel}>Cancel</Button>
-    <Button variant="danger" onclick={onConfirm}>Disable anyway</Button>
+    <Button variant="danger" onclick={onConfirm}>
+      Disable {cascade.length} {cascade.length === 1 ? 'plugin' : 'plugins'}
+    </Button>
   {/snippet}
 </Modal>
 
@@ -95,5 +110,4 @@
     color: var(--text-muted);
     font-style: italic;
   }
-
 </style>

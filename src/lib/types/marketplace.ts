@@ -9,7 +9,7 @@
 // from the raw URL and shows it in the UI.  No duplicated metadata in the
 // registry → authors update one file (their own plugin.toml).
 
-import type { PluginPermissions } from './plugin';
+import type { PluginPermissions, PluginDependency } from './plugin';
 
 // ─── Tab + source classification ──────────────────────────────────────────────
 
@@ -123,6 +123,12 @@ export interface MarketplacePlugin {
   update_available?:  string;
   /** The version currently on disk per `marketplace_installed.json`. */
   installed_version?: string;
+  /**
+   * Direct plugin-to-plugin dependencies declared in the resolved manifest.
+   * The install-confirm modal walks this list (transitively) to ask the user
+   * whether to also install required deps that aren't on disk yet.
+   */
+  dependencies?: PluginDependency[];
 }
 
 // ─── Resolved theme metadata ──────────────────────────────────────────────────

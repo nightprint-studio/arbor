@@ -231,4 +231,14 @@ pub struct PluginInfo {
     pub doc: Option<String>,
     /// Set when the plugin was skipped due to an unmet dependency.
     pub dep_error: Option<String>,
+    /// Direct declared dependencies from the manifest. Surfaced in the
+    /// Plugin Manager detail pane so the user can see at a glance what a
+    /// plugin needs without having to open the dependency-graph modal.
+    #[serde(default)]
+    pub dependencies: Vec<super::deps::PluginDependency>,
+    /// Names of installed plugins (loaded or dormant) that declare this one
+    /// as a required dependency. Used by the detail pane's "Required by" row
+    /// and by the cascade-confirm modal.
+    #[serde(default)]
+    pub required_by: Vec<String>,
 }

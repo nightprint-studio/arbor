@@ -752,6 +752,8 @@ pub fn run() {
             commands::plugin_commands::fire_plugin_action,
             commands::plugin_commands::enable_plugin,
             commands::plugin_commands::disable_plugin,
+            commands::plugin_commands::plugin_enable_preview,
+            commands::plugin_commands::plugin_disable_preview,
             commands::plugin_commands::delete_plugin,
             commands::plugin_commands::list_plugin_info,
             commands::plugin_commands::plugin_dep_graph,

@@ -183,10 +183,30 @@ pub fn fire_plugin_action(
     host.fire_hook_on(&plugin_name, &action, &context_json)
 }
 
+/// Enable a plugin. Returns the ordered list of plugins that were actually
+/// enabled (transitive required deps + target). Returns an error when a
+/// required dep is missing or unloadable — call `plugin_enable_preview`
+/// first to detect blockers and prompt the user.
 #[tauri::command]
-pub fn enable_plugin(state: State<'_, AppState>, name: String) -> Result<(), AppError> {
+pub fn enable_plugin(state: State<'_, AppState>, name: String) -> Result<Vec<String>, AppError> {
     let mut host = state.lock_plugin_host()?;
     host.enable_plugin(&name)
+}
+
+/// Preview the enable cascade for `name`. `plan` is the ordered list of
+/// plugins that would be enabled (deps first, target last); `blockers`
+/// lists required deps that are missing, unloadable, or version-incompatible.
+/// When `blockers` is non-empty, `enable_plugin` will refuse to run.
+#[tauri::command]
+pub fn plugin_enable_preview(
+    state: State<'_, AppState>,
+    name:  String,
+) -> Result<crate::plugin::runtime::host::dep_cascade::EnablePreview, AppError> {
+    let host = state.lock_plugin_host()?;
+    Ok(crate::plugin::runtime::host::dep_cascade::EnablePreview {
+        plan:     host.compute_enable_cascade(&name),
+        blockers: host.compute_enable_blockers(&name),
+    })
 }
 
 /// Uninstall a plugin. Removes the folder under `plugins/`, wipes its
@@ -232,10 +252,25 @@ pub fn delete_plugin(
     Ok(warnings)
 }
 
+/// Disable a plugin. Returns the ordered list of plugins that were actually
+/// disabled — `name` plus every transitively-required dependent. Leaves-first
+/// order so dependents stop before their dep.
 #[tauri::command]
-pub fn disable_plugin(state: State<'_, AppState>, name: String) -> Result<(), AppError> {
+pub fn disable_plugin(state: State<'_, AppState>, name: String) -> Result<Vec<String>, AppError> {
     let mut host = state.lock_plugin_host()?;
     host.disable_plugin(&name)
+}
+
+/// Preview the disable cascade for `name`: every currently-enabled plugin
+/// that (transitively) requires it, leaves-first, with `name` last.
+/// Returns an empty list when `name` isn't currently enabled.
+#[tauri::command]
+pub fn plugin_disable_preview(
+    state: State<'_, AppState>,
+    name:  String,
+) -> Result<Vec<String>, AppError> {
+    let host = state.lock_plugin_host()?;
+    Ok(host.compute_disable_cascade(&name))
 }
 
 #[tauri::command]

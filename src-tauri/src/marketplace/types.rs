@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::plugin::runtime::manifest::deps::PluginDependency;
 use crate::plugin::runtime::manifest::permissions::PluginPermissions;
 
 // ---------------------------------------------------------------------------
@@ -98,6 +99,11 @@ pub struct MarketplacePlugin {
     /// as `version` when no update is available; older when one is.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
+    /// Direct plugin-to-plugin dependencies declared in the resolved
+    /// `plugin.toml`. Empty when the plugin stands alone. Surfaced in the
+    /// install-confirm modal so the user can pre-install required deps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<PluginDependency>,
 }
 
 // ---------------------------------------------------------------------------

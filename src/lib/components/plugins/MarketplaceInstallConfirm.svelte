@@ -9,7 +9,7 @@
    * Wired by `MarketplaceModal` — the modal opens this confirm before
    * calling `marketplace_install_plugin`; cancelling here is a no-op.
    */
-  import { Shield, Globe, FolderGit2, Terminal, Variable, KeyRound, Wrench, MessagesSquare, ArrowDownToLine, Network, Download, AlertTriangle } from 'lucide-svelte';
+  import { Shield, Globe, FolderGit2, Terminal, Variable, KeyRound, Wrench, MessagesSquare, ArrowDownToLine, Network, Download, AlertTriangle, Package } from 'lucide-svelte';
   import Modal       from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -19,13 +19,31 @@
 
   let {
     plugin,
+    /**
+     * Resolved cascade: required deps (transitively) that aren't yet installed
+     * but ARE present in the marketplace catalog. Ordered deps-first so the
+     * caller can install them sequentially before the target plugin.
+     */
+    pendingDeps    = [] as MarketplacePlugin[],
+    /**
+     * Required deps that the catalog can't satisfy — missing entirely from
+     * community + custom sources. Surfaced as a hard error: the user must
+     * install them by hand (zip, dev folder, …) before this install can
+     * proceed.
+     */
+    missingDeps    = [] as { name: string; version: string }[],
     onCancel,
     onConfirm,
   }: {
-    plugin:    MarketplacePlugin;
-    onCancel:  () => void;
-    onConfirm: () => void;
+    plugin:       MarketplacePlugin;
+    pendingDeps?: MarketplacePlugin[];
+    missingDeps?: { name: string; version: string }[];
+    onCancel:     () => void;
+    onConfirm:    () => void;
   } = $props();
+
+  const blocked = $derived(missingDeps.length > 0);
+  const cascade = $derived([...pendingDeps, plugin]);
 
   /** A single row in the permissions list. */
   type Row = {
@@ -199,6 +217,44 @@
       </Alert>
     {/if}
 
+    {#if blocked}
+      <Alert variant="error" title="Required dependencies not in the marketplace">
+        <strong>{plugin.name}</strong> declares required plugins that aren't in the
+        community catalog or any custom source. Install them manually (e.g. via
+        zip import or a custom source) before retrying:
+        <ul class="mic-missing">
+          {#each missingDeps as d (d.name)}
+            <li>
+              <Package size={11} />
+              <strong>{d.name}</strong>{d.version ? ` ${d.version}` : ''}
+            </li>
+          {/each}
+        </ul>
+      </Alert>
+    {:else if pendingDeps.length > 0}
+      <section class="mic-section">
+        <h4><Package size={11} /> Will also install</h4>
+        <p class="mic-muted small">
+          <strong>{plugin.name}</strong> requires
+          {pendingDeps.length === 1 ? '1 plugin' : `${pendingDeps.length} plugins`}
+          that aren't on disk yet. They'll be downloaded first (in order), then
+          the target is installed. All stay disabled by default until you flip
+          them on from the Plugin Manager.
+        </p>
+        <ul class="mic-list">
+          {#each pendingDeps as d (d.name)}
+            <li class="mic-row mic-tone-safe">
+              <Package size={14} class="mic-row-icon" />
+              <div class="mic-row-body">
+                <span class="mic-row-title">{d.name}<span class="mic-dep-ver"> v{d.version}</span></span>
+                <span class="mic-row-detail">{d.description}</span>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
     <section class="mic-section">
       <h4><Shield size={11} /> The plugin will be able to:</h4>
       {#if rows.length === 0}
@@ -229,11 +285,15 @@
 
   {#snippet footer()}
     <ModalFooter>
-      <Button variant="ghost" onclick={onCancel}>Cancel</Button>
-      <Button variant="primary" onclick={onConfirm}>
-        {#snippet iconStart()}<Download size={14} />{/snippet}
-        Install
-      </Button>
+      <Button variant="ghost" onclick={onCancel}>{blocked ? 'Close' : 'Cancel'}</Button>
+      {#if !blocked}
+        <Button variant="primary" onclick={onConfirm}>
+          {#snippet iconStart()}<Download size={14} />{/snippet}
+          {cascade.length > 1
+            ? `Install ${cascade.length} plugins`
+            : 'Install'}
+        </Button>
+      {/if}
     </ModalFooter>
   {/snippet}
 </Modal>
@@ -350,6 +410,32 @@
     padding: 1px 4px;
     font-family: var(--font-mono, monospace);
     font-size: 10.5px;
+  }
+
+  /* Missing-dep list inside the error Alert (block-level layout, since the
+     Alert's body slot is a flex column). */
+  .mic-missing {
+    margin: 6px 0 0;
+    padding: 0 0 0 4px;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .mic-missing li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-primary);
+  }
+
+  .mic-dep-ver {
+    margin-left: 4px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    font-weight: 400;
   }
 
   /* Footer now uses the shared `<ModalFooter>` widget — no overrides needed. */
