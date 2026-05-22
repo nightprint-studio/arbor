@@ -86,10 +86,25 @@ class TooltipState {
   active: ActiveTooltip | null = $state(null);
   private lastHideAt = 0;
   private seq = 0;
+  private focusSuppressedUntil = 0;
 
   /** Returns true if the next show should skip the delay (quick re-hover). */
   shouldSkipDelay(): boolean {
     return performance.now() - this.lastHideAt < QUICK_REOPEN_MS;
+  }
+
+  /** Suppress tooltip-on-focus for the next `ms` milliseconds. Callers use
+   *  this around programmatic `.focus()` calls (e.g. Modal initial focus)
+   *  so the tooltip action doesn't pop a bubble on a focus the user never
+   *  asked for. Hover and user-driven focus (Tab, click) are unaffected
+   *  once the window elapses. */
+  suppressFocusFor(ms: number) {
+    this.focusSuppressedUntil = Math.max(this.focusSuppressedUntil, performance.now() + ms);
+  }
+
+  /** True while the suppression window is active. */
+  isFocusSuppressed(): boolean {
+    return performance.now() < this.focusSuppressedUntil;
   }
 
   show(trigger: HTMLElement, opts: NormalizedTooltipOptions) {

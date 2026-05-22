@@ -60,6 +60,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   table cells and headings; previously e.g. a table row referencing `<h1>` would
   render as a bare HTML tag (and be stripped by GitHub's renderer) instead of as
   inline code.
+- Modals no longer pop a tooltip on the freshly-focused control when they open,
+  and the share-worktree button in the Workspace Info header now has proper
+  icon-button styling.
 
 ## [0.1.0] — 2026-05-21
 

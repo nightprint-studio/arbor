@@ -92,6 +92,10 @@ export function tooltip(node: HTMLElement, input: TooltipInput) {
 
   function onFocus(e: FocusEvent) {
     if (opts.disabled || !opts.content) return;
+    // Skip if a recent programmatic focus (e.g. Modal initial focus) is
+    // active — that focus isn't a user-driven keyboard intent, so popping
+    // a tooltip on it would be noisy.
+    if (tooltipState.isFocusSuppressed()) return;
     const target = e.target as HTMLElement;
     // Only show on keyboard focus — mouse focus is already covered by hover.
     if (target.matches?.(':focus-visible')) {

@@ -33,6 +33,7 @@
   import { fade, fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { tooltipState } from '$lib/stores/tooltip.svelte';
   import ActivityBar from '$lib/components/layout/ActivityBar.svelte';
 
   type Size = 'sm' | 'md' | 'lg' | 'full';
@@ -134,6 +135,14 @@
       .filter(el => el.offsetParent !== null && el.getAttribute('aria-hidden') !== 'true');
   }
 
+  /** True when `el` lives inside the modal header chrome — header actions
+   *  are toolbar shortcuts (share, refresh, settings…), not the primary
+   *  intent of opening the dialog, so we skip them when picking initial
+   *  focus. They stay reachable via Tab. */
+  function isInHeader(el: HTMLElement): boolean {
+    return !!modalEl && !!el.closest('.modal-header') && modalEl.contains(el);
+  }
+
   // Unique token identifying this modal in the stack — created lazily so we
   // don't depend on lifecycle order between multiple modals mounting in the
   // same tick.
@@ -145,14 +154,21 @@
     const previouslyFocused = document.activeElement as HTMLElement | null;
     queueMicrotask(() => {
       const focusables = getFocusables();
-      // Skip the close button as the initial target — landing there feels
-      // wrong (you'd Enter and immediately dismiss the modal). Find the
-      // first non-close focusable; fall back to whatever exists or the
-      // modal shell itself.
+      // Prefer body/footer focusables over header actions: header actions
+      // (share, refresh, export…) are secondary tooling, not the primary
+      // intent on opening. Always skip the close button: landing there
+      // means Enter dismisses the modal immediately, which is jarring.
+      const nonClose = focusables.filter(el => el.getAttribute('aria-label') !== 'Close');
       const initial =
-        focusables.find(el => el.getAttribute('aria-label') !== 'Close')
+        nonClose.find(el => !isInHeader(el))
+        ?? nonClose[0]
         ?? focusables[0]
         ?? modalEl;
+      // Suppress the tooltip-on-focus side effect for this initial focus
+      // call: it's programmatic, not a user-driven Tab/click, so popping
+      // a tooltip on the freshly-focused control would be noise. The
+      // window covers just this synchronous focus dispatch.
+      tooltipState.suppressFocusFor(150);
       initial?.focus();
     });
     return () => {

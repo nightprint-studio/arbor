@@ -88,19 +88,20 @@
     <ModalHeader {onClose}>
       {#snippet actions()}
         {#if worktree.branch}
-          <button
-            class="header-icon-btn"
-            use:tooltip={'Copy arbor:// worktree link'}
+          <Button
+            variant="icon"
+            size="sm"
+            title="Copy arbor:// worktree link"
+            ariaLabel="Copy arbor:// worktree link"
             onclick={() => {
               const tabId = tabsStore.activeTabId;
               if (tabId && worktree.branch) {
                 void copyDeepLink({ kind: 'branch_worktree', branch: worktree.branch }, tabId);
               }
             }}
-            aria-label="Copy arbor:// worktree link"
           >
-            <Link2 size={14} />
-          </button>
+            {#snippet iconStart()}<Link2 size={14} />{/snippet}
+          </Button>
         {/if}
       {/snippet}
       <span class="modal-icon"><Layers size={15} /></span>
