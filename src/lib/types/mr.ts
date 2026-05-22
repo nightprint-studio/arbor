@@ -109,6 +109,16 @@ export interface MrDetail {
   checks:   MrCheck[];
 }
 
+/** Whether the active repo accepts pull/merge requests at all.
+ *  `enabled = false` is set only on an explicit signal from the provider
+ *  (archived/disabled GitHub repo, "disabled" MR access level on GitLab).
+ *  Any probe failure stays permissive (`enabled = true`). */
+export interface MrFeatureStatus {
+  enabled: boolean;
+  /** User-facing explanation when `enabled = false`. */
+  reason:  string | null;
+}
+
 /** Per-repo capability hints surfaced by `get_mr_capabilities`. Used by the
  *  Create MR modal to disable options the upstream provider would reject. */
 export interface MrCapabilities {

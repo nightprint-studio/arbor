@@ -243,6 +243,19 @@
         // screen until the fetch lands.
         dlLoading = { title: `Opening merge request !${number}`, status: 'loading' };
         try {
+          // Short-circuit when MR/PRs are disabled on the remote so the user
+          // sees the real reason instead of a generic 404 from get_mr_detail.
+          // The probe is cached per tab so this is usually free.
+          const feature = await cacheStore.loadMrFeature(tabId);
+          if (!feature.enabled) {
+            dlLoading = {
+              title:   `Merge request !${number}`,
+              status:  'error',
+              message: feature.reason ??
+                'Merge requests are disabled on this repository.',
+            };
+            return;
+          }
           const detail = await getMrDetail(tabId, number);
           dlLoading = null;
           openMrDetail(detail.mr);

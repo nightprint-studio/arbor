@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     GitPullRequest, RefreshCw, Plus, GitMerge,
-    AlertCircle, Loader, Circle, Search, X, Link2,
+    AlertCircle, Loader, Circle, Search, X, Link2, Ban,
   } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
@@ -103,12 +103,13 @@
   );
 
   // State machine for which view to show
-  type ViewState = 'loading' | 'no-remote' | 'no-token' | 'error' | 'empty' | 'list';
+  type ViewState = 'loading' | 'no-remote' | 'no-token' | 'mr-disabled' | 'error' | 'empty' | 'list';
   const viewState = $derived((() => {
     if (mrStore.providerInfo === undefined)            return 'loading' as ViewState;
     if (mrStore.loading)                               return 'loading' as ViewState;
     if (mrStore.providerInfo === null)                 return 'no-remote' as ViewState;
     if (!mrStore.providerInfo.has_token)               return 'no-token' as ViewState;
+    if (mrStore.mrFeature && !mrStore.mrFeature.enabled) return 'mr-disabled' as ViewState;
     if (mrStore.error)                                 return 'error' as ViewState;
     if (mrStore.mrs.length === 0)                      return 'empty' as ViewState;
     return 'list' as ViewState;
@@ -130,7 +131,7 @@
     >
       <RefreshCw size={13} class={mrStore.loading ? 'spin' : ''} />
     </button>
-    {#if mrStore.providerInfo?.has_token}
+    {#if mrStore.providerInfo?.has_token && mrStore.mrFeature?.enabled !== false}
       <button
         class="ps-btn ps-btn-accent"
         use:tooltip={'New PR / MR'}
@@ -144,7 +145,7 @@
   {#snippet toolbar()}
     <!-- Search + filters — both hidden when there's no provider/token, since
          neither has anything to act on in those states. -->
-    {#if viewState !== 'no-remote' && viewState !== 'no-token'}
+    {#if viewState !== 'no-remote' && viewState !== 'no-token' && viewState !== 'mr-disabled'}
       <div class="mr-search-wrap">
         <Search size={11} class="mr-search-icon" />
         <input
@@ -170,7 +171,7 @@
     <!-- Filter tabs — always rendered to avoid layout shift on tab switch -->
     <div
       class="mr-filters"
-      class:mr-filters-hidden={viewState === 'no-remote' || viewState === 'no-token'}
+      class:mr-filters-hidden={viewState === 'no-remote' || viewState === 'no-token' || viewState === 'mr-disabled'}
     >
       <Tabs
         items={[
@@ -213,6 +214,17 @@
         <p class="state-hint">
           Connect your {providerLabel(mrStore.providerInfo?.provider)} account in
           <strong>Settings → Authentication</strong> to view and manage {sidebarTitle.toLowerCase()}.
+        </p>
+      </div>
+
+    {:else if viewState === 'mr-disabled'}
+      <!-- Provider has the MR feature switched off for this repo -->
+      <div class="state-view">
+        <Ban size={28} class="state-icon state-muted" />
+        <p class="state-title">{sidebarTitle} unavailable</p>
+        <p class="state-hint">
+          {mrStore.mrFeature?.reason ??
+            `${sidebarTitle} are disabled on this repository.`}
         </p>
       </div>
 

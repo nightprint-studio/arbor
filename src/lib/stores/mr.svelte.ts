@@ -1,5 +1,5 @@
 import { getMrDetail } from '$lib/ipc/mr';
-import type { MergeRequest, MrDetail } from '$lib/types/mr';
+import type { MergeRequest, MrDetail, MrFeatureStatus } from '$lib/types/mr';
 import type { CiProviderInfo } from '$lib/types/pipeline';
 import { withLoading } from '$lib/utils/async-state';
 import { cacheStore } from './cache.svelte';
@@ -21,6 +21,11 @@ function createMrStore() {
    * object    = provider detected
    */
   let providerInfo  = $state<CiProviderInfo | null | undefined>(undefined);
+  /**
+   * Result of the MR-feature probe (archived / merge_requests disabled / …).
+   * `undefined` = not yet probed. Sidebar + palette gate on `enabled === false`.
+   */
+  let mrFeature     = $state<MrFeatureStatus | undefined>(undefined);
 
   // Monotonic counter used to discard results from stale `load()` calls.
   // Protects against rapid filter-tab switches where a slower request would
@@ -45,8 +50,11 @@ function createMrStore() {
     const myVersion       = ++loadVersion;
     const requestedFilter = stateFilter;
 
-    loading = true;
-    error   = null;
+    loading   = true;
+    error     = null;
+    // Reset feature gate so a previous tab's "disabled" state doesn't leak
+    // into the new tab's view while the probe is in flight.
+    mrFeature = undefined;
 
     // Always detect provider first (fast, no token needed — result is cached)
     const info = await detectProvider(tabId);
@@ -59,12 +67,40 @@ function createMrStore() {
       return;
     }
 
+    // Probe MR feature availability before hitting list_mrs (which would
+    // otherwise surface a 404 as a raw error). The probe is cached per tab
+    // and re-fetched on explicit `force` (sidebar refresh button).
+    const feature = await cacheStore.loadMrFeature(tabId, force);
+    if (myVersion !== loadVersion) return; // superseded
+    mrFeature = feature;
+    if (!feature.enabled) {
+      loading = false;
+      mrs     = [];
+      return;
+    }
+
     const result = await withLoading(
       v => { if (myVersion === loadVersion) loading = v; },
       v => { if (myVersion === loadVersion) error   = v; },
       () => cacheStore.loadMrList(tabId, requestedFilter, force),
     );
     if (myVersion !== loadVersion) return; // superseded
+    // The cheap probe (archived/disabled) misses some causes (fork-mirrors,
+    // branch-protection blocking PRs). If list_mrs surfaces a 404, retroactively
+    // mark the feature as unavailable so the sidebar + palette gate kicks in.
+    if (result === null && error && /\bnot found\b/i.test(error) && /404/.test(error)) {
+      const status: MrFeatureStatus = {
+        enabled: false,
+        reason:  info.provider === 'gitlab'
+          ? 'Merge requests are not available on this GitLab project.'
+          : 'Pull requests are not available on this GitHub repository.',
+      };
+      mrFeature = status;
+      cacheStore.setMrFeature(tabId, status);
+      error = null;
+      mrs   = [];
+      return;
+    }
     mrs = result ?? [];
   }
 
@@ -101,6 +137,7 @@ function createMrStore() {
     get detailError()   { return detailError; },
     get provider()      { return provider; },
     get providerInfo()  { return providerInfo; },
+    get mrFeature()     { return mrFeature; },
     load,
     loadDetail,
     clearDetail,

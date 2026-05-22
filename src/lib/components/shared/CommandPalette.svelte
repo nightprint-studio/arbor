@@ -436,7 +436,9 @@
     }
 
     // ── Merge Requests ──────────────────────────────────────────────────────
-    if (hasTab) {
+    // Hidden entirely when the active repo has MR/PRs disabled on the
+    // provider (probed via probeMrFeature, cached on mrStore.mrFeature).
+    if (hasTab && mrStore.mrFeature?.enabled !== false) {
       actions.push(
         { id: 'action:create-mr', kind: 'action', icon: 'GitPullRequest', group: 'Merge Requests',
           title: 'Open Pull / Merge Request',
@@ -469,6 +471,8 @@
     // Sidebar sections — respect user-configured visibility.
     for (const sec of SIDEBAR_SECTIONS) {
       if (!activityBarConfigStore.isVisible(sec.id)) continue;
+      // Hide the MR section entry when MR/PRs are disabled for this repo.
+      if (sec.id === 'mr' && mrStore.mrFeature?.enabled === false) continue;
       actions.push({
         id: `action:show-${sec.id}`, kind: 'action', icon: sec.icon, group: 'Panels',
         title: sec.title,
@@ -1423,7 +1427,10 @@
 
     // Group verbs by their declared group so the palette reads as a taxonomy.
     const verbGroups = new Map<string, PaletteItem[]>();
+    const mrDisabled = mrStore.mrFeature?.enabled === false;
     for (const v of VERBS) {
+      // Skip MR-targeted verbs when the active repo has MR/PRs disabled.
+      if (mrDisabled && v.targetKind === 'mr') continue;
       const s = scoreVerb(v, q);
       if (s <= 0) continue;
       const item: PaletteItem = {

@@ -7,6 +7,10 @@
 
 # ── Claude Code ───────────────────────────────────────────────────────────────
 .claude/
+CLAUDE.md
+
+# ── Large media not tracked in the repo ───────────────────────────────────────
+assets/hero.mp4
 
 # ── Arbor app data (per-repo config, not source) ──────────────────────────────
 .arbor/

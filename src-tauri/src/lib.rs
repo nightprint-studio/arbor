@@ -945,6 +945,7 @@ pub fn run() {
             commands::mr_commands::get_mr_detail,
             commands::mr_commands::create_mr,
             commands::mr_commands::get_mr_capabilities,
+            commands::mr_commands::probe_mr_feature,
             commands::mr_commands::disable_mr_auto_merge,
             commands::mr_commands::merge_mr,
             commands::mr_commands::close_mr,

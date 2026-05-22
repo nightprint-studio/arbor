@@ -3,13 +3,15 @@ use tauri::State;
 use crate::AppState;
 use crate::error::{AppError, Result};
 use crate::git_provider::mr_impl::{
-    CreateMrParams, MergeRequest, MergedMrHint, MrCapabilities, MrDetail, MrFileDiff, MrCommit,
+    CreateMrParams, MergeRequest, MergedMrHint, MrCapabilities, MrDetail, MrFeatureStatus,
+    MrFileDiff, MrCommit,
     get_github_pr_commits,    get_gitlab_mr_commits,
     get_github_commit_files,  get_gitlab_commit_files,
     mark_github_pr_ready,     mark_gitlab_mr_ready,
     enable_github_auto_merge, enable_gitlab_auto_merge,
     disable_github_auto_merge, disable_gitlab_auto_merge,
     fetch_github_auto_merge_allowed, fetch_gitlab_mwps_supported,
+    fetch_github_pr_feature_enabled, fetch_gitlab_mr_feature_enabled,
     wait_gitlab_merge_status_ready,
 };
 use crate::git_provider::{
@@ -217,6 +219,51 @@ pub async fn get_mr_capabilities(
             }
         }
         _ => Ok(MrCapabilities::default()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MR/PR feature probe (drives sidebar EmptyState + Palette gating)
+// ---------------------------------------------------------------------------
+
+/// Probe whether the active repo accepts merge/pull requests at all.
+/// Permissive on failure: any missing token or network error returns
+/// `enabled = true` so the user can still try.  Only an explicit signal
+/// from the provider (archived/disabled repo on GitHub, MR access level
+/// "disabled" on GitLab) flips it to `false`.
+#[tauri::command]
+pub async fn probe_mr_feature(
+    state:  State<'_, AppState>,
+    tab_id: String,
+) -> Result<MrFeatureStatus> {
+    let resolved = match provider_for_tab(&state, &tab_id) {
+        Ok(r)  => r,
+        Err(_) => return Ok(MrFeatureStatus::default()),
+    };
+    crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
+
+    match resolved.info.provider.as_str() {
+        "github" => {
+            let token = match crate::git_provider::mr_impl::get_github_token() {
+                Ok(Some(t)) => t,
+                _           => return Ok(MrFeatureStatus::default()),
+            };
+            let owner = resolved.info.owner.as_deref().unwrap_or("");
+            let repo  = resolved.info.repo_name.as_deref().unwrap_or("");
+            Ok(fetch_github_pr_feature_enabled(owner, repo, &token).await
+                .unwrap_or_default())
+        }
+        "gitlab" => {
+            let base  = resolved.info.gitlab_base_url.as_deref().unwrap_or("https://gitlab.com");
+            let token = match crate::git_provider::mr_impl::get_gitlab_token(base) {
+                Ok(Some(t)) => t,
+                _           => return Ok(MrFeatureStatus::default()),
+            };
+            let path  = resolved.info.project_path.as_deref().unwrap_or("");
+            Ok(fetch_gitlab_mr_feature_enabled(path, base, &token).await
+                .unwrap_or_default())
+        }
+        _ => Ok(MrFeatureStatus::default()),
     }
 }
 
