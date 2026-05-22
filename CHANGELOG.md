@@ -9,6 +9,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- File / folder picker: F6 (Shift+F6 reverse) cycles focus between the file
+  list, the sidebar locations and the address bar, and Arrow Up / Down walks
+  the sidebar once focused there — keyboard-only navigation of the picker is
+  now complete.
 - Keyboard-only navigation in the commit graph: Arrow Up / Down follow the
   current lane (same branch column), Arrow Left / Right hop to the nearest
   sibling lane, PageUp / PageDown jump a viewport, Home / End jump to the

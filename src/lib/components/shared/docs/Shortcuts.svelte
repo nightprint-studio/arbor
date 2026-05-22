@@ -180,6 +180,8 @@
     <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>Create a new file in the current folder</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>Create a new folder in the current folder</td></tr>
     <tr><td><Kbd action="toggle_sidebar" size="sm" /></td><td>Collapse / expand the picker sidebar (same global shortcut)</td></tr>
+    <tr><td><kbd>F6</kbd> / <kbd>Shift</kbd>+<kbd>F6</kbd></td><td>Cycle focus between file list, sidebar (locations) and address bar</td></tr>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd> in sidebar</td><td>Move between locations once focus is on the sidebar</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>Alt</kbd>+<kbd>→</kbd></td><td>Back / Forward through navigation history</td></tr>
     <tr><td><kbd>Backspace</kbd></td><td>Go up one folder</td></tr>
     <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Move selection in the file list</td></tr>
