@@ -10,27 +10,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::StreamExt;
 use opendal::Operator;
-use tauri::{AppHandle, Manager};
 
-use crate::error::{AppError, Result};
-use crate::cloud::operator::{build, map_op_err};
-use crate::cloud::types::{CloudConnection, CloudListPage, CloudObject, CloudTestReport};
+use crate::error::{CloudError, Result};
+use crate::host::CloudHost;
+use crate::operator::{build, map_op_err};
+use crate::types::{CloudConnection, CloudListPage, CloudObject, CloudTestReport};
 
-const PLUGIN_NAME:    &str = "cloud-storage";
+const PLUGIN_NAME:     &str = "cloud-storage";
 const HOOK_LIST_CHUNK: &str = "cloud-storage:list-chunk";
 
 /// Push one chunk payload into the cloud-storage plugin via the plugin host.
-/// `app.emit(…)` would deliver to the JS frontend only — Lua subscribers live
-/// in `__arbor_hooks__` and are reachable exclusively through `fire_hook_on`.
-fn deliver_chunk(app: &AppHandle, payload: serde_json::Value) {
-    let state = app.state::<crate::AppState>();
-    let json  = match serde_json::to_string(&payload) {
+/// `host.emit_event(...)` would deliver to the JS frontend only — Lua
+/// subscribers live in `__arbor_hooks__` and are reachable exclusively
+/// through `fire_plugin_hook`.
+fn deliver_chunk(host: &dyn CloudHost, payload: serde_json::Value) {
+    let json = match serde_json::to_string(&payload) {
         Ok(s)  => s,
         Err(e) => { tracing::warn!("cloud chunk encode: {e}"); return; }
     };
-    if let Ok(host) = state.lock_plugin_host() {
-        let _ = host.fire_hook_on(PLUGIN_NAME, HOOK_LIST_CHUNK, &json);
-    };
+    host.fire_plugin_hook(PLUGIN_NAME, HOOK_LIST_CHUNK, &json);
 }
 
 /// Default cap on `list` to keep the UI responsive on huge prefixes. The
@@ -130,24 +128,24 @@ pub async fn test_connection(conn: &CloudConnection, bucket: Option<&str>) -> Re
         .map(|s| s.to_string())
         // No bucket given: refuse rather than guessing — the user needs a
         // bucket to do anything useful, so this is a real failure.
-        .ok_or_else(|| AppError::Other("test_connection: a bucket is required".into()))?;
+        .ok_or_else(|| CloudError::Other("test_connection: a bucket is required".into()))?;
 
     let method = match &conn.provider {
-        crate::cloud::types::Provider::Gcs    => conn.gcs.as_ref().map(|a| gcs_method_name(a).to_string()),
-        crate::cloud::types::Provider::S3     => Some("aws_access_key".to_string()),
-        crate::cloud::types::Provider::Azblob => Some("azure_account_key".to_string()),
+        crate::types::Provider::Gcs    => conn.gcs.as_ref().map(|a| gcs_method_name(a).to_string()),
+        crate::types::Provider::S3     => Some("aws_access_key".to_string()),
+        crate::types::Provider::Azblob => Some("azure_account_key".to_string()),
     };
 
     // Resolve identity up-front (lets us surface SA email even when the
     // bucket probe later fails with permission denied).
     let identity = match (&conn.provider, &conn.gcs, &conn.s3, &conn.azblob) {
-        (crate::cloud::types::Provider::Gcs, Some(a), _, _) => {
-            crate::cloud::auth_gcs::resolve(a).await
+        (crate::types::Provider::Gcs, Some(a), _, _) => {
+            crate::auth_gcs::resolve(a).await
                 .ok()
                 .and_then(|r| r.identity().map(|s| s.to_string()))
         }
-        (crate::cloud::types::Provider::S3,     _, Some(a), _) => Some(a.access_key_id.clone()),
-        (crate::cloud::types::Provider::Azblob, _, _, Some(a)) => Some(a.account_name.clone()),
+        (crate::types::Provider::S3,     _, Some(a), _) => Some(a.access_key_id.clone()),
+        (crate::types::Provider::Azblob, _, _, Some(a)) => Some(a.account_name.clone()),
         _ => None,
     };
 
@@ -156,7 +154,7 @@ pub async fn test_connection(conn: &CloudConnection, bucket: Option<&str>) -> Re
         // `op.list("/")` with limit 1 — cheap probe that validates auth +
         // bucket existence + ACLs in one call.
         let _ = op.list_with("/").limit(1).await.map_err(map_op_err)?;
-        Ok::<_, AppError>(())
+        Ok::<_, CloudError>(())
     }.await;
 
     match probe_result {
@@ -177,8 +175,8 @@ pub async fn test_connection(conn: &CloudConnection, bucket: Option<&str>) -> Re
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-fn gcs_method_name(a: &crate::cloud::types::GcsAuth) -> &'static str {
-    use crate::cloud::types::GcsAuth::*;
+fn gcs_method_name(a: &crate::types::GcsAuth) -> &'static str {
+    use crate::types::GcsAuth::*;
     match a {
         SaFile { .. }   => "service_account_file",
         SaInline { .. } => "service_account_inline",
@@ -215,7 +213,7 @@ fn entry_to_object(e: &opendal::Entry) -> CloudObject {
 }
 
 #[allow(dead_code)]
-pub(crate) async fn open_operator(conn: &CloudConnection, bucket: &str) -> Result<Operator> {
+pub async fn open_operator(conn: &CloudConnection, bucket: &str) -> Result<Operator> {
     build(conn, bucket).await
 }
 
@@ -232,30 +230,30 @@ pub async fn concat_files(
     delete_inputs: bool,
 ) -> Result<()> {
     if inputs.is_empty() {
-        return Err(AppError::Other("concat_files: inputs is empty".into()));
+        return Err(CloudError::Other("concat_files: inputs is empty".into()));
     }
     let out_path = std::path::Path::new(&output);
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
             tokio::fs::create_dir_all(parent).await
-                .map_err(|e| AppError::Other(format!("mkdir {}: {e}", parent.display())))?;
+                .map_err(|e| CloudError::Other(format!("mkdir {}: {e}", parent.display())))?;
         }
     }
 
     let mut out = tokio::fs::File::create(out_path).await
-        .map_err(|e| AppError::Other(format!("create {}: {e}", out_path.display())))?;
+        .map_err(|e| CloudError::Other(format!("create {}: {e}", out_path.display())))?;
 
     for input in &inputs {
         let mut f = tokio::fs::File::open(input).await
-            .map_err(|e| AppError::Other(format!("open {input}: {e}")))?;
+            .map_err(|e| CloudError::Other(format!("open {input}: {e}")))?;
         tokio::io::copy(&mut f, &mut out).await
-            .map_err(|e| AppError::Other(format!("copy {input}: {e}")))?;
+            .map_err(|e| CloudError::Other(format!("copy {input}: {e}")))?;
     }
     // Flush before deleting inputs — otherwise a crash between the flush and
     // the unlinks would leave us with no source and a half-written output.
     use tokio::io::AsyncWriteExt;
     out.flush().await
-        .map_err(|e| AppError::Other(format!("flush {}: {e}", out_path.display())))?;
+        .map_err(|e| CloudError::Other(format!("flush {}: {e}", out_path.display())))?;
     drop(out);
 
     if delete_inputs {
@@ -276,13 +274,13 @@ pub async fn concat_files(
 // Hook payload:
 //   { stream_id: String, items: [CloudObject], done: bool, truncated?: bool, error?: String }
 //
-// Cancellation: callers register a flag in `AppState.cloud_cancellations`
-// keyed by `stream_id`; flipping it ends the loop on the next batch boundary.
+// Cancellation: callers register a flag in `CloudHost::cancellations` keyed
+// by `stream_id`; flipping it ends the loop on the next batch boundary.
 
-/// Batch size — bigger batches reduce the number of `fire_hook_on` calls
-/// (each one locks `plugin_host` for the duration of the Lua handler).
-/// 1000 means ~10 hook fires for a 10k-item folder instead of 67; the
-/// handler only renders a lightweight counter mid-stream anyway, so a
+/// Batch size — bigger batches reduce the number of `fire_plugin_hook` calls
+/// (each one locks the host's PluginHost mutex for the duration of the Lua
+/// handler). 1000 means ~10 hook fires for a 10k-item folder instead of 67;
+/// the handler only renders a lightweight counter mid-stream anyway, so a
 /// large batch costs us nothing on the UI side.
 const STREAM_BATCH_SIZE: usize = 1000;
 
@@ -300,7 +298,7 @@ const STREAM_DEFAULT_CAP: usize = 5_000;
 const SEARCH_HARD_CAP: usize = 5_000;
 
 pub async fn list_stream(
-    app:       AppHandle,
+    host:      Arc<dyn CloudHost>,
     conn:      CloudConnection,
     bucket:    String,
     prefix:    String,
@@ -328,7 +326,7 @@ pub async fn list_stream(
         let entry = match entry {
             Ok(e) => e,
             Err(e) => {
-                deliver_chunk(&app, serde_json::json!({
+                deliver_chunk(&*host, serde_json::json!({
                     "stream_id": stream_id,
                     "items":     Vec::<CloudObject>::new(),
                     "done":      true,
@@ -345,7 +343,7 @@ pub async fn list_stream(
             break;
         }
         if batch.len() >= STREAM_BATCH_SIZE {
-            deliver_chunk(&app, serde_json::json!({
+            deliver_chunk(&*host, serde_json::json!({
                 "stream_id": stream_id,
                 "items":     std::mem::take(&mut batch),
                 "done":      false,
@@ -353,7 +351,7 @@ pub async fn list_stream(
         }
     }
 
-    deliver_chunk(&app, serde_json::json!({
+    deliver_chunk(&*host, serde_json::json!({
         "stream_id": stream_id,
         "items":     batch,
         "done":      true,
@@ -428,24 +426,24 @@ fn compile_glob(pattern: &str) -> Result<CompiledGlob> {
     }
     re.push('$');
     let regex = regex::Regex::new(&re)
-        .map_err(|e| AppError::Other(format!("invalid pattern '{pattern}': {e}")))?;
+        .map_err(|e| CloudError::Other(format!("invalid pattern '{pattern}': {e}")))?;
     Ok(CompiledGlob { literal_prefix: lp, regex })
 }
 
 pub async fn search_stream(
-    app:        AppHandle,
-    conn:       CloudConnection,
-    bucket:     String,
+    host:        Arc<dyn CloudHost>,
+    conn:        CloudConnection,
+    bucket:      String,
     root_prefix: String,
-    pattern:    String,
-    stream_id:  String,
-    cancel:     Arc<AtomicBool>,
+    pattern:     String,
+    stream_id:   String,
+    cancel:      Arc<AtomicBool>,
 ) -> Result<()> {
     // Anything that fails before the streaming loop needs to surface as a
     // terminal `done` event with `error` set — otherwise the plugin sits on
     // "Searching… (0 matches)" forever because no async chunk ever arrives.
     let emit_done_err = |msg: String| {
-        deliver_chunk(&app, serde_json::json!({
+        deliver_chunk(&*host, serde_json::json!({
             "stream_id": stream_id,
             "items":     Vec::<CloudObject>::new(),
             "done":      true,
@@ -501,7 +499,7 @@ pub async fn search_stream(
         let entry = match entry {
             Ok(e) => e,
             Err(e) => {
-                deliver_chunk(&app, serde_json::json!({
+                deliver_chunk(&*host, serde_json::json!({
                     "stream_id": stream_id,
                     "items":     Vec::<CloudObject>::new(),
                     "done":      true,
@@ -527,7 +525,7 @@ pub async fn search_stream(
         matched += 1;
         if matched >= SEARCH_HARD_CAP { truncated = true; break; }
         if batch.len() >= STREAM_BATCH_SIZE {
-            deliver_chunk(&app, serde_json::json!({
+            deliver_chunk(&*host, serde_json::json!({
                 "stream_id": stream_id,
                 "items":     std::mem::take(&mut batch),
                 "done":      false,
@@ -541,7 +539,7 @@ pub async fn search_stream(
         "cloud search done: scanned={scanned} matched={matched} samples={samples:?}"
     );
 
-    deliver_chunk(&app, serde_json::json!({
+    deliver_chunk(&*host, serde_json::json!({
         "stream_id":     stream_id,
         "items":         batch,
         "done":          true,

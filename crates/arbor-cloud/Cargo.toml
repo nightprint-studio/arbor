@@ -1,0 +1,35 @@
+[package]
+name         = "arbor-cloud"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Cloud object-storage layer (GCS/S3/Azure) for the Arbor cloud-storage plugin host."
+
+# Earmarked for WASM-migration alongside the cloud-storage plugin's host code
+# (`src-tauri/src/plugin/api/ns/cloud.rs` + `commands/cloud_commands.rs`). The
+# crate exists as a clean boundary so the WASM cut is a one-shot delete.
+
+[dependencies]
+arbor-process-ext = { path = "../arbor-process-ext" }
+arbor-auth        = { path = "../arbor-auth" }
+
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+tokio        = { workspace = true }
+futures-util = { workspace = true }
+
+reqwest = { workspace = true }
+keyring = { workspace = true }
+base64  = { workspace = true }
+
+dirs    = { workspace = true }
+regex   = { workspace = true }
+
+opendal    = { workspace = true }
+# Transitive of opendal — pinned at workspace root so the Windows NASM prebuilt
+# feature is consistent regardless of feature unification surprises.
+aws-lc-sys = { workspace = true }

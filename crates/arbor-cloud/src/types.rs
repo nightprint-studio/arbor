@@ -23,7 +23,7 @@ pub enum Provider {
 /// `sa_inline` and `oauth` store their secret material in the OS keyring,
 /// referenced by an opaque `secret_ref` (e.g. `"gcs/cfg_abc"`). The plugin
 /// is responsible for choosing & persisting that ref; the host just looks
-/// it up via `crate::cloud::secrets`.
+/// it up via `crate::secrets`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum GcsAuth {
@@ -136,7 +136,7 @@ pub struct CloudTestReport {
 
 /// Emitted on `arbor://cloud-progress` from a transfer/sync job. The plugin
 /// listens and renders a progress bar; the JobOutputPanel surfaces a
-/// human-readable line per chunk separately via `JobRegistry::append_output`.
+/// human-readable line per chunk separately via the host's job sink.
 #[derive(Debug, Clone, Serialize)]
 pub struct CloudProgress {
     pub job_id:     String,

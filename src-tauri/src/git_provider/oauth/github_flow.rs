@@ -6,14 +6,14 @@
 //! `client_id`, so no secret needs to be embedded in the published source.
 //!
 //! Flow:
-//!   1. Frontend calls `start_github_device_flow` → backend POSTs to
-//!      `https://github.com/login/device/code`.  Returns `DeviceFlowInfo`
-//!      (`user_code`, `verification_uri`, …) for the UI to display, and
-//!      spawns a background polling task.
+//!   1. Frontend calls `start_github_device_flow` → backend hits
+//!      `https://github.com/login/device/code` via [`arbor_auth::oauth2::DeviceFlow`]
+//!      and returns `DeviceFlowInfo` (`user_code`, `verification_uri`, …)
+//!      for the UI to display.
 //!   2. User opens `verification_uri` in their browser and types `user_code`.
-//!   3. The polling task POSTs to `https://github.com/login/oauth/access_token`
-//!      with `grant_type=urn:ietf:params:oauth:grant-type:device_code` until
-//!      authorization completes.  The token is stored in the OS keychain.
+//!   3. A spawned task polls `https://github.com/login/oauth/access_token`
+//!      (handled by `arbor-auth`) until the user authorises or the code
+//!      expires; on success the token is stored in the OS keychain.
 //!   4. The Tauri event `arbor://github-oauth-done` is emitted (payload:
 //!      `null` on success, error message on failure).
 //!
@@ -24,12 +24,16 @@
 
 use tauri::Emitter;
 
-use crate::auth::DeviceFlowInfo;
-use crate::auth::device_flow::DeviceFlowProvider;
-use crate::error::Result;
+use arbor_auth::oauth2::{DeviceFlow, PollOutcome, refresh_token};
+use arbor_auth::{AuthError, BodyFormat};
 
-const KR_HOST:   &str = "github.com/arbor";
-const KR_USER:   &str = "oauth";
+use crate::auth::DeviceFlowInfo;
+use crate::auth::credential_store;
+use crate::error::{AppError, Result};
+
+const KR_HOST:    &str = "github.com/arbor";
+const KR_USER:    &str = "oauth";
+const KR_REFRESH: &str = "github.com/arbor-refresh";
 
 /// Bundled GitHub OAuth application client ID.  Users can override this in
 /// `~/.config/arbor/config.toml` under `[oauth.github] client_id = "..."`
@@ -40,6 +44,8 @@ pub const DEFAULT_CLIENT_ID: &str = "Ov23liYsZ6gFaytjebJY";
 const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 const TOKEN_URL:       &str = "https://github.com/login/oauth/access_token";
 
+const SCOPE: &str = "repo workflow";
+
 /// Resolve the active GitHub `client_id` — config override or bundled default.
 fn resolve_client_id() -> String {
     crate::config::app_config::OAuthOverrides::load_from_disk()
@@ -49,23 +55,13 @@ fn resolve_client_id() -> String {
         .unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string())
 }
 
-fn provider() -> DeviceFlowProvider {
-    DeviceFlowProvider {
-        device_code_url: DEVICE_CODE_URL,
-        token_url:       TOKEN_URL,
+fn make_flow() -> DeviceFlow {
+    DeviceFlow {
+        device_code_url: DEVICE_CODE_URL.into(),
+        token_url:       TOKEN_URL.into(),
         client_id:       resolve_client_id(),
-        scope:           "repo workflow",
-        kr_host:         KR_HOST,
-        kr_user:         KR_USER,
-        // GitHub returns the token body as text — sometimes JSON, sometimes
-        // form-encoded depending on the Accept header.  Reading as text and
-        // parsing JSON is the most reliable approach.
-        token_from_text: true,
-        provider_name:   "GitHub",
-        // GitHub returns a `refresh_token` only when the OAuth App owner
-        // opts into "Expiring user tokens".  When no refresh token is
-        // stored, `refresh_access_token` returns `Ok(false)` silently.
-        refresh_url:     Some(TOKEN_URL),
+        scope:           SCOPE.into(),
+        format:          BodyFormat::Form,
     }
 }
 
@@ -78,58 +74,49 @@ fn provider() -> DeviceFlowProvider {
 ///   - payload `null`        → success, token persisted in the keychain
 ///   - payload `<string>`    → human-readable error message
 pub async fn start_github_device_flow(app_handle: tauri::AppHandle) -> Result<DeviceFlowInfo> {
-    let info = provider().start_device_flow().await?;
+    let flow = make_flow();
+    let code = flow.request_code().await
+        .map_err(|e| AppError::Other(format!("GitHub device-code request: {e}")))?;
 
-    let device_code = info.device_code.clone();
-    let interval    = info.interval;
-    let expires_in  = info.expires_in;
+    let info = DeviceFlowInfo {
+        device_code:      code.device_code.clone(),
+        user_code:        code.user_code.clone(),
+        verification_uri: code.verification_uri.clone(),
+        expires_in:       code.expires_in,
+        interval:         code.interval,
+    };
 
+    let app = app_handle.clone();
     tokio::spawn(async move {
-        let result = poll_until_done(device_code, interval, expires_in).await;
-        let _ = app_handle.emit("arbor://github-oauth-done", result);
+        let result: Option<String> = match flow.poll_until_done(&code).await {
+            Ok(PollOutcome::Granted(token)) => match persist(&token.access_token, token.refresh_token.as_deref()) {
+                Ok(_)  => None,
+                Err(e) => {
+                    tracing::error!("github oauth: keychain save failed: {e}");
+                    Some(format!("Keychain save failed: {e}"))
+                }
+            },
+            Ok(PollOutcome::AccessDenied)     => Some("Authorization denied.".into()),
+            Err(AuthError::DeviceCodeExpired) => Some("Device code expired — please try again.".into()),
+            Err(e) => {
+                tracing::error!("github device flow poll error: {e}");
+                Some(e.to_string())
+            }
+        };
+        let _ = app.emit("arbor://github-oauth-done", result);
     });
 
     Ok(info)
 }
 
-/// Poll the token endpoint until authorisation succeeds, fails, or the device
-/// code expires.  Returns `None` on success, `Some(error)` otherwise — matching
-/// the `Option<String>` payload shape the frontend already listens for.
-async fn poll_until_done(
-    device_code: String,
-    initial_interval: u64,
-    expires_in: u64,
-) -> Option<String> {
-    let p = provider();
-    let start = std::time::Instant::now();
-    let mut interval_secs = initial_interval.max(1);
-
-    loop {
-        if start.elapsed().as_secs() >= expires_in {
-            return Some("Device code expired — please try again.".into());
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
-
-        match p.poll_device_token(device_code.clone()).await {
-            Ok(r) => match r.status.as_str() {
-                "authorized" => return None,
-                "denied"     => return Some("Authorization denied.".into()),
-                "expired"    => return Some("Device code expired — please try again.".into()),
-                "pending"    => {
-                    // GitHub issues `slow_down` with a new minimum interval; honour it.
-                    if let Some(new_iv) = r.interval {
-                        interval_secs = new_iv.max(interval_secs.saturating_add(1));
-                    }
-                    continue;
-                }
-                other => return Some(format!("Unexpected status: {other}")),
-            },
-            Err(e) => {
-                tracing::error!("github device flow poll error: {e}");
-                return Some(e.to_string());
-            }
+fn persist(access: &str, refresh: Option<&str>) -> Result<()> {
+    credential_store::save(KR_HOST, KR_USER, access)?;
+    if let Some(rt) = refresh {
+        if let Err(e) = credential_store::save(KR_REFRESH, KR_USER, rt) {
+            tracing::warn!("github oauth: failed to save refresh token: {e}");
         }
     }
+    Ok(())
 }
 
 /// Serialize OAuth refresh attempts: GitHub's "Expiring user tokens" feature
@@ -161,7 +148,7 @@ pub async fn try_refresh_if_stale(stale_access_token: Option<&str>) -> Result<bo
     let _guard = REFRESH_LOCK.lock().await;
 
     if let Some(stale) = stale_access_token {
-        let current = crate::auth::credential_store::get(KR_HOST, KR_USER)?;
+        let current = credential_store::get(KR_HOST, KR_USER)?;
         if matches!(&current, Some(t) if t != stale) {
             // Another caller refreshed while we were queued — keychain has a
             // fresh access token. Skip the round-trip.
@@ -169,16 +156,38 @@ pub async fn try_refresh_if_stale(stale_access_token: Option<&str>) -> Result<bo
         }
     }
 
-    provider().refresh_access_token().await
+    let Some(refresh) = credential_store::get(KR_REFRESH, KR_USER)? else {
+        return Ok(false);
+    };
+
+    let client_id = resolve_client_id();
+    let token = match refresh_token(TOKEN_URL, &client_id, None, &refresh, BodyFormat::Form).await {
+        Ok(t)  => t,
+        Err(e) => {
+            tracing::warn!("github token refresh failed: {e}");
+            return Ok(false);
+        }
+    };
+
+    credential_store::save(KR_HOST, KR_USER, &token.access_token)?;
+    if let Some(new_rt) = token.refresh_token {
+        if let Err(e) = credential_store::save(KR_REFRESH, KR_USER, &new_rt) {
+            tracing::warn!("github oauth: failed to update refresh token: {e}");
+        }
+    }
+
+    tracing::debug!("github access token refreshed successfully");
+    Ok(true)
 }
 
 /// Returns `true` when a GitHub token (PAT or OAuth) is present in the OS keychain.
 #[allow(dead_code)]
 pub fn get_status() -> Result<bool> {
-    provider().get_status()
+    Ok(credential_store::get(KR_HOST, KR_USER)?.is_some())
 }
 
 /// Remove the GitHub access token (and refresh token, if any) from the OS keychain.
 pub fn disconnect() -> Result<()> {
-    provider().disconnect()
+    let _ = credential_store::delete(KR_REFRESH, KR_USER);
+    credential_store::delete(KR_HOST, KR_USER)
 }

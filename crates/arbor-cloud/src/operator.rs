@@ -9,10 +9,10 @@ use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use opendal::Operator;
 use opendal::services;
 
-use crate::error::{AppError, Result};
-use crate::cloud::auth_gcs;
-use crate::cloud::secrets;
-use crate::cloud::types::{AzBlobAuth, CloudConnection, Provider, S3Auth};
+use crate::auth_gcs;
+use crate::error::{CloudError, Result};
+use crate::secrets;
+use crate::types::{AzBlobAuth, CloudConnection, Provider, S3Auth};
 
 /// Build an Operator for the given connection + bucket.
 ///
@@ -28,7 +28,7 @@ pub async fn build(conn: &CloudConnection, bucket: &str) -> Result<Operator> {
 
 async fn build_gcs(conn: &CloudConnection, bucket: &str) -> Result<Operator> {
     let auth = conn.gcs.as_ref().ok_or_else(||
-        AppError::AuthFailed("GCS connection is missing a `gcs` auth block".into())
+        CloudError::AuthFailed("GCS connection is missing a `gcs` auth block".into())
     )?;
     let resolved = auth_gcs::resolve(auth).await?;
 
@@ -60,17 +60,17 @@ async fn build_gcs(conn: &CloudConnection, bucket: &str) -> Result<Operator> {
 
 async fn build_s3(conn: &CloudConnection, bucket: &str) -> Result<Operator> {
     let auth: &S3Auth = conn.s3.as_ref().ok_or_else(||
-        AppError::AuthFailed("S3 connection is missing an `s3` auth block".into())
+        CloudError::AuthFailed("S3 connection is missing an `s3` auth block".into())
     )?;
     if auth.access_key_id.is_empty() {
-        return Err(AppError::AuthFailed("S3 connection is missing access_key_id".into()));
+        return Err(CloudError::AuthFailed("S3 connection is missing access_key_id".into()));
     }
     if auth.secret_ref.is_empty() {
-        return Err(AppError::AuthFailed("S3 connection is missing secret_ref".into()));
+        return Err(CloudError::AuthFailed("S3 connection is missing secret_ref".into()));
     }
     let secret_access_key = secrets::get(&auth.secret_ref)
-        .map_err(|e| AppError::AuthFailed(format!("S3 secret lookup ({}): {e}", auth.secret_ref)))?
-        .ok_or_else(|| AppError::AuthFailed(format!(
+        .map_err(|e| CloudError::AuthFailed(format!("S3 secret lookup ({}): {e}", auth.secret_ref)))?
+        .ok_or_else(|| CloudError::AuthFailed(format!(
             "S3 secret missing from keyring ({}) — re-enter the secret access key in the connection editor",
             auth.secret_ref
         )))?;
@@ -94,17 +94,17 @@ async fn build_s3(conn: &CloudConnection, bucket: &str) -> Result<Operator> {
 
 async fn build_azblob(conn: &CloudConnection, bucket: &str) -> Result<Operator> {
     let auth: &AzBlobAuth = conn.azblob.as_ref().ok_or_else(||
-        AppError::AuthFailed("Azure Blob connection is missing an `azblob` auth block".into())
+        CloudError::AuthFailed("Azure Blob connection is missing an `azblob` auth block".into())
     )?;
     if auth.account_name.is_empty() {
-        return Err(AppError::AuthFailed("Azure Blob connection is missing account_name".into()));
+        return Err(CloudError::AuthFailed("Azure Blob connection is missing account_name".into()));
     }
     if auth.secret_ref.is_empty() {
-        return Err(AppError::AuthFailed("Azure Blob connection is missing secret_ref".into()));
+        return Err(CloudError::AuthFailed("Azure Blob connection is missing secret_ref".into()));
     }
     let account_key = secrets::get(&auth.secret_ref)
-        .map_err(|e| AppError::AuthFailed(format!("Azure secret lookup ({}): {e}", auth.secret_ref)))?
-        .ok_or_else(|| AppError::AuthFailed(format!(
+        .map_err(|e| CloudError::AuthFailed(format!("Azure secret lookup ({}): {e}", auth.secret_ref)))?
+        .ok_or_else(|| CloudError::AuthFailed(format!(
             "Azure secret missing from keyring ({}) — re-enter the account key in the connection editor",
             auth.secret_ref
         )))?;
@@ -120,6 +120,6 @@ async fn build_azblob(conn: &CloudConnection, bucket: &str) -> Result<Operator> 
     Ok(Operator::new(builder).map_err(map_op_err)?.finish())
 }
 
-pub(crate) fn map_op_err(e: opendal::Error) -> AppError {
-    AppError::Other(format!("opendal: {e}"))
+pub fn map_op_err(e: opendal::Error) -> CloudError {
+    CloudError::Other(format!("opendal: {e}"))
 }

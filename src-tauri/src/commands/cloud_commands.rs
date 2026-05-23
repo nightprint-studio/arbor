@@ -3,34 +3,41 @@
 //! Stateless: every call carries a full `CloudConnection`. Secrets live in
 //! the host's keyring (see `cloud::secrets`), keyed by an opaque `secret_ref`
 //! the plugin chose. The host never persists anything else.
+//!
+//! Cloud logic lives in `crates/arbor-cloud`. These commands are thin
+//! shims that pull the `Arc<dyn CloudHost>` out of Tauri State and forward
+//! into the crate. The `CloudHost` is published once at startup by
+//! `crate::cloud::install` (see `cloud/mod.rs`).
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use tauri::{Manager, State};
+use tauri::State;
 
-use crate::error::{AppError, Result};
+use arbor_cloud::host::CloudHost;
 use crate::cloud::{
     self,
     types::{CloudConnection, CloudListPage, CloudObject, CloudTestReport},
     transfer::SyncDir,
 };
+use crate::error::{AppError, Result};
 use crate::AppState;
 
 // ── Secrets (keyring) ──────────────────────────────────────────────────────
 
 #[tauri::command]
 pub fn cloud_secret_set(_state: State<'_, AppState>, secret_ref: String, value: String) -> Result<()> {
-    cloud::secrets::set(&secret_ref, &value)
+    cloud::secrets::set(&secret_ref, &value).map_err(Into::into)
 }
 
 #[tauri::command]
 pub fn cloud_secret_exists(_state: State<'_, AppState>, secret_ref: String) -> Result<bool> {
-    cloud::secrets::exists(&secret_ref)
+    cloud::secrets::exists(&secret_ref).map_err(Into::into)
 }
 
 #[tauri::command]
 pub fn cloud_secret_delete(_state: State<'_, AppState>, secret_ref: String) -> Result<()> {
-    cloud::secrets::delete(&secret_ref)
+    cloud::secrets::delete(&secret_ref).map_err(Into::into)
 }
 
 // ── Connection probe ───────────────────────────────────────────────────────
@@ -41,7 +48,7 @@ pub async fn cloud_test_connection(
     conn:   CloudConnection,
     bucket: Option<String>,
 ) -> Result<CloudTestReport> {
-    cloud::ops::test_connection(&conn, bucket.as_deref()).await
+    cloud::ops::test_connection(&conn, bucket.as_deref()).await.map_err(Into::into)
 }
 
 // ── Object operations ──────────────────────────────────────────────────────
@@ -55,6 +62,7 @@ pub async fn cloud_list(
     limit:  Option<usize>,
 ) -> Result<CloudListPage> {
     cloud::ops::list(&conn, &bucket, prefix.as_deref().unwrap_or(""), limit).await
+        .map_err(Into::into)
 }
 
 /// Wildcard search — recursive list under `root_prefix` filtered by a glob
@@ -64,7 +72,7 @@ pub async fn cloud_list(
 /// non-separator char. Capped at SEARCH_HARD_CAP results.
 #[tauri::command]
 pub async fn cloud_search_stream(
-    app:         tauri::AppHandle,
+    host:        State<'_, Arc<dyn CloudHost>>,
     state:       State<'_, AppState>,
     conn:        CloudConnection,
     bucket:      String,
@@ -79,12 +87,13 @@ pub async fn cloud_search_stream(
         )?;
         map.insert(stream_id.clone(), cancel.clone());
     };
-    let root = root_prefix.unwrap_or_default();
-    let sid  = stream_id.clone();
+    let root  = root_prefix.unwrap_or_default();
+    let sid   = stream_id.clone();
+    let host  = host.inner().clone();
+    let state_cancel = state.cloud_cancellations.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = cloud::ops::search_stream(app.clone(), conn, bucket, root, pattern, sid.clone(), cancel).await;
-        let st = app.state::<AppState>();
-        if let Ok(mut map) = st.cloud_cancellations.lock() {
+        let _ = cloud::ops::search_stream(host, conn, bucket, root, pattern, sid.clone(), cancel).await;
+        if let Ok(mut map) = state_cancel.lock() {
             map.remove(&sid);
         };
     });
@@ -96,7 +105,7 @@ pub async fn cloud_search_stream(
 /// the stream_id (so callers can cancel via `cloud_cancellations`).
 #[tauri::command]
 pub async fn cloud_list_stream(
-    app:       tauri::AppHandle,
+    host:      State<'_, Arc<dyn CloudHost>>,
     state:     State<'_, AppState>,
     conn:      CloudConnection,
     bucket:    String,
@@ -113,11 +122,12 @@ pub async fn cloud_list_stream(
     }
     let prefix = prefix.unwrap_or_default();
     let sid    = stream_id.clone();
+    let host   = host.inner().clone();
+    let state_cancel = state.cloud_cancellations.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = cloud::ops::list_stream(app.clone(), conn, bucket, prefix, sid.clone(), cap, cancel).await;
+        let _ = cloud::ops::list_stream(host, conn, bucket, prefix, sid.clone(), cap, cancel).await;
         // Drop the cancellation flag from the registry once we're done.
-        let st = app.state::<AppState>();
-        if let Ok(mut map) = st.cloud_cancellations.lock() {
+        if let Ok(mut map) = state_cancel.lock() {
             map.remove(&sid);
         };
     });
@@ -131,7 +141,7 @@ pub async fn cloud_stat(
     bucket: String,
     path:   String,
 ) -> Result<CloudObject> {
-    cloud::ops::stat(&conn, &bucket, &path).await
+    cloud::ops::stat(&conn, &bucket, &path).await.map_err(Into::into)
 }
 
 #[tauri::command]
@@ -143,6 +153,7 @@ pub async fn cloud_delete(
     recursive: Option<bool>,
 ) -> Result<()> {
     cloud::ops::delete(&conn, &bucket, &path, recursive.unwrap_or(false)).await
+        .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -153,26 +164,27 @@ pub async fn cloud_copy(
     src:    String,
     dst:    String,
 ) -> Result<()> {
-    cloud::ops::copy(&conn, &bucket, &src, &dst).await
+    cloud::ops::copy(&conn, &bucket, &src, &dst).await.map_err(Into::into)
 }
 
 // ── Transfers (jobified) ───────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn cloud_download(
-    app:    tauri::AppHandle,
+    host:   State<'_, Arc<dyn CloudHost>>,
     _state: State<'_, AppState>,
     conn:   CloudConnection,
     bucket: String,
     path:   String,
     local:  String,
 ) -> Result<String> {
-    cloud::transfer::download(app, conn, bucket, path, PathBuf::from(local)).await
+    cloud::transfer::download(host.inner().clone(), conn, bucket, path, PathBuf::from(local))
+        .await.map_err(Into::into)
 }
 
 #[tauri::command]
 pub async fn cloud_upload(
-    app:       tauri::AppHandle,
+    host:      State<'_, Arc<dyn CloudHost>>,
     _state:    State<'_, AppState>,
     conn:      CloudConnection,
     bucket:    String,
@@ -180,12 +192,13 @@ pub async fn cloud_upload(
     local:     String,
     overwrite: Option<bool>,
 ) -> Result<String> {
-    cloud::transfer::upload(app, conn, bucket, path, PathBuf::from(local), overwrite.unwrap_or(false)).await
+    cloud::transfer::upload(host.inner().clone(), conn, bucket, path, PathBuf::from(local), overwrite.unwrap_or(false))
+        .await.map_err(Into::into)
 }
 
 #[tauri::command]
 pub async fn cloud_sync(
-    app:           tauri::AppHandle,
+    host:          State<'_, Arc<dyn CloudHost>>,
     _state:        State<'_, AppState>,
     conn:          CloudConnection,
     bucket:        String,
@@ -201,14 +214,15 @@ pub async fn cloud_sync(
             "cloud_sync: direction must be \"up\" or \"down\", got {other:?}"
         ))),
     };
-    cloud::transfer::sync(app, conn, bucket, remote_prefix, PathBuf::from(local), dir, delete.unwrap_or(false)).await
+    cloud::transfer::sync(host.inner().clone(), conn, bucket, remote_prefix, PathBuf::from(local), dir, delete.unwrap_or(false))
+        .await.map_err(Into::into)
 }
 
 // ── download_many / concat_files / is_cancelled ───────────────────────────
 
 #[tauri::command]
 pub async fn cloud_download_many(
-    app:         tauri::AppHandle,
+    host:        State<'_, Arc<dyn CloudHost>>,
     _state:      State<'_, AppState>,
     conn:        CloudConnection,
     bucket:      String,
@@ -223,11 +237,11 @@ pub async fn cloud_download_many(
     let parallel = parallel.unwrap_or(4).clamp(1, 16);
     let op_label = op_label.unwrap_or_else(|| format!("Downloading {} files", paths.len()));
     cloud::transfer::download_many(
-        app, conn, bucket, paths, std::path::PathBuf::from(local_dir),
+        host.inner().clone(), conn, bucket, paths, std::path::PathBuf::from(local_dir),
         parallel, op_label, stream_id,
         extra_steps.unwrap_or_default(),
         keep_open.unwrap_or(false),
-    ).await
+    ).await.map_err(Into::into)
 }
 
 #[tauri::command]
@@ -238,6 +252,7 @@ pub async fn cloud_concat_files(
     delete_inputs: Option<bool>,
 ) -> Result<()> {
     cloud::ops::concat_files(inputs, output, delete_inputs.unwrap_or(false)).await
+        .map_err(Into::into)
 }
 
 /// Push a step update to the OperationsOverlay card backing a
@@ -367,11 +382,12 @@ pub fn cloud_is_cancelled(state: State<'_, AppState>, stream_id: String) -> Resu
 
 #[tauri::command]
 pub async fn cloud_gcs_oauth_start(
-    app:           tauri::AppHandle,
+    host:          State<'_, Arc<dyn CloudHost>>,
     _state:        State<'_, AppState>,
     secret_ref:    String,
     client_id:     String,
     client_secret: Option<String>,
 ) -> Result<String> {
-    cloud::oauth_google::start(app, secret_ref, client_id, client_secret).await
+    cloud::oauth_google::start(host.inner().clone(), secret_ref, client_id, client_secret)
+        .await.map_err(Into::into)
 }

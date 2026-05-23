@@ -1,5 +1,4 @@
 pub mod credential_store;
-pub mod device_flow;
 pub mod oauth_jira;
 pub mod oauth_linear;
 
@@ -68,6 +67,11 @@ pub async fn maybe_refresh_for_provider(provider: &str) {
 }
 
 /// Device Authorization Grant response (GitHub / GitLab Device Flow).
+///
+/// Wire shape returned to the frontend by `start_github_device_flow`. The
+/// underlying transport lives in [`arbor_auth::oauth2::DeviceFlow`]; this
+/// struct is the public API surface that has shipped to consumers, kept
+/// stable for the IPC layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceFlowInfo {
     pub device_code: String,
@@ -75,14 +79,4 @@ pub struct DeviceFlowInfo {
     pub verification_uri: String,
     pub expires_in: u64,
     pub interval: u64,
-}
-
-/// Result of a single device-token poll cycle.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PollResult {
-    /// "pending" | "authorized" | "denied" | "expired"
-    pub status: String,
-    pub token: Option<String>,
-    /// New polling interval in seconds (set by GitHub slow_down response).
-    pub interval: Option<u64>,
 }

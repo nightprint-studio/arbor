@@ -10,13 +10,16 @@
 //! the host deserialises them via serde so the Lua surface stays close
 //! to the Rust types.
 
+use std::sync::Arc;
+
 use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
+use arbor_cloud::host::CloudHost;
+use crate::cloud::types::CloudConnection;
 use crate::error::{AppError, Result};
 use crate::plugin::api::ctx::ApiCtx;
 use crate::plugin::api::helpers::tuple::{LuaTuple, err2, ok2};
-use crate::cloud::types::CloudConnection;
 
 pub(crate) fn install(_ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -256,12 +259,18 @@ fn install_list_stream(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
             };
         }
 
+        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
         let app    = h.clone();
         let sid    = stream_id.clone();
         let bk     = bucket.clone();
         let pref   = prefix.unwrap_or_default();
+        // MUST be `tauri::async_runtime::spawn` (not `tokio::spawn`): this
+        // closure runs on the Lua plugin-host thread which has no tokio
+        // current runtime, so `tokio::spawn` would panic with "there is no
+        // reactor running". The Tauri wrapper always targets the long-lived
+        // runtime Tauri created at startup.
         tauri::async_runtime::spawn(async move {
-            let _ = crate::cloud::ops::list_stream(app.clone(), conn, bk, pref, sid.clone(), cap, cancel).await;
+            let _ = crate::cloud::ops::list_stream(host, conn, bk, pref, sid.clone(), cap, cancel).await;
             let st = app.state::<crate::AppState>();
             if let Ok(mut map) = st.cloud_cancellations.lock() {
                 map.remove(&sid);
@@ -294,11 +303,14 @@ fn install_search_stream(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
             };
         }
 
+        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
         let app = h.clone();
         let sid = stream_id.clone();
+        // MUST be `tauri::async_runtime::spawn` — see install_list_stream
+        // for the rationale (Lua closure has no current tokio runtime).
         tauri::async_runtime::spawn(async move {
             let _ = crate::cloud::ops::search_stream(
-                app.clone(), conn, bucket, root_prefix, pattern, sid.clone(), cancel,
+                host, conn, bucket, root_prefix, pattern, sid.clone(), cancel,
             ).await;
             let st = app.state::<crate::AppState>();
             if let Ok(mut map) = st.cloud_cancellations.lock() {
@@ -415,8 +427,9 @@ fn install_download(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
         let bucket = match req_str(&opts, "bucket", op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let path   = match req_str(&opts, "path",   op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let local  = match req_str(&opts, "local",  op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
+        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
         let res = block_on!(crate::cloud::transfer::download(
-            h.clone(), conn, bucket, path, std::path::PathBuf::from(local),
+            host, conn, bucket, path, std::path::PathBuf::from(local),
         ));
         match res {
             Ok(id) => ok2(_lua_ctx, mlua::Value::String(_lua_ctx.create_string(&id)?)),
@@ -439,8 +452,9 @@ fn install_upload(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
         let path      = match req_str(&opts, "path",   op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let local     = match req_str(&opts, "local",  op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let overwrite = opt_bool(&opts, "overwrite").unwrap_or(false);
+        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
         let res = block_on!(crate::cloud::transfer::upload(
-            h.clone(), conn, bucket, path, std::path::PathBuf::from(local), overwrite,
+            host, conn, bucket, path, std::path::PathBuf::from(local), overwrite,
         ));
         match res {
             Ok(id) => ok2(_lua_ctx, mlua::Value::String(_lua_ctx.create_string(&id)?)),
@@ -469,8 +483,9 @@ fn install_sync(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
             "down" => crate::cloud::transfer::SyncDir::Down,
             other  => return err2(_lua_ctx, format!("{op}: direction must be \"up\" or \"down\", got {other:?}")),
         };
+        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
         let res = block_on!(crate::cloud::transfer::sync(
-            h.clone(), conn, bucket, remote_prefix,
+            host, conn, bucket, remote_prefix,
             std::path::PathBuf::from(local), dir, delete,
         ));
         match res {
@@ -527,8 +542,9 @@ fn install_download_many(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
         }
         let keep_open = opt_bool(&opts, "keep_open").unwrap_or(false);
 
+        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
         let res = block_on!(crate::cloud::transfer::download_many(
-            h.clone(), conn, bucket, paths, std::path::PathBuf::from(local_dir),
+            host, conn, bucket, paths, std::path::PathBuf::from(local_dir),
             parallel.unwrap_or(4).clamp(1, 16),
             op_label.unwrap_or_else(|| format!("Downloading items")),
             stream_id.clone(),
@@ -723,8 +739,9 @@ fn install_oauth_start(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
         let secret_ref    = match req_str(&opts, "secret_ref", op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let client_id     = match req_str(&opts, "client_id",  op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let client_secret = opt_str(&opts, "client_secret");
+        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
         let res = block_on!(crate::cloud::oauth_google::start(
-            h.clone(), secret_ref, client_id, client_secret,
+            host, secret_ref, client_id, client_secret,
         ));
         match res {
             Ok(url) => ok2(_lua_ctx, mlua::Value::String(_lua_ctx.create_string(&url)?)),

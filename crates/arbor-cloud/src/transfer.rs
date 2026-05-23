@@ -1,18 +1,21 @@
 //! Streaming download/upload + recursive sync.
 //!
-//! Each entry point registers a job in [`JobRegistry`], spawns a tokio
-//! task, and returns the job id immediately. The task streams bytes in
-//! chunks, periodically:
-//!   * emits `arbor://cloud-progress` with bytes_done/bytes_total/speed
-//!   * appends a human-readable line to the job output via
-//!     `JobRegistry::append_output`
-//! and on completion emits `arbor://cloud-job-done` + sets the final
-//! `JobStatus` on the registry.
+//! Each entry point registers a job via [`CloudHost::job_register`], spawns
+//! a tokio task, and returns the job id immediately. The task streams bytes
+//! in chunks, periodically:
+//!   * emits `arbor://cloud-progress` via [`CloudHost::emit_event`] (the JS
+//!     frontend listens)
+//!   * fires the `cloud-storage:progress` plugin hook via
+//!     [`CloudHost::fire_plugin_hook`] (Lua subscribers listen)
+//!   * appends a human-readable line via [`CloudHost::job_append_output`]
+//! and on completion fires `arbor://cloud-job-done` + sets the final
+//! `CloudJobStatus`.
 //!
 //! Cancellation is cooperative: every spawn registers an `Arc<AtomicBool>`
-//! flag in `AppState.cloud_cancellations`. The standard `cancel_job`
-//! command flips that flag (in addition to the normal subprocess-kill
-//! path) and the streaming loop breaks out at the next chunk boundary.
+//! in [`CloudHost::cancellations`]. The host's `cancel_job` Tauri command
+//! flips that flag (in addition to the normal PID-kill path used for
+//! subprocess-backed jobs) and the streaming loop breaks out at the next
+//! chunk boundary.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,35 +23,38 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use futures_util::StreamExt;
-use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::error::{AppError, Result};
-use crate::jobs::{JobInfo, JobStatus};
-use crate::cloud::operator::{build, map_op_err};
-use crate::cloud::types::{CloudConnection, CloudProgress};
-use crate::AppState;
+use crate::error::{CloudError, Result};
+use crate::host::{CloudHost, CloudJobInfo, CloudJobStatus};
+use crate::operator::{build, map_op_err};
+use crate::types::{CloudConnection, CloudProgress};
 
 const PLUGIN_NAME:    &str = "cloud-storage";
 const HOOK_PROGRESS:  &str = "cloud-storage:progress";
 const HOOK_JOB_DONE:  &str = "cloud-storage:job-done";
 
-// download_many → modal listens on the Tauri channel, Lua plugin orchestrator
-// listens on the hook (only the terminal `done` event reaches both — progress
-// updates are UI-only and don't need Lua delivery).
+// download_many → modal listens on the Tauri event channel, Lua plugin
+// orchestrator listens on the hook (only the terminal `done` event reaches
+// both — progress updates are UI-only and don't need Lua delivery).
 const EVT_MANY_PROGRESS: &str = "arbor://cloud-many-progress";
 const EVT_MANY_DONE:     &str = "arbor://cloud-many-done";
 const HOOK_MANY_DONE:    &str = "cloud-storage:download-many-done";
 
-fn fire_plugin_hook(app: &AppHandle, hook: &str, payload: serde_json::Value) {
-    let state = app.state::<AppState>();
-    let json  = match serde_json::to_string(&payload) {
+/// Helper: serialise a `Value` and fan it out to Lua subscribers via the
+/// `cloud-storage` plugin hook. Errors during encoding are logged and
+/// swallowed — there's nothing the caller could do with them.
+fn fire_plugin_hook(host: &dyn CloudHost, hook: &str, payload: serde_json::Value) {
+    let json = match serde_json::to_string(&payload) {
         Ok(s)  => s,
         Err(e) => { tracing::warn!("cloud hook encode: {e}"); return; }
     };
-    if let Ok(host) = state.lock_plugin_host() {
-        let _ = host.fire_hook_on(PLUGIN_NAME, hook, &json);
-    };
+    host.fire_plugin_hook(PLUGIN_NAME, hook, &json);
+}
+
+fn now_secs() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
 const CHUNK_SIZE:        usize = 256 * 1024;  // 256 KiB per opendal read/write
@@ -57,31 +63,31 @@ const PROGRESS_TICK_MS:  u128  = 200;          // emit/append every ~200ms
 // ── public entry points ────────────────────────────────────────────────────
 
 pub async fn download(
-    app:       AppHandle,
+    host:      Arc<dyn CloudHost>,
     conn:      CloudConnection,
     bucket:    String,
     remote:    String,
     local:     PathBuf,
 ) -> Result<String> {
     let (job_id, cancel) = spawn_job_shell(
-        &app,
+        &*host,
         &conn.config_id,
         "Download",
         &format!("{bucket}:{remote} → {}", local.display()),
     )?;
-    let app_for_task = app.clone();
+    let host_t = host.clone();
     let task_id = job_id.clone();
     tokio::spawn(async move {
         let result = run_download(
-            &app_for_task, &task_id, &conn, &bucket, &remote, &local, cancel.clone()
+            &*host_t, &task_id, &conn, &bucket, &remote, &local, cancel.clone()
         ).await;
-        finalize_job(&app_for_task, &task_id, result, &cancel).await;
+        finalize_job(&*host_t, &task_id, result, &cancel).await;
     });
     Ok(job_id)
 }
 
 pub async fn upload(
-    app:       AppHandle,
+    host:      Arc<dyn CloudHost>,
     conn:      CloudConnection,
     bucket:    String,
     remote:    String,
@@ -89,24 +95,24 @@ pub async fn upload(
     overwrite: bool,
 ) -> Result<String> {
     let (job_id, cancel) = spawn_job_shell(
-        &app,
+        &*host,
         &conn.config_id,
         "Upload",
         &format!("{} → {bucket}:{remote}", local.display()),
     )?;
-    let app_for_task = app.clone();
+    let host_t = host.clone();
     let task_id = job_id.clone();
     tokio::spawn(async move {
         let result = run_upload(
-            &app_for_task, &task_id, &conn, &bucket, &remote, &local, overwrite, cancel.clone()
+            &*host_t, &task_id, &conn, &bucket, &remote, &local, overwrite, cancel.clone()
         ).await;
-        finalize_job(&app_for_task, &task_id, result, &cancel).await;
+        finalize_job(&*host_t, &task_id, result, &cancel).await;
     });
     Ok(job_id)
 }
 
 pub async fn sync(
-    app:       AppHandle,
+    host:      Arc<dyn CloudHost>,
     conn:      CloudConnection,
     bucket:    String,
     remote_prefix: String,
@@ -119,15 +125,15 @@ pub async fn sync(
         SyncDir::Down => format!("{bucket}:{remote_prefix} → {}", local.display()),
         SyncDir::Up   => format!("{} → {bucket}:{remote_prefix}", local.display()),
     };
-    let (job_id, cancel) = spawn_job_shell(&app, &conn.config_id, kind_label, &label)?;
-    let app_for_task = app.clone();
+    let (job_id, cancel) = spawn_job_shell(&*host, &conn.config_id, kind_label, &label)?;
+    let host_t = host.clone();
     let task_id = job_id.clone();
     tokio::spawn(async move {
         let result = run_sync(
-            &app_for_task, &task_id, &conn, &bucket, &remote_prefix, &local,
+            &*host_t, &task_id, &conn, &bucket, &remote_prefix, &local,
             direction, delete, cancel.clone(),
         ).await;
-        finalize_job(&app_for_task, &task_id, result, &cancel).await;
+        finalize_job(&*host_t, &task_id, result, &cancel).await;
     });
     Ok(job_id)
 }
@@ -158,7 +164,7 @@ struct ManyFileState {
 pub type ExtraSteps = Vec<(String, String)>;
 
 pub async fn download_many(
-    app:        AppHandle,
+    host:       Arc<dyn CloudHost>,
     conn:       CloudConnection,
     bucket:     String,
     paths:      Vec<String>,
@@ -170,42 +176,38 @@ pub async fn download_many(
     keep_open:  bool,
 ) -> Result<String> {
     if paths.is_empty() {
-        return Err(AppError::Other("download_many: paths is empty".into()));
+        return Err(CloudError::Other("download_many: paths is empty".into()));
     }
     tokio::fs::create_dir_all(&local_dir).await
-        .map_err(|e| AppError::Other(format!("mkdir {}: {e}", local_dir.display())))?;
+        .map_err(|e| CloudError::Other(format!("mkdir {}: {e}", local_dir.display())))?;
 
     // One shared cancellation flag for the aggregate. Registered in the
-    // global map so `cancel_job` / `arbor.cloud.cancel` flip it just like
-    // any other cloud op.
+    // host's cancellations map so `cancel_job` / `arbor.cloud.cancel` flip
+    // it just like any other cloud op.
     let cancel = Arc::new(AtomicBool::new(false));
     {
-        let state = app.state::<AppState>();
-        let mut map = state.cloud_cancellations.lock().map_err(|e|
-            AppError::MutexPoisoned(format!("cloud_cancellations: {e}"))
+        let mut map = host.cancellations().lock().map_err(|e|
+            CloudError::Other(format!("cloud_cancellations poisoned: {e}"))
         )?;
         map.insert(stream_id.clone(), cancel.clone());
     };
 
-    // Register the aggregate JobRegistry entry so it appears in JobsOverlay /
-    // status bar count, and `cancel_job` can flip the cancel flag through the
-    // standard plumbing.
+    // Register the aggregate job so it appears in JobsOverlay / status bar
+    // count, and `cancel_job` can flip the cancel flag through the standard
+    // plumbing.
     let job_id = {
-        let state = app.state::<AppState>();
-        let mut jobs = state.lock_jobs()?;
-        let id = jobs.new_id();
-        jobs.register(JobInfo {
+        let id = host.job_new_id();
+        host.job_register(CloudJobInfo {
             id:          id.clone(),
             name:        op_label.clone(),
             plugin_name: "cloud-storage".into(),
             command:     "cloud:download_many".into(),
-            started_at:  crate::jobs::JobRegistry::now_secs(),
-            status:      JobStatus::Running,
+            started_at:  now_secs(),
+            status:      CloudJobStatus::Running,
             category:    Some("Cloud Storage".into()),
             non_cancellable: false,
             hidden:      false,
             is_system:   false,
-            finished_at: None,
         });
         id
     };
@@ -213,7 +215,7 @@ pub async fn download_many(
     // proper name. The single-shell helper emits the same payload shape;
     // download_many goes its own route (no spawn_job_shell call) so we have
     // to mirror it here.
-    let _ = app.emit("arbor://job-started", serde_json::json!({
+    host.emit_event("arbor://job-started", serde_json::json!({
         "job_id":      job_id,
         "name":        op_label,
         "plugin_name": "cloud-storage",
@@ -225,8 +227,7 @@ pub async fn download_many(
     // Bind the job_id to the same cancel flag so the standard cancel_job
     // (which keys by job_id) hits this aggregate too.
     {
-        let state = app.state::<AppState>();
-        if let Ok(mut map) = state.cloud_cancellations.lock() {
+        if let Ok(mut map) = host.cancellations().lock() {
             map.insert(job_id.clone(), cancel.clone());
         };
     }
@@ -263,17 +264,16 @@ pub async fn download_many(
         }).collect()
     ));
 
-    let app_for_task   = app.clone();
-    let stream_for_task = stream_id.clone();
-    let job_for_task   = job_id.clone();
-    let cancel_for_task = cancel.clone();
-    let states_for_task = states.clone();
-    let label_for_task = op_label.clone();
-
-    let extra_for_task = extra_steps.clone();
+    let host_for_task    = host.clone();
+    let stream_for_task  = stream_id.clone();
+    let job_for_task     = job_id.clone();
+    let cancel_for_task  = cancel.clone();
+    let states_for_task  = states.clone();
+    let label_for_task   = op_label.clone();
+    let extra_for_task   = extra_steps.clone();
     tokio::spawn(async move {
         run_download_many(
-            app_for_task,
+            host_for_task,
             conn,
             bucket,
             local_dir,
@@ -293,7 +293,7 @@ pub async fn download_many(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_download_many(
-    app:         AppHandle,
+    host:        Arc<dyn CloudHost>,
     conn:        CloudConnection,
     bucket:      String,
     _local_dir:  PathBuf,
@@ -331,7 +331,7 @@ async fn run_download_many(
         for (key, label) in &extra_steps {
             steps.push(serde_json::json!({ "key": key, "label": label }));
         }
-        let _ = app.emit("arbor://plugin-operation-start", serde_json::json!({
+        host.emit_event("arbor://plugin-operation-start", serde_json::json!({
             "id":       &op_id,
             "plugin":   "cloud-storage",
             "title":    &op_label,
@@ -342,17 +342,17 @@ async fn run_download_many(
     }
 
     // When the caller plans to drive a follow-up phase (chunk merge), we
-    // stash the job_id so `report_done` can finalize the JobRegistry entry
-    // once that phase reports its terminal state.
+    // stash the job_id so `report_done` can finalize the job once that
+    // phase reports its terminal state.
     if keep_open {
-        if let Ok(mut map) = app.state::<AppState>().cloud_pending_ops.lock() {
+        if let Ok(mut map) = host.pending_ops().lock() {
             map.insert(stream_id.clone(), job_id.clone());
         }
     }
 
     // Periodic aggregate-progress emitter. Reads the shared state snapshot
     // every PROGRESS_AGGREGATE_MS and fires the hook. Stops when `done` is set.
-    let prog_app    = app.clone();
+    let prog_host   = host.clone();
     let prog_states = states.clone();
     let prog_label  = op_label.clone();
     let prog_stream = stream_id.clone();
@@ -363,7 +363,7 @@ async fn run_download_many(
         loop {
             tick.tick().await;
             if prog_done_w.load(Ordering::Relaxed) { break; }
-            emit_aggregate_progress(&prog_app, &prog_stream, &prog_label, &prog_states).await;
+            emit_aggregate_progress(&*prog_host, &prog_stream, &prog_label, &prog_states).await;
         }
     });
 
@@ -375,7 +375,7 @@ async fn run_download_many(
         let bucket_c = bucket.clone();
         let states_c = states.clone();
         let cancel_c = cancel.clone();
-        let app_c    = app.clone();
+        let host_c   = host.clone();
         // Clone the per-task strings BEFORE the `async move` closure so the
         // owner (`job_id` / `op_id`) survives every iteration. With `async
         // move` an inner `.clone()` would still move the original on the
@@ -396,9 +396,8 @@ async fn run_download_many(
                 let mut s = states_c.lock().await;
                 s[i].status = "cancelled";
                 let line = format!("[{:>3}/{}] cancelled: {}", i + 1, n, s[i].basename);
-                let st = app_c.state::<AppState>();
-                if let Ok(mut jobs) = st.lock_jobs() { jobs.append_output(&job_c, line); };
-                let _ = app_c.emit("arbor://plugin-operation-update", serde_json::json!({
+                host_c.job_append_output(&job_c, line);
+                host_c.emit_event("arbor://plugin-operation-update", serde_json::json!({
                     "id": &op_c, "plugin": "cloud-storage",
                     "kind": "update_step", "step": &step_key,
                     "status": "skipped", "detail": "cancelled before start",
@@ -420,11 +419,10 @@ async fn run_download_many(
                 let mut s = states_c.lock().await;
                 s[i].status = "downloading";
                 let line = format!("[{:>3}/{}] start: {}", i + 1, n, s[i].basename);
-                let st = app_c.state::<AppState>();
-                if let Ok(mut jobs) = st.lock_jobs() { jobs.append_output(&job_c, line); };
+                host_c.job_append_output(&job_c, line);
                 // Mark THIS step as the current active one — the collapsed
                 // overlay header reads `currentIdx + 1 / N · <label>` from this.
-                let _ = app_c.emit("arbor://plugin-operation-update", serde_json::json!({
+                host_c.emit_event("arbor://plugin-operation-update", serde_json::json!({
                     "id":     &op_c,
                     "plugin": "cloud-storage",
                     "kind":   "set_current",
@@ -436,7 +434,7 @@ async fn run_download_many(
             // Stream this file. Updates per-file bytes_done in the shared
             // state so the aggregate emitter sees fresh numbers.
             let res = stream_one_file(
-                &app_c, &conn_c, &bucket_c, &path, &local_path,
+                &*host_c, &conn_c, &bucket_c, &path, &local_path,
                 cancel_c.clone(), states_c.clone(), i,
             ).await;
 
@@ -453,7 +451,7 @@ async fn run_download_many(
                         Some(human_bytes(s[i].bytes_total)),
                     )
                 }
-                Err(AppError::Cancelled) => {
+                Err(CloudError::Cancelled) => {
                     s[i].status = "cancelled";
                     (
                         format!("[{:>3}/{}] cancelled: {}", i + 1, n, s[i].basename),
@@ -471,9 +469,8 @@ async fn run_download_many(
                     )
                 }
             };
-            let st = app_c.state::<AppState>();
-            if let Ok(mut jobs) = st.lock_jobs() { jobs.append_output(&job_c, line); };
-            let _ = app_c.emit("arbor://plugin-operation-update", serde_json::json!({
+            host_c.job_append_output(&job_c, line);
+            host_c.emit_event("arbor://plugin-operation-update", serde_json::json!({
                 "id":     &op_c,
                 "plugin": "cloud-storage",
                 "kind":   "update_step",
@@ -494,7 +491,7 @@ async fn run_download_many(
     // shows the terminal per-file states before the done hook lands.
     prog_done.store(true, Ordering::Relaxed);
     let _ = progress_task.await;
-    emit_aggregate_progress(&app, &stream_id, &op_label, &states).await;
+    emit_aggregate_progress(&*host, &stream_id, &op_label, &states).await;
 
     // Build the final done payload.
     let (ok, local_paths, error) = {
@@ -525,9 +522,9 @@ async fn run_download_many(
         "local_paths": local_paths,
     });
     // Tauri channel for the host modal.
-    let _ = app.emit(EVT_MANY_DONE, &done_payload);
+    host.emit_event(EVT_MANY_DONE, done_payload.clone());
     // Hook for the plugin orchestrator (the chunk-handler trigger).
-    fire_plugin_hook(&app, HOOK_MANY_DONE, done_payload);
+    fire_plugin_hook(&*host, HOOK_MANY_DONE, done_payload);
 
     // Close the OperationsOverlay card with a per-status summary — unless
     // `keep_open` is set (chunk-merge flow), in which case the merge phase
@@ -557,14 +554,13 @@ async fn run_download_many(
         let error_msg = if !ok {
             error.clone().or_else(|| Some("download failed".to_string()))
         } else { None };
-        let _ = app.emit("arbor://plugin-operation-finish", serde_json::json!({
+        host.emit_event("arbor://plugin-operation-finish", serde_json::json!({
             "id":      &op_id,
             "plugin":  "cloud-storage",
             "summary": summary,
             "error":   error_msg,
         }));
 
-        let state = app.state::<AppState>();
         let cancelled_flag = cancel.load(Ordering::Relaxed);
         let final_err = if ok {
             None
@@ -573,32 +569,30 @@ async fn run_download_many(
         } else {
             error.clone().or_else(|| Some("unknown error".into()))
         };
-        if let Ok(mut jobs) = state.lock_jobs() {
-            let status = if ok {
-                JobStatus::Completed { exit_code: 0 }
-            } else if cancelled_flag {
-                JobStatus::Cancelled
-            } else {
-                JobStatus::Failed {
-                    error: final_err.clone().unwrap_or_else(|| "unknown error".into()),
-                }
-            };
-            jobs.set_status(&job_id, status);
+        let status = if ok {
+            CloudJobStatus::Completed { exit_code: 0 }
+        } else if cancelled_flag {
+            CloudJobStatus::Cancelled
+        } else {
+            CloudJobStatus::Failed {
+                error: final_err.clone().unwrap_or_else(|| "unknown error".into()),
+            }
         };
+        host.job_set_status(&job_id, status);
         // Mirror the single-job `finalize_job` so JobsOverlay flips this
         // aggregate from running → terminal state.
-        let _ = app.emit("arbor://job-done", serde_json::json!({
+        host.emit_event("arbor://job-done", serde_json::json!({
             "job_id":    job_id,
             "success":   ok,
             "exit_code": if ok { 0 } else { -1 },
             "cancelled": cancelled_flag,
             "error":     final_err,
         }));
-        if let Ok(mut map) = state.cloud_cancellations.lock() {
+        if let Ok(mut map) = host.cancellations().lock() {
             map.remove(&job_id);
             map.remove(&stream_id);
         };
-        if let Ok(mut map) = state.cloud_pending_ops.lock() {
+        if let Ok(mut map) = host.pending_ops().lock() {
             map.remove(&stream_id);
         };
     }
@@ -611,7 +605,7 @@ async fn run_download_many(
 /// Download one object, mutating the shared state's `bytes_done` / `bytes_total`
 /// so the aggregate emitter sees fresh values without a separate channel.
 async fn stream_one_file(
-    app:        &AppHandle,
+    host:       &dyn CloudHost,
     conn:       &CloudConnection,
     bucket:     &str,
     remote:     &str,
@@ -620,7 +614,7 @@ async fn stream_one_file(
     states:     Arc<tokio::sync::Mutex<Vec<ManyFileState>>>,
     index:      usize,
 ) -> Result<()> {
-    let _ = app; // reserved for per-file events later if we add them
+    let _ = host; // reserved for per-file events later if we add them
     let op = build(conn, bucket).await?;
     let meta = op.stat(remote).await.map_err(map_op_err)?;
     let total = if meta.is_file() { meta.content_length() } else { 0 };
@@ -633,7 +627,7 @@ async fn stream_one_file(
     if let Some(parent) = local_path.parent() {
         if !parent.as_os_str().is_empty() {
             tokio::fs::create_dir_all(parent).await
-                .map_err(|e| AppError::Other(format!("mkdir {}: {e}", parent.display())))?;
+                .map_err(|e| CloudError::Other(format!("mkdir {}: {e}", parent.display())))?;
         }
     }
 
@@ -641,23 +635,23 @@ async fn stream_one_file(
         .into_bytes_stream(0..)
         .await.map_err(map_op_err)?;
     let mut file = tokio::fs::File::create(local_path).await
-        .map_err(|e| AppError::Other(format!("create {}: {e}", local_path.display())))?;
+        .map_err(|e| CloudError::Other(format!("create {}: {e}", local_path.display())))?;
 
     while let Some(chunk) = reader.next().await {
-        if cancel.load(Ordering::Relaxed) { return Err(AppError::Cancelled); }
-        let bytes = chunk.map_err(|e| AppError::Other(format!("opendal read: {e}")))?;
+        if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
+        let bytes = chunk.map_err(|e| CloudError::Other(format!("opendal read: {e}")))?;
         file.write_all(&bytes).await
-            .map_err(|e| AppError::Other(format!("write {}: {e}", local_path.display())))?;
+            .map_err(|e| CloudError::Other(format!("write {}: {e}", local_path.display())))?;
         let mut s = states.lock().await;
         s[index].bytes_done += bytes.len() as u64;
     }
     file.flush().await
-        .map_err(|e| AppError::Other(format!("flush {}: {e}", local_path.display())))?;
+        .map_err(|e| CloudError::Other(format!("flush {}: {e}", local_path.display())))?;
     Ok(())
 }
 
 async fn emit_aggregate_progress(
-    app:       &AppHandle,
+    host:      &dyn CloudHost,
     stream_id: &str,
     op_label:  &str,
     states:    &Arc<tokio::sync::Mutex<Vec<ManyFileState>>>,
@@ -670,7 +664,7 @@ async fn emit_aggregate_progress(
 
     // Progress goes straight to the Tauri channel — modal-only, no Lua
     // subscriber needs the high-frequency stream.
-    let _ = app.emit(EVT_MANY_PROGRESS, serde_json::json!({
+    host.emit_event(EVT_MANY_PROGRESS, serde_json::json!({
         "stream_id": stream_id,
         "op_label":  op_label,
         "phase":     "download",
@@ -687,7 +681,7 @@ async fn emit_aggregate_progress(
 // ── implementation ─────────────────────────────────────────────────────────
 
 async fn run_download(
-    app: &AppHandle, job_id: &str,
+    host: &dyn CloudHost, job_id: &str,
     conn: &CloudConnection, bucket: &str, remote: &str, local: &Path,
     cancel: Arc<AtomicBool>,
 ) -> Result<()> {
@@ -698,7 +692,7 @@ async fn run_download(
     if let Some(parent) = local.parent() {
         if !parent.as_os_str().is_empty() {
             tokio::fs::create_dir_all(parent).await
-                .map_err(|e| AppError::Other(format!("mkdir {}: {e}", parent.display())))?;
+                .map_err(|e| CloudError::Other(format!("mkdir {}: {e}", parent.display())))?;
         }
     }
 
@@ -706,25 +700,25 @@ async fn run_download(
         .into_bytes_stream(0..)
         .await.map_err(map_op_err)?;
     let mut file = tokio::fs::File::create(local).await
-        .map_err(|e| AppError::Other(format!("create {}: {e}", local.display())))?;
+        .map_err(|e| CloudError::Other(format!("create {}: {e}", local.display())))?;
 
     let mut ticker = ProgressTicker::new(total);
     while let Some(chunk) = reader.next().await {
-        if cancel.load(Ordering::Relaxed) { return Err(AppError::Cancelled); }
-        let bytes = chunk.map_err(|e| AppError::Other(format!("opendal read: {e}")))?;
+        if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
+        let bytes = chunk.map_err(|e| CloudError::Other(format!("opendal read: {e}")))?;
         file.write_all(&bytes).await
-            .map_err(|e| AppError::Other(format!("write {}: {e}", local.display())))?;
+            .map_err(|e| CloudError::Other(format!("write {}: {e}", local.display())))?;
         ticker.advance(bytes.len() as u64);
-        ticker.maybe_emit(app, job_id, &conn.config_id, "download", bucket, remote);
+        ticker.maybe_emit(host, job_id, &conn.config_id, "download", bucket, remote);
     }
     file.flush().await
-        .map_err(|e| AppError::Other(format!("flush {}: {e}", local.display())))?;
-    ticker.final_emit(app, job_id, &conn.config_id, "download", bucket, remote);
+        .map_err(|e| CloudError::Other(format!("flush {}: {e}", local.display())))?;
+    ticker.final_emit(host, job_id, &conn.config_id, "download", bucket, remote);
     Ok(())
 }
 
 async fn run_upload(
-    app: &AppHandle, job_id: &str,
+    host: &dyn CloudHost, job_id: &str,
     conn: &CloudConnection, bucket: &str, remote: &str, local: &Path,
     overwrite: bool, cancel: Arc<AtomicBool>,
 ) -> Result<()> {
@@ -735,7 +729,7 @@ async fn run_upload(
         // the object isn't there, anything else means we found it (or hit
         // a real error worth surfacing).
         match op.stat(remote).await {
-            Ok(_)  => return Err(AppError::Other(format!(
+            Ok(_)  => return Err(CloudError::Other(format!(
                 "destination already exists: {bucket}:{remote} (pass overwrite=true to replace)"
             ))),
             Err(e) if e.kind() == opendal::ErrorKind::NotFound => {}
@@ -744,11 +738,11 @@ async fn run_upload(
     }
 
     let meta = tokio::fs::metadata(local).await
-        .map_err(|e| AppError::Other(format!("stat {}: {e}", local.display())))?;
+        .map_err(|e| CloudError::Other(format!("stat {}: {e}", local.display())))?;
     let total = meta.len();
 
     let mut file = tokio::fs::File::open(local).await
-        .map_err(|e| AppError::Other(format!("open {}: {e}", local.display())))?;
+        .map_err(|e| CloudError::Other(format!("open {}: {e}", local.display())))?;
 
     let mut writer = op.writer(remote).await.map_err(map_op_err)?;
     let mut ticker = ProgressTicker::new(total);
@@ -758,40 +752,40 @@ async fn run_upload(
         if cancel.load(Ordering::Relaxed) {
             // Best-effort: abort the in-progress upload (opendal multipart).
             let _ = writer.abort().await;
-            return Err(AppError::Cancelled);
+            return Err(CloudError::Cancelled);
         }
         let n = file.read(&mut buf).await
-            .map_err(|e| AppError::Other(format!("read {}: {e}", local.display())))?;
+            .map_err(|e| CloudError::Other(format!("read {}: {e}", local.display())))?;
         if n == 0 { break; }
         writer.write(buf[..n].to_vec()).await.map_err(map_op_err)?;
         ticker.advance(n as u64);
-        ticker.maybe_emit(app, job_id, &conn.config_id, "upload", bucket, remote);
+        ticker.maybe_emit(host, job_id, &conn.config_id, "upload", bucket, remote);
     }
     writer.close().await.map_err(map_op_err)?;
-    ticker.final_emit(app, job_id, &conn.config_id, "upload", bucket, remote);
+    ticker.final_emit(host, job_id, &conn.config_id, "upload", bucket, remote);
     Ok(())
 }
 
 async fn run_sync(
-    app: &AppHandle, job_id: &str,
+    host: &dyn CloudHost, job_id: &str,
     conn: &CloudConnection, bucket: &str, remote_prefix: &str, local: &Path,
     direction: SyncDir, delete: bool, cancel: Arc<AtomicBool>,
 ) -> Result<()> {
     match direction {
-        SyncDir::Down => sync_down(app, job_id, conn, bucket, remote_prefix, local, delete, cancel).await,
-        SyncDir::Up   => sync_up  (app, job_id, conn, bucket, remote_prefix, local, delete, cancel).await,
+        SyncDir::Down => sync_down(host, job_id, conn, bucket, remote_prefix, local, delete, cancel).await,
+        SyncDir::Up   => sync_up  (host, job_id, conn, bucket, remote_prefix, local, delete, cancel).await,
     }
 }
 
 async fn sync_down(
-    app: &AppHandle, job_id: &str,
+    host: &dyn CloudHost, job_id: &str,
     conn: &CloudConnection, bucket: &str, remote_prefix: &str, local: &Path,
     delete: bool, cancel: Arc<AtomicBool>,
 ) -> Result<()> {
     let op = build(conn, bucket).await?;
     let prefix = normalize_for_listing(remote_prefix);
     tokio::fs::create_dir_all(local).await
-        .map_err(|e| AppError::Other(format!("mkdir {}: {e}", local.display())))?;
+        .map_err(|e| CloudError::Other(format!("mkdir {}: {e}", local.display())))?;
 
     // 1. Walk remote recursively, collect object keys + sizes.
     let entries = op.list_with(&prefix).recursive(true).await.map_err(map_op_err)?;
@@ -800,7 +794,7 @@ async fn sync_down(
         .map(|e| e.metadata().content_length())
         .sum();
 
-    append_job_line(app, job_id, &format!(
+    append_job_line(host, job_id, &format!(
         "Found {} remote object(s), {} bytes",
         entries.iter().filter(|e| !e.metadata().is_dir()).count(),
         total_bytes
@@ -811,29 +805,29 @@ async fn sync_down(
     let mut seen_local: Vec<PathBuf> = Vec::new();
 
     for entry in &entries {
-        if cancel.load(Ordering::Relaxed) { return Err(AppError::Cancelled); }
+        if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
         if entry.metadata().is_dir() { continue; }
         let rel = entry.path().strip_prefix(&prefix).unwrap_or(entry.path());
         let dst = local.join(rel);
         if let Some(parent) = dst.parent() {
             tokio::fs::create_dir_all(parent).await
-                .map_err(|e| AppError::Other(format!("mkdir {}: {e}", parent.display())))?;
+                .map_err(|e| CloudError::Other(format!("mkdir {}: {e}", parent.display())))?;
         }
 
         let mut reader = op.reader(entry.path()).await.map_err(map_op_err)?
             .into_bytes_stream(0..).await.map_err(map_op_err)?;
         let mut f = tokio::fs::File::create(&dst).await
-            .map_err(|e| AppError::Other(format!("create {}: {e}", dst.display())))?;
+            .map_err(|e| CloudError::Other(format!("create {}: {e}", dst.display())))?;
         while let Some(chunk) = reader.next().await {
-            if cancel.load(Ordering::Relaxed) { return Err(AppError::Cancelled); }
-            let bytes = chunk.map_err(|e| AppError::Other(format!("opendal read: {e}")))?;
+            if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
+            let bytes = chunk.map_err(|e| CloudError::Other(format!("opendal read: {e}")))?;
             f.write_all(&bytes).await
-                .map_err(|e| AppError::Other(format!("write {}: {e}", dst.display())))?;
+                .map_err(|e| CloudError::Other(format!("write {}: {e}", dst.display())))?;
             ticker.advance(bytes.len() as u64);
-            ticker.maybe_emit(app, job_id, &conn.config_id, "sync", bucket, entry.path());
+            ticker.maybe_emit(host, job_id, &conn.config_id, "sync", bucket, entry.path());
         }
         f.flush().await
-            .map_err(|e| AppError::Other(format!("flush {}: {e}", dst.display())))?;
+            .map_err(|e| CloudError::Other(format!("flush {}: {e}", dst.display())))?;
         seen_local.push(dst);
     }
 
@@ -842,12 +836,12 @@ async fn sync_down(
         prune_local_not_in(local, &seen_local).await?;
     }
 
-    ticker.final_emit(app, job_id, &conn.config_id, "sync", bucket, remote_prefix);
+    ticker.final_emit(host, job_id, &conn.config_id, "sync", bucket, remote_prefix);
     Ok(())
 }
 
 async fn sync_up(
-    app: &AppHandle, job_id: &str,
+    host: &dyn CloudHost, job_id: &str,
     conn: &CloudConnection, bucket: &str, remote_prefix: &str, local: &Path,
     delete: bool, cancel: Arc<AtomicBool>,
 ) -> Result<()> {
@@ -863,7 +857,7 @@ async fn sync_up(
         })
     ).await.into_iter().sum();
 
-    append_job_line(app, job_id, &format!(
+    append_job_line(host, job_id, &format!(
         "Found {} local file(s), {total} bytes", local_files.len()
     ));
 
@@ -871,28 +865,28 @@ async fn sync_up(
     let mut seen_remote: Vec<String> = Vec::new();
 
     for src in &local_files {
-        if cancel.load(Ordering::Relaxed) { return Err(AppError::Cancelled); }
-        let rel = src.strip_prefix(local).map_err(|_| AppError::Other(
+        if cancel.load(Ordering::Relaxed) { return Err(CloudError::Cancelled); }
+        let rel = src.strip_prefix(local).map_err(|_| CloudError::Other(
             "internal: local file fell outside the sync root".into()
         ))?;
         let rel_s = rel.to_string_lossy().replace('\\', "/");
         let remote = if prefix.is_empty() { rel_s.clone() } else { format!("{prefix}{rel_s}") };
 
         let mut f = tokio::fs::File::open(src).await
-            .map_err(|e| AppError::Other(format!("open {}: {e}", src.display())))?;
+            .map_err(|e| CloudError::Other(format!("open {}: {e}", src.display())))?;
         let mut writer = op.writer(&remote).await.map_err(map_op_err)?;
         let mut buf = vec![0u8; CHUNK_SIZE];
         loop {
             if cancel.load(Ordering::Relaxed) {
                 let _ = writer.abort().await;
-                return Err(AppError::Cancelled);
+                return Err(CloudError::Cancelled);
             }
             let n = f.read(&mut buf).await
-                .map_err(|e| AppError::Other(format!("read {}: {e}", src.display())))?;
+                .map_err(|e| CloudError::Other(format!("read {}: {e}", src.display())))?;
             if n == 0 { break; }
             writer.write(buf[..n].to_vec()).await.map_err(map_op_err)?;
             ticker.advance(n as u64);
-            ticker.maybe_emit(app, job_id, &conn.config_id, "sync", bucket, &remote);
+            ticker.maybe_emit(host, job_id, &conn.config_id, "sync", bucket, &remote);
         }
         writer.close().await.map_err(map_op_err)?;
         seen_remote.push(remote);
@@ -909,45 +903,41 @@ async fn sync_up(
         }
     }
 
-    ticker.final_emit(app, job_id, &conn.config_id, "sync", bucket, remote_prefix);
+    ticker.final_emit(host, job_id, &conn.config_id, "sync", bucket, remote_prefix);
     Ok(())
 }
 
 // ── job shell ──────────────────────────────────────────────────────────────
 
 fn spawn_job_shell(
-    app:       &AppHandle,
+    host:      &dyn CloudHost,
     config_id: &str,
     kind:      &str,
     label:     &str,
 ) -> Result<(String, Arc<AtomicBool>)> {
     let cancel = Arc::new(AtomicBool::new(false));
-    let state = app.state::<AppState>();
 
     let name = format!("{kind}: {label}");
     let command = format!("cloud:{kind}");
     let category = "Cloud Storage";
 
-    let mut jobs = state.lock_jobs()?;
-    let job_id = jobs.new_id();
-    jobs.register(JobInfo {
+    let job_id = host.job_new_id();
+    host.job_register(CloudJobInfo {
         id:          job_id.clone(),
         name:        name.clone(),
         plugin_name: "cloud-storage".into(),
         command:     command.clone(),
-        started_at:  crate::jobs::JobRegistry::now_secs(),
-        status:      JobStatus::Running,
+        started_at:  now_secs(),
+        status:      CloudJobStatus::Running,
         category:    Some(category.into()),
         non_cancellable: false,
         hidden:      false,
         is_system:   false,
-        finished_at: None,
     });
-    drop(jobs);
 
     // Stash the cancel flag so the global cancel_job command can flip it.
-    let mut map = state.cloud_cancellations.lock().map_err(|e|
-        AppError::MutexPoisoned(format!("cloud_cancellations: {e}"))
+    let mut map = host.cancellations().lock().map_err(|e|
+        CloudError::Other(format!("cloud_cancellations poisoned: {e}"))
     )?;
     map.insert(job_id.clone(), cancel.clone());
     drop(map);
@@ -956,7 +946,7 @@ fn spawn_job_shell(
     // handler expects: `name`, `plugin_name`, `command`, `category`,
     // `hidden`. Without these the JobsOverlay renders the entry with a
     // blank name.
-    let _ = app.emit("arbor://job-started", serde_json::json!({
+    host.emit_event("arbor://job-started", serde_json::json!({
         "job_id":      job_id,
         "name":        name,
         "plugin_name": "cloud-storage",
@@ -970,54 +960,52 @@ fn spawn_job_shell(
 }
 
 async fn finalize_job(
-    app: &AppHandle,
+    host: &dyn CloudHost,
     job_id: &str,
     result: Result<()>,
     cancel: &Arc<AtomicBool>,
 ) {
-    let state = app.state::<AppState>();
     // Remove the cancel-flag entry now that the task is done.
-    if let Ok(mut map) = state.cloud_cancellations.lock() {
+    if let Ok(mut map) = host.cancellations().lock() {
         map.remove(job_id);
     }
 
     let cancelled = cancel.load(Ordering::Relaxed);
     let (status, ok, err) = match result {
-        Ok(()) if cancelled => (JobStatus::Cancelled, false, Some("cancelled".to_string())),
-        Ok(())              => (JobStatus::Completed { exit_code: 0 }, true, None),
-        Err(AppError::Cancelled) => (JobStatus::Cancelled, false, Some("cancelled".to_string())),
-        Err(_) if cancelled => (JobStatus::Cancelled, false, Some("cancelled".to_string())),
-        Err(e) => (JobStatus::Failed { error: e.to_string() }, false, Some(e.to_string())),
+        Ok(()) if cancelled => (CloudJobStatus::Cancelled, false, Some("cancelled".to_string())),
+        Ok(())              => (CloudJobStatus::Completed { exit_code: 0 }, true, None),
+        Err(CloudError::Cancelled) => (CloudJobStatus::Cancelled, false, Some("cancelled".to_string())),
+        Err(_) if cancelled => (CloudJobStatus::Cancelled, false, Some("cancelled".to_string())),
+        Err(e) => (CloudJobStatus::Failed { error: e.to_string() }, false, Some(e.to_string())),
     };
     let (exit_code, cancelled_flag) = match &status {
-        JobStatus::Completed { exit_code } => (*exit_code, false),
-        JobStatus::Cancelled               => (-1, true),
-        JobStatus::Failed   { .. }         => (-1, false),
-        JobStatus::Running                 => unreachable!(),
+        CloudJobStatus::Completed { exit_code } => (*exit_code, false),
+        CloudJobStatus::Cancelled               => (-1, true),
+        CloudJobStatus::Failed   { .. }         => (-1, false),
+        CloudJobStatus::Running                 => unreachable!(),
     };
-    if let Ok(mut jobs) = state.lock_jobs() {
-        // Append a final summary line for the JobOutputPanel.
-        let final_line = match &status {
-            JobStatus::Completed { .. } => "✓ done".to_string(),
-            JobStatus::Cancelled        => "✗ cancelled".to_string(),
-            JobStatus::Failed { error } => format!("✗ failed: {error}"),
-            JobStatus::Running          => unreachable!(),
-        };
-        jobs.append_output(job_id, final_line);
-        jobs.set_status(job_id, status);
-    }
+    // Append a final summary line for the JobOutputPanel.
+    let final_line = match &status {
+        CloudJobStatus::Completed { .. } => "✓ done".to_string(),
+        CloudJobStatus::Cancelled        => "✗ cancelled".to_string(),
+        CloudJobStatus::Failed { error } => format!("✗ failed: {error}"),
+        CloudJobStatus::Running          => unreachable!(),
+    };
+    host.job_append_output(job_id, final_line);
+    host.job_set_status(job_id, status);
+
     // Same shape the standard subprocess `spawn_job` emits so the frontend's
     // `arbor://job-done` handler can flip the JobsOverlay entry from
     // "running" to the terminal state. Without this the cloud transfer's
     // JobsOverlay row stays on the spinner forever.
-    let _ = app.emit("arbor://job-done", serde_json::json!({
+    host.emit_event("arbor://job-done", serde_json::json!({
         "job_id":    job_id,
         "success":   ok,
         "exit_code": exit_code,
         "cancelled": cancelled_flag,
         "error":     err.clone(),
     }));
-    fire_plugin_hook(app, HOOK_JOB_DONE, serde_json::json!({
+    fire_plugin_hook(host, HOOK_JOB_DONE, serde_json::json!({
         "job_id": job_id,
         "ok":     ok,
         "error":  err,
@@ -1037,13 +1025,13 @@ async fn walk_local(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(
     let mut stack: Vec<PathBuf> = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         let mut rd = tokio::fs::read_dir(&d).await
-            .map_err(|e| AppError::Other(format!("readdir {}: {e}", d.display())))?;
+            .map_err(|e| CloudError::Other(format!("readdir {}: {e}", d.display())))?;
         while let Some(entry) = rd.next_entry().await
-            .map_err(|e| AppError::Other(format!("readdir entry: {e}")))?
+            .map_err(|e| CloudError::Other(format!("readdir entry: {e}")))?
         {
             let p = entry.path();
             let ft = entry.file_type().await
-                .map_err(|e| AppError::Other(format!("stat {}: {e}", p.display())))?;
+                .map_err(|e| CloudError::Other(format!("stat {}: {e}", p.display())))?;
             if ft.is_dir() {
                 stack.push(p);
             } else if ft.is_file() {
@@ -1065,11 +1053,8 @@ async fn prune_local_not_in(root: &Path, keep: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-fn append_job_line(app: &AppHandle, job_id: &str, line: &str) {
-    let state = app.state::<AppState>();
-    if let Ok(mut jobs) = state.lock_jobs() {
-        jobs.append_output(job_id, line.to_string());
-    };
+fn append_job_line(host: &dyn CloudHost, job_id: &str, line: &str) {
+    host.job_append_output(job_id, line.to_string());
 }
 
 // ── progress ticker ────────────────────────────────────────────────────────
@@ -1095,22 +1080,22 @@ impl ProgressTicker {
     }
     fn advance(&mut self, n: u64) { self.bytes_done += n; }
 
-    fn maybe_emit(&mut self, app: &AppHandle, job_id: &str, config_id: &str,
+    fn maybe_emit(&mut self, host: &dyn CloudHost, job_id: &str, config_id: &str,
                   kind: &'static str, bucket: &str, path: &str)
     {
         let elapsed_ms = self.last_emit.elapsed().as_millis();
         if elapsed_ms < PROGRESS_TICK_MS { return; }
-        self.emit(app, job_id, config_id, kind, bucket, path, elapsed_ms);
+        self.emit(host, job_id, config_id, kind, bucket, path, elapsed_ms);
     }
 
-    fn final_emit(&mut self, app: &AppHandle, job_id: &str, config_id: &str,
+    fn final_emit(&mut self, host: &dyn CloudHost, job_id: &str, config_id: &str,
                   kind: &'static str, bucket: &str, path: &str)
     {
         let elapsed_ms = self.last_emit.elapsed().as_millis().max(1);
-        self.emit(app, job_id, config_id, kind, bucket, path, elapsed_ms);
+        self.emit(host, job_id, config_id, kind, bucket, path, elapsed_ms);
     }
 
-    fn emit(&mut self, app: &AppHandle, job_id: &str, config_id: &str,
+    fn emit(&mut self, host: &dyn CloudHost, job_id: &str, config_id: &str,
             kind: &'static str, bucket: &str, path: &str, elapsed_ms: u128)
     {
         let delta = self.bytes_done.saturating_sub(self.last_bytes);
@@ -1132,23 +1117,20 @@ impl ProgressTicker {
             speed_bps,
             eta_sec:      eta,
         };
-        fire_plugin_hook(app, HOOK_PROGRESS,
+        fire_plugin_hook(host, HOOK_PROGRESS,
             serde_json::to_value(&progress).unwrap_or(serde_json::Value::Null));
 
         // Append a human-readable line to the job output (used by the
         // generic JobOutputPanel — separate from the progress event).
-        let state = app.state::<AppState>();
-        if let Ok(mut jobs) = state.lock_jobs() {
-            jobs.append_output(job_id, format!(
-                "{} {} {}/{} ({}%) {}/s",
-                kind_arrow(kind),
-                short_path(path),
-                human_bytes(self.bytes_done),
-                if self.bytes_total > 0 { human_bytes(self.bytes_total) } else { "?".into() },
-                if self.bytes_total > 0 { 100 * self.bytes_done / self.bytes_total } else { 0 },
-                human_bytes(speed_bps),
-            ));
-        }
+        host.job_append_output(job_id, format!(
+            "{} {} {}/{} ({}%) {}/s",
+            kind_arrow(kind),
+            short_path(path),
+            human_bytes(self.bytes_done),
+            if self.bytes_total > 0 { human_bytes(self.bytes_total) } else { "?".into() },
+            if self.bytes_total > 0 { 100 * self.bytes_done / self.bytes_total } else { 0 },
+            human_bytes(speed_bps),
+        ));
 
         self.last_emit = Instant::now();
         self.last_bytes = self.bytes_done;
@@ -1182,4 +1164,3 @@ fn human_bytes(n: u64) -> String {
     else if nf >= KB   { format!("{:.1} KB", nf / KB) }
     else               { format!("{n} B") }
 }
-
