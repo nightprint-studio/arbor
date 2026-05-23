@@ -55,7 +55,7 @@
   import { depsExplorerStore } from '$lib/stores/depsExplorer.svelte';
   import CommandPalette from '../shared/CommandPalette.svelte';
   import Tooltip from '../shared/Tooltip.svelte';
-  import ConflictResolutionModal from '../stage/ConflictResolutionModal.svelte';
+  import ConflictResolutionModal from '../stage/conflict/ConflictResolutionModal.svelte';
   import CheckoutConflictModal from '../shared/CheckoutConflictModal.svelte';
   import InitRepoModal from '../shared/InitRepoModal.svelte';
   import CloneRepoModal from '../shared/CloneRepoModal.svelte';
