@@ -4,12 +4,12 @@
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
   import { RefreshCw, ChevronDown, ChevronRight, Package, Power, Globe, HardDrive, GitBranch, Zap, TerminalSquare, Settings, Info, Trash, AlertTriangle, Network, FolderOpen, Wand2, Store } from 'lucide-svelte';
-  import PluginDepGraphModal           from './PluginDepGraphModal.svelte';
-  import PluginDisableConfirmModal     from './PluginDisableConfirmModal.svelte';
-  import PluginEnableConfirmModal      from './PluginEnableConfirmModal.svelte';
-  import PluginUninstallConfirmModal   from './PluginUninstallConfirmModal.svelte';
-  import PluginExportTemplateModal     from './PluginExportTemplateModal.svelte';
-  import PluginInfoModal               from './PluginInfoModal.svelte';
+  import PluginDepGraphModal           from './manager/PluginDepGraphModal.svelte';
+  import PluginDisableConfirmModal     from './manager/PluginDisableConfirmModal.svelte';
+  import PluginEnableConfirmModal      from './manager/PluginEnableConfirmModal.svelte';
+  import PluginUninstallConfirmModal   from './manager/PluginUninstallConfirmModal.svelte';
+  import PluginExportTemplateModal     from './manager/PluginExportTemplateModal.svelte';
+  import PluginInfoModal               from './manager/PluginInfoModal.svelte';
   import type { PluginInfo } from '$lib/types/plugin';
   import {
     reloadPlugins, listPluginInfo, pluginDependents, deletePlugin,
@@ -39,12 +39,12 @@
   let loading    = $state(false);
   let reloading  = $state(false);
   let selected   = $state<string | null>(null);
-  /** Set of plugin names installed through the marketplace — used to paint
+  /** Set of plugin names installed through the marketplace â€” used to paint
    *  the "Marketplace" badge next to those rows so dev / hand-copied plugins
    *  remain visually distinguishable. */
   let marketplaceNames = $state<Set<string>>(new Set());
 
-  /** Master kill-switch — when false the runtime is empty and we render
+  /** Master kill-switch â€” when false the runtime is empty and we render
    *  neither the list nor any per-plugin state.  Loaded once on mount and
    *  flipped via the toggle at the top of the body. */
   let systemEnabled = $state(false);
@@ -81,13 +81,13 @@
       await setPluginsEnabled(next);
       systemEnabled = next;
       if (next) {
-        // Backend just reloaded everything from disk — pull the fresh list.
+        // Backend just reloaded everything from disk â€” pull the fresh list.
         await loadPlugins();
       } else {
         // Pretend no plugins exist: empty local + shared caches and drop
         // any selected/expanded row so the body re-renders cleanly when the
         // toggle flips back on. Also close any plugin-owned sidebar / panel
-        // that was open — its contributions just disappeared.
+        // that was open â€” its contributions just disappeared.
         pluginInfos = [];
         pluginStore.syncFromInfos([]);
         uiStore.closePluginSections();
@@ -147,10 +147,10 @@
     try {
       // Backend reloads all plugins from disk, starts schedulers, then emits
       // "arbor://plugins-reloaded". That event triggers:
-      //   • contributionStore.reloadAll() → refreshes the unified registry
+      //   â€¢ contributionStore.reloadAll() â†’ refreshes the unified registry
       //     so ActivityBar / Sidebar / Command Palette / Keybindings / etc.
       //     all see the new plugin shapes.
-      //   • loadPlugins() → updates this panel's list (via onMount listener above)
+      //   â€¢ loadPlugins() â†’ updates this panel's list (via onMount listener above)
       await reloadPlugins();
       uiStore.showToast('Plugins reloaded', 'success');
     } catch (err) {
@@ -160,7 +160,7 @@
     }
   }
 
-  // ── Disable / enable cascade confirmations ────────────────────────────────
+  // â”€â”€ Disable / enable cascade confirmations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /** When non-null, PluginDisableConfirmModal is shown with the cascade plan
    *  (leaves-first, target last) returned by `plugin_disable_preview`. */
@@ -180,19 +180,19 @@
     if (!info) return;
 
     if (info.enabled) {
-      // Disable flow — preview the cascade so the modal can list every
+      // Disable flow â€” preview the cascade so the modal can list every
       // dependent that will be turned off alongside the explicit click.
       try {
         const cascade = await pluginDisablePreview(name);
         // cascade always ends with `name`. Anything before it is a transitively-
-        // required dependent — surface those in a confirm modal.
+        // required dependent â€” surface those in a confirm modal.
         if (cascade.length > 1) {
           pendingDisable = { plugin: name, cascade };
           return;
         }
       } catch { /* fall through to direct toggle on error */ }
     } else {
-      // Enable flow — preview blockers AND cascade. Open the modal when
+      // Enable flow â€” preview blockers AND cascade. Open the modal when
       // either is non-empty so the user knows what's happening.
       try {
         const preview = await pluginEnablePreview(name);
@@ -216,7 +216,7 @@
         await pluginStore.togglePlugin(name);
       } catch (err) {
         // Toggle failed (e.g. enable blocker the user dismissed). The store
-        // already rolled back its optimistic state — surface a toast and
+        // already rolled back its optimistic state â€” surface a toast and
         // bail before the list refresh below repaints with stale info.
         uiStore.showToast(`${err instanceof Error ? err.message : err}`, 'error');
         return;
@@ -231,7 +231,7 @@
         marketplaceNames = new Set(await listMarketplaceInstalledNames());
       } catch { /* badge is decorative; ignore */ }
       // If we just disabled the plugin, its sidebar / bottom panel
-      // contributions are gone — close any section it had open.
+      // contributions are gone â€” close any section it had open.
       if (wasEnabled) uiStore.closePluginSections(name);
     } catch (err) {
       uiStore.showToast(`${err}`, 'error');
@@ -258,12 +258,12 @@
       uiStore.showToast(`${plugin.name} did not register a settings panel`, 'warning');
       return;
     }
-    // First container wins — the gear is a single button. A multi-container
+    // First container wins â€” the gear is a single button. A multi-container
     // chooser (rare) would go into a dropdown next to the gear.
     containerStore.open(keys[0]);
   }
 
-  // ── Uninstall plugin (folder + cache + per-repo data) ────────────────────
+  // â”€â”€ Uninstall plugin (folder + cache + per-repo data) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let pendingUninstall = $state<{ plugin: string; dependents: string[] } | null>(null);
   let uninstalling     = $state(false);
 
@@ -271,7 +271,7 @@
     let deps: string[] = [];
     try {
       // Look up dependents so the modal can warn when other plugins rely on
-      // this one. Failure here is non-fatal — we just open the modal without
+      // this one. Failure here is non-fatal â€” we just open the modal without
       // a dependent list.
       deps = await pluginDependents(plugin.name);
     } catch { /* non-fatal */ }
@@ -284,14 +284,14 @@
     uninstalling = true;
     try {
       const warnings = await deletePlugin(name);
-      // The plugin's contributions are gone — close any sidebar / panel it
+      // The plugin's contributions are gone â€” close any sidebar / panel it
       // owned so the user isn't staring at a now-empty section. Done before
       // refreshing the list so the UI doesn't flash through an inconsistent
       // state where the section is still active.
       uiStore.closePluginSections(name);
       if (warnings.length > 0) {
         uiStore.showToast(
-          `Uninstalled "${name}" with ${warnings.length} warning(s) — see logs`,
+          `Uninstalled "${name}" with ${warnings.length} warning(s) â€” see logs`,
           'warning',
         );
         for (const w of warnings) console.warn('[plugin uninstall]', w);
@@ -355,7 +355,7 @@
         <span class="ps-count">{pluginInfos.length}</span>
       {/if}
       {#snippet actions()}
-        <button class="ps-btn ps-btn-marketplace" use:tooltip={'Browse marketplace — discover plugins & themes'} disabled={!systemEnabled} onclick={() => uiStore.openMarketplace()}>
+        <button class="ps-btn ps-btn-marketplace" use:tooltip={'Browse marketplace â€” discover plugins & themes'} disabled={!systemEnabled} onclick={() => uiStore.openMarketplace()}>
           <Store size={13} />
           <span class="ps-btn-label">Browse</span>
         </button>
@@ -374,13 +374,13 @@
   {/snippet}
 
   <div class="plugin-list">
-    <!-- Security advisory — plugins run sandboxed Lua but can still touch the
+    <!-- Security advisory â€” plugins run sandboxed Lua but can still touch the
          filesystem, network, terminal and git history with the permissions
          their author declares.  Treat them like any other third-party code. -->
     <Alert variant="warning" title="Importa solo plugin di cui ti fidi">
       I plugin sono codice di terze parti che gira con i permessi dichiarati
       nel loro <code>plugin.toml</code> (filesystem, network, terminale,
-      git…). Verifica sempre la fonte e ispeziona <code>main.lua</code> +
+      gitâ€¦). Verifica sempre la fonte e ispeziona <code>main.lua</code> +
       la sezione <code>[permissions]</code> prima di abilitare un plugin
       che non hai scritto tu.
     </Alert>
@@ -397,13 +397,13 @@
         label="Abilita gestione plugin"
         description={systemEnabled
           ? 'I plugin installati sono caricati ed eseguiti.'
-          : 'Nessun plugin viene caricato. Lo stato in cache è vuoto.'}
+          : 'Nessun plugin viene caricato. Lo stato in cache Ã¨ vuoto.'}
         onchange={toggleSystem}
       />
     </div>
 
     {#if systemLoading}
-      <div class="msg"><RefreshCw size={20} class="spinning" /><span>Loading…</span></div>
+      <div class="msg"><RefreshCw size={20} class="spinning" /><span>Loadingâ€¦</span></div>
     {:else if !systemEnabled}
       <div class="msg empty-msg">
         <Power size={32} class="empty-icon" />
@@ -416,7 +416,7 @@
         </p>
       </div>
     {:else if loading}
-      <div class="msg"><RefreshCw size={20} class="spinning" /><span>Loading…</span></div>
+      <div class="msg"><RefreshCw size={20} class="spinning" /><span>Loadingâ€¦</span></div>
     {:else if pluginInfos.length === 0}
       <div class="msg empty-msg">
         <Package size={32} class="empty-icon" />
@@ -451,7 +451,7 @@
               </div>
             {/if}
             <div class="plugin-item-header">
-              <!-- ── Main row ───────────────────────────────────────────── -->
+              <!-- â”€â”€ Main row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
               <button class="plugin-main" onclick={() => toggleSelected(plugin.name)}>
                 <Monogram
                   name={plugin.name}
@@ -470,7 +470,7 @@
                     {#if plugin.experimental}
                       <ExperimentalBadge
                         size="sm"
-                        description="This plugin is flagged experimental in its manifest — its settings, hooks or storage format may change between releases."
+                        description="This plugin is flagged experimental in its manifest â€” its settings, hooks or storage format may change between releases."
                       />
                     {/if}
                     {#if marketplaceNames.has(plugin.name)}
@@ -488,7 +488,7 @@
                         use:tooltip={schedRunning
                           ? `${plugin.schedulers_running}/${plugin.scheduler_count} scheduler(s) running`
                           : 'All schedulers stopped'}
-                      >{schedRunning ? '●' : '○'}</span>
+                      >{schedRunning ? 'â—' : 'â—‹'}</span>
                     {/if}
                   </div>
                   <span class="plugin-desc truncate">{plugin.description}</span>
@@ -503,7 +503,7 @@
                 </span>
               </button>
 
-              <!-- ── Action buttons ── -->
+              <!-- â”€â”€ Action buttons â”€â”€ -->
               <div class="item-actions">
                 {#if pluginHasSettings(plugin)}
                   <button
@@ -521,7 +521,7 @@
                        form. -->
                   <span class="action-btn action-placeholder" aria-hidden="true"></span>
                 {/if}
-                <!-- Plugin info — opens a detailed modal that also hosts the
+                <!-- Plugin info â€” opens a detailed modal that also hosts the
                      destructive "Clear settings cache" action and per-schedule
                      enable/disable toggles. -->
                 <button
@@ -531,7 +531,7 @@
                 >
                   <Info size={12} />
                 </button>
-                <!-- Uninstall plugin — removes folder + global data + per-repo data -->
+                <!-- Uninstall plugin â€” removes folder + global data + per-repo data -->
                 <button
                   class="action-btn uninstall-btn"
                   use:tooltip={'Uninstall plugin'}
@@ -552,7 +552,7 @@
               </div>
             </div>
 
-            <!-- ── Expanded detail ───────────────────────────────────── -->
+            <!-- â”€â”€ Expanded detail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
             {#if selected === plugin.name}
               <div class="plugin-detail"
                    transition:slide={{ duration: animStore.dPanel, easing: cubicOut }}>
@@ -686,7 +686,7 @@
                   <div class="api-row"><code class="api-fn">arbor.log.info(msg)</code><span class="api-desc">Log message (debug/info/warn/error)</span></div>
                   <div class="api-row"><code class="api-fn">arbor.settings.global.get(k)</code><span class="api-desc">Global persisted setting</span></div>
                   <div class="api-row"><code class="api-fn">arbor.settings.project.get(k)</code><span class="api-desc">Per-repo persisted setting</span></div>
-                  <div class="api-row"><code class="api-fn">arbor.json.encode(v)</code><span class="api-desc">Lua → JSON string</span></div>
+                  <div class="api-row"><code class="api-fn">arbor.json.encode(v)</code><span class="api-desc">Lua â†’ JSON string</span></div>
                   <div class="api-row"><code class="api-fn">arbor.job.spawn(cfg)</code><span class="api-desc">Run background process</span></div>
                   {#if perms.terminal && perms.terminal !== 'none'}
                     <div class="api-row">
@@ -694,7 +694,7 @@
                       <span class="api-desc">
                         Blocking shell command
                         {#if perms.terminal === 'commands'}
-                          — allowed: {perms.terminal_scope?.join(', ')}
+                          â€” allowed: {perms.terminal_scope?.join(', ')}
                         {/if}
                       </span>
                     </div>
@@ -728,7 +728,7 @@
           <FolderOpen size={11} />
           plugins/
         </button>
-        · Reload to pick up disk changes
+        Â· Reload to pick up disk changes
       </span>
     </div>
   {/snippet}
@@ -793,7 +793,7 @@
 {/if}
 
 <style>
-  /* Body / chrome / borders / scrolling all live on <Modal> now —
+  /* Body / chrome / borders / scrolling all live on <Modal> now â€”
      this stylesheet only owns the inner list + per-item rendering. */
 
   .ps-count {
@@ -834,7 +834,7 @@
     opacity: 0.35;
     cursor: not-allowed;
   }
-  /* Primary CTA — the marketplace is the main entry point for discovering and
+  /* Primary CTA â€” the marketplace is the main entry point for discovering and
      installing plugins, so it gets a labelled button instead of icon-only. */
   .ps-btn-marketplace {
     width: auto;
@@ -871,11 +871,11 @@
 
   :global(.spinning) { animation: spin 1s linear infinite; }
 
-  /* ── Body / List ─────────────────────────────────────────────────── */
+  /* â”€â”€ Body / List â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   /* Modal-body is the scrollable card; this just lays out the plugin rows. */
   .plugin-list   { scrollbar-gutter: stable; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 
-  /* Inline code chips inside the security alert — pick up tinted bg from
+  /* Inline code chips inside the security alert â€” pick up tinted bg from
      the alert variant via inheritance, but we want monospace + padding. */
   .plugin-list :global(.alert code) {
     font-family: var(--font-code);
@@ -912,7 +912,7 @@
   .empty-msg .hint { font-size: var(--font-size-xs); color: var(--text-disabled); }
   :global(.empty-icon) { color: var(--text-disabled); }
 
-  /* ── Plugin item — card style ─────────────────────────────────── */
+  /* â”€â”€ Plugin item â€” card style â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .plugin-item {
     background: var(--bg-elevated);
     border: 1px solid var(--border-subtle);
@@ -981,10 +981,10 @@
   .sched-badge.running { color: var(--success); }
 
 
-  /* ── Action buttons ──────────────────────────────────────────────── */
+  /* â”€â”€ Action buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   /* Fixed-width, non-shrinking container so the three action slots
      (settings / clear / toggle) live at the same x position on every
-     plugin row — regardless of description length or whether the
+     plugin row â€” regardless of description length or whether the
      plugin exposes a settings form. */
   .item-actions {
     display: flex;
@@ -1020,7 +1020,7 @@
     background: transparent;
   }
 
-  /* Scheduler ▶/■ button */
+  /* Scheduler â–¶/â–  button */
   .sched-btn.running                        { color: var(--success); border-color: rgba(95,173,86,0.5); background: rgba(95,173,86,0.1); }
   .sched-btn.running:hover:not(:disabled)   { background: rgba(199,84,80,0.1); color: var(--error); border-color: rgba(199,84,80,0.5); }
   .sched-btn:not(.running):hover:not(:disabled) { color: var(--success); border-color: rgba(95,173,86,0.5); }
@@ -1028,21 +1028,21 @@
   /* Settings gear */
   .settings-btn:hover:not(:disabled) { color: var(--accent); border-color: rgba(77,120,204,0.5); background: var(--accent-subtle); }
 
-  /* Info button — opens the rich detail modal */
+  /* Info button â€” opens the rich detail modal */
   .info-btn:hover:not(:disabled) { color: var(--accent); border-color: rgba(77,120,204,0.5); background: var(--accent-subtle); }
 
-  /* Uninstall — destructive, opens confirmation modal on click */
+  /* Uninstall â€” destructive, opens confirmation modal on click */
   .uninstall-btn:hover:not(:disabled) {
     color: var(--error);
     border-color: rgba(199,84,80,0.5);
     background: rgba(199,84,80,0.1);
   }
 
-  /* Power button — soft state: on = subtle green tint, off = muted */
+  /* Power button â€” soft state: on = subtle green tint, off = muted */
   .toggle-btn.enabled                       { color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, transparent); background: color-mix(in srgb, var(--success) 8%, transparent); }
   .toggle-btn.enabled:hover:not(:disabled)  { background: rgba(199,84,80,0.09); color: var(--error); border-color: rgba(199,84,80,0.4); }
 
-  /* ── Expanded detail panel ───────────────────────────────────────── */
+  /* â”€â”€ Expanded detail panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   .plugin-detail {
     padding: 10px 14px 14px;
     background: rgba(0,0,0,0.15);
@@ -1131,7 +1131,7 @@
   .text-muted   { color: var(--text-muted); }
   .truncate     { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  /* ── Footer ────────────────────────────────────────────────────────
+  /* â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
      Padding + chrome come from Modal's `.modal-footer`; inner content only
      owns its own typography. */
   .panel-footer {

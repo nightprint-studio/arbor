@@ -12,6 +12,7 @@
   import { notificationsStore } from '$lib/stores/notifications.svelte';
   import { fsReadTextFile, fsWriteTextFile } from '$lib/ipc/fs';
   import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import ColorSwatch from '$lib/components/shared/ui/ColorSwatch.svelte';
   import type { Theme } from '$lib/types/theme';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -220,12 +221,6 @@
   function onTextInput(key: string, e: Event) {
     const val = (e.target as HTMLInputElement).value;
     onVarChange(key, val);
-  }
-
-  // Color picker → text input
-  function onColorPick(key: string, e: Event) {
-    const hex = (e.target as HTMLInputElement).value;
-    onVarChange(key, hex);
   }
 
   function resetVar(key: string) {
@@ -608,34 +603,23 @@
                     {@const hex = isHex(val)}
                     {@const isColorVal = hex || /^(rgb|rgba|hsl|hsla)\(/i.test(val) || /^[a-f0-9]{6,8}$/i.test(val)}
                     {@const changed = !isBuiltIn && val !== (selectedTheme.vars[def.key] ?? '')}
+                    {@const tokenGlyph = isColorVal
+                      ? undefined
+                      : (/px$|rem$|em$|%$/.test(val) ? '#'
+                        : /^[\d.]+$/.test(val) ? 'n' : 'T')}
                     <div class="var-row">
-                      <!-- Swatch — acts as color picker trigger for hex values.
-                           For non-colour values (lengths, numbers, font stacks)
-                           the swatch falls back to a glyph indicator so the
-                           empty box doesn't look broken. -->
-                      <div
-                        class="swatch-trigger"
-                        class:clickable={hex && !isBuiltIn}
-                        class:non-color={!isColorVal}
-                        use:tooltip={val}
-                      >
-                        {#if isColorVal}
-                          <span class="swatch-color" style="background: {swatchColor(val)};"></span>
-                        {:else}
-                          <span class="swatch-glyph" aria-hidden="true">
-                            {#if /px$|rem$|em$|%$/.test(val)}#{:else if /^[\d.]+$/.test(val)}n{:else}T{/if}
-                          </span>
-                        {/if}
-                        {#if hex && !isBuiltIn}
-                          <input
-                            type="color"
-                            class="swatch-input"
-                            value={val}
-                            oninput={(e) => onColorPick(def.key, e)}
-                            tabindex="-1"
-                          />
-                        {/if}
-                      </div>
+                      <!-- Shared swatch — colour fill for hex/rgb/hsl values
+                           with a glyph fallback for lengths / numbers /
+                           typography so the row keeps its visual anchor.
+                           Editable only when the value is pure hex AND the
+                           theme isn't built-in. -->
+                      <ColorSwatch
+                        color={isColorVal ? swatchColor(val) : val}
+                        glyph={tokenGlyph}
+                        chipSize={22}
+                        tooltip={val}
+                        onchange={hex && !isBuiltIn ? (h) => onVarChange(def.key, h) : undefined}
+                      />
 
                       <!-- Label -->
                       <span class="var-label">{def.label}</span>
@@ -1041,56 +1025,6 @@
     transition: background var(--transition-fast);
   }
   .var-row:hover { background: var(--bg-hover); }
-
-  /* ── Swatch (color picker trigger) ──────────────────────────── */
-  .swatch-trigger {
-    position: relative;
-    width: 22px;
-    height: 22px;
-    border-radius: var(--radius-sm);
-    border: 1px solid rgba(128, 128, 128, 0.25);
-    flex-shrink: 0;
-    overflow: hidden;
-    cursor: default;
-  }
-  .swatch-trigger.clickable { cursor: pointer; }
-  .swatch-trigger.clickable:hover { border-color: var(--border-focus); }
-
-  .swatch-color {
-    display: block;
-    width: 100%;
-    height: 100%;
-    background-clip: padding-box;
-  }
-
-  /* Non-colour token swatch: shows a single-letter glyph centred in the box
-     so the row still has a visual anchor where the swatch would have been.
-     "#" for lengths, "n" for plain numbers, "T" for typography / fallback. */
-  .swatch-trigger.non-color { background: var(--bg-overlay); }
-  .swatch-glyph {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
-    font-family: var(--font-code);
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: lowercase;
-  }
-
-  /* Invisible native color picker overlaid on the swatch */
-  .swatch-input {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    cursor: pointer;
-    padding: 0;
-    border: none;
-  }
 
   .var-label {
     flex: 1;
