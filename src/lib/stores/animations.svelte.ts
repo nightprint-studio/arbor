@@ -1,6 +1,8 @@
 import { untrack } from 'svelte';
+import { getAnimationsConfig, setAnimationsConfig } from '$lib/ipc/config';
+import type { AnimSpeed, AnimationsConfig } from '$lib/types/config';
 
-export type AnimSpeed = 'fast' | 'normal' | 'slow';
+export type { AnimSpeed };
 
 const SPEED_SCALE: Record<AnimSpeed, number> = {
   fast:   0.5,
@@ -26,14 +28,14 @@ function applyToRoot(enabled: boolean, speed: AnimSpeed) {
 }
 
 function createAnimStore() {
-  let enabled = $state(localStorage.getItem('arbor:anim-enabled') !== 'false');
-  let speed   = $state<AnimSpeed>(
-    (localStorage.getItem('arbor:anim-speed') as AnimSpeed | null) ?? 'normal',
-  );
+  // Defaults applied synchronously so first paint already has sane durations;
+  // `loadConfig()` (called from AppShell.onMount) overwrites with disk values.
+  let enabled = $state<boolean>(true);
+  let speed   = $state<AnimSpeed>('normal');
+  let loaded  = $state(false);
 
-  // Apply immediately so first render uses the correct durations.
   // Wrapped in `untrack` because this initialiser runs once at module load —
-  // the setEnabled/setSpeed methods explicitly re-call applyToRoot afterwards.
+  // setEnabled / setSpeed / loadConfig explicitly re-call applyToRoot after.
   untrack(() => applyToRoot(enabled, speed));
 
   // Derived JS values for Svelte transition `duration` props.
@@ -42,9 +44,27 @@ function createAnimStore() {
   const dPanel  = $derived(Math.round(BASE_PANEL   * (enabled ? SPEED_SCALE[speed] : 0)));
   const dSlow   = $derived(Math.round(BASE_SLOW    * (enabled ? SPEED_SCALE[speed] : 0)));
 
+  async function loadConfig() {
+    try {
+      const cfg = await getAnimationsConfig();
+      enabled = !!cfg.enabled;
+      speed   = (cfg.speed === 'fast' || cfg.speed === 'slow') ? cfg.speed : 'normal';
+      applyToRoot(enabled, speed);
+      loaded = true;
+    } catch {
+      // First-run / backend not ready — keep defaults; next call will retry.
+    }
+  }
+
+  function persist() {
+    const next: AnimationsConfig = { enabled, speed };
+    void setAnimationsConfig(next).catch(() => {});
+  }
+
   return {
     get enabled() { return enabled; },
     get speed()   { return speed; },
+    get loaded()  { return loaded; },
 
     /** Duration for micro-interactions (hover states, toggles). */
     get dFast()  { return dFast;  },
@@ -55,16 +75,20 @@ function createAnimStore() {
     /** Duration for slower decorative animations. */
     get dSlow()  { return dSlow;  },
 
+    loadConfig,
+
     setEnabled(v: boolean) {
+      if (enabled === v) return;
       enabled = v;
-      localStorage.setItem('arbor:anim-enabled', String(v));
       applyToRoot(enabled, speed);
+      persist();
     },
 
     setSpeed(s: AnimSpeed) {
+      if (speed === s) return;
       speed = s;
-      localStorage.setItem('arbor:anim-speed', s);
       applyToRoot(enabled, speed);
+      persist();
     },
   };
 }

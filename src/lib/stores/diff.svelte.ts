@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { DiffFile } from '../types/git';
-import type { DiffConfig, DiffMode } from '../types/config';
+import type { DiffConfig, DiffMode, DiffAlgorithm, FileListView } from '../types/config';
 import { getDiffConfig, setDiffConfig } from '$lib/ipc/config';
 import { getCommitFileDiff } from '$lib/ipc/diff';
 
@@ -23,6 +23,17 @@ type StreamFilePayload = {
 type StreamDonePayload = { job_id: string; tab_id: string };
 type StreamErrorPayload = { job_id: string; tab_id: string; error: string };
 
+const DEFAULT_CONFIG: DiffConfig = {
+  algorithm:        'myers',
+  context_lines:    3,
+  word_wrap:        false,
+  full_file:        false,
+  virt_threshold:   200,
+  mode:             'split',
+  file_list_view:   'list',
+  confirm_discard:  true,
+};
+
 function createDiffStore() {
   let files = $state<DiffFile[]>([]);
   let selectedFile = $state<DiffFile | null>(null);
@@ -34,56 +45,58 @@ function createDiffStore() {
   /// The job_id of the in-flight streaming request.  Used to ignore stale events
   /// when the user triggers a new load before the previous one finishes.
   let activeJobId = $state<string | null>(null);
-  let mode = $state<DiffMode>(
-    (localStorage.getItem('arbor:diff-mode') as DiffMode | null) ?? 'split'
-  );
-  let wordWrap = $state(localStorage.getItem('arbor:word-wrap') === 'true');
-  // fullFile and virtThreshold are persisted server-side in
-  // ~/.config/arbor/config.toml under [diff] — call loadConfig() on app boot
-  // to populate these. Defaults match DiffConfig::default in app_config.rs.
-  let fullFile = $state(false);
-  let virtThreshold = $state(200);
-  let configLoaded = $state(false);
-  // Cache the most recently loaded full DiffConfig so set_diff_config can
-  // round-trip every field (algorithm/context/word_wrap) — we only mutate
-  // the two we own, then echo the rest back to disk.
-  let lastLoadedConfig: DiffConfig | null = null;
+
+  // ── DiffConfig fields (all persisted via the backend config.toml) ────────
+  // Defaults render immediately on first paint; disk values overwrite once
+  // `loadConfig()` resolves (called from AppShell.onMount).
+  let algorithm     = $state<DiffAlgorithm>(DEFAULT_CONFIG.algorithm);
+  let contextLines  = $state<number>(DEFAULT_CONFIG.context_lines);
+  let wordWrap      = $state<boolean>(DEFAULT_CONFIG.word_wrap);
+  let fullFile      = $state<boolean>(DEFAULT_CONFIG.full_file);
+  let virtThreshold = $state<number>(DEFAULT_CONFIG.virt_threshold);
+  let mode          = $state<DiffMode>(DEFAULT_CONFIG.mode);
+  let fileListView  = $state<FileListView>(DEFAULT_CONFIG.file_list_view);
+  let confirmDiscard = $state<boolean>(DEFAULT_CONFIG.confirm_discard);
+  let configLoaded  = $state(false);
 
   async function loadConfig() {
     try {
       const cfg = await getDiffConfig();
-      lastLoadedConfig = cfg;
-      fullFile = !!cfg.full_file;
-      virtThreshold = clampThreshold(cfg.virt_threshold);
-      configLoaded = true;
+      algorithm      = cfg.algorithm;
+      contextLines   = clampContext(cfg.context_lines);
+      wordWrap       = !!cfg.word_wrap;
+      fullFile       = !!cfg.full_file;
+      virtThreshold  = clampThreshold(cfg.virt_threshold);
+      mode           = cfg.mode === 'unified' || cfg.mode === 'word_diff' ? cfg.mode : 'split';
+      fileListView   = cfg.file_list_view === 'tree' ? 'tree' : 'list';
+      confirmDiscard = !!cfg.confirm_discard;
+      configLoaded   = true;
     } catch {
       // First-run / backend not ready yet: keep defaults, retry on next call.
     }
   }
 
   function clampThreshold(n: number): number {
-    if (!Number.isFinite(n)) return 200;
+    if (!Number.isFinite(n)) return DEFAULT_CONFIG.virt_threshold;
     return Math.max(50, Math.min(100000, Math.floor(n)));
   }
+  function clampContext(n: number): number {
+    if (!Number.isFinite(n)) return DEFAULT_CONFIG.context_lines;
+    return Math.max(0, Math.min(20, Math.floor(n)));
+  }
 
-  /** Persist the current fullFile + virtThreshold to disk via IPC. */
+  /** Persist the current DiffConfig snapshot via IPC. */
   function persistConfig() {
-    if (!lastLoadedConfig) {
-      // No baseline yet — synthesize one with safe defaults.
-      lastLoadedConfig = {
-        algorithm: 'myers',
-        context_lines: 3,
-        word_wrap: false,
-        full_file: fullFile,
-        virt_threshold: virtThreshold,
-      };
-    }
     const next: DiffConfig = {
-      ...lastLoadedConfig,
-      full_file: fullFile,
-      virt_threshold: virtThreshold,
+      algorithm,
+      context_lines:    contextLines,
+      word_wrap:        wordWrap,
+      full_file:        fullFile,
+      virt_threshold:   virtThreshold,
+      mode,
+      file_list_view:   fileListView,
+      confirm_discard:  confirmDiscard,
     };
-    lastLoadedConfig = next;
     void setDiffConfig(next).catch(() => {});
   }
 
@@ -199,13 +212,40 @@ function createDiffStore() {
   }
 
   function setMode(m: DiffMode) {
+    if (mode === m) return;
     mode = m;
-    localStorage.setItem('arbor:diff-mode', m);
+    persistConfig();
   }
 
   function setWordWrap(v: boolean) {
+    if (wordWrap === v) return;
     wordWrap = v;
-    localStorage.setItem('arbor:word-wrap', String(v));
+    persistConfig();
+  }
+
+  function setAlgorithm(a: DiffAlgorithm) {
+    if (algorithm === a) return;
+    algorithm = a;
+    persistConfig();
+  }
+
+  function setContextLines(n: number) {
+    const clamped = clampContext(n);
+    if (clamped === contextLines) return;
+    contextLines = clamped;
+    persistConfig();
+  }
+
+  function setFileListView(v: FileListView) {
+    if (fileListView === v) return;
+    fileListView = v;
+    persistConfig();
+  }
+
+  function setConfirmDiscard(v: boolean) {
+    if (confirmDiscard === v) return;
+    confirmDiscard = v;
+    persistConfig();
   }
 
   function setFullFile(v: boolean) {
@@ -340,6 +380,10 @@ function createDiffStore() {
     get wordWrap() { return wordWrap; },
     get fullFile() { return fullFile; },
     get virtThreshold() { return virtThreshold; },
+    get algorithm() { return algorithm; },
+    get contextLines() { return contextLines; },
+    get fileListView() { return fileListView; },
+    get confirmDiscard() { return confirmDiscard; },
     get configLoaded() { return configLoaded; },
     loadConfig,
     setFiles,
@@ -350,6 +394,10 @@ function createDiffStore() {
     setLoading,
     setMode,
     setWordWrap,
+    setAlgorithm,
+    setContextLines,
+    setFileListView,
+    setConfirmDiscard,
     setFullFile,
     setVirtThreshold,
     clear,

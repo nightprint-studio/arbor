@@ -40,6 +40,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- The "Stash changes" prompt and the full-screen diff viewer now use the
+  standard modal shell — consistent backdrop, focus trap, ESC handling and
+  animation across the app.
 - Plugin enable / disable / uninstall now cascades along required dependencies.
   Disabling a plugin asks for confirmation and turns off every transitively-
   required dependent (leaves first); enabling a plugin with required deps off
@@ -59,6 +62,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   Delete Worktree Link, Remove Alias Group, Clear Pipeline Logs and the RON
   Studio Format / Convert-to-JSON actions now use the themed in-app confirm
   modal with Enter-to-confirm.
+- Settings — font scale, animations enable / speed, commit-template fallback,
+  diff algorithm / context / view mode / word-wrap / confirm-discard, graph
+  page size, branch / tag visibility and ticket-link chip toggle, plus the
+  "use theme fonts" opt-in — now live in `~/.config/arbor/config.toml` instead
+  of browser localStorage, so the choices survive WebView cache clears and can
+  be edited from disk.
 
 ### Fixed
 

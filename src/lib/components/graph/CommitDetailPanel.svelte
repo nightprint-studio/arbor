@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Avatar from '../shared/Avatar.svelte';
+  import Avatar from '../shared/internal/Avatar.svelte';
   import BranchLabel from './BranchLabel.svelte';
   import TicketChip from './TicketChip.svelte';
   import NotesModal from './NotesModal.svelte';

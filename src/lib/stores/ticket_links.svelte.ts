@@ -12,6 +12,7 @@
  */
 
 import { tabsStore } from '$lib/stores/tabs.svelte';
+import { graphConfigStore } from '$lib/stores/graph_config.svelte';
 import {
   getCommitTicketLinks,
   addTicketLink   as ipcAdd,
@@ -20,9 +21,6 @@ import {
   checkNotesPushConfig,
 } from '$lib/ipc/ticket_links';
 import type { CommitQueryItem, TicketLink, TicketLinkConfig } from '$lib/types/git';
-
-// ── localStorage key for the global enabled toggle ───────────────────────────
-const ENABLED_KEY = 'arbor:ticket-links-enabled';
 
 function createTicketLinksStore() {
   // ── Reactive state ────────────────────────────────────────────────────────
@@ -37,8 +35,7 @@ function createTicketLinksStore() {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   function isEnabled(): boolean {
-    try { return (localStorage.getItem(ENABLED_KEY) ?? 'true') === 'true'; }
-    catch { return true; }
+    return graphConfigStore.ticketLinksEnabled;
   }
 
   /** Reset when the active tab changes. */

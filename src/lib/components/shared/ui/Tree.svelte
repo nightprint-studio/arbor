@@ -18,8 +18,7 @@
    *     stage area and file panel use, since they persist expansion in
    *     their own stores keyed by full paths.
    *   - Filter auto-expands subtrees containing matches without polluting
-   *     the user-driven expand state — same trick the legacy TreeView
-   *     already used and worth preserving for keyboard search UX.
+   *     the user-driven expand state — keyboard-search UX stays intact.
    *   - Virtualisation: the tree is flattened DFS into a row list each
    *     time `nodes`, expansion state or the filter changes. Only rows
    *     intersecting the nearest scroll ancestor's viewport (plus a

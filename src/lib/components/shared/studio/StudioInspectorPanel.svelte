@@ -195,6 +195,7 @@
     ArrowUpRight, RotateCcw, FileCode,
   } from 'lucide-svelte';
   import Button from '../ui/Button.svelte';
+  import PanelShell from '../ui/PanelShell.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { studioStore } from '$lib/stores/studio.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
@@ -353,15 +354,8 @@
   }
 </script>
 
-<div class="sip-pane">
-  <!-- Standard panel header — matches PanelShell ps-header. The
-       activity rail owns the open/close toggle, so no redundant X
-       button here. -->
-  <div class="sip-head">
-    <ScanSearch size={13} />
-    <span class="sip-title">Inspector</span>
-    <span class="sip-spacer"></span>
-  </div>
+<PanelShell title="Inspector" class="sip-shell" scrollable={false}>
+  {#snippet icon()}<ScanSearch size={13} />{/snippet}
 
   {#if selectedNode}
     <div class="sip-head-row">
@@ -633,48 +627,9 @@
       {/if}
     </div>
   {/if}
-</div>
+</PanelShell>
 
 <style>
-  /* The card chrome (width / slide animation / background) lives in
-     the parent's `.rs-detail-pane` wrapper — the panel only fills it.
-     min-height:0 + overflow:hidden keep the body scroll container
-     bounded inside the flex column. */
-  .sip-pane {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  /* Standard panel header — same recipe as RonStudioModal's
-     `.rs-panel-head` so the inspector matches the schema / refs /
-     stage / etc. panels at a glance. */
-  .sip-head {
-    display: flex; align-items: center; gap: 6px;
-    padding: 0 8px 0 12px;
-    height: 34px;
-    min-height: 34px;
-    border-bottom: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
-    flex-shrink: 0;
-  }
-  .sip-title {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  /* Title-icon tint — matches PanelShell.ps-icon. */
-  .sip-head > :global(svg:first-child) {
-    color: var(--accent);
-    flex-shrink: 0;
-  }
   .sip-spacer { flex: 1; }
 
   /* Action strip directly under the panel head. */

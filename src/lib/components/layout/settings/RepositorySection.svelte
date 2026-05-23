@@ -3,10 +3,13 @@
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { getRepoConfig, setRepoConfig } from '$lib/ipc/config';
   import type { RepoConfig } from '$lib/ipc/config';
+  import { commitConfigStore } from '$lib/stores/commit_config.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
+
+  const commitTemplate = $derived(commitConfigStore.templateGlobal);
 
   const tab = $derived(tabsStore.activeTab);
   let repoConfig        = $state<RepoConfig | null>(null);
@@ -46,7 +49,7 @@
 
 <SectionHeader title="Repository Settings" description="Per-project overrides, stored in .arbor/config.toml alongside your repository." />
 
-<!-- Global commit template (localStorage, applies to all repos) -->
+<!-- Global commit template (persisted in ~/.config/arbor/config.toml under [commit]). -->
 <div class="card">
   <div class="card-section-title">Commit Template</div>
   <div class="card-row-note">
@@ -57,8 +60,8 @@
       class="template-textarea"
       placeholder="Enter a default commit message template…"
       rows="5"
-      value={localStorage.getItem('arbor:commit-template') ?? ''}
-      oninput={(e) => localStorage.setItem('arbor:commit-template', (e.target as HTMLTextAreaElement).value)}
+      value={commitTemplate}
+      oninput={(e) => commitConfigStore.setTemplateGlobal((e.target as HTMLTextAreaElement).value)}
     ></textarea>
   </div>
 </div>

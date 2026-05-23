@@ -17,7 +17,7 @@
 <h3>Animations</h3>
 <p>
   Controls the speed and behaviour of every transition and motion effect in the UI.
-  Settings are stored in <code>localStorage</code> and take effect immediately.
+  Settings are stored in <code>~/.config/arbor/config.toml</code> and take effect immediately.
 </p>
 <ul>
   <li>
@@ -138,7 +138,7 @@
   No <code>backdrop-filter</code> or runtime blur is used anywhere in the overlay: it
   paints to solid colours only, so even at 60+ entries per second on the busiest
   CommitGraph there is zero per-frame compositor work for the background.
-  All settings persist to <code>localStorage</code> and survive restarts.
+  All settings persist to <code>~/.config/arbor/config.toml</code> and survive restarts.
 </p>
 
 <h3>Graph</h3>
@@ -151,7 +151,7 @@
 
 <h3>Diff &amp; Stage</h3>
 <ul>
-  <li><strong>Diff algorithm</strong> — Myers (default), Patience, or Minimal. Myers is a good general-purpose default; Patience tends to produce cleaner hunks on refactors; Minimal produces the smallest diff.</li>
+  <li><strong>Diff algorithm</strong> — Myers (default), Patience, or Histogram. Myers is a good general-purpose default; Patience tends to produce cleaner hunks on refactors; Histogram favours unique anchor lines.</li>
   <li><strong>Context lines</strong> — number of unchanged lines shown around each hunk (0 – 20, default 3).</li>
   <li><strong>View mode</strong> — Unified (single column) or Split (side-by-side).</li>
   <li><strong>Word wrap</strong> — wraps long lines instead of scrolling horizontally.</li>

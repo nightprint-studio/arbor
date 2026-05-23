@@ -11,9 +11,8 @@
   import { commitChanges, getGitCommitTemplate } from '$lib/ipc/stage';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
+  import { commitConfigStore } from '$lib/stores/commit_config.svelte';
   import { pushBranch } from '$lib/ipc/remote';
-
-  const TEMPLATE_KEY = 'arbor:commit-template';
 
   let { onCommit }: { onCommit?: () => void } = $props();
 
@@ -59,7 +58,7 @@
           return;
         }
       } catch { /* ignore */ }
-      resolvedTemplate = localStorage.getItem(TEMPLATE_KEY) ?? '';
+      resolvedTemplate = commitConfigStore.templateGlobal;
     })();
   });
 

@@ -152,6 +152,7 @@
   import { jobsStore } from '$lib/stores/jobs.svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
+  import { commitConfigStore } from '$lib/stores/commit_config.svelte';
   import { terminalStore } from '$lib/stores/terminal.svelte';
   import { pipelinesStore } from '$lib/stores/pipelines.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
@@ -177,11 +178,10 @@
   import type { PluginFormConfig } from '$lib/types/plugin';
   import type { MergeRequest } from '$lib/types/mr';
 
-  // Apply persisted font scale immediately so first render uses the correct size.
-  {
-    const _s = parseFloat(localStorage.getItem('arbor:font-scale') ?? '1');
-    if (_s !== 1) document.documentElement.style.setProperty('--font-scale', String(_s));
-  }
+  // Font scale + theme-font opt-in live in `appearanceStore` (persisted in
+  // config.toml). The store applies the default `--font-scale` synchronously
+  // on import; `appearanceStore.loadConfig()` (called in onMount below)
+  // overwrites it with the on-disk value once the backend answers.
 
   // ── Missing-projects config (tombstone + locate behaviour) ────────────────
   let missingConfig = $state<MissingProjectsConfig>({
@@ -538,9 +538,12 @@
   // paint isn't blocked; this just refreshes them once disk values are read.
   onMount(() => { void diffStore.loadConfig(); });
 
-  // Same flow for appearance (window control style): defaults render now,
-  // disk values overwrite once read.
+  // Same flow for appearance (window controls, font scale, theme-font opt-in),
+  // animations (enabled + speed), and commit (global template fallback):
+  // defaults render now, disk values overwrite once read.
   onMount(() => { void appearanceStore.loadConfig(); });
+  onMount(() => { void animStore.loadConfig(); });
+  onMount(() => { void commitConfigStore.loadConfig(); });
 
   // Initialise the data cache and run one-time IDE detection at startup.
   onMount(async () => {

@@ -1,14 +1,9 @@
 export type DiffMode = 'unified' | 'split' | 'word_diff';
 export type DiffAlgorithm = 'myers' | 'patience' | 'histogram';
+export type FileListView = 'list' | 'tree';
 
 export interface ThemeConfig {
   name: string;
-}
-
-export interface LayoutConfig {
-  sidebar_width: number;
-  bottom_panel_height: number;
-  diff_mode: DiffMode;
 }
 
 export interface DiffConfig {
@@ -19,6 +14,12 @@ export interface DiffConfig {
   full_file: boolean;
   /** Switch to virtualized rendering above this line count. */
   virt_threshold: number;
+  /** Layout used by DiffViewer: split (side-by-side) vs unified. */
+  mode: DiffMode;
+  /** Layout used by FileDiffList: flat list vs folder tree. */
+  file_list_view: FileListView;
+  /** Show a confirmation dialog before discarding workdir changes. */
+  confirm_discard: boolean;
 }
 
 export interface GraphConfig {
@@ -27,6 +28,8 @@ export interface GraphConfig {
   show_tags: boolean;
   /** When false the entire history is loaded at once (no lazy-load on scroll). */
   paginate: boolean;
+  /** Render the ticket-link chip column in the commit graph. */
+  ticket_links_enabled: boolean;
 }
 
 export interface CacheConfig {
@@ -80,17 +83,35 @@ export interface PipelinesConfig {
 }
 
 export type WindowControlsStyle = 'mac' | 'windows';
+export type AnimSpeed = 'fast' | 'normal' | 'slow';
 
-/** Visual tweaks that don't belong to theme or layout — currently only the
- *  window-control button style. Position and dimensions of the controls are
- *  intentionally fixed regardless of style. */
+/** Visual tweaks that don't belong to theme or layout: window-control button
+ *  style, global font scale, and the opt-in for per-theme font preferences. */
 export interface AppearanceConfig {
   window_controls_style: WindowControlsStyle;
+  /** Global UI font scale multiplier applied to `--font-scale`. */
+  font_scale: number;
+  /** When true the active theme's `--theme-font-*` win over the global font stack. */
+  use_theme_fonts: boolean;
+}
+
+/** UI animation preferences. `enabled=false` collapses every transition
+ *  duration to 0ms; `speed` scales the base durations otherwise. */
+export interface AnimationsConfig {
+  enabled: boolean;
+  speed: AnimSpeed;
+}
+
+/** Host-wide commit preferences. Per-repo overrides live in
+ *  `.arbor/config.toml`; this is the global fallback. */
+export interface CommitConfig {
+  /** Fallback commit-message template used when the repo has no native
+   *  `commit.template` configured. Empty string disables the template. */
+  template_global: string;
 }
 
 export interface AppConfig {
   theme: ThemeConfig;
-  layout: LayoutConfig;
   diff: DiffConfig;
   graph: GraphConfig;
   recent_repos: string[];
@@ -98,4 +119,6 @@ export interface AppConfig {
   activity_bar: ActivityBarConfig;
   mr: MrConfig;
   appearance: AppearanceConfig;
+  animations: AnimationsConfig;
+  commit: CommitConfig;
 }

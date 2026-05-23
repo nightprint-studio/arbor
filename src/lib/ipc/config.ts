@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityBarConfig, AppearanceConfig, CacheConfig, DiffConfig, GraphConfig, MrConfig, PipelinesConfig } from '$lib/types/config';
+import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, MrConfig, PipelinesConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
 export type { TicketLinksRepoConfig };
@@ -112,3 +112,19 @@ export const getDiffConfig = () =>
 
 export const setDiffConfig = (config: DiffConfig) =>
   invoke<void>('set_diff_config', { config });
+
+// ── Animations config (enabled + speed multiplier) ────────────────────────────
+
+export const getAnimationsConfig = () =>
+  invoke<AnimationsConfig>('get_animations_config');
+
+export const setAnimationsConfig = (config: AnimationsConfig) =>
+  invoke<void>('set_animations_config', { config });
+
+// ── Commit config (global template fallback, …) ───────────────────────────────
+
+export const getCommitConfig = () =>
+  invoke<CommitConfig>('get_commit_config');
+
+export const setCommitConfig = (config: CommitConfig) =>
+  invoke<void>('set_commit_config', { config });

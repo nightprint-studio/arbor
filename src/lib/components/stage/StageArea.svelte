@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Plus, Minus, X, RotateCcw, RefreshCw, Archive, Check, Square, CheckSquare, GitMerge, AlertTriangle, ChevronDown, ChevronRight, List, FolderTree, Folder, CheckCircle2, FileDiff } from 'lucide-svelte';
+  import { Plus, Minus, X, RotateCcw, RefreshCw, Archive, Square, CheckSquare, GitMerge, AlertTriangle, ChevronDown, ChevronRight, List, FolderTree, Folder, CheckCircle2, FileDiff } from 'lucide-svelte';
   import CommitForm from './CommitForm.svelte';
   import DiffViewer, { type DiffViewerApi } from '../diff/DiffViewer.svelte';
   import DiffToolbar from '../diff/DiffToolbar.svelte';
@@ -14,6 +14,7 @@
   import ConflictResolver from './ConflictResolver.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
+  import StashDialog from '$lib/components/shared/internal/StashDialog.svelte';
   import { getStatus, stageFile, unstageFile, stageAll, unstageAll, discardFile, discardAll, stagePatch } from '$lib/ipc/stage';
   import { stashSave } from '$lib/ipc/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
@@ -26,9 +27,6 @@
   let viewMode         = $state<'staged' | 'unstaged'>('unstaged');
   let currentDiffStaged = $state(false);
   let stashOpen           = $state(false);
-  let stashMsg            = $state('');
-  let stashInputEl: HTMLInputElement | undefined = $state();
-  $effect(() => { if (stashOpen) stashInputEl?.focus(); });
   let isStashing          = $state(false);
   // Imperative handle exposed by the chromeless DiffViewer below — drives
   // the DiffToolbar we render inside the BottomPanelHeader.
@@ -165,7 +163,7 @@
   let discardPending = $state<DiscardTarget | null>(null);
 
   function isConfirmDiscardEnabled() {
-    return (localStorage.getItem('arbor:confirm-discard') ?? 'true') === 'true';
+    return diffStore.confirmDiscard;
   }
 
   // ── Context menu ────────────────────────────────────────────────
@@ -240,7 +238,7 @@
     else if (id === 'stage-folder')   await handleStageFolder(paths ?? []);
     else if (id === 'discard-folder') handleDiscardFolder(paths ?? []);
     else if (id === 'unstage-folder') await handleUnstageFolder(paths ?? []);
-    else if (id === 'stash-all')      { stashMsg = ''; stashOpen = true; }
+    else if (id === 'stash-all')      stashOpen = true;
   }
 
   $effect(() => {
@@ -471,14 +469,13 @@
     }
   }
 
-  async function confirmStash() {
+  async function confirmStash(message: string) {
     if (!tab || isStashing) return;
     isStashing = true;
     try {
-      await stashSave(tab.id, stashMsg.trim() || undefined, true);
+      await stashSave(tab.id, message || undefined, true);
       uiStore.showToast('Changes stashed', 'success');
       stashOpen = false;
-      stashMsg  = '';
       // Clear the currently-shown diff: the workdir is now clean so any
       // previously selected unstaged/staged file no longer exists.
       diffStore.setFiles([]);
@@ -491,11 +488,6 @@
     } finally {
       isStashing = false;
     }
-  }
-
-  function onStashKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirmStash(); }
-    if (e.key === 'Escape') { e.stopPropagation(); stashOpen = false; stashMsg = ''; }
   }
 </script>
 
@@ -583,29 +575,6 @@
   <ResizablePanel direction="horizontal" initialSize={280} minSize={160} maxSize={500}>
     <div class="files-panel">
 
-      <!-- Stash inline dialog -->
-      {#if stashOpen}
-        <div class="stash-drop" role="dialog" aria-label="Stash changes">
-          <p class="stash-title">Stash message <span class="stash-opt">(optional)</span></p>
-          <input
-            class="stash-input"
-            type="text"
-            placeholder="WIP on {status?.current_branch ?? 'branch'}…"
-            bind:value={stashMsg}
-            onkeydown={onStashKeydown}
-            bind:this={stashInputEl}
-          />
-          <div class="stash-row">
-            <button class="stash-btn cancel" onclick={() => { stashOpen = false; stashMsg = ''; }} disabled={isStashing}>
-              <X size={11} /> Cancel
-            </button>
-            <button class="stash-btn confirm" onclick={confirmStash} disabled={isStashing}>
-              <Check size={11} /> {isStashing ? 'Stashing…' : 'Stash All'}
-            </button>
-          </div>
-        </div>
-      {/if}
-
       <!-- ── Unstaged ─────────────────────────────────────────────── -->
       <div class="section" class:collapsed={unstagedCollapsed}>
         <div class="section-header" role="button" tabindex="0"
@@ -624,7 +593,7 @@
             <!-- git actions -->
             <button class="icon-action" onclick={(e) => { e.stopPropagation(); handleStageAll(); }} use:tooltip={'Stage all'}><CheckSquare size={13} /></button>
             <button class="icon-action discard-all-btn" onclick={(e) => { e.stopPropagation(); handleDiscardAll(); }} use:tooltip={'Discard all unstaged changes'}><RotateCcw size={12} /></button>
-            <button class="icon-action" onclick={(e) => { e.stopPropagation(); stashMsg = ''; stashOpen = !stashOpen; }} use:tooltip={'Stash all changes'}><Archive size={12} /></button>
+            <button class="icon-action" onclick={(e) => { e.stopPropagation(); stashOpen = !stashOpen; }} use:tooltip={'Stash all changes'}><Archive size={12} /></button>
           </div>
         </div>
 
@@ -831,6 +800,15 @@
       : `all ${discardPending.count} unstaged file${discardPending.count !== 1 ? 's' : ''}`}
     onConfirm={onDiscardConfirm}
     onCancel={onDiscardCancel}
+  />
+{/if}
+
+{#if stashOpen}
+  <StashDialog
+    branchName={status?.current_branch}
+    busy={isStashing}
+    onConfirm={confirmStash}
+    onCancel={() => (stashOpen = false)}
   />
 {/if}
 
@@ -1051,73 +1029,6 @@
     border-top: 1px solid var(--border);
     flex-shrink: 0;
   }
-
-  /* ── Stash inline dialog ── */
-  .stash-drop {
-    border-bottom: 1px solid var(--border);
-    padding: 10px;
-    background: var(--bg-base);
-    animation: slideDown 120ms cubic-bezier(0.16,1,0.3,1);
-  }
-  @keyframes slideDown {
-    from { opacity: 0; transform: translateY(-6px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  .stash-title {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin: 0 0 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-  }
-  .stash-opt {
-    font-weight: 400;
-    text-transform: none;
-    letter-spacing: 0;
-    color: var(--text-muted);
-  }
-
-  .stash-input {
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--bg-base);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-primary);
-    font-family: var(--font-ui-sans);
-    font-size: 12px;
-    padding: 5px 8px;
-    outline: none;
-    transition: border-color var(--transition-fast);
-  }
-  .stash-input:focus { border-color: var(--accent); }
-
-  .stash-row {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-    margin-top: 8px;
-  }
-
-  .stash-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    font-family: var(--font-ui-sans);
-    font-size: 11px;
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-  }
-  .stash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .stash-btn.cancel { background: transparent; color: var(--text-muted); }
-  .stash-btn.cancel:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
-  .stash-btn.confirm { background: var(--accent); color: var(--text-on-accent); border-color: var(--accent); }
-  .stash-btn.confirm:hover:not(:disabled) { background: var(--accent-hover, #3b5fc0); }
 
   /* ── Clean working tree empty state ── */
   .stage-area.clean-state {

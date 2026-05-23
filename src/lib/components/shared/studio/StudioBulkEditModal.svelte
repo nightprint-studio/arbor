@@ -34,11 +34,12 @@
   import { onMount } from 'svelte';
   import {
     AlertCircle, AlertTriangle, ChevronDown, ChevronRight, FileText,
-    PencilRuler, X as XIcon, Type as TypeIcon, Hash, ToggleLeft, Slash,
+    PencilRuler, Type as TypeIcon, Hash, ToggleLeft, Slash,
     PenLine, Trash2, FileCode, FolderOpen, Code2,
   } from 'lucide-svelte';
 
   import Modal from '$lib/components/shared/Modal.svelte';
+  import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
@@ -377,16 +378,11 @@
   ariaLabel="Bulk edit by query"
 >
   {#snippet header()}
-    <div class="be-header">
-      <div class="be-title">
-        <PencilRuler size={16} />
-        <span>Bulk transform</span>
-        <span class="be-format-tag">{formatLabel}</span>
-      </div>
-      <button class="be-close" type="button" aria-label="Close" onclick={onClose}>
-        <XIcon size={14} />
-      </button>
-    </div>
+    <ModalHeader {onClose}>
+      <PencilRuler size={14} />
+      <span class="modal-title">Bulk transform</span>
+      <span class="be-format-tag">{formatLabel}</span>
+    </ModalHeader>
   {/snippet}
 
   <div class="be-body">
@@ -708,28 +704,14 @@
 </Modal>
 
 <style>
-  /* Header / chrome — same pattern as StudioRenameModal. */
-  .be-header {
-    display: flex; align-items: center; justify-content: space-between;
-    width: 100%; padding: 0;
-  }
-  .be-title {
-    display: flex; align-items: center; gap: 8px;
-    font-weight: 600; color: var(--text-primary);
-  }
+  /* Header chrome (background, padding, close button) comes from
+     `<ModalHeader>` + `<Modal>`. Only the format tag chip is local. */
   .be-format-tag {
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
     padding: 2px 6px; border-radius: 4px;
     background: var(--bg-elevated); color: var(--text-secondary);
     font-weight: 500;
   }
-  .be-close {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px;
-    border: none; background: transparent; cursor: pointer;
-    border-radius: 4px; color: var(--text-secondary);
-  }
-  .be-close:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   /* Body layout */
   .be-body {

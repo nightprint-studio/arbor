@@ -23,12 +23,31 @@ use super::ast::{self, JsonAst, JsonObject, JsonArray, Span};
 
 // ── Primitive serialisation ─────────────────────────────────────────────────
 
+/// Unwrap the FE's tagged `StudioPrimitiveValue` (`{type, value}`) into a
+/// raw `serde_json::Value`. Accepts both wire formats — raw scalar
+/// (`true`, `42`, `"foo"`) and the tagged form
+/// (`{type: "string", value: "foo"}`). Mirror of yaml_studio's helper.
+fn unwrap_primitive_wire(v: &Value) -> Value {
+    if let Value::Object(map) = v {
+        let is_tagged = map.len() == 2
+            && map.contains_key("type")
+            && map.contains_key("value");
+        if is_tagged {
+            if let Some(inner) = map.get("value") {
+                return inner.clone();
+            }
+        }
+    }
+    v.clone()
+}
+
 /// Produce the literal text for a primitive value, suitable for
 /// splicing into a JSON buffer. Mirrors `studio::format::types::
 /// StudioMutation::SetPrimitive { value: serde_json::Value }` and the
 /// `null_handling = Native` policy from the descriptor.
 pub fn serialize_primitive(value: &Value) -> Result<String> {
-    match value {
+    let value = unwrap_primitive_wire(value);
+    match &value {
         Value::String(s) => Ok(serde_json::to_string(s)
             .map_err(|e| AppError::Other(format!("serialize string: {e}")))?),
         Value::Number(n) => Ok(n.to_string()),

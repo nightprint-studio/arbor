@@ -826,9 +826,15 @@ pub fn run() {
             // MR/PR Activity timeline defaults
             commands::config_commands::get_mr_config,
             commands::config_commands::set_mr_config,
-            // Appearance preferences (window control style, …)
+            // Appearance preferences (window control style, font scale, …)
             commands::config_commands::get_appearance_config,
             commands::config_commands::set_appearance_config,
+            // UI animations preferences (enabled, speed)
+            commands::config_commands::get_animations_config,
+            commands::config_commands::set_animations_config,
+            // Commit preferences (host-wide template fallback, …)
+            commands::config_commands::get_commit_config,
+            commands::config_commands::set_commit_config,
             // Activity bar config
             commands::config_commands::get_activity_bar_config,
             commands::config_commands::set_activity_bar_config,

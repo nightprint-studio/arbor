@@ -18,11 +18,8 @@ import { encodingOverrides } from '$lib/stores/encodingOverrides.svelte';
 //     of any realistic source file.
 const FULL_FILE_CONTEXT = 1_000_000;
 
-const getContextLines = () => {
-  if (diffStore.fullFile) return FULL_FILE_CONTEXT;
-  return parseInt(localStorage.getItem('arbor:context-lines') ?? '3');
-};
-const getDiffAlgo = () => localStorage.getItem('arbor:diff-algo') ?? 'myers';
+const getContextLines = () => diffStore.fullFile ? FULL_FILE_CONTEXT : diffStore.contextLines;
+const getDiffAlgo = () => diffStore.algorithm;
 
 /** Per-path encoding pins, e.g. `{ "src/foo.java": "windows-1252" }`. Empty
  *  / `undefined` means "no overrides — auto-detect every file". The pill

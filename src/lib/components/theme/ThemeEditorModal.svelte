@@ -7,6 +7,7 @@
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { themeStore, type ImportResult } from '$lib/stores/theme.svelte';
+  import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { notificationsStore } from '$lib/stores/notifications.svelte';
   import { fsReadTextFile, fsWriteTextFile } from '$lib/ipc/fs';
@@ -412,8 +413,11 @@
         <label class="font-toggle" use:tooltip={'When on, themes that declare a UI / code font use it; when off, the global font stack is used.'}>
           <input
             type="checkbox"
-            checked={themeStore.useThemeFonts}
-            onchange={(e) => themeStore.setUseThemeFonts((e.currentTarget as HTMLInputElement).checked)}
+            checked={appearanceStore.useThemeFonts}
+            onchange={(e) => appearanceStore.setUseThemeFonts(
+              (e.currentTarget as HTMLInputElement).checked,
+              themeStore.activeTheme.vars,
+            )}
           />
           <span>Use theme fonts</span>
         </label>

@@ -1,7 +1,7 @@
 use tauri::State;
 use crate::error::AppError;
 use crate::config::repo_config::{RepoConfig, load as load_repo_config, save as save_repo_config};
-use crate::config::app_config::{self, ActivityBarConfig, AppearanceConfig, CacheConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, PipelinesConfig, RecoveryConfig, StudioSettings};
+use crate::config::app_config::{self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, PipelinesConfig, RecoveryConfig, StudioSettings};
 use crate::AppState;
 
 // Cap the persisted recent-repo list. With WelcomeScreen showing 6 and the
@@ -412,6 +412,46 @@ pub fn set_appearance_config(
 ) -> Result<(), AppError> {
     let mut cfg = state.lock_config()?;
     cfg.appearance = config;
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Read the current UI animations preferences (enabled + speed).
+#[tauri::command]
+pub fn get_animations_config(state: State<'_, AppState>) -> Result<AnimationsConfig, AppError> {
+    let config = state.lock_config()?;
+    Ok(config.animations.clone())
+}
+
+/// Persist updated animations preferences to disk.
+#[tauri::command]
+pub fn set_animations_config(
+    state: State<'_, AppState>,
+    config: AnimationsConfig,
+) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    cfg.animations = config;
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Read host-wide commit preferences (global template fallback, …).
+#[tauri::command]
+pub fn get_commit_config(state: State<'_, AppState>) -> Result<CommitConfig, AppError> {
+    let config = state.lock_config()?;
+    Ok(config.commit.clone())
+}
+
+/// Persist updated commit preferences to disk.
+#[tauri::command]
+pub fn set_commit_config(
+    state: State<'_, AppState>,
+    config: CommitConfig,
+) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    cfg.commit = config;
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))

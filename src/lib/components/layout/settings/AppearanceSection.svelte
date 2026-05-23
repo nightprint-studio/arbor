@@ -10,14 +10,16 @@
 
   let { onOpenThemeEditor }: { onOpenThemeEditor: () => void } = $props();
 
-  let fontScale = $state(parseFloat(localStorage.getItem('arbor:font-scale') ?? '1'));
-
   const FONT_PRESETS = [0.85, 1.0, 1.15, 1.3];
 
-  $effect(() => {
-    document.documentElement.style.setProperty('--font-scale', String(fontScale));
-    localStorage.setItem('arbor:font-scale', String(fontScale));
-  });
+  // Reactive read-through to the store so the slider and chip auto-update
+  // if any other surface (e.g. command palette) changes the scale.
+  const fontScale = $derived(appearanceStore.fontScale);
+
+  function onScaleInput(e: Event) {
+    const n = parseFloat((e.target as HTMLInputElement).value);
+    if (Number.isFinite(n)) appearanceStore.setFontScale(n);
+  }
 
   function isPreset(p: number) {
     return Math.abs(fontScale - p) < 0.005;
@@ -59,7 +61,8 @@
         min="0.8"
         max="1.4"
         step="0.05"
-        bind:value={fontScale}
+        value={fontScale}
+        oninput={onScaleInput}
         class="slider"
       />
       <div class="preset-row">
@@ -68,7 +71,7 @@
             type="button"
             class="preset-btn"
             class:active={isPreset(p)}
-            onclick={() => fontScale = p}
+            onclick={() => appearanceStore.setFontScale(p)}
             use:tooltip={`Set to ${(p * 100).toFixed(0)}%`}
           >
             {(p * 100).toFixed(0)}%

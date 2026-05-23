@@ -42,7 +42,7 @@
 
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { tick } from 'svelte';
+  import { tick, onMount } from 'svelte';
   import { fly, slide } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { Search, ChevronDown, ChevronRight, Check, Loader } from 'lucide-svelte';
@@ -102,6 +102,15 @@
     loading?: boolean;
     /** Fires the moment the menu opens (use for lazy-loading items). */
     onopen?: () => void;
+    /** Fires every time the menu closes — pick, Escape, Tab, or
+     *  outside-click. Lets callers distinguish "closed without picking"
+     *  (treat as cancel) from "closed via item selection" by setting a
+     *  flag in the item's `onclick` before the close runs. */
+    onclose?: () => void;
+    /** When true, open the menu on mount (one-shot — toggled to false
+     *  externally has no effect). Used by inline-edit shells that
+     *  pop the dropdown automatically when entering edit mode. */
+    autoOpen?: boolean;
     class?: string;
   }
 
@@ -122,6 +131,8 @@
     closeOnSelect,
     loading           = false,
     onopen,
+    onclose,
+    autoOpen          = false,
     showFooter        = true,
     class: rootClass  = '',
   }: Props = $props();
@@ -217,6 +228,14 @@
     menuStyle = style;
   }
 
+  // Auto-open on mount when the caller drives the open lifecycle from
+  // outside (e.g. an inline-edit shell that pops the dropdown the moment
+  // the row enters edit mode). One-shot — toggling `autoOpen` back to
+  // false later has no effect; the menu is fully driven by `open` after.
+  onMount(() => {
+    if (autoOpen) void tick().then(() => { if (!open) toggle(); });
+  });
+
   // ── Toggle / close / reposition ───────────────────────────────────────────
   function toggle() {
     if (open) { close(); return; }
@@ -249,8 +268,10 @@
   }
 
   function close(restoreFocus = false) {
+    if (!open) return;
     open = false;
     if (restoreFocus) focusTrigger();
+    onclose?.();
   }
 
   function reposition() { if (position === 'fixed') computeFixed(); }
