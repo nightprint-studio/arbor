@@ -26,6 +26,16 @@ Fills the gap created by the bulk *Fetch all* / *Pull all* / *Tag all* actions: 
 
 Drag-and-drop reordering with squash / edit / drop / fixup actions and a timeline preview. Today rebase delegates to the `git` CLI.
 
+### Configurable GitFlow
+
+The current GitFlow surface is opinionated — fixed branch prefixes, fixed base branches, fixed finish behaviour (tag, merge-back, branch deletion). The next iteration exposes these as per-repo settings: custom prefixes for feature/release/hotfix/support, configurable base and target branches, opt-in steps for finish actions, and hook points so plugins can extend the flow without forking it.
+
+## Architectural block: backend split into separate crates
+
+A multi-session cleanup pass: today most of the Rust backend lives in a single `arbor` crate. The goal is to peel off self-contained domains into dedicated crates so each one has a sharp dependency surface, can be built and tested in isolation, and could in principle be reused outside the app. The split is already underway — `cloud-storage` and the OAuth helpers were extracted first — and continues with `git_provider` (GitHub/GitLab clients), `pipeline`, the Lua `plugin` host, `jobs`, and the `git` wrapper layer.
+
+Pure refactor: no user-visible behaviour changes, but it unlocks the subprocess-runtime block below and makes future contribution easier.
+
 ## Architectural block: plugin runtime as a subprocess
 
 A single contiguous effort spread over multiple sessions. Each phase ships independently, but the real payoff comes from completing all three.

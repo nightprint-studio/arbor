@@ -9,6 +9,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Marketplace registry now supports external plugin entries — third-party
+  plugins maintained in their own GitHub repo can be listed from
+  `arbor-extensions` with a one-line pointer, instead of hosting the code in
+  the registry itself. Entries without a `pinned_sha` surface an "Unpinned"
+  badge in the detail view.
 - Plugin Marketplace is now reachable directly from the Command Palette and via
   the new Alt+Shift+M shortcut — no need to open Plugin Manager first.
 - Workspace Manager: Arrow Up / Down navigates groups, workspaces and repo

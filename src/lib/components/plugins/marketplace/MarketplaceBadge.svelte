@@ -7,7 +7,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  type Tone = 'community' | 'custom' | 'local' | 'experimental' | 'variant';
+  type Tone = 'community' | 'custom' | 'local' | 'experimental' | 'variant' | 'unpinned';
 
   interface Props {
     tone:     Tone;
@@ -60,5 +60,13 @@
     color: var(--text-secondary);
     border: 1px solid var(--border-subtle);
     text-transform: capitalize;
+  }
+  /* Unpinned — warning tone for external Community entries that track a
+     moving ref. Same palette as `experimental` because both convey
+     "proceed with awareness" without escalating to error. */
+  .badge-unpinned {
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
+    color: var(--warning);
+    border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
   }
 </style>

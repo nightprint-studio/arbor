@@ -57,6 +57,14 @@ export interface RegistryEntry {
    * `custom` sources to defend against tag-hijack.
    */
   pinned_sha?: string;
+  /**
+   * True when the entry points at a third-party repo (the registry just
+   * lists it). `source` stays `community` because the entry was vetted via
+   * PR; the flag drives the "Unpinned" hint when `pinned_sha` is absent.
+   * Always false for entries that live inside the registry repo and for
+   * `custom` / `local` sources.
+   */
+  external?: boolean;
 }
 
 // ─── Resolved plugin metadata ─────────────────────────────────────────────────

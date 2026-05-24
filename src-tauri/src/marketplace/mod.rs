@@ -275,6 +275,7 @@ fn local_plugin_entry(m: crate::plugin::runtime::PluginManifest, enabled: bool) 
             subpath:    None,
             source:     MarketplaceSource::Local,
             pinned_sha: None,
+            external:   false,
         },
         experimental:      if m.experimental { Some(true) } else { None },
         doc:               None,
@@ -337,6 +338,7 @@ fn load_local_themes() -> Vec<MarketplaceTheme> {
                 subpath:    Some(path.to_string_lossy().to_string()),
                 source:     MarketplaceSource::Local,
                 pinned_sha: None,
+                external:   false,
             },
         });
     }

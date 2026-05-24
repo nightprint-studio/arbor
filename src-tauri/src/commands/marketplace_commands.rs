@@ -393,6 +393,7 @@ fn stub_plugin(name: &str) -> MarketplacePlugin {
         entry: RegistryEntry {
             repo: String::new(), r#ref: None, subpath: None,
             source: MarketplaceSource::Local, pinned_sha: None,
+            external: false,
         },
         experimental: None,
         doc:         None,
@@ -420,6 +421,7 @@ fn stub_theme(id: &str) -> MarketplaceTheme {
         entry: RegistryEntry {
             repo: String::new(), r#ref: None, subpath: None,
             source: MarketplaceSource::Local, pinned_sha: None,
+            external: false,
         },
     }
 }

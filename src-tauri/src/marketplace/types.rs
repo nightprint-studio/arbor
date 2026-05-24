@@ -46,6 +46,13 @@ pub struct RegistryEntry {
     /// ref doesn't match. Defends custom sources against tag-hijack.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinned_sha:  Option<String>,
+    /// True when this entry points at a third-party repo (different from the
+    /// registry repo it was listed in). `source = Community` stays the same —
+    /// vetting still happens via PR review on the registry — but the FE
+    /// uses this flag to surface a "this lives in someone else's repo" hint
+    /// and to encourage `pinned_sha` for moving refs.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub external:    bool,
 }
 
 // ---------------------------------------------------------------------------

@@ -715,6 +715,38 @@ ev.emit("config_changed", { repo = arbor.repo.current() })`, '.lua')}</pre>
   <li><strong>settings_read_others</strong> — boolean; allow <code>arbor.settings.read(plugin, key)</code> on other plugins' globals</li>
 </ul>
 
+<h2>Publishing to the Marketplace</h2>
+<p>
+  Once your plugin works locally, you can propose it for the curated
+  <strong>Community</strong> catalog without dropping the code into the registry repo.
+  Keep the source in your own GitHub repo and submit a one-line pointer:
+</p>
+<ol>
+  <li>Push a tagged release (e.g. <code>v1.0.0</code>) on your repo.</li>
+  <li>Resolve the commit SHA: <code>git rev-parse v1.0.0</code>.</li>
+  <li>
+    Open a PR on <code>nightprint-studio/arbor-extensions</code> adding an entry to
+    <code>index.json</code>:
+    <pre><code>{`{
+  "repo": "https://github.com/your-handle/your-plugin",
+  "ref": "v1.0.0",
+  "pinned_sha": "<the SHA from step 2>"
+}`}</code></pre>
+    Add <code>"subpath": "plugins/foo"</code> if your plugin sits in a sub-folder.
+  </li>
+  <li>
+    Version bumps are themselves one-line PRs (update <code>ref</code> +
+    <code>pinned_sha</code>). Pinning is optional but strongly recommended: without
+    it, Arbor shows an <strong>Unpinned</strong> badge to signal the entry tracks a
+    moving ref. With it, the Marketplace only ever installs the exact commit that
+    was reviewed at merge time.
+  </li>
+</ol>
+<p>
+  The legacy <strong>Internal</strong> shape (<code>{`{ "subpath": "plugins/foo" }`}</code>)
+  is reserved for plugins maintained alongside Arbor inside the registry repo itself.
+</p>
+
 <h2>Manifest top-level fields</h2>
 <ul>
   <li><strong>min_arbor_version</strong> <em>(optional)</em> — semver string. The plugin is rejected at load time if the running Arbor build is older. Plain strings (<code>"0.5.0"</code>) are interpreted as <code>&gt;=0.5.0</code>; full semver requirements (<code>"&gt;=0.5, &lt;0.7"</code>) are also accepted.</li>

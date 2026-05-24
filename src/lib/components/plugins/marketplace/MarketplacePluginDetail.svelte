@@ -68,6 +68,11 @@
       {/if}
       <MarketplaceBadge tone={p.source}>{sourceBadgeLabel(p.source)}</MarketplaceBadge>
       {#if p.experimental}<MarketplaceBadge tone="experimental">Experimental</MarketplaceBadge>{/if}
+      {#if p.entry.external && !p.entry.pinned_sha}
+        <span use:tooltip={'This entry tracks a moving ref (branch or tag). Maintainers recommend pinning to a commit SHA to defend against upstream tag changes.'}>
+          <MarketplaceBadge tone="unpinned">Unpinned</MarketplaceBadge>
+        </span>
+      {/if}
     </div>
     <div class="meta">
       <span>by <strong>{p.author}</strong></span>
