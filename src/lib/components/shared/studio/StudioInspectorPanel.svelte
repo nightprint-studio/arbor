@@ -36,6 +36,7 @@
 <script lang="ts" module>
   import type { Snippet } from 'svelte';
   import type { StudioBackend, StudioFormat } from '$lib/ipc/studio-format';
+  import type { UsageMatch } from '$lib/ipc/studio';
   import type { StudioTreeNodeBase } from './StudioTreePane.svelte';
 
   /** Resolved-type info the schema strip surfaces at the top of the
@@ -71,13 +72,11 @@
 
   /** Usage entry (cross-ref definition site → all sites that reference
    *  the value). Format-agnostic: `studioStore.readUsages` already
-   *  works in these terms for every format with cross-refs. */
-  export interface InspectorUsageEntry {
-    absolute_path: string;
-    field_path: string[];
-    key_name: string;
-    file_name: string;
-  }
+   *  works in these terms for every format with cross-refs.
+   *  Aliased to `UsageMatch` so the panel's `onJumpToUsage` callback
+   *  can be wired straight to `useStudioCrossRefs.jumpToUsage` without
+   *  a structural cast that drops `relative_path` / `kind`. */
+  export type InspectorUsageEntry = UsageMatch;
 
   /** Imperative surface exposed via `bind:this`. Empty today — focus
    *  management is internal and triggered by prop changes. Reserved
@@ -340,7 +339,7 @@
     const tabId = tabsStore.activeTabId;
     if (!value || !tabId) return null;
     return {
-      items:   studioStore.readUsagesForKind(tabId, value, usagesKind) as InspectorUsageEntry[] | null,
+      items:   studioStore.readUsagesForKind(tabId, value, usagesKind),
       loading: studioStore.isUsagesLoadingForKind(tabId, value, usagesKind),
     };
   });

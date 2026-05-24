@@ -12,6 +12,7 @@
 
 import { studioStore } from '$lib/stores/studio.svelte';
 import { notificationsStore } from '$lib/stores/notifications.svelte';
+import type { StudioFileKind } from '$lib/ipc/studio';
 import type {
   BulkEditOpenDoc, BulkEditResult,
   RenameOpenDoc, RenameResult,
@@ -19,7 +20,7 @@ import type {
 
 export interface RenameBulkConfig<TNode> {
   /** e.g. 'yaml' — used by `studioStore.loadCrossRefsForKind`. */
-  formatId: string;
+  formatId: StudioFileKind;
   /** Display label for notifications — e.g. 'YAML'. Unused for now,
    *  but kept so consumers don't need a second prop later. */
   formatLabel: string;
@@ -69,7 +70,7 @@ function pathTouched(active: string | null, written: string[]): boolean {
   return written.some(p => p.replace(/\\/g, '/').toLowerCase() === norm);
 }
 
-async function refreshCrossRefIndex(tabId: string | null, formatId: string): Promise<void> {
+async function refreshCrossRefIndex(tabId: string | null, formatId: StudioFileKind): Promise<void> {
   if (!tabId) return;
   try { await studioStore.loadCrossRefsForKind(tabId, formatId, true); } catch { /* soft */ }
   try { await studioStore.refreshIndex(tabId); }                         catch { /* soft */ }

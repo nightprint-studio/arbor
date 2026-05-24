@@ -12,6 +12,7 @@
  */
 
 import type { StudioPrimitiveValue } from '$lib/ipc/studio-format';
+import type { StudioFileKind } from '$lib/ipc/studio';
 
 export type EditLocation = 'tree' | 'detail';
 
@@ -22,7 +23,7 @@ export interface CommitResult {
 
 export interface EditPipelineConfig<TKind extends string, TNode> {
   /** Used to build localStorage key for the dismissed-banner pref. */
-  formatId: string;
+  formatId: StudioFileKind;
   /** Whether a row's kind supports the F2/double-click primitive editor. */
   isEditablePrimitive: (kind: TKind) => boolean;
   /** YAML's `null` leaf — promotable via `replace_at` snippet. */

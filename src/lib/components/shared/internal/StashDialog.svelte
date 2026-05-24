@@ -14,6 +14,7 @@
    *   - whether the modal is mounted (open/close state)
    *   - the actual `stashSave` call and any post-stash refresh
    */
+  import { untrack } from 'svelte';
   import { Check, X } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -49,7 +50,7 @@
     onCancel,
   }: Props = $props();
 
-  let message = $state(initialMessage);
+  let message = $state(untrack(() => initialMessage));
 
   function submit() {
     if (busy) return;

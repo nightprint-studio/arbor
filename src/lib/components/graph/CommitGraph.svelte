@@ -1381,8 +1381,13 @@
     />
   {/if}
 
-  <!-- Virtual scroll area -->
-  <div class="scroll-area" role="region" aria-label="Commit graph" tabindex="0"
+  <!-- Virtual scroll area — custom keyboard-driven widget (arrow keys walk
+       lanes, PgUp/Dn jump viewports, Home/End jump to newest/oldest). The
+       `role="application"` is correct but svelte-a11y still flags the div
+       as non-interactive; the ignores below are intentional. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="scroll-area" role="application" aria-label="Commit graph" tabindex="0"
        bind:this={scrollEl} onscroll={handleScroll} onkeydown={handleGraphKeydown}
        oncontextmenu={handleBgContextMenu}>
     {#if graphStore.isLoading}

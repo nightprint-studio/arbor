@@ -112,7 +112,6 @@ fn default_entry() -> String { "main.lua".to_string() }
 #[derive(Debug, Clone)]
 pub struct ManifestParseFailure {
     pub folder_name: String,
-    pub path:        PathBuf,
     pub error:       String,
 }
 
@@ -173,7 +172,6 @@ pub fn discover_plugins_detailed() -> Result<(Vec<PluginManifest>, Vec<ManifestP
                         .to_string();
                     bad.push(ManifestParseFailure {
                         folder_name,
-                        path: path.clone(),
                         error: e.to_string(),
                     });
                 }

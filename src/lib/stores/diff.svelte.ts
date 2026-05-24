@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { DiffFile } from '../types/git';
 import type { DiffConfig, DiffMode, DiffAlgorithm, FileListView } from '../types/config';
@@ -70,7 +71,8 @@ function createDiffStore() {
   let configLoaded  = $state(false);
 
   // Apply the default immediately so first paint already has the var set.
-  applyTabWidth(tabWidth);
+  // Wrap in `untrack` so the one-shot read doesn't trip `state_referenced_locally`.
+  untrack(() => applyTabWidth(tabWidth));
 
   async function loadConfig() {
     try {

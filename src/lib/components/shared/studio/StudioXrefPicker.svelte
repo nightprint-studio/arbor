@@ -61,6 +61,7 @@
          style:left="{picker.x}px"
          style:top="{picker.y}px"
          role="menu"
+         tabindex="-1"
          aria-label={ariaLabel}
          onclick={(e) => e.stopPropagation()}
     >

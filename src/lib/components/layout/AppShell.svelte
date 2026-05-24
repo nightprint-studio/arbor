@@ -566,10 +566,11 @@
     if (!onboardingStore.loaded)            return;
     if (!onboardingStore.shouldAutoOpen())  return;
     // Defer until git detection has settled.  `ready` is the happy path;
-    // `failed` still lets the user proceed without git (e.g. they'll
-    // pick a path later) so the tour is still useful.
+    // `error` / `missing` still let the user proceed without git (they
+    // can install it later via the Settings → Git CLI panel) so the
+    // tour is still useful.
     const phase = gitCliStore.phase;
-    if (phase !== 'ready' && phase !== 'failed') return;
+    if (phase !== 'ready' && phase !== 'error' && phase !== 'missing') return;
     _onboardingAutoFired = true;
     onboardingStore.show();
   });

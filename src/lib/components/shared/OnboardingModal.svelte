@@ -581,20 +581,6 @@
   .step-icon.teaser-icon {
     background: color-mix(in srgb, var(--accent) 18%, transparent);
   }
-  .hint {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    line-height: 1.5;
-  }
-  .hint code {
-    font-family: var(--font-code);
-    background: var(--bg-overlay);
-    padding: 1px 5px;
-    border-radius: 4px;
-    border: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
-  }
   .step-header p code {
     font-family: var(--font-code);
     background: var(--bg-overlay);
@@ -603,15 +589,6 @@
     border: 1px solid var(--border-subtle);
     color: var(--text-secondary);
     font-size: 0.9em;
-  }
-
-  /* CTA row used under the provider grid — primary button next to a
-     muted hint. Just an inline-flex container; nothing fancier needed. */
-  .cta-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    flex-wrap: wrap;
   }
 
   /* ── Three-up grid (provider tiles + first-repo tiles) ───────────────── */

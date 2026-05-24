@@ -473,7 +473,7 @@
     </div>
 
     <!-- Body -->
-    <div class="body" bind:this={bodyEl} onkeydown={onBodyKeydown}>
+    <div class="body" role="tree" aria-label="Workspaces" tabindex="-1" bind:this={bodyEl} onkeydown={onBodyKeydown}>
       {#if entries.length === 0}
         <div class="empty">
           <Folder size={36} />
@@ -684,6 +684,9 @@
                 class="repo-row"
                 class:missing={hp?.missing}
                 class:conflicted={hp?.conflicted}
+                role="treeitem"
+                aria-level="3"
+                aria-selected="false"
                 data-nav-row
                 tabindex="-1"
                 onkeydown={(e) => onRepoRowKeydown(e, entry, ws.id)}

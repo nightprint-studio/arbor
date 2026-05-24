@@ -20,7 +20,7 @@
  */
 
 import { studioStore } from '$lib/stores/studio.svelte';
-import type { CrossRefDef, UsageMatch } from '$lib/ipc/studio';
+import type { CrossRefDef, UsageMatch, StudioFileKind } from '$lib/ipc/studio';
 
 export interface CrossRefEntry {
   sourcePath: string;
@@ -35,7 +35,7 @@ export interface CrossRefEntry {
 
 export interface CrossRefsConfig<TNode> {
   /** Format ID for `studioStore.findCrossRefsForKind` and friends. */
-  formatId: string;
+  formatId: StudioFileKind;
   /** The active doc's absolute path. `null` when no doc is open. */
   getSourcePath: () => string | null;
   /** Navigate to a path within the active doc. */

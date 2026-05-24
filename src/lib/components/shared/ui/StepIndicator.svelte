@@ -288,6 +288,6 @@
      can't read dynamic CSS variables). */
   @media (max-width: 768px) {
     .step-indicator.collapsible .label { display: none; }
-    .step-indicator.collapsible .v-pill .step { padding: 3px; }
+    .step-indicator.collapsible.v-pill .step { padding: 3px; }
   }
 </style>

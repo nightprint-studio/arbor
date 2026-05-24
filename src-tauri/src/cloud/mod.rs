@@ -17,7 +17,7 @@
 
 // Re-export migrated modules so external paths keep working without
 // touching every consumer.
-pub use arbor_cloud::{auth_gcs, oauth_google, operator, ops, secrets, transfer, types};
+pub use arbor_cloud::{oauth_google, ops, secrets, transfer, types};
 
 use std::sync::{Arc, Mutex};
 

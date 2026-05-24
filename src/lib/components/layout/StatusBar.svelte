@@ -9,6 +9,7 @@
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { fetchRemote, openInBrowser } from '$lib/ipc/remote';
   import { getStatus } from '$lib/ipc/stage';
+  import { getAppInfo } from '$lib/ipc/app';
   import type { RepoStatus } from '$lib/types/git';
   import Contribution from '$lib/components/shared/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
@@ -18,6 +19,11 @@
 
   const activeTab = $derived(tabsStore.activeTab);
   const status    = $derived(repoStore.status);
+
+  let appVersion = $state<string>('');
+  $effect(() => {
+    getAppInfo().then(info => { appVersion = info.version; }).catch(() => {});
+  });
 
   function getChangeCounts(s: RepoStatus) {
     const paths = new Map<string, 'modified' | 'added' | 'deleted'>();
@@ -409,7 +415,7 @@
     class="version"
     onclick={() => uiStore.setPanel(uiStore.activePanel === 'about' ? 'graph' : 'about')}
     use:tooltip={'About Arbor'}
-  >Arbor v0.1.0</button>
+  >Arbor{appVersion ? ` v${appVersion}` : ''}</button>
 </div>
 
 <style>

@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import { getAppearanceConfig, setAppearanceConfig } from '$lib/ipc/config';
 import type {
   AppearanceConfig, WindowControlsStyle, ActivityBarPosition,
@@ -69,10 +70,15 @@ function createAppearanceStore() {
   let compactTitleBar      = $state<boolean>(DEFAULT.compact_title_bar);
   let loaded               = $state(false);
 
-  applyAttribute(windowControlsStyle);
-  applyFontScale(fontScale);
-  applyActivityBarPosition(activityBarPosition);
-  applyCompactTitleBar(compactTitleBar);
+  // Defaults applied once at module load; subsequent changes go through the
+  // setters and through `loadConfig`. Wrap in `untrack` so the references are
+  // explicit one-shots and don't trip `state_referenced_locally`.
+  untrack(() => {
+    applyAttribute(windowControlsStyle);
+    applyFontScale(fontScale);
+    applyActivityBarPosition(activityBarPosition);
+    applyCompactTitleBar(compactTitleBar);
+  });
 
   async function loadConfig() {
     try {
