@@ -151,12 +151,10 @@
 
 <h3>Diff &amp; Stage</h3>
 <ul>
-  <li><strong>Diff algorithm</strong> — Myers (default), Patience, or Histogram. Myers is a good general-purpose default; Patience tends to produce cleaner hunks on refactors; Histogram favours unique anchor lines.</li>
   <li><strong>Context lines</strong> — number of unchanged lines shown around each hunk (0 – 20, default 3).</li>
   <li><strong>View mode</strong> — Unified (single column) or Split (side-by-side).</li>
-  <li><strong>Word wrap</strong> — wraps long lines instead of scrolling horizontally.</li>
   <li><strong>Show full file</strong> — render the entire file with diff highlights instead of just changed hunks. Useful for reading a change in its full surrounding context. The same toggle is available as a button (file icon) in the diff viewer header. Persisted to <code>~/.config/arbor/config.toml</code> under <code>[diff]</code>.</li>
-  <li><strong>Virtualization threshold</strong> — when a file's diff has more than this many lines, the renderer switches to a windowed mode that only paints visible rows (default 200). Lower values keep huge files snappier; word wrap forces the simple renderer regardless.</li>
+  <li><strong>Virtualization threshold</strong> — when a file's diff has more than this many lines, the renderer switches to a windowed mode that only paints visible rows (default 200). Lower values keep huge files snappier.</li>
   <li><strong>Confirm before discarding</strong> — when enabled (default), a confirmation dialog appears before discarding a single file's changes. The <em>Discard All</em> confirmation is always shown regardless of this setting.</li>
 </ul>
 

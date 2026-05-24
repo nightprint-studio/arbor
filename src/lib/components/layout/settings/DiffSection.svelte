@@ -3,18 +3,15 @@
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
-  import Select from '$lib/components/shared/ui/Select.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
-  import type { DiffAlgorithm, DiffMode } from '$lib/types/config';
+  import type { DiffMode } from '$lib/types/config';
 
   // All values are read straight from the store ($derived so external writes
   // — e.g. command palette toggles — flow back into the UI without effects).
-  const diffAlgorithm  = $derived(diffStore.algorithm);
   const contextLines   = $derived(diffStore.contextLines);
   const confirmDiscard = $derived(diffStore.confirmDiscard);
   const diffMode       = $derived(diffStore.mode);
-  const wordWrap       = $derived(diffStore.wordWrap);
   const fullFile       = $derived(diffStore.fullFile);
   const virtThreshold  = $derived(diffStore.virtThreshold);
 </script>
@@ -22,6 +19,7 @@
 <SectionHeader title="Diff &amp; Stage" description="Configure how code diffs are computed, rendered, and how the stage area behaves." />
 
 <div class="card">
+  <!-- Diff algorithm: hidden from UI for now.
   <FormRow label="Diff algorithm" description="Controls how changes are detected">
     <Select
       value={diffAlgorithm}
@@ -33,6 +31,7 @@
       ]}
     />
   </FormRow>
+  -->
 
   <FormRow label="Context lines" description="Lines shown around each changed hunk">
     <NumberStepper
@@ -56,9 +55,11 @@
     />
   </FormRow>
 
+  <!-- Word wrap: hidden from UI for now.
   <FormRow label="Word wrap" description="Wrap long lines in the diff viewer">
     <Toggle checked={wordWrap} onchange={(v) => diffStore.setWordWrap(v)} />
   </FormRow>
+  -->
 
   <FormRow label="Show full file" description="Render the entire file with diff highlights, not just changed hunks. Useful for navigating around a change in context.">
     <Toggle checked={fullFile} onchange={(v) => diffStore.setFullFile(v)} />

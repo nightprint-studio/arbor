@@ -54,10 +54,8 @@
 
 <h3>Diff &amp; Stage</h3>
 <ul>
-  <li><strong>Diff algorithm</strong> — Histogram (recommended), Patience, or Myers. Histogram produces cleaner hunks on most code.</li>
   <li><strong>Context lines</strong> — number of unchanged lines shown around each hunk (0 – 20, default 3).</li>
   <li><strong>View mode</strong> — Unified (single column) or Split (side-by-side).</li>
-  <li><strong>Word wrap</strong> — wraps long lines instead of scrolling horizontally.</li>
   <li><strong>Confirm before discarding</strong> — when enabled (default), a confirmation dialog appears before discarding a single file's changes. The <em>Discard All</em> confirmation is always shown regardless of this setting.</li>
 </ul>
 
