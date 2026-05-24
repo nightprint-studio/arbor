@@ -12,7 +12,8 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { getReflog } from '$lib/ipc/reflog';
-  import { checkoutCommit } from '$lib/ipc/branch';
+  import { checkoutCommitSafe } from '$lib/ipc/branch';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import {
     listRecoveryEntries, previewRecoveryRestore,
     restoreRecoveryEntry, deleteRecoveryEntry,
@@ -279,8 +280,12 @@
 
     if (id === 'checkout') {
       try {
-        await checkoutCommit(activeTab.id, entry.id);
-        uiStore.showToast(`Checked out ${shortHash(entry.id)}`, 'success');
+        const short = shortHash(entry.id);
+        const result = await checkoutCommitSafe(activeTab.id, entry.id);
+        handleCheckoutResult(result, {
+          targetLabel:    short,
+          successMessage: `Checked out ${short}`,
+        });
         graphStore.refresh();
       } catch (e) { uiStore.showToast(`${e}`, 'error'); }
     } else if (id === 'branch') {

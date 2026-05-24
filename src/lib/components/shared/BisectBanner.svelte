@@ -4,7 +4,8 @@
   import { graphStore } from '$lib/stores/graph.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { getGraph } from '$lib/ipc/graph';
-  import { checkoutCommit } from '$lib/ipc/branch';
+  import { checkoutCommitSafe } from '$lib/ipc/branch';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import { tooltip } from '$lib/actions/tooltip';
 
   function scrollToCurrent(state: typeof bisectStore.state) {
@@ -36,9 +37,13 @@
     const hash = s?.current_hash;
     if (!hash) return;
     try {
-      await checkoutCommit(tabId, hash);
+      const short = hash.slice(0, 7);
+      const result = await checkoutCommitSafe(tabId, hash);
       await reloadGraph();
-      uiStore.showToast(`Checked out ${hash.slice(0, 7)} for testing`, 'info');
+      handleCheckoutResult(result, {
+        targetLabel:    short,
+        successMessage: `Checked out ${short} for testing`,
+      });
     } catch (err) {
       uiStore.showToast(`Checkout failed: ${err}`, 'error');
     }

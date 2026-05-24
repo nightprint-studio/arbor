@@ -133,6 +133,8 @@ export const checkoutBranchSafe = async (tabId: string, name: string): Promise<C
  * Checkout a remote-tracking branch by creating (if needed) a local tracking
  * branch. `remoteName` is the form `origin/patch/4.14`. Returns the resolved
  * local short name (e.g. `patch/4.14`).
+ *
+ * Non-safe variant — kept for backward compat. Prefer `checkoutRemoteAsLocalSafe`.
  */
 export const checkoutRemoteAsLocal = async (tabId: string, remoteName: string): Promise<string> => {
   const localName = await invoke<string>('checkout_remote_as_local', { tabId, remoteName });
@@ -141,11 +143,41 @@ export const checkoutRemoteAsLocal = async (tabId: string, remoteName: string): 
   return localName;
 };
 
+/** Stash-safe variant of `checkoutRemoteAsLocal`. */
+export const checkoutRemoteAsLocalSafe = async (
+  tabId: string,
+  remoteName: string,
+): Promise<CheckoutResult> => {
+  const result = await invoke<CheckoutResult>('checkout_remote_as_local_safe', {
+    tabId, remoteName,
+  });
+  invalidateTabCache(tabId);
+  if (
+    !result.stash_apply_error
+    && result.stash_conflicts.length === 0
+    && result.resolved_local_name
+  ) {
+    tabsStore.updateTab(tabId, { currentBranch: result.resolved_local_name });
+  }
+  return result;
+};
+
 export const checkoutCommit = async (tabId: string, oid: string): Promise<void> => {
   await invoke<void>('checkout_commit', { tabId, oid });
   invalidateTabCache(tabId);
   // Detached HEAD: clear the branch chip.
   tabsStore.updateTab(tabId, { currentBranch: null });
+};
+
+/** Stash-safe detached commit checkout. */
+export const checkoutCommitSafe = async (tabId: string, oid: string): Promise<CheckoutResult> => {
+  const result = await invoke<CheckoutResult>('checkout_commit_safe', { tabId, oid });
+  invalidateTabCache(tabId);
+  if (!result.stash_apply_error && result.stash_conflicts.length === 0) {
+    // Detached HEAD: clear the branch chip.
+    tabsStore.updateTab(tabId, { currentBranch: null });
+  }
+  return result;
 };
 
 export const stashSave = async (tabId: string, message?: string, includeUntracked = true): Promise<StashEntry> => {

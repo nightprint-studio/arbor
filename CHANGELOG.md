@@ -51,8 +51,27 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   Mac-inspired coloured trio (default) and a flat Windows-/IntelliJ-style set;
   the same switch also restyles the close button in modal and panel headers.
 
+### Removed
+
+- Stash markers on the graph no longer show inline hover buttons
+  (Apply / Pop / Drop). Use right-click on the marker, the sidebar Stash
+  list, or the Command Palette instead.
+
 ### Changed
 
+- Checkout of a branch, commit (detached) or remote tracking branch now
+  auto-stashes uncommitted changes when the working directory is dirty,
+  switches HEAD, then re-applies the stash — same flow as `Pull`. If the
+  re-apply has conflicts the standard resolution modal opens with the stash
+  preserved at index 0.
+- Conflict resolution modal — clicking *Apply resolution* / *Merge* / *Complete*
+  while files are still unresolved now jumps to the first unresolved file and
+  surfaces a toast, instead of relying on a hover-only tooltip on a disabled
+  button.
+- Conflict resolution toolbar — the action button is now always labelled
+  *Stage file*, including for modify/delete and add/modify conflicts where it
+  previously flipped between *Keep file* and *Remove file*. The choice itself
+  is still made in the two large cards underneath.
 - Documentation pages now use the shared Callout and Kbd widgets — keybindings displayed in Docs reflect user remaps live.
 - The welcome tour and the plugin form wizard now share the same step
   indicator widget, so step badges, active highlight and done states stay

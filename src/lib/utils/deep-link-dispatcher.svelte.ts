@@ -30,6 +30,7 @@ import { uiStore } from '$lib/stores/ui.svelte';
 import { diffStore } from '$lib/stores/diff.svelte';
 import { cacheStore } from '$lib/stores/cache.svelte';
 import { checkoutBranchSafe } from '$lib/ipc/branch';
+import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
 import { getCommitDiff } from '$lib/ipc/diff';
 import { getDeepLinkConfig } from '$lib/ipc/deep-link';
 import type { ConfirmConfig, EnableConfig } from '$lib/types/deep-link';
@@ -437,20 +438,10 @@ function createDispatcher() {
             // immediately.
             step('focus-branch',       () => graphStore.scrollToBranch(action.branch)),
           ]);
-          if (r.stash_apply_error?.startsWith('checkout failed')) {
-            uiStore.showToast(
-              `Could not switch to ${action.branch}: ${r.stash_apply_error.replace(/^checkout failed:\s*/, '')}. Stash preserved.`,
-              'error',
-              7000,
-            );
-          } else if (r.stash_apply_error || r.stash_conflicts.length > 0) {
-            uiStore.showToast(
-              `Checked out ${action.branch} — stash re-apply has conflicts; resolve in the UI`,
-              'warning',
-            );
-          } else {
-            uiStore.showToast(`Checked out ${action.branch}`, 'success');
-          }
+          handleCheckoutResult(r, {
+            targetLabel:    action.branch,
+            successMessage: `Checked out ${action.branch}`,
+          });
         } catch (e) {
           uiStore.showToast(`Checkout failed: ${e}`, 'error');
         }

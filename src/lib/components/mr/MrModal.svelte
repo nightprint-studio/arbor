@@ -24,7 +24,8 @@
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { fetchRemote } from '$lib/ipc/remote';
-  import { deleteBranch, checkoutBranch, listLocalBranches } from '$lib/ipc/branch';
+  import { deleteBranch, checkoutBranchSafe, listLocalBranches } from '$lib/ipc/branch';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import { listWorktrees } from '$lib/ipc/worktree';
   import { getStatus } from '$lib/ipc/stage';
   import { notificationsStore } from '$lib/stores/notifications.svelte';
@@ -515,7 +516,16 @@
     // 3. If HEAD is on the source branch, switch to the target first.
     if (currentBranch === source) {
       try {
-        await checkoutBranch(mrTabId, target);
+        const result = await checkoutBranchSafe(mrTabId, target);
+        // If the safe checkout couldn't settle cleanly (stash conflicts,
+        // apply error, or post-merge checkout failure), surface that via the
+        // shared handler and bail before the branch-delete step — deleting
+        // the source while we're still on it would error out anyway.
+        const clean = handleCheckoutResult(result, {
+          targetLabel:    target,
+          successMessage: `Switched to ${target}`,
+        });
+        if (!clean) return;
       } catch (e: any) {
         const msg = firstLine(e);
         notificationsStore.add(

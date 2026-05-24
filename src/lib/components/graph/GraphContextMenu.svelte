@@ -15,7 +15,8 @@
   import { pluginStore }       from '$lib/stores/plugin.svelte';
   import { ticketLinksStore } from '$lib/stores/ticket_links.svelte';
   import { bisectStore } from '$lib/stores/bisect.svelte';
-  import { checkoutCommit, resetToCommit } from '$lib/ipc/branch';
+  import { checkoutCommitSafe, resetToCommit } from '$lib/ipc/branch';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import { pushBranch, openInBrowser } from '$lib/ipc/remote';
   import { cherryPick, revertCommit } from '$lib/ipc/stage';
   import { getGraph } from '$lib/ipc/graph';
@@ -119,8 +120,11 @@
           const shortOid = node.short_oid;
           const tabId    = tab.id;
           onClose();
-          await checkoutCommit(tabId, oid);
-          uiStore.showToast(`Checked out ${shortOid}`, 'success');
+          const result = await checkoutCommitSafe(tabId, oid);
+          handleCheckoutResult(result, {
+            targetLabel:    shortOid,
+            successMessage: `Checked out ${shortOid}`,
+          });
           await refresh();
           return;
         }

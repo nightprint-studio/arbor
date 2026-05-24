@@ -28,9 +28,7 @@
   import { getCommitDiffMeta, getWorkdirDiff } from '$lib/ipc/diff';
   import { createBranch, createTag, checkoutBranch, stashSave } from '$lib/ipc/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
-  import { applyStashAction, popStashAction, dropStashAction } from '$lib/utils/stash-actions';
   import { getBranchPolicy, assertBranchNameAllowed } from '$lib/utils/branch-policy';
-  import { Play as PlayIcon, CornerDownLeft as PopIcon, Trash2 as DropIcon } from 'lucide-svelte';
   import { pushBranch } from '$lib/ipc/remote';
   import { localTagTracker } from '$lib/stores/local-tags.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
@@ -307,30 +305,6 @@
 
   function openStashPopupAt(x: number, y: number, stashes: StashRef[]) {
     stashPopup = { x, y, stashes };
-  }
-
-  // Inline hover actions on a single-stash bubble. Bridges the StashRef the
-  // graph carries (index/oid/message + parentOid) to the StashEntry shape
-  // the action helpers expect — same fields, just dropping parentOid.
-  //
-  // No `onRefresh` callback: the helpers call `applyPostStashChange`
-  // internally which is the right scope for a stash op (markers + sidebar
-  // list + status).  Passing `graphStore.refresh()` here would trigger an
-  // unnecessary full `getGraph` round-trip on top.
-  async function inlineApplyStash(s: StashRef, e: MouseEvent) {
-    e.stopPropagation();
-    if (!tab) return;
-    await applyStashAction(tab.id, { index: s.index, oid: s.oid, message: s.message });
-  }
-  async function inlinePopStash(s: StashRef, e: MouseEvent) {
-    e.stopPropagation();
-    if (!tab) return;
-    await popStashAction(tab.id, { index: s.index, oid: s.oid, message: s.message });
-  }
-  async function inlineDropStash(s: StashRef, e: MouseEvent) {
-    e.stopPropagation();
-    if (!tab) return;
-    await dropStashAction(tab.id, { index: s.index, oid: s.oid, message: s.message });
   }
 
   async function handleStashPopupSelect(id: string) {
@@ -1600,39 +1574,6 @@
                     pointer-events="none"
                   />
 
-                  <!-- Hover-only inline actions for SINGLE-stash bubbles
-                       (apply / pop / drop). Foreign-object embeds HTML
-                       buttons inside the SVG so they participate in the
-                       same .stash-marker:hover state as the bubble. The
-                       actions float to the LEFT of the bubble so they
-                       never overlap the bubble itself or the right-edge
-                       accent line. Multi-stash bubbles keep popup-only
-                       behavior — picking which stash to act on first is
-                       a separate decision the user must make. -->
-                  {@const stash = stashes[0]}
-                  <foreignObject
-                    class="stash-actions-fo"
-                    x={bx - 78} y={by - 10}
-                    width="64" height="20"
-                  >
-                    <div class="stash-actions" onclick={(e) => e.stopPropagation()} role="presentation">
-                      <button
-                        class="stash-action"
-                        use:tooltip={'Apply stash'}
-                        onclick={(e) => inlineApplyStash(stash, e)}
-                      ><PlayIcon size={11} /></button>
-                      <button
-                        class="stash-action"
-                        use:tooltip={'Pop stash'}
-                        onclick={(e) => inlinePopStash(stash, e)}
-                      ><PopIcon size={11} /></button>
-                      <button
-                        class="stash-action danger"
-                        use:tooltip={'Drop stash'}
-                        onclick={(e) => inlineDropStash(stash, e)}
-                      ><DropIcon size={11} /></button>
-                    </div>
-                  </foreignObject>
                 {/if}
               </g>
             {/if}
@@ -1845,42 +1786,6 @@
     stroke-width: 2;
     fill: color-mix(in srgb, var(--color-stash, #c9a227) 14%, var(--bg-elevated));
   }
-
-  /* Inline hover-only stash action toolbar (single-stash bubbles). The
-     foreignObject itself is pointer-events:none so it doesn't steal hover
-     from the bubble while invisible — only the inner .stash-actions
-     re-enables pointer events when the marker is hovered. */
-  .stash-actions-fo { overflow: visible; }
-  .stash-marker .stash-actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 2px;
-    height: 100%;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity var(--transition-fast);
-  }
-  .stash-marker:hover .stash-actions,
-  .stash-marker:focus-visible .stash-actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
-  .stash-action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px; height: 18px;
-    border: none;
-    background: var(--bg-elevated);
-    color: var(--text-muted);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .stash-action:hover { background: var(--bg-overlay); color: var(--text-primary); }
-  .stash-action.danger:hover { color: var(--error); background: var(--error-subtle); }
 
   .graph-toolbar {
     display: flex;

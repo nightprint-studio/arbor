@@ -27,10 +27,11 @@
   import { activityBarConfigStore } from '$lib/stores/activityBarConfig.svelte';
   import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
   import {
-    checkoutBranch, mergeBranch, deleteBranch, createBranch,
+    checkoutBranch, checkoutBranchSafe, mergeBranch, deleteBranch, createBranch,
     stashApply, stashPop, stashDrop, resetToCommit,
     listStashes,
   } from '$lib/ipc/branch';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import type { MergeStrategy } from '$lib/ipc/branch';
   import { pushBranch, fetchRemote, pullBranch, listRemotes } from '$lib/ipc/remote';
   import { handlePullResult, handlePullThrown } from '$lib/utils/pullResultHandler';
@@ -1110,19 +1111,17 @@
         const tabId = requireTab(); if (!tabId) return;
         if (b.is_head) { onClose(); return; }
         try {
-          await checkoutBranch(tabId, b.name);
+          const result = await checkoutBranchSafe(tabId, b.name);
+          handleCheckoutResult(result, {
+            targetLabel:    b.name,
+            successMessage: `Checked out ${b.name}`,
+          });
           await applyPostCheckout(tabId);
           onClose();
         }
         catch (e) {
-          const msg = String(e);
-          if (msg.toLowerCase().includes('conflict') || msg.includes('prevents checkout')) {
-            onClose();
-            uiStore.openCheckoutConflictModal(tabId, b.name);
-          } else {
-            await applyPostCheckout(tabId).catch(() => { /* best-effort */ });
-            uiStore.showToast(`Checkout failed: ${msg}`, 'error');
-          }
+          await applyPostCheckout(tabId).catch(() => { /* best-effort */ });
+          uiStore.showToast(`Checkout failed: ${e}`, 'error');
         }
       },
     },

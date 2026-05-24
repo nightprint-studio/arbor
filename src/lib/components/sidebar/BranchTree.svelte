@@ -7,8 +7,9 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
-  import { checkoutBranch, checkoutRemoteAsLocal, deleteBranch, deleteRemoteBranches, mergeBranch } from '$lib/ipc/branch';
+  import { checkoutBranchSafe, checkoutRemoteAsLocalSafe, deleteBranch, deleteRemoteBranches, mergeBranch } from '$lib/ipc/branch';
   import { applyPostCheckout } from '$lib/utils/applyPostCheckout';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import { pushBranch, openInBrowser } from '$lib/ipc/remote';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import DeleteRemoteBranchModal from './DeleteRemoteBranchModal.svelte';
@@ -45,22 +46,21 @@
     e.stopPropagation();
     if (!tab || type !== 'local' || branch.is_head) return;
     try {
-      await checkoutBranch(tab.id, branch.name);
-      uiStore.showToast(`Checked out ${branch.name}`, 'success');
+      const result = await checkoutBranchSafe(tab.id, branch.name);
+      handleCheckoutResult(result, {
+        targetLabel:    branch.name,
+        successMessage: `Checked out ${branch.name}`,
+      });
       // Light refresh — checkout doesn't change graph topology, only HEAD.
       // Skips the expensive `getGraph` lane re-assignment.
       await applyPostCheckout(tab.id);
     } catch (err) {
-      const msg = String(err);
-      if (msg.toLowerCase().includes('conflict') || msg.includes('prevents checkout')) {
-        uiStore.openCheckoutConflictModal(tab.id, branch.name);
-      } else {
-        // Refresh anyway — the failure could have partially mutated the
-        // workdir (Windows file-lock during checkout_tree, hook side-effect)
-        // and the abnormal-state alert in repoStore will surface it.
-        await applyPostCheckout(tab.id).catch(() => { /* best-effort */ });
-        uiStore.showToast(msg, 'error');
-      }
+      // Backend reject — refresh anyway because the failure could have
+      // partially mutated the workdir (Windows file-lock during checkout_tree,
+      // hook side-effect) and the abnormal-state alert in repoStore will
+      // surface it.
+      await applyPostCheckout(tab.id).catch(() => { /* best-effort */ });
+      uiStore.showToast(`${err}`, 'error');
     }
   }
 
@@ -119,24 +119,25 @@
 
     if (id === 'checkout') {
       try {
-        const isRemote  = type === 'remote';
-        const localName = isRemote
-          ? await checkoutRemoteAsLocal(tab.id, branch.name)
-          : (await checkoutBranch(tab.id, branch.name), branch.name);
-        uiStore.showToast(`Checked out ${localName}`, 'success');
+        const isRemote = type === 'remote';
+        const result = isRemote
+          ? await checkoutRemoteAsLocalSafe(tab.id, branch.name)
+          : await checkoutBranchSafe(tab.id, branch.name);
+        // Use the resolved local name (for remote-as-local it may differ from
+        // the full `origin/foo` we asked for) when displaying the toast.
+        const label = result.resolved_local_name ?? branch.name;
+        handleCheckoutResult(result, {
+          targetLabel:    label,
+          successMessage: `Checked out ${label}`,
+        });
         // Remote-as-local creates a brand-new ref that needs to appear on
         // the graph node — full refresh required.  For an existing local
         // branch only HEAD moves, so the light path is enough.
         if (isRemote) graphStore.refresh();
         else          await applyPostCheckout(tab.id);
       } catch (err) {
-        const msg = String(err);
-        if (msg.toLowerCase().includes('conflict') || msg.includes('prevents checkout')) {
-          uiStore.openCheckoutConflictModal(tab.id, branch.name);
-        } else {
-          await applyPostCheckout(tab.id).catch(() => { /* best-effort */ });
-          uiStore.showToast(msg, 'error');
-        }
+        await applyPostCheckout(tab.id).catch(() => { /* best-effort */ });
+        uiStore.showToast(`${err}`, 'error');
       }
     } else if (id === 'push') {
       try {

@@ -614,6 +614,24 @@
   // ── Completion / force-apply / abort ────────────────────────────────────
   async function handleComplete() {
     if (!tab || isCompleting || isMerging) return;
+    // Pre-flight: if any file is still unresolved, tell the user explicitly
+    // and jump to the first one — clicking a disabled button only surfaced a
+    // hover-only tooltip, which was easy to miss.
+    if (!allFilesResolved) {
+      const unresolved = conflictedFiles.filter(f => !resolvedPaths.has(f.path));
+      const count = unresolved.length;
+      uiStore.showToast(
+        `${count} file${count === 1 ? '' : 's'} still to resolve — staging the highlighted one and using the same flow on the rest will unlock completion.`,
+        'warning',
+        5000,
+      );
+      if (unresolved.length > 0) selectConflictFile(unresolved[0].path);
+      return;
+    }
+    if (isRealMerge && mergeMessage.trim().length === 0) {
+      uiStore.showToast('Enter a merge commit message first.', 'warning');
+      return;
+    }
     if (isMerge) {
       isMerging = true;
       try {
@@ -810,10 +828,6 @@
   // ── Completion gate ─────────────────────────────────────────────────────
   const allFilesResolved = $derived(
     conflictedFiles.length > 0 && conflictedFiles.every(f => resolvedPaths.has(f.path)),
-  );
-  const canComplete = $derived(
-    allFilesResolved && !isCompleting && !isMerging &&
-    (!isRealMerge || mergeMessage.trim().length > 0),
   );
 
   // ── Sidebar item builders ───────────────────────────────────────────────
@@ -1169,13 +1183,9 @@
                 onPrev={prevConflict}
                 onNext={nextConflict}
                 action={resolvedPaths.has(selectedPath) ? 'done' : (isStagingFile ? 'busy' : 'idle')}
-                actionLabel={isStagingFile
-                  ? 'Staging…'
-                  : isPresenceConflict
-                    ? (presenceDecisions[selectedPath] === 'remove' ? 'Remove file' : 'Keep file')
-                    : 'Stage file'}
+                actionLabel={isStagingFile ? 'Staging…' : 'Stage file'}
                 actionTooltip={isPresenceConflict
-                  ? 'Apply the chosen Keep / Remove decision'
+                  ? 'Apply the chosen Keep / Accept-deletion decision and stage the file'
                   : 'Apply the current resolution and stage the file'}
                 doneLabel="File staged"
                 onAction={stageMergeFile}
@@ -1312,11 +1322,11 @@
           variant="primary"
           color={isMerge ? undefined : 'var(--success)'}
           onclick={handleComplete}
-          disabled={!canComplete}
+          disabled={isCompleting || isMerging}
           loading={isMerging || isCompleting}
           title={
             !allFilesResolved
-              ? 'Resolve all conflicts before completing'
+              ? `Resolve all conflicts before completing (${conflictedFiles.length - resolvedPaths.size} left)`
               : (isRealMerge && mergeMessage.trim().length === 0)
                 ? 'Enter a merge commit message first'
                 : ''
