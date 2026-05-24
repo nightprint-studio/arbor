@@ -229,7 +229,7 @@
   .titlebar {
     display: flex;
     align-items: center;
-    height: 42px;
+    height: var(--titlebar-h, 42px);
     background: var(--bg-elevated);
     padding: 0;
     flex-shrink: 0;
@@ -237,6 +237,16 @@
     position: relative;
     z-index: 100;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    transition: height var(--anim-dur-base) ease;
+  }
+  /* Compact title bar — shrinks icon-buttons to match the smaller height,
+     keeping the chrome visually proportional. */
+  :global([data-compact-title-bar="true"]) .icon-btn {
+    width: 26px;
+    height: 26px;
+  }
+  :global([data-compact-title-bar="true"]) .ctrl-sep {
+    height: 14px;
   }
 
   .no-drag { -webkit-app-region: no-drag; display: contents; }

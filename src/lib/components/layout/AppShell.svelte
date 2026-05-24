@@ -1699,6 +1699,84 @@
     const tabId = tabsStore.activeTabId;
     if (tabId) mrStore.load(tabId);
   }
+
+  // ── Activity bar "peek" (for appearance.activity_bar_position = hidden) ──
+  // Each edge has its own independent peek flag and global mousemove watcher:
+  // hovering the LEFT edge reveals whichever bar currently sits on the left
+  // (built-in by default, plugin bar in `right` mirror mode); the RIGHT edge
+  // mirrors that affordance. Using mouseleave on the 4-px sliver would close
+  // the peek the instant the cursor crossed onto the bar itself — a global
+  // mousemove watcher with an explicit threshold is the robust path.
+  const PEEK_WIDTH = 38;
+  let _peekLeft  = $state(false);
+  let _peekRight = $state(false);
+  let _peekLeftMoveHandler:  ((e: MouseEvent) => void) | null = null;
+  let _peekRightMoveHandler: ((e: MouseEvent) => void) | null = null;
+
+  function onPeekLeftStart() {
+    if (_peekLeftMoveHandler) return;
+    _peekLeft = true;
+    _peekLeftMoveHandler = (e: MouseEvent) => {
+      if (e.clientX > PEEK_WIDTH) onPeekLeftEnd();
+    };
+    window.addEventListener('mousemove', _peekLeftMoveHandler);
+  }
+  function onPeekLeftEnd() {
+    if (_peekLeftMoveHandler) {
+      window.removeEventListener('mousemove', _peekLeftMoveHandler);
+      _peekLeftMoveHandler = null;
+    }
+    _peekLeft = false;
+  }
+  function onPeekRightStart() {
+    if (_peekRightMoveHandler) return;
+    _peekRight = true;
+    _peekRightMoveHandler = (e: MouseEvent) => {
+      if (e.clientX < window.innerWidth - PEEK_WIDTH) onPeekRightEnd();
+    };
+    window.addEventListener('mousemove', _peekRightMoveHandler);
+  }
+  function onPeekRightEnd() {
+    if (_peekRightMoveHandler) {
+      window.removeEventListener('mousemove', _peekRightMoveHandler);
+      _peekRightMoveHandler = null;
+    }
+    _peekRight = false;
+  }
+
+  // Position `hidden` is mutually exclusive with the mirror — when hidden,
+  // built-in stays at its natural DOM spot (left) and the plugin bar at
+  // its (right). So the mapping is straight:
+  //   peek-left  ⇒ reveals the built-in bar (visually leftmost)
+  //   peek-right ⇒ reveals the plugin bar (visually rightmost)
+  // Outside of `hidden`, both bars are always mounted.
+  const showBuiltinBar = $derived(
+    appearanceStore.activityBarPosition !== 'hidden' || _peekLeft
+  );
+  const showPluginBar = $derived(
+    appearanceStore.activityBarPosition !== 'hidden' || _peekRight
+  );
+
+  // If the user flips OUT of "hidden" while peeking, clear both watchers so
+  // they don't keep firing against a no-op state.
+  $effect(() => {
+    if (appearanceStore.activityBarPosition !== 'hidden') {
+      onPeekLeftEnd();
+      onPeekRightEnd();
+    }
+  });
+
+  // Custom horizontal-slide transition for the activity bars. Mirrors the
+  // existing `sidebarSlide` helper above but parametrised so it can be
+  // applied to a 38-px wrapper without measuring layout each time.
+  function barSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
+    const w = node.getBoundingClientRect().width || 38;
+    return {
+      duration,
+      easing: cubicOut,
+      css: (t: number) => `width: ${t * w}px; min-width: 0; overflow: hidden;`,
+    };
+  }
 </script>
 
 <!-- Boot-time splash overlay. Self-mounts at startup, listens for
@@ -1726,8 +1804,33 @@
       />
     {:else}
       <div class="workspace">
-        <!-- Activity Bar: always-visible left icon rail, flush to left edge -->
-        <ActivityBarLeft />
+        <!-- Edge hover triggers for the hidden activity-bar mode. Two
+             independent 4-px sliders: hovering the left edge reveals the
+             built-in bar (DOM-leftmost), hovering the right edge reveals
+             the plugin bar (DOM-rightmost). A global mousemove watcher per
+             side clears its flag once the cursor leaves the 38-px peek
+             strip — see `onPeekLeftStart` / `onPeekRightStart` above. -->
+        {#if appearanceStore.activityBarPosition === 'hidden'}
+          <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
+          <div
+            class="activity-bar-edge-trigger edge-left"
+            aria-hidden="true"
+            onmouseenter={onPeekLeftStart}
+          ></div>
+          <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
+          <div
+            class="activity-bar-edge-trigger edge-right"
+            aria-hidden="true"
+            onmouseenter={onPeekRightStart}
+          ></div>
+        {/if}
+        <!-- Built-in activity bar: always mounted unless `hidden` + not peeking.
+             A horizontal-slide transition handles the mount/unmount animation. -->
+        {#if showBuiltinBar}
+          <div class="ab-slot" transition:barSlide={{ duration: animStore.dPanel }}>
+            <ActivityBarLeft />
+          </div>
+        {/if}
 
         <!-- Inset panels container: gaps reveal the workspace bg (IntelliJ-style) -->
         <div class="panels">
@@ -1925,8 +2028,14 @@
         </div>
 
         <!-- Right ActivityBar: hidden completely when no plugin has
-             registered a right-side entry. -->
-        <ActivityBarRight />
+             registered a right-side entry. Wrapped in the same slide-in
+             transition as the built-in bar so peeking the right edge
+             animates symmetrically. -->
+        {#if showPluginBar}
+          <div class="ab-slot" transition:barSlide={{ duration: animStore.dPanel }}>
+            <ActivityBarRight />
+          </div>
+        {/if}
 
       </div>
     {/if}
@@ -2349,6 +2458,17 @@
 </div>
 
 <style>
+  /* Activity-bar wrapper. The bar component owns its own 38px width; the
+     wrapper exists purely so the Svelte slide transition can animate
+     `width` on a host element without colliding with the bar's own
+     :global(.activity-bar) rules. flex-shrink:0 keeps the bar from being
+     squeezed when the workspace is narrow. */
+  .ab-slot {
+    display: flex;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
   .shell {
     display: flex;
     flex-direction: column;

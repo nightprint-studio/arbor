@@ -32,7 +32,16 @@ const DEFAULT_CONFIG: DiffConfig = {
   mode:             'split',
   file_list_view:   'list',
   confirm_discard:  true,
+  tab_width:        4,
 };
+
+const TAB_WIDTH_MIN = 1;
+const TAB_WIDTH_MAX = 16;
+
+function applyTabWidth(n: number) {
+  if (typeof document === 'undefined') return;
+  document.documentElement.style.setProperty('--diff-tab-size', String(n));
+}
 
 function createDiffStore() {
   let files = $state<DiffFile[]>([]);
@@ -57,7 +66,11 @@ function createDiffStore() {
   let mode          = $state<DiffMode>(DEFAULT_CONFIG.mode);
   let fileListView  = $state<FileListView>(DEFAULT_CONFIG.file_list_view);
   let confirmDiscard = $state<boolean>(DEFAULT_CONFIG.confirm_discard);
+  let tabWidth      = $state<number>(DEFAULT_CONFIG.tab_width);
   let configLoaded  = $state(false);
+
+  // Apply the default immediately so first paint already has the var set.
+  applyTabWidth(tabWidth);
 
   async function loadConfig() {
     try {
@@ -70,6 +83,8 @@ function createDiffStore() {
       mode           = cfg.mode === 'unified' || cfg.mode === 'word_diff' ? cfg.mode : 'split';
       fileListView   = cfg.file_list_view === 'tree' ? 'tree' : 'list';
       confirmDiscard = !!cfg.confirm_discard;
+      tabWidth       = clampTabWidth(cfg.tab_width);
+      applyTabWidth(tabWidth);
       configLoaded   = true;
     } catch {
       // First-run / backend not ready yet: keep defaults, retry on next call.
@@ -84,6 +99,10 @@ function createDiffStore() {
     if (!Number.isFinite(n)) return DEFAULT_CONFIG.context_lines;
     return Math.max(0, Math.min(20, Math.floor(n)));
   }
+  function clampTabWidth(n: number): number {
+    if (!Number.isFinite(n)) return DEFAULT_CONFIG.tab_width;
+    return Math.max(TAB_WIDTH_MIN, Math.min(TAB_WIDTH_MAX, Math.floor(n)));
+  }
 
   /** Persist the current DiffConfig snapshot via IPC. */
   function persistConfig() {
@@ -96,8 +115,17 @@ function createDiffStore() {
       mode,
       file_list_view:   fileListView,
       confirm_discard:  confirmDiscard,
+      tab_width:        tabWidth,
     };
     void setDiffConfig(next).catch(() => {});
+  }
+
+  function setTabWidth(n: number) {
+    const clamped = clampTabWidth(n);
+    if (clamped === tabWidth) return;
+    tabWidth = clamped;
+    applyTabWidth(clamped);
+    persistConfig();
   }
 
   /// Track which file paths are still awaiting their hunk data (streaming
@@ -384,6 +412,7 @@ function createDiffStore() {
     get contextLines() { return contextLines; },
     get fileListView() { return fileListView; },
     get confirmDiscard() { return confirmDiscard; },
+    get tabWidth() { return tabWidth; },
     get configLoaded() { return configLoaded; },
     loadConfig,
     setFiles,
@@ -400,6 +429,7 @@ function createDiffStore() {
     setConfirmDiscard,
     setFullFile,
     setVirtThreshold,
+    setTabWidth,
     clear,
     beginStream,
     applyStreamFile,

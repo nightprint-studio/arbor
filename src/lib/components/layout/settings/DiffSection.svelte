@@ -14,6 +14,13 @@
   const diffMode       = $derived(diffStore.mode);
   const fullFile       = $derived(diffStore.fullFile);
   const virtThreshold  = $derived(diffStore.virtThreshold);
+  const tabWidth       = $derived(diffStore.tabWidth);
+
+  const TAB_WIDTH_OPTIONS = [
+    { value: '2', label: '2' },
+    { value: '4', label: '4' },
+    { value: '8', label: '8' },
+  ];
 </script>
 
 <SectionHeader title="Diff &amp; Stage" description="Configure how code diffs are computed, rendered, and how the stage area behaves." />
@@ -51,6 +58,15 @@
         { value: 'unified', label: 'Unified' },
         { value: 'split',   label: 'Split' },
       ]}
+      appearance="segment"
+    />
+  </FormRow>
+
+  <FormRow label="Tab width" description="Visual width of a Tab character in diff lines.">
+    <RadioGroup
+      value={String(tabWidth)}
+      onchange={(v) => diffStore.setTabWidth(parseInt(v, 10))}
+      options={TAB_WIDTH_OPTIONS}
       appearance="segment"
     />
   </FormRow>

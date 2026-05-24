@@ -204,6 +204,26 @@ html, body { height: 100%; overflow: hidden; }
   --space-7:  24px;
   --space-8:  32px;
 
+  /* Density tokens — drive list / sidebar / tree row geometry. Defaults
+     match the "comfortable" preset; the [data-ui-density="…"] override at
+     the bottom of this file swaps in compact/spacious values. Widgets that
+     want to participate should reach for these vars instead of hard-coding
+     row heights / paddings.  */
+  --density-row-h:     26px;
+  --density-row-pad-y: 4px;
+  --density-row-pad-x: 8px;
+  --density-row-gap:   6px;
+
+  /* Title-bar height — single source of truth for the top chrome height.
+     Overridden by [data-compact-title-bar="true"] (28px) for users on
+     narrow laptops. */
+  --titlebar-h: 42px;
+
+  /* Diff visual tab width — written by diffStore.applyTabWidth from the
+     persisted DiffConfig.tab_width. Consumers apply `tab-size: var(--diff-tab-size)`
+     to any <pre>/code element that renders raw diff text. */
+  --diff-tab-size: 4;
+
   /* Animation system — durations overridden at runtime by animStore */
   --anim-dur-fast:    80ms;
   --anim-dur-base:    150ms;
@@ -824,3 +844,69 @@ input[type="radio"]:disabled {
 .token.property-number,
 .token.property-boolean { color: var(--syntax-number,  #9876aa); }
 .token.property-null    { color: var(--text-muted); }
+
+/* ================================================================
+   APPEARANCE OVERRIDES — driven by attributes on <html>, set by
+   `appearanceStore`. Lookups stay localised here so consumers don't
+   need to know about the data-attr contract.
+   ================================================================ */
+
+/* ---- UI density (lists / sidebar / tree row geometry) ----
+   Only the row-* tokens move; font sizes and panel padding are
+   intentionally untouched. */
+:root[data-ui-density="compact"] {
+  --density-row-h:     22px;
+  --density-row-pad-y: 2px;
+  --density-row-pad-x: 6px;
+  --density-row-gap:   4px;
+}
+:root[data-ui-density="spacious"] {
+  --density-row-h:     32px;
+  --density-row-pad-y: 6px;
+  --density-row-pad-x: 10px;
+  --density-row-gap:   8px;
+}
+
+/* ---- Compact title bar ----
+   Shrinks the top chrome height and the icon-button square. The
+   TitleBar.svelte stylesheet references `var(--titlebar-h)` so the
+   override here is enough. */
+:root[data-compact-title-bar="true"] {
+  --titlebar-h: 28px;
+}
+
+/* ---- Activity bar position ----
+   `right` mirrors the workspace layout: the built-in (left) activity
+   bar floats to the right edge and the plugin (right) bar floats to
+   the left edge via `flex-direction: row-reverse` on `.workspace`.
+   `hidden` collapses the activity bar entirely; AppShell renders a
+   1-px hover-edge trigger that adds `[data-activity-bar-peek="true"]`
+   to <html> while the cursor sits over it, restoring the bar in place.
+*/
+:root[data-activity-bar-position="right"] .workspace {
+  flex-direction: row-reverse;
+}
+/* Mirror the inner panel order too, so the sidebar ends up adjacent to the
+   relocated activity bar instead of being stranded on the wrong side of
+   the editor card. */
+:root[data-activity-bar-position="right"] .panels {
+  flex-direction: row-reverse;
+}
+
+/* Edge trigger zones — rendered by AppShell only when the activity bar is
+   in `hidden` mode. Two independent 4-px sliders, one per edge: hovering
+   the left one peeks the built-in bar (DOM-leftmost), hovering the right
+   one peeks the plugin bar (DOM-rightmost). The mount / slide animation
+   itself lives in AppShell via the `barSlide` Svelte transition; the CSS
+   here only positions the trigger surfaces. */
+.activity-bar-edge-trigger {
+  position: fixed;
+  top: var(--titlebar-h);
+  bottom: 0;
+  width: 4px;
+  z-index: 50;
+  background: transparent;
+  cursor: pointer;
+}
+.activity-bar-edge-trigger.edge-left  { left: 0; }
+.activity-bar-edge-trigger.edge-right { right: 0; }

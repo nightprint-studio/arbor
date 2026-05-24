@@ -129,10 +129,40 @@ pub struct AppearanceConfig {
     /// shouldn't be allowed to change the user's preferred font.
     #[serde(default)]
     pub use_theme_fonts: bool,
+    /// Row-height density for lists, sidebar items and tree views. Does NOT
+    /// affect font sizes or panel padding — those have their own knobs.
+    #[serde(default)]
+    pub ui_density: UiDensity,
+    /// Position of the built-in activity bar: left (default), right (mirror
+    /// layout), or hidden (collapsed, revealed by hovering the left edge).
+    #[serde(default)]
+    pub activity_bar_position: ActivityBarPosition,
+    /// When `true`, the title bar uses a reduced height and tighter padding.
+    /// Useful on laptops where vertical space is at a premium.
+    #[serde(default)]
+    pub compact_title_bar: bool,
 }
 
 fn default_window_controls_style() -> String { "mac".into() }
 fn default_font_scale() -> f32 { 1.0 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UiDensity {
+    Compact,
+    #[default]
+    Comfortable,
+    Spacious,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityBarPosition {
+    #[default]
+    Left,
+    Right,
+    Hidden,
+}
 
 impl Default for AppearanceConfig {
     fn default() -> Self {
@@ -140,6 +170,9 @@ impl Default for AppearanceConfig {
             window_controls_style: default_window_controls_style(),
             font_scale:            default_font_scale(),
             use_theme_fonts:       false,
+            ui_density:            UiDensity::default(),
+            activity_bar_position: ActivityBarPosition::default(),
+            compact_title_bar:     false,
         }
     }
 }
@@ -674,11 +707,16 @@ pub struct DiffConfig {
     /// Show a confirmation dialog before discarding workdir changes.
     #[serde(default = "default_true_diff")]
     pub confirm_discard: bool,
+    /// Visual tab width used when rendering diff lines containing `\t`.
+    /// Clamped to `[1, 16]` at read time on the frontend; persisted as-is.
+    #[serde(default = "default_tab_width")]
+    pub tab_width: u32,
 }
 
 fn default_virt_threshold() -> u32 { 200 }
 fn default_diff_mode_split() -> DiffMode { DiffMode::Split }
 fn default_true_diff() -> bool { true }
+fn default_tab_width() -> u32 { 4 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -791,6 +829,7 @@ impl Default for AppConfig {
                 mode: DiffMode::Split,
                 file_list_view: FileListView::List,
                 confirm_discard: true,
+                tab_width: default_tab_width(),
             },
             graph: GraphConfig {
                 page_size: 500,
