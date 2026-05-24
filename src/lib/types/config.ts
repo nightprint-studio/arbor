@@ -87,7 +87,6 @@ export interface PipelinesConfig {
 
 export type WindowControlsStyle = 'mac' | 'windows';
 export type AnimSpeed = 'fast' | 'normal' | 'slow';
-export type UiDensity = 'compact' | 'comfortable' | 'spacious';
 export type ActivityBarPosition = 'left' | 'right' | 'hidden';
 
 /** Visual tweaks that don't belong to theme or layout: window-control button
@@ -98,9 +97,6 @@ export interface AppearanceConfig {
   font_scale: number;
   /** When true the active theme's `--theme-font-*` win over the global font stack. */
   use_theme_fonts: boolean;
-  /** Row-height density for lists, sidebar items and tree views. Does NOT
-   *  scale font sizes — that's `font_scale`. */
-  ui_density: UiDensity;
   /** Position of the built-in activity bar. `hidden` collapses it and
    *  reveals it on hover of the left edge. */
   activity_bar_position: ActivityBarPosition;

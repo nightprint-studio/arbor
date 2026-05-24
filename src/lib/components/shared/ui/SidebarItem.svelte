@@ -82,12 +82,12 @@
   .sidebar-item {
     display: flex;
     align-items: center;
-    gap: var(--density-row-gap, 5px);
-    padding: var(--density-row-pad-y, 3px) var(--density-row-pad-x, 8px) var(--density-row-pad-y, 3px) var(--space-2);
-    min-height: var(--density-row-h, 22px);
+    gap: 5px;
+    padding: 3px 8px 3px 4px;
+    min-height: 22px;
     cursor: pointer;
     border-radius: 0;
-    transition: background var(--transition-fast), min-height var(--transition-base), padding var(--transition-base);
+    transition: background var(--transition-fast);
     position: relative;
   }
   .sidebar-item:hover { background: rgba(255, 255, 255, 0.05); }

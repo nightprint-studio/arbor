@@ -9,10 +9,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
-- Appearance settings: new *UI density* (Compact / Comfortable / Spacious) for
-  list and sidebar row heights, *Activity bar* position (Left / Right / Hidden
-  with edge-hover reveal), *Compact title bar* toggle, and diff *Tab width*
-  preset (2 / 4 / 8) — all persisted in `config.toml`.
+- Appearance settings: new *Activity bar* position (Left / Right / Hidden with
+  edge-hover reveal), *Compact title bar* toggle, and diff *Tab width* preset
+  (2 / 4 / 8) — all persisted in `config.toml`.
 - First-run welcome tour: a polished onboarding modal walks new users
   through Git identity, provider connection, opening the first repository,
   and a quick tour of the Command Palette, plugin marketplace, issue-tracker

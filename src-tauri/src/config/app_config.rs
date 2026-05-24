@@ -129,10 +129,6 @@ pub struct AppearanceConfig {
     /// shouldn't be allowed to change the user's preferred font.
     #[serde(default)]
     pub use_theme_fonts: bool,
-    /// Row-height density for lists, sidebar items and tree views. Does NOT
-    /// affect font sizes or panel padding — those have their own knobs.
-    #[serde(default)]
-    pub ui_density: UiDensity,
     /// Position of the built-in activity bar: left (default), right (mirror
     /// layout), or hidden (collapsed, revealed by hovering the left edge).
     #[serde(default)]
@@ -145,15 +141,6 @@ pub struct AppearanceConfig {
 
 fn default_window_controls_style() -> String { "mac".into() }
 fn default_font_scale() -> f32 { 1.0 }
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum UiDensity {
-    Compact,
-    #[default]
-    Comfortable,
-    Spacious,
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -170,7 +157,6 @@ impl Default for AppearanceConfig {
             window_controls_style: default_window_controls_style(),
             font_scale:            default_font_scale(),
             use_theme_fonts:       false,
-            ui_density:            UiDensity::default(),
             activity_bar_position: ActivityBarPosition::default(),
             compact_title_bar:     false,
         }

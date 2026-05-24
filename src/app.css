@@ -204,16 +204,6 @@ html, body { height: 100%; overflow: hidden; }
   --space-7:  24px;
   --space-8:  32px;
 
-  /* Density tokens — drive list / sidebar / tree row geometry. Defaults
-     match the "comfortable" preset; the [data-ui-density="…"] override at
-     the bottom of this file swaps in compact/spacious values. Widgets that
-     want to participate should reach for these vars instead of hard-coding
-     row heights / paddings.  */
-  --density-row-h:     26px;
-  --density-row-pad-y: 4px;
-  --density-row-pad-x: 8px;
-  --density-row-gap:   6px;
-
   /* Title-bar height — single source of truth for the top chrome height.
      Overridden by [data-compact-title-bar="true"] (28px) for users on
      narrow laptops. */
@@ -850,22 +840,6 @@ input[type="radio"]:disabled {
    `appearanceStore`. Lookups stay localised here so consumers don't
    need to know about the data-attr contract.
    ================================================================ */
-
-/* ---- UI density (lists / sidebar / tree row geometry) ----
-   Only the row-* tokens move; font sizes and panel padding are
-   intentionally untouched. */
-:root[data-ui-density="compact"] {
-  --density-row-h:     22px;
-  --density-row-pad-y: 2px;
-  --density-row-pad-x: 6px;
-  --density-row-gap:   4px;
-}
-:root[data-ui-density="spacious"] {
-  --density-row-h:     32px;
-  --density-row-pad-y: 6px;
-  --density-row-pad-x: 10px;
-  --density-row-gap:   8px;
-}
 
 /* ---- Compact title bar ----
    Shrinks the top chrome height and the icon-button square. The

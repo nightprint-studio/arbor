@@ -14,6 +14,10 @@ Inspector for live Bevy applications via the Bevy Remote Protocol. Entity tree, 
 
 First-party native issue tracking alongside the existing Linear and Jira integrations. Reuses the OAuth credentials and REST/GraphQL clients that already power the PR/MR, CI, and security surfaces.
 
+### Releases
+
+A first-party view of GitHub and GitLab releases: tag, asset list, and notes, with the option to cut a new release from any tag — notes pre-filled from the commit range since the previous one. Sits next to the existing PR/MR and CI panels, on the same provider clients.
+
 ### Markdown viewer and editor for project documentation
 
 Wiki-style rendering and editing of repository documentation. Tables, callouts, checklists, footnotes, wikilinks `[[…]]`. The viewer ships first; the editor follows.
@@ -22,6 +26,14 @@ Wiki-style rendering and editing of repository documentation. Tables, callouts, 
 
 Fills the gap created by the bulk *Fetch all* / *Pull all* / *Tag all* actions: trigger the same operation against a single workspace member, without leaving the workspace manager.
 
+### Customisable status bar
+
+The footer ships a fixed set of chips today — current branch, ahead/behind, encoding, indexer status, jobs, notifications. Make each one toggleable and reorderable, and let the whole bar be hidden outright for users who want the absolute minimum chrome. Same drag-to-reorder, click-to-hide UX as the Activity Bar customise modal.
+
+### System notifications
+
+For events that deserve a desktop ping when Arbor isn't the foreground window — pipeline finished, push complete, MR/PR merged, fetch picked up new upstream commits — fall back from the in-app toast to the native OS notification stack (Windows toast, macOS Notification Center, libnotify on Linux). Per-event opt-in, off by default so the user picks what's worth being interrupted for.
+
 ### Visual interactive rebase
 
 Drag-and-drop reordering with squash / edit / drop / fixup actions and a timeline preview. Today rebase delegates to the `git` CLI.
@@ -29,6 +41,14 @@ Drag-and-drop reordering with squash / edit / drop / fixup actions and a timelin
 ### Configurable GitFlow
 
 The current GitFlow surface is opinionated — fixed branch prefixes, fixed base branches, fixed finish behaviour (tag, merge-back, branch deletion). The next iteration exposes these as per-repo settings: custom prefixes for feature/release/hotfix/support, configurable base and target branches, opt-in steps for finish actions, and hook points so plugins can extend the flow without forking it.
+
+### Extension API in the Run / Compile plugin
+
+The bundled *Run / Compile* plugin ships with a fixed set of language toolchains. Open it up so other plugins can register their own: how to detect a project (file patterns, manifest), how to invoke build and run, what to stream into the bottom panel. New language support then ships as a standalone plugin instead of as a patch to the bundled one.
+
+### Optional AI plugin for commit messages, PR descriptions, branch names
+
+Bundled but off by default. Calls a model of the user's choice — local via Ollama, or any of the usual API providers (Claude, OpenAI, …) — to draft the parts of git work that are mostly typing: commit messages from the staged diff, MR/PR descriptions from the commit range, branch names from a one-sentence intent, release notes from the commits since the last tag. Endpoint, model and prompt templates live in the plugin's settings; nothing leaves the machine unless the user explicitly wires it to a remote provider.
 
 ## Architectural block: backend split into separate crates
 
@@ -49,6 +69,14 @@ A single contiguous effort spread over multiple sessions. Each phase ships indep
 ### Source Export operation catalog
 
 The unimplemented operations listed in [status.md](status.md#known-gaps) shipped progressively, removing the *"not implemented"* set entirely. Today they fail fast at run time.
+
+## Maybe
+
+> Both halves are awkward. Every language prints stack traces its own way — Rust `src/foo.rs:12:34`, Python `File "foo.py", line 12`, JS `at fn (path:line:col)`, Java `at Foo.bar(File.java:42)`, Go `file.go:123 +0xdead`, and the list goes on — and every editor has its own URL scheme for jumping to a location (`vscode://file/…`, `idea://open?file=…`, `subl://`, `zed://`…). Doing this well means a parser per stack format and a launcher per IDE the user has configured under Settings → IDE; any miss silently drops the link, and people fall back to copy-pasting paths into a terminal — worse than leaving the text plain.
+
+### Clickable stack traces in the Job Output panel
+
+Detect file paths inside JobOutput log lines — relative paths resolved against the job's working directory, line and column captured when present — and turn them into links. Clicking jumps to the user's preferred editor for that language, reusing the IDE picker that already lives in settings.
 
 ## A note on the Experimental plugins
 

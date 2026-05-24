@@ -3,7 +3,7 @@
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import type {
-    WindowControlsStyle, UiDensity, ActivityBarPosition,
+    WindowControlsStyle, ActivityBarPosition,
   } from '$lib/types/config';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
@@ -18,7 +18,6 @@
   // Reactive read-through to the store so the slider and chip auto-update
   // if any other surface (e.g. command palette) changes the scale.
   const fontScale          = $derived(appearanceStore.fontScale);
-  const uiDensity          = $derived(appearanceStore.uiDensity);
   const activityBarPos     = $derived(appearanceStore.activityBarPosition);
   const compactTitleBar    = $derived(appearanceStore.compactTitleBar);
 
@@ -34,12 +33,6 @@
   const WC_OPTIONS = [
     { value: 'mac',     label: 'Mac-inspired',  description: 'Coloured trio (close/min/max).' },
     { value: 'windows', label: 'Windows',       description: 'Flat rectangular controls.'    },
-  ];
-
-  const DENSITY_OPTIONS = [
-    { value: 'compact',     label: 'Compact',     description: 'Tighter rows in lists, sidebar and tree views.' },
-    { value: 'comfortable', label: 'Comfortable', description: 'Default balanced row heights.' },
-    { value: 'spacious',    label: 'Spacious',    description: 'Looser rows — easier to scan on big screens.' },
   ];
 
   const ACTIVITY_BAR_OPTIONS = [
@@ -76,16 +69,6 @@
     <Toggle
       checked={compactTitleBar}
       onchange={(v) => appearanceStore.setCompactTitleBar(v)}
-    />
-  </FormRow>
-
-  <FormRow label="UI density" description="Row height for lists, sidebar items and tree views. Doesn't change font sizes.">
-    <RadioGroup
-      value={uiDensity}
-      options={DENSITY_OPTIONS}
-      appearance="segment"
-      size="sm"
-      onchange={(v) => appearanceStore.setUiDensity(v as UiDensity)}
     />
   </FormRow>
 
