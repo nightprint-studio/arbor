@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, MrConfig, PipelinesConfig } from '$lib/types/config';
+import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
 export type { TicketLinksRepoConfig };
@@ -128,3 +128,11 @@ export const getCommitConfig = () =>
 
 export const setCommitConfig = (config: CommitConfig) =>
   invoke<void>('set_commit_config', { config });
+
+// ── Onboarding tour state ─────────────────────────────────────────────────────
+
+export const getOnboardingConfig = () =>
+  invoke<OnboardingConfig>('get_onboarding_config');
+
+export const setOnboardingConfig = (config: OnboardingConfig) =>
+  invoke<void>('set_onboarding_config', { config });

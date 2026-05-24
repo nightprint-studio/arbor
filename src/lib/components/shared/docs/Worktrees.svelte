@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Worktrees</h1>
 
 <p class="doc-lead">
@@ -6,10 +10,9 @@
   letting you switch contexts instantly without stashing or committing.
 </p>
 
-<div class="callout tip">
-  <strong>Fast switch</strong>
+<Callout variant="tip" title="Fast switch">
   Double-click any worktree row in the sidebar to open it as a new tab immediately.
-</div>
+</Callout>
 
 <h2>Sidebar panel</h2>
 <p>
@@ -96,9 +99,8 @@
   <li>On Windows, IDEs that ship as batch scripts (<code>code.cmd</code>, <code>cursor.cmd</code>, etc.) are launched correctly through <code>cmd /c</code> — no manual workaround needed.</li>
 </ul>
 
-<div class="callout info">
-  <strong>Git worktrees vs. branches</strong>
+<Callout variant="info" title="Git worktrees vs. branches">
   A worktree is not a clone — it shares the full Git history and object store with the main
   repository. Disk usage is minimal (only the working tree files are duplicated). You can have
   multiple branches checked out simultaneously without any stashing.
-</div>
+</Callout>

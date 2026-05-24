@@ -1,7 +1,7 @@
 use tauri::State;
 use crate::error::AppError;
 use crate::config::repo_config::{RepoConfig, load as load_repo_config, save as save_repo_config};
-use crate::config::app_config::{self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, PipelinesConfig, RecoveryConfig, StudioSettings};
+use crate::config::app_config::{self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, OnboardingConfig, PipelinesConfig, RecoveryConfig, StudioSettings};
 use crate::AppState;
 
 // Cap the persisted recent-repo list. With WelcomeScreen showing 6 and the
@@ -432,6 +432,26 @@ pub fn set_animations_config(
 ) -> Result<(), AppError> {
     let mut cfg = state.lock_config()?;
     cfg.animations = config;
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Return the first-run onboarding tour state.
+#[tauri::command]
+pub fn get_onboarding_config(state: State<'_, AppState>) -> Result<OnboardingConfig, AppError> {
+    let config = state.lock_config()?;
+    Ok(config.onboarding.clone())
+}
+
+/// Persist the onboarding tour state (completed flag + schema version).
+#[tauri::command]
+pub fn set_onboarding_config(
+    state: State<'_, AppState>,
+    config: OnboardingConfig,
+) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    cfg.onboarding = config;
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))

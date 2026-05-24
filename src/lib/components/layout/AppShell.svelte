@@ -60,6 +60,8 @@
   import InitRepoModal from '../shared/InitRepoModal.svelte';
   import CloneRepoModal from '../shared/CloneRepoModal.svelte';
   import GitSetupModal from '../shared/GitSetupModal.svelte';
+  import OnboardingModal from '../shared/OnboardingModal.svelte';
+  import { onboardingStore } from '$lib/stores/onboarding.svelte';
   import { gitCliStore } from '$lib/stores/gitCli.svelte';
   import RepoBrowserModal from '../shared/RepoBrowserModal.svelte';
   // Cloud bulk transfers surface via the standard JobRegistry → JobsOverlay
@@ -544,6 +546,40 @@
   onMount(() => { void appearanceStore.loadConfig(); });
   onMount(() => { void animStore.loadConfig(); });
   onMount(() => { void commitConfigStore.loadConfig(); });
+
+  // ── Onboarding tour ──────────────────────────────────────────────────────
+  // Load the persisted onboarding state up front. The auto-open trigger is
+  // deferred to the effect below so we can wait for git detection to settle
+  // — opening on top of the GitSetupModal bouncer would just stack two
+  // dialogs in the user's face.
+  onMount(() => { void onboardingStore.loadConfig(); });
+
+  // Auto-open once when: (a) config has loaded, (b) git detection has reached
+  // a non-blocking phase, (c) the user hasn't been through the current
+  // onboarding schema version yet, (d) the bouncer isn't on screen. Wrapped
+  // in a fired-once guard so reloading the store later (e.g. via "Reset
+  // onboarding" in Settings) doesn't re-pop it mid-session — the store's
+  // `show()` is the explicit re-entry path.
+  let _onboardingAutoFired = $state(false);
+  $effect(() => {
+    if (_onboardingAutoFired)               return;
+    if (!onboardingStore.loaded)            return;
+    if (!onboardingStore.shouldAutoOpen())  return;
+    // Defer until git detection has settled.  `ready` is the happy path;
+    // `failed` still lets the user proceed without git (e.g. they'll
+    // pick a path later) so the tour is still useful.
+    const phase = gitCliStore.phase;
+    if (phase !== 'ready' && phase !== 'failed') return;
+    _onboardingAutoFired = true;
+    onboardingStore.show();
+  });
+
+  // Manual re-entry from Command Palette / Docs / Settings.
+  $effect(() => {
+    function open() { onboardingStore.show(); }
+    window.addEventListener('arbor:open-onboarding', open);
+    return () => window.removeEventListener('arbor:open-onboarding', open);
+  });
 
   // Initialise the data cache and run one-time IDE detection at startup.
   onMount(async () => {
@@ -1116,7 +1152,8 @@
         pluginPickFile !== null ||
         mrModalOpen ||
         createMrOpen ||
-        renameBranchTarget !== null;
+        renameBranchTarget !== null ||
+        onboardingStore.open;
       if (modalOpen) return;
 
       // Check plugin keybindings first (they take priority over unbound app keys).
@@ -2301,6 +2338,13 @@
       dismissable
       onClose={() => (gitBouncerDismissed = true)}
     />
+  {/if}
+
+  <!-- Welcome / onboarding tour. Auto-opens once per CURRENT_ONBOARDING_VERSION
+       (see effect above); re-entry from the command palette / Docs link
+       dispatches the `arbor:open-onboarding` window event. -->
+  {#if onboardingStore.open}
+    <OnboardingModal />
   {/if}
 </div>
 

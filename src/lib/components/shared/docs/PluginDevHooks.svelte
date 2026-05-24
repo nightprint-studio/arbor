@@ -1,5 +1,6 @@
 <script lang="ts">
   import { highlight } from '$lib/utils/diff-formatter';
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
 </script>
 
 <h1>Plugin Development — Hooks &amp; Events</h1>
@@ -198,10 +199,9 @@ end)`, '.lua')}</pre>
 <h4>Debug helpers</h4>
 <pre class="language-lua">{@html highlight(`arbor.service.list()        -- every "<plugin>.<method>" exported by any enabled plugin
 arbor.service.list_own()    -- only the services this plugin has exported`, '.lua')}</pre>
-<div class="callout info">
-  <strong>Delivery semantics</strong>
+<Callout variant="info" title="Delivery semantics">
   Each call spawns a short-lived worker thread that acquires the plugin host mutex, runs the target handler, then invokes the caller's callback — in that order, under the same lock. The callback executes on the worker thread, so don't assume Svelte-side state is in any particular state; prefer to <code>arbor.events.emit</code> a follow-up event for UI reactions.
-</div>
+</Callout>
 
 <h3>Wildcard subscriptions</h3>
 <p>
@@ -219,10 +219,9 @@ end)
 
 -- Match a suffix
 arbor.events.on("*:build-done", function(ctx) ... end)`, '.lua')}</pre>
-<div class="callout info">
-  <strong>Note</strong>
+<Callout variant="info" title="Note">
   A plugin with at least one wildcard subscription bypasses the manifest hook filter — it will receive all built-in lifecycle hooks too (<code>on_commit</code>, <code>on_repo_open</code>, …) even if they aren't declared under <code>[hooks]</code>. Handlers must tolerate varied payload shapes.
-</div>
+</Callout>
 
 <h3>Discovering hooks at runtime — <code>arbor.hooks</code></h3>
 <p>

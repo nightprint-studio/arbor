@@ -4,7 +4,7 @@
 
 <h1>Settings — Interface &amp; Git</h1>
 
-<p class="doc-lead">Open Settings with <kbd>Ctrl+,</kbd> or via the gear icon in the title bar. Settings are organised into groups in the left sidebar — Interface, Git, Performance, Access, and Project.</p>
+<p class="doc-lead">Open Settings with <Kbd action="settings" /> or via the gear icon in the title bar. Settings are organised into groups in the left sidebar — Interface, Git, Performance, Access, and Project.</p>
 
 <h2>Interface</h2>
 
@@ -163,7 +163,7 @@
 <h3>Diff viewer controls</h3>
 <p>The diff header carries a few extra controls on top of the Unified/Split toggle:</p>
 <ul>
-  <li><strong>Chunk navigation</strong> — <kbd>↑</kbd> / <kbd>↓</kbd> chevrons (with a <em>n/N</em> counter) jump between change blocks. <kbd>F3</kbd> / <kbd>Shift+F3</kbd> do the same from the keyboard.</li>
+  <li><strong>Chunk navigation</strong> — <kbd>↑</kbd> / <kbd>↓</kbd> chevrons (with a <em>n/N</em> counter) jump between change blocks. <Kbd action="next_chunk" /> / <Kbd action="prev_chunk" /> do the same from the keyboard.</li>
   <li><strong>Show full file</strong> — the file icon mirrors the global setting; toggling it here rebuilds the visible diff immediately.</li>
   <li><strong>Auto-focus</strong> — opening a file (or staging a line) lands the view on the first remaining change instead of the top of the file.</li>
 </ul>

@@ -852,6 +852,9 @@ pub fn run() {
             // Commit preferences (host-wide template fallback, …)
             commands::config_commands::get_commit_config,
             commands::config_commands::set_commit_config,
+            // First-run onboarding tour state
+            commands::config_commands::get_onboarding_config,
+            commands::config_commands::set_onboarding_config,
             // Activity bar config
             commands::config_commands::get_activity_bar_config,
             commands::config_commands::set_activity_bar_config,

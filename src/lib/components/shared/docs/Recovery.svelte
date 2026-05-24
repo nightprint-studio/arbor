@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Recovery Journal</h1>
 
 <p class="doc-lead">
@@ -36,10 +40,10 @@
   </div>
 </div>
 
-<div class="callout info">
+<Callout variant="info">
   Snapshots are taken <strong>before</strong> the operation runs, so even if the operation fails
   mid-way you still have a clean restore point.
-</div>
+</Callout>
 
 <h2>Opening the Recovery tab</h2>
 <p>
@@ -85,10 +89,10 @@
   produces conflicts. Once the apply is clean, the pinning ref is automatically released.
 </p>
 
-<div class="callout warning">
+<Callout variant="warning">
   Restoring a snapshot overwrites your current working tree. Arbor takes a new safety snapshot
   <em>before</em> each restore, so the operation is always reversible.
-</div>
+</Callout>
 
 <h2>Deleting entries</h2>
 <p>

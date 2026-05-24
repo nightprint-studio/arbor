@@ -1,5 +1,6 @@
 <script lang="ts">
   import { highlight } from '$lib/utils/diff-formatter';
+  import Kbd           from '$lib/components/shared/internal/Kbd.svelte';
 </script>
 
 <h1>Plugin Development — API: Core</h1>
@@ -31,7 +32,7 @@ arbor.log.error("fatal: " .. err)
 <p>
   Every call is also pushed to an in-memory ring buffer (last 5 000 entries)
   and surfaced in the <strong>Plugin Logs</strong> bottom panel —
-  <em>Tools → Plugin Logs</em> in the main menu, or <kbd>Alt+Shift+L</kbd>.
+  <em>Tools → Plugin Logs</em> in the main menu, or <Kbd action="plugin_logs" />.
   Disabled plugins do not log: their entries are dropped at the API boundary,
   and plugins disabled at startup never get a Lua VM in the first place.
 </p>

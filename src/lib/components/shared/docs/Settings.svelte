@@ -1,6 +1,10 @@
+<script lang="ts">
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
+</script>
+
 <h1>Settings</h1>
 
-<p class="doc-lead">Open Settings with <kbd>Ctrl+,</kbd> or via the gear icon in the Activity Bar. Settings are organised into groups in the left sidebar — <em>Interface</em>, <em>Git</em>, <em>Tools</em>, <em>Performance</em>, <em>Access</em>, and <em>Project</em>. Global, host-wide tooling (pipeline cap, IDE registry, terminal registry) lives under <em>Tools</em>; per-repository overrides for those tools sit under <em>Project</em>.</p>
+<p class="doc-lead">Open Settings with <Kbd action="settings" /> or via the gear icon in the Activity Bar. Settings are organised into groups in the left sidebar — <em>Interface</em>, <em>Git</em>, <em>Tools</em>, <em>Performance</em>, <em>Access</em>, and <em>Project</em>. Global, host-wide tooling (pipeline cap, IDE registry, terminal registry) lives under <em>Tools</em>; per-repository overrides for those tools sit under <em>Project</em>.</p>
 
 <h2>Interface</h2>
 

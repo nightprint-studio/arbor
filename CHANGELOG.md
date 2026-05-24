@@ -9,6 +9,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- First-run welcome tour: a polished onboarding modal walks new users
+  through Git identity, provider connection, opening the first repository,
+  and a quick tour of the Command Palette, plugin marketplace, issue-tracker
+  ticket chips, linked worktrees and workspaces. Re-openable any time from
+  the Command Palette (*Welcome Tour*) or the Documentation panel.
 - Marketplace registry now supports external plugin entries — third-party
   plugins maintained in their own GitHub repo can be listed from
   `arbor-extensions` with a one-line pointer, instead of hosting the code in
@@ -45,6 +50,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Documentation pages now use the shared Callout and Kbd widgets — keybindings displayed in Docs reflect user remaps live.
+- The welcome tour and the plugin form wizard now share the same step
+  indicator widget, so step badges, active highlight and done states stay
+  visually identical across both surfaces.
 - The "Stash changes" prompt and the full-screen diff viewer now use the
   standard modal shell — consistent backdrop, focus trap, ESC handling and
   animation across the app.

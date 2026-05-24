@@ -17,7 +17,7 @@
   import { animStore } from '$lib/stores/animations.svelte';
   import {
     PanelLeftClose, PanelLeftOpen, ChevronRight,
-    Plus, Pencil, Trash2, Copy, MoreHorizontal, Check,
+    Plus, Pencil, Trash2, Copy, MoreHorizontal,
   } from 'lucide-svelte';
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
@@ -32,6 +32,8 @@
   import ChipBar   from '$lib/components/shared/ui/ChipBar.svelte';
   import Tabs      from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
+  import StepIndicator from '$lib/components/shared/ui/StepIndicator.svelte';
+  import type { Step as StepIndicatorStep } from '$lib/components/shared/ui/StepIndicator.svelte';
 
   import type { FormNode } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
@@ -451,24 +453,15 @@
 {:else if node.type === 'wizard'}
   {@const wn = node as any}
   {@const curIdx = ctx.wizardStepIndex(wn)}
+  {@const wizardSteps = (wn.steps as any[]).map(s => ({
+    id:    s.id,
+    label: s.label,
+    icon:  s.icon ? PLUGIN_ICONS[s.icon] : undefined,
+  })) satisfies StepIndicatorStep[]}
   <div class="pf-wizard {(node as any).class ?? ''}" style={(node as any).style}>
-    <ol class="pf-wizard-steps">
-      {#each wn.steps as step, i (step.id)}
-        {@const Icon = step.icon ? PLUGIN_ICONS[step.icon] : null}
-        <li
-          class="pf-wizard-step"
-          class:pf-wizard-step-active={i === curIdx}
-          class:pf-wizard-step-done={i < curIdx}
-          aria-current={i === curIdx ? 'step' : undefined}
-        >
-          <span class="pf-wizard-step-badge">
-            {#if i < curIdx}<Check size={11} />{:else if Icon}<Icon size={11} />{:else}{i + 1}{/if}
-          </span>
-          <span class="pf-wizard-step-label">{step.label}</span>
-          {#if i < wn.steps.length - 1}<span class="pf-wizard-sep"></span>{/if}
-        </li>
-      {/each}
-    </ol>
+    <div class="pf-wizard-rail">
+      <StepIndicator steps={wizardSteps} current={wn.steps[curIdx]?.id ?? wn.steps[0]?.id ?? ''} size="sm" />
+    </div>
     {#each wn.steps as step, i (step.id)}
       <div
         class="pf-wizard-panel"

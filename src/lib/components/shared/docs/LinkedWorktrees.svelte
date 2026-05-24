@@ -1,14 +1,17 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Linked Worktrees</h1>
 
-<div class="callout warn">
-  <strong>Experimental feature</strong>
+<Callout variant="warning" title="Experimental feature">
   Linked Worktrees is still being shaped — file format
   (<code>linked_worktrees.toml</code>), Tauri commands, plugin hooks and the
   edge-case behaviour around stash conflicts may change between releases.
   Avoid building plugins or muscle memory around the wire-format details for
   now; the user-facing UI (manager modal, badges, command palette verbs) is
   the stable surface.
-</div>
+</Callout>
 
 <p class="doc-lead">
   A <strong>worktree link</strong> ties several worktrees together so that a
@@ -17,13 +20,12 @@
   navigation, a link coordinates their HEADs.
 </p>
 
-<div class="callout tip">
-  <strong>Where it lives</strong>
+<Callout variant="tip" title="Where it lives">
   Persisted in <code>~/.config/arbor/linked_worktrees.toml</code>.  Members
   are identified by their <code>RepoRegistry</code> UUID (the same identity
   used by workspaces, keyed by path), so each worktree path is its own
   member — multiple worktrees of the same repo are independent links.
-</div>
+</Callout>
 
 <h2>How sync works</h2>
 <ol class="step-list">
@@ -33,13 +35,12 @@
   <li>Members where the branch is missing are <em>skipped silently</em>.  An aggregated notification at the end summarises updated / skipped / conflicting members.</li>
 </ol>
 
-<div class="callout info">
-  <strong>Stash safety</strong>
+<Callout variant="info" title="Stash safety">
   Pre-checkout stashes use <code>git stash push -u</code> so untracked files
   are preserved.  Re-application uses <code>git stash apply</code>, not
   <code>pop</code>: a clean apply drops the entry, but on conflict the entry
   is kept so nothing is silently lost.
-</div>
+</Callout>
 
 <h2>Branch aliases</h2>
 <p>

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { highlight } from '$lib/utils/diff-formatter';
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import Kbd     from '$lib/components/shared/internal/Kbd.svelte';
 </script>
 
 <h1>Initialize Repository</h1>
@@ -8,10 +10,10 @@
 
 <h2>The flow</h2>
 <ol class="step-list">
-  <li>Either open the hamburger menu and pick <strong>Initialize Repository…</strong>, or press <kbd>Ctrl+O</kbd> and select any folder without a <code>.git</code> directory</li>
+  <li>Either open the hamburger menu and pick <strong>Initialize Repository…</strong>, or press <Kbd action="open_repo" /> and select any folder without a <code>.git</code> directory</li>
   <li>The <strong>Initialize Repository</strong> dialog opens automatically</li>
   <li>Configure options across three tabs: <strong>Project</strong>, <strong>Files</strong>, <strong>Remote</strong></li>
-  <li>Click <strong>Initialize Repository</strong> or press <kbd>Ctrl+Enter</kbd></li>
+  <li>Click <strong>Initialize Repository</strong> or press <Kbd action="commit" /></li>
   <li>The repo is created and opens as a new tab immediately</li>
 </ol>
 <p>The menu entry routes you straight into the dialog regardless of whether the folder already has a <code>.git</code> directory: a folder that's already a repo just opens normally, no destructive re-init.</p>
@@ -52,10 +54,9 @@
   </tbody>
 </table>
 
-<div class="callout tip">
-  <strong>API failure is non-fatal</strong>
+<Callout variant="tip" title="API failure is non-fatal">
   If the provider API call fails, the local repository is still initialized. Arbor shows an error toast but the repo opens normally.
-</div>
+</Callout>
 
 <h2>Plugin hook: <code>on_repo_init</code></h2>
 <p>Fires after a repository is successfully initialized and opened. Declare in <code>plugin.toml</code>:</p>

@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Submodules</h1>
 
 <p class="doc-lead">Arbor shows rich status for each Git submodule — current branch, ahead/behind counts, dirty state — and lets you fetch, pull, push, and switch branches directly from the sidebar.</p>
@@ -56,11 +60,10 @@
   <li>Shows a spinner during the branch-list fetch and during the checkout itself.</li>
 </ul>
 
-<div class="callout info">
-  <strong>Adding or removing submodules</strong>
+<Callout variant="info" title="Adding or removing submodules">
   These operations are not supported from the UI. Use the integrated terminal or an external shell:
   <code>git submodule add &lt;url&gt; &lt;path&gt;</code> / <code>git rm &lt;path&gt;</code>
-</div>
+</Callout>
 
 <h2>Initialising submodules</h2>
 <p>Uninitialised (not-yet-cloned) submodules show a warning icon and all sync operations are disabled. To initialise them use the integrated terminal:</p>

@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Git Executable</h1>
 
 <p class="doc-lead">
@@ -39,11 +43,10 @@ that you can't dismiss until the path is resolved. Three actions:</p>
     while Arbor was already open.</li>
 </ul>
 
-<div class="callout info">
-  <strong>Why a blocking modal?</strong>
+<Callout variant="info" title="Why a blocking modal?">
   Without git, anything that depends on the CLI (rebase, stash apply, submodule update) silently fails.
   Forcing the user to resolve the path up-front prevents confusing partial-functionality states.
-</div>
+</Callout>
 
 <h2>Installing git on macOS / Linux</h2>
 
@@ -75,11 +78,10 @@ falls back to PATH / portable lookup without touching the on-disk binary.</p>
 (<code>cmd/</code>, <code>bin/</code>, <code>etc/</code>, …). To remove it, delete the folder — Arbor
 will fall back to PATH on next launch.</p>
 
-<div class="callout info">
-  <strong>Updating the portable copy</strong>
+<Callout variant="info" title="Updating the portable copy">
   Re-running <strong>Download portable</strong> from Settings overwrites the existing extraction with
   the latest release. The active path is repointed automatically.
-</div>
+</Callout>
 
 <h2>Authentication</h2>
 
@@ -113,18 +115,16 @@ will fall back to PATH on next launch.</p>
   <li><strong>Authenticated only via GCM / netrc</strong>Continue to work for any host Arbor doesn't have a token for.  When Arbor does have a token, it wins for that host — refresh or remove it from Settings → Authentication if you'd rather defer to the OS.</li>
 </ul>
 
-<div class="callout info">
-  <strong>libgit2 vs CLI.</strong>
+<Callout variant="info" title="libgit2 vs CLI.">
   Network operations done through libgit2 (the main repo's <em>fetch</em>
   and <em>push</em>) have always used Arbor's stored credentials.  This
   page is about the CLI shell-outs, which historically deferred to the OS
   helper — they now align with libgit2's behaviour.
-</div>
+</Callout>
 
 <h2>Plugins should not shell out to <code>git</code></h2>
 
-<div class="callout warning">
-  <strong>For plugin authors.</strong>
+<Callout variant="warning" title="For plugin authors.">
   <code>arbor.terminal.exec("git ...")</code> uses the system <code>PATH</code>, NOT the binary
   configured here.  That means a plugin that shells out to <code>git</code> directly will silently
   bypass the user's choice — it can run a different version, miss the bundled portable copy
@@ -133,7 +133,7 @@ will fall back to PATH on next launch.</p>
   …).  If the operation you need isn't exposed, file an issue rather than working around it
   with a raw shell call — Arbor doesn't auto-rewrite plugin commands by design, since that
   would change their semantics behind the author's back.
-</div>
+</Callout>
 
 <h2>Config file</h2>
 

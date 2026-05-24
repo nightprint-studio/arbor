@@ -1,3 +1,8 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import Kbd     from '$lib/components/shared/internal/Kbd.svelte';
+</script>
+
 <h1>Workspaces</h1>
 
 <p class="doc-lead">
@@ -7,12 +12,11 @@
   losing context.
 </p>
 
-<div class="callout tip">
-  <strong>Workspace dropdown</strong>
+<Callout variant="tip" title="Workspace dropdown">
   The dropdown in the top bar (next to the hamburger menu) shows the active
   workspace and lets you switch between them. Every installation has a
   built-in <strong>Scratch</strong> workspace that collects ad-hoc opens.
-</div>
+</Callout>
 
 <h2>Key concepts</h2>
 <div class="feature-grid two-col">
@@ -162,15 +166,14 @@
 <table class="shortcuts-table">
   <thead><tr><th>Shortcut</th><th>Verb</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><kbd>Ctrl+N</kbd></td><td>Open Project</td><td>Fuzzy-open any repo from the active workspace (plus Scratch).</td></tr>
-    <tr><td><kbd>Ctrl+Shift+N</kbd></td><td>Open from Workspace</td><td>Fuzzy-open a repo from any <em>other</em> workspace as a cross-workspace tab.</td></tr>
-    <tr><td><kbd>Ctrl+K</kbd></td><td>Switch Workspace</td><td>Type <em>switch workspace</em> and pick a target. Saves the current snapshot, restores the target's.</td></tr>
+    <tr><td><Kbd action="open_project" /></td><td>Open Project</td><td>Fuzzy-open any repo from the active workspace (plus Scratch).</td></tr>
+    <tr><td><Kbd action="open_from_workspace" /></td><td>Open from Workspace</td><td>Fuzzy-open a repo from any <em>other</em> workspace as a cross-workspace tab.</td></tr>
+    <tr><td><Kbd action="command_palette" /></td><td>Switch Workspace</td><td>Type <em>switch workspace</em> and pick a target. Saves the current snapshot, restores the target's.</td></tr>
   </tbody>
 </table>
 
-<div class="callout info">
-  <strong>Not to be confused with…</strong>
+<Callout variant="info" title="Not to be confused with…">
   Git <em>worktrees</em> are an unrelated feature that share history but check
   out different branches — see the <em>Worktrees</em> documentation. Arbor
   workspaces are a UI-level grouping with no git-level counterpart.
-</div>
+</Callout>

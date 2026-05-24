@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Git Bisect</h1>
 
 <p class="doc-lead">
@@ -6,11 +10,11 @@
   <em>O(log n)</em> steps until it pinpoints the culprit.
 </p>
 
-<div class="callout info">
+<Callout variant="info">
   Arbor runs bisect in <strong>no-checkout mode</strong> — your working tree is never touched.
   Mark commits based on knowledge or history, and use the <em>Checkout</em> button only when you
   actually need to run tests against a specific commit.
-</div>
+</Callout>
 
 <h2>Starting a session</h2>
 <ol>
@@ -107,11 +111,11 @@
   </tbody>
 </table>
 
-<div class="callout tip">
-  <strong>Auto-save on result</strong> — when bisect finds the culprit commit, the session is saved
+<Callout variant="tip" title="Auto-save on result">
+  — when bisect finds the culprit commit, the session is saved
   automatically with a name like <em>"Found: abc1234 — commit message"</em>. You never lose a
   completed bisect result.
-</div>
+</Callout>
 
 <h2>Under the hood</h2>
 <p>The backend runs <code>git bisect start --no-checkout</code> and manages <code>BISECT_HEAD</code>

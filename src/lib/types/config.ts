@@ -110,6 +110,15 @@ export interface CommitConfig {
   template_global: string;
 }
 
+/** First-run onboarding tour state. Persisted so the welcome wizard
+ *  only auto-pops the very first time. `version` is a schema knob: when
+ *  we add meaningful new steps the frontend bumps the current version
+ *  and the modal re-opens for users on an older one. */
+export interface OnboardingConfig {
+  completed: boolean;
+  version:   number;
+}
+
 export interface AppConfig {
   theme: ThemeConfig;
   diff: DiffConfig;

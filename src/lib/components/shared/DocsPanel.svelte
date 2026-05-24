@@ -1183,33 +1183,6 @@
     line-height: 1.75 !important;
   }
 
-  /* ── Callout boxes ─────────────────────────────────────────────── */
-  .docs-content :global(.callout) {
-    padding: 10px 14px;
-    border-radius: 0 6px 6px 0;
-    border-left: 3px solid;
-    margin: 12px 0;
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    line-height: 1.65;
-  }
-  .docs-content :global(.callout > strong:first-child) {
-    display: block;
-    margin-bottom: 5px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-weight: 700;
-  }
-  .docs-content :global(.callout.tip)    { background: color-mix(in srgb, var(--success) 8%, transparent);   border-color: color-mix(in srgb, var(--success) 50%, transparent);  }
-  .docs-content :global(.callout.tip    > strong:first-child) { color: var(--success); }
-  .docs-content :global(.callout.info)   { background: color-mix(in srgb, var(--accent) 8%, transparent);    border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-  .docs-content :global(.callout.info   > strong:first-child) { color: var(--accent); }
-  .docs-content :global(.callout.warning){ background: color-mix(in srgb, var(--warning) 8%, transparent);   border-color: color-mix(in srgb, var(--warning) 50%, transparent); }
-  .docs-content :global(.callout.warning > strong:first-child){ color: var(--warning); }
-  .docs-content :global(.callout.danger) { background: color-mix(in srgb, var(--error) 8%, transparent);     border-color: color-mix(in srgb, var(--error) 50%, transparent);  }
-  .docs-content :global(.callout.danger  > strong:first-child){ color: var(--error); }
-
   /* ── Feature grid ──────────────────────────────────────────────── */
   .docs-content :global(.feature-grid) {
     display: grid;

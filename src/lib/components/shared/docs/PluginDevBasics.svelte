@@ -1,5 +1,6 @@
 <script lang="ts">
   import { highlight } from '$lib/utils/diff-formatter';
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
 </script>
 
 <h1>Plugin Development — Basics</h1>
@@ -338,7 +339,6 @@ optional = true`, 'toml')}</pre>
   </tbody>
 </table>
 
-<div class="callout warning">
-  <strong>Sandbox hardening</strong>
+<Callout variant="warning" title="Sandbox hardening">
   These Lua functions are removed from the sandbox: <code>os.execute</code>, <code>os.exit</code>, <code>os.remove</code>, <code>os.rename</code>, <code>io.*</code>, <code>load</code>, <code>loadfile</code>, <code>dofile</code>. The <code>terminal</code> permission is captured at plugin load time — it cannot be escalated by overwriting a Lua global.
-</div>
+</Callout>

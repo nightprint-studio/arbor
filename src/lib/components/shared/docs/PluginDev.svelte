@@ -1,5 +1,6 @@
 <script lang="ts">
   import { highlight } from '$lib/utils/diff-formatter';
+  import Kbd           from '$lib/components/shared/internal/Kbd.svelte';
 </script>
 
 <h1>Plugin Development</h1>
@@ -301,7 +302,7 @@ arbor.notify{
 }`, '.lua')}</pre>
 
 <h2>arbor.command — command palette entries</h2>
-<p>Register items that appear in the Command Palette (<kbd>Ctrl+K</kbd>). Each entry fires the action <code>command:&lt;id&gt;</code> on the plugin when selected.</p>
+<p>Register items that appear in the Command Palette (<Kbd action="command_palette" />). Each entry fires the action <code>command:&lt;id&gt;</code> on the plugin when selected.</p>
 <pre class="language-lua">{@html highlight(`arbor.command.register({
   id          = "my-action",    -- unique within this plugin
   title       = "My Action",    -- shown in the palette

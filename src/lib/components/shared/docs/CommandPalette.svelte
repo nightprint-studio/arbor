@@ -2,6 +2,7 @@
   import { highlight }          from '$lib/utils/diff-formatter';
   import { contributionStore }  from '$lib/stores/contribution.svelte';
   import { pluginStore }        from '$lib/stores/plugin.svelte';
+  import Kbd                    from '$lib/components/shared/internal/Kbd.svelte';
 
   type PluginCmd = {
     plugin_name: string;
@@ -34,13 +35,13 @@
 </script>
 
 <h1>Command Palette</h1>
-<p class="doc-lead">The Command Palette (<kbd>Ctrl+K</kbd>) is a strictly <strong>verb-first</strong> launcher: you always pick an action first, then (when the action takes a target) refine to a specific branch / tag / commit / file. Ambiguity is removed by design — the palette always shows what will happen on <kbd>Enter</kbd>.</p>
+<p class="doc-lead">The Command Palette (<Kbd action="command_palette" />) is a strictly <strong>verb-first</strong> launcher: you always pick an action first, then (when the action takes a target) refine to a specific branch / tag / commit / file. Ambiguity is removed by design — the palette always shows what will happen on <kbd>Enter</kbd>.</p>
 
 <h2>Opening &amp; navigating</h2>
 <table class="shortcuts-table">
   <thead><tr><th>Key</th><th>Action</th></tr></thead>
   <tbody>
-    <tr><td><kbd>Ctrl+K</kbd></td><td>Open / close the palette</td></tr>
+    <tr><td><Kbd action="command_palette" /></td><td>Open / close the palette</td></tr>
     <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Move selection up / down</td></tr>
     <tr><td><kbd>Enter</kbd></td><td>Pick the highlighted command (Phase 1) or run it on the highlighted target (Phase 2)</td></tr>
     <tr><td><kbd>Tab</kbd></td><td>Accept ghost-text autocompletion</td></tr>

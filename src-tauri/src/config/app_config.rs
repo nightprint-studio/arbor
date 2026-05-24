@@ -101,6 +101,11 @@ pub struct AppConfig {
     /// Host-wide commit preferences (global template fallback, …).
     #[serde(default)]
     pub commit: CommitConfig,
+    /// First-run onboarding tour state. Tracks whether the welcome wizard
+    /// has been completed/dismissed and the schema version so future
+    /// additions can re-prompt only for new steps.
+    #[serde(default)]
+    pub onboarding: OnboardingConfig,
 }
 
 /// User-facing visual tweaks. Theme lives in its own slot (the active theme id
@@ -165,6 +170,30 @@ pub enum AnimSpeed {
     #[default]
     Normal,
     Slow,
+}
+
+/// First-run onboarding tour state. Persisted in `~/.config/arbor/config.toml`
+/// under `[onboarding]` so the welcome modal only auto-pops once.
+///
+/// `version` is a schema bump knob: when we add meaningful new steps in a
+/// future release we increment `CURRENT_ONBOARDING_VERSION` on the
+/// frontend, and the modal re-opens automatically for users whose stored
+/// `version` is lower (showing only the new steps, not the whole tour
+/// again).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnboardingConfig {
+    /// User has finished or skipped the tour at least once.
+    #[serde(default)]
+    pub completed: bool,
+    /// Onboarding schema the user has been through. `0` means never seen.
+    #[serde(default)]
+    pub version: u32,
+}
+
+impl Default for OnboardingConfig {
+    fn default() -> Self {
+        Self { completed: false, version: 0 }
+    }
 }
 
 /// Global commit-related preferences. Per-repo overrides live in
@@ -793,6 +822,7 @@ impl Default for AppConfig {
             appearance: AppearanceConfig::default(),
             animations: AnimationsConfig::default(),
             commit: CommitConfig::default(),
+            onboarding: OnboardingConfig::default(),
         }
     }
 }

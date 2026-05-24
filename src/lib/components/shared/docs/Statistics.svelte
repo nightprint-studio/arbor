@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Repository Statistics</h1>
 
 <p class="doc-lead">
@@ -73,9 +77,9 @@
   <li><strong>Most Changed Files</strong> — top 20 individual files by change count, sampled from the first 500 commits.</li>
 </ul>
 
-<div class="callout info">
-  <strong>Performance note:</strong> File-level and contributor line stats are sampled from the <strong>first 500 commits</strong> for performance. Commit-level stats (totals, contributors by count, timing, heatmap) scan the full history.
-</div>
+<Callout variant="info" title="Performance note:">
+  File-level and contributor line stats are sampled from the <strong>first 500 commits</strong> for performance. Commit-level stats (totals, contributors by count, timing, heatmap) scan the full history.
+</Callout>
 
 <h2>Caching</h2>
 <p>
@@ -109,11 +113,11 @@
     </div>
   </div>
 </div>
-<div class="callout info">
+<Callout variant="info">
   The export runs as a <strong>background job</strong> so the UI stays responsive.
   Progress and completion status are visible in the <em>Jobs</em> overlay, and a bell notification appears when the export finishes or fails.
   If statistics have already been computed for the current HEAD, the cached data is used directly — no re-computation is needed.
-</div>
+</Callout>
 
 <h2>Excluding Files from Statistics</h2>
 <p>

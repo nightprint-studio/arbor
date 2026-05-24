@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Missing &amp; Relocated Projects</h1>
 
 <p class="doc-lead">
@@ -34,12 +38,11 @@ title bar with a warning glyph, and clicking it opens the locate UI instead of t
   <li><strong>Remove from Arbor</strong>Deregister the project: removes it from every workspace and clears its registry entry. The folder on disk is never touched.</li>
 </ul>
 
-<div class="callout info">
-  <strong>Re-validate on focus</strong>
+<Callout variant="info" title="Re-validate on focus">
   By default, Arbor re-classifies every tombstoned tab when the window regains focus, so a tab can
   return to a normal repo automatically once you remount the drive. You can turn this off in
   <strong>Settings → Git → Missing Projects</strong>.
-</div>
+</Callout>
 
 <h2>Recent projects (Welcome screen)</h2>
 

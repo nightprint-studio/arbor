@@ -211,7 +211,7 @@
 <p>Built-in shortcuts are rendered live next to the action wherever it appears:</p>
 <ul>
   <li><strong>Main menu</strong> (hamburger top-left) — IntelliJ-style right-aligned hint on each row.</li>
-  <li><strong>Command Palette</strong> (<kbd>Ctrl+K</kbd>) — small <kbd>kbd</kbd> badge at the right of the row.</li>
+  <li><strong>Command Palette</strong> (<Kbd action="command_palette" />) — small <kbd>kbd</kbd> badge at the right of the row.</li>
   <li><strong>Right-click context menus</strong> — branch, commit, tab, stage entries.</li>
   <li><strong>Tooltips</strong> on Activity Bar, Status Bar and TitleBar buttons (e.g. hovering the Fetch button shows <em>Fetch from remote (Ctrl+Shift+F)</em>).</li>
 </ul>

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { highlight } from '$lib/utils/diff-formatter';
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import Kbd     from '$lib/components/shared/internal/Kbd.svelte';
 </script>
 
 <h1>Plugin Development — API: UI</h1>
@@ -299,7 +301,7 @@ arbor.notify{ title = "Repo updated", message = "main pulled 3 commits", level =
 </ul>
 
 <h2>arbor.command — command palette entries</h2>
-<p>Register items that appear in the Command Palette (<kbd>Ctrl+K</kbd>). Each entry fires the action <code>command:&lt;id&gt;</code> on the plugin when selected.</p>
+<p>Register items that appear in the Command Palette (<Kbd action="command_palette" />). Each entry fires the action <code>command:&lt;id&gt;</code> on the plugin when selected.</p>
 <pre class="language-lua">{@html highlight(`arbor.command.register({
   id          = "my-action",    -- unique within this plugin
   title       = "My Action",    -- shown in the palette
@@ -1672,10 +1674,9 @@ end)`, '.lua')}</pre>
     <tr><td><code>replace(cfg)</code></td><td>whole form</td><td>Swaps the root <code>nodes</code> tree in-place — no close+reopen flicker. See below.</td></tr>
   </tbody>
 </table>
-<div class="callout info">
-  <strong>Note</strong>
+<Callout variant="info" title="Note">
   <code>arbor.ui.form</code> is both a function (open a form) and a table of helpers. The <code>__call</code> metamethod preserves the original <code>arbor.ui.form(config)</code> syntax.
-</div>
+</Callout>
 
 <h3>arbor.ui.form.replace — in-place structural swap</h3>
 <p>

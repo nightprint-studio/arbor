@@ -973,6 +973,11 @@
      above — both widgets share the same chrome now.) */
 
   /* ── Wizard ──────────────────────────────────────────────────────────────── */
+  /* The step rail itself is rendered by the shared `StepIndicator` widget
+     (see `shared/ui/StepIndicator.svelte`).  This block owns only the
+     wizard *container* + panel chrome.  Per-step look (badge, label,
+     active / done tint) belongs to the widget so the plugin wizard and
+     the onboarding tour stay visually in sync. */
 
   .pf-wizard {
     display: flex;
@@ -981,57 +986,14 @@
     min-width: 0;
   }
 
-  .pf-wizard-steps {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  /* Wrapper around the StepIndicator — gives the rail the divider line
+     that visually separates the breadcrumb from the current step's body
+     (the equivalent of the old `.pf-wizard-steps` border-bottom). */
+  .pf-wizard-rail {
     padding: 6px 0 10px;
-    margin: 0;
-    list-style: none;
     border-bottom: 1px solid var(--border-subtle);
     overflow-x: auto;
-  }
-  .pf-wizard-step {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-muted);
-    font-size: var(--font-size-sm);
-    white-space: nowrap;
-  }
-  .pf-wizard-step-active { color: var(--text-primary); font-weight: 600; }
-  .pf-wizard-step-done   { color: color-mix(in srgb, var(--accent) 80%, var(--text-secondary)); }
-
-  .pf-wizard-step-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 999px;
-    background: var(--bg-base);
-    border: 1px solid var(--border);
-    font-size: 10px;
-    font-weight: 600;
-    color: inherit;
-    flex-shrink: 0;
-  }
-  .pf-wizard-step-active .pf-wizard-step-badge {
-    background: var(--accent);
-    color: var(--text-on-accent);
-    border-color: var(--accent);
-  }
-  .pf-wizard-step-done .pf-wizard-step-badge {
-    background: color-mix(in srgb, var(--accent) 20%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-    color: var(--accent);
-  }
-
-  .pf-wizard-sep {
-    width: 20px;
-    height: 1px;
-    background: var(--border);
-    margin: 0 4px;
+    overflow-y: hidden;
   }
 
   .pf-wizard-panel {

@@ -1,3 +1,8 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import Kbd     from '$lib/components/shared/internal/Kbd.svelte';
+</script>
+
 <h1>Merge Conflicts</h1>
 
 <p class="doc-lead">When a merge produces conflicts, Arbor detects the state automatically and surfaces a guided resolution workflow. No need to manually edit <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> markers in a text editor.</p>
@@ -54,7 +59,7 @@
 <h3>Conflict navigation toolbar</h3>
 <p>A toolbar across the top of the editor area lets you jump between conflict blocks <em>inside the active file</em>:</p>
 <ul class="prop-list">
-  <li><strong>↑ / ↓</strong>step through regions (also bound to <kbd>F3</kbd> / <kbd>Shift+F3</kbd>).</li>
+  <li><strong>↑ / ↓</strong>step through regions (also bound to <Kbd action="next_chunk" /> / <Kbd action="prev_chunk" />).</li>
   <li><strong>Counter</strong>"<em>3 / 7</em>" — current region over total.</li>
   <li><strong>‹ ours</strong> / <strong>theirs ›</strong>resolve the active block and advance to the next.</li>
   <li><strong>"File staged"</strong> badge appears once every region is resolved and the result is written.</li>
@@ -125,10 +130,9 @@
 <h3>Aborting the merge</h3>
 <p>Click <strong>Annulla Merge</strong> in the footer (to the left of <em>Mergia</em>) to discard all resolution work. A confirmation prompt appears — confirm to run <code>git merge --abort</code> and restore the working tree.</p>
 
-<div class="callout warning">
-  <strong>Abort is irreversible</strong>
+<Callout variant="warning" title="Abort is irreversible">
   Aborting discards all conflict resolutions you've made so far. You'll need to start over if you re-trigger the merge.
-</div>
+</Callout>
 
 <h2>Blocking files (stash apply)</h2>
 <p>When a <code>stash apply</code> / <code>pop</code> can't proceed because tracked or untracked files in the workdir would be overwritten, the same modal opens in <em>blocking-files</em> mode. The sidebar shows two clearly-separated sections:</p>
