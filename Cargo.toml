@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "src-tauri",
+    "crates/*",
+]
+
+# ── Shared package metadata ─────────────────────────────────────────────────
+# Inherit with `version.workspace = true` etc. in member crates.
+[workspace.package]
+version      = "0.2.0"
+edition      = "2021"
+rust-version = "1.80"
+license      = "GPL-3.0-only"
+authors      = ["Nightprint Studio"]
+
+# ── Shared dependencies ─────────────────────────────────────────────────────
+# Member crates pin with `serde.workspace = true` to avoid version drift.
+# Only deps used by 2+ crates (or that arbor-cloud needs) are listed here for
+# now. The rest stays inline in src-tauri/Cargo.toml until the next split.
+[workspace.dependencies]
+# Core
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror  = "2"
+tracing    = "0.1"
+tokio      = { version = "1", features = ["full"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+async-trait  = "0.1"
+
+# HTTP / auth / crypto
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "stream"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+base64  = "0.22"
+sha2    = "0.10"
+
+# Misc
+uuid   = { version = "1", features = ["v4"] }
+dirs   = "6.0.0"
+regex  = "1"
+
+# Tauri (member crates that need AppHandle / Manager pull this in)
+tauri = { version = "2.11.0", features = ["tray-icon", "image-png", "image-ico"] }
+
+# Cloud-only — pinned here so the eventual WASM-migration only edits one place
+opendal = { version = "0.56", default-features = false, features = [
+  "services-gcs",
+  "services-s3",
+  "services-azblob",
+  "reqwest-rustls-tls",
+] }
+aws-lc-sys = { version = "0.41", features = ["prebuilt-nasm"] }
+
+# ── Release profile ─────────────────────────────────────────────────────────
+# Moved from src-tauri/Cargo.toml: profile sections must live at workspace root.
+# Tuning rationale unchanged — see comment block in the original location.
+[profile.release]
+opt-level     = "s"
+lto           = "thin"
+codegen-units = 1
+strip         = "debuginfo"
+panic         = "unwind"
+debug         = 1

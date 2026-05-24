@@ -171,6 +171,10 @@ export interface PluginInfo {
    * user can diagnose the issue.
    */
   dep_error?: string;
+  /** Direct declared dependencies from the manifest. */
+  dependencies?: PluginDependency[];
+  /** Names of installed plugins (loaded or dormant) that require this one. */
+  required_by?: string[];
 }
 
 // ── UI Registrations — typed shapes produced by parsers in src/lib/contributions/ ───

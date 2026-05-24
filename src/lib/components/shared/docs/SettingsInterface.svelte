@@ -1,22 +1,23 @@
 <script lang="ts">
-  import Kbd from '$lib/components/shared/ui/Kbd.svelte';
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
 </script>
 
 <h1>Settings — Interface &amp; Git</h1>
 
-<p class="doc-lead">Open Settings with <kbd>Ctrl+,</kbd> or via the gear icon in the title bar. Settings are organised into groups in the left sidebar — Interface, Git, Performance, Access, and Project.</p>
+<p class="doc-lead">Open Settings with <Kbd action="settings" /> or via the gear icon in the title bar. Settings are organised into groups in the left sidebar — Interface, Git, Performance, Access, and Project.</p>
 
 <h2>Interface</h2>
 
 <h3>Appearance</h3>
 <ul>
+  <li><strong>Window controls</strong> — switches the close / minimize / maximize buttons in the title bar between the Mac-inspired coloured trio (default) and a flat Windows-/IntelliJ-style set that runs the full height of the title bar and reaches the right edge. The same switch also restyles the close button used in modal and panel headers.</li>
   <li><strong>Font scale</strong> — scales all UI text from 0.8× to 1.4× in 5 % increments. Useful on HiDPI or small screens.</li>
 </ul>
 
 <h3>Animations</h3>
 <p>
   Controls the speed and behaviour of every transition and motion effect in the UI.
-  Settings are stored in <code>localStorage</code> and take effect immediately.
+  Settings are stored in <code>~/.config/arbor/config.toml</code> and take effect immediately.
 </p>
 <ul>
   <li>
@@ -137,7 +138,7 @@
   No <code>backdrop-filter</code> or runtime blur is used anywhere in the overlay: it
   paints to solid colours only, so even at 60+ entries per second on the busiest
   CommitGraph there is zero per-frame compositor work for the background.
-  All settings persist to <code>localStorage</code> and survive restarts.
+  All settings persist to <code>~/.config/arbor/config.toml</code> and survive restarts.
 </p>
 
 <h3>Graph</h3>
@@ -150,19 +151,17 @@
 
 <h3>Diff &amp; Stage</h3>
 <ul>
-  <li><strong>Diff algorithm</strong> — Myers (default), Patience, or Minimal. Myers is a good general-purpose default; Patience tends to produce cleaner hunks on refactors; Minimal produces the smallest diff.</li>
   <li><strong>Context lines</strong> — number of unchanged lines shown around each hunk (0 – 20, default 3).</li>
   <li><strong>View mode</strong> — Unified (single column) or Split (side-by-side).</li>
-  <li><strong>Word wrap</strong> — wraps long lines instead of scrolling horizontally.</li>
   <li><strong>Show full file</strong> — render the entire file with diff highlights instead of just changed hunks. Useful for reading a change in its full surrounding context. The same toggle is available as a button (file icon) in the diff viewer header. Persisted to <code>~/.config/arbor/config.toml</code> under <code>[diff]</code>.</li>
-  <li><strong>Virtualization threshold</strong> — when a file's diff has more than this many lines, the renderer switches to a windowed mode that only paints visible rows (default 200). Lower values keep huge files snappier; word wrap forces the simple renderer regardless.</li>
+  <li><strong>Virtualization threshold</strong> — when a file's diff has more than this many lines, the renderer switches to a windowed mode that only paints visible rows (default 200). Lower values keep huge files snappier.</li>
   <li><strong>Confirm before discarding</strong> — when enabled (default), a confirmation dialog appears before discarding a single file's changes. The <em>Discard All</em> confirmation is always shown regardless of this setting.</li>
 </ul>
 
 <h3>Diff viewer controls</h3>
 <p>The diff header carries a few extra controls on top of the Unified/Split toggle:</p>
 <ul>
-  <li><strong>Chunk navigation</strong> — <kbd>↑</kbd> / <kbd>↓</kbd> chevrons (with a <em>n/N</em> counter) jump between change blocks. <kbd>F3</kbd> / <kbd>Shift+F3</kbd> do the same from the keyboard.</li>
+  <li><strong>Chunk navigation</strong> — <kbd>↑</kbd> / <kbd>↓</kbd> chevrons (with a <em>n/N</em> counter) jump between change blocks. <Kbd action="next_chunk" /> / <Kbd action="prev_chunk" /> do the same from the keyboard.</li>
   <li><strong>Show full file</strong> — the file icon mirrors the global setting; toggling it here rebuilds the visible diff immediately.</li>
   <li><strong>Auto-focus</strong> — opening a file (or staging a line) lands the view on the first remaining change instead of the top of the file.</li>
 </ul>

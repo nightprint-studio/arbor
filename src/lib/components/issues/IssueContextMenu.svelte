@@ -2,7 +2,7 @@
   import { ExternalLink, GitBranch, Copy, ArrowRight, Eye } from 'lucide-svelte';
   import { issuesStore } from '$lib/stores/issues.svelte';
   import { linearBranchNameForIssue } from '$lib/ipc/issues';
-  import { uiStore } from '$lib/stores/ui.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import type { Issue } from '$lib/types/issues';
 
@@ -20,21 +20,18 @@
   const top  = $derived(Math.min(y, window.innerHeight - menuH - 8));
 
   async function copyIdentifier() {
-    await navigator.clipboard.writeText(issue.identifier);
-    uiStore.showToast(`Copied ${issue.identifier}`, 'success');
+    await copyToClipboard(issue.identifier, { successToast: `Copied ${issue.identifier}` });
     onClose();
   }
 
   async function copyTitle() {
-    await navigator.clipboard.writeText(issue.title);
-    uiStore.showToast('Title copied', 'success');
+    await copyToClipboard(issue.title, { successToast: 'Title copied' });
     onClose();
   }
 
   async function copyBranchName() {
     const name = await linearBranchNameForIssue(issue);
-    await navigator.clipboard.writeText(name);
-    uiStore.showToast(`Branch name copied: ${name}`, 'success');
+    await copyToClipboard(name, { successToast: `Branch name copied: ${name}` });
     onClose();
   }
 

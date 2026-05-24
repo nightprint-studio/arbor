@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Reflog</h1>
 
 <p class="doc-lead">
@@ -72,11 +76,11 @@
   </div>
 </div>
 
-<div class="callout info">
-  <strong>Recovering lost commits</strong> — if you accidentally reset a branch or dropped a stash,
+<Callout variant="info" title="Recovering lost commits">
+  — if you accidentally reset a branch or dropped a stash,
   find the commit in the Reflog, right-click → <em>Create branch here</em> to restore it before
   Git's garbage collector runs (typically after 30–90 days).
-</div>
+</Callout>
 
 <h2>Under the hood</h2>
 <p>

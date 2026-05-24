@@ -24,7 +24,7 @@
       })
   );
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
-  import Kbd           from '$lib/components/shared/ui/Kbd.svelte';
+  import Kbd           from '$lib/components/shared/internal/Kbd.svelte';
 
   let recordingAction = $state<string | null>(null);
   let _captureHandler: ((e: KeyboardEvent) => void) | null = null;

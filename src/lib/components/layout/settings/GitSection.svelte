@@ -1,11 +1,16 @@
 <script lang="ts">
   import {
-    CheckCircle2, Loader2, XCircle, Copy,
+    XCircle, Copy,
     ChevronDown, ChevronRight, Eye, EyeOff, ExternalLink, Settings2,
+    Key, Lock, User,
   } from 'lucide-svelte';
-  import BrandTile from '$lib/components/shared/ui/BrandTile.svelte';
-  import ProviderUserBadge from '$lib/components/shared/ui/ProviderUserBadge.svelte';
+  import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
+  import ProviderUserBadge from '$lib/components/shared/internal/ProviderUserBadge.svelte';
   import OAuthAdvancedPanel from '$lib/components/shared/OAuthAdvancedPanel.svelte';
+  import ProviderConnectionStatus from '$lib/components/shared/internal/ProviderConnectionStatus.svelte';
+  import OAuthBrowserAuthForm from '$lib/components/shared/internal/OAuthBrowserAuthForm.svelte';
+  import SplitButton from '$lib/components/shared/ui/SplitButton.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { listen } from '@tauri-apps/api/event';
   import {
@@ -15,6 +20,7 @@
     type DeviceFlowInfo, type ProviderUser,
   } from '$lib/ipc/auth';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -25,7 +31,6 @@
   let ghState        = $state<ConnState>('checking');
   let ghError        = $state('');
   let ghMethod       = $state<AuthMethod | null>(null);
-  let ghDropOpen     = $state(false);
   let ghPatInput     = $state('');
   let ghShowPass     = $state(false);
   let ghUser         = $state('');
@@ -41,7 +46,6 @@
   let glState        = $state<ConnState>('checking');
   let glError        = $state('');
   let glMethod       = $state<AuthMethod | null>(null);
-  let glDropOpen     = $state(false);
   let glPatInput     = $state('');
   let glShowPass     = $state(false);
   let glUser         = $state('');
@@ -53,6 +57,17 @@
   let glAdvancedOpen = $state(false);
   let glOAuthUnsub: (() => void) | null = null;
   let glIdentity     = $state<ProviderUser | null>(null);
+
+  // Connect dropdown options shared between GH and GL — the verbs and
+  // ordering are identical, only the brand-tinted CTA differs. Icon tints
+  // follow the convention used by GraphContextMenu / CommitGraph: success
+  // for the safest / recommended path, amber for key-shaped secrets, and
+  // the app accent for the credentials fallback.
+  const CONNECT_OPTIONS = [
+    { id: 'oauth',    label: 'OAuth (browser)',       icon: Lock, iconColor: 'var(--success)' },
+    { id: 'pat',      label: 'Personal Access Token', icon: Key,  iconColor: '#ffc66d'        },
+    { id: 'userpass', label: 'Username + Password',   icon: User, iconColor: 'var(--accent)'  },
+  ];
 
   $effect(() => {
     getGithubStatus()
@@ -80,15 +95,9 @@
     }
   });
 
-  function closeDropdowns(e: MouseEvent) {
-    if (!(e.target as HTMLElement).closest('.split-btn-wrap')) {
-      ghDropOpen = glDropOpen = false;
-    }
-  }
-
   // ── GitHub ────────────────────────────────────────────────────────────────
   function pickGhMethod(m: AuthMethod) {
-    ghMethod = m; ghDropOpen = false; ghError = '';
+    ghMethod = m; ghError = '';
     if (m === 'oauth') startGithubOAuthFlow();
   }
 
@@ -122,8 +131,7 @@
 
   function copyGhDeviceCode() {
     if (!ghDeviceInfo) return;
-    navigator.clipboard.writeText(ghDeviceInfo.user_code).catch(() => {});
-    uiStore.showToast('Code copied to clipboard', 'success');
+    void copyToClipboard(ghDeviceInfo.user_code, { successToast: 'Code copied to clipboard' });
   }
 
   function openGhVerification() {
@@ -168,7 +176,7 @@
 
   // ── GitLab ────────────────────────────────────────────────────────────────
   function pickGlMethod(m: AuthMethod) {
-    glMethod = m; glDropOpen = false; glError = '';
+    glMethod = m; glError = '';
     if (m === 'oauth') startGitlabOAuthFlow();
   }
 
@@ -230,13 +238,7 @@
     uiStore.showToast('GitLab disconnected', 'info');
   }
 
-  function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text).catch(() => {});
-    uiStore.showToast('Copied to clipboard', 'success');
-  }
 </script>
-
-<div class="backdrop-listener" role="presentation" onclick={closeDropdowns}></div>
 
 <SectionHeader title="Git" description="Connect to Git hosting providers. Credentials are stored in the OS keychain." />
 
@@ -249,31 +251,25 @@
         <span class="provider-name">GitHub</span>
         <span class="provider-desc">github.com — OAuth &amp; credentials</span>
       </div>
-      <div class="provider-action">
-        {#if ghState === 'checking'}
-          <span class="status-checking"><Loader2 size={12} class="spin" /> Checking…</span>
-        {:else if ghState === 'connected'}
-          <span class="status-ok"><CheckCircle2 size={12} /> Connected</span>
-          <button class="btn-ghost-danger" onclick={disconnectGithubAcc}>Disconnect</button>
-        {:else if ghState === 'connecting'}
-          <span class="status-wait"><Loader2 size={12} class="spin" /> Waiting for authorisation…</span>
-          <button class="btn-ghost" onclick={cancelGithubOAuth}>Cancel</button>
-        {:else if ghMethod === null}
-          <div class="split-btn-wrap">
-            <button class="split-main github-btn" onclick={() => pickGhMethod('oauth')}>Connect</button>
-            <button class="split-chev github-btn" onclick={(e) => { e.stopPropagation(); ghDropOpen = !ghDropOpen; }}>
-              <ChevronDown size={11} />
-            </button>
-            {#if ghDropOpen}
-              <div class="split-dropdown">
-                <button onclick={() => pickGhMethod('oauth')}><span class="drop-icon">🔐</span> OAuth (browser)</button>
-                <button onclick={() => pickGhMethod('pat')}><span class="drop-icon">🔑</span> Personal Access Token</button>
-                <button onclick={() => pickGhMethod('userpass')}><span class="drop-icon">👤</span> Username + Password</button>
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <ProviderConnectionStatus
+        state={ghState}
+        connectingLabel="Waiting for authorisation…"
+        onDisconnect={disconnectGithubAcc}
+        onCancel={cancelGithubOAuth}
+      >
+        {#snippet connect()}
+          {#if ghMethod === null}
+            <SplitButton
+              label="Connect"
+              color="var(--brand-github-green)"
+              direction="down"
+              options={CONNECT_OPTIONS}
+              onclick={() => pickGhMethod('oauth')}
+              onselect={(id) => pickGhMethod(id as AuthMethod)}
+            />
+          {/if}
+        {/snippet}
+      </ProviderConnectionStatus>
     </div>
 
     {#if ghState === 'connected' && ghIdentity}
@@ -300,7 +296,7 @@
           <p class="form-hint">Opens a GitHub verification page where you confirm a one-time code.</p>
           <div class="inline-form-row">
             <button class="btn-save github-btn" onclick={startGithubOAuthFlow} disabled={ghOAuthWaiting}>
-              {#if ghOAuthWaiting}<Loader2 size={11} class="spin" />{/if}
+              {#if ghOAuthWaiting}<Spinner size={11} color="#fff" />{/if}
               {ghOAuthWaiting ? 'Requesting code…' : 'Authorize with GitHub'}
             </button>
             <button class="btn-cancel" onclick={cancelGithubOAuth}>Cancel</button>
@@ -363,31 +359,25 @@
         <span class="provider-name">GitLab</span>
         <span class="provider-desc">gitlab.com or self-hosted — OAuth &amp; credentials</span>
       </div>
-      <div class="provider-action">
-        {#if glState === 'checking'}
-          <span class="status-checking"><Loader2 size={12} class="spin" /> Checking…</span>
-        {:else if glState === 'connected'}
-          <span class="status-ok"><CheckCircle2 size={12} /> Connected</span>
-          <button class="btn-ghost-danger" onclick={disconnectGitlabAcc}>Disconnect</button>
-        {:else if glState === 'connecting'}
-          <span class="status-wait"><Loader2 size={12} class="spin" /> Waiting for browser…</span>
-          <button class="btn-ghost" onclick={() => { glOAuthUnsub?.(); glOAuthWaiting=false; glState='disconnected'; glMethod=null; }}>Cancel</button>
-        {:else if glMethod === null}
-          <div class="split-btn-wrap">
-            <button class="split-main gitlab-btn" onclick={() => pickGlMethod('oauth')}>Connect</button>
-            <button class="split-chev gitlab-btn" onclick={(e) => { e.stopPropagation(); glDropOpen = !glDropOpen; }}>
-              <ChevronDown size={11} />
-            </button>
-            {#if glDropOpen}
-              <div class="split-dropdown">
-                <button onclick={() => pickGlMethod('oauth')}><span class="drop-icon">🔐</span> OAuth (browser)</button>
-                <button onclick={() => pickGlMethod('pat')}><span class="drop-icon">🔑</span> Personal Access Token</button>
-                <button onclick={() => pickGlMethod('userpass')}><span class="drop-icon">👤</span> Username + Password</button>
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <ProviderConnectionStatus
+        state={glState}
+        connectingLabel="Waiting for browser…"
+        onDisconnect={disconnectGitlabAcc}
+        onCancel={() => { glOAuthUnsub?.(); glOAuthWaiting=false; glState='disconnected'; glMethod=null; }}
+      >
+        {#snippet connect()}
+          {#if glMethod === null}
+            <SplitButton
+              label="Connect"
+              color="var(--brand-gitlab)"
+              direction="down"
+              options={CONNECT_OPTIONS}
+              onclick={() => pickGlMethod('oauth')}
+              onselect={(id) => pickGlMethod(id as AuthMethod)}
+            />
+          {/if}
+        {/snippet}
+      </ProviderConnectionStatus>
     </div>
 
     {#if glState === 'connected' && glIdentity}
@@ -399,20 +389,16 @@
     {/if}
 
     {#if glMethod === 'oauth'}
-      <div class="inline-form">
-        {#if glOAuthWaiting}
-          <p class="form-hint">Browser opened — approve access on GitLab then return here.</p>
-        {:else}
-          <p class="form-hint">Opens gitlab.com in the browser to authorize Arbor. For self-hosted instances, use PAT or Username + Password.</p>
-        {/if}
-        <div class="inline-form-row">
-          <button class="btn-save gitlab-btn" onclick={startGitlabOAuthFlow} disabled={glOAuthWaiting}>
-            {#if glOAuthWaiting}<Loader2 size={11} class="spin" />{/if}
-            {glOAuthWaiting ? 'Waiting for browser…' : 'Authorize with GitLab'}
-          </button>
-          <button class="btn-cancel" onclick={() => { glOAuthUnsub?.(); glOAuthWaiting=false; glMethod=null; glError=''; }}>Cancel</button>
-        </div>
-      </div>
+      <OAuthBrowserAuthForm
+        waiting={glOAuthWaiting}
+        brandColor="var(--brand-gitlab)"
+        hintIdle="Opens gitlab.com in the browser to authorize Arbor. For self-hosted instances, use PAT or Username + Password."
+        hintWaiting="Browser opened — approve access on GitLab then return here."
+        idleLabel="Authorize with GitLab"
+        busyLabel="Waiting for browser…"
+        onAuthorize={startGitlabOAuthFlow}
+        onCancel={() => { glOAuthUnsub?.(); glOAuthWaiting=false; glMethod=null; glError=''; }}
+      />
     {/if}
 
     {#if glMethod === 'pat'}
@@ -492,8 +478,6 @@
 </div>
 
 <style>
-  .backdrop-listener { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
-
   .provider-card {
     display: flex; align-items: flex-start; gap: 13px;
     padding: 13px 14px;
@@ -505,60 +489,21 @@
   .provider-disabled { opacity: 0.45; pointer-events: none; }
   /* Provider tiles use the shared BrandTile widget — no local logo styles. */
 
-  .provider-main   { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-  .provider-top    { display: flex; align-items: center; gap: 10px; }
-  .provider-info   { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-  .provider-name   { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .provider-desc   { font-size: 11px; color: var(--text-muted); }
-  .provider-action { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+  .provider-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .provider-top  { display: flex; align-items: center; gap: 10px; }
+  .provider-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .provider-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .provider-desc { font-size: 11px; color: var(--text-muted); }
 
-  .status-checking, .status-wait {
-    display: flex; align-items: center; gap: 5px;
-    font-size: 11px; color: var(--text-muted);
-  }
-  .status-ok {
-    display: flex; align-items: center; gap: 5px;
-    font-size: 12px; font-weight: 500; color: var(--success, #6aab73);
-  }
-
-  .split-btn-wrap { position: relative; display: flex; z-index: 10; }
-  .split-main {
-    padding: 5px 12px; border: none;
-    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 12px; font-weight: 500;
-    cursor: pointer; transition: filter var(--transition-fast); white-space: nowrap;
-  }
-  .split-chev {
-    display: flex; align-items: center; justify-content: center;
-    width: 26px; border: none; border-left: 1px solid rgba(255,255,255,0.2);
-    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-    cursor: pointer; transition: filter var(--transition-fast);
-  }
-  /* Brand-coloured buttons: hard-coded #fff foreground (the bg is an absolute
-     brand colour, so the label must not borrow `--text-on-accent`, which can
-     resolve to dark in light themes). */
+  /* Brand-coloured save buttons inside the PAT / UserPass / device-flow forms.
+     Hard-coded #fff foreground because the bg is an absolute brand colour
+     (`--text-on-accent` is theme-dependent and would drop to dark in light
+     themes). The Connect CTA itself is rendered by <SplitButton color=…>,
+     which carries its own theme-aware brand styling. */
   .github-btn { background: var(--brand-github-green); color: #fff; }
-  .github-btn:hover { filter: brightness(1.15); }
+  .github-btn:hover:not(:disabled) { filter: brightness(1.15); }
   .gitlab-btn { background: var(--brand-gitlab); color: #fff; }
-  .gitlab-btn:hover { filter: brightness(1.1); }
-
-  .split-dropdown {
-    position: absolute; top: calc(100% + 4px); right: 0; min-width: 210px;
-    background: var(--bg-overlay); border: 1px solid var(--border);
-    border-radius: var(--radius-md); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-    padding: 4px; z-index: var(--z-dropdown); animation: dropIn var(--anim-dur-fast) ease-out;
-  }
-  @keyframes dropIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
-  .split-dropdown button {
-    display: flex; align-items: center; gap: 8px;
-    width: 100%; padding: 7px 10px; text-align: left;
-    font-size: 12px; color: var(--text-primary);
-    background: transparent; border: none; border-radius: var(--radius-sm);
-    cursor: pointer; font-family: var(--font-ui-sans);
-    transition: background var(--transition-fast);
-  }
-  .split-dropdown button:hover { background: var(--bg-hover); }
-  .drop-icon { font-size: 13px; }
+  .gitlab-btn:hover:not(:disabled) { filter: brightness(1.1); }
 
   .inline-form { display: flex; flex-direction: column; gap: 8px; }
   .inline-form-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
@@ -577,20 +522,6 @@
     cursor: pointer; transition: all var(--transition-fast); white-space: nowrap;
   }
   .btn-cancel:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .btn-ghost {
-    padding: 4px 10px; background: transparent;
-    border: 1px solid var(--border); border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 11px; color: var(--text-muted);
-    cursor: pointer; transition: all var(--transition-fast); white-space: nowrap;
-  }
-  .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .btn-ghost-danger {
-    padding: 4px 10px; background: transparent;
-    border: 1px solid var(--border); border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 11px; color: var(--error, #f87171);
-    border-color: var(--error, #f87171); cursor: pointer; transition: all var(--transition-fast);
-  }
-  .btn-ghost-danger:hover { background: color-mix(in srgb, var(--error, #f87171) 12%, transparent); }
 
   .inline-check {
     display: flex; align-items: center; gap: 5px;
@@ -675,7 +606,4 @@
     cursor: pointer; color: var(--text-muted); transition: color var(--transition-fast);
   }
   .addon-btn:hover { color: var(--text-primary); }
-
-  :global(.spin) { animation: spin-anim 1.2s linear infinite; }
-  @keyframes spin-anim { to { transform: rotate(360deg); } }
 </style>

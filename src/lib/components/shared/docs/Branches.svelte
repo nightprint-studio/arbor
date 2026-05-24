@@ -1,3 +1,8 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import Kbd     from '$lib/components/shared/internal/Kbd.svelte';
+</script>
+
 <h1>Branch Management</h1>
 
 <p class="doc-lead">Create, switch, rename, and clean up branches without leaving the UI. Ahead/behind counts refresh in real time after every fetch.</p>
@@ -18,7 +23,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Command Palette</div>
-    <div class="fc-desc">Press <kbd>Ctrl+K</kbd> and type the branch name for a fuzzy match.</div>
+    <div class="fc-desc">Press <Kbd action="command_palette" /> and type the branch name for a fuzzy match.</div>
   </div>
 </div>
 
@@ -41,7 +46,7 @@
 </dl>
 
 <h3>From the Command Palette</h3>
-<p>The same four strategies are reachable without drag-and-drop. Press <kbd>Ctrl+K</kbd> and type one of the merge verbs, then pick a branch as the target — HEAD is always the recipient:</p>
+<p>The same four strategies are reachable without drag-and-drop. Press <Kbd action="command_palette" /> and type one of the merge verbs, then pick a branch as the target — HEAD is always the recipient:</p>
 <dl class="meta-grid">
   <dt><code>Merge</code></dt><dd>Default strategy — fast-forward when possible, otherwise a merge commit. Aliases: <code>merge-default</code>.</dd>
   <dt><code>Merge (no fast-forward)</code></dt><dd>Always produces a merge commit. Aliases: <code>no-ff</code>, <code>noff</code>.</dd>
@@ -58,10 +63,9 @@
   <dt><code>squashed</code></dt><dd>Changes staged but not committed — Stage panel takes over.</dd>
 </dl>
 
-<div class="callout info">
-  <strong>Merge direction</strong>
+<Callout variant="info" title="Merge direction">
   Dragging <code>feature</code> onto <code>main</code> merges <em>feature into main</em>, not the reverse. The target (drop target) is always the recipient.
-</div>
+</Callout>
 
 <h3>Compare modal</h3>
 <p>Left panel lists all files that differ between the two tips; click one to load its diff on the right with full syntax highlighting and unified/split mode. Identical branches show a notice instead of an empty list.</p>
@@ -106,15 +110,13 @@
   <li>Push the new name to the remote (<code>git push &lt;remote&gt; &lt;new-name&gt;</code>)</li>
   <li>Delete the old remote branch (<code>git push &lt;remote&gt; --delete &lt;old-name&gt;</code>)</li>
 </ol>
-<div class="callout danger">
-  <strong>Irreversible — remote rename</strong>
+<Callout variant="danger" title="Irreversible — remote rename">
   Once the old remote branch is deleted, any teammate tracking it will have a broken upstream. The rename button turns red and shows <strong>"Rename + Delete Remote"</strong> as a confirmation prompt.
-</div>
-<div class="callout warning">
-  <strong>After a local-only rename</strong>
+</Callout>
+<Callout variant="warning" title="After a local-only rename">
   Without the remote toggle, only the local ref updates. Update the upstream manually:<br>
   <code>git branch --set-upstream-to=&lt;remote&gt;/&lt;new-name&gt; &lt;new-name&gt;</code>
-</div>
+</Callout>
 
 <h3>Renaming a remote-only branch</h3>
 <p>Right-click any <code>origin/&lt;branch&gt;</code> row → <strong>Rename…</strong> to open a dedicated <em>Remote Branch Rename</em> modal. The flow is three steps and is shown progressively as it runs (push tip → delete old → optional local rename):</p>
@@ -124,10 +126,9 @@
   <li>If a <strong>local branch with the same short name</strong> exists, an <em>"Also rename my local branch"</em> toggle (on by default) renames it and re-points its upstream to the new remote ref. Otherwise the toggle is hidden.</li>
 </ol>
 <p>The same name-validation rules as the local rename apply (no spaces, forbidden chars, <code>..</code>, leading <code>-</code>/<code>.</code>, etc.).</p>
-<div class="callout danger">
-  <strong>Irreversible</strong>
+<Callout variant="danger" title="Irreversible">
   Teammates tracking the old name will have a broken upstream once step 2 lands. The confirm button is red and labelled <em>"Rename + Delete Remote"</em>.
-</div>
+</Callout>
 
 <h2>Deleting branches</h2>
 <dl class="meta-grid">
@@ -135,10 +136,9 @@
   <dt>Remote</dt><dd>Right-click any remote branch → <strong>Delete remote branch</strong>. Confirmation modal appears first.</dd>
   <dt>Bulk</dt><dd>Use <strong>Branch Cleanup</strong> (trash icon in <em>Local Branches</em> header).</dd>
 </dl>
-<div class="callout danger">
-  <strong>Irreversible — pushes a delete</strong>
+<Callout variant="danger" title="Irreversible — pushes a delete">
   Deleting a remote branch runs <code>git push origin --delete &lt;branch&gt;</code>. Any teammate with a tracking ref will have a broken upstream. Requires credentials configured in <em>Settings → Git &amp; Integrations</em>.
-</div>
+</Callout>
 
 <h2>Branch Cleanup</h2>
 <p>The <strong>trash icon</strong> in the sidebar's <em>Local Branches</em> header opens the Branch Cleanup modal. It scans for branches whose tip is fully reachable from a target branch (already merged).</p>

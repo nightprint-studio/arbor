@@ -20,6 +20,32 @@
   <li>Icons, docs, screenshots come straight from the repo, always in sync with the code.</li>
 </ul>
 
+<h2>Internal vs external entries</h2>
+<p>
+  Registry entries come in two shapes — both surface as <strong>Community</strong> because
+  both are vetted via PR review on <code>arbor-extensions</code>:
+</p>
+<ul>
+  <li>
+    <strong>Internal</strong> — the plugin/theme lives inside the registry repo itself
+    (<code>{'{ "subpath": "plugins/foo" }'}</code>). The historical layout for plugins
+    maintained alongside Arbor.
+  </li>
+  <li>
+    <strong>External</strong> — the entry points at a third-party GitHub repo
+    (<code>{'{ "repo": "https://github.com/author/their-plugin", "ref": "v1.2", "pinned_sha": "abc1234…" }'}</code>).
+    The author keeps ownership of the code in their own repo; the registry just stores
+    a pointer.
+  </li>
+</ul>
+<p>
+  External entries that omit <code>pinned_sha</code> get an <strong>Unpinned</strong> badge
+  in the detail header — a hint that the entry follows a moving ref (branch or tag) and
+  could change underneath you when Arbor refetches. Pinning to a commit SHA means the
+  Marketplace only ever installs the exact code that was reviewed when the entry was
+  merged; bumping the pin requires a fresh PR.
+</p>
+
 <h2>Installing a plugin</h2>
 <ol>
   <li>Click a row in the catalog to open its detail pane.</li>

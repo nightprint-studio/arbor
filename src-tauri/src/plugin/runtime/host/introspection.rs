@@ -21,6 +21,32 @@ impl PluginHost {
     }
 
     pub fn list_plugin_info(&self) -> Vec<PluginInfo> {
+        // Pre-build a reverse-edge map (dep_name → [dependent names]) so each
+        // entry below can answer "who needs me?" in O(1). Both live and
+        // dormant plugins contribute edges — load-failed entries don't, since
+        // we lost their manifest. Optional edges are excluded so the
+        // "Required by" row only lists plugins that would break.
+        use std::collections::HashMap;
+        let mut required_by_map: HashMap<String, Vec<String>> = HashMap::new();
+        for p in &self.plugins {
+            for d in &p.manifest.dependencies {
+                if d.optional { continue; }
+                required_by_map.entry(d.name.clone()).or_default()
+                    .push(p.manifest.name.clone());
+            }
+        }
+        for d in &self.dormant {
+            for dep in &d.manifest.dependencies {
+                if dep.optional { continue; }
+                required_by_map.entry(dep.name.clone()).or_default()
+                    .push(d.manifest.name.clone());
+            }
+        }
+        for list in required_by_map.values_mut() {
+            list.sort();
+            list.dedup();
+        }
+
         let mut infos: Vec<PluginInfo> = self.plugins.iter().map(|p| {
             let regs = p.schedules.lock().map(|g| g.clone()).unwrap_or_default();
             let scheduler_count = regs.len();
@@ -52,6 +78,8 @@ impl PluginHost {
                 schedules,
                 doc,
                 dep_error: None,
+                dependencies: p.manifest.dependencies.clone(),
+                required_by:  required_by_map.get(&p.manifest.name).cloned().unwrap_or_default(),
             }
         }).collect();
 
@@ -75,6 +103,8 @@ impl PluginHost {
                 schedules:          Vec::new(),
                 doc:                None,
                 dep_error:          Some(f.error.clone()),
+                dependencies:       Vec::new(),
+                required_by:        required_by_map.get(&f.name).cloned().unwrap_or_default(),
             });
         }
 
@@ -104,6 +134,8 @@ impl PluginHost {
                 schedules:          Vec::new(),
                 doc,
                 dep_error:          None,
+                dependencies:       m.dependencies.clone(),
+                required_by:        required_by_map.get(&m.name).cloned().unwrap_or_default(),
             });
         }
 

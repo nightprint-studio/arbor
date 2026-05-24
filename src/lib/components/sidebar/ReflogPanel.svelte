@@ -12,7 +12,8 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { getReflog } from '$lib/ipc/reflog';
-  import { checkoutCommit } from '$lib/ipc/branch';
+  import { checkoutCommitSafe } from '$lib/ipc/branch';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import {
     listRecoveryEntries, previewRecoveryRestore,
     restoreRecoveryEntry, deleteRecoveryEntry,
@@ -20,6 +21,7 @@
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { ReflogEntry, RecoveryEntry, RecoveryKind, RecoveryRestorePreview } from '$lib/types/git';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -278,15 +280,18 @@
 
     if (id === 'checkout') {
       try {
-        await checkoutCommit(activeTab.id, entry.id);
-        uiStore.showToast(`Checked out ${shortHash(entry.id)}`, 'success');
+        const short = shortHash(entry.id);
+        const result = await checkoutCommitSafe(activeTab.id, entry.id);
+        handleCheckoutResult(result, {
+          targetLabel:    short,
+          successMessage: `Checked out ${short}`,
+        });
         graphStore.refresh();
       } catch (e) { uiStore.showToast(`${e}`, 'error'); }
     } else if (id === 'branch') {
       window.dispatchEvent(new CustomEvent('arbor:new-branch-from', { detail: { oid: entry.id } }));
     } else if (id === 'copy') {
-      try { await navigator.clipboard.writeText(entry.id); } catch { /* ignore */ }
-      uiStore.showToast('Hash copied', 'success');
+      await copyToClipboard(entry.id, { successToast: 'Hash copied' });
     }
   }
 
@@ -993,6 +998,4 @@
   .error-msg { color: var(--color-error, #e06c75); }
 
   /* ── Spinner ─────────────────────────────────────────────────────────────── */
-  :global(.spin) { animation: spin 1s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 </style>

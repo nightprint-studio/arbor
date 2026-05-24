@@ -5,9 +5,11 @@
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import LogStream from '$lib/components/shared/ui/LogStream.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { pluginLogsStore, NON_PIPELINE_SENTINEL } from '$lib/stores/pluginLogs.svelte';
   import type { PluginLogEntry, PluginLogLevel } from '$lib/types/plugin-logs';
   import { renderStructuredLogLine, formatLogTime, shortRunId } from '$lib/utils/log-highlight';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
   const LEVELS: PluginLogLevel[] = ['debug', 'info', 'warn', 'error'];
@@ -140,10 +142,12 @@
     return f === null ? true : f.has(key);
   }
 
-  function confirmClearPipeline(name: string) {
-    if (window.confirm(`Remove all log entries from pipeline '${name}'?`)) {
-      pluginLogsStore.clearByPipeline(name);
-    }
+  let pendingClearPipeline = $state<string | null>(null);
+  function confirmClearPipeline(name: string) { pendingClearPipeline = name; }
+  function performClearPipeline() {
+    const n = pendingClearPipeline;
+    pendingClearPipeline = null;
+    if (n) pluginLogsStore.clearByPipeline(n);
   }
 
   // True when the buffer holds at least one entry without a pipeline tag —
@@ -242,7 +246,7 @@
     // formatLine here avoids amortising it on every keystroke / filter
     // change in the steady-state render path.
     const text = filtered.map(formatLine).join('\n');
-    await navigator.clipboard.writeText(text);
+    await copyToClipboard(text);
     copied = true;
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copied = false; }, 1800);
@@ -434,6 +438,17 @@
     />
   </div>
 </div>
+
+{#if pendingClearPipeline}
+  <ConfirmModal
+    title="Clear pipeline logs"
+    message={`Remove all log entries from pipeline '${pendingClearPipeline}'?`}
+    variant="danger"
+    confirmLabel="Clear"
+    onCancel={() => pendingClearPipeline = null}
+    onConfirm={performClearPipeline}
+  />
+{/if}
 
 <style>
   .pl-action-btn {

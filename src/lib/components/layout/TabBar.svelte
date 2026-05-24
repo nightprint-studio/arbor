@@ -2,6 +2,7 @@
   import { Layers, AlertTriangle } from 'lucide-svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import { closeRepo } from '$lib/ipc/graph';
   import ContextMenu, { type MenuItem } from '../shared/ContextMenu.svelte';
@@ -81,8 +82,7 @@
     } else if (id === 'copy-path') {
       const tab = tabsStore.tabs.find(t => t.id === tabId);
       if (tab) {
-        await navigator.clipboard.writeText(tab.path);
-        uiStore.showToast('Path copied', 'info');
+        await copyToClipboard(tab.path, { successToast: 'Path copied' });
       }
     } else if (id === 'add-to-active') {
       const activeWs = workspacesStore.activeId;

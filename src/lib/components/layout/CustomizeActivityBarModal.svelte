@@ -19,9 +19,19 @@
   } from '$lib/stores/activityBarConfig.svelte';
   import type { ActivityBarEntry } from '$lib/types/plugin';
   import { pluginStore } from '$lib/stores/plugin.svelte';
+  import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { ACTIVITY_BAR_POINT, parseActivityBarEntry } from '$lib/contributions/activity-bar';
   import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
   import { onMount } from 'svelte';
+
+  // When the user has mirrored the workspace (activity_bar_position === 'right')
+  // the built-in bar lives visually on the right and the plugin bar on the
+  // left. The tabs in this modal follow that mirroring so "Left" always
+  // labels the bar physically on the left, regardless of which internal
+  // section (built-in vs. plugin) it contains. The underlying `activeTab`
+  // value stays semantic ('left' = built-in, 'right' = plugin section) —
+  // only labels and tab order swap.
+  const mirrored = $derived(appearanceStore.activityBarPosition === 'right');
 
   function activityBarEntries(): ActivityBarEntry[] {
     return contributionStore.forPoint(ACTIVITY_BAR_POINT)
@@ -353,31 +363,51 @@
   {/snippet}
 
   <div class="cab-body">
-  <!-- Tabs: Left / Right bar -->
+  <!-- Tabs: Left / Right bar — the visual order follows the workspace
+       mirroring so "Left" always points at the bar physically on the left. -->
   <div class="tabs" role="tablist">
-    <button
-      class="tab-btn"
-      class:tab-active={activeTab === 'left'}
-      role="tab"
-      aria-selected={activeTab === 'left'}
-      onclick={() => setActiveTab('left')}
-    >Left</button>
-    <button
-      class="tab-btn"
-      class:tab-active={activeTab === 'right'}
-      role="tab"
-      aria-selected={activeTab === 'right'}
-      onclick={() => setActiveTab('right')}
-    >Right</button>
+    {#if mirrored}
+      <button
+        class="tab-btn"
+        class:tab-active={activeTab === 'right'}
+        role="tab"
+        aria-selected={activeTab === 'right'}
+        onclick={() => setActiveTab('right')}
+      >Left</button>
+      <button
+        class="tab-btn"
+        class:tab-active={activeTab === 'left'}
+        role="tab"
+        aria-selected={activeTab === 'left'}
+        onclick={() => setActiveTab('left')}
+      >Right</button>
+    {:else}
+      <button
+        class="tab-btn"
+        class:tab-active={activeTab === 'left'}
+        role="tab"
+        aria-selected={activeTab === 'left'}
+        onclick={() => setActiveTab('left')}
+      >Left</button>
+      <button
+        class="tab-btn"
+        class:tab-active={activeTab === 'right'}
+        role="tab"
+        aria-selected={activeTab === 'right'}
+        onclick={() => setActiveTab('right')}
+      >Right</button>
+    {/if}
   </div>
 
   <!-- Content -->
   <div class="cab-content">
     <p class="hint">
       {#if activeTab === 'left'}
-        Built-in sections + legacy plugins on the <strong>left</strong> bar.
+        Built-in sections + legacy plugins
+        on the <strong>{mirrored ? 'right' : 'left'}</strong> bar.
       {:else}
-        Plugins registered with <code>side="right"</code>.
+        Plugins registered with <code>side="right"</code> — currently
+        on the <strong>{mirrored ? 'left' : 'right'}</strong> bar.
         Nothing here yet? Install a plugin that uses the new <code>add_sidebar</code> API.
       {/if}
       <br>
@@ -530,7 +560,9 @@
     <Button
       variant="ghost"
       onclick={resetCurrentTab}
-      title={`Restore default order on the ${activeTab === 'left' ? 'Left' : 'Right'} bar`}
+      title={`Restore default order on the ${
+        activeTab === (mirrored ? 'right' : 'left') ? 'Left' : 'Right'
+      } bar`}
     >
       {#snippet iconStart()}<RotateCcw size={14} />{/snippet}
       Restore defaults

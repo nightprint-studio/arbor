@@ -1,7 +1,7 @@
 <script lang="ts">
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { pluginStore }       from '$lib/stores/plugin.svelte';
-  import Kbd                   from '$lib/components/shared/ui/Kbd.svelte';
+  import Kbd                   from '$lib/components/shared/internal/Kbd.svelte';
   import type { Keybinding }   from '$lib/utils/keybindings';
 
   type PluginKb = {
@@ -68,7 +68,25 @@
     <tr><td><Kbd action="prev_tab" size="sm" /></td><td>Previous tab</td></tr>
     <tr><td><Kbd action="close_tab" size="sm" /></td><td>Close active tab</td></tr>
     <tr><td><Kbd action="jump_to_head" size="sm" /></td><td>Jump to HEAD commit in graph</td></tr>
+    <tr><td><Kbd action="focus_graph" size="sm" /></td><td>Focus the commit graph (enables the arrow / Page / Home / End nav below)</td></tr>
+    <tr><td><Kbd action="cycle_focus" size="sm" /> / <Kbd action="cycle_focus_reverse" size="sm" /></td><td>Cycle focus across layout zones — titlebar, tabs, activity bars, sidebar, graph, bottom panel, status bar (skips zones that aren't visible)</td></tr>
     <tr><td><Kbd action="search" size="sm" /></td><td>Search commits (message / author / SHA)</td></tr>
+  </tbody>
+</table>
+
+<h2>Commit graph (keyboard navigation)</h2>
+<p class="hint">
+  These keys work while the graph viewport has focus — click it once, press <Kbd action="focus_graph" size="sm" />,
+  or Tab into it. The selected commit auto-scrolls into view and drives the Detail panel.
+  Arrow keys are topology-aware: vertical arrows stay on the current branch line, horizontal arrows hop to a sibling.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Previous / next commit on the <em>same lane</em> (visual branch column); falls back to one row when the lane ends</td></tr>
+    <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Hop to the nearest occupied lane on the left / right (closest commit by row)</td></tr>
+    <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>Jump one viewport up / down (linear, ignores lanes)</td></tr>
+    <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Select the newest / oldest loaded commit</td></tr>
   </tbody>
 </table>
 
@@ -89,6 +107,8 @@
     <tr><td><Kbd action="stage_view" size="sm" /></td><td>Toggle Stage area</td></tr>
     <tr><td><Kbd action="toggle_terminal" size="sm" /></td><td>Toggle terminal panel</td></tr>
     <tr><td><Kbd action="new_terminal" size="sm" /></td><td>Open new terminal tab</td></tr>
+    <tr><td><Kbd action="plugins" size="sm" /></td><td>Open Plugin Manager</td></tr>
+    <tr><td><Kbd action="open_marketplace" size="sm" /></td><td>Open Plugin Marketplace</td></tr>
     <tr><td><Kbd action="plugin_logs" size="sm" /></td><td>Toggle Plugin Logs console</td></tr>
     <tr><td><Kbd action="toggle_keystrokes" size="sm" /></td><td>Toggle the <em>Keyboard Inputs</em> overlay (demos, screencasts) — works even inside modals</td></tr>
   </tbody>
@@ -134,6 +154,7 @@
   <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
   <tbody>
     <tr><td><Kbd action="commit" size="sm" /></td><td>Commit (when focus is in message field)</td></tr>
+    <tr><td><Kbd action="commit_and_push" size="sm" /></td><td>Commit and push current branch in one go</td></tr>
   </tbody>
 </table>
 
@@ -162,6 +183,8 @@
     <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>Create a new file in the current folder</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>Create a new folder in the current folder</td></tr>
     <tr><td><Kbd action="toggle_sidebar" size="sm" /></td><td>Collapse / expand the picker sidebar (same global shortcut)</td></tr>
+    <tr><td><kbd>F6</kbd> / <kbd>Shift</kbd>+<kbd>F6</kbd></td><td>Cycle focus between file list, sidebar (locations) and address bar</td></tr>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd> in sidebar</td><td>Move between locations once focus is on the sidebar</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>Alt</kbd>+<kbd>→</kbd></td><td>Back / Forward through navigation history</td></tr>
     <tr><td><kbd>Backspace</kbd></td><td>Go up one folder</td></tr>
     <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Move selection in the file list</td></tr>
@@ -188,7 +211,7 @@
 <p>Built-in shortcuts are rendered live next to the action wherever it appears:</p>
 <ul>
   <li><strong>Main menu</strong> (hamburger top-left) — IntelliJ-style right-aligned hint on each row.</li>
-  <li><strong>Command Palette</strong> (<kbd>Ctrl+K</kbd>) — small <kbd>kbd</kbd> badge at the right of the row.</li>
+  <li><strong>Command Palette</strong> (<Kbd action="command_palette" />) — small <kbd>kbd</kbd> badge at the right of the row.</li>
   <li><strong>Right-click context menus</strong> — branch, commit, tab, stage entries.</li>
   <li><strong>Tooltips</strong> on Activity Bar, Status Bar and TitleBar buttons (e.g. hovering the Fetch button shows <em>Fetch from remote (Ctrl+Shift+F)</em>).</li>
 </ul>

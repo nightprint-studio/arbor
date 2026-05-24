@@ -179,7 +179,13 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (showPicker) return;
-    if (e.key === 'Enter' && canClone && !e.shiftKey) handleClone();
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    // Don't hijack Enter when focus is on a button/checkbox — let the
+    // element's native activation (e.g. opening the folder picker) win.
+    const t = e.target as HTMLElement | null;
+    if (t instanceof HTMLButtonElement) return;
+    if (t instanceof HTMLInputElement && (t.type === 'checkbox' || t.type === 'button')) return;
+    if (canClone) handleClone();
   }
 </script>
 
@@ -243,9 +249,9 @@
             autocomplete="off"
           />
           <button
+            type="button"
             class="input-action-btn"
             onclick={() => showPicker = true}
-            tabindex={-1}
             use:tooltip={'Browse…'}
             aria-label="Browse for folder"
           >
@@ -548,8 +554,6 @@
     border-radius: var(--radius-sm);
   }
 
-  :global(.spin) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   .inline-error {
     display: flex;

@@ -20,8 +20,7 @@ Used day-to-day, broad coverage, considered reliable.
 - **Pull/Merge requests on GitHub and GitLab** — list, detail, create, merge (squash/rebase), close, reopen, mark-ready, auto-merge, comments, activity timeline (bot events), CI checks, file diffs, commit drill-down
 - **CI/CD** — list, retrigger, create dispatch with variables (GitHub Actions and GitLab CI; self-hosted GitLab supported)
 - **Security Dashboard** (per-repo) — GitLab Vulnerability Report (GraphQL) and GitHub GHAS/Dependabot/Secret Scanning (REST)
-- **Issue trackers** — Linear and Jira, with automatic ticket detection from commit messages
-- **GitFlow** actions
+- **Issue trackers** — Linear and Jira, with automatic ticket detection from commit messages. Tested combinations to date: **Jira Data Center with API token**, **Linear with OAuth**. The other auth combinations (Jira Cloud, Linear with personal API key) share the same code paths and should work, but haven't been exercised by the maintainer.
 - **Theme editor** with 19 bundled presets
 - **Command palette** (verb-first, two-phase)
 - **Background jobs panel** with streaming output
@@ -38,6 +37,7 @@ Wired into real workflows but with less mileage than the stable set. Expect occa
 
 - **Linked Worktrees** — cross-project branch synchronisation via alias groups
 - **Vetoable `on_pre_commit` hooks**, the pre-commit message validation API used by the `commit-validator` plugin
+- **GitFlow** start/finish actions for feature, release, hotfix, and support branches. Currently opinionated about prefixes, base branches, and finish behaviour; a more configurable version is on the [roadmap](roadmap.md).
 
 ## Experimental
 
@@ -53,6 +53,8 @@ Recent additions. Functional but not broadly tested; APIs may change.
 Arbor does not bundle any plugins in the binary. The plugin runtime and Marketplace ship empty — every plugin, including the ones that power workflows like build runners, format studios, source export, and the Lua-driven UI contributions, is installed on demand from the [arbor-extensions](https://github.com/nightprint-studio/arbor-extensions) registry (or from any custom GitHub source you point Arbor at).
 
 Per-plugin maturity, descriptions, and screenshots live alongside each plugin in the registry — they're resolved straight from the source repo, so they're always in sync with the code that's actually shipping.
+
+> **Plugin API stability.** The plugin runtime and the host-side Lua API surface are still settling. Breaking changes between releases are possible — manifest fields, hook signatures, and `arbor.*` namespaces may be renamed, restructured, or removed when a cleaner shape emerges. Plugins maintained inside the [arbor-extensions](https://github.com/nightprint-studio/arbor-extensions) registry are kept in sync; out-of-tree plugins may need small adjustments after a release.
 
 The plugin development reference (manifest schema, hooks, full Lua API surface) lives in the in-app **Docs** panel.
 

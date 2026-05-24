@@ -1,5 +1,6 @@
 <script lang="ts">
   import { highlight } from '$lib/utils/diff-formatter';
+  import Kbd           from '$lib/components/shared/internal/Kbd.svelte';
 </script>
 
 <h1>Plugin Development</h1>
@@ -8,12 +9,12 @@
 <h2>Directory layout</h2>
 <pre><code>plugins/
   my-plugin/
-    plugin.toml       â† manifest (required)
-    main.lua          â† entry point (default; override with entry = "â€¦")
-    doc.html          â† optional: HTML docs shown in this panel under Plugins
-    lib/utils.lua     â† require("lib.utils") works inside the plugin sandbox
+    plugin.toml       ← manifest (required)
+    main.lua          ← entry point (default; override with entry = "…")
+    doc.html          ← optional: HTML docs shown in this panel under Plugins
+    lib/utils.lua     ← require("lib.utils") works inside the plugin sandbox
     config/
-      global.lua      â† optional sub-modules</code></pre>
+      global.lua      ← optional sub-modules</code></pre>
 
 <h2>plugin.toml</h2>
 <pre class="language-toml">{@html highlight(`[plugin]
@@ -26,7 +27,7 @@ repository        = "https://github.com/you/my-plugin"
 keywords          = ["git", "tool"]
 min_arbor_version = "0.1.0"  # optional; rejects plugin on older builds (semver)
 arbor_api         = 1        # minimum Arbor plugin API version required
-os                = []       # ["windows", "linux", "macos"] â€” empty = cross-platform
+os                = []       # ["windows", "linux", "macos"] — empty = cross-platform
 entry             = "main.lua" # default; can be changed
 doc_file          = "doc.html" # optional: HTML file shown in the Docs panel
 
@@ -64,14 +65,14 @@ on_stash_pop     = true
 on_rebase_start  = true
 on_rebase_abort  = true
 
-# Background scheduler â€” opt-in only. Schedule data (action, trigger,
-# focus gating, â€¦) is declared from main.lua via arbor.scheduler.register.
+# Background scheduler — opt-in only. Schedule data (action, trigger,
+# focus gating, …) is declared from main.lua via arbor.scheduler.register.
 [scheduler]
 enabled = true
 
 # Settings UI is no longer declared in plugin.toml. Plugins register a
-# panel at runtime via \`arbor.ui.settings.panel(...)\` â€” see Plugin
-# Development â†’ API: UI for the contribution-based settings model.`, 'toml')}</pre>
+# panel at runtime via \`arbor.ui.settings.panel(...)\` — see Plugin
+# Development → API: UI for the contribution-based settings model.`, 'toml')}</pre>
 
 <h2>Plugin documentation (doc.html)</h2>
 <p>
@@ -80,7 +81,7 @@ enabled = true
   the <strong>Plugins</strong> group in the left nav.
 </p>
 <p>
-  Write plain HTML using the same element types the rest of the docs use â€” they inherit
+  Write plain HTML using the same element types the rest of the docs use — they inherit
   all styles automatically:
 </p>
 <table class="shortcuts-table">
@@ -109,8 +110,8 @@ enabled = true
 
 &lt;h2&gt;Getting Started&lt;/h2&gt;
 &lt;ol&gt;
-  &lt;li&gt;Open a repo â€” the plugin activates automatically.&lt;/li&gt;
-  &lt;li&gt;Click &lt;strong&gt;â–¶&lt;/strong&gt; in the Activity Bar to run.&lt;/li&gt;
+  &lt;li&gt;Open a repo — the plugin activates automatically.&lt;/li&gt;
+  &lt;li&gt;Click &lt;strong&gt;▶&lt;/strong&gt; in the Activity Bar to run.&lt;/li&gt;
 &lt;/ol&gt;
 
 &lt;h2&gt;Permissions&lt;/h2&gt;
@@ -122,20 +123,20 @@ enabled = true
 &lt;/table&gt;</code></pre>
 
 <h2>main.lua skeleton</h2>
-<pre class="language-lua">{@html highlight(`-- main.lua â€” thin wiring file
+<pre class="language-lua">{@html highlight(`-- main.lua — thin wiring file
 -- Register UI elements, subscribe to hooks. Keep logic in sub-modules.
 
 local state = require("state")        -- sub-module inside this plugin dir
 
--- â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Lifecycle ──────────────────────────────────────────────────────────────────
 -- on_plugin_load fires once AFTER main.lua finishes executing.
 -- Ideal for one-time initialisation (load settings, register combos, etc.)
 arbor.events.on("on_plugin_load", function(ctx)
-  arbor.log.info("loaded â€” api_version=" .. ctx.api_version)
+  arbor.log.info("loaded — api_version=" .. ctx.api_version)
   state.init()
 end)
 
--- â”€â”€ Hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── Hooks ──────────────────────────────────────────────────────────────────────
 arbor.events.on("on_repo_open", function(ctx)
   state.set_repo(ctx.repo)
   arbor.log.debug("repo_open: " .. ctx.repo)
@@ -146,16 +147,16 @@ arbor.events.on("on_commit", function(ctx)
 end)
 
 arbor.events.on("on_branch_rename", function(ctx)
-  -- ctx.tab_id   : string  â€” the repository tab
-  -- ctx.old_name : string  â€” previous branch name
-  -- ctx.new_name : string  â€” new branch name
+  -- ctx.tab_id   : string  — the repository tab
+  -- ctx.old_name : string  — previous branch name
+  -- ctx.new_name : string  — new branch name
   arbor.log.info("Branch renamed: " .. ctx.old_name .. " -> " .. ctx.new_name)
 end)
 
--- â”€â”€ UI registrations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- ── UI registrations ───────────────────────────────────────────────────────────
 -- Every UI surface is a "contribution point". Push items via the generic
--- arbor.ui.contribute(point, item) â€” sugar APIs (add_context_menu_item,
--- add_sidebar, â€¦) are shortcuts that wrap this same call.
+-- arbor.ui.contribute(point, item) — sugar APIs (add_context_menu_item,
+-- add_sidebar, …) are shortcuts that wrap this same call.
 arbor.ui.contribute("arbor:context-menu:commit", {
   id      = "inspect",
   payload = { label = "Inspect", action = "my_plugin:inspect", icon = "Search" },
@@ -176,18 +177,18 @@ arbor.notify{ message = "be careful", level = "warning" }
 arbor.log.warn("unexpected state")
 local lvl = arbor.log.LEVELS.WARN  -- == "warn"`, '.lua')}</pre>
 
-<h2>arbor.log â€” logging</h2>
+<h2>arbor.log — logging</h2>
 <pre class="language-lua">{@html highlight(`arbor.log.debug("detailed trace")
 arbor.log.info("something happened")
 arbor.log.warn("unexpected state: " .. tostring(val))
 arbor.log.error("fatal: " .. err)
 -- All messages are prefixed [plugin-name] in the Arbor log`, '.lua')}</pre>
 
-<h2>arbor.settings â€” persistence</h2>
+<h2>arbor.settings — persistence</h2>
 <p>Settings are split into two scopes:</p>
 <ul>
-  <li><strong>global</strong> â€” stored in <code>~/.config/arbor/plugin_data/&lt;name&gt;/global.json</code> â€” independent of the active repo</li>
-  <li><strong>project</strong> â€” stored in <code>&lt;repo&gt;/.arbor/plugins/&lt;name&gt;/project.json</code> â€” per-repository; raises a Lua error if no repo is open</li>
+  <li><strong>global</strong> — stored in <code>~/.config/arbor/plugin_data/&lt;name&gt;/global.json</code> — independent of the active repo</li>
+  <li><strong>project</strong> — stored in <code>&lt;repo&gt;/.arbor/plugins/&lt;name&gt;/project.json</code> — per-repository; raises a Lua error if no repo is open</li>
 </ul>
 <pre class="language-lua">{@html highlight(`-- Global settings
 arbor.settings.global.set("api_key", "secret")
@@ -200,15 +201,15 @@ arbor.settings.project.set("profile", "prod")
 local p = arbor.settings.project.get("profile")
 local all_proj = arbor.settings.project.get_all()`, '.lua')}</pre>
 
-<h2>arbor.json â€” encode / decode</h2>
+<h2>arbor.json — encode / decode</h2>
 <pre class="language-lua">{@html highlight(`local s, err = arbor.json.encode({ key = "val", n = 42 })
 -- s = '{"key":"val","n":42}'   err = nil on success
 
 local t, err = arbor.json.decode('{"a":1}')
 -- t.a == 1   err = nil on success`, '.lua')}</pre>
 
-<h2>arbor.fs â€” filesystem</h2>
-<p>Requires the <code>fs</code> permission: <code>"read"</code> for read-only ops, <code>"write"</code> for read+write. The <code>fs_scope</code> field controls path bounds â€” empty (default) sandboxes to the active repo; <code>["*"]</code> grants unrestricted access; any other list extends the active-repo sandbox with those absolute paths. All read/write functions return <code>result, nil</code> on success or <code>nil, err</code> on failure.</p>
+<h2>arbor.fs — filesystem</h2>
+<p>Requires the <code>fs</code> permission: <code>"read"</code> for read-only ops, <code>"write"</code> for read+write. The <code>fs_scope</code> field controls path bounds — empty (default) sandboxes to the active repo; <code>["*"]</code> grants unrestricted access; any other list extends the active-repo sandbox with those absolute paths. All read/write functions return <code>result, nil</code> on success or <code>nil, err</code> on failure.</p>
 <pre class="language-lua">{@html highlight(`local content, err = arbor.fs.read("/path/to/file.txt")
 local ok,      err = arbor.fs.write("/path/to/out.txt", content)
 local entries      = arbor.fs.list("/path/to/dir")  -- array of {name, is_file, is_dir}
@@ -221,7 +222,7 @@ arbor.fs.copy("/path/to/app.war", "/opt/tomcat/webapps/")
 -- delete(path): removes a file or a directory tree
 arbor.fs.delete("/path/to/old.war")`, '.lua')}</pre>
 
-<h2>arbor.repo â€” repository info</h2>
+<h2>arbor.repo — repository info</h2>
 <p>Read functions require <code>git = "read"</code> (or higher). <code>fetch_active_tab</code> and <code>clone</code> require <code>git = "write"</code> (or higher).</p>
 <pre class="language-lua">{@html highlight(`local path     = arbor.repo.current()           -- active repo path, or nil
 local branch   = arbor.repo.branch()            -- current branch name
@@ -230,13 +231,13 @@ local remote   = arbor.repo.remote("origin")    -- URL of the named remote, or n
 
 -- Fetch origin for the currently active tab (the tab the user is looking at).
 -- Returns true on success, false when silently skipped (no active tab, no
--- origin remote, or network failure â€” no error is raised either way).
+-- origin remote, or network failure — no error is raised either way).
 -- After a successful fetch, emits "arbor://graph-refresh" so the frontend
 -- reloads the commit graph and remote branch list automatically.
 -- Ideal for use inside a focus-gated scheduler (only_when_focused = true).
 local ok = arbor.repo.fetch_active_tab()   -- requires git = "write" (or higher)`, '.lua')}</pre>
 
-<h2>arbor.meta â€” plugin identity &amp; environment</h2>
+<h2>arbor.meta — plugin identity &amp; environment</h2>
 <pre class="language-lua">{@html highlight(`arbor.meta.plugin_name()  -- "my-plugin"
 arbor.meta.api_version()  -- 1  (Arbor plugin API integer)
 arbor.meta.app_version()  -- "0.9.0"  (Arbor app semver string)
@@ -249,7 +250,7 @@ local ext    = is_win and ".bat" or ".sh"
 -- e.g. build the Tomcat catalina script path:
 local bin = tomcat_home .. sep .. "bin" .. sep .. "catalina" .. ext`, '.lua')}</pre>
 
-<h2>arbor.timer â€” deferred / recurring execution</h2>
+<h2>arbor.timer — deferred / recurring execution</h2>
 <pre class="language-lua">{@html highlight(`-- Fire once after delay_ms milliseconds
 local id = arbor.timer.after(500, function()
   arbor.log.info("fired after 500ms")
@@ -261,9 +262,9 @@ local id2 = arbor.timer.every(5000, function()
 end)
 
 arbor.timer.cancel(id)   -- cancel a timer by its id`, '.lua')}</pre>
-<p><strong>Tip:</strong> prefer <code>arbor.scheduler.register</code> for recurring tasks â€” Spring-style triggers (<code>fixed_rate</code> / <code>fixed_delay</code> / <code>cron</code>), focus gating, and per-entry start/stop from the Plugin Manager.</p>
+<p><strong>Tip:</strong> prefer <code>arbor.scheduler.register</code> for recurring tasks — Spring-style triggers (<code>fixed_rate</code> / <code>fixed_delay</code> / <code>cron</code>), focus gating, and per-entry start/stop from the Plugin Manager.</p>
 
-<h2>arbor.ui â€” user interface</h2>
+<h2>arbor.ui — user interface</h2>
 <table class="shortcuts-table">
   <thead><tr><th>Function</th><th>Description</th></tr></thead>
   <tbody>
@@ -274,7 +275,7 @@ arbor.timer.cancel(id)   -- cancel a timer by its id`, '.lua')}</pre>
     <tr><td><code>arbor.ui.set_panel_content(id, body)</code></td><td>Push form-DSL content (<code>&#123;title, nodes, actions?&#125;</code>) into a registered plugin panel.</td></tr>
     <tr><td><code>arbor.ui.add_graph_combo(opts)</code></td><td>Register a split button (run + dropdown). <code>target</code>: "activity_bar" (default) or "repo_actions"</td></tr>
     <tr><td><code>arbor.ui.set_combo_options&#123; id, options, selected? &#125;</code></td><td>Dynamically update a combo's option list. Optional <code>selected</code> adopts a pick if it appears in <code>options</code> (call from <code>on_repo_open</code> to refresh per-repo).</td></tr>
-    <tr><td><code>arbor.ui.contribute_patch(point, id, partial)</code></td><td>Shallow-merge <code>partial</code> into the existing payload of a previously-contributed item â€” without re-specifying the full payload.</td></tr>
+    <tr><td><code>arbor.ui.contribute_patch(point, id, partial)</code></td><td>Shallow-merge <code>partial</code> into the existing payload of a previously-contributed item — without re-specifying the full payload.</td></tr>
     <tr><td><code>arbor.ui.add_separator()</code></td><td>Insert a horizontal separator in the activity bar after the last registered item</td></tr>
     <tr><td><code>arbor.ui.add_context_menu_item(opts)</code></td><td>Add item to the commit/branch/file context menu</td></tr>
     <tr><td><code>arbor.ui.add_menu_item(opts)</code></td><td>Add item to the hamburger menu</td></tr>
@@ -284,13 +285,13 @@ arbor.timer.cancel(id)   -- cancel a timer by its id`, '.lua')}</pre>
   </tbody>
 </table>
 
-<h2>arbor.notify â€” persistent notifications</h2>
+<h2>arbor.notify — persistent notifications</h2>
 <p>Adds a notification to the in-app notification center (bell icon in the status bar). Notifications persist until the user explicitly dismisses them. <code>message</code> is required and non-empty; <code>level</code>, <code>title</code>, and <code>action</code> are optional. Invalid input raises a Lua error at the boundary.</p>
 <pre class="language-lua">{@html highlight(`-- arbor.notify{ message, title?, level?, action? }
 -- level: "info" | "success" | "warning" | "error"  (default "info")
 
 arbor.notify{ title = "Build succeeded", message = "Release build completed", level = "success" }
-arbor.notify{ title = "Build failed",    message = "Exited with code 2 â€” see Jobs panel", level = "error" }
+arbor.notify{ title = "Build failed",    message = "Exited with code 2 — see Jobs panel", level = "error" }
 arbor.notify{ message = "Config reloaded" }   -- title-less, defaults to "info"
 
 -- Optional click-action button on the notification card:
@@ -300,8 +301,8 @@ arbor.notify{
   action  = { kind = "open-link-manager", label = "View link", link_id = "abc" },
 }`, '.lua')}</pre>
 
-<h2>arbor.command â€” command palette entries</h2>
-<p>Register items that appear in the Command Palette (<kbd>Ctrl+K</kbd>). Each entry fires the action <code>command:&lt;id&gt;</code> on the plugin when selected.</p>
+<h2>arbor.command — command palette entries</h2>
+<p>Register items that appear in the Command Palette (<Kbd action="command_palette" />). Each entry fires the action <code>command:&lt;id&gt;</code> on the plugin when selected.</p>
 <pre class="language-lua">{@html highlight(`arbor.command.register({
   id          = "my-action",    -- unique within this plugin
   title       = "My Action",    -- shown in the palette
@@ -318,8 +319,8 @@ end)
 -- Remove the entry at runtime:
 arbor.command.unregister("my-action")`, '.lua')}</pre>
 
-<h2>arbor.keybinding â€” plugin keyboard shortcuts</h2>
-<p>Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the <strong>Plugins</strong> group in <strong>Settings â†’ Keybindings</strong> (read-only).</p>
+<h2>arbor.keybinding — plugin keyboard shortcuts</h2>
+<p>Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the <strong>Plugins</strong> group in <strong>Settings → Keybindings</strong> (read-only).</p>
 <pre class="language-lua">{@html highlight(`-- arbor.keybinding.register(config)
 -- config: { key, action, description?, ctrl?, shift?, alt? }
 -- Call once during on_plugin_load.
@@ -346,12 +347,12 @@ arbor.events.on("compile:run", function(ctx)
 end)`, '.lua')}</pre>
 <p><strong>Note:</strong> plugin keybindings take priority over unbound app keys when the shortcut matches. They do <em>not</em> override user-customised app keybindings.</p>
 
-<h2>arbor.job â€” background jobs</h2>
+<h2>arbor.job — background jobs</h2>
 <p>Use <code>arbor.job</code> for long-running or async work. The job runs in a separate OS thread; output is streamed line-by-line to the Jobs panel. Use <code>arbor.terminal.exec()</code> only for short blocking commands.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Function</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>arbor.job.spawn(config)</code></td><td>Launch a background job. Returns <code>(JobHandle, nil)</code> on success or <code>(nil, err)</code> on a spawn-side failure. The handle is a Promise (<code>:ok / :err</code>) with extra <code>.id</code> and <code>:cancel()</code>. Config: <code>name</code>, <code>command</code>, <code>cwd?</code>, <code>env?</code>, <code>category?</code> (string â€” groups jobs into collapsible sections in the overlay, e.g. <code>"Builds"</code> / <code>"Services"</code>), <code>on_done_action?</code> (string â€” sugar), <code>on_done?</code> (function â€” sugar)</td></tr>
+    <tr><td><code>arbor.job.spawn(config)</code></td><td>Launch a background job. Returns <code>(JobHandle, nil)</code> on success or <code>(nil, err)</code> on a spawn-side failure. The handle is a Promise (<code>:ok / :err</code>) with extra <code>.id</code> and <code>:cancel()</code>. Config: <code>name</code>, <code>command</code>, <code>cwd?</code>, <code>env?</code>, <code>category?</code> (string — groups jobs into collapsible sections in the overlay, e.g. <code>"Builds"</code> / <code>"Services"</code>), <code>on_done_action?</code> (string — sugar), <code>on_done?</code> (function — sugar)</td></tr>
     <tr><td><code>arbor.job.list()</code></td><td>Returns a Lua table of all job records</td></tr>
     <tr><td><code>arbor.job.cancel(job_id)</code></td><td>Kill a running job (SIGTERM / taskkill /T). No-op if the job has already finished.</td></tr>
   </tbody>
@@ -364,10 +365,10 @@ local job, err = arbor.job.spawn({
 })
 if err then arbor.notify{ message = "Spawn failed: " .. err, level = "error" }; return end
 
-job:ok(function(ctx)  arbor.notify{ message = "Build succeeded âœ“", level = "success" } end)
+job:ok(function(ctx)  arbor.notify{ message = "Build succeeded ✓", level = "success" } end)
    :err(function(ctx) arbor.notify{ message = "Build failed (exit " .. (ctx.exit_code or -1) .. ")", level = "error" } end)
 
--- on_done / on_done_action stay as zucchero â€” they fire alongside the promise.
+-- on_done / on_done_action stay as zucchero — they fire alongside the promise.
 arbor.job.spawn({
   name           = "Cargo build",
   command        = "cargo build --release",
@@ -378,7 +379,7 @@ arbor.events.on("my_plugin:build_done", function(ctx)
   arbor.log.info("exit_code=" .. ctx.exit_code)
 end)
 
--- Job sequencing â€” Pattern 1: build then run via :ok chain.
+-- Job sequencing — Pattern 1: build then run via :ok chain.
 local function launch_service()
   local svc = arbor.job.spawn({ name = "Server", command = "./server", category = "Services" })
   if svc then svc:ok(function(_) arbor.notify{ title = "Server stopped", message = "", level = "info" } end) end
@@ -390,7 +391,7 @@ if build then
        :err(function(ctx) arbor.notify{ title = "Build failed", message = "exit " .. (ctx.exit_code or -1), level = "error" } end)
 end
 
--- Pattern 2 â€” mutual exclusion with a queue
+-- Pattern 2 — mutual exclusion with a queue
 -- (See compile-action plugin for a full implementation)
 local active_build = nil
 local pending_run  = nil
@@ -404,7 +405,7 @@ arbor.events.on("my_plugin:run", function(ctx)
   -- ... spawn service immediately
 end)`, '.lua')}</pre>
 
-<h2>arbor.pipeline â€” pipelines</h2>
+<h2>arbor.pipeline — pipelines</h2>
 <p>Define and run multi-stage command pipelines. Results appear in the Pipelines panel (Workflow icon in the Activity Bar). No special permissions required.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Function</th><th>Description</th></tr></thead>
@@ -416,7 +417,7 @@ end)`, '.lua')}</pre>
   </tbody>
 </table>
 
-<h2>arbor.issues â€” Linear issue tracker</h2>
+<h2>arbor.issues — Linear issue tracker</h2>
 <p>Provides synchronous Lua wrappers around the Linear API. Requires <code>issues = "read"</code> or <code>issues = "write"</code> in <code>[permissions]</code>. See the <strong>Issues (Linear)</strong> section of this documentation for full details, filter options, and hook examples.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Function</th><th>Permission</th><th>Description</th></tr></thead>
@@ -425,12 +426,12 @@ end)`, '.lua')}</pre>
     <tr><td><code>arbor.issues.get(id)</code></td><td><code>issues = "read"</code></td><td>Fetch a single issue by UUID. Includes full comment list.</td></tr>
     <tr><td><code>arbor.issues.transition(id, status_id)</code></td><td><code>issues = "write"</code></td><td>Move an issue to a new workflow state. Returns updated issue.</td></tr>
     <tr><td><code>arbor.issues.comment(issue_id, body)</code></td><td><code>issues = "write"</code></td><td>Add a comment. Returns the new comment table.</td></tr>
-    <tr><td><code>arbor.issues.branch_name(issue)</code></td><td>â€”</td><td>Pure-computation helper: generates a git branch slug from an issue table.</td></tr>
+    <tr><td><code>arbor.issues.branch_name(issue)</code></td><td>—</td><td>Pure-computation helper: generates a git branch slug from an issue table.</td></tr>
   </tbody>
 </table>
 
-<h2>arbor.terminal.exec â€” blocking shell</h2>
-<pre class="language-lua">{@html highlight(`-- Requires terminal permission. Always blocking â€” use arbor.job.spawn for async.
+<h2>arbor.terminal.exec — blocking shell</h2>
+<pre class="language-lua">{@html highlight(`-- Requires terminal permission. Always blocking — use arbor.job.spawn for async.
 local r, err = arbor.terminal.exec{ command = "git status --short", cwd = arbor.repo.current() }
 if err then
   arbor.log.error("exec failed: " .. err)
@@ -445,12 +446,12 @@ end
   Settings are contribution-driven. The modal is an IntelliJ-style two-pane
   layout (sidebar + content) and lets <em>any</em> plugin add sidebar
   entries, drop cards into existing entries, or refresh sections on open.
-  See <strong>Plugin Development â†’ API: UI</strong> for the full guide.
+  See <strong>Plugin Development → API: UI</strong> for the full guide.
 </p>
 <pre class="language-lua">{@html highlight(`-- in main.lua, at PLUGIN_LOAD:
 arbor.ui.settings.panel({
   id    = "main",
-  title = "My Plugin â€” Settings",
+  title = "My Plugin — Settings",
   on_save = "my_plugin:save_all",
 })
 
@@ -494,11 +495,11 @@ end)`, '.lua')}</pre>
     <tr><td><code>radio</code></td><td>name, label, default, options[], inline</td><td>options: value+label+description?</td></tr>
     <tr><td><code>color</code></td><td>name, label, default (#rrggbb)</td><td></td></tr>
     <tr><td><code>kv_list</code></td><td>name, label, key_placeholder, value_placeholder, default</td><td>Submitted as JSON object</td></tr>
-    <tr><td><code>section</code></td><td>title, description, children[], collapsible, collapsed, card, count, add_action</td><td><code>card = true</code> â†’ dark title bar + counter pill + optional + button</td></tr>
+    <tr><td><code>section</code></td><td>title, description, children[], collapsible, collapsed, card, count, add_action</td><td><code>card = true</code> → dark title bar + counter pill + optional + button</td></tr>
     <tr><td><code>container</code></td><td>children[], columns, gap</td><td>CSS grid</td></tr>
     <tr><td><code>row</code></td><td>children[], gap, align, wrap</td><td>Flexbox row</td></tr>
     <tr><td><code>separator</code></td><td>label?</td><td>Labelled divider line</td></tr>
-    <tr><td><code>divider</code></td><td>â€”</td><td>Plain &lt;hr&gt;</td></tr>
+    <tr><td><code>divider</code></td><td>—</td><td>Plain &lt;hr&gt;</td></tr>
     <tr><td><code>paragraph</code></td><td>content, variant (normal/muted/heading/caption)</td><td></td></tr>
     <tr><td><code>label</code></td><td>text, variant</td><td>Static text alias</td></tr>
     <tr><td><code>alert</code></td><td>text, variant (info/warning/error/success)</td><td></td></tr>
@@ -516,16 +517,16 @@ end)`, '.lua')}</pre>
   </tbody>
 </table>
 <p>
-  Field nodes (inputs) are described in detail on the <strong>API â€” UI</strong>
+  Field nodes (inputs) are described in detail on the <strong>API — UI</strong>
   page along with the full form DSL (including <code>tree_layout</code>,
   <code>menu_button</code>, <code>arbor.ui.form.replace</code>). Any node supports
-  <code>show_if</code> for conditional visibility â€” operators: <code>eq</code>,
+  <code>show_if</code> for conditional visibility — operators: <code>eq</code>,
   <code>neq</code>, <code>gt</code>, <code>lt</code>, <code>gte</code>, <code>lte</code>,
   <code>in</code>/<code>in_values</code>, <code>nin</code>, and logical
   <code>and</code>/<code>or</code>/<code>not</code>.
 </p>
 
-<h2>Form state â€” opaque context echo</h2>
+<h2>Form state — opaque context echo</h2>
 <p>Pass a <code>state</code> table to <code>form</code> to carry server-side context that isn't rendered in the UI but is echoed back unchanged in every <code>ctx</code> payload (submit, button actions, cancel).</p>
 <pre class="language-lua">{@html highlight(`arbor.ui.form({
   title         = "Edit Config",
@@ -545,13 +546,13 @@ end)`, '.lua')}</pre>
 <h2>Combo Button</h2>
 <p>
   A split widget: a primary action button (icon only) on the left and a dropdown arrow on the right.
-  <code>run_icon</code> accepts any Lucide icon name â€” common choices: <code>"Play"</code> (â–¶),
-  <code>"Hammer"</code> (ðŸ”¨), <code>"Wrench"</code>, <code>"Zap"</code>.
+  <code>run_icon</code> accepts any Lucide icon name — common choices: <code>"Play"</code> (▶),
+  <code>"Hammer"</code> (🔨), <code>"Wrench"</code>, <code>"Zap"</code>.
   You can register <strong>multiple combos</strong> from the same plugin; they appear in
   registration order within the target area.
 </p>
 <pre class="language-lua">{@html highlight(`-- Register once (e.g. in on_plugin_load).
--- Example: two combos â€” Run (â–¶) and Build (ðŸ”¨).
+-- Example: two combos — Run (▶) and Build (🔨).
 arbor.ui.add_graph_combo({
   id         = "my_plugin:run",
   run_icon   = "Play",           -- Lucide icon name
@@ -574,15 +575,15 @@ arbor.events.on("on_repo_open", function(ctx)
   arbor.ui.set_combo_options{
     id = "my_plugin:run",
     options = {
-      { value = "dev",  label = "Run Â· dev",  group = "Project" },
-      { value = "prod", label = "Run Â· prod", group = "Project" },
+      { value = "dev",  label = "Run · dev",  group = "Project" },
+      { value = "prod", label = "Run · prod", group = "Project" },
     },
   }
   arbor.ui.set_combo_options{
     id = "my_plugin:build",
     options = {
-      { value = "debug",   label = "Build Â· debug",   group = "Project" },
-      { value = "release", label = "Build Â· release", group = "Project" },
+      { value = "debug",   label = "Build · debug",   group = "Project" },
+      { value = "release", label = "Build · release", group = "Project" },
     },
   }
 end)
@@ -599,16 +600,16 @@ arbor.events.on("my_plugin:do_build", function(ctx)
 end)`, '.lua')}</pre>
 
 <h2>Built-in utility modules</h2>
-<p>These are available via <code>require()</code> inside any plugin without adding files â€” they are pre-loaded by the sandbox.</p>
+<p>These are available via <code>require()</code> inside any plugin without adding files — they are pre-loaded by the sandbox.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Module</th><th>Key exports</th></tr></thead>
   <tbody>
-    <tr><td><code>arbor.schema</code></td><td><code>validate(data, rules)</code> â†’ ok, errors Â· <code>check(data, rules)</code> â†’ bool (shows toast on first error)</td></tr>
-    <tr><td><code>arbor.async</code></td><td><code>Promise</code> Â· <code>run(fn)</code> Â· <code>await(p)</code> Â· <code>debounce(fn, delay_ms)</code> Â· <code>throttle(fn, interval_ms)</code></td></tr>
-    <tr><td><code>arbor.event</code></td><td><code>on(event, fn)</code> Â· <code>off(event, fn?)</code> Â· <code>emit(event, payload)</code> â€” in-process pub/sub between plugin modules</td></tr>
+    <tr><td><code>arbor.schema</code></td><td><code>validate(data, rules)</code> → ok, errors · <code>check(data, rules)</code> → bool (shows toast on first error)</td></tr>
+    <tr><td><code>arbor.async</code></td><td><code>Promise</code> · <code>run(fn)</code> · <code>await(p)</code> · <code>debounce(fn, delay_ms)</code> · <code>throttle(fn, interval_ms)</code></td></tr>
+    <tr><td><code>arbor.event</code></td><td><code>on(event, fn)</code> · <code>off(event, fn?)</code> · <code>emit(event, payload)</code> — in-process pub/sub between plugin modules</td></tr>
   </tbody>
 </table>
-<pre class="language-lua">{@html highlight(`-- arbor.schema â€” validate form submissions
+<pre class="language-lua">{@html highlight(`-- arbor.schema — validate form submissions
 local schema = require("arbor.schema")
 arbor.events.on("my_plugin:save", function(ctx)
   if not schema.check(ctx, {
@@ -619,7 +620,7 @@ arbor.events.on("my_plugin:save", function(ctx)
   -- ... proceed with save ...
 end)
 
--- arbor.async â€” Promise + debounce
+-- arbor.async — Promise + debounce
 local async  = require("arbor.async")
 local refresh = async.debounce(function()
   -- called at most once per 200ms after the last trigger
@@ -629,14 +630,14 @@ end, 200)
 arbor.ui.confirm{ message = "Reset workdir?" }
   :ok(function(yes) if yes then arbor.log.info("user confirmed") end end)
 
--- Sequential await inside async.run â€” yields the coroutine until each promise settles.
+-- Sequential await inside async.run — yields the coroutine until each promise settles.
 async.run(function()
   local r, err = arbor.async.await(arbor.service.call("greeter.greet", { name = "Arbor" }))
   if err then arbor.log.warn(err.message); return end
   arbor.log.info(r)
 end)
 
--- arbor.event â€” decouple modules
+-- arbor.event — decouple modules
 local ev = require("arbor.event")
 ev.on("config_changed", function(payload)
   -- payload.repo, etc.
@@ -644,38 +645,38 @@ end)
 ev.emit("config_changed", { repo = arbor.repo.current() })`, '.lua')}</pre>
 
 <h2>require() sandbox</h2>
-<p><code>require()</code> inside a plugin is sandboxed to the plugin directory. Dots in the module name are converted to path separators (<code>require("lib.utils")</code> â†’ <code>plugins/my-plugin/lib/utils.lua</code>). Path traversal attempts (<code>../</code>) raise a Lua error. Standard Lua packages (<code>string</code>, <code>table</code>, <code>math</code>, <code>os</code>) are always available.</p>
+<p><code>require()</code> inside a plugin is sandboxed to the plugin directory. Dots in the module name are converted to path separators (<code>require("lib.utils")</code> → <code>plugins/my-plugin/lib/utils.lua</code>). Path traversal attempts (<code>../</code>) raise a Lua error. Standard Lua packages (<code>string</code>, <code>table</code>, <code>math</code>, <code>os</code>) are always available.</p>
 
 <h2>Hooks reference</h2>
 <p>Declare which hooks your plugin subscribes to via boolean flags in <code>[hooks]</code>. Each hook handler is registered with <code>arbor.events.on("on_hook_name", fn)</code> in Lua.</p>
 <table class="shortcuts-table">
   <thead><tr><th>Hook constant</th><th>TOML key</th><th>Context fields</th></tr></thead>
   <tbody>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Lifecycle ─────────────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>PLUGIN_LOAD</code></td><td><code>on_plugin_load</code></td><td>plugin_name, dir, api_version</td></tr>
     <tr><td><code>REPO_OPEN</code></td><td><code>on_repo_open</code></td><td>tab_id, path, name</td></tr>
     <tr><td><code>REPO_CLOSE</code></td><td><code>on_repo_close</code></td><td>tab_id, path, name</td></tr>
     <tr><td><code>REPO_INIT</code></td><td><code>on_repo_init</code></td><td>path, name, default_branch, provider, remote_url, has_readme, license, gitignore</td></tr>
     <tr><td><code>TAB_SWITCH</code></td><td><code>on_tab_switch</code></td><td>tab_id</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Git operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Git operations ────────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>COMMIT</code></td><td><code>on_commit</code></td><td>tab_id, oid, message, amend</td></tr>
     <tr><td><code>PUSH</code></td><td><code>on_push</code></td><td>tab_id, remote, refspec, force</td></tr>
     <tr><td><code>PULL</code></td><td><code>on_pull</code></td><td>tab_id, remote</td></tr>
     <tr><td><code>FETCH</code></td><td><code>on_fetch</code></td><td>tab_id, remote</td></tr>
     <tr><td><code>CHECKOUT</code></td><td><code>on_checkout</code></td><td>tab_id, branch <em>or</em> oid (detached)</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Branch / tag â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Branch / tag ──────────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>BRANCH_CREATE</code></td><td><code>on_branch_create</code></td><td>tab_id, name, from_oid</td></tr>
     <tr><td><code>BRANCH_DELETE</code></td><td><code>on_branch_delete</code></td><td>tab_id, name <em>or</em> names[] (bulk delete)</td></tr>
     <tr><td><code>BRANCH_RENAME</code></td><td><code>on_branch_rename</code></td><td>tab_id, old_name, new_name</td></tr>
     <tr><td><code>TAG_CREATE</code></td><td><code>on_tag_create</code></td><td>tab_id, name, oid, annotated</td></tr>
     <tr><td><code>TAG_DELETE</code></td><td><code>on_tag_delete</code></td><td>tab_id, name</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Stash â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Stash ─────────────────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>STASH_PUSH</code></td><td><code>on_stash_push</code></td><td>tab_id, index, message, include_untracked</td></tr>
     <tr><td><code>STASH_POP</code></td><td><code>on_stash_pop</code></td><td>tab_id, index, drop (true=pop, false=apply)</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Rebase â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Rebase ────────────────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>REBASE_START</code></td><td><code>on_rebase_start</code></td><td>tab_id, base, action_count</td></tr>
     <tr><td><code>REBASE_ABORT</code></td><td><code>on_rebase_abort</code></td><td>tab_id</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Git Flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Git Flow ──────────────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>FLOW_INIT</code></td><td><code>on_flow_init</code></td><td>tab_id</td></tr>
     <tr><td><code>FLOW_FEATURE_START</code></td><td><code>on_flow_feature_start</code></td><td>tab_id, name</td></tr>
     <tr><td><code>FLOW_FEATURE_FINISH</code></td><td><code>on_flow_feature_finish</code></td><td>tab_id, name</td></tr>
@@ -683,71 +684,103 @@ ev.emit("config_changed", { repo = arbor.repo.current() })`, '.lua')}</pre>
     <tr><td><code>FLOW_RELEASE_FINISH</code></td><td><code>on_flow_release_finish</code></td><td>tab_id, version</td></tr>
     <tr><td><code>FLOW_HOTFIX_START</code></td><td><code>on_flow_hotfix_start</code></td><td>tab_id, name</td></tr>
     <tr><td><code>FLOW_HOTFIX_FINISH</code></td><td><code>on_flow_hotfix_finish</code></td><td>tab_id, name</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Pipelines â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Pipelines ─────────────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>PIPELINE_STARTED</code></td><td><code>on_pipeline_started</code></td><td>run_id, pipeline_id, plugin</td></tr>
     <tr><td><code>PIPELINE_STEP_DONE</code></td><td><code>on_pipeline_step_done</code></td><td>run_id, stage, step, exit_code</td></tr>
     <tr><td><code>PIPELINE_DONE</code></td><td><code>on_pipeline_done</code></td><td>run_id, plugin, status</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Merge Requests / Pull Requests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Merge Requests / Pull Requests ────────────────────────────────────────────</td></tr>
     <tr><td><code>MR_OPENED</code></td><td><code>on_mr_opened</code></td><td>number, title, source_branch, target_branch, provider</td></tr>
     <tr><td><code>MR_MERGED</code></td><td><code>on_mr_merged</code></td><td>number, provider</td></tr>
     <tr><td><code>MR_UPDATED</code></td><td><code>on_mr_updated</code></td><td>number, provider</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Issues (Linear) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Issues (Linear) ───────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>ISSUE_LINKED</code></td><td><code>on_issue_linked</code></td><td>issue_id, identifier, sha, branch</td></tr>
     <tr><td><code>ISSUE_TRANSITIONED</code></td><td><code>on_issue_transitioned</code></td><td>issue_id, identifier, from_status, to_status</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Theme / branding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Theme / branding ──────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>THEME_CHANGED</code></td><td><code>on_theme_changed</code></td><td>theme_id, theme_name, vars (merged effective stylesheet), source ("user"|"plugin"|"init")</td></tr>
-    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">â”€â”€ Schedulers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€</td></tr>
+    <tr><td colspan="3" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Schedulers ────────────────────────────────────────────────────────────────</td></tr>
     <tr><td>(action name)</td><td><code>arbor.scheduler.register</code></td><td>Spring-style triggers: <code>fixed_rate</code> / <code>fixed_delay</code> / <code>cron</code>. Manifest opt-in: <code>[scheduler] enabled = true</code></td></tr>
   </tbody>
 </table>
 
 <h2>Permissions reference</h2>
 <ul>
-  <li><strong>fs</strong> â€” <code>"none"</code> (default), <code>"read"</code>, or <code>"write"</code>. Higher implies lower</li>
-  <li><strong>fs_scope</strong> â€” <code>[]</code> (default) sandboxes <code>arbor.fs.*</code> to the active repo; <code>["*"]</code> grants unrestricted access; otherwise a list of absolute paths to allow in addition to the active repo</li>
-  <li><strong>network</strong> â€” list of allowed hostnames; empty = no network</li>
-  <li><strong>git</strong> â€” <code>"none"</code> (default), <code>"read"</code> (<code>arbor.repo.*</code> read ops), <code>"write"</code> (commit, branch, fetch/push, notes, clone, stash), or <code>"history_rewrite"</code> (rebase, <code>reset --hard</code>, force-push, amend, filter-branch â€” destructive)</li>
-  <li><strong>issues</strong> â€” <code>"none"</code> (default), <code>"read"</code> (<code>arbor.issues.search/get</code>), or <code>"write"</code> (transition / comment; implies read)</li>
-  <li><strong>toolchain</strong> â€” <code>"none"</code> (default), <code>"read"</code> (list / active / detect / env), or <code>"write"</code> (add / remove / set_active)</li>
-  <li><strong>terminal</strong> â€” <code>"none"</code> (default), <code>"any"</code> (any command), or <code>"commands"</code> (only basenames in <code>terminal_scope</code>)</li>
-  <li><strong>env_read</strong> â€” <code>true</code> (default; all vars), <code>false</code> (<code>os.getenv</code> removed), or an allowlist like <code>["PATH", "JAVA_HOME"]</code></li>
-  <li><strong>service_call / service_export</strong> â€” booleans; allow <code>arbor.service.call</code> / <code>arbor.service.export</code></li>
-  <li><strong>settings_read_others</strong> â€” boolean; allow <code>arbor.settings.read(plugin, key)</code> on other plugins' globals</li>
+  <li><strong>fs</strong> — <code>"none"</code> (default), <code>"read"</code>, or <code>"write"</code>. Higher implies lower</li>
+  <li><strong>fs_scope</strong> — <code>[]</code> (default) sandboxes <code>arbor.fs.*</code> to the active repo; <code>["*"]</code> grants unrestricted access; otherwise a list of absolute paths to allow in addition to the active repo</li>
+  <li><strong>network</strong> — list of allowed hostnames; empty = no network</li>
+  <li><strong>git</strong> — <code>"none"</code> (default), <code>"read"</code> (<code>arbor.repo.*</code> read ops), <code>"write"</code> (commit, branch, fetch/push, notes, clone, stash), or <code>"history_rewrite"</code> (rebase, <code>reset --hard</code>, force-push, amend, filter-branch — destructive)</li>
+  <li><strong>issues</strong> — <code>"none"</code> (default), <code>"read"</code> (<code>arbor.issues.search/get</code>), or <code>"write"</code> (transition / comment; implies read)</li>
+  <li><strong>toolchain</strong> — <code>"none"</code> (default), <code>"read"</code> (list / active / detect / env), or <code>"write"</code> (add / remove / set_active)</li>
+  <li><strong>terminal</strong> — <code>"none"</code> (default), <code>"any"</code> (any command), or <code>"commands"</code> (only basenames in <code>terminal_scope</code>)</li>
+  <li><strong>env_read</strong> — <code>true</code> (default; all vars), <code>false</code> (<code>os.getenv</code> removed), or an allowlist like <code>["PATH", "JAVA_HOME"]</code></li>
+  <li><strong>service_call / service_export</strong> — booleans; allow <code>arbor.service.call</code> / <code>arbor.service.export</code></li>
+  <li><strong>settings_read_others</strong> — boolean; allow <code>arbor.settings.read(plugin, key)</code> on other plugins' globals</li>
 </ul>
+
+<h2>Publishing to the Marketplace</h2>
+<p>
+  Once your plugin works locally, you can propose it for the curated
+  <strong>Community</strong> catalog without dropping the code into the registry repo.
+  Keep the source in your own GitHub repo and submit a one-line pointer:
+</p>
+<ol>
+  <li>Push a tagged release (e.g. <code>v1.0.0</code>) on your repo.</li>
+  <li>Resolve the commit SHA: <code>git rev-parse v1.0.0</code>.</li>
+  <li>
+    Open a PR on <code>nightprint-studio/arbor-extensions</code> adding an entry to
+    <code>index.json</code>:
+    <pre><code>{`{
+  "repo": "https://github.com/your-handle/your-plugin",
+  "ref": "v1.0.0",
+  "pinned_sha": "<the SHA from step 2>"
+}`}</code></pre>
+    Add <code>"subpath": "plugins/foo"</code> if your plugin sits in a sub-folder.
+  </li>
+  <li>
+    Version bumps are themselves one-line PRs (update <code>ref</code> +
+    <code>pinned_sha</code>). Pinning is optional but strongly recommended: without
+    it, Arbor shows an <strong>Unpinned</strong> badge to signal the entry tracks a
+    moving ref. With it, the Marketplace only ever installs the exact commit that
+    was reviewed at merge time.
+  </li>
+</ol>
+<p>
+  The legacy <strong>Internal</strong> shape (<code>{`{ "subpath": "plugins/foo" }`}</code>)
+  is reserved for plugins maintained alongside Arbor inside the registry repo itself.
+</p>
 
 <h2>Manifest top-level fields</h2>
 <ul>
-  <li><strong>min_arbor_version</strong> <em>(optional)</em> â€” semver string. The plugin is rejected at load time if the running Arbor build is older. Plain strings (<code>"0.5.0"</code>) are interpreted as <code>&gt;=0.5.0</code>; full semver requirements (<code>"&gt;=0.5, &lt;0.7"</code>) are also accepted.</li>
-  <li><strong>arbor_api</strong> â€” integer Lua API contract version. Bumped on breaking changes. Plugins requiring a higher version than the build supports are rejected.</li>
-  <li><strong>os</strong> <em>(optional)</em> â€” list of supported operating systems (<code>"windows"</code>, <code>"linux"</code>, <code>"macos"</code>). Empty/missing = cross-platform. Plugins are skipped at discovery on non-listed hosts.</li>
+  <li><strong>min_arbor_version</strong> <em>(optional)</em> — semver string. The plugin is rejected at load time if the running Arbor build is older. Plain strings (<code>"0.5.0"</code>) are interpreted as <code>&gt;=0.5.0</code>; full semver requirements (<code>"&gt;=0.5, &lt;0.7"</code>) are also accepted.</li>
+  <li><strong>arbor_api</strong> — integer Lua API contract version. Bumped on breaking changes. Plugins requiring a higher version than the build supports are rejected.</li>
+  <li><strong>os</strong> <em>(optional)</em> — list of supported operating systems (<code>"windows"</code>, <code>"linux"</code>, <code>"macos"</code>). Empty/missing = cross-platform. Plugins are skipped at discovery on non-listed hosts.</li>
 </ul>
-<p>Dangerous Lua functions (<code>os.execute</code>, <code>os.exit</code>, <code>os.remove</code>, <code>os.rename</code>, <code>io.*</code>, <code>load</code>, <code>loadfile</code>, <code>dofile</code>) are removed from the sandbox. The terminal permission is captured at plugin load time â€” it cannot be escalated by overwriting a Lua global.</p>
+<p>Dangerous Lua functions (<code>os.execute</code>, <code>os.exit</code>, <code>os.remove</code>, <code>os.rename</code>, <code>io.*</code>, <code>load</code>, <code>loadfile</code>, <code>dofile</code>) are removed from the sandbox. The terminal permission is captured at plugin load time — it cannot be escalated by overwriting a Lua global.</p>
 
 <h2>Multi-file plugin layout (recommended)</h2>
 <pre><code>plugins/compile-action/
   plugin.toml
-  main.lua              â† thin wiring: require sub-modules, register hooks/UI
-  state.lua             â† shared mutable state (current repo, running job IDs)
-  detect.lua            â† project type auto-detection (Maven/Gradle/npm/â€¦)
-  defaults.lua          â† default build configs per project type
-  run_defaults.lua      â† default run configs per project type
+  main.lua              ← thin wiring: require sub-modules, register hooks/UI
+  state.lua             ← shared mutable state (current repo, running job IDs)
+  detect.lua            ← project type auto-detection (Maven/Gradle/npm/…)
+  defaults.lua          ← default build configs per project type
+  run_defaults.lua      ← default run configs per project type
   config/
-    global.lua          â† global build settings CRUD + form
-    project.lua         â† per-repo build settings CRUD + form
-    run_global.lua      â† global run settings CRUD + form (+ auto_stop global default)
-    run_project.lua     â† per-repo run settings CRUD + form (+ tomcat_home, auto_stop override)
-    jdk.lua             â† JDK registry (shared by build + run)
+    global.lua          ← global build settings CRUD + form
+    project.lua         ← per-repo build settings CRUD + form
+    run_global.lua      ← global run settings CRUD + form (+ auto_stop global default)
+    run_project.lua     ← per-repo run settings CRUD + form (+ tomcat_home, auto_stop override)
+    jdk.lua             ← JDK registry (shared by build + run)
   ui/
-    combo.lua           â† build combo (Hammer icon)
-    run_combo.lua       â† run combo (Play icon)</code></pre>
+    combo.lua           ← build combo (Hammer icon)
+    run_combo.lua       ← run combo (Play icon)</code></pre>
 <pre class="language-lua">{@html highlight(`-- main.lua
 local state     = require("state")
 local combo     = require("ui.combo")
 local run_combo = require("ui.run_combo")
 
 arbor.events.on("on_plugin_load", function(ctx)
-  combo.register()      -- ðŸ”¨ Build combo (right)
-  run_combo.register()  -- â–¶  Run combo (left)
+  combo.register()      -- 🔨 Build combo (right)
+  run_combo.register()  -- ▶  Run combo (left)
 
   arbor.keybinding.register({ key = "F9", action = "compile:run", description = "Build selected" })
   arbor.keybinding.register({ key = "F5", action = "run:run",     description = "Run selected"   })
@@ -765,7 +798,7 @@ arbor.events.on("compile:run", function(ctx)
   arbor.job.spawn({ name = cfg.label, command = cfg.command, cwd = cfg.cwd })
 end)
 
--- Run action â€” stops existing instance first (if auto_stop is enabled)
+-- Run action — stops existing instance first (if auto_stop is enabled)
 arbor.events.on("run:run", function(ctx)
   local existing = state.get_running(ctx.value)
   if existing and auto_stop_enabled() then

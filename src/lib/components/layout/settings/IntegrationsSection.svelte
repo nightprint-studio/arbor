@@ -208,6 +208,4 @@
   .btn-primary:disabled { opacity: 0.5; cursor: default; }
   .token-error { font-size: 10px; color: var(--status-error, #f87171); margin: 0; }
 
-  :global(.spin) { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

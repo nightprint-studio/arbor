@@ -10,6 +10,7 @@
   import Modal from '../shared/Modal.svelte';
   import ModalHeader from '../shared/ModalHeader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { animStore } from '$lib/stores/animations.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
@@ -258,8 +259,9 @@
   }
 
   async function copyUrl(entry: RepoRegistryEntry) {
-    await navigator.clipboard.writeText(entry.remote_url ?? entry.path);
-    uiStore.showToast(entry.remote_url ? 'Remote URL copied' : 'Path copied', 'info');
+    await copyToClipboard(entry.remote_url ?? entry.path, {
+      successToast: entry.remote_url ? 'Remote URL copied' : 'Path copied',
+    });
   }
 
   // ── Move-to-workspace popover ───────────────────────────────────────
@@ -348,8 +350,7 @@
     try {
       const payload = await exportWorkspace(ws.id);
       const text = JSON.stringify(payload, null, 2);
-      await navigator.clipboard.writeText(text);
-      uiStore.showToast(`Workspace JSON copied to clipboard`, 'success');
+      await copyToClipboard(text, { successToast: 'Workspace JSON copied to clipboard', errorToast: true });
     } catch (e) { uiStore.showToast(`Export failed: ${e}`, 'error'); }
   }
 
@@ -383,6 +384,55 @@
   function repoHealth(wsId: string, repoId: string): RepoHealth | null {
     return health.get(wsId)?.get(repoId) ?? null;
   }
+
+  // ── Keyboard navigation across rows ─────────────────────────────────
+  // Arrow Up/Down cycles focus across the currently-rendered group
+  // headers, workspace headers, and (when expanded) repo rows.  Space
+  // already toggles group / workspace headers via their own onkeydown;
+  // Enter on a repo row opens it.  Tab navigation is unchanged.
+  let bodyEl: HTMLElement | undefined = $state();
+
+  function navRows(): HTMLElement[] {
+    if (!bodyEl) return [];
+    return Array.from(bodyEl.querySelectorAll<HTMLElement>('[data-nav-row]'));
+  }
+
+  function moveFocus(dir: 1 | -1) {
+    const rows = navRows();
+    if (rows.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    const idx = active ? rows.indexOf(active) : -1;
+    if (idx === -1) {
+      (dir === 1 ? rows[0] : rows[rows.length - 1])?.focus();
+      return;
+    }
+    const next = Math.max(0, Math.min(rows.length - 1, idx + dir));
+    rows[next]?.focus();
+  }
+
+  function onBodyKeydown(e: KeyboardEvent) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    // Only when focus is on a nav row itself — leave action toolbars
+    // and inline inputs free to handle their own arrows.
+    const target = e.target as HTMLElement;
+    if (!target.matches?.('[data-nav-row]')) return;
+    e.preventDefault();
+    moveFocus(e.key === 'ArrowDown' ? 1 : -1);
+  }
+
+  function onSearchKeydown(e: KeyboardEvent) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      navRows()[0]?.focus();
+    }
+  }
+
+  function onRepoRowKeydown(e: KeyboardEvent, entry: RepoRegistryEntry, wsId: string) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      openRepoTab(entry, wsId);
+    }
+  }
 </script>
 
 <Modal {onClose} width="900px" height="78vh" padBody={false} ariaLabel="Repository Management">
@@ -415,6 +465,7 @@
         type="text"
         placeholder="Search workspaces or repositories…"
         bind:value={query}
+        onkeydown={onSearchKeydown}
       />
       {#if query}
         <button class="icon-btn" onclick={() => query = ''} aria-label="Clear"><X size={12} /></button>
@@ -422,7 +473,7 @@
     </div>
 
     <!-- Body -->
-    <div class="body">
+    <div class="body" role="tree" aria-label="Workspaces" tabindex="-1" bind:this={bodyEl} onkeydown={onBodyKeydown}>
       {#if entries.length === 0}
         <div class="empty">
           <Folder size={36} />
@@ -440,6 +491,7 @@
                 class="group-header"
                 role="button"
                 tabindex="0"
+                data-nav-row
                 onclick={() => workspacesStore.toggleGroupCollapsed(entry.group.id)}
                 onkeydown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -504,6 +556,7 @@
       class:active={isActive}
       role="button"
       tabindex="0"
+      data-nav-row
       aria-expanded={isExpanded}
       onclick={() => toggleExpanded(ws.id)}
       onkeydown={(e) => {
@@ -627,7 +680,17 @@
             {@const pending = fetchState?.pending.has(repoId) || pullState?.pending.has(repoId)}
             {@const outcome = wsOutcomes?.get(repoId)}
             {#if entry}
-              <div class="repo-row" class:missing={hp?.missing} class:conflicted={hp?.conflicted}>
+              <div
+                class="repo-row"
+                class:missing={hp?.missing}
+                class:conflicted={hp?.conflicted}
+                role="treeitem"
+                aria-level="3"
+                aria-selected="false"
+                data-nav-row
+                tabindex="-1"
+                onkeydown={(e) => onRepoRowKeydown(e, entry, ws.id)}
+              >
                 {#if pending}
                   <Loader size={10} class="spin" />
                 {:else if hp?.missing}
@@ -725,7 +788,7 @@
               <!-- Orphan member: workspace references this repo_id but the
                    registry has no entry for it.  Render a placeholder so the
                    count-vs-rows contract holds and the user can clean it up. -->
-              <div class="repo-row orphan">
+              <div class="repo-row orphan" data-nav-row tabindex="-1">
                 <AlertTriangle size={12} class="repo-icon missing-icon" />
                 <span class="orphan-label">Unknown repository</span>
                 <span class="orphan-id" use:tooltip={repoId}>{repoId.slice(0, 8)}…</span>
@@ -1086,6 +1149,12 @@
   }
   .repo-row:last-child { border-bottom: none; }
   .repo-row:hover { background: var(--bg-hover); }
+  .repo-row:focus { outline: none; }
+  .repo-row:focus-visible {
+    outline: none;
+    background: var(--bg-hover);
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
   .repo-row.missing { opacity: 0.66; }
   .repo-row.orphan { opacity: 0.85; font-style: italic; }
   .orphan-label {
@@ -1278,7 +1347,8 @@
     opacity: 0;
     transition: opacity var(--transition-fast);
   }
-  .repo-row:hover .repo-actions { opacity: 1; }
+  .repo-row:hover .repo-actions,
+  .repo-row:focus-within .repo-actions { opacity: 1; }
 
   .icon-btn {
     display: inline-flex;
@@ -1296,8 +1366,6 @@
   .icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
   .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  :global(.spin) { animation: spin 900ms linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   .popover-backdrop {
     position: fixed;

@@ -7,6 +7,10 @@
 
 # ── Claude Code ───────────────────────────────────────────────────────────────
 .claude/
+CLAUDE.md
+
+# ── Large media not tracked in the repo ───────────────────────────────────────
+assets/hero.mp4
 
 # ── Arbor app data (per-repo config, not source) ──────────────────────────────
 .arbor/
@@ -29,8 +33,15 @@ vite.config.ts.timestamp-*
 package-lock.json
 
 # ── Rust / Cargo ──────────────────────────────────────────────────────────────
+# `src-tauri/target/` is the canonical build directory because `.cargo/config.toml`
+# redirects the workspace target there (preserves the CI path that pre-dates the
+# workspace split). The `/target/` line below catches anything an IDE / tool
+# might still drop at the workspace root despite the override. Per-crate target/
+# folders shouldn't exist with the redirect but are ignored defensively.
 src-tauri/target/
 src-tauri/gen/schemas
+/target/
+crates/*/target/
 
 # ── Tauri ─────────────────────────────────────────────────────────────────────
 # Desktop bundles produced by `cargo tauri build`

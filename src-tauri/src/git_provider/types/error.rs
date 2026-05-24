@@ -45,7 +45,16 @@ pub enum ProviderError {
 
 impl From<crate::error::AppError> for ProviderError {
     fn from(err: crate::error::AppError) -> Self {
-        ProviderError::Internal(err.to_string())
+        let s = err.to_string();
+        // Recognise the canonical "GitHub API 404 / GitLab API 404" shape
+        // produced by mr_impl/ci_impl so the trait layer surfaces a typed
+        // NotFound instead of swallowing it into Internal. This drives the
+        // sidebar EmptyState (MR feature unavailable) and lets the frontend
+        // gracefully degrade without parsing error strings.
+        if s.contains("API 404") {
+            return ProviderError::NotFound(s);
+        }
+        ProviderError::Internal(s)
     }
 }
 

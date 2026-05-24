@@ -1,0 +1,12 @@
+# Pin the workspace build target directory to `src-tauri/target/` so the
+# release CI (`.github/workflows/release.yml`) and `cargo tauri` tooling
+# keep finding the binary at the path they expect from before this repo
+# became a Cargo workspace.
+#
+# Relative paths in `.cargo/config.toml` resolve against the directory that
+# contains this file — so `src-tauri/target` here means the workspace's
+# `arbor/src-tauri/target`. Drop this override and the target dir migrates
+# to the workspace-default `arbor/target/`; CI + Tauri bundler paths would
+# need to follow.
+[build]
+target-dir = "src-tauri/target"

@@ -476,6 +476,4 @@
     font-family: var(--font-ui-sans); padding: 6px 0;
   }
 
-  :global(.spin) { animation: spin 0.8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

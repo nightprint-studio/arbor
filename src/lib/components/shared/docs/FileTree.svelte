@@ -1,3 +1,8 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import Kbd     from '$lib/components/shared/internal/Kbd.svelte';
+</script>
+
 <h1>File Tree</h1>
 
 <p class="doc-lead">The <strong>File Tree</strong> panel shows every tracked file in the repository as a collapsible directory tree, with per-file last-commit metadata loaded progressively in the background.</p>
@@ -40,11 +45,11 @@
   The last-commit info is then streamed from a background Rust thread via batched Tauri events
   (<code>arbor://file-meta-batch</code>), so the tree remains usable while metadata fills in progressively.
 </p>
-<div class="callout info">
-  <strong>Session cache</strong> — completed scans are saved to <code>sessionStorage</code> keyed by
+<Callout variant="info" title="Session cache">
+  Completed scans are saved to <code>sessionStorage</code> keyed by
   repository path + HEAD fingerprint. Re-opening the panel (or switching tabs and back) is instant
   as long as HEAD has not moved.
-</div>
+</Callout>
 
 <h2>File search</h2>
 <p>The search box filters files using a <strong>multi-tier fuzzy search</strong>:</p>
@@ -60,11 +65,11 @@
   </tbody>
 </table>
 <p>Results are capped at 200 items. The search is debounced by 150 ms to avoid scoring on every keystroke.</p>
-<div class="callout info">
-  <strong>Command Palette</strong> — the <em>Modified Files</em> section in the Command Palette (<kbd>Ctrl+K</kbd>)
+<Callout variant="info" title="Command Palette">
+  The <em>Modified Files</em> section in the Command Palette (<Kbd action="command_palette" />)
   also searches the file tree and dispatches an <code>arbor:navigate-to-file</code> event that
   expands all ancestor folders and scrolls the target file into view.
-</div>
+</Callout>
 
 <h2>Context menu actions</h2>
 <p>Right-click any file to access:</p>
@@ -107,10 +112,10 @@
   </tbody>
 </table>
 
-<div class="callout info">
-  <strong>Under the hood</strong> — blame is computed by the Rust backend via <code>git2::Repository::blame_file()</code>
+<Callout variant="info" title="Under the hood">
+  Blame is computed by the Rust backend via <code>git2::Repository::blame_file()</code>
   and returned as a flat array of <code>BlameLine</code> structs (one per source line).
   Each <code>BlameLine</code> carries: <code>line_no</code>, <code>content</code>, <code>commit_oid</code>,
   <code>short_oid</code>, <code>author_name</code>, <code>author_email</code>, <code>timestamp</code>,
   <code>summary</code>, and a <code>is_group_start</code> flag set when the commit OID changes from the previous line.
-</div>
+</Callout>

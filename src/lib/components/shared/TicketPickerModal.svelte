@@ -857,6 +857,4 @@
     color: var(--text-muted);
   }
 
-  :global(.spin) { animation: spin 0.9s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 </style>

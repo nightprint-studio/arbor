@@ -12,7 +12,6 @@ use crate::git::ticket_links::StorageBackend;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub theme: ThemeConfig,
-    pub layout: LayoutConfig,
     pub diff: DiffConfig,
     pub graph: GraphConfig,
     pub keybindings: KeybindingsConfig,
@@ -93,6 +92,138 @@ pub struct AppConfig {
     /// Marketplace catalog auto-refresh policy.
     #[serde(default)]
     pub marketplace: MarketplaceConfig,
+    /// Visual appearance preferences (window control style, …).
+    #[serde(default)]
+    pub appearance: AppearanceConfig,
+    /// UI animation preferences (enable/disable, speed multiplier).
+    #[serde(default)]
+    pub animations: AnimationsConfig,
+    /// Host-wide commit preferences (global template fallback, …).
+    #[serde(default)]
+    pub commit: CommitConfig,
+    /// First-run onboarding tour state. Tracks whether the welcome wizard
+    /// has been completed/dismissed and the schema version so future
+    /// additions can re-prompt only for new steps.
+    #[serde(default)]
+    pub onboarding: OnboardingConfig,
+}
+
+/// User-facing visual tweaks. Theme lives in its own slot (the active theme id
+/// is persisted via `ThemeConfig`); the smaller switches that don't belong
+/// anywhere else are gathered here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppearanceConfig {
+    /// Style of the close/minimize/maximize buttons in the title bar.
+    /// `"mac"` (default) — the rounded coloured trio drawn at the right of
+    /// the title bar; `"windows"` — flat rectangular controls in the same
+    /// position and dimensions. Position is intentionally fixed regardless
+    /// of style.
+    #[serde(default = "default_window_controls_style")]
+    pub window_controls_style: String,
+    /// Global UI font scale multiplier applied to `--font-scale`.
+    /// Clamped to `[0.8, 1.4]` at read time on the frontend; persisted as-is.
+    #[serde(default = "default_font_scale")]
+    pub font_scale: f32,
+    /// When `true`, the active theme's optional `--theme-font-*` variables
+    /// override the global font stack. Off by default — themes usually
+    /// shouldn't be allowed to change the user's preferred font.
+    #[serde(default)]
+    pub use_theme_fonts: bool,
+    /// Position of the built-in activity bar: left (default), right (mirror
+    /// layout), or hidden (collapsed, revealed by hovering the left edge).
+    #[serde(default)]
+    pub activity_bar_position: ActivityBarPosition,
+    /// When `true`, the title bar uses a reduced height and tighter padding.
+    /// Useful on laptops where vertical space is at a premium.
+    #[serde(default)]
+    pub compact_title_bar: bool,
+}
+
+fn default_window_controls_style() -> String { "mac".into() }
+fn default_font_scale() -> f32 { 1.0 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityBarPosition {
+    #[default]
+    Left,
+    Right,
+    Hidden,
+}
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        Self {
+            window_controls_style: default_window_controls_style(),
+            font_scale:            default_font_scale(),
+            use_theme_fonts:       false,
+            activity_bar_position: ActivityBarPosition::default(),
+            compact_title_bar:     false,
+        }
+    }
+}
+
+/// UI animation preferences. `enabled = false` collapses every transition
+/// duration to zero so power users on remote desktops / Hyper-V can skip
+/// the visual cost without losing functionality.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnimationsConfig {
+    #[serde(default = "default_true_anim")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub speed: AnimSpeed,
+}
+
+fn default_true_anim() -> bool { true }
+
+impl Default for AnimationsConfig {
+    fn default() -> Self {
+        Self { enabled: true, speed: AnimSpeed::default() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnimSpeed {
+    Fast,
+    #[default]
+    Normal,
+    Slow,
+}
+
+/// First-run onboarding tour state. Persisted in `~/.config/arbor/config.toml`
+/// under `[onboarding]` so the welcome modal only auto-pops once.
+///
+/// `version` is a schema bump knob: when we add meaningful new steps in a
+/// future release we increment `CURRENT_ONBOARDING_VERSION` on the
+/// frontend, and the modal re-opens automatically for users whose stored
+/// `version` is lower (showing only the new steps, not the whole tour
+/// again).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnboardingConfig {
+    /// User has finished or skipped the tour at least once.
+    #[serde(default)]
+    pub completed: bool,
+    /// Onboarding schema the user has been through. `0` means never seen.
+    #[serde(default)]
+    pub version: u32,
+}
+
+impl Default for OnboardingConfig {
+    fn default() -> Self {
+        Self { completed: false, version: 0 }
+    }
+}
+
+/// Global commit-related preferences. Per-repo overrides live in
+/// `.arbor/config.toml`; this struct holds the host-wide fallbacks.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommitConfig {
+    /// Default commit-message template used as a fallback when the repo
+    /// has no native `commit.template` configured. Empty string disables
+    /// the template entirely.
+    #[serde(default)]
+    pub template_global: String,
 }
 
 /// Marketplace catalog auto-refresh settings.
@@ -531,13 +662,6 @@ pub struct ThemeConfig {
     pub active: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LayoutConfig {
-    pub sidebar_width: u32,
-    pub bottom_panel_height: u32,
-    pub diff_mode: DiffMode,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffMode {
@@ -559,9 +683,34 @@ pub struct DiffConfig {
     /// virtualized renderer. Defaults to 200.
     #[serde(default = "default_virt_threshold")]
     pub virt_threshold: u32,
+    /// Layout used by DiffViewer: split (side-by-side) vs unified (single
+    /// column). `word_diff` is reserved.
+    #[serde(default = "default_diff_mode_split")]
+    pub mode: DiffMode,
+    /// Layout used by FileDiffList: flat list vs collapsible folder tree.
+    #[serde(default)]
+    pub file_list_view: FileListView,
+    /// Show a confirmation dialog before discarding workdir changes.
+    #[serde(default = "default_true_diff")]
+    pub confirm_discard: bool,
+    /// Visual tab width used when rendering diff lines containing `\t`.
+    /// Clamped to `[1, 16]` at read time on the frontend; persisted as-is.
+    #[serde(default = "default_tab_width")]
+    pub tab_width: u32,
 }
 
 fn default_virt_threshold() -> u32 { 200 }
+fn default_diff_mode_split() -> DiffMode { DiffMode::Split }
+fn default_true_diff() -> bool { true }
+fn default_tab_width() -> u32 { 4 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FileListView {
+    #[default]
+    List,
+    Tree,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -579,6 +728,11 @@ pub struct GraphConfig {
     /// When false the entire history is loaded at once (no lazy-load on scroll).
     #[serde(default = "default_true")]
     pub paginate: bool,
+    /// Render the ticket-link chip column in the commit graph. Independent
+    /// of the per-repo ticket-link feature toggle (which gates fetches): when
+    /// `false` the chips are hidden even if links are available.
+    #[serde(default = "default_true")]
+    pub ticket_links_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -652,23 +806,23 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             theme: ThemeConfig { active: "dark".into() },
-            layout: LayoutConfig {
-                sidebar_width: 240,
-                bottom_panel_height: 280,
-                diff_mode: DiffMode::Split,
-            },
             diff: DiffConfig {
                 algorithm: DiffAlgorithm::Myers,
                 context_lines: 3,
                 word_wrap: false,
                 full_file: false,
                 virt_threshold: 200,
+                mode: DiffMode::Split,
+                file_list_view: FileListView::List,
+                confirm_discard: true,
+                tab_width: default_tab_width(),
             },
             graph: GraphConfig {
                 page_size: 500,
                 show_remote_branches: true,
                 show_tags: true,
                 paginate: true,
+                ticket_links_enabled: true,
             },
             keybindings: KeybindingsConfig::default(),
             recent_repos: Vec::new(),
@@ -690,6 +844,10 @@ impl Default for AppConfig {
             deep_link: crate::deep_link::DeepLinkConfig::default(),
             studio: StudioSettings::default(),
             marketplace: MarketplaceConfig::default(),
+            appearance: AppearanceConfig::default(),
+            animations: AnimationsConfig::default(),
+            commit: CommitConfig::default(),
+            onboarding: OnboardingConfig::default(),
         }
     }
 }

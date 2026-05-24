@@ -10,6 +10,7 @@
   // duplicate per-component map allowed (PLUGIN_ICONS is the single source).
   import { Zap, Search, ChevronRight } from 'lucide-svelte';
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { invoke } from '@tauri-apps/api/core';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { contributionStore } from '$lib/stores/contribution.svelte';
@@ -26,10 +27,11 @@
   import { activityBarConfigStore } from '$lib/stores/activityBarConfig.svelte';
   import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
   import {
-    checkoutBranch, mergeBranch, deleteBranch, createBranch,
-    stashApply, stashPop, stashDrop, resetToCommit, deleteTag,
+    checkoutBranch, checkoutBranchSafe, mergeBranch, deleteBranch, createBranch,
+    stashApply, stashPop, stashDrop, resetToCommit,
     listStashes,
   } from '$lib/ipc/branch';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import type { MergeStrategy } from '$lib/ipc/branch';
   import { pushBranch, fetchRemote, pullBranch, listRemotes } from '$lib/ipc/remote';
   import { handlePullResult, handlePullThrown } from '$lib/utils/pullResultHandler';
@@ -55,11 +57,28 @@
   import type { Issue } from '$lib/types/issues';
   import { issuesStore } from '$lib/stores/issues.svelte';
   import { getBranchPolicy, assertBranchNameAllowed, type BranchPolicy } from '$lib/utils/branch-policy';
-  import Kbd from '$lib/components/shared/ui/Kbd.svelte';
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { shortcutFor } from '$lib/utils/shortcut';
   import { tooltip } from '$lib/actions/tooltip';
 
   let { onClose }: { onClose: () => void } = $props();
+
+  // Confirm-prompt state — replaces window.confirm. While set, ConfirmModal
+  // is rendered on top of the palette; on confirm we run the supplied
+  // callback (which is responsible for calling onClose), on cancel we just
+  // close the palette like the old prompt-cancel behaviour.
+  type ConfirmReq = {
+    title:        string;
+    message:      string;
+    detail?:      string;
+    variant?:     'default' | 'danger' | 'warning' | 'info';
+    confirmLabel?: string;
+    onConfirm:    () => void | Promise<void>;
+  };
+  let pendingConfirm = $state<ConfirmReq | null>(null);
+  function askConfirm(req: ConfirmReq) { pendingConfirm = req; }
 
   // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -157,6 +176,7 @@
     }
     if (v.targetKind === 'worktree')     void ensureWorktrees();
     if (v.targetKind === 'project-file') void ensureProjectFiles();
+    if (v.targetKind === 'mr')           void ensureMrList();
     tick().then(() => {
       inputEl?.focus();
       if (inputEl) inputEl.selectionStart = inputEl.selectionEnd = query.length;
@@ -222,6 +242,7 @@
     'action:stage':              'stage_view',
     'action:settings':           'settings',
     'action:plugins':            'plugins',
+    'action:marketplace':        'open_marketplace',
     'action:docs':               'toggle_docs',
     'action:jump-head':          'jump_to_head',
     // Sidebar / bottom section toggles — auto-generated `action:show-<id>` rows
@@ -334,12 +355,18 @@
           actions.push(
             { id: 'action:remove-from-link', kind: 'action', icon: 'Trash2', group: 'Linked Worktrees',
               title: `Unlink from "${link.name}"`,
-              action: async () => {
-                if (confirm(`Remove this worktree from "${link.name}"?`)) {
-                  try { await removeWorktreeLinkMember(link.id, repoId); }
-                  catch (e) { uiStore.showToast(`${e}`, 'error'); }
-                }
-                onClose();
+              action: () => {
+                askConfirm({
+                  title: 'Unlink worktree',
+                  message: `Remove this worktree from "${link.name}"?`,
+                  variant: 'danger',
+                  confirmLabel: 'Unlink',
+                  onConfirm: async () => {
+                    try { await removeWorktreeLinkMember(link.id, repoId); }
+                    catch (e) { uiStore.showToast(`${e}`, 'error'); }
+                    onClose();
+                  },
+                });
               } },
             { id: 'action:toggle-link-sync', kind: 'action', icon: 'RefreshCw', group: 'Linked Worktrees',
               title: link.sync_enabled
@@ -436,7 +463,9 @@
     }
 
     // ── Merge Requests ──────────────────────────────────────────────────────
-    if (hasTab) {
+    // Hidden entirely when the active repo has MR/PRs disabled on the
+    // provider (probed via probeMrFeature, cached on mrStore.mrFeature).
+    if (hasTab && mrStore.mrFeature?.enabled !== false) {
       actions.push(
         { id: 'action:create-mr', kind: 'action', icon: 'GitPullRequest', group: 'Merge Requests',
           title: 'Open Pull / Merge Request',
@@ -469,6 +498,8 @@
     // Sidebar sections — respect user-configured visibility.
     for (const sec of SIDEBAR_SECTIONS) {
       if (!activityBarConfigStore.isVisible(sec.id)) continue;
+      // Hide the MR section entry when MR/PRs are disabled for this repo.
+      if (sec.id === 'mr' && mrStore.mrFeature?.enabled === false) continue;
       actions.push({
         id: `action:show-${sec.id}`, kind: 'action', icon: sec.icon, group: 'Panels',
         title: sec.title,
@@ -528,12 +559,19 @@
       { id: 'action:plugins',      kind: 'action', icon: 'Plug',      group: 'System',
         title: 'Plugin Manager',
         action: () => { uiStore.setPanel('plugins'); onClose(); } },
+      { id: 'action:marketplace',  kind: 'action', icon: 'Store',     group: 'System',
+        title: 'Plugin Marketplace', subtitle: 'Browse and install plugins & themes',
+        action: () => { uiStore.openMarketplace(); onClose(); } },
       { id: 'action:reload-plugins', kind: 'action', icon: 'RefreshCw', group: 'System',
         title: 'Reload Plugins',
         action: () => reloadAllPlugins() },
       { id: 'action:docs',         kind: 'action', icon: 'FileText',  group: 'System',
         title: 'Documentation',
         action: () => { uiStore.setPanel('docs'); onClose(); } },
+      { id: 'action:welcome-tour', kind: 'action', icon: 'Sparkles',  group: 'System',
+        title: 'Welcome Tour',
+        subtitle: 'Re-open the first-run onboarding walkthrough',
+        action: () => closeAndDispatch('arbor:open-onboarding') },
       { id: 'action:about',        kind: 'action', icon: 'Info',      group: 'System',
         title: 'About Arbor',
         action: () => { uiStore.setPanel('about'); onClose(); } },
@@ -566,12 +604,10 @@
   // ── Action helpers ─────────────────────────────────────────────────────────
 
   async function copyText(text: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      uiStore.showToast(`${label} copied`, 'success', 1800);
-    } catch {
-      uiStore.showToast(`Failed to copy ${label.toLowerCase()}`, 'error');
-    }
+    await copyToClipboard(text, {
+      successToast: `${label} copied`,
+      errorToast: `Failed to copy ${label.toLowerCase()}`,
+    });
     onClose();
   }
 
@@ -582,9 +618,23 @@
       if (op === 'stage')   { await stageAll(tabId);   uiStore.showToast('Staged all changes',   'success'); }
       if (op === 'unstage') { await unstageAll(tabId); uiStore.showToast('Unstaged all changes', 'success'); }
       if (op === 'discard') {
-        if (!window.confirm('Discard ALL unstaged changes? This cannot be undone.')) { onClose(); return; }
-        await discardAll(tabId);
-        uiStore.showToast('Discarded all unstaged changes', 'success');
+        askConfirm({
+          title: 'Discard all changes',
+          message: 'Discard ALL unstaged changes?',
+          detail: 'This cannot be undone.',
+          variant: 'danger',
+          confirmLabel: 'Discard',
+          onConfirm: async () => {
+            try {
+              await discardAll(tabId);
+              uiStore.showToast('Discarded all unstaged changes', 'success');
+            } catch (e) {
+              uiStore.showToast(`discard failed: ${e}`, 'error');
+            }
+            onClose();
+          },
+        });
+        return;
       }
     } catch (e) {
       uiStore.showToast(`${op} failed: ${e}`, 'error');
@@ -611,10 +661,24 @@
       const detail = await getCommitDetail(tabId, head.head_oid);
       const parent = detail.parent_oids[0];
       if (!parent) { uiStore.showToast('HEAD has no parent — cannot undo', 'warning'); onClose(); return; }
-      if (!window.confirm(`Soft-reset HEAD to ${parent.slice(0, 7)}? Changes stay in the index.`)) { onClose(); return; }
-      await resetToCommit(tabId, parent, 'soft');
-      uiStore.showToast('Last commit undone (soft reset)', 'success');
-      await refreshAfterReset(tabId);
+      askConfirm({
+        title: 'Undo last commit',
+        message: `Soft-reset HEAD to ${parent.slice(0, 7)}?`,
+        detail: 'Changes stay in the index.',
+        variant: 'warning',
+        confirmLabel: 'Undo commit',
+        onConfirm: async () => {
+          try {
+            await resetToCommit(tabId, parent, 'soft');
+            uiStore.showToast('Last commit undone (soft reset)', 'success');
+            await refreshAfterReset(tabId);
+          } catch (e) {
+            uiStore.showToast(`Undo failed: ${e}`, 'error');
+          }
+          onClose();
+        },
+      });
+      return;
     } catch (e) {
       uiStore.showToast(`Undo failed: ${e}`, 'error');
     }
@@ -818,6 +882,20 @@
     projectFilesLoaded = true;
   }
 
+  /// Lazy MR-list fetch driven by entering an `mr` target-kind verb. Uses
+  /// `mrStore.loadAll` (open + merged + closed in a single list) rather than
+  /// `mrStore.load`, which is bound to the sidebar's `stateFilter` and would
+  /// only surface open MRs in the palette autocomplete. The underlying
+  /// `cacheStore.loadMrList(tabId, 'all')` is cached per tab, so a second
+  /// visit short-circuits. The MR target section renders a spinner while
+  /// `mrStore.allLoading` is true.
+  async function ensureMrList() {
+    const tabId = tabsStore.activeTabId;
+    if (!tabId) return;
+    if (mrStore.mrFeature?.enabled === false) return;
+    try { await mrStore.loadAll(tabId); } catch { /* surfaced via mrStore.error */ }
+  }
+
   /// One-shot fetch of the worktree list for the active tab. Mirrors
   /// `ensureProjectFiles` — cached for the lifetime of the palette open.
   async function ensureWorktrees() {
@@ -916,17 +994,28 @@
   async function applyReset(c: SearchResult, mode: 'soft' | 'mixed' | 'hard') {
     const tabId = requireTab();
     if (!tabId) return;
-    if (mode === 'hard' && !window.confirm(
-      `Hard-reset HEAD to ${c.short_oid}?\n\nThis will DISCARD all uncommitted changes.`,
-    )) { onClose(); return; }
-    try {
-      await resetToCommit(tabId, c.oid, mode);
-      uiStore.showToast(`Reset (${mode}) to ${c.short_oid}`, 'success');
-      await refreshAfterReset(tabId);
-    } catch (e) {
-      uiStore.showToast(`Reset failed: ${e}`, 'error');
+    const doReset = async () => {
+      try {
+        await resetToCommit(tabId, c.oid, mode);
+        uiStore.showToast(`Reset (${mode}) to ${c.short_oid}`, 'success');
+        await refreshAfterReset(tabId);
+      } catch (e) {
+        uiStore.showToast(`Reset failed: ${e}`, 'error');
+      }
+      onClose();
+    };
+    if (mode === 'hard') {
+      askConfirm({
+        title: 'Hard-reset HEAD',
+        message: `Hard-reset HEAD to ${c.short_oid}?`,
+        detail: 'This will DISCARD all uncommitted changes.',
+        variant: 'danger',
+        confirmLabel: 'Reset hard',
+        onConfirm: doReset,
+      });
+      return;
     }
-    onClose();
+    await doReset();
   }
 
   async function applyStash(s: StashEntry, op: 'apply' | 'pop' | 'drop') {
@@ -946,9 +1035,24 @@
         else if (r.no_changes)              uiStore.showToast('No changes — working tree already matches the stash. Stash dropped.', 'info');
         else                                 uiStore.showToast('Stash popped', 'success');
       } else {
-        if (!window.confirm(`Drop stash "${s.message}"?`)) { onClose(); return; }
-        await stashDrop(tabId, s.index);
-        uiStore.showToast('Stash dropped', 'success');
+        askConfirm({
+          title: 'Drop stash',
+          message: `Drop stash "${s.message}"?`,
+          detail: 'This cannot be undone.',
+          variant: 'danger',
+          confirmLabel: 'Drop',
+          onConfirm: async () => {
+            try {
+              await stashDrop(tabId, s.index);
+              uiStore.showToast('Stash dropped', 'success');
+              await applyPostStashChange(tabId);
+            } catch (e) {
+              uiStore.showToast(`Stash drop: ${e}`, 'error');
+            }
+            onClose();
+          },
+        });
+        return;
       }
       // Repaint stash markers + sidebar list so the change is reflected
       // immediately — palette closes on the next line so the user otherwise
@@ -1007,19 +1111,17 @@
         const tabId = requireTab(); if (!tabId) return;
         if (b.is_head) { onClose(); return; }
         try {
-          await checkoutBranch(tabId, b.name);
+          const result = await checkoutBranchSafe(tabId, b.name);
+          handleCheckoutResult(result, {
+            targetLabel:    b.name,
+            successMessage: `Checked out ${b.name}`,
+          });
           await applyPostCheckout(tabId);
           onClose();
         }
         catch (e) {
-          const msg = String(e);
-          if (msg.toLowerCase().includes('conflict') || msg.includes('prevents checkout')) {
-            onClose();
-            uiStore.openCheckoutConflictModal(tabId, b.name);
-          } else {
-            await applyPostCheckout(tabId).catch(() => { /* best-effort */ });
-            uiStore.showToast(`Checkout failed: ${msg}`, 'error');
-          }
+          await applyPostCheckout(tabId).catch(() => { /* best-effort */ });
+          uiStore.showToast(`Checkout failed: ${e}`, 'error');
         }
       },
     },
@@ -1048,14 +1150,21 @@
       },
     },
     { id: 'delete-branch', title: 'Delete Branch', subtitle: 'Remove a local branch', icon: 'Trash2', aliases: ['del', 'rm', 'delb'], targetKind: 'branch', group: 'Branch',
-      run: async (target) => {
+      run: (target) => {
         const b = target as BranchInfo;
         const tabId = requireTab(); if (!tabId) return;
         if (b.is_head) { uiStore.showToast("Can't delete the current branch", 'warning'); onClose(); return; }
-        if (!window.confirm(`Delete branch "${b.name}"?`)) { onClose(); return; }
-        try { await deleteBranch(tabId, b.name); uiStore.showToast(`Deleted branch "${b.name}"`, 'success'); }
-        catch (e) { uiStore.showToast(`Delete failed: ${e}`, 'error'); }
-        onClose();
+        askConfirm({
+          title: 'Delete branch',
+          message: `Delete branch "${b.name}"?`,
+          variant: 'danger',
+          confirmLabel: 'Delete',
+          onConfirm: async () => {
+            try { await deleteBranch(tabId, b.name); uiStore.showToast(`Deleted branch "${b.name}"`, 'success'); }
+            catch (e) { uiStore.showToast(`Delete failed: ${e}`, 'error'); }
+            onClose();
+          },
+        });
       },
     },
     { id: 'rename-branch', title: 'Rename Branch', subtitle: 'Rename a local branch', icon: 'Pencil', aliases: ['ren', 'mv'], targetKind: 'branch', group: 'Branch',
@@ -1189,14 +1298,20 @@
       run: (target) => applyStash(target as StashEntry, 'drop') },
 
     // ── Tag ────────────────────────────────────────────────────────────────
-    { id: 'delete-tag', title: 'Delete Tag', subtitle: 'Remove a local tag', icon: 'Trash2', aliases: ['delt', 'rmt'], targetKind: 'tag', group: 'Tag',
-      run: async (target) => {
+    { id: 'delete-tag-local', title: 'Delete Tag (local)', subtitle: 'Remove the tag from this repo only', icon: 'Trash2', aliases: ['delt', 'rmt'], targetKind: 'tag', group: 'Tag',
+      run: (target) => {
         const t = target as TagInfo;
         const tabId = requireTab(); if (!tabId) return;
-        if (!window.confirm(`Delete tag "${t.name}"?`)) { onClose(); return; }
-        try { await deleteTag(tabId, t.name); uiStore.showToast(`Deleted tag "${t.name}"`, 'success'); }
-        catch (e) { uiStore.showToast(`Delete tag failed: ${e}`, 'error'); }
         onClose();
+        tick().then(() => window.dispatchEvent(new CustomEvent('arbor:delete-tag', { detail: { tabId, name: t.name, scope: 'local' } })));
+      },
+    },
+    { id: 'delete-tag-remote', title: 'Delete Tag (local + origin)', subtitle: 'Also push a delete refspec to origin', icon: 'Trash2', aliases: ['delto', 'rmto'], targetKind: 'tag', group: 'Tag',
+      run: (target) => {
+        const t = target as TagInfo;
+        const tabId = requireTab(); if (!tabId) return;
+        onClose();
+        tick().then(() => window.dispatchEvent(new CustomEvent('arbor:delete-tag', { detail: { tabId, name: t.name, scope: 'remote' } })));
       },
     },
     { id: 'push-tag', title: 'Push Tag', subtitle: 'Push a tag to origin', icon: 'ArrowUpToLine', aliases: ['pusht'], targetKind: 'tag', group: 'Tag',
@@ -1369,6 +1484,14 @@
         onClose();
       },
     },
+    // ── Merge Requests ─────────────────────────────────────────────────────
+    { id: 'mr-detail', title: 'View MR / PR Detail', subtitle: 'Open the pull / merge request detail modal', icon: 'GitPullRequest', aliases: ['mr', 'mrd', 'prd', 'mr-detail', 'pr-detail', 'view-mr', 'view-pr', 'open-mr', 'open-pr'], targetKind: 'mr', group: 'Merge Requests',
+      run: (target) => {
+        const mr = target as MergeRequest;
+        onClose();
+        tick().then(() => window.dispatchEvent(new CustomEvent('arbor:open-mr-detail', { detail: { mr } })));
+      },
+    },
     { id: 'link-mr', title: 'Copy arbor:// Link to MR', subtitle: 'Build an arbor:// link to a pull / merge request', icon: 'Link2', aliases: ['linkmr', 'dl-mr'], targetKind: 'mr', group: 'Deep Links',
       run: async (target) => {
         const mr = target as MergeRequest;
@@ -1409,6 +1532,16 @@
 
   const sections = $derived<PaletteSection[]>(buildSections(query));
 
+  /// True while the targets for the currently-selected verb are being fetched
+  /// (MR list today; future async target sources can plug in the same way).
+  /// Drives the centred spinner in the results area so users don't see an
+  /// empty "No merge requests available" message before the cache warms up.
+  const targetsLoading = $derived.by(() => {
+    if (!selectedVerb) return false;
+    if (selectedVerb.targetKind === 'mr') return mrStore.allLoading;
+    return false;
+  });
+
   function buildSections(raw: string): PaletteSection[] {
     // Phase 2 — a verb chip is set: show only matching targets.
     if (selectedVerb) return buildTargetSections(selectedVerb, raw);
@@ -1423,7 +1556,10 @@
 
     // Group verbs by their declared group so the palette reads as a taxonomy.
     const verbGroups = new Map<string, PaletteItem[]>();
+    const mrDisabled = mrStore.mrFeature?.enabled === false;
     for (const v of VERBS) {
+      // Skip MR-targeted verbs when the active repo has MR/PRs disabled.
+      if (mrDisabled && v.targetKind === 'mr') continue;
       const s = scoreVerb(v, q);
       if (s <= 0) continue;
       const item: PaletteItem = {
@@ -1716,14 +1852,14 @@
     }
 
     if (verb.targetKind === 'mr') {
-      const items: PaletteItem[] = mrStore.mrs
+      const items: PaletteItem[] = mrStore.allMrs
         .map(mr => ({
           id:       `target:${verb.id}:${mr.number}`,
           kind:     'mr' as PaletteItemKind,
           icon:     'GitPullRequest',
           title:    `#${mr.number} ${mr.title}`,
           subtitle: `${mr.state} · ${mr.sourceBranch} → ${mr.targetBranch}`,
-          score:    score(`#${mr.number} ${mr.title} ${mr.sourceBranch}`, q),
+          score:    score(`#${mr.number} ${mr.title} ${mr.sourceBranch} ${mr.state}`, q),
           action:   () => executeVerb(verb, mr),
         }))
         .filter(i => i.score > 0)
@@ -2148,10 +2284,10 @@
   onMount(() => {
     inputEl?.focus();
     loadBranchesAndStatus();
-    // Kick off MR list load if a repo is open — the mrStore short-circuits
-    // when no GitHub/GitLab provider is configured, so this is cheap.
+    // MR list is loaded lazily on demand — only when the user enters a verb
+    // whose `targetKind === 'mr'` (see `ensureMrList`). The list is cached
+    // per tab in `cacheStore`, so the second visit is instant.
     const tabId = tabsStore.activeTabId;
-    if (tabId && mrStore.mrs.length === 0) mrStore.load(tabId).catch(() => {});
     // Resolve branch-creation policy + warm the issues cache when a ticket
     // tracker is configured. Both are best-effort: failures don't block the
     // palette and just leave the suggestions section empty.
@@ -2289,7 +2425,11 @@
 
     <!-- Results -->
     <div class="palette-results" bind:this={listEl}>
-      {#if flatItems.length === 0 && !loading}
+      {#if flatItems.length === 0 && targetsLoading}
+        <div class="loading">
+          <Spinner size="md" label={`Loading ${selectedVerb ? TARGET_KIND_LABEL[selectedVerb.targetKind] : 'data'}…`} />
+        </div>
+      {:else if flatItems.length === 0 && !loading}
         <div class="empty">
           {#if selectedVerb}
             {#if query.trim()}
@@ -2365,6 +2505,22 @@
     </div>
   </div>
 </div>
+
+{#if pendingConfirm}
+  <ConfirmModal
+    title={pendingConfirm.title}
+    message={pendingConfirm.message}
+    detail={pendingConfirm.detail}
+    variant={pendingConfirm.variant ?? 'default'}
+    confirmLabel={pendingConfirm.confirmLabel ?? 'Confirm'}
+    onCancel={() => { pendingConfirm = null; onClose(); }}
+    onConfirm={async () => {
+      const p = pendingConfirm!;
+      pendingConfirm = null;
+      await p.onConfirm();
+    }}
+  />
+{/if}
 
 <style>
   /* ── Backdrop ───────────────────────────────────────────────────────────────── */
@@ -2511,6 +2667,15 @@
   .empty {
     padding: 32px 20px;
     text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .loading {
+    padding: 32px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     color: var(--text-muted);
     font-size: 13px;
   }

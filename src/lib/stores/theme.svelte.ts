@@ -10,6 +10,7 @@ import {
 import { listen } from '@tauri-apps/api/event';
 import darkTheme from '$lib/themes/dark.json';
 import lightTheme from '$lib/themes/light.json';
+import { appearanceStore } from '$lib/stores/appearance.svelte';
 
 const BUILT_IN: Theme[] = [darkTheme as Theme, lightTheme as Theme];
 
@@ -21,14 +22,10 @@ let _activeId   = $state<string>('dark');
 let _custom     = $state<Theme[]>([]);
 let _ready      = $state(false);
 
-// Whether to apply the active theme's optional font preferences
-// (`--theme-font-ui` / `--theme-font-code`). Persisted globally — most
-// users don't want themes to override their preferred font, so this is
-// off by default and exposed as a checkbox in the Theme Editor.
-const FONT_OPT_IN_KEY = 'arbor:use-theme-fonts';
-let _useThemeFonts = $state<boolean>(
-  typeof localStorage !== 'undefined' && localStorage.getItem(FONT_OPT_IN_KEY) === '1',
-);
+// The "apply theme fonts" opt-in lives in `appearanceStore` (persisted in
+// config.toml). The theme store calls `appearanceStore.syncThemeFonts(vars)`
+// whenever the active vars change so the opt-in stays in sync without each
+// caller having to know about both stores.
 
 /** Plugin-applied CSS-var overlays, keyed by plugin name. RAM-only —
  *  cleared on reload. Each entry is merged on top of the active theme
@@ -56,7 +53,7 @@ function applyVars(vars: Record<string, string>) {
   for (const [k, v] of Object.entries(vars)) {
     root.style.setProperty(k, v);
   }
-  syncThemeFonts(vars);
+  appearanceStore.syncThemeFonts(vars);
 }
 
 /** Active theme vars + every plugin overlay, merged. Later overlays win
@@ -80,28 +77,18 @@ function applyAndBroadcast(source: 'user' | 'plugin' | 'init') {
     .catch(() => { /* dev mode / backend offline */ });
 }
 
-/** Mirror the theme's `--theme-font-*` preferences into the *-active
- *  variants only when the user opted in. Removing the active vars when
- *  off (or empty) lets app.css fall back to the global font stack
- *  defined at :root, so a missing/disabled override never breaks. */
-function syncThemeFonts(vars: Record<string, string>) {
-  const root = document.documentElement;
-  const ui   = (vars['--theme-font-ui']   ?? '').trim();
-  const code = (vars['--theme-font-code'] ?? '').trim();
-  const apply = _useThemeFonts;
-
-  if (apply && ui)   root.style.setProperty('--theme-font-ui-active', ui);
-  else               root.style.removeProperty('--theme-font-ui-active');
-
-  if (apply && code) root.style.setProperty('--theme-font-code-active', code);
-  else               root.style.removeProperty('--theme-font-code-active');
-}
-
 // ---------------------------------------------------------------------------
 // Store API
 // ---------------------------------------------------------------------------
 
 async function init() {
+  // Pull the appearance config first so `applyAndBroadcast('init')` honors
+  // the persisted `use_theme_fonts` opt-in on first paint. Both stores hit
+  // the same `~/.config/arbor/config.toml` so serializing the calls costs
+  // ~nothing in practice and avoids a flash of "default fonts".
+  if (!appearanceStore.loaded) {
+    try { await appearanceStore.loadConfig(); } catch { /* ignore */ }
+  }
   try {
     const [id, custom] = await Promise.all([
       getActiveThemeId(),
@@ -110,8 +97,8 @@ async function init() {
     _custom   = custom;
     _activeId = id;
   } catch {
-    // Backend not ready yet (dev mode) — fall back to dark
-    _activeId = localStorage.getItem('arbor:theme-id') ?? 'dark';
+    // Backend not ready yet (dev mode) — fall back to the built-in default.
+    _activeId = 'dark';
   }
   applyAndBroadcast('init');
   // Subscribe to plugin-driven overlays. Empty `vars` is the agreed
@@ -154,7 +141,6 @@ async function refresh() {
 async function setActive(id: string) {
   _activeId = id;
   applyAndBroadcast('user');
-  localStorage.setItem('arbor:theme-id', id);
   try { await setActiveThemeId(id); } catch { /* ignore in dev */ }
 }
 
@@ -177,15 +163,6 @@ async function saveCustom(theme: Theme) {
   } else {
     _custom = [..._custom, theme];
   }
-}
-
-/** Toggle whether the active theme's font preferences win over the
- *  global default stack. Persists the choice and re-applies fonts so
- *  the change is visible immediately. */
-function setUseThemeFonts(value: boolean) {
-  _useThemeFonts = value;
-  try { localStorage.setItem(FONT_OPT_IN_KEY, value ? '1' : '0'); } catch { /* ignore */ }
-  syncThemeFonts(activeTheme.vars);
 }
 
 async function deleteCustom(id: string) {
@@ -298,8 +275,6 @@ export const themeStore = {
   get allThemes()   { return allThemes; },
   get builtIn()     { return BUILT_IN; },
   get custom()      { return _custom; },
-  get useThemeFonts() { return _useThemeFonts; },
-  setUseThemeFonts,
   init,
   refresh,
   setActive,

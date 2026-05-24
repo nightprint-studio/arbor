@@ -10,6 +10,7 @@
   import Modal               from './Modal.svelte';
   import ModalHeader         from './ModalHeader.svelte';
   import SearchBar           from './ui/SearchBar.svelte';
+  import PluginDocBlock      from './internal/PluginDocBlock.svelte';
   import { tooltip }          from '$lib/actions/tooltip';
   import { listPluginInfo }  from '$lib/ipc/plugin';
   import type { PluginInfo } from '$lib/types/plugin';
@@ -843,22 +844,29 @@
     </nav>
 
     <!-- Content — keyed remount on section switch so highlight injection
-         never sees a half-updated DOM tree. -->
+         never sees a half-updated DOM tree. PluginDocBlock owns the
+         typography baseline (h1-h4, p, ul, code, kbd, pre, table …); the
+         docs design-system utilities below (callout, feature-grid, eyebrow,
+         badge, matrix, prop-list, indicator-list, hint, …) stay scoped to
+         `.docs-content` because they're DocsPanel-internal authoring
+         conventions used by the static section components. -->
     <div class="docs-content">
       {#key activeSection}
-        <div class="docs-content-inner" bind:this={contentEl}>
-          {#if isPluginSection(activeSection)}
-            {@const plugin = activePluginInfo()}
-            {#if plugin}
-              {@html plugin.doc}
+        <PluginDocBlock bind:innerEl={contentEl}>
+          {#snippet children()}
+            {#if isPluginSection(activeSection)}
+              {@const plugin = activePluginInfo()}
+              {#if plugin}
+                {@html plugin.doc}
+              {:else}
+                <p style="color: var(--text-muted); margin-top: 24px;">Plugin not found.</p>
+              {/if}
             {:else}
-              <p style="color: var(--text-muted); margin-top: 24px;">Plugin not found.</p>
+              {@const ActiveSection = sectionComponents[activeSection]}
+              <ActiveSection />
             {/if}
-          {:else}
-            {@const ActiveSection = sectionComponents[activeSection]}
-            <ActiveSection />
-          {/if}
-        </div>
+          {/snippet}
+        </PluginDocBlock>
       {/key}
     </div>
   </div>
@@ -969,15 +977,6 @@
     visibility: hidden;
     pointer-events: none;
     width: 800px; /* give it a real width so components render correctly */
-  }
-
-  /* Spinning loader */
-  :global(.spin) {
-    animation: spin 1s linear infinite;
-  }
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
   }
 
   /* ── Body: nav + content ───────────────────────────────────────
@@ -1155,155 +1154,19 @@
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
-  .docs-content-inner {
-    padding: 20px 26px 28px;
-    user-select: text;
-  }
-  /* Re-enable text selection for every descendant — the global
-     `body { user-select: none }` rule wins over the inherited value
-     unless we restate it on the children. */
-  .docs-content-inner :global(*) { user-select: text; }
   .docs-content::-webkit-scrollbar { width: 5px; }
   .docs-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-sm); }
 
-  /* All content styles use :global() so they reach child components
-     and {@html} plugin docs alike. */
+  /* Typography baseline (h1-h4, p, ul, li, strong, kbd, code, pre, table)
+     lives in `shared/internal/PluginDocBlock.svelte` so both DocsPanel and
+     the Marketplace plugin-detail pane share the same reading experience.
+     The design-system utilities below stay here — they're DocsPanel-internal
+     authoring conventions used by the static section components. They reach
+     into PluginDocBlock through `:global()` because they sit inside this
+     component's `.docs-content` wrapper. */
 
-  .docs-content :global(h1) {
-    font-size: 19px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0 0 14px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-subtle);
-    letter-spacing: -0.2px;
-  }
-
-  .docs-content :global(h2) {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--text-secondary);
-    margin: 22px 0 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border-subtle);
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
-  }
-  .docs-content :global(h2 code) {
-    text-transform: none;
-    letter-spacing: 0;
-    font-size: 11px;
-  }
-
-  .docs-content :global(h3) {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 16px 0 6px;
-    letter-spacing: 0.2px;
-  }
-
-  .docs-content :global(h4) {
-    font-size: 10px;
-    font-weight: 700;
-    color: var(--text-muted);
-    margin: 12px 0 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .docs-content :global(p) {
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    line-height: 1.65;
-    margin: 0 0 10px;
-  }
-
-  .docs-content :global(ul),
-  .docs-content :global(ol) {
-    margin: 0 0 12px;
-    padding-left: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .docs-content :global(li) {
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    line-height: 1.5;
-  }
-
-  .docs-content :global(strong) { color: var(--text-primary); font-weight: 600; }
-
-  .docs-content :global(kbd) {
-    display: inline-block;
-    font-family: var(--font-code);
-    font-size: 10px;
-    background: var(--bg-overlay);
-    border: 1px solid var(--border);
-    border-bottom-width: 2px;
-    padding: 1px 5px;
-    border-radius: var(--radius-sm);
-    color: var(--text-primary);
-    white-space: nowrap;
-  }
-
-  .docs-content :global(code) {
-    font-family: var(--font-code);
-    font-size: 11px;
-    background: var(--bg-overlay);
-    padding: 1px 4px;
-    border-radius: var(--radius-sm);
-    color: var(--accent);
-  }
-
-  .docs-content :global(pre) {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    padding: 12px 14px;
-    overflow-x: auto;
-    margin: 0 0 14px;
-  }
-
-  .docs-content :global(pre code) {
-    background: none;
-    padding: 0;
-    font-size: 11px;
-    color: var(--text-secondary);
-    border-radius: 0;
-  }
-
-  .docs-content :global(table) {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--font-size-xs);
-    margin: 10px 0 14px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-  .docs-content :global(th) {
-    text-align: left;
-    padding: 7px 12px;
-    font-size: 9.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-muted);
-    background: rgba(255,255,255,0.02);
-    border-bottom: 1px solid var(--border);
-  }
-  .docs-content :global(td) {
-    padding: 6px 12px;
-    color: var(--text-secondary);
-    border-bottom: 1px solid var(--border-subtle);
-    vertical-align: top;
-    line-height: 1.55;
-  }
-  .docs-content :global(tbody tr:last-child td) { border-bottom: none; }
+  /* One typography exception kept here: table row hover. The widget renders
+     plain rows; DocsPanel adds the hover for its denser comparison tables. */
   .docs-content :global(tbody tr:hover) { background: rgba(255,255,255,0.015); }
 
   /* ═══════════════════════════════════════════════════════════════════
@@ -1319,33 +1182,6 @@
     margin-bottom: 18px !important;
     line-height: 1.75 !important;
   }
-
-  /* ── Callout boxes ─────────────────────────────────────────────── */
-  .docs-content :global(.callout) {
-    padding: 10px 14px;
-    border-radius: 0 6px 6px 0;
-    border-left: 3px solid;
-    margin: 12px 0;
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-    line-height: 1.65;
-  }
-  .docs-content :global(.callout > strong:first-child) {
-    display: block;
-    margin-bottom: 5px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-weight: 700;
-  }
-  .docs-content :global(.callout.tip)    { background: color-mix(in srgb, var(--success) 8%, transparent);   border-color: color-mix(in srgb, var(--success) 50%, transparent);  }
-  .docs-content :global(.callout.tip    > strong:first-child) { color: var(--success); }
-  .docs-content :global(.callout.info)   { background: color-mix(in srgb, var(--accent) 8%, transparent);    border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-  .docs-content :global(.callout.info   > strong:first-child) { color: var(--accent); }
-  .docs-content :global(.callout.warning){ background: color-mix(in srgb, var(--warning) 8%, transparent);   border-color: color-mix(in srgb, var(--warning) 50%, transparent); }
-  .docs-content :global(.callout.warning > strong:first-child){ color: var(--warning); }
-  .docs-content :global(.callout.danger) { background: color-mix(in srgb, var(--error) 8%, transparent);     border-color: color-mix(in srgb, var(--error) 50%, transparent);  }
-  .docs-content :global(.callout.danger  > strong:first-child){ color: var(--error); }
 
   /* ── Feature grid ──────────────────────────────────────────────── */
   .docs-content :global(.feature-grid) {

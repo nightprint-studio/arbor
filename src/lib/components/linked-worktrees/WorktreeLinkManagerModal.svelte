@@ -6,6 +6,7 @@
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import ModalSidebarToggle from '$lib/components/shared/ui/ModalSidebarToggle.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
@@ -179,13 +180,19 @@
     finally { busy = false; }
   }
 
-  async function deleteCurrent() {
+  let confirmDeleteLink = $state<{ id: string; name: string } | null>(null);
+  function deleteCurrent() {
     if (!selectedLink) return;
-    if (!confirm(`Delete worktree link "${selectedLink.name}"?  This cannot be undone.`)) return;
+    confirmDeleteLink = { id: selectedLink.id, name: selectedLink.name };
+  }
+  async function performDeleteLink() {
+    const req = confirmDeleteLink;
+    confirmDeleteLink = null;
+    if (!req) return;
     busy = true; error = null;
     try {
-      await deleteWorktreeLink(selectedLink.id);
-      selectedId = null;
+      await deleteWorktreeLink(req.id);
+      if (selectedId === req.id) selectedId = null;
     } catch (e) { error = `${e}`; }
     finally { busy = false; }
   }
@@ -548,12 +555,18 @@
     } catch (e) { error = `${e}`; }
     finally { busy = false; }
   }
-  async function dropGroup(g: AliasGroup) {
+  let confirmDropGroup = $state<{ linkId: string; groupId: string } | null>(null);
+  function dropGroup(g: AliasGroup) {
     if (!selectedLink) return;
-    if (!confirm('Remove this alias group?')) return;
+    confirmDropGroup = { linkId: selectedLink.id, groupId: g.id };
+  }
+  async function performDropGroup() {
+    const req = confirmDropGroup;
+    confirmDropGroup = null;
+    if (!req) return;
     busy = true; error = null;
     try {
-      await removeAliasGroup(selectedLink.id, g.id);
+      await removeAliasGroup(req.linkId, req.groupId);
     } catch (e) { error = `${e}`; }
     finally { busy = false; }
   }
@@ -1042,6 +1055,29 @@
           </section>
         </div>
   </Modal>
+{/if}
+
+{#if confirmDeleteLink}
+  <ConfirmModal
+    title="Delete worktree link"
+    message={`Delete worktree link "${confirmDeleteLink.name}"?`}
+    detail="This cannot be undone."
+    variant="danger"
+    confirmLabel="Delete"
+    onCancel={() => confirmDeleteLink = null}
+    onConfirm={performDeleteLink}
+  />
+{/if}
+
+{#if confirmDropGroup}
+  <ConfirmModal
+    title="Remove alias group"
+    message="Remove this alias group?"
+    variant="danger"
+    confirmLabel="Remove"
+    onCancel={() => confirmDropGroup = null}
+    onConfirm={performDropGroup}
+  />
 {/if}
 
 <style>

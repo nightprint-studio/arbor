@@ -1,5 +1,7 @@
 <script lang="ts">
   import { languageEntries } from '$lib/utils/language-colours';
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import Kbd     from '$lib/components/shared/internal/Kbd.svelte';
   const legend = languageEntries();
 </script>
 
@@ -10,12 +12,11 @@
 <h2>Opening the Repository Browser</h2>
 <ul>
   <li>Click the <strong>Repository Browser</strong> button in the hamburger menu (☰ → Repository Browser)</li>
-  <li>Press <kbd>Ctrl+Shift+R</kbd></li>
+  <li>Press <Kbd action="repo_browser" /></li>
 </ul>
-<div class="callout tip">
-  <strong>Requires connected accounts.</strong>
+<Callout variant="tip" title="Requires connected accounts.">
   Go to <em>Settings → Git &amp; Integrations</em> to add a GitHub or GitLab token before using the browser.
-</div>
+</Callout>
 
 <h2>Layout</h2>
 <div class="feature-grid">
@@ -68,13 +69,12 @@
   <li>Tune the TTL (default 10 minutes) or wipe the cache from <em>Settings → Cache → Repository Browser</em>.</li>
   <li>Set the TTL to <code>0</code> to disable caching entirely (every open re-fetches).</li>
 </ul>
-<div class="callout tip">
-  <strong>Backend speed-ups.</strong>
+<Callout variant="tip" title="Backend speed-ups.">
   Pages 2..N of the GitHub/GitLab repo list are now fetched concurrently
   (capped by the API's own rate limit). GitLab's slow <code>statistics=true</code>
   flag was dropped — the list view doesn't display repo size, so paying for
   it on every open isn't worth it.
-</div>
+</Callout>
 
 <h2>Language colours</h2>
 <p>Each repository row shows a coloured dot next to the last-update time, indicating the repo's primary language. The palette mirrors GitHub's Linguist colours so the dots match what you see on github.com. Click <strong>Legend</strong> at the bottom of the repo list to open the same legend inline.</p>
@@ -86,9 +86,9 @@
     </div>
   {/each}
 </div>
-<div class="callout tip">
+<Callout variant="tip">
   Languages not in the palette fall back to a neutral grey dot. The dot is hidden entirely if the provider didn't return a primary language for the repo.
-</div>
+</Callout>
 
 <style>
   .lang-legend-grid {

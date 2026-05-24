@@ -334,11 +334,4 @@
     line-height: 1.55;
   }
 
-  :global(.missing-state .spin) {
-    animation: spin 1s linear infinite;
-  }
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-  }
 </style>

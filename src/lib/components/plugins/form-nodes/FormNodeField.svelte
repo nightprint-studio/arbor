@@ -35,7 +35,7 @@
   import Dropdown      from '$lib/components/shared/ui/Dropdown.svelte';
   import RadioGroup    from '$lib/components/shared/ui/RadioGroup.svelte';
   import Toggle        from '$lib/components/shared/ui/Toggle.svelte';
-  import TypePill      from '$lib/components/shared/ui/TypePill.svelte';
+  import TypePill      from '$lib/components/shared/internal/TypePill.svelte';
 
   import type {
     FormNode, FormFieldRange,

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { GitBranch, Globe, Archive, Tag, RefreshCw, GitCommitHorizontal, FileDiff, Layers, Trash2, Copy, GitMerge, AlertTriangle, Search as SearchIcon, Upload } from 'lucide-svelte';
   import { pushBranch } from '$lib/ipc/remote';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { localTagTracker } from '$lib/stores/local-tags.svelte';
   import RepoActions from './RepoActions.svelte';
   import BranchTree from './BranchTree.svelte';
@@ -16,7 +17,7 @@
   import { repoStore } from '$lib/stores/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { bisectStore } from '$lib/stores/bisect.svelte';
-  import { deleteTag } from '$lib/ipc/branch';
+  import { executeTagDelete as runTagDelete } from '$lib/utils/tag-delete';
   import { getStatus } from '$lib/ipc/stage';
   import { listSubmodules } from '$lib/ipc/submodule';
   import { cacheStore } from '$lib/stores/cache.svelte';
@@ -131,10 +132,7 @@
     const { name } = tagCtxMenu;
     tagCtxMenu = null;
     if (id === 'copy') {
-      try {
-        await navigator.clipboard.writeText(name);
-        uiStore.showToast(`Copied "${name}"`, 'info');
-      } catch { uiStore.showToast('Copy failed', 'error'); }
+      await copyToClipboard(name, { successToast: `Copied "${name}"`, errorToast: 'Copy failed' });
       return;
     }
     if (id === 'push') {
@@ -160,34 +158,7 @@
     if (!tab || !pendingTagDelete) return;
     const { name, scope } = pendingTagDelete;
     pendingTagDelete = null;
-
-    if (scope === 'local') {
-      try {
-        await deleteTag(tab.id, name);
-        await localTagTracker.markPushed(tab.id, name).catch(() => {});
-        uiStore.showToast(`Tag "${name}" eliminato in locale`, 'success');
-        await loadSidebarData(tab.id);
-        graphStore.refresh();
-      } catch (err) { uiStore.showToast(`${err}`, 'error'); }
-      return;
-    }
-
-    // scope === 'remote' → push delete refspec, then drop the local ref.
-    try {
-      await pushBranch(tab.id, 'origin', `:refs/tags/${name}`);
-    } catch (err) {
-      uiStore.showToast(`Delete su origin fallito: ${err}`, 'error');
-      return;
-    }
-    try {
-      await deleteTag(tab.id, name);
-      await localTagTracker.markPushed(tab.id, name).catch(() => {});
-      uiStore.showToast(`Tag "${name}" eliminato in locale e su origin`, 'success');
-      await loadSidebarData(tab.id);
-      graphStore.refresh();
-    } catch (err) {
-      uiStore.showToast(`Origin pulito ma delete locale fallito: ${err}`, 'warning');
-    }
+    await runTagDelete(tab.id, name, scope);
   }
 
   async function handleRefresh() {
@@ -559,8 +530,6 @@
   }
   .cleanup-btn:hover { color: var(--error, #c75450); background: rgba(199,84,80,0.12); }
 
-  :global(.spin) { animation: spin 0.9s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
   /* ── Working tree changes banner — card style ── */
   .changes-banner {

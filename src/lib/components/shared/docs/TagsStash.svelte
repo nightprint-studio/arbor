@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Tags &amp; Stash</h1>
 
 <h2>Tags</h2>
@@ -113,6 +117,6 @@
   </div>
 </div>
 <p>Bytes that already match between workdir and stash are filtered out before the modal opens, so identical files don't show up as blockers (silent-apply path).</p>
-<div class="callout info">
-  <strong>Pull auto-stash</strong> — when you pull a branch with a dirty working directory, Arbor automatically stashes first, pulls, then pops the stash. If the pop has conflicts the same resolution modal appears with the original stash entry preserved.
-</div>
+<Callout variant="info" title="Auto-stash on pull and checkout">
+  When you pull, or when you checkout a branch, commit or remote tracking branch with a dirty working directory, Arbor automatically stashes first, performs the operation, then re-applies the stash. If the re-apply has conflicts the same resolution modal appears with the original stash entry preserved at <code>stash@&#123;0&#125;</code>.
+</Callout>

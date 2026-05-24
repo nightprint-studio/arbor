@@ -7,20 +7,13 @@
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
 
-  let pageSize = $state(parseInt(localStorage.getItem('arbor:graph-page-size') ?? '500'));
-  let showRemoteBranches = $state((localStorage.getItem('arbor:show-remotes') ?? 'true') === 'true');
-  let showTags = $state((localStorage.getItem('arbor:show-tags') ?? 'true') === 'true');
-  let ticketLinksEnabled = $state((localStorage.getItem('arbor:ticket-links-enabled') ?? 'true') === 'true');
+  const pageSize             = $derived(graphConfigStore.pageSize);
+  const showRemoteBranches   = $derived(graphConfigStore.showRemoteBranches);
+  const showTags             = $derived(graphConfigStore.showTags);
+  const ticketLinksEnabled   = $derived(graphConfigStore.ticketLinksEnabled);
 
   let saved = $state(false);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-  $effect(() => {
-    localStorage.setItem('arbor:graph-page-size', String(pageSize));
-    localStorage.setItem('arbor:show-remotes', String(showRemoteBranches));
-    localStorage.setItem('arbor:show-tags', String(showTags));
-    localStorage.setItem('arbor:ticket-links-enabled', String(ticketLinksEnabled));
-  });
 
   async function onTogglePaginate() {
     const newValue = !graphConfigStore.paginate;
@@ -41,19 +34,26 @@
 
 <div class="card">
   <FormRow label="Commits per load" description="Loaded in one batch; more added on scroll">
-    <NumberStepper bind:value={pageSize} min={100} max={2000} step={100} ariaLabel="Commits per load" />
+    <NumberStepper
+      value={pageSize}
+      onchange={(n) => graphConfigStore.setPageSize(n)}
+      min={100}
+      max={2000}
+      step={100}
+      ariaLabel="Commits per load"
+    />
   </FormRow>
 
   <FormRow label="Show remote branches" description="Display remote tracking refs on the graph">
-    <Toggle bind:checked={showRemoteBranches} />
+    <Toggle checked={showRemoteBranches} onchange={(v) => graphConfigStore.setShowRemoteBranches(v)} />
   </FormRow>
 
   <FormRow label="Show tags" description="Display annotated and lightweight tags">
-    <Toggle bind:checked={showTags} />
+    <Toggle checked={showTags} onchange={(v) => graphConfigStore.setShowTags(v)} />
   </FormRow>
 
   <FormRow label="Ticket link chips" description="Show ticket ID chips on commits (may slightly affect scroll performance)">
-    <Toggle bind:checked={ticketLinksEnabled} />
+    <Toggle checked={ticketLinksEnabled} onchange={(v) => graphConfigStore.setTicketLinksEnabled(v)} />
   </FormRow>
 
   <FormRow label="Lazy-load pagination" description="When off, the entire history is loaded at once — disable only on small repos">

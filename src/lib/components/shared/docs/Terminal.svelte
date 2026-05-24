@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
+</script>
+
 <h1>Terminal</h1>
 
 <p class="doc-lead">Arbor includes a built-in multi-tab terminal emulator powered by <strong>xterm.js</strong> and native PTY — ConPTY on Windows, POSIX PTY on Linux/macOS. No window-switching required.</p>
@@ -6,8 +10,8 @@
 <table class="shortcuts-table">
   <thead><tr><th>Action</th><th>How</th></tr></thead>
   <tbody>
-    <tr><td>Toggle terminal panel</td><td><kbd>Ctrl+`</kbd> or the terminal icon in the Activity Bar</td></tr>
-    <tr><td>Open a new tab immediately</td><td><kbd>Ctrl+Shift+`</kbd></td></tr>
+    <tr><td>Toggle terminal panel</td><td><Kbd action="toggle_terminal" /> or the terminal icon in the Activity Bar</td></tr>
+    <tr><td>Open a new tab immediately</td><td><Kbd action="new_terminal" /></td></tr>
     <tr><td>New tab in default shell</td><td>Click <strong>+</strong> in the terminal tab bar</td></tr>
     <tr><td>Pick a shell from the list</td><td>Click the <strong>▾</strong> dropdown next to <strong>+</strong></td></tr>
     <tr><td>Close tab</td><td>Click <strong>×</strong> on the tab, or type <code>exit</code> in the shell</td></tr>

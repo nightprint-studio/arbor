@@ -780,6 +780,4 @@
   .primary-mini:disabled { opacity: 0.5; cursor: not-allowed; }
   .primary-mini.wide { flex: 1; justify-content: center; }
 
-  :global(.spin) { animation: spin 0.9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

@@ -201,8 +201,4 @@
     text-align: center;
   }
   .state-error { color: var(--error); }
-  .state :global(.spin) {
-    animation: spin 1s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

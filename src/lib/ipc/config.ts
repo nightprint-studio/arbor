@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityBarConfig, CacheConfig, DiffConfig, GraphConfig, MrConfig, PipelinesConfig } from '$lib/types/config';
+import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
 export type { TicketLinksRepoConfig };
@@ -61,6 +61,14 @@ export const getMrConfig = () =>
 export const setMrConfig = (config: MrConfig) =>
   invoke<void>('set_mr_config', { config });
 
+// ── Appearance preferences (window control style, …) ─────────────────────────
+
+export const getAppearanceConfig = () =>
+  invoke<AppearanceConfig>('get_appearance_config');
+
+export const setAppearanceConfig = (config: AppearanceConfig) =>
+  invoke<void>('set_appearance_config', { config });
+
 // ── Recent repos (persisted in config.toml via backend) ──────────────────────
 
 export const getRecentRepos = () =>
@@ -104,3 +112,27 @@ export const getDiffConfig = () =>
 
 export const setDiffConfig = (config: DiffConfig) =>
   invoke<void>('set_diff_config', { config });
+
+// ── Animations config (enabled + speed multiplier) ────────────────────────────
+
+export const getAnimationsConfig = () =>
+  invoke<AnimationsConfig>('get_animations_config');
+
+export const setAnimationsConfig = (config: AnimationsConfig) =>
+  invoke<void>('set_animations_config', { config });
+
+// ── Commit config (global template fallback, …) ───────────────────────────────
+
+export const getCommitConfig = () =>
+  invoke<CommitConfig>('get_commit_config');
+
+export const setCommitConfig = (config: CommitConfig) =>
+  invoke<void>('set_commit_config', { config });
+
+// ── Onboarding tour state ─────────────────────────────────────────────────────
+
+export const getOnboardingConfig = () =>
+  invoke<OnboardingConfig>('get_onboarding_config');
+
+export const setOnboardingConfig = (config: OnboardingConfig) =>
+  invoke<void>('set_onboarding_config', { config });

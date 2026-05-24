@@ -40,7 +40,12 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // numbered scheme and the mnemonic is well-established.
   toggle_mr_sidebar:  { key: 'm',     ctrl: true,  shift: true,  description: 'Toggle Pull / Merge Requests sidebar', group: 'Sidebar Sections' },
   focus_graph:        { key: 'g',     alt: true,                 description: 'Focus commit graph',         group: 'Navigation' },
-  focus_sidebar:      { key: 's',     alt: true,                 description: 'Focus sidebar',              group: 'Navigation' },
+  // F6 cycles focus across the major layout zones (titlebar, tabs, activity
+  // bars, sidebar, graph, bottom panel, status bar) so the whole UI is
+  // reachable from the keyboard without dedicated per-zone shortcuts.
+  // Mirrors the same chord already used by FilePickerModal.
+  cycle_focus:         { key: 'F6',                              description: 'Cycle focus to next panel',     group: 'Navigation' },
+  cycle_focus_reverse: { key: 'F6',                shift: true,  description: 'Cycle focus to previous panel', group: 'Navigation' },
   // Workspace-aware project pickers (pre-fill the command palette).
   open_project:       { key: 'n',     ctrl: true,                description: 'Open project in workspace',  group: 'Navigation' },
   open_from_workspace:{ key: 'n',     ctrl: true,  shift: true,  description: 'Open project from another workspace', group: 'Navigation' },
@@ -53,6 +58,10 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   command_palette: { key: 'k',   ctrl: true,                description: 'Command palette',       group: 'Panels' },
   settings:       { key: ',',     ctrl: true,                description: 'Open settings',         group: 'Panels' },
   plugins:        { key: 'x',     ctrl: true,  shift: true,  description: 'Open Plugin Manager',   group: 'Panels' },
+  // Sibling of `plugins` (Ctrl+Shift+X). Marketplace is global — reachable
+  // from any panel — so it gets an Alt+Shift+M binding, symmetric with
+  // Alt+Shift+W (Workspace Manager). Avoids the Ctrl+Alt+letter AltGr trap.
+  open_marketplace: { key: 'm',                 shift: true, alt: true, description: 'Open Plugin Marketplace', group: 'Panels' },
   stage_view:     { key: 's',     ctrl: true,  shift: true,  description: 'Toggle stage area',     group: 'Panels' },
   toggle_docs:    { key: 'F1',                               description: 'Toggle documentation',  group: 'Panels' },
   // Avoid Ctrl+Alt+letter — on Italian / German / French / Spanish keyboards
@@ -93,6 +102,9 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   new_branch:     { key: 'b',     alt: true,   shift: true,  description: 'Create new branch',     group: 'Git' },
   stash:          { key: 'h',     ctrl: true,  shift: true,  description: 'Stash changes',         group: 'Git' },
   commit:         { key: 'Enter', ctrl: true,                description: 'Commit staged changes', group: 'Git' },
+  // Pairs with `commit` (Ctrl+Enter): same chord with Shift commits and pushes
+  // in one go. Only meaningful while the commit message field has focus.
+  commit_and_push: { key: 'Enter', ctrl: true, shift: true,  description: 'Commit staged changes and push', group: 'Git' },
   stage_all:      { key: 'a',     ctrl: true,  shift: true,  description: 'Stage all changes',     group: 'Git' },
   unstage_all:    { key: 'u',     ctrl: true,  shift: true,  description: 'Unstage all changes',   group: 'Git' },
 

@@ -8,7 +8,8 @@
     Link2, Wand2,
   } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
-  import BrandIcon from '$lib/components/shared/ui/BrandIcon.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
+  import BrandIcon from '$lib/components/shared/internal/BrandIcon.svelte';
   import { mrStore } from '$lib/stores/mr.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
   import {
@@ -23,7 +24,8 @@
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { fetchRemote } from '$lib/ipc/remote';
-  import { deleteBranch, checkoutBranch, listLocalBranches } from '$lib/ipc/branch';
+  import { deleteBranch, checkoutBranchSafe, listLocalBranches } from '$lib/ipc/branch';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import { listWorktrees } from '$lib/ipc/worktree';
   import { getStatus } from '$lib/ipc/stage';
   import { notificationsStore } from '$lib/stores/notifications.svelte';
@@ -514,7 +516,16 @@
     // 3. If HEAD is on the source branch, switch to the target first.
     if (currentBranch === source) {
       try {
-        await checkoutBranch(mrTabId, target);
+        const result = await checkoutBranchSafe(mrTabId, target);
+        // If the safe checkout couldn't settle cleanly (stash conflicts,
+        // apply error, or post-merge checkout failure), surface that via the
+        // shared handler and bail before the branch-delete step — deleting
+        // the source while we're still on it would error out anyway.
+        const clean = handleCheckoutResult(result, {
+          targetLabel:    target,
+          successMessage: `Switched to ${target}`,
+        });
+        if (!clean) return;
       } catch (e: any) {
         const msg = firstLine(e);
         notificationsStore.add(
@@ -775,23 +786,13 @@
         type="button"
         class="modal-title modal-title-btn"
         use:tooltip={'Click to copy title'}
-        onclick={async () => {
-          try {
-            await navigator.clipboard.writeText(detailMr.title);
-            uiStore.showToast('Title copied', 'success');
-          } catch (e) { uiStore.showToast(`Copy failed: ${e}`, 'error'); }
-        }}
+        onclick={() => copyToClipboard(detailMr.title, { successToast: 'Title copied', errorToast: true })}
       >{detailMr.title}</button>
       <button
         type="button"
         class="modal-num modal-num-btn"
         use:tooltip={'Click to copy'}
-        onclick={async () => {
-          try {
-            await navigator.clipboard.writeText(`#${mr.number}`);
-            uiStore.showToast(`Copied #${mr.number}`, 'success');
-          } catch (e) { uiStore.showToast(`Copy failed: ${e}`, 'error'); }
-        }}
+        onclick={() => copyToClipboard(`#${mr.number}`, { successToast: `Copied #${mr.number}`, errorToast: true })}
       >#{mr.number}</button>
 
       {#snippet actions()}
@@ -2210,8 +2211,6 @@
   .md-opt strong { font-size:12px;color:var(--text-primary);font-weight:600; }
   .md-opt span   { font-size:11px;color:var(--text-muted); }
 
-  :global(.spin) { animation:spin 1s linear infinite; }
-  @keyframes spin { to{transform:rotate(360deg)} }
 
   /* ── CI tab ─────────────────────────────────────────────────────────────── */
   .ci-pane {

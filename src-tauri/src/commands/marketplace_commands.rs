@@ -177,6 +177,20 @@ pub fn marketplace_uninstall_plugin(
     state:      State<'_, AppState>,
     name:       String,
 ) -> Result<MarketplacePlugin> {
+    // Cascade-disable required dependents BEFORE the folder is removed —
+    // mirrors the Plugin Manager's uninstall path. Without this, dependents
+    // stay running with a vanished service / hook target until the next
+    // reload (where they'd land in load_failures). The cascade also flips
+    // the marketplace ledger so the modal doesn't show them as "enabled"
+    // immediately after the operation.
+    let cascaded: Vec<String> = {
+        let mut host = state.lock_plugin_host()?;
+        host.disable_required_dependents(&name)
+    };
+    for other in &cascaded {
+        marketplace::installs::set_plugin_enabled(other, false);
+    }
+
     marketplace::installer::uninstall_plugin(&name)?;
     marketplace::installs::forget_plugin(&name);
 
@@ -200,19 +214,40 @@ pub fn marketplace_uninstall_plugin(
 
 #[tauri::command]
 pub fn marketplace_set_plugin_enabled(
-    state:   State<'_, AppState>,
-    name:    String,
-    enabled: bool,
+    app_handle: tauri::AppHandle,
+    state:      State<'_, AppState>,
+    name:       String,
+    enabled:    bool,
 ) -> Result<MarketplacePlugin> {
-    // Mirror the change through the host so the live VM picks it up.
-    {
+    // Mirror the change through the host so the live VM picks it up. Both
+    // sides cascade — disabling a plugin disables every transitively-required
+    // dependent, enabling one enables its required deps. We capture the
+    // returned cascade list so the marketplace ledger stays in sync for all
+    // plugins touched, not just the user-clicked one.
+    let cascaded: Vec<String> = {
         let mut host = state.lock_plugin_host()?;
-        if enabled { host.enable_plugin(&name)?; }
-        else       { host.disable_plugin(&name)?; }
-    }
-    // Update the marketplace ledger so the modal reflects state across
-    // restarts even without a host re-scan.
+        if enabled { host.enable_plugin(&name)? }
+        else       { host.disable_plugin(&name)? }
+    };
+
+    // Update the marketplace ledger for every plugin actually flipped (so
+    // the modal reflects state across restarts even without a host re-scan).
+    // The cascade list excludes the target when it was already in the desired
+    // state — write it explicitly to handle that corner case.
     marketplace::installs::set_plugin_enabled(&name, enabled);
+    for other in &cascaded {
+        if other != &name {
+            marketplace::installs::set_plugin_enabled(other, enabled);
+        }
+    }
+
+    // Notify every listener (Plugin Manager, contribution store, sidebar
+    // panels…) that plugin state changed. Without this, a toggle from the
+    // marketplace silently desyncs the Plugin Manager if it's open in the
+    // background — the user would have to close + reopen the panel to see
+    // the new state. Install / uninstall already emit via `reload_plugin_host`;
+    // toggle skips the host reload, so it needs its own explicit emit.
+    let _ = app_handle.emit("arbor://plugins-reloaded", ());
 
     lock(&state)?
         .catalog()
@@ -358,11 +393,13 @@ fn stub_plugin(name: &str) -> MarketplacePlugin {
         entry: RegistryEntry {
             repo: String::new(), r#ref: None, subpath: None,
             source: MarketplaceSource::Local, pinned_sha: None,
+            external: false,
         },
         experimental: None,
         doc:         None,
         update_available:  None,
         installed_version: None,
+        dependencies: Vec::new(),
     }
 }
 
@@ -384,6 +421,7 @@ fn stub_theme(id: &str) -> MarketplaceTheme {
         entry: RegistryEntry {
             repo: String::new(), r#ref: None, subpath: None,
             source: MarketplaceSource::Local, pinned_sha: None,
+            external: false,
         },
     }
 }

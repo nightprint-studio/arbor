@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Plus, Trash2, Play, AlertCircle, GitBranch, ChevronDown } from 'lucide-svelte';
-  import BrandIcon from '$lib/components/shared/ui/BrandIcon.svelte';
+  import BrandIcon from '$lib/components/shared/internal/BrandIcon.svelte';
   import { listLocalBranches } from '$lib/ipc/branch';
   import { listCiWorkflows, createCiPipeline } from '$lib/ipc/pipeline';
   import type { CiProviderInfo, CiWorkflow } from '$lib/types/pipeline';

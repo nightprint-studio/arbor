@@ -2,7 +2,7 @@
   import { Maximize2, Copy, Check, ChevronUp, ChevronDown, FileText } from 'lucide-svelte';
   import Contribution from '$lib/components/shared/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
-  import EncodingPill from '$lib/components/shared/ui/EncodingPill.svelte';
+  import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { encodingOverrides } from '$lib/stores/encodingOverrides.svelte';

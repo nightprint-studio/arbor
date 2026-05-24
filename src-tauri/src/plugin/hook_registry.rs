@@ -92,6 +92,10 @@ pub fn fire(lua: &Lua, hook: &str, context_json: &str) -> Result<()> {
             };
             if let Err(e) = func.call::<mlua::Value>(ctx.clone()) {
                 tracing::warn!(target: "plugin", "hook '{hook}' handler error: {e}");
+                crate::plugin::lua_ctx::record(
+                    lua, "error",
+                    format!("hook '{hook}' handler error: {e}"),
+                );
             }
         }
     }
@@ -146,6 +150,10 @@ pub fn fire_collecting(
                 Ok(v)  => out.push(v),
                 Err(e) => {
                     tracing::warn!(target: "plugin", "hook '{hook}' handler error: {e}");
+                    crate::plugin::lua_ctx::record(
+                        lua, "error",
+                        format!("hook '{hook}' handler error: {e}"),
+                    );
                 }
             }
         }

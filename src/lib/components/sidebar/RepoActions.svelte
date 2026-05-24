@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { RefreshCw, ArrowUpToLine, ArrowDownToLine, Archive, GitCommitHorizontal, X, Check, Play, ChevronDown } from 'lucide-svelte';
+  import { RefreshCw, ArrowUpToLine, ArrowDownToLine, Archive, GitCommitHorizontal, Play, ChevronDown } from 'lucide-svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -18,6 +18,7 @@
   import { ACTIVITY_BAR_POINT, parseActivityBarEntry } from '$lib/contributions/activity-bar';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import StashDialog from '$lib/components/shared/internal/StashDialog.svelte';
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import { tooltipForAction } from '$lib/utils/shortcut';
   import { tooltip } from '$lib/actions/tooltip';
@@ -28,9 +29,6 @@
   let isPulling   = $state(false);
   let isPushing   = $state(false);
   let stashOpen   = $state(false);
-  let stashMsg    = $state('');
-  let stashInputEl: HTMLInputElement | undefined = $state();
-  $effect(() => { if (stashOpen) stashInputEl?.focus(); });
   let isStashing  = $state(false);
 
   type RepoCombo = Extract<ActivityBarEntry, { kind: 'combo' }>;
@@ -254,18 +252,16 @@
 
   function openStashDialog() {
     if (!tab) return;
-    stashMsg = '';
     stashOpen = true;
   }
 
-  async function confirmStash() {
+  async function confirmStash(message: string) {
     if (!tab || isStashing) return;
     isStashing = true;
     try {
-      await stashSave(tab.id, stashMsg.trim() || undefined, true);
+      await stashSave(tab.id, message || undefined, true);
       uiStore.showToast('Changes stashed', 'success');
       stashOpen = false;
-      stashMsg  = '';
       // Light refresh — stash save doesn't change graph topology, only the
       // stash list + working dir state.  Skips the costly getGraph call.
       await applyPostStashChange(tab.id);
@@ -278,12 +274,6 @@
 
   function cancelStash() {
     stashOpen = false;
-    stashMsg = '';
-  }
-
-  function onStashKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); confirmStash(); }
-    if (e.key === 'Escape') { e.stopPropagation(); cancelStash(); }
   }
 
   // Listen for global keybinding events dispatched from AppShell
@@ -452,29 +442,16 @@
 
   </div>
 
-  <!-- Stash dialog (inline dropdown) -->
-  {#if stashOpen}
-    <div class="stash-dialog" role="dialog" aria-label="Stash changes">
-      <p class="stash-label">Stash message <span class="stash-opt">(optional)</span></p>
-      <input
-        class="stash-input"
-        type="text"
-        placeholder="WIP on {status?.current_branch ?? 'branch'}…"
-        bind:value={stashMsg}
-        onkeydown={onStashKeydown}
-        bind:this={stashInputEl}
-      />
-      <div class="stash-actions">
-        <button class="stash-btn cancel" onclick={cancelStash} disabled={isStashing}>
-          <X size={11} /> Cancel
-        </button>
-        <button class="stash-btn confirm" onclick={confirmStash} disabled={isStashing}>
-          <Check size={11} /> {isStashing ? 'Stashing…' : 'Stash All'}
-        </button>
-      </div>
-    </div>
-  {/if}
 </div>
+
+{#if stashOpen}
+  <StashDialog
+    branchName={status?.current_branch}
+    busy={isStashing}
+    onConfirm={confirmStash}
+    onCancel={cancelStash}
+  />
+{/if}
 
 <style>
   .repo-actions {
@@ -578,97 +555,7 @@
   .badge.ahead   { background: var(--success); color: var(--text-on-accent); }
   .badge.behind  { background: var(--warning); color: var(--text-on-accent); }
 
-  /* ── Stash dropdown ── */
-  .stash-dialog {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 8px;
-    right: 8px;
-    z-index: var(--z-sticky);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 10px 10px 8px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-    animation: dropIn 120ms cubic-bezier(0.16,1,0.3,1);
-  }
-
-  @keyframes dropIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  .stash-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin: 0 0 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-  }
-  .stash-opt {
-    font-weight: 400;
-    text-transform: none;
-    letter-spacing: 0;
-    color: var(--text-muted);
-  }
-
-  .stash-input {
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--bg-base);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-primary);
-    font-family: var(--font-ui-sans);
-    font-size: 12px;
-    padding: 5px 8px;
-    outline: none;
-    transition: border-color var(--transition-fast);
-  }
-  .stash-input:focus { border-color: var(--accent); }
-
-  .stash-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-    margin-top: 8px;
-  }
-
-  .stash-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    font-family: var(--font-ui-sans);
-    font-size: 11px;
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-  }
-  .stash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .stash-btn.cancel {
-    background: transparent;
-    color: var(--text-muted);
-  }
-  .stash-btn.cancel:hover:not(:disabled) {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-
-  .stash-btn.confirm {
-    background: var(--accent);
-    color: var(--text-on-accent);
-    border-color: var(--accent);
-  }
-  .stash-btn.confirm:hover:not(:disabled) {
-    background: var(--accent-hover, #3b5fc0);
-  }
-
   :global(.spinning) { animation: spin 1s linear infinite; }
-  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
   /* ── RepoAction combo widget (JetBrains run style) ──
      The dropdown chrome is provided by the shared <Dropdown> widget; only the

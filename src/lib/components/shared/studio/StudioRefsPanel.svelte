@@ -73,6 +73,7 @@
   } from 'lucide-svelte';
   import Spinner from '../ui/Spinner.svelte';
   import Button from '../ui/Button.svelte';
+  import PanelShell from '../ui/PanelShell.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { animStore } from '$lib/stores/animations.svelte';
   import { studioStore } from '$lib/stores/studio.svelte';
@@ -257,11 +258,9 @@
   }
 </script>
 
-<div class="srp-root">
-  <div class="srp-head">
-    <Layers size={13} />
-    <span class="srp-title">Bindings</span>
-    <span class="srp-spacer"></span>
+<PanelShell title="Bindings" class="srp-shell">
+  {#snippet icon()}<Layers size={13} />{/snippet}
+  {#snippet actions()}
     <Button variant="icon" size="md"
             onclick={rescan}
             disabled={!tabsStore.activeTabId || kindBrokenRefsLoading || kindCrossRefsLoading}
@@ -269,7 +268,7 @@
             ariaLabel="Rescan references">
       {#snippet iconStart()}<RotateCcw size={11} class={kindBrokenRefsLoading || kindCrossRefsLoading ? 'spin' : ''} />{/snippet}
     </Button>
-  </div>
+  {/snippet}
   <div class="srp-body">
     {#if bindingEntries.length === 0}
       {#if emptyState}
@@ -457,34 +456,9 @@
       </div>
     {/if}
   </div>
-</div>
+</PanelShell>
 
 <style>
-  /* Outer flex column — sits inside the modal's right-rail card slot.
-     Same shape as `<StudioSchemaPanel>` so swapping rails feels
-     identical. */
-  .srp-root {
-    display: flex; flex-direction: column;
-    min-height: 0;
-    flex: 1;
-  }
-
-  /* Header — matches the parent's `.rs-panel-head` chrome (also used
-     by inspector + query) so the row reads as part of the same
-     family even though the class names differ. */
-  .srp-head {
-    display: flex; align-items: center; gap: 6px;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--border-subtle);
-    background: var(--bg-overlay);
-    font-size: 11px; font-weight: 600;
-    color: var(--text-secondary);
-    flex-shrink: 0;
-  }
-  .srp-title { font-weight: 600; color: var(--text-primary); }
-  .srp-spacer { flex: 1; }
-  .srp-head > :global(svg:first-child) { color: var(--accent); flex-shrink: 0; }
-
   .srp-body {
     padding: 10px 8px 8px;
     overflow: auto;

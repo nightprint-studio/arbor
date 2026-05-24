@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { MergeRequest, MrDetail, CreateMrParams, MrFileDiff, MrCommit, MergedMrHint, MrCapabilities } from '$lib/types/mr';
+import type { MergeRequest, MrDetail, CreateMrParams, MrFileDiff, MrCommit, MergedMrHint, MrCapabilities, MrFeatureStatus } from '$lib/types/mr';
 import { invalidateTabCache } from './cache-invalidate';
 
 export function listMrs(
@@ -17,6 +17,13 @@ export function getMrDetail(tabId: string, number: number): Promise<MrDetail> {
  *  Never rejects — falls back to permissive defaults on backend errors. */
 export function getMrCapabilities(tabId: string): Promise<MrCapabilities> {
   return invoke('get_mr_capabilities', { tabId });
+}
+
+/** Probe whether the active repo accepts pull/merge requests at all.
+ *  Permissive on failure (returns `{ enabled: true, reason: null }`) so
+ *  the user can still try when the probe itself errors. */
+export function probeMrFeature(tabId: string): Promise<MrFeatureStatus> {
+  return invoke('probe_mr_feature', { tabId });
 }
 
 export async function createMr(tabId: string, params: CreateMrParams): Promise<MergeRequest> {

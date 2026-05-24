@@ -100,6 +100,7 @@
   import Alert from '../ui/Alert.svelte';
   import Dropdown, { type DropdownItem } from '../ui/Dropdown.svelte';
   import FilePickerModal from '../FilePickerModal.svelte';
+  import PanelShell from '../ui/PanelShell.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   let {
@@ -179,12 +180,8 @@
   }
 </script>
 
-<div class="ssp-root">
-  <div class="ssp-head">
-    <BookOpen size={13} />
-    <span class="ssp-title">Schema</span>
-    <span class="ssp-spacer"></span>
-  </div>
+<PanelShell title="Schema" class="ssp-shell">
+  {#snippet icon()}<BookOpen size={13} />{/snippet}
   <div class="ssp-body">
     {#if !schemaRsPath}
       {#if intro}
@@ -336,7 +333,7 @@
       {/if}
     {/if}
   </div>
-</div>
+</PanelShell>
 
 {#if pickerOpen}
   <FilePickerModal
@@ -350,28 +347,6 @@
 {/if}
 
 <style>
-  /* Outer flex column — sits inside the modal's right-rail card slot. */
-  .ssp-root {
-    display: flex; flex-direction: column;
-    min-height: 0;
-    flex: 1;
-  }
-
-  /* Header — matches the parent's `.rs-panel-head` chrome (used by
-     inspector + bindings) so the row reads as part of the same
-     family even though the class names differ. */
-  .ssp-head {
-    display: flex; align-items: center; gap: 6px;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--border-subtle);
-    background: var(--bg-overlay);
-    font-size: 11px; font-weight: 600;
-    color: var(--text-secondary);
-    flex-shrink: 0;
-  }
-  .ssp-title { font-weight: 600; color: var(--text-primary); }
-  .ssp-spacer { flex: 1; }
-
   .ssp-body {
     padding: 12px; overflow: auto;
     display: flex; flex-direction: column;

@@ -25,6 +25,7 @@
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
   import { renderMarkdown } from '$lib/utils/markdown';
 
@@ -164,8 +165,7 @@
         ev.stopPropagation();
         const code = pre.querySelector('code');
         const text = code?.textContent ?? pre.textContent ?? '';
-        try {
-          await navigator.clipboard.writeText(text);
+        if (await copyToClipboard(text)) {
           btn.classList.add('copied');
           btn.innerHTML =
             '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
@@ -174,7 +174,7 @@
             btn.innerHTML =
               '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
           }, 1400);
-        } catch { /* ignore — clipboard denied */ }
+        }
       });
 
       pre.appendChild(btn);

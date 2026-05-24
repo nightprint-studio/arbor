@@ -1,14 +1,9 @@
 export type DiffMode = 'unified' | 'split' | 'word_diff';
 export type DiffAlgorithm = 'myers' | 'patience' | 'histogram';
+export type FileListView = 'list' | 'tree';
 
 export interface ThemeConfig {
   name: string;
-}
-
-export interface LayoutConfig {
-  sidebar_width: number;
-  bottom_panel_height: number;
-  diff_mode: DiffMode;
 }
 
 export interface DiffConfig {
@@ -19,6 +14,15 @@ export interface DiffConfig {
   full_file: boolean;
   /** Switch to virtualized rendering above this line count. */
   virt_threshold: number;
+  /** Layout used by DiffViewer: split (side-by-side) vs unified. */
+  mode: DiffMode;
+  /** Layout used by FileDiffList: flat list vs folder tree. */
+  file_list_view: FileListView;
+  /** Show a confirmation dialog before discarding workdir changes. */
+  confirm_discard: boolean;
+  /** Visual tab width used when rendering diff lines containing `\t`.
+   *  Clamped to [1, 16] at read; persisted as-is. */
+  tab_width: number;
 }
 
 export interface GraphConfig {
@@ -27,6 +31,8 @@ export interface GraphConfig {
   show_tags: boolean;
   /** When false the entire history is loaded at once (no lazy-load on scroll). */
   paginate: boolean;
+  /** Render the ticket-link chip column in the commit graph. */
+  ticket_links_enabled: boolean;
 }
 
 export interface CacheConfig {
@@ -79,13 +85,58 @@ export interface PipelinesConfig {
   max_concurrent_runs: number;
 }
 
+export type WindowControlsStyle = 'mac' | 'windows';
+export type AnimSpeed = 'fast' | 'normal' | 'slow';
+export type ActivityBarPosition = 'left' | 'right' | 'hidden';
+
+/** Visual tweaks that don't belong to theme or layout: window-control button
+ *  style, global font scale, and the opt-in for per-theme font preferences. */
+export interface AppearanceConfig {
+  window_controls_style: WindowControlsStyle;
+  /** Global UI font scale multiplier applied to `--font-scale`. */
+  font_scale: number;
+  /** When true the active theme's `--theme-font-*` win over the global font stack. */
+  use_theme_fonts: boolean;
+  /** Position of the built-in activity bar. `hidden` collapses it and
+   *  reveals it on hover of the left edge. */
+  activity_bar_position: ActivityBarPosition;
+  /** Reduced title-bar height + tighter padding. */
+  compact_title_bar: boolean;
+}
+
+/** UI animation preferences. `enabled=false` collapses every transition
+ *  duration to 0ms; `speed` scales the base durations otherwise. */
+export interface AnimationsConfig {
+  enabled: boolean;
+  speed: AnimSpeed;
+}
+
+/** Host-wide commit preferences. Per-repo overrides live in
+ *  `.arbor/config.toml`; this is the global fallback. */
+export interface CommitConfig {
+  /** Fallback commit-message template used when the repo has no native
+   *  `commit.template` configured. Empty string disables the template. */
+  template_global: string;
+}
+
+/** First-run onboarding tour state. Persisted so the welcome wizard
+ *  only auto-pops the very first time. `version` is a schema knob: when
+ *  we add meaningful new steps the frontend bumps the current version
+ *  and the modal re-opens for users on an older one. */
+export interface OnboardingConfig {
+  completed: boolean;
+  version:   number;
+}
+
 export interface AppConfig {
   theme: ThemeConfig;
-  layout: LayoutConfig;
   diff: DiffConfig;
   graph: GraphConfig;
   recent_repos: string[];
   cache: CacheConfig;
   activity_bar: ActivityBarConfig;
   mr: MrConfig;
+  appearance: AppearanceConfig;
+  animations: AnimationsConfig;
+  commit: CommitConfig;
 }

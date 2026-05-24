@@ -12,7 +12,7 @@ use super::PluginHost;
 use crate::plugin::runtime::consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION};
 use crate::plugin::runtime::loaded::{DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter};
 use crate::plugin::runtime::manifest::{
-    PluginManifest, discover_plugins, load_plugin_states, plugin_dir,
+    PluginManifest, discover_plugins_detailed, load_plugin_states, plugin_dir,
     save_plugin_states, topo_sort_manifests,
 };
 use crate::plugin::runtime::manifest::deps::PluginLoadFailure;
@@ -70,7 +70,32 @@ impl PluginHost {
         self.unload_all();
 
         let states = load_plugin_states();
-        let all_manifests = discover_plugins()?;
+        let (all_manifests, bad_manifests) = discover_plugins_detailed()?;
+
+        // Surface manifest parse failures the same way we surface load
+        // failures: list them in the Plugin Manager AND drop a line in the
+        // Plugin Logs panel so the author isn't left guessing why their
+        // plugin folder is being ignored.
+        for bad in bad_manifests {
+            tracing::warn!(
+                "plugin folder '{}' skipped: manifest parse error — {}",
+                bad.folder_name, bad.error
+            );
+            self.load_failures.retain(|f| f.name != bad.folder_name);
+            self.load_failures.push(PluginLoadFailure {
+                name:        bad.folder_name.clone(),
+                version:     String::new(),
+                description: String::new(),
+                author:      String::new(),
+                error:       format!("plugin.toml parse error: {}", bad.error),
+            });
+            if let Some(ref h) = self.app_handle {
+                crate::plugin_logs::record(
+                    h, "error", &bad.folder_name,
+                    format!("plugin.toml parse error: {}", bad.error),
+                );
+            }
+        }
 
         // Sort topologically so dependencies are loaded before dependents.
         let (sorted, cycle_names) = topo_sort_manifests(all_manifests);
@@ -251,7 +276,45 @@ impl PluginHost {
     // Enable / Disable
     // -----------------------------------------------------------------------
 
-    pub fn enable_plugin(&mut self, name: &str) -> Result<()> {
+    /// Enable `name` and every transitively-required dep that's currently off.
+    /// Refuses to proceed (returns an error listing the blockers) when a
+    /// required dep is missing or won't load.
+    ///
+    /// Returns the ordered list of plugin names that were actually enabled
+    /// (deps first, target last). The caller (IPC layer) doesn't use it
+    /// today, but it makes manual scripting + tests far easier to read.
+    pub fn enable_plugin(&mut self, name: &str) -> Result<Vec<String>> {
+        let blockers = self.compute_enable_blockers(name);
+        if !blockers.is_empty() {
+            let summary = blockers.iter()
+                .map(|b| format!("'{}' ({})", b.name, b.reason))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(AppError::Other(format!(
+                "cannot enable '{name}': required dependencies unavailable — {summary}"
+            )));
+        }
+        let plan = self.compute_enable_cascade(name);
+        if plan.is_empty() {
+            // Two reasons the cascade can be empty: target is already on
+            // (no-op) or doesn't exist on disk at all (surface as error so
+            // the UI doesn't quietly succeed).
+            let exists = self.plugins.iter().any(|p| p.manifest.name == name)
+                || self.dormant.iter().any(|d| d.manifest.name == name);
+            if !exists {
+                return Err(AppError::Other(format!("plugin '{name}' not found")));
+            }
+            return Ok(Vec::new());
+        }
+        for plugin_name in &plan {
+            self.enable_one_plugin(plugin_name)?;
+        }
+        Ok(plan)
+    }
+
+    /// Single-plugin enable — the old `enable_plugin` body. Reused by the
+    /// cascade wrapper above; not called directly by the IPC layer.
+    fn enable_one_plugin(&mut self, name: &str) -> Result<()> {
         // Branch 1 — plugin already in `self.plugins` (was disabled mid-session
         // and the Lua VM is still alive). Flip the flag, re-arm schedulers,
         // and re-fire `on_plugin_load` so any side-effecting setup the plugin
@@ -345,7 +408,37 @@ impl PluginHost {
         Ok(())
     }
 
-    pub fn disable_plugin(&mut self, name: &str) -> Result<()> {
+    /// Disable `name` and every transitively-enabled plugin that requires
+    /// it. Order is leaves-first so dependents stop before their target,
+    /// keeping the hook stream consistent (no `on_*` from a dependent against
+    /// an already-disabled dep). Returns the list of plugin names that were
+    /// actually disabled — empty when `name` was already off or unknown.
+    pub fn disable_plugin(&mut self, name: &str) -> Result<Vec<String>> {
+        // Idempotent on "already off": compute_disable_cascade returns empty
+        // when `name` isn't currently enabled, so we'd otherwise re-fire
+        // `on_plugin_unload` on something that already ran it.
+        let is_live_enabled = self.plugins.iter()
+            .any(|p| p.manifest.name == name && p.is_enabled());
+        let is_known = self.plugins.iter().any(|p| p.manifest.name == name)
+            || self.dormant.iter().any(|d| d.manifest.name == name);
+        if !is_live_enabled {
+            if !is_known {
+                return Err(AppError::Other(format!("plugin '{name}' not found")));
+            }
+            return Ok(Vec::new());
+        }
+
+        let plan = self.compute_disable_cascade(name);
+        for plugin_name in &plan {
+            self.disable_one_plugin(plugin_name)?;
+        }
+        Ok(plan)
+    }
+
+    /// Single-plugin disable — the old `disable_plugin` body. Reused by the
+    /// cascade wrapper above and by `delete_plugin` (which disables dependents
+    /// before removing the target's folder).
+    fn disable_one_plugin(&mut self, name: &str) -> Result<()> {
         let plugin = self.plugins.iter_mut()
             .find(|p| p.manifest.name == name)
             .ok_or_else(|| AppError::Other(format!("plugin '{name}' not found")))?;
@@ -398,8 +491,34 @@ impl PluginHost {
     /// (RepoManager + RepoRegistry) while holding the plugin-host lock.
     /// Filesystem failures are collected and returned as warnings — the
     /// uninstall is best-effort once the in-memory state has been cleared.
+    /// Cascade-disable required dependents of `name` (without disabling
+    /// `name` itself). Used by both the Plugin Manager's uninstall path and
+    /// the Marketplace uninstall path before the plugin's folder is removed.
+    /// Returns the names that were actually disabled (best-effort: a
+    /// single-plugin disable failure is swallowed so the uninstall still
+    /// proceeds — the next reload will reconcile).
+    pub fn disable_required_dependents(&mut self, name: &str) -> Vec<String> {
+        let cascade = self.compute_disable_cascade(name);
+        let mut disabled = Vec::new();
+        for dep in cascade.iter().filter(|n| n.as_str() != name) {
+            if self.disable_one_plugin(dep).is_ok() {
+                disabled.push(dep.clone());
+            }
+        }
+        disabled
+    }
+
     pub fn delete_plugin(&mut self, name: &str, repo_paths: &[String]) -> Result<Vec<String>> {
         let mut warnings: Vec<String> = Vec::new();
+
+        // Step 0: cascade-disable required dependents BEFORE we delete the
+        // target's folder. Without this, dependents stay enabled with a
+        // vanished service/hook target until the next reload — IPCs that go
+        // through `service.call` start returning "plugin not found" errors
+        // and the dependent author has no signal that anything went wrong.
+        // Dependents are only disabled (not uninstalled); the user can
+        // re-enable / uninstall them separately.
+        let _ = self.disable_required_dependents(name);
 
         // Step 1: detach the live plugin (if any) so its hooks/timers/
         // schedulers stop firing before we touch disk.

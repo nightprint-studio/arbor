@@ -8,7 +8,7 @@
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
-  import BrandIcon from '$lib/components/shared/ui/BrandIcon.svelte';
+  import BrandIcon from '$lib/components/shared/internal/BrandIcon.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';

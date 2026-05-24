@@ -77,7 +77,7 @@ import {
   Variable, ScrollText,
   // Misc
   CircleSlash, MoreVertical, MoreHorizontal,
-  Plug, Unplug, Cpu, Crosshair, Sparkles, Palette, Rewind, StopCircle,
+  Plug, Unplug, Cpu, Crosshair, Sparkles, Palette, Rewind, StopCircle, Store,
   // Game / inspection
   Gamepad, Gamepad2, ScanLine, Joystick, Pin, PinOff,
 } from 'lucide-svelte';
@@ -125,6 +125,6 @@ export const PLUGIN_ICONS: Record<string, any> = {
   AlignJustify, AlignEndHorizontal, Replace, Scissors,
   Variable, ScrollText,
   CircleSlash, MoreVertical, MoreHorizontal,
-  Plug, Unplug, Cpu, Crosshair, Sparkles, Palette, Rewind, StopCircle,
+  Plug, Unplug, Cpu, Crosshair, Sparkles, Palette, Rewind, StopCircle, Store,
   Gamepad, Gamepad2, ScanLine, Joystick, Pin, PinOff,
 };

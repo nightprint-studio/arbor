@@ -5,6 +5,7 @@
     Search, Check, X, SkipForward, Link2,
   } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import ContextMenu, { type MenuItem } from '../shared/ContextMenu.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -14,7 +15,8 @@
   import { pluginStore }       from '$lib/stores/plugin.svelte';
   import { ticketLinksStore } from '$lib/stores/ticket_links.svelte';
   import { bisectStore } from '$lib/stores/bisect.svelte';
-  import { checkoutCommit, resetToCommit } from '$lib/ipc/branch';
+  import { checkoutCommitSafe, resetToCommit } from '$lib/ipc/branch';
+  import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import { pushBranch, openInBrowser } from '$lib/ipc/remote';
   import { cherryPick, revertCommit } from '$lib/ipc/stage';
   import { getGraph } from '$lib/ipc/graph';
@@ -118,8 +120,11 @@
           const shortOid = node.short_oid;
           const tabId    = tab.id;
           onClose();
-          await checkoutCommit(tabId, oid);
-          uiStore.showToast(`Checked out ${shortOid}`, 'success');
+          const result = await checkoutCommitSafe(tabId, oid);
+          handleCheckoutResult(result, {
+            targetLabel:    shortOid,
+            successMessage: `Checked out ${shortOid}`,
+          });
           await refresh();
           return;
         }
@@ -202,16 +207,13 @@
         }
 
         case 'copy-sha':
-          await navigator.clipboard.writeText(node.oid);
-          uiStore.showToast('SHA copied', 'info');
+          await copyToClipboard(node.oid, { successToast: 'SHA copied' });
           break;
         case 'copy-short':
-          await navigator.clipboard.writeText(node.short_oid);
-          uiStore.showToast('Short SHA copied', 'info');
+          await copyToClipboard(node.short_oid, { successToast: 'Short SHA copied' });
           break;
         case 'copy-message':
-          await navigator.clipboard.writeText(node.summary);
-          uiStore.showToast('Message copied', 'info');
+          await copyToClipboard(node.summary, { successToast: 'Message copied' });
           break;
 
         case 'open-browser':

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { Settings, BookOpen, LayoutDashboard, Palette, Check } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
@@ -9,13 +8,14 @@
   import MenuBar from './MenuBar.svelte';
   import Contribution from '$lib/components/shared/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
-  import ArborLogo    from '$lib/components/shared/ui/ArborLogo.svelte';
-  import Kbd          from '$lib/components/shared/ui/Kbd.svelte';
+  import ArborLogo    from '$lib/components/shared/internal/ArborLogo.svelte';
+  import Kbd          from '$lib/components/shared/internal/Kbd.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   // Title bar buttons sit at the very top — tooltips fly downward away from
   // the bar, never above (they'd be clipped by the window edge).
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
   import CustomizeActivityBarModal from './CustomizeActivityBarModal.svelte';
+  import WindowControls from './WindowControls.svelte';
   import WorkspaceDropdown from '../workspace/WorkspaceDropdown.svelte';
 
   interface Props {
@@ -75,19 +75,6 @@
     }
   }
 
-  const appWindow = getCurrentWindow();
-  let isMaximized = $state(false);
-
-  $effect(() => {
-    let active = true;
-    let unlisten: (() => void) | null = null;
-    appWindow.isMaximized().then(m => { if (active) isMaximized = m; });
-    appWindow.onResized(async () => {
-      const m = await appWindow.isMaximized();
-      if (active) isMaximized = m;
-    }).then(fn => { if (active) unlisten = fn; else fn(); });
-    return () => { active = false; unlisten?.(); };
-  });
 
 </script>
 
@@ -232,30 +219,9 @@
 
     <div class="ctrl-sep"></div>
 
-    <!-- Mac-style window controls (leftmost) -->
-    <div class="window-controls no-drag">
-      <button class="wc-btn wc-close"    onclick={() => appWindow.close()}          use:tooltip={'Close'}    aria-label="Close window">
-        <svg class="wc-icon" width="7" height="7" viewBox="0 0 7 7" fill="none" aria-hidden="true">
-          <path d="M1 1l5 5M6 1L1 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-        </svg>
-      </button>
-      <button class="wc-btn wc-minimize" onclick={() => appWindow.minimize()}       use:tooltip={'Minimize'} aria-label="Minimize">
-        <svg class="wc-icon" width="7" height="7" viewBox="0 0 7 7" fill="none" aria-hidden="true">
-          <path d="M1 3.5h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-        </svg>
-      </button>
-      <button class="wc-btn wc-maximize" onclick={() => appWindow.toggleMaximize()} use:tooltip={isMaximized ? 'Restore' : 'Maximize'} aria-label={isMaximized ? 'Restore' : 'Maximize'}>
-        {#if isMaximized}
-          <svg class="wc-icon" width="7" height="7" viewBox="0 0 7 7" fill="none" aria-hidden="true">
-            <path d="M2.5 1H6v3.5M1 2.5V6h3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        {:else}
-          <svg class="wc-icon" width="7" height="7" viewBox="0 0 7 7" fill="none" aria-hidden="true">
-            <path d="M1 3.5h5M3.5 1v5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-          </svg>
-        {/if}
-      </button>
-    </div>
+    <!-- Window controls (close/minimize/maximize). Style is user-controlled
+         from Appearance settings; dimensions and position stay constant. -->
+    <WindowControls />
   </div>
 </div>
 
@@ -263,7 +229,7 @@
   .titlebar {
     display: flex;
     align-items: center;
-    height: 42px;
+    height: var(--titlebar-h, 42px);
     background: var(--bg-elevated);
     padding: 0;
     flex-shrink: 0;
@@ -271,6 +237,16 @@
     position: relative;
     z-index: 100;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    transition: height var(--anim-dur-base) ease;
+  }
+  /* Compact title bar — shrinks icon-buttons to match the smaller height,
+     keeping the chrome visually proportional. */
+  :global([data-compact-title-bar="true"]) .icon-btn {
+    width: 26px;
+    height: 26px;
+  }
+  :global([data-compact-title-bar="true"]) .ctrl-sep {
+    height: 14px;
   }
 
   .no-drag { -webkit-app-region: no-drag; display: contents; }
@@ -290,41 +266,6 @@
     padding: 0 8px 0 8px;
     flex-shrink: 0;
   }
-
-  /* ── Mac-style window controls ──────────────────────────────── */
-  .window-controls {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 0 14px;
-    height: 100%;
-    flex-shrink: 0;
-    -webkit-app-region: no-drag;
-  }
-
-  .wc-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    border: none;
-    cursor: pointer;
-    color: transparent;
-    transition: color var(--transition-fast), filter var(--transition-fast);
-    flex-shrink: 0;
-    padding: 0;
-    -webkit-app-region: no-drag;
-  }
-  .wc-btn:hover .wc-icon { color: rgba(0,0,0,0.6); }
-  .wc-close    { background: #ff5f57; }
-  .wc-minimize { background: #ffbd2e; }
-  .wc-maximize { background: #28ca41; }
-  .wc-close:hover    { filter: brightness(0.82); }
-  .wc-minimize:hover { filter: brightness(0.82); }
-  .wc-maximize:hover { filter: brightness(0.82); }
-  .wc-icon { display: block; pointer-events: none; }
 
   .ctrl-sep {
     width: 1px;

@@ -2,23 +2,23 @@
   import { highlight } from '$lib/utils/diff-formatter';
 </script>
 
-<h1>Plugin Development â€” Toolchains</h1>
-<p>The toolchain API manages versioned runtime installations (JDKs, Node.js, Rust toolchains). Entries are stored per-kind at <code>~/.config/arbor/toolchains/&lt;kind&gt;.json</code>. One entry per kind can be marked <em>active</em> â€” it is used automatically when no more specific selection is set.</p>
+<h1>Plugin Development — Toolchains</h1>
+<p>The toolchain API manages versioned runtime installations (JDKs, Node.js, Rust toolchains). Entries are stored per-kind at <code>~/.config/arbor/toolchains/&lt;kind&gt;.json</code>. One entry per kind can be marked <em>active</em> — it is used automatically when no more specific selection is set.</p>
 
 <h2>Sharing settings between plugins</h2>
 <p>Two complementary mechanisms cover cross-plugin settings access:</p>
 <ul>
-  <li><strong>Cross-plugin reads</strong> â€” declare <code>settings_read_others = true</code> in <code>[permissions]</code> and call <code>arbor.settings.read("other-plugin", "key")</code> / <code>arbor.settings.read_project(...)</code>.</li>
-  <li><strong>Cross-plugin writes</strong> â€” the target plugin opts in by exposing a service via <code>arbor.service.export(&#123; name = ..., handler = ... &#125;)</code>; the caller invokes it through <code>arbor.service.call</code>. Writing without consent is not supported.</li>
-  <li><strong>Shared settings UI</strong> â€” a member plugin can contribute sections to another plugin's settings panel via <code>arbor.ui.contribute("&lt;owner&gt;:settings:section", ...)</code>. Each plugin still owns its own settings store.</li>
+  <li><strong>Cross-plugin reads</strong> — declare <code>settings_read_others = true</code> in <code>[permissions]</code> and call <code>arbor.settings.read("other-plugin", "key")</code> / <code>arbor.settings.read_project(...)</code>.</li>
+  <li><strong>Cross-plugin writes</strong> — the target plugin opts in by exposing a service via <code>arbor.service.export(&#123; name = ..., handler = ... &#125;)</code>; the caller invokes it through <code>arbor.service.call</code>. Writing without consent is not supported.</li>
+  <li><strong>Shared settings UI</strong> — a member plugin can contribute sections to another plugin's settings panel via <code>arbor.ui.contribute("&lt;owner&gt;:settings:section", ...)</code>. Each plugin still owns its own settings store.</li>
 </ul>
 
-<h2>arbor.toolchain â€” runtime toolchains</h2>
+<h2>arbor.toolchain — runtime toolchains</h2>
 
 <h3>Permissions required</h3>
 <ul>
-  <li><code>toolchain = "read"</code> â€” for <code>list</code>, <code>active</code>, <code>env</code>, <code>detect</code></li>
-  <li><code>toolchain = "write"</code> â€” for <code>add</code>, <code>remove</code>, <code>set_active</code> (implies read)</li>
+  <li><code>toolchain = "read"</code> — for <code>list</code>, <code>active</code>, <code>env</code>, <code>detect</code></li>
+  <li><code>toolchain = "write"</code> — for <code>add</code>, <code>remove</code>, <code>set_active</code> (implies read)</li>
 </ul>
 
 <pre class="language-toml">{@html highlight(`# plugin.toml
@@ -90,4 +90,4 @@ arbor.events.on("my_plugin:set_profile", function(ctx)
 end)
 `, 'lua')}</pre>
 
-<p>Semantic <code>color</code> values: <code>"dev"</code> â†’ green, <code>"prod"</code> â†’ red, <code>"test"</code> â†’ accent blue, <code>"none"</code> â†’ muted. Any other value falls back to the default accent style.</p>
+<p>Semantic <code>color</code> values: <code>"dev"</code> → green, <code>"prod"</code> → red, <code>"test"</code> → accent blue, <code>"none"</code> → muted. Any other value falls back to the default accent style.</p>

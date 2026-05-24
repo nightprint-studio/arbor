@@ -9,6 +9,7 @@
   } from 'lucide-svelte';
   import Icon from '@iconify/svelte';
   import { getFileIcon, getFolderIcon } from '$lib/utils/file-icons';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { langColour, languageEntries } from '$lib/utils/language-colours';
   import { highlight, getLanguage } from '$lib/utils/diff-formatter';
   import { repoBrowserStore } from '$lib/stores/repoBrowser.svelte';
@@ -153,8 +154,7 @@
   // ── Copy file content ─────────────────────────────────────────────────────
   async function copyFileContent() {
     if (!store.fileContent?.content) return;
-    await navigator.clipboard.writeText(store.fileContent.content);
-    uiStore.showToast('Copied to clipboard', 'success');
+    await copyToClipboard(store.fileContent.content, { successToast: 'Copied to clipboard' });
   }
 
   // ── Format helpers ────────────────────────────────────────────────────────
@@ -1723,11 +1723,4 @@
     overflow: visible;
   }
 
-  /* Spinner */
-  :global(.spin) {
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
 </style>

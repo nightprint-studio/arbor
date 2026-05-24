@@ -99,6 +99,10 @@ impl PluginHost {
         let payload_lua = plugin.lua.to_value(payload).unwrap_or(mlua::Value::Nil);
         if let Err(e) = cb.call::<mlua::Value>((ok, payload_lua)) {
             tracing::warn!(target: "plugin", "service callback error in '{caller}': {e}");
+            crate::plugin::lua_ctx::record(
+                &plugin.lua, "error",
+                format!("service callback error: {e}"),
+            );
         }
     }
 

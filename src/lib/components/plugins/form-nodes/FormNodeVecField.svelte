@@ -8,7 +8,7 @@
   plugin owns the round-trip.
 -->
 <script lang="ts">
-  import TypePill from '$lib/components/shared/ui/TypePill.svelte';
+  import TypePill from '$lib/components/shared/internal/TypePill.svelte';
   import type { FormNode } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
 

@@ -206,7 +206,6 @@
     display: flex;
     color: var(--text-muted);
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   .split-layout {
     display: flex;

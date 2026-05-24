@@ -22,8 +22,7 @@
 
 import type { GraphData, CommitDetail, BranchInfo, TagInfo, StashEntry, SubmoduleInfo } from '$lib/types/git';
 import type { CiProviderInfo, CiRun, PipelineDef, PipelineRun } from '$lib/types/pipeline';
-import type { MergeRequest } from '$lib/types/mr';
-import type { MergedMrHint } from '$lib/types/mr';
+import type { MergeRequest, MergedMrHint, MrFeatureStatus } from '$lib/types/mr';
 import type { CacheConfig } from '$lib/types/config';
 
 import { getGraph, getGraphForFile, getCommitDetail, getRepoFingerprint } from '$lib/ipc/graph';
@@ -31,7 +30,7 @@ import { listLocalBranches, listRemoteBranches, listStashes, listTags, getNeares
 import { listSubmodules } from '$lib/ipc/submodule';
 import { getMergedMrHints } from '$lib/ipc/mr';
 import { getCiProvider, fetchCiRuns, listPipelineDefs, listPipelineRuns } from '$lib/ipc/pipeline';
-import { listMrs } from '$lib/ipc/mr';
+import { listMrs, probeMrFeature } from '$lib/ipc/mr';
 import { getCacheConfig, setCacheConfig, evictTabCache } from '$lib/ipc/config';
 import { registerInvalidateHandler } from '$lib/ipc/cache-invalidate';
 
@@ -56,6 +55,8 @@ interface TabSnapshot {
   pipelineRuns:   PipelineRun[] | null;
   mrLists:        Partial<Record<'open' | 'closed' | 'merged' | 'all', MergeRequest[]>>;
   mrProviderInfo: CiProviderInfo | null | undefined;
+  /** Whether the remote accepts MR/PRs. `undefined` = not yet probed. */
+  mrFeature:      MrFeatureStatus | undefined;
   fingerprint:    string | null;
   lastRefreshed:  number; // ms since epoch
   lruTick:        number; // higher = more recently used
@@ -154,6 +155,7 @@ function createCacheStore() {
         pipelineRuns:   null,
         mrLists:        {},
         mrProviderInfo: undefined,
+        mrFeature:      undefined,
         fingerprint:    null,
         lastRefreshed:  0,
         lruTick:        ++lruCounter,
@@ -344,6 +346,37 @@ function createCacheStore() {
     const info = await getCiProvider(tabId).catch(() => null);
     snap.mrProviderInfo = info;
     return info;
+  }
+
+  /** Probe whether the remote accepts MR/PRs. Cached per tab; invalidated on
+   *  `invalidate(tabId)` and on explicit `force = true` (sidebar refresh). */
+  async function loadMrFeature(
+    tabId: string,
+    force = false,
+  ): Promise<MrFeatureStatus> {
+    const fallback: MrFeatureStatus = { enabled: true, reason: null };
+    if (!config.enabled) {
+      return probeMrFeature(tabId).catch(() => fallback);
+    }
+
+    const snap = _getOrCreate(tabId);
+    if (!force && snap.mrFeature !== undefined) {
+      _touch(tabId);
+      return snap.mrFeature;
+    }
+
+    const status = await probeMrFeature(tabId).catch(() => fallback);
+    snap.mrFeature = status;
+    return status;
+  }
+
+  /** Force-set the cached MR feature status. Used by mrStore.load() when
+   *  list_mrs surfaces a 404 — the lightweight `archived/disabled` probe
+   *  can't cover every cause (fork-mirrors, branch-protection blocking PRs)
+   *  so we let the real call retroactively flip the cache. */
+  function setMrFeature(tabId: string, status: MrFeatureStatus) {
+    const snap = _getOrCreate(tabId);
+    snap.mrFeature = status;
   }
 
   async function loadCommitDetail(tabId: string, oid: string): Promise<CommitDetail> {
@@ -575,6 +608,8 @@ function createCacheStore() {
     loadPipelineData,
     loadMrList,
     loadMrProvider,
+    loadMrFeature,
+    setMrFeature,
     loadCommitDetail,
 
     // Invalidation

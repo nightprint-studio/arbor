@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Deep Links (<code>arbor://</code>)</h1>
 
 <p class="doc-lead">
@@ -7,13 +11,12 @@
   to the foreground (single-instance), or starts cold if it isn't running yet.
 </p>
 
-<div class="callout warning">
-  <strong>Off by default.</strong>
+<Callout variant="warning" title="Off by default.">
   Deep links are disabled out of the box and every action kind is individually opt-in.  An
   incoming URL on a fresh install is intercepted and shown as a "Deep Link Blocked" modal.
   Turn the master switch on in <strong>Settings → Tools → Deep Links → Master switch</strong>,
   then enable each action you want to accept under <strong>Enabled actions</strong>.
-</div>
+</Callout>
 
 <h2>URL shape</h2>
 

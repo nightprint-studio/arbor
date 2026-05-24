@@ -508,6 +508,4 @@
   }
   .btn-primary:hover { background: var(--accent-hover); }
 
-  @keyframes spin { to { transform: rotate(360deg); } }
-  :global(.spin) { animation: spin 0.8s linear infinite; }
 </style>

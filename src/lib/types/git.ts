@@ -299,6 +299,14 @@ export interface CheckoutResult {
   pre_checkout_stash: StashEntry | null;
   /** Set when stash re-apply failed for a non-conflict reason. Stash is preserved at index 0. */
   stash_apply_error?: string;
+  /** Populated by `checkoutRemoteAsLocalSafe` — short name of the created/reused
+   *  local tracking branch. `null` for branch / commit checkouts. Lets callers
+   *  update the tab badge even when stash apply produced conflicts. */
+  resolved_local_name?: string | null;
+  /** True when the backend stashed before the checkout. Survives the clean-apply
+   *  path (where `pre_checkout_stash` is reset to null after the apply drops
+   *  the entry) so the success toast can mention the round-trip. */
+  did_stash?: boolean;
 }
 
 export interface PullResult {

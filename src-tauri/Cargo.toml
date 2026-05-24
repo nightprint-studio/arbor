@@ -1,11 +1,11 @@
 [package]
 name        = "arbor"
-version     = "0.1.0"
 description = "Arbor — Git GUI Client"
-authors     = ["Nightprint Studio"]
-edition     = "2021"
-rust-version = "1.80"
-license     = "GPL-3.0-only"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
 
 [lib]
 name = "arbor_lib"
@@ -34,36 +34,24 @@ deep-link-dev = []
 # Schannel, libgit2 uses WinHTTP).
 vendored-openssl = ["dep:openssl-sys"]
 
-# Release profile — tuned for shipping a desktop binary, not for build speed.
-# `lto = "thin"` keeps link times reasonable while still inlining across
-# crates; `codegen-units = 1` lets the optimiser see the full crate at once.
-#
-# NOTE — `panic = "unwind"` + `strip = false` + `debug = 1` are NOT the
-# typical "shipping" choices but are deliberate here: setting them to the
-# usual aggressive `panic = "abort"` + `strip = true` (no `debug`) makes the
-# release binary crash silently at startup on at least one supported
-# environment.  We never bisected which of the three is the real culprit —
-# possibly an interaction between a vendored native dep (libgit2 or Lua),
-# LTO, and stripped panic landing pads.  Until that's diagnosed:
-#   · keep panic = "unwind" so any panic prints a message before death,
-#   · keep strip = false so backtraces resolve to symbol names,
-#   · keep debug = 1 (line tables only) so stack traces include file:line.
-# The binary is somewhat larger than a fully-stripped build but starts up
-# correctly. Revisit once a reproducer for the silent crash exists.
-[profile.release]
-opt-level     = "s"
-lto           = "thin"
-codegen-units = 1
-strip         = "debuginfo"
-panic         = "unwind"
-debug         = 1
+# NOTE — the [profile.release] section moved to the workspace root
+# Cargo.toml (../Cargo.toml) when this crate became a workspace member.
+# Cargo only honours profile sections at the workspace root and silently
+# ignores them in member crates. The rationale for the chosen settings
+# (panic=unwind, strip=debuginfo, debug=1) is preserved in the root file's
+# comment block — see "[profile.release]" there.
 
 [build-dependencies]
 tauri-build = { version = "2.6.1", features = [] }
 
 [dependencies]
+# --- Arbor crates (split out of this crate, see ../Cargo.toml workspace) ---
+arbor-process-ext = { path = "../crates/arbor-process-ext" }
+arbor-cloud       = { path = "../crates/arbor-cloud" }
+arbor-auth        = { path = "../crates/arbor-auth" }
+
 # --- Tauri ---
-tauri             = { version = "2.11.0", features = ["tray-icon", "image-png", "image-ico"] }
+tauri             = { workspace = true }
 tauri-plugin-opener       = "2.5.4"
 tauri-plugin-notification = "2.3.3"
 # Deep-link `arbor://…` URL handling.  The `deep-link` feature of the
@@ -82,19 +70,19 @@ similar = { version = "2",    features = ["text", "unicode", "bytes", "inline"] 
 mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send"] }
 
 # --- Async ---
-tokio        = { version = "1", features = ["full"] }
+tokio        = { workspace = true }
 # Used for `StreamExt::next()` when streaming HTTP bodies (e.g. attachment downloads).
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+futures-util = { workspace = true }
 # Required by `git_provider::GitProvider` trait — async fns in traits via macro.
-async-trait  = "0.1"
+async-trait  = { workspace = true }
 
 # --- Auth / HTTP ---
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "stream"] }
+keyring = { workspace = true }
+reqwest = { workspace = true }
 
 # --- Serialization ---
-serde      = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde      = { workspace = true }
+serde_json = { workspace = true }
 # SIMD-accelerated JSON parser. Used ONLY by the json_studio plugin namespace
 # (`plugin/api/ns/json_studio.rs`) for parsing multi-MB documents into a lazy
 # tree the JSON Studio modal navigates without blocking the UI. Earmarked to
@@ -155,11 +143,11 @@ serde_yaml_ng = "0.10"
 # quote style, anchors, and tags survive the round-trip.
 yaml-edit = "0.2"
 quick-xml  = { version = "0.36", features = ["serialize"] }
-base64     = "0.22"
-sha2       = "0.10"
+base64     = { workspace = true }
+sha2       = { workspace = true }
 
 # --- Config / paths ---
-dirs   = "6.0.0"
+dirs   = { workspace = true }
 toml   = "0.8"
 # `toml_edit` — lossless TOML AST that preserves comments / whitespace /
 # inline-vs-block formatting natively. Used by `toml_studio` (Phase 4)
@@ -178,10 +166,10 @@ cron = "0.13"
 notify = "6"
 
 # --- Error handling ---
-thiserror = "2"
+thiserror = { workspace = true }
 
 # --- Logging ---
-tracing            = "0.1"
+tracing            = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # --- Terminal / PTY ---
@@ -195,42 +183,19 @@ zip          = "2"
 # (which would pop a visible "extracting…" dialog the user mistakes for a
 # Git-for-Windows installer). See `git_cli::download_portable`.
 sevenz-rust2 = "0.17"
-uuid     = { version = "1", features = ["v4"] }
+uuid     = { workspace = true }
 chrono   = { version = "0.4", features = ["serde"] }
 libc     = "0.2"
-regex    = "1"
+regex    = { workspace = true }
 # HTML sanitizer for issue tracker rendered descriptions/comments (Jira renderedFields).
 ammonia  = "4"
 
 # --- Cloud storage (cloud-storage plugin) ---
-# opendal — unified object-store client. Used ONLY by the cloud-storage plugin
-# namespace (`plugin/api/ns/cloud.rs`) and `src/cloud/*`. Same WASM-migration
-# earmark as simd-json: when the WASM plugin runtime lands, this whole module
-# (host commands + namespace + crates) is deleted and the plugin gets its own
-# WASM module that bundles opendal.  See: memory/project_cloud_storage_plugin.md
-#
-# Service-account JWT signing is handled by opendal internally; the user
-# OAuth flow uses the existing `oauth2` crate, and ADC/gcloud-CLI token
-# refresh uses the existing `reqwest` — so opendal is the only new dep.
-opendal = { version = "0.56", default-features = false, features = [
-  "services-gcs",
-  "services-s3",
-  "services-azblob",
-  # opendal-core's internal reqwest 0.13 is independent of our top-level
-  # reqwest 0.12 (different major → no feature unification). Without an
-  # explicit TLS feature here that reqwest gets no TLS backend at all, so
-  # every HTTPS call (notably reqsign's GCS / Azure / S3 OAuth token
-  # exchange) fails at request-signing time. opendal 0.56 only exposes
-  # `reqwest-rustls-tls` (no native-tls passthrough), so we use that.
-  "reqwest-rustls-tls",
-] }
-# opendal 0.56 transitively pulls jsonwebtoken 10 (replacing the vulnerable
-# jsonwebtoken 9, GHSA-h395-gr6q-cpjc / CVE-2026-25537). jsonwebtoken 10
-# switched its default crypto backend from `ring` to `aws-lc-rs`, which
-# compiles `aws-lc-sys` — and on Windows that build runs NASM + CMake unless
-# we opt in to the pre-built NASM object files. Enable that feature here so
-# the toolchain prereqs don't grow.
-aws-lc-sys = { version = "0.41", features = ["prebuilt-nasm"] }
+# opendal + the aws-lc-sys NASM-prebuilt pin live in `crates/arbor-cloud` as
+# of the Phase A split. The plugin host command layer (`commands/cloud_commands.rs`
+# + `plugin/api/ns/cloud.rs`) consumes the cloud crate via `arbor-cloud` above.
+# Same WASM-migration earmark applies — when the WASM plugin runtime lands,
+# the cloud crate + cloud_commands + ns/cloud.rs all get deleted together.
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [

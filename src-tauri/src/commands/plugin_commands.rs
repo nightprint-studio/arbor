@@ -100,6 +100,20 @@ pub fn get_plugin_directory() -> Result<String, AppError> {
     Ok(dir.to_string_lossy().to_string())
 }
 
+/// Resolve the on-disk folder of a discovered plugin by name. Walks the same
+/// discovery roots as the host (`plugin_dir()` first, then the marketplace
+/// install dir) and returns the directory whose manifest claims `name`. The
+/// folder name on disk can differ from the manifest's `name` (e.g. zip imports
+/// preserve the archive root), so the FE can't construct the path itself.
+#[tauri::command]
+pub fn get_installed_plugin_path(name: String) -> Result<String, AppError> {
+    let manifests = crate::plugin::runtime::discover_plugins()?;
+    let m = manifests.into_iter()
+        .find(|m| m.name == name)
+        .ok_or_else(|| AppError::Other(format!("plugin '{name}' is not installed")))?;
+    Ok(m.dir.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 pub fn reload_plugins(app_handle: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
     // Cancel all running plugin jobs before reloading so stale processes don't linger.
@@ -183,10 +197,30 @@ pub fn fire_plugin_action(
     host.fire_hook_on(&plugin_name, &action, &context_json)
 }
 
+/// Enable a plugin. Returns the ordered list of plugins that were actually
+/// enabled (transitive required deps + target). Returns an error when a
+/// required dep is missing or unloadable — call `plugin_enable_preview`
+/// first to detect blockers and prompt the user.
 #[tauri::command]
-pub fn enable_plugin(state: State<'_, AppState>, name: String) -> Result<(), AppError> {
+pub fn enable_plugin(state: State<'_, AppState>, name: String) -> Result<Vec<String>, AppError> {
     let mut host = state.lock_plugin_host()?;
     host.enable_plugin(&name)
+}
+
+/// Preview the enable cascade for `name`. `plan` is the ordered list of
+/// plugins that would be enabled (deps first, target last); `blockers`
+/// lists required deps that are missing, unloadable, or version-incompatible.
+/// When `blockers` is non-empty, `enable_plugin` will refuse to run.
+#[tauri::command]
+pub fn plugin_enable_preview(
+    state: State<'_, AppState>,
+    name:  String,
+) -> Result<crate::plugin::runtime::host::dep_cascade::EnablePreview, AppError> {
+    let host = state.lock_plugin_host()?;
+    Ok(crate::plugin::runtime::host::dep_cascade::EnablePreview {
+        plan:     host.compute_enable_cascade(&name),
+        blockers: host.compute_enable_blockers(&name),
+    })
 }
 
 /// Uninstall a plugin. Removes the folder under `plugins/`, wipes its
@@ -232,10 +266,25 @@ pub fn delete_plugin(
     Ok(warnings)
 }
 
+/// Disable a plugin. Returns the ordered list of plugins that were actually
+/// disabled — `name` plus every transitively-required dependent. Leaves-first
+/// order so dependents stop before their dep.
 #[tauri::command]
-pub fn disable_plugin(state: State<'_, AppState>, name: String) -> Result<(), AppError> {
+pub fn disable_plugin(state: State<'_, AppState>, name: String) -> Result<Vec<String>, AppError> {
     let mut host = state.lock_plugin_host()?;
     host.disable_plugin(&name)
+}
+
+/// Preview the disable cascade for `name`: every currently-enabled plugin
+/// that (transitively) requires it, leaves-first, with `name` last.
+/// Returns an empty list when `name` isn't currently enabled.
+#[tauri::command]
+pub fn plugin_disable_preview(
+    state: State<'_, AppState>,
+    name:  String,
+) -> Result<Vec<String>, AppError> {
+    let host = state.lock_plugin_host()?;
+    Ok(host.compute_disable_cascade(&name))
 }
 
 #[tauri::command]

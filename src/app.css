@@ -204,6 +204,16 @@ html, body { height: 100%; overflow: hidden; }
   --space-7:  24px;
   --space-8:  32px;
 
+  /* Title-bar height — single source of truth for the top chrome height.
+     Overridden by [data-compact-title-bar="true"] (28px) for users on
+     narrow laptops. */
+  --titlebar-h: 42px;
+
+  /* Diff visual tab width — written by diffStore.applyTabWidth from the
+     persisted DiffConfig.tab_width. Consumers apply `tab-size: var(--diff-tab-size)`
+     to any <pre>/code element that renders raw diff text. */
+  --diff-tab-size: 4;
+
   /* Animation system — durations overridden at runtime by animStore */
   --anim-dur-fast:    80ms;
   --anim-dur-base:    150ms;
@@ -229,7 +239,7 @@ html, body { height: 100%; overflow: hidden; }
      the foreground (icon glyph) MUST be hard-coded white (#fff) too, not
      `var(--text-on-accent)` — the latter is a theme token and may resolve
      to a dark colour in light themes, killing contrast on the absolute
-     brand fill. See `shared/ui/BrandTile.svelte` for the canonical tile.
+     brand fill. See `shared/internal/BrandTile.svelte` for the canonical tile.
   */
   --brand-github:        #24292e;
   --brand-github-green:  #238636;
@@ -341,7 +351,14 @@ body {
 }
 .btn-danger:hover { background: var(--error-subtle); border-color: var(--error); }
 
-/* ---- Mac-style close button (red dot) ---- */
+/* ---- Mac-style close button (red dot) ────────────────────────────────
+   Default look — small coloured circle in modal / panel headers. Behavior
+   swaps to a flat IntelliJ-style X glyph when the user picks the Windows
+   variant in Appearance settings; the swap is driven by an attribute on
+   the <html> element so the 15+ existing callsites don't need to change.
+   The button itself has no children (callers just set aria-label) — both
+   variants draw their visual via pseudo-elements / background.
+   ──────────────────────────────────────────────────────────────────── */
 .mac-close-btn {
   width: 13px;
   height: 13px;
@@ -351,10 +368,44 @@ body {
   cursor: pointer;
   flex-shrink: 0;
   padding: 0;
-  transition: filter var(--transition-fast);
+  transition: filter var(--transition-fast),
+              background var(--transition-fast),
+              color var(--transition-fast);
 }
 .mac-close-btn:hover  { filter: brightness(0.8); }
 .mac-close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Windows / IntelliJ variant — bigger, flat, glyph drawn via two rotated
+   pseudo-elements so no markup changes are needed. Red flash on hover for
+   the conventional close affordance. */
+[data-window-controls="windows"] .mac-close-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  position: relative;
+  filter: none;
+}
+[data-window-controls="windows"] .mac-close-btn::before,
+[data-window-controls="windows"] .mac-close-btn::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 50%;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+  pointer-events: none;
+}
+[data-window-controls="windows"] .mac-close-btn::before { transform: translateY(-50%) rotate(45deg); }
+[data-window-controls="windows"] .mac-close-btn::after  { transform: translateY(-50%) rotate(-45deg); }
+[data-window-controls="windows"] .mac-close-btn:hover {
+  background: #e81123;
+  color: #ffffff;
+  filter: none;
+}
 
 /* ---- Inputs ---- */
 .input {
@@ -783,3 +834,53 @@ input[type="radio"]:disabled {
 .token.property-number,
 .token.property-boolean { color: var(--syntax-number,  #9876aa); }
 .token.property-null    { color: var(--text-muted); }
+
+/* ================================================================
+   APPEARANCE OVERRIDES — driven by attributes on <html>, set by
+   `appearanceStore`. Lookups stay localised here so consumers don't
+   need to know about the data-attr contract.
+   ================================================================ */
+
+/* ---- Compact title bar ----
+   Shrinks the top chrome height and the icon-button square. The
+   TitleBar.svelte stylesheet references `var(--titlebar-h)` so the
+   override here is enough. */
+:root[data-compact-title-bar="true"] {
+  --titlebar-h: 28px;
+}
+
+/* ---- Activity bar position ----
+   `right` mirrors the workspace layout: the built-in (left) activity
+   bar floats to the right edge and the plugin (right) bar floats to
+   the left edge via `flex-direction: row-reverse` on `.workspace`.
+   `hidden` collapses the activity bar entirely; AppShell renders a
+   1-px hover-edge trigger that adds `[data-activity-bar-peek="true"]`
+   to <html> while the cursor sits over it, restoring the bar in place.
+*/
+:root[data-activity-bar-position="right"] .workspace {
+  flex-direction: row-reverse;
+}
+/* Mirror the inner panel order too, so the sidebar ends up adjacent to the
+   relocated activity bar instead of being stranded on the wrong side of
+   the editor card. */
+:root[data-activity-bar-position="right"] .panels {
+  flex-direction: row-reverse;
+}
+
+/* Edge trigger zones — rendered by AppShell only when the activity bar is
+   in `hidden` mode. Two independent 4-px sliders, one per edge: hovering
+   the left one peeks the built-in bar (DOM-leftmost), hovering the right
+   one peeks the plugin bar (DOM-rightmost). The mount / slide animation
+   itself lives in AppShell via the `barSlide` Svelte transition; the CSS
+   here only positions the trigger surfaces. */
+.activity-bar-edge-trigger {
+  position: fixed;
+  top: var(--titlebar-h);
+  bottom: 0;
+  width: 4px;
+  z-index: 50;
+  background: transparent;
+  cursor: pointer;
+}
+.activity-bar-edge-trigger.edge-left  { left: 0; }
+.activity-bar-edge-trigger.edge-right { right: 0; }

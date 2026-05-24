@@ -38,6 +38,14 @@ const RAW_HOST: &str = "https://raw.githubusercontent.com";
 /// Per-request timeout. Generous enough for a slow GitHub edge but short
 /// enough that the modal doesn't feel stuck.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
+/// Hard cap on entries per `index.json`. By construction no entry triggers
+/// further index fetches (External entries resolve to a single `plugin.toml`
+/// leaf, not another catalog), so the worst-case fan-out from one registry
+/// fetch is bounded by `2 * MAX_ENTRIES_PER_INDEX` HTTP requests (plugins +
+/// themes, in parallel). The cap is here as a defence against a degenerate
+/// or malicious index file slipping past PR review and exploding fetch
+/// traffic — the live catalog has ~20 entries today.
+const MAX_ENTRIES_PER_INDEX: usize = 1000;
 
 // ---------------------------------------------------------------------------
 // HTTP client
@@ -54,6 +62,15 @@ pub fn client() -> Result<reqwest::Client> {
 // ---------------------------------------------------------------------------
 // URL helpers
 // ---------------------------------------------------------------------------
+
+/// Canonical-form a GitHub URL (`https://github.com/{owner}/{repo}`) so two
+/// strings that point at the same repo compare equal — drops `.git`, the
+/// trailing slash, `http`-vs-`https` skew, and the casing of the host.
+/// Returns `None` for anything that isn't a recognisable GitHub URL.
+fn normalise_github_url(url: &str) -> Option<String> {
+    let (owner, repo) = parse_github_repo(url)?;
+    Some(github_url(&owner, &repo))
+}
 
 /// Parse `https://github.com/{owner}/{repo}[.git]` → (owner, repo).
 pub fn parse_github_repo(url: &str) -> Option<(String, String)> {
@@ -73,6 +90,89 @@ fn raw_url(owner: &str, repo: &str, r#ref: &str, path: &str) -> String {
     format!("{RAW_HOST}/{owner}/{repo}/{}/{p}", r#ref)
 }
 
+/// Resolved location an `IndexEntry` points at. Internal entries reuse the
+/// host registry's `(owner, repo)`; external entries parse their own `repo`
+/// URL. The downstream `fetch_*` calls take these primitives.
+struct EntryTarget {
+    owner:      String,
+    repo:       String,
+    subpath:    String,           // "" = root
+    r#ref:      String,           // resolved (defaulted to REGISTRY_REF)
+    pinned_sha: Option<String>,   // only ever Some for External entries
+    external:   bool,             // mirrored onto RegistryEntry post-fetch
+}
+
+fn resolve_entry_target(
+    entry:      &IndexEntry,
+    host_owner: &str,
+    host_repo:  &str,
+) -> EntryTarget {
+    match entry {
+        IndexEntry::Internal { subpath, r#ref } => EntryTarget {
+            owner:      host_owner.to_string(),
+            repo:       host_repo.to_string(),
+            subpath:    subpath.clone(),
+            r#ref:      r#ref.clone().unwrap_or_else(|| REGISTRY_REF.to_string()),
+            pinned_sha: None,
+            external:   false,
+        },
+        IndexEntry::External { repo, subpath, r#ref, pinned_sha } => {
+            // We tolerate a malformed `repo` field by surfacing it as
+            // (entry-level) owner="" repo=""; the fetch call that follows
+            // will fail with a clean HTTP error and the entry will be
+            // logged + skipped. That keeps error reporting in one place.
+            let (owner, repo_name) = parse_github_repo(repo)
+                .unwrap_or_else(|| (String::new(), String::new()));
+            EntryTarget {
+                owner,
+                repo:       repo_name,
+                subpath:    subpath.clone().unwrap_or_default(),
+                r#ref:      r#ref.clone().unwrap_or_else(|| REGISTRY_REF.to_string()),
+                pinned_sha: pinned_sha.clone(),
+                external:   true,
+            }
+        }
+    }
+}
+
+/// Resolve the actual commit SHA the ref currently points at and refuse to
+/// continue if it disagrees with the pin. Uses GitHub's unauthenticated
+/// commits endpoint — fine for catalog-fetch traffic, and the cache loop
+/// already coalesces refreshes.
+async fn verify_pinned_sha(
+    http:    &reqwest::Client,
+    owner:   &str,
+    repo:    &str,
+    r#ref:   &str,
+    pinned:  &str,
+) -> Result<()> {
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/commits/{}", r#ref);
+    #[derive(Deserialize)] struct Resp { sha: String }
+    let r: Resp = http.get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .send().await
+        .map_err(|e| AppError::Other(format!("pin verify GET {url}: {e}")))?
+        .error_for_status()
+        .map_err(|e| AppError::Other(format!("pin verify HTTP {url}: {e}")))?
+        .json().await
+        .map_err(|e| AppError::Other(format!("pin verify parse {url}: {e}")))?;
+    // Pins are SHAs; compare prefix-insensitively to allow short pins (≥7 hex).
+    let pin_norm = pinned.trim().to_lowercase();
+    let sha_norm = r.sha.to_lowercase();
+    if pin_norm.len() < 7 {
+        return Err(AppError::Other(format!(
+            "pinned_sha '{pinned}' is too short (need ≥7 hex chars)"
+        )));
+    }
+    if !sha_norm.starts_with(&pin_norm) {
+        return Err(AppError::Other(format!(
+            "pinned_sha mismatch on {owner}/{repo}@{}: expected '{pinned}', got '{}'",
+            r#ref, &sha_norm[..pin_norm.len().min(sha_norm.len())],
+        )));
+    }
+    Ok(())
+}
+
 fn join_subpath(subpath: &str, file: &str) -> String {
     let s = subpath.trim_end_matches('/');
     let f = file.trim_start_matches('/');
@@ -89,11 +189,33 @@ struct IndexFile {
     #[serde(default)] themes:  Vec<IndexEntry>,
 }
 
+/// An entry in the registry `index.json`. Two shapes, discriminated by the
+/// presence of the `repo` field:
+///
+///   * **Internal** — `{ "subpath": "plugins/foo", "ref"?: "…" }` — the
+///     plugin/theme lives inside the registry repo itself. This is the
+///     original shape and matches every entry shipped today.
+///   * **External** — `{ "repo": "https://github.com/owner/repo",
+///     "subpath"?: "…", "ref"?: "…", "pinned_sha"?: "…" }` — the
+///     plugin/theme lives in a third-party GitHub repo. The registry just
+///     points at it. Both shapes resolve to `MarketplaceSource::Community`
+///     (vetting happens via PR review on the registry repo itself);
+///     `pinned_sha` is the recommended-but-optional defence against
+///     tag-hijack on third-party repos.
 #[derive(Debug, Deserialize, Clone)]
-struct IndexEntry {
-    subpath: String,
-    #[serde(default)] #[serde(rename = "ref")]
-    r#ref:   Option<String>,
+#[serde(untagged)]
+enum IndexEntry {
+    External {
+        repo:                                          String,
+        #[serde(default)]                              subpath:    Option<String>,
+        #[serde(default)] #[serde(rename = "ref")]     r#ref:      Option<String>,
+        #[serde(default)]                              pinned_sha: Option<String>,
+    },
+    Internal {
+        subpath: String,
+        #[serde(default)] #[serde(rename = "ref")]
+        r#ref:   Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -137,25 +259,85 @@ pub async fn fetch_catalog(
         .json().await
         .map_err(|e| AppError::Other(format!("parse {index_url}: {e}")))?;
 
-    // Plugins — fetched in parallel.
-    let plugin_futs = index.plugins.iter().cloned().map(|entry| {
-        let http  = http.clone();
-        let owner = owner.clone();
-        let repo  = repo.clone();
-        let src   = source_kind;
+    // Defensive cap — see MAX_ENTRIES_PER_INDEX. We refuse the whole fetch
+    // rather than truncating: a registry this large is almost certainly
+    // broken, and partial results would silently hide entries the user
+    // expects to see.
+    if index.plugins.len() > MAX_ENTRIES_PER_INDEX
+        || index.themes.len() > MAX_ENTRIES_PER_INDEX
+    {
+        return Err(AppError::Other(format!(
+            "index.json at {index_url} exceeds the {MAX_ENTRIES_PER_INDEX}-entry cap \
+             (plugins={}, themes={})",
+            index.plugins.len(), index.themes.len(),
+        )));
+    }
+
+    // Drop entries whose External `repo` points back at this very registry —
+    // that's a manifest-authoring mistake (use Internal instead), not a
+    // cycle (External is a leaf), but the resulting double-fetch is wasted
+    // work and the entry would shadow itself in the catalog.
+    let host_url_lc = github_url(&owner, &repo).to_lowercase();
+    let points_at_host = |entry: &IndexEntry| matches!(entry,
+        IndexEntry::External { repo, .. }
+            if normalise_github_url(repo)
+                .map(|u| u.to_lowercase() == host_url_lc)
+                .unwrap_or(false)
+    );
+    let keep_entry = |kind: &str, e: IndexEntry| -> Option<IndexEntry> {
+        if points_at_host(&e) {
+            tracing::warn!(
+                "marketplace: skipping External {kind} entry that points at the \
+                 registry itself ({owner}/{repo}) — use the Internal shape \
+                 (just `subpath`) for entries hosted in the registry repo"
+            );
+            None
+        } else { Some(e) }
+    };
+    let plugin_entries: Vec<_> = index.plugins.into_iter()
+        .filter_map(|e| keep_entry("plugin", e)).collect();
+    let theme_entries: Vec<_> = index.themes.into_iter()
+        .filter_map(|e| keep_entry("theme",  e)).collect();
+
+    // Plugins — fetched in parallel. Each entry is either internal (lives
+    // in the registry repo) or external (points at a third-party GitHub
+    // repo); both surface with `source = Community` because both are
+    // PR-vetted on the registry side.
+    let plugin_futs = plugin_entries.iter().cloned().map(|entry| {
+        let http       = http.clone();
+        let host_owner = owner.clone();
+        let host_repo  = repo.clone();
+        let src        = source_kind;
         async move {
-            let r#ref = entry.r#ref.clone().unwrap_or_else(|| REGISTRY_REF.to_string());
-            fetch_plugin(&http, &owner, &repo, &r#ref, &entry.subpath, src).await
+            let t = resolve_entry_target(&entry, &host_owner, &host_repo);
+            let mut p = fetch_plugin(&http, &t.owner, &t.repo, &t.r#ref, &t.subpath, src).await?;
+            p.entry.external = t.external;
+            if let Some(pin) = t.pinned_sha.as_deref() {
+                verify_pinned_sha(&http, &t.owner, &t.repo, &t.r#ref, pin).await?;
+                p.entry.pinned_sha = Some(pin.to_string());
+            }
+            Ok::<_, AppError>(p)
         }
     });
-    let theme_futs = index.themes.iter().cloned().map(|entry| {
-        let http  = http.clone();
-        let owner = owner.clone();
-        let repo  = repo.clone();
-        let src   = source_kind;
+    let theme_futs = theme_entries.iter().cloned().map(|entry| {
+        let http       = http.clone();
+        let host_owner = owner.clone();
+        let host_repo  = repo.clone();
+        let src        = source_kind;
         async move {
-            let r#ref = entry.r#ref.clone().unwrap_or_else(|| REGISTRY_REF.to_string());
-            fetch_theme(&http, &owner, &repo, &r#ref, &entry.subpath, src).await
+            let t = resolve_entry_target(&entry, &host_owner, &host_repo);
+            if t.subpath.is_empty() {
+                return Err(AppError::Other(
+                    "theme entry has no subpath (need the .json filename)".into(),
+                ));
+            }
+            let mut th = fetch_theme(&http, &t.owner, &t.repo, &t.r#ref, &t.subpath, src).await?;
+            th.entry.external = t.external;
+            if let Some(pin) = t.pinned_sha.as_deref() {
+                verify_pinned_sha(&http, &t.owner, &t.repo, &t.r#ref, pin).await?;
+                th.entry.pinned_sha = Some(pin.to_string());
+            }
+            Ok::<_, AppError>(th)
         }
     });
 
@@ -242,11 +424,13 @@ async fn fetch_plugin(
             subpath:    Some(subpath.to_string()),
             source,
             pinned_sha: None,
+            external:   false,
         },
         experimental: if manifest.experimental { Some(true) } else { None },
         doc,
         update_available:  None,
         installed_version: None,
+        dependencies: manifest.dependencies,
     })
 }
 
@@ -332,6 +516,7 @@ async fn fetch_theme(
             subpath:    Some(subpath.to_string()),
             source,
             pinned_sha: None,
+            external:   false,
         },
     })
 }

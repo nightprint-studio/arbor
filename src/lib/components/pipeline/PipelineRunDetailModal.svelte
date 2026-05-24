@@ -24,6 +24,7 @@
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import LogStream from '$lib/components/shared/ui/LogStream.svelte';
   import { renderStructuredLogLine, inferLogLevel } from '$lib/utils/log-highlight';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
 
@@ -129,13 +130,10 @@
 
   async function copyOutput() {
     if (!stepRun || stepRun.output.length === 0) return;
-    try {
-      await navigator.clipboard.writeText(stepRun.output.join('\n'));
+    if (await copyToClipboard(stepRun.output.join('\n'), { errorToast: true })) {
       copied = true;
       if (copyTimer) clearTimeout(copyTimer);
       copyTimer = setTimeout(() => { copied = false; }, 1800);
-    } catch (err) {
-      uiStore.showToast(`Copy failed: ${err}`, 'error');
     }
   }
 

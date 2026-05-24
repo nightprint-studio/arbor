@@ -1,24 +1,27 @@
 //! Jira OAuth 2.0 (3LO) Authorization Code + PKCE flow.
 //! Also provides Basic Auth (email + Atlassian API token) helpers.
 //!
-//! OAuth flow (requires an Atlassian OAuth 2.0 app registered at developer.atlassian.com):
-//!   1. `start_jira_oauth(client_id)` — PKCE verifier/challenge, spawns callback listener,
-//!      returns the authorization URL.
+//! OAuth flow (requires an Atlassian OAuth 2.0 app registered at
+//! developer.atlassian.com):
+//!   1. `start_jira_oauth()` configures [`arbor_auth::oauth2::InstalledAppFlow`]
+//!      with the Atlassian endpoints + a JSON token body, binds the loopback
+//!      listener and returns the authorization URL.
 //!   2. User approves in browser.
 //!   3. Atlassian redirects to `http://127.0.0.1:7730/callback?code=…`.
-//!   4. Exchange code for token via the Atlassian token endpoint.
-//!   5. Fetch accessible cloud resources to obtain the cloud ID.
+//!   4. `arbor-auth` exchanges code → tokens.
+//!   5. Jira-specific: fetch accessible cloud resources to obtain the cloud ID.
 //!   6. Persist access token, refresh token, cloud ID in keychain.
 //!   7. Emit `arbor://jira-oauth-done` (bool).
 //!
 //! Basic Auth: user provides Atlassian email + API token + Jira subdomain.
 //! API token can be generated at https://id.atlassian.com/manage-profile/security/api-tokens.
 
-use base64::{Engine, engine::general_purpose::{URL_SAFE_NO_PAD, STANDARD}};
-use sha2::{Digest, Sha256};
-use tauri::Emitter;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Deserialize;
+use tauri::Emitter;
+
+use arbor_auth::oauth2::{InstalledAppFlow, refresh_token};
+use arbor_auth::BodyFormat;
 
 use crate::auth::credential_store;
 use crate::error::{AppError, Result};
@@ -44,7 +47,8 @@ const KR_DOMAIN:  &str = "arbor-jira-domain";
 /// Scopes: read:jira-work write:jira-work offline_access read:me
 pub const DEFAULT_CLIENT_ID: &str = "jV9R7QAut4zXzxT62ANeqecZTObAmXmm";
 
-/// Loopback port for the OAuth callback — distinct from Linear (7729).
+/// Loopback port for the OAuth callback — distinct from Linear (7729) and
+/// Google Cloud Storage (7732).
 const CALLBACK_PORT: u16 = 7730;
 
 /// Resolve the active Jira `client_id` — config override or bundled default.
@@ -62,69 +66,7 @@ const AUTH_URL:      &str = "https://auth.atlassian.com/authorize";
 const TOKEN_URL:     &str = "https://auth.atlassian.com/oauth/token";
 const RESOURCES_URL: &str = "https://api.atlassian.com/oauth/token/accessible-resources";
 
-// ── PKCE helpers ─────────────────────────────────────────────────────────────
-
-fn code_verifier() -> String {
-    let a = uuid::Uuid::new_v4();
-    let b = uuid::Uuid::new_v4();
-    let bytes: Vec<u8> = a.as_bytes().iter().chain(b.as_bytes().iter()).copied().collect();
-    URL_SAFE_NO_PAD.encode(&bytes)
-}
-
-fn code_challenge(verifier: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(verifier.as_bytes());
-    URL_SAFE_NO_PAD.encode(h.finalize())
-}
-
-fn random_state() -> String {
-    URL_SAFE_NO_PAD.encode(uuid::Uuid::new_v4().as_bytes())
-}
-
-// ── HTTP callback helpers ────────────────────────────────────────────────────
-
-fn extract_param(request: &str, key: &str) -> Option<String> {
-    let line = request.lines().next()?;
-    let query = line.split('?').nth(1)?.split_whitespace().next()?;
-    for pair in query.split('&') {
-        let mut parts = pair.splitn(2, '=');
-        if parts.next() == Some(key) {
-            return parts.next().map(percent_decode);
-        }
-    }
-    None
-}
-
-fn percent_decode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let h1 = chars.next().unwrap_or('0');
-            let h2 = chars.next().unwrap_or('0');
-            if let Ok(b) = u8::from_str_radix(&format!("{h1}{h2}"), 16) {
-                out.push(b as char);
-                continue;
-            }
-            out.push('%'); out.push(h1); out.push(h2);
-        } else if c == '+' {
-            out.push(' ');
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-fn urlencoded(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => vec![c as u8],
-            _ => format!("%{:02X}", c as u32).into_bytes(),
-        })
-        .map(|b| b as char)
-        .collect()
-}
+const SCOPE: &str = "read:jira-work write:jira-work offline_access";
 
 // ── Public configuration struct ───────────────────────────────────────────────
 
@@ -244,98 +186,7 @@ pub fn save_basic_auth(email: &str, api_token: &str, domain: &str) -> Result<()>
     Ok(())
 }
 
-// ── HTML callback pages ───────────────────────────────────────────────────────
-
-async fn send_html(stream: &mut tokio::net::TcpStream, body: &str) {
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        body.len(), body
-    );
-    let _ = stream.write_all(response.as_bytes()).await;
-}
-
-fn oauth_success_html(provider: &str) -> String {
-    format!(r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Arbor — Connected</title>
-  <style>
-    *{{margin:0;padding:0;box-sizing:border-box}}
-    body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-      background:#1e1f22;color:#dfe1e5;min-height:100vh;
-      display:flex;align-items:center;justify-content:center}}
-    .card{{background:#2b2d30;border:1px solid #3c3f41;border-radius:12px;
-      padding:44px 52px;max-width:420px;width:90%;text-align:center}}
-    .brand{{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
-      color:#6c707a;margin-bottom:32px}}
-    .icon{{width:56px;height:56px;border-radius:50%;background:#1a3326;
-      border:2px solid #6aab73;display:flex;align-items:center;justify-content:center;
-      margin:0 auto 20px;font-size:24px}}
-    h1{{font-size:18px;font-weight:600;color:#6aab73;margin-bottom:10px}}
-    p{{font-size:13px;color:#888d94;line-height:1.6}}
-    .provider{{color:#dfe1e5;font-weight:500}}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="brand">Arbor</div>
-    <div class="icon">✓</div>
-    <h1>Connected successfully</h1>
-    <p><span class="provider">{provider}</span> has been authorized.<br>You can close this tab and return to Arbor.</p>
-  </div>
-</body>
-</html>"#)
-}
-
-fn oauth_error_html(provider: &str, message: &str) -> String {
-    format!(r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Arbor — Authorization failed</title>
-  <style>
-    *{{margin:0;padding:0;box-sizing:border-box}}
-    body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-      background:#1e1f22;color:#dfe1e5;min-height:100vh;
-      display:flex;align-items:center;justify-content:center}}
-    .card{{background:#2b2d30;border:1px solid #3c3f41;border-radius:12px;
-      padding:44px 52px;max-width:460px;width:90%;text-align:center}}
-    .brand{{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
-      color:#6c707a;margin-bottom:32px}}
-    .icon{{width:56px;height:56px;border-radius:50%;background:#2d1f1f;
-      border:2px solid #f87171;display:flex;align-items:center;justify-content:center;
-      margin:0 auto 20px;font-size:24px}}
-    h1{{font-size:18px;font-weight:600;color:#f87171;margin-bottom:10px}}
-    p{{font-size:13px;color:#888d94;line-height:1.6}}
-    .provider{{color:#dfe1e5;font-weight:500}}
-    .detail{{margin-top:20px;padding:12px 14px;background:#1e1f22;
-      border:1px solid #3c3f41;border-radius:6px;font-size:11px;
-      color:#888d94;font-family:'JetBrains Mono','Fira Code',monospace;
-      text-align:left;word-break:break-all;line-height:1.5}}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="brand">Arbor</div>
-    <div class="icon">✗</div>
-    <h1>Authorization failed</h1>
-    <p>Could not connect <span class="provider">{provider}</span>. Please return to Arbor and try again.</p>
-    <div class="detail">{message}</div>
-  </div>
-</body>
-</html>"#)
-}
-
 // ── OAuth ─────────────────────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct TokenResponse {
-    access_token:  String,
-    refresh_token: Option<String>,
-}
 
 #[derive(Deserialize)]
 struct CloudResource {
@@ -349,162 +200,65 @@ struct CloudResource {
 pub async fn start_jira_oauth(app_handle: tauri::AppHandle) -> Result<String> {
     let client_id = resolve_client_id();
 
-    let verifier  = code_verifier();
-    let challenge = code_challenge(&verifier);
-    let state     = random_state();
+    let flow = InstalledAppFlow {
+        auth_url:               AUTH_URL.into(),
+        token_url:              TOKEN_URL.into(),
+        client_id,
+        // Atlassian 3LO public clients don't send a client_secret.
+        client_secret:          None,
+        scope:                  SCOPE.into(),
+        redirect_port:          CALLBACK_PORT,
+        extra_authorize_params: vec![
+            ("audience".into(), "api.atlassian.com".into()),
+            ("prompt".into(),   "consent".into()),
+        ],
+        // Atlassian's token endpoint expects a JSON body.
+        token_request_format:   BodyFormat::Json,
+        provider_label:         "Jira".into(),
+        success_html:           None,
+        error_html_template:    None,
+    };
 
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
-        .await
-        .map_err(|e| AppError::Other(format!(
-            "cannot start Jira OAuth callback server on port {CALLBACK_PORT}: {e}\n\
-             Make sure nothing else is using that port."
-        )))?;
+    let (auth_url, pending) = flow.start().await
+        .map_err(|e| AppError::Other(format!("Jira OAuth start: {e}")))?;
 
-    let redirect_uri = format!("http://127.0.0.1:{CALLBACK_PORT}/callback");
-    let scope = "read:jira-work%20write:jira-work%20offline_access";
-    let auth_url = format!(
-        "{AUTH_URL}\
-         ?audience=api.atlassian.com\
-         &client_id={client_id}\
-         &scope={scope}\
-         &redirect_uri={redir}\
-         &state={state}\
-         &response_type=code\
-         &prompt=consent\
-         &code_challenge={challenge}\
-         &code_challenge_method=S256",
-        redir = urlencoded(&redirect_uri),
-    );
-
-    let app  = app_handle.clone();
-    let redir = redirect_uri.clone();
-    let ver  = verifier.clone();
-    let st   = state.clone();
-    let cid  = client_id.clone();
-
+    let app = app_handle.clone();
     tokio::spawn(async move {
-        match wait_for_callback(listener, &ver, &st, &cid, &redir).await {
-            Ok((access_token, refresh_token, cloud_id, domain)) => {
-                let save_result = (|| -> Result<()> {
-                    credential_store::save(KR_TOKEN, "v", &access_token)?;
-                    credential_store::save(KR_CLOUD, "v", &cloud_id)?;
-                    if let Some(rt) = &refresh_token {
-                        let _ = credential_store::save(KR_REFRESH, "v", rt);
-                    }
-                    if let Some(d) = &domain {
-                        let sub = d.trim_end_matches(".atlassian.net");
-                        let _ = credential_store::save(KR_DOMAIN, "v", sub);
-                    }
-                    Ok(())
-                })();
-                match save_result {
-                    Ok(_)  => { let _ = app.emit("arbor://jira-oauth-done", true); }
+        let outcome = pending.await_callback().await;
+        let ok = match outcome {
+            Ok(token) => {
+                match persist_oauth_result(&token.access_token, token.refresh_token.as_deref()).await {
+                    Ok(()) => true,
                     Err(e) => {
-                        tracing::error!("jira oauth: keychain save failed: {e}");
-                        let _ = app.emit("arbor://jira-oauth-done", false);
+                        tracing::error!("jira oauth: persist failed: {e}");
+                        false
                     }
                 }
             }
             Err(e) => {
                 tracing::error!("jira oauth callback error: {e}");
-                let _ = app.emit("arbor://jira-oauth-done", false);
+                false
             }
-        }
+        };
+        let _ = app.emit("arbor://jira-oauth-done", ok);
     });
 
     Ok(auth_url)
 }
 
-async fn wait_for_callback(
-    listener: tokio::net::TcpListener,
-    verifier: &str,
-    expected_state: &str,
-    client_id: &str,
-    redirect_uri: &str,
-) -> Result<(String, Option<String>, String, Option<String>)> {
-    let (mut stream, _) = listener
-        .accept()
-        .await
-        .map_err(|e| AppError::Other(format!("accept error: {e}")))?;
-
-    let mut buf = vec![0u8; 8192];
-    let n = stream
-        .read(&mut buf)
-        .await
-        .map_err(|e| AppError::Other(format!("read error: {e}")))?;
-    let request = String::from_utf8_lossy(&buf[..n]).to_string();
-
-    // Provider-side error (e.g. user clicked "Deny").
-    if let Some(err) = extract_param(&request, "error") {
-        let desc = extract_param(&request, "error_description").unwrap_or_default();
-        let msg = if desc.is_empty() { err.clone() } else { format!("{err}: {desc}") };
-        send_html(&mut stream, &oauth_error_html("Jira", &msg)).await;
-        return Err(AppError::AuthFailed(msg));
+/// Jira-specific post-callback work: fetch the cloud_id + site name and
+/// stash access_token / refresh_token / cloud_id / domain in three separate
+/// keychain entries.
+async fn persist_oauth_result(access_token: &str, refresh_token: Option<&str>) -> Result<()> {
+    let (cloud_id, site_name) = fetch_cloud_resource(access_token).await?;
+    credential_store::save(KR_TOKEN, "v", access_token)?;
+    credential_store::save(KR_CLOUD, "v", &cloud_id)?;
+    if let Some(rt) = refresh_token {
+        let _ = credential_store::save(KR_REFRESH, "v", rt);
     }
-
-    let code = extract_param(&request, "code")
-        .ok_or_else(|| AppError::AuthFailed("no 'code' in Jira OAuth callback".into()))?;
-    let recv_state = extract_param(&request, "state")
-        .ok_or_else(|| AppError::AuthFailed("no 'state' in Jira OAuth callback".into()))?;
-
-    if recv_state != expected_state {
-        let msg = "State mismatch — possible CSRF attack, authorization rejected.".to_string();
-        send_html(&mut stream, &oauth_error_html("Jira", &msg)).await;
-        return Err(AppError::AuthFailed(msg));
-    }
-
-    // Exchange code for token — serve HTML only after we know the outcome.
-    let result = async {
-        let (access_token, refresh_token) =
-            exchange_code(client_id, &code, verifier, redirect_uri).await?;
-        let (cloud_id, site_name) =
-            fetch_cloud_resource(&access_token).await?;
-        Ok::<_, AppError>((access_token, refresh_token, cloud_id, Some(site_name)))
-    }.await;
-
-    match result {
-        Ok(tokens) => {
-            send_html(&mut stream, &oauth_success_html("Jira")).await;
-            Ok(tokens)
-        }
-        Err(e) => {
-            send_html(&mut stream, &oauth_error_html("Jira", &e.to_string())).await;
-            Err(e)
-        }
-    }
-}
-
-async fn exchange_code(
-    client_id: &str,
-    code: &str,
-    verifier: &str,
-    redirect_uri: &str,
-) -> Result<(String, Option<String>)> {
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(TOKEN_URL)
-        .json(&serde_json::json!({
-            "grant_type":    "authorization_code",
-            "client_id":     client_id,
-            "code":          code,
-            "redirect_uri":  redirect_uri,
-            "code_verifier": verifier,
-        }))
-        .send()
-        .await
-        .map_err(|e| AppError::Other(format!("Jira token exchange request failed: {e}")))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body   = resp.text().await.unwrap_or_default();
-        return Err(AppError::AuthFailed(format!("Jira token exchange {status}: {body}")));
-    }
-
-    let tr: TokenResponse = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Other(format!("Jira token response parse: {e}")))?;
-    Ok((tr.access_token, tr.refresh_token))
+    let sub = site_name.trim_end_matches(".atlassian.net");
+    let _ = credential_store::save(KR_DOMAIN, "v", sub);
+    Ok(())
 }
 
 async fn fetch_cloud_resource(token: &str) -> Result<(String, String)> {
@@ -540,34 +294,20 @@ async fn fetch_cloud_resource(token: &str) -> Result<(String, String)> {
 /// Returns `true` when a new token was obtained and stored.
 pub async fn try_refresh() -> Result<bool> {
     let client_id = resolve_client_id();
-    let Some(refresh_token) = credential_store::get(KR_REFRESH, "v")? else {
+    let Some(refresh) = credential_store::get(KR_REFRESH, "v")? else {
         return Ok(false);
     };
 
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(TOKEN_URL)
-        .json(&serde_json::json!({
-            "grant_type":    "refresh_token",
-            "client_id":     client_id,
-            "refresh_token": refresh_token,
-        }))
-        .send()
-        .await
-        .map_err(|e| AppError::Other(format!("Jira token refresh request failed: {e}")))?;
+    let token = match refresh_token(TOKEN_URL, &client_id, None, &refresh, BodyFormat::Json).await {
+        Ok(t)  => t,
+        Err(e) => {
+            tracing::warn!("jira token refresh failed: {e}");
+            return Ok(false);
+        }
+    };
 
-    if !resp.status().is_success() {
-        tracing::warn!("jira token refresh failed: {}", resp.status());
-        return Ok(false);
-    }
-
-    let tr: TokenResponse = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Other(format!("Jira token refresh parse: {e}")))?;
-
-    credential_store::save(KR_TOKEN, "v", &tr.access_token)?;
-    if let Some(new_rt) = tr.refresh_token {
+    credential_store::save(KR_TOKEN, "v", &token.access_token)?;
+    if let Some(new_rt) = token.refresh_token {
         let _ = credential_store::save(KR_REFRESH, "v", &new_rt);
     }
 

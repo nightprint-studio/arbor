@@ -5,12 +5,14 @@
   import VirtualHunk from './VirtualHunk.svelte';
   import ImageDiff from './ImageDiff.svelte';
   import DiffToolbar from './DiffToolbar.svelte';
+  import Modal from '$lib/components/shared/Modal.svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import type { DiffFile } from '$lib/types/git';
   import { hunkLineKeys, buildStagePatch, buildUnstagePatch } from '$lib/utils/patch-builder';
   import { computeChunkAnchors, totalDiffLines, type ChunkAnchor } from '$lib/utils/diff-chunks';
   import { tooltipForAction, shortcutFor } from '$lib/utils/shortcut';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
   /**
@@ -77,15 +79,8 @@
 
   function openFullscreen() { fsMode = mode === 'split' ? 'split' : 'unified'; fullscreen = true; }
   function closeFullscreen() { fullscreen = false; }
-
-  $effect(() => {
-    if (!fullscreen) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') closeFullscreen();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+  // ESC handling lives in `<Modal>` — no need for a duplicate window-level
+  // listener here (would race with Modal's own ESC dispatch).
 
   // ── Partial staging ────────────────────────────────────────────────────────
 
@@ -151,11 +146,12 @@
         .filter(l => l.kind !== 'removed')
         .map(l => l.content.replace(/\n$/, ''))
     );
-    navigator.clipboard.writeText(lines.join('\n')).then(() => {
-      copyDone = true;
-      uiStore.showToast('Code copied', 'success');
-      setTimeout(() => { copyDone = false; }, 1500);
-    }).catch(() => uiStore.showToast('Copy failed', 'error'));
+    copyToClipboard(lines.join('\n'), { successToast: 'Code copied', errorToast: 'Copy failed' }).then(ok => {
+      if (ok) {
+        copyDone = true;
+        setTimeout(() => { copyDone = false; }, 1500);
+      }
+    });
   }
 
   // ── Chunk navigation ──────────────────────────────────────────────────────
@@ -374,64 +370,62 @@
   </div>
 </div>
 
-<!-- Full-screen modal -->
+<!-- Full-screen diff viewer — composes the shared <Modal> shell so it gets
+     the standard backdrop, ESC handling, focus trap and animation for free. -->
 {#if fullscreen && file}
-  <div
-    class="fs-overlay"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Full-screen diff"
-    onclick={closeFullscreen}
-    onkeydown={(e) => e.key === 'Escape' && closeFullscreen()}
-    tabindex="-1"
+  <Modal
+    onClose={closeFullscreen}
+    width="calc(100vw - 48px)"
+    height="calc(100vh - 48px)"
+    padBody={false}
+    ariaLabel="Full-screen diff"
   >
-    <div class="fs-dialog" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <div class="fs-header">
-        <span class="fs-path">{file.old_path ? `${file.old_path} → ` : ''}{file.path}</span>
-        <div class="diff-stats">
-          {#if file.stats.additions > 0}<span class="add">+{file.stats.additions}</span>{/if}
-          {#if file.stats.deletions > 0}<span class="del">-{file.stats.deletions}</span>{/if}
+    {#snippet header()}
+      <span class="fs-path">{file.old_path ? `${file.old_path} → ` : ''}{file.path}</span>
+      <div class="diff-stats">
+        {#if file.stats.additions > 0}<span class="add">+{file.stats.additions}</span>{/if}
+        {#if file.stats.deletions > 0}<span class="del">-{file.stats.deletions}</span>{/if}
+      </div>
+      {#if chunkAnchors.length > 0}
+        <div class="chunk-nav" use:tooltip={`Navigate change chunks (${shortcutFor('next_chunk') ?? 'F3'} / ${shortcutFor('prev_chunk') ?? 'Shift+F3'})`}>
+          <button class="expand-btn" onclick={prevChunk} use:tooltip={tooltipForAction('Previous chunk', 'prev_chunk')} aria-label="Previous chunk">
+            <ChevronUp size={12} />
+          </button>
+          <span class="chunk-counter">{currentChunkIdx + 1}/{chunkAnchors.length}</span>
+          <button class="expand-btn" onclick={nextChunk} use:tooltip={tooltipForAction('Next chunk', 'next_chunk')} aria-label="Next chunk">
+            <ChevronDown size={12} />
+          </button>
         </div>
-        {#if chunkAnchors.length > 0}
-          <div class="chunk-nav" use:tooltip={`Navigate change chunks (${shortcutFor('next_chunk') ?? 'F3'} / ${shortcutFor('prev_chunk') ?? 'Shift+F3'})`}>
-            <button class="expand-btn" onclick={prevChunk} use:tooltip={tooltipForAction('Previous chunk', 'prev_chunk')} aria-label="Previous chunk">
-              <ChevronUp size={12} />
-            </button>
-            <span class="chunk-counter">{currentChunkIdx + 1}/{chunkAnchors.length}</span>
-            <button class="expand-btn" onclick={nextChunk} use:tooltip={tooltipForAction('Next chunk', 'next_chunk')} aria-label="Next chunk">
-              <ChevronDown size={12} />
-            </button>
-          </div>
+      {/if}
+      <div class="mode-toggle">
+        <button class="mode-btn" class:active={fsMode === 'unified'} onclick={() => fsMode = 'unified'}>Unified</button>
+        <button class="mode-btn" class:active={fsMode === 'split'} onclick={() => fsMode = 'split'}>Split</button>
+      </div>
+      <button class="mac-close-btn" onclick={closeFullscreen} use:tooltip={{ content: 'Close', shortcut: 'Esc' }} aria-label="Close"></button>
+    {/snippet}
+
+    <div class="fs-hunks" class:is-split={fsMode === 'split'} bind:this={fsHunksEl}>
+      {#each file.hunks as hunk, hi (hunk.header + hi)}
+        {#if useVirtual}
+          <VirtualHunk
+            {hunk}
+            hunkIdx={hi}
+            {path}
+            mode={fsMode}
+            scrollContainer={fsHunksEl}
+          />
+        {:else}
+          <DiffHunkView
+            {hunk}
+            hunkIdx={hi}
+            {path}
+            mode={fsMode}
+            {wordWrap}
+          />
         {/if}
-        <div class="mode-toggle">
-          <button class="mode-btn" class:active={fsMode === 'unified'} onclick={() => fsMode = 'unified'}>Unified</button>
-          <button class="mode-btn" class:active={fsMode === 'split'} onclick={() => fsMode = 'split'}>Split</button>
-        </div>
-        <button class="mac-close-btn" onclick={closeFullscreen} use:tooltip={{ content: 'Close', shortcut: 'Esc' }} aria-label="Close"></button>
-      </div>
-      <div class="fs-hunks" class:is-split={fsMode === 'split'} bind:this={fsHunksEl}>
-        {#each file.hunks as hunk, hi (hunk.header + hi)}
-          {#if useVirtual}
-            <VirtualHunk
-              {hunk}
-              hunkIdx={hi}
-              {path}
-              mode={fsMode}
-              scrollContainer={fsHunksEl}
-            />
-          {:else}
-            <DiffHunkView
-              {hunk}
-              hunkIdx={hi}
-              {path}
-              mode={fsMode}
-              {wordWrap}
-            />
-          {/if}
-        {/each}
-      </div>
+      {/each}
     </div>
-  </div>
+  </Modal>
 {/if}
 
 <style>
@@ -467,8 +461,6 @@
   .diff-stats { display: flex; gap: 8px; }
   .add { color: var(--success); }
   .del { color: var(--error); }
-
-  @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 
   .chunk-nav {
     display: flex;
@@ -546,47 +538,9 @@
   .parsing-skeleton .spinner { animation: diff-spin 1s linear infinite; }
   @keyframes diff-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-  .fs-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: var(--z-modal);
-    display: flex;
-    align-items: stretch;
-    /* `backdrop-filter: blur()` removed — see Modal.svelte for rationale.
-       Already mostly opaque so no compensation needed. */
-    background: rgba(0, 0, 0, 0.82);
-    animation: fadeIn 100ms ease;
-  }
-
-  .fs-dialog {
-    display: flex;
-    flex-direction: column;
-    width: calc(100vw - 48px);
-    height: calc(100vh - 48px);
-    margin: 24px;
-    background: var(--bg-base);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    box-shadow: 0 28px 80px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.04);
-    animation: slideUp 150ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  @keyframes slideUp {
-    from { transform: translateY(12px); opacity: 0; }
-    to   { transform: translateY(0);    opacity: 1; }
-  }
-
-  .fs-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 16px;
-    background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    font-size: var(--font-size-xs);
-  }
-
+  /* Header content lives inside Modal's header chrome — only typography
+     and layout of the path span remains here; the bar (background,
+     padding) is provided by `.modal-header` in Modal.svelte. */
   .fs-path {
     flex: 1;
     font-family: var(--font-code);
@@ -596,14 +550,18 @@
     white-space: nowrap;
   }
 
+  /* `.fs-hunks` lives inside `.modal-body.no-pad` — fill it and own the
+     scroll so the body's own `overflow: auto` never kicks in (avoids
+     double scrollbars on edge cases). */
   .fs-hunks {
-    flex: 1;
-    min-height: 0;
+    width: 100%;
+    height: 100%;
     overflow-x: scroll;
     overflow-y: auto;
     font-family: var(--font-code);
     font-size: var(--font-size-sm);
     position: relative;
+    box-sizing: border-box;
   }
   /* Per-column horizontal scrollbars in split mode (see DiffHunk / VirtualHunk). */
   .fs-hunks.is-split { overflow-x: hidden; }

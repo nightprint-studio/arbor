@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { setupTauriListeners } from '$lib/utils/tauri-listeners';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { coalesceLatestByKey } from '$lib/utils/coalesce';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -54,11 +55,13 @@
   import { depsExplorerStore } from '$lib/stores/depsExplorer.svelte';
   import CommandPalette from '../shared/CommandPalette.svelte';
   import Tooltip from '../shared/Tooltip.svelte';
-  import ConflictResolutionModal from '../stage/ConflictResolutionModal.svelte';
+  import ConflictResolutionModal from '../stage/conflict/ConflictResolutionModal.svelte';
   import CheckoutConflictModal from '../shared/CheckoutConflictModal.svelte';
   import InitRepoModal from '../shared/InitRepoModal.svelte';
   import CloneRepoModal from '../shared/CloneRepoModal.svelte';
   import GitSetupModal from '../shared/GitSetupModal.svelte';
+  import OnboardingModal from '../shared/OnboardingModal.svelte';
+  import { onboardingStore } from '$lib/stores/onboarding.svelte';
   import { gitCliStore } from '$lib/stores/gitCli.svelte';
   import RepoBrowserModal from '../shared/RepoBrowserModal.svelte';
   // Cloud bulk transfers surface via the standard JobRegistry → JobsOverlay
@@ -110,6 +113,8 @@
   import { listen } from '@tauri-apps/api/event';
   import IssuesSidebar from '../issues/IssuesSidebar.svelte';
   import BranchRenameModal from '../sidebar/BranchRenameModal.svelte';
+  import DeleteTagModal from '../sidebar/DeleteTagModal.svelte';
+  import { executeTagDelete as runTagDelete } from '$lib/utils/tag-delete';
   import type { BranchInfo } from '$lib/types/git';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
@@ -148,6 +153,8 @@
   import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
   import { jobsStore } from '$lib/stores/jobs.svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
+  import { appearanceStore } from '$lib/stores/appearance.svelte';
+  import { commitConfigStore } from '$lib/stores/commit_config.svelte';
   import { terminalStore } from '$lib/stores/terminal.svelte';
   import { pipelinesStore } from '$lib/stores/pipelines.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
@@ -173,11 +180,10 @@
   import type { PluginFormConfig } from '$lib/types/plugin';
   import type { MergeRequest } from '$lib/types/mr';
 
-  // Apply persisted font scale immediately so first render uses the correct size.
-  {
-    const _s = parseFloat(localStorage.getItem('arbor:font-scale') ?? '1');
-    if (_s !== 1) document.documentElement.style.setProperty('--font-scale', String(_s));
-  }
+  // Font scale + theme-font opt-in live in `appearanceStore` (persisted in
+  // config.toml). The store applies the default `--font-scale` synchronously
+  // on import; `appearanceStore.loadConfig()` (called in onMount below)
+  // overwrites it with the on-disk value once the backend answers.
 
   // ── Missing-projects config (tombstone + locate behaviour) ────────────────
   let missingConfig = $state<MissingProjectsConfig>({
@@ -243,6 +249,19 @@
         // screen until the fetch lands.
         dlLoading = { title: `Opening merge request !${number}`, status: 'loading' };
         try {
+          // Short-circuit when MR/PRs are disabled on the remote so the user
+          // sees the real reason instead of a generic 404 from get_mr_detail.
+          // The probe is cached per tab so this is usually free.
+          const feature = await cacheStore.loadMrFeature(tabId);
+          if (!feature.enabled) {
+            dlLoading = {
+              title:   `Merge request !${number}`,
+              status:  'error',
+              message: feature.reason ??
+                'Merge requests are disabled on this repository.',
+            };
+            return;
+          }
           const detail = await getMrDetail(tabId, number);
           dlLoading = null;
           openMrDetail(detail.mr);
@@ -520,6 +539,48 @@
   // ~/.config/arbor/config.toml. Defaults are applied immediately so first
   // paint isn't blocked; this just refreshes them once disk values are read.
   onMount(() => { void diffStore.loadConfig(); });
+
+  // Same flow for appearance (window controls, font scale, theme-font opt-in),
+  // animations (enabled + speed), and commit (global template fallback):
+  // defaults render now, disk values overwrite once read.
+  onMount(() => { void appearanceStore.loadConfig(); });
+  onMount(() => { void animStore.loadConfig(); });
+  onMount(() => { void commitConfigStore.loadConfig(); });
+
+  // ── Onboarding tour ──────────────────────────────────────────────────────
+  // Load the persisted onboarding state up front. The auto-open trigger is
+  // deferred to the effect below so we can wait for git detection to settle
+  // — opening on top of the GitSetupModal bouncer would just stack two
+  // dialogs in the user's face.
+  onMount(() => { void onboardingStore.loadConfig(); });
+
+  // Auto-open once when: (a) config has loaded, (b) git detection has reached
+  // a non-blocking phase, (c) the user hasn't been through the current
+  // onboarding schema version yet, (d) the bouncer isn't on screen. Wrapped
+  // in a fired-once guard so reloading the store later (e.g. via "Reset
+  // onboarding" in Settings) doesn't re-pop it mid-session — the store's
+  // `show()` is the explicit re-entry path.
+  let _onboardingAutoFired = $state(false);
+  $effect(() => {
+    if (_onboardingAutoFired)               return;
+    if (!onboardingStore.loaded)            return;
+    if (!onboardingStore.shouldAutoOpen())  return;
+    // Defer until git detection has settled.  `ready` is the happy path;
+    // `error` / `missing` still let the user proceed without git (they
+    // can install it later via the Settings → Git CLI panel) so the
+    // tour is still useful.
+    const phase = gitCliStore.phase;
+    if (phase !== 'ready' && phase !== 'error' && phase !== 'missing') return;
+    _onboardingAutoFired = true;
+    onboardingStore.show();
+  });
+
+  // Manual re-entry from Command Palette / Docs / Settings.
+  $effect(() => {
+    function open() { onboardingStore.show(); }
+    window.addEventListener('arbor:open-onboarding', open);
+    return () => window.removeEventListener('arbor:open-onboarding', open);
+  });
 
   // Initialise the data cache and run one-time IDE detection at startup.
   onMount(async () => {
@@ -919,8 +980,7 @@
         }
       } else {
         // GitHub / GitLab — no native detail view yet, copy ID as fallback.
-        await navigator.clipboard.writeText(ticketId).catch(() => {});
-        uiStore.showToast(`${ticketId} copied to clipboard`, 'info');
+        await copyToClipboard(ticketId, { successToast: `${ticketId} copied to clipboard` });
       }
     }
     window.addEventListener('arbor:view-issue', handleViewIssue);
@@ -1023,20 +1083,18 @@
   $effect(() => {
     function onKeydown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        // Close topmost modal first (recent > palette > plugin form > panel > search)
-        if (openPickerOpen)                  { e.preventDefault(); openPickerOpen = false; return; }
-        if (cloneModalOpen)                  { e.preventDefault(); cloneModalOpen = false; return; }
-        if (createWorkspaceOpen)             { e.preventDefault(); createWorkspaceOpen = false; return; }
-        if (workspaceManagerOpen)            { e.preventDefault(); workspaceManagerOpen = false; return; }
-        if (uiStore.repoBrowserOpen)         { e.preventDefault(); uiStore.closeRepoBrowser(); return; }
-        if (statsOverlayOpen)                { e.preventDefault(); statsOverlayOpen = false; return; }
-        if (themeEditorOpen)                 { e.preventDefault(); themeEditorOpen = false; return; }
+        // If any Modal-component-based modal is mounted, let its own ESC
+        // handler (Modal.svelte → onClose) close the topmost one. Touching
+        // our state flags here would close BOTH the topmost AND the
+        // underlying modal (e.g. ESC on a FilePicker opened from inside
+        // ThemeEditor would also close the editor). Modal already routes
+        // ESC only to the topmost via its modalStack guard.
+        if (hasOpenModal()) return;
+        // Below: overlays that do NOT use Modal (command palette, recent
+        // quick switch, plugin form host, search bar) still need an ESC
+        // fallback here.
         if (uiStore.recentQuickSwitchOpen)  { e.preventDefault(); uiStore.setRecentQuickSwitchOpen(false); return; }
         if (uiStore.commandPaletteOpen)     { e.preventDefault(); uiStore.setCommandPaletteOpen(false); return; }
-        if (jsonStudioStore.open)           { e.preventDefault(); jsonStudioStore.closeDoc();          return; }
-        if (ronStudioStore.open)            { e.preventDefault(); ronStudioStore.closeDoc();           return; }
-        if (tomlStudioStore.open)           { e.preventDefault(); tomlStudioStore.closeDoc();          return; }
-        if (yamlStudioStore.open)           { e.preventDefault(); yamlStudioStore.closeDoc();          return; }
         if (pluginStore.pendingForm)        { e.preventDefault(); pluginStore.clearPendingForm(); return; }
         if (uiStore.searchVisible)          { e.preventDefault(); uiStore.setSearchVisible(false); return; }
         // Panel-level fallback: only fire when no Modal is mounted.
@@ -1079,6 +1137,7 @@
         createWorkspaceOpen ||
         workspaceManagerOpen ||
         uiStore.repoBrowserOpen ||
+        uiStore.marketplaceOpen ||
         statsOverlayOpen ||
         themeEditorOpen ||
         uiStore.recentQuickSwitchOpen ||
@@ -1094,7 +1153,8 @@
         pluginPickFile !== null ||
         mrModalOpen ||
         createMrOpen ||
-        renameBranchTarget !== null;
+        renameBranchTarget !== null ||
+        onboardingStore.open;
       if (modalOpen) return;
 
       // Check plugin keybindings first (they take priority over unbound app keys).
@@ -1122,7 +1182,7 @@
       // back to the graph first.
       if (uiStore.activePanel !== 'graph') {
         const ALLOWED_OFF_GRAPH = new Set([
-          'settings', 'plugins', 'toggle_docs',
+          'settings', 'plugins', 'open_marketplace', 'toggle_docs',
           'command_palette', 'open_project', 'open_from_workspace',
           'next_tab', 'prev_tab', 'close_tab',
           // Bottom-panel toggles are independent from the active main panel —
@@ -1130,8 +1190,8 @@
           // Manager, Docs, etc.
           'plugin_logs',
           'toggle_bottom_panel',
-          // Repo creation modals are global — fine to fire from any panel.
-          'open_repo', 'clone_repo', 'init_repo',
+          // Layout focus cycling is global by design.
+          'cycle_focus', 'cycle_focus_reverse',
         ]);
         if (!ALLOWED_OFF_GRAPH.has(action)) return;
       }
@@ -1159,6 +1219,7 @@
         case 'toggle_pipelines_panel':  uiStore.toggleBottomSectionIfVisible('pipelines'); break;
         case 'settings':         uiStore.setPanel(uiStore.activePanel === 'settings' ? 'graph' : 'settings'); break;
         case 'plugins':          uiStore.setPanel(uiStore.activePanel === 'plugins'  ? 'graph' : 'plugins');  break;
+        case 'open_marketplace': uiStore.marketplaceOpen ? uiStore.closeMarketplace() : uiStore.openMarketplace(); break;
         case 'command_palette':      uiStore.toggleCommandPalette(); break;
         case 'open_project':         uiStore.openCommandPaletteWithVerb('open-project'); break;
         case 'open_from_workspace':  uiStore.openCommandPaletteWithVerb('open-from-workspace'); break;
@@ -1176,6 +1237,9 @@
         case 'new_branch':       window.dispatchEvent(new CustomEvent('arbor:new-branch')); break;
         case 'stash':            window.dispatchEvent(new CustomEvent('arbor:stash')); break;
         case 'jump_to_head':     window.dispatchEvent(new CustomEvent('arbor:jump-to-head')); break;
+        case 'focus_graph':      window.dispatchEvent(new CustomEvent('arbor:focus-graph')); break;
+        case 'cycle_focus':         cycleFocus(1);  break;
+        case 'cycle_focus_reverse': cycleFocus(-1); break;
         case 'next_chunk':       window.dispatchEvent(new CustomEvent('arbor:next-chunk')); break;
         case 'prev_chunk':       window.dispatchEvent(new CustomEvent('arbor:prev-chunk')); break;
         case 'open_recent':      uiStore.toggleRecentQuickSwitch(); break;
@@ -1187,6 +1251,60 @@
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
   });
+
+  // ── Layout-zone focus cycling (F6 / Shift+F6) ──────────────────────────────
+  // Lets the user move focus across the major UI regions from the keyboard
+  // without dedicated shortcuts for each one. The order roughly mirrors the
+  // visual flow: top bar → tabs → left rails → sidebar → graph → bottom
+  // panel → right rails → status bar. Zones whose root element isn't in the
+  // DOM (collapsed sidebar / hidden bottom panel / …) are skipped.
+  type FocusZone = { name: string; selector: string };
+  const FOCUS_ZONES: FocusZone[] = [
+    { name: 'titlebar',       selector: '.titlebar' },
+    { name: 'tabs',           selector: '.tabbar-wrap' },
+    { name: 'activity-left',  selector: '.activity-bar[data-side="left"]' },
+    { name: 'sidebar',        selector: '.sidebar-wrap' },
+    { name: 'graph',          selector: '.graph-area' },
+    { name: 'bottom',         selector: '.bottom-wrap' },
+    { name: 'right-sidebar',  selector: '.right-sidebar-wrap' },
+    { name: 'activity-right', selector: '.activity-bar[data-side="right"]' },
+    { name: 'statusbar',      selector: '.statusbar' },
+  ];
+  const FOCUSABLE_SEL =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),' +
+    ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  function focusZone(zone: FocusZone): boolean {
+    // Graph uses its existing event hook so the scrollEl gets focus (which
+    // is what enables the arrow / Page / Home / End graph navigation).
+    if (zone.name === 'graph') {
+      window.dispatchEvent(new CustomEvent('arbor:focus-graph'));
+      return true;
+    }
+    const root = document.querySelector<HTMLElement>(zone.selector);
+    if (!root) return false;
+    const focusable = root.querySelector<HTMLElement>(FOCUSABLE_SEL);
+    if (focusable) { focusable.focus(); return true; }
+    // No natural focusable inside — focus the wrapper itself.
+    if (root.tabIndex < 0) root.tabIndex = -1;
+    root.focus();
+    return true;
+  }
+
+  function cycleFocus(direction: 1 | -1) {
+    const zones = FOCUS_ZONES.filter(z => document.querySelector(z.selector) !== null);
+    if (zones.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    let currentIdx = -1;
+    for (let i = 0; i < zones.length; i++) {
+      const el = document.querySelector(zones[i].selector);
+      if (el && active && el.contains(active)) { currentIdx = i; break; }
+    }
+    const nextIdx = currentIdx === -1
+      ? (direction === 1 ? 0 : zones.length - 1)
+      : (currentIdx + direction + zones.length) % zones.length;
+    focusZone(zones[nextIdx]);
+  }
 
   async function openNewTerminal() {
     // Ensure terminal panel is visible
@@ -1265,12 +1383,10 @@
         event: 'plugin:ui-clipboard-write',
         handler: async (e: { payload: { plugin: string; text: string; toast?: string } }) => {
           const { text, toast } = e.payload;
-          try {
-            await navigator.clipboard.writeText(text);
-            uiStore.showToast(toast ?? 'Copied to clipboard', 'success');
-          } catch (err) {
-            uiStore.showToast(`Clipboard failed: ${err}`, 'error');
-          }
+          await copyToClipboard(text, {
+            successToast: toast ?? 'Copied to clipboard',
+            errorToast: true,
+          });
         },
       },
       {
@@ -1481,6 +1597,20 @@
   // Rename-branch modal state (driven by palette event)
   let renameBranchTarget = $state<BranchInfo | null>(null);
 
+  // Tag-delete modal state (driven by palette event — sidebar handles its
+  // own modal locally for the context-menu flow).
+  let pendingTagDelete = $state<{ tabId: string; name: string; scope: 'local' | 'remote' } | null>(null);
+  $effect(() => {
+    function onDeleteTag(e: Event) {
+      const d = (e as CustomEvent<{ tabId: string; name: string; scope: 'local' | 'remote' }>).detail;
+      if (d?.tabId && d.name && (d.scope === 'local' || d.scope === 'remote')) {
+        pendingTagDelete = { tabId: d.tabId, name: d.name, scope: d.scope };
+      }
+    }
+    window.addEventListener('arbor:delete-tag', onDeleteTag);
+    return () => window.removeEventListener('arbor:delete-tag', onDeleteTag);
+  });
+
   // Global Git Blame modal — driven by the `arbor:show-blame` event so any
   // surface (Command Palette, plugin, future quick-action menus) can ask
   // for a blame without forcing a particular sidebar open.
@@ -1570,6 +1700,84 @@
     const tabId = tabsStore.activeTabId;
     if (tabId) mrStore.load(tabId);
   }
+
+  // ── Activity bar "peek" (for appearance.activity_bar_position = hidden) ──
+  // Each edge has its own independent peek flag and global mousemove watcher:
+  // hovering the LEFT edge reveals whichever bar currently sits on the left
+  // (built-in by default, plugin bar in `right` mirror mode); the RIGHT edge
+  // mirrors that affordance. Using mouseleave on the 4-px sliver would close
+  // the peek the instant the cursor crossed onto the bar itself — a global
+  // mousemove watcher with an explicit threshold is the robust path.
+  const PEEK_WIDTH = 38;
+  let _peekLeft  = $state(false);
+  let _peekRight = $state(false);
+  let _peekLeftMoveHandler:  ((e: MouseEvent) => void) | null = null;
+  let _peekRightMoveHandler: ((e: MouseEvent) => void) | null = null;
+
+  function onPeekLeftStart() {
+    if (_peekLeftMoveHandler) return;
+    _peekLeft = true;
+    _peekLeftMoveHandler = (e: MouseEvent) => {
+      if (e.clientX > PEEK_WIDTH) onPeekLeftEnd();
+    };
+    window.addEventListener('mousemove', _peekLeftMoveHandler);
+  }
+  function onPeekLeftEnd() {
+    if (_peekLeftMoveHandler) {
+      window.removeEventListener('mousemove', _peekLeftMoveHandler);
+      _peekLeftMoveHandler = null;
+    }
+    _peekLeft = false;
+  }
+  function onPeekRightStart() {
+    if (_peekRightMoveHandler) return;
+    _peekRight = true;
+    _peekRightMoveHandler = (e: MouseEvent) => {
+      if (e.clientX < window.innerWidth - PEEK_WIDTH) onPeekRightEnd();
+    };
+    window.addEventListener('mousemove', _peekRightMoveHandler);
+  }
+  function onPeekRightEnd() {
+    if (_peekRightMoveHandler) {
+      window.removeEventListener('mousemove', _peekRightMoveHandler);
+      _peekRightMoveHandler = null;
+    }
+    _peekRight = false;
+  }
+
+  // Position `hidden` is mutually exclusive with the mirror — when hidden,
+  // built-in stays at its natural DOM spot (left) and the plugin bar at
+  // its (right). So the mapping is straight:
+  //   peek-left  ⇒ reveals the built-in bar (visually leftmost)
+  //   peek-right ⇒ reveals the plugin bar (visually rightmost)
+  // Outside of `hidden`, both bars are always mounted.
+  const showBuiltinBar = $derived(
+    appearanceStore.activityBarPosition !== 'hidden' || _peekLeft
+  );
+  const showPluginBar = $derived(
+    appearanceStore.activityBarPosition !== 'hidden' || _peekRight
+  );
+
+  // If the user flips OUT of "hidden" while peeking, clear both watchers so
+  // they don't keep firing against a no-op state.
+  $effect(() => {
+    if (appearanceStore.activityBarPosition !== 'hidden') {
+      onPeekLeftEnd();
+      onPeekRightEnd();
+    }
+  });
+
+  // Custom horizontal-slide transition for the activity bars. Mirrors the
+  // existing `sidebarSlide` helper above but parametrised so it can be
+  // applied to a 38-px wrapper without measuring layout each time.
+  function barSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
+    const w = node.getBoundingClientRect().width || 38;
+    return {
+      duration,
+      easing: cubicOut,
+      css: (t: number) => `width: ${t * w}px; min-width: 0; overflow: hidden;`,
+    };
+  }
 </script>
 
 <!-- Boot-time splash overlay. Self-mounts at startup, listens for
@@ -1597,8 +1805,33 @@
       />
     {:else}
       <div class="workspace">
-        <!-- Activity Bar: always-visible left icon rail, flush to left edge -->
-        <ActivityBarLeft />
+        <!-- Edge hover triggers for the hidden activity-bar mode. Two
+             independent 4-px sliders: hovering the left edge reveals the
+             built-in bar (DOM-leftmost), hovering the right edge reveals
+             the plugin bar (DOM-rightmost). A global mousemove watcher per
+             side clears its flag once the cursor leaves the 38-px peek
+             strip — see `onPeekLeftStart` / `onPeekRightStart` above. -->
+        {#if appearanceStore.activityBarPosition === 'hidden'}
+          <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
+          <div
+            class="activity-bar-edge-trigger edge-left"
+            aria-hidden="true"
+            onmouseenter={onPeekLeftStart}
+          ></div>
+          <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
+          <div
+            class="activity-bar-edge-trigger edge-right"
+            aria-hidden="true"
+            onmouseenter={onPeekRightStart}
+          ></div>
+        {/if}
+        <!-- Built-in activity bar: always mounted unless `hidden` + not peeking.
+             A horizontal-slide transition handles the mount/unmount animation. -->
+        {#if showBuiltinBar}
+          <div class="ab-slot" transition:barSlide={{ duration: animStore.dPanel }}>
+            <ActivityBarLeft />
+          </div>
+        {/if}
 
         <!-- Inset panels container: gaps reveal the workspace bg (IntelliJ-style) -->
         <div class="panels">
@@ -1796,8 +2029,14 @@
         </div>
 
         <!-- Right ActivityBar: hidden completely when no plugin has
-             registered a right-side entry. -->
-        <ActivityBarRight />
+             registered a right-side entry. Wrapped in the same slide-in
+             transition as the built-in bar so peeking the right edge
+             animates symmetrically. -->
+        {#if showPluginBar}
+          <div class="ab-slot" transition:barSlide={{ duration: animStore.dPanel }}>
+            <ActivityBarRight />
+          </div>
+        {/if}
 
       </div>
     {/if}
@@ -1920,6 +2159,20 @@
       branch={renameBranchTarget}
       onClose={() => renameBranchTarget = null}
       onRenamed={() => { const tid = tabsStore.activeTabId; if (tid) cacheStore.invalidate(tid); graphStore.refresh(); }}
+    />
+  {/if}
+
+  <!-- Delete tag modal (triggered by palette via arbor:delete-tag) -->
+  {#if pendingTagDelete}
+    <DeleteTagModal
+      tagName={pendingTagDelete.name}
+      scope={pendingTagDelete.scope}
+      onCancel={() => pendingTagDelete = null}
+      onConfirm={async () => {
+        const p = pendingTagDelete!;
+        pendingTagDelete = null;
+        await runTagDelete(p.tabId, p.name, p.scope);
+      }}
     />
   {/if}
 
@@ -2163,6 +2416,16 @@
     />
   {/if}
 
+  <!-- Modal: Plugin Marketplace — mounted globally so the open_marketplace
+       shortcut and the Command Palette can reach it without having to open
+       the Plugin Manager first. Lazy-loaded: drags in the registry catalog,
+       install-confirm and a heap of icons that aren't needed at startup. -->
+  <Lazy
+    gate={uiStore.marketplaceOpen}
+    loader={() => import('../plugins/MarketplaceModal.svelte')}
+    onClose={() => uiStore.closeMarketplace()}
+  />
+
   <!-- Modal: Linked Worktrees (cross-project sync) -->
   <WorktreeLinkManagerModal />
   <AddToWorktreeLinkModal />
@@ -2186,9 +2449,27 @@
       onClose={() => (gitBouncerDismissed = true)}
     />
   {/if}
+
+  <!-- Welcome / onboarding tour. Auto-opens once per CURRENT_ONBOARDING_VERSION
+       (see effect above); re-entry from the command palette / Docs link
+       dispatches the `arbor:open-onboarding` window event. -->
+  {#if onboardingStore.open}
+    <OnboardingModal />
+  {/if}
 </div>
 
 <style>
+  /* Activity-bar wrapper. The bar component owns its own 38px width; the
+     wrapper exists purely so the Svelte slide transition can animate
+     `width` on a host element without colliding with the bar's own
+     :global(.activity-bar) rules. flex-shrink:0 keeps the bar from being
+     squeezed when the workspace is narrow. */
+  .ab-slot {
+    display: flex;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
   .shell {
     display: flex;
     flex-direction: column;

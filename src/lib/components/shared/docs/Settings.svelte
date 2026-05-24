@@ -1,6 +1,10 @@
+<script lang="ts">
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
+</script>
+
 <h1>Settings</h1>
 
-<p class="doc-lead">Open Settings with <kbd>Ctrl+,</kbd> or via the gear icon in the Activity Bar. Settings are organised into groups in the left sidebar — <em>Interface</em>, <em>Git</em>, <em>Tools</em>, <em>Performance</em>, <em>Access</em>, and <em>Project</em>. Global, host-wide tooling (pipeline cap, IDE registry, terminal registry) lives under <em>Tools</em>; per-repository overrides for those tools sit under <em>Project</em>.</p>
+<p class="doc-lead">Open Settings with <Kbd action="settings" /> or via the gear icon in the Activity Bar. Settings are organised into groups in the left sidebar — <em>Interface</em>, <em>Git</em>, <em>Tools</em>, <em>Performance</em>, <em>Access</em>, and <em>Project</em>. Global, host-wide tooling (pipeline cap, IDE registry, terminal registry) lives under <em>Tools</em>; per-repository overrides for those tools sit under <em>Project</em>.</p>
 
 <h2>Interface</h2>
 
@@ -50,10 +54,8 @@
 
 <h3>Diff &amp; Stage</h3>
 <ul>
-  <li><strong>Diff algorithm</strong> — Histogram (recommended), Patience, or Myers. Histogram produces cleaner hunks on most code.</li>
   <li><strong>Context lines</strong> — number of unchanged lines shown around each hunk (0 – 20, default 3).</li>
   <li><strong>View mode</strong> — Unified (single column) or Split (side-by-side).</li>
-  <li><strong>Word wrap</strong> — wraps long lines instead of scrolling horizontally.</li>
   <li><strong>Confirm before discarding</strong> — when enabled (default), a confirmation dialog appears before discarding a single file's changes. The <em>Discard All</em> confirmation is always shown regardless of this setting.</li>
 </ul>
 

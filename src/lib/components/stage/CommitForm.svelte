@@ -11,9 +11,8 @@
   import { commitChanges, getGitCommitTemplate } from '$lib/ipc/stage';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
+  import { commitConfigStore } from '$lib/stores/commit_config.svelte';
   import { pushBranch } from '$lib/ipc/remote';
-
-  const TEMPLATE_KEY = 'arbor:commit-template';
 
   let { onCommit }: { onCommit?: () => void } = $props();
 
@@ -59,7 +58,7 @@
           return;
         }
       } catch { /* ignore */ }
-      resolvedTemplate = localStorage.getItem(TEMPLATE_KEY) ?? '';
+      resolvedTemplate = commitConfigStore.templateGlobal;
     })();
   });
 
@@ -144,7 +143,7 @@
   function handleKeydown(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      handleCommit();
+      handleCommit(e.shiftKey);
     }
   }
 </script>
@@ -154,7 +153,7 @@
     <textarea
       bind:this={textareaEl}
       class="message-input"
-      placeholder="Commit message (Ctrl+Enter to commit)"
+      placeholder="Commit message (Ctrl+Enter to commit, Ctrl+Shift+Enter to commit &amp; push)"
       bind:value={message}
       onkeydown={handleKeydown}
       rows="3"
@@ -191,8 +190,8 @@
       disabled={!canCommit || committing}
       tooltip={tooltipForAction('Commit', 'commit')}
       options={[
-        { id: 'commit',       label: 'Commit',        icon: GitCommitHorizontal },
-        { id: 'commit-push',  label: 'Commit & Push', icon: Upload },
+        { id: 'commit',       label: 'Commit',        icon: GitCommitHorizontal, iconColor: 'var(--success)', action: 'commit' },
+        { id: 'commit-push',  label: 'Commit & Push', icon: Upload,              iconColor: 'var(--accent)',  action: 'commit_and_push' },
       ]}
       onclick={() => handleCommit(false)}
       onselect={(id) => {

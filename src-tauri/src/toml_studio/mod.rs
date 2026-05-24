@@ -1285,6 +1285,16 @@ fn step_value_mut<'a>(v: &'a mut TomlValue, seg: &str) -> Option<CursorMut<'a>> 
 /// `None` for nulls and arrays — `set_primitive` is for scalar leaves
 /// only; structural replacements go through `replace_at`.
 fn json_value_to_toml_value(v: &Value) -> Option<TomlValue> {
+    // The FE wire format may be tagged (`{type, value}`) or raw — unwrap
+    // the tagged form so the match below sees the actual scalar. Mirror
+    // of yaml_studio / json_studio / properties_studio.
+    let unwrapped: Value;
+    let v = if let Value::Object(map) = v {
+        if map.len() == 2 && map.contains_key("type") && map.contains_key("value") {
+            unwrapped = map.get("value").cloned().unwrap_or(Value::Null);
+            &unwrapped
+        } else { v }
+    } else { v };
     match v {
         Value::Bool(b)   => Some(TomlValue::from(*b)),
         Value::String(s) => Some(TomlValue::from(s.as_str())),

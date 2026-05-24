@@ -51,6 +51,8 @@ use crate::branding::BrandingState;
 use crate::deep_link::DeepLinkBuffer;
 use crate::studio::format::StudioRegistry;
 use crate::cloud::{CloudCancellations, CloudPendingOps};
+// `crate::cloud` is now a thin shim around the `arbor-cloud` workspace
+// crate — see `cloud/mod.rs` for the layout / Phase A vs Phase B split.
 use crate::brp::BrpRegistry;
 use crate::marketplace::MarketplaceRegistry;
 
@@ -60,10 +62,17 @@ use crate::marketplace::MarketplaceRegistry;
 
 pub struct AppState {
     pub repos:          Mutex<RepoManager>,
-    pub plugin_host:    Mutex<PluginHost>,
+    /// Arc-wrapped because the `arbor-cloud` CloudHost impl holds a clone —
+    /// both AppState's `lock_plugin_host()` helper and the cloud crate's
+    /// `host.fire_plugin_hook()` need access. Arc<Mutex<…>> keeps both
+    /// pointing at the same lock without ownership tricks.
+    pub plugin_host:    Arc<Mutex<PluginHost>>,
     pub config:         Mutex<AppConfig>,
     pub terminals:      Mutex<TerminalManager>,
-    pub jobs:           Mutex<JobRegistry>,
+    /// Arc-wrapped for the same reason as `plugin_host` — the cloud
+    /// crate's CloudHost impl needs to register/append/set status on jobs
+    /// from its spawned tokio tasks.
+    pub jobs:           Arc<Mutex<JobRegistry>>,
     /// Ring-buffer of recent `arbor.log.*` entries from every plugin —
     /// powers the Plugin Logs bottom panel.
     pub plugin_logs:    Mutex<PluginLogBuffer>,
@@ -124,11 +133,11 @@ pub struct AppState {
     /// PID-kill cancel path doesn't apply). `cancel_job` flips the right
     /// flag before falling through. Earmarked to be deleted alongside the
     /// rest of the cloud-storage host code when WASM lands.
-    pub cloud_cancellations: CloudCancellations,
+    pub cloud_cancellations: Arc<CloudCancellations>,
     /// stream_id → JobRegistry job_id for `download_many` calls with
     /// `keep_open=true` (chunk-merge flow). `cloud_report_done` reads +
     /// removes the entry to finalize the job once the merge phase ends.
-    pub cloud_pending_ops: CloudPendingOps,
+    pub cloud_pending_ops: Arc<CloudPendingOps>,
     /// Bevy Remote Protocol — singleton live session against one Bevy game
     /// at a time. Read-only HTTP for Phase 1; SSE watch + editing in later
     /// phases. See `project_bevy_brp_client.md` memory.
@@ -275,10 +284,10 @@ impl AppState {
 
         Self {
             repos:          Mutex::new(RepoManager::new()),
-            plugin_host:    Mutex::new(PluginHost::new()),
+            plugin_host:    Arc::new(Mutex::new(PluginHost::new())),
             config:         Mutex::new(config),
             terminals:      Mutex::new(TerminalManager::new()),
-            jobs:           Mutex::new(JobRegistry::default()),
+            jobs:           Arc::new(Mutex::new(JobRegistry::default())),
             plugin_logs:    Mutex::new(PluginLogBuffer::default()),
             // Seed the registry with runs persisted on disk (terminal/resumable
             // ones — Running/Pending get coerced to Failed by `load_persisted_runs`).
@@ -310,8 +319,8 @@ impl AppState {
                 reg.register(crate::properties_studio::backend_impl::backend());
                 Arc::new(reg)
             },
-            cloud_cancellations:    Mutex::new(HashMap::new()),
-            cloud_pending_ops:      Mutex::new(HashMap::new()),
+            cloud_cancellations:    Arc::new(Mutex::new(HashMap::new())),
+            cloud_pending_ops:      Arc::new(Mutex::new(HashMap::new())),
             brp:                    Mutex::new(BrpRegistry::default()),
             marketplace:            Mutex::new(MarketplaceRegistry::new()),
             boot_done:              Arc::new(AtomicBool::new(false)),
@@ -365,6 +374,14 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(AppState::new())
         .setup(|app| {
+            // Wire the `arbor-cloud` crate against AppState: registers the
+            // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
+            // into Tauri state so command + plugin-namespace layers can pull
+            // it back out. Must run before any cloud command can fire — safe
+            // here because commands only route once `Builder::run()` enters
+            // its event loop, which happens after `setup()` returns.
+            crate::cloud::install(&app.handle());
+
             // Register the `arbor://` URI scheme at runtime.  This is what
             // makes deep links work in `--no-bundle` builds where there is no
             // installer to write the registry entry — every dev launch points
@@ -677,7 +694,9 @@ pub fn run() {
             commands::branch_commands::checkout_branch,
             commands::branch_commands::checkout_branch_safe,
             commands::branch_commands::checkout_remote_as_local,
+            commands::branch_commands::checkout_remote_as_local_safe,
             commands::branch_commands::checkout_commit,
+            commands::branch_commands::checkout_commit_safe,
             commands::branch_commands::list_merged_branches,
             commands::branch_commands::delete_branches,
             commands::branch_commands::list_merged_remote_branches,
@@ -745,6 +764,7 @@ pub fn run() {
             // Plugins
             commands::plugin_commands::list_plugins,
             commands::plugin_commands::get_plugin_directory,
+            commands::plugin_commands::get_installed_plugin_path,
             commands::plugin_commands::get_plugins_enabled,
             commands::plugin_commands::set_plugins_enabled,
             commands::plugin_commands::reload_plugins,
@@ -752,6 +772,8 @@ pub fn run() {
             commands::plugin_commands::fire_plugin_action,
             commands::plugin_commands::enable_plugin,
             commands::plugin_commands::disable_plugin,
+            commands::plugin_commands::plugin_enable_preview,
+            commands::plugin_commands::plugin_disable_preview,
             commands::plugin_commands::delete_plugin,
             commands::plugin_commands::list_plugin_info,
             commands::plugin_commands::plugin_dep_graph,
@@ -823,6 +845,18 @@ pub fn run() {
             // MR/PR Activity timeline defaults
             commands::config_commands::get_mr_config,
             commands::config_commands::set_mr_config,
+            // Appearance preferences (window control style, font scale, …)
+            commands::config_commands::get_appearance_config,
+            commands::config_commands::set_appearance_config,
+            // UI animations preferences (enabled, speed)
+            commands::config_commands::get_animations_config,
+            commands::config_commands::set_animations_config,
+            // Commit preferences (host-wide template fallback, …)
+            commands::config_commands::get_commit_config,
+            commands::config_commands::set_commit_config,
+            // First-run onboarding tour state
+            commands::config_commands::get_onboarding_config,
+            commands::config_commands::set_onboarding_config,
             // Activity bar config
             commands::config_commands::get_activity_bar_config,
             commands::config_commands::set_activity_bar_config,
@@ -945,6 +979,7 @@ pub fn run() {
             commands::mr_commands::get_mr_detail,
             commands::mr_commands::create_mr,
             commands::mr_commands::get_mr_capabilities,
+            commands::mr_commands::probe_mr_feature,
             commands::mr_commands::disable_mr_auto_merge,
             commands::mr_commands::merge_mr,
             commands::mr_commands::close_mr,

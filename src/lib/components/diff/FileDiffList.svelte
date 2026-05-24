@@ -7,13 +7,8 @@
 
   let { files }: { files: DiffFile[] } = $props();
 
-  let viewMode = $state<'list' | 'tree'>(
-    (localStorage.getItem('arbor:diff-view-mode') as 'list' | 'tree') ?? 'list'
-  );
-
-  $effect(() => {
-    localStorage.setItem('arbor:diff-view-mode', viewMode);
-  });
+  const viewMode = $derived(diffStore.fileListView);
+  function setViewMode(v: 'list' | 'tree') { diffStore.setFileListView(v); }
 
   const STATUS_ICON: Record<string, string> = {
     added: 'A', modified: 'M', deleted: 'D',
@@ -106,7 +101,7 @@
         class="toggle-btn"
         class:active={viewMode === 'list'}
         use:tooltip={'List view'}
-        onclick={() => viewMode = 'list'}
+        onclick={() => setViewMode('list')}
       >
         <List size={11} />
       </button>
@@ -114,7 +109,7 @@
         class="toggle-btn"
         class:active={viewMode === 'tree'}
         use:tooltip={'Tree view'}
-        onclick={() => viewMode = 'tree'}
+        onclick={() => setViewMode('tree')}
       >
         <FolderTree size={11} />
       </button>

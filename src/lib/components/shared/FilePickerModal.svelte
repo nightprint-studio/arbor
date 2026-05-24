@@ -198,6 +198,99 @@
     return () => window.removeEventListener('keydown', onKey, { capture: true });
   });
 
+  // ── Focus zone cycling (F6 / Shift+F6) ───────────────────────────────────
+  // Mirrors Windows Explorer / browser convention: F6 rotates focus between
+  // the file list, the sidebar (locations), and the address bar.
+  let pickerEl = $state<HTMLElement | null>(null);
+
+  type FocusZone = 'list' | 'sidebar' | 'address';
+
+  function detectZone(): FocusZone {
+    const active = document.activeElement as HTMLElement | null;
+    if (!active) return 'list';
+    if (pickerEl?.querySelector('.sidebar')?.contains(active)) return 'sidebar';
+    if (active.id === 'addr-input' || active.closest('.hdr-address')) return 'address';
+    return 'list';
+  }
+
+  function focusSidebarZone() {
+    const sidebar = pickerEl?.querySelector('.sidebar');
+    if (!sidebar) return;
+    const target = sidebar.querySelector<HTMLElement>('.sb-item.active, .sb-ws-header.active')
+                ?? sidebar.querySelector<HTMLElement>('.sb-item, .sb-ws-header');
+    target?.focus();
+  }
+
+  function focusListZone() {
+    if (!listEl) {
+      // Falls back to filter input when the list isn't mounted (e.g. This PC).
+      pickerEl?.querySelector<HTMLElement>('.filter-input')?.focus();
+      return;
+    }
+    const target = listEl.querySelector<HTMLElement>('.row.selected')
+                ?? listEl.querySelector<HTMLElement>('.row');
+    if (target) { target.focus(); return; }
+    pickerEl?.querySelector<HTMLElement>('.filter-input')?.focus();
+  }
+
+  function focusAddressZone() {
+    if (isThisPc) { focusSidebarZone(); return; }
+    startAddressEdit();
+  }
+
+  /** Cancel transient sub-states (rename, create, address-edit, delete-confirm,
+   *  context menu) WITHOUT triggering their commit-on-blur side-effects. */
+  function bailTransientStates() {
+    if (addressEditing) { addressInput = ''; addressEditing = false; }
+    if (renamingPath)   cancelRename();
+    if (createKind)     cancelCreate();
+    if (deletingPath)   deletingPath = '';
+    if (ctxMenu)        ctxMenu = null;
+  }
+
+  function cycleFocus(dir: 1 | -1) {
+    const cur = detectZone();
+    bailTransientStates();
+    const order: FocusZone[] = isThisPc ? ['list', 'sidebar'] : ['list', 'sidebar', 'address'];
+    const idx  = order.indexOf(cur);
+    const next = order[(idx + dir + order.length) % order.length];
+    tick().then(() => {
+      if (next === 'list')    focusListZone();
+      if (next === 'sidebar') focusSidebarZone();
+      if (next === 'address') focusAddressZone();
+    });
+  }
+
+  // Capture-phase listener so F6 fires even when focus is in an input that
+  // stops propagation (address-bar editor, filter input, rename/create input).
+  $effect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'F6') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        cycleFocus(e.shiftKey ? -1 : 1);
+        return;
+      }
+      // Once focus is on a sidebar button, ↑↓ should walk the locations list
+      // (browsers don't do this natively for buttons). We don't preventDefault
+      // unless the focus is actually inside the sidebar so the file-list arrow
+      // navigation isn't disturbed.
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      const sidebar = pickerEl?.querySelector('.sidebar');
+      const active = document.activeElement as HTMLElement | null;
+      if (!sidebar || !active || !sidebar.contains(active)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const items = Array.from(sidebar.querySelectorAll<HTMLElement>('.sb-item, .sb-ws-header'));
+      const i = items.indexOf(active);
+      if (i < 0) return;
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      items[(i + step + items.length) % items.length].focus();
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  });
+
   // ── Virtual scroll ────────────────────────────────────────────────────────
   const VS_ROW_HEIGHT = 28;
   const VS_OVERSCAN   = 20;
@@ -882,7 +975,13 @@
           : list[Math.max(idx - 1, 0)];
         if (next) {
           clickEntry(next);
-          tick().then(() => scrollToSelected());
+          tick().then(() => {
+            scrollToSelected();
+            // Keep DOM focus on the newly selected row so the :focus-visible
+            // ring tracks selection — otherwise focus stays on the previously
+            // focused row and the user can't tell which panel/item is live.
+            listEl?.querySelector<HTMLElement>('.row.selected')?.focus({ preventScroll: true });
+          });
         }
         return;
       }
@@ -1122,6 +1221,7 @@
   class="picker"
   role="presentation"
   tabindex="-1"
+  bind:this={pickerEl}
 >
 
   <!-- ══ Body ══ -->
@@ -1895,6 +1995,16 @@
     background: var(--accent-subtle);
     color: var(--accent);
   }
+  /* Keyboard focus — inset accent ring distinguishes a focused item from a
+     merely "active" one (e.g. the current directory shown in the sidebar).
+     Mouse focus is intentionally not styled (:focus-visible only). */
+  .sb-item:focus-visible,
+  .sb-ws-header:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+    color: var(--text-primary);
+  }
+  .sb-item:focus-visible .sb-icon-wrap { color: var(--accent); }
 
   .sidebar.collapsed .sb-item {
     padding: 0;
@@ -2148,6 +2258,12 @@
   .row.dimmed    { opacity: 0.35; pointer-events: none; }
   .row.deleting  { background: var(--error-subtle); }
   .row.create-row { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  /* Keyboard focus — inset accent ring. Layered on top of .selected so a row
+     that is BOTH focused and selected is unmistakeably "the live one". */
+  .row:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
 
   .entry-name {
     font-size: 12px; color: var(--text-primary);
@@ -2291,6 +2407,4 @@
   }
   :global(.delete-icon) { color: var(--error); flex-shrink: 0; }
   .delete-confirm strong { color: var(--text-primary); }
-  :global(.spin) { animation: spin 0.75s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

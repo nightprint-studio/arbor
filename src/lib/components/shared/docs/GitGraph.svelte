@@ -1,3 +1,8 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+  import Kbd     from '$lib/components/shared/internal/Kbd.svelte';
+</script>
+
 <h1>Git Graph</h1>
 
 <p class="doc-lead">The commit graph renders your entire repository history as SVG lanes with virtual scrolling — only visible rows are painted, regardless of repository size or branch count.</p>
@@ -9,10 +14,10 @@
     <tr><td>Select commit &amp; load diff</td><td>Click any row</td></tr>
     <tr><td>Context menu</td><td>Right-click any row</td></tr>
     <tr><td>Load more history</td><td>Scroll to the bottom — loads automatically (when pagination is on)</td></tr>
-    <tr><td>Search commits</td><td><kbd>Ctrl+F</kbd> — message, author name, or SHA</td></tr>
+    <tr><td>Search commits</td><td><Kbd action="search" /> — message, author name, or SHA</td></tr>
     <tr><td>Next search match</td><td><kbd>Enter</kbd> while search is open (or the ▼ button)</td></tr>
     <tr><td>Previous search match</td><td><kbd>Shift+Enter</kbd> while search is open (or the ▲ button)</td></tr>
-    <tr><td>Jump to HEAD</td><td><kbd>Ctrl+Home</kbd> or the ↑ button in the toolbar</td></tr>
+    <tr><td>Jump to HEAD</td><td><Kbd action="jump_to_head" /> or the ↑ button in the toolbar</td></tr>
   </tbody>
 </table>
 
@@ -35,9 +40,9 @@
   <li>A <strong>Gravatar</strong> lookup is attempted: <code>gravatar.com/avatar/&lt;sha256&gt;</code></li>
   <li>If no Gravatar exists, a deterministic <strong>colored circle with initials</strong> is generated client-side</li>
 </ol>
-<div class="callout info">
-  <strong>GitHub &amp; GitLab</strong> — both platforms associate commit emails with Gravatar accounts by default, so avatars resolve automatically for most contributors. Users who have set a custom avatar only on GitHub/GitLab (not on Gravatar) will fall back to the generated initials avatar.
-</div>
+<Callout variant="info" title="GitHub & GitLab">
+  Both platforms associate commit emails with Gravatar accounts by default, so avatars resolve automatically for most contributors. Users who have set a custom avatar only on GitHub/GitLab (not on Gravatar) will fall back to the generated initials avatar.
+</Callout>
 <p>Avatars are cached in memory for the session — each email is fetched at most once.</p>
 
 <h2>Branch labels</h2>
@@ -93,12 +98,11 @@
   </div>
 </div>
 
-<div class="callout warning">
-  <strong>Cherry-picking or reverting a merge commit</strong>
+<Callout variant="warning" title="Cherry-picking or reverting a merge commit">
   Merge commits have two parents, so both cherry-pick and revert are ambiguous on them: Git needs to know which side of the merge to keep. Arbor defaults to <strong>parent 1</strong> (the receiving branch) — equivalent to <code>git revert -m 1</code> / <code>git cherry-pick -m 1</code> — which targets the changes that were merged in while keeping the branch you merged onto as the baseline. This is what you want in almost every case; if you ever need the opposite, use the CLI with <code>-m 2</code>.
   <br><br>
   <em>Reset</em> is unaffected — it just moves <code>HEAD</code> to the target commit and never computes a diff, so the number of parents doesn't matter.
-</div>
+</Callout>
 
 <h2>WIP node context menu</h2>
 <p>The <strong>WIP node</strong> (dashed circle at the top of the graph) represents uncommitted working directory changes. <strong>Right-click</strong> it to access quick actions:</p>
@@ -137,10 +141,9 @@
   <li>Click it — the graph reloads with only the relevant commits visible</li>
   <li>A pill in the toolbar shows the active file name. Click <strong>×</strong> to clear the filter</li>
 </ol>
-<div class="callout info">
-  <strong>Under the hood</strong>
+<Callout variant="info" title="Under the hood">
   The filter runs in Rust via <code>DiffOptions::pathspec</code> — renames, copies, and binary files are all included. Pagination (load-more) also respects the active filter.
-</div>
+</Callout>
 
 <h2>Commit Templates</h2>
 <p>The commit message field is auto-filled from the first available source, in priority order:</p>
@@ -176,9 +179,9 @@
   Progress is visible in the <em>Jobs</em> overlay (click the status-bar spinner or the badge count).
   A <strong>bell notification</strong> appears when the export completes or fails.
 </p>
-<div class="callout info">
+<Callout variant="info">
   The SVG is written as a streaming <code>BufWriter</code> directly to disk — the full file is never held in memory — so exports of repositories with tens of thousands of commits stay within normal memory usage.
-</div>
+</Callout>
 
 <h2>Branch Cleanup</h2>
 <p>The <strong>trash icon</strong> in the sidebar's <em>Local Branches</em> header opens the Branch Cleanup modal. It scans for all branches already merged into a target branch and lets you delete them in bulk — locally or on the remote. See the <strong>Branches</strong> section for full details.</p>

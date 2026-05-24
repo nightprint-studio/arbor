@@ -28,9 +28,7 @@
   import { getCommitDiffMeta, getWorkdirDiff } from '$lib/ipc/diff';
   import { createBranch, createTag, checkoutBranch, stashSave } from '$lib/ipc/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
-  import { applyStashAction, popStashAction, dropStashAction } from '$lib/utils/stash-actions';
   import { getBranchPolicy, assertBranchNameAllowed } from '$lib/utils/branch-policy';
-  import { Play as PlayIcon, CornerDownLeft as PopIcon, Trash2 as DropIcon } from 'lucide-svelte';
   import { pushBranch } from '$lib/ipc/remote';
   import { localTagTracker } from '$lib/stores/local-tags.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
@@ -307,30 +305,6 @@
 
   function openStashPopupAt(x: number, y: number, stashes: StashRef[]) {
     stashPopup = { x, y, stashes };
-  }
-
-  // Inline hover actions on a single-stash bubble. Bridges the StashRef the
-  // graph carries (index/oid/message + parentOid) to the StashEntry shape
-  // the action helpers expect — same fields, just dropping parentOid.
-  //
-  // No `onRefresh` callback: the helpers call `applyPostStashChange`
-  // internally which is the right scope for a stash op (markers + sidebar
-  // list + status).  Passing `graphStore.refresh()` here would trigger an
-  // unnecessary full `getGraph` round-trip on top.
-  async function inlineApplyStash(s: StashRef, e: MouseEvent) {
-    e.stopPropagation();
-    if (!tab) return;
-    await applyStashAction(tab.id, { index: s.index, oid: s.oid, message: s.message });
-  }
-  async function inlinePopStash(s: StashRef, e: MouseEvent) {
-    e.stopPropagation();
-    if (!tab) return;
-    await popStashAction(tab.id, { index: s.index, oid: s.oid, message: s.message });
-  }
-  async function inlineDropStash(s: StashRef, e: MouseEvent) {
-    e.stopPropagation();
-    if (!tab) return;
-    await dropStashAction(tab.id, { index: s.index, oid: s.oid, message: s.message });
   }
 
   async function handleStashPopupSelect(id: string) {
@@ -818,6 +792,116 @@
     // which also avoids the parallel fetch we used to issue here.
   }
 
+  // ── Keyboard navigation (graph viewport must have focus) ────────────────
+  // Bare Arrow / Page / Home / End move the selection through the commit list.
+  // Selection follows the active search filter implicitly — we walk all nodes
+  // since rendering already shows all nodes (search just highlights matches).
+  function isRowFullyVisible(row: number): boolean {
+    const el = scrollEl;
+    if (!el) return false;
+    const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
+    const yMid = nodeY(row) + padTop;
+    const top = el.scrollTop;
+    const bottom = top + viewportH;
+    const margin = ROW_HEIGHT;
+    return (yMid - ROW_HEIGHT / 2) >= (top + margin)
+        && (yMid + ROW_HEIGHT / 2) <= (bottom - margin);
+  }
+
+  function ensureRowVisible(row: number) {
+    if (!scrollEl) return;
+    if (isRowFullyVisible(row)) return;
+    scrollEl.scrollTo({ top: centerScrollTop(nodeY(row)), behavior: 'smooth' });
+  }
+
+  // Walk along the anchor's lane (= same column in the graph — gitk's lane
+  // reuse means this maps to "stay on the visual branch line" rather than to
+  // git's branch refs, which matches what the user sees on screen).  Falls
+  // back to a single-row step when the lane has no more commits in the
+  // requested direction, so the keys never feel "stuck" at branch tips.
+  function moveAlongLane(idx: number, dir: 1 | -1, nodes: CommitNode[]): number {
+    const last = nodes.length - 1;
+    const cur = nodes[idx];
+    for (let i = idx + dir; i >= 0 && i <= last; i += dir) {
+      if (nodes[i].lane === cur.lane) return i;
+    }
+    const fb = idx + dir;
+    return (fb >= 0 && fb <= last) ? fb : idx;
+  }
+
+  // Find the nearest occupied lane on the requested side (← / →) within a
+  // bounded window around the anchor, then return the commit on that lane
+  // whose row is closest to the current one.  Window cap keeps the scan
+  // O(WINDOW) even on 100k-commit repos.
+  function moveAcrossLane(idx: number, dir: 1 | -1, nodes: CommitNode[]): number {
+    const last = nodes.length - 1;
+    const cur = nodes[idx];
+    const WINDOW = 300;
+    const lo = Math.max(0, idx - WINDOW);
+    const hi = Math.min(last, idx + WINDOW);
+    const closestPerLane = new Map<number, { idx: number; dist: number }>();
+    for (let i = lo; i <= hi; i++) {
+      const n = nodes[i];
+      if (dir === 1  && n.lane <= cur.lane) continue;
+      if (dir === -1 && n.lane >= cur.lane) continue;
+      const d = Math.abs(i - idx);
+      const ex = closestPerLane.get(n.lane);
+      if (!ex || d < ex.dist) closestPerLane.set(n.lane, { idx: i, dist: d });
+    }
+    if (closestPerLane.size === 0) return idx;
+    let bestLane = -1;
+    for (const lane of closestPerLane.keys()) {
+      if (bestLane === -1 || Math.abs(lane - cur.lane) < Math.abs(bestLane - cur.lane)) {
+        bestLane = lane;
+      }
+    }
+    return closestPerLane.get(bestLane)!.idx;
+  }
+
+  function handleGraphKeydown(e: KeyboardEvent) {
+    // Bare keys only — modifier chords (Ctrl+Home, …) belong to AppShell.
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (!data || data.nodes.length === 0) return;
+
+    const nodes = data.nodes;
+    const last  = nodes.length - 1;
+    const currentIdx = graphStore.selectedOid
+      ? nodes.findIndex(n => n.oid === graphStore.selectedOid)
+      : -1;
+    const headIdx = nodes.findIndex(n => n.is_head);
+    // Anchor: current selection → HEAD → top.
+    const anchor = currentIdx >= 0 ? currentIdx : (headIdx >= 0 ? headIdx : 0);
+    // Page = rows that fully fit, minus one for context overlap.
+    const pageSize = Math.max(1, Math.floor(viewportH / ROW_HEIGHT) - 1);
+
+    let target = -1;
+    switch (e.key) {
+      // Topology nav — ↑ / ↓ follow the current lane (visual branch line),
+      // ← / → hop to the nearest occupied lane on that side.
+      case 'ArrowDown':  target = moveAlongLane(anchor,  1, nodes); break;
+      case 'ArrowUp':    target = moveAlongLane(anchor, -1, nodes); break;
+      case 'ArrowRight': target = moveAcrossLane(anchor,  1, nodes); break;
+      case 'ArrowLeft':  target = moveAcrossLane(anchor, -1, nodes); break;
+      // Linear nav — Page / Home / End walk the row list, ignoring lanes.
+      case 'PageDown':   target = Math.min(last, anchor + pageSize); break;
+      case 'PageUp':     target = Math.max(0,    anchor - pageSize); break;
+      case 'Home':       target = 0; break;
+      case 'End':        target = last; break;
+      default: return;
+    }
+
+    e.preventDefault();
+    if (target === currentIdx) {
+      // Hit the edge of the list / lane — at least keep the row on screen.
+      ensureRowVisible(anchor);
+      return;
+    }
+    const node = nodes[target];
+    if (!node) return;
+    void handleSelectCommit(node);
+    ensureRowVisible(target);
+  }
+
   function handleContextMenu(e: MouseEvent, node: CommitNode) {
     e.preventDefault();
     e.stopPropagation(); // don't bubble to scroll-area background handler
@@ -947,6 +1031,14 @@
     function onJumpToHead() { graphStore.scrollToHead(); }
     window.addEventListener('arbor:jump-to-head', onJumpToHead);
     return () => window.removeEventListener('arbor:jump-to-head', onJumpToHead);
+  });
+
+  // Listen for focus-graph keybinding event — pulls focus into the scroll
+  // area so the bare Arrow / Page / Home / End keys start driving navigation.
+  $effect(() => {
+    function onFocusGraph() { scrollEl?.focus(); }
+    window.addEventListener('arbor:focus-graph', onFocusGraph);
+    return () => window.removeEventListener('arbor:focus-graph', onFocusGraph);
   });
 
   // Navigate to a specific commit OID — fired by Command Palette (tags, commits)
@@ -1289,8 +1381,15 @@
     />
   {/if}
 
-  <!-- Virtual scroll area -->
-  <div class="scroll-area" role="presentation" bind:this={scrollEl} onscroll={handleScroll} oncontextmenu={handleBgContextMenu}>
+  <!-- Virtual scroll area — custom keyboard-driven widget (arrow keys walk
+       lanes, PgUp/Dn jump viewports, Home/End jump to newest/oldest). The
+       `role="application"` is correct but svelte-a11y still flags the div
+       as non-interactive; the ignores below are intentional. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div class="scroll-area" role="application" aria-label="Commit graph" tabindex="0"
+       bind:this={scrollEl} onscroll={handleScroll} onkeydown={handleGraphKeydown}
+       oncontextmenu={handleBgContextMenu}>
     {#if graphStore.isLoading}
       <div class="center-msg">
         <div class="spinner"></div>
@@ -1480,39 +1579,6 @@
                     pointer-events="none"
                   />
 
-                  <!-- Hover-only inline actions for SINGLE-stash bubbles
-                       (apply / pop / drop). Foreign-object embeds HTML
-                       buttons inside the SVG so they participate in the
-                       same .stash-marker:hover state as the bubble. The
-                       actions float to the LEFT of the bubble so they
-                       never overlap the bubble itself or the right-edge
-                       accent line. Multi-stash bubbles keep popup-only
-                       behavior — picking which stash to act on first is
-                       a separate decision the user must make. -->
-                  {@const stash = stashes[0]}
-                  <foreignObject
-                    class="stash-actions-fo"
-                    x={bx - 78} y={by - 10}
-                    width="64" height="20"
-                  >
-                    <div class="stash-actions" onclick={(e) => e.stopPropagation()} role="presentation">
-                      <button
-                        class="stash-action"
-                        use:tooltip={'Apply stash'}
-                        onclick={(e) => inlineApplyStash(stash, e)}
-                      ><PlayIcon size={11} /></button>
-                      <button
-                        class="stash-action"
-                        use:tooltip={'Pop stash'}
-                        onclick={(e) => inlinePopStash(stash, e)}
-                      ><PopIcon size={11} /></button>
-                      <button
-                        class="stash-action danger"
-                        use:tooltip={'Drop stash'}
-                        onclick={(e) => inlineDropStash(stash, e)}
-                      ><DropIcon size={11} /></button>
-                    </div>
-                  </foreignObject>
                 {/if}
               </g>
             {/if}
@@ -1726,42 +1792,6 @@
     fill: color-mix(in srgb, var(--color-stash, #c9a227) 14%, var(--bg-elevated));
   }
 
-  /* Inline hover-only stash action toolbar (single-stash bubbles). The
-     foreignObject itself is pointer-events:none so it doesn't steal hover
-     from the bubble while invisible — only the inner .stash-actions
-     re-enables pointer events when the marker is hovered. */
-  .stash-actions-fo { overflow: visible; }
-  .stash-marker .stash-actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 2px;
-    height: 100%;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity var(--transition-fast);
-  }
-  .stash-marker:hover .stash-actions,
-  .stash-marker:focus-visible .stash-actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
-  .stash-action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px; height: 18px;
-    border: none;
-    background: var(--bg-elevated);
-    color: var(--text-muted);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .stash-action:hover { background: var(--bg-overlay); color: var(--text-primary); }
-  .stash-action.danger:hover { color: var(--error); background: var(--error-subtle); }
-
   .graph-toolbar {
     display: flex;
     align-items: center;
@@ -1887,6 +1917,16 @@
     position: relative;
     padding-left: 8px;
     padding-top: .5em;
+  }
+
+  /* Hide the default outline (mouse focus) but keep a visible ring when the
+     user reaches the graph viewport via Tab or Alt+G — required so the
+     keyboard-only nav (Arrows / Page / Home / End) is discoverable. The inset
+     offset keeps the ring inside the panel's rounded corners. */
+  .scroll-area:focus { outline: none; }
+  .scroll-area:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .graph-body {
@@ -2073,5 +2113,4 @@
     animation: spin 700ms linear infinite;
   }
 
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

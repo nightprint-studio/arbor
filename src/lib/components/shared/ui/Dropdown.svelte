@@ -6,12 +6,22 @@
         label:     string;
         /** Lucide-style component rendered at size 14. */
         icon?:     any;
+        /** Optional CSS colour applied to the icon (any CSS colour or
+         *  `var(--token)`). Matches the same option on ContextMenu — useful
+         *  for split-button menus that mirror a right-click menu's palette. */
+        iconColor?: string;
         /** If provided, shown as a 22px avatar circle (icon is ignored). */
         avatarUrl?: string;
         /** Second line below the label in smaller text. */
         subtitle?: string;
         /** Right-aligned muted text (counts, dates, …). */
         meta?:     string;
+        /** Built-in keybinding action id (e.g. 'commit') — resolved live via
+         *  keybindingsStore so user remaps flow through. Preferred over
+         *  `shortcut`. Rendered as an inline kbd hint on the right. */
+        action?:   string;
+        /** Pre-formatted shortcut fallback when `action` is not a known id. */
+        shortcut?: string;
         /** Single-mode: shows a check on the right. Multi-mode: drives the checkbox state. */
         active?:   boolean;
         disabled?: boolean;
@@ -32,11 +42,16 @@
 
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { tick } from 'svelte';
+  import { tick, onMount } from 'svelte';
   import { fly, slide } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { Search, ChevronDown, ChevronRight, Check, Loader } from 'lucide-svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  // NOTE: Kbd lives in shared/internal/ because its `action=` mode reaches
+  // into Arbor's keybindings store. Dropdown uses it only as an optional
+  // right-aligned shortcut hint, so the leak across the ui/internal boundary
+  // is contained to this single import — see CLAUDE.md tier convention.
+  import Kbd from '../internal/Kbd.svelte';
 
   type Ctx        = { open: boolean; toggle: () => void; close: () => void };
   type ContentCtx = { filter: string; close: () => void; reposition: () => void };
@@ -87,6 +102,15 @@
     loading?: boolean;
     /** Fires the moment the menu opens (use for lazy-loading items). */
     onopen?: () => void;
+    /** Fires every time the menu closes — pick, Escape, Tab, or
+     *  outside-click. Lets callers distinguish "closed without picking"
+     *  (treat as cancel) from "closed via item selection" by setting a
+     *  flag in the item's `onclick` before the close runs. */
+    onclose?: () => void;
+    /** When true, open the menu on mount (one-shot — toggled to false
+     *  externally has no effect). Used by inline-edit shells that
+     *  pop the dropdown automatically when entering edit mode. */
+    autoOpen?: boolean;
     class?: string;
   }
 
@@ -107,6 +131,8 @@
     closeOnSelect,
     loading           = false,
     onopen,
+    onclose,
+    autoOpen          = false,
     showFooter        = true,
     class: rootClass  = '',
   }: Props = $props();
@@ -202,6 +228,14 @@
     menuStyle = style;
   }
 
+  // Auto-open on mount when the caller drives the open lifecycle from
+  // outside (e.g. an inline-edit shell that pops the dropdown the moment
+  // the row enters edit mode). One-shot — toggling `autoOpen` back to
+  // false later has no effect; the menu is fully driven by `open` after.
+  onMount(() => {
+    if (autoOpen) void tick().then(() => { if (!open) toggle(); });
+  });
+
   // ── Toggle / close / reposition ───────────────────────────────────────────
   function toggle() {
     if (open) { close(); return; }
@@ -225,15 +259,28 @@
     });
   }
 
-  function close() { open = false; }
+  /** Move focus back to the trigger element when the menu closes via
+   *  keyboard (Escape / Enter selection). Without this the focus is
+   *  orphaned on `<body>` and Tab restarts the tab cycle from scratch. */
+  function focusTrigger() {
+    const t = (anchorEl?.firstElementChild as HTMLElement | null) ?? null;
+    if (t && typeof t.focus === 'function') t.focus();
+  }
+
+  function close(restoreFocus = false) {
+    if (!open) return;
+    open = false;
+    if (restoreFocus) focusTrigger();
+    onclose?.();
+  }
 
   function reposition() { if (position === 'fixed') computeFixed(); }
 
   // ── Item selection ────────────────────────────────────────────────────────
-  function pickItem(item: Extract<DropdownItem, { kind: 'item' }>) {
+  function pickItem(item: Extract<DropdownItem, { kind: 'item' }>, viaKeyboard = false) {
     if (item.disabled) return;
     item.onclick();
-    if (effectiveCloseOnSelect) close();
+    if (effectiveCloseOnSelect) close(viaKeyboard);
   }
 
   function toggleGroup(id: string) {
@@ -257,7 +304,11 @@
       if (!menuEl?.contains(t) && !anchorEl?.contains(t)) close();
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.stopPropagation(); close(); return; }
+      if (e.key === 'Escape') { e.stopPropagation(); close(true); return; }
+      // Tab moves focus out of the menu — close without preventDefault so
+      // the browser advances focus to the next tabstop naturally. Without
+      // this the menu lingered open behind the next field.
+      if (e.key === 'Tab') { close(false); return; }
       const max = navigableItems.length;
       if (max === 0) return;
       if (e.key === 'ArrowDown') {
@@ -275,7 +326,7 @@
       } else if (e.key === 'Enter') {
         if (focusedIdx >= 0 && focusedIdx < max) {
           e.preventDefault();
-          pickItem(navigableItems[focusedIdx]);
+          pickItem(navigableItems[focusedIdx], true);
         }
       }
     }
@@ -371,13 +422,22 @@
       <img class="dd-avatar" src={item.avatarUrl} alt="" />
     {:else if item.icon}
       {@const ItemIcon = item.icon}
-      <ItemIcon size={14} class="dd-icon" />
+      {#if item.iconColor}
+        <span class="dd-icon-tint" style="color:{item.iconColor}"><ItemIcon size={14} /></span>
+      {:else}
+        <ItemIcon size={14} class="dd-icon" />
+      {/if}
     {/if}
     <span class="dd-item-body">
       <span class="dd-item-label">{item.label}</span>
       {#if item.subtitle}<span class="dd-item-sub">{item.subtitle}</span>{/if}
     </span>
     {#if item.meta}<span class="dd-item-meta">{item.meta}</span>{/if}
+    {#if item.action}
+      <span class="dd-shortcut"><Kbd action={item.action} variant="inline" /></span>
+    {:else if item.shortcut}
+      <span class="dd-shortcut"><Kbd label={item.shortcut} variant="inline" /></span>
+    {/if}
     {#if item.active && selectionMode !== 'multiple'}<Check size={11} class="dd-check" />{/if}
   </button>
 {/snippet}
@@ -425,6 +485,16 @@
   class="dd-root {rootClass}"
   class:dd-rel={position === 'absolute'}
   bind:this={anchorEl}
+  onkeydown={(e) => {
+    // WAI-ARIA combobox pattern: ArrowDown (or Alt+ArrowDown) on the focused
+    // trigger opens the menu and lands on the first item. Enter / Space are
+    // already handled natively by the trigger <button>. Only react when the
+    // menu is closed — once open, the document-level key handler takes over.
+    if (!open && (e.key === 'ArrowDown' || (e.altKey && e.key === 'ArrowDown'))) {
+      e.preventDefault();
+      toggle();
+    }
+  }}
 >
   {@render trigger({ open, toggle, close })}
 
@@ -678,6 +748,16 @@
   }
   :global(.dd-icon)  { flex-shrink: 0; color: var(--text-muted); }
   :global(.dd-check) { color: var(--accent); flex-shrink: 0; }
+  /* Per-item icon tint (set via iconColor). The wrapping span owns the
+     colour so we don't fight the `:global(.dd-icon)` muted default; the
+     lucide glyph inside paints in currentColor. */
+  .dd-icon-tint {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  /* Right-aligned inline kbd hint (mirrors ContextMenu's .shortcut-slot). */
+  .dd-shortcut { margin-left: 8px; flex-shrink: 0; }
 
   .dd-item-body {
     flex: 1;

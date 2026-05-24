@@ -229,8 +229,6 @@
   .state-overlay.err   { color: var(--error, #c75450); }
   .state-overlay.muted { color: var(--text-disabled); }
 
-  :global(.spin) { animation: spin 0.9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* ── Blame table ── */
   .blame-table {

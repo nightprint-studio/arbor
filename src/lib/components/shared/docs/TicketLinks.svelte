@@ -5,25 +5,25 @@
 <div class="doc">
   <h1>Ticket Links</h1>
   <p>
-    Arbor can associate commits with tickets from your issue tracker â€” automatically
+    Arbor can associate commits with tickets from your issue tracker — automatically
     by parsing commit messages and branch names, or manually via right-click.
     Linked tickets appear as small chips on each graph row and in the commit detail panel.
   </p>
 
   <h2>How it works</h2>
   <ul>
-    <li><strong>Auto-detect (message)</strong> â€” Arbor scans each visible commit message for
+    <li><strong>Auto-detect (message)</strong> — Arbor scans each visible commit message for
       ticket IDs matching the configured tracker pattern (e.g. <code>ENG-123</code> for Linear,
-      <code>#456</code> for GitHub / GitLab). Results are cached in memory â€” no re-scan on scroll.</li>
-    <li><strong>Auto-detect (branch)</strong> â€” Branch names pointing to a commit are also scanned
+      <code>#456</code> for GitHub / GitLab). Results are cached in memory — no re-scan on scroll.</li>
+    <li><strong>Auto-detect (branch)</strong> — Branch names pointing to a commit are also scanned
       (e.g. <code>feature/ENG-123-login-flow</code>).</li>
-    <li><strong>Manual link</strong> â€” Right-click a commit â†’ <em>Link to ticketâ€¦</em> to open the
+    <li><strong>Manual link</strong> — Right-click a commit → <em>Link to ticket…</em> to open the
       ticket picker and create a persistent association stored in the backing store.</li>
   </ul>
 
   <h2>Storage backends</h2>
   <p>
-    Manual links can be stored in one of two backends. The backend is exclusive â€”
+    Manual links can be stored in one of two backends. The backend is exclusive —
     only one is active per repository at a time (no mixed reads).
   </p>
 
@@ -54,7 +54,7 @@
 
   <h3>Global config (<code>~/.config/arbor/config.toml</code>)</h3>
   <pre class="language-toml">{@html highlight(`[ticket_links]
-enabled    = true          # master switch (also in Settings â†’ Graph)
+enabled    = true          # master switch (also in Settings → Graph)
 storage    = "git_notes"   # "git_notes" | "links_toml"
 auto_parse = true          # parse commit messages + branch names
 warn_push  = true          # warn when notes push refspec is missing`, 'toml')}</pre>
@@ -64,16 +64,16 @@ warn_push  = true          # warn when notes push refspec is missing`, 'toml')}<
 storage        = "links_toml"      # override the global backend for this repo
 tracker        = "linear"          # "linear" | "jira" | "github" | "gitlab"
 auto_parse     = true
-custom_pattern = "\\\\b(MYCO-\\\\d+)\\\\b"  # optional â€” overrides the tracker default`, 'toml')}</pre>
+custom_pattern = "\\\\b(MYCO-\\\\d+)\\\\b"  # optional — overrides the tracker default`, 'toml')}</pre>
   <p>
-    <code>custom_pattern</code> can also be set via <strong>Settings â†’ Repository â†’ Ticket Links</strong>
+    <code>custom_pattern</code> can also be set via <strong>Settings → Repository → Ticket Links</strong>
     without editing the TOML file manually. The value must be a valid Rust regex with exactly
-    one capture group â€” the captured text becomes the ticket ID.
+    one capture group — the captured text becomes the ticket ID.
   </p>
 
   <p>
     <strong>Tip:</strong> <code>tracker</code> can also be set via the existing
-    <code>issue_tracker</code> field in <code>.arbor/config.toml</code> â€” the
+    <code>issue_tracker</code> field in <code>.arbor/config.toml</code> — the
     ticket-links system inherits it as a fallback.
   </p>
 
@@ -92,33 +92,33 @@ custom_pattern = "\\\\b(MYCO-\\\\d+)\\\\b"  # optional â€” overrides the tr
 
   <h2>UI elements</h2>
   <ul>
-    <li><strong>Graph chips</strong> â€” Colored pill badges on each row.
+    <li><strong>Graph chips</strong> — Colored pill badges on each row.
       Color indicates the tracker: purple = Linear / Jira, grey = GitHub, orange = GitLab.
-      Click to open the issue detail. Hover a manually-added chip to reveal the âœ• remove button.</li>
-    <li><strong>Commit detail panel</strong> â€” "Tickets" row below the commit body
-      showing all linked tickets. Manual links have an âœ• button to remove them.</li>
-    <li><strong>Right-click â†’ Link to ticketâ€¦</strong> â€” Opens the ticket picker
+      Click to open the issue detail. Hover a manually-added chip to reveal the ✕ remove button.</li>
+    <li><strong>Commit detail panel</strong> — "Tickets" row below the commit body
+      showing all linked tickets. Manual links have an ✕ button to remove them.</li>
+    <li><strong>Right-click → Link to ticket…</strong> — Opens the ticket picker
       to create a manual association.</li>
-    <li><strong>Issue detail â†’ Linked Commits</strong> â€” When viewing a ticket in the
+    <li><strong>Issue detail → Linked Commits</strong> — When viewing a ticket in the
       issues sidebar, a <em>Linked Commits</em> section loads lazily and shows every
       commit associated with that ticket (both auto-detected and manual). Each entry
       displays the short SHA, summary, author, date, and branch chips (when the
       commit is already in the graph cache). Click any entry to navigate directly to
       that commit in the graph.</li>
-    <li><strong>Settings â†’ Graph â†’ Ticket link chips</strong> â€” Toggle to disable the
+    <li><strong>Settings → Graph → Ticket link chips</strong> — Toggle to disable the
       feature entirely if you experience scroll slowdowns on very large repos.</li>
   </ul>
 
-  <h2>Reverse lookup: ticket â†’ commits</h2>
+  <h2>Reverse lookup: ticket → commits</h2>
   <p>
     The <em>Linked Commits</em> section in the issue detail provides full reverse lookup:
   </p>
   <ul>
-    <li><strong>Manual links (git notes)</strong> â€” All notes under
+    <li><strong>Manual links (git notes)</strong> — All notes under
       <code>refs/notes/arbor/tickets</code> are scanned.</li>
-    <li><strong>Manual links (links.toml)</strong> â€” The full
+    <li><strong>Manual links (links.toml)</strong> — The full
       <code>.arbor/links.toml</code> file is read (served from cache when warm).</li>
-    <li><strong>Auto-detected</strong> â€” Commits already scrolled into view whose
+    <li><strong>Auto-detected</strong> — Commits already scrolled into view whose
       message or branch name matched the ticket ID are included. Commits not yet
       loaded in the graph are not covered by auto-detection (scroll more of the
       graph to widen the search).</li>
@@ -136,14 +136,14 @@ custom_pattern = "\\\\b(MYCO-\\\\d+)\\\\b"  # optional â€” overrides the tr
   </table>
   <p>
     Any tracker's default pattern can be overridden with a <strong>custom regex</strong> per repository.
-    Set it in <strong>Settings â†’ Repository â†’ Ticket Links</strong> or directly in
+    Set it in <strong>Settings → Repository → Ticket Links</strong> or directly in
     <code>.arbor/config.toml</code>:
   </p>
   <pre class="language-toml">{@html highlight(`[ticket_links]
 tracker        = "jira"
 custom_pattern = "\\\\b(MYCO-\\\\d+)\\\\b"   # must have exactly one capture group`, 'toml')}</pre>
   <p>
-    When <code>custom_pattern</code> is set it takes full precedence â€” the tracker default is ignored.
+    When <code>custom_pattern</code> is set it takes full precedence — the tracker default is ignored.
     The captured text (group 1) becomes the ticket ID stored and displayed on the chip.
     Invalid regex is silently ignored and the tracker default is used instead.
   </p>

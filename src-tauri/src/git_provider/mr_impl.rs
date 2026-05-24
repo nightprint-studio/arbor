@@ -1068,6 +1068,112 @@ pub async fn fetch_gitlab_mwps_supported(
     Ok(v.get("jobs_enabled").and_then(|b| b.as_bool()).unwrap_or(true))
 }
 
+// ---------------------------------------------------------------------------
+// MR/PR feature availability probe
+// ---------------------------------------------------------------------------
+
+/// Whether the remote repository accepts merge/pull requests at all.
+///
+/// Drives the sidebar EmptyState + Command-Palette gating so a repo with
+/// MRs disabled doesn't surface broken actions or 404s.  Defaults to
+/// `enabled = true` on any probe failure (permissive — the user can still
+/// try and the failing call will surface a normal error).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MrFeatureStatus {
+    pub enabled: bool,
+    /// User-facing explanation when `enabled = false`.
+    pub reason:  Option<String>,
+}
+
+impl Default for MrFeatureStatus {
+    fn default() -> Self { Self { enabled: true, reason: None } }
+}
+
+/// GitHub probe: archived or disabled repos cannot accept new PRs and the
+/// `/pulls` endpoint may 404 on certain configurations.
+///
+/// TODO: GitHub has no granular `has_pull_requests` flag. Edge cases we
+/// don't yet catch: fork-mirrors whose upstream blocks PRs, repos with
+/// branch-protection forbidding PRs entirely. If 404 keeps surfacing in
+/// the wild, add a `list_mrs(per_page=1)` fallback here.
+pub async fn fetch_github_pr_feature_enabled(
+    owner: &str,
+    repo:  &str,
+    token: &str,
+) -> Result<MrFeatureStatus> {
+    let url = format!("https://api.github.com/repos/{owner}/{repo}");
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("User-Agent", "arbor-git-gui/1.0")
+        .send().await
+        .map_err(|e| AppError::Other(format!("GitHub repo fetch failed: {e}")))?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!("GitHub repo fetch {s}: {b}")));
+    }
+    let v: serde_json::Value = resp.json().await
+        .map_err(|e| AppError::Other(format!("GitHub repo parse: {e}")))?;
+    let archived = v.get("archived").and_then(|b| b.as_bool()).unwrap_or(false);
+    let disabled = v.get("disabled").and_then(|b| b.as_bool()).unwrap_or(false);
+    if disabled {
+        return Ok(MrFeatureStatus {
+            enabled: false,
+            reason:  Some("This repository is disabled on GitHub.".into()),
+        });
+    }
+    if archived {
+        return Ok(MrFeatureStatus {
+            enabled: false,
+            reason:  Some("This repository is archived — new pull requests cannot be opened.".into()),
+        });
+    }
+    Ok(MrFeatureStatus::default())
+}
+
+/// GitLab probe: `merge_requests_access_level = "disabled"` means the
+/// MR feature has been turned off in project settings, so every MR call
+/// returns 404.
+pub async fn fetch_gitlab_mr_feature_enabled(
+    project_path: &str,
+    base_url:     &str,
+    token:        &str,
+) -> Result<MrFeatureStatus> {
+    let encoded = percent_encode_slash(project_path);
+    let url = format!("{base_url}/api/v4/projects/{encoded}");
+    let client = reqwest::Client::new();
+    let resp = crate::git_provider::ci_impl::gitlab_send_with_refresh(
+        |tok| client.get(&url)
+            .header("Authorization", format!("Bearer {tok}"))
+            .header("User-Agent", "arbor-git-gui/1.0"),
+        base_url,
+        token,
+    ).await?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!("GitLab project fetch {s}: {b}")));
+    }
+    let v: serde_json::Value = resp.json().await
+        .map_err(|e| AppError::Other(format!("GitLab project parse: {e}")))?;
+    let access = v.get("merge_requests_access_level")
+        .and_then(|s| s.as_str())
+        .unwrap_or("enabled");
+    if access == "disabled" {
+        return Ok(MrFeatureStatus {
+            enabled: false,
+            reason:  Some("Merge requests are disabled in this project's settings on GitLab.".into()),
+        });
+    }
+    Ok(MrFeatureStatus::default())
+}
+
 pub async fn update_gitlab_mr_state(
     project_path: &str,
     base_url:     &str,

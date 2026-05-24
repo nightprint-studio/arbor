@@ -1,18 +1,21 @@
 //! GitLab OAuth 2.0 Authorization Code flow with PKCE.
 //!
 //! GitLab supports RFC 7636 PKCE since version 12.3. We use the standard
-//! Authorization Code flow with a temporary localhost HTTP server to receive
-//! the redirect callback — the same approach used for Linear and Jira.
+//! Authorization Code flow via [`arbor_auth::oauth2::InstalledAppFlow`]: a
+//! temporary loopback HTTP server receives the redirect, the crate exchanges
+//! the code for tokens, and we persist them in the OS keychain.
 //!
 //! Flow:
-//!   1. `start_gitlab_oauth(app_handle)` — generates PKCE verifier/challenge,
-//!      spawns a one-shot TCP listener on port 7731, returns the authorization URL.
-//!   2. Frontend calls `open_url(auth_url)` → user authenticates in their browser.
+//!   1. `start_gitlab_oauth(app_handle)` configures `InstalledAppFlow` against
+//!      the resolved `base_host` (gitlab.com by default, or a self-hosted
+//!      override), binds the loopback listener on port 7731 and returns the
+//!      authorize URL.
+//!   2. Frontend opens the URL → user authenticates in the browser.
 //!   3. GitLab redirects to `http://127.0.0.1:7731/callback?code=…&state=…`.
-//!   4. The background listener exchanges the code for a token via POST to
-//!      `https://gitlab.com/oauth/token`.
-//!   5. Token (+ refresh token) is stored in the OS keychain.
-//!      The Tauri event `arbor://gitlab-oauth-done` (bool) is emitted.
+//!   4. `arbor-auth` exchanges the code for `(access, refresh)` tokens.
+//!   5. Tokens are persisted in two keychain slots; the Tauri event
+//!      `arbor://gitlab-oauth-done` (`Option<String>`: `null` on success,
+//!      error message on failure) is emitted.
 //!
 //! # GitLab OAuth application setup
 //! Register an application at: gitlab.com → Preferences → Applications
@@ -21,19 +24,18 @@
 //!   - Scopes: `api`
 //!   - Confidential: No (public client — PKCE is used instead of a secret)
 
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use sha2::{Digest, Sha256};
 use tauri::Emitter;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use serde::Deserialize;
+
+use arbor_auth::oauth2::{InstalledAppFlow, refresh_token};
+use arbor_auth::BodyFormat;
 
 use crate::auth::credential_store;
 use crate::error::{AppError, Result};
 
 /// Keychain slot — shared with the PAT flow so the CI client, remote commands,
 /// and any other GitLab API callers work regardless of how the user authenticated.
-const KR_HOST: &str  = "gitlab.com/arbor";
-const KR_USER: &str  = "oauth";
+const KR_HOST:    &str = "gitlab.com/arbor";
+const KR_USER:    &str = "oauth";
 const KR_REFRESH: &str = "gitlab.com/arbor-refresh";
 
 /// Bundled GitLab OAuth 2.0 application client ID (public client, no secret
@@ -64,131 +66,46 @@ fn resolve_overrides() -> (String, String) {
     (client_id, base_host)
 }
 
-// ── PKCE helpers ─────────────────────────────────────────────────────────────
-
-fn code_verifier() -> String {
-    let a = uuid::Uuid::new_v4();
-    let b = uuid::Uuid::new_v4();
-    let bytes: Vec<u8> = a.as_bytes().iter().chain(b.as_bytes().iter()).copied().collect();
-    URL_SAFE_NO_PAD.encode(&bytes)
-}
-
-fn code_challenge(verifier: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(verifier.as_bytes());
-    URL_SAFE_NO_PAD.encode(h.finalize())
-}
-
-fn random_state() -> String {
-    URL_SAFE_NO_PAD.encode(uuid::Uuid::new_v4().as_bytes())
-}
-
-// ── HTTP callback parser ──────────────────────────────────────────────────────
-
-fn extract_param(request: &str, key: &str) -> Option<String> {
-    let line = request.lines().next()?;
-    let query = line.split('?').nth(1)?.split_whitespace().next()?;
-    for pair in query.split('&') {
-        let mut parts = pair.splitn(2, '=');
-        if parts.next() == Some(key) {
-            return parts.next().map(percent_decode);
-        }
-    }
-    None
-}
-
-fn percent_decode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let h1 = chars.next().unwrap_or('0');
-            let h2 = chars.next().unwrap_or('0');
-            if let Ok(b) = u8::from_str_radix(&format!("{h1}{h2}"), 16) {
-                out.push(b as char);
-                continue;
-            }
-            out.push('%'); out.push(h1); out.push(h2);
-        } else if c == '+' {
-            out.push(' ');
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-fn urlencoded(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => vec![c as u8],
-            _ => format!("%{:02X}", c as u32).into_bytes(),
-        })
-        .map(|b| b as char)
-        .collect()
-}
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Start the GitLab OAuth 2.0 Authorization Code + PKCE flow.
 ///
 /// Spawns a background task that waits for the browser callback, exchanges
 /// the code for a token, persists it (plus the refresh token) in the keychain,
-/// and emits `arbor://gitlab-oauth-done` (payload: `true` on success, `false` on error).
+/// and emits `arbor://gitlab-oauth-done` (payload: `null` on success,
+/// error string on failure).
 ///
 /// Returns the authorization URL that the frontend should open in the default browser.
 pub async fn start_gitlab_oauth(app_handle: tauri::AppHandle) -> Result<String> {
     let (client_id, base_host) = resolve_overrides();
-    let verifier  = code_verifier();
-    let challenge = code_challenge(&verifier);
-    let state     = random_state();
 
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
-        .await
-        .map_err(|e| AppError::Other(format!(
-            "cannot start OAuth callback server on port {CALLBACK_PORT}: {e}\n\
-             Make sure nothing else is using that port."
-        )))?;
+    let flow = InstalledAppFlow {
+        auth_url:               format!("https://{base_host}/oauth/authorize"),
+        token_url:              format!("https://{base_host}/oauth/token"),
+        client_id,
+        client_secret:          None,
+        scope:                  "api".into(),
+        redirect_port:          CALLBACK_PORT,
+        extra_authorize_params: vec![],
+        token_request_format:   BodyFormat::Form,
+        provider_label:         "GitLab".into(),
+        success_html:           None,
+        error_html_template:    None,
+    };
 
-    let redirect_uri = format!("http://127.0.0.1:{CALLBACK_PORT}/callback");
-    let auth_url = format!(
-        "https://{base_host}/oauth/authorize\
-         ?client_id={client_id}\
-         &redirect_uri={redir}\
-         &response_type=code\
-         &state={state}\
-         &scope=api\
-         &code_challenge={challenge}\
-         &code_challenge_method=S256",
-        redir = urlencoded(&redirect_uri),
-    );
+    let (auth_url, pending) = flow.start().await
+        .map_err(|e| AppError::Other(format!("GitLab OAuth start: {e}")))?;
 
-    let app  = app_handle.clone();
-    let redir = redirect_uri.clone();
-    let ver  = verifier.clone();
-    let st   = state.clone();
-    let cid  = client_id.clone();
-    let bh   = base_host.clone();
-
-    // Payload: null = success, string = error message.
+    let app = app_handle.clone();
     tokio::spawn(async move {
-        let result: Option<String> = match wait_for_callback(listener, &ver, &st, &redir, &cid, &bh).await {
-            Ok((access_token, refresh_token)) => {
-                match credential_store::save(KR_HOST, KR_USER, &access_token) {
-                    Ok(_) => {
-                        if let Some(rt) = refresh_token {
-                            if let Err(e) = credential_store::save(KR_REFRESH, KR_USER, &rt) {
-                                tracing::warn!("gitlab oauth: failed to save refresh token: {e}");
-                            }
-                        }
-                        None // success
-                    }
-                    Err(e) => {
-                        tracing::error!("gitlab oauth: keychain save failed: {e}");
-                        Some(format!("Keychain save failed: {e}"))
-                    }
+        let result: Option<String> = match pending.await_callback().await {
+            Ok(token) => match persist(&token.access_token, token.refresh_token.as_deref()) {
+                Ok(_)  => None,
+                Err(e) => {
+                    tracing::error!("gitlab oauth: keychain save failed: {e}");
+                    Some(format!("Keychain save failed: {e}"))
                 }
-            }
+            },
             Err(e) => {
                 tracing::error!("gitlab oauth callback error: {e}");
                 Some(e.to_string())
@@ -200,181 +117,14 @@ pub async fn start_gitlab_oauth(app_handle: tauri::AppHandle) -> Result<String> 
     Ok(auth_url)
 }
 
-async fn send_html(stream: &mut tokio::net::TcpStream, body: &str) {
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        body.len(), body
-    );
-    let _ = stream.write_all(response.as_bytes()).await;
-}
-
-fn oauth_success_html(provider: &str) -> String {
-    format!(r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Arbor — Connected</title>
-  <style>
-    *{{margin:0;padding:0;box-sizing:border-box}}
-    body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-      background:#1e1f22;color:#dfe1e5;min-height:100vh;
-      display:flex;align-items:center;justify-content:center}}
-    .card{{background:#2b2d30;border:1px solid #3c3f41;border-radius:12px;
-      padding:44px 52px;max-width:420px;width:90%;text-align:center}}
-    .brand{{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
-      color:#6c707a;margin-bottom:32px}}
-    .icon{{width:56px;height:56px;border-radius:50%;background:#1a3326;
-      border:2px solid #6aab73;display:flex;align-items:center;justify-content:center;
-      margin:0 auto 20px;font-size:24px}}
-    h1{{font-size:18px;font-weight:600;color:#6aab73;margin-bottom:10px}}
-    p{{font-size:13px;color:#888d94;line-height:1.6}}
-    .provider{{color:#dfe1e5;font-weight:500}}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="brand">Arbor</div>
-    <div class="icon">✓</div>
-    <h1>Connected successfully</h1>
-    <p><span class="provider">{provider}</span> has been authorized.<br>You can close this tab and return to Arbor.</p>
-  </div>
-</body>
-</html>"#)
-}
-
-fn oauth_error_html(provider: &str, message: &str) -> String {
-    format!(r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Arbor — Authorization failed</title>
-  <style>
-    *{{margin:0;padding:0;box-sizing:border-box}}
-    body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-      background:#1e1f22;color:#dfe1e5;min-height:100vh;
-      display:flex;align-items:center;justify-content:center}}
-    .card{{background:#2b2d30;border:1px solid #3c3f41;border-radius:12px;
-      padding:44px 52px;max-width:460px;width:90%;text-align:center}}
-    .brand{{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
-      color:#6c707a;margin-bottom:32px}}
-    .icon{{width:56px;height:56px;border-radius:50%;background:#2d1f1f;
-      border:2px solid #f87171;display:flex;align-items:center;justify-content:center;
-      margin:0 auto 20px;font-size:24px}}
-    h1{{font-size:18px;font-weight:600;color:#f87171;margin-bottom:10px}}
-    p{{font-size:13px;color:#888d94;line-height:1.6}}
-    .provider{{color:#dfe1e5;font-weight:500}}
-    .detail{{margin-top:20px;padding:12px 14px;background:#1e1f22;
-      border:1px solid #3c3f41;border-radius:6px;font-size:11px;
-      color:#888d94;font-family:'JetBrains Mono','Fira Code',monospace;
-      text-align:left;word-break:break-all;line-height:1.5}}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="brand">Arbor</div>
-    <div class="icon">✗</div>
-    <h1>Authorization failed</h1>
-    <p>Could not connect <span class="provider">{provider}</span>. Please return to Arbor and try again.</p>
-    <div class="detail">{message}</div>
-  </div>
-</body>
-</html>"#)
-}
-
-async fn wait_for_callback(
-    listener: tokio::net::TcpListener,
-    verifier: &str,
-    expected_state: &str,
-    redirect_uri: &str,
-    client_id: &str,
-    base_host: &str,
-) -> Result<(String, Option<String>)> {
-    let (mut stream, _) = listener
-        .accept()
-        .await
-        .map_err(|e| AppError::Other(format!("accept error: {e}")))?;
-
-    let mut buf = vec![0u8; 8192];
-    let n = stream
-        .read(&mut buf)
-        .await
-        .map_err(|e| AppError::Other(format!("read error: {e}")))?;
-    let request = String::from_utf8_lossy(&buf[..n]).to_string();
-
-    // Provider-side error (e.g. user clicked "Deny").
-    if let Some(err) = extract_param(&request, "error") {
-        let desc = extract_param(&request, "error_description").unwrap_or_default();
-        let msg = if desc.is_empty() { err.clone() } else { format!("{err}: {desc}") };
-        send_html(&mut stream, &oauth_error_html("GitLab", &msg)).await;
-        return Err(AppError::AuthFailed(msg));
-    }
-
-    let code = extract_param(&request, "code")
-        .ok_or_else(|| AppError::AuthFailed("no 'code' in OAuth callback".into()))?;
-    let recv_state = extract_param(&request, "state")
-        .ok_or_else(|| AppError::AuthFailed("no 'state' in OAuth callback".into()))?;
-
-    if recv_state != expected_state {
-        let msg = "State mismatch — possible CSRF attack, authorization rejected.".to_string();
-        send_html(&mut stream, &oauth_error_html("GitLab", &msg)).await;
-        return Err(AppError::AuthFailed(msg));
-    }
-
-    // Exchange code for token — serve HTML only after we know the outcome.
-    match exchange_code(&code, verifier, redirect_uri, client_id, base_host).await {
-        Ok(tokens) => {
-            send_html(&mut stream, &oauth_success_html("GitLab")).await;
-            Ok(tokens)
-        }
-        Err(e) => {
-            send_html(&mut stream, &oauth_error_html("GitLab", &e.to_string())).await;
-            Err(e)
+fn persist(access: &str, refresh: Option<&str>) -> Result<()> {
+    credential_store::save(KR_HOST, KR_USER, access)?;
+    if let Some(rt) = refresh {
+        if let Err(e) = credential_store::save(KR_REFRESH, KR_USER, rt) {
+            tracing::warn!("gitlab oauth: failed to save refresh token: {e}");
         }
     }
-}
-
-#[derive(Deserialize)]
-struct TokenResponse {
-    access_token:  String,
-    refresh_token: Option<String>,
-}
-
-async fn exchange_code(
-    code: &str,
-    verifier: &str,
-    redirect_uri: &str,
-    client_id: &str,
-    base_host: &str,
-) -> Result<(String, Option<String>)> {
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(format!("https://{base_host}/oauth/token"))
-        .header("Accept", "application/json")
-        .form(&[
-            ("client_id",     client_id),
-            ("code",          code),
-            ("redirect_uri",  redirect_uri),
-            ("grant_type",    "authorization_code"),
-            ("code_verifier", verifier),
-        ])
-        .send()
-        .await
-        .map_err(|e| AppError::Other(format!("gitlab token exchange request failed: {e}")))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body   = resp.text().await.unwrap_or_default();
-        return Err(AppError::AuthFailed(format!("gitlab token exchange {status}: {body}")));
-    }
-
-    let tr: TokenResponse = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Other(format!("gitlab token response parse: {e}")))?;
-
-    Ok((tr.access_token, tr.refresh_token))
+    Ok(())
 }
 
 /// Serialize OAuth refresh attempts: GitLab's refresh token is single-use
@@ -419,39 +169,22 @@ pub async fn try_refresh_if_stale(stale_access_token: Option<&str>) -> Result<bo
         }
     }
 
-    let Some(refresh_token) = credential_store::get(KR_REFRESH, KR_USER)? else {
+    let Some(refresh) = credential_store::get(KR_REFRESH, KR_USER)? else {
         return Ok(false);
     };
 
     let (client_id, base_host) = resolve_overrides();
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(format!("https://{base_host}/oauth/token"))
-        .header("Accept", "application/json")
-        .form(&[
-            ("client_id",     client_id.as_str()),
-            ("grant_type",    "refresh_token"),
-            ("refresh_token", refresh_token.as_str()),
-        ])
-        .send()
-        .await
-        .map_err(|e| AppError::Other(format!("gitlab token refresh request failed: {e}")))?;
+    let token_url = format!("https://{base_host}/oauth/token");
+    let token = match refresh_token(&token_url, &client_id, None, &refresh, BodyFormat::Form).await {
+        Ok(t)  => t,
+        Err(e) => {
+            tracing::warn!("gitlab token refresh failed: {e}");
+            return Ok(false);
+        }
+    };
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body   = resp.text().await.unwrap_or_default();
-        tracing::warn!("gitlab token refresh {status}: {body}");
-        return Ok(false);
-    }
-
-    let tr: TokenResponse = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Other(format!("gitlab token refresh parse: {e}")))?;
-
-    credential_store::save(KR_HOST, KR_USER, &tr.access_token)?;
-
-    if let Some(new_rt) = tr.refresh_token {
+    credential_store::save(KR_HOST, KR_USER, &token.access_token)?;
+    if let Some(new_rt) = token.refresh_token {
         if let Err(e) = credential_store::save(KR_REFRESH, KR_USER, &new_rt) {
             tracing::warn!("gitlab oauth: failed to update refresh token: {e}");
         }

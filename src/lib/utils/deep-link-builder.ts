@@ -20,6 +20,7 @@
 import { listRemotes } from '$lib/ipc/remote';
 import { getDeepLinkConfig } from '$lib/ipc/deep-link';
 import { uiStore } from '$lib/stores/ui.svelte';
+import { copyToClipboard } from '$lib/utils/clipboard';
 import type { RemoteInfo } from '$lib/types/git';
 
 // ---------------------------------------------------------------------------
@@ -180,12 +181,9 @@ export async function copyDeepLink(
   }
   const workerBaseUrl = await getWorkerBaseUrl();
   const link = buildDeepLink(spec, remoteUrl, workerBaseUrl);
-  try {
-    await navigator.clipboard.writeText(link);
-    uiStore.showToast(`Copied deep link (${specLabel(spec)})`, 'success');
-    return link;
-  } catch (e) {
-    uiStore.showToast(`Copy failed: ${e}`, 'error');
-    return null;
-  }
+  const ok = await copyToClipboard(link, {
+    successToast: `Copied deep link (${specLabel(spec)})`,
+    errorToast: true,
+  });
+  return ok ? link : null;
 }

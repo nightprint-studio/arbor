@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { CheckCircle2, Loader2, XCircle, Eye, EyeOff, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronRight, Settings2 } from 'lucide-svelte';
+  import { XCircle, Eye, EyeOff, ArrowUp, ArrowDown, ChevronDown, ChevronRight, Settings2 } from 'lucide-svelte';
   import SplitButton from '$lib/components/shared/ui/SplitButton.svelte';
   import OAuthAdvancedPanel from '$lib/components/shared/OAuthAdvancedPanel.svelte';
+  import ProviderConnectionStatus from '$lib/components/shared/internal/ProviderConnectionStatus.svelte';
+  import OAuthBrowserAuthForm from '$lib/components/shared/internal/OAuthBrowserAuthForm.svelte';
   import type { IssueSortField, IssueSortDir } from '$lib/types/issues';
   import { SORT_FIELD_LABELS } from '$lib/types/issues';
   import { openUrl } from '@tauri-apps/plugin-opener';
@@ -14,8 +16,8 @@
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import BrandTile from '$lib/components/shared/ui/BrandTile.svelte';
-  import ProviderUserBadge from '$lib/components/shared/ui/ProviderUserBadge.svelte';
+  import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
+  import ProviderUserBadge from '$lib/components/shared/internal/ProviderUserBadge.svelte';
 
   type ConnState  = 'checking' | 'disconnected' | 'connecting' | 'connected';
   type AuthMethod = 'oauth' | 'pat' | 'basic';
@@ -207,29 +209,31 @@
         <span class="provider-name">Linear</span>
         <span class="provider-desc">Issue tracker — OAuth &amp; Personal API Key</span>
       </div>
-      <div class="provider-action">
-        {#if linState === 'checking' || issuesStore.authStatus === null}
-          <span class="status-checking"><Loader2 size={12} class="spin" /> Checking…</span>
-        {:else if linState === 'connected' && issuesStore.authStatus?.authenticated}
-          <span class="status-ok"><CheckCircle2 size={12} /> Connected</span>
-          <button class="btn-ghost-danger" onclick={disconnectLinear}>Disconnect</button>
-        {:else if linState === 'connecting'}
-          <span class="status-wait"><Loader2 size={12} class="spin" /> Waiting…</span>
-          <button class="btn-ghost" onclick={() => { linOAuthWaiting = false; linState = 'disconnected'; linMethod = null; linOAuthUnsub?.(); }}>Cancel</button>
-        {:else if linMethod === null}
-          <SplitButton
-            label="Connect"
-            color="var(--brand-linear)"
-            direction="down"
-            options={[
-              { id: 'oauth', label: 'OAuth (recommended)' },
-              { id: 'pat',   label: 'Personal API Key' },
-            ]}
-            onclick={() => pickLinMethod('oauth')}
-            onselect={(id) => pickLinMethod(id as AuthMethod)}
-          />
-        {/if}
-      </div>
+      <ProviderConnectionStatus
+        state={linState === 'checking' || issuesStore.authStatus === null
+          ? 'checking'
+          : linState === 'connected' && issuesStore.authStatus?.authenticated
+            ? 'connected'
+            : linState}
+        onDisconnect={disconnectLinear}
+        onCancel={() => { linOAuthWaiting = false; linState = 'disconnected'; linMethod = null; linOAuthUnsub?.(); }}
+      >
+        {#snippet connect()}
+          {#if linMethod === null}
+            <SplitButton
+              label="Connect"
+              color="var(--brand-linear)"
+              direction="down"
+              options={[
+                { id: 'oauth', label: 'OAuth (recommended)' },
+                { id: 'pat',   label: 'Personal API Key' },
+              ]}
+              onclick={() => pickLinMethod('oauth')}
+              onselect={(id) => pickLinMethod(id as AuthMethod)}
+            />
+          {/if}
+        {/snippet}
+      </ProviderConnectionStatus>
     </div>
 
     {#if linState === 'connected' && issuesStore.authStatus?.user}
@@ -242,23 +246,17 @@
     {/if}
 
     {#if linMethod === 'oauth'}
-      <div class="inline-form">
-        {#if linOAuthWaiting}
-          <p class="form-hint">Browser opened — approve access in Linear then return here.</p>
-        {:else}
-          <p class="form-hint">Opens Linear in the browser to authorize Arbor.</p>
-        {/if}
-        <div class="inline-form-row">
-          <button class="btn-save linear-btn" onclick={startLinearOAuthFlow} disabled={linOAuthWaiting}>
-            {#if linOAuthWaiting}<Loader2 size={11} class="spin" />{/if}
-            {linOAuthWaiting ? 'Waiting for browser…' : 'Authorize with Linear'}
-          </button>
-          <button class="btn-cancel" onclick={() => { linOAuthWaiting = false; linMethod = null; linOAuthError = ''; linOAuthUnsub?.(); }}>Cancel</button>
-        </div>
-        {#if linOAuthError}
-          <div class="provider-error"><XCircle size={12} />{linOAuthError}</div>
-        {/if}
-      </div>
+      <OAuthBrowserAuthForm
+        waiting={linOAuthWaiting}
+        error={linOAuthError}
+        brandColor="var(--brand-linear)"
+        hintIdle="Opens Linear in the browser to authorize Arbor."
+        hintWaiting="Browser opened — approve access in Linear then return here."
+        idleLabel="Authorize with Linear"
+        busyLabel="Waiting for browser…"
+        onAuthorize={startLinearOAuthFlow}
+        onCancel={() => { linOAuthWaiting = false; linMethod = null; linOAuthError = ''; linOAuthUnsub?.(); }}
+      />
     {/if}
 
     {#if linMethod === 'pat'}
@@ -298,29 +296,27 @@
         <span class="provider-name">Jira</span>
         <span class="provider-desc">Atlassian issue tracker — API Token &amp; OAuth</span>
       </div>
-      <div class="provider-action">
-        {#if jiraState === 'checking'}
-          <span class="status-checking"><Loader2 size={12} class="spin" /> Checking…</span>
-        {:else if jiraState === 'connected'}
-          <span class="status-ok"><CheckCircle2 size={12} /> Connected</span>
-          <button class="btn-ghost-danger" onclick={disconnectJiraAccount}>Disconnect</button>
-        {:else if jiraState === 'connecting'}
-          <span class="status-wait"><Loader2 size={12} class="spin" /> Waiting…</span>
-          <button class="btn-ghost" onclick={() => { jiraOAuthWaiting = false; jiraState = 'disconnected'; jiraMethod = null; jiraOAuthUnsub?.(); }}>Cancel</button>
-        {:else if jiraMethod === null}
-          <SplitButton
-            label="Connect"
-            color="var(--brand-jira)"
-            direction="down"
-            options={[
-              { id: 'basic', label: 'API Token (recommended)' },
-              { id: 'oauth', label: 'OAuth 2.0 (requires Atlassian app)' },
-            ]}
-            onclick={() => pickJiraMethod('basic')}
-            onselect={(id) => pickJiraMethod(id as AuthMethod)}
-          />
-        {/if}
-      </div>
+      <ProviderConnectionStatus
+        state={jiraState}
+        onDisconnect={disconnectJiraAccount}
+        onCancel={() => { jiraOAuthWaiting = false; jiraState = 'disconnected'; jiraMethod = null; jiraOAuthUnsub?.(); }}
+      >
+        {#snippet connect()}
+          {#if jiraMethod === null}
+            <SplitButton
+              label="Connect"
+              color="var(--brand-jira)"
+              direction="down"
+              options={[
+                { id: 'basic', label: 'API Token (recommended)' },
+                { id: 'oauth', label: 'OAuth 2.0 (requires Atlassian app)' },
+              ]}
+              onclick={() => pickJiraMethod('basic')}
+              onselect={(id) => pickJiraMethod(id as AuthMethod)}
+            />
+          {/if}
+        {/snippet}
+      </ProviderConnectionStatus>
     </div>
 
     {#if jiraState === 'connected' && jiraUser}
@@ -371,19 +367,17 @@
 
     <!-- OAuth form -->
     {#if jiraMethod === 'oauth'}
-      <div class="inline-form">
-        <div class="inline-form-row">
-          <button class="btn-save jira-btn" onclick={startJiraOAuthFlow}
-                  disabled={jiraOAuthWaiting}>
-            {#if jiraOAuthWaiting}<Loader2 size={11} class="spin" />{/if}
-            {jiraOAuthWaiting ? 'Waiting for browser…' : 'Authorize with Atlassian'}
-          </button>
-          <button class="btn-cancel" onclick={() => { jiraOAuthWaiting = false; jiraMethod = null; jiraOAuthError = ''; jiraOAuthUnsub?.(); }}>Cancel</button>
-        </div>
-        {#if jiraOAuthError}
-          <div class="provider-error"><XCircle size={12} />{jiraOAuthError}</div>
-        {/if}
-      </div>
+      <OAuthBrowserAuthForm
+        waiting={jiraOAuthWaiting}
+        error={jiraOAuthError}
+        brandColor="var(--brand-jira)"
+        hintIdle="Opens Atlassian in the browser to authorize Arbor. Requires a configured Atlassian OAuth app."
+        hintWaiting="Browser opened — approve access in Atlassian then return here."
+        idleLabel="Authorize with Atlassian"
+        busyLabel="Waiting for browser…"
+        onAuthorize={startJiraOAuthFlow}
+        onCancel={() => { jiraOAuthWaiting = false; jiraMethod = null; jiraOAuthError = ''; jiraOAuthUnsub?.(); }}
+      />
     {/if}
 
     <button class="advanced-toggle" onclick={() => jiraAdvancedOpen = !jiraAdvancedOpen}>
@@ -447,25 +441,17 @@
   .provider-card.flow-active { border-color: var(--accent); }
   /* Provider tiles use the shared BrandTile widget — no local logo styles. */
 
-  .provider-main   { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-  .provider-top    { display: flex; align-items: center; gap: 10px; }
-  .provider-info   { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-  .provider-name   { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .provider-desc   { font-size: 11px; color: var(--text-muted); }
-  .provider-action { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
-
-  .status-checking, .status-wait {
-    display: flex; align-items: center; gap: 5px;
-    font-size: 11px; color: var(--text-muted);
-  }
-  .status-ok {
-    display: flex; align-items: center; gap: 5px;
-    font-size: 12px; font-weight: 500; color: var(--success, #6aab73);
-  }
+  .provider-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .provider-top  { display: flex; align-items: center; gap: 10px; }
+  .provider-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .provider-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .provider-desc { font-size: 11px; color: var(--text-muted); }
 
   .inline-form { display: flex; flex-direction: column; gap: 8px; }
   .inline-form-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 
+  /* Brand-coloured CTA for the PAT/Basic-auth forms (the OAuth-redirect
+     button lives inside <OAuthBrowserAuthForm>, which owns its own styles). */
   .btn-save {
     padding: 5px 14px; border: none; border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans); font-size: 12px; font-weight: 500;
@@ -473,6 +459,14 @@
     display: flex; align-items: center; gap: 5px;
   }
   .btn-save:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Brand backgrounds — hard-coded #fff foreground (the bg is an absolute
+     brand colour; `--text-on-accent` would resolve to dark in light themes). */
+  .linear-btn { background: var(--brand-linear); color: #fff; }
+  .linear-btn:hover:not(:disabled) { filter: brightness(1.12); }
+  .jira-btn   { background: var(--brand-jira);   color: #fff; }
+  .jira-btn:hover:not(:disabled)   { filter: brightness(1.12); }
+
   .btn-cancel {
     padding: 5px 10px; background: transparent;
     border: 1px solid var(--border); border-radius: var(--radius-sm);
@@ -480,20 +474,6 @@
     cursor: pointer; transition: all var(--transition-fast); white-space: nowrap;
   }
   .btn-cancel:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .btn-ghost {
-    padding: 4px 10px; background: transparent;
-    border: 1px solid var(--border); border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 11px; color: var(--text-muted);
-    cursor: pointer; transition: all var(--transition-fast);
-  }
-  .btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .btn-ghost-danger {
-    padding: 4px 10px; background: transparent;
-    border: 1px solid var(--error, #f87171); border-radius: var(--radius-sm);
-    font-family: var(--font-ui-sans); font-size: 11px; color: var(--error, #f87171);
-    cursor: pointer; transition: all var(--transition-fast);
-  }
-  .btn-ghost-danger:hover { background: color-mix(in srgb, var(--error, #f87171) 12%, transparent); }
 
   .form-hint { font-size: 10.5px; color: var(--text-muted); margin: 0; line-height: 1.5; }
   .form-hint code {
@@ -535,9 +515,6 @@
     cursor: pointer; color: var(--text-muted); transition: color var(--transition-fast);
   }
   .addon-btn:hover { color: var(--text-primary); }
-
-  :global(.spin) { animation: spin-anim 1.2s linear infinite; }
-  @keyframes spin-anim { to { transform: rotate(360deg); } }
 
   /* Sort direction toggle */
   .sort-dir-toggle { display: flex; gap: 4px; }

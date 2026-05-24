@@ -19,7 +19,7 @@
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
-  import Kbd from '$lib/components/shared/ui/Kbd.svelte';
+  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
   import {
     keystrokesStore, TONE_COLORS,
     type KeystrokePosition, type KeystrokeSize, type KeystrokeTone,

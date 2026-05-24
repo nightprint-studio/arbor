@@ -1,3 +1,7 @@
+<script lang="ts">
+  import Callout from '$lib/components/shared/ui/Callout.svelte';
+</script>
+
 <h1>Background Jobs</h1>
 
 <p class="doc-lead">The Jobs system lets plugins run long-running processes in the background — builds, tests, deploys — without blocking the UI. Output is streamed line by line in real time.</p>
@@ -51,13 +55,12 @@
   <li>Plugin <code>reload_plugins</code> skips non-cancellable jobs — they are not affected by plugin reloads.</li>
 </ul>
 
-<div class="callout warning">
-  <strong>Reserved category: <code>"system"</code></strong>
+<Callout variant="warning" title={'Reserved category: "system"'}>
   The category <code>"system"</code> (case-insensitive) is reserved for Arbor's own internal background jobs.
   Calling <code>arbor.job.spawn()</code> with this category from a plugin raises a Lua error.
   System jobs are also <strong>automatically dismissed</strong> from the overlay once they complete successfully —
   they are designed to run silently and leave no trace on a clean exit.
-</div>
+</Callout>
 
 <h2>Hidden jobs</h2>
 <p>
@@ -75,10 +78,9 @@
 <h2>Output ring buffer</h2>
 <p>Each job stores the last <strong>2 000 lines</strong> of output in memory (oldest lines dropped when exceeded) and on disk — so you can view output after reopening the overlay or restarting the app.</p>
 
-<div class="callout info">
-  <strong>Background jobs vs. terminal</strong>
+<Callout variant="info" title="Background jobs vs. terminal">
   Background jobs are designed for automated tasks triggered by plugins. For interactive work (running a dev server, using a REPL) use the built-in <strong>Terminal</strong> instead.
-</div>
+</Callout>
 
 <h2>Job sequencing</h2>
 <p>Jobs can be chained by attaching <code>:ok</code> / <code>:err</code> on the returned <code>JobHandle</code>, by passing an <code>on_done</code> sugar callback, or by awaiting inside <code>arbor.async.run</code>. Common patterns:</p>

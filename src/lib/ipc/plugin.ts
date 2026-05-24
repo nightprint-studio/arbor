@@ -27,13 +27,45 @@ export const execHook = (hook: string, contextJson: string) =>
 export const firePluginAction = (pluginName: string, action: string, contextJson: string) =>
   invoke<void>('fire_plugin_action', { pluginName, action, contextJson });
 
-/** Enable a plugin by name (persisted across restarts; starts its scheduler if any). */
+/**
+ * Enable a plugin. Returns the ordered list of plugins that were actually
+ * enabled — required deps first, target last. The backend refuses to enable
+ * when a required dependency is missing or unloadable; call `pluginEnablePreview`
+ * first to detect blockers and prompt the user when the cascade is non-trivial.
+ */
 export const enablePlugin = (name: string) =>
-  invoke<void>('enable_plugin', { name });
+  invoke<string[]>('enable_plugin', { name });
 
-/** Disable a plugin by name (persisted across restarts; cancels its scheduler). */
+/**
+ * Disable a plugin. Returns the ordered list of plugins that were disabled
+ * — every transitively-required dependent, leaves-first, with `name` last.
+ * Call `pluginDisablePreview` first when you need to show a confirmation.
+ */
 export const disablePlugin = (name: string) =>
-  invoke<void>('disable_plugin', { name });
+  invoke<string[]>('disable_plugin', { name });
+
+/** One blocker preventing a plugin's enable cascade from running. */
+export interface EnableBlocker {
+  name:        string;
+  version_req: string;
+  /** Human-readable reason: "not installed" | "version mismatch: …" | "failed to load: …". */
+  reason:      string;
+}
+
+export interface EnablePreview {
+  /** Ordered list of plugins that would be enabled (deps first, target last). */
+  plan:     string[];
+  /** Required deps that are missing / unloadable / version-incompatible. */
+  blockers: EnableBlocker[];
+}
+
+/** Preview an enable cascade — used to drive the confirmation modal. */
+export const pluginEnablePreview = (name: string) =>
+  invoke<EnablePreview>('plugin_enable_preview', { name });
+
+/** Preview a disable cascade — every transitively-required dependent. */
+export const pluginDisablePreview = (name: string) =>
+  invoke<string[]>('plugin_disable_preview', { name });
 
 /**
  * Permanently uninstall a plugin. Removes the plugin folder, its global
@@ -184,3 +216,12 @@ export const importPluginZip = (zipBytes: Uint8Array) =>
 /** Install a plugin zip by absolute path — backend reads the file itself. */
 export const importPluginZipFromPath = (path: string) =>
   invoke<ImportPluginResult>('import_plugin_zip_from_path', { path });
+
+/**
+ * Resolve the on-disk folder of a discovered plugin by name. Errors when no
+ * installed plugin matches. The folder name on disk can differ from the
+ * manifest's `name` (zip imports preserve the archive root), so this is the
+ * only reliable way to map name → path from the FE.
+ */
+export const getInstalledPluginPath = (name: string) =>
+  invoke<string>('get_installed_plugin_path', { name });
