@@ -7,6 +7,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+
+- Minimize button on long-form dialogs (MR detail, Issue detail): parks
+  a "reopen" shortcut in the status-bar dock so you can roam to other
+  tabs / workspaces and pick the workflow back up later. Click a chip
+  to switch to the original tab and re-open the dialog; ✕ to discard.
+  Surviving workspace and tab switches comes from the action-based
+  design — the chip outlives the modal component, so unsubmitted text
+  and scroll position aren't preserved across the round trip. The cap
+  (default 5, max 20) lives under *Settings → Appearance → Minimized
+  dialogs cap*.
+
 ### Changed
 
 - Status bar slimmed down: repo path moved to the left segment; Fetch and

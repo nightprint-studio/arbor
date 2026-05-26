@@ -102,6 +102,9 @@ export interface AppearanceConfig {
   activity_bar_position: ActivityBarPosition;
   /** Reduced title-bar height + tighter padding. */
   compact_title_bar: boolean;
+  /** Maximum number of dialogs that can be minimized at the same time
+   *  (status-bar parked-dialogs panel). Clamped to `[1, 20]` at read time. */
+  parked_modals_max: number;
 }
 
 /** UI animation preferences. `enabled=false` collapses every transition

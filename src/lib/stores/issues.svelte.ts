@@ -10,6 +10,7 @@ import {
   jiraSaveBasicAuth, jiraLogout,
 } from '$lib/ipc/issues';
 import { getIssuesConfig, setIssuesConfig, getRepoConfig } from '$lib/ipc/config';
+import { tabsStore } from '$lib/stores/tabs.svelte';
 
 export type IssueProvider = 'linear' | 'jira';
 
@@ -39,6 +40,11 @@ function createIssuesStore() {
   // ── Selected issue (for detail modal) ──────────────────────────────────────
   let selectedIssue = $state<Issue | null>(null);
   let detailLoading = $state(false);
+  // Tab the issue was opened from. Captured synchronously when `selectIssue`
+  // / `selectAndLoadIssue` runs so the parked-dialog restore action can
+  // return to the same repo even after workspace switches. Null when no
+  // issue is selected.
+  let selectedIssueSourceTab = $state<string | null>(null);
 
   // ── Create issue modal ──────────────────────────────────────────────────────
   let createOpen = $state(false);
@@ -85,6 +91,7 @@ function createIssuesStore() {
     filterOptionsError = null;
     error           = null;
     selectedIssue   = null;
+    selectedIssueSourceTab = null;
     filters         = { assigneeMe: false, statusIds: [], labelIds: [], issueTypeIds: [] };
   }
 
@@ -139,6 +146,7 @@ function createIssuesStore() {
     issues        = [];
     filterOptions = null;
     selectedIssue = null;
+    selectedIssueSourceTab = null;
     error         = null;
   }
 
@@ -261,6 +269,7 @@ function createIssuesStore() {
 
   function selectIssue(issue: Issue | null) {
     selectedIssue = issue;
+    selectedIssueSourceTab = issue ? tabsStore.activeTabId : null;
   }
 
   /**
@@ -271,6 +280,7 @@ function createIssuesStore() {
   async function selectAndLoadIssue(issue: Issue) {
     // Optimistic: show modal immediately with whatever data we already have.
     selectedIssue = issue;
+    selectedIssueSourceTab = tabsStore.activeTabId;
     detailLoading  = true;
     try {
       const full = activeProvider === 'jira'
@@ -348,6 +358,7 @@ function createIssuesStore() {
     get loading()          { return loading; },
     get error()            { return error; },
     get selectedIssue()    { return selectedIssue; },
+    get selectedIssueSourceTab() { return selectedIssueSourceTab; },
     get detailLoading()    { return detailLoading; },
     get createOpen()       { return createOpen; },
     get contextMenuIssue() { return contextMenuIssue; },

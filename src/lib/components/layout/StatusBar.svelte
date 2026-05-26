@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowUp, ArrowDown, GitBranch, Tag, AlertCircle, GitMerge, Loader, Bell, Clock, Undo2, ShieldAlert } from 'lucide-svelte';
+  import { ArrowUp, ArrowDown, GitBranch, Tag, AlertCircle, GitMerge, Loader, Bell, Clock, Undo2, ShieldAlert, Minimize2 } from 'lucide-svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -7,6 +7,7 @@
   import { notificationsStore } from '$lib/stores/notifications.svelte';
   import { securityStore } from '$lib/stores/security.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
+  import { parkedModalsStore } from '$lib/stores/parked-modals.svelte';
   import type { RepoStatus } from '$lib/types/git';
   import Contribution from '$lib/components/shared/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
@@ -96,6 +97,8 @@
   // Visible job total: hidden jobs are excluded from the badge unless the
   // user has flipped the "Show hidden" toggle on the Jobs panels.
   const totalJobs    = $derived(jobsStore.runningCount + jobsStore.finishedCount);
+
+  const parkedCount  = $derived(parkedModalsStore.count);
 
   async function copyRefName(text: string, kind: 'branch' | 'tag') {
     if (await copyToClipboard(text, { errorToast: 'Copy failed' })) {
@@ -336,6 +339,26 @@
     {/if}
   </button>
 
+  <!-- Minimized dialogs (parked modals) — always visible, click opens
+       the floating panel anchored above this badge. Same affordance
+       shape as Jobs / Notifications so they read as a cluster. -->
+  <button
+    class="parked-badge"
+    class:parked-badge-has={parkedCount > 0}
+    use:tooltip={{
+      content: parkedCount > 0
+        ? `${parkedCount} minimized dialog${parkedCount > 1 ? 's' : ''}`
+        : 'No minimized dialogs',
+      description: 'Click to view',
+    }}
+    onclick={() => uiStore.toggleParkedModalsOverlay()}
+  >
+    <Minimize2 size={12} />
+    {#if parkedCount > 0}
+      <span class="parked-count">{parkedCount > 99 ? '99+' : parkedCount}</span>
+    {/if}
+  </button>
+
   <!-- Notifications bell -->
   <button
     class="notif-badge"
@@ -544,6 +567,43 @@
     color: var(--success);
   }
 
+
+  /* ── Parked-modals badge ──────────────────────────────────────────────────
+     Same shape as the notifications bell so the right cluster reads as a
+     unified group. Muted when empty; accent when at least one entry is
+     parked, with a count pill mirroring the bell. */
+  .parked-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    padding: 0 10px;
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .parked-badge:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+  .parked-badge-has   { color: var(--accent); }
+
+  .parked-count {
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--accent);
+    color: var(--text-on-accent);
+    border-radius: var(--radius-md);
+    padding: 0 4px;
+    min-width: 16px;
+    text-align: center;
+    line-height: 16px;
+  }
 
   /* ── Notifications badge ────────────────────────────────────────────────── */
   .notif-badge {

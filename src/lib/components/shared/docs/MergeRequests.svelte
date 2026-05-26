@@ -34,6 +34,7 @@
 
 <h2>Detail modal</h2>
 <p>Four tabs across the top: <strong>Overview</strong>, <strong>CI</strong>, <strong>Files</strong>, <strong>Commits</strong>. Press <kbd>Esc</kbd> to close. The header has a <strong>refresh</strong> button that reloads detail + list + every tab that's already been opened.</p>
+<p>The minimize button in the header parks a "reopen" shortcut in the status-bar dock — useful when you need to check a commit or branch and come back to the MR later. The status-bar badge (next to notifications) shows how many dialogs are parked; click it to see the list and pick which to restore. Restoring switches back to the source tab and re-opens the dialog, so the chip survives tab and workspace changes; scroll position and unsubmitted comments do not — the modal re-fetches and re-renders.</p>
 <div class="feature-grid">
   <div class="feature-card">
     <div class="fc-title">Header</div>

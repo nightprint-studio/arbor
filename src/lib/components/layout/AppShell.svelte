@@ -8,6 +8,7 @@
   import TitleBar from './TitleBar.svelte';
   import TabBar from './TabBar.svelte';
   import StatusBar from './StatusBar.svelte';
+  import ParkedModalsDock from './ParkedModalsDock.svelte';
   import ActivityBarLeft from './ActivityBarLeft.svelte';
   import ActivityBarRight from './ActivityBarRight.svelte';
   import PluginSidebarPanel from '../plugins/PluginSidebarPanel.svelte';
@@ -112,6 +113,7 @@
   import type { CiRun } from '$lib/types/pipeline';
   import { listen } from '@tauri-apps/api/event';
   import IssuesSidebar from '../issues/IssuesSidebar.svelte';
+  import IssueDetailModal from '../issues/IssueDetailModal.svelte';
   import BranchRenameModal from '../sidebar/BranchRenameModal.svelte';
   import DeleteTagModal from '../sidebar/DeleteTagModal.svelte';
   import { executeTagDelete as runTagDelete } from '$lib/utils/tag-delete';
@@ -179,6 +181,10 @@
   import { firePluginAction, listPluginInfo } from '$lib/ipc/plugin';
   import type { PluginFormConfig } from '$lib/types/plugin';
   import type { MergeRequest } from '$lib/types/mr';
+  import type { Issue } from '$lib/types/issues';
+  import { getDeepLinkRemoteUrl } from '$lib/utils/deep-link-builder';
+  import { openRepoFromUrl } from '$lib/utils/openRepoFromUrl';
+  import { getRepoConfig } from '$lib/ipc/config';
 
   // Font scale + theme-font opt-in live in `appearanceStore` (persisted in
   // config.toml). The store applies the default `--font-scale` synchronously
@@ -1152,6 +1158,7 @@
         pluginStore.pendingForm !== null ||
         pluginPickFile !== null ||
         mrModalOpen ||
+        issuesStore.selectedIssue !== null ||
         createMrOpen ||
         renameBranchTarget !== null ||
         onboardingStore.open;
@@ -1589,10 +1596,31 @@
   let themeEditorOpen = $state(false);
 
   // MR / PR modal state
-  let mrModalOpen      = $state(false);
-  let mrModalMr        = $state<MergeRequest | null>(null);
-  let createMrOpen     = $state(false);
-  let mrCurrentBranch  = $state('');
+  let mrModalOpen        = $state(false);
+  let mrModalMr          = $state<MergeRequest | null>(null);
+  // Tab the MR detail was opened from — pinned at open time so the
+  // parked-dialog restore action can switch back to the right repo
+  // even after workspace / tab changes. The corresponding remote URL
+  // is NOT kept in state: it's seeded into `deep-link-builder`'s
+  // module-level cache via a fire-and-forget IPC at modal-open time,
+  // and the restore closure reads it back from the cache at click
+  // time — this dodges the $state/{@const} reactivity race where a
+  // very fast minimize could capture `url=null` before the IPC
+  // resolved.
+  let mrModalSourceTab   = $state<string | null>(null);
+  let createMrOpen       = $state(false);
+  let mrCurrentBranch    = $state('');
+
+  // Issue detail modal — lifted from IssuesSidebar to top-level so it
+  // survives sidebar-section changes; the parked-dialog dock now owns
+  // any continuity across workspace switches. Source tab is captured
+  // synchronously in `issuesStore.selectIssue` / `selectAndLoadIssue`;
+  // the remote URL follows the same cache-warming pattern as MR.
+  $effect(() => {
+    const tabId = issuesStore.selectedIssueSourceTab;
+    if (!tabId) return;
+    void getDeepLinkRemoteUrl(tabId).catch(() => {});
+  });
 
   // Rename-branch modal state (driven by palette event)
   let renameBranchTarget = $state<BranchInfo | null>(null);
@@ -1681,13 +1709,93 @@
   });
 
   function openMrDetail(mr: MergeRequest) {
-    mrModalMr   = mr;
-    mrModalOpen = true;
+    mrModalMr        = mr;
+    mrModalOpen      = true;
+    // Pin the source tab so the parked-dialog restore action can switch
+    // back to it later, even if the user has moved to another tab in
+    // the meantime. Seed the remote URL cache in the background — the
+    // restore closure reads it back at click time.
+    mrModalSourceTab = tabsStore.activeTabId;
+    if (mrModalSourceTab) {
+      void getDeepLinkRemoteUrl(mrModalSourceTab).catch(() => {});
+    }
   }
   function closeMrDetail() {
-    mrModalOpen = false;
-    mrModalMr   = null;
+    mrModalOpen      = false;
+    mrModalMr        = null;
+    mrModalSourceTab = null;
     mrStore.clearDetail();
+  }
+
+  /** Make sure the source repo is the active tab before re-opening a
+   *  parked dialog. Resolves the source URL via the deep-link cache
+   *  (seeded at modal-open time) and routes through `openRepoFromUrl`,
+   *  which handles cross-workspace switching + tab activation. Falls
+   *  back to a local tabs-only lookup when the URL cannot be resolved
+   *  (repo with no remote, or IPC failure both at open and click).
+   *  Throws on failure — the chip catches and toasts. */
+  async function ensureSourceRepoActive(srcTab: string): Promise<void> {
+    let srcUrl: string | null = null;
+    try { srcUrl = await getDeepLinkRemoteUrl(srcTab); } catch { /* ignore */ }
+    if (srcUrl) {
+      const outcome = await openRepoFromUrl(srcUrl);
+      if (outcome.kind === 'opened') return;
+      if (outcome.kind === 'error') throw new Error(outcome.message);
+      if (outcome.kind === 'needs_clone') {
+        throw new Error('source repository must be re-cloned first (registry mismatch or path missing)');
+      }
+      return;
+    }
+    const tab = tabsStore.tabs.find(t => t.id === srcTab);
+    if (!tab) throw new Error('source repo is no longer open in this session');
+    if (tabsStore.activeTabId !== srcTab) tabsStore.setActive(srcTab);
+  }
+
+  /** Re-open MR detail. Switches workspace + tab as needed via
+   *  `openRepoFromUrl`, then re-runs the local open path with the
+   *  captured MR snapshot (the modal will refetch fresh detail). */
+  async function reopenMrDetail(srcTab: string, mr: MergeRequest) {
+    await ensureSourceRepoActive(srcTab);
+    openMrDetail(mr);
+  }
+
+  /** Re-open Issue detail.
+   *
+   *  Race we have to dodge: workspace switch transitions through several
+   *  intermediate active tabs. IssuesSidebar's `$effect` fires once per
+   *  transition and each run kicks off an async `getRepoConfig().then(...
+   *  setProvider)` chain. Stale chains for intermediate tabs can resolve
+   *  AFTER our selection runs and clobber `selectedIssue` via setProvider's
+   *  cross-tracker reset.
+   *
+   *  Mitigation: after the workspace+tab dust settles (small delay +
+   *  Svelte tick), we prime the provider ourselves using the final tab's
+   *  repo config, then set `selectedIssue`. Any late IssuesSidebar chain
+   *  that targets the SAME tab calls setProvider with the same value (no-op
+   *  via the equality guard). Late chains for earlier transient tabs can
+   *  still in theory fire — we accept that as a rare edge case until
+   *  IssuesSidebar's effect grows proper cancellation. */
+  async function reopenIssueDetail(srcTab: string, issue: Issue) {
+    await ensureSourceRepoActive(srcTab);
+    // Let queued IssuesSidebar effects + their IPC chains resolve so
+    // they don't overwrite our state on a later microtask. 150ms is
+    // empirically enough for the typical `getRepoConfig` round-trip.
+    await new Promise(r => setTimeout(r, 150));
+    const activeTabId = tabsStore.activeTabId;
+    if (activeTabId) {
+      try {
+        const cfg = await getRepoConfig(activeTabId);
+        const tracker = cfg.issue_tracker ?? null;
+        if (tracker === 'linear' || tracker === 'jira') {
+          issuesStore.setProvider(tracker);
+        }
+      } catch { /* fallback to whatever provider is currently set */ }
+    }
+    issuesStore.selectAndLoadIssue(issue);
+  }
+
+  function closeIssueDetail() {
+    issuesStore.selectIssue(null);
   }
   function openCreateMr() {
     // Try to get current branch name
@@ -2070,16 +2178,39 @@
     </div>
   {/if}
 
+  <!-- Minimized dialogs overlay (parked modals list) -->
+  {#if uiStore.parkedModalsOverlayOpen}
+    <div transition:fly={{ y: 10, duration: animStore.dBase, easing: cubicOut }}>
+      <ParkedModalsDock />
+    </div>
+  {/if}
+
   <!-- OperationsOverlay is rendered INSIDE the bottom-right unified stack
        above (so it's always anchored at the bottom of the column). -->
 
 
   <!-- MR detail modal -->
   {#if mrModalOpen && mrModalMr}
+    {@const _mr = mrModalMr}
+    {@const _srcTab = mrModalSourceTab}
     <MrModal
-      mr={mrModalMr}
+      mr={_mr}
       onClose={closeMrDetail}
       onRefresh={() => { const tid = tabsStore.activeTabId; if (tid) mrStore.load(tid); }}
+      onRestoreFromScratch={_srcTab ? () => reopenMrDetail(_srcTab, _mr) : undefined}
+    />
+  {/if}
+
+  <!-- Issue detail modal — top-level so it survives sidebar-section
+       changes; the parked-dialog dock owns continuity across workspace
+       switches via the source tab pinned inside the issues store. -->
+  {#if issuesStore.selectedIssue}
+    {@const _issue = issuesStore.selectedIssue}
+    {@const _srcTab = issuesStore.selectedIssueSourceTab}
+    <IssueDetailModal
+      issue={_issue}
+      onClose={closeIssueDetail}
+      onRestoreFromScratch={_srcTab ? () => reopenIssueDetail(_srcTab, _issue) : undefined}
     />
   {/if}
 

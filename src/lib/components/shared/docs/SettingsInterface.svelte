@@ -12,6 +12,7 @@
 <ul>
   <li><strong>Window controls</strong> — switches the close / minimize / maximize buttons in the title bar between the Mac-inspired coloured trio (default) and a flat Windows-/IntelliJ-style set that runs the full height of the title bar and reaches the right edge. The same switch also restyles the close button used in modal and panel headers.</li>
   <li><strong>Font scale</strong> — scales all UI text from 0.8× to 1.4× in 5 % increments. Useful on HiDPI or small screens.</li>
+  <li><strong>Minimized dialogs cap</strong> — maximum number of dialogs that can sit minimized in the status-bar panel at the same time (1–20, default 5). New minimize attempts past this cap are refused with a toast; no parked dialog is auto-closed.</li>
 </ul>
 
 <h3>Animations</h3>

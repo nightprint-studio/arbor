@@ -20,7 +20,8 @@
    * `actions` is an optional snippet placed between the content and the close
    * button — typically a refresh / settings cluster.
    */
-  import type { Snippet } from 'svelte';
+  import { getContext, type Snippet } from 'svelte';
+  import { Minus } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   let {
@@ -43,6 +44,12 @@
      *  the button is visible but inert and confuses users. */
     hideClose?: boolean;
   } = $props();
+
+  // Read the minimize callback from the enclosing <Modal> when it's marked
+  // `minimizable` — the button only appears in that case. ModalHeader is
+  // also used outside of <Modal> (e.g. wrapping bottom panels), where the
+  // context isn't present and the button stays hidden.
+  const modalCtx = getContext<{ minimize?: () => void } | undefined>('arbor-modal');
 </script>
 
 <div class="content">
@@ -54,6 +61,16 @@
 </div>
 {#if actions}
   <span class="actions">{@render actions()}</span>
+{/if}
+{#if modalCtx?.minimize}
+  <button
+    class="modal-minimize-btn"
+    onclick={modalCtx.minimize}
+    aria-label="Minimize"
+    use:tooltip={'Minimize'}
+  >
+    <Minus size={14} />
+  </button>
 {/if}
 {#if !hideClose}
   <button class="mac-close-btn" onclick={onClose} aria-label="Close" use:tooltip={'Close'}></button>
@@ -80,5 +97,27 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+
+  /* Sits just to the left of the close button — matches its size so the
+     header chrome stays balanced. Subtle background on hover, no fill at
+     rest, so it doesn't compete with the close button's accent. */
+  .modal-minimize-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    flex-shrink: 0;
+  }
+  .modal-minimize-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
   }
 </style>

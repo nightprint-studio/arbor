@@ -137,10 +137,17 @@ pub struct AppearanceConfig {
     /// Useful on laptops where vertical space is at a premium.
     #[serde(default)]
     pub compact_title_bar: bool,
+    /// Maximum number of dialogs that can sit minimized in the status-bar
+    /// parked-dialogs panel at the same time. New minimize attempts past
+    /// this cap are refused with a toast (non-destructive — no parked
+    /// dialog is auto-closed). Clamped to `[1, 20]` on read.
+    #[serde(default = "default_parked_modals_max")]
+    pub parked_modals_max: u32,
 }
 
 fn default_window_controls_style() -> String { "mac".into() }
 fn default_font_scale() -> f32 { 1.0 }
+fn default_parked_modals_max() -> u32 { 5 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -159,6 +166,7 @@ impl Default for AppearanceConfig {
             use_theme_fonts:       false,
             activity_bar_position: ActivityBarPosition::default(),
             compact_title_bar:     false,
+            parked_modals_max:     default_parked_modals_max(),
         }
     }
 }

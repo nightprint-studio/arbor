@@ -24,7 +24,11 @@
   import type { Issue, IssueStatus, IssueAttachment } from '$lib/types/issues';
   import type { LinkedCommitRef } from '$lib/types/git';
 
-  let { issue, onClose }: { issue: Issue; onClose: () => void } = $props();
+  let { issue, onClose, onRestoreFromScratch }: {
+    issue: Issue;
+    onClose: () => void;
+    onRestoreFromScratch?: () => void | Promise<void>;
+  } = $props();
 
   let mainEl = $state<HTMLElement | null>(null);
 
@@ -277,7 +281,17 @@
   })());
 </script>
 
-<Modal {onClose} width="min(1180px, 92vw)" height="90vh" padBody={false} ariaLabel={liveIssue.title}>
+<Modal
+  {onClose}
+  width="min(1180px, 92vw)" height="90vh"
+  padBody={false}
+  ariaLabel={liveIssue.title}
+  minimizable
+  parkId={`issue-${liveIssue.id}`}
+  parkTitle={`${liveIssue.identifier} · ${liveIssue.title}`}
+  parkIcon={CircleDot}
+  {onRestoreFromScratch}
+>
   {#snippet header()}
     <ModalHeader {onClose}>
       {#if issuesStore.activeProvider}

@@ -47,10 +47,11 @@
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
 
-  let { mr, onClose, onRefresh }: {
+  let { mr, onClose, onRefresh, onRestoreFromScratch }: {
     mr:        MergeRequest;
     onClose:   () => void;
     onRefresh: () => void;
+    onRestoreFromScratch?: () => void | Promise<void>;
   } = $props();
 
   const tabId = $derived(tabsStore.activeTabId ?? '');
@@ -772,7 +773,17 @@
   <button type="button" aria-label="Close menu" class="merge-backdrop" onclick={() => mergeMenu = false}></button>
 {/if}
 
-<Modal {onClose} width="min(940px, 95vw)" height="min(700px, 92vh)" padBody={false} ariaLabel="Merge request">
+<Modal
+  {onClose}
+  width="min(940px, 95vw)" height="min(700px, 92vh)"
+  padBody={false}
+  ariaLabel="Merge request"
+  minimizable
+  parkId={`mr-${mr.number}`}
+  parkTitle={`#${mr.number} · ${detailMr.title}`}
+  parkIcon={GitPullRequest}
+  {onRestoreFromScratch}
+>
   {#snippet header()}
     <ModalHeader {onClose}>
       <span class="state-badge state-{detailMr.state}">

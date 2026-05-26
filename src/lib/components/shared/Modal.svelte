@@ -29,11 +29,13 @@
    *     and fill the slots with `<ModalHeader>` / `<ModalFooter>` helpers (or
    *     custom content) so visual rhythm stays consistent across the app.
    */
-  import { onMount, type Snippet } from 'svelte';
+  import { onMount, setContext, type Component, type Snippet } from 'svelte';
   import { fade, fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
   import { tooltipState } from '$lib/stores/tooltip.svelte';
+  import { parkedModalsStore } from '$lib/stores/parked-modals.svelte';
+  import { uiStore } from '$lib/stores/ui.svelte';
   import ActivityBar from '$lib/components/layout/ActivityBar.svelte';
 
   type Size = 'sm' | 'md' | 'lg' | 'full';
@@ -53,6 +55,11 @@
     topGap          = false,
     zIndex,
     ariaLabel,
+    minimizable     = false,
+    parkId,
+    parkTitle,
+    parkIcon,
+    onRestoreFromScratch,
   }: {
     onClose:          () => void;
     header?:          Snippet;
@@ -90,12 +97,66 @@
      *  so they're never trapped behind their caller. */
     zIndex?:          string;
     ariaLabel?:       string;
+    /** When true, the header shows a minimize button that parks the modal
+     *  into the status-bar dock. Requires `onRestoreFromScratch` —
+     *  minimize closes the modal AND records a re-open action; the chip
+     *  doesn't preserve local state, it re-runs the open path on click. */
+    minimizable?:     boolean;
+    /** Stable id used to dedupe parked entries across re-parks. Defaults
+     *  to a random id per Modal instance, so each mount gets its own slot. */
+    parkId?:          string;
+    /** Label shown on the parked-dock chip. Defaults to the dialog's
+     *  aria-label, then to a generic "Parked dialog" fallback. */
+    parkTitle?:       string;
+    /** Optional Lucide icon component rendered on the chip. */
+    parkIcon?:        Component<{ size?: number; class?: string }>;
+    /** Required for `minimizable`. Re-opens the modal from scratch when
+     *  the chip is clicked: typically `() => switchToTab(srcTab) then
+     *  openDetail(payload)`. May be async; the chip shows a spinner
+     *  until it resolves. */
+    onRestoreFromScratch?: () => void | Promise<void>;
   } = $props();
 
   const sizeStyle = $derived([
     width  ? `width: ${width};`   : '',
     height ? `height: ${height};` : '',
   ].filter(Boolean).join(' '));
+
+  // ── Minimize / park ────────────────────────────────────────────────────
+  // Minimize records a re-open action in `parkedModalsStore` and immediately
+  // closes the modal. The chip in the status-bar dock survives workspace /
+  // tab switches because it's not a hidden DOM node — it's a callback that
+  // knows how to re-run the open path. State local to the modal (scroll,
+  // unsaved input) is intentionally lost: chasing self-contained state
+  // preservation across remounts is much more complex than the workflow
+  // continuity that the action-based approach already gives us.
+  const resolvedParkId = parkId ?? `modal-${crypto.randomUUID()}`;
+
+  function doMinimize() {
+    if (!minimizable || !onRestoreFromScratch) return;
+    const accepted = parkedModalsStore.park({
+      id:      resolvedParkId,
+      title:   parkTitle ?? ariaLabel ?? 'Parked dialog',
+      icon:    parkIcon,
+      execute: onRestoreFromScratch,
+    });
+    if (!accepted) {
+      uiStore.showToast(
+        'Minimize cap reached — close a parked dialog or raise the limit in Appearance settings',
+        'warning',
+      );
+      return;
+    }
+    onClose();
+  }
+
+  // ModalHeader reads this context to decide whether to render the minimize
+  // button. The minimize button is gated on BOTH `minimizable` and the
+  // consumer providing `onRestoreFromScratch` — without the latter we'd
+  // park a dead action.
+  setContext('arbor-modal', {
+    minimize: (minimizable && onRestoreFromScratch) ? doMinimize : undefined,
+  });
 
   // Backdrop dismiss must require BOTH mousedown AND mouseup on the backdrop.
   // Otherwise a text-selection drag that starts inside an input and releases

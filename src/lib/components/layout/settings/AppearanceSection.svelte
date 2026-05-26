@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Palette } from 'lucide-svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
-  import { appearanceStore } from '$lib/stores/appearance.svelte';
+  import { appearanceStore, PARKED_MODALS_MAX_MIN, PARKED_MODALS_MAX_MAX } from '$lib/stores/appearance.svelte';
   import type {
     WindowControlsStyle, ActivityBarPosition,
   } from '$lib/types/config';
@@ -9,6 +9,7 @@
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
+  import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   let { onOpenThemeEditor }: { onOpenThemeEditor: () => void } = $props();
@@ -20,6 +21,7 @@
   const fontScale          = $derived(appearanceStore.fontScale);
   const activityBarPos     = $derived(appearanceStore.activityBarPosition);
   const compactTitleBar    = $derived(appearanceStore.compactTitleBar);
+  const parkedModalsMax    = $derived(appearanceStore.parkedModalsMax);
 
   function onScaleInput(e: Event) {
     const n = parseFloat((e.target as HTMLInputElement).value);
@@ -69,6 +71,20 @@
     <Toggle
       checked={compactTitleBar}
       onchange={(v) => appearanceStore.setCompactTitleBar(v)}
+    />
+  </FormRow>
+
+  <FormRow
+    label="Minimized dialogs cap"
+    description="Maximum number of dialogs that can sit minimized in the status-bar panel at the same time. New minimize attempts past this cap are refused with a toast — no parked dialog is auto-closed."
+  >
+    <NumberStepper
+      value={parkedModalsMax}
+      min={PARKED_MODALS_MAX_MIN}
+      max={PARKED_MODALS_MAX_MAX}
+      step={1}
+      onchange={(v) => appearanceStore.setParkedModalsMax(v)}
+      ariaLabel="Minimized dialogs cap"
     />
   </FormRow>
 

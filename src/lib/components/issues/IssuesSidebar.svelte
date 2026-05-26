@@ -19,7 +19,6 @@
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import FilterButton from '$lib/components/shared/ui/FilterButton.svelte';
   import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
-  import IssueDetailModal from './IssueDetailModal.svelte';
   import CreateIssueModal from './CreateIssueModal.svelte';
   import IssueContextMenu from './IssueContextMenu.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -371,13 +370,9 @@
   />
 {/if}
 
-<!-- Issue detail modal -->
-{#if issuesStore.selectedIssue}
-  <IssueDetailModal
-    issue={issuesStore.selectedIssue}
-    onClose={() => issuesStore.selectIssue(null)}
-  />
-{/if}
+<!-- Issue detail modal is mounted at AppShell level so it can survive
+     sidebar-section changes and (via the parked-dialogs dock) workspace
+     switches. Opened by setting `issuesStore.selectedIssue`. -->
 
 <!-- Create issue modal -->
 {#if issuesStore.createOpen}

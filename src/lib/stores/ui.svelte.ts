@@ -133,6 +133,7 @@ function createUiStore() {
   let jobsOverlayOpen          = $state(false);
   let notificationsOverlayOpen = $state(false);
   let securityOverlayOpen      = $state(false);
+  let parkedModalsOverlayOpen  = $state(false);
   let recentQuickSwitchOpen    = $state(false);
   let repoBrowserOpen          = $state(false);
   let mergeModalOpen                = $state(false);
@@ -396,6 +397,8 @@ function createUiStore() {
   function setNotificationsOverlayOpen(v: boolean){ notificationsOverlayOpen = v; }
   function toggleSecurityOverlay()                { securityOverlayOpen = !securityOverlayOpen; }
   function setSecurityOverlayOpen(v: boolean)     { securityOverlayOpen = v; }
+  function toggleParkedModalsOverlay()            { parkedModalsOverlayOpen = !parkedModalsOverlayOpen; }
+  function setParkedModalsOverlayOpen(v: boolean) { parkedModalsOverlayOpen = v; }
   function openRepoBrowser()                      { repoBrowserOpen = true; }
   function closeRepoBrowser()                     { repoBrowserOpen = false; }
 
@@ -483,6 +486,7 @@ function createUiStore() {
     get jobsOverlayOpen()                { return jobsOverlayOpen; },
     get notificationsOverlayOpen()       { return notificationsOverlayOpen; },
     get securityOverlayOpen()            { return securityOverlayOpen; },
+    get parkedModalsOverlayOpen()        { return parkedModalsOverlayOpen; },
     get recentQuickSwitchOpen()          { return recentQuickSwitchOpen; },
     get repoBrowserOpen()                { return repoBrowserOpen; },
     get mergeModalOpen()                 { return mergeModalOpen; },
@@ -523,6 +527,7 @@ function createUiStore() {
     openCheckoutConflictModal, closeCheckoutConflictModal,
     toggleNotificationsOverlay, setNotificationsOverlayOpen,
     toggleSecurityOverlay, setSecurityOverlayOpen,
+    toggleParkedModalsOverlay, setParkedModalsOverlayOpen,
     toggleRecentQuickSwitch, setRecentQuickSwitchOpen,
     openRepoBrowser, closeRepoBrowser,
     loadRecentRepos, addRecentRepo, showToast, dismissToast, openModal, closeModal,

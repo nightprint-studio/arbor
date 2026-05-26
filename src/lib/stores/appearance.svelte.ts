@@ -10,14 +10,24 @@ const DEFAULT: AppearanceConfig = {
   use_theme_fonts:       false,
   activity_bar_position: 'left',
   compact_title_bar:     false,
+  parked_modals_max:     5,
 };
 
 const FONT_SCALE_MIN = 0.8;
 const FONT_SCALE_MAX = 1.4;
 
+export const PARKED_MODALS_MAX_MIN = 1;
+export const PARKED_MODALS_MAX_MAX = 20;
+
 function clampScale(n: number): number {
   if (!Number.isFinite(n)) return 1;
   return Math.max(FONT_SCALE_MIN, Math.min(FONT_SCALE_MAX, n));
+}
+
+function clampParkedMax(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT.parked_modals_max;
+  const i = Math.round(n);
+  return Math.max(PARKED_MODALS_MAX_MIN, Math.min(PARKED_MODALS_MAX_MAX, i));
 }
 
 /** Mirror the active style onto `<html data-window-controls="…">` so global
@@ -68,6 +78,7 @@ function createAppearanceStore() {
   let useThemeFonts        = $state<boolean>(DEFAULT.use_theme_fonts);
   let activityBarPosition  = $state<ActivityBarPosition>(DEFAULT.activity_bar_position);
   let compactTitleBar      = $state<boolean>(DEFAULT.compact_title_bar);
+  let parkedModalsMax      = $state<number>(DEFAULT.parked_modals_max);
   let loaded               = $state(false);
 
   // Defaults applied once at module load; subsequent changes go through the
@@ -88,6 +99,7 @@ function createAppearanceStore() {
       useThemeFonts       = !!cfg.use_theme_fonts;
       activityBarPosition = normalisePosition(cfg.activity_bar_position);
       compactTitleBar     = !!cfg.compact_title_bar;
+      parkedModalsMax     = clampParkedMax(cfg.parked_modals_max);
       applyAttribute(windowControlsStyle);
       applyFontScale(fontScale);
       applyActivityBarPosition(activityBarPosition);
@@ -105,6 +117,7 @@ function createAppearanceStore() {
       use_theme_fonts:       useThemeFonts,
       activity_bar_position: activityBarPosition,
       compact_title_bar:     compactTitleBar,
+      parked_modals_max:     parkedModalsMax,
     }).catch(() => {});
   }
 
@@ -137,6 +150,13 @@ function createAppearanceStore() {
     persist();
   }
 
+  function setParkedModalsMax(n: number) {
+    const clamped = clampParkedMax(n);
+    if (clamped === parkedModalsMax) return;
+    parkedModalsMax = clamped;
+    persist();
+  }
+
   /** Toggle whether the active theme's optional font preferences win over
    *  the global font stack. `themeVars` is the active theme's `vars` map so
    *  the change can be applied without going through the theme store. */
@@ -161,6 +181,7 @@ function createAppearanceStore() {
     get useThemeFonts()        { return useThemeFonts; },
     get activityBarPosition()  { return activityBarPosition; },
     get compactTitleBar()      { return compactTitleBar; },
+    get parkedModalsMax()      { return parkedModalsMax; },
     get loaded()               { return loaded; },
     loadConfig,
     setWindowControlsStyle,
@@ -168,6 +189,7 @@ function createAppearanceStore() {
     setUseThemeFonts,
     setActivityBarPosition,
     setCompactTitleBar,
+    setParkedModalsMax,
     syncThemeFonts,
   };
 }
