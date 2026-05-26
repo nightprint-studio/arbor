@@ -40,7 +40,7 @@ dirs   = "6.0.0"
 regex  = "1"
 
 # Tauri (member crates that need AppHandle / Manager pull this in)
-tauri = { version = "2.11.0", features = ["tray-icon", "image-png", "image-ico"] }
+tauri = { version = "2.11.0", features = ["tray-icon", "image-png", "image-ico", "protocol-asset"] }
 
 # Cloud-only — pinned here so the eventual WASM-migration only edits one place
 opendal = { version = "0.56", default-features = false, features = [

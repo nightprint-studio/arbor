@@ -33,9 +33,28 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   and scroll position aren't preserved across the round trip. The cap
   (default 5, max 20) lives under *Settings → Appearance → Minimized
   dialogs cap*.
+- Markdown editor inline media: `![alt](url)` references render as a
+  real `<img>` (or `<video controls>` / `<audio controls>` based on
+  the file extension — `.mp4` / `.webm` / `.mov`, `.mp3` / `.wav` /
+  `.m4a`). URLs can be `http(s):`, `data:`, or filesystem paths
+  relative to the markdown file (resolved through Tauri's asset
+  protocol). Bare URLs on their own line are recognised too. GitHub
+  user-attachments video URLs render as an "Open in browser" card
+  (their signed-redirect chain can't be followed from an embedded
+  WebView), so the system browser handles playback while the rest of
+  the README stays in the editor. Caret on the source reveals the
+  raw `![…](…)` for editing.
 
 ### Changed
 
+- Markdown editor live preview: GFM tables render as a real HTML table
+  with framed cells, header row and column alignment from the
+  `|:--:|--:|` markers; cell content supports bold, italic,
+  strikethrough, inline code, and links. An all-empty header row
+  renders as a headerless grid. The caret entering the block flips it
+  back to source mode for editing. Unordered list markers (`-` / `*`
+  / `+`) show as a proper bullet glyph off the active line, and
+  ordered list numbers align tabularly.
 - Status bar slimmed down: repo path moved to the left segment; Fetch and
   "Open in browser" relocated to the graph toolbar; version pill removed
   (About still reachable from the Command Palette and the menu).

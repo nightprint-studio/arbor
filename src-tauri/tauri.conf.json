@@ -25,7 +25,18 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif",
+          "**/*.webp", "**/*.svg", "**/*.bmp", "**/*.ico", "**/*.avif",
+          "**/*.mp4", "**/*.webm", "**/*.ogg", "**/*.ogv",
+          "**/*.mov", "**/*.m4v", "**/*.mkv",
+          "**/*.mp3", "**/*.wav", "**/*.m4a", "**/*.flac",
+          "**/*.aac", "**/*.opus", "**/*.oga"
+        ]
+      }
     }
   },
   "plugins": {

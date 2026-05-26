@@ -98,7 +98,7 @@
       state: EditorState.create({
         doc: currentText,
         extensions: [
-          createMarkdownExtensions({ readOnly }, compartments),
+          createMarkdownExtensions({ readOnly, docPath: path }, compartments),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) {
               currentText = u.state.doc.toString();
