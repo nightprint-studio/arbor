@@ -24,6 +24,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Status bar slimmed down: repo path moved to the left segment; Fetch and
   "Open in browser" relocated to the graph toolbar; version pill removed
   (About still reachable from the Command Palette and the menu).
+- Issue detail dialog is now self-contained: the tracker, API routing,
+  and linked-commits source repo are pinned at open time, so a Linear
+  ticket stays usable from a Jira-configured repo (and vice versa), and
+  restoring from the parked-dialog dock no longer forces a checkout back
+  to the source repo. The Linked Commits section explains itself when
+  the original tab is no longer open and offers a one-click fallback to
+  the current repo.
 
 ### Fixed
 

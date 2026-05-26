@@ -15,16 +15,21 @@ import { tabsStore } from '$lib/stores/tabs.svelte';
 export type IssueProvider = 'linear' | 'jira';
 
 function createIssuesStore() {
-  // ── Provider ────────────────────────────────────────────────────────────────
+  // ── Provider (drives the sidebar's view) ───────────────────────────────────
+  // The detail modal carries its own `selectedIssueProvider` snapshot so it
+  // keeps working when the sidebar switches to a different tracker.
   let activeProvider = $state<IssueProvider | null>(null);
 
   // ── Auth state ──────────────────────────────────────────────────────────────
   let authStatus   = $state<IssueAuthStatus | null>(null);
   let authLoading  = $state(false);
 
-  // ── Filter options (teams, statuses, labels…) ───────────────────────────────
-  let filterOptions      = $state<IssueFilterOptions | null>(null);
-  let filterOptionsError = $state<string | null>(null);
+  // ── Filter options cache (per-provider) ─────────────────────────────────────
+  // The sidebar reads via `filterOptions` (active provider). The detail modal
+  // reads via `getFilterOptionsFor(provider)` so a parked Linear modal can
+  // pull Linear statuses even while the sidebar is on Jira.
+  let filterOptionsByProvider      = $state<Partial<Record<IssueProvider, IssueFilterOptions>>>({});
+  let filterOptionsErrorByProvider = $state<Partial<Record<IssueProvider, string>>>({});
 
   // ── Default project filter (set from repo config, applied automatically) ────
   let defaultProjectId = $state<string | null>(null);
@@ -38,12 +43,15 @@ function createIssuesStore() {
   let error        = $state<string | null>(null);
 
   // ── Selected issue (for detail modal) ──────────────────────────────────────
-  let selectedIssue = $state<Issue | null>(null);
-  let detailLoading = $state(false);
+  // Decoupled from `activeProvider` so switching the sidebar between trackers
+  // never nukes a parked detail modal. The modal carries its own provider via
+  // `selectedIssueProvider` (snapshot at open time).
+  let selectedIssue          = $state<Issue | null>(null);
+  let selectedIssueProvider  = $state<IssueProvider | null>(null);
+  let detailLoading          = $state(false);
   // Tab the issue was opened from. Captured synchronously when `selectIssue`
-  // / `selectAndLoadIssue` runs so the parked-dialog restore action can
-  // return to the same repo even after workspace switches. Null when no
-  // issue is selected.
+  // / `selectAndLoadIssue` runs so the parked-dialog restore action and the
+  // Linked Commits panel can pin to the original repo even after tab switches.
   let selectedIssueSourceTab = $state<string | null>(null);
 
   // ── Create issue modal ──────────────────────────────────────────────────────
@@ -74,25 +82,22 @@ function createIssuesStore() {
   // ---------------------------------------------------------------------------
 
   /**
-   * Switch provider and reset all issue state. Auth is *not* fetched here —
-   * `IssuesSidebar` has a dedicated `$effect` that calls `loadAuthStatus()`
-   * when `authStatus === null && activeProvider !== null`, so the work
-   * happens on demand only when the sidebar is actually mounted. This lets
-   * lightweight callers (e.g. the activity bar's per-tab brand-icon
-   * resolver) call `setProvider` without triggering network round-trips
-   * for issues/auth on every tab switch.
+   * Switch the sidebar's provider and reset sidebar-scoped state. Auth is
+   * *not* fetched here — `IssuesSidebar` has a dedicated `$effect` that calls
+   * `loadAuthStatus()` when `authStatus === null && activeProvider !== null`,
+   * so the work happens on demand only when the sidebar is actually mounted.
+   *
+   * Note: this does NOT touch `selectedIssue` / `selectedIssueProvider` /
+   * `selectedIssueSourceTab`. The detail modal lives independently so a
+   * parked Linear ticket survives a sidebar switch to Jira and vice-versa.
    */
   function setProvider(p: IssueProvider | null) {
     if (activeProvider === p) return;
-    activeProvider  = p;
-    authStatus      = null;
-    issues          = [];
-    filterOptions   = null;
-    filterOptionsError = null;
-    error           = null;
-    selectedIssue   = null;
-    selectedIssueSourceTab = null;
-    filters         = { assigneeMe: false, statusIds: [], labelIds: [], issueTypeIds: [] };
+    activeProvider     = p;
+    authStatus         = null;
+    issues             = [];
+    error              = null;
+    filters            = { assigneeMe: false, statusIds: [], labelIds: [], issueTypeIds: [] };
   }
 
   async function loadAuthStatus() {
@@ -144,23 +149,40 @@ function createIssuesStore() {
     }
     authStatus    = { authenticated: false, user: null };
     issues        = [];
-    filterOptions = null;
-    selectedIssue = null;
-    selectedIssueSourceTab = null;
     error         = null;
+    // Keep the detail modal alive — logging out of Jira from the sidebar
+    // should not wipe a parked Linear ticket.
   }
 
-  async function loadFilterOptions() {
-    filterOptionsError = null;
-    try {
-      if (activeProvider === 'jira') {
-        filterOptions = await jiraGetFilterOptions();
-      } else {
-        filterOptions = await linearGetFilterOptions();
-      }
-    } catch (e) {
-      filterOptionsError = String(e);
+  /**
+   * Load filter options for a provider (defaults to the sidebar's active one).
+   * Results land in the per-provider cache, so the detail modal can pull
+   * statuses for whichever tracker its ticket belongs to — independent of
+   * what the sidebar is currently showing.
+   */
+  async function loadFilterOptions(provider?: IssueProvider) {
+    const p = provider ?? activeProvider;
+    if (!p) return;
+    // Clear any previous error for this provider before re-attempting.
+    if (filterOptionsErrorByProvider[p]) {
+      const next = { ...filterOptionsErrorByProvider };
+      delete next[p];
+      filterOptionsErrorByProvider = next;
     }
+    try {
+      const opts = p === 'jira' ? await jiraGetFilterOptions() : await linearGetFilterOptions();
+      filterOptionsByProvider = { ...filterOptionsByProvider, [p]: opts };
+    } catch (e) {
+      filterOptionsErrorByProvider = { ...filterOptionsErrorByProvider, [p]: String(e) };
+    }
+  }
+
+  function getFilterOptionsFor(provider: IssueProvider): IssueFilterOptions | null {
+    return filterOptionsByProvider[provider] ?? null;
+  }
+
+  function getFilterOptionsErrorFor(provider: IssueProvider): string | null {
+    return filterOptionsErrorByProvider[provider] ?? null;
   }
 
   async function loadIssues() {
@@ -267,8 +289,15 @@ function createIssuesStore() {
     if (authStatus?.authenticated) void loadIssues();
   }
 
-  function selectIssue(issue: Issue | null) {
-    selectedIssue = issue;
+  /**
+   * Select an issue (light data, no detail fetch). Provider defaults to the
+   * sidebar's active one — but callers that know the tracker explicitly
+   * (e.g. the ticket-chip deep-link handler) should pass it to avoid a
+   * mismatch when the chip's tracker differs from the active tab's.
+   */
+  function selectIssue(issue: Issue | null, provider?: IssueProvider) {
+    selectedIssue          = issue;
+    selectedIssueProvider  = issue ? (provider ?? activeProvider) : null;
     selectedIssueSourceTab = issue ? tabsStore.activeTabId : null;
   }
 
@@ -276,14 +305,25 @@ function createIssuesStore() {
    * Select an issue and immediately fetch its full detail (description + comments).
    * Sets `selectedIssue` optimistically right away (light data) so the modal opens
    * instantly, then replaces it with the full payload once the API call returns.
+   *
+   * The provider is captured synchronously and used for the detail fetch, so a
+   * Linear ticket opened from a Linear-configured repo will keep talking to
+   * Linear even if the user switches the sidebar to a Jira repo mid-flight.
+   *
+   * `sourceTabId` lets the parked-dialog dock restore the modal with its
+   * original source tab pinned, instead of capturing whatever tab happens
+   * to be active at restore time.
    */
-  async function selectAndLoadIssue(issue: Issue) {
+  async function selectAndLoadIssue(issue: Issue, provider?: IssueProvider, sourceTabId?: string) {
+    const p = provider ?? activeProvider;
     // Optimistic: show modal immediately with whatever data we already have.
-    selectedIssue = issue;
-    selectedIssueSourceTab = tabsStore.activeTabId;
-    detailLoading  = true;
+    selectedIssue          = issue;
+    selectedIssueProvider  = p;
+    selectedIssueSourceTab = sourceTabId ?? tabsStore.activeTabId;
+    detailLoading          = true;
     try {
-      const full = activeProvider === 'jira'
+      if (!p) return;
+      const full = p === 'jira'
         ? await jiraGetIssue(issue.identifier)
         : await linearGetIssue(issue.id);
       // Only apply if the user hasn't navigated away to a different issue.
@@ -306,21 +346,35 @@ function createIssuesStore() {
     contextMenuPos   = null;
   }
 
-  async function transitionIssue(id: string, statusId: string) {
+  /**
+   * Transition an issue's status. Provider defaults to the sidebar's active
+   * one — callers driven by the detail modal MUST pass the modal's pinned
+   * provider so a Linear modal sitting on top of a Jira-active sidebar still
+   * routes to Linear's API.
+   *
+   * The list `issues[]` is only updated when the provider matches the active
+   * one, otherwise we'd be mixing trackers in a single list.
+   */
+  async function transitionIssue(id: string, statusId: string, provider?: IssueProvider) {
+    const p = provider ?? activeProvider;
     let updated: Issue;
-    if (activeProvider === 'jira') {
+    if (p === 'jira') {
       updated = await jiraTransitionIssue(id, statusId);
     } else {
       updated = await linearTransitionIssue(id, statusId);
     }
-    issues = issues.map(i => i.id === id ? updated : i);
+    if (p === activeProvider) {
+      issues = issues.map(i => i.id === id ? updated : i);
+    }
     if (selectedIssue?.id === id) selectedIssue = updated;
     return updated;
   }
 
-  async function addComment(issueId: string, body: string) {
+  /** Same provider-routing logic as `transitionIssue`. */
+  async function addComment(issueId: string, body: string, provider?: IssueProvider) {
+    const p = provider ?? activeProvider;
     let comment;
-    if (activeProvider === 'jira') {
+    if (p === 'jira') {
       comment = await jiraAddComment(issueId, body);
     } else {
       comment = await linearAddComment(issueId, body);
@@ -352,26 +406,28 @@ function createIssuesStore() {
     get activeProvider()   { return activeProvider; },
     get authStatus()       { return authStatus; },
     get authLoading()      { return authLoading; },
-    get filterOptions()    { return filterOptions; },
+    /** Filter options for the sidebar's active provider (legacy alias). */
+    get filterOptions()    { return activeProvider ? (filterOptionsByProvider[activeProvider] ?? null) : null; },
+    get filterOptionsError() { return activeProvider ? (filterOptionsErrorByProvider[activeProvider] ?? null) : null; },
     get filters()          { return filters; },
     get issues()           { return issues; },
     get loading()          { return loading; },
     get error()            { return error; },
     get selectedIssue()    { return selectedIssue; },
+    get selectedIssueProvider()  { return selectedIssueProvider; },
     get selectedIssueSourceTab() { return selectedIssueSourceTab; },
     get detailLoading()    { return detailLoading; },
     get createOpen()       { return createOpen; },
     get contextMenuIssue() { return contextMenuIssue; },
     get contextMenuPos()   { return contextMenuPos; },
-    get filterOptionsError() { return filterOptionsError; },
-    get defaultProjectId()   { return defaultProjectId; },
-    get sortField()          { return sortField; },
-    get sortDir()            { return sortDir; },
-    get sortedIssues()       { return sortedIssues; },
+    get defaultProjectId() { return defaultProjectId; },
+    get sortField()        { return sortField; },
+    get sortDir()          { return sortDir; },
+    get sortedIssues()     { return sortedIssues; },
     // actions
     setProvider, loadProviderForTab,
     loadAuthStatus, saveToken, saveJiraBasicAuth, logout,
-    loadFilterOptions, loadIssues,
+    loadFilterOptions, getFilterOptionsFor, getFilterOptionsErrorFor, loadIssues,
     setFilters, clearFilters, setDefaultProjectId, setSort,
     selectIssue, selectAndLoadIssue, openCreate, closeCreate,
     openContextMenu, closeContextMenu,

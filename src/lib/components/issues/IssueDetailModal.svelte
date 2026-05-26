@@ -3,15 +3,16 @@
     ExternalLink, GitBranch, ChevronDown, Send, Loader,
     Calendar, User, Tag, Layers, CircleDot, GitCommit, CornerDownLeft,
     Paperclip, Download, FileText, FileImage, FileArchive, FileVideo, FileAudio, File as FileIcon,
+    Pin, PinOff, AlertCircle,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
-  import BrandTile, { type Brand } from '$lib/components/shared/internal/BrandTile.svelte';
+  import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import { renderMarkdown } from '$lib/utils/markdown';
   import { htmlToText, installListAwareCopy } from '$lib/utils/html-to-text';
-  import { issuesStore } from '$lib/stores/issues.svelte';
-  import { linearBranchNameForIssue, jiraDownloadAttachment } from '$lib/ipc/issues';
+  import { issuesStore, type IssueProvider } from '$lib/stores/issues.svelte';
+  import { branchNameForIssue, jiraDownloadAttachment } from '$lib/ipc/issues';
   import { findCommitsForTicket } from '$lib/ipc/ticket_links';
   import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -24,8 +25,15 @@
   import type { Issue, IssueStatus, IssueAttachment } from '$lib/types/issues';
   import type { LinkedCommitRef } from '$lib/types/git';
 
-  let { issue, onClose, onRestoreFromScratch }: {
+  /**
+   * `provider` is captured at open time and pinned for the lifetime of the
+   * modal. This is what makes the dialog self-contained: a Linear ticket
+   * keeps talking to Linear (status dropdown, transitions, comments) even
+   * when the sidebar has switched to a Jira-configured repo.
+   */
+  let { issue, provider, onClose, onRestoreFromScratch }: {
     issue: Issue;
+    provider: IssueProvider;
     onClose: () => void;
     onRestoreFromScratch?: () => void | Promise<void>;
   } = $props();
@@ -57,9 +65,9 @@
   async function openStatusDrop() {
     if (statusDropOpen) { statusDropOpen = false; return; }
     statusDropOpen = true;
-    if (!issuesStore.filterOptions) {
+    if (!issuesStore.getFilterOptionsFor(provider)) {
       loadingOptions = true;
-      try { await issuesStore.loadFilterOptions(); } finally { loadingOptions = false; }
+      try { await issuesStore.loadFilterOptions(provider); } finally { loadingOptions = false; }
     }
   }
 
@@ -76,13 +84,15 @@
     return `background:${hex}22;color:${hex};border:1px solid ${hex}55`;
   }
 
-  // Use live version from store if available (updated after transition/comment/detail fetch).
-  // Prefer selectedIssue first: it is updated by selectAndLoadIssue with the full payload
-  // (description + comments), which is not present in the search-result list.
+  // Use the store's selectedIssue when it matches — that's the full payload
+  // (description + comments) installed by `selectAndLoadIssue`, plus any
+  // updates from transitions/comments routed through this modal.
+  //
+  // We deliberately do NOT fall back to `issuesStore.issues[]`: that list is
+  // scoped to the sidebar's active provider, so reading from it when the
+  // sidebar has switched to a different tracker would pull the wrong record.
   const liveIssue = $derived(
-    (issuesStore.selectedIssue?.id === issue.id ? issuesStore.selectedIssue : null) ??
-    issuesStore.issues.find(i => i.id === issue.id) ??
-    issue
+    (issuesStore.selectedIssue?.id === issue.id ? issuesStore.selectedIssue : null) ?? issue
   );
 
   function statusTypeClass(type: string) {
@@ -116,15 +126,17 @@
     } catch { return '—'; }
   }
 
-  // Distinct status list from filter options
-  const availableStatuses = $derived(issuesStore.filterOptions?.statuses ?? []);
+  // Distinct status list from the modal's pinned provider — never the
+  // sidebar's. A Linear modal must keep showing Linear statuses even after
+  // the sidebar has switched to Jira.
+  const availableStatuses = $derived(issuesStore.getFilterOptionsFor(provider)?.statuses ?? []);
 
   async function transitionTo(status: IssueStatus) {
     statusDropOpen = false;
     if (status.id === liveIssue.status.id) return;
     transitioning = true;
     try {
-      await issuesStore.transitionIssue(liveIssue.id, status.id);
+      await issuesStore.transitionIssue(liveIssue.id, status.id, provider);
     } catch (e) {
       uiStore.showToast(String(e), 'error');
     } finally {
@@ -137,7 +149,7 @@
     if (!body) return;
     commentSending = true;
     try {
-      await issuesStore.addComment(liveIssue.id, body);
+      await issuesStore.addComment(liveIssue.id, body, provider);
       commentBody = '';
     } catch (e) {
       uiStore.showToast(String(e), 'error');
@@ -148,7 +160,7 @@
 
   async function createBranch() {
     try {
-      const name = await linearBranchNameForIssue(liveIssue);
+      const name = await branchNameForIssue(liveIssue);
       if (await copyToClipboard(name, { successToast: `Branch name copied: ${name}`, errorToast: true })) {
         branchCopied = true;
         setTimeout(() => { branchCopied = false; }, 2000);
@@ -172,26 +184,59 @@
     return format === 'html' ? htmlToText(body) : body;
   }
 
-  // Comment composer state
-  const me    = $derived(issuesStore.filterOptions?.me ?? issuesStore.authStatus?.user ?? null);
+  // Comment composer state. `me` is read from the modal's pinned provider —
+  // never the sidebar's authStatus, which may belong to a different tracker.
+  const me    = $derived(issuesStore.getFilterOptionsFor(provider)?.me ?? null);
   const dirty = $derived(commentBody.trim().length > 0);
+
+  // Lazy-load filter options for this provider on mount, so the composer
+  // avatar and the status dropdown pre-fetch their data instead of waiting
+  // for the first user click. Fire-and-forget — failure surfaces via the
+  // status dropdown's existing error path.
+  $effect(() => {
+    if (!issuesStore.getFilterOptionsFor(provider)) {
+      void issuesStore.loadFilterOptions(provider);
+    }
+  });
 
   // Stable primitive derived so the effect below only re-runs when the identifier
   // string actually changes — not on every object reference change of liveIssue
   // (e.g. when selectAndLoadIssue replaces the light version with the full detail).
   const stableIdentifier = $derived(liveIssue.identifier);
 
-  // Lazy-load commits linked to this issue whenever the issue identifier changes.
+  // ── Linked Commits source-tab resolution ─────────────────────────────────
+  // Default: pinned to the tab the issue was opened from (self-contained).
+  // The user can unpin to fall back to the current active tab — useful when
+  // they're cross-referencing the same ticket across multiple repos.
+  // Local state, not persisted: a fresh open of the same issue restarts
+  // pinned to source.
+  let usingCurrentRepo = $state(false);
+  const sourceTabId    = $derived(issuesStore.selectedIssueSourceTab);
+  const sourceTab      = $derived(sourceTabId
+    ? tabsStore.tabs.find(t => t.id === sourceTabId) ?? null
+    : null);
+  // The tab we actually run the git lookup against. Null when no tab can
+  // be resolved (source missing AND user hasn't fallen back to current).
+  const lookupTab      = $derived(usingCurrentRepo ? tabsStore.activeTab : sourceTab);
+  // "Source repo not open in this session": only meaningful while pinned.
+  const sourceMissing  = $derived(!usingCurrentRepo && sourceTabId !== null && sourceTab === null);
+
+  // Lazy-load commits linked to this issue. Re-runs when the identifier or
+  // the lookup tab changes (pin/unpin, tab close).
   $effect(() => {
-    const tab        = tabsStore.activeTab;
+    const tabId      = lookupTab?.id ?? null;
     const identifier = stableIdentifier; // primitive → effect won't re-run unless ID changes
-    if (!tab) return;
+    if (!tabId) {
+      linkedCommits        = [];
+      linkedCommitsLoading = false;
+      return;
+    }
 
     linkedCommits        = [];
     linkedCommitsLoading = true;
     let cancelled = false;
 
-    findCommitsForTicket(tab.id, identifier)
+    findCommitsForTicket(tabId, identifier)
       .then(c => { if (!cancelled) linkedCommits = c; })
       .catch(() => {})
       .finally(() => { if (!cancelled) linkedCommitsLoading = false; });
@@ -199,7 +244,22 @@
     return () => { cancelled = true; };
   });
 
+  // Whether to render the Linked Commits section at all. Always render when
+  // the source tab is missing (so we can explain why), otherwise keep the
+  // original behavior (hide when there's nothing to show).
+  const showLinkedCommitsSection = $derived(
+    linkedCommitsLoading || linkedCommits.length > 0 || sourceMissing
+  );
+
   function goToCommit(sha: string) {
+    // If the linked-commits lookup is running against a tab different from
+    // the active one (typical when the modal is parked while the user
+    // browses another repo), switch to it first so the graph view actually
+    // contains the commit we're about to select.
+    const target = lookupTab;
+    if (target && target.id !== tabsStore.activeTabId) {
+      tabsStore.setActive(target.id);
+    }
     graphStore.selectCommit(sha);
     onClose();
   }
@@ -265,6 +325,11 @@
   }
 
   function getCommitRefs(sha: string): { name: string; isCurrent: boolean; type: string }[] {
+    // `graphStore.graphData` belongs to whichever tab is active right now.
+    // When the linked-commits lookup runs against a different tab (source
+    // tab pinned while the user browses another repo), the refs don't
+    // apply — skip them instead of showing wrong annotations.
+    if (!lookupTab || lookupTab.id !== tabsStore.activeTabId) return [];
     const refs = graphStore.graphData?.nodes.find(n => n.oid === sha)?.refs ?? [];
     return refs.map(r => ({ name: r.name, isCurrent: r.is_current, type: r.ref_type }));
   }
@@ -294,9 +359,7 @@
 >
   {#snippet header()}
     <ModalHeader {onClose}>
-      {#if issuesStore.activeProvider}
-        <BrandTile brand={issuesStore.activeProvider as Brand} size={14} tileSize={22} />
-      {/if}
+      <BrandTile brand={provider} size={14} tileSize={22} />
       <button
         type="button"
         class="modal-identifier modal-identifier-btn"
@@ -556,20 +619,68 @@
           </div>
         {/if}
 
-        <!-- Linked Commits (lazy-loaded) -->
-        {#if linkedCommitsLoading || linkedCommits.length > 0}
+        <!-- Linked Commits (lazy-loaded, pinned to source tab by default) -->
+        {#if showLinkedCommitsSection}
           <div class="commits-section">
             <div class="commits-header">
               <GitCommit size={13} />
               Linked Commits
               {#if linkedCommitsLoading}
                 <Loader size={11} class="spin commits-spin" />
-              {:else}
+              {:else if !sourceMissing}
                 <span class="commits-count">{linkedCommits.length}</span>
+              {/if}
+
+              <!-- Pin indicator on the right side of the header.
+                   Three states: pinned to a still-open source, unpinned
+                   (using current repo with a "repin" affordance if the
+                   source is back), source missing (no toggle here — the
+                   call-to-action lives in the explanation card below). -->
+              {#if !sourceMissing}
+                <span class="commits-pin-info">
+                  {#if usingCurrentRepo}
+                    <span class="commits-pin-label" use:tooltip={'Looking up against the currently active repo'}>
+                      <PinOff size={10} /> Current repo
+                    </span>
+                    {#if sourceTab}
+                      <button
+                        class="commits-pin-btn"
+                        onclick={() => (usingCurrentRepo = false)}
+                        use:tooltip={`Repin to ${sourceTab.name}`}
+                      >
+                        <Pin size={10} /> Repin
+                      </button>
+                    {/if}
+                  {:else if sourceTab}
+                    <span class="commits-pin-label" use:tooltip={`Pinned to ${sourceTab.name}`}>
+                      <Pin size={10} /> {sourceTab.name}
+                    </span>
+                  {/if}
+                </span>
               {/if}
             </div>
 
-            {#if !linkedCommitsLoading}
+            {#if sourceMissing}
+              <div class="commits-missing">
+                <AlertCircle size={13} class="commits-missing-icon" />
+                <div class="commits-missing-body">
+                  <div class="commits-missing-title">Source repo not open</div>
+                  <div class="commits-missing-hint">
+                    This ticket was opened from a tab that's no longer in this session,
+                    so we can't search its history for linked commits.
+                  </div>
+                  {#if tabsStore.activeTab}
+                    <button
+                      class="commits-missing-action"
+                      onclick={() => (usingCurrentRepo = true)}
+                    >
+                      <PinOff size={11} />
+                      Use current repo ({tabsStore.activeTab.name})
+                    </button>
+                  {/if}
+                </div>
+              </div>
+            {:else if !linkedCommitsLoading}
               {#each linkedCommits as commit (commit.sha)}
                 {@const refs = getCommitRefs(commit.sha)}
                 <button class="linked-commit" onclick={() => goToCommit(commit.sha)}>
@@ -1639,6 +1750,76 @@
     padding: 0 5px; border-radius: 99px;
   }
   :global(.commits-spin) { color: var(--text-muted); }
+
+  /* ── Pin indicator (Linked Commits) ──────────────────────────────────────── */
+  .commits-pin-info {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .commits-pin-label {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 10px; font-weight: 500;
+    color: var(--text-muted);
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 1px 6px;
+    max-width: 180px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .commits-pin-btn {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 10px; font-weight: 500;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 1px 6px;
+    cursor: pointer;
+    font-family: var(--font-ui-sans);
+    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  }
+  .commits-pin-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border);
+  }
+
+  /* ── Source-tab-missing card (Linked Commits) ────────────────────────────── */
+  .commits-missing {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid color-mix(in srgb, var(--warning, #fbbf24) 60%, var(--border));
+    border-radius: var(--radius-md);
+  }
+  :global(.commits-missing-icon) { color: var(--warning, #fbbf24); flex-shrink: 0; margin-top: 1px; }
+  .commits-missing-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .commits-missing-title {
+    font-size: 12px; font-weight: 600; color: var(--text-primary);
+  }
+  .commits-missing-hint {
+    font-size: 11px; color: var(--text-muted); line-height: 1.5;
+  }
+  .commits-missing-action {
+    align-self: flex-start;
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-top: 4px;
+    padding: 4px 10px;
+    font-size: 11px; font-weight: 500;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-family: var(--font-ui-sans);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+  }
+  .commits-missing-action:hover {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
 
   .linked-commit {
     display: flex; flex-direction: column; gap: 3px;

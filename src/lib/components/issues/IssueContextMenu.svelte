@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ExternalLink, GitBranch, Copy, ArrowRight, Eye } from 'lucide-svelte';
   import { issuesStore } from '$lib/stores/issues.svelte';
-  import { linearBranchNameForIssue } from '$lib/ipc/issues';
+  import { branchNameForIssue } from '$lib/ipc/issues';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import type { Issue } from '$lib/types/issues';
@@ -30,7 +30,7 @@
   }
 
   async function copyBranchName() {
-    const name = await linearBranchNameForIssue(issue);
+    const name = await branchNameForIssue(issue);
     await copyToClipboard(name, { successToast: `Branch name copied: ${name}` });
     onClose();
   }

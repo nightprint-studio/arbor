@@ -1009,7 +1009,6 @@ pub fn run() {
             commands::issues_commands::linear_assign_issue,
             commands::issues_commands::linear_add_comment,
             commands::issues_commands::linear_create_issue,
-            commands::issues_commands::linear_branch_name_for_issue,
             // Issues / Jira
             commands::issues_commands::jira_get_auth_status,
             commands::issues_commands::jira_save_basic_auth,
@@ -1021,8 +1020,9 @@ pub fn run() {
             commands::issues_commands::jira_assign_issue,
             commands::issues_commands::jira_add_comment,
             commands::issues_commands::jira_create_issue,
-            commands::issues_commands::jira_branch_name_for_issue,
             commands::issues_commands::jira_download_attachment,
+            // Issues / provider-agnostic
+            commands::issues_commands::branch_name_for_issue,
             // Merge conflict resolution
             commands::merge_commands::merge_branch,
             commands::merge_commands::get_conflict_content,

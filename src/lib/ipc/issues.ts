@@ -68,10 +68,6 @@ export function linearCreateIssue(params: {
   });
 }
 
-export function linearBranchNameForIssue(issue: Issue): Promise<string> {
-  return invoke('linear_branch_name_for_issue', { issue });
-}
-
 // ── Jira ─────────────────────────────────────────────────────────────────────
 
 export function jiraGetAuthStatus(): Promise<JiraAuthStatus> {
@@ -140,8 +136,10 @@ export function jiraCreateIssue(params: {
   });
 }
 
-export function jiraBranchNameForIssue(issue: Issue): Promise<string> {
-  return invoke('jira_branch_name_for_issue', { issue });
+/** Suggest a git branch name for an issue. Provider-agnostic — the backend
+ *  helper produces `{lower-identifier}-{slugified-title}` for any tracker. */
+export function branchNameForIssue(issue: Issue): Promise<string> {
+  return invoke('branch_name_for_issue', { issue });
 }
 
 /** Download a Jira attachment to a path on disk (the user picks via save dialog).

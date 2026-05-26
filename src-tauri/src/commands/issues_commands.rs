@@ -109,8 +109,10 @@ pub async fn linear_create_issue(
     ).await
 }
 
+/// Suggest a git branch name for an issue. Provider-agnostic — the helper
+/// produces `{lower-identifier}-{slugified-title}` from any tracker's issue.
 #[tauri::command]
-pub fn linear_branch_name_for_issue(
+pub fn branch_name_for_issue(
     _state: State<'_, AppState>,
     issue: Issue,
 ) -> Result<String, AppError> {
@@ -223,14 +225,6 @@ pub async fn jira_create_issue(
         estimate,
         issue_type.as_deref(),
     ).await
-}
-
-#[tauri::command]
-pub fn jira_branch_name_for_issue(
-    _state: State<'_, AppState>,
-    issue: Issue,
-) -> Result<String, AppError> {
-    Ok(crate::integrations::branch_name_for_issue(&issue))
 }
 
 /// Download a Jira attachment to `dest_path` (chosen by the frontend via the

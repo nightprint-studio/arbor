@@ -98,7 +98,9 @@
 
 <h2>Detail modal</h2>
 <p>Click an issue card to open the full detail view: metadata sidebar, description, attachments, linked commits, and threaded comments.</p>
-<p>The minimize button in the header parks a "reopen" shortcut in the status-bar dock — handy when an issue is open while you go check a commit elsewhere. The status-bar badge lists parked dialogs; click an entry to switch back to the source tab and re-open. The chip survives tab and workspace changes; scroll and draft comments do not — the dialog re-fetches and re-renders.</p>
+<p>The minimize button in the header parks a "reopen" shortcut in the status-bar dock — handy when an issue is open while you go check a commit elsewhere. The status-bar badge lists parked dialogs; click an entry to bring the dialog back. The chip survives tab and workspace changes; scroll and draft comments do not — the dialog re-fetches and re-renders.</p>
+<p>The dialog is <strong>self-contained</strong>: the tracker (Linear or Jira), the API routing for status transitions and comments, and the linked-commits source repo are all pinned at open time. Restoring a Linear ticket while the sidebar happens to be on a Jira-configured repo just re-opens the dialog where you were — no automatic checkout to the source repo.</p>
+<p>The <strong>Linked Commits</strong> section is pinned to the tab the ticket was opened from. If that tab is no longer open in the session, the section explains why and offers a one-click switch to the currently active repo (a small pin chip in the section header lets you flip back).</p>
 
 <h3>Description &amp; comments rendering</h3>
 <p>Bodies are rendered with full styling — headings, lists, code blocks, tables, blockquotes, panels, mentions, status lozenges:</p>

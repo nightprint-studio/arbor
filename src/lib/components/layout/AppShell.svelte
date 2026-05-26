@@ -175,7 +175,7 @@
   import { worktreeStore } from '$lib/stores/worktree.svelte';
   import { startIdeDetection } from '$lib/ipc/worktree';
   import { startShellDetection } from '$lib/ipc/terminal';
-  import { issuesStore } from '$lib/stores/issues.svelte';
+  import { issuesStore, type IssueProvider } from '$lib/stores/issues.svelte';
   import { linearGetIssue, jiraGetIssue } from '$lib/ipc/issues';
   import { matchesBinding } from '$lib/utils/keybindings';
   import { firePluginAction, listPluginInfo } from '$lib/ipc/plugin';
@@ -980,7 +980,7 @@
           const issue = tracker === 'jira'
             ? await jiraGetIssue(ticketId)
             : await linearGetIssue(ticketId);
-          issuesStore.selectIssue(issue);
+          issuesStore.selectIssue(issue, tracker);
         } catch {
           uiStore.showToast(`Issue ${ticketId} not found`, 'error');
         }
@@ -1611,17 +1611,6 @@
   let createMrOpen       = $state(false);
   let mrCurrentBranch    = $state('');
 
-  // Issue detail modal — lifted from IssuesSidebar to top-level so it
-  // survives sidebar-section changes; the parked-dialog dock now owns
-  // any continuity across workspace switches. Source tab is captured
-  // synchronously in `issuesStore.selectIssue` / `selectAndLoadIssue`;
-  // the remote URL follows the same cache-warming pattern as MR.
-  $effect(() => {
-    const tabId = issuesStore.selectedIssueSourceTab;
-    if (!tabId) return;
-    void getDeepLinkRemoteUrl(tabId).catch(() => {});
-  });
-
   // Rename-branch modal state (driven by palette event)
   let renameBranchTarget = $state<BranchInfo | null>(null);
 
@@ -1759,39 +1748,15 @@
     openMrDetail(mr);
   }
 
-  /** Re-open Issue detail.
+  /** Re-open Issue detail from the parked-dialog dock.
    *
-   *  Race we have to dodge: workspace switch transitions through several
-   *  intermediate active tabs. IssuesSidebar's `$effect` fires once per
-   *  transition and each run kicks off an async `getRepoConfig().then(...
-   *  setProvider)` chain. Stale chains for intermediate tabs can resolve
-   *  AFTER our selection runs and clobber `selectedIssue` via setProvider's
-   *  cross-tracker reset.
-   *
-   *  Mitigation: after the workspace+tab dust settles (small delay +
-   *  Svelte tick), we prime the provider ourselves using the final tab's
-   *  repo config, then set `selectedIssue`. Any late IssuesSidebar chain
-   *  that targets the SAME tab calls setProvider with the same value (no-op
-   *  via the equality guard). Late chains for earlier transient tabs can
-   *  still in theory fire — we accept that as a rare edge case until
-   *  IssuesSidebar's effect grows proper cancellation. */
-  async function reopenIssueDetail(srcTab: string, issue: Issue) {
-    await ensureSourceRepoActive(srcTab);
-    // Let queued IssuesSidebar effects + their IPC chains resolve so
-    // they don't overwrite our state on a later microtask. 150ms is
-    // empirically enough for the typical `getRepoConfig` round-trip.
-    await new Promise(r => setTimeout(r, 150));
-    const activeTabId = tabsStore.activeTabId;
-    if (activeTabId) {
-      try {
-        const cfg = await getRepoConfig(activeTabId);
-        const tracker = cfg.issue_tracker ?? null;
-        if (tracker === 'linear' || tracker === 'jira') {
-          issuesStore.setProvider(tracker);
-        }
-      } catch { /* fallback to whatever provider is currently set */ }
-    }
-    issuesStore.selectAndLoadIssue(issue);
+   *  The dialog is fully self-contained — provider, source tab, and tracker
+   *  API routing are all pinned inside the modal — so we deliberately do
+   *  NOT switch the active repo here. Restoring a Linear ticket while the
+   *  sidebar happens to be on a Jira repo just re-opens the modal where
+   *  the user was; Linked Commits stays pinned to its source tab. */
+  async function reopenIssueDetail(srcTab: string, issue: Issue, provider: IssueProvider) {
+    issuesStore.selectAndLoadIssue(issue, provider, srcTab);
   }
 
   function closeIssueDetail() {
@@ -2202,15 +2167,18 @@
   {/if}
 
   <!-- Issue detail modal — top-level so it survives sidebar-section
-       changes; the parked-dialog dock owns continuity across workspace
-       switches via the source tab pinned inside the issues store. -->
-  {#if issuesStore.selectedIssue}
+       changes; the modal is self-contained (provider + source tab pinned
+       at open time) so it also survives workspace / tracker switches
+       without forcing a checkout back to the source repo. -->
+  {#if issuesStore.selectedIssue && issuesStore.selectedIssueProvider}
     {@const _issue = issuesStore.selectedIssue}
     {@const _srcTab = issuesStore.selectedIssueSourceTab}
+    {@const _provider = issuesStore.selectedIssueProvider}
     <IssueDetailModal
       issue={_issue}
+      provider={_provider}
       onClose={closeIssueDetail}
-      onRestoreFromScratch={_srcTab ? () => reopenIssueDetail(_srcTab, _issue) : undefined}
+      onRestoreFromScratch={_srcTab ? () => reopenIssueDetail(_srcTab, _issue, _provider) : undefined}
     />
   {/if}
 
