@@ -8,6 +8,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 mod error;
 mod process_ext;
 mod platform;
+mod taskbar_icon_refresh;
 mod git;
 mod git_cli;
 mod commands;
@@ -548,6 +549,12 @@ pub fn run() {
                     })
                     .expect("failed to spawn efficiency-periodic thread");
             }
+
+            // Re-apply the main window icon after sleep/resume — works
+            // around a Windows + WebView2 quirk that drops the taskbar's
+            // small HICON on wake. Active in debug and release alike since
+            // the bug is OS-level.
+            crate::taskbar_icon_refresh::install(app.handle());
 
             // System tray — only in release builds
             #[cfg(not(debug_assertions))]

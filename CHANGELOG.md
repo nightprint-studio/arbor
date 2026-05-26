@@ -7,6 +7,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows taskbar icon goes blank after the system resumes from sleep —
+  re-applied on every power-resume notification.
+
 ## [0.2.0] — 2026-05-24
 
 ### Added

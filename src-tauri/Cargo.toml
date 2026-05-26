@@ -203,6 +203,7 @@ windows-sys = { version = "0.52", features = [
   "Win32_System_Threading",             # EcoQoS — SetProcessInformation, SetPriorityClass
   "Win32_System_Diagnostics_ToolHelp",  # EcoQoS — apply throttling to child processes (WebView2 renderers)
   "Win32_Storage_FileSystem",           # FilePickerModal — GetLogicalDrives (enumerate drive letters)
+  "Win32_System_Power",                 # taskbar_icon_refresh — PowerRegisterSuspendResumeNotification
 ] }
 
 # Optional, target-gated openssl-sys. Activated by the `vendored-openssl`
