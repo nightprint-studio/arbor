@@ -16,6 +16,8 @@
   import GitBlameModal from '$lib/components/shared/GitBlameModal.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { markdownStore } from '$lib/stores/markdown.svelte';
+  import { compactMiddleDirs } from '$lib/utils/file-tree/compact-middle-dirs';
+  import { appearanceStore } from '$lib/stores/appearance.svelte';
 
   // ── File / folder icons ──────────────────────────────────────────────────────
   import { getFileIcon, getFolderIcon } from '$lib/utils/file-icons';
@@ -254,7 +256,39 @@
     }
   }
 
-  const tree = $derived(buildTree(rawPaths));
+  // IntelliJ-style "compact middle packages": collapse single-child dir
+  // chains into one row, then re-sort each level by the joined name.
+  const FILE_TREE_ACCESSORS = {
+    isDir:       (n: TreeNode) => n.kind === 'dir',
+    getName:     (n: TreeNode) => n.name,
+    setName:     (n: TreeNode, name: string) => { n.name = name; },
+    getChildren: (n: TreeNode) => (n.kind === 'dir' ? n.children : []),
+    setChildren: (n: TreeNode, kids: TreeNode[]) => {
+      if (n.kind === 'dir') n.children = kids;
+    },
+  };
+  function compactFileTree(roots: TreeNode[]): TreeNode[] {
+    const out = compactMiddleDirs(roots, FILE_TREE_ACCESSORS);
+    const reSort = (n: TreeNode) => {
+      if (n.kind !== 'dir') return;
+      n.children.sort((a, b) => {
+        if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      for (const c of n.children) reSort(c);
+    };
+    out.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const n of out) reSort(n);
+    return out;
+  }
+
+  const tree = $derived.by(() => {
+    const base = buildTree(rawPaths);
+    return appearanceStore.compactFileTreeDirs ? compactFileTree(base) : base;
+  });
 
   // ── Search ────────────────────────────────────────────────────────────────────
 

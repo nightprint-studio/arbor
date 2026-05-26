@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- IntelliJ-style "compact middle packages" for file trees — *Settings → Interface → Compact file tree folders* collapses chains of single-child directories into a single row across the Files sidebar, the Stage area tree, and the commit detail file list. Also exposed as a Command Palette toggle. Conflict file lists always compact regardless of the setting.
 - Markdown editor with Obsidian-style live preview — open any `.md` /
   `.markdown` file via the Files sidebar context menu and edit it
   in-place. Markdown markup is concealed per inline component: only

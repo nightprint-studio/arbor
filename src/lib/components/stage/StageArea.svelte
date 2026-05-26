@@ -14,6 +14,8 @@
   import ConflictResolver from './ConflictResolver.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
+  import { compactMiddleDirs } from '$lib/utils/file-tree/compact-middle-dirs';
+  import { appearanceStore } from '$lib/stores/appearance.svelte';
   import StashDialog from '$lib/components/shared/internal/StashDialog.svelte';
   import { getStatus, stageFile, unstageFile, stageAll, unstageAll, discardFile, discardAll, stagePatch } from '$lib/ipc/stage';
   import { stashSave } from '$lib/ipc/branch';
@@ -97,8 +99,29 @@
     && stagedEntries.length === 0
     && (status.conflicted?.length ?? 0) === 0
   );
-  const unstagedTree    = $derived(buildStageTree(unstagedEntries));
-  const stagedTree      = $derived(buildStageTree(stagedEntries));
+
+  // After build, optionally collapse single-child directory chains
+  // (IntelliJ "Compact Middle Packages"). Re-sorts each level by the joined
+  // name so the alphabetical order matches what the user sees.
+  const STAGE_ACCESSORS = {
+    isDir:       (n: StageTreeNode) => n.children.size > 0,
+    getName:     (n: StageTreeNode) => n.name,
+    setName:     (n: StageTreeNode, name: string) => { n.name = name; },
+    getChildren: (n: StageTreeNode) => n.sortedChildren,
+    setChildren: (n: StageTreeNode, kids: StageTreeNode[]) => { n.sortedChildren = kids; },
+  };
+  function maybeCompactStageTree(root: StageTreeNode): StageTreeNode {
+    if (!appearanceStore.compactFileTreeDirs) return root;
+    root.sortedChildren = compactMiddleDirs(root.sortedChildren, STAGE_ACCESSORS);
+    const reSort = (n: StageTreeNode) => {
+      n.sortedChildren.sort(sortNodes);
+      for (const c of n.sortedChildren) reSort(c);
+    };
+    reSort(root);
+    return root;
+  }
+  const unstagedTree    = $derived(maybeCompactStageTree(buildStageTree(unstagedEntries)));
+  const stagedTree      = $derived(maybeCompactStageTree(buildStageTree(stagedEntries)));
 
   let unstagedExpandedPaths = $state(new Set<string>());
   let stagedExpandedPaths   = $state(new Set<string>());
@@ -107,9 +130,12 @@
   let unstagedKnownDirs = new Set<string>();
   let stagedKnownDirs   = new Set<string>();
 
+  // Walk the *rendered* tree (sortedChildren reflects compact mode if on)
+  // so the expand-state Set only ever contains paths that actually appear
+  // as collapsible rows in the UI.
   function collectDirs(node: StageTreeNode, out: Set<string>) {
-    if (node.children.size > 0 && node.fullPath) out.add(node.fullPath);
-    for (const c of node.children.values()) collectDirs(c, out);
+    if (node.sortedChildren.length > 0 && node.fullPath) out.add(node.fullPath);
+    for (const c of node.sortedChildren) collectDirs(c, out);
   }
 
   function reconcileExpanded(currentDirs: Set<string>, prevExpanded: Set<string>, knownDirs: Set<string>): Set<string> {

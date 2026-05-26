@@ -9,6 +9,14 @@
 // Used by both merge-mode (`conflictedFiles`) and stash-blocking mode
 // (`blockingFiles`) — they pass different inputs but want the same flat/tree
 // switch in the sidebar.
+//
+// The single-child chain collapsing is delegated to the shared helper in
+// `$lib/utils/file-tree/compact-middle-dirs` so all file-style trees in the
+// app collapse identically. Conflict trees always compact (independent of
+// the global `appearance.compact_file_tree_dirs` toggle) — conflict lists
+// are typically short and the compactness is unambiguously helpful.
+
+import { compactMiddleDirs, type CompactAccessors } from '../file-tree/compact-middle-dirs';
 
 export type ConflictTreeNode = {
   name: string;
@@ -22,6 +30,21 @@ export type ConflictTreeNode = {
 export type ConflictTreeRow =
   | { kind: 'dir';  depth: number; name: string; fullPath: string; hasChildren: boolean }
   | { kind: 'file'; depth: number; name: string; path: string };
+
+const ACCESSORS: CompactAccessors<ConflictTreeNode> = {
+  isDir:       (n) => !n.filePath,
+  getName:     (n) => n.name,
+  setName:     (n, name) => { n.name = name; },
+  getChildren: (n) => n.sortedChildren,
+  setChildren: (n, kids) => { n.sortedChildren = kids; },
+};
+
+function sortNodes(a: ConflictTreeNode, b: ConflictTreeNode): number {
+  const aIsDir = !a.filePath;
+  const bIsDir = !b.filePath;
+  if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
+  return a.name.localeCompare(b.name);
+}
 
 export function buildConflictTree(files: { path: string }[]): ConflictTreeNode {
   const root: ConflictTreeNode = { name: '', fullPath: '', children: new Map(), sortedChildren: [] };
@@ -42,32 +65,23 @@ export function buildConflictTree(files: { path: string }[]): ConflictTreeNode {
     }
     node.filePath = f.path;
   }
-  const collapse = (n: ConflictTreeNode): ConflictTreeNode => {
-    if (n.filePath) return n;
-    if (n.children.size === 1 && !n.filePath) {
-      const only = [...n.children.values()][0];
-      if (!only.filePath) {
-        const collapsed = collapse(only);
-        return {
-          ...collapsed,
-          name: (n.name ? n.name + '/' : '') + collapsed.name,
-        };
-      }
-    }
-    return n;
+
+  // Seed sortedChildren from the Maps, then compact + re-sort. Building once
+  // (seed → compact → sort) keeps the per-render Tree iteration cheap.
+  const seed = (n: ConflictTreeNode) => {
+    n.sortedChildren = [...n.children.values()];
+    for (const c of n.sortedChildren) seed(c);
   };
-  const bakeSort = (n: ConflictTreeNode) => {
-    const kids = [...n.children.values()].map(collapse);
-    kids.sort((a, b) => {
-      const aIsDir = !a.filePath;
-      const bIsDir = !b.filePath;
-      if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-    n.sortedChildren = kids;
-    for (const c of kids) bakeSort(c);
+  seed(root);
+
+  root.sortedChildren = compactMiddleDirs(root.sortedChildren, ACCESSORS);
+
+  const reSort = (n: ConflictTreeNode) => {
+    n.sortedChildren.sort(sortNodes);
+    for (const c of n.sortedChildren) reSort(c);
   };
-  bakeSort(root);
+  reSort(root);
+
   return root;
 }
 

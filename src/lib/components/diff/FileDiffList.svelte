@@ -2,8 +2,10 @@
   import { List, FolderTree, ChevronRight, ChevronDown, Folder, FileSearch, Loader2 } from 'lucide-svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
+  import { appearanceStore } from '$lib/stores/appearance.svelte';
   import type { DiffFile } from '$lib/types/git';
   import { tooltip } from '$lib/actions/tooltip';
+  import { compactMiddleDirs } from '$lib/utils/file-tree/compact-middle-dirs';
 
   let { files }: { files: DiffFile[] } = $props();
 
@@ -63,7 +65,31 @@
     return root;
   }
 
-  const tree = $derived(buildTree(files));
+  // IntelliJ-style "compact middle packages" — collapse single-child dir
+  // chains so the tree stays vertically compact.
+  const FILE_DIFF_ACCESSORS = {
+    isDir:       (n: TreeNode) => n.children.size > 0,
+    getName:     (n: TreeNode) => n.name,
+    setName:     (n: TreeNode, name: string) => { n.name = name; },
+    getChildren: (n: TreeNode) => n.sortedChildren,
+    setChildren: (n: TreeNode, kids: TreeNode[]) => { n.sortedChildren = kids; },
+  };
+  function maybeCompactDiffTree(root: TreeNode): TreeNode {
+    if (!appearanceStore.compactFileTreeDirs) return root;
+    root.sortedChildren = compactMiddleDirs(root.sortedChildren, FILE_DIFF_ACCESSORS);
+    const sortFn = (a: TreeNode, b: TreeNode) => {
+      const aIsDir = a.children.size > 0, bIsDir = b.children.size > 0;
+      if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    };
+    const reSort = (n: TreeNode) => {
+      n.sortedChildren.sort(sortFn);
+      for (const c of n.sortedChildren) reSort(c);
+    };
+    reSort(root);
+    return root;
+  }
+  const tree = $derived(maybeCompactDiffTree(buildTree(files)));
 
   let expandedPaths = $state<Set<string>>(new Set());
 
@@ -74,12 +100,13 @@
     expandedPaths = s;
   }
 
-  // Auto-expand all dirs when tree changes
+  // Auto-expand all dirs when tree changes. Walk sortedChildren so the Set
+  // matches the rendered structure when compact-middle-dirs is active.
   $effect(() => {
     const paths = new Set<string>();
     function collect(node: TreeNode) {
-      if (node.children.size > 0 && node.fullPath) paths.add(node.fullPath);
-      for (const child of node.children.values()) collect(child);
+      if (node.sortedChildren.length > 0 && node.fullPath) paths.add(node.fullPath);
+      for (const child of node.sortedChildren) collect(child);
     }
     collect(tree);
     expandedPaths = paths;

@@ -20,6 +20,7 @@
   import { worktreeStore } from '$lib/stores/worktree.svelte';
   import { mrStore } from '$lib/stores/mr.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
+  import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
   import { setWorktreeLinkSyncEnabled, removeWorktreeLinkMember } from '$lib/ipc/linkedWorktree';
@@ -601,6 +602,15 @@
       { id: 'action:about',        kind: 'action', icon: 'Info',      group: 'System',
         title: 'About Arbor',
         action: () => { uiStore.setPanel('about'); onClose(); } },
+      { id: 'action:toggle-compact-file-tree-dirs', kind: 'action', icon: 'FolderTree', group: 'System',
+        title: appearanceStore.compactFileTreeDirs
+          ? 'Disable Compact File Tree Folders'
+          : 'Enable Compact File Tree Folders',
+        subtitle: 'IntelliJ-style: collapse single-child folder chains in file panels',
+        action: () => {
+          appearanceStore.setCompactFileTreeDirs(!appearanceStore.compactFileTreeDirs);
+          onClose();
+        } },
     );
 
     // ── Misc (repo-level) ───────────────────────────────────────────────────

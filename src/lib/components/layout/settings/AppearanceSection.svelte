@@ -22,6 +22,7 @@
   const activityBarPos     = $derived(appearanceStore.activityBarPosition);
   const compactTitleBar    = $derived(appearanceStore.compactTitleBar);
   const parkedModalsMax    = $derived(appearanceStore.parkedModalsMax);
+  const compactFileTreeDirs = $derived(appearanceStore.compactFileTreeDirs);
 
   function onScaleInput(e: Event) {
     const n = parseFloat((e.target as HTMLInputElement).value);
@@ -71,6 +72,16 @@
     <Toggle
       checked={compactTitleBar}
       onchange={(v) => appearanceStore.setCompactTitleBar(v)}
+    />
+  </FormRow>
+
+  <FormRow
+    label="Compact file tree folders"
+    description="IntelliJ-style — collapse chains of single-child folders into one row across the file panel, stage area, and commit detail file list. Conflict lists always compact regardless of this setting."
+  >
+    <Toggle
+      checked={compactFileTreeDirs}
+      onchange={(v) => appearanceStore.setCompactFileTreeDirs(v)}
     />
   </FormRow>
 

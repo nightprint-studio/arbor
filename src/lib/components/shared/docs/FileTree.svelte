@@ -22,6 +22,9 @@
   </tbody>
 </table>
 
+<h2>Compact folder chains</h2>
+<p>Settings → Interface → <strong>Compact file tree folders</strong> (on by default) collapses chains of single-child directories into one row, IntelliJ-style. With it on, <code>src/lib/components/foo.svelte</code> appears as a single <code>src/lib/components</code> entry whenever each intermediate folder only contains the next segment; expanding that row reveals the deepest folder's children directly. The same toggle drives the Stage area tree and the commit detail file list.</p>
+
 <h2>File &amp; folder icons</h2>
 <p>Icons are resolved using the <strong>VS Code Icons</strong> set (Iconify). Resolution order for files:</p>
 <ol class="step-list">

@@ -143,7 +143,16 @@ pub struct AppearanceConfig {
     /// dialog is auto-closed). Clamped to `[1, 20]` on read.
     #[serde(default = "default_parked_modals_max")]
     pub parked_modals_max: u32,
+    /// IntelliJ-style "compact middle packages" for file trees. When `true`,
+    /// chains of single-child directories collapse into one row (e.g.
+    /// `a/b/c/foo.md` shows as `a/b/c` if `a` and `b` only contain the next
+    /// segment). Applies to the file panel, stage area, commit detail diff
+    /// list, and conflict file sidebar. On by default.
+    #[serde(default = "default_true_compact_dirs")]
+    pub compact_file_tree_dirs: bool,
 }
+
+fn default_true_compact_dirs() -> bool { true }
 
 fn default_window_controls_style() -> String { "mac".into() }
 fn default_font_scale() -> f32 { 1.0 }
@@ -167,6 +176,7 @@ impl Default for AppearanceConfig {
             activity_bar_position: ActivityBarPosition::default(),
             compact_title_bar:     false,
             parked_modals_max:     default_parked_modals_max(),
+            compact_file_tree_dirs: true,
         }
     }
 }

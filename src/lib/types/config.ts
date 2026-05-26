@@ -105,6 +105,10 @@ export interface AppearanceConfig {
   /** Maximum number of dialogs that can be minimized at the same time
    *  (status-bar parked-dialogs panel). Clamped to `[1, 20]` at read time. */
   parked_modals_max: number;
+  /** IntelliJ-style "compact middle packages" — collapse chains of
+   *  single-child directories into one row across file panel, stage area,
+   *  commit detail file list, and conflict sidebar. */
+  compact_file_tree_dirs: boolean;
 }
 
 /** UI animation preferences. `enabled=false` collapses every transition

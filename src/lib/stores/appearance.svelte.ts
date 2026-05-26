@@ -11,6 +11,7 @@ const DEFAULT: AppearanceConfig = {
   activity_bar_position: 'left',
   compact_title_bar:     false,
   parked_modals_max:     5,
+  compact_file_tree_dirs: true,
 };
 
 const FONT_SCALE_MIN = 0.8;
@@ -79,6 +80,7 @@ function createAppearanceStore() {
   let activityBarPosition  = $state<ActivityBarPosition>(DEFAULT.activity_bar_position);
   let compactTitleBar      = $state<boolean>(DEFAULT.compact_title_bar);
   let parkedModalsMax      = $state<number>(DEFAULT.parked_modals_max);
+  let compactFileTreeDirs  = $state<boolean>(DEFAULT.compact_file_tree_dirs);
   let loaded               = $state(false);
 
   // Defaults applied once at module load; subsequent changes go through the
@@ -100,6 +102,7 @@ function createAppearanceStore() {
       activityBarPosition = normalisePosition(cfg.activity_bar_position);
       compactTitleBar     = !!cfg.compact_title_bar;
       parkedModalsMax     = clampParkedMax(cfg.parked_modals_max);
+      compactFileTreeDirs = !!cfg.compact_file_tree_dirs;
       applyAttribute(windowControlsStyle);
       applyFontScale(fontScale);
       applyActivityBarPosition(activityBarPosition);
@@ -118,6 +121,7 @@ function createAppearanceStore() {
       activity_bar_position: activityBarPosition,
       compact_title_bar:     compactTitleBar,
       parked_modals_max:     parkedModalsMax,
+      compact_file_tree_dirs: compactFileTreeDirs,
     }).catch(() => {});
   }
 
@@ -157,6 +161,12 @@ function createAppearanceStore() {
     persist();
   }
 
+  function setCompactFileTreeDirs(on: boolean) {
+    if (compactFileTreeDirs === on) return;
+    compactFileTreeDirs = on;
+    persist();
+  }
+
   /** Toggle whether the active theme's optional font preferences win over
    *  the global font stack. `themeVars` is the active theme's `vars` map so
    *  the change can be applied without going through the theme store. */
@@ -182,6 +192,7 @@ function createAppearanceStore() {
     get activityBarPosition()  { return activityBarPosition; },
     get compactTitleBar()      { return compactTitleBar; },
     get parkedModalsMax()      { return parkedModalsMax; },
+    get compactFileTreeDirs()  { return compactFileTreeDirs; },
     get loaded()               { return loaded; },
     loadConfig,
     setWindowControlsStyle,
@@ -190,6 +201,7 @@ function createAppearanceStore() {
     setActivityBarPosition,
     setCompactTitleBar,
     setParkedModalsMax,
+    setCompactFileTreeDirs,
     syncThemeFonts,
   };
 }
