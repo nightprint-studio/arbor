@@ -388,6 +388,30 @@ function createWorkspacesStore() {
   }
   async function removeRepoFrom(workspaceId: string, repoId: string): Promise<void> {
     await ipcRemoveRepo(workspaceId, repoId);
+    // If the repo is currently open as a tab in the active workspace, close
+    // the tab too. Otherwise the snapshot keeps listing it in `open_tab_ids`
+    // and the next time this workspace is loaded the tab gets resurrected
+    // for a repo that's no longer a member.
+    if (workspaceId === activeId && bridge) {
+      const isOpen = bridge.currentOpenTabIds().includes(repoId);
+      const wasActive = bridge.currentActiveTabId() === repoId;
+      if (isOpen) {
+        try { await bridge.closeTab(repoId); } catch { /* ignore — graph handle may be gone already */ }
+        // bridge.closeTab uses the silent removal path (designed for the
+        // workspace-swap loop that clears activeTabId up front). When the
+        // user removes the currently-active tab from the manager modal,
+        // we need to shift focus to a sibling so the graph doesn't stay
+        // stuck on a no-longer-open id.
+        if (wasActive) {
+          const next = tabsStore.tabs[0]?.id ?? null;
+          if (next) tabsStore.setActive(next); else tabsStore.clearActive();
+        }
+      }
+      // Persist the updated tab set right away — without this the workspace
+      // snapshot would still hold the removed repo until the next tab-edit
+      // event triggers `persistHook`.
+      await persistSnapshotNow();
+    }
     await load();
   }
   async function moveRepoBetween(from: string, to: string, repoId: string): Promise<void> {

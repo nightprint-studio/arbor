@@ -1136,7 +1136,15 @@
       // (or any other binding) should not pile a second modal on top of the
       // current one.  We bail BEFORE plugin keybindings too, so plugin
       // shortcuts don't sneak through either.
+      //
+      // `hasOpenModal()` covers every Modal-based overlay generically
+      // (full-screen diff, MR detail, etc.); the explicit booleans below
+      // catch overlays that don't go through <Modal>. Diff-local shortcuts
+      // that should still work inside the fullscreen overlay (F3 / chunk
+      // nav, Alt+Shift+D toggle) register their own capture-phase listeners
+      // and fire before this guard.
       const modalOpen =
+        hasOpenModal() ||
         openPickerOpen ||
         cloneModalOpen ||
         initModalOpen ||

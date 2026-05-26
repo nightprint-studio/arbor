@@ -141,7 +141,7 @@
   {/snippet}
 </Contribution>
 
-<button class="expand-btn" use:tooltip={'Full screen'} onclick={() => onOpenFullscreen?.()}>
+<button class="expand-btn" use:tooltip={tooltipForAction('Full screen', 'toggle_diff_fullscreen')} onclick={() => onOpenFullscreen?.()}>
   <Maximize2 size={12} />
 </button>
 

@@ -166,6 +166,7 @@
     <tr><td><Kbd action="prev_chunk" size="sm" /></td><td>Jump to previous change chunk</td></tr>
     <tr><td><Kbd action="diff_split" size="sm" /></td><td>Split view</td></tr>
     <tr><td><Kbd action="diff_unified" size="sm" /></td><td>Unified view</td></tr>
+    <tr><td><Kbd action="toggle_diff_fullscreen" size="sm" /></td><td>Toggle full-screen diff overlay</td></tr>
   </tbody>
 </table>
 

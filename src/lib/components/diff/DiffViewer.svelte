@@ -11,6 +11,8 @@
   import type { DiffFile } from '$lib/types/git';
   import { hunkLineKeys, buildStagePatch, buildUnstagePatch } from '$lib/utils/patch-builder';
   import { computeChunkAnchors, totalDiffLines, type ChunkAnchor } from '$lib/utils/diff-chunks';
+  import { keybindingsStore } from '$lib/stores/keybindings.svelte';
+  import { matchesBinding } from '$lib/utils/keybindings';
   import { tooltipForAction, shortcutFor } from '$lib/utils/shortcut';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
@@ -273,6 +275,25 @@
       e.preventDefault();
       e.stopPropagation();
       if (e.shiftKey) prevChunk(); else nextChunk();
+    }
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  });
+
+  // Toggle full-screen diff shortcut. Capture-phase so it fires from inside
+  // the Modal overlay too (AppShell's global handler bails out when any
+  // Modal is open). Same visibility gate as F3 — only the visible viewer
+  // reacts, and the fullscreen overlay (position:fixed) always qualifies.
+  $effect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!file) return;
+      if (!matchesBinding(e, keybindingsStore.getBinding('toggle_diff_fullscreen'))) return;
+      const root = hunksEl ?? fsHunksEl;
+      if (root && root.offsetParent === null && !fullscreen) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (fullscreen) closeFullscreen();
+      else openFullscreen();
     }
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });

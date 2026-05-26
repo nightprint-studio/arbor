@@ -9,6 +9,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Shortcut **F11** toggles the full-screen diff overlay for the currently
+  visible diff (stage panel, commit detail, MR detail). Press again from
+  inside the overlay to dismiss.
 - Command Palette verbs *Linear Issue* and *Jira Issue* — cross-tab
   ticket search that opens the detail modal pinned to the picked
   provider, visible only when signed in to that tracker. Same `#` / `~`
@@ -38,6 +41,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Global shortcuts (Ctrl+R, Ctrl+B, Alt+Shift+1…, etc.) no longer leak
+  through the full-screen diff overlay or any other modal dialog —
+  pressing a bound chord on top of a modal is now a no-op instead of
+  firing the underlying action.
+- Removing a repository from a workspace via the Workspace Manager now
+  also closes its tab when that workspace is active, so reopening the
+  workspace later doesn't resurrect the tab for a repo that's no longer
+  a member.
 - Diff viewer scrolling no longer stutters on multi-thousand-line files —
   off-screen hunks skip the per-scroll layout work, and chunk navigation
   (F3 / Shift+F3) jumps instantly instead of smooth-scrolling through

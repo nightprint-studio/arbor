@@ -79,6 +79,14 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   diff_unified:   { key: '2',     alt: true,                 description: 'Unified diff view',     group: 'Panels' },
   next_chunk:     { key: 'F3',                                description: 'Next diff chunk',       group: 'Panels' },
   prev_chunk:     { key: 'F3',                  shift: true,  description: 'Previous diff chunk',   group: 'Panels' },
+  // Toggle the full-screen diff overlay for the currently visible diff
+  // (stage panel, commit detail, MR detail). F11 is the universal
+  // fullscreen convention (browsers, OS, IDEs); Tauri's webview doesn't
+  // claim it for native window fullscreen, so it's free for us. Handled
+  // inside DiffViewer via a capture-phase listener so the same chord
+  // closes the overlay when it's already open (Modal-based modals
+  // otherwise block global shortcuts).
+  toggle_diff_fullscreen: { key: 'F11', description: 'Toggle full-screen diff', group: 'Panels' },
 
   // Terminal
   toggle_terminal: { key: '`',   ctrl: true,                 description: 'Toggle terminal panel',  group: 'Terminal' },
