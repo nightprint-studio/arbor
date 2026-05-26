@@ -68,6 +68,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Idle CPU/IPC waste from plugins re-publishing identical state. The
+  contribution registry now deduplicates writes by value, so polling
+  views (running services, status indicators) no longer fan out
+  frontend refetches when nothing actually changed.
 - Global shortcuts (Ctrl+R, Ctrl+B, Alt+Shift+1…, etc.) no longer leak
   through the full-screen diff overlay or any other modal dialog —
   pressing a bound chord on top of a modal is now a no-op instead of

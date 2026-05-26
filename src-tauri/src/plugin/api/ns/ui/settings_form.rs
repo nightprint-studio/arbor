@@ -72,8 +72,9 @@ fn install_panel(ctx: &ApiCtx, lua: &Lua, settings_ui: &Table) -> Result<()> {
             category_point: Some(format!("{}:settings:category", pname)),
             section_point:  Some(format!("{}:settings:section",  pname)),
         };
-        reg.register_container(def);
-        reg.notify_changed(&handle, "arbor:container");
+        if reg.register_container(def) {
+            reg.notify_containers_changed(&handle);
+        }
         Ok(())
     }).map_err(|e| AppError::Plugin(e.to_string()))?;
     settings_ui.set("panel", fn_).map_err(|e| AppError::Plugin(e.to_string()))?;

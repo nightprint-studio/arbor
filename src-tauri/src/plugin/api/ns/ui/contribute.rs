@@ -92,8 +92,9 @@ fn install_contribute(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
             priority,
             when, disabled, group,
         };
-        reg.contribute(contribution);
-        reg.notify_changed(&handle, &point);
+        if reg.contribute(contribution) {
+            reg.notify_changed(&handle, &point);
+        }
         Ok(())
     }).map_err(|e| AppError::Plugin(e.to_string()))?;
     ui.set("contribute", fn_).map_err(|e| AppError::Plugin(e.to_string()))?;

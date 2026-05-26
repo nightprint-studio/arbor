@@ -11,7 +11,9 @@ use crate::plugin::contribution::{
 /// `arbor://contributions-changed` so frontend consumers can refetch the
 /// affected point. Re-registering with the same key replaces the previous
 /// payload (idempotent updates). Bursts of writes to the same point collapse
-/// to a single emit (~16ms window).
+/// to a single emit (~16ms window). Re-writing an identical payload is a
+/// no-op — the registry's dedup short-circuits the emit, so plugins that
+/// poll-and-republish (status views, timers) don't fan out reloads.
 pub(crate) fn dual_write_contribution(
     contributions: &ContributionRegistry,
     handle:        &Option<tauri::AppHandle>,
@@ -34,7 +36,7 @@ pub(crate) fn dual_write_contribution(
         );
         return;
     }
-    contributions.contribute(PluginContribution {
+    let changed = contributions.contribute(PluginContribution {
         plugin_name: plugin_name.to_string(),
         point:       point.to_string(),
         item_id:     item_id.to_string(),
@@ -44,7 +46,9 @@ pub(crate) fn dual_write_contribution(
         disabled:    false,
         group:       None,
     });
-    contributions.notify_changed(handle, point);
+    if changed {
+        contributions.notify_changed(handle, point);
+    }
 }
 
 /// Shallow-merge `partial` into the existing contribution payload at

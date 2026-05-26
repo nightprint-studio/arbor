@@ -383,7 +383,7 @@ fn validate<T: for<'de> Deserialize<'de>>(payload: &serde_json::Value) -> Result
     serde_json::from_value::<T>(payload.clone()).map(|_| ()).map_err(|e| e.to_string())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginContribution {
     /// Plugin that contributed this item (for attribution + permission checks).
     pub plugin_name: String,
@@ -424,7 +424,7 @@ fn is_false(b: &bool) -> bool { !*b }
 // when `when` was promoted from an informal payload convention to a typed
 // top-level contribution field.
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct WhenClause {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind:       Option<StringOrVec>,
@@ -439,13 +439,13 @@ pub struct WhenClause {
     pub multi:      Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataFieldMatch {
     pub key:   String,
     pub value: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StringOrVec {
     One(String),
@@ -483,7 +483,7 @@ pub struct ContributionPoint {
 // container id; closing emits `arbor://container-close`.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContainerDef {
     /// Globally unique key — `"<plugin>::<id>"`. Built by the registry from
     /// `plugin_name` + `id` so callers don't have to.
@@ -587,8 +587,12 @@ struct RegistryInner {
 impl ContributionRegistry {
     pub fn new() -> Self { Self::default() }
 
-    /// Add or replace a contribution. Returns `true` if a previous item with
-    /// the same (plugin, point, item_id) was replaced.
+    /// Add or replace a contribution. Returns `true` when the stored state
+    /// actually changed (new item, or replace with a different value); `false`
+    /// when the write is a no-op (identical payload + metadata). Callers use
+    /// the return value to gate `notify_changed`, so plugins that re-push the
+    /// same snapshot on every tick (polling views) don't fan out frontend
+    /// reloads.
     ///
     /// Phase 5 — when `point` matches a registered container's section_point,
     /// the payload's `nodes` array is rewritten in place so every field name
@@ -606,19 +610,25 @@ impl ContributionRegistry {
             }
         }
         let bucket = inner.by_point.entry(item.point.clone()).or_default();
-        let mut replaced = false;
+        let changed;
         if let Some(pos) = bucket.iter().position(|c|
             c.plugin_name == item.plugin_name && c.item_id == item.item_id
         ) {
+            if bucket[pos] == item {
+                // Identical to what's already stored — no state change, skip
+                // the bucket re-sort and tell the caller to skip notify.
+                return false;
+            }
             bucket[pos] = item;
-            replaced = true;
+            changed = true;
         } else {
             bucket.push(item);
+            changed = true;
         }
         // Keep sorted by priority for cheap reads. Stable so registration
         // order is preserved within the same priority.
         bucket.sort_by_key(|c| c.priority);
-        replaced
+        changed
     }
 
     /// True when `point` is the (effective) `section_point` of any registered
@@ -691,11 +701,18 @@ impl ContributionRegistry {
     // ── Containers (Phase 2) ────────────────────────────────────────────────
 
     /// Register or replace a container definition. The key is built from
-    /// `def.plugin_name` + `def.id` so callers can't desynchronise it.
-    pub fn register_container(&self, mut def: ContainerDef) {
+    /// `def.plugin_name` + `def.id` so callers can't desynchronise it. Returns
+    /// `true` when the registry state actually changed (new container, or
+    /// replace with a different value); `false` when re-registering the same
+    /// definition. Callers gate `arbor://containers-changed` on the result.
+    pub fn register_container(&self, mut def: ContainerDef) -> bool {
         def.key = format!("{}::{}", def.plugin_name, def.id);
-        let mut inner = match self.inner.lock() { Ok(g) => g, Err(_) => return };
+        let mut inner = match self.inner.lock() { Ok(g) => g, Err(_) => return false };
+        if let Some(existing) = inner.containers.get(&def.key) {
+            if existing == &def { return false; }
+        }
         inner.containers.insert(def.key.clone(), def);
+        true
     }
 
     pub fn get_container(&self, key: &str) -> Option<ContainerDef> {
@@ -719,6 +736,16 @@ impl ContributionRegistry {
     pub fn notify_changed(&self, handle: &Option<AppHandle>, point: &str) {
         if let Some(h) = handle {
             self.emitter.request(h, point);
+        }
+    }
+
+    /// Emit `arbor://containers-changed` to the frontend. Used by
+    /// `register_container` so the container store can refetch its mirror
+    /// without piggy-backing on `contributions-changed` (which fires on every
+    /// per-point payload update and is much higher-frequency).
+    pub fn notify_containers_changed(&self, handle: &Option<AppHandle>) {
+        if let Some(h) = handle {
+            let _ = h.emit("arbor://containers-changed", serde_json::json!({}));
         }
     }
 }

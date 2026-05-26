@@ -4,14 +4,20 @@
  * Mirrors the backend `ContributionRegistry.containers` map and tracks the
  * currently-open container. The frontend listens to:
  *
- *   • arbor://container-open   { container_id }   — show ContributableModal
- *   • arbor://container-close  { container_id }   — hide it (ignored if it
- *                                                     wasn't the active one)
- *   • arbor://contributions-changed                — refetch defs (a plugin
- *                                                     just registered / a
- *                                                     reload wiped the
- *                                                     registry)
- *   • arbor://plugins-reloaded                     — full refetch
+ *   • arbor://container-open      { container_id }  — show ContributableModal
+ *   • arbor://container-close     { container_id }  — hide it (ignored if it
+ *                                                      wasn't the active one)
+ *   • arbor://containers-changed                    — refetch defs (a plugin
+ *                                                      registered or replaced
+ *                                                      a container). Distinct
+ *                                                      from
+ *                                                      `contributions-changed`,
+ *                                                      which fires for every
+ *                                                      payload write — the
+ *                                                      container registry is
+ *                                                      a much smaller, slower-
+ *                                                      moving slice.
+ *   • arbor://plugins-reloaded                      — full refetch
  *
  * The store is the single source of truth for "is a container open and which
  * one"; consumers (AppShell) bind to `openContainerId`.
@@ -62,7 +68,7 @@ function createContainerStore() {
         },
       },
       {
-        event: 'arbor://contributions-changed',
+        event: 'arbor://containers-changed',
         handler: () => reloadDefsCoalesced(),
       },
       {

@@ -63,8 +63,9 @@ fn install_register(ctx: &ApiCtx, lua: &Lua, container_table: &Table) -> Result<
             kind, layout, title, width, height, submit_label, cancel_label,
             on_save, on_load, category_point, section_point,
         };
-        reg.register_container(def);
-        reg.notify_changed(&handle, "arbor:container");
+        if reg.register_container(def) {
+            reg.notify_containers_changed(&handle);
+        }
         Ok(())
     }).map_err(|e| AppError::Plugin(e.to_string()))?;
     container_table.set("register", fn_).map_err(|e| AppError::Plugin(e.to_string()))?;
