@@ -40,6 +40,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - Windows taskbar icon goes blank after the system resumes from sleep —
   re-applied on every power-resume notification.
+- Repository Browser: cloning from the in-app browser sometimes left the
+  Clone button stuck in *Cloning…* even after the repo had been cloned;
+  the modal now dismisses as soon as the clone itself succeeds and the
+  workspace setup runs afterwards.
 
 ## [0.2.0] — 2026-05-24
 

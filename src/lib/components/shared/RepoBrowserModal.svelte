@@ -89,27 +89,45 @@
     const destPath = `${folder.replace(/[\\/]+$/, '')}/${repo.name}`;
     cloning    = true;
     cloneError = null;
+
+    // Phase 1: the actual clone. Only failures here keep the spinner +
+    // surface an inline error — once `cloneRepo` resolves the user-facing
+    // operation is "done" as far as the modal is concerned.
+    const tempTabId = crypto.randomUUID();
+    let cloned;
     try {
-      // Same dance as CloneRepoModal: clone with a temp id, then re-open with
-      // the canonical id from the workspace registry so the new repo is
-      // automatically a member of the active workspace.
-      const tempTabId = crypto.randomUUID();
-      const cloned    = await cloneRepo(
+      cloned = await cloneRepo(
         { url: repo.clone_url_https, dest_path: destPath },
         tempTabId,
       );
-      try { await closeRepo(tempTabId); } catch { /* best effort */ }
+    } catch (err) {
+      cloneError = String(err).replace(/^.*error:/i, '').trim();
+      cloning    = false;
+      return;
+    }
 
+    // Phase 2: tell the user it's done and dismiss the browser. Doing this
+    // BEFORE the post-clone setup means a slow/failing follow-up step
+    // (registry, openRepo, plugin on_repo_open hook, …) can't strand the
+    // modal in a perpetual "Cloning…" state.
+    cloning = false;
+    uiStore.showToast(`Cloned ${repo.name}`, 'success');
+    onClose();
+
+    // Phase 3: best-effort post-clone setup — swap the temp tab for one
+    // keyed by the canonical workspace-registry id so the new repo is a
+    // first-class member of the active workspace. If any step here fails,
+    // log it and surface a follow-up toast; the clone itself already
+    // succeeded so we don't undo anything.
+    try { await closeRepo(tempTabId); } catch { /* best effort */ }
+    try {
       const repoId = await workspacesStore.ensureRepoRegistered(cloned.path);
       const info   = await openRepo(cloned.path, repoId);
       tabsStore.addTab(info);
       uiStore.addRecentRepo(info.path);
-      uiStore.showToast(`Cloned ${repo.name}`, 'success');
-      onClose();
     } catch (err) {
-      cloneError = String(err).replace(/^.*error:/i, '').trim();
-    } finally {
-      cloning = false;
+      console.warn('[RepoBrowserModal] post-clone setup failed', err);
+      uiStore.showToast(`Couldn't open ${repo.name}: ${String(err)}`, 'error');
     }
   }
 
