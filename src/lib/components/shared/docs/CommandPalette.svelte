@@ -65,6 +65,7 @@
   <li><strong>Tabs</strong> — <em>Switch Tab</em>, <em>Close Tab</em></li>
   <li><strong>Repository</strong> — <em>Open Recent Repository</em></li>
   <li><strong>Merge Requests</strong> — <em>View MR / PR Detail</em> (opens the detail modal for a pull / merge request), <em>Open Pull / Merge Request</em> (opens the create MR/PR modal)</li>
+  <li><strong>Issues</strong> — <em>Linear Issue</em>, <em>Jira Issue</em> (each visible only when signed in to the corresponding tracker). Searches across the whole tracker — no per-project scoping — and opens the detail modal pinned to the picked provider. The query box honors the same prefixes as the Issues sidebar: <code>#</code> for code-only (ticket key), <code>~</code> for text-only (titles &amp; comments).</li>
   <li><strong>Appearance</strong> — <em>Switch Theme</em></li>
   <li><strong>Repository actions (leaves)</strong> — Open / Init / Clone / Reload Repository</li>
   <li><strong>Workspaces</strong> — <em>Switch Workspace</em>, <em>Open Project</em>, <em>Open from Workspace</em>, Manage Workspaces, Create Workspace</li>
@@ -87,7 +88,7 @@
 
 <h3>Phase 2 — Target picker</h3>
 <p>Selecting a verb inserts a coloured chip at the start of the input (e.g. <kbd>⌥ Checkout ›</kbd>) and the list becomes the verb's target set. The input placeholder flips to match the verb's target — <em>"Filter branches…"</em>, <em>"Filter stashes…"</em>, <em>"Filter remotes…"</em>, etc. <kbd>Enter</kbd> runs the verb on the highlighted row; clicking the chip (or <kbd>Backspace</kbd> on empty input) removes it and returns to Phase 1.</p>
-<p>Target kinds: <code>branch</code>, <code>tag</code>, <code>commit</code>, <code>file</code>, <code>stash</code>, <code>remote</code>, <code>tab</code>, <code>recent</code> (repository), <code>mr</code>, <code>theme</code>, <code>worktree</code>.</p>
+<p>Target kinds: <code>branch</code>, <code>tag</code>, <code>commit</code>, <code>file</code>, <code>stash</code>, <code>remote</code>, <code>tab</code>, <code>recent</code> (repository), <code>mr</code>, <code>theme</code>, <code>worktree</code>, <code>linear-issue</code>, <code>jira-issue</code>.</p>
 
 <h2>Command reference</h2>
 <h3>Branch verbs</h3>
@@ -168,6 +169,16 @@
   </tbody>
 </table>
 <p>The MR list is fetched lazily the first time you enter an <code>mr</code>-target verb. It pulls <strong>all states</strong> in one shot — open, merged and closed — so the autocomplete can find an MR regardless of what filter the sidebar is showing, and is cached per repo tab so subsequent visits are instant. While the list is still loading a spinner is shown in the results area; refreshing the sidebar (force-refresh) also invalidates this cache so the next palette open re-fetches. Both verbs are hidden when the active repo's provider has pull / merge requests disabled (archived repo, fork mirror, branch-protection blocking PRs, …).</p>
+
+<h3>Issue verbs</h3>
+<table class="shortcuts-table">
+  <thead><tr><th>Command</th><th>Aliases</th><th>Target</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>Linear Issue</code></td><td><code>linear</code>, <code>lin</code></td><td>linear-issue</td><td>Searches Linear and opens the picked ticket in the detail modal</td></tr>
+    <tr><td><code>Jira Issue</code></td><td><code>jira</code>, <code>jir</code></td><td>jira-issue</td><td>Searches Jira and opens the picked ticket in the detail modal</td></tr>
+  </tbody>
+</table>
+<p>Each verb is gated on per-provider auth — it only appears in Phase 1 (and only auto-promotes from <code>linear&nbsp;</code>/<code>jira&nbsp;</code>) when you've signed in to that tracker from the Issues sidebar. Search is cross-tab and ignores the current repo's tracker config, so you can pull a Linear ticket while looking at a Jira-configured repo. Per-project scoping is intentionally <em>not</em> applied here — the palette gives you the whole tracker. The query box accepts the same prefixes as the Issues sidebar: <code>#</code> matches only against the ticket key, <code>~</code> only against title/comment text; with no prefix the backend matches both.</p>
 
 <h3>Deep Link verbs</h3>
 <p>Build a shareable <code>arbor://</code> URL and copy it to the clipboard. The active tab's first remote is embedded as <code>?url=</code>, so the link resolves on any machine that has access to the same remote. If the repository has no remote configured, the palette toasts a warning rather than producing a non-shareable link — see the <em>Deep Links</em> doc page for the full URL schema.</p>

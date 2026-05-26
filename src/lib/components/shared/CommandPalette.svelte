@@ -56,6 +56,10 @@
   import type { Theme } from '$lib/types/theme';
   import type { Issue } from '$lib/types/issues';
   import { issuesStore } from '$lib/stores/issues.svelte';
+  import {
+    linearGetAuthStatus, jiraGetAuthStatus,
+    linearSearchIssues, jiraSearchIssues,
+  } from '$lib/ipc/issues';
   import { getBranchPolicy, assertBranchNameAllowed, type BranchPolicy } from '$lib/utils/branch-policy';
   import Kbd from '$lib/components/shared/internal/Kbd.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
@@ -150,6 +154,22 @@
   // Debounce timer for commit search
   let commitDebounce: ReturnType<typeof setTimeout> | undefined;
 
+  // ── Cross-tab issue query (Linear / Jira) ──────────────────────────────────
+  // Independent of the active tab's tracker config — the verbs are visible
+  // whenever the user is authenticated to that provider, and search runs
+  // straight against the provider IPC bypassing `issuesStore` so per-repo
+  // default project filters don't apply (per UX request: no project filter
+  // at the palette level). The placeholder hint surfaces the same #/~
+  // prefixes that the sidebar's search box supports — the backend
+  // interprets them, the palette just passes the query through.
+  let linearAuthed   = $state(false);
+  let jiraAuthed     = $state(false);
+  let linearIssues   = $state<Issue[]>([]);
+  let jiraIssues     = $state<Issue[]>([]);
+  let linearLoading  = $state(false);
+  let jiraLoading    = $state(false);
+  let issueDebounce: ReturnType<typeof setTimeout> | undefined;
+
   // Guard against re-entrancy in the query effect when we auto-promote a verb.
   let autoPromoting = false;
 
@@ -177,6 +197,12 @@
     if (v.targetKind === 'worktree')     void ensureWorktrees();
     if (v.targetKind === 'project-file') void ensureProjectFiles();
     if (v.targetKind === 'mr')           void ensureMrList();
+    if (v.targetKind === 'linear-issue' || v.targetKind === 'jira-issue') {
+      // Kick off an initial empty-query search so the list is populated the
+      // moment the user enters the verb chip; subsequent keystrokes go
+      // through the debounced effect below.
+      void runIssueSearch(v.targetKind, rest);
+    }
     tick().then(() => {
       inputEl?.focus();
       if (inputEl) inputEl.selectionStart = inputEl.selectionEnd = query.length;
@@ -896,6 +922,28 @@
     try { await mrStore.loadAll(tabId); } catch { /* surfaced via mrStore.error */ }
   }
 
+  /// Search Linear/Jira tickets directly against the provider IPC. Bypasses
+  /// `issuesStore.loadIssues` on purpose: that path applies the per-repo
+  /// default project filter and user-selected sidebar filters, both of which
+  /// would scope a palette-level query to whatever the current tab happens
+  /// to be configured for. The palette intentionally has no project filter
+  /// (per UX), so we pass through a fresh empty-filter object with just the
+  /// raw query — the backend interprets the `#`/`~` prefixes natively.
+  async function runIssueSearch(kind: 'linear-issue' | 'jira-issue', q: string) {
+    const filters = { assigneeMe: false, statusIds: [], labelIds: [], issueTypeIds: [], query: q.trim() || undefined };
+    if (kind === 'linear-issue') {
+      linearLoading = true;
+      try   { linearIssues = await linearSearchIssues(filters); }
+      catch { linearIssues = []; }
+      finally { linearLoading = false; }
+    } else {
+      jiraLoading = true;
+      try   { jiraIssues = await jiraSearchIssues(filters); }
+      catch { jiraIssues = []; }
+      finally { jiraLoading = false; }
+    }
+  }
+
   /// One-shot fetch of the worktree list for the active tab. Mirrors
   /// `ensureProjectFiles` — cached for the lifetime of the palette open.
   async function ensureWorktrees() {
@@ -954,7 +1002,8 @@
   type TargetKind =
     | 'branch' | 'tag' | 'commit' | 'project-file'
     | 'stash'  | 'remote' | 'tab' | 'recent' | 'mr' | 'theme'
-    | 'workspace' | 'ws-repo' | 'ws-repo-any' | 'worktree';
+    | 'workspace' | 'ws-repo' | 'ws-repo-any' | 'worktree'
+    | 'linear-issue' | 'jira-issue';
 
   interface VerbDef {
     id:         string;      // unique id, also item id for Phase 1
@@ -1500,15 +1549,49 @@
         onClose();
       },
     },
+
+    // ── Issues (cross-tab, gated on per-provider auth) ─────────────────────
+    // These query Linear/Jira directly via IPC — independent of the current
+    // tab's `issue_tracker` config — and open the detail modal pinned to
+    // the picked provider. Hidden in Phase 1 (and in `findVerbByWord`)
+    // when the user isn't authenticated to the provider.
+    { id: 'linear-issue', title: 'Linear Issue', subtitle: 'Search Linear tickets and open detail (# for code, ~ for text)', icon: 'Sparkles', aliases: ['linear', 'lin'], targetKind: 'linear-issue', group: 'Issues',
+      run: (target) => {
+        const issue = target as Issue;
+        onClose();
+        tick().then(() => issuesStore.selectAndLoadIssue(issue, 'linear'));
+      },
+    },
+    { id: 'jira-issue', title: 'Jira Issue', subtitle: 'Search Jira tickets and open detail (# for code, ~ for text)', icon: 'Sparkles', aliases: ['jira', 'jir'], targetKind: 'jira-issue', group: 'Issues',
+      run: (target) => {
+        const issue = target as Issue;
+        onClose();
+        tick().then(() => issuesStore.selectAndLoadIssue(issue, 'jira'));
+      },
+    },
   ];
 
-  /** Match a verb by its id, canonical title or any alias (case-insensitive). */
+  /** A verb is hidden when its target source isn't reachable — MR/PRs
+   *  disabled on the active repo, or the user isn't signed in to a tracker.
+   *  Single predicate so Phase 1 listing and `findVerbByWord` auto-promote
+   *  stay in lockstep. */
+  function isVerbAvailable(v: VerbDef): boolean {
+    if (v.targetKind === 'mr' && mrStore.mrFeature?.enabled === false) return false;
+    if (v.targetKind === 'linear-issue' && !linearAuthed) return false;
+    if (v.targetKind === 'jira-issue'   && !jiraAuthed)   return false;
+    return true;
+  }
+
+  /** Match a verb by its id, canonical title or any alias (case-insensitive).
+   *  Hidden verbs (MR disabled, tracker not authed) never auto-promote — so
+   *  typing "linear " when signed out doesn't enter an unreachable chip. */
   function findVerbByWord(word: string): VerbDef | null {
     const w = word.toLowerCase();
     return VERBS.find(v =>
-      v.id === w
-      || v.title.toLowerCase() === w
-      || v.aliases.includes(w),
+      isVerbAvailable(v) &&
+      (v.id === w
+        || v.title.toLowerCase() === w
+        || v.aliases.includes(w)),
     ) ?? null;
   }
 
@@ -1538,7 +1621,9 @@
   /// empty "No merge requests available" message before the cache warms up.
   const targetsLoading = $derived.by(() => {
     if (!selectedVerb) return false;
-    if (selectedVerb.targetKind === 'mr') return mrStore.allLoading;
+    if (selectedVerb.targetKind === 'mr')           return mrStore.allLoading;
+    if (selectedVerb.targetKind === 'linear-issue') return linearLoading;
+    if (selectedVerb.targetKind === 'jira-issue')   return jiraLoading;
     return false;
   });
 
@@ -1556,10 +1641,11 @@
 
     // Group verbs by their declared group so the palette reads as a taxonomy.
     const verbGroups = new Map<string, PaletteItem[]>();
-    const mrDisabled = mrStore.mrFeature?.enabled === false;
     for (const v of VERBS) {
-      // Skip MR-targeted verbs when the active repo has MR/PRs disabled.
-      if (mrDisabled && v.targetKind === 'mr') continue;
+      // Skip verbs whose target source isn't reachable (MR/PRs disabled,
+      // Linear/Jira not authed). Centralised in `isVerbAvailable` so the
+      // gate stays in lockstep with `findVerbByWord`.
+      if (!isVerbAvailable(v)) continue;
       const s = scoreVerb(v, q);
       if (s <= 0) continue;
       const item: PaletteItem = {
@@ -1964,6 +2050,40 @@
       return items.length ? [{ id: 'ws-repos', label: `Repositories in ${activeWs.name}`, items }] : [];
     }
 
+    if (verb.targetKind === 'linear-issue' || verb.targetKind === 'jira-issue') {
+      const list = verb.targetKind === 'linear-issue' ? linearIssues : jiraIssues;
+      // The backend already filtered by `query` (including the `#`/`~`
+      // prefix semantics). The local score below is only used to *order*
+      // results, so we strip the prefix first — otherwise an item like
+      // "ENG-42 fix login" gets score 0 against the literal query "#ENG-42"
+      // (the `#` doesn't appear anywhere in identifier/title) and the
+      // filter step drops the whole list. Stripping makes the local score
+      // line up with whatever the backend was matching against.
+      const trimmed = q.trim();
+      const scoreQuery = trimmed.startsWith('#') || trimmed.startsWith('~')
+        ? trimmed.slice(1).trim()
+        : trimmed;
+      const items: PaletteItem[] = list.map(i => {
+        const s = scoreQuery
+          ? score(`${i.identifier} ${i.title}`, scoreQuery)
+          : 50;
+        return {
+          id:       `target:${verb.id}:${i.id}`,
+          kind:     'action' as PaletteItemKind,
+          icon:     'Sparkles',
+          title:    `${i.identifier} — ${i.title}`,
+          subtitle: `${i.status.name}${i.assignee ? ` · ${i.assignee.displayName}` : ''}`,
+          score:    s,
+          action:   () => executeVerb(verb, i),
+        };
+      })
+        .filter(i => i.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20);
+      const label = verb.targetKind === 'linear-issue' ? 'Linear issues' : 'Jira issues';
+      return items.length ? [{ id: verb.targetKind, label, items }] : [];
+    }
+
     if (verb.targetKind === 'ws-repo-any') {
       const activeWsId = workspacesStore.activeId;
       const sections: PaletteSection[] = [];
@@ -2186,6 +2306,14 @@
     if (verb?.targetKind === 'worktree') {
       void ensureWorktrees();
     }
+    // Issue verbs — debounced server-side search. The initial empty-query
+    // fetch is kicked off by `enterVerb`; this effect handles keystrokes
+    // after the chip is already in place.
+    clearTimeout(issueDebounce);
+    if (verb?.targetKind === 'linear-issue' || verb?.targetKind === 'jira-issue') {
+      const kind = verb.targetKind;
+      issueDebounce = setTimeout(() => runIssueSearch(kind, q), 250);
+    }
     selectedIdx = 0;
   });
 
@@ -2284,6 +2412,15 @@
   onMount(() => {
     inputEl?.focus();
     loadBranchesAndStatus();
+    // Probe per-provider auth so the Linear/Jira issue verbs surface only
+    // for providers the user is signed in to. Fire-and-forget — failures
+    // just leave the corresponding verb hidden, which matches the intent.
+    linearGetAuthStatus()
+      .then(s => { linearAuthed = !!s.authenticated; })
+      .catch(() => { linearAuthed = false; });
+    jiraGetAuthStatus()
+      .then(s => { jiraAuthed = !!s.authenticated; })
+      .catch(() => { jiraAuthed = false; });
     // MR list is loaded lazily on demand — only when the user enters a verb
     // whose `targetKind === 'mr'` (see `ensureMrList`). The list is cached
     // per tab in `cacheStore`, so the second visit is instant.
@@ -2307,7 +2444,10 @@
         })
         .catch(() => {});
     }
-    return () => clearTimeout(commitDebounce);
+    return () => {
+      clearTimeout(commitDebounce);
+      clearTimeout(issueDebounce);
+    };
   });
 
   // Reactive pending-verb bridge: picks up uiStore.openCommandPaletteWithVerb
@@ -2359,12 +2499,17 @@
     theme: 'themes',
     workspace: 'workspaces', 'ws-repo': 'repos in this workspace', 'ws-repo-any': 'repos in other workspaces',
     worktree: 'worktrees',
+    'linear-issue': 'Linear issues', 'jira-issue': 'Jira issues',
   };
   const placeholder = $derived.by(() => {
     if (selectedVerb?.id === 'create-branch') {
       return createBranchStep === 'name'
         ? 'Branch name…  (Enter = from HEAD · Tab = pick parent)'
         : `Filter parent commits for '${pendingBranchName}'…  (Backspace to rename)`;
+    }
+    if (selectedVerb?.targetKind === 'linear-issue' || selectedVerb?.targetKind === 'jira-issue') {
+      const which = selectedVerb.targetKind === 'jira-issue' ? 'Jira' : 'Linear';
+      return `Search ${which} issues…  (# = code only, ~ = text only)`;
     }
     if (selectedVerb) return `Filter ${TARGET_KIND_LABEL[selectedVerb.targetKind]}…`;
     return "Type a command… (checkout, cherry-pick, stash, goto commit…)";

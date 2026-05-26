@@ -9,6 +9,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Command Palette verbs *Linear Issue* and *Jira Issue* — cross-tab
+  ticket search that opens the detail modal pinned to the picked
+  provider, visible only when signed in to that tracker. Same `#` / `~`
+  query prefixes as the Issues sidebar; no per-project scoping applied.
 - Minimize button on long-form dialogs (MR detail, Issue detail): parks
   a "reopen" shortcut in the status-bar dock so you can roam to other
   tabs / workspaces and pick the workflow back up later. Click a chip
