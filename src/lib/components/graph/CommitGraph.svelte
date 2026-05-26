@@ -11,7 +11,7 @@
   import TicketChip from './TicketChip.svelte';
   import TicketPickerModal from '../shared/TicketPickerModal.svelte';
   import NotesModal from './NotesModal.svelte';
-  import { PanelBottom, X, ArrowUpToLine, FileSearch, Archive, StickyNote, Download, Layers, Loader, Link2 } from 'lucide-svelte';
+  import { PanelBottom, X, ArrowUpToLine, FileSearch, Archive, StickyNote, Download, Layers, Loader, Link2, Globe } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
@@ -29,7 +29,7 @@
   import { createBranch, createTag, checkoutBranch, stashSave } from '$lib/ipc/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
   import { getBranchPolicy, assertBranchNameAllowed } from '$lib/utils/branch-policy';
-  import { pushBranch } from '$lib/ipc/remote';
+  import { pushBranch, openInBrowser } from '$lib/ipc/remote';
   import { localTagTracker } from '$lib/stores/local-tags.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -1305,6 +1305,17 @@
     {/if}
 
     {#if tab}
+      <button
+        class="toolbar-icon-btn"
+        use:tooltip={'Open repository in browser'}
+        onclick={async () => {
+          try { await openInBrowser(tab.id, 'repo'); }
+          catch (err) { uiStore.showToast(`${err}`, 'error'); }
+        }}
+      >
+        <Globe size={14} />
+      </button>
+
       <button
         class="toolbar-icon-btn"
         use:tooltip={'Copy arbor:// link to open this repository'}

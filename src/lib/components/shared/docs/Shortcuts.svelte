@@ -139,7 +139,7 @@
   <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
   <tbody>
     <tr><td><Kbd action="fetch" size="sm" /></td><td>Fetch all remotes</td></tr>
-    <tr><td><Kbd action="refresh_graph" size="sm" /></td><td>Refresh graph (same as the fetch button in the status bar)</td></tr>
+    <tr><td><Kbd action="refresh_graph" size="sm" /></td><td>Refresh graph (same as the fetch button in the graph toolbar)</td></tr>
     <tr><td><Kbd action="pull" size="sm" /></td><td>Pull current branch</td></tr>
     <tr><td><Kbd action="push" size="sm" /></td><td>Push current branch</td></tr>
     <tr><td><Kbd action="new_branch" size="sm" /></td><td>Create new branch</td></tr>

@@ -7,6 +7,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+
+- Status bar slimmed down: repo path moved to the left segment; Fetch and
+  "Open in browser" relocated to the graph toolbar; version pill removed
+  (About still reachable from the Command Palette and the menu).
+
 ### Fixed
 
 - Windows taskbar icon goes blank after the system resumes from sleep —

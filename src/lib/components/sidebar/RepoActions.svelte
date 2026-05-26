@@ -4,7 +4,8 @@
   import { repoStore } from '$lib/stores/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
-  import { pullBranch, pushBranch } from '$lib/ipc/remote';
+  import { cacheStore } from '$lib/stores/cache.svelte';
+  import { fetchRemote, pullBranch, pushBranch } from '$lib/ipc/remote';
   import { getStatus } from '$lib/ipc/stage';
   import { stashSave } from '$lib/ipc/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
@@ -28,6 +29,7 @@
 
   let isPulling   = $state(false);
   let isPushing   = $state(false);
+  let isFetching  = $state(false);
   let stashOpen   = $state(false);
   let isStashing  = $state(false);
 
@@ -150,6 +152,29 @@
       uiStore.showToast(`${err}`, 'error');
     } finally {
       repoStore.setRefreshing(false);
+    }
+  }
+
+  // Fetch is the canonical "refresh from remote" action. The F5 / Ctrl+Shift+F
+  // bindings (`fetch` / `refresh_graph` in keybindings.ts) and the Command
+  // Palette dispatch `arbor:fetch` on window; route it through the same
+  // handler so the spinner + toast feedback is identical regardless of entry
+  // point. Only fetches refs — graph topology reload happens via
+  // `cacheStore.refreshIfChanged`, which is a no-op when the fingerprint
+  // didn't move.
+  async function handleFetch() {
+    if (!tab || isFetching) return;
+    isFetching = true;
+    try {
+      await fetchRemote(tab.id);
+      uiStore.showToast('Fetched successfully', 'success');
+      const s = await getStatus(tab.id);
+      repoStore.setStatus(s);
+      await cacheStore.refreshIfChanged(tab.id);
+    } catch (err) {
+      uiStore.showToast(`Fetch failed: ${err}`, 'error');
+    } finally {
+      isFetching = false;
     }
   }
 
@@ -278,13 +303,16 @@
 
   // Listen for global keybinding events dispatched from AppShell
   $effect(() => {
+    const onFetch = () => void handleFetch();
     const onPull  = () => void pull();
     const onPush  = () => void push();
     const onStash = () => openStashDialog();
+    window.addEventListener('arbor:fetch', onFetch);
     window.addEventListener('arbor:pull',  onPull);
     window.addEventListener('arbor:push',  onPush);
     window.addEventListener('arbor:stash', onStash);
     return () => {
+      window.removeEventListener('arbor:fetch', onFetch);
       window.removeEventListener('arbor:pull',  onPull);
       window.removeEventListener('arbor:push',  onPush);
       window.removeEventListener('arbor:stash', onStash);
@@ -294,9 +322,16 @@
 
 <div class="repo-actions">
   <div class="action-row">
-    <!-- Refresh -->
-    <button class="action-btn" use:tooltip={'Refresh graph'} disabled={!tab || repoStore.isRefreshing} onclick={refreshGraph}>
-      <RefreshCw size={13} class={repoStore.isRefreshing ? 'spinning' : ''} />
+    <!-- Fetch from remote — replaces the old local-only "refresh graph" button.
+         Triggers a fetch (network), then re-reads status and reloads the graph
+         only if remote refs actually changed. -->
+    <button
+      class="action-btn"
+      use:tooltip={tooltipForAction('Fetch from remote', 'fetch')}
+      disabled={!tab || isFetching || repoStore.isRefreshing}
+      onclick={handleFetch}
+    >
+      <RefreshCw size={13} class={isFetching || repoStore.isRefreshing ? 'spinning' : ''} />
     </button>
 
     <div class="sep"></div>

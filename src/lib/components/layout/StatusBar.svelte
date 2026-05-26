@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowUp, ArrowDown, GitBranch, Tag, RefreshCw, AlertCircle, GitMerge, Loader, Bell, Globe, Clock, Undo2, ShieldAlert } from 'lucide-svelte';
+  import { ArrowUp, ArrowDown, GitBranch, Tag, AlertCircle, GitMerge, Loader, Bell, Clock, Undo2, ShieldAlert } from 'lucide-svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -7,23 +7,14 @@
   import { notificationsStore } from '$lib/stores/notifications.svelte';
   import { securityStore } from '$lib/stores/security.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
-  import { fetchRemote, openInBrowser } from '$lib/ipc/remote';
-  import { getStatus } from '$lib/ipc/stage';
-  import { getAppInfo } from '$lib/ipc/app';
   import type { RepoStatus } from '$lib/types/git';
   import Contribution from '$lib/components/shared/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
-  import { tooltipForAction } from '$lib/utils/shortcut';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
   const activeTab = $derived(tabsStore.activeTab);
   const status    = $derived(repoStore.status);
-
-  let appVersion = $state<string>('');
-  $effect(() => {
-    getAppInfo().then(info => { appVersion = info.version; }).catch(() => {});
-  });
 
   function getChangeCounts(s: RepoStatus) {
     const paths = new Map<string, 'modified' | 'added' | 'deleted'>();
@@ -48,8 +39,6 @@
 
   const changeCounts = $derived(status ? getChangeCounts(status) : null);
   const totalChanges = $derived(changeCounts ? changeCounts.modified + changeCounts.added + changeCounts.deleted : 0);
-
-  let fetching = $state(false);
 
   // ── Last-refresh badge ────────────────────────────────────────────────────
   // Re-computed every 15 s so the displayed age stays fresh without rerenders.
@@ -111,35 +100,6 @@
   async function copyRefName(text: string, kind: 'branch' | 'tag') {
     if (await copyToClipboard(text, { errorToast: 'Copy failed' })) {
       uiStore.showToast(`Copied ${kind} "${text}"`, 'info', 1800);
-    }
-  }
-
-  // Global keybindings (`fetch` / `refresh_graph` in keybindings.ts) and the
-  // Command Palette dispatch `arbor:fetch` on window. Route it to the same
-  // handler the StatusBar fetch button uses so the spinner + toast feedback
-  // is identical.
-  $effect(() => {
-    const onFetch = () => void handleFetch();
-    window.addEventListener('arbor:fetch', onFetch);
-    return () => window.removeEventListener('arbor:fetch', onFetch);
-  });
-
-  async function handleFetch() {
-    if (!activeTab || fetching) return;
-    fetching = true;
-    try {
-      await fetchRemote(activeTab.id);
-      uiStore.showToast('Fetched successfully', 'success');
-      const s = await getStatus(activeTab.id);
-      repoStore.setStatus(s);
-      // Only reload graph/sidebar if remote refs actually changed (new commits,
-      // updated tracking branches, etc.).  Pure working-directory changes don't
-      // affect the fingerprint and won't trigger a reload.
-      await cacheStore.refreshIfChanged(activeTab.id);
-    } catch (err) {
-      uiStore.showToast(`Fetch failed: ${err}`, 'error');
-    } finally {
-      fetching = false;
     }
   }
 </script>
@@ -294,33 +254,17 @@
       {/snippet}
     </Contribution>
 
-    <div class="spacer"></div>
-
-    <!-- Repo path chip (truncated, clickable to copy) -->
-    <div class="status-sep"></div>
+    <!-- Repo path chip (truncated, clickable to copy) — anchored at the
+         right edge of the left segment, just before the spacer, so it
+         doesn't compete with the branch/status chips for leftmost attention
+         but still lives on the "info" half of the bar. -->
     <button
       class="repo-path"
       use:tooltip={{ content: 'Copy path', description: activeTab.path }}
       onclick={() => copyToClipboard(activeTab.path, { successToast: 'Path copied' })}
     >{activeTab.path}</button>
 
-    <!-- Open in browser button -->
-    <button
-      class="status-action"
-      onclick={async () => {
-        try { await openInBrowser(activeTab.id, 'repo'); }
-        catch (err) { uiStore.showToast(`${err}`, 'error'); }
-      }}
-      use:tooltip={'Open repository in browser'}
-    >
-      <Globe size={13} />
-    </button>
-
-    <!-- Fetch button (right side) -->
-    <button class="status-action" onclick={handleFetch} disabled={fetching} use:tooltip={tooltipForAction('Fetch from remote', 'fetch')}>
-      <RefreshCw size={13} class={fetching ? 'spin' : ''} />
-      <span>{fetching ? 'Fetching…' : 'Fetch'}</span>
-    </button>
+    <div class="spacer"></div>
   {:else}
     <span class="no-repo">No repository open</span>
     <div class="spacer"></div>
@@ -409,13 +353,6 @@
       <span class="notif-count">{notificationsStore.count > 99 ? '99+' : notificationsStore.count}</span>
     {/if}
   </button>
-
-  <!-- About / version pill -->
-  <button
-    class="version"
-    onclick={() => uiStore.setPanel(uiStore.activePanel === 'about' ? 'graph' : 'about')}
-    use:tooltip={'About Arbor'}
-  >Arbor{appVersion ? ` v${appVersion}` : ''}</button>
 </div>
 
 <style>
@@ -541,26 +478,6 @@
 
   .spacer { flex: 1; }
 
-  .status-action {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    height: 20px;
-    padding: 0 8px;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    border-left: 1px solid var(--border);
-    color: var(--text-secondary);
-    font-family: var(--font-ui-sans);
-    font-size: var(--font-size-sm);
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .status-action:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
-  .status-action:disabled { opacity: 0.45; cursor: not-allowed; }
-
   .no-repo { color: var(--text-disabled); font-size: var(--font-size-sm); }
 
   .status-sep {
@@ -587,25 +504,6 @@
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .repo-path:hover { background: rgba(255,255,255,0.06); color: var(--text-muted); }
-
-  .version {
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0.3px;
-    color: var(--text-secondary);
-    padding: 0 10px;
-    height: 100%;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    border-left: 1px solid var(--border);
-    transition: color var(--transition-fast), background var(--transition-fast);
-    display: flex;
-    align-items: center;
-    user-select: none;
-    white-space: nowrap;
-  }
-  .version:hover { color: var(--text-secondary); background: rgba(255,255,255,0.05); }
 
   /* ── Jobs badge ─────────────────────────────────────────────────────────── */
   .job-badge {
