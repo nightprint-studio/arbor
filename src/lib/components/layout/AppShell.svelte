@@ -36,6 +36,8 @@
   // (FormNodeRenderer.svelte) — Rollup deduplicates automatically.
   import { containerStore }          from '$lib/stores/container.svelte';
   import GitBlameModal from '../shared/GitBlameModal.svelte';
+  import MarkdownEditorModal from '../shared/MarkdownEditorModal.svelte';
+  import { markdownStore } from '$lib/stores/markdown.svelte';
   import { hasOpenModal } from '../shared/Modal.svelte';
   import ToastItem from '../shared/Toast.svelte';
   import TerminalPanel from '../terminal/TerminalPanel.svelte';
@@ -2298,13 +2300,21 @@
 
   <!-- Global Git Blame modal (dispatched via `arbor:show-blame`). Mounted
        here so any surface — Command Palette, plugins, context menus — can
-       open it without depending on the File Tree sidebar being visible. -->
+       open it without depending on the Files sidebar being visible. -->
   {#if blameTarget}
     <GitBlameModal
       tabId={blameTarget.tabId}
       path={blameTarget.path}
       onClose={() => blameTarget = null}
     />
+  {/if}
+
+  <!-- Global Markdown Editor modal. Opened by `markdownStore.openFile`
+       from the Files sidebar context menu (.md / .markdown rows) and any
+       future surface (Command Palette verb, plugin action). Singleton —
+       opening a different file replaces the current one. -->
+  {#if markdownStore.open}
+    <MarkdownEditorModal />
   {/if}
 
   <!-- Global Worktree Info modal (dispatched via `arbor:show-worktree-info`).

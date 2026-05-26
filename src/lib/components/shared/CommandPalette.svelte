@@ -237,7 +237,7 @@
     { id: 'gitflow',  title: 'Show Git Flow',           icon: 'GitMerge'  },
     { id: 'mr',       title: 'Show Pull / Merge Requests', icon: 'GitPullRequest' },
     { id: 'issues',   title: 'Show Issues',             icon: 'Sparkles'  },
-    { id: 'files',    title: 'Show File Tree',          icon: 'FolderGit2' },
+    { id: 'files',    title: 'Show Files',              icon: 'FolderGit2' },
     { id: 'reflog',   title: 'Show Reflog',             icon: 'History'   },
     { id: 'stats',    title: 'Show Repository Stats',   icon: 'BarChart2' },
     { id: 'security', title: 'Show Security Dashboard', icon: 'ShieldAlert' },

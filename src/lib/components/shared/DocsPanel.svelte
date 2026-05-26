@@ -111,7 +111,7 @@
         { id: 'ticket-links',    label: 'Ticket Links',     icon: TicketCheck        },
         { id: 'git-notes',       label: 'Git Notes',        icon: StickyNote         },
         { id: 'worktrees',       label: 'Worktrees',        icon: Layers             },
-        { id: 'file-tree',       label: 'File Tree',        icon: FolderTree         },
+        { id: 'file-tree',       label: 'Files',            icon: FolderTree         },
         { id: 'reflog',          label: 'Reflog',           icon: History            },
         { id: 'recovery',        label: 'Recovery Journal', icon: ShieldCheck        },
         { id: 'missing-projects', label: 'Missing Projects',icon: FolderX            },

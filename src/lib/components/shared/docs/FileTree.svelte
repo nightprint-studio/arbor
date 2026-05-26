@@ -3,12 +3,12 @@
   import Kbd     from '$lib/components/shared/internal/Kbd.svelte';
 </script>
 
-<h1>File Tree</h1>
+<h1>Files</h1>
 
-<p class="doc-lead">The <strong>File Tree</strong> panel shows every tracked file in the repository as a collapsible directory tree, with per-file last-commit metadata loaded progressively in the background.</p>
+<p class="doc-lead">The <strong>Files</strong> panel shows every tracked file in the repository as a collapsible directory tree, with per-file last-commit metadata loaded progressively in the background.</p>
 
 <h2>Opening the panel</h2>
-<p>Click the <strong>Files</strong> icon in the Activity Bar (folder icon) to toggle the File Tree sidebar section.</p>
+<p>Click the <strong>Files</strong> icon in the Activity Bar (folder icon) to toggle the Files sidebar section.</p>
 
 <h2>Tree navigation</h2>
 <table class="shortcuts-table">
@@ -80,17 +80,64 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Filter Graph by File</div>
-    <div class="fc-desc">Filters the commit graph to show only commits that touched this file. A pill in the graph toolbar shows the active filter; click <strong>×</strong> to clear it. Also reachable from the Command Palette via <code>Show Commits Touching File</code> (aliases <code>file-history</code> / <code>log-file</code> / <code>history</code>) — that route lists every project file and doesn't open the File Tree sidebar.</div>
+    <div class="fc-desc">Filters the commit graph to show only commits that touched this file. A pill in the graph toolbar shows the active filter; click <strong>×</strong> to clear it. Also reachable from the Command Palette via <code>Show Commits Touching File</code> (aliases <code>file-history</code> / <code>log-file</code> / <code>history</code>) — that route lists every project file and doesn't open the Files sidebar.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-title">Open in Markdown Editor</div>
+    <div class="fc-desc">Visible on <code>.md</code> / <code>.markdown</code> rows. Opens the file in an Obsidian-style live-preview editor: headings, bold/italic, links, code blocks and blockquotes render inline as you type. The eye button toggles read-only mode; <kbd>Ctrl</kbd>+<kbd>S</kbd> saves to disk.</div>
   </div>
 </div>
+
+<h2>Markdown Editor</h2>
+<p>
+  The Markdown Editor opens any <code>.md</code> / <code>.markdown</code> file from the repository
+  with a live preview rendered in the same pane — there is no separate preview window. The
+  reveal is <strong>per inline component</strong>: putting the cursor on a <code>**bold**</code>
+  word reveals its <code>**</code> markers without disturbing a sibling <code>*italic*</code> on
+  the same line. Block-level markers (heading <code>#</code>, blockquote <code>&gt;</code>, code
+  fences) reveal on the whole line they belong to.
+</p>
+
+<h3>What renders inline</h3>
+<ul>
+  <li><strong>Headings</strong> — <code>#</code> through <code>######</code>, sized down progressively, with a subtle bottom border on H1/H2</li>
+  <li><strong>Bold / italic / strikethrough</strong> — the asterisks, underscores and tildes are hidden when off-line</li>
+  <li><strong>Inline code</strong> — monospace pill with subtle background</li>
+  <li><strong>Fenced &amp; indented code blocks</strong> — full-line background, monospace, syntax-highlighted via Prism (same grammar set as DiffViewer / blame: JS/TS, Rust, Python, Go, Java, Kotlin, C/C++/C#, Swift, Lua, PowerShell, Bash, JSON/YAML/TOML, CSS/SCSS, HTML/XML, SQL, Docker, Svelte, XSD)</li>
+  <li><strong>Blockquotes</strong> — left accent border, italicised muted text</li>
+  <li><strong>Lists</strong> — bullet and ordered, with the markers highlighted in the accent colour</li>
+  <li><strong>Task lists</strong> — <code>[ ]</code> / <code>[x]</code> checkbox markers</li>
+  <li><strong>Links</strong> — the visible label shows underlined in the accent colour; the URL is dimmed when off-line</li>
+  <li><strong>Horizontal rules</strong> — rendered as a thin separator line</li>
+</ul>
+
+<h3>Interactions</h3>
+<table class="shortcuts-table">
+  <thead><tr><th>Action</th><th>How</th></tr></thead>
+  <tbody>
+    <tr><td>Save</td><td><kbd>Ctrl</kbd>+<kbd>S</kbd> (or the <em>Save</em> button in the footer)</td></tr>
+    <tr><td>Switch to read-only mode</td><td>Click the <strong>eye</strong> button in the modal header</td></tr>
+    <tr><td>Close</td><td>Header <strong>✕</strong>, <kbd>Esc</kbd>, or backdrop click — unsaved changes trigger a confirmation</td></tr>
+  </tbody>
+</table>
+
+<Callout variant="info" title="Under the hood">
+  The editor is built on CodeMirror 6 with the Lezer Markdown parser. The live-preview layer is a
+  ViewPlugin that walks the syntax tree of the visible viewport, applies styling decorations and
+  conceals markup characters based on whether the current selection sits inside each inline
+  component's range. Fenced code blocks are tokenised by Prism (via <code>Prism.tokenize</code>)
+  and mapped back to CodeMirror mark decorations carrying the same <code>.token.*</code> classes
+  used elsewhere in the app, so theming flows from the central CSS variables. The plugin rebuilds
+  only when the document, viewport or selection changes — so it stays cheap on long files.
+</Callout>
 
 <h2>Git Blame</h2>
 <p>
   The Git Blame modal shows the full content of a file annotated line-by-line with the commit that last
   modified each line. It can be opened either from the <strong>right-click context menu</strong> in the
-  File Tree, or from the Command Palette via the <code>Blame File</code> verb (aliases <code>blame</code> /
+  Files, or from the Command Palette via the <code>Blame File</code> verb (aliases <code>blame</code> /
   <code>annotate</code>) — the palette route lists every tracked file in the project, so you don't need
-  the File Tree sidebar to be open.
+  the Files sidebar to be open.
 </p>
 
 <h3>Reading the blame view</h3>

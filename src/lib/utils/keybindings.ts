@@ -122,7 +122,7 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // Alt+Shift+digit avoids the AltGr (Ctrl+Alt+letter) trap on IT/DE/FR/ES
   // layouts and the Win32 Alt-menu access collision of bare Alt+digit.
   toggle_branches_sidebar: { key: '1', alt: true, shift: true, description: 'Toggle Branches & Stashes sidebar', group: 'Sidebar Sections' },
-  toggle_files_sidebar:    { key: '2', alt: true, shift: true, description: 'Toggle File Tree sidebar',          group: 'Sidebar Sections' },
+  toggle_files_sidebar:    { key: '2', alt: true, shift: true, description: 'Toggle Files sidebar',              group: 'Sidebar Sections' },
   toggle_gitflow_sidebar:  { key: '3', alt: true, shift: true, description: 'Toggle Git Flow sidebar',           group: 'Sidebar Sections' },
   toggle_issues_sidebar:   { key: '4', alt: true, shift: true, description: 'Toggle Issues sidebar',             group: 'Sidebar Sections' },
   toggle_pipelines_panel:  { key: '5', alt: true, shift: true, description: 'Toggle Pipelines panel',            group: 'Sidebar Sections' },

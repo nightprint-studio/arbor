@@ -306,7 +306,7 @@
           <button
             class="ab-btn"
             class:ab-active={uiStore.activeSidebarSection === 'files'}
-            use:tooltip={tooltipForAction('File Tree', 'toggle_files_sidebar')}
+            use:tooltip={tooltipForAction('Files', 'toggle_files_sidebar')}
             aria-pressed={uiStore.activeSidebarSection === 'files'}
             onclick={() => uiStore.toggleSidebarSection('files')}
           >

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Search, X, RefreshCw, GitCommitHorizontal, History, FolderTree } from 'lucide-svelte';
+  import { Search, X, RefreshCw, GitCommitHorizontal, History, FolderTree, FileText } from 'lucide-svelte';
   import Icon from '@iconify/svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
 
@@ -15,6 +15,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import GitBlameModal from '$lib/components/shared/GitBlameModal.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
+  import { markdownStore } from '$lib/stores/markdown.svelte';
 
   // ── File / folder icons ──────────────────────────────────────────────────────
   import { getFileIcon, getFolderIcon } from '$lib/utils/file-icons';
@@ -49,10 +50,33 @@
   let ctxMenu     = $state<CtxMenu | null>(null);
   let blameTarget = $state<string | null>(null);
 
-  const ctxMenuItems: MenuItem[] = [
-    { id: 'blame', label: 'Git Blame', icon: History, iconColor: 'var(--color-tag)' },
-    { id: 'filter', label: 'Filter Graph by File', icon: GitCommitHorizontal, iconColor: '#20b2aa' },
-  ];
+  function isMarkdownPath(p: string): boolean {
+    const lower = p.toLowerCase();
+    return lower.endsWith('.md') || lower.endsWith('.markdown');
+  }
+
+  /** Resolve a repo-relative path to an absolute filesystem path. Uses the
+   *  repo root's native separator (`\` on Windows, `/` elsewhere) so the
+   *  resulting string round-trips through Rust `Path` parsing unchanged. */
+  function absolutePath(repoRoot: string, relative: string): string {
+    const useBackslash = repoRoot.includes('\\') && !repoRoot.includes('/');
+    const sep = useBackslash ? '\\' : '/';
+    const normRel = useBackslash ? relative.replace(/\//g, '\\') : relative;
+    const trimmed = repoRoot.endsWith(sep) ? repoRoot.slice(0, -1) : repoRoot;
+    return `${trimmed}${sep}${normRel}`;
+  }
+
+  const ctxMenuItems = $derived.by((): MenuItem[] => {
+    const items: MenuItem[] = [];
+    if (ctxMenu && isMarkdownPath(ctxMenu.path)) {
+      items.push({ id: 'open-md', label: 'Open in Markdown Editor', icon: FileText, iconColor: 'var(--accent)' });
+    }
+    items.push(
+      { id: 'blame', label: 'Git Blame', icon: History, iconColor: 'var(--color-tag)' },
+      { id: 'filter', label: 'Filter Graph by File', icon: GitCommitHorizontal, iconColor: '#20b2aa' },
+    );
+    return items;
+  });
 
   function openContextMenu(e: MouseEvent, path: string) {
     e.preventDefault();
@@ -61,13 +85,19 @@
   }
 
   function handleCtxSelect(id: string) {
-    if (!ctxMenu) return;
+    if (!ctxMenu || !tab) return;
     const path = ctxMenu.path;
     ctxMenu = null;
     if (id === 'blame') {
       blameTarget = path;
     } else if (id === 'filter') {
       selectFile(path);
+    } else if (id === 'open-md') {
+      markdownStore.openFile({
+        path:     absolutePath(tab.path, path),
+        filename: path.split('/').pop() ?? path,
+        tabId:    tab.id,
+      });
     }
   }
 
@@ -346,7 +376,7 @@
   <!-- ── Header ── -->
   <div class="panel-header">
     <span class="header-icon"><FolderTree size={14} /></span>
-    <span class="header-title">File Tree</span>
+    <span class="header-title">Files</span>
     {#if metaLoading}
       <span class="meta-loading-badge" use:tooltip={'Loading file history…'}>
         <RefreshCw size={10} />

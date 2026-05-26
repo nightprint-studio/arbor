@@ -123,7 +123,7 @@
   <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
   <tbody>
     <tr><td><Kbd action="toggle_branches_sidebar" size="sm" /></td><td>Toggle Branches &amp; Stashes</td></tr>
-    <tr><td><Kbd action="toggle_files_sidebar"    size="sm" /></td><td>Toggle File Tree</td></tr>
+    <tr><td><Kbd action="toggle_files_sidebar"    size="sm" /></td><td>Toggle Files</td></tr>
     <tr><td><Kbd action="toggle_gitflow_sidebar"  size="sm" /></td><td>Toggle Git Flow</td></tr>
     <tr><td><Kbd action="toggle_issues_sidebar"   size="sm" /></td><td>Toggle Issues (Linear / Jira)</td></tr>
     <tr><td><Kbd action="toggle_pipelines_panel"  size="sm" /></td><td>Toggle Pipelines panel</td></tr>

@@ -16,7 +16,7 @@ export const BUILTIN_TOP: BuiltinItem[] = [
   { id: 'gitflow',   label: 'Git Flow',               mandatory: false, section: 'top' },
   { id: 'mr',        label: 'Pull / Merge Requests',  mandatory: false, section: 'top' },
   { id: 'issues',    label: 'Issues',                 mandatory: false, section: 'top' },
-  { id: 'files',     label: 'File Tree',              mandatory: false, section: 'top' },
+  { id: 'files',     label: 'Files',                  mandatory: false, section: 'top' },
   { id: 'reflog',    label: 'Reflog',                 mandatory: false, section: 'top' },
   { id: 'stats',     label: 'Repository Statistics',  mandatory: false, section: 'top' },
   { id: 'security',  label: 'Security',               mandatory: false, section: 'top' },

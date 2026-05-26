@@ -9,6 +9,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Markdown editor with Obsidian-style live preview — open any `.md` /
+  `.markdown` file via the Files sidebar context menu and edit it
+  in-place. Markdown markup is concealed per inline component: only
+  the element under the cursor reveals its raw syntax (e.g. editing
+  one `**bold**` word doesn't reveal the sibling `*italic*` on the
+  same line). Fenced code blocks are syntax-highlighted through Prism
+  so the rendering matches DiffViewer and blame. The eye button in the
+  header toggles read-only; `Ctrl+S` saves.
 - Shortcut **F11** toggles the full-screen diff overlay for the currently
   visible diff (stage panel, commit detail, MR detail). Press again from
   inside the overlay to dismiss.
