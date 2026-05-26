@@ -175,11 +175,11 @@
   async function scrollToAnchor(target: HTMLElement, anchor: ChunkAnchor, isSplit: boolean, smooth = true) {
     if (!file) return;
     const sel = `[data-chunk-key="${anchor.key}"]`;
-    const behavior: ScrollBehavior = smooth ? 'smooth' : 'auto';
 
     if (!useVirtual) {
       const el = target.querySelector(sel) as HTMLElement | null;
-      el?.scrollIntoView({ block: 'center', behavior });
+      // Short, fixed-height diffs — smooth scroll feels natural here.
+      el?.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
       return;
     }
 
@@ -213,7 +213,11 @@
     }
 
     const targetScrollTop = Math.max(0, top - target.clientHeight / 2);
-    target.scrollTo({ top: targetScrollTop, behavior });
+    // Virtualized renderer: never smooth-scroll. A long smooth animation
+    // makes the browser fire dozens of scroll events while interpolating,
+    // each one re-slicing + re-rendering every hunk in the file. The
+    // user only cares about the destination — jump there, then refine.
+    target.scrollTo({ top: targetScrollTop, behavior: 'auto' });
 
     // After the virtualizer re-renders the now-visible window, refine the
     // alignment by scrolling the actual element into view.

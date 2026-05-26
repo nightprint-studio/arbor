@@ -38,6 +38,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Diff viewer scrolling no longer stutters on multi-thousand-line files —
+  off-screen hunks skip the per-scroll layout work, and chunk navigation
+  (F3 / Shift+F3) jumps instantly instead of smooth-scrolling through
+  every intermediate hunk.
 - Windows taskbar icon goes blank after the system resumes from sleep —
   re-applied on every power-resume notification.
 - Repository Browser: cloning from the in-app browser sometimes left the

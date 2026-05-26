@@ -61,10 +61,16 @@
   // ── Scroll-driven window ──────────────────────────────────────────────────
 
   let hunkEl: HTMLElement | null = $state(null);
-  let headerEl: HTMLElement | null = $state(null);
   let firstRow = $state(0);
   let lastRow  = $state(80);
   let inViewport = $state(true);
+  // Cheap IntersectionObserver flag — gates the expensive scroll-driven
+  // recompute. With many hunks (hundreds in a large file) and a single
+  // scroll listener per hunk on the shared container, scroll events were
+  // forcing N getBoundingClientRect()/offsetHeight reads per frame even
+  // for hunks far off-screen. The IO short-circuits that path: only hunks
+  // near the viewport pay the layout cost.
+  let nearViewport = $state(false);
 
   function recompute() {
     if (!hunkEl || !scrollContainer) return;
@@ -80,7 +86,9 @@
       return;
     }
 
-    const headerH = headerEl?.offsetHeight ?? 0;
+    // Keep in sync with `.hunk-header` (padding 3px + content 18px ≈ 24px)
+    // and with DiffViewer.scrollToAnchor which uses the same constant.
+    const headerH = 24;
     const rowsTop = top + headerH;
 
     const visibleTop    = Math.max(0, -rowsTop);
@@ -93,6 +101,7 @@
 
   let rafPending = false;
   function onScroll() {
+    if (!nearViewport) return;
     if (rafPending) return;
     rafPending = true;
     requestAnimationFrame(() => {
@@ -108,10 +117,33 @@
     const ro = new ResizeObserver(onScroll);
     ro.observe(scrollContainer);
     if (hunkEl) ro.observe(hunkEl);
-    recompute();
+    // Use a generous rootMargin so fast scrolling never reveals an
+    // un-rendered hunk before the IO callback wakes us up.
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const wasNear = nearViewport;
+          nearViewport = e.isIntersecting;
+          if (nearViewport) {
+            // Either just entered the near-zone, or were already there —
+            // recompute the slice so it matches the current scroll position.
+            recompute();
+          } else if (wasNear) {
+            // Left the near-zone: collapse the slice so we stop rendering
+            // lines outside the viewport.
+            inViewport = false;
+            firstRow = 0;
+            lastRow = 0;
+          }
+        }
+      },
+      { root: scrollContainer, rootMargin: '800px 0px', threshold: 0 },
+    );
+    if (hunkEl) io.observe(hunkEl);
     return () => {
       scrollContainer.removeEventListener('scroll', onScroll);
       ro.disconnect();
+      io.disconnect();
     };
   });
 
@@ -153,7 +185,7 @@
 </script>
 
 <div class="hunk virt-hunk" class:is-split={mode === 'split'} bind:this={hunkEl}>
-  <div class="hunk-header" bind:this={headerEl}>
+  <div class="hunk-header">
     <span class="hunk-range">{hunk.header.trim()}</span>
     {#if stageable}
       <button class="hunk-action-btn" onclick={() => onStageHunk?.(hunkIdx)} use:tooltip={actionLabel}>
