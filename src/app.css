@@ -811,6 +811,8 @@ input[type="radio"]:disabled {
 .token.tag .token.attr-name         { color: var(--syntax-function, #ffc66d); }
 .token.tag .token.attr-value        { color: var(--syntax-string,   #6a9956); }
 .token.tag .token.attr-value .token.punctuation { color: var(--text-muted); }
+/* XSD built-in type references inside attribute values (`type="xs:string"`). */
+.token.tag .token.attr-value .token.builtin     { color: var(--syntax-type,    #4d78cc); font-weight: 500; }
 .token.namespace                    { color: var(--syntax-keyword,  #cc7832); }
 .token.entity                       { color: var(--syntax-number,   #9876aa); }
 

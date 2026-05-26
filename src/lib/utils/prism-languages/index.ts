@@ -12,6 +12,8 @@
  */
 
 import { highlightLine as svelteLine } from './svelte';
+// Side-effect-only: registers `Prism.languages.xsd` (XML Schema).
+import './xsd';
 
 export const CUSTOM_HIGHLIGHTERS: Record<string, (code: string) => string> = {
   svelte: svelteLine,

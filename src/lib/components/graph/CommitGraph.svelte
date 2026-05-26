@@ -1916,7 +1916,8 @@
     align-items: center;
     padding: 4px 10px;
     background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border);
+    border-left: 4px solid var(--bg-base);
+    border-right: 4px solid var(--bg-base);
     gap: 6px;
     flex-shrink: 0;
   }

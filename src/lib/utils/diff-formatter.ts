@@ -31,6 +31,7 @@ const EXT_TO_LANG: Record<string, string> = {
   md: 'markdown', mdx: 'markdown',
   // Markup
   html: 'markup', xml: 'markup', svg: 'markup', htm: 'markup',
+  xsd: 'xsd',
   // C family
   c: 'c', h: 'c',
   cpp: 'cpp', cc: 'cpp', cxx: 'cpp', hpp: 'cpp',
