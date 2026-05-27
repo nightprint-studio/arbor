@@ -1,5 +1,6 @@
 pub mod runtime;
 pub mod api;
+pub mod api_installer;
 pub mod hook_registry;
 pub mod event_bus;
 pub mod sandbox;

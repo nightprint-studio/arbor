@@ -34,7 +34,7 @@ impl PluginHost {
                 .unwrap_or(false);
             if !has_wildcard && !plugin.manifest.hooks.subscribes_to(hook) { continue; }
 
-            if let Err(e) = crate::plugin::hook_registry::fire(&plugin.lua, hook, context_json) {
+            if let Err(e) = crate::hook_registry::fire(&plugin.lua, hook, context_json) {
                 tracing::warn!("hook '{hook}' error in '{}': {e}", plugin.manifest.name);
             }
         }
@@ -44,7 +44,7 @@ impl PluginHost {
     pub fn fire_hook_on(&self, plugin_name: &str, hook: &str, context_json: &str) -> Result<()> {
         if let Some(plugin) = self.plugins.iter().find(|p| p.manifest.name == plugin_name) {
             if !plugin.is_enabled() { return Ok(()); }
-            if let Err(e) = crate::plugin::hook_registry::fire(&plugin.lua, hook, context_json) {
+            if let Err(e) = crate::hook_registry::fire(&plugin.lua, hook, context_json) {
                 tracing::warn!("hook '{hook}' error in '{plugin_name}': {e}");
             }
         }
@@ -96,7 +96,7 @@ impl PluginHost {
                 _ => continue,
             };
             if pattern.is_empty() { continue; }
-            if !crate::plugin::hook_registry::matches_pattern(&pattern, hook) { continue; }
+            if !crate::hook_registry::matches_pattern(&pattern, hook) { continue; }
             // Match — confirm the handler list isn't empty (a plugin may have
             // called `arbor.events.off` and left a key with zero handlers).
             if handlers.raw_len() > 0 { return true; }
@@ -121,7 +121,7 @@ impl PluginHost {
             if !has_wildcard && !plugin.manifest.hooks.subscribes_to(hook) { continue; }
 
             let mut returns: Vec<mlua::Value> = Vec::new();
-            if let Err(e) = crate::plugin::hook_registry::fire_collecting(
+            if let Err(e) = crate::hook_registry::fire_collecting(
                 &plugin.lua, hook, context_json, &mut returns,
             ) {
                 tracing::warn!("hook '{hook}' fire_collecting error in '{}': {e}", plugin.manifest.name);

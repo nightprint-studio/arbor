@@ -20,7 +20,7 @@ use std::time::Duration;
 use arbor_plugin_types::prelude::{Schedule, ScheduleTrigger};
 use arbor_scheduler::prelude::*;
 
-use crate::error::{AppError, Result};
+use crate::error::{PluginCoreError, Result};
 
 use self::lua_action::LuaHookAction;
 use super::host::PluginHost;
@@ -87,25 +87,25 @@ impl PluginHost {
     pub fn start_plugin_scheduler(&mut self, name: &str, action: &str) -> Result<()> {
         let plugin = self.plugins.iter()
             .find(|p| p.manifest.name == name)
-            .ok_or_else(|| AppError::Other(format!("plugin '{name}' not found")))?;
+            .ok_or_else(|| PluginCoreError::Other(format!("plugin '{name}' not found")))?;
 
         if !plugin.is_enabled() {
-            return Err(AppError::Other(format!(
+            return Err(PluginCoreError::Other(format!(
                 "plugin '{name}' is disabled — enable it first"
             )));
         }
         if !plugin.manifest.scheduler.enabled {
-            return Err(AppError::Other(format!(
+            return Err(PluginCoreError::Other(format!(
                 "plugin '{name}' has no [scheduler] section enabled in plugin.toml"
             )));
         }
 
         let schedule = plugin.schedules.lock()
-            .map_err(|_| AppError::Other("schedule registry mutex poisoned".into()))?
+            .map_err(|_| PluginCoreError::Other("schedule registry mutex poisoned".into()))?
             .iter()
             .find(|s| s.action == action)
             .cloned()
-            .ok_or_else(|| AppError::Other(format!(
+            .ok_or_else(|| PluginCoreError::Other(format!(
                 "no schedule with action '{action}' in plugin '{name}'"
             )))?;
 

@@ -42,6 +42,16 @@ for the tracker. Currently landed:
   `notify_containers_changed` dropped their per-call handle argument
   in favour of a `install_app_ctx` boot-time hook. src-tauri keeps
   shim `pub use` re-exports until the final cleanup step.
+- ✅ Step 4 — sandbox + runtime migrated: `sandbox` (with the
+  [`LuaApiInstaller`] trait — the host shell injects the
+  `arbor.*` namespace surface back through this hook until the
+  per-namespace migration of step 5/6), `runtime::{consts, loaded,
+  manifest/*, scheduler/*, host/*}`, `hook_registry` (slated for
+  removal in session 7), plus the 8 embedded Lua builtin files. All
+  internal `AppHandle` uses swapped to `Arc<dyn AppCtx>`. `PluginHost`
+  gained `set_app_ctx` / `set_api_installer` / `set_extra_plugin_roots`
+  for the host shell to inject Tauri-specific bits at boot. The shell
+  crate now wires up a `TauriApiInstaller` adapter at boot.
 
 ## Contents
 
@@ -62,26 +72,42 @@ Modules already migrated (call sites go through
 - `lua_ctx` — per-VM `PluginLuaCtx` stashed in `lua.app_data`; the
   bridge that lets `&Lua`-only code paths route runtime errors to
   the Plugin Logs panel.
+- `sandbox` — per-plugin Lua VM construction. Loads the curated
+  StdLib slice, hardens `os.*` per `permissions.env_read`, sandboxes
+  `require()` to the plugin dir, injects the embedded `arbor.*`
+  builtins, and delegates the `arbor.*` namespace surface itself to
+  the host-supplied [`LuaApiInstaller`].
+- `lua_builtins/` — eight embedded Lua modules shipped via
+  `include_str!`: `schema`, `async_lib`, `event`, `promise_bridge`,
+  `builders`, and the `core/{_util, edit, assert}` pipeline-op
+  catalog.
+- `runtime::consts` — `ARBOR_API_VERSION`, `ARBOR_APP_VERSION`,
+  `current_os()`.
+- `runtime::loaded` — `LoadedPlugin` / `DormantPlugin` +
+  `TimerCancels` / `TimerCounter`.
+- `runtime::manifest` — `plugin.toml` discovery + topological sort
+  over `[[dependencies]]` + persisted enable/disable state
+  (`plugin_states[-dev].json`). Caller-supplied roots
+  (`discover_in_roots`) so marketplace overlay stays decoupled.
+- `runtime::scheduler` — bridge between `PluginHost` and the shared
+  `arbor-scheduler` engine.
+- `runtime::host` — `PluginHost` struct + lifecycle (load/enable/
+  disable/delete), service invocation, pipeline-op invocation,
+  dependency cascade preview, frontend-facing `list_plugin_info`.
+  `hooks` submodule is the legacy fire path (slated for removal in
+  session 7 in favour of `HookDispatcher` + `LuaHookListener`).
+- `hook_registry` — the low-level Lua-side dispatch helpers
+  (`fire`, `fire_collecting`, `matches_pattern`). Also slated for
+  removal in session 7.
 
 Still in the src-tauri shell, scheduled for later sessions:
 
-- `host` — `PluginHost` struct: registry of loaded plugins, lifecycle
-  methods (`load_all`, `enable`, `disable`, `reload`), dispatcher
-  wiring to `arbor-plugin-api`.
-- `loaded` — `LoadedPlugin` with the mlua state, manifest, schedule
-  handles, service exports, settings store.
-- `sandbox` — capability enforcement against `Permissions`. File
-  access, network host allow-list, IPC scope.
-- `lifecycle` — disk scan, topological sort by `[[dependencies]]`,
-  load/unload/reload sequencing.
 - `api/ns/*` — all Lua-facing namespaces (`notify`, `ui`, `fs`,
   `http`, `scheduler`, `service`, `brp`, `cloud`, `keyring`, `git`,
   `repo`, `ipc`, `markdown`, `pipeline`, `studio`, …). The
   "host-pure" subset migrates into this crate; src-tauri-coupled
   namespaces stay in the shell as `LuaNamespaceInstaller`
   implementations.
-- `lua_builtins` — Lua-side companion code shipped as embedded
-  strings (`promise_bridge.lua`, `async_lib.lua`).
 - `service_registry` — inter-plugin `arbor.service.export` / `.call`
   runtime table.
 

@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use arbor_plugin_types::prelude::{Manifest, ManifestParseFailure};
 
-use crate::error::Result;
+use crate::error::{PluginCoreError, Result};
 
 use super::consts::current_os;
 
@@ -23,29 +23,30 @@ use super::consts::current_os;
 // Discovery
 // ---------------------------------------------------------------------------
 
+/// Walk a single root looking for `plugin.toml` files. Convenience wrapper
+/// around [`discover_in_roots`] for the common "no marketplace overlay" case.
 pub fn discover_plugins() -> Result<Vec<Manifest>> {
-    Ok(discover_plugins_detailed()?.0)
+    Ok(discover_in_roots(&[plugin_dir()])?.0)
 }
 
-/// Same as `discover_plugins`, but also returns the list of folders whose
-/// manifest failed to parse. The caller (PluginHost::reload) uses it to
-/// surface those failures in the Plugin Logs panel and the Plugin Manager.
-pub fn discover_plugins_detailed() -> Result<(Vec<Manifest>, Vec<ManifestParseFailure>)> {
+/// Same as `discover_plugins`, but caller-supplied roots. The host shell
+/// crate composes its own slice (host `plugin_dir()` + marketplace install
+/// dir) and feeds it in so this crate stays free of any marketplace coupling.
+///
+/// Roots are scanned in order; later roots cannot shadow names that earlier
+/// roots already claimed — a name collision is logged and the later entry is
+/// skipped. The second return value is the list of folders whose manifest
+/// failed to parse (caller uses it to render "broken plugin" entries in the
+/// Plugin Manager).
+pub fn discover_in_roots(
+    roots: &[PathBuf],
+) -> Result<(Vec<Manifest>, Vec<ManifestParseFailure>)> {
     let host_os = current_os();
     let mut manifests: Vec<Manifest> = Vec::new();
     let mut bad: Vec<ManifestParseFailure> = Vec::new();
     let mut seen_names: HashSet<String> = HashSet::new();
 
-    // Two roots, scanned in order so dev / hand-installed plugins win on
-    // name collision with marketplace installs (marketplace shadow is
-    // skipped + warned in the logs).
-    //
-    //   1. `plugin_dir()`            — dev / manual installs (workspace
-    //      `plugins/` in debug, `~/.config/arbor/plugins` in release).
-    //   2. `marketplace_plugin_dir()` — downloads from the marketplace.
-    let roots = [plugin_dir(), crate::marketplace::installs::marketplace_plugin_dir()];
-
-    for dir in &roots {
+    for dir in roots {
         if !dir.exists() { continue; }
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
@@ -92,7 +93,7 @@ pub fn discover_plugins_detailed() -> Result<(Vec<Manifest>, Vec<ManifestParseFa
 fn read_manifest(toml_path: &std::path::Path, dir: &std::path::Path) -> Result<Manifest> {
     let content = std::fs::read_to_string(toml_path)?;
     let manifest = Manifest::from_toml_str(&content, dir)
-        .map_err(|e| crate::error::AppError::Plugin(e.to_string()))?;
+        .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     Ok(manifest)
 }
 
@@ -101,10 +102,11 @@ pub fn plugin_dir() -> PathBuf {
     // directory so we don't fight with whatever's installed under
     // `~/.config/arbor/plugins` for a stable Arbor running in parallel.
     // CARGO_MANIFEST_DIR is replaced at compile time with the absolute path
-    // of `src-tauri/`, so we go up one level to the workspace root.
+    // of `crates/plugin/core/`, so we walk up three levels to the workspace
+    // root (`core` → `plugin` → `crates` → workspace).
     if cfg!(debug_assertions) {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        if let Some(workspace) = manifest_dir.parent() {
+        if let Some(workspace) = manifest_dir.ancestors().nth(3) {
             let dev_plugins = workspace.join("plugins");
             if dev_plugins.exists() {
                 return dev_plugins;
@@ -120,7 +122,7 @@ pub fn plugin_dir() -> PathBuf {
 // cycle are returned separately so the caller can flag them as errors.
 // ---------------------------------------------------------------------------
 
-pub(crate) fn topo_sort_manifests(
+pub fn topo_sort_manifests(
     manifests: Vec<Manifest>,
 ) -> (Vec<Manifest>, Vec<String>) {
     let known: HashSet<String> = manifests.iter().map(|m| m.name.clone()).collect();
@@ -186,7 +188,7 @@ fn plugin_states_path() -> PathBuf {
     arbor_core::prelude::arbor_config_path(filename)
 }
 
-pub(crate) fn load_plugin_states() -> HashMap<String, bool> {
+pub fn load_plugin_states() -> HashMap<String, bool> {
     let path = plugin_states_path();
     if !path.exists() { return HashMap::new(); }
     std::fs::read_to_string(&path)
@@ -195,7 +197,7 @@ pub(crate) fn load_plugin_states() -> HashMap<String, bool> {
         .unwrap_or_default()
 }
 
-pub(crate) fn save_plugin_states(map: &HashMap<String, bool>) {
+pub fn save_plugin_states(map: &HashMap<String, bool>) {
     let path = plugin_states_path();
     if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
     if let Ok(json) = serde_json::to_string_pretty(map) {

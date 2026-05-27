@@ -31,7 +31,7 @@ pub mod scheduler;
 pub use consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION, current_os};
 
 // ── Manifest discovery + state ───────────────────────────────────────────────
-pub use manifest::{discover_plugins, plugin_dir};
+pub use manifest::{discover_in_roots, discover_plugins, plugin_dir};
 pub use manifest::info::{ComboOption, PluginInfo};
 
 // ── Loaded-plugin state ──────────────────────────────────────────────────────

@@ -83,6 +83,20 @@ impl From<arbor_core::prelude::CoreError> for AppError {
     }
 }
 
+/// Bridge `arbor_plugin_core::error::PluginCoreError` into the host enum.
+/// Mapped to existing variants so wire shape (Plugin / IO / Other) is
+/// unchanged from the pre-split codebase.
+impl From<arbor_plugin_core::prelude::PluginCoreError> for AppError {
+    fn from(e: arbor_plugin_core::prelude::PluginCoreError) -> Self {
+        use arbor_plugin_core::prelude::PluginCoreError as P;
+        match e {
+            P::Plugin(s) => AppError::Plugin(s),
+            P::Io(e)     => AppError::Io(e),
+            P::Other(s)  => AppError::Other(s),
+        }
+    }
+}
+
 /// Implements Serialize so AppError can be returned from Tauri commands directly.
 impl serde::Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

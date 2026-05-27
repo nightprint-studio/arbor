@@ -28,9 +28,13 @@
 //! See `docs/plugin-core-architecture.md` for the full PR #4 plan.
 
 pub mod contribution;
+pub mod error;
 pub mod event_bus;
+pub mod hook_registry;
 pub mod lua_ctx;
 pub mod prelude;
+pub mod runtime;
+pub mod sandbox;
 pub mod settings_store;
 pub mod toolchain;
 pub mod tree;

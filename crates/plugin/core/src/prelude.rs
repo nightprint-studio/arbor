@@ -25,3 +25,22 @@ pub use crate::toolchain::{ToolchainEntry, ToolchainRegistry, toolchains_dir};
 pub use crate::tree::{
     BreadcrumbSegment, IconRegistry, TreeNode, TreeSnapshot, TreeStore,
 };
+
+// ── Errors (Step 4) ─────────────────────────────────────────────────────────
+pub use crate::error::{PluginCoreError, Result as PluginCoreResult};
+
+// ── Sandbox + runtime (Step 4) ──────────────────────────────────────────────
+pub use crate::sandbox::{
+    create_sandbox, ApiInstallParams, LuaApiInstaller, NoopApiInstaller,
+};
+pub use crate::runtime::{
+    ARBOR_API_VERSION, ARBOR_APP_VERSION, current_os,
+    discover_in_roots, discover_plugins, plugin_dir,
+    ComboOption, PluginInfo,
+    DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter,
+    PluginHost, load_plugin, PipelineOpResult, ServiceError,
+};
+pub use crate::runtime::host::dep_cascade::{EnableBlocker, EnablePreview};
+
+// ── Hook dispatch helpers (Step 4 — slated for removal in Session 7) ───────
+pub use crate::hook_registry::{fire as fire_hook, fire_collecting, matches_pattern};

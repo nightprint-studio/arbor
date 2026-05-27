@@ -29,7 +29,7 @@ fn save_plugin_settings(plugin_name: &str, map: &serde_json::Map<String, serde_j
 
 #[tauri::command]
 pub fn list_plugins(_state: State<'_, AppState>) -> Result<Vec<Manifest>, AppError> {
-    crate::plugin::runtime::discover_plugins()
+    Ok(crate::plugin::runtime::discover_plugins()?)
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ pub fn exec_hook(
     context_json: String,
 ) -> Result<(), AppError> {
     let host = state.lock_plugin_host()?;
-    host.fire_hook(&hook, &context_json)
+    Ok(host.fire_hook(&hook, &context_json)?)
 }
 
 /// Fire a specific action on a specific plugin.
@@ -195,7 +195,7 @@ pub fn fire_plugin_action(
 ) -> Result<(), AppError> {
     let host = state.lock_plugin_host()?;
     // Fire the action directly by name — Lua plugins register with arbor.events.on("action-name", fn)
-    host.fire_hook_on(&plugin_name, &action, &context_json)
+    Ok(host.fire_hook_on(&plugin_name, &action, &context_json)?)
 }
 
 /// Enable a plugin. Returns the ordered list of plugins that were actually
@@ -205,7 +205,7 @@ pub fn fire_plugin_action(
 #[tauri::command]
 pub fn enable_plugin(state: State<'_, AppState>, name: String) -> Result<Vec<String>, AppError> {
     let mut host = state.lock_plugin_host()?;
-    host.enable_plugin(&name)
+    Ok(host.enable_plugin(&name)?)
 }
 
 /// Preview the enable cascade for `name`. `plan` is the ordered list of
@@ -273,7 +273,7 @@ pub fn delete_plugin(
 #[tauri::command]
 pub fn disable_plugin(state: State<'_, AppState>, name: String) -> Result<Vec<String>, AppError> {
     let mut host = state.lock_plugin_host()?;
-    host.disable_plugin(&name)
+    Ok(host.disable_plugin(&name)?)
 }
 
 /// Preview the disable cascade for `name`: every currently-enabled plugin
@@ -433,7 +433,7 @@ pub fn start_plugin_scheduler(
     action: String,
 ) -> Result<(), AppError> {
     let mut host = state.lock_plugin_host()?;
-    host.start_plugin_scheduler(&name, &action)
+    Ok(host.start_plugin_scheduler(&name, &action)?)
 }
 
 /// Stop a specific scheduler action for a plugin.
@@ -444,7 +444,7 @@ pub fn stop_plugin_scheduler(
     action: String,
 ) -> Result<(), AppError> {
     let mut host = state.lock_plugin_host()?;
-    host.stop_plugin_scheduler(&name, &action)
+    Ok(host.stop_plugin_scheduler(&name, &action)?)
 }
 
 // ---------------------------------------------------------------------------

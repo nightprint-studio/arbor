@@ -479,17 +479,30 @@ pub fn run() {
                     )
                 );
 
-                // Hand the AppCtx to the ContributionRegistry so the
-                // coalesced `arbor://contributions-changed` /
+                // Hand the host context + the Lua API installer to
+                // PluginHost. `set_app_ctx` also routes the AppCtx into the
+                // ContributionRegistry so the coalesced
+                // `arbor://contributions-changed` /
                 // `arbor://containers-changed` emits stay routed to the
-                // frontend after the registry stopped taking an `AppHandle`
-                // per call (PR #4 — `arbor-plugin-core` migration).
+                // frontend (PR #4 — `arbor-plugin-core` migration).
                 {
-                    let host = state
+                    let mut host = state
                         .plugin_host
                         .lock()
                         .expect("plugin_host poisoned at AppCtx install");
-                    host.contributions.install_app_ctx(ctx.clone());
+                    host.set_app_ctx(ctx.clone());
+                    host.set_api_installer(
+                        crate::plugin::api_installer::tauri_api_installer(
+                            Some(app.handle().clone()),
+                        ),
+                    );
+                    // Marketplace install dir is scanned alongside the host's
+                    // dev `plugin_dir()` during reload. Passed as an extra
+                    // root so `arbor-plugin-core` itself stays free of any
+                    // marketplace coupling.
+                    host.set_extra_plugin_roots(vec![
+                        crate::marketplace::installs::marketplace_plugin_dir(),
+                    ]);
                 }
 
                 let scheduler = Arc::new(Scheduler::new(ctx, rt_handle));
@@ -583,7 +596,10 @@ pub fn run() {
                         }
                     }
 
-                    host.set_app_handle(handle_for_boot.clone());
+                    // PluginHost's app context / api installer / extra
+                    // roots are wired up in the early setup block above —
+                    // before this thread acquires the lock — so the boot
+                    // thread goes straight to `reload()`.
 
                     let plugins_enabled = state
                         .config

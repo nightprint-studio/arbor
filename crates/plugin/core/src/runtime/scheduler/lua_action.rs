@@ -10,7 +10,7 @@ use std::sync::{Mutex, Weak};
 use arbor_scheduler::prelude::Action;
 use async_trait::async_trait;
 
-use crate::plugin::runtime::host::PluginHost;
+use crate::runtime::host::PluginHost;
 
 pub(crate) struct LuaHookAction {
     pub host:        Weak<Mutex<PluginHost>>,

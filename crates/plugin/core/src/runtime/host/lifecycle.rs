@@ -6,26 +6,41 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use crate::error::{AppError, Result};
+use arbor_core::prelude::AppCtx;
+
+use crate::contribution::ContributionRegistry;
+use crate::error::{PluginCoreError, Result};
+use crate::sandbox::LuaApiInstaller;
+use crate::tree::{IconRegistry, TreeStore};
 
 use super::PluginHost;
-use crate::plugin::runtime::consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION};
-use crate::plugin::runtime::loaded::{DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter};
+use crate::runtime::consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION};
+use crate::runtime::loaded::{DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter};
 use arbor_plugin_types::prelude::{LoadFailure, Manifest, ScheduleRegistry};
 
-use crate::plugin::runtime::manifest::{
-    discover_plugins_detailed, load_plugin_states, plugin_dir,
+use crate::runtime::manifest::{
+    discover_in_roots, load_plugin_states, plugin_dir,
     save_plugin_states, topo_sort_manifests,
 };
 
 impl PluginHost {
+    /// Walk every configured plugin root (host `plugin_dir()` + the extra
+    /// roots installed by the shell crate via `set_extra_plugin_roots`).
+    /// Centralises the discovery call so reload / list / refresh paths agree
+    /// on the roots in play.
+    fn discover_plugins_with_extras(&self) -> Result<(Vec<Manifest>, Vec<arbor_plugin_types::prelude::ManifestParseFailure>)> {
+        let mut roots: Vec<PathBuf> = vec![plugin_dir()];
+        roots.extend(self.extra_plugin_roots.iter().cloned());
+        discover_in_roots(&roots)
+    }
+
     /// Record a plugin-load failure in every surface the user can see:
     ///   1. terminal log (tracing::warn)
     ///   2. `self.load_failures` so `list_plugins` / dependency-graph IPCs
     ///      include it with `dep_error` populated → Plugin Manager renders
     ///      a red "Failed to load" entry
-    ///   3. the Lua log panel (`plugin_logs::record`) so users who already
-    ///      have that panel open see the error inline
+    ///   3. the Lua log panel (via [`AppCtx::record_plugin_log`]) so users
+    ///      who already have that panel open see the error inline
     ///   4. a transient error notification so users not staring at the
     ///      Plugin Manager still know something went wrong
     ///
@@ -45,15 +60,14 @@ impl PluginHost {
             error:       error.to_string(),
         });
 
-        if let Some(ref h) = self.app_handle {
-            crate::plugin_logs::record(
-                h, "error", name,
-                format!("Plugin failed to load: {error}"),
+        if let Some(ref ctx) = self.app_ctx {
+            ctx.record_plugin_log(
+                "error", name,
+                &format!("Plugin failed to load: {error}"),
             );
             // Best-effort UI notification. Same channel as `arbor.notify`,
             // so it appears in the StatusBar bell + dismissable list.
-            use tauri::Emitter;
-            let _ = h.emit("plugin:notification", serde_json::json!({
+            ctx.emit("plugin:notification", serde_json::json!({
                 "plugin_name": name,
                 "title":       format!("Plugin '{name}' failed to load"),
                 "message":     error,
@@ -70,7 +84,7 @@ impl PluginHost {
         self.unload_all();
 
         let states = load_plugin_states();
-        let (all_manifests, bad_manifests) = discover_plugins_detailed()?;
+        let (all_manifests, bad_manifests) = self.discover_plugins_with_extras()?;
 
         // Surface manifest parse failures the same way we surface load
         // failures: list them in the Plugin Manager AND drop a line in the
@@ -89,10 +103,10 @@ impl PluginHost {
                 author:      String::new(),
                 error:       format!("plugin.toml parse error: {}", bad.error),
             });
-            if let Some(ref h) = self.app_handle {
-                crate::plugin_logs::record(
-                    h, "error", &bad.folder_name,
-                    format!("plugin.toml parse error: {}", bad.error),
+            if let Some(ref ctx) = self.app_ctx {
+                ctx.record_plugin_log(
+                    "error", &bad.folder_name,
+                    &format!("plugin.toml parse error: {}", bad.error),
                 );
             }
         }
@@ -116,9 +130,8 @@ impl PluginHost {
         // before the (potentially slow) `load_plugin` call so the UI shows
         // the name of whatever is currently being parsed/initialised.
         let total = sorted.len();
-        if let Some(ref h) = self.app_handle {
-            use tauri::Emitter;
-            let _ = h.emit("arbor://boot-progress", serde_json::json!({
+        if let Some(ref ctx) = self.app_ctx {
+            ctx.emit("arbor://boot-progress", serde_json::json!({
                 "phase":   "starting",
                 "name":    "",
                 "current": 0,
@@ -141,15 +154,14 @@ impl PluginHost {
         for (idx, manifest) in sorted.into_iter().enumerate() {
             let name = manifest.name.clone();
 
-            if let Some(ref h) = self.app_handle {
-                use tauri::Emitter;
+            if let Some(ref ctx) = self.app_ctx {
                 let prev_note = match &last_timing {
                     Some((prev_name, ms)) => {
                         format!(" (prev: '{}' {}ms)", prev_name, ms)
                     }
                     None => String::new(),
                 };
-                let _ = h.emit("arbor://boot-progress", serde_json::json!({
+                ctx.emit("arbor://boot-progress", serde_json::json!({
                     "phase":   "loading-plugin",
                     "name":    name,
                     "current": idx + 1,
@@ -229,7 +241,8 @@ impl PluginHost {
             let plugin_started = std::time::Instant::now();
             let result = load_plugin(
                 manifest,
-                self.app_handle.clone(),
+                self.app_ctx.clone(),
+                self.api_installer.clone(),
                 self.contributions.clone(),
                 self.tree_store.clone(),
                 self.icon_registry.clone(),
@@ -290,7 +303,7 @@ impl PluginHost {
                 .map(|b| format!("'{}' ({})", b.name, b.reason))
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(AppError::Other(format!(
+            return Err(PluginCoreError::Other(format!(
                 "cannot enable '{name}': required dependencies unavailable — {summary}"
             )));
         }
@@ -302,7 +315,7 @@ impl PluginHost {
             let exists = self.plugins.iter().any(|p| p.manifest.name == name)
                 || self.dormant.iter().any(|d| d.manifest.name == name);
             if !exists {
-                return Err(AppError::Other(format!("plugin '{name}' not found")));
+                return Err(PluginCoreError::Other(format!("plugin '{name}' not found")));
             }
             return Ok(Vec::new());
         }
@@ -340,7 +353,7 @@ impl PluginHost {
                 "dir":         plugin.manifest.dir.to_string_lossy(),
                 "api_version": plugin.manifest.arbor_api,
             });
-            let _ = crate::plugin::hook_registry::fire(
+            let _ = crate::hook_registry::fire(
                 &plugin.lua, "on_plugin_load", &ctx.to_string(),
             );
 
@@ -354,7 +367,7 @@ impl PluginHost {
         // disabled). Promote it: build the Lua VM now via `load_plugin`, run
         // main.lua, fire on_plugin_load, then arm schedulers.
         let dormant_idx = self.dormant.iter().position(|d| d.manifest.name == name)
-            .ok_or_else(|| AppError::Other(format!("plugin '{name}' not found")))?;
+            .ok_or_else(|| PluginCoreError::Other(format!("plugin '{name}' not found")))?;
         let manifest = self.dormant.remove(dormant_idx).manifest;
         // Keep a snapshot for failure surfacing — `load_plugin` consumes
         // the original. Also lets us flip plugin_states back to false so
@@ -363,7 +376,8 @@ impl PluginHost {
 
         let loaded = match load_plugin(
             manifest,
-            self.app_handle.clone(),
+            self.app_ctx.clone(),
+            self.api_installer.clone(),
             self.contributions.clone(),
             self.tree_store.clone(),
             self.icon_registry.clone(),
@@ -379,7 +393,7 @@ impl PluginHost {
                 let mut states = load_plugin_states();
                 states.insert(name.to_string(), false);
                 save_plugin_states(&states);
-                return Err(AppError::Other(format!("Plugin '{name}' failed to load: {err_msg}")));
+                return Err(PluginCoreError::Other(format!("Plugin '{name}' failed to load: {err_msg}")));
             }
         };
 
@@ -420,7 +434,7 @@ impl PluginHost {
             || self.dormant.iter().any(|d| d.manifest.name == name);
         if !is_live_enabled {
             if !is_known {
-                return Err(AppError::Other(format!("plugin '{name}' not found")));
+                return Err(PluginCoreError::Other(format!("plugin '{name}' not found")));
             }
             return Ok(Vec::new());
         }
@@ -438,10 +452,10 @@ impl PluginHost {
     fn disable_one_plugin(&mut self, name: &str) -> Result<()> {
         let plugin = self.plugins.iter_mut()
             .find(|p| p.manifest.name == name)
-            .ok_or_else(|| AppError::Other(format!("plugin '{name}' not found")))?;
+            .ok_or_else(|| PluginCoreError::Other(format!("plugin '{name}' not found")))?;
 
         // Fire unload hook before disabling.
-        let _ = crate::plugin::hook_registry::fire(&plugin.lua, "on_plugin_unload", "{}");
+        let _ = crate::hook_registry::fire(&plugin.lua, "on_plugin_unload", "{}");
 
         plugin.enabled.store(false, Ordering::Relaxed);
 
@@ -465,7 +479,7 @@ impl PluginHost {
         // Cancel every scheduled entry owned by this plugin in one shot.
         if let Some(sched) = &self.scheduler {
             sched.cancel_namespace(
-                &crate::plugin::runtime::scheduler::plugin_namespace(name),
+                &crate::runtime::scheduler::plugin_namespace(name),
             );
         }
         Ok(())
@@ -518,7 +532,7 @@ impl PluginHost {
         if let Some(idx) = self.plugins.iter().position(|p| p.manifest.name == name) {
             let plugin = &self.plugins[idx];
             // Best-effort unload hook.
-            let _ = crate::plugin::hook_registry::fire(&plugin.lua, "on_plugin_unload", "{}");
+            let _ = crate::hook_registry::fire(&plugin.lua, "on_plugin_unload", "{}");
             // Cancel Lua timers.
             if let Ok(tc) = plugin.timer_cancels.lock() {
                 for cancel in tc.values() { cancel.store(true, Ordering::Relaxed); }
@@ -526,7 +540,7 @@ impl PluginHost {
             // Cancel schedulers belonging to this plugin.
             if let Some(sched) = &self.scheduler {
                 sched.cancel_namespace(
-                    &crate::plugin::runtime::scheduler::plugin_namespace(name),
+                    &crate::runtime::scheduler::plugin_namespace(name),
                 );
             }
             // Drop contributed UI state.
@@ -588,16 +602,18 @@ impl PluginHost {
 // `PluginHost::plugins`.
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub fn load_plugin(
-    manifest: Manifest,
-    app_handle: Option<tauri::AppHandle>,
-    contributions: crate::plugin::contribution::ContributionRegistry,
-    tree_store:    crate::plugin::tree::TreeStore,
-    icon_registry: crate::plugin::tree::IconRegistry,
+    manifest:       Manifest,
+    app_ctx:        Option<Arc<dyn AppCtx>>,
+    api_installer:  Option<Arc<dyn LuaApiInstaller>>,
+    contributions:  ContributionRegistry,
+    tree_store:     TreeStore,
+    icon_registry:  IconRegistry,
 ) -> Result<LoadedPlugin> {
     // API version compatibility check (integer contract — bumped on breaking changes).
     if manifest.arbor_api > ARBOR_API_VERSION {
-        return Err(AppError::Plugin(format!(
+        return Err(PluginCoreError::Plugin(format!(
             "plugin '{}' requires Arbor API v{} but this build supports v{} — \
              please update Arbor",
             manifest.name, manifest.arbor_api, ARBOR_API_VERSION
@@ -614,7 +630,7 @@ pub fn load_plugin(
                 semver::Version::parse(ARBOR_APP_VERSION),
             ) {
                 (Ok(req), Ok(current)) if !req.matches(&current) => {
-                    return Err(AppError::Plugin(format!(
+                    return Err(PluginCoreError::Plugin(format!(
                         "plugin '{}' requires Arbor {} but this build is {}",
                         manifest.name, req_str, ARBOR_APP_VERSION
                     )));
@@ -638,10 +654,17 @@ pub fn load_plugin(
     // background timer or scheduler tick is mid-call.
     let enabled: Arc<AtomicBool> = Arc::new(AtomicBool::new(true));
 
+    // Resolve the installer. Production wires one at boot; tests / headless
+    // runs that never hit `set_api_installer` get a no-op stub here so the
+    // sandbox can still be constructed (no `arbor.*` namespace is published).
+    let installer: Arc<dyn LuaApiInstaller> = api_installer
+        .unwrap_or_else(|| Arc::new(crate::sandbox::NoopApiInstaller));
+
     let sandbox_started = std::time::Instant::now();
-    let lua = crate::plugin::sandbox::create_sandbox(
+    let lua = crate::sandbox::create_sandbox(
         &manifest,
-        app_handle,
+        app_ctx,
+        installer.as_ref(),
         timer_cancels.clone(),
         timer_counter,
         schedules.clone(),
@@ -660,7 +683,7 @@ pub fn load_plugin(
         lua.load(&code)
             .set_name(manifest.name.clone())
             .exec()
-            .map_err(|e| AppError::Plugin(format!(
+            .map_err(|e| PluginCoreError::Plugin(format!(
                 "plugin '{}' load error: {e}", manifest.name
             )))?;
     }
@@ -673,7 +696,7 @@ pub fn load_plugin(
         "dir":         manifest.dir.to_string_lossy(),
         "api_version": manifest.arbor_api,
     });
-    let _ = crate::plugin::hook_registry::fire(
+    let _ = crate::hook_registry::fire(
         &lua, "on_plugin_load", &ctx.to_string(),
     );
     let hook_ms = hook_started.elapsed().as_millis();

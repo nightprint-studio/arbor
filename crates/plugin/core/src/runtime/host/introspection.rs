@@ -5,8 +5,8 @@ use arbor_plugin_types::prelude::{Hooks, Permissions, ScheduleStatus};
 use arbor_scheduler::prelude::ScheduleKey;
 
 use super::PluginHost;
-use crate::plugin::runtime::manifest::info::PluginInfo;
-use crate::plugin::runtime::scheduler::plugin_namespace;
+use crate::runtime::manifest::info::PluginInfo;
+use crate::runtime::scheduler::plugin_namespace;
 
 impl PluginHost {
     /// Return true when a plugin with the given manifest name is currently

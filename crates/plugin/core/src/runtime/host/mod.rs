@@ -1,7 +1,7 @@
 //! `PluginHost` — central registry of every plugin Arbor knows about.
 //!
 //! The struct itself plus the small lifecycle primitives (`new`,
-//! `set_app_handle`, `unload_all`) live here. Larger groups of methods are
+//! `set_app_ctx`, `unload_all`) live here. Larger groups of methods are
 //! split into sibling modules: `lifecycle` (load/enable/disable/delete),
 //! `hooks`, `service`, `pipeline_op`, `introspection`. The scheduler thread
 //! spawn helper is kept in `super::scheduler` next to its loop function.
@@ -15,11 +15,15 @@ pub mod service;
 
 use std::sync::{Arc, Mutex, Weak};
 
+use arbor_core::prelude::AppCtx;
 use arbor_scheduler::prelude::Scheduler;
 
 use arbor_plugin_types::prelude::LoadFailure;
 
 use super::loaded::{DormantPlugin, LoadedPlugin};
+use crate::contribution::ContributionRegistry;
+use crate::sandbox::LuaApiInstaller;
+use crate::tree::{IconRegistry, TreeStore};
 
 pub struct PluginHost {
     pub plugins:    Vec<LoadedPlugin>,
@@ -29,44 +33,86 @@ pub struct PluginHost {
     /// `load_plugin()` call. Surfaced in the Plugin Manager so the user
     /// can flip them back on.
     pub dormant:    Vec<DormantPlugin>,
-    pub(crate) app_handle: Option<tauri::AppHandle>,
-    /// Shared trigger engine. Set once at boot via [`set_scheduler`] (after
-    /// `setup()` has constructed it on the running Tokio runtime). `None`
-    /// means "scheduling disabled" — plugin lifecycle code that needs to
-    /// register / cancel schedules treats `None` as a no-op rather than
+    /// Host context handle. Used to record plugin log entries, emit frontend
+    /// events, and locate the Arbor data root. `None` between host
+    /// construction and [`set_app_ctx`].
+    pub(crate) app_ctx: Option<Arc<dyn AppCtx>>,
+    /// Installer that publishes the `arbor.*` Lua surface into every
+    /// freshly-built sandbox VM. The host shell crate creates one at boot
+    /// (production), or `NoopApiInstaller` is used in tests / headless runs.
+    pub(crate) api_installer: Option<Arc<dyn LuaApiInstaller>>,
+    /// Extra plugin roots (besides the host's `plugin_dir()`) to walk during
+    /// `discover_plugins_detailed`. Set by the host shell so marketplace
+    /// installs can live in a separate directory without coupling this crate
+    /// to the marketplace module.
+    pub(crate) extra_plugin_roots: Vec<std::path::PathBuf>,
+    /// Shared trigger engine. Set once at boot via [`install_scheduler`]
+    /// (after `setup()` has constructed it on the running Tokio runtime).
+    /// `None` means "scheduling disabled" — plugin lifecycle code that needs
+    /// to register / cancel schedules treats `None` as a no-op rather than
     /// panicking.
     pub(crate) scheduler: Option<Arc<Scheduler>>,
-    /// Weak self-reference, set alongside [`set_scheduler`]. Lua-bridge
+    /// Weak self-reference, set alongside [`install_scheduler`]. Lua-bridge
     /// actions installed in the engine upgrade this to call back into
     /// `fire_hook_on`; using `Weak` avoids a self-strong-cycle.
     pub(crate) self_arc: Option<Weak<Mutex<PluginHost>>>,
     /// Plugins that failed to load due to dependency errors (shown in Plugin Manager).
     pub load_failures: Vec<LoadFailure>,
     /// Cross-plugin contribution registry (arbor.ui.contribute).
-    pub contributions: crate::plugin::contribution::ContributionRegistry,
+    pub contributions: ContributionRegistry,
     /// Tree-state storage for kind="tree" sidebars (arbor.ui.tree.set).
-    pub tree_store:    crate::plugin::tree::TreeStore,
+    pub tree_store:    TreeStore,
     /// Plugin-supplied custom SVG icons (arbor.ui.icon.register).
-    pub icon_registry: crate::plugin::tree::IconRegistry,
+    pub icon_registry: IconRegistry,
 }
 
 impl PluginHost {
     pub fn new() -> Self {
         Self {
-            plugins:           Vec::new(),
-            dormant:           Vec::new(),
-            app_handle:        None,
-            scheduler:         None,
-            self_arc:          None,
-            load_failures:     Vec::new(),
-            contributions:     crate::plugin::contribution::ContributionRegistry::new(),
-            tree_store:        crate::plugin::tree::TreeStore::new(),
-            icon_registry:     crate::plugin::tree::IconRegistry::new(),
+            plugins:            Vec::new(),
+            dormant:            Vec::new(),
+            app_ctx:            None,
+            api_installer:      None,
+            extra_plugin_roots: Vec::new(),
+            scheduler:          None,
+            self_arc:           None,
+            load_failures:      Vec::new(),
+            contributions:      ContributionRegistry::new(),
+            tree_store:         TreeStore::new(),
+            icon_registry:      IconRegistry::new(),
         }
     }
 
-    pub fn set_app_handle(&mut self, handle: tauri::AppHandle) {
-        self.app_handle = Some(handle);
+    /// Install the host context handle. Called once at boot from the host
+    /// shell after the Tauri `AppHandle` is wrapped in `TauriAppCtx`. Also
+    /// propagates the handle into [`ContributionRegistry`] so contributions
+    /// emitted from this point on reach the frontend.
+    pub fn set_app_ctx(&mut self, ctx: Arc<dyn AppCtx>) {
+        self.contributions.install_app_ctx(ctx.clone());
+        self.app_ctx = Some(ctx);
+    }
+
+    /// Install the Lua API installer. The shell crate creates the production
+    /// installer (it depends on the Tauri-bound `arbor.*` namespace surface
+    /// that hasn't migrated yet); tests can install
+    /// [`NoopApiInstaller`](crate::sandbox::NoopApiInstaller).
+    pub fn set_api_installer(&mut self, installer: Arc<dyn LuaApiInstaller>) {
+        self.api_installer = Some(installer);
+    }
+
+    /// Set extra plugin roots (e.g. the marketplace install dir) that should
+    /// be scanned in addition to the host's `plugin_dir()` during
+    /// `discover_plugins_detailed`. Order matters — earlier roots win on
+    /// name collisions.
+    pub fn set_extra_plugin_roots(&mut self, roots: Vec<std::path::PathBuf>) {
+        self.extra_plugin_roots = roots;
+    }
+
+    /// Snapshot the installed `AppCtx`, if any. Returns `None` in the brief
+    /// window between `PluginHost::new` and the host shell calling
+    /// [`set_app_ctx`].
+    pub fn app_ctx(&self) -> Option<Arc<dyn AppCtx>> {
+        self.app_ctx.clone()
     }
 
     /// Wire the shared trigger engine + the weak self-pointer used by
@@ -99,7 +145,7 @@ impl PluginHost {
         // Fire on_plugin_unload on all currently loaded (enabled) plugins.
         for plugin in &self.plugins {
             if plugin.is_enabled() {
-                let _ = crate::plugin::hook_registry::fire(
+                let _ = crate::hook_registry::fire(
                     &plugin.lua, "on_plugin_unload", "{}",
                 );
             }
@@ -122,5 +168,11 @@ impl PluginHost {
         self.plugins.clear();
         self.dormant.clear();
         self.load_failures.clear();
+    }
+}
+
+impl Default for PluginHost {
+    fn default() -> Self {
+        Self::new()
     }
 }
