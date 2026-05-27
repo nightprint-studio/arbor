@@ -1,5 +1,7 @@
 //! Permission tiers + the `[permissions]` section of `plugin.toml`.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -109,6 +111,18 @@ pub struct Permissions {
     /// `arbor.service.call`.
     #[serde(default)]
     pub settings_read_others: bool,
+
+    /// Free-form catch-all for permission keys contributed by domain crates
+    /// (`arbor-git-provider-*`, `arbor-pipeline-*`, future plugins, …) that
+    /// are NOT part of the typed core above.
+    ///
+    /// Populated by `#[serde(flatten)]` — any unknown `[permissions]` key in
+    /// `plugin.toml` lands here as a raw `toml::Value`. The plugin runtime
+    /// walks this map at validation time and rejects keys that no registered
+    /// [`PermissionDef`](../../../arbor_plugin_api/perm/struct.PermissionDef.html)
+    /// covers, or whose value shape doesn't match the registered schema.
+    #[serde(flatten, default)]
+    pub ext: HashMap<String, toml::Value>,
 }
 
 fn default_env_read() -> EnvReadPerm { EnvReadPerm::All(true) }

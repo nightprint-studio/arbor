@@ -31,4 +31,13 @@ pub trait AppCtx: Send + Sync {
     /// throughput-sensitive background loops (auto-refresh, polling) to
     /// back off while the user is in another app.
     fn is_focused(&self) -> bool;
+
+    /// Append a line to the Plugin Logs panel (the in-memory ring buffer
+    /// that streams to the frontend via `arbor://plugin-log` events).
+    ///
+    /// `level` is one of `"debug" | "info" | "warn" | "error"`. `plugin`
+    /// is the offending plugin's name. `message` is the human-readable
+    /// payload. Default is a no-op so headless hosts (CLI, tests) don't
+    /// need to wire up a buffer.
+    fn record_plugin_log(&self, _level: &str, _plugin: &str, _message: &str) {}
 }

@@ -30,7 +30,6 @@ fn install_add_context_menu_item(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<
     // add_context_menu_item — sugar for arbor.ui.contribute("arbor:context-menu:<target>", …)
     let pname = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
-    let handle   = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, config: mlua::Table| {
         let target = config.get::<String>("target").unwrap_or_else(|_| "commit".to_string());
         let label  = config.get::<String>("label").map_err(|_| {
@@ -52,7 +51,7 @@ fn install_add_context_menu_item(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<
             "icon":   icon,
         });
         dual_write_contribution(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             &point, &action, payload, 100,
         );
         Ok(())
@@ -65,7 +64,6 @@ fn install_add_menu_item(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     // add_menu_item — sugar for arbor.ui.contribute("arbor:menu", …)
     let pname = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
-    let handle   = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, config: mlua::Table| {
         let label  = config.get::<String>("label").map_err(|_| {
             mlua::Error::RuntimeError("arbor.ui.add_menu_item: 'label' is required".to_string())
@@ -80,7 +78,7 @@ fn install_add_menu_item(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
             "icon":   icon,
         });
         dual_write_contribution(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             points::MENU, &action, payload, 100,
         );
         Ok(())
@@ -106,7 +104,6 @@ fn install_add_toolbar_action(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()>
     //   }
     let pname = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
-    let handle   = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, config: mlua::Table| {
         let id = config.get::<String>("id").map_err(|_| {
             mlua::Error::RuntimeError("arbor.ui.add_toolbar_action: 'id' is required".to_string())
@@ -131,7 +128,7 @@ fn install_add_toolbar_action(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()>
             "color":   color,
         });
         dual_write_contribution(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             &point, &id, payload, 100,
         );
         Ok(())
@@ -150,7 +147,6 @@ fn install_add_sidebar(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     // Sugar for arbor.ui.contribute("arbor:sidebar", …)
     let pname = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
-    let handle   = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |lua_ctx, config: mlua::Table| {
         let id = config.get::<String>("id").map_err(|_| {
             mlua::Error::RuntimeError("arbor.ui.add_sidebar: 'id' is required".to_string())
@@ -201,7 +197,7 @@ fn install_add_sidebar(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
             "search":      search_value,
         });
         dual_write_contribution(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             points::SIDEBAR, &id, payload, 100,
         );
         Ok(())
@@ -218,7 +214,6 @@ fn install_set_panel_content(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> 
     // are atomic together). The frontend re-renders via
     // `arbor://contributions-changed` from the contribution registry.
     let pname = ctx.plugin_name.clone();
-    let handle = ctx.app_handle.clone();
     let contribs = ctx.contributions.clone();
     let fn_ = lua.create_function(move |_, (id, body): (String, mlua::Table)| {
         let nodes_val = body.get::<mlua::Value>("nodes").unwrap_or(mlua::Value::Nil);
@@ -234,7 +229,7 @@ fn install_set_panel_content(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> 
             "actions": json_actions,
         });
         dual_write_contribution(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             points::PANEL_CONTENT, &id, payload, 100,
         );
         Ok(())

@@ -16,7 +16,6 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 
     let pname = ctx.plugin_name.clone();
     let reg = ctx.icon_registry.clone();
-    let handle = ctx.app_handle.clone();
     let contribs_icon = ctx.contributions.clone();
     let register_fn = lua.create_function(move |_, config: mlua::Table| {
         let id = config.get::<String>("id").map_err(|_| {
@@ -35,7 +34,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
         // event — the legacy `arbor://icons-changed` event is gone.
         let payload = serde_json::json!({ "svg": svg.clone() });
         dual_write_contribution(
-            &contribs_icon, &handle, &pname,
+            &contribs_icon, &pname,
             points::ICON, &id, payload, 100,
         );
         reg.register(&pname, &id, svg);

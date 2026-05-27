@@ -1,12 +1,7 @@
-use tauri::{AppHandle, Emitter};
+//! Shim — the real implementation moved to
+//! [`arbor_plugin_core::event_bus`] in PR #4. The API now takes
+//! `&dyn AppCtx` instead of `&AppHandle`; the `pub use` below carries the
+//! new signature through. Removed in the final cleanup step of PR #4.
 
-/// Emit a Tauri event from a plugin to the frontend.
-///
-/// `event_name` is prefixed with `plugin:` to namespace plugin events.
-#[allow(dead_code)]
-pub fn emit(app: &AppHandle, plugin_name: &str, event_name: &str, payload: &str) {
-    let full_event = format!("plugin:{plugin_name}:{event_name}");
-    if let Err(e) = app.emit(&full_event, payload) {
-        tracing::warn!("event_bus emit error: {e}");
-    }
-}
+#[allow(unused_imports)]
+pub use arbor_plugin_core::event_bus::*;

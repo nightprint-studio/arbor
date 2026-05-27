@@ -16,7 +16,6 @@ use crate::plugin::contribution::{
 /// poll-and-republish (status views, timers) don't fan out reloads.
 pub(crate) fn dual_write_contribution(
     contributions: &ContributionRegistry,
-    handle:        &Option<tauri::AppHandle>,
     plugin_name:   &str,
     point:         &str,
     item_id:       &str,
@@ -47,7 +46,7 @@ pub(crate) fn dual_write_contribution(
         group:       None,
     });
     if changed {
-        contributions.notify_changed(handle, point);
+        contributions.notify_changed(point);
     }
 }
 
@@ -58,7 +57,6 @@ pub(crate) fn dual_write_contribution(
 /// never silently re-order an item).
 pub(crate) fn contribute_patch_payload(
     contributions:    &ContributionRegistry,
-    handle:           &Option<tauri::AppHandle>,
     plugin_name:      &str,
     point:            &str,
     item_id:          &str,
@@ -80,7 +78,7 @@ pub(crate) fn contribute_patch_payload(
         // Non-object prior or non-object partial — fall back to full replace.
         payload = partial;
     }
-    dual_write_contribution(contributions, handle, plugin_name, point, item_id, payload, priority);
+    dual_write_contribution(contributions, plugin_name, point, item_id, payload, priority);
 }
 
 /// Map an `add_toolbar_action({ target = ... })` short-name to the corresponding

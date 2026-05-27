@@ -478,6 +478,20 @@ pub fn run() {
                         state.app_focused.clone(),
                     )
                 );
+
+                // Hand the AppCtx to the ContributionRegistry so the
+                // coalesced `arbor://contributions-changed` /
+                // `arbor://containers-changed` emits stay routed to the
+                // frontend after the registry stopped taking an `AppHandle`
+                // per call (PR #4 — `arbor-plugin-core` migration).
+                {
+                    let host = state
+                        .plugin_host
+                        .lock()
+                        .expect("plugin_host poisoned at AppCtx install");
+                    host.contributions.install_app_ctx(ctx.clone());
+                }
+
                 let scheduler = Arc::new(Scheduler::new(ctx, rt_handle));
                 let _ = state.scheduler.set(scheduler.clone());
 

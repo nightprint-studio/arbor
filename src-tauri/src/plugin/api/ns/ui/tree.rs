@@ -155,7 +155,7 @@ fn install_set(ctx: &ApiCtx, lua: &Lua, tree_table: &Table) -> Result<()> {
             "version":                     version,
         });
         dual_write_contribution(
-            &contribs_set, &handle, &pname,
+            &contribs_set, &pname,
             points::TREE_STATE, &sidebar_id, payload, 100,
         );
         // The coalesced `arbor://contributions-changed` emitted by

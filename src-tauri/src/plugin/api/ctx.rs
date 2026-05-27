@@ -91,6 +91,10 @@ impl ApiCtx {
             service_export,
             service_call,
             settings_read_others,
+            // Free-form catch-all for crate-contributed permission keys
+            // (validated by PluginRegistry::validate_manifest at boot, not
+            // consumed by the typed ApiCtx fields).
+            ext: _,
         } = permissions;
 
         Self {

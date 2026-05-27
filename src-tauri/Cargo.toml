@@ -51,6 +51,7 @@ arbor-cloud       = { path = "../crates/arbor-cloud" }
 arbor-auth        = { path = "../crates/arbor-auth" }
 arbor-core        = { path = "../crates/core" }
 arbor-plugin-api  = { path = "../crates/plugin/api" }
+arbor-plugin-core = { path = "../crates/plugin/core" }
 arbor-plugin-types = { path = "../crates/plugin/types" }
 arbor-scheduler   = { path = "../crates/scheduler" }
 

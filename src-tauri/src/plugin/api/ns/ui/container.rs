@@ -32,7 +32,6 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 fn install_register(ctx: &ApiCtx, lua: &Lua, container_table: &Table) -> Result<()> {
     let pname  = ctx.plugin_name.clone();
     let reg    = ctx.contributions.clone();
-    let handle = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, config: mlua::Table| {
         let id = config.get::<String>("id").map_err(|_| {
             mlua::Error::RuntimeError(
@@ -64,7 +63,7 @@ fn install_register(ctx: &ApiCtx, lua: &Lua, container_table: &Table) -> Result<
             on_save, on_load, category_point, section_point,
         };
         if reg.register_container(def) {
-            reg.notify_containers_changed(&handle);
+            reg.notify_containers_changed();
         }
         Ok(())
     }).map_err(|e| AppError::Plugin(e.to_string()))?;

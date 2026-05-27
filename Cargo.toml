@@ -12,6 +12,7 @@ members = [
     "crates/arbor-process-ext",
     "crates/core",
     "crates/plugin/api",
+    "crates/plugin/core",
     "crates/plugin/types",
     "crates/scheduler",
 ]

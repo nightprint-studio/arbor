@@ -28,7 +28,6 @@ fn install_add_graph_combo(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     // add_graph_combo — sugar for arbor.ui.contribute("arbor:activitybar", { kind = "combo", … })
     let pname = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
-    let handle   = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, config: mlua::Table| {
         let options = parse_combo_options(&config);
 
@@ -58,7 +57,7 @@ fn install_add_graph_combo(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
             "options":       options_json,
         });
         dual_write_contribution(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             points::ACTIVITY_BAR, &id, payload, 100,
         );
         Ok(())
@@ -132,7 +131,7 @@ fn install_set_combo_options(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> 
         }
         let partial = serde_json::json!({ "options": options.clone() });
         contribute_patch_payload(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             points::ACTIVITY_BAR, &id, partial, 100,
         );
         if let (Some(sv), Some(ref h)) = (selected_value.as_ref(), &handle) {
@@ -157,7 +156,6 @@ fn install_add_separator(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     // collapse them all to a single entry).
     let pname = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
-    let handle   = ctx.app_handle.clone();
     let sep_counter = Arc::new(AtomicU64::new(0));
     let fn_ = lua.create_function(move |_, ()| {
         let n = sep_counter.fetch_add(1, Ordering::Relaxed);
@@ -167,7 +165,7 @@ fn install_add_separator(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
             "target": "activity_bar",
         });
         dual_write_contribution(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             points::ACTIVITY_BAR, &item_id, payload, 100,
         );
         Ok(())

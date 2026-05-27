@@ -30,7 +30,6 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 fn install_contribute(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     let pname = ctx.plugin_name.clone();
     let reg = ctx.contributions.clone();
-    let handle = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, (point, item): (String, mlua::Table)| {
         let item_id = item.get::<String>("id").map_err(|_| {
             mlua::Error::RuntimeError("arbor.ui.contribute: 'id' is required".to_string())
@@ -93,7 +92,7 @@ fn install_contribute(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
             when, disabled, group,
         };
         if reg.contribute(contribution) {
-            reg.notify_changed(&handle, &point);
+            reg.notify_changed(&point);
         }
         Ok(())
     }).map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -177,11 +176,10 @@ fn install_contribute_patch(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     // this.
     let pname = ctx.plugin_name.clone();
     let reg = ctx.contributions.clone();
-    let handle = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, (point, item_id, partial): (String, String, mlua::Value)| {
         let partial_json: serde_json::Value =
             serde_json::to_value(&partial).unwrap_or(serde_json::Value::Null);
-        contribute_patch_payload(&reg, &handle, &pname, &point, &item_id, partial_json, 100);
+        contribute_patch_payload(&reg, &pname, &point, &item_id, partial_json, 100);
         Ok(())
     }).map_err(|e| AppError::Plugin(e.to_string()))?;
     ui.set("contribute_patch", fn_).map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -191,11 +189,10 @@ fn install_contribute_patch(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 fn install_unregister(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     let pname = ctx.plugin_name.clone();
     let reg = ctx.contributions.clone();
-    let handle = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, (point, item_id): (String, String)| {
         let removed = reg.remove(&pname, &point, &item_id);
         if removed {
-            reg.notify_changed(&handle, &point);
+            reg.notify_changed(&point);
         }
         Ok(removed)
     }).map_err(|e| AppError::Plugin(e.to_string()))?;

@@ -95,12 +95,37 @@ impl PluginRegistry {
 
     /// Validate a plugin manifest against the registered permission schemas.
     ///
-    /// Today this is a no-op (returns `Ok(())`): the `ext: HashMap` extension
-    /// to `Permissions` lands in PR #4 — at which point this method will walk
-    /// `m.permissions.ext`, look each key up, and run [`PermSchema::validate`]
-    /// against the value.
-    pub fn validate_manifest(&self, _m: &Manifest) -> Result<(), Vec<ManifestPermError>> {
-        Ok(())
+    /// Walks `m.permissions.ext` — the free-form catch-all that collects
+    /// `[permissions]` keys not covered by the typed core (`fs`, `git`, …).
+    /// For each entry:
+    ///
+    /// 1. The key must match a registered [`PermissionDef`]. Unknown keys
+    ///    are rejected (a typo in `plugin.toml` shouldn't silently grant
+    ///    nothing).
+    /// 2. The value must satisfy the registered [`PermSchema`].
+    ///
+    /// Returns `Ok(())` when every entry checks out, or `Err(Vec<…>)` with
+    /// one [`ManifestPermError`] per failure so callers can surface them all
+    /// at once.
+    pub fn validate_manifest(&self, m: &Manifest) -> Result<(), Vec<ManifestPermError>> {
+        let mut errors = Vec::new();
+        for (key, value) in &m.permissions.ext {
+            match self.permissions.get(key.as_str()) {
+                None => errors.push(ManifestPermError {
+                    key:     key.clone(),
+                    message: "unknown permission key".into(),
+                }),
+                Some(def) => {
+                    if let Err(msg) = def.schema.validate(value) {
+                        errors.push(ManifestPermError {
+                            key:     key.clone(),
+                            message: msg,
+                        });
+                    }
+                }
+            }
+        }
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
     /// Invoke a contributed function with the permission gate in front.

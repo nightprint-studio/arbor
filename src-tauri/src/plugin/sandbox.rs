@@ -55,10 +55,15 @@ pub fn create_sandbox(
     let lua = Lua::new_with(libs, LuaOptions::default())
         .map_err(|e| AppError::Plugin(e.to_string()))?;
 
-    // Stash plugin name + AppHandle in Lua app_data so code paths that only
-    // see `&Lua` (hook dispatch, service callbacks) can surface runtime
+    // Stash plugin name + AppCtx handle in Lua app_data so code paths that
+    // only see `&Lua` (hook dispatch, service callbacks) can surface runtime
     // errors to the Plugin Logs panel without extra plumbing.
-    crate::plugin::lua_ctx::install(&lua, manifest.name.clone(), app_handle.clone());
+    let lua_app_ctx: Option<std::sync::Arc<dyn arbor_core::prelude::AppCtx>> =
+        app_handle.clone().map(|h| {
+            std::sync::Arc::new(crate::app_ctx::TauriAppCtx::from_handle(h))
+                as std::sync::Arc<dyn arbor_core::prelude::AppCtx>
+        });
+    crate::plugin::lua_ctx::install(&lua, manifest.name.clone(), lua_app_ctx);
 
     // ── Register the arbor.* API ──────────────────────────────────────────────
     crate::plugin::api::register(

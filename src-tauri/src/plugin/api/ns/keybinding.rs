@@ -21,7 +21,6 @@ fn install_register(ctx: &ApiCtx, lua: &Lua, kb_table: &Table) -> Result<()> {
     // — sugar for arbor.ui.contribute("arbor:keybinding", …)
     let pname = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
-    let handle   = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, config: mlua::Table| {
         let action = config.get::<String>("action").map_err(|_| {
             mlua::Error::RuntimeError("arbor.keybinding.register: 'action' is required".to_string())
@@ -51,7 +50,7 @@ fn install_register(ctx: &ApiCtx, lua: &Lua, kb_table: &Table) -> Result<()> {
             "description": description,
         });
         dual_write_contribution(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             points::KEYBINDING, &chord, payload, 100,
         );
         Ok(())

@@ -22,7 +22,6 @@ fn install_register(ctx: &ApiCtx, lua: &Lua, cmd_table: &Table) -> Result<()> {
     // — sugar for arbor.ui.contribute("arbor:command-palette", …)
     let pname = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
-    let handle   = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, config: mlua::Table| {
         let id = config.get::<String>("id").map_err(|_| {
             mlua::Error::RuntimeError("arbor.command.register: 'id' is required".to_string())
@@ -40,7 +39,7 @@ fn install_register(ctx: &ApiCtx, lua: &Lua, cmd_table: &Table) -> Result<()> {
             "group":       group,
         });
         dual_write_contribution(
-            &contribs, &handle, &pname,
+            &contribs, &pname,
             points::COMMAND_PALETTE, &id, payload, 100,
         );
         Ok(())
@@ -52,10 +51,9 @@ fn install_register(ctx: &ApiCtx, lua: &Lua, cmd_table: &Table) -> Result<()> {
 fn install_unregister(ctx: &ApiCtx, lua: &Lua, cmd_table: &Table) -> Result<()> {
     let pname    = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
-    let handle   = ctx.app_handle.clone();
     let fn_ = lua.create_function(move |_, id: String| {
         if contribs.remove(&pname, points::COMMAND_PALETTE, &id) {
-            contribs.notify_changed(&handle, points::COMMAND_PALETTE);
+            contribs.notify_changed(points::COMMAND_PALETTE);
         }
         Ok(())
     }).map_err(|e| AppError::Plugin(e.to_string()))?;

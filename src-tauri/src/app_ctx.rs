@@ -29,6 +29,14 @@ impl TauriAppCtx {
             arbor_dir: arbor_core::prelude::arbor_config_dir(),
         }
     }
+
+    /// Convenience constructor for call sites that only need `emit` /
+    /// `record_plugin_log` and don't have access to the global focus flag.
+    /// `is_focused` reports `false` — safe default because every loop that
+    /// throttles on focus also has access to the real `AppState.app_focused`.
+    pub fn from_handle(handle: AppHandle) -> Self {
+        Self::new(handle, Arc::new(AtomicBool::new(false)))
+    }
 }
 
 impl AppCtx for TauriAppCtx {
@@ -44,5 +52,9 @@ impl AppCtx for TauriAppCtx {
 
     fn is_focused(&self) -> bool {
         self.focused.load(Ordering::Relaxed)
+    }
+
+    fn record_plugin_log(&self, level: &str, plugin: &str, message: &str) {
+        crate::plugin_logs::record(&self.handle, level, plugin, message.to_string());
     }
 }
