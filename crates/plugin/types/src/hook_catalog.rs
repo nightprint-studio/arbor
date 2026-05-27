@@ -9,7 +9,7 @@
 //! what fields each hook payload carries — without having to consult external
 //! documentation.
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum FieldType {
     String,
     Number,
@@ -30,7 +30,7 @@ impl FieldType {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct HookField {
     pub name:        &'static str,
     pub ty:          FieldType,
@@ -38,7 +38,7 @@ pub struct HookField {
     pub description: &'static str,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct HookDef {
     pub name:        &'static str,
     pub category:    &'static str,

@@ -58,8 +58,9 @@ only when) the first type here genuinely references it (e.g. once
 
 ## Consumed by
 
-- `arbor-plugin-api` *(planned)* — the hook dispatcher reads the hook
-  catalog.
+- `arbor-plugin-api` — reuses `HookField` / `FieldType` for the dynamic
+  hook catalog, and `Manifest` is re-exported through its prelude for
+  contributor ergonomics.
 - `arbor-plugin-marketplace` *(planned)* — manifest parsing for catalog
   and install.
 - `arbor-plugin-core` *(planned)* — runtime loads [`Manifest`], applies

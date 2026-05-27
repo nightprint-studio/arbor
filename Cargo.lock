@@ -106,6 +106,7 @@ dependencies = [
  "arbor-auth",
  "arbor-cloud",
  "arbor-core",
+ "arbor-plugin-api",
  "arbor-plugin-types",
  "arbor-process-ext",
  "arbor-scheduler",
@@ -205,6 +206,18 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "arbor-plugin-api"
+version = "0.2.0"
+dependencies = [
+ "arbor-plugin-types",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
 ]
 
 [[package]]
