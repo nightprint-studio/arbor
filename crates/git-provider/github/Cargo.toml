@@ -1,0 +1,24 @@
+[package]
+name         = "arbor-git-provider-github"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "GitHub implementation of GitProvider (PRs, releases, repo metadata) AND home of the shared GithubClient (HTTP + auth + parsers) re-used by arbor-issue-tracker-github."
+
+[dependencies]
+arbor-core             = { path = "../../core" }
+arbor-auth             = { path = "../../arbor-auth" }
+arbor-git-provider-api = { path = "../api" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+reqwest     = { workspace = true }
+keyring     = { workspace = true }
+
+chrono = { version = "0.4", features = ["serde"] }

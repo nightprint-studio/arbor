@@ -1,0 +1,20 @@
+[package]
+name         = "arbor-plugin-types"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Pure data shapes shared by the plugin runtime and the marketplace: manifest, permissions, dependencies, schedule, hook catalog (names only), PluginConfig."
+
+[dependencies]
+arbor-core = { path = "../../core" }
+
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+
+# Manifest-file format (`plugin.toml`).
+toml   = "0.8"
+# Dependency version constraints (manifest `[[dependencies]] version = "^1.2"`).
+semver = "1"

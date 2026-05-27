@@ -1,0 +1,18 @@
+[package]
+name         = "arbor-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Shared core for Arbor crates: paths, HTTP client builder, AppError base, AppCtx trait, common GitHub API helpers."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+tokio      = { workspace = true }
+reqwest    = { workspace = true }
+dirs       = { workspace = true }
+async-trait = { workspace = true }

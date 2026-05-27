@@ -1,0 +1,18 @@
+[package]
+name         = "arbor-pipeline-api"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Pipeline trait + DTOs (PipelineRun, Stage, Step, Status) + step-extension registry + PipelineConfig. Concrete orchestrator lives in arbor-pipeline-core."
+
+[dependencies]
+arbor-core = { path = "../../core" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+async-trait = { workspace = true }
+
+chrono = { version = "0.4", features = ["serde"] }

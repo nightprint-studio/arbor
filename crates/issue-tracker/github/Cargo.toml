@@ -1,0 +1,22 @@
+[package]
+name         = "arbor-issue-tracker-github"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "GitHub Issues implementation of IssueTracker. Re-uses GithubClient (HTTP + auth + parsers) from arbor-git-provider-github."
+
+[dependencies]
+arbor-core                = { path = "../../core" }
+arbor-issue-tracker-api   = { path = "../api" }
+arbor-git-provider-github = { path = "../../git-provider/github" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+
+chrono = { version = "0.4", features = ["serde"] }

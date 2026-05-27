@@ -1,0 +1,33 @@
+[package]
+name         = "arbor-plugin-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Plugin runtime host: mlua VM management, lifecycle (load/unload/reload), sandbox, builtin Lua API surface (arbor.* namespace)."
+
+[dependencies]
+arbor-core         = { path = "../../core" }
+arbor-scheduler    = { path = "../../scheduler" }
+arbor-plugin-types = { path = "../types" }
+arbor-plugin-api   = { path = "../api" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+regex       = { workspace = true }
+reqwest     = { workspace = true }
+dirs        = { workspace = true }
+
+# Lua 5.4 VM (vendored — no system lua dep). `send` is required because plugin
+# code may run on async tasks; `serialize` enables serde<->lua conversion.
+mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send"] }
+
+# Manifest format + semver dependency resolution (re-used here for the
+# topo-sort during plugin load).
+toml   = "0.8"
+semver = "1"

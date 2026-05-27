@@ -1,0 +1,23 @@
+[package]
+name         = "arbor-scheduler"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Trigger engine (FixedRate / FixedDelay / Cron) with cooperative cancel and focus-gating. Consumed by the plugin runtime and the marketplace auto-refresh."
+
+[dependencies]
+arbor-core = { path = "../core" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+
+# Cron-expression parser (6-field Spring-style). Same crate already used by the
+# Lua plugin scheduler today.
+cron   = "0.13"
+chrono = { version = "0.4", features = ["serde"] }
