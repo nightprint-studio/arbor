@@ -16,42 +16,70 @@ without dragging in the plugin runtime:
   schedule registrations,
 - the in-app docs panel renders the hook catalog.
 
-Today these all reach into `src-tauri/src/plugin/runtime/manifest/*`. After
-the split they all reach into `arbor-plugin-types` — a leaf crate with no
-behaviour.
+Everything below lives here as a pure-data leaf crate; behaviour (disk
+walking, dependency-graph topo sort, `plugin_states.json` round-tripping,
+Lua sandboxing, scheduler dispatch) stays in the host crate (`arbor` /
+`arbor-plugin-core`).
 
-## Contents (planned)
+## Contents
 
-- `Manifest` — full `plugin.toml` shape (name, version, author,
-  description, `[permissions]`, `[scheduler]`, `[[dependencies]]`,
-  `[fs] scope`, `experimental`, `min_arbor_version`, `category`,
-  `keywords`, `icon`, `doc_file`, `homepage`, `repository`).
-- `Permissions` — typed `[permissions]` block. Stays serde-compatible
-  with the existing JSON-on-wire shape the Plugin Manager already speaks.
-- `Dependency` — `{ name, version (semver constraint), optional }`.
-- `Schedule` + `ScheduleTrigger` — `fixed_rate` / `fixed_delay` / `cron`
-  + `initial_delay_sec` + `only_when_focused` + `on_load`.
-- `HookCatalog` — hook **names** (constants like `HOOK_ON_PRE_COMMIT`) and
-  their context-schema descriptors. **Not** the dispatcher — that's in
-  `arbor-plugin-api`.
-- `PluginConfig` — the host-side per-plugin settings struct (enabled
-  state, runtime overrides). Part of strada (2) for config — this is the
-  fragment `arbor` aggregates into the global `AppConfig`.
+- [`manifest`](src/manifest.rs) — [`Manifest`] (the `plugin.toml` shape),
+  [`ManifestParseError`], [`ManifestParseFailure`], and the pure-parsing
+  entry point `Manifest::from_toml_str`.
+- [`permissions`](src/permissions.rs) — [`Permissions`] + the typed access
+  tiers ([`AccessLevel`], [`GitLevel`], [`TerminalLevel`], [`EnvReadPerm`]).
+- [`dependency`](src/dependency.rs) — [`Dependency`] (plugin-to-plugin
+  requirement, semver string + optional flag) and [`LoadFailure`] (record
+  of a plugin that didn't satisfy its dependency graph at load time).
+- [`schedule`](src/schedule.rs) — [`SchedulerSection`] (manifest opt-in),
+  [`Schedule`] / [`ScheduleTrigger`] (Lua-registered schedule shape),
+  [`ScheduleStatus`] (UI-side runtime status), the [`ScheduleRegistry`]
+  type alias the host populates, and [`parse_duration_secs`].
+- [`hooks`](src/hooks.rs) — [`Hooks`] (per-hook opt-in flags read from
+  `plugin.toml`'s `[hooks]` block, with `subscribes_to(name)` lookup).
+- [`sandbox`](src/sandbox.rs) — [`Sandbox`] (the `[sandbox]` Lua-stdlib
+  allowlist).
+- [`hook_catalog`](src/hook_catalog.rs) — canonical [`HOOK_CATALOG`] +
+  [`HookDef`] / [`HookField`] / [`FieldType`] + `find(name)`. **Not** the
+  dispatcher — that's in `arbor-plugin-api`.
+
+`PluginConfig` is listed in the workspace blueprint but not yet
+introduced — strada (2) of the per-domain config split. It will land
+alongside `arbor-plugin-core` (or earlier, if another consumer needs it).
 
 ## Depends on
 
-- `arbor-core` — for `AppError` reuse and the few common shapes.
+External: `serde`, `thiserror`, `toml`.
 
-External: `serde`, `serde_json`, `thiserror`, `toml`, `semver`.
+`arbor-core` is not currently a dependency — none of the migrated types
+need `CoreError`, paths, or HTTP helpers. It will be added back when (and
+only when) the first type here genuinely references it (e.g. once
+`PluginConfig` introduces the `AppCtx` trait at its boundaries).
 
 ## Consumed by
 
-- `arbor-plugin-api` — the hook dispatcher reads the hook catalog.
-- `arbor-plugin-marketplace` — manifest parsing for catalog and install.
-- `arbor-plugin-core` — runtime loads `Manifest`, applies `Permissions`,
-  registers `Schedule` entries with `arbor-scheduler`.
-- `arbor` (Tauri shell) — Plugin Manager UI commands serialize/deserialize
-  these shapes over IPC.
+- `arbor-plugin-api` *(planned)* — the hook dispatcher reads the hook
+  catalog.
+- `arbor-plugin-marketplace` *(planned)* — manifest parsing for catalog
+  and install.
+- `arbor-plugin-core` *(planned)* — runtime loads [`Manifest`], applies
+  [`Permissions`], registers [`Schedule`] entries with `arbor-scheduler`.
+- `arbor` (the Tauri shell) — Plugin Manager UI commands serialise /
+  deserialise these shapes over IPC.
+
+## Public API: the prelude
+
+Workspace convention — every Arbor library crate exposes its public surface
+through a `prelude` module:
+
+```rust
+use arbor_plugin_types::prelude::{Manifest, Permissions, Hooks};
+// …or, when a module touches many of the types:
+use arbor_plugin_types::prelude::*;
+```
+
+The per-feature submodules (`manifest`, `permissions`, …) stay `pub` for
+discoverability in rustdoc, but call sites should reach for the prelude.
 
 ## Notes
 

@@ -250,7 +250,7 @@ fn newer_version(installed: &str, catalog: &str) -> Option<String> {
 /// Build a `MarketplacePlugin` from a locally-discovered manifest. Used to
 /// surface dev / hand-copied plugins (or marketplace plugins after install)
 /// when no remote catalog entry matches the name.
-fn local_plugin_entry(m: crate::plugin::runtime::PluginManifest, enabled: bool) -> MarketplacePlugin {
+fn local_plugin_entry(m: arbor_plugin_types::prelude::Manifest, enabled: bool) -> MarketplacePlugin {
     let dependencies = m.dependencies.clone();
     let repository_for_entry = m.repository.clone().unwrap_or_default();
     MarketplacePlugin {

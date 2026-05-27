@@ -3,9 +3,8 @@ use mlua::{Lua, LuaOptions, StdLib};
 
 use crate::error::{AppError, Result};
 use crate::plugin::contribution::ContributionRegistry;
-use crate::plugin::runtime::{
-    EnvReadPerm, PluginManifest, ScheduleRegistry, TimerCancels, TimerCounter,
-};
+use arbor_plugin_types::prelude::{EnvReadPerm, Manifest, ScheduleRegistry};
+use crate::plugin::runtime::{TimerCancels, TimerCounter};
 use crate::plugin::tree::{IconRegistry, TreeStore};
 
 // Embedded built-in Lua utility modules. Injected as require("arbor.*") preloads.
@@ -36,7 +35,7 @@ const CORE_ASSERT_LUA:  &str = include_str!("lua_builtins/core/assert.lua");
 
 /// Create a sandboxed Lua runtime for a plugin.
 pub fn create_sandbox(
-    manifest:      &PluginManifest,
+    manifest:      &Manifest,
     app_handle:    Option<tauri::AppHandle>,
     timer_cancels: TimerCancels,
     timer_counter: TimerCounter,
@@ -148,7 +147,7 @@ pub fn create_sandbox(
 // OS hardening — remove dangerous functions, respect env_read permission
 // ---------------------------------------------------------------------------
 
-fn harden_os_table(lua: &Lua, manifest: &PluginManifest) -> Result<()> {
+fn harden_os_table(lua: &Lua, manifest: &Manifest) -> Result<()> {
     let globals = lua.globals();
     let os: mlua::Table = globals.get("os")
         .map_err(|e| AppError::Plugin(e.to_string()))?;

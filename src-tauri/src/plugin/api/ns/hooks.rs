@@ -26,7 +26,7 @@ use mlua::{Lua, Table};
 
 use crate::error::{AppError, Result};
 use crate::plugin::api::ctx::ApiCtx;
-use crate::plugin::hook_catalog::{HOOK_CATALOG, HookDef, find};
+use arbor_plugin_types::prelude::{HOOK_CATALOG, HookDef, find};
 
 pub(crate) fn install(_ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let hooks_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;

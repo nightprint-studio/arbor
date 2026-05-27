@@ -1,12 +1,15 @@
-//! Plugin runtime — manifest parsing, host registry, lifecycle, hooks,
+//! Plugin runtime — manifest discovery, host registry, lifecycle, hooks,
 //! services, pipeline ops, scheduler engine.
 //!
 //! The module is split across small files mirroring the conceptual layers:
 //!
 //!   * `consts`    — API contract version, app version, host OS string
-//!   * `manifest/` — `plugin.toml` shape (permissions, hooks, schedule, deps,
-//!                   info) plus discovery + topological sort + persisted
-//!                   enabled-state file
+//!   * `manifest/` — `plugin.toml` discovery + topological sort + persisted
+//!                   enabled-state file. The pure-data manifest shapes
+//!                   (`Manifest`, `Permissions`, `Hooks`, …) live in the
+//!                   `arbor-plugin-types` crate; this module re-exports
+//!                   what the rest of the host historically reached for
+//!                   under `crate::plugin::runtime::manifest::*`.
 //!   * `loaded`    — `LoadedPlugin` / `DormantPlugin` + per-plugin cancel maps
 //!   * `host/`     — `PluginHost` registry, lifecycle, hooks, services,
 //!                   pipeline-op invocation, frontend-facing introspection
@@ -27,19 +30,9 @@ pub mod scheduler;
 // ── Constants ────────────────────────────────────────────────────────────────
 pub use consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION, current_os};
 
-// ── Manifest types ───────────────────────────────────────────────────────────
-pub use manifest::{
-    PluginManifest, discover_plugins, plugin_dir,
-};
-pub use manifest::deps::{PluginDependency, PluginLoadFailure};
-pub use manifest::info::{ComboOption, PluginHooks, PluginInfo, PluginSandbox};
-pub use manifest::permissions::{
-    AccessLevel, EnvReadPerm, GitLevel, PluginPermissions, TerminalLevel,
-};
-pub use manifest::schedule::{
-    PluginSchedule, PluginScheduleStatus, PluginSchedulerSection,
-    ScheduleRegistry, ScheduleTrigger, parse_duration_secs,
-};
+// ── Manifest discovery + state ───────────────────────────────────────────────
+pub use manifest::{discover_plugins, plugin_dir};
+pub use manifest::info::{ComboOption, PluginInfo};
 
 // ── Loaded-plugin state ──────────────────────────────────────────────────────
 pub use loaded::{DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter};

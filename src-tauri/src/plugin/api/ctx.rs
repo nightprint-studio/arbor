@@ -10,10 +10,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::plugin::contribution::ContributionRegistry;
-use crate::plugin::runtime::{
-    AccessLevel, GitLevel, PluginPermissions, ScheduleRegistry,
-    TerminalLevel, TimerCancels, TimerCounter,
+use arbor_plugin_types::prelude::{
+    AccessLevel, GitLevel, Permissions, ScheduleRegistry, TerminalLevel,
 };
+use crate::plugin::runtime::{TimerCancels, TimerCounter};
 use crate::plugin::tree::{IconRegistry, TreeStore};
 
 /// Snapshot of everything a namespace closure may capture. All fields are
@@ -70,14 +70,14 @@ impl ApiCtx {
         timer_counter: TimerCounter,
         schedules: ScheduleRegistry,
         scheduler_enabled: bool,
-        permissions: PluginPermissions,
+        permissions: Permissions,
         contributions: ContributionRegistry,
         tree_store: TreeStore,
         icon_registry: IconRegistry,
         enabled: Arc<AtomicBool>,
     ) -> Self {
         // env_read is consumed by sandbox.rs (harden_os_table); not used here.
-        let PluginPermissions {
+        let Permissions {
             network: network_perm,
             fs: fs_perm,
             fs_scope,

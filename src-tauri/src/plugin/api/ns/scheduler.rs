@@ -23,7 +23,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use crate::error::{AppError, Result};
 use crate::plugin::api::ctx::ApiCtx;
 use crate::plugin::api::helpers::convert::lua_value_to_duration_secs;
-use crate::plugin::runtime::{PluginSchedule, ScheduleTrigger};
+use arbor_plugin_types::prelude::{Schedule, ScheduleTrigger};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let sched_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -55,7 +55,7 @@ fn install_register(ctx: &ApiCtx, lua: &Lua, sched_table: &Table) -> Result<()> 
         let on_load           = config.get::<Option<bool>>("on_load").unwrap_or(None).unwrap_or(false);
         let only_when_focused = config.get::<Option<bool>>("only_when_focused").unwrap_or(None).unwrap_or(false);
 
-        let schedule = PluginSchedule {
+        let schedule = Schedule {
             action: action.clone(),
             trigger,
             initial_delay_sec,

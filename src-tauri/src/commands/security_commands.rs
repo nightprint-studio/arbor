@@ -73,7 +73,7 @@ pub async fn fetch_security_summary(
 
     // Fire-and-forget hook — never let a misbehaving plugin block the
     // dashboard load. The payload mirrors the catalog entry in
-    // `plugin/hook_catalog.rs`.
+    // `arbor-plugin-types::hook_catalog`.
     if let Ok(host) = state.lock_plugin_host() {
         let total = summary.counts.total();
         let ctx = serde_json::json!({

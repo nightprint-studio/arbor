@@ -123,7 +123,7 @@ impl PluginHost {
     /// or load-failed (failed entries don't keep their manifest, so they're
     /// skipped — callers treat that as "blocker" via `compute_enable_blockers`).
     fn manifest_for(&self, name: &str)
-        -> Option<&crate::plugin::runtime::PluginManifest>
+        -> Option<&arbor_plugin_types::prelude::Manifest>
     {
         if let Some(p) = self.plugins.iter().find(|p| p.manifest.name == name) {
             return Some(&p.manifest);

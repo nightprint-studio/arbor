@@ -18,8 +18,9 @@ use std::time::Duration;
 use futures_util::future::join_all;
 use serde::Deserialize;
 
+use arbor_plugin_types::prelude::Manifest;
+
 use crate::error::{AppError, Result};
-use crate::plugin::runtime::manifest::PluginManifest;
 
 use super::types::{
     MarketplaceCatalog, MarketplacePlugin, MarketplaceSource, MarketplaceTheme,
@@ -386,7 +387,7 @@ async fn fetch_plugin(
         .map_err(|e| AppError::Other(format!("HTTP {toml_url}: {e}")))?
         .text().await
         .map_err(|e| AppError::Other(format!("body {toml_url}: {e}")))?;
-    let manifest: PluginManifest = toml::from_str(&body)
+    let manifest: Manifest = toml::from_str(&body)
         .map_err(|e| AppError::Other(format!("parse {toml_url}: {e}")))?;
 
     // Optional icon SVG. We inline the file content so the modal can theme

@@ -7,8 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::plugin::runtime::manifest::deps::PluginDependency;
-use crate::plugin::runtime::manifest::permissions::PluginPermissions;
+use arbor_plugin_types::prelude::{Dependency, Permissions};
 
 // ---------------------------------------------------------------------------
 // Where a listing came from
@@ -83,7 +82,7 @@ pub struct MarketplacePlugin {
     /// existing host type so the same JSON-on-wire shape the Plugin Manager
     /// already speaks works here too.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub permissions: Option<PluginPermissions>,
+    pub permissions: Option<Permissions>,
     pub source:      MarketplaceSource,
     pub installed:   bool,
     /// Mirror of the host's enable state when `installed = true`. Undefined
@@ -110,7 +109,7 @@ pub struct MarketplacePlugin {
     /// `plugin.toml`. Empty when the plugin stands alone. Surfaced in the
     /// install-confirm modal so the user can pre-install required deps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dependencies: Vec<PluginDependency>,
+    pub dependencies: Vec<Dependency>,
 }
 
 // ---------------------------------------------------------------------------

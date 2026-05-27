@@ -1,130 +1,38 @@
-//! `plugin.toml` parsing, discovery, dependency topological sort, and the
-//! per-user persisted enable/disable state file.
+//! Plugin discovery, dependency topological sort, and the per-user persisted
+//! enable/disable state file.
+//!
+//! The pure-data manifest types (`Manifest`, `Permissions`, `Dependency`,
+//! `Hooks`, `Sandbox`, `Schedule*`) live in the `arbor-plugin-types` crate.
+//! This module keeps the host-side I/O: walking the plugin directories,
+//! reading + parsing `plugin.toml` files off disk, ordering them by
+//! dependency, and round-tripping the user's enable/disable state through
+//! `~/.config/arbor/plugin_states.json`.
 
-pub mod permissions;
-pub mod deps;
 pub mod info;
-pub mod schedule;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use arbor_plugin_types::prelude::{Manifest, ManifestParseFailure};
 
 use crate::error::Result;
 
 use super::consts::current_os;
-use deps::PluginDependency;
-use info::{PluginHooks, PluginSandbox};
-use permissions::PluginPermissions;
-use schedule::PluginSchedulerSection;
-
-// ---------------------------------------------------------------------------
-// Manifest (plugin.toml)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginManifest {
-    // ── Identity ──────────────────────────────────────────────────────────────
-    pub name:        String,
-    pub version:     String,
-    pub description: String,
-    pub author:      String,
-    #[serde(default)]
-    pub license:     Option<String>,
-    #[serde(default)]
-    pub repository:  Option<String>,
-    /// Optional homepage / docs URL — surfaced in the marketplace detail pane.
-    #[serde(default)]
-    pub homepage:    Option<String>,
-    #[serde(default)]
-    pub keywords:    Vec<String>,
-    /// Free-form category for marketplace filtering. Curated values:
-    /// `build` · `ci` · `git-workflow` · `language` · `ui` · `data` · `theme`.
-    #[serde(default)]
-    pub category:    Option<String>,
-    /// Path (relative to the plugin dir) to a square SVG/PNG icon used by the
-    /// marketplace + Plugin Manager. Falls back to a monogram when absent.
-    #[serde(default)]
-    pub icon:        Option<String>,
-
-    // ── Compatibility ─────────────────────────────────────────────────────────
-    /// Minimum Arbor version required (semver string), e.g. "0.8.0".
-    /// Validated against `ARBOR_APP_VERSION` at load time — incompatible
-    /// plugins are rejected with a clear error.
-    #[serde(default)]
-    pub min_arbor_version: Option<String>,
-    /// Integer version of the Lua API contract. Bumped on breaking changes.
-    /// Plugins with arbor_api > ARBOR_API_VERSION are rejected at load time.
-    #[serde(default = "default_arbor_api")]
-    pub arbor_api: u32,
-    /// Operating systems this plugin supports. Empty = cross-platform.
-    /// Recognised values: "windows", "linux", "macos". Plugins running on a
-    /// non-listed OS are skipped at discovery time.
-    #[serde(default)]
-    pub os: Vec<String>,
-    /// Plugin entry point. Defaults to "main.lua".
-    #[serde(default = "default_entry")]
-    pub entry: String,
-
-    // ── Documentation ────────────────────────────────────────────────────────
-    /// Optional path to an HTML file (relative to plugin dir) shown in the
-    /// Docs panel under "Plugins". Not required — omit to skip the Plugins section.
-    #[serde(default)]
-    pub doc_file: Option<String>,
-
-    /// When true, the plugin is flagged as experimental in the Plugin Manager
-    /// (orange "EXPERIMENTAL" pill next to the version). Intended for plugins
-    /// that are still iterating heavily on their public surface — settings,
-    /// hooks, storage formats — and may break between releases.
-    #[serde(default)]
-    pub experimental: bool,
-
-    // ── Sections ──────────────────────────────────────────────────────────────
-    pub permissions: PluginPermissions,
-    #[serde(default)]
-    pub sandbox:     PluginSandbox,
-    #[serde(default)]
-    pub hooks:       PluginHooks,
-    /// Background-scheduler opt-in. Schedule data (interval / cron / etc.)
-    /// is declared from Lua via `arbor.scheduler.register`; the manifest only
-    /// gates the feature on or off.
-    #[serde(default)]
-    pub scheduler:   PluginSchedulerSection,
-    #[serde(default)]
-    pub dependencies: Vec<PluginDependency>,
-
-    /// Path to the plugin directory — not in TOML, filled at discovery time.
-    #[serde(skip)]
-    pub dir: PathBuf,
-}
-
-fn default_arbor_api() -> u32 { 1 }
-fn default_entry() -> String { "main.lua".to_string() }
 
 // ---------------------------------------------------------------------------
 // Discovery
 // ---------------------------------------------------------------------------
 
-/// A plugin folder whose `plugin.toml` could not be parsed. Kept separate
-/// from `PluginManifest` because we don't have a typed manifest to attach
-/// the error to — the folder name is the best stand-in for the plugin name.
-#[derive(Debug, Clone)]
-pub struct ManifestParseFailure {
-    pub folder_name: String,
-    pub error:       String,
-}
-
-pub fn discover_plugins() -> Result<Vec<PluginManifest>> {
+pub fn discover_plugins() -> Result<Vec<Manifest>> {
     Ok(discover_plugins_detailed()?.0)
 }
 
 /// Same as `discover_plugins`, but also returns the list of folders whose
 /// manifest failed to parse. The caller (PluginHost::reload) uses it to
 /// surface those failures in the Plugin Logs panel and the Plugin Manager.
-pub fn discover_plugins_detailed() -> Result<(Vec<PluginManifest>, Vec<ManifestParseFailure>)> {
+pub fn discover_plugins_detailed() -> Result<(Vec<Manifest>, Vec<ManifestParseFailure>)> {
     let host_os = current_os();
-    let mut manifests: Vec<PluginManifest> = Vec::new();
+    let mut manifests: Vec<Manifest> = Vec::new();
     let mut bad: Vec<ManifestParseFailure> = Vec::new();
     let mut seen_names: HashSet<String> = HashSet::new();
 
@@ -181,10 +89,10 @@ pub fn discover_plugins_detailed() -> Result<(Vec<PluginManifest>, Vec<ManifestP
     Ok((manifests, bad))
 }
 
-fn read_manifest(toml_path: &std::path::Path, dir: &std::path::Path) -> Result<PluginManifest> {
+fn read_manifest(toml_path: &std::path::Path, dir: &std::path::Path) -> Result<Manifest> {
     let content = std::fs::read_to_string(toml_path)?;
-    let mut manifest: PluginManifest = toml::from_str(&content)?;
-    manifest.dir = dir.to_path_buf();
+    let manifest = Manifest::from_toml_str(&content, dir)
+        .map_err(|e| crate::error::AppError::Plugin(e.to_string()))?;
     Ok(manifest)
 }
 
@@ -213,8 +121,8 @@ pub fn plugin_dir() -> PathBuf {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn topo_sort_manifests(
-    manifests: Vec<PluginManifest>,
-) -> (Vec<PluginManifest>, Vec<String>) {
+    manifests: Vec<Manifest>,
+) -> (Vec<Manifest>, Vec<String>) {
     let known: HashSet<String> = manifests.iter().map(|m| m.name.clone()).collect();
 
     // Build adjacency: dep_name → [dependents]. Edges that point at plugins
@@ -222,7 +130,7 @@ pub(crate) fn topo_sort_manifests(
     // emit a proper "dependency X not found" error for those.
     let mut indegree: HashMap<String, usize> = HashMap::new();
     let mut adj: HashMap<String, Vec<String>> = HashMap::new();
-    let mut by_name: HashMap<String, PluginManifest> = HashMap::new();
+    let mut by_name: HashMap<String, Manifest> = HashMap::new();
     for m in &manifests {
         indegree.entry(m.name.clone()).or_insert(0);
         for d in &m.dependencies {
@@ -243,7 +151,7 @@ pub(crate) fn topo_sort_manifests(
         .map(|(k, _)| k.clone())
         .collect();
 
-    let mut sorted: Vec<PluginManifest> = Vec::with_capacity(by_name.len());
+    let mut sorted: Vec<Manifest> = Vec::with_capacity(by_name.len());
     while let Some(name) = queue.pop_front() {
         if let Some(m) = by_name.remove(&name) {
             sorted.push(m);

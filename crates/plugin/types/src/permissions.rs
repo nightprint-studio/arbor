@@ -43,7 +43,7 @@ pub enum TerminalLevel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PluginPermissions {
+pub struct Permissions {
     /// Allowlist of hostnames the plugin may contact. Empty = no network.
     #[serde(default)]
     pub network: Vec<String>,

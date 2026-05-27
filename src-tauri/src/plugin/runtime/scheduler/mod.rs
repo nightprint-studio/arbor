@@ -5,7 +5,7 @@
 //!   * the [`LuaHookAction`] bridge (Lua hook fired on every tick),
 //!   * the (plugin_name, action) → [`ScheduleKey`] mapping,
 //!   * the trigger/options translation from the plugin manifest's
-//!     [`PluginSchedule`] shape to the engine's [`Trigger`] /
+//!     [`Schedule`] shape to the engine's [`Trigger`] /
 //!     [`ScheduleOpts`].
 //!
 //! Public API (registered / cancelled per plugin) remains on `PluginHost`:
@@ -17,13 +17,13 @@ mod lua_action;
 use std::sync::Arc;
 use std::time::Duration;
 
+use arbor_plugin_types::prelude::{Schedule, ScheduleTrigger};
 use arbor_scheduler::prelude::*;
 
 use crate::error::{AppError, Result};
 
 use self::lua_action::LuaHookAction;
 use super::host::PluginHost;
-use super::manifest::schedule::{PluginSchedule, ScheduleTrigger};
 
 /// Namespace under which `(plugin_name, action)` schedules live in the
 /// shared engine. Built per-plugin so `cancel_namespace` cleanly maps to
@@ -48,7 +48,8 @@ fn trigger_from(t: &ScheduleTrigger) -> Trigger {
     }
 }
 
-fn opts_from(s: &PluginSchedule) -> ScheduleOpts {
+fn opts_from(s: &Schedule) -> ScheduleOpts {
+
     ScheduleOpts {
         initial_delay:     Duration::from_secs(s.initial_delay_sec),
         fire_on_load:      s.on_load,
@@ -66,7 +67,7 @@ impl PluginHost {
         // whose `[scheduler] enabled = false` (or omitted) are skipped —
         // even if their main.lua called `arbor.scheduler.register`, those
         // entries were rejected at registration time so the list is empty.
-        let to_start: Vec<(String, Vec<PluginSchedule>)> = self
+        let to_start: Vec<(String, Vec<Schedule>)> = self
             .plugins
             .iter()
             .filter(|p| p.is_enabled() && p.manifest.scheduler.enabled)
@@ -124,7 +125,7 @@ impl PluginHost {
     /// the previous task automatically. No-op when the engine hasn't been
     /// installed yet (boot-phase ordering) or when the host has no
     /// upgradable self-reference (shouldn't happen after `setup()`).
-    pub(crate) fn spawn_scheduler(&mut self, plugin_name: &str, schedule: &PluginSchedule) {
+    pub(crate) fn spawn_scheduler(&mut self, plugin_name: &str, schedule: &Schedule) {
         let Some(sched) = self.scheduler.clone() else {
             tracing::debug!(
                 "spawn_scheduler('{plugin_name}:{}') called before scheduler install — skipping",

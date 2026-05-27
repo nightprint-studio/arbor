@@ -20,9 +20,8 @@ use mlua::Lua;
 
 use crate::error::{AppError, Result};
 use crate::plugin::contribution::ContributionRegistry;
-use crate::plugin::runtime::{
-    PluginPermissions, ScheduleRegistry, TimerCancels, TimerCounter,
-};
+use arbor_plugin_types::prelude::{Permissions, ScheduleRegistry};
+use crate::plugin::runtime::{TimerCancels, TimerCounter};
 use crate::plugin::tree::{IconRegistry, TreeStore};
 
 use ctx::ApiCtx;
@@ -39,7 +38,7 @@ pub fn register(
     schedules:         ScheduleRegistry,
     scheduler_enabled: bool,
     // Permission snapshot captured at load time — never re-read from Lua globals.
-    permissions:       PluginPermissions,
+    permissions:       Permissions,
     contributions:     ContributionRegistry,
     tree_store:        TreeStore,
     icon_registry:     IconRegistry,

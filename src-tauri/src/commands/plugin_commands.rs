@@ -3,8 +3,9 @@ use std::sync::atomic::Ordering;
 use tauri::{Emitter, State};
 use serde::Serialize;
 
+use arbor_plugin_types::prelude::Manifest;
+
 use crate::error::AppError;
-use crate::plugin::runtime::PluginManifest;
 use crate::plugin::toolchain::ToolchainEntry;
 use crate::AppState;
 
@@ -27,7 +28,7 @@ fn save_plugin_settings(plugin_name: &str, map: &serde_json::Map<String, serde_j
 }
 
 #[tauri::command]
-pub fn list_plugins(_state: State<'_, AppState>) -> Result<Vec<PluginManifest>, AppError> {
+pub fn list_plugins(_state: State<'_, AppState>) -> Result<Vec<Manifest>, AppError> {
     crate::plugin::runtime::discover_plugins()
 }
 
@@ -323,7 +324,7 @@ pub fn plugin_dep_graph(state: State<'_, AppState>) -> Result<Vec<DepGraphNode>,
 
     let host = state.lock_plugin_host()?;
     // Map name -> (version, enabled, declared deps)
-    let mut entries: HashMap<String, (String, bool, Vec<crate::plugin::runtime::PluginDependency>, Option<String>)> = HashMap::new();
+    let mut entries: HashMap<String, (String, bool, Vec<arbor_plugin_types::prelude::Dependency>, Option<String>)> = HashMap::new();
     for p in &host.plugins {
         entries.insert(
             p.manifest.name.clone(),

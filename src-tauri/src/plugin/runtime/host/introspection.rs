@@ -1,13 +1,11 @@
 //! `list_plugin_info` — frontend-facing summary of every plugin (loaded,
 //! dormant, or failed).
 
+use arbor_plugin_types::prelude::{Hooks, Permissions, ScheduleStatus};
 use arbor_scheduler::prelude::ScheduleKey;
 
 use super::PluginHost;
 use crate::plugin::runtime::manifest::info::PluginInfo;
-use crate::plugin::runtime::manifest::permissions::PluginPermissions;
-use crate::plugin::runtime::manifest::info::PluginHooks;
-use crate::plugin::runtime::manifest::schedule::PluginScheduleStatus;
 use crate::plugin::runtime::scheduler::plugin_namespace;
 
 impl PluginHost {
@@ -52,11 +50,11 @@ impl PluginHost {
             let regs = p.schedules.lock().map(|g| g.clone()).unwrap_or_default();
             let scheduler_count = regs.len();
             let ns = plugin_namespace(&p.manifest.name);
-            let schedules: Vec<PluginScheduleStatus> = regs.into_iter().map(|s| {
+            let schedules: Vec<ScheduleStatus> = regs.into_iter().map(|s| {
                 let running = self.scheduler.as_ref()
                     .map(|sched| sched.contains(&ScheduleKey::new(ns.clone(), s.action.clone())))
                     .unwrap_or(false);
-                PluginScheduleStatus { schedule: s, running }
+                ScheduleStatus { schedule: s, running }
             }).collect();
             let schedulers_running = schedules.iter().filter(|s| s.running).count();
             let doc = p.manifest.doc_file.as_ref()
@@ -97,8 +95,8 @@ impl PluginHost {
                 arbor_api:          0,
                 enabled:            false,
                 experimental:       false,
-                permissions:        PluginPermissions::default(),
-                hooks:              PluginHooks::default(),
+                permissions:        Permissions::default(),
+                hooks:              Hooks::default(),
                 scheduler_count:    0,
                 schedulers_running: 0,
                 schedules:          Vec::new(),

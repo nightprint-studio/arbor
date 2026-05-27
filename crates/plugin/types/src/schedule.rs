@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// on or off — every concrete schedule (action name, interval / cron, focus
 /// gate, etc.) is registered from Lua via `arbor.scheduler.register`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PluginSchedulerSection {
+pub struct SchedulerSection {
     #[serde(default)]
     pub enabled: bool,
 }
@@ -29,7 +29,7 @@ pub enum ScheduleTrigger {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct PluginSchedule {
+pub struct Schedule {
     /// Action name fired on the plugin when the trigger elapses.
     pub action: String,
     /// What drives the firing cadence.
@@ -53,15 +53,15 @@ pub struct PluginSchedule {
 
 /// Shared registry of plugin schedules. Populated from Lua via
 /// `arbor.scheduler.register` and consumed by `PluginHost::start_*_schedulers`.
-pub type ScheduleRegistry = Arc<Mutex<Vec<PluginSchedule>>>;
+pub type ScheduleRegistry = Arc<Mutex<Vec<Schedule>>>;
 
 /// One scheduler entry as exposed to the frontend — combines the static
 /// declaration with the live running state so the Plugin Info modal can render
 /// a per-action enable/disable toggle.
 #[derive(Debug, Clone, Serialize)]
-pub struct PluginScheduleStatus {
+pub struct ScheduleStatus {
     #[serde(flatten)]
-    pub schedule: PluginSchedule,
+    pub schedule: Schedule,
     pub running:  bool,
 }
 

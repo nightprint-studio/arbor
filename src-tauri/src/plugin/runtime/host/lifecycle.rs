@@ -11,12 +11,12 @@ use crate::error::{AppError, Result};
 use super::PluginHost;
 use crate::plugin::runtime::consts::{ARBOR_API_VERSION, ARBOR_APP_VERSION};
 use crate::plugin::runtime::loaded::{DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter};
+use arbor_plugin_types::prelude::{LoadFailure, Manifest, ScheduleRegistry};
+
 use crate::plugin::runtime::manifest::{
-    PluginManifest, discover_plugins_detailed, load_plugin_states, plugin_dir,
+    discover_plugins_detailed, load_plugin_states, plugin_dir,
     save_plugin_states, topo_sort_manifests,
 };
-use crate::plugin::runtime::manifest::deps::PluginLoadFailure;
-use crate::plugin::runtime::manifest::schedule::ScheduleRegistry;
 
 impl PluginHost {
     /// Record a plugin-load failure in every surface the user can see:
@@ -32,12 +32,12 @@ impl PluginHost {
     /// Used by both startup `reload()` and on-demand `enable_plugin()` —
     /// previously both silently dropped the error to the terminal log,
     /// making activation-failures invisible from inside Arbor.
-    fn record_load_failure(&mut self, manifest: &PluginManifest, error: &str) {
+    fn record_load_failure(&mut self, manifest: &Manifest, error: &str) {
         let name = &manifest.name;
         tracing::warn!("failed to load plugin '{name}': {error}");
 
         self.load_failures.retain(|f| f.name != *name);
-        self.load_failures.push(PluginLoadFailure {
+        self.load_failures.push(LoadFailure {
             name:        name.clone(),
             version:     manifest.version.clone(),
             description: manifest.description.clone(),
@@ -82,7 +82,7 @@ impl PluginHost {
                 bad.folder_name, bad.error
             );
             self.load_failures.retain(|f| f.name != bad.folder_name);
-            self.load_failures.push(PluginLoadFailure {
+            self.load_failures.push(LoadFailure {
                 name:        bad.folder_name.clone(),
                 version:     String::new(),
                 description: String::new(),
@@ -101,7 +101,7 @@ impl PluginHost {
         let (sorted, cycle_names) = topo_sort_manifests(all_manifests);
         for name in cycle_names {
             tracing::error!("plugin '{name}' is in a dependency cycle — skipping");
-            self.load_failures.push(PluginLoadFailure {
+            self.load_failures.push(LoadFailure {
                 name:        name.clone(),
                 version:     String::new(),
                 description: String::new(),
@@ -199,7 +199,7 @@ impl PluginHost {
 
             if let Some(err) = dep_error {
                 tracing::warn!("plugin '{name}' skipped: {err}");
-                self.load_failures.push(PluginLoadFailure {
+                self.load_failures.push(LoadFailure {
                     name:        name.clone(),
                     version:     manifest.version.clone(),
                     description: manifest.description.clone(),
@@ -589,7 +589,7 @@ impl PluginHost {
 // ---------------------------------------------------------------------------
 
 pub fn load_plugin(
-    manifest: PluginManifest,
+    manifest: Manifest,
     app_handle: Option<tauri::AppHandle>,
     contributions: crate::plugin::contribution::ContributionRegistry,
     tree_store:    crate::plugin::tree::TreeStore,

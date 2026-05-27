@@ -8,13 +8,13 @@ authors.workspace      = true
 description  = "Pure data shapes shared by the plugin runtime and the marketplace: manifest, permissions, dependencies, schedule, hook catalog (names only), PluginConfig."
 
 [dependencies]
-arbor-core = { path = "../../core" }
-
+# Pure data shapes only — no `arbor-core` dep yet. None of the migrated types
+# need `AppError` or paths/HTTP helpers; the host crate owns I/O + error
+# mapping. Re-add `arbor-core` when (and only when) the first type here
+# actually references it (e.g. once `PluginConfig` is introduced and wants the
+# `AppCtx` trait).
 serde      = { workspace = true }
-serde_json = { workspace = true }
 thiserror  = { workspace = true }
 
 # Manifest-file format (`plugin.toml`).
 toml   = "0.8"
-# Dependency version constraints (manifest `[[dependencies]] version = "^1.2"`).
-semver = "1"

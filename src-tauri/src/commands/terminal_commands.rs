@@ -138,7 +138,7 @@ pub async fn terminal_exec(
     plugin_name: Option<String>,
 ) -> Result<TerminalExecResult> {
     if let Some(ref pname) = plugin_name {
-        use crate::plugin::runtime::TerminalLevel;
+        use arbor_plugin_types::prelude::TerminalLevel;
         let host = state.lock_plugin_host()?;
 
         let plugin = host.plugins.iter().find(|p| p.manifest.name == *pname);

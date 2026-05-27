@@ -17,8 +17,9 @@ use std::sync::{Arc, Mutex, Weak};
 
 use arbor_scheduler::prelude::Scheduler;
 
+use arbor_plugin_types::prelude::LoadFailure;
+
 use super::loaded::{DormantPlugin, LoadedPlugin};
-use super::manifest::deps::PluginLoadFailure;
 
 pub struct PluginHost {
     pub plugins:    Vec<LoadedPlugin>,
@@ -40,7 +41,7 @@ pub struct PluginHost {
     /// `fire_hook_on`; using `Weak` avoids a self-strong-cycle.
     pub(crate) self_arc: Option<Weak<Mutex<PluginHost>>>,
     /// Plugins that failed to load due to dependency errors (shown in Plugin Manager).
-    pub load_failures: Vec<PluginLoadFailure>,
+    pub load_failures: Vec<LoadFailure>,
     /// Cross-plugin contribution registry (arbor.ui.contribute).
     pub contributions: crate::plugin::contribution::ContributionRegistry,
     /// Tree-state storage for kind="tree" sidebars (arbor.ui.tree.set).

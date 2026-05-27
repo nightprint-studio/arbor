@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use mlua::Lua;
 
-use crate::plugin::runtime::AccessLevel;
+use arbor_plugin_types::prelude::AccessLevel;
 
 /// `fp.0` = AccessLevel, `fp.1` = scope list. Bundled as a tuple so the
 /// per-closure `let fp = fp.clone()` capture pattern stays terse across

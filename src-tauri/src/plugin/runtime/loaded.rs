@@ -6,8 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use super::manifest::PluginManifest;
-use super::manifest::schedule::ScheduleRegistry;
+use arbor_plugin_types::prelude::{Manifest, ScheduleRegistry};
 
 // ---------------------------------------------------------------------------
 // Timer registry — tracks per-plugin timers spawned from Lua
@@ -21,11 +20,11 @@ pub type TimerCounter = Arc<AtomicU64>;
 /// promoting it to a `LoadedPlugin` happens only when the user explicitly
 /// enables it.
 pub struct DormantPlugin {
-    pub manifest: PluginManifest,
+    pub manifest: Manifest,
 }
 
 pub struct LoadedPlugin {
-    pub manifest:      PluginManifest,
+    pub manifest:      Manifest,
     pub lua:           mlua::Lua,
     /// Live enable flag. Shared with closures inside the Lua VM (api.rs) so
     /// they can short-circuit even when fired from background threads after

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginDependency {
+pub struct Dependency {
     /// Name of the required plugin (must match the `name` field in its plugin.toml).
     pub name: String,
     /// Semver version requirement, e.g. ">=1.0.0". Empty string accepts any version.
@@ -18,7 +18,7 @@ pub struct PluginDependency {
 /// load time. Surfaced in the Plugin Manager so the user can see why a plugin
 /// is unavailable.
 #[derive(Debug, Clone)]
-pub struct PluginLoadFailure {
+pub struct LoadFailure {
     pub name:        String,
     pub version:     String,
     pub description: String,

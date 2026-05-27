@@ -2,7 +2,7 @@
 
 use mlua::{Lua, LuaSerdeExt};
 
-use crate::plugin::runtime::parse_duration_secs;
+use arbor_plugin_types::prelude::parse_duration_secs;
 
 pub(crate) fn lua_value_to_json(val: mlua::Value) -> Option<serde_json::Value> {
     match val {
