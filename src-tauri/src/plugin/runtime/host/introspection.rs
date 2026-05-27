@@ -1,13 +1,14 @@
 //! `list_plugin_info` — frontend-facing summary of every plugin (loaded,
 //! dormant, or failed).
 
-use std::sync::atomic::Ordering;
+use arbor_scheduler::prelude::ScheduleKey;
 
 use super::PluginHost;
 use crate::plugin::runtime::manifest::info::PluginInfo;
 use crate::plugin::runtime::manifest::permissions::PluginPermissions;
 use crate::plugin::runtime::manifest::info::PluginHooks;
 use crate::plugin::runtime::manifest::schedule::PluginScheduleStatus;
+use crate::plugin::runtime::scheduler::plugin_namespace;
 
 impl PluginHost {
     /// Return true when a plugin with the given manifest name is currently
@@ -50,10 +51,10 @@ impl PluginHost {
         let mut infos: Vec<PluginInfo> = self.plugins.iter().map(|p| {
             let regs = p.schedules.lock().map(|g| g.clone()).unwrap_or_default();
             let scheduler_count = regs.len();
+            let ns = plugin_namespace(&p.manifest.name);
             let schedules: Vec<PluginScheduleStatus> = regs.into_iter().map(|s| {
-                let key = format!("{}:{}", p.manifest.name, s.action);
-                let running = self.scheduler_cancels.get(&key)
-                    .map(|c| !c.load(Ordering::Relaxed))
+                let running = self.scheduler.as_ref()
+                    .map(|sched| sched.contains(&ScheduleKey::new(ns.clone(), s.action.clone())))
                     .unwrap_or(false);
                 PluginScheduleStatus { schedule: s, running }
             }).collect();

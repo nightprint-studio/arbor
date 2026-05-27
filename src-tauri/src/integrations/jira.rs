@@ -36,9 +36,7 @@ fn sanitize_html(input: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .user_agent("Arbor-Git-GUI/1.0")
+    arbor_core::prelude::client_builder()
         // Many Jira Data Center / Server installations use self-signed or
         // internal-CA certificates that aren't in the OS trust store.
         // This is a desktop tool connecting to internal infrastructure.

@@ -49,6 +49,8 @@ tauri-build = { version = "2.6.1", features = [] }
 arbor-process-ext = { path = "../crates/arbor-process-ext" }
 arbor-cloud       = { path = "../crates/arbor-cloud" }
 arbor-auth        = { path = "../crates/arbor-auth" }
+arbor-core        = { path = "../crates/core" }
+arbor-scheduler   = { path = "../crates/scheduler" }
 
 # --- Tauri ---
 tauri             = { workspace = true }

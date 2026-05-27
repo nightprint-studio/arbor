@@ -1,26 +1,71 @@
-//! Scheduler engine — fixed_rate / fixed_delay / cron.
+//! Bridge between `PluginHost` and the shared `arbor-scheduler` engine.
 //!
-//! `PluginHost::start_all_schedulers` spins up one OS thread per registered
-//! schedule. Each thread sleeps in 1-second slices so cancellation (disable /
-//! reload) takes effect within ~1 s without an extra signalling primitive.
+//! The actual loop lives in `arbor-scheduler`; this module owns:
+//!
+//!   * the [`LuaHookAction`] bridge (Lua hook fired on every tick),
+//!   * the (plugin_name, action) → [`ScheduleKey`] mapping,
+//!   * the trigger/options translation from the plugin manifest's
+//!     [`PluginSchedule`] shape to the engine's [`Trigger`] /
+//!     [`ScheduleOpts`].
+//!
+//! Public API (registered / cancelled per plugin) remains on `PluginHost`:
+//! [`start_all_schedulers`], [`start_plugin_scheduler`],
+//! [`stop_plugin_scheduler`], [`spawn_scheduler`].
 
-use std::str::FromStr;
+mod lua_action;
+
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
-use tauri::Manager;
+use arbor_scheduler::prelude::*;
 
 use crate::error::{AppError, Result};
 
+use self::lua_action::LuaHookAction;
 use super::host::PluginHost;
 use super::manifest::schedule::{PluginSchedule, ScheduleTrigger};
 
+/// Namespace under which `(plugin_name, action)` schedules live in the
+/// shared engine. Built per-plugin so `cancel_namespace` cleanly maps to
+/// "cancel every schedule owned by this plugin" without prefix-collision
+/// risk (the engine uses exact equality, not `starts_with`).
+pub(crate) fn plugin_namespace(plugin_name: &str) -> String {
+    format!("plugin:{plugin_name}")
+}
+
+fn schedule_key(plugin_name: &str, action: &str) -> ScheduleKey {
+    ScheduleKey::new(plugin_namespace(plugin_name), action)
+}
+
+fn trigger_from(t: &ScheduleTrigger) -> Trigger {
+    match t {
+        ScheduleTrigger::FixedRate  { interval_sec } =>
+            Trigger::FixedRate  { interval: Duration::from_secs(*interval_sec) },
+        ScheduleTrigger::FixedDelay { delay_sec } =>
+            Trigger::FixedDelay { delay:    Duration::from_secs(*delay_sec) },
+        ScheduleTrigger::Cron { expr } =>
+            Trigger::Cron       { expr:     expr.clone() },
+    }
+}
+
+fn opts_from(s: &PluginSchedule) -> ScheduleOpts {
+    ScheduleOpts {
+        initial_delay:     Duration::from_secs(s.initial_delay_sec),
+        fire_on_load:      s.on_load,
+        only_when_focused: s.only_when_focused,
+        gate:              None,
+    }
+}
+
 impl PluginHost {
+    /// Register every schedule declared by every loaded + enabled plugin
+    /// against the shared engine. No-op when the engine isn't installed
+    /// yet (boot-phase ordering) or when no plugins are loaded.
     pub fn start_all_schedulers(&mut self) {
-        // Snapshot every enabled plugin's registered schedules. Plugins whose
-        // `[scheduler] enabled = false` (or omitted) are skipped — even if
-        // their main.lua called `arbor.scheduler.register`, those entries
-        // were rejected at registration time so the list is empty anyway.
+        // Snapshot every enabled plugin's registered schedules. Plugins
+        // whose `[scheduler] enabled = false` (or omitted) are skipped —
+        // even if their main.lua called `arbor.scheduler.register`, those
+        // entries were rejected at registration time so the list is empty.
         let to_start: Vec<(String, Vec<PluginSchedule>)> = self
             .plugins
             .iter()
@@ -33,9 +78,6 @@ impl PluginHost {
 
         for (name, schedules) in to_start {
             for schedule in schedules {
-                if schedule.on_load {
-                    let _ = self.fire_hook_on(&name, &schedule.action, "{}");
-                }
                 self.spawn_scheduler(&name, &schedule);
             }
         }
@@ -71,147 +113,49 @@ impl PluginHost {
     }
 
     pub fn stop_plugin_scheduler(&mut self, name: &str, action: &str) -> Result<()> {
-        let key = format!("{name}:{action}");
-        if let Some(cancel) = self.scheduler_cancels.remove(&key) {
-            cancel.store(true, Ordering::Relaxed);
+        if let Some(sched) = &self.scheduler {
+            sched.cancel(&schedule_key(name, action));
         }
         Ok(())
     }
 
-    /// Spawn (or restart) the OS thread driving a single registered schedule.
-    /// Re-registration with the same `(plugin_name, action)` key cancels the
-    /// previous thread first.
+    /// Register (or replace) a single schedule against the shared engine.
+    /// Re-registration with the same `(plugin_name, action)` key cancels
+    /// the previous task automatically. No-op when the engine hasn't been
+    /// installed yet (boot-phase ordering) or when the host has no
+    /// upgradable self-reference (shouldn't happen after `setup()`).
     pub(crate) fn spawn_scheduler(&mut self, plugin_name: &str, schedule: &PluginSchedule) {
-        let key = format!("{plugin_name}:{}", schedule.action);
-
-        // Cancel any existing scheduler with the same key — re-registration
-        // (or a UI-driven stop+start) replaces the running thread.
-        if let Some(old) = self.scheduler_cancels.get(&key) {
-            old.store(true, Ordering::Relaxed);
-        }
-
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.scheduler_cancels.insert(key, cancel.clone());
-
-        let Some(handle) = self.app_handle.clone() else { return };
-
-        let plugin_name_owned = plugin_name.to_string();
-        let action            = schedule.action.clone();
-        let trigger           = schedule.trigger.clone();
-        let initial_delay_sec = schedule.initial_delay_sec;
-        let only_when_focused = schedule.only_when_focused;
-
-        std::thread::Builder::new()
-            .name(format!("arbor-sched-{plugin_name_owned}-{action}"))
-            .spawn(move || {
-                run_scheduler_loop(
-                    handle,
-                    plugin_name_owned,
-                    action,
-                    trigger,
-                    initial_delay_sec,
-                    only_when_focused,
-                    cancel,
-                );
-            })
-            .ok();
-    }
-}
-
-/// Background loop driving a single registered schedule. One thread per
-/// schedule. `cancel` is checked between every sleep tick so disable / reload
-/// stops the loop within ~1 s.
-fn run_scheduler_loop(
-    handle:            tauri::AppHandle,
-    plugin_name:       String,
-    action:            String,
-    trigger:           ScheduleTrigger,
-    initial_delay_sec: u64,
-    only_when_focused: bool,
-    cancel:            Arc<AtomicBool>,
-) {
-    // Initial delay — applies to fixed_rate / fixed_delay (cron is always
-    // anchored to the wall clock, never to "now + N").
-    if initial_delay_sec > 0 && !matches!(trigger, ScheduleTrigger::Cron { .. }) {
-        if !sleep_with_cancel(initial_delay_sec, &cancel) { return; }
-    }
-
-    // Cron schedules need parsing once up front. A malformed expression is
-    // logged and the loop exits — no point spinning forever.
-    let cron_schedule = match &trigger {
-        ScheduleTrigger::Cron { expr } => match cron::Schedule::from_str(expr) {
-            Ok(s)  => Some(s),
-            Err(e) => {
-                tracing::error!(
-                    "plugin '{plugin_name}': invalid cron expression '{expr}': {e} \
-                     — scheduler not started"
-                );
-                return;
-            }
-        },
-        _ => None,
-    };
-
-    // Tracks the start time of the previous fire so FixedRate can compute
-    // "interval since previous start" rather than "interval since previous
-    // end" (= FixedDelay). On overrun the next fire happens immediately.
-    let mut last_fire_start: Option<std::time::Instant> = None;
-
-    loop {
-        if cancel.load(Ordering::Relaxed) { break; }
-
-        // Compute how long to sleep before the next fire.
-        let wait = match (&trigger, &cron_schedule) {
-            (ScheduleTrigger::FixedRate { interval_sec }, _) => {
-                match last_fire_start {
-                    None    => *interval_sec,
-                    Some(t) => interval_sec.saturating_sub(t.elapsed().as_secs()),
-                }
-            }
-            (ScheduleTrigger::FixedDelay { delay_sec }, _) => *delay_sec,
-            (ScheduleTrigger::Cron { .. }, Some(sched)) => {
-                let now = chrono::Utc::now();
-                match sched.upcoming(chrono::Utc).next() {
-                    Some(next) => {
-                        let delta = (next - now).num_seconds();
-                        if delta < 0 { 0 } else { delta as u64 }
-                    }
-                    None => break, // no future occurrence — done
-                }
-            }
-            _ => break,
+        let Some(sched) = self.scheduler.clone() else {
+            tracing::debug!(
+                "spawn_scheduler('{plugin_name}:{}') called before scheduler install — skipping",
+                schedule.action,
+            );
+            return;
+        };
+        let Some(self_arc) = self.self_arc.clone() else {
+            tracing::warn!(
+                "spawn_scheduler('{plugin_name}:{}'): host self-pointer missing — skipping",
+                schedule.action,
+            );
+            return;
         };
 
-        if wait > 0 && !sleep_with_cancel(wait, &cancel) { break; }
+        let action: ArcAction = Arc::new(LuaHookAction {
+            host:        self_arc,
+            plugin_name: plugin_name.to_string(),
+            action_name: schedule.action.clone(),
+        });
 
-        // Skip when focus-gated and the window is in the background. The
-        // clock keeps advancing — we just don't fire this tick.
-        let state = handle.state::<crate::AppState>();
-        if only_when_focused && !state.app_focused.load(Ordering::Relaxed) {
-            // Mark the (skipped) fire time so FixedRate doesn't catch up
-            // with a burst of back-to-back fires when focus returns.
-            last_fire_start = Some(std::time::Instant::now());
-            continue;
+        if let Err(e) = sched.register(
+            schedule_key(plugin_name, &schedule.action),
+            trigger_from(&schedule.trigger),
+            opts_from(schedule),
+            action,
+        ) {
+            tracing::warn!(
+                "scheduler register failed for '{plugin_name}:{}': {e}",
+                schedule.action,
+            );
         }
-
-        last_fire_start = Some(std::time::Instant::now());
-        // Fire. For fixed_delay the handler runs synchronously inside the
-        // host's plugin lock — the next sleep starts after `fire_hook_on`
-        // returns, which gives us the desired "wait N after handler" cadence.
-        if let Ok(host) = state.plugin_host.lock() {
-            let _ = host.fire_hook_on(&plugin_name, &action, "{}");
-        };
     }
-}
-
-/// Sleep `secs` seconds in 1-second slices, returning false if `cancel`
-/// flipped before the wait completed.
-fn sleep_with_cancel(secs: u64, cancel: &Arc<AtomicBool>) -> bool {
-    let mut left = secs;
-    while left > 0 {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        if cancel.load(Ordering::Relaxed) { return false; }
-        left -= 1;
-    }
-    true
 }

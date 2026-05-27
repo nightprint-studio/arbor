@@ -397,12 +397,9 @@ impl PluginHost {
         save_plugin_states(&states);
 
         for sched in schedules {
-            // `on_load` actions on schedules registered during main.lua are
-            // a fresh-VM concept — fire them here so the first activation
-            // matches the startup-load path.
-            if sched.on_load {
-                let _ = self.fire_hook_on(name, &sched.action, "{}");
-            }
+            // `on_load` is honoured by the shared engine itself (it fires
+            // once at registration before `initial_delay`), so we don't
+            // call `fire_hook_on` manually here — that would double-fire.
             self.spawn_scheduler(name, &sched);
         }
         Ok(())
@@ -465,15 +462,11 @@ impl PluginHost {
         states.insert(name.to_string(), false);
         save_plugin_states(&states);
 
-        // Cancel all schedulers for this plugin.
-        let keys: Vec<String> = self.scheduler_cancels.keys()
-            .filter(|k| k.starts_with(&format!("{name}:")))
-            .cloned()
-            .collect();
-        for k in keys {
-            if let Some(cancel) = self.scheduler_cancels.remove(&k) {
-                cancel.store(true, Ordering::Relaxed);
-            }
+        // Cancel every scheduled entry owned by this plugin in one shot.
+        if let Some(sched) = &self.scheduler {
+            sched.cancel_namespace(
+                &crate::plugin::runtime::scheduler::plugin_namespace(name),
+            );
         }
         Ok(())
     }
@@ -531,14 +524,10 @@ impl PluginHost {
                 for cancel in tc.values() { cancel.store(true, Ordering::Relaxed); }
             }
             // Cancel schedulers belonging to this plugin.
-            let keys: Vec<String> = self.scheduler_cancels.keys()
-                .filter(|k| k.starts_with(&format!("{name}:")))
-                .cloned()
-                .collect();
-            for k in keys {
-                if let Some(c) = self.scheduler_cancels.remove(&k) {
-                    c.store(true, Ordering::Relaxed);
-                }
+            if let Some(sched) = &self.scheduler {
+                sched.cancel_namespace(
+                    &crate::plugin::runtime::scheduler::plugin_namespace(name),
+                );
             }
             // Drop contributed UI state.
             self.contributions.remove_plugin(name);
@@ -566,11 +555,7 @@ impl PluginHost {
 
         // Step 3: remove the global plugin_data folder for this plugin.
         let data_subdir = if cfg!(debug_assertions) { "plugin_data-dev" } else { "plugin_data" };
-        let data_root = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("arbor")
-            .join(data_subdir)
-            .join(name);
+        let data_root = arbor_core::prelude::arbor_config_path(data_subdir).join(name);
         if data_root.exists() {
             if let Err(e) = std::fs::remove_dir_all(&data_root) {
                 warnings.push(format!("failed to remove {}: {e}", data_root.display()));

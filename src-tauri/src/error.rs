@@ -70,6 +70,19 @@ impl From<arbor_cloud::CloudError> for AppError {
     }
 }
 
+/// Bridge `arbor_core::prelude::CoreError` (paths / http builder failures) into the
+/// host enum. Mapped to existing variants so the wire shape stays
+/// untouched.
+impl From<arbor_core::prelude::CoreError> for AppError {
+    fn from(e: arbor_core::prelude::CoreError) -> Self {
+        use arbor_core::prelude::CoreError as C;
+        match e {
+            C::Io(e)   => AppError::Io(e),
+            C::Http(e) => AppError::Other(format!("HTTP: {e}")),
+        }
+    }
+}
+
 /// Implements Serialize so AppError can be returned from Tauri commands directly.
 impl serde::Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

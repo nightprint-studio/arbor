@@ -48,6 +48,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Marketplace auto-refresh toggles (refresh interval, poll cadence) now
+  take effect on the running schedule immediately instead of waiting for
+  the next poll cycle.
+- HTTP requests to Jira, Linear, and the GitHub releases API used by the
+  PortableGit downloader now share a uniform `Arbor-Git-GUI/<version>`
+  user-agent. Jira and Linear requests share a 30s timeout (was 30s and
+  20s respectively); the PortableGit download stays untimed since the
+  same connection streams a multi-MB archive.
 - Markdown editor live preview: GFM tables render as a real HTML table
   with framed cells, header row and column alignment from the
   `|:--:|--:|` markers; cell content supports bold, italic,

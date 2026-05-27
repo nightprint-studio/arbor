@@ -24,10 +24,7 @@ struct LegacySession {
 }
 
 fn legacy_session_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join("session.json")
+    arbor_core::prelude::arbor_config_path("session.json")
 }
 
 fn read_legacy_session() -> Option<LegacySession> {

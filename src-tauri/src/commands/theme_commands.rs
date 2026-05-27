@@ -33,10 +33,7 @@ pub fn themes_dir() -> PathBuf {
     } else {
         "themes"
     };
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join(filename)
+    arbor_core::prelude::arbor_config_path(filename)
 }
 
 // ---------------------------------------------------------------------------

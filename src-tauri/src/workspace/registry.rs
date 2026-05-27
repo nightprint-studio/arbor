@@ -124,10 +124,7 @@ impl RepoRegistry {
 // ---------------------------------------------------------------------------
 
 pub fn registry_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join("repos.json")
+    arbor_core::prelude::arbor_config_path("repos.json")
 }
 
 pub fn load() -> RepoRegistry {

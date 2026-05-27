@@ -1,97 +1,125 @@
-//! Background auto-refresh scheduler for the marketplace catalog.
+//! Marketplace auto-refresh — one entry in the shared `arbor-scheduler`
+//! engine.
 //!
-//! Arbor is meant to stay open for long stretches — a fetch only on modal
-//! open isn't enough. This task wakes every `poll_minutes` minutes, reads
-//! the user's configured interval, and re-fetches if the cache has aged
-//! past it. Failures are logged but never surfaced — the next manual
-//! Refresh is always available.
+//! Behaviour mirrored from the previous bespoke loop:
 //!
-//! Config lives in `AppConfig.marketplace`:
-//!   * `refresh_hours`: `Some(0)` / `None` → auto-refresh disabled,
-//!                      `Some(n)`           → refresh every n hours.
-//!   * `poll_minutes`:  how often the scheduler wakes up to decide
-//!                      whether to fire (default 10, clamped to [1, 60]).
+//!   * `refresh_hours = None` / `Some(0)` → auto-refresh disabled.
+//!   * `refresh_hours = Some(n)`          → refresh whenever the on-disk
+//!                                          cache is older than `n` hours.
+//!   * `poll_minutes`  → how often the engine wakes up to re-evaluate
+//!                       the "is it time?" gate (clamped to [1, 60]).
 //!
-//! Reads the config on every poll, so changes propagate within at most
-//! one poll cycle without needing to restart the scheduler.
+//! The two settings are exposed via [`apply_refresh_hours`] /
+//! [`apply_poll_minutes`], called from `marketplace_set_*` commands so
+//! the running schedule reconfigures on the fly — no app restart.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use arbor_scheduler::prelude::*;
 use tauri::{AppHandle, Manager};
 
 use crate::AppState;
-
 use super::cache;
 
-/// Lower bound for the poll cadence — anything finer is wasted work.
-const MIN_POLL_MINUTES: u32 = 1;
-/// Upper bound — going past an hour starts to lag too far behind setting
-/// changes (toggle off → still fires once for up to an hour).
-const MAX_POLL_MINUTES: u32 = 60;
-/// Fallback used when the config value is missing or out of range.
+const NAMESPACE: &str = "marketplace";
+const NAME:      &str = "auto_refresh";
+
+const MIN_POLL_MINUTES:     u32 = 1;
+const MAX_POLL_MINUTES:     u32 = 60;
 const DEFAULT_POLL_MINUTES: u32 = 10;
 
-/// Hand-off from the Tauri `setup()` callback. Spawns a long-lived
-/// background task; never blocks the caller.
-pub fn start(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        run(app).await;
-    });
+fn key() -> ScheduleKey {
+    ScheduleKey::new(NAMESPACE, NAME)
 }
 
-async fn run(app: AppHandle) {
-    loop {
-        let poll_secs = read_poll_secs(&app);
-        tokio::time::sleep(std::time::Duration::from_secs(poll_secs)).await;
+/// Register the auto-refresh schedule against the shared engine. Called
+/// from Tauri `setup()` after the scheduler is installed in `AppState`.
+/// Failure is logged + swallowed — a broken auto-refresh must never
+/// prevent the app from booting; manual `Refresh` stays available.
+pub fn install(app: AppHandle) {
+    let state = app.state::<AppState>();
+    let Some(sched) = state.scheduler() else {
+        tracing::warn!("marketplace scheduler: shared engine not available — skipping");
+        return;
+    };
 
-        let interval_secs = match read_interval_secs(&app) {
-            Some(s) => s,
-            None    => continue, // user disabled auto-refresh
-        };
+    let (poll_minutes, hours) = read_settings(&app);
+    let trigger = trigger_for(poll_minutes);
+    let enabled = hours.is_some();
 
-        let age = current_cache_age_secs();
-        if age < interval_secs {
-            continue;
+    let app_for_action = app.clone();
+    let app_for_gate   = app.clone();
+
+    let opts = ScheduleOpts {
+        gate: Some(Arc::new(move || is_refresh_due(&app_for_gate))),
+        ..Default::default()
+    };
+
+    let action: ArcAction = Arc::new(FnAction(move || {
+        let app = app_for_action.clone();
+        async move {
+            let state = app.state::<AppState>();
+            match super::refresh_community(&state.marketplace).await {
+                Ok(()) => tracing::info!("marketplace auto-refresh: catalog refreshed"),
+                Err(e) => tracing::warn!("marketplace auto-refresh failed: {e}"),
+            }
         }
+    }));
 
-        // Cache is stale (or missing). Fire the refresh.
-        let state = app.state::<AppState>();
-        match super::refresh_community(&state.marketplace).await {
-            Ok(()) => tracing::info!(
-                "marketplace auto-refresh: catalog refreshed (was {age}s old, interval {interval_secs}s)"
-            ),
-            Err(e) => tracing::warn!("marketplace auto-refresh failed: {e}"),
-        }
+    if let Err(e) = sched.register_with(key(), trigger, opts, action, enabled) {
+        tracing::warn!("marketplace scheduler: register failed: {e}");
     }
 }
 
-/// Resolve the configured refresh interval in seconds, or `None` when the
-/// user has disabled the scheduler (refresh_hours = 0 or unset).
-fn read_interval_secs(app: &AppHandle) -> Option<u64> {
-    let state = app.state::<AppState>();
-    let cfg = state.config.lock().ok()?;
-    let hours = cfg.marketplace.refresh_hours?;
-    if hours == 0 { return None; }
-    Some(u64::from(hours) * 3600)
+/// On-the-fly reconfiguration when the user toggles `refresh_hours`.
+/// `None` / `Some(0)` parks the schedule (no thread teardown — the entry
+/// stays registered, just disabled). Any positive value re-enables it.
+pub fn apply_refresh_hours(app: &AppHandle, hours: Option<u32>) {
+    let Some(sched) = app.state::<AppState>().scheduler() else { return; };
+    let enabled = matches!(hours, Some(n) if n > 0);
+    sched.set_enabled(&key(), enabled);
 }
 
-/// Resolve the configured polling cadence in seconds, clamped to a sane
-/// range. Falls back to the default when the lock fails or the value
-/// is out of bounds.
-fn read_poll_secs(app: &AppHandle) -> u64 {
-    let state = app.state::<AppState>();
-    let raw = state.config.lock().ok()
-        .map(|c| c.marketplace.poll_minutes)
-        .unwrap_or(DEFAULT_POLL_MINUTES);
-    let clamped = raw.clamp(MIN_POLL_MINUTES, MAX_POLL_MINUTES);
-    u64::from(clamped) * 60
+/// On-the-fly reconfiguration when the user changes `poll_minutes`.
+/// Swaps the trigger; the running task picks up the new cadence on its
+/// very next wake-up.
+pub fn apply_poll_minutes(app: &AppHandle, minutes: u32) {
+    let Some(sched) = app.state::<AppState>().scheduler() else { return; };
+    if let Err(e) = sched.update_trigger(&key(), trigger_for(minutes)) {
+        tracing::warn!("marketplace scheduler: update_trigger failed: {e}");
+    }
 }
 
-/// Seconds since the on-disk cache was last written. `u64::MAX` when the
-/// cache is missing — that's "infinitely stale" so the next poll fires
-/// immediately.
+fn trigger_for(minutes: u32) -> Trigger {
+    let clamped = minutes.clamp(MIN_POLL_MINUTES, MAX_POLL_MINUTES);
+    Trigger::FixedDelay { delay: Duration::from_secs(u64::from(clamped) * 60) }
+}
+
+fn read_settings(app: &AppHandle) -> (u32, Option<u32>) {
+    let state = app.state::<AppState>();
+    let Ok(cfg) = state.config.lock() else {
+        return (DEFAULT_POLL_MINUTES, None);
+    };
+    (cfg.marketplace.poll_minutes, cfg.marketplace.refresh_hours)
+}
+
+/// Gate predicate evaluated by the engine on every tick. `false` skips
+/// the fire without unscheduling the task — settings can flip back on
+/// without re-registering.
+fn is_refresh_due(app: &AppHandle) -> bool {
+    let (_, hours) = read_settings(app);
+    let Some(h) = hours.filter(|h| *h > 0) else { return false; };
+    let interval = u64::from(h) * 3600;
+    current_cache_age_secs() >= interval
+}
+
+/// Seconds since the cache was last written. `u64::MAX` when the cache
+/// is missing — that's "infinitely stale" so the next gate evaluation
+/// fires immediately.
 fn current_cache_age_secs() -> u64 {
     let Some(file) = cache::load_any() else { return u64::MAX; };
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     now.saturating_sub(file.fetched_at)
 }

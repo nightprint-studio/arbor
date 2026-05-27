@@ -29,10 +29,7 @@ pub type SettingsMap = serde_json::Map<String, serde_json::Value>;
 /// stable Arbor's per-plugin settings.
 pub fn global_settings_path(plugin_name: &str) -> PathBuf {
     let data_subdir = if cfg!(debug_assertions) { "plugin_data-dev" } else { "plugin_data" };
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join(data_subdir)
+    arbor_core::prelude::arbor_config_path(data_subdir)
         .join(plugin_name)
         .join("global.json")
 }

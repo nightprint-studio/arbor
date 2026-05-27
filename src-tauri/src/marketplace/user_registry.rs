@@ -69,10 +69,7 @@ pub fn path() -> PathBuf {
     } else {
         "user_registry.toml"
     };
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join(filename)
+    arbor_core::prelude::arbor_config_path(filename)
 }
 
 // ---------------------------------------------------------------------------

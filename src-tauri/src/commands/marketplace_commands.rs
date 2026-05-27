@@ -94,19 +94,23 @@ pub fn marketplace_get_refresh_hours(state: State<'_, AppState>) -> Result<Optio
 /// the scheduler. The change takes effect on the next poll cycle.
 #[tauri::command]
 pub fn marketplace_set_refresh_hours(
+    app:   tauri::AppHandle,
     state: State<'_, AppState>,
     hours: Option<u32>,
 ) -> Result<()> {
+    let normalized = match hours {
+        Some(0) => None,
+        other   => other,
+    };
     let snapshot = {
         let mut cfg = state.lock_config()?;
-        cfg.marketplace.refresh_hours = match hours {
-            Some(0) => None,
-            other   => other,
-        };
+        cfg.marketplace.refresh_hours = normalized;
         cfg.clone()
     };
     crate::config::app_config::save(&snapshot)
         .map_err(|e| AppError::Other(format!("could not persist marketplace refresh hours: {e}")))?;
+    // Park / re-arm the running schedule without restarting it.
+    marketplace::scheduler::apply_refresh_hours(&app, normalized);
     Ok(())
 }
 
@@ -121,16 +125,20 @@ pub fn marketplace_get_poll_minutes(state: State<'_, AppState>) -> Result<u32> {
 /// persisted — values outside the range fall back to the default.
 #[tauri::command]
 pub fn marketplace_set_poll_minutes(
+    app:     tauri::AppHandle,
     state:   State<'_, AppState>,
     minutes: u32,
 ) -> Result<()> {
+    let clamped = minutes.clamp(1, 60);
     let snapshot = {
         let mut cfg = state.lock_config()?;
-        cfg.marketplace.poll_minutes = minutes.clamp(1, 60);
+        cfg.marketplace.poll_minutes = clamped;
         cfg.clone()
     };
     crate::config::app_config::save(&snapshot)
         .map_err(|e| AppError::Other(format!("could not persist marketplace poll minutes: {e}")))?;
+    // Swap the running schedule's cadence on the fly.
+    marketplace::scheduler::apply_poll_minutes(&app, clamped);
     Ok(())
 }
 

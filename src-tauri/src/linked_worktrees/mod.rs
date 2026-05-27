@@ -342,10 +342,7 @@ impl WorktreeLinkRegistry {
 // ---------------------------------------------------------------------------
 
 pub fn links_file_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join("linked_worktrees.toml")
+    arbor_core::prelude::arbor_config_path("linked_worktrees.toml")
 }
 
 pub fn load() -> WorktreeLinkRegistry {

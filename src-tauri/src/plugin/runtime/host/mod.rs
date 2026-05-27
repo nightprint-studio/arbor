@@ -13,9 +13,9 @@ pub mod lifecycle;
 pub mod pipeline_op;
 pub mod service;
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Weak};
+
+use arbor_scheduler::prelude::Scheduler;
 
 use super::loaded::{DormantPlugin, LoadedPlugin};
 use super::manifest::deps::PluginLoadFailure;
@@ -29,8 +29,16 @@ pub struct PluginHost {
     /// can flip them back on.
     pub dormant:    Vec<DormantPlugin>,
     pub(crate) app_handle: Option<tauri::AppHandle>,
-    /// Cancel tokens keyed by "<plugin_name>:<schedule_action>" for schedulers.
-    pub(crate) scheduler_cancels: HashMap<String, Arc<AtomicBool>>,
+    /// Shared trigger engine. Set once at boot via [`set_scheduler`] (after
+    /// `setup()` has constructed it on the running Tokio runtime). `None`
+    /// means "scheduling disabled" — plugin lifecycle code that needs to
+    /// register / cancel schedules treats `None` as a no-op rather than
+    /// panicking.
+    pub(crate) scheduler: Option<Arc<Scheduler>>,
+    /// Weak self-reference, set alongside [`set_scheduler`]. Lua-bridge
+    /// actions installed in the engine upgrade this to call back into
+    /// `fire_hook_on`; using `Weak` avoids a self-strong-cycle.
+    pub(crate) self_arc: Option<Weak<Mutex<PluginHost>>>,
     /// Plugins that failed to load due to dependency errors (shown in Plugin Manager).
     pub load_failures: Vec<PluginLoadFailure>,
     /// Cross-plugin contribution registry (arbor.ui.contribute).
@@ -47,7 +55,8 @@ impl PluginHost {
             plugins:           Vec::new(),
             dormant:           Vec::new(),
             app_handle:        None,
-            scheduler_cancels: HashMap::new(),
+            scheduler:         None,
+            self_arc:          None,
             load_failures:     Vec::new(),
             contributions:     crate::plugin::contribution::ContributionRegistry::new(),
             tree_store:        crate::plugin::tree::TreeStore::new(),
@@ -59,15 +68,32 @@ impl PluginHost {
         self.app_handle = Some(handle);
     }
 
+    /// Wire the shared trigger engine + the weak self-pointer used by
+    /// scheduler-fired Lua actions to call back into [`Self::fire_hook_on`].
+    /// Called once at boot from `setup()` after `AppState` is `manage`d
+    /// and the Tokio runtime handle has been captured.
+    pub fn install_scheduler(
+        &mut self,
+        scheduler: Arc<Scheduler>,
+        self_arc:  Weak<Mutex<PluginHost>>,
+    ) {
+        self.scheduler = Some(scheduler);
+        self.self_arc  = Some(self_arc);
+    }
+
     /// Tear down every loaded plugin without re-discovering anything from
     /// disk. Used by `reload()` (before re-loading) and by the master plugin
     /// kill-switch when the user toggles the system off in the Plugin Manager.
     pub fn unload_all(&mut self) {
-        // Cancel all existing schedulers and Lua timers.
-        for cancel in self.scheduler_cancels.values() {
-            cancel.store(true, Ordering::Relaxed);
+        // Cancel every scheduled entry that any plugin owns. The shared
+        // engine cancels by namespace so we don't have to walk plugin-by-plugin.
+        if let Some(sched) = &self.scheduler {
+            for plugin in &self.plugins {
+                sched.cancel_namespace(
+                    &super::scheduler::plugin_namespace(&plugin.manifest.name),
+                );
+            }
         }
-        self.scheduler_cancels.clear();
 
         // Fire on_plugin_unload on all currently loaded (enabled) plugins.
         for plugin in &self.plugins {
@@ -79,7 +105,7 @@ impl PluginHost {
             // Cancel all Lua timers.
             if let Ok(tc) = plugin.timer_cancels.lock() {
                 for cancel in tc.values() {
-                    cancel.store(true, Ordering::Relaxed);
+                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         }

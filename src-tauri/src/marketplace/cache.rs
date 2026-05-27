@@ -32,10 +32,7 @@ pub fn path() -> PathBuf {
     } else {
         "marketplace_cache.json"
     };
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join(filename)
+    arbor_core::prelude::arbor_config_path(filename)
 }
 
 fn now_secs() -> u64 {
@@ -105,10 +102,7 @@ fn custom_cache_path() -> PathBuf {
     } else {
         "marketplace_custom.json"
     };
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join(filename)
+    arbor_core::prelude::arbor_config_path(filename)
 }
 
 pub fn load_custom() -> Vec<MarketplacePlugin> {

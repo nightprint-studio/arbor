@@ -203,10 +203,7 @@ pub fn plugin_dir() -> PathBuf {
             }
         }
     }
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join("plugins")
+    arbor_core::prelude::arbor_config_path("plugins")
 }
 
 // ---------------------------------------------------------------------------
@@ -278,10 +275,7 @@ fn plugin_states_path() -> PathBuf {
     } else {
         "plugin_states.json"
     };
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join(filename)
+    arbor_core::prelude::arbor_config_path(filename)
 }
 
 pub(crate) fn load_plugin_states() -> HashMap<String, bool> {

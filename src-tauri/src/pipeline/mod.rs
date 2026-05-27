@@ -485,7 +485,7 @@ pub fn now_ms() -> i64 {
 const RUN_LOG_CAP: usize = 5_000;
 
 fn run_store_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|p| p.join("arbor").join("pipeline_runs"))
+    arbor_core::prelude::try_arbor_config_path("pipeline_runs")
 }
 
 fn persist_run(run: &PipelineRun) {

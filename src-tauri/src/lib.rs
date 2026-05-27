@@ -5,6 +5,7 @@ use tauri::Manager;
 #[cfg(any(not(debug_assertions), feature = "deep-link-dev"))]
 use tauri_plugin_deep_link::DeepLinkExt;
 
+mod app_ctx;
 mod error;
 mod process_ext;
 mod platform;
@@ -56,6 +57,8 @@ use crate::cloud::{CloudCancellations, CloudPendingOps};
 // crate — see `cloud/mod.rs` for the layout / Phase A vs Phase B split.
 use crate::brp::BrpRegistry;
 use crate::marketplace::MarketplaceRegistry;
+use std::sync::OnceLock;
+use arbor_scheduler::prelude::Scheduler;
 
 // ---------------------------------------------------------------------------
 // Application state — shared across all Tauri commands
@@ -161,6 +164,12 @@ pub struct AppState {
     /// progress events, so events never land before listeners exist. The
     /// fallback timeout means a hung / missing frontend can't strand boot.
     pub frontend_ready: Arc<(Mutex<bool>, Condvar)>,
+    /// Shared trigger engine — drives both the marketplace auto-refresh
+    /// and every plugin-declared `arbor.scheduler.register`. Filled inside
+    /// `setup()` once the Tokio runtime handle is reachable (an `OnceLock`
+    /// because `AppState::new()` runs before the runtime is available).
+    /// Read via [`AppState::scheduler`].
+    pub scheduler: Arc<OnceLock<Arc<Scheduler>>>,
 }
 
 impl AppState {
@@ -334,9 +343,17 @@ impl AppState {
             boot_done:              Arc::new(AtomicBool::new(false)),
             boot_progress:          Arc::new(Mutex::new(None)),
             frontend_ready:         Arc::new((Mutex::new(false), Condvar::new())),
+            scheduler:              Arc::new(OnceLock::new()),
         }
     }
 
+    /// Shared trigger engine, once `setup()` has built it. Returns `None`
+    /// during the brief window between `AppState::new()` and the scheduler
+    /// being wired in — callers in that window should log + skip rather
+    /// than panic.
+    pub fn scheduler(&self) -> Option<Arc<Scheduler>> {
+        self.scheduler.get().cloned()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -437,13 +454,47 @@ pub fn run() {
                 }
             }
 
-            // Marketplace auto-refresh scheduler — long-lived background
-            // task that polls the cache age and re-fetches when it ages
-            // past the user's configured interval. Reads
-            // `AppConfig.marketplace.refresh_hours` on every poll so
-            // settings changes propagate without restart. Disabled when
-            // the setting is `Some(0)` / `None`.
-            crate::marketplace::scheduler::start(app.handle().clone());
+            // Shared trigger engine (`arbor-scheduler`). Built once on the
+            // tauri-managed Tokio runtime + wired into `AppState` and
+            // `PluginHost` BEFORE either the marketplace auto-refresh or
+            // the plugin boot thread tries to register against it.
+            {
+                let state = app.state::<AppState>();
+
+                // Tauri's `async_runtime::spawn` is usable from sync
+                // `setup()` and runs the future on its internal Tokio
+                // runtime — capture `Handle::current()` from inside that
+                // future to get the runtime handle the scheduler needs.
+                let (tx, rx) = std::sync::mpsc::sync_channel::<tokio::runtime::Handle>(1);
+                tauri::async_runtime::spawn(async move {
+                    let _ = tx.send(tokio::runtime::Handle::current());
+                });
+                let rt_handle = rx.recv()
+                    .expect("could not capture tokio runtime handle for arbor-scheduler");
+
+                let ctx: Arc<dyn arbor_core::prelude::AppCtx> = Arc::new(
+                    crate::app_ctx::TauriAppCtx::new(
+                        app.handle().clone(),
+                        state.app_focused.clone(),
+                    )
+                );
+                let scheduler = Arc::new(Scheduler::new(ctx, rt_handle));
+                let _ = state.scheduler.set(scheduler.clone());
+
+                // Hand the scheduler + a weak self-pointer to PluginHost so
+                // Lua-fired actions can call back into `fire_hook_on`.
+                let host_arc = state.plugin_host.clone();
+                {
+                    let mut host = host_arc.lock()
+                        .expect("plugin_host poisoned during scheduler install");
+                    host.install_scheduler(scheduler, Arc::downgrade(&host_arc));
+                }
+            }
+
+            // Marketplace auto-refresh — one entry in the shared engine.
+            // Settings reads ride the `gate` closure so toggling
+            // `refresh_hours` / `poll_minutes` reconfigures on the fly.
+            crate::marketplace::scheduler::install(app.handle().clone());
 
             // Plugin loading moved to a background thread so the webview can
             // mount + render its boot-splash overlay BEFORE the (potentially

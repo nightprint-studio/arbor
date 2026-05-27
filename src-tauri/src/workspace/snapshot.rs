@@ -50,10 +50,7 @@ pub struct TabSnapshot {
 }
 
 fn snapshot_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join("workspace-state")
+    arbor_core::prelude::arbor_config_path("workspace-state")
 }
 
 fn snapshot_path(ws_id: &str) -> PathBuf {

@@ -243,10 +243,7 @@ fn find_on_path() -> Option<PathBuf> {
 /// Path where [`download_portable`] extracts PortableGit and where we look for
 /// it on subsequent launches.
 pub fn portable_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join("git")
+    arbor_core::prelude::arbor_config_path("git")
 }
 
 fn portable_executable() -> PathBuf {
@@ -364,8 +361,12 @@ where
         stage: "resolving", message: "Querying git-for-windows latest release…".into(), bytes: 0, total: 0,
     });
 
+    // Build manually (not through arbor_core::prelude::client) because the same
+    // client streams the ~50 MB PortableGit SFX below — the standard 30s
+    // request timeout would abort the download on slow connections, and
+    // reqwest's builder offers no way to clear a timeout once it's set.
     let client = reqwest::Client::builder()
-        .user_agent("arbor-git-gui")
+        .user_agent(arbor_core::prelude::USER_AGENT)
         .build()
         .map_err(|e| err(format!("http client: {e}")))?;
 

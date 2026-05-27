@@ -61,10 +61,7 @@ pub fn path() -> PathBuf {
     } else {
         "marketplace_installed.json"
     };
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join(filename)
+    arbor_core::prelude::arbor_config_path(filename)
 }
 
 // ---------------------------------------------------------------------------
@@ -153,8 +150,5 @@ pub fn marketplace_plugin_dir() -> PathBuf {
     } else {
         "marketplace_plugins"
     };
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join(filename)
+    arbor_core::prelude::arbor_config_path(filename)
 }

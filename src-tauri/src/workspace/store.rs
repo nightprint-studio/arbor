@@ -279,10 +279,7 @@ impl WorkspaceStore {
 // ---------------------------------------------------------------------------
 
 pub fn store_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join("workspaces.json")
+    arbor_core::prelude::arbor_config_path("workspaces.json")
 }
 
 pub fn load() -> WorkspaceStore {

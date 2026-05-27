@@ -1,8 +1,17 @@
 [workspace]
 resolver = "2"
+# Explicit members list (not a `crates/*` glob): the rest of the directories
+# under `crates/` are scaffolded stubs (see docs/crate-refactor.md) without a
+# `src/lib.rs` yet, and Cargo would refuse to compile the workspace if it
+# picked them up. Each future PR in the refactor activates one crate by
+# appending its path here and adding the crate's `src/lib.rs`.
 members = [
     "src-tauri",
-    "crates/*",
+    "crates/arbor-auth",
+    "crates/arbor-cloud",
+    "crates/arbor-process-ext",
+    "crates/core",
+    "crates/scheduler",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────

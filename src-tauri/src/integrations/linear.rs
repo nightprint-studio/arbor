@@ -31,11 +31,7 @@ pub fn delete_token() -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .user_agent("Arbor-Git-GUI/1.0")
-        .build()
-        .unwrap_or_default()
+    arbor_core::prelude::client()
 }
 
 /// Raw GraphQL call with an explicit token. Used by the validation flow before

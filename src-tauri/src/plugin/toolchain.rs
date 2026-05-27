@@ -16,10 +16,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 pub fn toolchains_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("arbor")
-        .join("toolchains")
+    arbor_core::prelude::arbor_config_path("toolchains")
 }
 
 // ---------------------------------------------------------------------------

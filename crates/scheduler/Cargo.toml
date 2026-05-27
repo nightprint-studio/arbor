@@ -11,7 +11,6 @@ description  = "Trigger engine (FixedRate / FixedDelay / Cron) with cooperative 
 arbor-core = { path = "../core" }
 
 serde       = { workspace = true }
-serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 tracing     = { workspace = true }
 tokio       = { workspace = true }
@@ -20,4 +19,4 @@ async-trait = { workspace = true }
 # Cron-expression parser (6-field Spring-style). Same crate already used by the
 # Lua plugin scheduler today.
 cron   = "0.13"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = "0.4"
