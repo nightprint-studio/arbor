@@ -44,7 +44,7 @@ use crate::brp::{
     run_watch_stream,
 };
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 
@@ -73,7 +73,7 @@ fn install_connect(
 ) -> Result<()> {
     let pname = ctx.plugin_name.clone();
     let net_perm = ctx.network_perm.clone();
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
 
     let fn_ = lua
         .create_function(move |lua_ctx, args: mlua::MultiValue| {
@@ -146,7 +146,7 @@ async fn perform_connect(
 // ─── disconnect ──────────────────────────────────────────────────────────
 
 fn install_disconnect(ctx: &ApiCtx, lua: &Lua, brp_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua
         .create_function(move |lua_ctx, _: ()| {
             let Some(ref h) = handle else {
@@ -169,7 +169,7 @@ fn install_disconnect(ctx: &ApiCtx, lua: &Lua, brp_table: &Table) -> Result<()> 
 // ─── status ──────────────────────────────────────────────────────────────
 
 fn install_status(ctx: &ApiCtx, lua: &Lua, brp_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua
         .create_function(move |lua_ctx, _: ()| {
             let Some(ref h) = handle else {
@@ -199,7 +199,7 @@ fn install_call(
     counter: Arc<AtomicU64>,
 ) -> Result<()> {
     let pname = ctx.plugin_name.clone();
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
 
     let fn_ = lua
         .create_function(move |lua_ctx, args: mlua::MultiValue| {
@@ -267,7 +267,7 @@ fn install_watch(
     counter: Arc<AtomicU64>,
 ) -> Result<()> {
     let pname = ctx.plugin_name.clone();
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
 
     let fn_ = lua
         .create_function(move |lua_ctx, args: mlua::MultiValue| {
@@ -378,7 +378,7 @@ fn install_watch(
 
 fn install_unwatch(ctx: &ApiCtx, lua: &Lua, brp_table: &Table) -> Result<()> {
     let pname = ctx.plugin_name.clone();
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
 
     let fn_ = lua
         .create_function(move |_lua_ctx, sub_id: mlua::Integer| {

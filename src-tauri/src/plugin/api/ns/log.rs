@@ -6,7 +6,7 @@ use mlua::{Lua, Table};
 
 use crate::error::{AppError, Result};
 
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let log_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -14,7 +14,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     for level in &["debug", "info", "warn", "error"] {
         let lvl       = level.to_string();
         let pname     = ctx.plugin_name.clone();
-        let handle    = ctx.app_handle.clone();
+        let handle    = ctx.app_handle();
         let enabled_c = ctx.enabled.clone();
         let log_fn = lua
             .create_function(move |_, msg: String| {

@@ -15,7 +15,7 @@ use mlua::{Lua, LuaSerdeExt, SerializeOptions, Table};
 use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, err2, ok2};
 
 // `Option::None` / `serde_json::Value::Null` should reach Lua as plain `nil`,
@@ -66,7 +66,7 @@ macro_rules! block_on_provider {
 /// Ultimate, GitHub repo with GHAS off, etc.).
 fn install_supports(ctx: &ApiCtx, lua: &Lua, sec: &Table) -> Result<()> {
     let provider_read = ctx.provider_read;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, opts: Option<Table>| -> LuaTuple {
         if !provider_read {
             return Err(mlua::Error::RuntimeError(
@@ -110,7 +110,7 @@ fn install_supports(ctx: &ApiCtx, lua: &Lua, sec: &Table) -> Result<()> {
 /// clamped to `[7, 90]`.
 fn install_summary(ctx: &ApiCtx, lua: &Lua, sec: &Table) -> Result<()> {
     let provider_read = ctx.provider_read;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, opts: Option<Table>| -> LuaTuple {
         if !provider_read {
             return Err(mlua::Error::RuntimeError(
@@ -197,7 +197,7 @@ fn install_findings(ctx: &ApiCtx, lua: &Lua, sec: &Table) -> Result<()> {
     }
 
     let provider_read = ctx.provider_read;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, opts: Option<Table>| -> LuaTuple {
         if !provider_read {
             return Err(mlua::Error::RuntimeError(
@@ -280,7 +280,7 @@ fn install_findings(ctx: &ApiCtx, lua: &Lua, sec: &Table) -> Result<()> {
 /// deltas in the same call (e.g. compare new counts against a snapshot).
 fn install_refresh_active_tab(ctx: &ApiCtx, lua: &Lua, sec: &Table) -> Result<()> {
     let provider_read = ctx.provider_read;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, opts: Option<Table>| -> LuaTuple {
         if !provider_read {
             return Err(mlua::Error::RuntimeError(

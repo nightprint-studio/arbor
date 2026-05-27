@@ -34,7 +34,7 @@ use mlua::{Lua, Table};
 use tauri::Emitter;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     let op_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -57,7 +57,7 @@ fn scoped_id(plugin: &str, raw: &str) -> String {
 
 fn install_start(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
     let pname  = ctx.plugin_name.clone();
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, cfg: Table| {
         let raw_id: String = cfg.get::<String>("id").map_err(|_| {
             mlua::Error::RuntimeError("arbor.ui.operation.start: 'id' is required".into())
@@ -110,7 +110,7 @@ fn install_start(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
 
 fn install_set_current(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
     let pname  = ctx.plugin_name.clone();
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, args: mlua::MultiValue| {
         // Accept (id, step_key) or (id, step_key, detail).
         let mut it = args.into_iter();
@@ -145,7 +145,7 @@ fn install_set_current(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> 
 
 fn install_update_step(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
     let pname  = ctx.plugin_name.clone();
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, (id, step, patch): (String, String, Table)| {
         let status: Option<String> = patch.get::<Option<String>>("status").ok().flatten();
         let detail: Option<String> = patch.get::<Option<String>>("detail").ok().flatten();
@@ -167,7 +167,7 @@ fn install_update_step(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> 
 
 fn install_finish(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
     let pname  = ctx.plugin_name.clone();
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, (id, opts): (String, Option<Table>)| {
         let (summary, error) = match opts {
             Some(t) => (

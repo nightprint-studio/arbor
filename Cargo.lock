@@ -107,6 +107,7 @@ dependencies = [
  "arbor-cloud",
  "arbor-core",
  "arbor-plugin-api",
+ "arbor-plugin-core",
  "arbor-plugin-types",
  "arbor-process-ext",
  "arbor-scheduler",
@@ -218,6 +219,29 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "arbor-plugin-core"
+version = "0.2.0"
+dependencies = [
+ "arbor-core",
+ "arbor-plugin-api",
+ "arbor-plugin-types",
+ "arbor-scheduler",
+ "async-trait",
+ "dirs",
+ "mlua",
+ "quick-xml 0.36.2",
+ "regex",
+ "reqwest 0.12.28",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
 ]
 
 [[package]]

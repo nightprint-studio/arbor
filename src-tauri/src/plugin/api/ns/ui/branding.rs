@@ -16,7 +16,7 @@ use tauri::image::Image;
 
 use crate::commands::branding_commands::{emit_branding_changed, emit_theme_overlay};
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 
 /// Push `path` to the OS window-icon API so the taskbar / Alt-Tab list /
 /// window chrome reflect the override. Tauri requires a rasterised buffer
@@ -48,7 +48,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 }
 
 fn install_set_branding(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, cfg: mlua::Table| {
         // Fields are optional but at least one logo-or-icon source must be
@@ -132,7 +132,7 @@ fn install_set_branding(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 }
 
 fn install_clear_branding(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, ()| {
         if let Some(ref h) = handle {
@@ -154,7 +154,7 @@ fn install_clear_branding(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 }
 
 fn install_set_theme_tokens(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, cfg: mlua::Table| {
         let vars_tbl: mlua::Table = cfg.get("vars").map_err(|_| mlua::Error::RuntimeError(
@@ -182,7 +182,7 @@ fn install_set_theme_tokens(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 }
 
 fn install_clear_theme_tokens(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, ()| {
         if let Some(ref h) = handle {

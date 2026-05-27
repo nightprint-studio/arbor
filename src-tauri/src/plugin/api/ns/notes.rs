@@ -11,7 +11,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, boolerr2, err2, ok2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -28,7 +28,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
 
 fn install_list(ctx: &ApiCtx, lua: &Lua, notes_table: &Table) -> Result<()> {
     let git_read = ctx.git_read;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, commit_oid: String| -> LuaTuple {
         if !git_read {
             return Err(mlua::Error::RuntimeError(
@@ -73,7 +73,7 @@ fn install_list(ctx: &ApiCtx, lua: &Lua, notes_table: &Table) -> Result<()> {
 
 fn install_get(ctx: &ApiCtx, lua: &Lua, notes_table: &Table) -> Result<()> {
     let git_read = ctx.git_read;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, (commit_oid, namespace): (String, String)| -> LuaTuple {
         if !git_read {
             return Err(mlua::Error::RuntimeError(
@@ -111,7 +111,7 @@ fn install_get(ctx: &ApiCtx, lua: &Lua, notes_table: &Table) -> Result<()> {
 
 fn install_set(ctx: &ApiCtx, lua: &Lua, notes_table: &Table) -> Result<()> {
     let git_write = ctx.git_write;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, cfg: mlua::Table| -> LuaTuple {
         if !git_write {
@@ -162,7 +162,7 @@ fn install_set(ctx: &ApiCtx, lua: &Lua, notes_table: &Table) -> Result<()> {
 
 fn install_delete(ctx: &ApiCtx, lua: &Lua, notes_table: &Table) -> Result<()> {
     let git_write = ctx.git_write;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, (commit_oid, namespace): (String, String)| -> LuaTuple {
         if !git_write {

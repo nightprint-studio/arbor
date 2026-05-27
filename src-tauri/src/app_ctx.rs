@@ -39,7 +39,21 @@ impl TauriAppCtx {
     }
 }
 
+impl TauriAppCtx {
+    /// Internal accessor for the wrapped `AppHandle`. Used by the
+    /// src-tauri-side `ApiCtxExt::app_handle()` shim that bridges plugin-core's
+    /// `Arc<dyn AppCtx>` back to a concrete `tauri::AppHandle` for the ns/*
+    /// installers that haven't yet migrated to their own domain crates.
+    pub fn handle(&self) -> &AppHandle {
+        &self.handle
+    }
+}
+
 impl AppCtx for TauriAppCtx {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn emit(&self, event: &str, payload: serde_json::Value) {
         if let Err(e) = self.handle.emit(event, payload) {
             tracing::warn!("AppCtx emit '{event}' failed: {e}");

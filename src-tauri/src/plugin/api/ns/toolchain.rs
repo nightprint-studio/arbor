@@ -10,7 +10,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::convert::json_to_lua;
 use crate::plugin::api::helpers::tuple::{LuaTuple, boolerr2, err2, ok2};
 
@@ -31,7 +31,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
 
 fn install_list(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let read = ctx.toolchain_read || ctx.toolchain_write;
-    let h = ctx.app_handle.clone();
+    let h = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, kind: String| -> LuaTuple {
         if !read {
             return Err(mlua::Error::RuntimeError(
@@ -58,7 +58,7 @@ fn install_list(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_active(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let read = ctx.toolchain_read || ctx.toolchain_write;
-    let h = ctx.app_handle.clone();
+    let h = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, kind: String| -> LuaTuple {
         if !read {
             return Err(mlua::Error::RuntimeError(
@@ -90,7 +90,7 @@ fn install_active(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_env(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let read = ctx.toolchain_read || ctx.toolchain_write;
-    let h = ctx.app_handle.clone();
+    let h = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, cfg: mlua::Table| -> LuaTuple {
         if !read {
             return Err(mlua::Error::RuntimeError(
@@ -121,7 +121,7 @@ fn install_env(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_detect(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let read = ctx.toolchain_read || ctx.toolchain_write;
-    let h = ctx.app_handle.clone();
+    let h = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, kind: String| -> LuaTuple {
         if !read {
             return Err(mlua::Error::RuntimeError(
@@ -148,7 +148,7 @@ fn install_detect(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_add(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let write = ctx.toolchain_write;
-    let h = ctx.app_handle.clone();
+    let h = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, (kind, entry_table): (String, mlua::Table)| -> LuaTuple {
         if !write {
             return Err(mlua::Error::RuntimeError(
@@ -172,7 +172,7 @@ fn install_add(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_remove(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let write = ctx.toolchain_write;
-    let h = ctx.app_handle.clone();
+    let h = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, (kind, id): (String, String)| -> LuaTuple {
         if !write {
             return Err(mlua::Error::RuntimeError(
@@ -193,7 +193,7 @@ fn install_remove(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_set_active(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let write = ctx.toolchain_write;
-    let h = ctx.app_handle.clone();
+    let h = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, (kind, id): (String, String)| -> LuaTuple {
         if !write {
             return Err(mlua::Error::RuntimeError(

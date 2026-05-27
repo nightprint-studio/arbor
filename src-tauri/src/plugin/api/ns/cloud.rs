@@ -18,7 +18,7 @@ use tauri::Manager;
 use arbor_cloud::host::CloudHost;
 use crate::cloud::types::CloudConnection;
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, err2, ok2};
 
 pub(crate) fn install(_ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -167,7 +167,7 @@ fn install_test_connection(lua: &Lua, table: &Table) -> Result<()> {
 ///   { request_id = "...", ok = true,  reply = { … } }
 ///   { request_id = "...", ok = false, error = "..." }
 fn install_test_connection_async(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.test_connection_async";
         let Some(ref h) = handle else { return err2(lua_ctx, format!("{op}: app handle unavailable")); };
@@ -237,7 +237,7 @@ fn install_list(lua: &Lua, table: &Table) -> Result<()> {
 }
 
 fn install_list_stream(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.list_stream";
         let Some(ref h) = handle else { return err2(_lua_ctx, format!("{op}: app handle unavailable")); };
@@ -283,7 +283,7 @@ fn install_list_stream(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
 }
 
 fn install_search_stream(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.search_stream";
         let Some(ref h) = handle else { return err2(_lua_ctx, format!("{op}: app handle unavailable")); };
@@ -324,7 +324,7 @@ fn install_search_stream(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
 }
 
 fn install_cancel(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, stream_id: String| -> LuaTuple {
         let Some(ref h) = handle else { return err2(_lua_ctx, "arbor.cloud.cancel: app handle unavailable"); };
         let state = h.state::<crate::AppState>();
@@ -340,7 +340,7 @@ fn install_cancel(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
 }
 
 fn install_is_cancelled(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, stream_id: String| -> LuaTuple {
         let Some(ref h) = handle else { return err2(_lua_ctx, "arbor.cloud.is_cancelled: app handle unavailable"); };
         let state = h.state::<crate::AppState>();
@@ -417,7 +417,7 @@ fn install_copy(lua: &Lua, table: &Table) -> Result<()> {
 // ── transfers (return job_id) ──────────────────────────────────────────────
 
 fn install_download(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.download";
         let Some(ref h) = handle else { return err2(_lua_ctx, format!("{op}: app handle unavailable")); };
@@ -441,7 +441,7 @@ fn install_download(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
 }
 
 fn install_upload(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.upload";
         let Some(ref h) = handle else { return err2(_lua_ctx, format!("{op}: app handle unavailable")); };
@@ -466,7 +466,7 @@ fn install_upload(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
 }
 
 fn install_sync(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.sync";
         let Some(ref h) = handle else { return err2(_lua_ctx, format!("{op}: app handle unavailable")); };
@@ -500,7 +500,7 @@ fn install_sync(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
 // ── download_many ──────────────────────────────────────────────────────────
 
 fn install_download_many(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.download_many";
         let Some(ref h) = handle else { return err2(_lua_ctx, format!("{op}: app handle unavailable")); };
@@ -597,7 +597,7 @@ fn install_concat_files(lua: &Lua, table: &Table) -> Result<()> {
 // phase of the same card the download phase started.
 
 fn install_report_progress(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.report_progress";
         let Some(ref h) = handle else { return err2(_lua_ctx, format!("{op}: app handle unavailable")); };
@@ -624,7 +624,7 @@ fn install_report_progress(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()>
 }
 
 fn install_report_done(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.report_done";
         let Some(ref h) = handle else { return err2(_lua_ctx, format!("{op}: app handle unavailable")); };
@@ -696,7 +696,7 @@ fn install_report_done(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
 // or cancel. Mirrors the `arbor.ui.pick_file` round-trip pattern.
 
 fn install_pick_chunk_order(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.pick_chunk_order";
@@ -732,7 +732,7 @@ fn install_pick_chunk_order(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()
 // ── oauth start ────────────────────────────────────────────────────────────
 
 fn install_oauth_start(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let f = lua.create_function(move |_lua_ctx, opts: Table| -> LuaTuple {
         let op = "arbor.cloud.oauth_start";
         let Some(ref h) = handle else { return err2(_lua_ctx, format!("{op}: app handle unavailable")); };

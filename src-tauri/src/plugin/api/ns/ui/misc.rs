@@ -9,7 +9,7 @@ use mlua::{Lua, Table};
 use tauri::Emitter;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     install_open_path(ctx, lua, ui)?;
@@ -26,7 +26,7 @@ fn install_open_path(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     // its registered application; equivalent xdg-open / open behavior on
     // Linux / macOS. Useful for plugins that produce artefact folders
     // and want to expose a one-click "Open in file manager" affordance.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, path: String| {
         let Some(ref h) = handle else {
             return Err(mlua::Error::RuntimeError(
@@ -52,7 +52,7 @@ fn install_copy_to_clipboard(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> 
     // toast. Running it server-side would need a clipboard crate; going
     // via the frontend reuses the browser's permission model and keeps
     // this API sandbox-friendly.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, cfg: mlua::Table| {
         let text: String = cfg.get("text").map_err(|_|
@@ -76,7 +76,7 @@ fn install_open_job_output(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     // buffer and surface the JobOutputPanel in the bottom slot. No-op on
     // empty id; AppShell handles missing jobs by showing a "not found"
     // message in the panel (the call itself never fails).
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, job_id: String| {
         if job_id.is_empty() { return Ok(()); }
@@ -100,7 +100,7 @@ fn install_open_panel(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     // an entity in the top sidebar. AppShell parses the registered
     // sidebar contribution to decide left / right / bottom dispatch — the
     // plugin doesn't have to know its own side here.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, panel_id: String| {
         if panel_id.is_empty() { return Ok(()); }
@@ -120,7 +120,7 @@ fn install_show_pipeline_run(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> 
     // show_pipeline_run(run_id) — ask the frontend to open the
     // Pipelines bottom panel and focus the given run. No-op when the
     // run id is empty; AppShell decides whether to scroll / highlight.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, run_id: String| {
         if run_id.is_empty() { return Ok(()); }

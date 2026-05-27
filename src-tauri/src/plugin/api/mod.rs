@@ -1,121 +1,143 @@
-//! `arbor.*` Lua API surface.
+//! `arbor.*` Lua API surface — Tauri-shell side.
 //!
-//! `register()` is the single public entry point. Internally it builds an
-//! [`ApiCtx`] from the per-plugin parameters, then walks the namespace
-//! installers in `ns/*`. Each installer attaches one `arbor.<thing>` table
-//! and is responsible for its own closure captures.
+//! After PR #4 Step 5, the orchestrator (`register(...)`) and the shared
+//! [`ApiCtx`] both live in [`arbor_plugin_core::lua_api`]. This module owns
+//! the per-namespace installers that still need src-tauri-internal types
+//! (`git::*`, `pipeline::*`, `jobs::*`, `terminal::*`, `workspace::*`,
+//! `brp::*`, `cloud::*`, …) plus a thin shim that registers each of them
+//! as a [`LuaNamespaceInstaller`] with the plugin-core registry.
 //!
-//! Namespace files keep individual ops as small private `install_*`
-//! functions so the file structure mirrors the Lua surface 1:1.
+//! Each namespace is wrapped in a unit struct that adapts the legacy
+//! `pub fn install(&ApiCtx, &Lua, &Table) -> AppResult<()>` signature into
+//! the trait-required `-> PluginCoreResult<()>` (the only difference is
+//! the error type, mapped via `to_string`). As ns/* migrate into
+//! plugin-core in Step 6, their wrappers disappear from
+//! [`shell_installers`] and `register(...)` in plugin-core gains a direct
+//! hardcoded call instead.
 
-mod ctx;
-mod helpers;
+pub(crate) mod ctx;
+pub(crate) mod helpers;
 mod ns;
 
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
-use mlua::Lua;
+use mlua::{Lua, Table};
 
-use crate::error::{AppError, Result};
-use crate::plugin::contribution::ContributionRegistry;
-use arbor_plugin_types::prelude::{Permissions, ScheduleRegistry};
-use crate::plugin::runtime::{TimerCancels, TimerCounter};
-use crate::plugin::tree::{IconRegistry, TreeStore};
+use arbor_plugin_core::error::PluginCoreError;
+use arbor_plugin_core::prelude::{
+    ApiCtx, LuaNamespaceInstaller, PluginCoreResult,
+};
 
-use ctx::ApiCtx;
+use crate::error::Result;
 
-#[allow(clippy::too_many_arguments)]
-pub fn register(
-    lua: &Lua,
-    plugin_name: String,
-    plugin_dir: PathBuf,
-    arbor_api: u32,
-    app_handle: Option<tauri::AppHandle>,
-    timer_cancels: TimerCancels,
-    timer_counter: TimerCounter,
-    schedules:         ScheduleRegistry,
-    scheduler_enabled: bool,
-    // Permission snapshot captured at load time — never re-read from Lua globals.
-    permissions:       Permissions,
-    contributions:     ContributionRegistry,
-    tree_store:        TreeStore,
-    icon_registry:     IconRegistry,
-    // Live enable flag — closures that may keep firing after `disable_plugin`
-    // (timers, schedulers, async callbacks) consult this to no-op cleanly.
-    enabled:           Arc<AtomicBool>,
-) -> Result<()> {
-    let ctx = ApiCtx::from_register_args(
-        plugin_name,
-        plugin_dir,
-        arbor_api,
-        app_handle,
-        timer_cancels,
-        timer_counter,
-        schedules,
-        scheduler_enabled,
-        permissions,
-        contributions,
-        tree_store,
-        icon_registry,
-        enabled,
-    );
+/// Macro to declare a per-namespace `LuaNamespaceInstaller` wrapper. The
+/// wrapper struct is a zero-sized type; its `install(...)` thin-wraps the
+/// legacy `ns::*::install(&ctx, lua, arbor)` call and maps the host-side
+/// `AppError` into [`PluginCoreError::Plugin`].
+macro_rules! ns_installer {
+    ($name:ident, $path:path) => {
+        pub(crate) struct $name;
+        impl LuaNamespaceInstaller for $name {
+            fn install(
+                &self,
+                ctx: &ApiCtx,
+                lua: &Lua,
+                arbor: &Table,
+            ) -> PluginCoreResult<()> {
+                let f: fn(&ApiCtx, &Lua, &Table) -> Result<()> = $path;
+                f(ctx, lua, arbor)
+                    .map_err(|e| PluginCoreError::Plugin(e.to_string()))
+            }
+        }
+    };
+}
 
-    let arbor = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
+ns_installer!(LogInstaller,                ns::log::install);
+ns_installer!(EventsInstaller,             ns::events::install);
+ns_installer!(ServiceInstaller,            ns::service::install);
+ns_installer!(JsonInstaller,               ns::json::install);
+ns_installer!(JsonStudioInstaller,         ns::json_studio::install);
+ns_installer!(RonStudioInstaller,          ns::ron_studio::install);
+ns_installer!(TomlStudioInstaller,         ns::toml_studio::install);
+ns_installer!(YamlStudioInstaller,         ns::yaml_studio::install);
+ns_installer!(PropertiesStudioInstaller,   ns::properties_studio::install);
+ns_installer!(FsInstaller,                 ns::fs::install);
+ns_installer!(TextInstaller,               ns::text::install);
+ns_installer!(RepoInstaller,               ns::repo::install);
+ns_installer!(WorkspaceInstaller,          ns::workspace::install);
+ns_installer!(TabsInstaller,               ns::tabs::install);
+ns_installer!(LinkedWorktreesInstaller,    ns::linked_worktrees::install);
+ns_installer!(MetaInstaller,               ns::meta::install);
+ns_installer!(SettingsInstaller,           ns::settings::install);
+ns_installer!(ToolchainInstaller,          ns::toolchain::install);
+ns_installer!(TerminalInstaller,           ns::terminal::install);
+ns_installer!(JobInstaller,                ns::job::install);
+ns_installer!(HttpInstaller,               ns::http::install);
+ns_installer!(NotesInstaller,              ns::notes::install);
+ns_installer!(IssuesInstaller,             ns::issues::install);
+ns_installer!(TimerInstaller,              ns::timer::install);
+ns_installer!(SchedulerInstaller,          ns::scheduler::install);
+ns_installer!(UiInstaller,                 ns::ui::install);
+ns_installer!(KeybindingInstaller,         ns::keybinding::install);
+ns_installer!(CommandInstaller,            ns::command::install);
+ns_installer!(HooksInstaller,              ns::hooks::install);
+ns_installer!(ContributionInstaller,       ns::contribution::install);
+ns_installer!(NotifyInstaller,             ns::notify::install);
+ns_installer!(PipelineInstaller,           ns::pipeline::install);
+ns_installer!(MrInstaller,                 ns::mr::install);
+ns_installer!(CiInstaller,                 ns::ci::install);
+ns_installer!(SecurityInstaller,           ns::security::install);
+ns_installer!(CloudInstaller,              ns::cloud::install);
+ns_installer!(BrpInstaller,                ns::brp::install);
 
-    // Inject hook registry table (must exist before arbor.events.on is called).
-    let hooks_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
-    lua.globals()
-        .set("__arbor_hooks__", hooks_table)
-        .map_err(|e| AppError::Plugin(e.to_string()))?;
-
-    // Order matters in a few spots: `events` reads the hooks table set
-    // above; `service` bootstraps its own globals; `ui` and friends rely
-    // on the contribution registry being live (always is — it's a clone
-    // of an Arc on the AppState side).
-    ns::log::install(&ctx, lua, &arbor)?;
-    ns::events::install(&ctx, lua, &arbor)?;
-    ns::service::install(&ctx, lua, &arbor)?;
-    ns::json::install(&ctx, lua, &arbor)?;
-    ns::json_studio::install(&ctx, lua, &arbor)?;
-    ns::ron_studio::install(&ctx, lua, &arbor)?;
-    ns::toml_studio::install(&ctx, lua, &arbor)?;
-    ns::yaml_studio::install(&ctx, lua, &arbor)?;
-    ns::properties_studio::install(&ctx, lua, &arbor)?;
-    ns::fs::install(&ctx, lua, &arbor)?;
-    ns::text::install(&ctx, lua, &arbor)?;
-    ns::repo::install(&ctx, lua, &arbor)?;
-    ns::workspace::install(&ctx, lua, &arbor)?;
-    ns::tabs::install(&ctx, lua, &arbor)?;
-    ns::linked_worktrees::install(&ctx, lua, &arbor)?;
-    ns::meta::install(&ctx, lua, &arbor)?;
-    ns::settings::install(&ctx, lua, &arbor)?;
-    ns::toolchain::install(&ctx, lua, &arbor)?;
-    ns::terminal::install(&ctx, lua, &arbor)?;
-    ns::job::install(&ctx, lua, &arbor)?;
-    ns::http::install(&ctx, lua, &arbor)?;
-    ns::notes::install(&ctx, lua, &arbor)?;
-    ns::issues::install(&ctx, lua, &arbor)?;
-    ns::timer::install(&ctx, lua, &arbor)?;
-    ns::scheduler::install(&ctx, lua, &arbor)?;
-    ns::ui::install(&ctx, lua, &arbor)?;
-    ns::keybinding::install(&ctx, lua, &arbor)?;
-    ns::command::install(&ctx, lua, &arbor)?;
-    ns::hooks::install(&ctx, lua, &arbor)?;
-    ns::contribution::install(&ctx, lua, &arbor)?;
-    ns::notify::install(&ctx, lua, &arbor)?;
-    ns::pipeline::install(&ctx, lua, &arbor)?;
-    ns::mr::install(&ctx, lua, &arbor)?;
-    ns::ci::install(&ctx, lua, &arbor)?;
-    ns::security::install(&ctx, lua, &arbor)?;
-    ns::cloud::install(&ctx, lua, &arbor)?;
-    ns::brp::install(&ctx, lua, &arbor)?;
-
-    // Publish arbor global.
-    lua.globals()
-        .set("arbor", arbor)
-        .map_err(|e| AppError::Plugin(e.to_string()))?;
-
-    Ok(())
+/// Build the ordered list of shell-side `LuaNamespaceInstaller` wrappers.
+///
+/// Order matches the legacy `register(...)` body verbatim — preserving it
+/// matters in a few spots (`events` reads the `__arbor_hooks__` table
+/// `lua_api::register` sets up first; `service` bootstraps its own globals;
+/// `ui` consumers rely on the contribution registry being already alive).
+///
+/// As host-pure namespaces migrate into plugin-core (Step 6), their
+/// entries drop off this list and `arbor_plugin_core::lua_api::register`
+/// hardcodes them instead.
+pub fn shell_installers() -> Vec<Arc<dyn LuaNamespaceInstaller>> {
+    vec![
+        Arc::new(LogInstaller),
+        Arc::new(EventsInstaller),
+        Arc::new(ServiceInstaller),
+        Arc::new(JsonInstaller),
+        Arc::new(JsonStudioInstaller),
+        Arc::new(RonStudioInstaller),
+        Arc::new(TomlStudioInstaller),
+        Arc::new(YamlStudioInstaller),
+        Arc::new(PropertiesStudioInstaller),
+        Arc::new(FsInstaller),
+        Arc::new(TextInstaller),
+        Arc::new(RepoInstaller),
+        Arc::new(WorkspaceInstaller),
+        Arc::new(TabsInstaller),
+        Arc::new(LinkedWorktreesInstaller),
+        Arc::new(MetaInstaller),
+        Arc::new(SettingsInstaller),
+        Arc::new(ToolchainInstaller),
+        Arc::new(TerminalInstaller),
+        Arc::new(JobInstaller),
+        Arc::new(HttpInstaller),
+        Arc::new(NotesInstaller),
+        Arc::new(IssuesInstaller),
+        Arc::new(TimerInstaller),
+        Arc::new(SchedulerInstaller),
+        Arc::new(UiInstaller),
+        Arc::new(KeybindingInstaller),
+        Arc::new(CommandInstaller),
+        Arc::new(HooksInstaller),
+        Arc::new(ContributionInstaller),
+        Arc::new(NotifyInstaller),
+        Arc::new(PipelineInstaller),
+        Arc::new(MrInstaller),
+        Arc::new(CiInstaller),
+        Arc::new(SecurityInstaller),
+        Arc::new(CloudInstaller),
+        Arc::new(BrpInstaller),
+    ]
 }

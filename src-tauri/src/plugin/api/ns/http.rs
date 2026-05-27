@@ -23,14 +23,14 @@ use mlua::{Lua, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::http_worker::perform_http_get;
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let http_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
     let pname = ctx.plugin_name.clone();
     let net_perm = ctx.network_perm.clone();
-    let handle   = ctx.app_handle.clone();
+    let handle   = ctx.app_handle();
 
     // Per-plugin atomic counter for synthetic callback names. Same pattern
     // as `__job_done_<id>__` so concurrent in-flight requests can't

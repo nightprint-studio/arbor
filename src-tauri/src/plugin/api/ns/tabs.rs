@@ -15,7 +15,7 @@ use mlua::{Lua, Table};
 use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, boolerr2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -28,7 +28,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
 }
 
 fn install_open_repo(ctx: &ApiCtx, lua: &Lua, tabs: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, repo_id: String| -> LuaTuple {
         let Some(ref h) = handle else {
             return boolerr2(lua_ctx, false, Some("app handle unavailable".into()));

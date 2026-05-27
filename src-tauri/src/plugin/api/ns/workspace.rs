@@ -9,7 +9,7 @@ use mlua::{Lua, Table};
 use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, boolerr2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -55,7 +55,7 @@ fn entry_to_lua(lua: &Lua, e: &crate::workspace::RepoRegistryEntry) -> mlua::Res
 // ─── Functions ───────────────────────────────────────────────────────────
 
 fn install_list(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, ()| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
@@ -72,7 +72,7 @@ fn install_list(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
 }
 
 fn install_active(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, ()| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
@@ -88,7 +88,7 @@ fn install_active(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
 }
 
 fn install_get(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, ws_id: String| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
@@ -104,7 +104,7 @@ fn install_get(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
 }
 
 fn install_list_repos(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, ws_id: Option<String>| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
@@ -140,7 +140,7 @@ fn install_list_repos(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
 }
 
 fn install_repo(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, repo_id: String| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
@@ -159,7 +159,7 @@ fn install_switch(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
     // switch(ws_id) → (true, nil) | (false, err)
     //   Fires on_workspace_switched on success; frontend picks it up via
     //   arbor://workspace-switched and swaps the tab set.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, ws_id: String| -> LuaTuple {
         let h = match handle {
             Some(ref h) => h.clone(),

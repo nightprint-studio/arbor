@@ -10,7 +10,7 @@ use mlua::{Lua, Table};
 use tauri::Emitter;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::contrib_write::{
     contribute_patch_payload, dual_write_contribution,
 };
@@ -101,7 +101,7 @@ fn install_set_combo_options(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> 
     // the plugin's current pick. This is a separate event because user
     // clicks must NOT trigger a re-sync (the combo payload may not
     // change), and contribution events can fire for other reasons.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let contribs = ctx.contributions.clone();
     let fn_ = lua.create_function(move |_, cfg: mlua::Table| {

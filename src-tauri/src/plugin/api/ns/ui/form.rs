@@ -16,7 +16,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Emitter;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     let form_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -39,7 +39,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 }
 
 fn build_open_fn(ctx: &ApiCtx, lua: &Lua) -> Result<mlua::Function> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     lua.create_function(move |lua_ctx, (_self, config): (mlua::Value, mlua::Table)| {
         let json_val: serde_json::Value = lua_ctx
@@ -55,7 +55,7 @@ fn build_open_fn(ctx: &ApiCtx, lua: &Lua) -> Result<mlua::Function> {
 }
 
 fn install_set_options(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, (name, value): (String, mlua::Value)| {
         let payload_json: serde_json::Value = lua_ctx
@@ -76,7 +76,7 @@ fn install_set_options(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()
 }
 
 fn install_set_disabled(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, (name, disabled): (String, bool)| {
         if let Some(ref h) = handle {
@@ -94,7 +94,7 @@ fn install_set_disabled(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<(
 }
 
 fn install_set_value(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, (name, value): (String, mlua::Value)| {
         let payload_json: serde_json::Value = lua_ctx
@@ -120,7 +120,7 @@ fn install_replace(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
     // form in-place, preserving field values whose `name` still exists
     // in the new structure. `partial_cfg` is a table with:
     //   { nodes = { ... }, state = { ... optional ... } }
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, cfg: mlua::Table| {
         let payload_json: serde_json::Value = lua_ctx
@@ -149,7 +149,7 @@ fn install_set_loading(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()
     // and (optionally) updates its label without re-rendering the entire
     // form node tree. Use during a tight fan-out loop where issuing a
     // full `replace` per step would just re-mount the form for nothing.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, arg: mlua::Value| {
         let (loading, label): (bool, Option<String>) = match arg {
@@ -191,7 +191,7 @@ fn install_close(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
     // Frontend listens via `plugin:form-update { op = "close" }` —
     // PluginFormModal calls its onClose prop when this op arrives and
     // the open form belongs to this plugin.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, ()| {
         if let Some(ref h) = handle {

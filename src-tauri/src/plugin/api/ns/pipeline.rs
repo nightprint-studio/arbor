@@ -4,7 +4,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, boolerr2, err2, ok2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -45,7 +45,7 @@ fn install_define(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     //     steps = [{ id, name, command, cwd?, allow_failure? }]
     //   }]
     // }
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, config: mlua::Table| {
         let Some(ref h) = handle else {
@@ -237,7 +237,7 @@ fn install_run(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     //             done-notification for THIS run, regardless of the def's
     //             default. Pass `false` to force the toast/notify even when
     //             the def was registered with `silent = true`.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, cfg: mlua::Table| -> LuaTuple {
         let pipeline_id: String = cfg.get("pipeline_id").map_err(|_|
@@ -295,7 +295,7 @@ fn install_run(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_resume(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     // resume(run_id) → (true, nil) | (false, err)
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, run_id: String| -> LuaTuple {
         let Some(ref h) = handle else {
             return boolerr2(lua_ctx, false, Some("pipeline.resume: app handle unavailable".into()));
@@ -311,7 +311,7 @@ fn install_resume(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_discard(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     // discard(run_id) → (true, nil) | (false, err)
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, run_id: String| -> LuaTuple {
         let Some(ref h) = handle else {
             return boolerr2(lua_ctx, false, Some("pipeline.discard: app handle unavailable".into()));
@@ -327,7 +327,7 @@ fn install_discard(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_is_locked(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     // is_locked(lock_key) → run_id | nil
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, lock_key: String| {
         let Some(ref h) = handle else { return Ok(mlua::Value::Nil); };
         let state = h.state::<crate::AppState>();
@@ -344,7 +344,7 @@ fn install_is_locked(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 
 fn install_list(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     // list() → array of pipeline definitions for this plugin
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, ()| {
         let Some(ref h) = handle else {
@@ -371,7 +371,7 @@ fn install_get(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     // get(id) → pipeline definition table for THIS plugin, or nil. Scoped
     // to the calling plugin so a plugin can't peek at another's defs (and
     // accidentally collide on a shared id like `"build"`).
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, id: String| {
         let Some(ref h) = handle else { return Ok(mlua::Value::Nil); };
@@ -389,7 +389,7 @@ fn install_get(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 }
 
 fn install_cancel(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, run_id: String| {
         if let Some(ref h) = handle {
             let state = h.state::<crate::AppState>();
@@ -412,7 +412,7 @@ fn install_list_runs(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     // opts.plugin      — filter by plugin name (defaults to current plugin)
     // opts.pipeline_id — additionally filter by pipeline id
     // opts.all         — when true, returns runs from every plugin (ignores plugin filter)
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, opts: Option<mlua::Table>| {
         let Some(ref h) = handle else {
@@ -450,7 +450,7 @@ fn install_list_runs(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
 }
 
 fn install_get_run(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, run_id: String| {
         let Some(ref h) = handle else { return Ok(mlua::Value::Nil); };
         let state = h.state::<crate::AppState>();
@@ -518,7 +518,7 @@ fn install_unregister_op(lua: &Lua, t: &Table) -> Result<()> {
 fn install_list_ops(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     // arbor.pipeline.list_ops() — debugging helper: all registered ops
     // across all enabled plugins, as "<plugin>.<op>" strings.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, ()| {
         let h = match &handle {
             Some(h) => h,

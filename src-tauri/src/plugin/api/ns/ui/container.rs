@@ -15,7 +15,7 @@ use mlua::{Lua, Table};
 use tauri::Emitter;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::contribution::ContainerDef;
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
@@ -72,7 +72,7 @@ fn install_register(ctx: &ApiCtx, lua: &Lua, container_table: &Table) -> Result<
 }
 
 fn install_open(ctx: &ApiCtx, lua: &Lua, container_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, key: String| {
         if let Some(ref h) = handle {
             let _ = h.emit("arbor://container-open", serde_json::json!({
@@ -86,7 +86,7 @@ fn install_open(ctx: &ApiCtx, lua: &Lua, container_table: &Table) -> Result<()> 
 }
 
 fn install_close(ctx: &ApiCtx, lua: &Lua, container_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, key: String| {
         if let Some(ref h) = handle {
             let _ = h.emit("arbor://container-close", serde_json::json!({

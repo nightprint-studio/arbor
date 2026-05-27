@@ -4,7 +4,7 @@ use mlua::{Lua, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::runtime::ARBOR_APP_VERSION;
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -12,7 +12,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let pname   = ctx.plugin_name.clone();
     let pdir    = ctx.plugin_dir.clone();
     let api_ver = ctx.arbor_api;
-    let handle  = ctx.app_handle.clone();
+    let handle  = ctx.app_handle();
 
     let pn = pname.clone();
     meta_table.set("plugin_name", lua.create_function(move |lua_ctx, ()| {

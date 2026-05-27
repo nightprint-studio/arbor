@@ -4,7 +4,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, err2, ok2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -25,7 +25,7 @@ fn install_spawn(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<()> {
     // config: { name, command, cwd?, env?, on_done_action?, on_done? }
     // Validation problems (missing `command`, reserved category) raise.
     // Mutex / app-handle failures come back as the (nil, err) tuple.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let spawn_fn = lua
         .create_function(move |lua_ctx, config: mlua::Table| -> LuaTuple {
@@ -139,7 +139,7 @@ fn install_spawn(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<()> {
 }
 
 fn install_list(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let list_fn = lua
         .create_function(move |lua_ctx, ()| -> LuaTuple {
             let Some(ref h) = handle else {
@@ -166,7 +166,7 @@ fn install_list(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<()> {
 
 fn install_cancel(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<()> {
     // cancel(job_id) → nil   (best-effort, never fails)
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let cancel_fn = lua
         .create_function(move |_lua_ctx, job_id: String| {
             let Some(ref h) = handle else { return Ok(()); };
@@ -186,7 +186,7 @@ fn install_dismiss(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<()> {
     // Mirrors the host's `dismiss_job` Tauri command — only terminal jobs
     // (completed / failed / cancelled) are eligible. Running jobs are
     // ignored so a misclick doesn't leak a process from the registry.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let dismiss_fn = lua
         .create_function(move |_lua_ctx, job_id: String| {
             let Some(ref h) = handle else { return Ok(false); };
@@ -205,7 +205,7 @@ fn install_clear_finished(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<
     // clear_finished() → string[]   (ids of dismissed jobs)
     // Drops every terminal-state job in one pass. Useful for "clear all"
     // affordances in monitor-style panels.
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let clear_fn = lua
         .create_function(move |lua_ctx, ()| {
             let Some(ref h) = handle else { return Ok(lua_ctx.create_table()?); };

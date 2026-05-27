@@ -27,7 +27,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let events_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -62,7 +62,7 @@ fn install_on(lua: &Lua, events_table: &Table) -> Result<()> {
 }
 
 fn install_emit(ctx: &ApiCtx, lua: &Lua, events_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, (event, payload): (String, Option<mlua::Value>)| {
         // Resolve full event name.

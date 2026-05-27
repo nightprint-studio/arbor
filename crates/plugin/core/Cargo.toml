@@ -31,3 +31,7 @@ mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send
 # topo-sort during plugin load).
 toml   = "0.8"
 semver = "1"
+
+# Used by `lua_api::helpers::xml_patch` (arbor.fs.xml_set). Same version
+# as src-tauri so both shells link against the same artifact.
+quick-xml = { version = "0.36", features = ["serialize"] }

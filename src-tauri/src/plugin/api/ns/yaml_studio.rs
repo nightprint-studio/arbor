@@ -21,12 +21,12 @@ use mlua::{Lua, Table};
 use tauri::Emitter;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
 
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let open = lua.create_function(move |_, opts: mlua::Value| {
         let cfg = match opts {

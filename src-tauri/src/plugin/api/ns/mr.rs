@@ -17,7 +17,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, err2, ok2};
 
 const CURRENT_USER_SENTINEL: &str = "current_user";
@@ -87,7 +87,7 @@ fn install_list(ctx: &ApiCtx, lua: &Lua, mr_table: &Table) -> Result<()> {
     //   labels  : array of label names (post-filter; provider-side support varies)
     //   query   : free-text query forwarded to the provider's filter
     let provider_read = ctx.provider_read;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, opts: Option<Table>| -> LuaTuple {
         if !provider_read {
             return Err(mlua::Error::RuntimeError(
@@ -178,7 +178,7 @@ fn install_current_user(ctx: &ApiCtx, lua: &Lua, mr_table: &Table) -> Result<()>
     // given repo. Plugins can use this to display "you" in their UI
     // without ever touching the token.
     let provider_read = ctx.provider_read;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, opts: Option<Table>| -> LuaTuple {
         if !provider_read {
             return Err(mlua::Error::RuntimeError(

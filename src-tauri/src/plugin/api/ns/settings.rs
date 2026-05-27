@@ -8,7 +8,7 @@ use mlua::{Lua, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::convert::json_to_lua;
 use crate::plugin::api::helpers::settings_scope::{
     GlobalCache, ProjectCache, build_settings_scope,
@@ -71,7 +71,7 @@ fn install_read_project(ctx: &ApiCtx, lua: &Lua, settings_table: &Table) -> Resu
     // AppState; returns nil if there is no active tab.
     let pname = ctx.plugin_name.clone();
     let allow_others = ctx.settings_read_others;
-    let h = ctx.app_handle.clone();
+    let h = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, (target_plugin, key): (String, String)| {
         if target_plugin != pname && !allow_others {
             return Err(mlua::Error::RuntimeError(

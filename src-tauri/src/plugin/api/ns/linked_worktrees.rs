@@ -6,7 +6,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, boolerr2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -21,7 +21,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
 }
 
 fn install_list(ctx: &ApiCtx, lua: &Lua, lw_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, ()| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
@@ -43,7 +43,7 @@ fn install_list(ctx: &ApiCtx, lua: &Lua, lw_table: &Table) -> Result<()> {
 }
 
 fn install_get(ctx: &ApiCtx, lua: &Lua, lw_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, id: String| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
@@ -59,7 +59,7 @@ fn install_get(ctx: &ApiCtx, lua: &Lua, lw_table: &Table) -> Result<()> {
 }
 
 fn install_set_sync_enabled(ctx: &ApiCtx, lua: &Lua, lw_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, (id, enabled): (String, bool)| -> LuaTuple {
         let h = match handle {
             Some(ref h) => h.clone(),

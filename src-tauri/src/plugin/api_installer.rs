@@ -1,63 +1,45 @@
 //! `LuaApiInstaller` adapter that bridges the runtime-side
 //! `arbor-plugin-core::sandbox` builder back into the shell-crate-resident
-//! `arbor.*` namespace surface (`crate::plugin::api::register`).
+//! `arbor.*` namespace surface.
 //!
-//! The src-tauri shell still owns the per-namespace installers (because they
-//! pull on git/jobs/pipeline/cloud/… internal types that haven't migrated to
-//! their own crates yet). This struct is the single touch-point between the
-//! plugin-core sandbox builder and that surface — once steps 5-7 of PR #4
-//! atterrano, the trait is implemented in the `lua_api` module of
-//! `arbor-plugin-core` and this shim disappears.
+//! After PR #4 Step 5, the orchestrator (`register(...)`) lives in
+//! `arbor_plugin_core::lua_api`. This adapter:
+//!   1. Builds the ordered list of [`LuaNamespaceInstaller`] wrappers for
+//!      each ns/* that still lives in `src-tauri/src/plugin/api/ns/*`
+//!      (see [`crate::plugin::api::shell_installers`]).
+//!   2. Hands the parameter bag straight through to
+//!      [`arbor_plugin_core::prelude::register_lua_api`].
+//!
+//! Once every ns/* migrates into its own domain crate (PR #6+), the
+//! wrapper list shrinks to empty and this adapter (and the `LuaApiInstaller`
+//! trait it implements) can disappear.
 
 use std::sync::Arc;
 
-use arbor_plugin_core::error::PluginCoreError;
-use arbor_plugin_core::prelude::{ApiInstallParams, LuaApiInstaller, PluginCoreResult};
+use arbor_plugin_core::prelude::{
+    ApiInstallParams, LuaApiInstaller, PluginCoreResult, register_lua_api,
+};
 use mlua::Lua;
 
-/// Wraps the Tauri `AppHandle` captured at boot so the plugin-host crate can
-/// publish `arbor.*` into a freshly-built sandbox without ever seeing a
-/// concrete `tauri::*` type itself.
-pub struct TauriApiInstaller {
-    app_handle: Option<tauri::AppHandle>,
-}
+pub struct TauriApiInstaller;
 
 impl TauriApiInstaller {
-    pub fn new(app_handle: Option<tauri::AppHandle>) -> Self {
-        Self { app_handle }
-    }
+    pub fn new() -> Self { Self }
+}
+
+impl Default for TauriApiInstaller {
+    fn default() -> Self { Self::new() }
 }
 
 impl LuaApiInstaller for TauriApiInstaller {
     fn install(&self, lua: &Lua, params: ApiInstallParams) -> PluginCoreResult<()> {
-        crate::plugin::api::register(
-            lua,
-            params.plugin_name,
-            params.plugin_dir,
-            params.arbor_api,
-            self.app_handle.clone(),
-            params.timer_cancels,
-            params.timer_counter,
-            params.schedules,
-            params.scheduler_enabled,
-            params.permissions,
-            params.contributions,
-            params.tree_store,
-            params.icon_registry,
-            params.enabled,
-        )
-        .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
-        // Capture the AppCtx so `_unused` compiles when no body reads it.
-        // The host side already routes through `params.app_ctx` for the
-        // log/event surface; the legacy `register(...)` path uses the
-        // AppHandle stashed on this struct instead.
-        let _ = params.app_ctx;
-        Ok(())
+        let installers = crate::plugin::api::shell_installers();
+        register_lua_api(lua, params, &installers)
     }
 }
 
 /// Convenience wrapper so the boot site can write
-/// `host.set_api_installer(tauri_api_installer(handle))`.
-pub fn tauri_api_installer(handle: Option<tauri::AppHandle>) -> Arc<dyn LuaApiInstaller> {
-    Arc::new(TauriApiInstaller::new(handle))
+/// `host.set_api_installer(tauri_api_installer())`.
+pub fn tauri_api_installer() -> Arc<dyn LuaApiInstaller> {
+    Arc::new(TauriApiInstaller::new())
 }

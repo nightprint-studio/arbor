@@ -14,7 +14,7 @@ use mlua::{Lua, Table};
 use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, boolerr2, err2, ok2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -141,7 +141,7 @@ fn install_fetch_active_tab(ctx: &ApiCtx, lua: &Lua, repo_table: &Table) -> Resu
     // Fetches origin for the currently active tab. Emits
     // "arbor://graph-refresh" on success.  Requires git_write = true.
     let git_write = ctx.git_write;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, ()| -> LuaTuple {
         if !git_write {
             return Err(mlua::Error::RuntimeError(
@@ -189,7 +189,7 @@ fn install_fetch_active_tab(ctx: &ApiCtx, lua: &Lua, repo_table: &Table) -> Resu
 }
 
 fn install_release_handles(ctx: &ApiCtx, lua: &Lua, repo_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, ()| {
         let Some(ref h) = handle else { return Ok(()); };
         let state = h.state::<crate::AppState>();
@@ -451,7 +451,7 @@ fn install_clone(ctx: &ApiCtx, lua: &Lua, repo_table: &Table) -> Result<()> {
     // errors. App-state failures (no handle, mutex poisoned) come back
     // as the (nil, err) tuple so the caller can fall through.
     let git_write = ctx.git_write;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |lua_ctx, cfg: Table| -> LuaTuple {
         if !git_write {

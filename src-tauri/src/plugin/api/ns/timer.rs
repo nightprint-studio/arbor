@@ -6,7 +6,7 @@ use mlua::{Lua, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::timer::{register_timer_cancel, register_timer_hook};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -21,7 +21,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
 }
 
 fn install_after(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
-    let handle   = ctx.app_handle.clone();
+    let handle   = ctx.app_handle();
     let pname    = ctx.plugin_name.clone();
     let cancels  = ctx.timer_cancels.clone();
     let counter  = ctx.timer_counter.clone();
@@ -53,7 +53,7 @@ fn install_after(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
 }
 
 fn install_every(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
-    let handle  = ctx.app_handle.clone();
+    let handle  = ctx.app_handle();
     let pname   = ctx.plugin_name.clone();
     let cancels = ctx.timer_cancels.clone();
     let counter = ctx.timer_counter.clone();

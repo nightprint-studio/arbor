@@ -21,7 +21,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     if !(ctx.service_export || ctx.service_call) {
@@ -80,7 +80,7 @@ fn install_export(lua: &Lua, svc_table: &Table) -> Result<()> {
 
 fn install_call(ctx: &ApiCtx, lua: &Lua, svc_table: &Table) -> Result<()> {
     let counter: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let caller = ctx.plugin_name.clone();
     let counter_c = counter.clone();
     let fn_ = lua.create_function(
@@ -135,7 +135,7 @@ fn install_call(ctx: &ApiCtx, lua: &Lua, svc_table: &Table) -> Result<()> {
 }
 
 fn install_list(ctx: &ApiCtx, lua: &Lua, svc_table: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, _: ()| {
         let out = lua_ctx.create_table()?;
         if let Some(ref h) = handle {

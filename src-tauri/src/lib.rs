@@ -492,9 +492,7 @@ pub fn run() {
                         .expect("plugin_host poisoned at AppCtx install");
                     host.set_app_ctx(ctx.clone());
                     host.set_api_installer(
-                        crate::plugin::api_installer::tauri_api_installer(
-                            Some(app.handle().clone()),
-                        ),
+                        crate::plugin::api_installer::tauri_api_installer(),
                     );
                     // Marketplace install dir is scanned alongside the host's
                     // dev `plugin_dir()` during reload. Passed as an extra

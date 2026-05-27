@@ -8,7 +8,7 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::tuple::{LuaTuple, err2, ok2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
@@ -45,7 +45,7 @@ fn install_runs(ctx: &ApiCtx, lua: &Lua, ci_table: &Table) -> Result<()> {
     // use-case (the CI-failure-triage plugin scans MR head branches one by
     // one and asks for runs scoped to each).
     let provider_read = ctx.provider_read;
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |lua_ctx, opts: Option<Table>| -> LuaTuple {
         if !provider_read {
             return Err(mlua::Error::RuntimeError(

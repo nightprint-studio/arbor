@@ -25,7 +25,7 @@ use mlua::{Lua, Table};
 use tauri::Emitter;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::contribution::ContainerDef;
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
@@ -81,7 +81,7 @@ fn install_panel(ctx: &ApiCtx, lua: &Lua, settings_ui: &Table) -> Result<()> {
 }
 
 fn install_open(ctx: &ApiCtx, lua: &Lua, settings_ui: &Table) -> Result<()> {
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, (target_plugin, panel_id): (String, String)| {
         if let Some(ref h) = handle {
             let _ = h.emit("arbor://container-open", serde_json::json!({
@@ -97,7 +97,7 @@ fn install_open(ctx: &ApiCtx, lua: &Lua, settings_ui: &Table) -> Result<()> {
 fn install_close(ctx: &ApiCtx, lua: &Lua, settings_ui: &Table) -> Result<()> {
     // close() — emits arbor://container-close with an empty id, meaning
     // "close whatever is currently open" (the store handles the wildcard).
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let fn_ = lua.create_function(move |_, ()| {
         if let Some(ref h) = handle {
             let _ = h.emit("arbor://container-close", serde_json::json!({

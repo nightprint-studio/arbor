@@ -10,7 +10,7 @@
 use mlua::{Lua, LuaSerdeExt, Table};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
 use crate::plugin::api::helpers::contrib_write::dual_write_contribution;
 use crate::plugin::contribution::points;
 use crate::plugin::tree::{BreadcrumbSegment, TreeNode};
@@ -28,7 +28,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 fn install_set(ctx: &ApiCtx, lua: &Lua, tree_table: &Table) -> Result<()> {
     let pname = ctx.plugin_name.clone();
     let store = ctx.tree_store.clone();
-    let handle = ctx.app_handle.clone();
+    let handle = ctx.app_handle();
     let contribs_set = ctx.contributions.clone();
     let set_fn = lua.create_function(move |_, (sidebar_id, body): (String, mlua::Value)| {
         // Accept either `{nodes = {...}, title = "..."}` or a bare array of nodes.

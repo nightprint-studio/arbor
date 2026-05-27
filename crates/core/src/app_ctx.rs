@@ -14,9 +14,17 @@
 //! every domain crate can depend on a single common definition without
 //! pulling in the Tauri shell.
 
+use std::any::Any;
 use std::path::Path;
 
-pub trait AppCtx: Send + Sync {
+pub trait AppCtx: Any + Send + Sync {
+    /// Downcast hook so host-specific call sites (e.g. the Tauri shell's
+    /// per-namespace installers that still need a real `tauri::AppHandle`)
+    /// can recover the concrete impl from a `&dyn AppCtx`. Domain crates
+    /// should never call this — the existence of a downcast is a smell that
+    /// a capability is missing from the trait surface.
+    fn as_any(&self) -> &dyn Any;
+
     /// Emit a frontend event with a JSON payload. Equivalent to
     /// `tauri::AppHandle::emit(event, payload)` on the Tauri impl.
     fn emit(&self, event: &str, payload: serde_json::Value);
