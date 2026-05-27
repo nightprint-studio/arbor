@@ -476,11 +476,10 @@ pub fn plugin_settings_set_all(
 
 /// Notify the backend whether the app window currently has focus.
 ///
-/// Snapshot of the boot loader's current state.  The splash component calls
-/// this on mount to recover from the dev-mode race where the WebView is not
-/// yet ready when `arbor://boot-done` is emitted — without it the splash
-/// would sit through the 10s fallback timeout even though plugin load
-/// completed in ~250ms.
+/// Snapshot of the boot loader's current state. The splash component polls
+/// this on mount as a safety net for dev-mode HMR remounts where the listener
+/// attaches after `arbor://boot-done` has already fired (the `frontend_ready`
+/// handshake covers first-launch; this covers re-mount).
 #[tauri::command]
 pub fn get_boot_state(state: State<'_, AppState>) -> serde_json::Value {
     let done = state.boot_done.load(Ordering::Acquire);
@@ -489,6 +488,21 @@ pub fn get_boot_state(state: State<'_, AppState>) -> serde_json::Value {
         "done":     done,
         "progress": progress,
     })
+}
+
+/// Frontend handshake — `BootSplash.onMount` calls this once both the
+/// `arbor://boot-progress` and `arbor://boot-done` listeners are registered.
+/// The boot thread parks on `state.frontend_ready` until this flips, then
+/// emits its events. Idempotent: subsequent calls are a no-op.
+#[tauri::command]
+pub fn frontend_ready(state: State<'_, AppState>) {
+    let (lock, cvar) = &*state.frontend_ready;
+    if let Ok(mut ready) = lock.lock() {
+        if !*ready {
+            *ready = true;
+            cvar.notify_all();
+        }
+    }
 }
 
 /// Two things happen when the focus state changes:

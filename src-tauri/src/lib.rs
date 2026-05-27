@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::sync::atomic::AtomicBool;
 use std::collections::{HashMap, HashSet};
 use tauri::Manager;
@@ -148,12 +148,19 @@ pub struct AppState {
     /// + user_registry.toml persistence.
     pub marketplace: Mutex<MarketplaceRegistry>,
     /// Mirrors the `arbor://boot-progress` / `arbor://boot-done` event stream
-    /// in shared state so the splash can recover from the dev-mode race where
-    /// the WebView mounts (and registers its listener) AFTER the boot thread
-    /// has already finished and emitted `boot-done`. `BootSplash.svelte` polls
+    /// in shared state as a safety net for dev-mode HMR remounts where the
+    /// listener attaches after the events have already fired (the
+    /// `frontend_ready` handshake doesn't help there because the boot thread
+    /// already passed its gate on first launch). `BootSplash.svelte` polls
     /// `get_boot_state` on mount and dismisses immediately when `done == true`.
     pub boot_done:     Arc<AtomicBool>,
     pub boot_progress: Arc<Mutex<Option<serde_json::Value>>>,
+    /// Handshake: BootSplash calls `frontend_ready` after registering its
+    /// `arbor://boot-progress` / `arbor://boot-done` listeners. The boot
+    /// thread waits on this condvar (with a safety timeout) before emitting
+    /// progress events, so events never land before listeners exist. The
+    /// fallback timeout means a hung / missing frontend can't strand boot.
+    pub frontend_ready: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl AppState {
@@ -326,6 +333,7 @@ impl AppState {
             marketplace:            Mutex::new(MarketplaceRegistry::new()),
             boot_done:              Arc::new(AtomicBool::new(false)),
             boot_progress:          Arc::new(Mutex::new(None)),
+            frontend_ready:         Arc::new((Mutex::new(false), Condvar::new())),
         }
     }
 
@@ -450,24 +458,66 @@ pub fn run() {
             // against the boot loader, so a frontend command issued before
             // boot completes simply waits on the mutex.
             let handle_for_boot = app.handle().clone();
+            // Synchronous handshake: setup() returns ONLY after the boot
+            // thread has acquired the plugin_host mutex. Without this gate,
+            // there's a window between `thread::spawn` returning and the OS
+            // actually scheduling the boot thread — during which the WebView
+            // can mount and AppShell.onMount can fire IPCs (list_plugin_info,
+            // list_plugin_contributions) that win the lock first, find an
+            // empty host, and seed frontend stores with empty state.
+            let (lock_acquired_tx, lock_acquired_rx) =
+                std::sync::mpsc::sync_channel::<()>(0);
             std::thread::Builder::new()
                 .name("arbor-plugin-boot".to_string())
                 .spawn(move || {
                     use tauri::Emitter;
-                    // The webview mounts AFTER `setup()` returns. Give it a
-                    // moment to come up + register its event listeners before
-                    // we start emitting `arbor://boot-progress` — otherwise
-                    // early events (and possibly the terminal `boot-done`
-                    // when load is fast) would be dropped on the floor and
-                    // the splash would either skip the progress detail or
-                    // stay stuck until the 10s fallback timeout.
-                    std::thread::sleep(std::time::Duration::from_millis(250));
-
                     let state = handle_for_boot.state::<AppState>();
                     let mut host = state
                         .plugin_host
                         .lock()
                         .expect("plugin_host mutex poisoned during boot");
+                    // Signal setup() that the lock is now held by us. From
+                    // this point on, every frontend IPC that needs
+                    // `plugin_host` queues behind us. `send` blocks until
+                    // setup() calls `recv`, so this is a true rendezvous.
+                    let _ = lock_acquired_tx.send(());
+
+                    // Wait for the frontend handshake before emitting any
+                    // boot events. `BootSplash.onMount` registers the
+                    // `arbor://boot-progress` + `arbor://boot-done` listeners,
+                    // then calls the `frontend_ready` IPC which flips this
+                    // flag. Without the handshake, fast boots can emit and
+                    // dismiss before listeners exist; with it, events always
+                    // land. The 5s timeout is a safety net so a wedged or
+                    // missing frontend can't strand the boot thread forever.
+                    {
+                        let (lock, cvar) = &*state.frontend_ready;
+                        let mut ready = lock.lock()
+                            .expect("frontend_ready mutex poisoned during boot");
+                        let timeout = std::time::Duration::from_secs(5);
+                        let deadline = std::time::Instant::now() + timeout;
+                        while !*ready {
+                            let remaining = deadline.saturating_duration_since(
+                                std::time::Instant::now(),
+                            );
+                            if remaining.is_zero() {
+                                tracing::warn!(
+                                    "frontend_ready handshake timed out after 5s — proceeding (BootSplash will recover via get_boot_state)"
+                                );
+                                break;
+                            }
+                            let (g, wait_res) = cvar.wait_timeout(ready, remaining)
+                                .expect("frontend_ready condvar wait poisoned");
+                            ready = g;
+                            if wait_res.timed_out() && !*ready {
+                                tracing::warn!(
+                                    "frontend_ready handshake timed out after 5s — proceeding (BootSplash will recover via get_boot_state)"
+                                );
+                                break;
+                            }
+                        }
+                    }
+
                     host.set_app_handle(handle_for_boot.clone());
 
                     let plugins_enabled = state
@@ -516,11 +566,29 @@ pub fn run() {
                     }));
                     host.start_all_schedulers();
 
+                    // Match the manual `reload_plugins` command: emit
+                    // `arbor://plugins-reloaded` so every store/component that
+                    // refreshes on that signal (contributionStore, pluginStore
+                    // via PluginPanel, containerStore, depsExplorerStore,
+                    // DocsPanel, PluginSidebarPanel, …) re-reads with the
+                    // host fully populated. Without this, listeners attached
+                    // during AppShell mount sit idle waiting for an event
+                    // that only the manual Refresh button would fire.
+                    let _ = handle_for_boot.emit("arbor://plugins-reloaded", ());
+
                     mark_done(serde_json::json!({
                         "skipped": false,
                     }));
                 })
                 .expect("failed to spawn arbor-plugin-boot thread");
+
+            // Block setup() here until the boot thread has acquired the
+            // plugin_host lock. The send() in the thread is the rendezvous
+            // point: after this returns, every plugin-touching IPC issued
+            // by the frontend is guaranteed to queue behind boot.
+            lock_acquired_rx
+                .recv()
+                .expect("arbor-plugin-boot thread exited before signalling lock acquisition");
 
             // Periodic efficiency-mode re-apply.  When the app is unfocused we
             // re-scan child processes (WebView2 renderers and any subprocess
@@ -905,6 +973,8 @@ pub fn run() {
             commands::plugin_commands::set_active_tab,
             // Boot state — polled by BootSplash to recover from listener-timing race
             commands::plugin_commands::get_boot_state,
+            // Boot handshake — BootSplash flips this once listeners are attached
+            commands::plugin_commands::frontend_ready,
             // Toolchains
             commands::plugin_commands::list_toolchains,
             commands::plugin_commands::add_toolchain,

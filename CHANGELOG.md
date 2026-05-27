@@ -69,6 +69,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Plugins sometimes appeared disabled after launch until the Plugin
+  Manager *Refresh* button was clicked. Boot now handshakes with the
+  frontend before emitting plugin events, serialises IPC against the
+  load thread, and fires the same reload signal the manual refresh
+  uses — so sidebars / activity-bar items / command-palette verbs
+  appear as soon as the splash dismisses.
 - Idle CPU/IPC waste from plugins re-publishing identical state. The
   contribution registry now deduplicates writes by value, so polling
   views (running services, status indicators) no longer fan out

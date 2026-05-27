@@ -83,24 +83,37 @@
     const unlistens: UnlistenFn[] = [];
     let stopped = false;
 
-    listen<BootProgress>('arbor://boot-progress', (ev) => {
-      if (stopped) return;
-      const p = ev.payload;
-      if (p) hostProgress = { ...hostProgress, ...p };
-    }).then((u) => { if (!stopped) unlistens.push(u); else u(); });
+    // Register listeners FIRST (awaiting both), THEN signal the backend via
+    // `frontend_ready`. The boot thread parks until that IPC fires, so we
+    // can guarantee no event is emitted before the listeners exist —
+    // no more 250ms guess-the-mount-time sleep.
+    (async () => {
+      try {
+        const [u1, u2] = await Promise.all([
+          listen<BootProgress>('arbor://boot-progress', (ev) => {
+            if (stopped) return;
+            const p = ev.payload;
+            if (p) hostProgress = { ...hostProgress, ...p };
+          }),
+          listen<unknown>('arbor://boot-done', () => {
+            hostDone = true;
+            tryDismiss();
+          }),
+        ]);
+        if (stopped) { u1(); u2(); return; }
+        unlistens.push(u1, u2);
+        // Listeners ready — unblock the boot thread.
+        invoke('frontend_ready').catch(() => { /* legacy backend without handshake */ });
+      } catch {
+        /* `listen` itself failed — falling through to the polling recovery
+         *  below + the 15s fallback timer is the safest behaviour. */
+      }
+    })();
 
-    listen<unknown>('arbor://boot-done', () => {
-      hostDone = true;
-      tryDismiss();
-    }).then((u) => { if (stopped) u(); else unlistens.push(u); });
-
-    // Recovery for the dev-mode race: in `tauri dev` the WebView mounts
-    // *after* the boot thread has often already fired `arbor://boot-done`,
-    // so our listener above never sees it and we'd sit through the 15s
-    // fallback. Poll the backend's mirrored state instead — if done, mark
-    // the host gate closed; otherwise seed the last-known progress payload
-    // so the splash doesn't show a stale "Starting Arbor…" while loading
-    // is well underway.
+    // Belt-and-suspenders: poll the backend's mirrored boot state once.
+    // Covers dev-mode HMR remounts where the listener attaches after
+    // `arbor://boot-done` has already fired (the handshake doesn't help
+    // there because the boot thread already passed the gate on first launch).
     invoke<{ done: boolean; progress?: BootProgress | null }>('get_boot_state')
       .then((snap) => {
         if (stopped) return;
