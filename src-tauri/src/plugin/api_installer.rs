@@ -5,8 +5,8 @@
 //! After PR #4 Step 5, the orchestrator (`register(...)`) lives in
 //! `arbor_plugin_core::lua_api`. This adapter:
 //!   1. Builds the ordered list of [`LuaNamespaceInstaller`] wrappers for
-//!      each ns/* that still lives in `src-tauri/src/plugin/api/ns/*`
-//!      (see [`crate::plugin::api::shell_installers`]).
+//!      each ns/* that still lives in `src-tauri/src/plugin/ns_shell/*`
+//!      (see [`crate::plugin::ns_shell::shell_installers`]).
 //!   2. Hands the parameter bag straight through to
 //!      [`arbor_plugin_core::prelude::register_lua_api`].
 //!
@@ -33,7 +33,7 @@ impl Default for TauriApiInstaller {
 
 impl LuaApiInstaller for TauriApiInstaller {
     fn install(&self, lua: &Lua, params: ApiInstallParams) -> PluginCoreResult<()> {
-        let installers = crate::plugin::api::shell_installers();
+        let installers = crate::plugin::ns_shell::shell_installers();
         register_lua_api(lua, params, &installers)
     }
 }

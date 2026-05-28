@@ -4,7 +4,7 @@
 //!
 //! The downcast bridge is intentionally a smell: every ns/* still using
 //! `ctx.app_handle()` is a namespace that hasn't yet migrated into a
-//! domain crate. As ns/* move out of `src-tauri/src/plugin/api/ns/*`, the
+//! domain crate. As ns/* move out of `src-tauri/src/plugin/ns_shell/*`, the
 //! `app_handle()` calls disappear and the AppCtx surface grows the
 //! corresponding capability instead.
 
