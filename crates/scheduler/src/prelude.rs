@@ -12,4 +12,4 @@ pub use crate::key::ScheduleKey;
 pub use crate::opts::{Gate, ScheduleOpts};
 pub use crate::scheduler::Scheduler;
 pub use crate::snapshot::ScheduleSnapshot;
-pub use crate::trigger::Trigger;
+pub use crate::trigger::{Trigger, validate_cron};

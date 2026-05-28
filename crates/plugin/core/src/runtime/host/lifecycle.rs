@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use arbor_core::prelude::AppCtx;
@@ -242,6 +242,7 @@ impl PluginHost {
             let result = load_plugin(
                 manifest,
                 self.app_ctx.clone(),
+                self.self_arc.clone(),
                 self.api_installer.clone(),
                 self.contributions.clone(),
                 self.tree_store.clone(),
@@ -377,6 +378,7 @@ impl PluginHost {
         let loaded = match load_plugin(
             manifest,
             self.app_ctx.clone(),
+            self.self_arc.clone(),
             self.api_installer.clone(),
             self.contributions.clone(),
             self.tree_store.clone(),
@@ -606,6 +608,7 @@ impl PluginHost {
 pub fn load_plugin(
     manifest:       Manifest,
     app_ctx:        Option<Arc<dyn AppCtx>>,
+    host_weak:      Option<Weak<Mutex<PluginHost>>>,
     api_installer:  Option<Arc<dyn LuaApiInstaller>>,
     contributions:  ContributionRegistry,
     tree_store:     TreeStore,
@@ -664,6 +667,7 @@ pub fn load_plugin(
     let lua = crate::sandbox::create_sandbox(
         &manifest,
         app_ctx,
+        host_weak,
         installer.as_ref(),
         timer_cancels.clone(),
         timer_counter,

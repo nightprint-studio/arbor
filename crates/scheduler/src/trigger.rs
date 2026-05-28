@@ -25,6 +25,20 @@ pub enum Trigger {
     Cron       { expr:     String },
 }
 
+/// Eagerly validate a 6-field Spring cron expression without building a
+/// [`Trigger`]. Exposed so callers that accept cron strings from end users
+/// (e.g. the `arbor.scheduler.register` Lua API) can surface a parse error
+/// at definition time instead of waiting for the runner to reject it. Keeps
+/// the `cron` dependency contained to this crate.
+pub fn validate_cron(expr: &str) -> Result<(), SchedulerError> {
+    cron::Schedule::from_str(expr)
+        .map(|_| ())
+        .map_err(|e| SchedulerError::InvalidCron {
+            expr:    expr.to_string(),
+            message: e.to_string(),
+        })
+}
+
 /// Parsed form, built once at register / update time so the runner loop
 /// never re-parses the cron string on every iteration. Not part of the
 /// public API — exists only inside [`crate::scheduler::TriggerState`].

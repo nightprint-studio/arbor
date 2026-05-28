@@ -23,6 +23,7 @@
 
 pub mod ctx;
 pub mod helpers;
+pub(crate) mod ns;
 
 use mlua::{Lua, Table};
 
@@ -73,8 +74,32 @@ pub fn register(
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
 
     // ── Host-pure namespaces (Step 6) ────────────────────────────────────
-    // Each ns::*::install(&ctx, lua, &arbor)?; call lands here as the
-    // namespace migrates into plugin-core.
+    // Hardcoded here in the same relative order they held in the legacy
+    // single `register(...)` body. They run before any shell installer so
+    // late-arriving shell namespaces (e.g. `ui.branding`) can inspect what
+    // a host-pure ns published (e.g. the `arbor.ui` table).
+    ns::log::install(&ctx, lua, &arbor)?;
+    ns::events::install(&ctx, lua, &arbor)?;
+    ns::service::install(&ctx, lua, &arbor)?;
+    ns::json::install(&ctx, lua, &arbor)?;
+    ns::json_studio::install(&ctx, lua, &arbor)?;
+    ns::ron_studio::install(&ctx, lua, &arbor)?;
+    ns::toml_studio::install(&ctx, lua, &arbor)?;
+    ns::yaml_studio::install(&ctx, lua, &arbor)?;
+    ns::properties_studio::install(&ctx, lua, &arbor)?;
+    ns::fs::install(&ctx, lua, &arbor)?;
+    ns::text::install(&ctx, lua, &arbor)?;
+    ns::meta::install(&ctx, lua, &arbor)?;
+    ns::settings::install(&ctx, lua, &arbor)?;
+    ns::http::install(&ctx, lua, &arbor)?;
+    ns::timer::install(&ctx, lua, &arbor)?;
+    ns::scheduler::install(&ctx, lua, &arbor)?;
+    ns::ui::install(&ctx, lua, &arbor)?;
+    ns::keybinding::install(&ctx, lua, &arbor)?;
+    ns::command::install(&ctx, lua, &arbor)?;
+    ns::hooks::install(&ctx, lua, &arbor)?;
+    ns::contribution::install(&ctx, lua, &arbor)?;
+    ns::notify::install(&ctx, lua, &arbor)?;
 
     // ── Host-shell installers (always last so they may inspect anything
     //    a host-pure ns has already set up). Order is the caller's

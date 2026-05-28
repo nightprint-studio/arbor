@@ -1,39 +1,24 @@
-//! `arbor.*` namespace installers. One module per top-level table.
+//! Shell-side `arbor.*` namespace installers. These still depend on
+//! src-tauri-internal types (`git::*`, `pipeline::*`, `jobs::*`,
+//! `terminal::*`, `workspace::*`, `brp::*`, `cloud::*`, …) and stay here
+//! until their domain crate is born (PR #6+).
+//!
+//! The host-pure namespaces (log, events, json, fs, http, ui.*, studios, …)
+//! migrated into `arbor_plugin_core::lua_api::ns::*` in PR #4 Step 6.
 
 pub(crate) mod brp;
 pub(crate) mod ci;
 pub(crate) mod cloud;
-pub(crate) mod command;
-pub(crate) mod contribution;
-pub(crate) mod events;
-pub(crate) mod fs;
-pub(crate) mod hooks;
-pub(crate) mod http;
 pub(crate) mod issues;
 pub(crate) mod job;
-pub(crate) mod json;
-pub(crate) mod json_studio;
-pub(crate) mod ron_studio;
-pub(crate) mod toml_studio;
-pub(crate) mod yaml_studio;
-pub(crate) mod properties_studio;
-pub(crate) mod keybinding;
 pub(crate) mod linked_worktrees;
-pub(crate) mod log;
-pub(crate) mod meta;
 pub(crate) mod mr;
 pub(crate) mod notes;
-pub(crate) mod notify;
 pub(crate) mod pipeline;
 pub(crate) mod repo;
-pub(crate) mod scheduler;
 pub(crate) mod security;
-pub(crate) mod service;
-pub(crate) mod settings;
 pub(crate) mod tabs;
 pub(crate) mod terminal;
-pub(crate) mod text;
-pub(crate) mod timer;
 pub(crate) mod toolchain;
 pub(crate) mod ui;
 pub(crate) mod workspace;

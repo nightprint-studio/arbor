@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use arbor_core::prelude::AppCtx;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub struct TauriAppCtx {
     handle:    AppHandle,
@@ -70,5 +70,18 @@ impl AppCtx for TauriAppCtx {
 
     fn record_plugin_log(&self, level: &str, plugin: &str, message: &str) {
         crate::plugin_logs::record(&self.handle, level, plugin, message.to_string());
+    }
+
+    fn active_repo_path(&self) -> Option<PathBuf> {
+        let state = self.handle.state::<crate::AppState>();
+        let tab_id = state.active_tab_id.lock().ok()?.clone()?;
+        let mut repos = state.repos.lock().ok()?;
+        repos.get(&tab_id).ok().map(|r| PathBuf::from(&r.path))
+    }
+
+    fn open_path(&self, path: &str) -> Result<(), String> {
+        use tauri_plugin_opener::OpenerExt;
+        self.handle.opener().open_path(path, None::<&str>)
+            .map_err(|e| e.to_string())
     }
 }

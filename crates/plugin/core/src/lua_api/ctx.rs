@@ -15,7 +15,7 @@
 //! cover whatever the ns needed and the downcast goes away.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 use std::sync::atomic::AtomicBool;
 
 use arbor_core::prelude::AppCtx;
@@ -24,6 +24,7 @@ use arbor_plugin_types::prelude::{
 };
 
 use crate::contribution::ContributionRegistry;
+use crate::runtime::host::PluginHost;
 use crate::runtime::loaded::{TimerCancels, TimerCounter};
 use crate::sandbox::ApiInstallParams;
 use crate::tree::{IconRegistry, TreeStore};
@@ -41,6 +42,14 @@ pub struct ApiCtx {
     /// concrete `TauriAppCtx` via `as_any()` (see the `ApiCtxExt` shim in
     /// src-tauri) until they migrate into domain crates.
     pub app_ctx: Option<Arc<dyn AppCtx>>,
+
+    /// Weak self-reference of the owning [`PluginHost`]. Captured by `arbor.*`
+    /// closures that need to fire hooks / invoke services back into the
+    /// runtime from a background thread (`events.emit`, `timer.after/every`,
+    /// `service.call`, `http.get` response delivery, …). `None` when the
+    /// plugin was loaded outside a `PluginHost` (e.g. unit tests calling the
+    /// standalone `load_plugin` helper).
+    pub host_weak: Option<Weak<Mutex<PluginHost>>>,
 
     pub timer_cancels: TimerCancels,
     pub timer_counter: TimerCounter,
@@ -86,6 +95,7 @@ impl ApiCtx {
             plugin_dir,
             arbor_api,
             app_ctx,
+            host_weak,
             timer_cancels,
             timer_counter,
             schedules,
@@ -123,6 +133,7 @@ impl ApiCtx {
             plugin_dir,
             arbor_api,
             app_ctx,
+            host_weak,
             timer_cancels,
             timer_counter,
             schedules,

@@ -16,7 +16,7 @@
 //! module migrates, in the host shell crate via a shim installer.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 use std::sync::atomic::AtomicBool;
 
 use arbor_core::prelude::AppCtx;
@@ -25,6 +25,7 @@ use mlua::{Lua, LuaOptions, StdLib};
 
 use crate::contribution::ContributionRegistry;
 use crate::error::{PluginCoreError, Result};
+use crate::runtime::host::PluginHost;
 use crate::runtime::loaded::{TimerCancels, TimerCounter};
 use crate::tree::{IconRegistry, TreeStore};
 
@@ -72,6 +73,13 @@ pub struct ApiInstallParams {
     pub plugin_dir:         PathBuf,
     pub arbor_api:          u32,
     pub app_ctx:            Option<Arc<dyn AppCtx>>,
+    /// Weak self-reference of the owning [`PluginHost`]. Captured by the
+    /// `arbor.*` namespaces that need to fire hooks / invoke services back
+    /// into the runtime from a background thread (`events`, `timer`,
+    /// `service`, `http`, …). `None` in headless / test runs that don't go
+    /// through a `PluginHost` (e.g. the standalone `load_plugin` helper
+    /// called from a unit test).
+    pub host_weak:          Option<Weak<Mutex<PluginHost>>>,
     pub timer_cancels:      TimerCancels,
     pub timer_counter:      TimerCounter,
     pub schedules:          ScheduleRegistry,
@@ -105,6 +113,7 @@ impl LuaApiInstaller for NoopApiInstaller {
 pub fn create_sandbox(
     manifest:      &Manifest,
     app_ctx:       Option<Arc<dyn AppCtx>>,
+    host_weak:     Option<Weak<Mutex<PluginHost>>>,
     api_installer: &dyn LuaApiInstaller,
     timer_cancels: TimerCancels,
     timer_counter: TimerCounter,
@@ -135,6 +144,7 @@ pub fn create_sandbox(
         plugin_dir:         manifest.dir.clone(),
         arbor_api:          manifest.arbor_api,
         app_ctx,
+        host_weak,
         timer_cancels,
         timer_counter,
         schedules,

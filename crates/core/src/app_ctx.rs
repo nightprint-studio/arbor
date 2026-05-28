@@ -15,7 +15,7 @@
 //! pulling in the Tauri shell.
 
 use std::any::Any;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub trait AppCtx: Any + Send + Sync {
     /// Downcast hook so host-specific call sites (e.g. the Tauri shell's
@@ -48,4 +48,18 @@ pub trait AppCtx: Any + Send + Sync {
     /// payload. Default is a no-op so headless hosts (CLI, tests) don't
     /// need to wire up a buffer.
     fn record_plugin_log(&self, _level: &str, _plugin: &str, _message: &str) {}
+
+    /// Path of the repository currently visible in the active tab, if any.
+    /// Used by host-pure namespaces (`arbor.settings.read_project`, …) that
+    /// need to scope per-repo state without depending on a shell-side
+    /// `AppState`. Default is `None` so headless / test hosts trivially
+    /// satisfy the contract.
+    fn active_repo_path(&self) -> Option<PathBuf> { None }
+
+    /// Hand a file/folder path to the OS' default handler (Explorer / Finder
+    /// / xdg-open). Backs `arbor.ui.open_path`. Default errors out so headless
+    /// hosts surface a clear "unsupported" rather than silently succeeding.
+    fn open_path(&self, _path: &str) -> Result<(), String> {
+        Err("open_path: not supported by this host".to_string())
+    }
 }
