@@ -235,31 +235,19 @@ pub fn commit(
 ) -> Result<String, AppError> {
     // ── Pre-commit veto ────────────────────────────────────────────────
     // Plugins subscribed to `on_pre_commit` may reject the commit by
-    // returning a non-empty string from their handler. We stitch every
-    // veto into the error message so the user sees which plugin
-    // complained and why. Empty-reason vetoes are listed by plugin name
-    // only.
-    if let Ok(host) = state.lock_plugin_host() {
-        let pre_ctx = serde_json::json!({
+    // returning a non-empty string from their handler. The dispatcher
+    // short-circuits at the first plugin that vetoes and hands back a
+    // `"<plugin>: <reason>"` string (or `"<plugin>: blocked"` for an
+    // empty reason), which we surface to the user.
+    if let Some(reason) = state.hook_dispatcher.fire_vetoable_blocking(
+        "on_pre_commit",
+        arbor_plugin_api::prelude::PluginValue::from_json(serde_json::json!({
             "tab_id":  &tab_id,
             "message": &message,
             "amend":   amend,
-        });
-        let vetoes = host.collect_veto("on_pre_commit", &pre_ctx.to_string());
-        if !vetoes.is_empty() {
-            let mut lines: Vec<String> = Vec::with_capacity(vetoes.len());
-            for (plugin, reason) in &vetoes {
-                if reason.is_empty() {
-                    lines.push(format!("{plugin}: blocked"));
-                } else {
-                    lines.push(format!("{plugin}: {reason}"));
-                }
-            }
-            return Err(AppError::Other(format!(
-                "Commit blocked by plugin(s):\n{}",
-                lines.join("\n")
-            )));
-        }
+        })),
+    ) {
+        return Err(AppError::Other(format!("Commit blocked by plugin:\n{reason}")));
     }
 
     // Scope the repos lock so it is released before firing plugin hooks
@@ -300,15 +288,15 @@ pub fn commit(
     }
     }; // repos lock released here
 
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({
+    state.fire_hook(
+        "on_commit",
+        serde_json::json!({
             "tab_id":  &tab_id,
             "oid":     &oid,
             "message": &message,
             "amend":   amend,
-        });
-        let _ = host.fire_hook("on_commit", &ctx.to_string());
-    }
+        }),
+    );
     Ok(oid)
 }
 

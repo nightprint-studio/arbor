@@ -31,9 +31,7 @@ pub fn take_migration_report(state: State<'_, AppState>) -> Result<Option<migrat
 // ---------------------------------------------------------------------------
 
 fn fire_hook(app: &AppHandle, hook: &str, payload: serde_json::Value) {
-    let state = app.state::<AppState>();
-    let Ok(host) = state.lock_plugin_host() else { return; };
-    let _ = host.fire_hook(hook, &payload.to_string());
+    app.state::<AppState>().fire_hook(hook, payload);
 }
 
 fn workspace_payload(ws: &WorkspaceDef) -> serde_json::Value {

@@ -42,8 +42,11 @@ pub use crate::runtime::{
 };
 pub use crate::runtime::host::dep_cascade::{EnableBlocker, EnablePreview};
 
-// ── Hook dispatch helpers (Step 4 — slated for removal in Session 7) ───────
-pub use crate::hook_registry::{fire as fire_hook, fire_collecting, matches_pattern};
+// ── Hook routing (Step 8) ───────────────────────────────────────────────────
+pub use crate::hook_router::{
+    fire, fire_broadcast, fire_collecting, fire_on, fire_vetoable, matches_pattern,
+    LuaHookListener,
+};
 
 // ── Lua API surface (Step 5) ────────────────────────────────────────────────
 pub use crate::lua_api::{

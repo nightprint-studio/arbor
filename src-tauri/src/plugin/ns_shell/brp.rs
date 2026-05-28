@@ -539,7 +539,7 @@ fn fire_callback(
     });
     let state = handle.state::<crate::AppState>();
     if let Ok(host) = state.plugin_host.lock() {
-        let _ = host.fire_hook_on(pname, hook_name, &payload_str);
+        arbor_plugin_core::prelude::fire_on(&host, pname, hook_name, &payload_str);
     };
 }
 

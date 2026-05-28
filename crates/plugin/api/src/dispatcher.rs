@@ -102,6 +102,23 @@ impl HookDispatcher {
         }
         None
     }
+
+    /// Synchronous wrapper around [`Self::fire`] for call sites that aren't in
+    /// an async context (the bulk of Arbor's Tauri commands run on sync
+    /// command threads). Today's only listener does synchronous Lua work, so
+    /// `block_on` returns as soon as the listener finishes — it never parks a
+    /// worker. `futures::executor::block_on` is used rather than
+    /// `tokio::runtime::Handle::block_on` so this works whether or not a Tokio
+    /// runtime is on the current thread.
+    pub fn fire_blocking(&self, name: &str, ctx: PluginValue) {
+        futures_executor::block_on(self.fire(name, ctx));
+    }
+
+    /// Synchronous wrapper around [`Self::fire_vetoable`]. See
+    /// [`Self::fire_blocking`] for why `block_on` is safe here.
+    pub fn fire_vetoable_blocking(&self, name: &str, ctx: PluginValue) -> Option<String> {
+        futures_executor::block_on(self.fire_vetoable(name, ctx))
+    }
 }
 
 impl Default for HookDispatcher {

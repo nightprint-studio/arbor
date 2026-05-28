@@ -35,13 +35,10 @@ impl Action for LuaHookAction {
         // hop onto a blocking-pool thread so the executor isn't pinned.
         let join = tokio::task::spawn_blocking(move || {
             match host_arc.lock() {
-                Ok(host) => host.fire_hook_on(&plugin, &action, "{}"),
-                Err(e)   => {
-                    tracing::warn!(
-                        "plugin_host mutex poisoned in scheduler fire for '{plugin}:{action}': {e}"
-                    );
-                    Ok(())
-                }
+                Ok(host) => crate::hook_router::fire_on(&host, &plugin, &action, "{}"),
+                Err(e)   => tracing::warn!(
+                    "plugin_host mutex poisoned in scheduler fire for '{plugin}:{action}': {e}"
+                ),
             }
         }).await;
         if let Err(e) = join {

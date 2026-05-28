@@ -20,8 +20,8 @@
 //! to distinguish "hook" from "custom event".
 //!
 //! Delivery is asynchronous: emit() spawns a background thread that calls
-//! `PluginHost.fire_hook` so we never deadlock when emitting from inside a
-//! hook handler.
+//! `hook_router::fire_broadcast` so we never deadlock when emitting from
+//! inside a hook handler.
 
 use mlua::{Lua, LuaSerdeExt, Table};
 
@@ -81,7 +81,7 @@ fn install_emit(ctx: &ApiCtx, lua: &Lua, events_table: &Table) -> Result<()> {
         };
 
         // Serialise payload to JSON once so every subscribing Lua VM
-        // receives an equivalent table (hook_registry decodes it).
+        // receives an equivalent table (hook_router decodes it).
         let ctx_json = match payload {
             None | Some(mlua::Value::Nil) => "{}".to_string(),
             Some(v) => {
@@ -97,7 +97,7 @@ fn install_emit(ctx: &ApiCtx, lua: &Lua, events_table: &Table) -> Result<()> {
             std::thread::spawn(move || {
                 if let Some(arc) = weak.upgrade() {
                     if let Ok(host) = arc.lock() {
-                        let _ = host.fire_hook(&full_event, &ctx_json);
+                        crate::hook_router::fire_broadcast(&host, &full_event, &ctx_json);
                     }
                 }
             });

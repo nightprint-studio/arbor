@@ -46,8 +46,8 @@ for the tracker. Currently landed:
   [`LuaApiInstaller`] trait — the host shell injects the
   `arbor.*` namespace surface back through this hook until the
   per-namespace migration of step 5/6), `runtime::{consts, loaded,
-  manifest/*, scheduler/*, host/*}`, `hook_registry` (slated for
-  removal in session 7), plus the 8 embedded Lua builtin files. All
+  manifest/*, scheduler/*, host/*}`, plus the 8 embedded Lua builtin
+  files. All
   internal `AppHandle` uses swapped to `Arc<dyn AppCtx>`. `PluginHost`
   gained `set_app_ctx` / `set_api_installer` / `set_extra_plugin_roots`
   for the host shell to inject Tauri-specific bits at boot. The shell
@@ -94,11 +94,14 @@ Modules already migrated (call sites go through
 - `runtime::host` — `PluginHost` struct + lifecycle (load/enable/
   disable/delete), service invocation, pipeline-op invocation,
   dependency cascade preview, frontend-facing `list_plugin_info`.
-  `hooks` submodule is the legacy fire path (slated for removal in
-  session 7 in favour of `HookDispatcher` + `LuaHookListener`).
-- `hook_registry` — the low-level Lua-side dispatch helpers
-  (`fire`, `fire_collecting`, `matches_pattern`). Also slated for
-  removal in session 7.
+  The `hooks` submodule holds the surviving subscription queries
+  (`plugin_has_handler`, `remove_hook`) — firing moved to `hook_router`.
+- `hook_router` — the Lua-side hook pipeline: low-level dispatch
+  helpers (`fire`, `fire_collecting`, `matches_pattern`), the
+  broadcast / targeted / vetoable free functions over `&PluginHost`
+  (`fire_broadcast`, `fire_on`, `fire_vetoable`), and the
+  `LuaHookListener` adapter that the runtime-agnostic
+  `arbor_plugin_api::HookDispatcher` drives.
 
 Still in the src-tauri shell, scheduled for later sessions:
 

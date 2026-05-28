@@ -8,7 +8,7 @@ use mlua::{Lua, Table};
 use crate::plugin::runtime::TimerCancels;
 
 /// Park a one-shot Lua function under `__arbor_hooks__[id]` so the timer
-/// thread can fire it via `host.fire_hook_on(plugin, id, "{}")`.
+/// thread can fire it via `hook_router::fire_on(&host, plugin, id, "{}")`.
 pub(crate) fn register_timer_hook(lua: &Lua, id: &str, func: mlua::Function) -> mlua::Result<()> {
     let registry: Table = lua.globals().get("__arbor_hooks__")?;
     let list = lua.create_table()?;

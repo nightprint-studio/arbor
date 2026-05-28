@@ -202,7 +202,7 @@ fn install_switch(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
         std::thread::spawn(move || {
             let state = h2.state::<crate::AppState>();
             if let Ok(host) = state.plugin_host.lock() {
-                let _ = host.fire_hook("on_workspace_switched", &payload_str);
+                arbor_plugin_core::prelude::fire_broadcast(&host, "on_workspace_switched", &payload_str);
             };
         });
         boolerr2(lua_ctx, true, None)

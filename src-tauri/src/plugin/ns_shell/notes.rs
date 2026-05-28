@@ -152,7 +152,7 @@ fn install_set(ctx: &ApiCtx, lua: &Lua, notes_table: &Table) -> Result<()> {
                 "tab_id": &tab_id, "commit_oid": &commit_oid,
                 "namespace": &namespace, "plugin": &pname,
             });
-            let _ = host.fire_hook("on_note_saved", &ctx_json.to_string());
+            arbor_plugin_core::prelude::fire_broadcast(&host, "on_note_saved", &ctx_json.to_string());
         }
         boolerr2(lua_ctx, true, None)
     }).map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -196,7 +196,7 @@ fn install_delete(ctx: &ApiCtx, lua: &Lua, notes_table: &Table) -> Result<()> {
                 "tab_id": &tab_id, "commit_oid": &commit_oid,
                 "namespace": &namespace, "plugin": &pname,
             });
-            let _ = host.fire_hook("on_note_deleted", &ctx_json.to_string());
+            arbor_plugin_core::prelude::fire_broadcast(&host, "on_note_deleted", &ctx_json.to_string());
         }
         boolerr2(lua_ctx, true, None)
     }).map_err(|e| AppError::Plugin(e.to_string()))?;

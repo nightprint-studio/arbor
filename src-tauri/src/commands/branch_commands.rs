@@ -264,10 +264,10 @@ pub fn create_branch(
         let repo = mgr.get(&tab_id)?;
         crate::git::branch::create_branch(repo.inner(), &name, &from_oid)?
     };
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "name": &name, "from_oid": &from_oid });
-        let _ = host.fire_hook("on_branch_create", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_branch_create",
+        serde_json::json!({ "tab_id": &tab_id, "name": &name, "from_oid": &from_oid }),
+    );
     Ok(info)
 }
 
@@ -283,10 +283,10 @@ pub fn delete_branch(
         let repo = mgr.get(&tab_id)?;
         crate::git::branch::delete_branch(repo.inner(), &name)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "name": &name });
-        let _ = host.fire_hook("on_branch_delete", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_branch_delete",
+        serde_json::json!({ "tab_id": &tab_id, "name": &name }),
+    );
     // Remove alias entries that referenced this (repo_id, branch).
     if let Some(repo_id) = repo_id_for_tab(&state, &tab_id) {
         if let Ok(mut reg) = state.lock_linked_worktrees() {
@@ -316,10 +316,10 @@ pub fn rename_branch(
         let repo = mgr.get(&tab_id)?;
         crate::git::branch::rename_branch(repo.inner(), &old_name, &new_name)?
     };
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "old_name": &old_name, "new_name": &new_name });
-        let _ = host.fire_hook("on_branch_rename", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_branch_rename",
+        serde_json::json!({ "tab_id": &tab_id, "old_name": &old_name, "new_name": &new_name }),
+    );
     // Smart-update alias entries: rename in-place; collapse groups that
     // become trivial (every member shares the same branch name).
     if let Some(repo_id) = repo_id_for_tab(&state, &tab_id) {
@@ -349,10 +349,10 @@ pub fn checkout_branch(
         let repo = mgr.get(&tab_id)?;
         crate::git::branch::checkout_branch(repo.inner(), &name)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "branch": &name });
-        let _ = host.fire_hook("on_checkout", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_checkout",
+        serde_json::json!({ "tab_id": &tab_id, "branch": &name }),
+    );
     // Trigger space sync if this tab's repo is a member of a sync-enabled
     // space.  No-op otherwise.  Runs in a background thread.
     if let Some(repo_id) = repo_id_for_tab(&state, &tab_id) {
@@ -383,10 +383,10 @@ pub fn checkout_branch_safe(
 
     // Fire hook + trigger worktree-link sync only on clean success.
     if checkout_is_clean(&result) {
-        if let Ok(host) = state.lock_plugin_host() {
-            let ctx = serde_json::json!({ "tab_id": &tab_id, "branch": &name });
-            let _ = host.fire_hook("on_checkout", &ctx.to_string());
-        }
+        state.fire_hook(
+            "on_checkout",
+            serde_json::json!({ "tab_id": &tab_id, "branch": &name }),
+        );
         if let Some(repo_id) = repo_id_for_tab(&state, &tab_id) {
             linked_worktrees::orchestrator::maybe_trigger_checkout_sync(&app, &tab_id, &repo_id, &name);
         }
@@ -414,10 +414,10 @@ pub fn checkout_remote_as_local(
         let repo = mgr.get(&tab_id)?;
         crate::git::branch::checkout_remote_as_local(repo.inner(), &remote_name)?
     };
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "branch": &local_name });
-        let _ = host.fire_hook("on_checkout", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_checkout",
+        serde_json::json!({ "tab_id": &tab_id, "branch": &local_name }),
+    );
     if let Some(repo_id) = repo_id_for_tab(&state, &tab_id) {
         linked_worktrees::orchestrator::maybe_trigger_checkout_sync(&app, &tab_id, &repo_id, &local_name);
     }
@@ -448,10 +448,10 @@ pub fn checkout_remote_as_local_safe(
 
     if checkout_is_clean(&result) {
         if let Some(ref local_name) = result.resolved_local_name {
-            if let Ok(host) = state.lock_plugin_host() {
-                let ctx = serde_json::json!({ "tab_id": &tab_id, "branch": local_name });
-                let _ = host.fire_hook("on_checkout", &ctx.to_string());
-            }
+            state.fire_hook(
+                "on_checkout",
+                serde_json::json!({ "tab_id": &tab_id, "branch": local_name }),
+            );
             if let Some(repo_id) = repo_id_for_tab(&state, &tab_id) {
                 linked_worktrees::orchestrator::maybe_trigger_checkout_sync(&app, &tab_id, &repo_id, local_name);
             }
@@ -474,10 +474,10 @@ pub fn checkout_commit(
         let repo = mgr.get(&tab_id)?;
         crate::git::branch::checkout_commit_detached(repo.inner(), &oid)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "oid": &oid });
-        let _ = host.fire_hook("on_checkout", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_checkout",
+        serde_json::json!({ "tab_id": &tab_id, "oid": &oid }),
+    );
     Ok(())
 }
 
@@ -502,10 +502,10 @@ pub fn checkout_commit_safe(
     )?;
 
     if checkout_is_clean(&result) {
-        if let Ok(host) = state.lock_plugin_host() {
-            let ctx = serde_json::json!({ "tab_id": &tab_id, "oid": &oid });
-            let _ = host.fire_hook("on_checkout", &ctx.to_string());
-        }
+        state.fire_hook(
+            "on_checkout",
+            serde_json::json!({ "tab_id": &tab_id, "oid": &oid }),
+        );
     }
 
     Ok(result)
@@ -546,10 +546,10 @@ pub fn delete_remote_branches(
         names.iter().filter(|n| !failed.contains(n)).cloned().collect()
     };
     if !deleted_names.is_empty() {
-        if let Ok(host) = state.lock_plugin_host() {
-            let ctx = serde_json::json!({ "tab_id": &tab_id, "names": &deleted_names });
-            let _ = host.fire_hook("on_branch_delete", &ctx.to_string());
-        }
+        state.fire_hook(
+            "on_branch_delete",
+            serde_json::json!({ "tab_id": &tab_id, "names": &deleted_names }),
+        );
     }
     // Return the failed names (same convention as delete_branches)
     let failed: Vec<String> = names.into_iter().filter(|n| !deleted_names.contains(n)).collect();
@@ -574,15 +574,15 @@ pub fn rename_remote_branch(
             rename_local,
         )?
     };
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({
+    state.fire_hook(
+        "on_branch_rename",
+        serde_json::json!({
             "tab_id": &tab_id,
             "old_name": &old_full_name,
             "new_name": &result.new_full_name,
             "local_renamed": result.local_renamed,
-        });
-        let _ = host.fire_hook("on_branch_rename", &ctx.to_string());
-    }
+        }),
+    );
     Ok(result)
 }
 
@@ -598,10 +598,10 @@ pub fn delete_branches(
         crate::git::branch::delete_branches(repo.inner(), &names)
     };
     if !deleted.is_empty() {
-        if let Ok(host) = state.lock_plugin_host() {
-            let ctx = serde_json::json!({ "tab_id": &tab_id, "names": &deleted });
-            let _ = host.fire_hook("on_branch_delete", &ctx.to_string());
-        }
+        state.fire_hook(
+            "on_branch_delete",
+            serde_json::json!({ "tab_id": &tab_id, "names": &deleted }),
+        );
     }
     Ok(deleted)
 }

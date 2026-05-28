@@ -38,6 +38,10 @@ thiserror  = "2"
 tracing    = "0.1"
 tokio      = { version = "1", features = ["full"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Minimal `block_on` executor — lets sync Tauri command call sites drive the
+# async `HookDispatcher` without a Tokio runtime context (the listener bodies
+# are synchronous Lua work, so this never blocks a worker).
+futures-executor = { version = "0.3", default-features = false, features = ["std"] }
 async-trait  = "0.1"
 
 # HTTP / auth / crypto

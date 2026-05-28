@@ -24,10 +24,10 @@ pub fn open_repo(
         let mut mgr = state.lock_repos()?;
         mgr.open(tab_id.clone(), &path)?
     };
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "path": &info.path, "name": &info.name });
-        let _ = host.fire_hook("on_repo_open", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_repo_open",
+        serde_json::json!({ "tab_id": &tab_id, "path": &info.path, "name": &info.name }),
+    );
     Ok(info)
 }
 
@@ -41,10 +41,10 @@ pub fn close_repo(state: State<'_, AppState>, tab_id: String) -> Result<(), AppE
         mgr.close(&tab_id);
         info
     };
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "path": &path, "name": &name });
-        let _ = host.fire_hook("on_repo_close", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_repo_close",
+        serde_json::json!({ "tab_id": &tab_id, "path": &path, "name": &name }),
+    );
 
     // After the close, decide whether the repo is now orphaned:
     //   · not open in any other tab, AND
@@ -67,15 +67,15 @@ pub fn close_repo(state: State<'_, AppState>, tab_id: String) -> Result<(), AppE
                 None => false, // not in registry → definitely not in any workspace
             };
             if !in_any_ws {
-                if let Ok(host) = state.lock_plugin_host() {
-                    let ctx = serde_json::json!({
+                state.fire_hook(
+                    "on_repo_deregistered",
+                    serde_json::json!({
                         "repo_id": repo_id,
                         "path":    &path,
                         "name":    &name,
                         "reason":  "tab_closed_when_orphan",
-                    });
-                    let _ = host.fire_hook("on_repo_deregistered", &ctx.to_string());
-                }
+                    }),
+                );
             }
         }
     }
@@ -127,8 +127,9 @@ pub async fn init_repo(
     };
 
     // Step 3 — fire on_repo_init plugin hook.
-    {
-        let ctx = serde_json::json!({
+    state.fire_hook(
+        "on_repo_init",
+        serde_json::json!({
             "path":           &info.path,
             "name":           &info.name,
             "default_branch": &options.default_branch,
@@ -138,11 +139,8 @@ pub async fn init_repo(
             "has_readme":     options.readme,
             "license":        &options.license,
             "gitignore":      &options.gitignore_template,
-        });
-        if let Ok(host) = state.plugin_host.lock() {
-            let _ = host.fire_hook("on_repo_init", &ctx.to_string());
-        }
-    }
+        }),
+    );
 
     Ok(InitRepoResult {
         info,
@@ -281,10 +279,10 @@ pub async fn clone_repo(
         let mut mgr = state.lock_repos()?;
         mgr.open(tab_id.clone(), &dest)?
     };
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "path": &info.path, "name": &info.name });
-        let _ = host.fire_hook("on_repo_open", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_repo_open",
+        serde_json::json!({ "tab_id": &tab_id, "path": &info.path, "name": &info.name }),
+    );
     Ok(info)
 }
 

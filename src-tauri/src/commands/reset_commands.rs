@@ -108,15 +108,15 @@ pub fn create_tag(
             r.tag_lightweight(&name, &obj, false)?;
         }
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({
+    state.fire_hook(
+        "on_tag_create",
+        serde_json::json!({
             "tab_id":    &tab_id,
             "name":      &name,
             "oid":       &oid,
             "annotated": annotated,
-        });
-        let _ = host.fire_hook("on_tag_create", &ctx.to_string());
-    }
+        }),
+    );
     Ok(())
 }
 
@@ -131,9 +131,9 @@ pub fn delete_tag(
         let repo = mgr.get(&tab_id)?;
         repo.inner().tag_delete(&name)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "name": &name });
-        let _ = host.fire_hook("on_tag_delete", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_tag_delete",
+        serde_json::json!({ "tab_id": &tab_id, "name": &name }),
+    );
     Ok(())
 }

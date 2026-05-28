@@ -354,7 +354,7 @@ impl PluginHost {
                 "dir":         plugin.manifest.dir.to_string_lossy(),
                 "api_version": plugin.manifest.arbor_api,
             });
-            let _ = crate::hook_registry::fire(
+            let _ = crate::hook_router::fire(
                 &plugin.lua, "on_plugin_load", &ctx.to_string(),
             );
 
@@ -415,7 +415,7 @@ impl PluginHost {
         for sched in schedules {
             // `on_load` is honoured by the shared engine itself (it fires
             // once at registration before `initial_delay`), so we don't
-            // call `fire_hook_on` manually here — that would double-fire.
+            // call `hook_router::fire_on` manually here — that would double-fire.
             self.spawn_scheduler(name, &sched);
         }
         Ok(())
@@ -457,7 +457,7 @@ impl PluginHost {
             .ok_or_else(|| PluginCoreError::Other(format!("plugin '{name}' not found")))?;
 
         // Fire unload hook before disabling.
-        let _ = crate::hook_registry::fire(&plugin.lua, "on_plugin_unload", "{}");
+        let _ = crate::hook_router::fire(&plugin.lua, "on_plugin_unload", "{}");
 
         plugin.enabled.store(false, Ordering::Relaxed);
 
@@ -534,7 +534,7 @@ impl PluginHost {
         if let Some(idx) = self.plugins.iter().position(|p| p.manifest.name == name) {
             let plugin = &self.plugins[idx];
             // Best-effort unload hook.
-            let _ = crate::hook_registry::fire(&plugin.lua, "on_plugin_unload", "{}");
+            let _ = crate::hook_router::fire(&plugin.lua, "on_plugin_unload", "{}");
             // Cancel Lua timers.
             if let Ok(tc) = plugin.timer_cancels.lock() {
                 for cancel in tc.values() { cancel.store(true, Ordering::Relaxed); }
@@ -700,7 +700,7 @@ pub fn load_plugin(
         "dir":         manifest.dir.to_string_lossy(),
         "api_version": manifest.arbor_api,
     });
-    let _ = crate::hook_registry::fire(
+    let _ = crate::hook_router::fire(
         &lua, "on_plugin_load", &ctx.to_string(),
     );
     let hook_ms = hook_started.elapsed().as_millis();

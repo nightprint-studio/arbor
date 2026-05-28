@@ -45,15 +45,15 @@ pub fn stash_save(
             .to_path_buf()
     };
     let entry = crate::git::stash::stash_save(&workdir, message.as_deref(), include_untracked)?;
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({
+    state.fire_hook(
+        "on_stash_push",
+        serde_json::json!({
             "tab_id":            &tab_id,
             "index":             entry.index,
             "message":           &entry.message,
             "include_untracked": include_untracked,
-        });
-        let _ = host.fire_hook("on_stash_push", &ctx.to_string());
-    }
+        }),
+    );
     Ok(entry)
 }
 
@@ -70,10 +70,10 @@ pub fn stash_apply(
     };
     // Only fire hook when clean apply (no conflicts)
     if !result.has_conflicts {
-        if let Ok(host) = state.lock_plugin_host() {
-            let ctx = serde_json::json!({ "tab_id": &tab_id, "index": index, "drop": false });
-            let _ = host.fire_hook("on_stash_pop", &ctx.to_string());
-        }
+        state.fire_hook(
+            "on_stash_pop",
+            serde_json::json!({ "tab_id": &tab_id, "index": index, "drop": false }),
+        );
     }
     Ok(result)
 }
@@ -91,10 +91,10 @@ pub fn stash_pop(
     };
     // Only fire hook when clean pop (no conflicts) — if conflicted, stash is still present
     if !result.has_conflicts {
-        if let Ok(host) = state.lock_plugin_host() {
-            let ctx = serde_json::json!({ "tab_id": &tab_id, "index": index, "drop": true });
-            let _ = host.fire_hook("on_stash_pop", &ctx.to_string());
-        }
+        state.fire_hook(
+            "on_stash_pop",
+            serde_json::json!({ "tab_id": &tab_id, "index": index, "drop": true }),
+        );
     }
     Ok(result)
 }

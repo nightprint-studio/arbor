@@ -784,9 +784,6 @@ fn fire_mr_hook_by_number(
 }
 
 fn fire_hook(state: &AppState, hook: &str, ctx: serde_json::Value) {
-    if let Ok(host) = state.plugin_host.lock() {
-        let ctx_str = ctx.to_string();
-        let _ = host.fire_hook(hook, &ctx_str);
-    }
+    state.fire_hook(hook, ctx);
 }
 

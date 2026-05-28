@@ -139,33 +139,29 @@ pub fn reload_plugins(app_handle: tauri::AppHandle, state: State<'_, AppState>) 
         }
     };
     if !opens.is_empty() {
-        if let Ok(host) = state.lock_plugin_host() {
-            for (tab_id, path, name) in &opens {
-                let ctx = serde_json::json!({
+        for (tab_id, path, name) in &opens {
+            state.fire_hook("on_repo_open", serde_json::json!({
+                "tab_id": tab_id,
+                "path":   path,
+                "name":   name,
+            }));
+        }
+
+        // `list_open()` iterates a HashMap — order is non-deterministic,
+        // so plugins that derive their `current_repo` from the LAST
+        // `on_repo_open` they receive end up pointing at a random tab
+        // instead of the one the user is actually looking at. Fire one
+        // final `on_tab_switch` for the active tab so plugins land on the
+        // right repo AND those that subscribe only to `on_tab_switch`
+        // (not `on_repo_open`) wake up too.
+        let active_tab = state.active_tab_id.lock().ok().and_then(|g| g.clone());
+        if let Some(tid) = active_tab {
+            if let Some((tab_id, path, name)) = opens.iter().find(|(t, _, _)| t == &tid) {
+                state.fire_hook("on_tab_switch", serde_json::json!({
                     "tab_id": tab_id,
                     "path":   path,
                     "name":   name,
-                });
-                let _ = host.fire_hook("on_repo_open", &ctx.to_string());
-            }
-
-            // `list_open()` iterates a HashMap — order is non-deterministic,
-            // so plugins that derive their `current_repo` from the LAST
-            // `on_repo_open` they receive end up pointing at a random tab
-            // instead of the one the user is actually looking at. Fire one
-            // final `on_tab_switch` for the active tab so plugins land on the
-            // right repo AND those that subscribe only to `on_tab_switch`
-            // (not `on_repo_open`) wake up too.
-            let active_tab = state.active_tab_id.lock().ok().and_then(|g| g.clone());
-            if let Some(tid) = active_tab {
-                if let Some((tab_id, path, name)) = opens.iter().find(|(t, _, _)| t == &tid) {
-                    let ctx = serde_json::json!({
-                        "tab_id": tab_id,
-                        "path":   path,
-                        "name":   name,
-                    });
-                    let _ = host.fire_hook("on_tab_switch", &ctx.to_string());
-                }
+                }));
             }
         }
     }
@@ -180,8 +176,10 @@ pub fn exec_hook(
     hook: String,
     context_json: String,
 ) -> Result<(), AppError> {
-    let host = state.lock_plugin_host()?;
-    Ok(host.fire_hook(&hook, &context_json)?)
+    let ctx: serde_json::Value =
+        serde_json::from_str(&context_json).unwrap_or_else(|_| serde_json::json!({}));
+    state.fire_hook(&hook, ctx);
+    Ok(())
 }
 
 /// Fire a specific action on a specific plugin.
@@ -195,7 +193,8 @@ pub fn fire_plugin_action(
 ) -> Result<(), AppError> {
     let host = state.lock_plugin_host()?;
     // Fire the action directly by name — Lua plugins register with arbor.events.on("action-name", fn)
-    Ok(host.fire_hook_on(&plugin_name, &action, &context_json)?)
+    arbor_plugin_core::prelude::fire_on(&host, &plugin_name, &action, &context_json);
+    Ok(())
 }
 
 /// Enable a plugin. Returns the ordered list of plugins that were actually
@@ -541,14 +540,11 @@ pub fn set_active_tab(state: State<'_, AppState>, tab_id: Option<String>) {
         let repo_info: Option<(String, String)> = state.lock_repos().ok().and_then(|mut mgr| {
             mgr.get(tid).ok().map(|r| (r.path.clone(), r.name.clone()))
         });
-        if let Ok(host) = state.lock_plugin_host() {
-            let ctx = serde_json::json!({
-                "tab_id": tid,
-                "path":   repo_info.as_ref().map(|(p, _)| p.as_str()).unwrap_or(""),
-                "name":   repo_info.as_ref().map(|(_, n)| n.as_str()).unwrap_or(""),
-            });
-            let _ = host.fire_hook("on_tab_switch", &ctx.to_string());
-        }
+        state.fire_hook("on_tab_switch", serde_json::json!({
+            "tab_id": tid,
+            "path":   repo_info.as_ref().map(|(p, _)| p.as_str()).unwrap_or(""),
+            "name":   repo_info.as_ref().map(|(_, n)| n.as_str()).unwrap_or(""),
+        }));
     }
 }
 

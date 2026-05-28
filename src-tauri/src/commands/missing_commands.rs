@@ -181,15 +181,13 @@ pub fn relocate_repo(
     }
 
     if let Some(entry) = updated {
-        if let Ok(host) = state.lock_plugin_host() {
-            let _ = host.fire_hook("on_project_relocated", &serde_json::json!({
-                "repo_id":   &repo_id,
-                "old_path":  &old_path,
-                "new_path":  &new_path,
-                "name":      &entry.display_name,
-                "remote_url": &entry.remote_url,
-            }).to_string());
-        }
+        state.fire_hook("on_project_relocated", serde_json::json!({
+            "repo_id":   &repo_id,
+            "old_path":  &old_path,
+            "new_path":  &new_path,
+            "name":      &entry.display_name,
+            "remote_url": &entry.remote_url,
+        }));
         let _ = app.emit("arbor://repo-relocated", serde_json::json!({
             "repo_id":  &repo_id,
             "old_path": &old_path,
@@ -215,14 +213,12 @@ pub fn report_repo_missing(
     let name = state.lock_repo_registry().ok()
         .and_then(|reg| reg.get(&repo_id).map(|e| e.display_name.clone()));
 
-    if let Ok(host) = state.lock_plugin_host() {
-        let _ = host.fire_hook("on_project_missing", &serde_json::json!({
-            "repo_id": &repo_id,
-            "path":    &path,
-            "name":    &name,
-            "reason":  &reason,
-        }).to_string());
-    }
+    state.fire_hook("on_project_missing", serde_json::json!({
+        "repo_id": &repo_id,
+        "path":    &path,
+        "name":    &name,
+        "reason":  &reason,
+    }));
     Ok(())
 }
 

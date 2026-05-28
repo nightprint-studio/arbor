@@ -45,9 +45,7 @@ fn get_workdir(state: &State<'_, AppState>, tab_id: &str) -> Result<String, AppE
 
 /// Fire a Git Flow lifecycle hook on all enabled plugins.
 fn fire_hook(state: &State<'_, AppState>, hook: &str, ctx: serde_json::Value) {
-    if let Ok(host) = state.plugin_host.lock() {
-        let _ = host.fire_hook(hook, &ctx.to_string());
-    }
+    state.fire_hook(hook, ctx);
 }
 
 // ---------------------------------------------------------------------------

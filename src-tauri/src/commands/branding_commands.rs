@@ -51,14 +51,15 @@ pub fn notify_theme_changed(
     vars:       std::collections::HashMap<String, String>,
     source:     String,
 ) -> Result<(), AppError> {
-    let host = state.lock_plugin_host()?;
-    let ctx = serde_json::json!({
-        "theme_id":   theme_id,
-        "theme_name": theme_name,
-        "vars":       vars,
-        "source":     source,
-    });
-    let _ = host.fire_hook("on_theme_changed", &ctx.to_string());
+    state.fire_hook(
+        "on_theme_changed",
+        serde_json::json!({
+            "theme_id":   theme_id,
+            "theme_name": theme_name,
+            "vars":       vars,
+            "source":     source,
+        }),
+    );
     Ok(())
 }
 

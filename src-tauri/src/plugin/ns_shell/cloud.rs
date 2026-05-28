@@ -182,9 +182,9 @@ fn install_test_connection_async(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Resu
         let app = h.clone();
         tauri::async_runtime::spawn(async move {
             let res = crate::cloud::ops::test_connection(&conn, bucket.as_deref()).await;
-            // Build payload as a JSON string — fire_hook decodes it back into
-            // a Lua table for each subscriber. Done off the tokio worker so we
-            // don't block it on the plugin host's mutex.
+            // Build payload as a JSON string — the hook router decodes it back
+            // into a Lua table for each subscriber. Done off the tokio worker
+            // so we don't block it on the plugin host's mutex.
             let payload = match res {
                 Ok(r) => serde_json::json!({
                     "request_id": request_id,
@@ -201,7 +201,7 @@ fn install_test_connection_async(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Resu
             std::thread::spawn(move || {
                 let state = app.state::<crate::AppState>();
                 if let Ok(host) = state.plugin_host.lock() {
-                    let _ = host.fire_hook(&on_done, &payload_str);
+                    arbor_plugin_core::prelude::fire_broadcast(&host, &on_done, &payload_str);
                 };
             });
         });

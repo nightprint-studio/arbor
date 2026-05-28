@@ -38,7 +38,7 @@ fn install_after(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
                 if cancel.load(Ordering::Relaxed) { return; }
                 if let Some(arc) = weak.upgrade() {
                     if let Ok(host) = arc.lock() {
-                        let _ = host.fire_hook_on(&pn, &hook_id, "{}");
+                        crate::hook_router::fire_on(&host, &pn, &hook_id, "{}");
                     }
                 }
                 // Clean up cancel token.
@@ -75,7 +75,7 @@ fn install_every(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
                     }
                     if let Some(arc) = weak.upgrade() {
                         if let Ok(host) = arc.lock() {
-                            let _ = host.fire_hook_on(&pn, &hook_id, "{}");
+                            crate::hook_router::fire_on(&host, &pn, &hook_id, "{}");
                         }
                     } else {
                         return;

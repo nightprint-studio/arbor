@@ -118,10 +118,10 @@ pub async fn fetch_remote(
     .await
     .map_err(|e| AppError::Other(format!("fetch task panicked: {e}")))??;
 
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id, "remote": &remote });
-        let _ = host.fire_hook("on_fetch", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_fetch",
+        serde_json::json!({ "tab_id": &tab_id, "remote": &remote }),
+    );
     Ok(result)
 }
 
@@ -155,15 +155,15 @@ pub async fn push_branch(
     .await
     .map_err(|e| AppError::Other(format!("push task panicked: {e}")))??;
 
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({
+    state.fire_hook(
+        "on_push",
+        serde_json::json!({
             "tab_id":  &tab_id,
             "remote":  &remote,
             "refspec": &refspec,
             "force":   force,
-        });
-        let _ = host.fire_hook("on_push", &ctx.to_string());
-    }
+        }),
+    );
     Ok(())
 }
 
@@ -252,11 +252,10 @@ pub async fn pull_branch(
     // AppHandle since the original `state` doesn't survive the await point
     // cleanly under all Tauri versions.
     if pr.pull_error.is_none() && pr.stash_apply_error.is_none() && pr.stash_conflicts.is_empty() {
-        let state_post = app.state::<AppState>();
-        if let Ok(host) = state_post.lock_plugin_host() {
-            let ctx = serde_json::json!({ "tab_id": &tab_id, "remote": &remote });
-            let _ = host.fire_hook("on_pull", &ctx.to_string());
-        };
+        app.state::<AppState>().fire_hook(
+            "on_pull",
+            serde_json::json!({ "tab_id": &tab_id, "remote": &remote }),
+        );
     }
 
     // If the pull failed AND there's no stash context to communicate, surface

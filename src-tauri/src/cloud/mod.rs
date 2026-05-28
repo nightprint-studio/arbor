@@ -77,7 +77,7 @@ impl CloudHost for ArborCloudHost {
 
     fn fire_plugin_hook(&self, plugin: &str, hook: &str, payload_json: &str) {
         match self.plugin_host.lock() {
-            Ok(host) => { let _ = host.fire_hook_on(plugin, hook, payload_json); }
+            Ok(host) => arbor_plugin_core::prelude::fire_on(&host, plugin, hook, payload_json),
             Err(e)   => tracing::warn!("plugin_host poisoned, dropping hook {plugin}:{hook}: {e}"),
         }
     }

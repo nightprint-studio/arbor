@@ -54,7 +54,7 @@ pub struct PluginHost {
     pub(crate) scheduler: Option<Arc<Scheduler>>,
     /// Weak self-reference, set alongside [`install_scheduler`]. Lua-bridge
     /// actions installed in the engine upgrade this to call back into
-    /// `fire_hook_on`; using `Weak` avoids a self-strong-cycle.
+    /// `hook_router::fire_on`; using `Weak` avoids a self-strong-cycle.
     pub(crate) self_arc: Option<Weak<Mutex<PluginHost>>>,
     /// Plugins that failed to load due to dependency errors (shown in Plugin Manager).
     pub load_failures: Vec<LoadFailure>,
@@ -116,9 +116,9 @@ impl PluginHost {
     }
 
     /// Wire the shared trigger engine + the weak self-pointer used by
-    /// scheduler-fired Lua actions to call back into [`Self::fire_hook_on`].
-    /// Called once at boot from `setup()` after `AppState` is `manage`d
-    /// and the Tokio runtime handle has been captured.
+    /// scheduler-fired Lua actions to call back into
+    /// [`crate::hook_router::fire_on`]. Called once at boot from `setup()`
+    /// after `AppState` is `manage`d and the Tokio runtime handle is captured.
     pub fn install_scheduler(
         &mut self,
         scheduler: Arc<Scheduler>,
@@ -145,7 +145,7 @@ impl PluginHost {
         // Fire on_plugin_unload on all currently loaded (enabled) plugins.
         for plugin in &self.plugins {
             if plugin.is_enabled() {
-                let _ = crate::hook_registry::fire(
+                let _ = crate::hook_router::fire(
                     &plugin.lua, "on_plugin_unload", "{}",
                 );
             }

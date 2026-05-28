@@ -40,6 +40,7 @@ use crate::error::{AppError, Result};
 use crate::git::repo::RepoManager;
 use crate::git::ticket_links::TicketLinkCache;
 use crate::plugin::runtime::PluginHost;
+use arbor_plugin_api::prelude::{HookDef, HookDispatcher, HookKind};
 use crate::config::app_config::AppConfig;
 use crate::terminal::TerminalManager;
 use crate::jobs::JobRegistry;
@@ -64,6 +65,32 @@ use arbor_scheduler::prelude::Scheduler;
 // Application state — shared across all Tauri commands
 // ---------------------------------------------------------------------------
 
+/// Build the [`HookDispatcher`]: register every static `HOOK_CATALOG` entry
+/// (so introspection knows each hook's kind / ctx schema) and wire the single
+/// mlua [`LuaHookListener`](arbor_plugin_core::prelude::LuaHookListener) bound
+/// to `plugin_host`. `on_pre_commit` is the only vetoable hook today; the rest
+/// are fire-and-forget.
+fn build_hook_dispatcher(plugin_host: &Arc<Mutex<PluginHost>>) -> HookDispatcher {
+    let mut dispatcher = HookDispatcher::new();
+    for h in arbor_plugin_types::prelude::HOOK_CATALOG {
+        dispatcher.register_hook(HookDef {
+            name:        h.name,
+            category:    h.category,
+            description: h.description,
+            kind:        if h.name == "on_pre_commit" {
+                HookKind::Vetoable
+            } else {
+                HookKind::FireAndForget
+            },
+            ctx: h.ctx,
+        });
+    }
+    dispatcher.register_listener(Arc::new(
+        arbor_plugin_core::prelude::LuaHookListener::new(Arc::downgrade(plugin_host)),
+    ));
+    dispatcher
+}
+
 pub struct AppState {
     pub repos:          Mutex<RepoManager>,
     /// Arc-wrapped because the `arbor-cloud` CloudHost impl holds a clone —
@@ -71,6 +98,14 @@ pub struct AppState {
     /// `host.fire_plugin_hook()` need access. Arc<Mutex<…>> keeps both
     /// pointing at the same lock without ownership tricks.
     pub plugin_host:    Arc<Mutex<PluginHost>>,
+    /// Runtime-agnostic hook broker (PR #4 — `arbor-plugin-core`). Built once
+    /// in `new()` with the static `HOOK_CATALOG` registered and a single
+    /// `LuaHookListener` bound to `plugin_host`. Domain code fires hooks
+    /// through this (`fire_blocking` / `fire_vetoable_blocking` from sync
+    /// commands, `.fire(...).await` from async) instead of reaching into
+    /// `PluginHost` directly. Arc so background threads can clone + fire after
+    /// a command returns.
+    pub hook_dispatcher: Arc<HookDispatcher>,
     pub config:         Mutex<AppConfig>,
     pub terminals:      Mutex<TerminalManager>,
     /// Arc-wrapped for the same reason as `plugin_host` — the cloud
@@ -192,6 +227,16 @@ impl AppState {
         })
     }
 
+    /// Fire a hook to every subscribing plugin, synchronously — the common
+    /// case for Tauri command threads. Thin wrapper over the hook dispatcher
+    /// that bridges `serde_json::Value` → `PluginValue` so call sites stay
+    /// terse. Async contexts can call `state.hook_dispatcher.fire(...).await`
+    /// directly instead.
+    pub fn fire_hook(&self, hook: &str, ctx: serde_json::Value) {
+        self.hook_dispatcher
+            .fire_blocking(hook, arbor_plugin_api::prelude::PluginValue::from_json(ctx));
+    }
+
     pub fn lock_config(&self) -> Result<MutexGuard<'_, AppConfig>> {
         self.config.lock().map_err(|e| {
             tracing::error!("config mutex poisoned: {e}");
@@ -299,9 +344,17 @@ impl AppState {
         providers.register(Arc::new(GithubProvider::new()));
         providers.register(Arc::new(GitlabProvider::new()));
 
+        // Hook broker — built here (rather than in `setup()`) so the field can
+        // stay an immutable `Arc<HookDispatcher>`: the static catalog and the
+        // `LuaHookListener` (bound to the just-created `plugin_host`) are the
+        // only inputs, and neither needs the Tauri `AppHandle`.
+        let plugin_host = Arc::new(Mutex::new(PluginHost::new()));
+        let hook_dispatcher = Arc::new(build_hook_dispatcher(&plugin_host));
+
         Self {
             repos:          Mutex::new(RepoManager::new()),
-            plugin_host:    Arc::new(Mutex::new(PluginHost::new())),
+            plugin_host,
+            hook_dispatcher,
             config:         Mutex::new(config),
             terminals:      Mutex::new(TerminalManager::new()),
             jobs:           Arc::new(Mutex::new(JobRegistry::default())),
@@ -507,7 +560,7 @@ pub fn run() {
                 let _ = state.scheduler.set(scheduler.clone());
 
                 // Hand the scheduler + a weak self-pointer to PluginHost so
-                // Lua-fired actions can call back into `fire_hook_on`.
+                // Lua-fired actions can call back into `hook_router::fire_on`.
                 let host_arc = state.plugin_host.clone();
                 {
                     let mut host = host_arc.lock()

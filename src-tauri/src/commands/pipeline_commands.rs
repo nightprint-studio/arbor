@@ -136,7 +136,7 @@ pub fn request_pipeline_run(
                     "pipeline_id": pipeline_id,
                     "tab_id":      tab_id,
                 }).to_string();
-                host.fire_hook_on(&plugin, "on_pipeline_run_request", &ctx)?;
+                arbor_plugin_core::prelude::fire_on(&host, &plugin, "on_pipeline_run_request", &ctx);
                 Ok(None)
             } else {
                 Err(AppError::Other(format!(

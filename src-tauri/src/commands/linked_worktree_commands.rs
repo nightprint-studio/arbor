@@ -96,10 +96,10 @@ pub fn add_worktree_link_member(
         reg.add_member(&link_id, &repo_id)?;
         linked_worktrees::save(&reg)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "link_id": &link_id, "repo_id": &repo_id });
-        let _ = host.fire_hook("on_worktree_link_member_added", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_worktree_link_member_added",
+        serde_json::json!({ "link_id": &link_id, "repo_id": &repo_id }),
+    );
     emit_changed(&app);
     Ok(())
 }
@@ -116,10 +116,10 @@ pub fn remove_worktree_link_member(
         reg.remove_member(&link_id, &repo_id)?;
         linked_worktrees::save(&reg)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "link_id": &link_id, "repo_id": &repo_id });
-        let _ = host.fire_hook("on_worktree_link_member_removed", &ctx.to_string());
-    }
+    state.fire_hook(
+        "on_worktree_link_member_removed",
+        serde_json::json!({ "link_id": &link_id, "repo_id": &repo_id }),
+    );
     emit_changed(&app);
     Ok(())
 }

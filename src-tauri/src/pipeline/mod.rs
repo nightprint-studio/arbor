@@ -625,9 +625,7 @@ fn log_event(
 }
 
 fn fire_hook(state: &crate::AppState, hook: &str, ctx: &serde_json::Value) {
-    if let Ok(host) = state.plugin_host.lock() {
-        let _ = host.fire_hook(hook, &ctx.to_string());
-    }
+    state.fire_hook(hook, ctx.clone());
 }
 
 /// Index of steps within `stage` that actually need to run, given the run's

@@ -13,7 +13,7 @@
 //! matches `maven.org` and itself).
 //!
 //! Threading: the callback is dispatched via the same `__arbor_hooks__`
-//! table and `fire_hook_on()` plumbing as `arbor.job.spawn`'s on_done,
+//! table and `hook_router::fire_on` plumbing as `arbor.job.spawn`'s on_done,
 //! so it shares the per-plugin Lua-VM mutex semantics for free.
 
 use std::sync::Arc;
@@ -86,7 +86,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
                 // arbor.job.spawn.
                 if let Some(arc) = host_c.and_then(|w| w.upgrade()) {
                     if let Ok(host) = arc.lock() {
-                        let _ = host.fire_hook_on(&pname_owned, &hook_owned, &payload_str);
+                        crate::hook_router::fire_on(&host, &pname_owned, &hook_owned, &payload_str);
                     }
                 }
             });

@@ -55,14 +55,14 @@ pub fn save_commit_note(
         let repo = mgr.get(&tab_id)?;
         crate::git::notes::set_note(repo.inner(), &commit_oid, &namespace, &content)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({
+    state.fire_hook(
+        "on_note_saved",
+        serde_json::json!({
             "tab_id":     &tab_id,
             "commit_oid": &commit_oid,
             "namespace":  &namespace,
-        });
-        let _ = host.fire_hook("on_note_saved", &ctx.to_string());
-    }
+        }),
+    );
     Ok(())
 }
 
@@ -92,13 +92,13 @@ pub fn delete_commit_note(
         let repo = mgr.get(&tab_id)?;
         crate::git::notes::delete_note(repo.inner(), &commit_oid, &namespace)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({
+    state.fire_hook(
+        "on_note_deleted",
+        serde_json::json!({
             "tab_id":     &tab_id,
             "commit_oid": &commit_oid,
             "namespace":  &namespace,
-        });
-        let _ = host.fire_hook("on_note_deleted", &ctx.to_string());
-    }
+        }),
+    );
     Ok(())
 }

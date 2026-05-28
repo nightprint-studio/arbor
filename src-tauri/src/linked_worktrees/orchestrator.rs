@@ -419,11 +419,7 @@ fn repo_name_map(app: &AppHandle) -> HashMap<String, String> {
 }
 
 fn fire_hook(app: &AppHandle, name: &str, ctx: &serde_json::Value) {
-    let state = app.state::<AppState>();
-    let lock_res = state.lock_plugin_host();
-    if let Ok(host) = lock_res {
-        let _ = host.fire_hook(name, &ctx.to_string());
-    }
+    app.state::<AppState>().fire_hook(name, ctx.clone());
 }
 
 /// Public helper — true if a link sync is currently running.

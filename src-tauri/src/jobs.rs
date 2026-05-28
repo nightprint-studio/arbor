@@ -515,7 +515,7 @@ pub fn spawn_job(req: JobSpawnRequest, app_handle: tauri::AppHandle) {
                                 }).to_string();
                                 let state = app_handle.state::<crate::AppState>();
                                 if let Ok(host) = state.plugin_host.lock() {
-                                    let _ = host.fire_hook_on(&req.plugin_name, action, &ctx);
+                                    arbor_plugin_core::prelude::fire_on(&host, &req.plugin_name, action, &ctx);
                                 };
                             }
                             return;
@@ -546,7 +546,7 @@ pub fn spawn_job(req: JobSpawnRequest, app_handle: tauri::AppHandle) {
                 }).to_string();
                 let state = app_handle.state::<crate::AppState>();
                 if let Ok(host) = state.plugin_host.lock() {
-                    let _ = host.fire_hook_on(&req.plugin_name, action, &ctx);
+                    arbor_plugin_core::prelude::fire_on(&host, &req.plugin_name, action, &ctx);
                 };
             }
         })

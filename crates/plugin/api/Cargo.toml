@@ -14,6 +14,9 @@ serde       = { workspace = true }
 serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 async-trait = { workspace = true }
+# `block_on` for the sync `fire_blocking` / `fire_vetoable_blocking` entry
+# points used by synchronous Tauri command call sites.
+futures-executor = { workspace = true }
 
 # Permission values come from `plugin.toml`, which is a TOML document — keep the
 # untyped `toml::Value` available alongside the typed permission schemas.

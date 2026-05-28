@@ -89,7 +89,7 @@ External: `tokio`, `cron`, `chrono`, `tracing`, `thiserror`,
 ## Consumed by (planned migration)
 
 - `arbor-plugin-core` — `arbor.scheduler.register` from Lua, via an
-  `Action` impl that wraps `PluginHost::fire_hook_on`.
+  `Action` impl that wraps `hook_router::fire_on`.
 - `arbor-plugin-marketplace` — auto-refresh task, a single `FixedDelay`
   entry with a `gate` that re-reads `marketplace.refresh_hours`.
 - `arbor-pipeline-core` — scheduled pipeline runs.

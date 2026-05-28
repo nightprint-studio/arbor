@@ -28,14 +28,14 @@ pub fn start_rebase(
         let repo = mgr.get(&tab_id)?;
         crate::git::rebase::start_interactive_rebase(&repo.path, &base, &todo)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({
+    state.fire_hook(
+        "on_rebase_start",
+        serde_json::json!({
             "tab_id":       &tab_id,
             "base":         &base,
             "action_count": action_count,
-        });
-        let _ = host.fire_hook("on_rebase_start", &ctx.to_string());
-    }
+        }),
+    );
     Ok(())
 }
 
@@ -53,10 +53,7 @@ pub fn rebase_abort(state: State<'_, AppState>, tab_id: String) -> Result<(), Ap
         let repo = mgr.get(&tab_id)?;
         crate::git::rebase::rebase_abort(&repo.path)?;
     }
-    if let Ok(host) = state.lock_plugin_host() {
-        let ctx = serde_json::json!({ "tab_id": &tab_id });
-        let _ = host.fire_hook("on_rebase_abort", &ctx.to_string());
-    }
+    state.fire_hook("on_rebase_abort", serde_json::json!({ "tab_id": &tab_id }));
     Ok(())
 }
 
