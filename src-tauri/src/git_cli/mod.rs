@@ -21,7 +21,7 @@
 //! `git`, NOT the binary configured in Arbor's settings.  This is
 //! intentional: silently rewriting plugin commands would change semantics
 //! behind the author's back.  The convention — documented in the Plugin
-//! Dev docs and in [`crate::plugin::api`] — is that plugins should use
+//! Dev docs and in the `arbor.*` Lua API surface — is that plugins should use
 //! the built-in Arbor APIs (e.g. `arbor.repo.fetch_active_tab`,
 //! `arbor.repo.clone`) instead of shelling out to `git` themselves.  If
 //! the API is missing an operation, the right fix is to extend the API,

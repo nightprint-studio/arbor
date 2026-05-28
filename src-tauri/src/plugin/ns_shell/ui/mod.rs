@@ -13,7 +13,7 @@ mod branding;
 use mlua::{Lua, Table};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::ApiCtx;
+use arbor_plugin_core::prelude::ApiCtx;
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let ui: Table = arbor.get("ui").map_err(|e| AppError::Plugin(format!(

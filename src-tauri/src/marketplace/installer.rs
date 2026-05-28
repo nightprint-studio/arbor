@@ -35,7 +35,7 @@ pub async fn install_plugin(plugin: &MarketplacePlugin) -> Result<InstalledPlugi
     let subpath = plugin.entry.subpath.clone().unwrap_or_default();
 
     // Collision guard: refuse to install on top of a dev plugin folder.
-    let dev_target = crate::plugin::runtime::plugin_dir().join(&plugin.name);
+    let dev_target = arbor_plugin_core::prelude::plugin_dir().join(&plugin.name);
     if dev_target.exists() {
         return Err(AppError::Other(format!(
             "a dev/local plugin named '{}' already exists at {dev_target:?}; \

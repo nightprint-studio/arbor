@@ -10,9 +10,8 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
-use crate::plugin::api::helpers::convert::json_to_lua;
-use crate::plugin::api::helpers::tuple::{LuaTuple, boolerr2, err2, ok2};
+use crate::plugin::ns_shell::ctx_ext::ApiCtxExt;
+use arbor_plugin_core::prelude::{ApiCtx, json_to_lua, LuaTuple, boolerr2, err2, ok2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let toolchain_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -158,7 +157,7 @@ fn install_add(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
         let Some(ref handle) = h else {
             return boolerr2(lua_ctx, false, Some("toolchain.add: app handle unavailable".into()));
         };
-        let entry: crate::plugin::toolchain::ToolchainEntry = lua_ctx
+        let entry: arbor_plugin_core::prelude::ToolchainEntry = lua_ctx
             .from_value(mlua::Value::Table(entry_table))
             .map_err(|e| mlua::Error::RuntimeError(format!("arbor.toolchain.add: invalid entry: {e}")))?;
         match handle.state::<crate::AppState>().toolchain_registry.lock() {

@@ -15,8 +15,8 @@ use mlua::{Lua, LuaSerdeExt, SerializeOptions, Table};
 use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
-use crate::plugin::api::helpers::tuple::{LuaTuple, err2, ok2};
+use crate::plugin::ns_shell::ctx_ext::ApiCtxExt;
+use arbor_plugin_core::prelude::{ApiCtx, LuaTuple, err2, ok2};
 
 // `Option::None` / `serde_json::Value::Null` should reach Lua as plain `nil`,
 // not mlua's null-sentinel userdata — otherwise plugins that defensively

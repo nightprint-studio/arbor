@@ -44,7 +44,8 @@ use crate::brp::{
     run_watch_stream,
 };
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
+use crate::plugin::ns_shell::ctx_ext::ApiCtxExt;
+use arbor_plugin_core::prelude::ApiCtx;
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 

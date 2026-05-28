@@ -547,9 +547,11 @@ impl EventCoalescer {
     /// scheduled this same point and the timer hasn't fired yet, this is a
     /// no-op — the pending emit will surface this caller's write too.
     ///
-    /// The spawned task uses `tokio::spawn`; callers must invoke this from
-    /// inside a Tokio runtime (Arbor's tauri-managed runtime satisfies that
-    /// from every Lua handler).
+    /// The delayed emit runs on the host's async runtime via
+    /// [`AppCtx::spawn`] (never a bare `tokio::spawn`): `notify_changed` fires
+    /// during plugin boot on an OS thread with no ambient Tokio reactor, so the
+    /// host — not the caller's thread — must own the runtime that drives the
+    /// `tokio::time` sleep below.
     pub fn request(&self, ctx: Arc<dyn AppCtx>, point: &str) {
         {
             let mut g = match self.pending.lock() { Ok(g) => g, Err(_) => return };
@@ -557,14 +559,15 @@ impl EventCoalescer {
         }
         let pending = self.pending.clone();
         let point   = point.to_string();
-        tokio::spawn(async move {
+        let ctx_for_emit = ctx.clone();
+        ctx.spawn(Box::pin(async move {
             tokio::time::sleep(Duration::from_millis(COALESCE_WINDOW_MS)).await;
             if let Ok(mut g) = pending.lock() { g.remove(&point); }
-            ctx.emit(
+            ctx_for_emit.emit(
                 "arbor://contributions-changed",
                 serde_json::json!({ "point": point }),
             );
-        });
+        }));
     }
 }
 

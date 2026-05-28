@@ -7,8 +7,8 @@
 //! than through the per-feature submodule paths. The submodules stay
 //! `pub` for rustdoc navigation, but call sites should go through here.
 //!
-//! Entries land as each step of PR #4 atterra. See
-//! `docs/plugin-core-architecture.md` for the migration plan.
+//! This is the complete public surface of the crate as of PR #4. See
+//! `docs/plugin-core-architecture.md` for the migration history.
 
 // ── Cross-plugin primitives (Step 3) ────────────────────────────────────────
 pub use crate::contribution::{
@@ -35,7 +35,8 @@ pub use crate::sandbox::{
 };
 pub use crate::runtime::{
     ARBOR_API_VERSION, ARBOR_APP_VERSION, current_os,
-    discover_in_roots, discover_plugins, plugin_dir,
+    discover_in_roots, discover_plugins, load_plugin_states, plugin_dir,
+    save_plugin_states,
     ComboOption, PluginInfo,
     DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter,
     PluginHost, load_plugin, PipelineOpResult, ServiceError,
@@ -52,3 +53,7 @@ pub use crate::hook_router::{
 pub use crate::lua_api::{
     register as register_lua_api, ApiCtx, LuaNamespaceInstaller,
 };
+
+// ── Lua API helpers (consumed by the shell-side `ns_shell/*` installers) ─────
+pub use crate::lua_api::helpers::convert::json_to_lua;
+pub use crate::lua_api::helpers::tuple::{boolerr2, err2, ok2, LuaTuple};

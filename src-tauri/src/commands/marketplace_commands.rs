@@ -203,9 +203,9 @@ pub fn marketplace_uninstall_plugin(
     marketplace::installs::forget_plugin(&name);
 
     // Wipe the host's enable-state entry too — keeps the ledger clean.
-    let mut states = crate::plugin::runtime::manifest::load_plugin_states();
+    let mut states = arbor_plugin_core::prelude::load_plugin_states();
     states.remove(&name);
-    crate::plugin::runtime::manifest::save_plugin_states(&states);
+    arbor_plugin_core::prelude::save_plugin_states(&states);
 
     reload_plugin_host(&app_handle, &state)?;
 

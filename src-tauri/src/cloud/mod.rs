@@ -26,7 +26,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use arbor_cloud::host::{CloudHost, CloudJobInfo, CloudJobStatus};
 use crate::AppState;
 use crate::jobs::{JobInfo, JobRegistry, JobStatus};
-use crate::plugin::runtime::PluginHost;
+use arbor_plugin_core::prelude::PluginHost;
 
 /// Type aliases re-exported at module root for backward compat with the
 /// pre-split `crate::cloud::CloudCancellations` / `CloudPendingOps` paths

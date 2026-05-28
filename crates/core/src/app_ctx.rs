@@ -15,7 +15,9 @@
 //! pulling in the Tauri shell.
 
 use std::any::Any;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 pub trait AppCtx: Any + Send + Sync {
     /// Downcast hook so host-specific call sites (e.g. the Tauri shell's
@@ -28,6 +30,17 @@ pub trait AppCtx: Any + Send + Sync {
     /// Emit a frontend event with a JSON payload. Equivalent to
     /// `tauri::AppHandle::emit(event, payload)` on the Tauri impl.
     fn emit(&self, event: &str, payload: serde_json::Value);
+
+    /// Spawn a detached future on the host's async runtime.
+    ///
+    /// Domain crates use this for background work that must NOT assume an
+    /// ambient Tokio reactor on the calling thread — the plugin-boot OS
+    /// thread, in particular, runs lifecycle hooks (`on_plugin_load`) with no
+    /// runtime in scope, so a bare `tokio::spawn` there panics. The Tauri impl
+    /// delegates to `tauri::async_runtime::spawn`, which carries a
+    /// process-global runtime handle and therefore works from any thread (and
+    /// drives `tokio::time` timers inside the future).
+    fn spawn(&self, fut: Pin<Box<dyn Future<Output = ()> + Send + 'static>>);
 
     /// Root of Arbor's on-disk state (typically the value of
     /// [`crate::paths::arbor_config_dir`]). Exposed through the trait so

@@ -155,8 +155,8 @@ impl MarketplaceRegistry {
         //   * Else append as a fresh Local row.
         let installed_via_marketplace: std::collections::HashSet<String> =
             installs.plugins.keys().cloned().collect();
-        let manifests = crate::plugin::runtime::manifest::discover_plugins().unwrap_or_default();
-        let states    = crate::plugin::runtime::manifest::load_plugin_states();
+        let manifests = arbor_plugin_core::prelude::discover_plugins().unwrap_or_default();
+        let states    = arbor_plugin_core::prelude::load_plugin_states();
         for m in manifests {
             if installed_via_marketplace.contains(&m.name) { continue; }
             let enabled = states.get(&m.name).copied().unwrap_or(true);

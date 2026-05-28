@@ -12,8 +12,8 @@ nei rispettivi crate di dominio.
 |----|-------|-------|
 | #1 | `arbor-core` + `arbor-scheduler` | ✅ atterrato |
 | #2 | `arbor-plugin-types` | ✅ atterrato |
-| **#3** | **`arbor-plugin-api`** | **🚧 questo documento** |
-| #4 | `arbor-plugin-core` (mlua runtime + namespace migration) | in coda |
+| #3 | `arbor-plugin-api` | ✅ atterrato |
+| #4 | `arbor-plugin-core` (mlua runtime + namespace migration) | ✅ atterrato |
 | #5 | `arbor-plugin-marketplace` | in coda |
 | #6+ | `arbor-git-provider-*`, `arbor-issue-tracker-*`, `arbor-pipeline-*`, `arbor-brp` | in coda |
 | finale | rinomina `src-tauri` → `arbor` | in coda |
@@ -401,7 +401,17 @@ impl NamespaceContributor for GitProviderContributor {
 Stessa simmetria per `arbor-issue-tracker-api` con `on_ticket_created` +
 `ticket_detail` + `create_ticket`. I due crate non si conoscono.
 
-### Composition root in src-tauri (post-PR #4)
+### Composition root in src-tauri (visione target)
+
+> **Nota (post-PR #4):** lo snippet sotto è la *visione target* (PR #6+, con
+> i contributor di dominio). Il PR #4 è atterrato col pattern più
+> conservativo descritto nella sezione [PR #4](#pr-4--arbor-plugin-core--atterrato):
+> i namespace host-pure restano `install(&ApiCtx, &Lua, &Table)` dentro
+> `arbor_plugin_core::lua_api::ns::*`, quelli del guscio sono
+> `LuaNamespaceInstaller` in `src-tauri/src/plugin/ns_shell/*` iniettati via
+> `register(lua, params, &shell_installers())`. Le free fn
+> `contribute_host_namespaces` / `contribute_host_hooks` qui sotto non sono
+> mai esistite con quei nomi.
 
 ```rust
 // src-tauri/src/lib.rs (excerpt, post-PR #4)
@@ -590,23 +600,33 @@ pub use arbor_plugin_types::prelude::{FieldType, HookField, Manifest};
 
 Solo per dare la traiettoria — i dettagli si decideranno PR per PR:
 
-### PR #4 — `arbor-plugin-core`
+### PR #4 — `arbor-plugin-core` ✅ atterrato
 
-Il PR grosso. Contiene:
+Il PR grosso. Piano dettagliato + tracker delle sessioni in
+[`docs/plugin-core-architecture.md`](plugin-core-architecture.md). Cosa è
+effettivamente atterrato (alcune scelte divergono da questa preview, presa
+dall'ottica del PR #3):
 
-- Runtime mlua (`LuaRuntime`) che prende un `PluginRegistry` + un
-  `HookDispatcher` e materializza tutto in Lua.
-- Migrazione di `src-tauri/src/plugin/api/ns/*.rs` al pattern
-  `NamespaceContributor` — i namespace host-side (fs, terminal, ui,
-  settings, jobs, command, …) atterrano in
-  `arbor-plugin-core::host_namespaces::*`.
-- Migrazione di `src-tauri/src/plugin/runtime/host/*` (lifecycle, hooks
-  routing, service, pipeline_op) in `arbor-plugin-core`.
-- Sostituzione di `src-tauri/src/plugin/hook_registry.rs` con il
-  `LuaHookListener` che si registra al `HookDispatcher`.
-- Aggiunta di `ext: HashMap<String, toml::Value>` a `Permissions` in
-  `arbor-plugin-types` (con deserializer backward-compatible per i
-  `plugin.toml` esistenti).
+- Runtime mlua, sandbox, lifecycle, hook routing e la fetta "host-pure"
+  della superficie `arbor.*` vivono in `arbor-plugin-core`. Il crate
+  **non** dipende da `tauri`: l'astrazione passa per `arbor-core::AppCtx`.
+- I namespace host-side **mantengono** la firma `install(&ApiCtx, &Lua,
+  &Table)` — niente conversione a `NamespaceContributor` in questo PR
+  (decisione C2). Gli host-pure atterrano in
+  `arbor_plugin_core::lua_api::ns::*`; quelli ancora accoppiati al guscio
+  (`git::*`, `pipeline::*`, `jobs::*`, `terminal::*`, `workspace::*`,
+  `brp::*`, `cloud::*`, …) restano in `src-tauri/src/plugin/ns_shell/*`
+  come impl di `LuaNamespaceInstaller` e vengono iniettati al boot via
+  `register(lua, params, &shell_installers())`.
+- `src-tauri/src/plugin/runtime/host/*` (lifecycle, service, pipeline_op,
+  introspection, dependency cascade) migrato in
+  `arbor_plugin_core::runtime::host`.
+- `hook_registry.rs` sostituito da `arbor_plugin_core::hook_router` +
+  `LuaHookListener`, registrato sul `HookDispatcher` di `arbor-plugin-api`
+  (con `fire_blocking` / `fire_vetoable_blocking` per i call site sync).
+- `Permissions.ext: HashMap<String, toml::Value>` aggiunto in
+  `arbor-plugin-types` (catch-all backward-compatible, validato contro i
+  `PermissionDef` registrati).
 
 ### PR #5 — `arbor-plugin-marketplace`
 

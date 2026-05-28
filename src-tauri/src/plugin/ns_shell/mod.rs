@@ -21,6 +21,7 @@
 pub(crate) mod brp;
 pub(crate) mod ci;
 pub(crate) mod cloud;
+pub(crate) mod ctx_ext;
 pub(crate) mod issues;
 pub(crate) mod job;
 pub(crate) mod linked_worktrees;
@@ -39,8 +40,9 @@ use std::sync::Arc;
 
 use mlua::{Lua, Table};
 
-use arbor_plugin_core::error::PluginCoreError;
-use arbor_plugin_core::prelude::{ApiCtx, LuaNamespaceInstaller, PluginCoreResult};
+use arbor_plugin_core::prelude::{
+    ApiCtx, LuaNamespaceInstaller, PluginCoreError, PluginCoreResult,
+};
 
 use crate::error::Result;
 

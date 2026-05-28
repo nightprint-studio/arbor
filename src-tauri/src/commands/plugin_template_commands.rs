@@ -460,7 +460,7 @@ pub fn import_plugin_zip(
     }
 
     // ── Refuse to overwrite an existing plugin folder.
-    let plugins_dir = crate::plugin::runtime::plugin_dir();
+    let plugins_dir = arbor_plugin_core::prelude::plugin_dir();
     std::fs::create_dir_all(&plugins_dir)?;
     let target_root = plugins_dir.join(&root);
     if target_root.exists() {

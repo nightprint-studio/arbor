@@ -1,62 +1,45 @@
 # arbor-plugin-core
 
-The plugin runtime host: mlua VM management, lifecycle, sandbox, and the
-built-in `arbor.*` Lua API surface.
+The plugin runtime host: mlua VM management, lifecycle, sandbox, hook
+routing, and the host-pure slice of the built-in `arbor.*` Lua API surface.
 
 ## Purpose
 
-This is the biggest crate of the refactor — the actual machinery that
-loads, runs, and tears down user-authored Lua plugins. It owns:
+The actual machinery that loads, runs, and tears down user-authored Lua
+plugins. It owns:
 
 - one `mlua::Lua` per loaded plugin,
 - the lifecycle hooks (`on_plugin_load` / `on_plugin_unload`),
-- the entire `arbor.*` namespace exposed to plugin code (notify, ui.form,
-  ui.settings, fs, http, scheduler, service, brp, …),
+- the host-pure slice of the `arbor.*` namespace (notify, fs, http,
+  settings, ui.*, scheduler, service, timer, studios, …),
 - the sandbox (file-scope guards, network allow-list, capability checks
   against the manifest's `[permissions]`),
 - the per-plugin `[scheduler]` registrations (delegated to
   `arbor-scheduler`),
-- the `LuaListener` adapter that bridges Lua callbacks into the
-  `arbor-plugin-api` dispatcher.
+- the `LuaHookListener` adapter that bridges Lua callbacks into the
+  `arbor-plugin-api` `HookDispatcher`.
 
-It's the largest crate because the `arbor.*` API surface alone is dozens
-of namespaces. Each namespace stays as today (`api/ns/<name>.rs`); the
-crate boundary just makes the consumer set explicit.
+Namespaces that need shell-internal concepts (`git::*`, `pipeline::*`,
+`jobs::*`, `terminal::*`, `workspace::*`, `brp::*`, `cloud::*`, …) stay in
+the Tauri shell crate as [`LuaNamespaceInstaller`] implementations and are
+wired into the runtime at boot. They migrate into their own domain crates
+in PR #6+.
 
 ## Status
 
-PR #4 lands in incremental sessions — see
+✅ **PR #4 landed.** The crate is the canonical home of the plugin runtime;
+the Tauri shell keeps only the domain-coupled namespace installers and the
+adapters that wire them in. See
 [`docs/plugin-core-architecture.md`](../../../docs/plugin-core-architecture.md)
-for the tracker. Currently landed:
+for the full migration history.
 
-- ✅ Step 0 — crate scaffold.
-- ✅ Step 1 — `AppCtx::record_plugin_log` (no-op default,
-  `TauriAppCtx` delegates to `plugin_logs::record`).
-- ✅ Step 2 — `Permissions.ext: HashMap<String, toml::Value>` +
-  `PluginRegistry::validate_manifest` walks the catch-all against
-  registered `PermissionDef` schemas.
-- ✅ Step 3 — cross-plugin primitives migrated: `contribution`,
-  `tree`, `toolchain` (state), `settings_store`, `event_bus`,
-  `lua_ctx`. All now consume `Arc<dyn AppCtx>` instead of
-  `tauri::AppHandle`. `ContributionRegistry::notify_changed` /
-  `notify_containers_changed` dropped their per-call handle argument
-  in favour of a `install_app_ctx` boot-time hook. src-tauri keeps
-  shim `pub use` re-exports until the final cleanup step.
-- ✅ Step 4 — sandbox + runtime migrated: `sandbox` (with the
-  [`LuaApiInstaller`] trait — the host shell injects the
-  `arbor.*` namespace surface back through this hook until the
-  per-namespace migration of step 5/6), `runtime::{consts, loaded,
-  manifest/*, scheduler/*, host/*}`, plus the 8 embedded Lua builtin
-  files. All
-  internal `AppHandle` uses swapped to `Arc<dyn AppCtx>`. `PluginHost`
-  gained `set_app_ctx` / `set_api_installer` / `set_extra_plugin_roots`
-  for the host shell to inject Tauri-specific bits at boot. The shell
-  crate now wires up a `TauriApiInstaller` adapter at boot.
+Public API is reached exclusively through
+[`prelude`](src/prelude.rs) — `use arbor_plugin_core::prelude::*;` or a
+fully-qualified `arbor_plugin_core::prelude::PluginHost`. The per-feature
+submodules stay `pub` for rustdoc navigation, but call sites go through the
+prelude.
 
 ## Contents
-
-Modules already migrated (call sites go through
-`arbor_plugin_core::prelude::*`):
 
 - `contribution` — `ContributionRegistry`, contribution points and
   payload schemas, container definitions, coalesced
@@ -88,7 +71,7 @@ Modules already migrated (call sites go through
 - `runtime::manifest` — `plugin.toml` discovery + topological sort
   over `[[dependencies]]` + persisted enable/disable state
   (`plugin_states[-dev].json`). Caller-supplied roots
-  (`discover_in_roots`) so marketplace overlay stays decoupled.
+  (`discover_in_roots`) so the marketplace overlay stays decoupled.
 - `runtime::scheduler` — bridge between `PluginHost` and the shared
   `arbor-scheduler` engine.
 - `runtime::host` — `PluginHost` struct + lifecycle (load/enable/
@@ -102,35 +85,48 @@ Modules already migrated (call sites go through
   (`fire_broadcast`, `fire_on`, `fire_vetoable`), and the
   `LuaHookListener` adapter that the runtime-agnostic
   `arbor_plugin_api::HookDispatcher` drives.
+- `lua_api` — the `arbor.*` surface orchestrator:
+  - `ctx` — `ApiCtx`, the per-`register()` capture bag.
+  - `helpers/*` — pure helpers shared by every namespace installer
+    (`convert`, `tuple`, `fs_perm`, `glob`, `http_worker`, `json_patch`,
+    `settings_scope`, `timer`, `contrib_write`, `xml_patch`).
+  - `ns/*` — the host-pure namespaces (`log`, `events`, `json`, `text`,
+    `meta`, `notify`, `hooks`, `command`, `keybinding`, `service`,
+    `timer`, `scheduler`, `contribution`, `fs`, `http`, `settings`,
+    `ui/*`, and the studios `json`/`yaml`/`toml`/`ron`/`properties`).
+  - `register(lua, params, extra_installers)` — builds the `arbor.*`
+    table, runs the in-crate host-pure namespaces, then the host-supplied
+    [`LuaNamespaceInstaller`] slice (the shell's domain-coupled ns).
 
-Still in the src-tauri shell, scheduled for later sessions:
+## Stays in the Tauri shell (PR #6+)
 
-- `api/ns/*` — all Lua-facing namespaces (`notify`, `ui`, `fs`,
-  `http`, `scheduler`, `service`, `brp`, `cloud`, `keyring`, `git`,
-  `repo`, `ipc`, `markdown`, `pipeline`, `studio`, …). The
-  "host-pure" subset migrates into this crate; src-tauri-coupled
-  namespaces stay in the shell as `LuaNamespaceInstaller`
-  implementations.
-- `service_registry` — inter-plugin `arbor.service.export` / `.call`
-  runtime table.
+`src-tauri/src/plugin/ns_shell/*` keeps the namespaces that still reach
+shell-internal types: `repo`, `mr`, `ci`, `issues`, `notes`, `pipeline`,
+`cloud`, `brp`, `security`, `toolchain` (the ns), `terminal`, `tabs`,
+`workspace`, `linked_worktrees`, `job`, and `ui/branding`. Each is a
+[`LuaNamespaceInstaller`] wrapper; `shell_installers()` hands them to
+`register()` after the host-pure namespaces. As each grows its own domain
+crate they drop out of that list, and once it's empty the shell-side
+`plugin` module disappears.
 
 ## Depends on
 
 - `arbor-core` — paths, http, AppCtx, AppError.
 - `arbor-plugin-types` — manifest, permissions, dependency, schedule,
   hook catalog constants.
-- `arbor-plugin-api` — register `LuaListener` per hook the plugin
-  subscribes to.
-- `arbor-scheduler` — register per-plugin schedules.
+- `arbor-plugin-api` — `HookDispatcher` / `HookListener` the
+  `LuaHookListener` plugs into.
+- `arbor-scheduler` — register per-plugin schedules + cron validation.
 
 External: `mlua` (Lua 5.4, vendored), `tokio`, `serde`, `serde_json`,
 `reqwest`, `dirs`, `toml`, `semver`, `regex`, `tracing`, `thiserror`,
-`async-trait`.
+`async-trait`, `futures-executor`.
 
 ## Consumed by
 
-- `arbor` (Tauri shell) — owns the singleton `PluginHost`, wires
-  `plugin_*` Tauri commands.
+- `arbor` (Tauri shell) — owns the singleton `PluginHost`, wires the
+  `plugin_*` Tauri commands, and supplies the domain-coupled
+  `LuaNamespaceInstaller`s.
 - (none else; the rest of the system reaches plugins via the dispatcher,
   not directly)
 
@@ -139,11 +135,9 @@ External: `mlua` (Lua 5.4, vendored), `tokio`, `serde`, `serde_json`,
 - The `arbor.*` Lua API surface is contract for plugin authors but the
   user is the only consumer right now — breaking changes are allowed
   but each one updates `sdk.d.lua` (in the `arbor-extensions` repo) and
-  the `PluginDevelopment.svelte` docs in the same change. Same rule as
-  today.
+  the `PluginDevelopment.svelte` docs in the same change.
 - `mlua` lives ONLY here. If any sibling crate ends up needing it,
   that's a design smell — the bridge should pass through `Action` /
-  `LuaListener` instead.
-- The Studio plugins (json, yaml, ron, toml, properties) currently live
-  in `src-tauri/` as Rust modules. They're earmarked for WASM-plugin
-  migration; until then they stay in the `arbor` shell, NOT here.
+  `LuaHookListener` instead.
+- The Studio plugins (json, yaml, ron, toml, properties) live here as
+  host-pure namespaces. They're earmarked for WASM-plugin migration.

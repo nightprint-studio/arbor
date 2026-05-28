@@ -60,6 +60,10 @@ impl AppCtx for TauriAppCtx {
         }
     }
 
+    fn spawn(&self, fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>) {
+        tauri::async_runtime::spawn(fut);
+    }
+
     fn arbor_dir(&self) -> &Path {
         &self.arbor_dir
     }

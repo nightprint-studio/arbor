@@ -16,7 +16,8 @@ use tauri::image::Image;
 
 use crate::commands::branding_commands::{emit_branding_changed, emit_theme_overlay};
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
+use crate::plugin::ns_shell::ctx_ext::ApiCtxExt;
+use arbor_plugin_core::prelude::ApiCtx;
 
 /// Push `path` to the OS window-icon API so the taskbar / Alt-Tab list /
 /// window chrome reflect the override. Tauri requires a rasterised buffer

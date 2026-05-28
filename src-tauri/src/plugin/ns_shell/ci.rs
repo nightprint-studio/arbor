@@ -8,8 +8,8 @@ use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
 use crate::error::{AppError, Result};
-use crate::plugin::api::ctx::{ApiCtx, ApiCtxExt};
-use crate::plugin::api::helpers::tuple::{LuaTuple, err2, ok2};
+use crate::plugin::ns_shell::ctx_ext::ApiCtxExt;
+use arbor_plugin_core::prelude::{ApiCtx, LuaTuple, err2, ok2};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     let ci_table = lua.create_table().map_err(|e| AppError::Plugin(e.to_string()))?;

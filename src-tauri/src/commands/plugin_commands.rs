@@ -6,7 +6,7 @@ use serde::Serialize;
 use arbor_plugin_types::prelude::Manifest;
 
 use crate::error::AppError;
-use crate::plugin::toolchain::ToolchainEntry;
+use arbor_plugin_core::prelude::ToolchainEntry;
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -18,18 +18,18 @@ use crate::AppState;
 // owned by the old `[[setting]]` schema is gone — clearing a plugin's
 // stored data therefore means clearing its `global.json`.
 fn load_plugin_settings(plugin_name: &str) -> serde_json::Map<String, serde_json::Value> {
-    let path = crate::plugin::settings_store::global_settings_path(plugin_name);
-    crate::plugin::settings_store::load_settings_file(&path)
+    let path = arbor_plugin_core::prelude::global_settings_path(plugin_name);
+    arbor_plugin_core::prelude::load_settings_file(&path)
 }
 
 fn save_plugin_settings(plugin_name: &str, map: &serde_json::Map<String, serde_json::Value>) {
-    let path = crate::plugin::settings_store::global_settings_path(plugin_name);
-    crate::plugin::settings_store::save_settings_file(&path, map);
+    let path = arbor_plugin_core::prelude::global_settings_path(plugin_name);
+    arbor_plugin_core::prelude::save_settings_file(&path, map);
 }
 
 #[tauri::command]
 pub fn list_plugins(_state: State<'_, AppState>) -> Result<Vec<Manifest>, AppError> {
-    Ok(crate::plugin::runtime::discover_plugins()?)
+    Ok(arbor_plugin_core::prelude::discover_plugins()?)
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ pub fn set_plugins_enabled(
 /// the frontend should create it before opening if that matters.
 #[tauri::command]
 pub fn get_plugin_directory() -> Result<String, AppError> {
-    let dir = crate::plugin::runtime::plugin_dir();
+    let dir = arbor_plugin_core::prelude::plugin_dir();
     // Try to ensure the directory exists so opening it in the explorer
     // doesn't fail when the user has never installed a plugin. Errors are
     // non-fatal — if creation fails we still return the path and let the
@@ -108,7 +108,7 @@ pub fn get_plugin_directory() -> Result<String, AppError> {
 /// preserve the archive root), so the FE can't construct the path itself.
 #[tauri::command]
 pub fn get_installed_plugin_path(name: String) -> Result<String, AppError> {
-    let manifests = crate::plugin::runtime::discover_plugins()?;
+    let manifests = arbor_plugin_core::prelude::discover_plugins()?;
     let m = manifests.into_iter()
         .find(|m| m.name == name)
         .ok_or_else(|| AppError::Other(format!("plugin '{name}' is not installed")))?;
@@ -215,9 +215,9 @@ pub fn enable_plugin(state: State<'_, AppState>, name: String) -> Result<Vec<Str
 pub fn plugin_enable_preview(
     state: State<'_, AppState>,
     name:  String,
-) -> Result<crate::plugin::runtime::host::dep_cascade::EnablePreview, AppError> {
+) -> Result<arbor_plugin_core::prelude::EnablePreview, AppError> {
     let host = state.lock_plugin_host()?;
-    Ok(crate::plugin::runtime::host::dep_cascade::EnablePreview {
+    Ok(arbor_plugin_core::prelude::EnablePreview {
         plan:     host.compute_enable_cascade(&name),
         blockers: host.compute_enable_blockers(&name),
     })
@@ -288,7 +288,7 @@ pub fn plugin_disable_preview(
 }
 
 #[tauri::command]
-pub fn list_plugin_info(state: State<'_, AppState>) -> Result<Vec<crate::plugin::runtime::PluginInfo>, AppError> {
+pub fn list_plugin_info(state: State<'_, AppState>) -> Result<Vec<arbor_plugin_core::prelude::PluginInfo>, AppError> {
     let host = state.lock_plugin_host()?;
     Ok(host.list_plugin_info())
 }
@@ -619,7 +619,7 @@ pub fn detect_toolchains(
 pub fn list_plugin_contributions(
     state: State<'_, AppState>,
     point: Option<String>,
-) -> Result<Vec<crate::plugin::contribution::PluginContribution>, AppError> {
+) -> Result<Vec<arbor_plugin_core::prelude::PluginContribution>, AppError> {
     let host = state.lock_plugin_host()?;
     let items = match point {
         Some(p) => host.contributions.list_for_point(&p),
@@ -633,7 +633,7 @@ pub fn list_plugin_contributions(
 #[tauri::command]
 pub fn list_contribution_points(
     state: State<'_, AppState>,
-) -> Result<Vec<crate::plugin::contribution::ContributionPoint>, AppError> {
+) -> Result<Vec<arbor_plugin_core::prelude::ContributionPoint>, AppError> {
     let host = state.lock_plugin_host()?;
     Ok(host.contributions.list_points())
 }
@@ -654,7 +654,7 @@ pub fn list_contribution_points(
 #[tauri::command]
 pub fn list_containers(
     state: State<'_, AppState>,
-) -> Result<Vec<crate::plugin::contribution::ContainerDef>, AppError> {
+) -> Result<Vec<arbor_plugin_core::prelude::ContainerDef>, AppError> {
     let host = state.lock_plugin_host()?;
     Ok(host.contributions.list_containers())
 }
@@ -665,7 +665,7 @@ pub fn list_containers(
 pub fn get_container(
     state: State<'_, AppState>,
     key:   String,
-) -> Result<Option<crate::plugin::contribution::ContainerDef>, AppError> {
+) -> Result<Option<arbor_plugin_core::prelude::ContainerDef>, AppError> {
     let host = state.lock_plugin_host()?;
     Ok(host.contributions.get_container(&key))
 }
