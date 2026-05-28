@@ -45,3 +45,4 @@ pub use host::PluginHost;
 pub use host::lifecycle::load_plugin;
 pub use host::pipeline_op::PipelineOpResult;
 pub use host::service::ServiceError;
+pub use host::command::CommandError;

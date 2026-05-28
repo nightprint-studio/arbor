@@ -92,7 +92,7 @@
     <tr><td><code>arbor:sidebar</code></td><td><code>add_sidebar</code></td><td><code>&#123;action, label, icon?, side, position, kind, …&#125;</code></td></tr>
     <tr><td><code>arbor:activitybar</code></td><td><code>add_graph_combo</code> · <code>add_separator</code></td><td><code>&#123;kind: "combo"|"separator", target, …&#125;</code></td></tr>
     <tr><td><code>arbor:diff-toolbar</code><br/><code>arbor:status-bar:&lt;side&gt;</code><br/><code>arbor:title-bar:&lt;side&gt;</code><br/><code>arbor:commit-detail:action</code><br/><code>arbor:commit-form:action</code></td><td><code>add_toolbar_action</code> (single sugar, <code>target</code> selects)</td><td><code>&#123;label?, icon?, action, tooltip?, color?&#125;</code></td></tr>
-    <tr><td><code>arbor:command-palette</code></td><td><code>arbor.command.register</code></td><td><code>&#123;title, description?, icon?, group?&#125;</code></td></tr>
+    <tr><td><code>arbor:command-palette</code></td><td><code>arbor.command.register</code></td><td><code>&#123;title, description?, icon?, group?, invocable?, required?&#125;</code></td></tr>
     <tr><td><code>arbor:keybinding</code></td><td><code>arbor.keybinding.register</code></td><td><code>&#123;key, ctrl?, shift?, alt?, action, description?&#125;</code></td></tr>
     <tr><td><code>arbor:icon</code></td><td><code>arbor.ui.icon.register</code></td><td><code>&#123;svg&#125;</code></td></tr>
     <tr><td><code>arbor:tree-state</code></td><td><code>arbor.ui.tree.set</code></td><td><code>&#123;title?, nodes[], version&#125;</code> — replace-by-id</td></tr>
@@ -317,6 +317,37 @@ end)
 
 -- Remove the entry at runtime:
 arbor.command.unregister("my-action")`, '.lua')}</pre>
+
+<h3>Invoking commands</h3>
+<p>
+  Mark a command <code>invocable = true</code> to let other plugins fire it, and
+  declare the permission tier a caller must hold via <code>required</code>. The
+  caller needs <code>command_invoke = true</code> in its manifest <em>and</em>
+  that tier. Fire a command — its own or another plugin's — with
+  <code>arbor.command.fire("&lt;owner&gt;::&lt;id&gt;", ctx)</code>. It is
+  fire-and-forget: the owner's <code>command:&lt;id&gt;</code> handler runs with
+  <code>ctx</code> (any declared <code>args</code> arrive under the
+  <code>args</code> key).
+</p>
+<pre class="language-lua">{@html highlight(`-- Owner plugin "deployer" — expose an invocable command:
+arbor.command.register({
+  id        = "deploy",
+  title     = "Deploy: Production",
+  invocable = true,                  -- other plugins may fire it
+  required  = { git = "write" },     -- caller must hold git write
+})
+arbor.events.on("command:deploy", function(ctx)
+  arbor.notify{ message = "Deploying " .. (ctx.args and ctx.args.env or "?"), level = "info" }
+end)
+
+-- Caller plugin (manifest: [permissions] command_invoke = true, git = "write"):
+arbor.command.fire("deployer::deploy", { args = { env = "prod" } })`, '.lua')}</pre>
+<p>
+  In a form, a <code>button</code> can target a command directly instead of a
+  plugin action by setting <code>dispatch</code>:
+</p>
+<pre class="language-lua">{@html highlight(`{ type = "button", label = "Deploy",
+  dispatch = { kind = "command", id = "deployer::deploy", args = { env = "prod" } } }`, '.lua')}</pre>
 
 <h2>arbor.contribution — registry introspection</h2>
 <p>

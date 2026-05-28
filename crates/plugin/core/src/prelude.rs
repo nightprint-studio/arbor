@@ -39,7 +39,7 @@ pub use crate::runtime::{
     save_plugin_states,
     ComboOption, PluginInfo,
     DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter,
-    PluginHost, load_plugin, PipelineOpResult, ServiceError,
+    PluginHost, load_plugin, PipelineOpResult, ServiceError, CommandError,
 };
 pub use crate::runtime::host::dep_cascade::{EnableBlocker, EnablePreview};
 

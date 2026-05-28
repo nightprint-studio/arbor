@@ -1496,6 +1496,53 @@ function Service.list() end
 
 
 -- =============================================================================
+-- arbor.command — command palette registration + invocation
+-- =============================================================================
+
+---Permission tier a command requires its *caller* to already hold. Supply a
+---single domain/level pair; the first recognised pair wins. Omit for "no tier
+---required" (any caller holding `command_invoke` may fire).
+---@class arbor.CommandRequiredPerm
+---@field git       "read"|"write"|"history_rewrite"|nil
+---@field fs        "read"|"write"|nil
+---@field issues    "read"|"write"|nil
+---@field provider  "read"|"write"|nil
+---@field toolchain "read"|"write"|nil
+---@field terminal  "commands"|"any"|nil
+
+---@class arbor.CommandConfig
+---@field id          string                          Unique id within this plugin (e.g. "run-tests")
+---@field title       string                          Display title shown in the Command Palette
+---@field description string|nil                       Secondary line in the palette
+---@field icon        string|nil                       Lucide icon name
+---@field group       string|nil                       Section label used to bucket palette results
+---@field invocable   boolean|nil                      When true, other plugins may fire this via `arbor.command.fire("<thisPlugin>::<id>")`. Default false (palette-only).
+---@field required    arbor.CommandRequiredPerm|nil    Permission tier the caller must hold to fire this command. Only meaningful with `invocable = true`.
+
+---@class arbor.Command
+local Command = {}
+
+---Register a Command Palette entry. Selecting it fires `command:<id>` on this
+---plugin (handle it with `arbor.events.on("command:<id>", fn)`). Pass
+---`invocable = true` to also let other plugins fire it via `arbor.command.fire`.
+---@param config arbor.CommandConfig
+function Command.register(config) end
+
+---Remove a previously-registered command from the palette.
+---@param id string
+function Command.unregister(id) end
+
+---Invoke a registered command. Today only commands another plugin marked
+---`invocable = true` can be fired, addressed as `"<owner>::<id>"`. Fire-and-
+---forget: the owner's `command:<id>` handler receives `ctx` (with any declared
+---`args` merged under the `args` key). Requires `command_invoke = true`, and
+---the caller must hold whatever tier the command declares as `required`.
+---@param id  string    Target command id — "<owner-plugin>::<command-id>"
+---@param ctx any|nil    Context table delivered to the command handler
+function Command.fire(id, ctx) end
+
+
+-- =============================================================================
 -- arbor.keybinding
 -- =============================================================================
 
@@ -1702,6 +1749,7 @@ function Ci.runs(opts) end
 ---@field scheduler    arbor.Scheduler
 ---@field ui           arbor.Ui
 ---@field keybinding   arbor.Keybinding
+---@field command      arbor.Command
 ---@field contribution arbor.Contribution
 ---@field events       arbor.Events
 ---@field service      arbor.Service
@@ -2639,14 +2687,26 @@ function CoreAssert.register() end
 ---@field type  "suggest_grid"
 ---@field items arbor.SuggestItem[]
 
----Inline action button — fires `action` without submitting the form. With
+---Dispatch target for an actionable slot. Either a callback to this plugin
+---(`{ kind = "action", name = "..." }`) or a registered command
+---(`{ kind = "command", id = "<owner>::<id>", args? = ... }`). A bare `action`
+---string on a node is sugar for the action form.
+---@class arbor.DispatchTarget
+---@field kind "action"|"command"
+---@field name string|nil    Action name (when kind = "action")
+---@field id   string|nil    Command id "<owner>::<id>" (when kind = "command")
+---@field args any|nil        Static args passed to the command (when kind = "command")
+
+---Inline action button — fires without submitting the form. With
 ---`icon_only = true` renders as a compact 26×26 square (useful in toolbars).
 ---`extra` is merged into the action payload alongside all form values — handy
----for item-specific actions in `cfg_list` / `card_row`.
+---for item-specific actions in `cfg_list` / `card_row`. Set `dispatch` to fire
+---a registered command instead of this plugin's own handler.
 ---@class arbor.FormNodeButton : arbor.FormNodeBase
 ---@field type        "button"
 ---@field label       string|nil
----@field action      string
+---@field action      string                    Action name (sugar for dispatch = { kind = "action", name = action })
+---@field dispatch    arbor.DispatchTarget|nil  Explicit target — takes precedence over `action`
 ---@field variant     "default"|"primary"|"danger"|"ghost"|nil
 ---@field close_after boolean|nil
 ---@field disabled    boolean|nil

@@ -29,7 +29,6 @@
 
 pub mod contribution;
 pub mod error;
-pub mod event_bus;
 pub mod hook_router;
 pub mod lua_api;
 pub mod lua_ctx;

@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Plugins can invoke each other's commands. A command registered as `invocable` can be fired by another plugin via `arbor.command.fire("<owner>::<id>")` or a form button's `dispatch = { kind = "command", … }`, gated by the new `command_invoke` permission plus the command's declared `required` tier.
 - IntelliJ-style "compact middle packages" for file trees — *Settings → Interface → Compact file tree folders* collapses chains of single-child directories into a single row across the Files sidebar, the Stage area tree, and the commit detail file list. Also exposed as a Command Palette toggle. Conflict file lists always compact regardless of the setting.
 - Markdown editor with Obsidian-style live preview — open any `.md` /
   `.markdown` file via the Files sidebar context menu and edit it

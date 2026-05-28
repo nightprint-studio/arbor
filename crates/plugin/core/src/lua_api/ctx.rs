@@ -73,6 +73,7 @@ pub struct ApiCtx {
     pub service_export:      bool,
     pub service_call:        bool,
     pub settings_read_others: bool,
+    pub command_invoke:      bool,
 
     // ── Shared registries ────────────────────────────────────────────────
     pub contributions: ContributionRegistry,
@@ -122,6 +123,7 @@ impl ApiCtx {
             service_export,
             service_call,
             settings_read_others,
+            command_invoke,
             // Free-form catch-all for crate-contributed permission keys
             // (validated by PluginRegistry::validate_manifest at boot, not
             // consumed by the typed ApiCtx fields).
@@ -154,6 +156,7 @@ impl ApiCtx {
             service_export,
             service_call,
             settings_read_others,
+            command_invoke,
             contributions,
             tree_store,
             icon_registry,

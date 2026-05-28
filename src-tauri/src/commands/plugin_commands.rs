@@ -197,6 +197,38 @@ pub fn fire_plugin_action(
     Ok(())
 }
 
+/// Invoke a registered command on behalf of `caller_plugin` — the declarative
+/// `kind = "command"` dispatch path. Resolution + the two capability gates
+/// (`command_invoke` + the command's `required` tier) live in
+/// [`PluginHost::invoke_command`], shared with `arbor.command.fire`.
+///
+/// `args` is the static argument data declared on the dispatch slot;
+/// `context_json` is the node payload (form values + state). They are merged
+/// into the ctx delivered to the owner's `command:<id>` handler — node payload
+/// fields stay top-level, `args` lands under the `args` key.
+#[tauri::command]
+pub fn fire_command(
+    state: State<'_, AppState>,
+    caller_plugin: String,
+    id: String,
+    args: Option<serde_json::Value>,
+    context_json: String,
+) -> Result<(), AppError> {
+    let mut ctx: serde_json::Value =
+        serde_json::from_str(&context_json).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(a) = args {
+        if !a.is_null() {
+            if let Some(obj) = ctx.as_object_mut() {
+                obj.insert("args".to_string(), a);
+            }
+        }
+    }
+    let host = state.lock_plugin_host()?;
+    host.invoke_command(&caller_plugin, &id, &ctx)
+        .map_err(|e| AppError::Other(format!("{}: {}", e.kind(), e.message())))?;
+    Ok(())
+}
+
 /// Enable a plugin. Returns the ordered list of plugins that were actually
 /// enabled (transitive required deps + target). Returns an error when a
 /// required dep is missing or unloadable — call `plugin_enable_preview`

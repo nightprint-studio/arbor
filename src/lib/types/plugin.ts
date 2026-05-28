@@ -52,6 +52,10 @@ export interface PluginPermissions {
   service_call?:         boolean;
   /** Read other plugins' settings via `arbor.settings.read(plugin, key)`. */
   settings_read_others?: boolean;
+  /** Allow `arbor.command.fire` / declarative `kind = "command"` dispatch.
+   *  The caller must also hold whatever tier the target command declares as
+   *  `required`. Default false. */
+  command_invoke?: boolean;
 }
 
 /**
@@ -308,6 +312,25 @@ export interface PluginCommand {
   group?:       string;
 }
 
+
+// ── Dispatch target ───────────────────────────────────────────────────────────
+
+/**
+ * Where an actionable node slot routes when triggered. Every clickable slot
+ * (button `action`, select `change` action, future `onSelect`/`onEdit`/…)
+ * resolves to one of these.
+ *
+ *   - `action`  — callback to the owning plugin's Lua handler (the only path
+ *                 today; `fire_plugin_action`).
+ *   - `command` — a registered host/plugin command, capability-gated. Wired
+ *                 in a later phase.
+ *
+ * A bare `action: string` on a node is sugar for `{ kind: 'action', name }`;
+ * see `toDispatchTarget` in `form-nodes/dispatch.ts`.
+ */
+export type DispatchTarget =
+  | { kind: 'action';  name: string }
+  | { kind: 'command'; id: string; args?: unknown };
 
 // ── Plugin form config — emitted via Tauri event "plugin:form" ────────────────
 
@@ -768,7 +791,13 @@ export interface FormNodeButton extends FormNodeBase {
   type:         'button';
   /** Label text. Optional when `icon_only = true`. */
   label?:       string;
+  /** Legacy slot — sugar for `dispatch = { kind: 'action', name: action }`.
+   *  Fires the owning plugin's handler. */
   action:       string;
+  /** Explicit dispatch target. When set, takes precedence over `action` —
+   *  lets a button invoke a registered command (`kind: 'command'`) instead of
+   *  the owning plugin's handler. */
+  dispatch?:    DispatchTarget;
   variant?:     'default' | 'primary' | 'danger' | 'ghost';
   close_after?: boolean;
   disabled?:    boolean;

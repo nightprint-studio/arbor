@@ -10,7 +10,7 @@ pub use crate::hook_catalog::{FieldType, HookDef, HookField, HOOK_CATALOG, find}
 pub use crate::hooks::Hooks;
 pub use crate::manifest::{Manifest, ManifestParseError, ManifestParseFailure};
 pub use crate::permissions::{
-    AccessLevel, EnvReadPerm, GitLevel, Permissions, TerminalLevel,
+    AccessLevel, EnvReadPerm, GitLevel, Permissions, RequiredPerm, TerminalLevel,
 };
 pub use crate::sandbox::Sandbox;
 pub use crate::schedule::{

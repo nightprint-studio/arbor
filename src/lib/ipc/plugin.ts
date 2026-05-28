@@ -28,6 +28,19 @@ export const firePluginAction = (pluginName: string, action: string, contextJson
   invoke<void>('fire_plugin_action', { pluginName, action, contextJson });
 
 /**
+ * Invoke a registered command on behalf of `callerPlugin` (declarative
+ * `kind = "command"` dispatch). The backend enforces the `command_invoke`
+ * permission + the command's `required` tier; rejections surface as an error.
+ * `args` is the static dispatch-slot data; `contextJson` is the node payload.
+ */
+export const fireCommand = (
+  callerPlugin: string,
+  id: string,
+  args: unknown,
+  contextJson: string,
+) => invoke<void>('fire_command', { callerPlugin, id, args, contextJson });
+
+/**
  * Enable a plugin. Returns the ordered list of plugins that were actually
  * enabled — required deps first, target last. The backend refuses to enable
  * when a required dependency is missing or unloadable; call `pluginEnablePreview`

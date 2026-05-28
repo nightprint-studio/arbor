@@ -112,6 +112,15 @@ pub struct Permissions {
     #[serde(default)]
     pub settings_read_others: bool,
 
+    /// Allow `arbor.command.fire` / declarative `kind = "command"` dispatch —
+    /// invoke a registered command (a command another plugin marked invocable,
+    /// or a future host built-in). Opt-in: default `false`, so no plugin gains
+    /// command access by accident. The caller must ALSO hold whatever
+    /// permission the target command declares as `required` (see
+    /// [`RequiredPerm`]).
+    #[serde(default)]
+    pub command_invoke: bool,
+
     /// Free-form catch-all for permission keys contributed by domain crates
     /// (`arbor-git-provider-*`, `arbor-pipeline-*`, future plugins, …) that
     /// are NOT part of the typed core above.
@@ -166,6 +175,50 @@ impl EnvReadPerm {
         match self {
             EnvReadPerm::All(b)       => *b,
             EnvReadPerm::Allowlist(v) => v.iter().any(|n| n == name),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RequiredPerm — the permission a command demands of its caller
+// ---------------------------------------------------------------------------
+
+/// Permission tier a registered command requires the *invoking* plugin to
+/// already hold. Per-command authorization derives from the existing
+/// permission tiers — there is no separate per-command allowlist.
+///
+/// Serializes externally-tagged: `None` → `"none"`, a tier variant →
+/// `{"git":"write"}`, `{"provider":"read"}`, etc. This is the shape carried in
+/// a command contribution's `required` field and parsed from the Lua
+/// `arbor.command.register{ required = { git = "write" } }` table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RequiredPerm {
+    /// No tier required — any caller holding `command_invoke` may invoke.
+    #[default]
+    None,
+    Git(GitLevel),
+    Fs(AccessLevel),
+    Issues(AccessLevel),
+    Provider(AccessLevel),
+    Toolchain(AccessLevel),
+    Terminal(TerminalLevel),
+}
+
+impl Permissions {
+    /// True when these permissions satisfy a command's `required` tier — i.e.
+    /// the caller already holds at least the demanded level. Uses the same
+    /// `>=` tier comparison the rest of the host applies to user-initiated
+    /// calls, so a plugin can't reach a command it couldn't reach directly.
+    pub fn satisfies(&self, req: &RequiredPerm) -> bool {
+        match req {
+            RequiredPerm::None         => true,
+            RequiredPerm::Git(l)       => self.git       >= *l,
+            RequiredPerm::Fs(l)        => self.fs        >= *l,
+            RequiredPerm::Issues(l)    => self.issues    >= *l,
+            RequiredPerm::Provider(l)  => self.provider  >= *l,
+            RequiredPerm::Toolchain(l) => self.toolchain >= *l,
+            RequiredPerm::Terminal(l)  => self.terminal  >= *l,
         }
     }
 }

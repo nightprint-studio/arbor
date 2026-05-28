@@ -976,6 +976,7 @@ pub fn run() {
             commands::plugin_commands::reload_plugins,
             commands::plugin_commands::exec_hook,
             commands::plugin_commands::fire_plugin_action,
+            commands::plugin_commands::fire_command,
             commands::plugin_commands::enable_plugin,
             commands::plugin_commands::disable_plugin,
             commands::plugin_commands::plugin_enable_preview,

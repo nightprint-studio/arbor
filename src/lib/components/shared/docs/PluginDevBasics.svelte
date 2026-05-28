@@ -117,6 +117,7 @@ env_read             = ["PATH", "JAVA_HOME"]
 # service_call         = false    # arbor.service.call — invoke services from other plugins
 # service_export       = false    # arbor.service.export — expose callable services
 # settings_read_others = false    # arbor.settings.read other plugins' globals
+# command_invoke       = false    # arbor.command.fire — invoke registered commands
 
 [hooks]
 on_plugin_load   = true   # fires once after main.lua executes (init/constructor)
@@ -336,6 +337,7 @@ optional = true`, 'toml')}</pre>
     <tr><td><code>service_export</code></td><td>bool</td><td><code>arbor.service.export / unexport / list_own</code> — expose callable services</td></tr>
     <tr><td><code>service_call</code></td><td>bool</td><td><code>arbor.service.call / list</code> — invoke services from other plugins</td></tr>
     <tr><td><code>settings_read_others</code></td><td>bool</td><td><code>arbor.settings.read(plugin, key)</code> — read other plugins' globals (own settings always readable)</td></tr>
+    <tr><td><code>command_invoke</code></td><td>bool</td><td><code>arbor.command.fire</code> / <code>kind = "command"</code> dispatch — invoke a registered command. Caller must also hold the command's <code>required</code> tier</td></tr>
   </tbody>
 </table>
 

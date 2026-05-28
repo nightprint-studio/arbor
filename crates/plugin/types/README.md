@@ -27,7 +27,9 @@ Lua sandboxing, scheduler dispatch) stays in the host crate (`arbor` /
   [`ManifestParseError`], [`ManifestParseFailure`], and the pure-parsing
   entry point `Manifest::from_toml_str`.
 - [`permissions`](src/permissions.rs) — [`Permissions`] + the typed access
-  tiers ([`AccessLevel`], [`GitLevel`], [`TerminalLevel`], [`EnvReadPerm`]).
+  tiers ([`AccessLevel`], [`GitLevel`], [`TerminalLevel`], [`EnvReadPerm`]),
+  plus [`RequiredPerm`] — the tier a command demands of its caller, checked
+  via `Permissions::satisfies`.
 - [`dependency`](src/dependency.rs) — [`Dependency`] (plugin-to-plugin
   requirement, semver string + optional flag) and [`LoadFailure`] (record
   of a plugin that didn't satisfy its dependency graph at load time).

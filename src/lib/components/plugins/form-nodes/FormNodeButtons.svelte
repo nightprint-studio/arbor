@@ -23,7 +23,8 @@
 
 {#if node.type === 'button'}
   {@const n = node as any}
-  {@const isLoading = ctx.actionPending === n.action}
+  {@const pendingKey = n.dispatch ? ctx.dispatchKey(n.dispatch) : n.action}
+  {@const isLoading = ctx.actionPending === pendingKey}
   {@const BIcon = n.icon ? PLUGIN_ICONS[n.icon] : null}
   <button
     class="pf-action-btn pf-action-{n.variant ?? 'default'} {n.icon_only ? 'pf-action-icon-only' : ''} {(node as any).class ?? ''}"
@@ -31,7 +32,9 @@
     type="button"
     use:tooltip={n.tooltip ?? (n.icon_only ? (n.label ?? '') : '')}
     disabled={!!(n.disabled) || !!ctx.actionPending}
-    onclick={() => ctx.handleButtonAction(n.action, n.close_after ?? false, n.extra)}
+    onclick={() => n.dispatch
+      ? ctx.handleDispatch(n.dispatch, n.close_after ?? false, n.extra)
+      : ctx.handleButtonAction(n.action, n.close_after ?? false, n.extra)}
   >
     {#if isLoading}
       <span class="pf-btn-spin"><Loader size={12} /></span>

@@ -182,6 +182,13 @@ pub mod payloads {
         #[serde(default)] pub description:      Option<String>,
         #[serde(default)] pub icon:             Option<String>,
         #[serde(default)] pub group:            Option<String>,
+        /// When `true`, other plugins may invoke this command via
+        /// `arbor.command.fire("<owner>::<id>")` / declarative `kind =
+        /// "command"`. Default `false` — palette-only, closed by default.
+        #[serde(default)] pub invocable:        bool,
+        /// Permission tier the *invoking* plugin must already hold to fire this
+        /// command. Defaults to `None` (any caller with `command_invoke`).
+        #[serde(default)] pub required:         arbor_plugin_types::prelude::RequiredPerm,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]

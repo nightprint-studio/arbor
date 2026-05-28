@@ -50,8 +50,6 @@ prelude.
   under `arbor_config_path("toolchains")`).
 - `settings_store` — JSON read/write helpers for per-plugin global /
   project settings.
-- `event_bus` — namespaced frontend emit wrapper
-  (`plugin:<name>:<event>`).
 - `lua_ctx` — per-VM `PluginLuaCtx` stashed in `lua.app_data`; the
   bridge that lets `&Lua`-only code paths route runtime errors to
   the Plugin Logs panel.
@@ -75,8 +73,10 @@ prelude.
 - `runtime::scheduler` — bridge between `PluginHost` and the shared
   `arbor-scheduler` engine.
 - `runtime::host` — `PluginHost` struct + lifecycle (load/enable/
-  disable/delete), service invocation, pipeline-op invocation,
-  dependency cascade preview, frontend-facing `list_plugin_info`.
+  disable/delete), service invocation, command invocation
+  (`invoke_command` — capability-gated `<owner>::<id>` dispatch),
+  pipeline-op invocation, dependency cascade preview, frontend-facing
+  `list_plugin_info`.
   The `hooks` submodule holds the surviving subscription queries
   (`plugin_has_handler`, `remove_hook`) — firing moved to `hook_router`.
 - `hook_router` — the Lua-side hook pipeline: low-level dispatch

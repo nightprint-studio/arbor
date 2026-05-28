@@ -10,7 +10,7 @@
  */
 import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
 import type {
-  FormCondition, FormFieldAutocomplete, FormFieldRange,
+  DispatchTarget, FormCondition, FormFieldAutocomplete, FormFieldRange,
   FormNode, FormSelectOption,
 } from '$lib/types/plugin';
 
@@ -52,7 +52,12 @@ export interface FormNodeCtx {
   resolvedOptions:   (n: any) => any;
 
   notifyChange:      (name: string, value: unknown) => void;
+  /** Legacy action-string entry point — desugars to `{ kind: 'action', name }`. */
   handleButtonAction:(action: string, closeAfter: boolean, extra?: Record<string, unknown>) => Promise<void> | void;
+  /** Dispatch an explicit target (action callback or registered command). */
+  handleDispatch:    (target: DispatchTarget | null, closeAfter: boolean, extra?: Record<string, unknown>) => Promise<void> | void;
+  /** Stable single-flight key for a target — matches `actionPending` for spinner state. */
+  dispatchKey:       (target: DispatchTarget) => string;
 
   openMenu:          (e: MouseEvent, menuId: string) => void;
   closeMenu:         () => void;

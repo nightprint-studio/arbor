@@ -45,9 +45,10 @@
   import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
   import type {
     FormNode, FormFieldKvList, FormCondition,
-    FormFieldAutocomplete, FormSelectOption,
+    FormFieldAutocomplete, FormSelectOption, DispatchTarget,
   } from '$lib/types/plugin';
-  import { firePluginAction } from '$lib/ipc/plugin';
+  import { firePluginAction, fireCommand } from '$lib/ipc/plugin';
+  import { toDispatchTarget } from './form-nodes/dispatch';
   import { uiStore }          from '$lib/stores/ui.svelte';
   import { tooltip }          from '$lib/actions/tooltip';
   import FilePickerModal      from '$lib/components/shared/FilePickerModal.svelte';
@@ -591,17 +592,43 @@
     return JSON.stringify(payload);
   }
 
-  async function handleButtonAction(action: string, closeAfter: boolean, extra?: Record<string, unknown>) {
-    if (actionPending) return;
-    actionPending = action;
+  // Single point every actionable slot routes through.
+  async function dispatch(target: DispatchTarget, payloadJson: string): Promise<void> {
+    switch (target.kind) {
+      case 'action':
+        await firePluginAction(pluginName, target.name, payloadJson);
+        return;
+      case 'command':
+        await fireCommand(pluginName, target.id, target.args ?? null, payloadJson);
+        return;
+    }
+  }
+
+  // Stable single-flight key for a target (used for actionPending + spinners).
+  function dispatchKey(target: DispatchTarget): string {
+    return target.kind === 'action' ? target.name : `command:${target.id}`;
+  }
+
+  async function handleDispatch(
+    target: DispatchTarget | null,
+    closeAfter: boolean,
+    extra?: Record<string, unknown>,
+  ) {
+    if (!target || actionPending) return;
+    actionPending = dispatchKey(target);
     try {
-      await firePluginAction(pluginName, action, buildActionPayload(extra));
+      await dispatch(target, buildActionPayload(extra));
       if (closeAfter) onClose?.();
     } catch (err) {
       uiStore.showToast(`Action failed: ${err}`, 'error');
     } finally {
       actionPending = null;
     }
+  }
+
+  // Legacy action-string entry point — desugars to a dispatch target.
+  function handleButtonAction(action: string, closeAfter: boolean, extra?: Record<string, unknown>) {
+    return handleDispatch(toDispatchTarget(action), closeAfter, extra);
   }
 
   function notifyChange(name: string, value: unknown) {
@@ -655,6 +682,8 @@
 
     notifyChange,
     handleButtonAction,
+    handleDispatch,
+    dispatchKey,
 
     openMenu,
     closeMenu,
