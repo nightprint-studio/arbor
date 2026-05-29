@@ -36,6 +36,8 @@
     <tr><td><code>arbor.ui.form.set_disabled(name, bool)</code></td><td>Disable or re-enable a field in the currently-open form</td></tr>
     <tr><td><code>arbor.ui.form.set_value(name, v)</code></td><td>Programmatically set a field's value in the currently-open form</td></tr>
     <tr><td><code>arbor.ui.form.replace(cfg)</code></td><td>Swap the whole node tree of the open form in-place, preserving field values by <code>name</code>. See <em>Dynamic form updates</em>.</td></tr>
+    <tr><td><code>arbor.ui.form.patch(ops)</code></td><td>Granular node-tree mutations addressed by stable <code>id</code> — no re-mount. Each op picks one verb: <code>merge</code> / <code>set</code> / <code>append</code> / <code>remove</code>. See <em>Granular patches</em>.</td></tr>
+    <tr><td><code>arbor.ui.form.set_state_path(segs, v)</code></td><td>Set (or, on <code>nil</code>, delete) one slice of the opaque liveState without replacing the whole blob. <code>segs</code> is an array of keys, e.g. <code>&#123; "filters", "branch" &#125;</code>.</td></tr>
     <tr><td><code>arbor.ui.form.set_loading(arg)</code></td><td>Toggle the loading overlay without re-rendering the form. <code>arg</code> can be <code>true</code> / <code>false</code>, a label string (implies <code>true</code>), or <code>&#123; loading, label &#125;</code>. Cheap — use it for per-step progress ticks during a fan-out loop.</td></tr>
     <tr><td><code>arbor.ui.form.close()</code></td><td>Programmatically dismiss the currently-open form. Pair with <code>keep_open = true</code> on the form config when submit launches a follow-up flow (file picker, second form): the modal stays mounted while the secondary flow is up, and you call <code>close()</code> once it completes.</td></tr>
     <tr><td><code>arbor.ui.operation.start&#123;…&#125;</code></td><td>Push a progress card into the operations overlay (same widget used by Pull / Fetch-all / Pull-all). Config: <code>&#123;id, title, subtitle?, steps[&#123;key,label&#125;], current?&#125;</code>. The id is plugin-scoped server-side — collisions across plugins are impossible.</td></tr>
@@ -1021,6 +1023,8 @@ local mode = arbor.settings.read("my-plugin", "mode") or "balanced"`, '.lua')}</
     <tr><td><code>label</code></td><td>text, variant</td><td>Static text alias</td></tr>
     <tr><td><code>alert</code></td><td>text, variant (info/warning/error/success)</td><td></td></tr>
     <tr><td><code>code</code></td><td>text, language?, copy?, toast?</td><td>Read-only monospace block. When <code>language</code> matches a Prism grammar (<code>"json"</code>, <code>"rust"</code>, <code>"yaml"</code>, …) the block is syntax-highlighted using the same Prism setup as the diff viewer. <code>copy: true</code> shows a floating Copy button; <code>toast</code> overrides the success toast.</td></tr>
+    <tr><td><code>editor</code></td><td>name, label, default, language?, height?, line_numbers?, active_line?, readonly, on_edit?, debounce_ms?, on_select?, scope_state?</td><td>Editable CodeMirror 6 field — value-bearing (submitted like any field; push from the host with <code>set_value</code>). <code>language ∈ &#123; "json", "toml", "yaml", "ron", "properties", "plain" &#125;</code> (unknown → plain). Emits SCOPED events: <code>on_edit</code> (debounced, slot <code>"edit"</code>, value = full text) and <code>on_select</code> (slot <code>"select"</code>, value = <code>&#123; from, to, text &#125;</code>). Both accept an action string or a <code>dispatch</code> target; <code>scope_state</code> rides a state slice.</td></tr>
+    <tr><td><code>diff</code></td><td>hunks[], path?, old_path?, language?, mode? (unified/split), hide_mode_toggle?, word_wrap?, height?, empty_text?, virtualize_threshold?</td><td>Read-only diff viewer — display-only (not value-bearing). Reuses the app's diff renderer: unified + split (local toggle), Prism syntax highlight, virtualization for large diffs. Each hunk: <code>&#123; header?, old_start?, new_start?, lines[] &#125;</code>; each line: <code>&#123; kind (context/added/removed), content, old_lineno?, new_lineno? &#125;</code> (line numbers auto-counted when omitted). Swap <code>hunks</code> live by giving the node an <code>id</code> and using the <code>patch</code> op (<code>merge</code>).</td></tr>
     <tr><td><code>icon</code></td><td>icon (Lucide name), variant (default/muted/info/success/warning/danger), size, tooltip, class, style</td><td>Inline Lucide glyph for status dots / badges. <code>Loader2</code> auto-spins via CSS.</td></tr>
     <tr><td><code>copy_link</code></td><td>text, toast?, tooltip?, font (normal/"mono"), class, style</td><td>Click-to-copy pseudo-link with a subtle <code>Copy</code> glyph on the right. Calls <code>navigator.clipboard</code> directly — no plugin action hop. Ideal for paths, IDs, URLs.</td></tr>
     <tr><td><code>button</code></td><td>label?, action, variant (default/primary/danger/ghost), close_after, disabled, icon, icon_only, tooltip, extra, class</td><td>Inline action; <code>icon</code> is a Lucide name, <code>icon_only</code> renders without label, <code>extra</code> merges into the action payload. Pass <code>class = "pal-row"</code> for a tight flush-left catalog-row style.</td></tr>
@@ -1034,7 +1038,7 @@ local mode = arbor.settings.read("my-plugin", "mode") or "balanced"`, '.lua')}</
     <tr><td><code>file</code></td><td>name, label, pick_mode, extensions, placeholder</td><td>Opens FilePickerModal — submits path string</td></tr>
     <tr><td><code>autocomplete</code></td><td>name, id, options?, source_action?, debounce_ms, free_form</td><td>Static or dynamic suggestions</td></tr>
     <tr><td><code>tags</code></td><td>name, default, suggestions, max</td><td>Submits <code>string[]</code></td></tr>
-    <tr><td><code>tree</code></td><td>name, nodes[], multi, expanded, bordered, max_height</td><td>Hierarchical selector. Nodes: <code>value, label, icon?, group?, tag?, tag_variant?, description?, children?</code></td></tr>
+    <tr><td><code>tree</code></td><td>name, nodes[], multi, expanded, bordered, max_height, <strong>lazy</strong>, <strong>on_expand</strong>, <strong>on_select</strong>, virtualize_threshold, row_height, height</td><td>Hierarchical selector (value-bearing) with full keyboard nav. Nodes: <code>value, label, icon?, group?, tag?, tag_variant?, description?, children?, id?, has_children?, loading?</code>. <strong>Dynamic "data tree"</strong>: set <code>lazy = true</code> + <code>on_expand</code> — expanding a row that has <code>has_children</code> but no loaded <code>children</code> fires the <em>scoped</em> <code>on_expand</code> (<code>&#123; id, value, path &#125;</code>) and shows a spinner; respond with <code>arbor.ui.form.patch</code> that <code>merge</code>s its <code>children</code> (and clears <code>loading</code>). <code>on_select</code> fires a scoped event on selection. Rows virtualize past <code>virtualize_threshold</code> (default 400).</td></tr>
     <tr><td><code>table</code></td><td>name, columns[], min_rows, max_rows, add_label</td><td>Submits <code>Array&lt;Record&gt;</code></td></tr>
     <tr><td><code>tree_layout</code></td><td>nav_children[], content_children[], nav_width</td><td>2-col split (nav + content). Typical use: tree on the left, form cards on the right gated with <code>show_if</code></td></tr>
     <tr><td><code>section</code></td><td>title, description, children[], collapsible, collapsed, card, count, add_action, header_actions[], class</td><td><code>card = true</code> renders with dark title bar + counter pill + optional + button. <code>collapsible = true</code> toggles the body. <code>header_actions</code>: <code>&#123; icon, tooltip, action, extra, disabled, variant &#125;[]</code> — icon buttons in the header; <code>variant = "danger"</code> applies the red hover. <code>class = "pf-card-compact"</code> tightens body padding for dense list-mode cards.</td></tr>
@@ -1107,6 +1111,9 @@ local mode = arbor.settings.read("my-plugin", "mode") or "balanced"`, '.lua')}</
     <tr><td><code>:section(title|cfg)</code> · <code>:end_section()</code></td><td>Open / close a flat section. Re-calling <code>:section()</code> auto-closes the previous one.</td></tr>
     <tr><td><code>:text</code> · <code>:textarea</code> · <code>:password</code> · <code>:number</code></td><td>Input fields. Args: <code>(name, opts?)</code> or <code>&#123;name=..., ...&#125;</code></td></tr>
     <tr><td><code>:select</code> · <code>:radio</code> · <code>:checkbox</code> · <code>:toggle</code> · <code>:kv_list</code></td><td>Choice / boolean / kv inputs</td></tr>
+    <tr><td><code>:editor(name|cfg, opts?)</code></td><td>CodeMirror 6 editor field (language, height, <code>on_edit</code> / <code>on_select</code> scoped slots)</td></tr>
+    <tr><td><code>:diff(cfg)</code></td><td>Read-only diff viewer (hunks, unified/split, syntax highlight) — display-only; patch <code>hunks</code> to update live</td></tr>
+    <tr><td><code>:tree(name|cfg, opts?)</code></td><td>Hierarchical selector; dynamic data-tree via <code>lazy</code> + scoped <code>on_expand</code> / <code>on_select</code></td></tr>
     <tr><td><code>:divider()</code> · <code>:label(text|cfg)</code> · <code>:paragraph(s)</code> · <code>:heading(s)</code></td><td>Static layout nodes</td></tr>
     <tr><td><code>:button(cfg)</code></td><td>Push a button node (<code>&#123;label, icon, action, variant&#125;</code>)</td></tr>
     <tr><td><code>:form_field(label|cfg, cfg?)</code></td><td>Push a <code>form_field</code> wrapper. Two call shapes: <code>:form_field(&#123;label="…", required=true, children=&#123;…&#125;&#125;)</code> or <code>:form_field("Label", &#123;children=&#123;…&#125;, hint="…"&#125;)</code>.</td></tr>
@@ -1186,6 +1193,35 @@ end)`, '.lua')}</pre>
 
 -- Multi-select variant
 { type = "tree", name = "tags_tree", multi = true, nodes = { --[[ ... ]] } }`, '.lua')}</pre>
+
+<h3>Dynamic data tree — lazy children + scoped events</h3>
+<p>
+  Set <code>lazy = true</code> and give each expandable row a stable <code>id</code>
+  plus <code>has_children = true</code> (with no <code>children</code> yet).
+  Expanding it fires the <em>scoped</em> <code>on_expand</code> slot
+  (value = <code>&#123; id, value, path &#125;</code>) and shows a spinner row;
+  reply with <code>arbor.ui.form.patch</code> that <code>merge</code>s the children
+  onto that row (clearing <code>loading</code>). <code>on_select</code> fires a
+  scoped event on every selection. Large trees virtualize automatically past
+  <code>virtualize_threshold</code>, and the whole tree is keyboard-navigable
+  (<code>↑</code>/<code>↓</code> move, <code>→</code>/<code>←</code> expand /
+  collapse, <code>Enter</code> selects).
+</p>
+<pre class="language-lua">{@html highlight(`{ type = "tree", name = "files", lazy = true, bordered = true, height = 240,
+  on_expand = "my-plugin:tree_expand",
+  on_select = "my-plugin:tree_select",
+  nodes = {
+    { id = "src", value = "src", label = "src", icon = "Folder", has_children = true },
+    {             value = "README.md", label = "README.md", icon = "FileText" },
+  },
+}
+
+arbor.events.on("my-plugin:tree_expand", function(ctx)
+  local row = ctx.value                       -- { id, value, path }
+  arbor.ui.form.patch({
+    { id = row.id, merge = { children = fetch_children(row.value), loading = false } },
+  })
+end)`, '.lua')}</pre>
 
 <h2>FormField wrapper</h2>
 <p>
@@ -1525,6 +1561,27 @@ arbor.events.on("dashboard:range_changed", function(ctx)
     -- re-fetch with the new range, then arbor.ui.form.replace(...)
 end)`, '.lua')}</pre>
 
+<h4>Scoped dispatch — for high-frequency slots</h4>
+<p>
+  A change slot can target a <strong>dispatch</strong> instead of a bare action string. With a <code>DispatchTarget</code> object the slot ships a <em>scoped</em> payload — just <code>&#123; node_id, slot, value, state? &#125;</code> — instead of the whole form, and can target a command. Scoped slots are tracked <strong>per node</strong> (latest-wins, no global lock), so edits on different nodes never block each other and a fast-firing widget isn't gated. Add <code>scope_state = &#123; "k1", "k2" &#125;</code> to ride a slice of the opaque form state along in <code>state</code>. Honoured today by the leaf <code>field</code> node (node-level <code>dispatch</code>), <code>vec_field</code>, and <code>select</code> <code>actions.change</code>; bare-string actions keep the legacy whole-form payload.
+</p>
+<pre class="language-lua">{@html highlight(`-- select: scoped change targeting an action
+{ type = "select", name = "branch", id = "branch_sel",
+  options = { "main", "dev" },
+  actions = { change = { kind = "action", name = "ui:branch_picked" } },
+  scope_state = { "repo_id" },          -- include state.repo_id in the payload
+}
+
+-- leaf field: scoped commit targeting a command
+{ type = "field", id = "limit", kind = "number", value = 10,
+  dispatch = { kind = "command", id = "myplugin::apply_limit" },
+}
+
+arbor.events.on("ui:branch_picked", function(ctx)
+    -- ctx = { node_id = "branch_sel", slot = "change", value = "dev",
+    --         state = { repo_id = "…" } }
+end)`, '.lua')}</pre>
+
 <h3>Rich select / multiselect options</h3>
 <p>
   In addition to <code>value</code> / <code>label</code>, the <code>select</code> and <code>multiselect</code>
@@ -1703,6 +1760,8 @@ end)`, '.lua')}</pre>
     <tr><td><code>setDisabled(name, bool)</code></td><td>text, textarea, number, range, date/time, select, radio, checkbox</td><td>OR'd with the field's own <code>readonly</code> flag</td></tr>
     <tr><td><code>setValue(name, v)</code></td><td>all value-bearing fields</td><td>Also clears the field's inline validation error</td></tr>
     <tr><td><code>replace(cfg)</code></td><td>whole form</td><td>Swaps the root <code>nodes</code> tree in-place — no close+reopen flicker. See below.</td></tr>
+    <tr><td><code>patch(ops)</code></td><td>nodes by id</td><td>Surgical in-place edits (merge props / append child / remove node) — no re-mount. See <em>Granular patches</em>.</td></tr>
+    <tr><td><code>set_state_path(segs, v)</code></td><td>liveState slice</td><td>Set or delete one path in the opaque state without replacing the whole blob.</td></tr>
   </tbody>
 </table>
 <Callout variant="info" title="Note">
@@ -1744,6 +1803,33 @@ end)`, '.lua')}</pre>
 <p>
   Assign <strong>stable <code>id</code></strong> values to your root container (and to sections you'll add/remove) so Svelte's <code>&#123;#each&#125;</code> diff reuses the DOM across replaces instead of remounting the subtree.
 </p>
+
+<h3>Granular patches — <code>patch</code> &amp; <code>set_state_path</code></h3>
+<p>
+  Where <code>replace</code> swaps the whole tree, <code>patch</code> mutates individual nodes <em>in place</em>, addressed by their stable <code>id</code> — no re-mount, no value reconciliation. Use it for studio-grade, high-frequency UIs (log streams, lazy trees, live status) where rebuilding the form per update would flicker or drop scroll/focus. Each op picks exactly one verb:
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Verb</th><th>Shape</th><th>Effect</th></tr></thead>
+  <tbody>
+    <tr><td><code>merge</code></td><td><code>&#123; id, merge = &#123; ...props &#125; &#125;</code></td><td>Shallow-merge props onto the node (label, options, disabled, variant…).</td></tr>
+    <tr><td><code>set</code></td><td><code>&#123; id, set = &#123; "options", 1, "label" &#125;, value = ... &#125;</code></td><td>Deep-assign at a path of segments <em>inside</em> the node; intermediate containers are created.</td></tr>
+    <tr><td><code>append</code></td><td><code>&#123; id, append = &#123; ...node &#125;, to = "children" &#125;</code></td><td>Push a child into an array-valued prop (<code>to</code> defaults to <code>"children"</code>; e.g. <code>"nodes"</code> for a tree).</td></tr>
+    <tr><td><code>remove</code></td><td><code>&#123; id, remove = true &#125;</code></td><td>Splice the node out of its parent array. To remove a <em>child</em>, target it by its own id.</td></tr>
+  </tbody>
+</table>
+<pre class="language-lua">{@html highlight(`arbor.ui.form.patch({
+  { id = "status", merge  = { label = "Running…", variant = "warning" } },
+  { id = "log",    append = { type = "paragraph", text = next_line }, to = "children" },
+  { id = "row7",   remove = true },
+})`, '.lua')}</pre>
+<p>
+  Patches touch the <strong>node tree only</strong>. To change a field's value use <code>set_value</code>; to mutate the opaque <code>state</code> blob use <code>set_state_path(segments, value)</code> — it sets one slice and, when <code>value</code> is <code>nil</code>, deletes that key:
+</p>
+<pre class="language-lua">{@html highlight(`arbor.ui.form.set_state_path({ "filters", "branch" }, "main")  -- set
+arbor.ui.form.set_state_path({ "filters", "branch" }, nil)     -- delete`, '.lua')}</pre>
+<Callout variant="info" title="Patchable nodes need stable ids">
+  A node without a stable <code>id</code> can't be patched (it can still be <code>replace</code>d). Assign your own <code>id</code> to every node you intend to mutate — auto-generated ids aren't addressable across updates.
+</Callout>
 
 <h2>Form state — opaque context echo</h2>
 <p>Pass a <code>state</code> table to <code>form</code> to carry server-side context that isn't rendered in the UI but is echoed back unchanged in every <code>ctx</code> payload (submit, button actions, cancel).</p>

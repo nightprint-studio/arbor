@@ -8,6 +8,8 @@
 //!   arbor.ui.form.set_disabled(name, bool)
 //!   arbor.ui.form.set_value(name, value)
 //!   arbor.ui.form.replace(partial_cfg)
+//!   arbor.ui.form.patch(ops)               -- granular node-tree mutations
+//!   arbor.ui.form.set_state_path(segs, v)  -- mutate one liveState slice
 //!
 //! Each helper emits `plugin:form-update`; the modal applies the op only
 //! when the open form belongs to this plugin.
@@ -25,6 +27,8 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     install_set_disabled(ctx, lua, &form_table)?;
     install_set_value(ctx, lua, &form_table)?;
     install_replace(ctx, lua, &form_table)?;
+    install_patch(ctx, lua, &form_table)?;
+    install_set_state_path(ctx, lua, &form_table)?;
     install_set_loading(ctx, lua, &form_table)?;
     install_close(ctx, lua, &form_table)?;
 
@@ -135,6 +139,69 @@ fn install_replace(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     form_table.set("replace", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    Ok(())
+}
+
+fn install_patch(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
+    // patch(ops)
+    // Granular, in-place mutations of the currently-open form's node tree —
+    // sibling to `replace`, but surgical (no re-mount). `ops` is an array of
+    // tables, each addressing a node by its stable `id` plus one verb:
+    //   { id = "...", merge  = { ...props } }          -- shallow-merge props
+    //   { id = "...", set    = { "options", 1, "label" }, value = ... }
+    //   { id = "...", append = { ...node }, to = "children" }  -- to defaults to "children"
+    //   { id = "...", remove = true }                  -- splice the node out
+    // A node without a stable `id` can't be patched (use `replace`).
+    let handle = ctx.app_ctx.clone();
+    let pname  = ctx.plugin_name.clone();
+    let fn_ = lua.create_function(move |lua_ctx, ops: mlua::Table| {
+        let patches: serde_json::Value = lua_ctx
+            .from_value(mlua::Value::Table(ops))
+            .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+        if let Some(ref h) = handle {
+            let _ = h.emit("plugin:form-update", serde_json::json!({
+                "plugin_name": pname,
+                "op":          "patch",
+                "patches":     patches,
+            }));
+        }
+        Ok(())
+    }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    form_table.set("patch", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    Ok(())
+}
+
+fn install_set_state_path(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
+    // set_state_path(segments, value)
+    // Mutate a single slice of the form's opaque liveState without replacing
+    // the whole blob (sibling to `replace { state = ... }`). `segments` is an
+    // array of string/number keys, e.g. { "filters", "branch" }. A `nil`
+    // value DELETES the addressed key (there is no JSON-null literal in Lua,
+    // so nil unambiguously means "drop it").
+    let handle = ctx.app_ctx.clone();
+    let pname  = ctx.plugin_name.clone();
+    let fn_ = lua.create_function(move |lua_ctx, (path, value): (mlua::Table, mlua::Value)| {
+        let path_json: serde_json::Value = lua_ctx
+            .from_value(mlua::Value::Table(path))
+            .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+        let mut payload = serde_json::json!({
+            "plugin_name": pname,
+            "op":          "set_state_path",
+            "path":        path_json,
+        });
+        if matches!(value, mlua::Value::Nil) {
+            payload["delete"] = serde_json::Value::Bool(true);
+        } else {
+            payload["value"] = lua_ctx
+                .from_value(value)
+                .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+        }
+        if let Some(ref h) = handle {
+            let _ = h.emit("plugin:form-update", payload);
+        }
+        Ok(())
+    }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    form_table.set("set_state_path", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     Ok(())
 }
 

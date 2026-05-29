@@ -68,7 +68,7 @@
     aria-label="Open main menu"
     aria-expanded={open}
   >
-    <AlignJustify size={20} strokeWidth={2} />
+    <AlignJustify size={22} strokeWidth={2} />
   </button>
 
   {#if open}

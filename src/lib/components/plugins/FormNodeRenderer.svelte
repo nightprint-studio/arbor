@@ -45,10 +45,11 @@
   import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
   import type {
     FormNode, FormFieldKvList, FormCondition,
-    FormFieldAutocomplete, FormSelectOption, DispatchTarget,
+    FormFieldAutocomplete, FormSelectOption, DispatchTarget, FormPatchOp,
   } from '$lib/types/plugin';
   import { firePluginAction, fireCommand } from '$lib/ipc/plugin';
   import { toDispatchTarget } from './form-nodes/dispatch';
+  import { applyPatchOps } from './form-nodes/patch';
   import { uiStore }          from '$lib/stores/ui.svelte';
   import { tooltip }          from '$lib/actions/tooltip';
   import FilePickerModal      from '$lib/components/shared/FilePickerModal.svelte';
@@ -68,6 +69,9 @@
   import FormNodeButtons       from './form-nodes/FormNodeButtons.svelte';
   import FormNodeCharts        from './form-nodes/FormNodeCharts.svelte';
   import FormNodeField         from './form-nodes/FormNodeField.svelte';
+  import FormNodeEditor        from './form-nodes/FormNodeEditor.svelte';
+  import FormNodeDiff          from './form-nodes/FormNodeDiff.svelte';
+  import FormNodeTree          from './form-nodes/FormNodeTree.svelte';
   import FormNodeVecField      from './form-nodes/FormNodeVecField.svelte';
   import FormNodePipelineEditor from './form-nodes/FormNodePipelineEditor.svelte';
 
@@ -82,7 +86,7 @@
     disabled?:         boolean;
     sidebarLayout?:    boolean;
     onValueChange?:    (name: string, value: unknown) => void;
-    onNodesChange?:    (newNodes: FormNode[]) => void;
+    onNodesChange?:    (newNodes: FormNode[], reason?: 'replace' | 'patch') => void;
     onClose?:          () => void;
     wizardInfo?:       WizardInfo;
   }
@@ -409,7 +413,28 @@
           }
         }
 
-        onNodesChange?.(newNodes);
+        onNodesChange?.(newNodes, 'replace');
+        return;
+      }
+
+      // Granular node-tree patch — mutate addressed nodes in place, no rebuild.
+      if (p.op === 'patch') {
+        const ops = Array.isArray(p.patches) ? (p.patches as FormPatchOp[]) : [];
+        if (ops.length === 0) return;
+        applyPatchOps(nodes, ops);
+        seedNewNodeState();
+        onNodesChange?.(nodes, 'patch');
+        return;
+      }
+
+      // Granular liveState slice — set or (on `delete`) drop one path.
+      if (p.op === 'set_state_path') {
+        const segs: (string | number)[] =
+          Array.isArray(p.path) ? p.path
+          : typeof p.path === 'string' ? [p.path]
+          : [];
+        if (segs.length === 0) return;
+        setStatePath(segs, p.value, !!p.delete);
         return;
       }
 
@@ -451,6 +476,48 @@
     if (unlistenAuto)       unlistenAuto();
     if (unlistenFormUpdate) unlistenFormUpdate();
   });
+
+  // ── Granular patch / state helpers (op: patch / set_state_path) ──────────
+
+  // Additive reconcile after a `patch` may have appended new subtrees: seed
+  // any field/container it introduced, without disturbing existing live state.
+  function seedNewNodeState() {
+    for (const [k, v] of collectFields(nodes)) {
+      if (!(k in values)) values[k] = v;
+    }
+    for (const n of nodes.flatMap(flattenAll)) {
+      if (n.type === 'kv_list') {
+        const nm = (n as FormFieldKvList).name;
+        if (!(nm in kvRows)) kvRows[nm] = kvObjToRows(values[nm] ?? {});
+      }
+    }
+    const c = buildCollapseMap(nodes, sectionBody);
+    for (const k of Object.keys(c)) if (!(k in collapsedMap))  collapsedMap[k]  = c[k];
+    const t = buildActiveTabMap(nodes);
+    for (const k of Object.keys(t)) if (!(k in activeTabMap))  activeTabMap[k]  = t[k];
+    const w = buildWizardStepMap(nodes);
+    for (const k of Object.keys(w)) if (!(k in wizardStepMap)) wizardStepMap[k] = w[k];
+  }
+
+  // Set (or, when `del`, drop) a single path inside the opaque liveState blob.
+  function setStatePath(segs: (string | number)[], value: unknown, del: boolean) {
+    if (liveState === undefined) liveState = {};
+    let cur: any = liveState;
+    for (let i = 0; i < segs.length - 1; i++) {
+      const k = segs[i];
+      if (cur[k] == null || typeof cur[k] !== 'object') {
+        cur[k] = typeof segs[i + 1] === 'number' ? [] : {};
+      }
+      cur = cur[k];
+    }
+    const last = segs[segs.length - 1];
+    if (del) {
+      if (Array.isArray(cur) && typeof last === 'number') cur.splice(last, 1);
+      else delete cur[last];
+    } else {
+      cur[last] = value;
+    }
+  }
 
   // ── Dynamic field overrides (set via plugin:form-update) ────────────────
   let fieldOverrides = $state<Record<string, { options?: any; disabled?: boolean }>>({});
@@ -631,6 +698,66 @@
     return handleDispatch(toDispatchTarget(action), closeAfter, extra);
   }
 
+  // ── Scoped per-node dispatch (high-frequency slots) ─────────────────────
+  // Unlike the whole-form button path above, a scoped slot ships only
+  // `{ node_id, slot, value, state? }` and is tracked per node+slot — never
+  // the single global `actionPending`, so concurrent edits on different nodes
+  // (or a hot widget firing rapidly) don't block each other. Latest-wins: we
+  // never gate on the in-flight count, it exists only for spinner/state.
+  let scopedInflight = $state<Record<string, number>>({});
+
+  function scopedKey(nodeId: string, slot: string): string {
+    return `${nodeId}::${slot}`;
+  }
+  function isScopedPending(nodeId: string, slot: string): boolean {
+    return (scopedInflight[scopedKey(nodeId, slot)] ?? 0) > 0;
+  }
+
+  function buildScopedPayload(
+    nodeId: string, slot: string, value: unknown, stateKeys?: string[],
+  ): string {
+    const p: Record<string, unknown> = { node_id: nodeId, slot, value };
+    if (stateKeys && stateKeys.length && liveState && typeof liveState === 'object') {
+      const slice: Record<string, unknown> = {};
+      for (const k of stateKeys) if (k in liveState) slice[k] = (liveState as any)[k];
+      p.state = slice;
+    }
+    return JSON.stringify(p);
+  }
+
+  async function handleScopedDispatch(
+    nodeId: string,
+    slot: string,
+    target: string | DispatchTarget | null | undefined,
+    value: unknown,
+    opts?: { stateKeys?: string[] },
+  ) {
+    const tgt = toDispatchTarget(target ?? null);
+    if (!tgt) return;
+    const key = scopedKey(nodeId, slot);
+    scopedInflight[key] = (scopedInflight[key] ?? 0) + 1;
+    try {
+      await dispatch(tgt, buildScopedPayload(nodeId, slot, value, opts?.stateKeys));
+    } catch (err) {
+      uiStore.showToast(`Action failed: ${err}`, 'error');
+    } finally {
+      scopedInflight[key] = Math.max(0, (scopedInflight[key] ?? 1) - 1);
+    }
+  }
+
+  // Route a select's `actions.change` slot: a bare string keeps the legacy
+  // whole-form payload; a DispatchTarget object goes scoped (and can target a
+  // command). `scope_state` declares which state keys ride along.
+  function selectChange(node: any, value: string) {
+    const change = node?.actions?.change;
+    if (!change) return;
+    if (typeof change === 'string') {
+      handleButtonAction(change, false, { value });
+    } else {
+      handleScopedDispatch(node.id, 'change', change, value, { stateKeys: node.scope_state });
+    }
+  }
+
   function notifyChange(name: string, value: unknown) {
     onValueChange?.(name, value);
   }
@@ -646,9 +773,6 @@
     } else {
       values[fieldName] = value;
     }
-  }
-  function fireChangeAction(action: string, extra: Record<string, unknown>) {
-    handleButtonAction(action, false, extra);
   }
 
   // ── Shared rendering context handed to every sub-renderer ───────────────
@@ -683,6 +807,8 @@
     notifyChange,
     handleButtonAction,
     handleDispatch,
+    handleScopedDispatch,
+    isScopedPending,
     dispatchKey,
 
     openMenu,
@@ -700,8 +826,8 @@
 
     buildSelectDropdownItems: (raw, fieldName, multiple, current) =>
       buildSelectDropdownItems(raw, fieldName, multiple, current, setSelectValue),
-    wrapSelectChange: (items, action) =>
-      wrapSelectChange(items, action, fireChangeAction),
+    wrapSelectChange: (items, node) =>
+      wrapSelectChange(items, node?.actions?.change ? (v) => selectChange(node, v) : undefined),
     multiselectSummary,
     selectLabelOf,
     selectItemCount,
@@ -904,6 +1030,12 @@
       <FormNodeCharts {node} {ctx} />
     {:else if node.type === 'pipeline_editor'}
       <FormNodePipelineEditor {node} {ctx} {renderNode} />
+    {:else if (node.type as string) === 'editor'}
+      <FormNodeEditor {node} {ctx} />
+    {:else if (node.type as string) === 'diff'}
+      <FormNodeDiff {node} {ctx} />
+    {:else if (node.type as string) === 'tree'}
+      <FormNodeTree {node} {ctx} />
     {:else if (node.type as string) === 'vec_field'}
       <FormNodeVecField {node} {ctx} />
     {:else}

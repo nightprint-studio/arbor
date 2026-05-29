@@ -28,6 +28,10 @@
     /** Fires per text change made inside the editor. NOT debounced — the
      *  parent owns the cadence (e.g. RonStudioModal debounces at 180ms). */
     oninput?: (text: string) => void;
+    /** Fires on a pure selection change (cursor move / range select) that is
+     *  not itself an edit — `oninput` already covers edits. Reports the main
+     *  selection range + its text. */
+    onselect?: (sel: { from: number; to: number; text: string }) => void;
     /** Optional callback when the editor gains focus. */
     onfocus?: () => void;
     /** Optional footer (char/line count, parse status, encoding pill). */
@@ -62,6 +66,7 @@
     language,
     readOnly = false,
     oninput,
+    onselect,
     onfocus,
     footer,
     showLineNumbers = true,
@@ -73,13 +78,26 @@
   /** Set while we're applying an external `value` change, so the
    *  updateListener doesn't echo it back via `oninput`. */
   let suppressEmit = false;
+  /** Last text we emitted via `oninput`. When the controlled `value` prop
+   *  echoes this exact string back (the parent stored our edit and fed it
+   *  straight back in), skip the reconcile entirely — otherwise every
+   *  keystroke pays an O(n) `doc.toString()` just to discover it's a no-op,
+   *  which is the dominant cost when typing in a large document. */
+  let lastEmitted: string | null = null;
 
   const compartments = makeStudioCompartments();
 
   function mount(target: HTMLDivElement) {
     const updateListener = EditorView.updateListener.of((u) => {
       if (u.docChanged && !suppressEmit) {
-        oninput?.(u.state.doc.toString());
+        const text = u.state.doc.toString();
+        lastEmitted = text;
+        oninput?.(text);
+      }
+      // Pure selection change (not an edit — edits flow through `oninput`).
+      if (u.selectionSet && !u.docChanged && !suppressEmit && onselect) {
+        const r = u.state.selection.main;
+        onselect({ from: r.from, to: r.to, text: u.state.sliceDoc(r.from, r.to) });
       }
       if (u.focusChanged && u.view.hasFocus) onfocus?.();
     });
@@ -111,6 +129,9 @@
   $effect(() => {
     const next = value;
     if (!view) return;
+    // Our own edit echoed straight back through the controlled prop — nothing
+    // to reconcile, and crucially no need to stringify the whole document.
+    if (next === lastEmitted) return;
     const current = view.state.doc.toString();
     if (current === next) return;
     suppressEmit = true;

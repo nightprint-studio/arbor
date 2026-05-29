@@ -190,14 +190,32 @@
     }
   }
 
-  // After `arbor.ui.form.replace` rebuilds the renderer's tree, recollect
-  // validation rules and drop errors that reference fields that no longer
-  // exist.
-  function onNodesChange(newNodes: FormNode[]) {
+  // The renderer signals when its node tree changed: a whole-tree `replace`
+  // (arbor.ui.form.replace) or a granular `patch`. Both can add/drop fields, so
+  // we always recollect the pattern rules — but they must NOT be treated the
+  // same for the error map.
+  function onNodesChange(newNodes: FormNode[], reason: 'replace' | 'patch' = 'replace') {
     validationRules = collectValidation(newNodes);
-    // Errors for now-missing fields are stale — the renderer can no longer
-    // display them so just reset to a clean slate.
-    validationErrors = {};
+
+    if (reason === 'replace') {
+      // Whole-tree swap: errors may reference fields that no longer exist —
+      // reset to a clean slate.
+      validationErrors = {};
+      return;
+    }
+
+    // Granular patch (e.g. a debounced editor `on_edit` refreshing live
+    // telemetry): do NOT nuke every error or reallocate the map each tick —
+    // a fresh `{}` per keystroke re-renders the whole form for nothing. Only
+    // drop errors whose field lost its rule, and keep the same object identity
+    // when nothing actually changed.
+    let changed = false;
+    const next: Record<string, string> = {};
+    for (const [k, v] of Object.entries(validationErrors)) {
+      if (k in validationRules) next[k] = v;
+      else changed = true;
+    }
+    if (changed) validationErrors = next;
   }
 </script>
 

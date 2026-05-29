@@ -64,6 +64,27 @@ export function getLanguage(path: string): string {
   return EXT_TO_LANG[ext] ?? 'plain';
 }
 
+// Reverse of EXT_TO_LANG: language id → a representative extension. Lets a
+// caller that knows the language but not a filename (e.g. a plugin `diff`
+// node passing `language: "rust"`) synthesise a path that `getLanguage`
+// resolves to the right Prism grammar. First extension wins.
+const LANG_TO_EXT: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const [ext, lang] of Object.entries(EXT_TO_LANG)) {
+    if (!(lang in m)) m[lang] = ext;
+  }
+  return m;
+})();
+
+/** Build a synthetic path (`"_.<ext>"`) for a language id so the highlighter,
+ *  which resolves grammars from a file path, can be driven by language alone.
+ *  Unknown ids fall back to using the id itself as the extension (→ `plain`
+ *  when still unrecognised). */
+export function syntheticPathForLang(lang: string): string {
+  const k = (lang ?? '').toLowerCase();
+  return `_.${LANG_TO_EXT[k] ?? k}`;
+}
+
 // Memoize per-line highlight output. Conflict-resolver and diff views
 // re-render the same lines repeatedly on every reactive update (checkbox
 // toggle, selection change, etc.) — running Prism for every line each time

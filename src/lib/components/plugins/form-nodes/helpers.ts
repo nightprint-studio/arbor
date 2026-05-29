@@ -198,18 +198,17 @@ export function buildSelectDropdownItems(
   return out;
 }
 
-/** Wrap each leaf item's onclick so it also fires `actions.change` with
- *  `{value}` payload. Recurses into groups. Items unchanged when `action`
- *  is falsy. */
+/** Wrap each leaf item's onclick so it also runs `onChange` with the picked
+ *  value. Recurses into groups. Items unchanged when `onChange` is falsy
+ *  (no `actions.change` slot). The caller owns the legacy-vs-scoped routing. */
 export function wrapSelectChange(
-  items:  DropdownItem[],
-  action: string | undefined,
-  fire:   (action: string, extra: Record<string, unknown>) => void,
+  items:    DropdownItem[],
+  onChange: ((value: string) => void) | undefined,
 ): DropdownItem[] {
-  if (!action) return items;
+  if (!onChange) return items;
   return items.map((it) => {
     if (it.kind === 'group') {
-      return { ...it, items: wrapSelectChange(it.items, action, fire) };
+      return { ...it, items: wrapSelectChange(it.items, onChange) };
     }
     if (it.kind !== 'item') return it;
     const orig = it.onclick;
@@ -217,7 +216,7 @@ export function wrapSelectChange(
       ...it,
       onclick: () => {
         orig?.();
-        fire(action, { value: it.id });
+        onChange(it.id);
       },
     };
   });

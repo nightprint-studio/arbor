@@ -12,7 +12,6 @@
     · file (browse + clear)
     · autocomplete (static or dynamic)
     · tags (chips input)
-    · tree (single + multi)
     · table (multi-column rows)
     · kv_list (key=value pairs)
 
@@ -25,10 +24,9 @@
   import { animStore } from '$lib/stores/animations.svelte';
 
   import {
-    ChevronDown, Plus, Trash2, Check, X as XIcon,
+    ChevronDown, Plus, Trash2, X as XIcon,
     File as FileIconLucide, FolderOpen,
   } from 'lucide-svelte';
-  import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
@@ -39,7 +37,7 @@
 
   import type {
     FormNode, FormFieldRange,
-    FormTableColumn, FormFieldAutocomplete, FormTreeNode, FormSelectOption,
+    FormTableColumn, FormFieldAutocomplete, FormSelectOption,
   } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
 
@@ -50,79 +48,8 @@
   let { node, ctx }: Props = $props();
 </script>
 
-<!-- ── treeNode snippet (recursive) ──────────────────────────────────── -->
-{#snippet treeNode(field: any, tnode: FormTreeNode, depth: number, sel: string | string[], multi: boolean)}
-  {@const hasChildren = !!(tnode.children && tnode.children.length)}
-  {@const expanded = !!ctx.treeExpanded[ctx.treeKey(field.name, tnode.value)]}
-  {@const selected = multi
-    ? (sel as string[]).includes(tnode.value)
-    : (sel as string) === tnode.value}
-  <div class="pf-tree-row" style="padding-left: {depth * 14 + 4}px" role="treeitem" aria-expanded={hasChildren ? expanded : undefined} aria-selected={selected}>
-    {#if hasChildren}
-      <button
-        class="pf-tree-chev"
-        type="button"
-        aria-label={expanded ? 'Collapse' : 'Expand'}
-        onclick={() => (ctx.treeExpanded[ctx.treeKey(field.name, tnode.value)] = !expanded)}
-      ><ChevronDown size={10} class={expanded ? '' : 'pf-chev-collapsed'} /></button>
-    {:else}
-      <span class="pf-tree-chev-spacer"></span>
-    {/if}
-    {#if tnode.icon}
-      <span class="pf-tree-icon"><PluginIcon name={tnode.icon} size={11} /></span>
-    {/if}
-    <button
-      class="pf-tree-label"
-      class:pf-tree-label-group={tnode.group}
-      class:pf-tree-label-selected={selected}
-      type="button"
-      disabled={tnode.group}
-      onclick={() => {
-        if (tnode.group) {
-          // Group headers: clicking toggles expansion instead of selecting
-          if (hasChildren) {
-            ctx.treeExpanded[ctx.treeKey(field.name, tnode.value)] =
-              !ctx.treeExpanded[ctx.treeKey(field.name, tnode.value)];
-          }
-          return;
-        }
-        if (multi) {
-          const arr = sel as string[];
-          ctx.values[field.name] = arr.includes(tnode.value)
-            ? arr.filter(v => v !== tnode.value)
-            : [...arr, tnode.value];
-        } else {
-          ctx.values[field.name] = tnode.value;
-        }
-        // Master/detail: fire change_action so plugin can rebuild siblings.
-        // Skipped for multi-select (selection shape differs).
-        if (!multi && field.change_action) {
-          ctx.handleButtonAction(field.change_action, false, { value: tnode.value });
-        }
-      }}
-    >
-      {#if multi && !tnode.group}
-        <span class="pf-tree-cb" class:checked={selected}>
-          {#if selected}<Check size={9} />{/if}
-        </span>
-      {/if}
-      <span class="pf-tree-label-text">
-        <span>{tnode.label}</span>
-        {#if tnode.description}
-          <span class="pf-tree-desc">{tnode.description}</span>
-        {/if}
-      </span>
-      {#if tnode.tag}
-        <span class="pf-cfg-tag pf-cfg-tag-{tnode.tag_variant ?? 'neutral'} pf-tree-tag">{tnode.tag}</span>
-      {/if}
-    </button>
-  </div>
-  {#if hasChildren && expanded}
-    {#each tnode.children ?? [] as child (child.value)}
-      {@render treeNode(field, child, depth + 1, sel, multi)}
-    {/each}
-  {/if}
-{/snippet}
+<!-- The `tree` node has its own sub-renderer (FormNodeTree) — routed before
+     this catch-all in FormNodeRenderer. -->
 
 <!-- ────────────────────────────────────────────────────────────────── -->
 
@@ -132,6 +59,13 @@
   {@const n = node as any}
   {@const fk = (n.kind ?? 'readonly') as string}
   {@const ro = !!n.readonly}
+  <!-- Commit slot: `dispatch` (object) goes scoped `{node_id,slot,value}`;
+       legacy `action` (string) keeps the `{...payload, value}` shape. -->
+  {@const leafFire = (v: unknown) => {
+    if (ro) return;
+    if (n.dispatch) ctx.handleScopedDispatch(n.id, 'change', n.dispatch, v, { stateKeys: n.scope_state });
+    else if (n.action) ctx.firePluginAction(ctx.pluginName, n.action, JSON.stringify({ ...(n.payload ?? {}), value: v }));
+  }}
   <div
     class="pf-field pf-field-leaf {(node as any).class ?? ''}"
     class:pf-field-compact={n.compact}
@@ -156,7 +90,7 @@
         disabled={ctx.disabled}
         narrow={false}
         ariaLabel={n.label ?? ''}
-        onchange={(v) => { if (!ro && n.action) ctx.firePluginAction(ctx.pluginName, n.action, JSON.stringify({ ...(n.payload ?? {}), value: v })); }}
+        onchange={(v) => leafFire(v)}
       />
 
     {:else if fk === 'text'}
@@ -166,11 +100,7 @@
         value={String(n.value ?? '')}
         readonly={ro}
         disabled={ctx.disabled}
-        onchange={(e) => {
-          if (ro || !n.action) return;
-          const v = (e.currentTarget as HTMLInputElement).value;
-          ctx.firePluginAction(ctx.pluginName, n.action, JSON.stringify({ ...(n.payload ?? {}), value: v }));
-        }}
+        onchange={(e) => leafFire((e.currentTarget as HTMLInputElement).value)}
       />
 
     {:else if fk === 'checkbox' || fk === 'toggle'}
@@ -179,10 +109,7 @@
           type="checkbox"
           checked={!!n.value}
           disabled={ro || ctx.disabled}
-          onchange={(e) => {
-            const v = (e.currentTarget as HTMLInputElement).checked;
-            if (!ro && n.action) ctx.firePluginAction(ctx.pluginName, n.action, JSON.stringify({ ...(n.payload ?? {}), value: v }));
-          }}
+          onchange={(e) => leafFire((e.currentTarget as HTMLInputElement).checked)}
         />
       </label>
 
@@ -192,10 +119,7 @@
         class="pf-input pf-select-trigger"
         value={String(n.value ?? '')}
         disabled={ro || ctx.disabled}
-        onchange={(e) => {
-          const v = (e.currentTarget as HTMLSelectElement).value;
-          if (!ro && n.action) ctx.firePluginAction(ctx.pluginName, n.action, JSON.stringify({ ...(n.payload ?? {}), value: v }));
-        }}
+        onchange={(e) => leafFire((e.currentTarget as HTMLSelectElement).value)}
       >
         {#each opts as o}
           {@const ov = typeof o === 'string' ? o : (o.value ?? o.label)}
@@ -317,7 +241,7 @@
       {@const rawOpts     = (ctx.resolvedOptions(n) ?? n.options) as FormSelectOption[] | undefined}
       {@const ddItems     = ctx.wrapSelectChange(
                               ctx.buildSelectDropdownItems(rawOpts, n.name, false, ctx.values[n.name]),
-                              (n as any).actions?.change,
+                              n,
                             )}
       {@const placeholder = (n as any).placeholder ?? '— select —'}
       {@const selectedLabel = (ctx.values[n.name] != null && ctx.values[n.name] !== '')
@@ -555,17 +479,6 @@
             </datalist>
           {/if}
         {/if}
-      </div>
-
-    {:else if node.type === 'tree'}
-      {@const multi = !!n.multi}
-      {@const sel = multi ? (Array.isArray(ctx.values[n.name]) ? ctx.values[n.name] as string[] : []) : (ctx.values[n.name] as string)}
-      <div class="pf-tree" class:pf-tree-bordered={n.bordered}
-           style={n.bordered && n.max_height ? `max-height:${n.max_height}` : ''}
-           role="tree">
-        {#each (n.nodes ?? []) as root (root.value)}
-          {@render treeNode(n, root, 0, sel, multi)}
-        {/each}
       </div>
 
     {:else if node.type === 'table'}

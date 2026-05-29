@@ -797,6 +797,8 @@ local Ui = {}
 ---  arbor.ui.form.set_disabled(name, bool)     -- disable/enable a field
 ---  arbor.ui.form.set_value(name, value)       -- programmatically set a field value
 ---  arbor.ui.form.replace(cfg)                -- swap the whole node tree in-place
+---  arbor.ui.form.patch(ops)                  -- granular node-tree mutations (no re-mount)
+---  arbor.ui.form.set_state_path(segs, value) -- mutate one slice of the opaque state
 ---  arbor.ui.form.set_loading(arg)            -- toggle the busy overlay (cheap, no re-render)
 ---  arbor.ui.form.close()                     -- programmatically dismiss the modal
 ---
@@ -822,6 +824,18 @@ local Ui = {}
 ---`actions = { change = "..." }` field. When set, the action fires on every
 ---selection (not just Submit) with `{ value }` in the payload — handy for
 ---"window picker" / live-filter controls that should re-fetch immediately.
+---
+---Scoped dispatch (high-frequency slots): a value slot's change can target a
+---DISPATCH instead of a bare action string — `change = { kind = "action",
+---name = "..." }` or `{ kind = "command", id = "..." }`. A dispatch slot ships
+---a SCOPED payload `{ node_id, slot, value, state? }` (not the whole form) and
+---is tracked per node, so concurrent edits on different nodes never block each
+---other and a fast-firing widget isn't gated by a global lock (latest-wins).
+---Add `scope_state = { "k1", "k2" }` on the node to ride a slice of the opaque
+---form state along in `state`. Honoured today by the leaf `field` node (via a
+---node-level `dispatch = …`), `vec_field`, `select` `actions.change`, and the
+---`editor` widget (`on_edit` slot `edit` / `on_select` slot `select`);
+---bare-string actions keep the legacy whole-form payload unchanged.
 ---
 ---Builder mode: `arbor.ui.form()` (no arg) or `arbor.ui.form("id")` returns a
 ---chainable `arbor.FormBuilder`; `:open()` emits the modal via the same path.
@@ -865,6 +879,44 @@ function Ui.form.set_value(name, value) end
 ---  }
 ---@param cfg table
 function Ui.form.replace(cfg) end
+
+---A single granular patch op for `arbor.ui.form.patch`. Targets a node by its
+---stable `id` and applies exactly one verb — pick one of merge / set / append /
+---remove. A node without a stable `id` can't be patched (use `replace`).
+---@class arbor.FormPatchOp
+---@field id      string            Stable id of the target node.
+---@field merge?  table             Shallow-merge these props onto the node (label, options, disabled, variant…).
+---@field set?    (string|number)[] Path of segments INSIDE the node for a deep assign, e.g. { "options", 1, "label" }.
+---@field value?  any               Value for `set` (required when `set` is present).
+---@field append? table             A child node to push into an array-valued prop.
+---@field to?     string            Array prop that `append` targets (default "children"; e.g. "nodes" for a tree).
+---@field remove? boolean           When true, splice the targeted node out of its parent. To remove a CHILD, target it by its own id.
+
+---Granular, in-place mutations of the currently-open form's node tree —
+---sibling to `replace`, but surgical: no re-mount, addressed by stable node id.
+---Patches touch the node tree ONLY; field values go via `set_value`, opaque
+---state via `set_state_path`. Ideal for high-frequency UIs (log streams, lazy
+---trees) where a full `replace` per update would re-mount the subtree.
+---
+---  arbor.ui.form.patch({
+---    { id = "status", merge  = { label = "Running…", variant = "warning" } },
+---    { id = "log",    append = { type = "paragraph", text = line }, to = "children" },
+---    { id = "opt3",   set    = { "label" }, value = "Renamed" },
+---    { id = "row7",   remove = true },
+---  })
+---@param ops arbor.FormPatchOp[]
+function Ui.form.patch(ops) end
+
+---Mutate a single slice of the form's opaque liveState without replacing the
+---whole blob (sibling to `replace { state = ... }`). `segments` is an array of
+---string/number keys addressing the slot; a `nil` value DELETES the key (Lua
+---has no JSON-null literal, so nil unambiguously means "drop it").
+---
+---  arbor.ui.form.set_state_path({ "filters", "branch" }, "main")  -- set
+---  arbor.ui.form.set_state_path({ "filters", "branch" }, nil)     -- delete
+---@param segments (string|number)[]
+---@param value    any
+function Ui.form.set_state_path(segments, value) end
 
 ---Toggle the busy overlay above the open form. Cheaper than `replace`
 ---because it does NOT re-render the node tree — use it for per-step
@@ -2438,6 +2490,28 @@ function FormBuilder:radio(name_or_cfg, opts) end
 ---@return arbor.FormBuilder
 function FormBuilder:kv_list(name_or_cfg, opts) end
 
+---CodeMirror 6 editor field. See `arbor.FormFieldEditor` for the full shape
+---(language, height, on_edit / on_select scoped slots, …).
+---@param  name_or_cfg string|table
+---@param  opts        table|nil
+---@return arbor.FormBuilder
+function FormBuilder:editor(name_or_cfg, opts) end
+
+---Read-only diff viewer. See `arbor.FormNodeDiff` for the full shape (hunks,
+---mode, language, height, …). Display-only — not collected into the form
+---values; update it live with `arbor.ui.form.patch` (`merge` the `hunks`).
+---@param  cfg table   { hunks = {…}, path?, mode?, language?, … }
+---@return arbor.FormBuilder
+function FormBuilder:diff(cfg) end
+
+---Hierarchical selector (value-bearing). Pass a cfg table with `nodes`; opt into
+---the dynamic data-tree with `lazy = true` + `on_expand` (+ optional `on_select`
+---/ `virtualize_threshold` / `row_height`). See `arbor.FormFieldTree`.
+---@param  name_or_cfg string|table
+---@param  opts        table|nil
+---@return arbor.FormBuilder
+function FormBuilder:tree(name_or_cfg, opts) end
+
 ---@return arbor.FormBuilder
 function FormBuilder:divider() end
 
@@ -2592,6 +2666,60 @@ function CoreAssert.register() end
 ---@field suggestions string[]|nil      When set, acts as an allowlist (multi-select)
 ---@field max         integer|nil
 
+---@class arbor.FormFieldEditor : arbor.FormNodeBase
+---Multi-line code/text editor (CodeMirror 6). Value-bearing: the document is
+---submitted as the field value and can be pushed from the host with
+---`arbor.ui.form.set_value(name, text)`. On top of the whole-form model it can
+---emit SCOPED events on the high-frequency channel — `on_edit` (debounced,
+---value = full text) and `on_select` (value = `{ from, to, text }`). Both
+---slots accept a bare action string or an `arbor.DispatchTarget` (so an edit /
+---selection can drive a command); `scope_state` rides a slice of form state.
+---@field type         "editor"
+---@field name         string
+---@field label        string|nil
+---@field default      string|nil                       Initial document
+---@field language      string|nil                       "json"|"toml"|"yaml"|"ron"|"properties"|"plain" (unknown → plain)
+---@field height        integer|string|nil               Editor box height (px number or CSS length). Default 240
+---@field line_numbers  boolean|nil                      Show the gutter (default true)
+---@field active_line   boolean|nil                      Highlight the active line (default true)
+---@field readonly      boolean|nil
+---@field on_edit       string|arbor.DispatchTarget|nil  Debounced scoped slot, slot "edit", value = full text
+---@field debounce_ms   integer|nil                      Debounce for on_edit (default 300)
+---@field on_select     string|arbor.DispatchTarget|nil  Scoped slot, slot "select", value = { from, to, text }
+---@field scope_state   string[]|nil                     liveState keys to include in the scoped payload
+
+---@class arbor.FormDiffLine
+---@field kind       "context"|"added"|"removed"
+---@field content    string
+---@field old_lineno integer|nil   Explicit old-side line number (auto-counted from the hunk start when omitted)
+---@field new_lineno integer|nil   Explicit new-side line number (auto-counted from the hunk start when omitted)
+
+---@class arbor.FormDiffHunk
+---@field header    string|nil               Synthesised "@@ … @@" when omitted
+---@field old_start integer|nil              First old-side line number (default 1)
+---@field new_start integer|nil              First new-side line number (default 1)
+---@field lines     arbor.FormDiffLine[]
+
+---@class arbor.FormNodeDiff : arbor.FormNodeBase
+---Read-only diff viewer. DISPLAY-ONLY (not value-bearing): the node carries
+---pre-diffed hunks supplied by the plugin and reuses the app's own diff
+---renderer — unified + split layouts, Prism syntax highlight, and
+---virtualization for large diffs. Give it a stable `id` to swap `hunks` live
+---via `arbor.ui.form.patch{ { id = "...", merge = { hunks = {…} } } }`.
+---@field type             "diff"
+---@field hunks            arbor.FormDiffHunk[]
+---@field label            string|nil
+---@field hint             string|nil
+---@field path             string|nil   Filename used to pick the highlight grammar; shown in the header
+---@field old_path         string|nil   Previous path when renamed (shown as "old → new")
+---@field language         string|nil   Override the highlight grammar ("rust"|"json"|…); wins over `path`
+---@field mode             "unified"|"split"|nil   Initial layout (default "unified")
+---@field hide_mode_toggle boolean|nil  Hide the local unified/split toggle (default false)
+---@field word_wrap        boolean|nil  Wrap long lines, unified only (default false)
+---@field height           integer|string|nil      Viewer height — px number or CSS length (default "320px")
+---@field empty_text       string|nil   Shown when there are no hunks (default "No changes")
+---@field virtualize_threshold integer|nil  Total-line count above which the virtualized renderer kicks in (default 600)
+
 ---@class arbor.FormTreeNode
 ---@field value       string
 ---@field label       string
@@ -2601,6 +2729,9 @@ function CoreAssert.register() end
 ---@field tag         string|nil    Small pill badge after the label (e.g. "Tomcat")
 ---@field tag_variant "neutral"|"ok"|"warn"|"error"|"accent"|"dev"|"prod"|"test"|nil
 ---@field description string|nil    Dim caption under the label
+---@field id          string|nil    Stable id — required to patch this row (lazy children, inline updates)
+---@field has_children boolean|nil  Advertise (lazy) children before they load: shows an expander, fires on_expand on first open
+---@field loading     boolean|nil   Show a spinner on this row (clear it with the patch that fills the children)
 
 ---@class arbor.FormFieldTree : arbor.FormNodeBase
 ---@field type       "tree"
@@ -2612,7 +2743,15 @@ function CoreAssert.register() end
 ---@field expanded   boolean|nil     Expand every node on open (default: false)
 ---@field bordered   boolean|nil     Legacy bordered look with inner padding + scroll cap (default: false — flush)
 ---@field max_height string|nil      When bordered, cap via CSS max-height (default: "300px")
----@field change_action string|nil   Plugin action fired on selection change (non-group nodes only). Ctx contains the full form state plus `value` (the newly selected node's value). Ideal for master/detail layouts.
+---@field change_action string|nil   Plugin action fired on selection change (non-group nodes only). Legacy whole-form payload — prefer the scoped `on_select`. Ctx contains the full form state plus `value` (the newly selected node's value).
+---Dynamic "data tree" opt-ins (additive — absent = static tree):
+---@field lazy        boolean|nil   Fetch children on expand: a row with has_children but no children fires on_expand + shows a spinner
+---@field on_expand   string|arbor.DispatchTarget|nil  Scoped slot fired on (lazy) expand — ships { id, value, path }; respond with a patch that merges the children
+---@field on_select   string|arbor.DispatchTarget|nil  Scoped slot fired on selection change — ships the new value (wins over change_action when both set)
+---@field on_scroll_range string|arbor.DispatchTarget|nil  Scoped slot fired as the (virtualized) viewport scrolls — ships { start, end, total }
+---@field virtualize_threshold integer|nil  Window the rows above this many visible rows (default 400)
+---@field row_height  integer|nil   Fixed row height (px) for the virtualized window (default 24)
+---@field height      string|integer|nil  Fixed viewport height (px or CSS length); falls back to max_height
 
 ---@class arbor.FormTableColumn
 ---@field key         string

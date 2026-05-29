@@ -233,6 +233,42 @@ command).
   existing ctx shape plugins already read.
 - Scope is a property of the *slot*, independent of dispatch kind.
 
+#### Landed (step 4)
+
+Design decisions (closed):
+
+- **Scoped payload — `{ node_id, slot, value, state? }`.** `state` is an
+  *optionally declared slice*: a slot lists `scope_state: string[]` keys and
+  only those ride along (default: no state). No whole-form blob on the
+  high-frequency channel.
+- **`set_state_path` segments format** already chosen in step 3 (array of
+  segments); scoped slots reuse that mental model for `scope_state`.
+- **Concurrency — latest-wins, no gating.** A per-`node_id+slot` in-flight
+  counter (`scopedInflight`) exists only for spinner/state; the path never
+  blocks, so a hot widget always emits its newest event and different nodes
+  never contend. The legacy button path keeps its single global
+  `actionPending` single-flight — unchanged.
+- **Opt-in via `dispatch`.** A value slot enters the scoped path only when it
+  carries a `DispatchTarget` object (`{kind:'action'|'command', …}`); a bare
+  `action`/`actions.change` string keeps the exact legacy whole-form payload.
+
+Implementation (FE-only — scoped events reuse the existing `dispatch()`
+executor, so no new Tauri command / Rust):
+
+- `FormNodeRenderer`: `handleScopedDispatch(nodeId, slot, target, value,
+  {stateKeys})` + `buildScopedPayload` + `isScopedPending`, exposed on the
+  rendering `ctx`. `selectChange(node, value)` routes string→legacy /
+  object→scoped.
+- `helpers.ts::wrapSelectChange` now takes a node-aware `onChange(value)`
+  callback (the renderer owns the routing); the select call site passes the
+  node.
+- Retrofit (opt-in, legacy untouched): leaf `field` (`leafFire`), `vec_field`
+  (`{axis,index,value}`), and `select` `actions.change`.
+- Types: `dispatch?`/`scope_state?` on `FormFieldBase`; `actions.change` on
+  `FormFieldSelect` widened to `string | DispatchTarget`.
+- The host widgets that consume this end-to-end (editor/tree/diff, §4) land in
+  step 5; until then the retrofit slots are the live exercise of the channel.
+
 ### 3.2 Granular patches (new `plugin:form-update` ops)
 
 Two new ops in the existing switch — existing ops untouched:
@@ -254,6 +290,40 @@ Two new ops in the existing switch — existing ops untouched:
 `FormNodeRenderer`'s `plugin:form-update` listener (already a switch) gains
 two cases; the patch applier mutates `nodes`/`values`/`liveState` `$state`
 in place.
+
+#### Landed (step 3)
+
+Design decisions (closed from §7):
+
+- **Patch addressing — id-keyed ops, not JSON-pointer.** `patch` carries
+  `patches: FormPatchOp[]`, each op targeting a node by its stable `id` plus
+  one verb: `merge` (shallow-merge props), `set` (deep assign at a path of
+  segments *inside* the node, e.g. `["options",0,"label"]`), `append` (push a
+  child into an array prop, `to` default `"children"`), `remove` (splice the
+  node out — removing a *child* = target it by its own id). No global tree
+  indices are exposed, so ids don't drift the way pointer paths would.
+- **`set_state_path` path — array of segments**, e.g.
+  `{ "filters", "branch" }`. No dotted-string parsing, unambiguous with keys
+  that contain `.`/`/`, idiomatic for Lua tables.
+- **Scope — node tree only.** `patch` never touches field `values` (use
+  `set_value`) nor the opaque blob (use `set_state_path`). On `set_state_path`,
+  a Lua `nil` value DELETES the key (emitted as `{ delete: true }`, since Lua
+  has no JSON-null literal).
+
+Implementation:
+
+- FE applier `form-nodes/patch.ts::applyPatchOps(roots, ops)` mutates the
+  `nodes` `$state` tree in place (locate-by-id walks every branching container;
+  appended nodes are `normalizeNode`'d). After a patch the listener runs
+  `seedNewNodeState()` — an **additive-only** reconcile that seeds `values` and
+  the collapse/tab/wizard/kv maps for any subtree an `append` introduced,
+  without disturbing existing live state.
+- `set_state_path` mutates `liveState` in place (creating intermediate
+  containers; `delete` drops the leaf).
+- Type `FormPatchOp` in `types/plugin.ts`. Lua: `arbor.ui.form.patch` +
+  `arbor.ui.form.set_state_path` in `ns/ui/form.rs`. The whole-form ops
+  (`replace`/`set_value`/`set_options`/`set_disabled`/`set_loading`/`close`)
+  are untouched.
 
 ### 3.3 Concurrency
 
@@ -287,14 +357,122 @@ widget). Specified separately:
 
 - **`editor`** — CodeMirror-backed, editable (today `code` is read-only);
   emits `onEdit` (debounced, scoped) + `onSelect`.
-- **`diff`** — text + tree diff viewer.
+- **`diff`** — read-only diff viewer (unified + split). *(landed — see
+  "Landed (step 5 — `diff`)" below)*
 - **`data_tree`** — lazy children fetch (via a dispatch slot), inline edit,
-  selection events, virtualization for large docs.
+  selection events, virtualization for large docs. *(landed as the `tree`
+  node's dynamic mode — see "Landed (step 5 — `data_tree`)" below)*
 - **workspace full-view container** — a main-area surface beyond modal /
   sidebar.
 
 These are what let a plugin rebuild a studio entirely declaratively, and
 ultimately retire `StudioModal.svelte`.
+
+### Landed (step 5 — `editor`)
+
+The first host widget. **Design decisions (closed):**
+
+- **Library — reuse the existing CodeMirror 6.** No new dependency: the
+  `editor` node wraps the existing `shared/studio/StudioTextPane.svelte` (the
+  same controlled CM6 host the Studio modals use), so syntax highlighting,
+  line numbers, search, history and the arbor-themed editor come for free.
+- **Value model — value-bearing + scoped.** The node carries a `name`, so its
+  document is collected into `values[name]` and submitted like any field, and
+  the host can push new content with the existing `set_value` op (the pane is
+  controlled, so an external write reconciles the buffer without an echo).
+  *On top of that* it is the first live consumer of the §3.1 scoped channel.
+- **Slots.** `on_edit` (debounced in the widget per §3.4 — `debounce_ms`
+  default 300; slot `edit`, value = full text) and `on_select` (slot `select`,
+  value = `{ from, to, text }`). Both accept a legacy action string or a
+  `DispatchTarget`, route through `ctx.handleScopedDispatch`, and honour
+  `scope_state`.
+- **Languages.** Mapped to the studio set (`json`/`toml`/`yaml`/`ron`/
+  `properties`/`plain`); unknown ids fall back to `plain`. Extending the
+  grammar set is deferred (would need new parsers — ask before adding libs).
+
+**Implementation (FE-only — no Rust/Tauri change):**
+
+- `form-nodes/FormNodeEditor.svelte` (new) wraps `StudioTextPane`, renders the
+  standard `.pf-field` chrome (label / validation error / hint / pill), binds
+  the document to `ctx.values[name]`, and fires the two scoped slots.
+- `StudioTextPane.svelte` gained one additive optional `onselect` callback
+  (fires on a pure selection change — `selectionSet && !docChanged`).
+- `FormNodeRenderer` routes `type:'editor'` → `FormNodeEditor` (before the
+  `FormNodeField` catch-all).
+- Type `FormFieldEditor` in `types/plugin.ts` (added to `FormFieldNode`); the
+  node is value-bearing so `collectFields` seeds it automatically.
+
+### Landed (step 5 — `diff`)
+
+The second host widget. **Design decisions (closed):**
+
+- **Renderer — reuse, don't rebuild.** The `diff` node wraps the app's own diff
+  row renderers (`components/diff/DiffHunk.svelte` + the virtualized
+  `VirtualHunk.svelte`), which are already self-contained (no `diffStore`
+  dependency) and render read-only when `stageable` is false. A lean
+  `FormNodeDiff.svelte` mounts them directly — deliberately *not* `DiffViewer`,
+  which drags in `diffStore`, partial staging, encoding overrides, the
+  fullscreen `Modal` and global keybindings (all app concepts, wrong for a
+  plugin form node).
+- **Hunk source — plugin supplies pre-diffed hunks.** FE-only, zero Rust, zero
+  new libraries: the node carries `hunks: FormDiffHunk[]`, each a list of
+  `{ kind, content }` lines. `form-nodes/diff.ts::normalizeDiffHunks` fills the
+  per-line `old_lineno`/`new_lineno` (counting from `old_start`/`new_start`,
+  default 1) and synthesises the `@@ … @@` header, so the Lua side stays terse.
+- **Layout — unified + split, local toggle.** A per-node `$state` (init from the
+  node's `mode`, default `unified`), *not* the app-wide `diffStore`, so two diff
+  nodes are independent and toggling one never touches the git diff panel.
+  `hide_mode_toggle` hides the control.
+- **Display-only.** `diff` extends `FormNodeBase` (no `name`) — it is not
+  collected into `values`. It updates live via the §3.2 `patch` op (`merge` new
+  `hunks` onto the node by its stable `id`), exercising that channel.
+- **Highlight.** Reuses the Prism setup via `diff-formatter.highlight(content,
+  path)`. A new additive export `syntheticPathForLang(lang)` (reverse of the
+  existing `EXT_TO_LANG`) lets the node drive the grammar from a `language` id
+  when it has no `path`.
+
+### Landed (step 5 — `data_tree`)
+
+The third host widget — shipped as a **dynamic mode of the existing `tree` node**
+(not a new type), so static trees are untouched and the dynamic opt-ins are
+purely additive. **Design decisions (closed):**
+
+- **Extend `tree`, don't fork.** `FormFieldTree` gains `lazy` / `on_expand` /
+  `on_select` / `virtualize_threshold` / `row_height` / `on_scroll_range`;
+  `FormTreeNode` gains `id` / `has_children` / `loading`. Absent ⇒ today's
+  behaviour. The renderer moved out of the `FormNodeField` catch-all into a
+  dedicated `form-nodes/FormNodeTree.svelte` (routed before the catch-all,
+  beside `editor`/`diff`), reusing the shared `.pf-tree-*` styles.
+- **Lazy children = scoped `on_expand` + `patch` (no new host API).** Expanding
+  a row that has `has_children` but no loaded `children` fires the scoped
+  `on_expand` slot (`{ id, value, path }`) and shows a spinner row; the plugin
+  responds with `arbor.ui.form.patch` that `merge`s `children` onto the row and
+  clears `loading`. This required one addition to the patch applier: a `tree`
+  node's `nodes` array is now walked by `childArraysOf`, so a `FormTreeNode` is
+  addressable by its own stable `id` (children themselves are caught by the
+  generic `children` descent). Prefer `merge`/`set` over `append` for tree rows
+  (`append` runs `normalizeNode`, which is for FormNodes, not FormTreeNodes).
+- **Value-bearing + scoped `on_select`.** Selection stays in `values[name]`
+  (string, or `string[]` in `multi`) and submits like any field; `on_select`
+  ships the new value on the scoped channel (preferred over the legacy
+  whole-form `change_action` when both are set). `scope_state` rides along.
+  Inline edit is **deferred** (reserved, not implemented this step).
+- **Flatten-then-window rendering.** Rows are rendered from a flat list of the
+  currently-visible (expanded) rows so virtualization and roving-focus keyboard
+  nav share one model. Above `virtualize_threshold` (default 400) the list is
+  windowed with fixed `row_height` (default 24) like `VirtualHunk`; an optional
+  `on_scroll_range` slot ships `{ start, end, total }` for window-driven fetch.
+- **Keyboard-first.** The tree is a focusable `role="tree"`; ↑/↓ move, →/←
+  expand-or-descend / collapse-or-ascend, Home/End jump, Enter/Space select,
+  with `aria-activedescendant` + scroll-into-view.
+
+**Implementation (FE-only — no Rust/Tauri change; reuses §1–4):** new
+`form-nodes/FormNodeTree.svelte`; routing in `FormNodeRenderer`; the `tree`
+branch + recursive snippet removed from `FormNodeField`; `FormTreeNode` /
+`FormFieldTree` extended in `types/plugin.ts`; one branch added to
+`patch.ts::childArraysOf`; `FormBuilder.tree` added in `builders.lua`.
+
+The remaining widget (full-view container) is still sketch-only.
 
 ---
 
@@ -322,9 +500,20 @@ ultimately retire `StudioModal.svelte`.
      host command logic extracted from the async Tauri wrappers into a
      callable registry. `fire_command` currently rejects `arbor:*` ids with
      `host_unavailable`.
-3. **Patch ops** (`patch`, `set_state_path`) — additive update ops.
-4. **Scoped per-node events + per-node concurrency.**
+3. ✅ **Patch ops** (`patch`, `set_state_path`) — additive update ops.
+   *(landed — see §3.2 "Landed (step 3)")*
+4. ✅ **Scoped per-node events + per-node concurrency.**
+   *(landed — see §3.1 "Landed (step 4)")*
 5. **Host widgets** (editor/diff/tree/full-view) consuming §1–4.
+   - ✅ **`editor` (landed)** — CodeMirror 6, value-bearing + scoped
+     `on_edit`/`on_select`. See §4 "Landed (step 5 — `editor`)".
+   - ✅ **`diff` (landed)** — read-only diff viewer reusing the app's diff row
+     renderers; plugin-supplied hunks, unified + split, display-only, updated
+     live via `patch`. See §4 "Landed (step 5 — `diff`)".
+   - ✅ **`data_tree` (landed)** — shipped as the `tree` node's dynamic mode:
+     lazy children via scoped `on_expand` + `patch`, scoped `on_select`,
+     keyboard nav, virtualization. See §4 "Landed (step 5 — `data_tree`)".
+   - ⏳ full-view container — sketch only.
 
 ## 7. Open questions
 
@@ -339,8 +528,20 @@ ultimately retire `StudioModal.svelte`.
   perm, or also require a `service_call`-style flag on the caller?
 - Should the legacy `action` single-flight silent-drop be fixed in the same
   effort (queue / disable / toast) or tracked separately?
-- Patch addressing: JSON-pointer over the node tree by id, vs a flat
-  `id → partial-node` map. Tradeoff: expressiveness vs simplicity.
+- ~~First host widget + its library / value model / slots.~~ **Decided
+  (step 5): `editor` first**, built on the existing CodeMirror 6
+  (`StudioTextPane`) — no new dependency — value-bearing + scoped
+  `on_edit` (debounced) / `on_select`. See §4 "Landed (step 5 — `editor`)".
+- ~~`diff` widget: hunk source / renderer / layout.~~ **Decided (step 5):
+  plugin supplies pre-diffed hunks** (FE-only, no Rust/lib), rendered by a lean
+  `FormNodeDiff` that **reuses the existing `DiffHunk`/`VirtualHunk`** (not the
+  app's `DiffViewer`), with a **local unified/split toggle**. Display-only;
+  updated live via the `patch` op. See §4 "Landed (step 5 — `diff`)".
+- ~~Patch addressing: JSON-pointer over the node tree by id, vs a flat
+  `id → partial-node` map.~~ **Decided (step 3): id-keyed ops** with verbs
+  (`merge`/`set`/`append`/`remove`) — more expressive than a flat merge map
+  (supports append/remove of children) without JSON-pointer's brittle global
+  indices. `set_state_path` uses an array of segments. See §3.2.
 
 ## 8. Docs / SDK to update when implementing
 

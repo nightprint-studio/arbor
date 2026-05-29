@@ -56,6 +56,20 @@ export interface FormNodeCtx {
   handleButtonAction:(action: string, closeAfter: boolean, extra?: Record<string, unknown>) => Promise<void> | void;
   /** Dispatch an explicit target (action callback or registered command). */
   handleDispatch:    (target: DispatchTarget | null, closeAfter: boolean, extra?: Record<string, unknown>) => Promise<void> | void;
+  /** Scoped per-node dispatch for high-frequency slots: ships only
+   *  `{ node_id, slot, value, state? }` (not the whole form) and is tracked
+   *  per `nodeId+slot` (latest-wins, no global lock). `target` accepts a
+   *  legacy action string or an explicit `DispatchTarget` (so a slot can
+   *  target a command). `stateKeys` declares which liveState keys ride along. */
+  handleScopedDispatch: (
+    nodeId: string,
+    slot: string,
+    target: string | DispatchTarget | null | undefined,
+    value: unknown,
+    opts?: { stateKeys?: string[] },
+  ) => Promise<void> | void;
+  /** Whether a scoped `nodeId+slot` has a request in flight (spinner state). */
+  isScopedPending:   (nodeId: string, slot: string) => boolean;
   /** Stable single-flight key for a target — matches `actionPending` for spinner state. */
   dispatchKey:       (target: DispatchTarget) => string;
 
@@ -79,7 +93,10 @@ export interface FormNodeCtx {
     multiple: boolean,
     current: unknown,
   ) => DropdownItem[];
-  wrapSelectChange:  (items: DropdownItem[], action: string | undefined) => DropdownItem[];
+  /** Wrap select items so picking one also fires the node's `actions.change`
+   *  slot. Pass the node (it carries `actions.change` + optional `scope_state`)
+   *  so a DispatchTarget change slot can go scoped; `undefined` = no change slot. */
+  wrapSelectChange:  (items: DropdownItem[], node: any) => DropdownItem[];
   multiselectSummary:(raw: FormSelectOption[] | undefined, selected: string[], placeholder: string) => string;
   selectLabelOf:     (raw: FormSelectOption[] | undefined, value: string) => string | undefined;
   selectItemCount:   (raw: FormSelectOption[] | undefined) => number;

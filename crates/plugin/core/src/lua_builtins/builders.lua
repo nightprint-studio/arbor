@@ -282,6 +282,11 @@ FormBuilder.checkbox = _make_field("checkbox")
 FormBuilder.toggle   = _make_field("toggle")
 FormBuilder.radio    = _make_field("radio")
 FormBuilder.kv_list  = _make_field("kv_list")
+FormBuilder.editor   = _make_field("editor")
+-- `tree` is value-bearing (selected value(s) → values[name]). Pass a cfg table
+-- with `nodes`; opt into the dynamic data-tree with `lazy = true` + `on_expand`
+-- (+ optional `on_select` / `virtualize_threshold` / `row_height`).
+FormBuilder.tree     = _make_field("tree")
 
 ---Insert a horizontal divider.
 function FormBuilder:divider()
@@ -319,6 +324,17 @@ function FormBuilder:button(cfg)
   local n = {}
   for k, v in pairs(cfg or {}) do n[k] = v end
   n.type = "button"
+  _push_node(self, n)
+  return self
+end
+
+---Insert a read-only `diff` viewer node. Display-only (not value-bearing):
+---pass the pre-diffed `hunks` plus optional `path` / `mode` / `language` / … .
+---Give it a stable `id` to swap `hunks` live with `arbor.ui.form.patch`.
+function FormBuilder:diff(cfg)
+  local n = {}
+  for k, v in pairs(cfg or {}) do n[k] = v end
+  n.type = "diff"
   _push_node(self, n)
   return self
 end

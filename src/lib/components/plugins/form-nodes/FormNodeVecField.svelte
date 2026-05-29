@@ -2,10 +2,12 @@
   FormNodeVecField — Vec2/Vec3/Vec4/Quat editor used by the Bevy BRP
   inspector and any other plugin that emits a `vec_field` node.
 
-  The change handler fires `vf.action` with `{entity, type_name, path,
+  The legacy change handler fires `vf.action` with `{entity, type_name, path,
   value}` directly via `ctx.firePluginAction` (NOT through the standard
   button-action helper) because vec writes are not transactional and the
-  plugin owns the round-trip.
+  plugin owns the round-trip. When the node instead carries a `dispatch`
+  target it goes through the scoped channel: `{node_id, slot:'change',
+  value:{axis,index,value}}` (and can target a command), tracked per node.
 -->
 <script lang="ts">
   import TypePill from '$lib/components/shared/internal/TypePill.svelte';
@@ -52,10 +54,14 @@
           disabled={ctx.disabled}
           value={av}
           onchange={(e) => {
-            if (vro || !vf.action) return;
-            const raw = (e.currentTarget as HTMLInputElement).value;
-            const num = Number(raw);
+            if (vro) return;
+            const num = Number((e.currentTarget as HTMLInputElement).value);
             if (!Number.isFinite(num)) return;
+            if (vf.dispatch) {
+              ctx.handleScopedDispatch(vf.id, 'change', vf.dispatch, { axis, index: ai, value: num }, { stateKeys: vf.scope_state });
+              return;
+            }
+            if (!vf.action) return;
             const base = (vf.payload?.base_path ?? '') as string;
             const subPath = vIsArray ? base + '[' + ai + ']' : base + '.' + axis;
             ctx.firePluginAction(ctx.pluginName, vf.action, JSON.stringify({

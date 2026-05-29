@@ -332,6 +332,33 @@ export type DispatchTarget =
   | { kind: 'action';  name: string }
   | { kind: 'command'; id: string; args?: unknown };
 
+/**
+ * Granular node-tree patch op (event `plugin:form-update`, `op: "patch"`).
+ *
+ * Each op targets a node by its stable `id` and applies one mutation in place,
+ * without re-mounting the form (sibling to the whole-tree `replace`). A node
+ * without a stable id can't be patched (it can still be `replace`d).
+ *
+ *   - `merge`  — shallow-merge object props onto the node (label, options,
+ *                disabled, variant…). Deep edits use `set`.
+ *   - `set`    — assign a value at a path of segments *inside* the node
+ *                (e.g. `["options", 0, "label"]`). Intermediate objects/arrays
+ *                are created as needed.
+ *   - `append` — push a child node into an array-valued prop (`to`, default
+ *                `"children"`; e.g. `"nodes"` for a tree). The appended node is
+ *                normalized (gets an auto id if missing).
+ *   - `remove` — splice the targeted node out of its parent array. Removing a
+ *                *child* = target that child by its own id with `remove`.
+ *
+ * Patches mutate the node tree only; field values go via `set_value` and the
+ * opaque liveState via `set_state_path`.
+ */
+export type FormPatchOp =
+  | { id: string; merge: Record<string, unknown> }
+  | { id: string; set: (string | number)[]; value: unknown }
+  | { id: string; append: FormNode; to?: string }
+  | { id: string; remove: true };
+
 // ── Plugin form config — emitted via Tauri event "plugin:form" ────────────────
 
 // ─── Visibility conditions ────────────────────────────────────────────────────
@@ -390,6 +417,16 @@ interface FormFieldBase extends FormNodeBase {
   /** Highlight tone for the row when the value changed since last frame
    *  / since last commit, etc. Renders a coloured strip on the left. */
   highlight?: boolean;
+  /** Opt-in scoped commit slot. When set, the field's change is dispatched
+   *  through the *scoped* channel — payload `{ node_id, slot, value, state? }`
+   *  instead of the whole form — and may target a command. A node must carry
+   *  a stable `id` to be a useful scoped target. Honoured today by the leaf
+   *  `field` node (and `vec_field`); other value fields use the legacy path.
+   *  Leave unset to keep the existing behaviour. */
+  dispatch?:    DispatchTarget;
+  /** Keys of the opaque form state to include (as `state`) in a scoped
+   *  payload. Default: none (the scoped channel ships no state). */
+  scope_state?: string[];
 }
 
 export interface FormFieldText extends FormFieldBase {
@@ -497,6 +534,11 @@ export interface FormFieldSelect extends FormFieldBase {
   placeholder?:   string;
   /** Empty-state message (no items match / list empty). */
   empty_message?: string;
+  /** Live action slots. `change` fires on every selection (not just Submit).
+   *  A string keeps the legacy whole-form payload; a `DispatchTarget` object
+   *  goes scoped (`{ node_id, slot:'change', value, state? }`) and can target
+   *  a command. `scope_state` (on the field base) declares the state slice. */
+  actions?:       { change?: string | DispatchTarget };
 }
 
 /** Multi-value variant of `select`. Stored as `string[]`. */
@@ -587,6 +629,16 @@ export interface FormTreeNode {
   tag_variant?: 'neutral' | 'ok' | 'warn' | 'error' | 'accent' | 'dev' | 'prod' | 'test';
   /** Optional dim caption under the label. */
   description?: string;
+  /** Stable id for granular patching. When a `lazy` node is expanded the widget
+   *  ships this id in the `on_expand` payload so the plugin can target it with
+   *  `arbor.ui.form.patch` (merge/append children, clear `loading`). */
+  id?:          string;
+  /** Advertise (lazy) children before they are loaded: shows an expander and,
+   *  on first expand, fires `on_expand`. The row may carry an empty `children`. */
+  has_children?: boolean;
+  /** Show a spinner on this row (e.g. while children are being fetched). The
+   *  plugin clears it — usually with the same patch that appends the children. */
+  loading?:     boolean;
 }
 
 /**
@@ -612,8 +664,37 @@ export interface FormFieldTree extends FormFieldBase {
    * The ctx passed to the handler includes the current form state plus
    * `value` — the newly selected node's `value`. Use this to drive master/
    * detail layouts where selecting a row must rebuild the right-hand side.
+   * Legacy whole-form payload — prefer the scoped `on_select` below.
    */
   change_action?: string;
+
+  // ── Dynamic ("data tree") opt-ins — additive; the static tree above is
+  //    unchanged when these are absent. See plugin-ui-dispatch-and-patch §4. ──
+
+  /** Enable lazy children: expanding a row that has `has_children` but no
+   *  loaded `children` fires `on_expand` and shows a spinner until a patch
+   *  fills them in. Without this the tree is fully static (today's behaviour). */
+  lazy?:        boolean;
+  /** Scoped slot fired when a (lazy) row is expanded. Ships `{ id, value, path }`
+   *  of the expanded row so the plugin can patch its children by id. Bare action
+   *  string or an explicit `DispatchTarget`. `scope_state` rides along. */
+  on_expand?:   string | DispatchTarget;
+  /** Scoped slot fired on selection change. Ships the newly selected value
+   *  (string, or string[] in multi mode). Bare action string or a
+   *  `DispatchTarget`. Coexists with `change_action`; when both are set
+   *  `on_select` wins. */
+  on_select?:   string | DispatchTarget;
+  /** Scoped slot fired as the (virtualized) viewport scrolls. Ships
+   *  `{ start, end, total }` row indices so a plugin can fetch by window. */
+  on_scroll_range?: string | DispatchTarget;
+  /** Window the rows when the flattened, currently-expanded tree exceeds this
+   *  many rows (default 400). Below the threshold every row is rendered. */
+  virtualize_threshold?: number;
+  /** Fixed row height (px) used for the virtualized window (default 24). */
+  row_height?:  number;
+  /** Optional fixed viewport height (px or CSS length); falls back to
+   *  `max_height`. Useful for virtualized trees. */
+  height?:      number | string;
 }
 
 /** Column definition for the table field. */
@@ -682,6 +763,94 @@ export interface FormFieldKvList extends FormFieldBase {
   default?:           Record<string, string>;
 }
 
+/** Multi-line code/text editor (CodeMirror 6). Value-bearing: the current
+ *  document is submitted as `values[name]`; the host can push new content via
+ *  `set_value`. On top of the whole-form model it can emit *scoped* events
+ *  (`{ node_id, slot, value, state? }`) on the high-frequency channel:
+ *  `on_edit` (debounced, slot `edit`, value = full text) and `on_select`
+ *  (slot `select`, value = `{ from, to, text }`). Both slots accept a legacy
+ *  action string or a `DispatchTarget` (so an edit/selection can drive a
+ *  command). `scope_state` (on the field base) declares the state slice that
+ *  rides along. */
+export interface FormFieldEditor extends FormFieldBase {
+  type:          'editor';
+  /** Initial document (used when `values[name]` is otherwise unset). */
+  default?:      string;
+  /** Syntax language: `json | toml | yaml | ron | properties | plain`.
+   *  Unknown ids fall back to `plain`. */
+  language?:     string;
+  /** Editor box height — a px number or any CSS length. Default `240`. */
+  height?:       number | string;
+  /** Show the line-number gutter (default `true`). */
+  line_numbers?: boolean;
+  /** Highlight the active line (default `true`). */
+  active_line?:  boolean;
+  /** Scoped, debounced slot fired on content edit. Payload value = full text. */
+  on_edit?:      string | DispatchTarget;
+  /** Debounce (ms) for `on_edit`. Default `300`. */
+  debounce_ms?:  number;
+  /** Scoped slot fired on selection change (cursor moves / range selects).
+   *  Payload value = `{ from, to, text }` (document offsets + selected text). */
+  on_select?:    string | DispatchTarget;
+}
+
+/** One line inside a {@link FormDiffHunk}. The plugin supplies the diffed
+ *  content; line numbers are auto-filled from the hunk's `old_start` /
+ *  `new_start` when omitted. */
+export interface FormDiffLine {
+  kind:        'context' | 'added' | 'removed';
+  content:     string;
+  /** Optional explicit old-side line number (auto-counted when omitted). */
+  old_lineno?: number;
+  /** Optional explicit new-side line number (auto-counted when omitted). */
+  new_lineno?: number;
+}
+
+/** A contiguous block of diff lines. `header` and the start offsets are
+ *  optional — the widget synthesises a `@@ … @@` header and counts line
+ *  numbers from `old_start` / `new_start` (default 1) when they're absent. */
+export interface FormDiffHunk {
+  header?:     string;
+  old_start?:  number;
+  new_start?:  number;
+  lines:       FormDiffLine[];
+}
+
+/** Read-only diff viewer. Display-only (NOT value-bearing): it carries
+ *  pre-diffed hunks supplied by the plugin and reuses the same renderer as the
+ *  app's git diff (unified + split, syntax highlight, virtualization for large
+ *  diffs). Address it by a stable `id` to swap its `hunks` live via the
+ *  `patch` op (`merge`). */
+export interface FormNodeDiff extends FormNodeBase {
+  type:    'diff';
+  hunks:   FormDiffHunk[];
+  label?:  string;
+  hint?:   string;
+  /** Filename used to pick the syntax-highlight grammar and shown in the
+   *  header. */
+  path?:     string;
+  /** Previous path when the file was renamed (shown as `old → new`). */
+  old_path?: string;
+  /** Override the highlight grammar explicitly (e.g. `"rust"`, `"json"`).
+   *  Takes precedence over the extension derived from `path`. */
+  language?: string;
+  /** Initial layout. Default `"unified"`. A local toggle switches it unless
+   *  `hide_mode_toggle` is set. */
+  mode?:    'unified' | 'split';
+  /** Hide the local unified/split toggle. Default `false`. */
+  hide_mode_toggle?: boolean;
+  /** Wrap long lines (unified only — split keeps per-column horizontal
+   *  scroll). Default `false`. */
+  word_wrap?: boolean;
+  /** Viewer height — a px number or any CSS length. Default `"320px"`. */
+  height?:  number | string;
+  /** Text shown when there are no hunks/lines. Default `"No changes"`. */
+  empty_text?: string;
+  /** Total-line count above which the virtualized renderer kicks in.
+   *  Default `600`. */
+  virtualize_threshold?: number;
+}
+
 export type FormFieldNode =
   | FormFieldText
   | FormFieldTextarea
@@ -694,6 +863,7 @@ export type FormFieldNode =
   | FormFieldRadio
   | FormFieldColor
   | FormFieldKvList
+  | FormFieldEditor
   | FormFieldDate
   | FormFieldDateTime
   | FormFieldTime
@@ -1400,7 +1570,8 @@ export type FormLayoutNode =
   | FormNodeFilterBar
   | FormNodeFormField
   | FormNodeInfoCard
-  | FormNodeChipBar;
+  | FormNodeChipBar
+  | FormNodeDiff;
 
 export type FormNode = FormFieldNode | FormLayoutNode;
 
