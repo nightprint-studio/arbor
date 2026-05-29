@@ -363,7 +363,8 @@ widget). Specified separately:
   selection events, virtualization for large docs. *(landed as the `tree`
   node's dynamic mode — see "Landed (step 5 — `data_tree`)" below)*
 - **workspace full-view container** — a main-area surface beyond modal /
-  sidebar.
+  sidebar. *(landed — see "Landed (step 5 — workspace full-view container)"
+  below)*
 
 These are what let a plugin rebuild a studio entirely declaratively, and
 ultimately retire `StudioModal.svelte`.
@@ -472,7 +473,57 @@ branch + recursive snippet removed from `FormNodeField`; `FormTreeNode` /
 `FormFieldTree` extended in `types/plugin.ts`; one branch added to
 `patch.ts::childArraysOf`; `FormBuilder.tree` added in `builders.lua`.
 
-The remaining widget (full-view container) is still sketch-only.
+### Landed (step 5 — workspace full-view container)
+
+The fourth and final host widget — a **main-area surface** beyond modal /
+sidebar / settings-panel. A *view* occupies the body of the window (where the
+commit graph lives, IntelliJ-style) and renders form-DSL content through the
+**full `FormNodeRenderer`**, so it inherits every node type plus the §1–4
+dispatch / scoped-event / patch protocol. This is the surface that lets a
+plugin rebuild a studio entirely declaratively and ultimately retire
+`StudioModal.svelte`.
+
+**Design decisions (closed):**
+
+- **Two placements, plugin's choice.** `arbor.ui.add_view{ id, label, icon?,
+  placement?, tooltip? }`. `placement = "graph"` (default) replaces the commit
+  graph but keeps the tab bar + bottom panel; `placement = "main"` takes over
+  the whole body column. One field, two modes — both requested.
+- **Registration via a new contribution point (`arbor:view`), content via the
+  existing `set_panel_content`.** `add_view` only declares the activity-bar
+  surface + placement; the body is pushed with the *same*
+  `arbor.ui.set_panel_content(view_id, {title, nodes, actions?})` channel
+  sidebar panels already use (`arbor:panel-content`). No new content API. View
+  ids must be distinct from sidebar ids within a plugin.
+- **Full `FormNodeRenderer`, not the lightweight sidebar renderer.** A new
+  `components/plugins/PluginViewPanel.svelte` mounts `FormNodeRenderer` with
+  header (title + close ✕) and an optional footer actions row. Live updates use
+  the existing `arbor.ui.form.{patch,set_state_path,set_value,replace}` ops on
+  the `plugin:form-update` channel (applied in place); `set_panel_content` is a
+  full rebuild and re-keys the renderer (compared by a content signature, since
+  high-frequency updates never round-trip through the store).
+- **Lifecycle — global, one per plugin, persists.** `uiStore.activeMainView`
+  (`"plugin:<name>:<id>"`, persisted to `localStorage` like the sidebar
+  section). Only one view occupies the body at a time. Survives tab / workspace
+  switch; on repo change the plugin reacts through the existing repo hooks and
+  refreshes content. Requires a repo open (a stale / disabled-plugin key falls
+  back to the graph). New catalog hooks `on_view_open` / `on_view_close` fire on
+  the owning plugin at mount / unmount (targeted, not broadcast — same firing
+  mechanism as `panel:open:<id>`).
+- **Keyboard-first.** Activity-bar icon (left rail), a Command Palette
+  "Open View: <label>" entry per registered view, and the **Alt+Shift+V**
+  `toggle_plugin_view` shortcut (toggles the active / last-opened view).
+
+**Implementation:** Rust — `points::VIEW` + `ViewPayload` + validation arm in
+`contribution.rs`, `install_add_view` in `ns/ui/sugar.rs`, `on_view_open` /
+`on_view_close` in `hook_catalog.rs`. FE — `contributions/view.ts`
+(`parseViewSection`), `PluginViewSection` / `ViewPlacement` in `types/plugin.ts`,
+`uiStore.activeMainView` + toggles, `PluginViewPanel.svelte`, the `.main-col`
+branch + `activeView` derivation in `AppShell.svelte`, the view icon group in
+`ActivityBarLeft.svelte`, the `toggle_plugin_view` binding, and per-view palette
+entries in `CommandPalette.svelte`.
+
+All four step-5 host widgets have now landed.
 
 ---
 
@@ -513,7 +564,11 @@ The remaining widget (full-view container) is still sketch-only.
    - ✅ **`data_tree` (landed)** — shipped as the `tree` node's dynamic mode:
      lazy children via scoped `on_expand` + `patch`, scoped `on_select`,
      keyboard nav, virtualization. See §4 "Landed (step 5 — `data_tree`)".
-   - ⏳ full-view container — sketch only.
+   - ✅ **full-view container (landed)** — `arbor.ui.add_view`, a main-area
+     surface (placement `graph` / `main`) rendering the full `FormNodeRenderer`,
+     content via `set_panel_content`, `on_view_open` / `on_view_close` hooks,
+     activity-bar + palette + Alt+Shift+V. See §4 "Landed (step 5 — workspace
+     full-view container)".
 
 ## 7. Open questions
 
@@ -549,6 +604,7 @@ The remaining widget (full-view container) is still sketch-only.
   `arbor.command.register`, dispatch union on node slots, new node event
   slots, `command_invoke` permission.
 - In-app docs (`PluginDevApiUI.svelte`, `PluginDevHooks.svelte`,
-  permission docs): command invocation, dispatch, event/patch.
-- `hook_catalog.rs`: unaffected (no new hooks) — note in PR.
+  permission docs): command invocation, dispatch, event/patch, `add_view`.
+- `hook_catalog.rs`: `on_view_open` / `on_view_close` added with the full-view
+  container (step 5). The earlier steps (1–4) added no hooks.
 - `CHANGELOG.md` `[Unreleased]`: user-facing additions per step.

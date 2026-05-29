@@ -13,6 +13,7 @@
   import ActivityBarRight from './ActivityBarRight.svelte';
   import PluginSidebarPanel from '../plugins/PluginSidebarPanel.svelte';
   import PluginTreeSidebar from '../plugins/PluginTreeSidebar.svelte';
+  import PluginViewPanel from '../plugins/PluginViewPanel.svelte';
   import ResizablePanel from './ResizablePanel.svelte';
   import Sidebar from '../sidebar/Sidebar.svelte';
   import CommitGraph from '../graph/CommitGraph.svelte';
@@ -155,6 +156,7 @@
   import { pluginStore } from '$lib/stores/plugin.svelte';
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
+  import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { jobsStore } from '$lib/stores/jobs.svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
@@ -1245,6 +1247,7 @@
         case 'toggle_docs':      uiStore.setPanel(uiStore.activePanel === 'docs' ? 'graph' : 'docs'); break;
         case 'toggle_terminal':  uiStore.toggleBottomSection('terminal'); break;
         case 'plugin_logs':      uiStore.toggleBottomSection('plugin-logs'); break;
+        case 'toggle_plugin_view': uiStore.toggleMainViewVisibility(); break;
         case 'new_terminal':     openNewTerminal(); break;
         case 'fetch':            window.dispatchEvent(new CustomEvent('arbor:fetch')); break;
         case 'refresh_graph':    window.dispatchEvent(new CustomEvent('arbor:fetch')); break;
@@ -1598,6 +1601,22 @@
   const leftPluginKey  = $derived(parsePluginKey(uiStore.activeSidebarSection));
   const rightPluginKey = $derived(parsePluginKey(uiStore.activeRightSidebar));
   const bottomPluginKey= $derived(parsePluginKey(typeof bottomSection === 'string' ? bottomSection : null));
+
+  // ── Main-area plugin view (arbor.ui.add_view) ──────────────────────────────
+  // Resolve the active `"plugin:<name>:<id>"` key against its registration so
+  // we know placement / label / icon. A view needs a repo open (it lives where
+  // the graph does) and a still-registered, enabled contribution — a stale key
+  // (plugin disabled / unregistered) silently falls back to the graph.
+  const activeView = $derived.by(() => {
+    const key = parsePluginKey(uiStore.activeMainView);
+    if (!key || !hasRepo) return null;
+    return contributionStore.forPoint(VIEW_POINT)
+      .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
+      .map(parseViewSection)
+      .find(v => v.plugin_name === key.plugin_name && v.id === key.panel_id) ?? null;
+  });
+  const showMainViewGraph = $derived(!!activeView && activeView.placement === 'graph');
+  const showMainViewMain  = $derived(!!activeView && activeView.placement === 'main');
 
   // Stats overlay state
   let statsOverlayOpen = $state(false);
@@ -1962,10 +1981,39 @@
                bottom panel card.  Separated by a visible gap that reveals
                the workspace bg, giving each a floating-card feel. -->
           <div class="main-col">
+            {#if showMainViewMain && activeView}
+              <!-- Full-body plugin view (placement="main"): takes over the
+                   whole column — tab bar + bottom panel are hidden while it's
+                   open. Closed via its header X, the activity-bar toggle, or
+                   the toggle_plugin_view shortcut. Keyed on the view id so a
+                   view switch remounts (fires on_view_close → on_view_open). -->
+              {#key `${activeView.plugin_name}::${activeView.id}`}
+                <PluginViewPanel
+                  pluginName={activeView.plugin_name}
+                  viewId={activeView.id}
+                  label={activeView.label}
+                  icon={activeView.icon}
+                  placement="main"
+                />
+              {/key}
+            {:else}
             <div class="editor-col">
               <TabBar onOpen={handleOpenRepo} />
               <div class="graph-area">
-                {#if tabsStore.activeTab?.tombstone}
+                {#if showMainViewGraph && activeView}
+                  <!-- Plugin view (placement="graph"): replaces the commit
+                       graph but keeps the tab bar + bottom panel. Keyed on the
+                       view id so a view switch remounts cleanly. -->
+                  {#key `${activeView.plugin_name}::${activeView.id}`}
+                    <PluginViewPanel
+                      pluginName={activeView.plugin_name}
+                      viewId={activeView.id}
+                      label={activeView.label}
+                      icon={activeView.icon}
+                      placement="graph"
+                    />
+                  {/key}
+                {:else if tabsStore.activeTab?.tombstone}
                   <MissingRepoState tab={tabsStore.activeTab} config={missingConfig} />
                 {:else}
                   <CommitGraph />
@@ -2080,6 +2128,7 @@
                 </ResizablePanel>
               {/if}
             </div>
+            {/if}
             {/if}
           </div>
 

@@ -14,6 +14,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { contributionStore } from '$lib/stores/contribution.svelte';
+  import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
@@ -538,6 +539,15 @@
         id: 'action:show-pipelines', kind: 'action', icon: 'Package', group: 'Panels',
         title: 'Show Pipelines Panel',
         action: () => { uiStore.setActiveBottomSection('pipelines'); onClose(); },
+      });
+    }
+    // Plugin main-area views (add_view API) — one entry per registered view.
+    for (const view of contributionStore.forPoint(VIEW_POINT).map(parseViewSection)) {
+      const vkey = `plugin:${view.plugin_name}:${view.id}`;
+      actions.push({
+        id: `action:view:${vkey}`, kind: 'action', icon: view.icon ?? 'LayoutDashboard', group: 'Panels',
+        title: `Open View: ${view.label}`, subtitle: view.plugin_name,
+        action: () => { uiStore.setActiveMainView(vkey); onClose(); },
       });
     }
 

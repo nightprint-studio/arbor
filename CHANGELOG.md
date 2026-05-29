@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Plugins can mount a full main-area view via `arbor.ui.add_view` — a body surface (where the commit graph lives) that renders form-DSL content with the full node + dispatch/patch protocol. It surfaces as an activity-bar icon, a Command Palette entry, and the **Alt+Shift+V** toggle; `placement = "graph"` keeps the tab bar and bottom panel, `placement = "main"` takes over the whole body. New `on_view_open` / `on_view_close` hooks fire on the owning plugin.
 - Plugins can embed an editable code/text editor in a form via the new `editor` node — a CodeMirror 6 field with syntax highlighting, line numbers and search. Its content is submitted like any field and can be pushed from the plugin with `set_value`; it can also emit scoped, debounced `on_edit` and `on_select` events for live, high-frequency UIs.
 - Plugins can embed a read-only diff viewer in a form via the new `diff` node — unified and split layouts (local toggle), syntax highlighting and virtualization for large diffs. The plugin supplies the diffed hunks; updating them live is a `patch` away.
 - The plugin form `tree` node gains a dynamic "data tree" mode — `lazy` children fetched on expand (the row fires a scoped `on_expand`, the plugin fills it with a `patch`), a scoped `on_select`, full keyboard navigation (arrows / Home / End / Enter), and row virtualization for large trees. Static trees are unchanged.

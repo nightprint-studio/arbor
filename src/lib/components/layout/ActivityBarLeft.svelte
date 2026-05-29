@@ -15,6 +15,7 @@
   import type { ActivityBarEntry, ComboOption } from '$lib/types/plugin';
   import { ACTIVITY_BAR_POINT, parseActivityBarEntry } from '$lib/contributions/activity-bar';
   import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
+  import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { activityBarConfigStore } from '$lib/stores/activityBarConfig.svelte';
   import PluginIcon from '../plugins/PluginIcon.svelte';
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
@@ -113,6 +114,17 @@
   }
   const leftNewTopSections    = $derived(_leftResolveOrdered('top'));
   const leftNewBottomSections = $derived(_leftResolveOrdered('bottom'));
+
+  // Plugin main-area views (add_view API). Rendered as their own icon group in
+  // the top area; clicking toggles the body view (only one active at a time).
+  // Sorted by plugin name for a stable order across registration timing.
+  const pluginViews = $derived(
+    contributionStore.forPoint(VIEW_POINT)
+      .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
+      .map(parseViewSection)
+      .slice()
+      .sort((a, b) => a.plugin_name.localeCompare(b.plugin_name))
+  );
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
   function isEmoji(s?: string) { return s && [...s].length <= 2; }
@@ -379,6 +391,21 @@
         onclick={() => uiStore.toggleSidebarSection(key)}
       >
         <PluginIcon name={section.icon} size={20} />
+      </button>
+    {/each}
+
+    <!-- Plugin main-area views (add_view API). Clicking toggles the body view
+         that occupies the area where the commit graph lives. -->
+    {#each pluginViews as view (view.plugin_name + ':' + view.id)}
+      {@const vkey = `plugin:${view.plugin_name}:${view.id}`}
+      <button
+        class="ab-btn"
+        class:ab-active={uiStore.activeMainView === vkey}
+        use:tooltip={view.tooltip ?? view.label}
+        aria-pressed={uiStore.activeMainView === vkey}
+        onclick={() => uiStore.toggleMainView(vkey)}
+      >
+        <PluginIcon name={view.icon} size={20} />
       </button>
     {/each}
   {/snippet}

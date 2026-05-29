@@ -56,6 +56,11 @@ const BOTTOM_SECTION_KEY      = 'arbor:bottom-section';
 // user actually had open, so the "toggle visibility" shortcut can re-open it
 // after the panel was closed (BOTTOM_SECTION_KEY gets cleared on close).
 const BOTTOM_LAST_SECTION_KEY = 'arbor:bottom-last-section';
+// Active main-area plugin view, encoded `"plugin:<name>:<id>"`. Only one view
+// occupies the body at a time. Cleared on close; MAIN_VIEW_LAST_KEY mirrors it
+// so the generic toggle shortcut can re-open the last view after a close.
+const MAIN_VIEW_KEY           = 'arbor:main-view';
+const MAIN_VIEW_LAST_KEY      = 'arbor:main-view-last';
 
 function loadPixels(key: string, defaultPx: number, min: number, max: number, useHeight = false): number {
   try {
@@ -90,6 +95,13 @@ function createUiStore() {
     (() => { try { return localStorage.getItem(RIGHT_SIDEBAR_SECTION_KEY); } catch { return null; } })()
   );
   let activeBottomSection = $state<BottomSection | null>(null);
+
+  // Active main-area plugin view (`"plugin:<name>:<id>"`), restored on boot if
+  // the user had one open. A view occupies the body where the commit graph
+  // lives — only one is ever active.
+  let activeMainView = $state<string | null>(
+    (() => { try { return localStorage.getItem(MAIN_VIEW_KEY); } catch { return null; } })()
+  );
 
   // ── Bottom-panel readiness signal ────────────────────────────────────────
   // Push-based notification used by the deep-link dispatcher (and any other
@@ -301,6 +313,39 @@ function createUiStore() {
     if (matches(activeSidebarSection))           setActiveSidebarSection(null);
     if (matches(activeRightSidebar))             setActiveRightSidebar(null);
     if (matches(activeBottomSection as string))  setActiveBottomSection(null);
+    if (matches(activeMainView))                 setActiveMainView(null);
+  }
+
+  // ── Main-area plugin view ────────────────────────────────────────────────
+  function setActiveMainView(key: string | null) {
+    activeMainView = key;
+    try {
+      if (key) {
+        localStorage.setItem(MAIN_VIEW_KEY, key);
+        // Remember the last view the user actually had open so
+        // toggleMainViewVisibility() can restore it after a close.
+        localStorage.setItem(MAIN_VIEW_LAST_KEY, key);
+      } else {
+        localStorage.removeItem(MAIN_VIEW_KEY);
+      }
+    } catch { /* ignore */ }
+  }
+
+  function toggleMainView(key: string) {
+    setActiveMainView(activeMainView === key ? null : key);
+  }
+
+  /** Generic body-view expand/collapse — mirrors `toggleSidebarVisibility`.
+   *  If a view is active, close it; if none is active, restore the last view
+   *  the user had open (no-op when the user has never opened a plugin view). */
+  function toggleMainViewVisibility(): void {
+    if (activeMainView !== null) {
+      setActiveMainView(null);
+      return;
+    }
+    let last: string | null = null;
+    try { last = localStorage.getItem(MAIN_VIEW_LAST_KEY); } catch { /* ignore */ }
+    if (last) setActiveMainView(last);
   }
 
   // The section that was active immediately before the current one.
@@ -475,6 +520,7 @@ function createUiStore() {
     get activeSidebarSection()   { return activeSidebarSection; },
     get activeRightSidebar()     { return activeRightSidebar; },
     get activeBottomSection()    { return activeBottomSection; },
+    get activeMainView()         { return activeMainView; },
     get previousBottomSection()  { return previousBottomSection; },
     /** True when no sidebar section is active (sidebar is hidden). */
     get isSidebarCollapsed()     { return activeSidebarSection === null; },
@@ -517,6 +563,7 @@ function createUiStore() {
     toggleSidebarSectionIfVisible, toggleBottomSectionIfVisible,
     setActiveRightSidebar, toggleRightSidebar, toggleRightSidebarVisibility,
     setActiveBottomSection, toggleBottomSection, toggleBottomVisibility,
+    setActiveMainView, toggleMainView, toggleMainViewVisibility,
     notifyBottomPanelReady, awaitBottomPanelReady,
     closePluginSections,
     setSearchVisible, setCommandPaletteOpen, toggleCommandPalette,

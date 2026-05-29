@@ -92,6 +92,9 @@ arbor.log.LEVELS.ERROR  -- "error"
     <tr><td colspan="2" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Security ──────────────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>on_security_summary_loaded</code></td><td>tab_id, provider, counts, total, risk_label?, web_url? (counts are active-only)</td></tr>
     <tr><td><code>on_security_finding_state_changed</code></td><td>tab_id, finding_id, severity, from_state?, to_state, title?, web_url? (plugin-cooperation channel)</td></tr>
+    <tr><td colspan="2" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Main-area views ───────────────────────────────────────────────────────────</td></tr>
+    <tr><td><code>on_view_open</code></td><td>view_id, label? — fired on the owning plugin when one of its <code>add_view</code> views opens; respond with <code>set_panel_content</code></td></tr>
+    <tr><td><code>on_view_close</code></td><td>view_id, label? — fired when the view is closed (toggled off, replaced, or plugin reloaded)</td></tr>
     <tr><td colspan="2" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Theme / branding ──────────────────────────────────────────────────────────</td></tr>
     <tr><td><code>on_theme_changed</code></td><td>theme_id, theme_name, vars (merged effective stylesheet), source ("user"|"plugin"|"init")</td></tr>
     <tr><td colspan="2" style="color:var(--text-muted);font-size:0.78rem;padding-top:0.6rem">── Schedulers ────────────────────────────────────────────────────────────────</td></tr>

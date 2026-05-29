@@ -69,6 +69,12 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // shortcut so the user can still type AltGr-mapped characters (@ \ ~ …).
   // Alt+Shift+L is unambiguous and doesn't trigger Windows menu access.
   plugin_logs:    { key: 'l',                  shift: true, alt: true, description: 'Toggle plugin logs console', group: 'Panels' },
+  // Toggle the active (or last-opened) plugin main-area view — the body
+  // surface registered via `arbor.ui.add_view`. Alt+Shift+V mirrors the
+  // Alt+Shift+letter scheme (avoids the Ctrl+Alt AltGr trap on IT/DE/FR/ES
+  // layouts and the Win32 Alt-menu collision of bare Alt+V). No-op until a
+  // plugin view has been opened at least once.
+  toggle_plugin_view: { key: 'v',              shift: true, alt: true, description: 'Toggle plugin view', group: 'Panels' },
   // "Show keyboard inputs" — the demo/screencast overlay. Alt+Shift+K
   // mirrors the Alt+Shift+letter scheme used everywhere else (avoids the
   // Ctrl+Alt AltGr trap on IT/DE/FR/ES layouts and the Win32 Alt-menu

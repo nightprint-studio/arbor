@@ -552,6 +552,26 @@ pub static HOOK_CATALOG: &[HookDef] = &[
         ],
     },
 
+    // ── Main-area views ────────────────────────────────────────────────────
+    HookDef {
+        name: "on_view_open",
+        category: "view",
+        description: "Fired on the owning plugin when one of its main-area views (registered via `arbor.ui.add_view`) is opened. Respond by pushing the body with `arbor.ui.set_panel_content(view_id, …)`. Targeted at the owner only — not a broadcast.",
+        ctx: &[
+            field!("view_id", String, req, "Id of the view that was opened."),
+            field!("label",   String, opt, "Display label of the view."),
+        ],
+    },
+    HookDef {
+        name: "on_view_close",
+        category: "view",
+        description: "Fired on the owning plugin when one of its main-area views is closed (toggled off, replaced by another view, or the plugin reloaded). Use it to release per-view resources or stop polling.",
+        ctx: &[
+            field!("view_id", String, req, "Id of the view that was closed."),
+            field!("label",   String, opt, "Display label of the view."),
+        ],
+    },
+
     // ── Theme / branding ───────────────────────────────────────────────────
     HookDef {
         name: "on_theme_changed",

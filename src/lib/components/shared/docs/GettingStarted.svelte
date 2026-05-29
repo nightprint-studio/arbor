@@ -81,6 +81,10 @@
     <div class="fc-desc">SVG lane graph with virtual scrolling — handles repositories of any size without performance degradation. Search with <Kbd action="search" />.</div>
   </div>
   <div class="feature-card">
+    <div class="fc-title">Plugin Views <Kbd action="toggle_plugin_view" /></div>
+    <div class="fc-desc">Plugins can mount a full view in the body (replacing or beside the commit graph). Open them from the activity bar or the Command Palette; toggle the active one with the shortcut.</div>
+  </div>
+  <div class="feature-card">
     <div class="fc-title">Detail Panel</div>
     <div class="fc-desc">Commit metadata, changed file list, and syntax-highlighted diff viewer. Dockable at the bottom or the right side (see Settings).</div>
   </div>

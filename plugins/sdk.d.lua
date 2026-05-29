@@ -113,6 +113,13 @@
 ---@field tab_id string
 ---@field name   string  Feature / release / hotfix branch name
 
+---@class arbor.HookCtxView
+---Payload of the `on_view_open` / `on_view_close` hooks, fired on the owning
+---plugin when one of its `arbor.ui.add_view` views is opened / closed. Respond
+---to `on_view_open` by pushing the body with `arbor.ui.set_panel_content`.
+---@field view_id string   Id of the view (matches the `add_view` config)
+---@field label   string|nil  Display label of the view
+
 ---@class arbor.HookField
 ---@field name        string   Field name in the ctx table
 ---@field type        string   "string" | "number" | "boolean" | "string[]" | "object"
@@ -768,11 +775,23 @@ function Scheduler.list() end
 ---@field collapsable boolean|nil               Reserved — sidebar panels don't collapse today
 
 ---Body pushed by `arbor.ui.set_panel_content`. Rendered by the lightweight
----sidebar form-DSL renderer.
+---sidebar form-DSL renderer (for `add_sidebar` panels) or the full
+---FormNodeRenderer (for `add_view` main-area views).
 ---@class arbor.UiPanelContent
 ---@field title   string|nil    Header shown above the body (optional)
 ---@field nodes   table[]|nil   Form-DSL node tree (list of node tables)
----@field actions table[]|nil   Optional footer buttons: `{label, action}`
+---@field actions table[]|nil   Optional footer buttons: `{label, action, variant?}`
+
+---Config for `arbor.ui.add_view` — registers a main-area view. Unlike a
+---sidebar (a side rail), a view occupies the body of the window where the
+---commit graph lives, and renders its content through the FULL FormNodeRenderer
+---(every node type + the dispatch / scoped-event / patch protocol).
+---@class arbor.UiViewConfig
+---@field id        string                   Unique id within the plugin
+---@field label     string|nil               Display label (fallback to `id`)
+---@field icon      string|nil               Lucide icon name / emoji / plugin icon ref
+---@field placement "graph"|"main"|nil       Body footprint (default "graph")
+---@field tooltip   string|nil               Hover tooltip (fallback to `label`)
 
 ---@class arbor.UiGraphComboConfig
 ---@field id         string                  Unique combo ID (scoped per plugin)
@@ -1006,15 +1025,40 @@ function Ui.add_toolbar_action(config) end
 ---@param config arbor.UiSidebarConfig
 function Ui.add_sidebar(config) end
 
----Push form-DSL content into a panel registered via `add_sidebar`. Arbor
----re-renders the panel in place and caches the content so subsequent opens
----display immediately while the plugin recomputes. Call this from the
----`panel:open:<id>` hook — or any time the underlying state changes.
+---Register a main-area view — a body surface (where the commit graph lives)
+---that renders form-DSL content through the FULL FormNodeRenderer, so it has
+---parity with modals (every node type + dispatch / scoped events / patch).
 ---
----Supported node types in the lightweight sidebar renderer:
----`heading`, `label`, `paragraph`, `divider`, `button`, `list`, `section`.
+---`placement` chooses how much of the body it occupies:
+---  * `"graph"` (default) — replaces the commit graph, keeps tab bar + bottom panel
+---  * `"main"`            — takes over the whole body column
 ---
----@param id   string                           Panel id (matches `add_sidebar` config)
+---The view surfaces as an activity-bar icon (left rail), a Command Palette
+---"Open View: <label>" entry, and the `Alt+Shift+V` toggle. Only one view
+---occupies the body at a time; the selection persists across tab / workspace
+---switches and requires a repo open.
+---
+---When the view opens Arbor fires `on_view_open` on the plugin (and
+---`on_view_close` on teardown). Respond by pushing the body with
+---`arbor.ui.set_panel_content(id, {title, nodes, actions?})` — the SAME channel
+---sidebar panels use. View ids must be distinct from sidebar ids. Drive live,
+---high-frequency updates with `arbor.ui.form.{patch,set_state_path,set_value}`.
+---
+---@param config arbor.UiViewConfig
+function Ui.add_view(config) end
+
+---Push form-DSL content into a panel registered via `add_sidebar` OR a view
+---registered via `add_view`. Arbor re-renders in place and caches the content
+---so subsequent opens display immediately while the plugin recomputes. Call it
+---from the `panel:open:<id>` hook (sidebar) / `on_view_open` hook (view) — or
+---any time the underlying state changes.
+---
+---Sidebar panels use a lightweight renderer (`heading`, `label`, `paragraph`,
+---`divider`, `button`, `list`, `section`); views use the full FormNodeRenderer
+---(every node type). For a view, `set_panel_content` is a full rebuild — use
+---`arbor.ui.form.patch` / `set_state_path` for surgical, high-frequency updates.
+---
+---@param id   string                           Panel/view id (matches `add_sidebar` / `add_view`)
 ---@param body arbor.UiPanelContent             Panel body
 function Ui.set_panel_content(id, body) end
 
@@ -1199,6 +1243,7 @@ function Ui.clear_theme_tokens() end
 --                                       | <plugin-defined>)
 --   arbor:menu                         arbor.ui.add_menu_item              {label, action, icon?}
 --   arbor:sidebar                      arbor.ui.add_sidebar               {action, label, icon?, side?, position?, kind?, …}
+--   arbor:view                         arbor.ui.add_view                  {label, icon?, placement?, tooltip?}  (body content via set_panel_content)
 --   arbor:diff-toolbar                 arbor.ui.add_toolbar_action(target="diff")           {label?, icon, action, tooltip?}
 --   arbor:status-bar:left              arbor.ui.add_toolbar_action(target="status-bar:left")    {label?, icon?, action, tooltip?, color?}
 --   arbor:status-bar:right             arbor.ui.add_toolbar_action(target="status-bar:right")   ›
@@ -2771,10 +2816,6 @@ function CoreAssert.register() end
 ---@field max_rows  integer|nil
 ---@field add_label string|nil      Default: "Add row"
 
----2-column container: navigation (toolbar + tree, typically) on the left,
----content (gated sections, typically) on the right. When the only root node
----of a form, the body automatically strips its padding so the split reaches
----the modal edges (IntelliJ look).
 ---Section container. With `card = true` renders with dark title bar, border
 ---and an optional `+` button / counter pill in the title. Use as grouping
 ---chrome inside `tree_layout` content or sidebar forms.

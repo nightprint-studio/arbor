@@ -248,6 +248,27 @@ export interface PluginSidebarSearch {
   wildcard_hint?:      boolean;
 }
 
+/** How much of the body a main-area view occupies.
+ *    `"graph"` — replaces the commit-graph area, keeps the tab bar + bottom panel.
+ *    `"main"`  — takes over the whole body column (tab bar + bottom hidden). */
+export type ViewPlacement = 'graph' | 'main';
+
+/** A plugin-registered main-area view (`arbor.ui.add_view`). Surfaces in the
+ *  activity bar; clicking it mounts the view in the body where the commit graph
+ *  lives. Body content is pushed via `set_panel_content(<id>, …)` (shares
+ *  `PluginPanelContent`) and rendered by the full `FormNodeRenderer`. */
+export interface PluginViewSection {
+  plugin_name: string;
+  /** Unique id within the plugin — key for set_panel_content + on_view_open. */
+  id:          string;
+  label:       string;
+  icon?:       string;
+  /** Body footprint. Defaults to `"graph"`. */
+  placement:   ViewPlacement;
+  /** Optional hover tooltip override. Falls back to `label` when empty. */
+  tooltip?:    string;
+}
+
 /** Content pushed by a plugin into one of its registered panels, rendered via
  *  the form-DSL renderer. Shape mirrors Rust `PanelContent`. */
 export interface PluginPanelContent {

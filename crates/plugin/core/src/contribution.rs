@@ -98,7 +98,14 @@ pub mod points {
     /// Tree-view sidebar snapshot (one item per sidebar id, replace-by-id).
     pub const TREE_STATE:      &str = "arbor:tree-state";
     /// Plugin panel form-DSL content (one per panel id, replace-by-id).
+    /// Shared by sidebar panels AND main-area views — both read the body from
+    /// here keyed by their own id (`arbor.ui.set_panel_content`).
     pub const PANEL_CONTENT:   &str = "arbor:panel-content";
+    /// Main-area workspace views (one item per view id, replace-by-id). A view
+    /// occupies the body of the window (where the commit graph lives) instead
+    /// of a side rail. Body content is pushed via `set_panel_content` (reuses
+    /// `PANEL_CONTENT`); this point only carries the registration metadata.
+    pub const VIEW:            &str = "arbor:view";
     // ── New decorator / inline-action points (Phase 1 — future-ready) ────────
     // Frontend consumers may not yet exist for all of these; the points are
     // declared up-front so plugins can start contributing and we can wire
@@ -234,6 +241,23 @@ pub mod payloads {
     fn default_position() -> String { "top".to_string() }
     fn default_kind()     -> String { "form".to_string() }
 
+    /// Main-area view registration. The view's body is a form-DSL tree pushed
+    /// via `set_panel_content(<view_id>, …)` (reusing `PANEL_CONTENT`); this
+    /// payload only declares how the view surfaces in the activity bar and how
+    /// much of the body it occupies.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ViewPayload {
+        pub label:                       String,
+        #[serde(default)] pub icon:      Option<String>,
+        /// `"graph"` (default) replaces the commit-graph area but keeps the tab
+        /// bar + bottom panel; `"main"` takes over the whole body column.
+        #[serde(default = "default_placement")]
+        pub placement:                   String,
+        #[serde(default)] pub tooltip:   Option<String>,
+    }
+
+    fn default_placement() -> String { "graph".to_string() }
+
     /// Activity-bar entry. `kind` discriminates action / combo / separator.
     /// `target` selects the host: `"activity_bar"` (default) or `"repo_actions"`
     /// for combos that should appear in the RepoActions panel above the graph.
@@ -366,6 +390,7 @@ pub fn validate_built_in(point: &str, payload: &serde_json::Value) -> Result<(),
     match point {
         points::MENU                 => validate::<MenuPayload>(payload),
         points::SIDEBAR              => validate::<SidebarPayload>(payload),
+        points::VIEW                 => validate::<ViewPayload>(payload),
         points::ACTIVITY_BAR         => validate::<ActivityBarPayload>(payload),
         points::COMMAND_PALETTE      => validate::<CommandPayload>(payload),
         points::KEYBINDING           => validate::<KeybindingPayload>(payload),

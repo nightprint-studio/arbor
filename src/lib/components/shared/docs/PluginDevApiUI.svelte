@@ -16,7 +16,8 @@
     <tr><td><code>arbor.ui.confirm&#123; message, confirm_label?, confirm_variant?, state? &#125;</code></td><td>Confirmation dialog. Returns a Promise that resolves with <code>true</code> on confirm and <code>false</code> on cancel. <code>confirm_variant</code>: <code>"primary" | "danger" | "ghost"</code>.</td></tr>
     <tr><td><code>arbor.ui.pick_file(opts)</code></td><td>Native file/folder picker. Fires <code>opts.action</code> with <code>&#123; path, ...opts.extra &#125;</code> on confirm; empty <code>path</code> on cancel. <code>opts.mode</code>: <code>"file"</code> (default), <code>"folder"</code>, <code>"save"</code>. Optional: <code>title</code>, <code>extensions</code>, <code>initial_path</code>.</td></tr>
     <tr><td><code>arbor.ui.add_sidebar(opts)</code></td><td>Register a plugin panel attached to an ActivityBar icon. Accepts <code>side: "left"|"right"</code> (default "right"), <code>position: "top"|"bottom"</code> (default "top"), and <code>kind: "form"|"tree"</code> (default "form"). Form panels respond to <code>panel:open:&lt;id&gt;</code> with <code>set_panel_content</code>; tree panels push nodes via <code>tree.set</code> and accept cross-plugin contributions — see the <em>Tree sidebars</em> section below.</td></tr>
-    <tr><td><code>arbor.ui.set_panel_content(id, body)</code></td><td>Push form-DSL content (<code>&#123;title, nodes, actions?&#125;</code>) into a registered panel. Call from the <code>panel:open:&lt;id&gt;</code> handler, or any time underlying state changes.</td></tr>
+    <tr><td><code>arbor.ui.add_view(opts)</code></td><td>Register a main-area <em>view</em> — a body surface (where the commit graph lives) rendering form-DSL through the <strong>full</strong> renderer. <code>opts = &#123;id, label?, icon?, placement?, tooltip?&#125;</code>; <code>placement: "graph"</code> (default, keeps tab bar + bottom panel) or <code>"main"</code> (whole body). Respond to <code>on_view_open</code> with <code>set_panel_content</code>. Surfaces in the activity bar, the Command Palette, and the <code>Alt+Shift+V</code> toggle. See the <em>Main-area views</em> section below.</td></tr>
+    <tr><td><code>arbor.ui.set_panel_content(id, body)</code></td><td>Push form-DSL content (<code>&#123;title, nodes, actions?&#125;</code>) into a registered panel <em>or view</em>. Call from the <code>panel:open:&lt;id&gt;</code> / <code>on_view_open</code> handler, or any time underlying state changes.</td></tr>
     <tr><td><code>arbor.ui.tree.set(sidebar_id, body)</code></td><td>Push a tree snapshot into a <code>kind="tree"</code> sidebar. <code>body</code> is <code>&#123;title?, breadcrumb?, nodes&#125;</code> or a bare nodes array. <code>breadcrumb</code> is an optional list of segments <code>&#123;label, icon?, action?, data?, badge?, tooltip?&#125;</code> rendered as a clickable trail above the tree — segments with empty <code>action</code> are non-interactive (the current location). Triggers a re-render on the frontend. <br><br><strong>Multi-selection:</strong> tree sidebars now support Ctrl/Cmd+click toggle and Shift+click range. Context-menu items can scope themselves via <code>when.multi</code>: <code>true</code> = only in multi-select, <code>false</code> = single-row only, omitted = both. Action handlers receive <code>ctx.node_ids[]</code> and <code>ctx.nodes[]</code> (single-row contexts get a 1-element array; <code>ctx.node_id</code> and <code>ctx.data</code> stay populated for backward compat).</td></tr>
     <tr><td><code>arbor.ui.tree.get(sidebar_id)</code></td><td>Read the snapshot you most recently set, or <code>nil</code>. Useful when merging incremental updates without keeping a parallel cache.</td></tr>
     <tr><td><code>arbor.ui.contribute(point, item)</code></td><td>Push an item into a contribution point owned by another plugin. <code>item = &#123;id, payload, priority?, when?, disabled?, group?&#125;</code>. Re-contributing with the same id replaces the previous payload (idempotent). <code>when</code> / <code>disabled</code> / <code>group</code> live at the top level — placing them inside <code>payload</code> still works but logs a deprecation warn.</td></tr>
@@ -92,6 +93,7 @@
     <tr><td><code>arbor:context-menu:&lt;target&gt;</code></td><td><code>add_context_menu_item</code></td><td><code>&#123;target, label, action, icon?&#125;</code></td></tr>
     <tr><td><code>arbor:menu</code></td><td><code>add_menu_item</code></td><td><code>&#123;label, action, icon?&#125;</code></td></tr>
     <tr><td><code>arbor:sidebar</code></td><td><code>add_sidebar</code></td><td><code>&#123;action, label, icon?, side, position, kind, …&#125;</code></td></tr>
+    <tr><td><code>arbor:view</code></td><td><code>add_view</code></td><td><code>&#123;label, icon?, placement, tooltip?&#125;</code> — body via <code>set_panel_content</code></td></tr>
     <tr><td><code>arbor:activitybar</code></td><td><code>add_graph_combo</code> · <code>add_separator</code></td><td><code>&#123;kind: "combo"|"separator", target, …&#125;</code></td></tr>
     <tr><td><code>arbor:diff-toolbar</code><br/><code>arbor:status-bar:&lt;side&gt;</code><br/><code>arbor:title-bar:&lt;side&gt;</code><br/><code>arbor:commit-detail:action</code><br/><code>arbor:commit-form:action</code></td><td><code>add_toolbar_action</code> (single sugar, <code>target</code> selects)</td><td><code>&#123;label?, icon?, action, tooltip?, color?&#125;</code></td></tr>
     <tr><td><code>arbor:command-palette</code></td><td><code>arbor.command.register</code></td><td><code>&#123;title, description?, icon?, group?, invocable?, required?&#125;</code></td></tr>
@@ -626,6 +628,57 @@ arbor.ui.set_panel_content("my_panel", {
 <p>
   <code>set_panel_content</code> also accepts a top-level <code>actions = [&#123;label, action, icon?&#125;…]</code>
   array that renders as full-width footer buttons below the body.
+</p>
+
+<h2>Main-area views (add_view)</h2>
+<p>
+  A <em>view</em> is a body surface — it occupies the area where the commit
+  graph lives (IntelliJ-style) instead of a side rail. Unlike a sidebar panel
+  (which uses a lightweight renderer), a view renders its content through the
+  <strong>full</strong> <code>FormNodeRenderer</code>, so it has parity with
+  modals: every node type plus the dispatch / scoped-event / patch protocol.
+  This is the surface for studio-grade, stateful UIs.
+</p>
+<p>
+  Register it with <code>arbor.ui.add_view</code>, then fill the body from the
+  <code>on_view_open</code> hook with <code>set_panel_content</code> — the
+  <em>same</em> channel sidebar panels use (view ids must be distinct from your
+  sidebar ids). <code>placement = "graph"</code> (default) replaces the graph
+  but keeps the tab bar + bottom panel; <code>placement = "main"</code> takes
+  over the whole body column.
+</p>
+<pre class="language-lua">{@html highlight(`arbor.ui.add_view({
+  id        = "dashboard",
+  label     = "Dashboard",
+  icon      = "LayoutDashboard",
+  placement = "graph",            -- or "main" for the whole body
+})
+
+arbor.on("on_view_open", function(ctx)
+  if ctx.view_id ~= "dashboard" then return end
+  arbor.ui.set_panel_content("dashboard", {
+    title = "Build Dashboard",
+    nodes = {
+      { type = "counter_grid", counters = { --[[ … ]] } },
+      { type = "data_table",   columns = { --[[ … ]] }, rows = { --[[ … ]] } },
+    },
+    actions = {
+      { label = "Refresh", variant = "primary", action = "dashboard:refresh" },
+    },
+  })
+end)
+
+arbor.on("on_view_close", function(ctx)
+  if ctx.view_id == "dashboard" then --[[ stop polling, drop caches ]] end
+end)`, '.lua')}</pre>
+<p>
+  The view surfaces as an activity-bar icon, a Command Palette
+  <em>“Open View: &lt;label&gt;”</em> entry, and the <code>Alt+Shift+V</code>
+  toggle. Only one view occupies the body at a time; the selection persists
+  across tab / workspace switches and needs a repo open. <code>set_panel_content</code>
+  is a full rebuild — for live, high-frequency updates drive the mounted view
+  with <code>arbor.ui.form.patch</code> / <code>set_state_path</code> /
+  <code>set_value</code> instead, exactly like an open modal.
 </p>
 
 <h2>Tree-kind sidebars (contribution model)</h2>

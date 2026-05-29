@@ -3,6 +3,7 @@
 //!   - arbor.ui.add_menu_item
 //!   - arbor.ui.add_toolbar_action
 //!   - arbor.ui.add_sidebar
+//!   - arbor.ui.add_view
 //!   - arbor.ui.set_panel_content
 //!
 //! Each is a thin wrapper that builds a payload and funnels it through
@@ -22,6 +23,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     install_add_menu_item(ctx, lua, ui)?;
     install_add_toolbar_action(ctx, lua, ui)?;
     install_add_sidebar(ctx, lua, ui)?;
+    install_add_view(ctx, lua, ui)?;
     install_set_panel_content(ctx, lua, ui)?;
     Ok(())
 }
@@ -203,6 +205,49 @@ fn install_add_sidebar(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     ui.set("add_sidebar", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    Ok(())
+}
+
+fn install_add_view(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
+    // add_view — register a main-area workspace view. Unlike a sidebar (a side
+    // rail), a view occupies the body of the window where the commit graph
+    // lives. The plugin provides an `id` (unique within the plugin); the host
+    // fires the `on_view_open` hook (and `on_view_close` on teardown) on the
+    // owning plugin, which responds with `arbor.ui.set_panel_content(id, …)`.
+    //
+    //   config = {
+    //     id        = string,            -- required, unique within the plugin
+    //     label     = string|nil,        -- defaults to id
+    //     icon      = string|nil,        -- Lucide name / emoji / plugin icon ref
+    //     placement = "graph"|"main"|nil,-- default "graph" (keeps tabs+bottom);
+    //                                       "main" takes over the whole body
+    //     tooltip   = string|nil,
+    //   }
+    // Sugar for arbor.ui.contribute("arbor:view", …)
+    let pname = ctx.plugin_name.clone();
+    let contribs = ctx.contributions.clone();
+    let fn_ = lua.create_function(move |_, config: mlua::Table| {
+        let id = config.get::<String>("id").map_err(|_| {
+            mlua::Error::RuntimeError("arbor.ui.add_view: 'id' is required".to_string())
+        })?;
+        let label = config.get::<String>("label").unwrap_or_else(|_| id.clone());
+        let icon: Option<String> = config.get::<Option<String>>("icon").unwrap_or(None);
+        let placement = config.get::<Option<String>>("placement")
+            .unwrap_or(None).unwrap_or_else(|| "graph".to_string());
+        let tooltip: Option<String> = config.get::<Option<String>>("tooltip").unwrap_or(None);
+        let payload = serde_json::json!({
+            "label":     label,
+            "icon":      icon,
+            "placement": placement,
+            "tooltip":   tooltip,
+        });
+        dual_write_contribution(
+            &contribs, &pname,
+            points::VIEW, &id, payload, 100,
+        );
+        Ok(())
+    }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    ui.set("add_view", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     Ok(())
 }
 
