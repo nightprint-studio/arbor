@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { GitBranch, Globe, Archive, Tag, RefreshCw, GitCommitHorizontal, FileDiff, Layers, Trash2, Copy, GitMerge, AlertTriangle, Search as SearchIcon, Upload } from 'lucide-svelte';
+  import { GitBranch, Globe, Archive, Tag, RefreshCw, GitCommitHorizontal, FileDiff, Layers, Trash2, Copy, GitMerge, AlertTriangle, Search as SearchIcon, Upload, FolderTree, List as ListIcon, Laptop } from 'lucide-svelte';
   import { pushBranch } from '$lib/ipc/remote';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { localTagTracker } from '$lib/stores/local-tags.svelte';
+  import { branchGroupingStore } from '$lib/stores/branch-grouping.svelte';
   import RepoActions from './RepoActions.svelte';
   import BranchTree from './BranchTree.svelte';
   import StashList from './StashList.svelte';
@@ -103,6 +104,10 @@
       // failures here, e.g. on an old backend build that doesn't have the
       // command yet, must NOT break the sidebar update above).
       localTagTracker.load(tabId).catch(() => {});
+      // Per-repo branch grouping state (enabled flag + collapsed groups) —
+      // failures must not break the sidebar load (e.g. old backend without
+      // the command yet).
+      branchGroupingStore.load(tabId).catch(() => {});
     } catch (err) {
       uiStore.showToast(`${err}`, 'error');
     }
@@ -175,6 +180,19 @@
 <PanelShell title="Branches & Stashes">
   {#snippet icon()}<GitBranch size={14} />{/snippet}
   {#snippet actions()}
+    {@const grouped = tab ? branchGroupingStore.isEnabled(tab.id) : false}
+    <button
+      class="ps-btn"
+      class:ps-btn-active={grouped}
+      onclick={() => tab && branchGroupingStore.toggleEnabled(tab.id)}
+      disabled={!tab}
+      use:tooltip={tooltipForAction(
+        grouped ? 'Switch to flat list' : 'Group branches by path',
+        'toggle_branch_grouping',
+      )}
+    >
+      {#if grouped}<ListIcon size={11} />{:else}<FolderTree size={11} />{/if}
+    </button>
     <button
       class="ps-btn"
       onclick={handleRefresh}
@@ -258,7 +276,7 @@
       badgeColor="var(--graph-lane-0)"
       bind:expanded={expanded.locals}
     >
-      {#snippet icon()}<GitBranch size={13} />{/snippet}
+      {#snippet icon()}<Laptop size={13} />{/snippet}
       {#snippet actions()}
         <button
           class="cleanup-btn"

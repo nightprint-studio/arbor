@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig } from '$lib/types/config';
+import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
 export type { TicketLinksRepoConfig };
@@ -136,3 +136,17 @@ export const getOnboardingConfig = () =>
 
 export const setOnboardingConfig = (config: OnboardingConfig) =>
   invoke<void>('set_onboarding_config', { config });
+
+// ── Branches sidebar (global recursive split + per-repo grouping state) ──────
+
+export const getBranchesConfig = () =>
+  invoke<BranchesConfig>('get_branches_config');
+
+export const setBranchesConfig = (config: BranchesConfig) =>
+  invoke<void>('set_branches_config', { config });
+
+export const getBranchGrouping = (tabId: string) =>
+  invoke<BranchGroupingConfig>('get_branch_grouping', { tabId });
+
+export const setBranchGrouping = (tabId: string, config: BranchGroupingConfig) =>
+  invoke<void>('set_branch_grouping', { tabId, config });

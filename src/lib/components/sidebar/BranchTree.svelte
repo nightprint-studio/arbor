@@ -1,5 +1,20 @@
+<script lang="ts" module>
+  // Node types for the grouped tree view (folder-tree by `/` segments).
+  // When `branchGroupingStore.isEnabled(tabId)` is true, `branches[]` is
+  // bucketed into a forest of group folders + branch leaves and rendered
+  // through `shared/ui/Tree.svelte`. The flat path stays available for
+  // the off-mode and is the historical look.
+  export type BranchNode =
+    | { kind: 'group'; path: string; name: string; children: BranchNode[] }
+    | { kind: 'leaf';  path: string; branch: import('$lib/types/git').BranchInfo };
+</script>
+
 <script lang="ts">
-  import { GitBranch, ArrowUp, ArrowDown, RotateCcw, ArrowUpToLine, Trash2, ExternalLink, Pencil, GitMerge, ArrowLeftRight, Link2, Combine, FastForward } from 'lucide-svelte';
+  import {
+    GitBranch, ArrowUp, ArrowDown, RotateCcw, ArrowUpToLine, Trash2, ExternalLink, Pencil,
+    GitMerge, ArrowLeftRight, Link2, Combine, FastForward, Folder, FolderOpen,
+    ChevronsDown, ChevronsUp, Cloud,
+  } from 'lucide-svelte';
   import type { MergeStrategy } from '$lib/ipc/branch';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import type { BranchInfo } from '$lib/types/git';
@@ -7,6 +22,8 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
+  import { branchGroupingStore } from '$lib/stores/branch-grouping.svelte';
+  import { branchesConfigStore } from '$lib/stores/branches-config.svelte';
   import { checkoutBranchSafe, checkoutRemoteAsLocalSafe, deleteBranch, deleteRemoteBranches, mergeBranch } from '$lib/ipc/branch';
   import { applyPostCheckout } from '$lib/utils/applyPostCheckout';
   import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
@@ -16,6 +33,7 @@
   import RemoteBranchRenameModal from './RemoteBranchRenameModal.svelte';
   import BranchCompareModal from './BranchCompareModal.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import Tree from '$lib/components/shared/ui/Tree.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   let {
@@ -27,6 +45,11 @@
 
   const tab = $derived(tabsStore.activeTab);
 
+  // Grouping is per-repo, so the toggle is read from the per-tab store.
+  // `recursive` is a host-wide preference (single-level vs deep `/` split).
+  const groupingEnabled = $derived(branchGroupingStore.isEnabled(tab?.id));
+  const groupingRecursive = $derived(branchesConfigStore.groupingRecursive);
+
   const LANE_COLORS = [
     '#4d78cc', '#cc7832', '#6a9956', '#9876aa',
     '#c75450', '#20b2aa', '#ffc66d', '#e08060',
@@ -36,6 +59,39 @@
     let h = 0;
     for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
     return LANE_COLORS[h % LANE_COLORS.length];
+  }
+
+  // Folder colour for grouped view. We don't hash random colours — the
+  // tree would look like a rainbow on a repo with 20 prefixes and the
+  // colour would carry no meaning. Instead: only the well-known prefixes
+  // pick up a semantic tint (GitFlow + common Conventional Branches);
+  // every other folder stays neutral so the eye locks onto branch types
+  // it actually recognises. Match is case-insensitive on the exact segment
+  // name, so nested folders (`feature/auth` → segment `auth`) stay neutral
+  // unless they themselves are a standard prefix.
+  const STANDARD_FOLDER_COLORS: Record<string, string> = {
+    feature:    'var(--accent)',
+    feat:       'var(--accent)',
+    release:    'var(--success)',
+    hotfix:     'var(--error)',
+    bugfix:     'var(--warning)',
+    fix:        'var(--warning)',
+    bug:        'var(--warning)',
+    experiment: 'var(--color-tag)',
+    exp:        'var(--color-tag)',
+    spike:      'var(--color-tag)',
+    support:    'var(--color-stash)',
+    chore:      'var(--text-muted)',
+    docs:       'var(--text-muted)',
+    doc:        'var(--text-muted)',
+    test:       'var(--text-muted)',
+    tests:      'var(--text-muted)',
+    ci:         'var(--text-muted)',
+    refactor:   'var(--text-muted)',
+  };
+
+  function folderColor(name: string): string {
+    return STANDARD_FOLDER_COLORS[name.toLowerCase()] ?? 'var(--text-secondary)';
   }
 
   function handleClick(branch: BranchInfo) {
@@ -379,61 +435,291 @@
       compareModal = { fromRef: target.name, toRef: source.name };
     }
   }
+
+  // ── Grouping forest ──────────────────────────────────────────────
+  // Build a folder-tree from the flat branch list. With `recursive` we split
+  // on every `/` (GitKraken / Fork — `feature/auth/login` → 3 levels). Without,
+  // only the first `/` becomes a group (JetBrains — `feature` then leaf
+  // `auth/login`). Branches with no `/` stay at the root as leaves regardless.
+  function splitSegments(name: string, recursive: boolean): string[] {
+    if (recursive) return name.split('/');
+    const i = name.indexOf('/');
+    return i < 0 ? [name] : [name.slice(0, i), name.slice(i + 1)];
+  }
+
+  function buildForest(list: BranchInfo[], recursive: boolean): BranchNode[] {
+    const root: BranchNode[] = [];
+    const groups = new Map<string, BranchNode & { kind: 'group' }>();
+
+    for (const b of list) {
+      const segs = splitSegments(b.name, recursive);
+      if (segs.length === 1) {
+        root.push({ kind: 'leaf', path: b.name, branch: b });
+        continue;
+      }
+      let bucket = root;
+      let pathSoFar = '';
+      for (let i = 0; i < segs.length - 1; i++) {
+        pathSoFar = pathSoFar ? `${pathSoFar}/${segs[i]}` : segs[i];
+        let g = groups.get(pathSoFar);
+        if (!g) {
+          g = { kind: 'group', path: pathSoFar, name: segs[i], children: [] };
+          groups.set(pathSoFar, g);
+          bucket.push(g);
+        }
+        bucket = g.children;
+      }
+      bucket.push({ kind: 'leaf', path: b.name, branch: b });
+    }
+
+    sortNodes(root);
+    return root;
+  }
+
+  // Group folders first, then leaves; alphabetic within each kind. Matches
+  // the GitKraken / Fork ordering and keeps the current branch easy to find
+  // (HEAD is the only deviation — handled visually, not via re-ordering).
+  function sortNodes(nodes: BranchNode[]) {
+    nodes.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'group' ? -1 : 1;
+      const an = a.kind === 'group' ? a.name : a.branch.name;
+      const bn = b.kind === 'group' ? b.name : b.branch.name;
+      return an.localeCompare(bn);
+    });
+    for (const n of nodes) {
+      if (n.kind === 'group') sortNodes(n.children);
+    }
+  }
+
+  const forest = $derived(groupingEnabled ? buildForest(branches, groupingRecursive) : []);
+
+  // Tree.svelte expansion is controlled — invert the persisted "collapsed"
+  // set into the "expanded" one it expects. Group paths absent from the
+  // collapsed list default to expanded, so first-time grouping pops the
+  // full tree instead of an empty stack the user has to reveal.
+  function allGroupPaths(nodes: BranchNode[], acc: Set<string> = new Set()): Set<string> {
+    for (const n of nodes) {
+      if (n.kind === 'group') { acc.add(n.path); allGroupPaths(n.children, acc); }
+    }
+    return acc;
+  }
+
+  const expandedIds = $derived.by(() => {
+    const ids = new Set<string>();
+    const collapsed = branchGroupingStore.collapsedGroups(tab?.id);
+    for (const p of allGroupPaths(forest)) {
+      if (!collapsed.has(p)) ids.add(p);
+    }
+    return ids;
+  });
+
+  function onExpandToggle(id: string, next: boolean) {
+    if (!tab) return;
+    branchGroupingStore.setCollapsed(tab.id, id, !next);
+  }
+
+  // ── Group context menu (Expand all / Collapse all from this folder) ────
+  type GroupCtx = { x: number; y: number; node: BranchNode & { kind: 'group' } };
+  let groupCtxMenu = $state<GroupCtx | null>(null);
+
+  function descendantGroupPaths(node: BranchNode): string[] {
+    if (node.kind !== 'group') return [];
+    const out = [node.path];
+    for (const c of node.children) {
+      if (c.kind === 'group') out.push(...descendantGroupPaths(c));
+    }
+    return out;
+  }
+
+  // Tree.svelte's `onContextMenu` is fired for every row (groups + leaves)
+  // and the tree has already preventDefault'd / stopPropagation'd, so the
+  // leaf row's own `oncontextmenu` no longer fires — route both kinds from
+  // here.
+  function handleTreeCtx(node: BranchNode, e: MouseEvent) {
+    if (node.kind === 'leaf') {
+      openBranchCtx(e, node.branch);
+      return;
+    }
+    groupCtxMenu = { x: e.clientX, y: e.clientY, node };
+  }
+
+  function groupMenuItems(): MenuItem[] {
+    return [
+      { id: 'expand-all',   label: 'Expand all',   icon: ChevronsDown, iconColor: 'var(--accent)' },
+      { id: 'collapse-all', label: 'Collapse all', icon: ChevronsUp,   iconColor: 'var(--text-muted)' },
+    ];
+  }
+
+  function handleGroupCtxSelect(id: string) {
+    if (!groupCtxMenu || !tab) return;
+    const node = groupCtxMenu.node;
+    groupCtxMenu = null;
+    const paths = descendantGroupPaths(node);
+    if (id === 'expand-all') {
+      branchGroupingStore.setCollapsedMany(tab.id, paths, false);
+    } else if (id === 'collapse-all') {
+      branchGroupingStore.setCollapsedMany(tab.id, paths, true);
+    }
+  }
+
+  // Tree.svelte snippet receives the node; route group rows to a folder
+  // visual and leaf rows to the existing branch markup.
+  const getChildren = (n: BranchNode) => (n.kind === 'group' ? n.children : undefined);
+  const getId       = (n: BranchNode) => n.path;
+  const hasChildren = (n: BranchNode) => n.kind === 'group';
+
+  // Count direct + nested leaves under a group — shown as a muted badge so the
+  // user knows how many branches are hiding behind a collapsed folder.
+  function countLeaves(node: BranchNode): number {
+    if (node.kind === 'leaf') return 1;
+    let n = 0;
+    for (const c of node.children) n += countLeaves(c);
+    return n;
+  }
 </script>
 
-<div class="branch-tree" role="list">
-  {#each branches as branch (branch.name)}
-    {@const color = branchColor(branch.name)}
-    <div
-      class="branch-item"
-      class:current={branch.is_head}
-      class:selected={graphStore.highlightedBranchName === branch.name}
-      data-bname={branch.name}
-      data-btype={type}
-      data-bhead={branch.is_head ? 'true' : 'false'}
-      onclick={() => handleClick(branch)}
-      ondblclick={(e) => handleCheckout(branch, e)}
-      oncontextmenu={(e) => openBranchCtx(e, branch)}
-      onmousedown={(e) => startDrag(e, branch)}
-      use:tooltip={{
-        content: branch.name,
-        description: branch.head_summary
-          ? `${branch.head_summary}\nClick to focus · Double-click to checkout · Right-click for options · Drag to merge/compare`
-          : 'Click to focus · Double-click to checkout · Right-click for options · Drag to merge/compare',
-      }}
-      role="button"
-      tabindex="0"
-      onkeydown={(e) => e.key === 'Enter' && handleClick(branch)}
-    >
-      <span class="branch-icon" style="color: {branch.is_head ? 'var(--accent)' : color}">
-        <GitBranch size={12} />
-      </span>
-
-      <span class="branch-name truncate">{branch.name}</span>
-
-      {#if branch.is_head}
-        <span class="current-pill">HEAD</span>
-      {/if}
-
-      {#if type === 'local' && !branch.upstream && !repoStore.remoteBranches.some(r => r.name.endsWith('/' + branch.name))}
-        <span class="local-only-badge" use:tooltip={{ content: 'No remote tracking branch', description: 'Not pushed yet' }}>local</span>
-      {/if}
-
-      {#if branch.ahead > 0}
-        <span class="sync-badge ahead" use:tooltip={`${branch.ahead} ahead of remote`}>
-          <ArrowUp size={10} />{branch.ahead}
+{#if !groupingEnabled}
+  <!-- ─── Flat list view (original layout) ─────────────────────── -->
+  <div class="branch-tree" role="list">
+    {#each branches as branch (branch.name)}
+      {@const color = branchColor(branch.name)}
+      <div
+        class="branch-item"
+        class:current={branch.is_head}
+        class:selected={graphStore.highlightedBranchName === branch.name}
+        data-bname={branch.name}
+        data-btype={type}
+        data-bhead={branch.is_head ? 'true' : 'false'}
+        onclick={() => handleClick(branch)}
+        ondblclick={(e) => handleCheckout(branch, e)}
+        oncontextmenu={(e) => openBranchCtx(e, branch)}
+        onmousedown={(e) => startDrag(e, branch)}
+        use:tooltip={{
+          content: branch.name,
+          description: branch.head_summary
+            ? `${branch.head_summary}\nClick to focus · Double-click to checkout · Right-click for options · Drag to merge/compare`
+            : 'Click to focus · Double-click to checkout · Right-click for options · Drag to merge/compare',
+        }}
+        role="button"
+        tabindex="0"
+        onkeydown={(e) => e.key === 'Enter' && handleClick(branch)}
+      >
+        <span class="branch-icon" style="color: {branch.is_head ? 'var(--accent)' : color}">
+          <GitBranch size={12} />
         </span>
-      {/if}
-      {#if branch.behind > 0}
-        <span class="sync-badge behind" use:tooltip={`${branch.behind} behind remote`}>
-          <ArrowDown size={10} />{branch.behind}
-        </span>
-      {/if}
-    </div>
-  {:else}
-    <EmptyState message="No branches" />
-  {/each}
-</div>
+
+        <span class="branch-name truncate">{branch.name}</span>
+
+        {#if branch.is_head}
+          <span class="current-pill">HEAD</span>
+        {/if}
+
+        {#if type === 'local' && !branch.upstream && !repoStore.remoteBranches.some(r => r.name.endsWith('/' + branch.name))}
+          <span class="local-only-badge" use:tooltip={{ content: 'No remote tracking branch', description: 'Not pushed yet' }}>local</span>
+        {/if}
+
+        {#if branch.ahead > 0}
+          <span class="sync-badge ahead" use:tooltip={`${branch.ahead} ahead of remote`}>
+            <ArrowUp size={10} />{branch.ahead}
+          </span>
+        {/if}
+        {#if branch.behind > 0}
+          <span class="sync-badge behind" use:tooltip={`${branch.behind} behind remote`}>
+            <ArrowDown size={10} />{branch.behind}
+          </span>
+        {/if}
+      </div>
+    {:else}
+      <EmptyState message="No branches" />
+    {/each}
+  </div>
+{:else}
+  <!-- ─── Grouped tree view (folder-tree by `/` segments) ──────── -->
+  <div class="branch-tree grouped" role="list">
+    {#if forest.length === 0}
+      <EmptyState message="No branches" />
+    {:else}
+      <Tree
+        nodes={forest}
+        {getChildren}
+        {getId}
+        {hasChildren}
+        {expandedIds}
+        {onExpandToggle}
+        onContextMenu={handleTreeCtx}
+        rowHeight={22}
+        indentSize={12}
+        basePadding={4}
+        showChevron={true}
+        ariaLabel={type === 'local' ? 'Local branches grouped by path' : 'Remote branches grouped by path'}
+      >
+        {#snippet row(ctx)}
+          {#if ctx.node.kind === 'group'}
+            {@const folderLabel = ctx.node.name}
+            {@const total = countLeaves(ctx.node)}
+            {@const isRemoteRoot = type === 'remote' && !ctx.node.path.includes('/')}
+            {@const tint = isRemoteRoot ? 'var(--graph-lane-1)' : folderColor(folderLabel)}
+            <span class="group-icon" style="color: {tint}">
+              {#if isRemoteRoot}
+                <Cloud size={12} />
+              {:else if ctx.expanded}
+                <FolderOpen size={12} />
+              {:else}
+                <Folder size={12} />
+              {/if}
+            </span>
+            <span class="group-name truncate">{folderLabel}</span>
+            <span class="group-count" use:tooltip={`${total} branch${total === 1 ? '' : 'es'}`}>{total}</span>
+          {:else}
+            {@const branch = ctx.node.branch}
+            {@const color = branchColor(branch.name)}
+            <span
+              class="branch-row"
+              class:current={branch.is_head}
+              class:selected={graphStore.highlightedBranchName === branch.name}
+              data-bname={branch.name}
+              data-btype={type}
+              data-bhead={branch.is_head ? 'true' : 'false'}
+              onclick={(e) => { e.stopPropagation(); handleClick(branch); }}
+              ondblclick={(e) => handleCheckout(branch, e)}
+              onmousedown={(e) => startDrag(e, branch)}
+              use:tooltip={{
+                content: branch.name,
+                description: branch.head_summary
+                  ? `${branch.head_summary}\nClick to focus · Double-click to checkout · Right-click for options · Drag to merge/compare`
+                  : 'Click to focus · Double-click to checkout · Right-click for options · Drag to merge/compare',
+              }}
+              role="button"
+              tabindex="0"
+              onkeydown={(e) => e.key === 'Enter' && handleClick(branch)}
+            >
+              <span class="branch-icon" style="color: {branch.is_head ? 'var(--accent)' : color}">
+                <GitBranch size={12} />
+              </span>
+              <span class="branch-name truncate">{splitSegments(branch.name, groupingRecursive).at(-1)}</span>
+              {#if branch.is_head}
+                <span class="current-pill">HEAD</span>
+              {/if}
+              {#if type === 'local' && !branch.upstream && !repoStore.remoteBranches.some(r => r.name.endsWith('/' + branch.name))}
+                <span class="local-only-badge" use:tooltip={{ content: 'No remote tracking branch', description: 'Not pushed yet' }}>local</span>
+              {/if}
+              {#if branch.ahead > 0}
+                <span class="sync-badge ahead" use:tooltip={`${branch.ahead} ahead of remote`}>
+                  <ArrowUp size={10} />{branch.ahead}
+                </span>
+              {/if}
+              {#if branch.behind > 0}
+                <span class="sync-badge behind" use:tooltip={`${branch.behind} behind remote`}>
+                  <ArrowDown size={10} />{branch.behind}
+                </span>
+              {/if}
+            </span>
+          {/if}
+        {/snippet}
+      </Tree>
+    {/if}
+  </div>
+{/if}
 
 <!-- Drag ghost -->
 {#if ghost}
@@ -445,6 +731,7 @@
 
 <style>
   .branch-tree { padding: 2px 0; }
+  .branch-tree.grouped { padding: 2px 0; }
 
   .branch-item {
     display: flex;
@@ -484,7 +771,8 @@
   .branch-item.selected:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
 
   /* Applied directly via DOM during mouse drag */
-  :global(.branch-item.drag-over) {
+  :global(.branch-item.drag-over),
+  :global(.branch-row.drag-over) {
     background: color-mix(in srgb, var(--accent) 20%, transparent) !important;
     outline: 1px dashed var(--accent) !important;
     outline-offset: -1px;
@@ -535,6 +823,63 @@
   .sync-badge.ahead  { color: var(--success); }
   .sync-badge.behind { color: var(--warning); }
 
+  /* ── Grouped tree visuals ───────────────────────────────────────
+     The folder row picks up the standard `tree-row` shell from
+     Tree.svelte; we only style the group/leaf chrome. */
+  .group-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+  }
+  .group-name {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .group-count {
+    flex-shrink: 0;
+    font-family: var(--font-code);
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 999px;
+    color: var(--text-muted);
+    background: var(--bg-overlay);
+  }
+
+  /* Leaf row inside a grouped Tree — flex container with the same look as
+     the flat `.branch-item`, but rendered as a span so it composes inside
+     the Tree row without nesting block-level elements. */
+  .branch-row {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    overflow: hidden;
+    outline: none;
+    user-select: none;
+    transition: color var(--transition-fast);
+  }
+  .branch-row:hover { color: var(--text-primary); }
+  .branch-row:focus-visible { outline: 1px solid var(--border-focus); outline-offset: -1px; }
+  .branch-row.current {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+  .branch-row.selected {
+    color: var(--text-primary);
+  }
+
   /* Drag ghost — fixed so it escapes overflow:hidden parents */
   .drag-ghost {
     position: fixed;
@@ -564,6 +909,16 @@
     items={branchMenuItems(ctxMenu.branch)}
     onSelect={handleBranchCtxSelect}
     onClose={() => ctxMenu = null}
+  />
+{/if}
+
+{#if groupCtxMenu}
+  <ContextMenu
+    x={groupCtxMenu.x}
+    y={groupCtxMenu.y}
+    items={groupMenuItems()}
+    onSelect={handleGroupCtxSelect}
+    onClose={() => groupCtxMenu = null}
   />
 {/if}
 

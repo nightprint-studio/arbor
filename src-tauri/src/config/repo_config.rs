@@ -65,6 +65,39 @@ pub struct RepoConfig {
     /// the global default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ide_id: Option<String>,
+    /// Local & remote branch list grouping (folder-tree by `/` segments).
+    /// On by default — almost every real-world repo has slash-prefixed
+    /// branches and a flat 20+ entry list is harder to read than the
+    /// folded one. Users who prefer flat flip it from the sidebar toggle
+    /// or the `toggle_branch_grouping` keybinding.
+    #[serde(default, skip_serializing_if = "branch_grouping_is_default")]
+    pub branch_grouping: BranchGroupingConfig,
+}
+
+/// Per-repo branch grouping state (folder-tree view of `feature/x` paths).
+///
+/// `collapsed_groups` lists the group paths the user has explicitly
+/// collapsed (joined with `/`, e.g. `feature` or `feature/auth`). Anything
+/// not in the list renders expanded, so first-time grouping pops the full
+/// tree open instead of an empty stack the user has to reveal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchGroupingConfig {
+    #[serde(default = "default_true_branch_grouping")]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collapsed_groups: Vec<String>,
+}
+
+fn default_true_branch_grouping() -> bool { true }
+
+impl Default for BranchGroupingConfig {
+    fn default() -> Self {
+        Self { enabled: true, collapsed_groups: Vec::new() }
+    }
+}
+
+fn branch_grouping_is_default(g: &BranchGroupingConfig) -> bool {
+    g.enabled && g.collapsed_groups.is_empty()
 }
 
 fn stats_exclude_is_empty(e: &StatsExcludeConfig) -> bool {

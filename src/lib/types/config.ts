@@ -85,6 +85,19 @@ export interface PipelinesConfig {
   max_concurrent_runs: number;
 }
 
+/** Global Branches-sidebar behaviour. Per-repo on/off lives in
+ *  RepoConfig.branch_grouping.enabled. */
+export interface BranchesConfig {
+  /** Recursive `/` split (GitKraken/Fork) when true; single-level (JetBrains) when false. */
+  grouping_recursive: boolean;
+}
+
+/** Per-repo branch-grouping state — enabled flag + collapsed group paths. */
+export interface BranchGroupingConfig {
+  enabled: boolean;
+  collapsed_groups: string[];
+}
+
 export type WindowControlsStyle = 'mac' | 'windows';
 export type AnimSpeed = 'fast' | 'normal' | 'slow';
 export type ActivityBarPosition = 'left' | 'right' | 'hidden';

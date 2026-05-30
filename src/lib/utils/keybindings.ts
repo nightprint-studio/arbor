@@ -135,6 +135,11 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   toggle_reflog_sidebar:   { key: '6', alt: true, shift: true, description: 'Toggle Reflog sidebar',             group: 'Sidebar Sections' },
   toggle_stats_sidebar:    { key: '7', alt: true, shift: true, description: 'Toggle Repository Statistics sidebar', group: 'Sidebar Sections' },
   toggle_security_sidebar: { key: '8', alt: true, shift: true, description: 'Toggle Security / Vulnerability sidebar', group: 'Sidebar Sections' },
+  // Branches sidebar: flip the per-repo path-grouping view (folder tree
+  // vs. flat list). Alt+Shift+G keeps the "G for group" mnemonic, avoids
+  // the Ctrl+Alt AltGr trap on IT/DE/FR/ES layouts, and is distinct from
+  // `focus_graph` (Alt+G).
+  toggle_branch_grouping:  { key: 'g', alt: true, shift: true, description: 'Toggle branch grouping (folder tree vs. flat list)', group: 'Sidebar Sections' },
 };
 
 export function matchesBinding(event: KeyboardEvent, binding: Keybinding): boolean {

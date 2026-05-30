@@ -106,6 +106,31 @@ pub struct AppConfig {
     /// additions can re-prompt only for new steps.
     #[serde(default)]
     pub onboarding: OnboardingConfig,
+    /// Global behaviour knobs for the Branches sidebar. The per-repo
+    /// `branch_grouping.enabled` toggle decides *whether* to group; the
+    /// fields here decide *how* (e.g. recursive vs single-level split).
+    #[serde(default)]
+    pub branches: BranchesConfig,
+}
+
+/// Global Branches-sidebar behaviour. Per-repo on/off lives in
+/// `RepoConfig.branch_grouping.enabled` — these knobs apply to every
+/// repo that has grouping turned on.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchesConfig {
+    /// When `true`, group splits on every `/` so `feature/auth/login`
+    /// renders as `feature → auth → login`. When `false`, only the first
+    /// `/` splits so the same branch renders as `feature → auth/login`.
+    /// Recursive matches GitKraken / Fork; single-level matches JetBrains.
+    /// Default: true.
+    #[serde(default = "default_true_branches")]
+    pub grouping_recursive: bool,
+}
+
+fn default_true_branches() -> bool { true }
+
+impl Default for BranchesConfig {
+    fn default() -> Self { Self { grouping_recursive: true } }
 }
 
 /// User-facing visual tweaks. Theme lives in its own slot (the active theme id
@@ -866,6 +891,7 @@ impl Default for AppConfig {
             animations: AnimationsConfig::default(),
             commit: CommitConfig::default(),
             onboarding: OnboardingConfig::default(),
+            branches: BranchesConfig::default(),
         }
     }
 }

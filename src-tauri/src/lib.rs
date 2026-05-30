@@ -1065,6 +1065,11 @@ pub fn run() {
             // First-run onboarding tour state
             commands::config_commands::get_onboarding_config,
             commands::config_commands::set_onboarding_config,
+            // Branches sidebar (global behaviour + per-repo grouping state)
+            commands::config_commands::get_branches_config,
+            commands::config_commands::set_branches_config,
+            commands::config_commands::get_branch_grouping,
+            commands::config_commands::set_branch_grouping,
             // Activity bar config
             commands::config_commands::get_activity_bar_config,
             commands::config_commands::set_activity_bar_config,

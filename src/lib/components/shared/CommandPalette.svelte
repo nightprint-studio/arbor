@@ -22,6 +22,7 @@
   import { mrStore } from '$lib/stores/mr.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
+  import { branchGroupingStore } from '$lib/stores/branch-grouping.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
   import { setWorktreeLinkSyncEnabled, removeWorktreeLinkMember } from '$lib/ipc/linkedWorktree';
@@ -283,6 +284,7 @@
     'action:show-stats':         'toggle_stats_sidebar',
     'action:show-security':      'toggle_security_sidebar',
     'action:show-pipelines':     'toggle_pipelines_panel',
+    'action:toggle-branch-grouping': 'toggle_branch_grouping',
   };
 
   const builtinActions = $derived<LeafAction[]>(decorateWithShortcuts(buildBuiltinActions()));
@@ -622,6 +624,18 @@
           onClose();
         } },
     );
+    if (hasTab) {
+      const t = tabsStore.activeTab!;
+      const grouped = branchGroupingStore.isEnabled(t.id);
+      actions.push({
+        id: 'action:toggle-branch-grouping', kind: 'action', icon: 'FolderTree', group: 'Panels',
+        title: grouped ? 'Branches: Switch to Flat List' : 'Branches: Group by Path',
+        subtitle: grouped
+          ? 'Hide the folder tree — show every branch as a single row'
+          : 'Bucket branches by `/` segments — feature/auth/login → folders',
+        action: () => { void branchGroupingStore.toggleEnabled(t.id); onClose(); },
+      });
+    }
 
     // ── Misc (repo-level) ───────────────────────────────────────────────────
     if (hasTab) {

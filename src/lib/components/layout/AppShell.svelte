@@ -161,6 +161,8 @@
   import { diffStore } from '$lib/stores/diff.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { commitConfigStore } from '$lib/stores/commit_config.svelte';
+  import { branchesConfigStore } from '$lib/stores/branches-config.svelte';
+  import { branchGroupingStore } from '$lib/stores/branch-grouping.svelte';
   import { terminalStore } from '$lib/stores/terminal.svelte';
   import { pipelinesStore } from '$lib/stores/pipelines.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
@@ -556,6 +558,7 @@
   onMount(() => { void appearanceStore.loadConfig(); });
   onMount(() => { void animStore.loadConfig(); });
   onMount(() => { void commitConfigStore.loadConfig(); });
+  onMount(() => { void branchesConfigStore.loadConfig(); });
 
   // ── Onboarding tour ──────────────────────────────────────────────────────
   // Load the persisted onboarding state up front. The auto-open trigger is
@@ -1256,6 +1259,14 @@
         case 'toggle_stats_sidebar':    uiStore.toggleSidebarSectionIfVisible('stats');    break;
         case 'toggle_security_sidebar': uiStore.toggleSidebarSectionIfVisible('security'); break;
         case 'toggle_pipelines_panel':  uiStore.toggleBottomSectionIfVisible('pipelines'); break;
+        case 'toggle_branch_grouping': {
+          // Per-repo flip of the folder-tree vs flat view in the Branches
+          // sidebar. No-op when no tab is active — the toggle button in the
+          // sidebar header is also disabled in that state.
+          const t = tabsStore.activeTab;
+          if (t) void branchGroupingStore.toggleEnabled(t.id);
+          break;
+        }
         case 'settings':         uiStore.setPanel(uiStore.activePanel === 'settings' ? 'graph' : 'settings'); break;
         case 'plugins':          uiStore.setPanel(uiStore.activePanel === 'plugins'  ? 'graph' : 'plugins');  break;
         case 'open_marketplace': uiStore.marketplaceOpen ? uiStore.closeMarketplace() : uiStore.openMarketplace(); break;

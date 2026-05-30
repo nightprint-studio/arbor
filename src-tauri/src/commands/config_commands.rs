@@ -1,7 +1,7 @@
 use tauri::State;
 use crate::error::AppError;
-use crate::config::repo_config::{RepoConfig, load as load_repo_config, save as save_repo_config};
-use crate::config::app_config::{self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, OnboardingConfig, PipelinesConfig, RecoveryConfig, StudioSettings};
+use crate::config::repo_config::{BranchGroupingConfig, RepoConfig, load as load_repo_config, save as save_repo_config};
+use crate::config::app_config::{self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, OnboardingConfig, PipelinesConfig, RecoveryConfig, StudioSettings};
 use crate::AppState;
 
 // Cap the persisted recent-repo list. With WelcomeScreen showing 6 and the
@@ -455,6 +455,54 @@ pub fn set_onboarding_config(
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
+}
+
+// ── Branches sidebar (global behaviour + per-repo grouping state) ───────────
+
+/// Read the global Branches-sidebar behaviour knobs (e.g. recursive path split).
+#[tauri::command]
+pub fn get_branches_config(state: State<'_, AppState>) -> Result<BranchesConfig, AppError> {
+    Ok(state.lock_config()?.branches.clone())
+}
+
+/// Persist updated Branches-sidebar behaviour knobs.
+#[tauri::command]
+pub fn set_branches_config(
+    state: State<'_, AppState>,
+    config: BranchesConfig,
+) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    cfg.branches = config;
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Read the per-repo branch-grouping state (enabled flag + collapsed groups).
+/// Convenience wrapper over `RepoConfig.branch_grouping` so the frontend
+/// store doesn't have to round-trip the entire RepoConfig on every toggle.
+#[tauri::command]
+pub fn get_branch_grouping(
+    state: State<'_, AppState>,
+    tab_id: String,
+) -> Result<BranchGroupingConfig, AppError> {
+    let mut mgr = state.lock_repos()?;
+    let repo = mgr.get(&tab_id)?;
+    Ok(load_repo_config(&repo.path)?.branch_grouping)
+}
+
+/// Persist per-repo branch-grouping state (enabled + collapsed groups).
+#[tauri::command]
+pub fn set_branch_grouping(
+    state: State<'_, AppState>,
+    tab_id: String,
+    config: BranchGroupingConfig,
+) -> Result<(), AppError> {
+    let mut mgr = state.lock_repos()?;
+    let repo = mgr.get(&tab_id)?;
+    let mut cfg = load_repo_config(&repo.path)?;
+    cfg.branch_grouping = config;
+    save_repo_config(&repo.path, &cfg)
 }
 
 /// Read host-wide commit preferences (global template fallback, …).

@@ -27,6 +27,11 @@
   </div>
 </div>
 
+<h2>Grouping by path</h2>
+<p>Branches are bucketed by their <code>/</code> segments by default — <code>feature/auth/login</code> shows as <code>feature → auth → login</code>, GitKraken / Fork style. Toggle between folder tree and flat list from the <strong>folder-tree icon in the panel header</strong> (always visible, next to refresh), the <Kbd action="toggle_branch_grouping" /> shortcut, or the Command Palette entry <em>Branches: Group by Path</em>. The on/off and collapsed-folder state are per-repo (saved in <code>.arbor/config.toml</code>); a host-wide <code>branches.grouping_recursive = false</code> in <code>~/.config/arbor/config.toml</code> flips splitting to single-level (only the first <code>/</code> becomes a group, JetBrains style) — useful on flat naming schemes.</p>
+<p>The toggle affects every section that lays out by branch path: <em>Local Branches</em>, <em>Remotes</em>, and <em>Worktrees</em>. Folders pick up a semantic tint when their name matches a well-known prefix (<code>feature</code>, <code>release</code>, <code>hotfix</code>, <code>bugfix</code>/<code>fix</code>, <code>experiment</code>/<code>spike</code>, <code>support</code>, plus muted tones for <code>chore</code>/<code>docs</code>/<code>test</code>/<code>ci</code>/<code>refactor</code>); everything else stays neutral so the colour carries meaning instead of noise.</p>
+<p>Right-click any folder for <strong>Expand all</strong> / <strong>Collapse all</strong> — both act recursively from that folder down (sub-folders included), not from the parent.</p>
+
 <h2>Drag to merge or compare</h2>
 <p>Drag any branch from the sidebar onto another branch — both local and remote branches are draggable.</p>
 <ol class="step-list">
