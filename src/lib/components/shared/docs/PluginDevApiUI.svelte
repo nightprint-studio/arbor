@@ -353,6 +353,34 @@ arbor.command.fire("deployer::deploy", { args = { env = "prod" } })`, '.lua')}</
 <pre class="language-lua">{@html highlight(`{ type = "button", label = "Deploy",
   dispatch = { kind = "command", id = "deployer::deploy", args = { env = "prod" } } }`, '.lua')}</pre>
 
+<h4>Host built-in commands</h4>
+<p>
+  The same dispatch / <code>arbor.command.fire</code> path also reaches a small
+  allowlist of <strong>host built-ins</strong>, addressed as
+  <code>arbor:area.verb</code> and run by Arbor itself. They are closed by
+  default (destructive / history-rewriting verbs are not exposed) and gated the
+  same way: the caller needs <code>command_invoke</code> plus the command's
+  <code>required</code> tier. The <code>arbor:git.*</code> commands target the
+  repo from <code>ctx.tab_id</code> (or static <code>args.tab_id</code>),
+  falling back to the active tab.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Command</th><th>Requires</th><th>Params (in <code>args</code> or ctx)</th></tr></thead>
+  <tbody>
+    <tr><td><code>arbor:git.commit</code></td><td><code>git=write</code></td><td><code>message</code> (req), <code>amend?</code></td></tr>
+    <tr><td><code>arbor:git.push</code></td><td><code>git=write</code></td><td><code>refspec</code> (req), <code>remote?</code>, <code>force?</code></td></tr>
+    <tr><td><code>arbor:git.fetch</code> · <code>arbor:git.pull</code></td><td><code>git=write</code></td><td><code>remote?</code> (=origin)</td></tr>
+    <tr><td><code>arbor:git.branch_create</code></td><td><code>git=write</code></td><td><code>name</code> (req), <code>from_oid?</code> (=HEAD)</td></tr>
+    <tr><td><code>arbor:git.checkout</code> · <code>arbor:git.branch_delete</code></td><td><code>git=write</code></td><td><code>name</code> (req)</td></tr>
+    <tr><td><code>arbor:git.stage_all</code> · <code>arbor:git.unstage_all</code></td><td><code>git=write</code></td><td>—</td></tr>
+    <tr><td><code>arbor:repo.refresh</code></td><td>(none)</td><td>re-loads the active repo view</td></tr>
+    <tr><td><code>arbor:app.open_settings</code></td><td>(none)</td><td>opens the Settings panel</td></tr>
+  </tbody>
+</table>
+<pre class="language-lua">{@html highlight(`-- caller manifest: [permissions] command_invoke = true, git = "write"
+arbor.command.fire("arbor:git.commit", { message = "chore: tidy", amend = false })
+arbor.command.fire("arbor:repo.refresh")   -- no tier needed`, '.lua')}</pre>
+
 <h2>arbor.contribution — registry introspection</h2>
 <p>
   Read-only access to the unified contribution registry. A plugin can list every

@@ -1629,14 +1629,38 @@ function Command.register(config) end
 ---@param id string
 function Command.unregister(id) end
 
----Invoke a registered command. Today only commands another plugin marked
----`invocable = true` can be fired, addressed as `"<owner>::<id>"`. Fire-and-
----forget: the owner's `command:<id>` handler receives `ctx` (with any declared
----`args` merged under the `args` key). Requires `command_invoke = true`, and
----the caller must hold whatever tier the command declares as `required`.
----@param id  string    Target command id — "<owner-plugin>::<command-id>"
+---Invoke a registered command. Two kinds are invocable:
+---  * another plugin's command marked `invocable = true`, addressed as
+---    `"<owner>::<id>"` — its `command:<id>` handler receives `ctx` (with any
+---    declared `args` merged under the `args` key);
+---  * a HOST BUILT-IN, addressed as `"arbor:area.verb"` — run by Arbor itself
+---    (commit, push, refresh the UI, …). See `arbor.HostCommands` below.
+---Fire-and-forget. Requires `command_invoke = true`, and the caller must hold
+---whatever permission tier the target declares as `required` (host built-ins
+---declare it too — e.g. the `arbor:git.*` commands require `git = "write"`).
+---@param id  string    "<owner>::<id>" (plugin) or "arbor:area.verb" (host)
 ---@param ctx any|nil    Context table delivered to the command handler
 function Command.fire(id, ctx) end
+
+---Host built-in commands a plugin may invoke via `arbor.command.fire(id, ctx)`
+---or a node `dispatch = { kind = "command", id = "..." }`. Closed by default —
+---only the ids below are exposed; destructive / history-rewriting verbs are not.
+---Git commands target the repo from `ctx.tab_id` (or the static `args.tab_id`),
+---falling back to the active tab.
+---
+---   id                       required        ctx params
+---   arbor:git.commit         git=write       message (req), amend?
+---   arbor:git.push           git=write       refspec (req), remote? (=origin), force?
+---   arbor:git.fetch          git=write       remote? (=origin)
+---   arbor:git.pull           git=write       remote? (=origin)
+---   arbor:git.branch_create  git=write       name (req), from_oid? (=HEAD)
+---   arbor:git.checkout       git=write       name (req)
+---   arbor:git.branch_delete  git=write       name (req)
+---   arbor:git.stage_all      git=write       —
+---   arbor:git.unstage_all    git=write       —
+---   arbor:repo.refresh       (none)          — (re-loads the active repo view)
+---   arbor:app.open_settings  (none)          — (opens the Settings panel)
+---@class arbor.HostCommands
 
 
 -- =============================================================================
@@ -2869,12 +2893,14 @@ function CoreAssert.register() end
 
 ---Dispatch target for an actionable slot. Either a callback to this plugin
 ---(`{ kind = "action", name = "..." }`) or a registered command
----(`{ kind = "command", id = "<owner>::<id>", args? = ... }`). A bare `action`
----string on a node is sugar for the action form.
+---(`{ kind = "command", id = "...", args? = ... }`). The command id is either
+---another plugin's `"<owner>::<id>"` or a host built-in `"arbor:area.verb"`
+---(see `arbor.HostCommands`). A bare `action` string on a node is sugar for the
+---action form.
 ---@class arbor.DispatchTarget
 ---@field kind "action"|"command"
 ---@field name string|nil    Action name (when kind = "action")
----@field id   string|nil    Command id "<owner>::<id>" (when kind = "command")
+---@field id   string|nil    Command id — "<owner>::<id>" or "arbor:area.verb" (when kind = "command")
 ---@field args any|nil        Static args passed to the command (when kind = "command")
 
 ---Inline action button — fires without submitting the form. With

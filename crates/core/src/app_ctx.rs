@@ -75,4 +75,19 @@ pub trait AppCtx: Any + Send + Sync {
     fn open_path(&self, _path: &str) -> Result<(), String> {
         Err("open_path: not supported by this host".to_string())
     }
+
+    /// Dispatch a gated host built-in command (`arbor:area.verb`) a plugin
+    /// invoked through the command-invocation protocol. Resolution + both
+    /// capability gates already ran in the plugin host; this only runs the
+    /// handler (which needs host state the plugin crate can't reach).
+    ///
+    /// **Must be non-blocking.** The caller holds the plugin-host lock, so the
+    /// implementation has to defer the actual work (spawn on the host runtime)
+    /// and return immediately — otherwise a handler that fires a plugin hook
+    /// would deadlock on the same lock. `ctx_json` is the node payload (form
+    /// values + declared `args`). Default is a no-op + warn so headless / test
+    /// hosts that expose no built-ins satisfy the contract trivially.
+    fn invoke_host_command(&self, id: &str, _ctx_json: &str) {
+        tracing::warn!("invoke_host_command('{id}'): no host built-ins on this host");
+    }
 }

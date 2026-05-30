@@ -953,6 +953,26 @@
         },
       },
       {
+        // Frontend-intent host commands a plugin invoked via the command
+        // protocol (`dispatch = { kind: 'command', id: 'arbor:repo.refresh' }`
+        // / `arbor.command.fire`). The backend gated + relayed the verb; the UI
+        // executes it. Backend git host commands never reach here — they run
+        // server-side and emit their own follow-up events.
+        event: 'arbor://host-ui-command',
+        handler: (e: { payload: { id: string } }) => {
+          switch (e.payload?.id) {
+            case 'app.open_settings':
+              uiStore.setPanel('settings');
+              break;
+            case 'repo.refresh': {
+              const tabId = tabsStore.activeTabId;
+              if (tabId) { cacheStore.invalidate(tabId); graphStore.refresh(); }
+              break;
+            }
+          }
+        },
+      },
+      {
         // Plugins can request a registered repo be opened as a tab via
         // arbor.tabs.open_repo(repo_id). Mirrors WorkspaceManagementModal.openRepoTab.
         event: 'arbor://open-repo-tab',

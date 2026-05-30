@@ -16,6 +16,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Plugin form value slots can opt into *scoped dispatch*: a `select` `actions.change`, a leaf `field`, or a `vec_field` whose change targets a `dispatch` object (action or command) now ships a compact `{ node_id, slot, value, state? }` payload instead of the whole form, tracked per node so concurrent edits don't block each other. Declare `scope_state` to include a slice of the opaque form state. Bare-string actions are unchanged.
 - Plugins can patch an open form's node tree granularly via `arbor.ui.form.patch(ops)` — merge props, append children, or remove nodes addressed by stable `id` without re-mounting — and mutate a single slice of the opaque form state via `arbor.ui.form.set_state_path(segments, value)` (passing `nil` deletes the key).
 - Plugins can invoke each other's commands. A command registered as `invocable` can be fired by another plugin via `arbor.command.fire("<owner>::<id>")` or a form button's `dispatch = { kind = "command", … }`, gated by the new `command_invoke` permission plus the command's declared `required` tier.
+- Plugins can invoke host built-in commands the same way — `arbor:git.commit|push|fetch|pull|branch_create|checkout|branch_delete|stage_all|unstage_all` (require `git = "write"`), plus `arbor:repo.refresh` and `arbor:app.open_settings` (no tier). Closed by default and gated by `command_invoke` + the declared tier; git commands target `ctx.tab_id` or the active tab.
 - IntelliJ-style "compact middle packages" for file trees — *Settings → Interface → Compact file tree folders* collapses chains of single-child directories into a single row across the Files sidebar, the Stage area tree, and the commit detail file list. Also exposed as a Command Palette toggle. Conflict file lists always compact regardless of the setting.
 - Markdown editor with Obsidian-style live preview — open any `.md` /
   `.markdown` file via the Files sidebar context menu and edit it
@@ -84,6 +85,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Plugin forms no longer silently ignore a click on a menu item, list/card row action, or suggest-grid entry while another action is still running — they now show a brief "action already running" notice (buttons already disabled themselves with a spinner).
 - Title bar app mark, hamburger menu, and workspace monogram are now the
   same height, so the left cluster reads as one aligned row.
 - Plugins sometimes appeared disabled after launch until the Plugin

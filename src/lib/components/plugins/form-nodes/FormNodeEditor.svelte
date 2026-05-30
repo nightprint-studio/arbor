@@ -7,7 +7,7 @@
   reconciles the buffer without an echo loop).
 
   On top of the whole-form model it is the first live consumer of the scoped
-  per-node channel (§3.1/§3.4 of plugin-ui-dispatch-and-patch):
+  per-node channel:
     · `on_edit`   — debounced, slot `edit`,   value = full document text
     · `on_select` — slot `select`, value = `{ from, to, text }`
 

@@ -74,7 +74,10 @@ prelude.
   `arbor-scheduler` engine.
 - `runtime::host` — `PluginHost` struct + lifecycle (load/enable/
   disable/delete), service invocation, command invocation
-  (`invoke_command` — capability-gated `<owner>::<id>` dispatch),
+  (`invoke_command` — capability-gated dispatch of `<owner>::<id>` plugin
+  commands and `arbor:area.verb` host built-ins; the built-in allowlist +
+  required tiers live in `host_command_required`, the handlers in the shell
+  via `AppCtx::invoke_host_command`),
   pipeline-op invocation, dependency cascade preview, frontend-facing
   `list_plugin_info`.
   The `hooks` submodule holds the surviving subscription queries

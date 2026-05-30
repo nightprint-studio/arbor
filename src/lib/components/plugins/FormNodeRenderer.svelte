@@ -681,7 +681,16 @@
     closeAfter: boolean,
     extra?: Record<string, unknown>,
   ) {
-    if (!target || actionPending) return;
+    if (!target) return;
+    // Single-flight: only one whole-form action runs at a time. Buttons already
+    // disable + show a spinner while pending (FormNodeButtons), but the other
+    // affordances that funnel through here (menu items, list/card row actions,
+    // suggest grid, chart selects) can't all do that — so give explicit
+    // feedback instead of silently dropping the interaction.
+    if (actionPending) {
+      uiStore.showToast('An action is already running — wait for it to finish', 'info', 1800);
+      return;
+    }
     actionPending = dispatchKey(target);
     try {
       await dispatch(target, buildActionPayload(extra));

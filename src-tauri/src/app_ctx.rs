@@ -88,4 +88,19 @@ impl AppCtx for TauriAppCtx {
         self.handle.opener().open_path(path, None::<&str>)
             .map_err(|e| e.to_string())
     }
+
+    fn invoke_host_command(&self, id: &str, ctx_json: &str) {
+        // Non-blocking: the plugin host calls this while holding its own lock,
+        // so we defer the handler to the async runtime and return immediately.
+        // The handler (a regular Tauri command body) may fire plugin hooks that
+        // re-lock the host — safe only because the lock is released by then.
+        let handle   = self.handle.clone();
+        let id       = id.to_string();
+        let ctx_json = ctx_json.to_string();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = crate::plugin_host_commands::dispatch(&handle, &id, &ctx_json).await {
+                tracing::warn!(target: "plugin", "host command '{id}' failed: {e}");
+            }
+        });
+    }
 }

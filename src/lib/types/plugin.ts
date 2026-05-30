@@ -690,7 +690,7 @@ export interface FormFieldTree extends FormFieldBase {
   change_action?: string;
 
   // ── Dynamic ("data tree") opt-ins — additive; the static tree above is
-  //    unchanged when these are absent. See plugin-ui-dispatch-and-patch §4. ──
+  //    unchanged when these are absent. ──
 
   /** Enable lazy children: expanding a row that has `has_children` but no
    *  loaded `children` fires `on_expand` and shows a spinner until a patch

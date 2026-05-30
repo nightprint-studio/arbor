@@ -13,7 +13,7 @@
       has no loaded `children` fires the scoped `on_expand` slot
       (`{ id, value, path }`) and shows a spinner row until the plugin patches
       the children in (merge `children` + clear `loading`, addressed by the
-      row's stable `id`). See plugin-ui-dispatch-and-patch §4 (data_tree).
+      row's stable `id`).
     · on_select — scoped selection event (ships the new value), preferred over
       `change_action` when both are set.
     · virtualize_threshold / row_height — window the flattened visible rows

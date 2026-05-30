@@ -18,6 +18,7 @@ mod plugin;
 mod config;
 mod terminal;
 mod jobs;
+mod plugin_host_commands;
 mod plugin_logs;
 mod pipeline;
 mod integrations;
