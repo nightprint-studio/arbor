@@ -97,6 +97,10 @@ export interface FormNodeCtx {
    *  slot. Pass the node (it carries `actions.change` + optional `scope_state`)
    *  so a DispatchTarget change slot can go scoped; `undefined` = no change slot. */
   wrapSelectChange:  (items: DropdownItem[], node: any) => DropdownItem[];
+  /** Fire a non-select field's `actions.change` slot — same routing as the
+   *  one wired into select items, but exposed so checkbox/toggle (and any
+   *  future opt-in field) can dispatch live without going through Submit. */
+  fireFieldChange:   (node: any, value: unknown) => void;
   multiselectSummary:(raw: FormSelectOption[] | undefined, selected: string[], placeholder: string) => string;
   selectLabelOf:     (raw: FormSelectOption[] | undefined, value: string) => string | undefined;
   selectItemCount:   (raw: FormSelectOption[] | undefined) => number;

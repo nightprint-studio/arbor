@@ -859,10 +859,20 @@ local Ui = {}
 ---the modal stays mounted while the secondary flow is up, and you call close()
 ---once the flow completes (or on a hard error path).
 ---
----Live `actions.change` on `select`: every `select` form-node accepts an
----`actions = { change = "..." }` field. When set, the action fires on every
----selection (not just Submit) with `{ value }` in the payload — handy for
----"window picker" / live-filter controls that should re-fetch immediately.
+---Live `actions.change` on `select` / `checkbox` / `toggle` / `radio`: each
+---of those form-nodes accepts an `actions = { change = "..." }` field. When
+---set, the action fires on every selection / flip (not just Submit) with
+---`{ value }` in the payload — handy for "window picker" / live-filter
+---controls that should re-fetch immediately, or boolean toggles / segmented
+---switches that should re-render dependent content. (For pure show/hide of
+---dependent nodes you usually do NOT need actions.change — gate them with
+---`show_if` instead and the swap happens client-side without a round-trip.)
+---
+---Radio appearance: `appearance = "segment"` renders a pill-style toggle bar
+---(IntelliJ studio-style View switcher), `appearance = "card"` renders
+---title+description cards, `appearance = "radio"` (the default) renders
+---classic radio dots. Pair `inline = true` + `appearance = "segment"` for
+---compact mode switches.
 ---
 ---Scoped dispatch (high-frequency slots): a value slot's change can target a
 ---DISPATCH instead of a bare action string — `change = { kind = "action",
@@ -872,9 +882,10 @@ local Ui = {}
 ---other and a fast-firing widget isn't gated by a global lock (latest-wins).
 ---Add `scope_state = { "k1", "k2" }` on the node to ride a slice of the opaque
 ---form state along in `state`. Honoured today by the leaf `field` node (via a
----node-level `dispatch = …`), `vec_field`, `select` `actions.change`, and the
----`editor` widget (`on_edit` slot `edit` / `on_select` slot `select`);
----bare-string actions keep the legacy whole-form payload unchanged.
+---node-level `dispatch = …`), `vec_field`, `select` / `checkbox` / `toggle` / `radio`
+---`actions.change`, and the `editor` widget (`on_edit` slot `edit` /
+---`on_select` slot `select`); bare-string actions keep the legacy whole-form
+---payload unchanged.
 ---
 ---Builder mode: `arbor.ui.form()` (no arg) or `arbor.ui.form("id")` returns a
 ---chainable `arbor.FormBuilder`; `:open()` emits the modal via the same path.

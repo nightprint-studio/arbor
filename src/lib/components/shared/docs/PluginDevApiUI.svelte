@@ -1625,11 +1625,34 @@ arbor.ui.form()
 
 <h3>Live change action</h3>
 <p>
-  Set <code>actions = &#123; change = "&lt;action&gt;" &#125;</code> on a <code>select</code> to fire a plugin
-  action on every selection. The handler receives <code>&#123; value &#125;</code> (the chosen option's <code>value</code>)
-  alongside the rest of the form's field map. Useful for "filter" or "window picker" controls
-  that should re-fetch data immediately rather than waiting for Submit.
+  Set <code>actions = &#123; change = "&lt;action&gt;" &#125;</code> on a <code>select</code>,
+  <code>checkbox</code>, <code>toggle</code>, or <code>radio</code> to fire a
+  plugin action on every selection / flip (not just Submit). The handler
+  receives <code>&#123; value &#125;</code> — the new option <code>value</code>
+  for selects / radios, the new boolean state for checkbox / toggle —
+  alongside the rest of the form's field map. Useful for filter /
+  window-picker controls that re-fetch data on change, and for boolean
+  toggles that drive backend-side state.
 </p>
+<p>
+  For pill-style mode switches (Tree / Raw, etc.), pair <code>radio</code>
+  with <code>inline = true</code> and <code>appearance = "segment"</code>
+  to render an IntelliJ studio-style segmented control instead of the
+  default radio dots. <code>appearance = "card"</code> renders
+  title+description cards.
+</p>
+<p>
+  For pure show/hide of dependent nodes you usually do <strong>not</strong> need
+  <code>actions.change</code> — gate the dependent nodes with <code>show_if</code>
+  on the toggle's field and the swap happens client-side, no round-trip:
+</p>
+<pre class="language-lua">{@html highlight(`{ type = "toggle", name = "raw_mode", label = "Raw editor" }
+
+-- These two containers swap as the user flips the toggle, no backend work:
+{ type = "container", show_if = { field = "raw_mode", eq = false },
+  children = structured_form() }
+{ type = "container", show_if = { field = "raw_mode", eq = true  },
+  children = raw_editor() }`, '.lua')}</pre>
 <pre class="language-lua">{@html highlight(`{ type = "select", name = "range_days",
   label   = "Trend window",
   default = "30",
@@ -1644,7 +1667,7 @@ end)`, '.lua')}</pre>
 
 <h4>Scoped dispatch — for high-frequency slots</h4>
 <p>
-  A change slot can target a <strong>dispatch</strong> instead of a bare action string. With a <code>DispatchTarget</code> object the slot ships a <em>scoped</em> payload — just <code>&#123; node_id, slot, value, state? &#125;</code> — instead of the whole form, and can target a command. Scoped slots are tracked <strong>per node</strong> (latest-wins, no global lock), so edits on different nodes never block each other and a fast-firing widget isn't gated. Add <code>scope_state = &#123; "k1", "k2" &#125;</code> to ride a slice of the opaque form state along in <code>state</code>. Honoured today by the leaf <code>field</code> node (node-level <code>dispatch</code>), <code>vec_field</code>, and <code>select</code> <code>actions.change</code>; bare-string actions keep the legacy whole-form payload.
+  A change slot can target a <strong>dispatch</strong> instead of a bare action string. With a <code>DispatchTarget</code> object the slot ships a <em>scoped</em> payload — just <code>&#123; node_id, slot, value, state? &#125;</code> — instead of the whole form, and can target a command. Scoped slots are tracked <strong>per node</strong> (latest-wins, no global lock), so edits on different nodes never block each other and a fast-firing widget isn't gated. Add <code>scope_state = &#123; "k1", "k2" &#125;</code> to ride a slice of the opaque form state along in <code>state</code>. Honoured today by the leaf <code>field</code> node (node-level <code>dispatch</code>), <code>vec_field</code>, and <code>select</code> / <code>checkbox</code> / <code>toggle</code> / <code>radio</code> <code>actions.change</code>; bare-string actions keep the legacy whole-form payload.
 </p>
 <pre class="language-lua">{@html highlight(`-- select: scoped change targeting an action
 { type = "select", name = "branch", id = "branch_sel",

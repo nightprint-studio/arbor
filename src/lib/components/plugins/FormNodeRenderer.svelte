@@ -754,10 +754,12 @@
     }
   }
 
-  // Route a select's `actions.change` slot: a bare string keeps the legacy
+  // Route a field's `actions.change` slot: a bare string keeps the legacy
   // whole-form payload; a DispatchTarget object goes scoped (and can target a
-  // command). `scope_state` declares which state keys ride along.
-  function selectChange(node: any, value: string) {
+  // command). `scope_state` declares which state keys ride along. Originally
+  // wired for `select`, now also used by `checkbox` and `toggle` so booleans
+  // can trigger a live re-render without going through Submit.
+  function fireFieldChange(node: any, value: unknown) {
     const change = node?.actions?.change;
     if (!change) return;
     if (typeof change === 'string') {
@@ -766,6 +768,9 @@
       handleScopedDispatch(node.id, 'change', change, value, { stateKeys: node.scope_state });
     }
   }
+  // Legacy alias retained for `wrapSelectChange` below — same function, was
+  // previously named after its sole caller.
+  const selectChange = fireFieldChange;
 
   function notifyChange(name: string, value: unknown) {
     onValueChange?.(name, value);
@@ -837,6 +842,7 @@
       buildSelectDropdownItems(raw, fieldName, multiple, current, setSelectValue),
     wrapSelectChange: (items, node) =>
       wrapSelectChange(items, node?.actions?.change ? (v) => selectChange(node, v) : undefined),
+    fireFieldChange,
     multiselectSummary,
     selectLabelOf,
     selectItemCount,

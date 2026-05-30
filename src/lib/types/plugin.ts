@@ -488,6 +488,10 @@ export interface FormFieldCheckbox extends FormFieldBase {
   type:     'checkbox';
   label:    string;
   default?: boolean;
+  /** Fire a slot every time the user flips the box (not deferred to submit).
+   *  Same shape as `FormFieldSelect.actions.change`: a bare string keeps the
+   *  legacy whole-form payload; a `DispatchTarget` object goes scoped. */
+  actions?: { change?: string | DispatchTarget };
 }
 
 /**
@@ -501,6 +505,9 @@ export interface FormFieldToggle extends FormFieldBase {
   description?: string;
   default?:     boolean;
   size?:        'sm' | 'md' | 'lg';
+  /** Fire a slot every time the user flips the switch (not deferred to submit).
+   *  Same shape as `FormFieldSelect.actions.change`. */
+  actions?:     { change?: string | DispatchTarget };
 }
 
 /** Shorthand element allowed inside radio / autocomplete / table cell option lists.
@@ -581,6 +588,16 @@ export interface FormFieldRadio extends FormFieldBase {
   default?: string;
   options:  FormOptionInput[];
   inline?:  boolean;
+  /** Visual style. `radio` = classic radio dots (default).
+   *  `segment` = pill-style toggle bar (IntelliJ / studio segmented control).
+   *  `card`    = description+title cards. Use `segment` for compact mode
+   *  switches (View: Tree / Raw, etc.). */
+  appearance?: 'radio' | 'segment' | 'card';
+  /** Size hint, honoured by `segment` and `card`. Default: `md`. */
+  size?:    'sm' | 'md' | 'lg';
+  /** Fire a slot every time the user picks a different option (not deferred
+   *  to submit). Same shape as `FormFieldSelect.actions.change`. */
+  actions?: { change?: string | DispatchTarget };
 }
 
 /** File / folder picker — opens the existing FilePickerModal on click. */

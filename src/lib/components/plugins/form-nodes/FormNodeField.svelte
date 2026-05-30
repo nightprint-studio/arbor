@@ -229,7 +229,12 @@
           id="pf-{n.name}"
           type="checkbox"
           disabled={(n.readonly ?? false) || ctx.resolvedDisabled(n)}
-          bind:checked={ctx.values[n.name]}
+          checked={!!ctx.values[n.name]}
+          onchange={(e) => {
+            const v = (e.currentTarget as HTMLInputElement).checked;
+            ctx.values[n.name] = v;
+            ctx.fireFieldChange(node, v);
+          }}
         />
         <span class="pf-checkbox-label">
           {n.label}
@@ -320,10 +325,14 @@
           description: o.description,
           disabled: o.disabled,
         }))}
-        appearance="radio"
+        appearance={(n as any).appearance ?? 'radio'}
+        size={(n as any).size ?? 'md'}
         direction={n.inline ? 'horizontal' : 'vertical'}
         disabled={(n.readonly ?? false) || ctx.resolvedDisabled(n)}
-        onchange={(v) => { ctx.values[n.name] = v; }}
+        onchange={(v) => {
+          ctx.values[n.name] = v;
+          ctx.fireFieldChange(node, v);
+        }}
       />
 
     {:else if node.type === 'toggle'}
@@ -334,7 +343,10 @@
           size={(n.size as any) ?? 'md'}
           label={n.label}
           description={n.description ?? n.hint}
-          onchange={(v) => { ctx.values[n.name] = v; }}
+          onchange={(v) => {
+            ctx.values[n.name] = v;
+            ctx.fireFieldChange(node, v);
+          }}
         />
         {#if n.required}<span class="pf-required" aria-hidden="true">*</span>{/if}
       </div>
