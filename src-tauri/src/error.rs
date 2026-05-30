@@ -83,6 +83,29 @@ impl From<arbor_core::prelude::CoreError> for AppError {
     }
 }
 
+/// Bridge `arbor_plugin_marketplace::MarketplaceError` into the host enum.
+/// Variant-by-variant so the wire shape stays informative — the marketplace
+/// crate distinguishes `PinMismatch` / `InvalidArchive` / `InstallCollision`
+/// where the old codebase had a single opaque `AppError::Other` string.
+impl From<arbor_plugin_marketplace::prelude::MarketplaceError> for AppError {
+    fn from(e: arbor_plugin_marketplace::prelude::MarketplaceError) -> Self {
+        use arbor_plugin_marketplace::prelude::MarketplaceError as M;
+        match e {
+            M::Io(e)               => AppError::Io(e),
+            M::Json(e)             => AppError::Json(e),
+            M::TomlDe(e)           => AppError::TomlDe(e),
+            M::TomlSer(e)          => AppError::TomlSer(e),
+            M::Http(e)             => AppError::Other(format!("HTTP: {e}")),
+            M::InvalidUrl(s)       => AppError::Other(format!("invalid GitHub URL: {s}")),
+            M::NotFound(s)         => AppError::Other(format!("not found: {s}")),
+            M::PinMismatch(s)      => AppError::Other(format!("pinned SHA mismatch: {s}")),
+            M::InvalidArchive(s)   => AppError::Other(format!("invalid archive: {s}")),
+            M::InstallCollision(s) => AppError::Other(s),
+            M::Other(s)            => AppError::Other(s),
+        }
+    }
+}
+
 /// Bridge `arbor_plugin_core::error::PluginCoreError` into the host enum.
 /// Mapped to existing variants so wire shape (Plugin / IO / Other) is
 /// unchanged from the pre-split codebase.

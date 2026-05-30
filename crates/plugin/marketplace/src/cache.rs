@@ -1,18 +1,23 @@
-//! Disk-backed cache for the fetched marketplace catalog.
+//! Disk-backed cache for the fetched marketplace catalog and custom-source
+//! resolution.
 //!
-//! Lives at `~/.config/arbor/marketplace_cache.json` (or
-//! `marketplace_cache-dev.json` in debug builds, so dev sessions don't
-//! poison the prod cache of a side-by-side Arbor install).
+//! Two files under `~/.config/arbor/` (see [`crate::paths`]):
 //!
-//! TTL is fixed at 1h — the modal carries a "Refresh" button for the rare
-//! moments the user wants newer data immediately.
+//!   * `marketplace_cache.json`   — TTL-checked snapshot of the last
+//!                                  successful community catalog fetch.
+//!                                  TTL = 1h; the modal carries a Refresh
+//!                                  button for forcing an earlier hit.
+//!   * `marketplace_custom.json`  — resolved metadata for every custom
+//!                                  source the user added (pointers live
+//!                                  in `user_registry.toml`). No TTL —
+//!                                  refreshed every time the modal opens.
 
-use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use super::types::{MarketplaceCatalog, MarketplacePlugin};
+use crate::paths;
+use crate::types::{MarketplaceCatalog, MarketplacePlugin};
 
 /// Time-to-live for a cached catalog snapshot.
 pub const TTL_SECS: u64 = 3600;
@@ -26,23 +31,18 @@ pub struct CacheFile {
     pub catalog:    MarketplaceCatalog,
 }
 
-pub fn path() -> PathBuf {
-    let filename = if cfg!(debug_assertions) {
-        "marketplace_cache-dev.json"
-    } else {
-        "marketplace_cache.json"
-    };
-    arbor_core::prelude::arbor_config_path(filename)
-}
-
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+// ---------------------------------------------------------------------------
+// Community catalog cache
+// ---------------------------------------------------------------------------
+
 /// Read the cache file regardless of age — useful as a cold-start fallback
 /// so the modal has something to show before the first refresh resolves.
 pub fn load_any() -> Option<CacheFile> {
-    let s = std::fs::read_to_string(path()).ok()?;
+    let s = std::fs::read_to_string(paths::community_cache_file()).ok()?;
     serde_json::from_str(&s).ok()
 }
 
@@ -60,7 +60,7 @@ pub fn load_if_fresh(repo: &str) -> Option<MarketplaceCatalog> {
 }
 
 pub fn save(repo: &str, catalog: &MarketplaceCatalog) {
-    let p = path();
+    let p = paths::community_cache_file();
     if let Some(parent) = p.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             tracing::warn!("marketplace cache: create_dir_all failed: {e}");
@@ -83,30 +83,15 @@ pub fn save(repo: &str, catalog: &MarketplaceCatalog) {
 }
 
 pub fn invalidate() {
-    let _ = std::fs::remove_file(path());
+    let _ = std::fs::remove_file(paths::community_cache_file());
 }
 
 // ---------------------------------------------------------------------------
 // Custom-source resolved cache
 // ---------------------------------------------------------------------------
-//
-// Resolved metadata for user-added custom sources (Phase 4). Pointers live
-// in `user_registry.toml`; this file caches the result of the last
-// successful network resolve so a cold offline boot still has something
-// to paint. No TTL — the cache is refreshed every time the user opens the
-// modal (alongside the community catalog refresh).
-
-fn custom_cache_path() -> PathBuf {
-    let filename = if cfg!(debug_assertions) {
-        "marketplace_custom-dev.json"
-    } else {
-        "marketplace_custom.json"
-    };
-    arbor_core::prelude::arbor_config_path(filename)
-}
 
 pub fn load_custom() -> Vec<MarketplacePlugin> {
-    let p = custom_cache_path();
+    let p = paths::custom_cache_file();
     if !p.exists() { return Vec::new(); }
     std::fs::read_to_string(&p)
         .ok()
@@ -115,7 +100,7 @@ pub fn load_custom() -> Vec<MarketplacePlugin> {
 }
 
 pub fn save_custom(plugins: &[MarketplacePlugin]) {
-    let p = custom_cache_path();
+    let p = paths::custom_cache_file();
     if let Some(parent) = p.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             tracing::warn!("custom cache create_dir_all failed: {e}");
@@ -134,5 +119,5 @@ pub fn save_custom(plugins: &[MarketplacePlugin]) {
 
 #[allow(dead_code)] // Phase 5 polish will use this for the "purge cache" action.
 pub fn invalidate_custom() {
-    let _ = std::fs::remove_file(custom_cache_path());
+    let _ = std::fs::remove_file(paths::custom_cache_file());
 }

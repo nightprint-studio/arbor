@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * MarketplaceModal â€” browse plugins + themes from the `arbor-registry` repo
+   * MarketplaceModal — browse plugins + themes from the `arbor-registry` repo
    * and from user-added custom git URLs.
    *
    * Phase 1 wiring: catalog data flows through Tauri commands (`marketplace_*`)
@@ -68,12 +68,12 @@
     initialTab?: MarketplaceTab;
   } = $props();
 
-  // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── State ────────────────────────────────────────────────────────────────
   // NOTE: variable name avoids `tab` deliberately. With `tab` we saw a
   // bizarre reactivity glitch where mutating it from inside an event
   // handler (the Tabs `onSelect` callback) failed to re-render the
   // `{#if tab === 'plugins'}` block until something else forced a tick.
-  // Renaming to `activeTab` made the issue go away â€” almost certainly a
+  // Renaming to `activeTab` made the issue go away — almost certainly a
   // shadowing collision with some implicit Svelte / HTML identifier the
   // compiler was tripping over.
   let activeTab = $state<MarketplaceTab>(untrack(() => initialTab));
@@ -94,11 +94,11 @@
   /** Resolved dep cascade for the plugin pending install: plugins that exist
    *  in the catalog but aren't on disk yet, dep-first order. */
   let confirmPendingDeps = $state<MarketplacePlugin[]>([]);
-  /** Required deps that aren't in the catalog at all â€” surfaced as a hard
+  /** Required deps that aren't in the catalog at all — surfaced as a hard
    *  error in the confirm modal so the user knows to install them manually. */
   let confirmMissingDeps = $state<{ name: string; version: string }[]>([]);
 
-  // â”€â”€ Registry load state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Registry load state ──────────────────────────────────────────────────
   // The modal NEVER blocks on the registry fetch. We render whatever we know
   // locally, then merge community entries in. When the network is down we
   // surface a banner + Retry but keep the Installed list fully usable.
@@ -126,7 +126,7 @@
     selected  = null;
   }
 
-  // â”€â”€ Derived: filter + sort â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Derived: filter + sort ───────────────────────────────────────────────
   const allCategories = $derived(pluginCategories(plugins));
   const allPluginTags = $derived(pluginTags(plugins));
   const allThemeTags  = $derived(themeTags(themes));
@@ -137,12 +137,12 @@
     return haystack.some(h => h.toLowerCase().includes(lo));
   }
   // (passesPluginFilter / passesThemeFilter inlined inside `$derived.by`
-  // below â€” see the comment there for the reactivity rationale.)
+  // below — see the comment there for the reactivity rationale.)
 
   // Use `$derived.by` so the filter property reads happen inside the
   // tracked closure. Calling helper functions with `filter` as an arg
   // works in Svelte 5 most of the time, but in this surface the
-  // installation tab switch wasn't re-deriving consistently â€” the
+  // installation tab switch wasn't re-deriving consistently — the
   // explicit closure makes the dependency on each accessed field
   // unambiguous to the tracker.
   const filteredPlugins = $derived.by(() => {
@@ -207,7 +207,7 @@
     return t ? { kind: 'theme' as const, theme: t } : null;
   });
 
-  // â”€â”€ Mock actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Mock actions ─────────────────────────────────────────────────────────
   async function fakeDelay(ms = 700) {
     await new Promise(r => setTimeout(r, ms));
   }
@@ -216,9 +216,9 @@
 
   /**
    * Two-step load:
-   *   1. `listInstalled` â€” fast, synchronous on the host. Populates the
+   *   1. `listInstalled` — fast, synchronous on the host. Populates the
    *      Installed tabs immediately so the modal never opens empty.
-   *   2. `loadRegistry`  â€” potentially networked. Brings in the community
+   *   2. `loadRegistry`  — potentially networked. Brings in the community
    *      catalog; failures here only suppress the available list and leave
    *      the installed slice untouched.
    */
@@ -228,7 +228,7 @@
       plugins = local.plugins;
       themes  = local.themes;
     } catch (err) {
-      // Failing here would mean the host is broken, not the network â€” surface
+      // Failing here would mean the host is broken, not the network — surface
       // it via toast but still try the registry fetch so the user gets *some*
       // content if the IPC recovers.
       uiStore.showToast(`Could not read installed plugins: ${err}`, 'error');
@@ -244,7 +244,7 @@
   /**
    * Fetch the community catalog and merge it into the in-memory lists,
    * preserving any local `installed` / `enabled` state the user has changed
-   * since opening the modal. Idempotent â€” safe to call repeatedly (Retry).
+   * since opening the modal. Idempotent — safe to call repeatedly (Retry).
    *
    * `force === true` bypasses the host's 1h disk cache (wired to the
    * footer's Refresh button). The initial bootstrap uses the cached path
@@ -259,7 +259,7 @@
       // The backend is authoritative: it already reconciles installed /
       // enabled from `marketplace_installed.json` + the on-disk manifest
       // scan. The old merge that preserved frontend state on top of the
-      // network response is gone â€” it was a Phase-1 leftover and would
+      // network response is gone — it was a Phase-1 leftover and would
       // mask legitimate updates from the catalog refresh.
       plugins = remote.plugins;
       themes  = remote.themes;
@@ -282,7 +282,7 @@
     themes = themes.map(t => (t.id === updated.id ? updated : t));
   }
 
-  /** Entry point from the row / detail Install buttons â€” opens the
+  /** Entry point from the row / detail Install buttons — opens the
    *  permission confirmation modal first. The actual install runs through
    *  `runInstall` once the user confirms. The cascade walker is a pure
    *  function in `marketplace/install-cascade.ts`. */
@@ -319,8 +319,8 @@
       const total = deps.length + 1;
       uiStore.showToast(
         total > 1
-          ? `Installed "${p.name}" + ${deps.length} required ${deps.length === 1 ? 'dependency' : 'dependencies'} â€” enable from the detail pane when ready.`
-          : `Installed "${p.name}" â€” enable it from the detail pane when ready.`,
+          ? `Installed "${p.name}" + ${deps.length} required ${deps.length === 1 ? 'dependency' : 'dependencies'} — enable from the detail pane when ready.`
+          : `Installed "${p.name}" — enable it from the detail pane when ready.`,
         'success',
       );
       return;
@@ -331,7 +331,7 @@
     }
   }
 
-  /** Entry point from the row / detail Uninstall buttons â€” opens the
+  /** Entry point from the row / detail Uninstall buttons — opens the
    *  uninstall confirmation modal first (which lists dependents the
    *  backend will cascade-disable). The actual uninstall runs through
    *  `runUninstall` once the user confirms. */
@@ -341,10 +341,10 @@
     if (busyId) return;
     let deps: string[] = [];
     try {
-      // Look up the FULL transitive cascade â€” the same set the backend will
+      // Look up the FULL transitive cascade — the same set the backend will
       // disable when uninstalling. `pluginDisablePreview` ends with the
       // target itself; strip it so the modal lists only the dependents.
-      // Failure here is non-fatal â€” we still open the modal so the user
+      // Failure here is non-fatal — we still open the modal so the user
       // can confirm even without a dependent list.
       const cascade = await pluginDisablePreview(p.name);
       deps = cascade.filter(n => n !== p.name);
@@ -355,7 +355,7 @@
   async function runUninstall() {
     if (!pendingUninstall || busyId) return;
     const p = pendingUninstall.plugin;
-    // `dependents` was resolved up front in `uninstallPlugin` â€” the backend
+    // `dependents` was resolved up front in `uninstallPlugin` — the backend
     // cascade-disables exactly that set. Patch them locally to avoid a full
     // registry re-fetch (visible lag in the sidebar otherwise).
     const cascaded = pendingUninstall.dependents.slice();
@@ -378,18 +378,18 @@
     }
   }
 
-  /** Flip the plugin's enable state from the detail pane â€” same effect as
+  /** Flip the plugin's enable state from the detail pane — same effect as
    *  toggling the per-row switch in the Plugin Manager. The backend mirrors
    *  the change in its own state; Phase 3 will also drive the live plugin
    *  host via `pluginStore.togglePlugin`. */
-  /** Confirm modals for cascade-aware toggles inside the marketplace â€” same
+  /** Confirm modals for cascade-aware toggles inside the marketplace — same
    *  UX as the Plugin Manager so users can't be surprised by a hidden
    *  cascade. Each holds the resolved plan + (for enable) blocker list. */
   let pendingDisable = $state<{ plugin: string; cascade: string[] } | null>(null);
   let pendingEnable  = $state<{ plugin: string; cascade: string[]; blockers: EnableBlocker[] } | null>(null);
   /** Tick incremented when a cascade-confirm modal is cancelled. The Toggle
    *  in the detail pane keys off this so its internal `bind:checked` resets
-   *  to the (unchanged) `p.enabled` prop â€” without this, the visual switch
+   *  to the (unchanged) `p.enabled` prop — without this, the visual switch
    *  stays in the just-clicked position even though the backend never ran. */
   let toggleResetTick = $state(0);
 
@@ -399,7 +399,7 @@
     // Preview the cascade first so the user sees what the toggle will actually
     // affect before anything changes on disk. Both preview IPCs are host-local
     // (no network), so the lookup stays instant. A non-trivial cascade or any
-    // enable blocker â†’ open the confirm modal; otherwise the toggle goes
+    // enable blocker → open the confirm modal; otherwise the toggle goes
     // straight to the backend.
     try {
       if (next) {
@@ -426,7 +426,7 @@
 
   /** Carry out the toggle once the user has either confirmed the cascade or
    *  the cascade was trivial enough to skip the modal. Patches the affected
-   *  rows locally â€” no registry re-fetch â€” so the sidebar stays smooth. */
+   *  rows locally — no registry re-fetch — so the sidebar stays smooth. */
   async function runTogglePluginEnabled(name: string, next: boolean) {
     let cascaded: string[] = [];
     try {
@@ -437,7 +437,7 @@
         const list = await pluginDisablePreview(name);
         cascaded = list.filter(n => n !== name);
       }
-    } catch { /* non-fatal â€” we'll still update the target */ }
+    } catch { /* non-fatal — we'll still update the target */ }
 
     try {
       const updated = await ipcSetPluginEnabled(name, next);
@@ -454,7 +454,7 @@
       );
     } catch (err) {
       uiStore.showToast(`Could not toggle "${name}": ${err}`, 'error');
-      // Re-sync from server only when the optimistic toggle was wrong â€” that's
+      // Re-sync from server only when the optimistic toggle was wrong — that's
       // the one path where a stale local state is worse than the brief flicker.
       void loadRegistry();
     }
@@ -467,7 +467,7 @@
       const updated = await ipcInstallTheme(t.id);
       patchTheme(updated);
       uiStore.showToast(
-        `Theme "${t.name}" added â€” apply it from Settings â†’ Appearance.`,
+        `Theme "${t.name}" added — apply it from Settings → Appearance.`,
         'success',
       );
     } catch (err) {
@@ -491,7 +491,7 @@
     }
   }
 
-  // â”€â”€ Filter chip toggling helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Filter chip toggling helpers ─────────────────────────────────────────
   function toggleArr<T>(arr: T[], v: T): T[] {
     return arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v];
   }
@@ -511,7 +511,7 @@
     || filter.themeVariant !== 'all',
   );
 
-  // â”€â”€ Tab + dropdown bindings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Tab + dropdown bindings ───────────────────────────────────────────────
   const topTabs = $derived<TabItem[]>([
     { id: 'plugins', label: 'Plugins', icon: Package, badge: plugins.length },
     { id: 'themes',  label: 'Themes',  icon: Palette, badge: themes.length  },
@@ -522,7 +522,7 @@
     { id: 'installed', label: 'Installed' },
   ];
 
-  // Source filter â€” single-select. Only the marketplace-tracked origins
+  // Source filter — single-select. Only the marketplace-tracked origins
   // (Community / Custom) get their own chip; "Local" isn't a category, it's
   // just the visual marker for plugins the user installed by hand. Such
   // plugins surface naturally in the Installed tab regardless.
@@ -566,10 +566,10 @@
     })),
   );
 
-  // â”€â”€ Add custom source â€” resolved by the secondary modal; host only
-  //    merges the result + picks the success-toast copy. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Add custom source — resolved by the secondary modal; host only
+  //    merges the result + picks the success-toast copy. ──────────────────
   function onCustomSourceResolved(resolved: MarketplacePlugin[]) {
-    // Merge resolved entries into the in-memory list â€” overwrite by name
+    // Merge resolved entries into the in-memory list — overwrite by name
     // when the source already had a placeholder.
     const byName = new Map(plugins.map(p => [p.name, p]));
     for (const r of resolved) byName.set(r.name, r);
@@ -578,13 +578,13 @@
     uiStore.showToast(
       resolved.length === 1
         ? `Custom source "${resolved[0].name}" added.`
-        : `Custom source added â€” resolved ${resolved.length} plugins.`,
+        : `Custom source added — resolved ${resolved.length} plugins.`,
       'success',
     );
     addCustomOpen = false;
   }
 
-  // â”€â”€ Auto-refresh interval â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Auto-refresh interval ────────────────────────────────────────────────
   async function changeRefreshHours(next: number | null) {
     const prev = refreshHours;
     refreshHours = next;
@@ -596,7 +596,7 @@
     }
   }
 
-  // â”€â”€ Remove custom source â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Remove custom source ─────────────────────────────────────────────────
   async function removeCustomSource(p: MarketplacePlugin) {
     if (p.source !== 'custom') return;
     try {
@@ -621,7 +621,7 @@
     }
   }
 
-  // â”€â”€ Import ZIP â€” real flow (kept as the only entry point for sideload). â”€â”€
+  // ── Import ZIP — real flow (kept as the only entry point for sideload). ──
   let zipImporting = $state(false);
   async function runZipImport(picked: string) {
     zipPickerOpen = false;
@@ -641,7 +641,7 @@
     }
   }
 
-  // â”€â”€ Context menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Context menu ─────────────────────────────────────────────────────────
   // Right-click on a row opens an actions menu mirroring the buttons in the
   // detail pane. Selecting an item also marks the row as selected so the
   // detail pane is in sync.
@@ -736,12 +736,12 @@
     </ModalHeader>
   {/snippet}
 
-  <!-- â”€â”€ Body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+  <!-- ── Body ────────────────────────────────────────────────────────────── -->
   <div class="mk-root">
 
     <!-- LEFT: filters + list -->
     <aside class="mk-left mk-card">
-      <!-- Installation tabs â€” split installed / available into distinct slots -->
+      <!-- Installation tabs — split installed / available into distinct slots -->
       <div class="mk-install-tabs">
         <Tabs
           variant="pill"
@@ -759,8 +759,8 @@
           type="search"
           bind:value={filter.search}
           placeholder={activeTab === 'plugins'
-            ? 'Search plugins by name, tag, authorâ€¦'
-            : 'Search themes by name or tagâ€¦'}
+            ? 'Search plugins by name, tag, author…'
+            : 'Search themes by name or tag…'}
           clearable
           ariaLabel="Marketplace search"
         >
@@ -778,7 +778,7 @@
               selectionMode="multiple"
               width="220px"
               searchable
-              searchPlaceholder="Filter categoriesâ€¦"
+              searchPlaceholder="Filter categories…"
               items={categoryItems}
             >
               {#snippet trigger({ open, toggle })}
@@ -797,7 +797,7 @@
               selectionMode="multiple"
               width="240px"
               searchable
-              searchPlaceholder="Filter tagsâ€¦"
+              searchPlaceholder="Filter tags…"
               items={pluginTagItems}
             >
               {#snippet trigger({ open, toggle })}
@@ -818,7 +818,7 @@
               selectionMode="multiple"
               width="220px"
               searchable
-              searchPlaceholder="Filter tagsâ€¦"
+              searchPlaceholder="Filter tags…"
               items={themeTagItems}
             >
               {#snippet trigger({ open, toggle })}
@@ -857,13 +857,13 @@
         {/if}
       </div>
 
-      <!-- Registry status banner â€” non-blocking. Only shown when the
+      <!-- Registry status banner — non-blocking. Only shown when the
            community catalog is loading or failed; the Installed list above
            keeps working regardless of network state. -->
       {#if registryState === 'loading'}
         <div class="mk-status-slot">
           <Alert variant="info" compact noIcon>
-            <Spinner size="xs" label="Fetching marketplace catalogâ€¦" />
+            <Spinner size="xs" label="Fetching marketplace catalog…" />
           </Alert>
         </div>
       {:else if registryState === 'error'}
@@ -880,7 +880,7 @@
         </div>
       {/if}
 
-      <!-- LIST â€” single flat list, sorted alphabetically. Visibility of installed
+      <!-- LIST — single flat list, sorted alphabetically. Visibility of installed
            vs available items is driven by the installation tabs above. -->
       <div class="mk-list">
         {#if activeTab === 'plugins'}
@@ -931,7 +931,7 @@
           Showing <strong>{totalShown}</strong> of <strong>{totalAll}</strong>
           {activeTab === 'plugins' ? 'plugins' : 'themes'}
         </span>
-        <button class="mk-link" use:tooltip={'Force re-fetch â€” bypasses the 1h cache'}
+        <button class="mk-link" use:tooltip={'Force re-fetch — bypasses the 1h cache'}
                 onclick={() => loadRegistry(true)} disabled={isLoading}>
           {#if isLoading}
             <Spinner size="xs" ariaLabel="Refreshing marketplace" />
@@ -1069,7 +1069,7 @@
 {/if}
 
 <style>
-  /* â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  /* ── Layout ────────────────────────────────────────────────────────────
      Studio-style two-card body: outer band is --bg-elevated (4px padding
      + gap), inner cards are --bg-base with rounded corners. */
   .mk-root {
@@ -1096,7 +1096,7 @@
     padding: 8px 10px 0;
   }
 
-  /* Top tab badge â€” flips foreground/background when its tab is active so
+  /* Top tab badge — flips foreground/background when its tab is active so
      the count stays readable on the accent-filled pill (the default Tabs
      badge would read accent-on-accent and disappear). Mirrors the
      StudioModal pattern. */
@@ -1117,14 +1117,14 @@
     color: var(--accent);
   }
 
-  /* â”€â”€ Search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-  /* Outer gutter â€” the inner field is rendered by the shared `Input`
+  /* ── Search ────────────────────────────────────────────────────────── */
+  /* Outer gutter — the inner field is rendered by the shared `Input`
      widget so the box / focus / clear chrome stays consistent app-wide. */
   .mk-search-wrap {
     padding: 8px 10px;
   }
 
-  /* â”€â”€ Filters: compact toolbar with multi-select dropdowns + mini chip
+  /* ── Filters: compact toolbar with multi-select dropdowns + mini chip
        groups for source / variant. Single horizontal row, wraps when narrow. */
   .mk-filters {
     padding: 4px 10px 8px;
@@ -1167,7 +1167,7 @@
   .mk-link:disabled { opacity: 0.5; cursor: not-allowed; text-decoration: none; }
   .mk-link-end { margin-left: auto; }
 
-  /* Auto-refresh dropdown wrapper â€” keeps the label + shared Select on the
+  /* Auto-refresh dropdown wrapper — keeps the label + shared Select on the
      same baseline as the other footer links. */
   .mk-auto-refresh {
     display: inline-flex;
@@ -1182,19 +1182,19 @@
     font-size: 9.5px;
   }
 
-  /* Slot around the registry-status Alert â€” pulls it into the same gutter
+  /* Slot around the registry-status Alert — pulls it into the same gutter
      as the list. The loading row is now the shared `<Spinner>` widget
      with a label prop, so no custom row CSS is needed. */
   .mk-status-slot { padding: 6px 10px 0; }
 
-  /* â”€â”€ List â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── List ──────────────────────────────────────────────────────────── */
   .mk-list {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     padding: 4px 6px 12px;
   }
-  /* â”€â”€ Left footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Left footer ───────────────────────────────────────────────────── */
   .mk-left-footer {
     border-top: 1px solid var(--border-subtle);
     padding: 6px 10px 8px;
@@ -1210,7 +1210,7 @@
   }
   .mk-footer-counter strong { color: var(--text-secondary); font-weight: 600; }
 
-  /* â”€â”€ Empty list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Empty list ───────────────────────────────────────────────────── */
   .mk-empty {
     text-align: center;
     padding: 30px 12px;
@@ -1222,6 +1222,6 @@
   }
   .mk-empty p { margin: 0; font-size: var(--font-size-sm); }
 
-  /* Spinner styles moved to the shared `<Spinner>` widget â€” no local
+  /* Spinner styles moved to the shared `<Spinner>` widget — no local
      `.spinning` / @keyframes spin rules needed here anymore. */
 </style>

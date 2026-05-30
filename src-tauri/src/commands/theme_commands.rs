@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use arbor_plugin_marketplace::prelude as mk;
+
 use crate::error::AppError;
 use crate::config::app_config;
 use crate::AppState;
@@ -24,17 +26,11 @@ pub struct ThemeData {
 // ---------------------------------------------------------------------------
 
 /// Directory holding both user-created custom themes (saved via the
-/// SettingsPanel) and marketplace-installed theme JSONs. Mirrors the
-/// `-dev` suffix the other marketplace state files use so a debug-build
-/// Arbor never poisons the release install (or vice versa).
-pub fn themes_dir() -> PathBuf {
-    let filename = if cfg!(debug_assertions) {
-        "themes-dev"
-    } else {
-        "themes"
-    };
-    arbor_core::prelude::arbor_config_path(filename)
-}
+/// SettingsPanel) and marketplace-installed theme JSONs. Single source of
+/// truth lives in `arbor-plugin-marketplace::paths::themes_dir` — the
+/// marketplace installer writes to the same folder this dir-lister reads
+/// back, so they must agree on the `-dev` suffix.
+pub fn themes_dir() -> PathBuf { mk::themes_dir() }
 
 // ---------------------------------------------------------------------------
 // Commands

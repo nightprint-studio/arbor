@@ -9,7 +9,6 @@ description  = "Curated and custom plugin/theme catalog, installer (ZIP extracti
 
 [dependencies]
 arbor-core         = { path = "../../core" }
-arbor-scheduler    = { path = "../../scheduler" }
 arbor-plugin-types = { path = "../types" }
 
 serde        = { workspace = true }
@@ -19,7 +18,6 @@ tracing      = { workspace = true }
 tokio        = { workspace = true }
 futures-util = { workspace = true }
 reqwest      = { workspace = true }
-dirs         = { workspace = true }
 
 # Manifest-file format and dependency version constraints. The marketplace
 # parses third-party plugin.toml during catalog resolution and compares
@@ -27,5 +25,5 @@ dirs         = { workspace = true }
 toml   = "0.8"
 semver = "1"
 
-# ZIP extraction for sideload installs and downloaded entries.
+# ZIP extraction for downloaded entries.
 zip = "2"

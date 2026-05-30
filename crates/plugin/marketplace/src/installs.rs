@@ -5,18 +5,14 @@
 //! by hand are a separate concern: they may or may not appear on disk but
 //! they never show up in the marketplace UI as "installed" unless they
 //! were actually downloaded through it.
-//!
-//! Lives at `~/.config/arbor/marketplace_installed.json` (debug uses a
-//! `-dev` suffix so a side-by-side dev Arbor doesn't poison the prod
-//! install ledger).
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use super::types::RegistryEntry;
+use crate::paths;
+use crate::types::RegistryEntry;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct InstalledFile {
@@ -30,8 +26,7 @@ pub struct InstalledPlugin {
     pub version:      String,
     pub entry:        RegistryEntry,
     /// Commit SHA we resolved at install time (when GitHub returned one).
-    /// Phase 4 can use it to compare against the registry's `pinned_sha` for
-    /// custom sources.
+    /// Used to compare against the registry's `pinned_sha` for custom sources.
     pub resolved_sha: Option<String>,
     /// Absolute path to the install directory on disk.
     pub install_path: String,
@@ -52,24 +47,11 @@ pub struct InstalledTheme {
 }
 
 // ---------------------------------------------------------------------------
-// File location
-// ---------------------------------------------------------------------------
-
-pub fn path() -> PathBuf {
-    let filename = if cfg!(debug_assertions) {
-        "marketplace_installed-dev.json"
-    } else {
-        "marketplace_installed.json"
-    };
-    arbor_core::prelude::arbor_config_path(filename)
-}
-
-// ---------------------------------------------------------------------------
 // Read / write
 // ---------------------------------------------------------------------------
 
 pub fn load() -> InstalledFile {
-    let p = path();
+    let p = paths::installs_file();
     if !p.exists() { return InstalledFile::default(); }
     std::fs::read_to_string(&p)
         .ok()
@@ -78,7 +60,7 @@ pub fn load() -> InstalledFile {
 }
 
 pub fn save(file: &InstalledFile) {
-    let p = path();
+    let p = paths::installs_file();
     if let Some(parent) = p.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             tracing::warn!("marketplace installs: create_dir_all failed: {e}");
@@ -100,7 +82,7 @@ pub fn now_secs() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// Convenience helpers used by the registry + commands
+// Convenience helpers
 // ---------------------------------------------------------------------------
 
 pub fn record_plugin(p: InstalledPlugin) {
@@ -135,20 +117,4 @@ pub fn set_plugin_enabled(name: &str, enabled: bool) {
         p.enabled = enabled;
         save(&file);
     }
-}
-
-// ---------------------------------------------------------------------------
-// On-disk install directory (separate from the host's plugins/ dev dir)
-// ---------------------------------------------------------------------------
-
-/// Directory marketplace-installed plugins live in. Kept intentionally
-/// separate from the host's `plugin_dir()` so dev plugins (or hand-copied
-/// folders) never collide with marketplace installs.
-pub fn marketplace_plugin_dir() -> PathBuf {
-    let filename = if cfg!(debug_assertions) {
-        "marketplace_plugins-dev"
-    } else {
-        "marketplace_plugins"
-    };
-    arbor_core::prelude::arbor_config_path(filename)
 }

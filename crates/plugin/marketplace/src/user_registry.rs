@@ -1,18 +1,14 @@
 //! User-added marketplace source pointers.
 //!
-//! Persisted at `~/.config/arbor/user_registry.toml` (debug uses a `-dev`
-//! suffix to keep dev sessions from poisoning a side-by-side prod
-//! install's pointers).
-//!
 //! The file is a flat list of pointers — *no* resolved metadata. The
 //! actual plugin name / version / permissions are resolved over the
-//! network by `fetcher::resolve_custom_source` and cached separately in
-//! `custom_cache.json` (see `cache.rs`) so an offline boot still has
-//! something to show.
-
-use std::path::PathBuf;
+//! network by [`crate::custom::resolve_custom_source`] and cached
+//! separately in `marketplace_custom.json` (see [`crate::cache`]) so an
+//! offline boot still has something to show.
 
 use serde::{Deserialize, Serialize};
+
+use crate::paths;
 
 // ---------------------------------------------------------------------------
 // File schema
@@ -60,24 +56,11 @@ pub struct UserSource {
 fn default_schema_version() -> u32 { 1 }
 
 // ---------------------------------------------------------------------------
-// File path
-// ---------------------------------------------------------------------------
-
-pub fn path() -> PathBuf {
-    let filename = if cfg!(debug_assertions) {
-        "user_registry-dev.toml"
-    } else {
-        "user_registry.toml"
-    };
-    arbor_core::prelude::arbor_config_path(filename)
-}
-
-// ---------------------------------------------------------------------------
 // Read / write
 // ---------------------------------------------------------------------------
 
 pub fn load() -> UserRegistry {
-    let p = path();
+    let p = paths::user_registry_file();
     if !p.exists() { return UserRegistry::default(); }
     match std::fs::read_to_string(&p) {
         Ok(s) => match toml::from_str(&s) {
@@ -95,7 +78,7 @@ pub fn load() -> UserRegistry {
 }
 
 pub fn save(reg: &UserRegistry) {
-    let p = path();
+    let p = paths::user_registry_file();
     if let Some(parent) = p.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             tracing::warn!("user_registry create_dir_all failed: {e}");

@@ -1,7 +1,7 @@
 //! Marketplace auto-refresh — one entry in the shared `arbor-scheduler`
 //! engine.
 //!
-//! Behaviour mirrored from the previous bespoke loop:
+//! Behaviour:
 //!
 //!   * `refresh_hours = None` / `Some(0)` → auto-refresh disabled.
 //!   * `refresh_hours = Some(n)`          → refresh whenever the on-disk
@@ -9,18 +9,17 @@
 //!   * `poll_minutes`  → how often the engine wakes up to re-evaluate
 //!                       the "is it time?" gate (clamped to [1, 60]).
 //!
-//! The two settings are exposed via [`apply_refresh_hours`] /
-//! [`apply_poll_minutes`], called from `marketplace_set_*` commands so
-//! the running schedule reconfigures on the fly — no app restart.
+//! Lives shell-side because reconfiguration touches `AppHandle` / `AppState`
+//! directly. The marketplace crate stays Tauri-agnostic.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use arbor_plugin_marketplace::prelude as mk;
 use arbor_scheduler::prelude::*;
 use tauri::{AppHandle, Manager};
 
 use crate::AppState;
-use super::cache;
 
 const NAMESPACE: &str = "marketplace";
 const NAME:      &str = "auto_refresh";
@@ -60,7 +59,7 @@ pub fn install(app: AppHandle) {
         let app = app_for_action.clone();
         async move {
             let state = app.state::<AppState>();
-            match super::refresh_community(&state.marketplace).await {
+            match mk::refresh_community(&state.marketplace).await {
                 Ok(()) => tracing::info!("marketplace auto-refresh: catalog refreshed"),
                 Err(e) => tracing::warn!("marketplace auto-refresh failed: {e}"),
             }
@@ -118,7 +117,7 @@ fn is_refresh_due(app: &AppHandle) -> bool {
 /// is missing — that's "infinitely stale" so the next gate evaluation
 /// fires immediately.
 fn current_cache_age_secs() -> u64 {
-    let Some(file) = cache::load_any() else { return u64::MAX; };
+    let Some(file) = mk::load_cache() else { return u64::MAX; };
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     now.saturating_sub(file.fetched_at)

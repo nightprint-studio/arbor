@@ -1,28 +1,29 @@
 //! IPC bridge for the plugin & theme marketplace.
 //!
-//! Phase 3 wires the real zipball installer (`marketplace::installer`) and
-//! enable-toggle plumbing through to `PluginHost`. The marketplace catalog
-//! is a pure remote view; `installed` flags come from
-//! `marketplace_installed.json` (see `marketplace::installs`).
+//! Catalog, cache, installer, install ledger, custom-source resolver, and
+//! refresh helpers all live in `arbor-plugin-marketplace`. This module is
+//! a thin Tauri-side adapter — it locks the in-memory registry, maps
+//! `MarketplaceError` to `AppError` via `?`, mirrors the install /
+//! uninstall / enable transitions into the host's plugin state, and
+//! emits the matching `arbor://*` notifications.
 //!
-//! Dev / hand-copied plugins are NOT reconciled with this catalog — that
-//! separation is by design.
+//! Dev / hand-copied plugins are NOT reconciled with this catalog — the
+//! `Local` rows surface through the same `MarketplaceRegistry::catalog`
+//! call but live in their own pool (see the crate's README).
 
 use std::sync::MutexGuard;
 
 use serde::Deserialize;
 use tauri::{Emitter, State};
 
-use crate::error::{AppError, Result};
-use crate::marketplace::{
-    self,
-    types::{
-        MarketplaceCatalog, MarketplacePlugin, MarketplaceSource, MarketplaceTheme,
-        RegistryEntry,
-    },
-    user_registry::UserSource,
-    MarketplaceRegistry,
+use arbor_plugin_marketplace::prelude as mk;
+use mk::{
+    MarketplaceCatalog, MarketplacePlugin, MarketplaceRegistry, MarketplaceSource,
+    MarketplaceTheme, MarketplaceThemePreview, RegistryEntry, UserSource,
 };
+
+use crate::error::{AppError, Result};
+use crate::marketplace;
 use crate::AppState;
 
 fn lock<'a>(state: &'a State<'a, AppState>) -> Result<MutexGuard<'a, MarketplaceRegistry>> {
@@ -55,7 +56,7 @@ pub async fn marketplace_fetch_registry(
 ) -> Result<MarketplaceCatalog> {
     let needs_refresh = !lock(&state)?.has_fresh_cache();
     if needs_refresh {
-        marketplace::refresh_community(&state.marketplace).await?;
+        mk::refresh_community(&state.marketplace).await?;
     }
     Ok(lock(&state)?.catalog())
 }
@@ -66,8 +67,8 @@ pub async fn marketplace_fetch_registry(
 pub async fn marketplace_refresh_registry(
     state: State<'_, AppState>,
 ) -> Result<MarketplaceCatalog> {
-    marketplace::cache::invalidate();
-    marketplace::refresh_community(&state.marketplace).await?;
+    mk::invalidate_cache();
+    mk::refresh_community(&state.marketplace).await?;
     Ok(lock(&state)?.catalog())
 }
 
@@ -76,8 +77,7 @@ pub async fn marketplace_refresh_registry(
 /// badge so dev plugins are visually distinguishable.
 #[tauri::command]
 pub fn marketplace_installed_plugin_names() -> Result<Vec<String>> {
-    let installs = marketplace::installs::load();
-    Ok(installs.plugins.keys().cloned().collect())
+    Ok(mk::load_installs().plugins.keys().cloned().collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -157,15 +157,18 @@ pub async fn marketplace_install_plugin(
     name:       String,
 ) -> Result<MarketplacePlugin> {
     // Resolve the catalog entry — clone out so we drop the mutex before
-    // hitting the network.
-    let plugin = {
+    // hitting the network. The host reference is taken from the registry
+    // so the installer sees the same dev-plugin dir the rest of the
+    // marketplace surface uses.
+    let (plugin, host) = {
         let reg = lock(&state)?;
-        reg.find_plugin(&name)
-            .ok_or_else(|| AppError::Other(format!("plugin '{name}' not in catalog")))?
+        let plugin = reg.find_plugin(&name)
+            .ok_or_else(|| AppError::Other(format!("plugin '{name}' not in catalog")))?;
+        (plugin, marketplace::TauriMarketplaceHost)
     };
 
-    let installed = marketplace::installer::install_plugin(&plugin).await?;
-    marketplace::installs::record_plugin(installed);
+    let installed = mk::install_plugin(&host, &plugin).await?;
+    mk::record_plugin(installed);
 
     // Tell the host to re-scan so the new folder is picked up.
     reload_plugin_host(&app_handle, &state)?;
@@ -196,11 +199,11 @@ pub fn marketplace_uninstall_plugin(
         host.disable_required_dependents(&name)
     };
     for other in &cascaded {
-        marketplace::installs::set_plugin_enabled(other, false);
+        mk::set_plugin_enabled(other, false);
     }
 
-    marketplace::installer::uninstall_plugin(&name)?;
-    marketplace::installs::forget_plugin(&name);
+    mk::uninstall_plugin(&name)?;
+    mk::forget_plugin(&name);
 
     // Wipe the host's enable-state entry too — keeps the ledger clean.
     let mut states = arbor_plugin_core::prelude::load_plugin_states();
@@ -242,10 +245,10 @@ pub fn marketplace_set_plugin_enabled(
     // the modal reflects state across restarts even without a host re-scan).
     // The cascade list excludes the target when it was already in the desired
     // state — write it explicitly to handle that corner case.
-    marketplace::installs::set_plugin_enabled(&name, enabled);
+    mk::set_plugin_enabled(&name, enabled);
     for other in &cascaded {
         if other != &name {
-            marketplace::installs::set_plugin_enabled(other, enabled);
+            mk::set_plugin_enabled(other, enabled);
         }
     }
 
@@ -280,8 +283,8 @@ pub async fn marketplace_install_theme(
         reg.find_theme(&id)
             .ok_or_else(|| AppError::Other(format!("theme '{id}' not in catalog")))?
     };
-    let installed = marketplace::installer::install_theme(&theme).await?;
-    marketplace::installs::record_theme(installed);
+    let installed = mk::install_theme(&theme).await?;
+    mk::record_theme(installed);
 
     // Tell the frontend so the Settings → Appearance picker picks it up.
     let _ = app_handle.emit("arbor://themes-changed", ());
@@ -300,8 +303,8 @@ pub fn marketplace_uninstall_theme(
     state:      State<'_, AppState>,
     id:         String,
 ) -> Result<MarketplaceTheme> {
-    marketplace::installer::uninstall_theme(&id)?;
-    marketplace::installs::forget_theme(&id);
+    mk::uninstall_theme(&id)?;
+    mk::forget_theme(&id);
     let _ = app_handle.emit("arbor://themes-changed", ());
 
     Ok(lock(&state)?
@@ -313,7 +316,7 @@ pub fn marketplace_uninstall_theme(
 }
 
 // ---------------------------------------------------------------------------
-// Custom source (Phase 4 — async resolve + persist)
+// Custom source — async resolve + persist
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
@@ -342,7 +345,7 @@ pub async fn marketplace_add_custom_source(
         pinned_sha:  args.pinned_sha,
         description: args.description,
     };
-    marketplace::add_custom_source(&state.marketplace, source).await
+    Ok(mk::add_custom_source(&state.marketplace, source).await?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -360,7 +363,7 @@ pub fn marketplace_remove_custom_source(
     state: State<'_, AppState>,
     args:  RemoveCustomSourceArgs,
 ) -> Result<bool> {
-    marketplace::remove_custom_source(&state.marketplace, &args.repo, args.subpath.as_deref())
+    Ok(mk::remove_custom_source(&state.marketplace, &args.repo, args.subpath.as_deref())?)
 }
 
 // ---------------------------------------------------------------------------
@@ -418,7 +421,7 @@ fn stub_theme(id: &str) -> MarketplaceTheme {
         description: String::new(),
         author:      None,
         tags:        None,
-        preview:     marketplace::types::MarketplaceThemePreview {
+        preview:     MarketplaceThemePreview {
             bg: "#000".into(), fg: "#fff".into(),
             accent: "#000".into(), success: "#000".into(),
             warning: "#000".into(), error: "#000".into(),

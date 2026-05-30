@@ -57,7 +57,7 @@ use crate::cloud::{CloudCancellations, CloudPendingOps};
 // `crate::cloud` is now a thin shim around the `arbor-cloud` workspace
 // crate — see `cloud/mod.rs` for the layout / Phase A vs Phase B split.
 use crate::brp::BrpRegistry;
-use crate::marketplace::MarketplaceRegistry;
+use arbor_plugin_marketplace::prelude::MarketplaceRegistry;
 use std::sync::OnceLock;
 use arbor_scheduler::prelude::Scheduler;
 
@@ -181,9 +181,9 @@ pub struct AppState {
     /// at a time. Read-only HTTP for Phase 1; SSE watch + editing in later
     /// phases. See `project_bevy_brp_client.md` memory.
     pub brp: Mutex<BrpRegistry>,
-    /// Plugin & theme marketplace registry. Phase 1 is an in-memory seeded
-    /// catalog (mock data); later phases swap the loader for a GitHub fetcher
-    /// + user_registry.toml persistence.
+    /// Plugin & theme marketplace registry — lives in
+    /// `arbor-plugin-marketplace`, wired to the shell via
+    /// `TauriMarketplaceHost`.
     pub marketplace: Mutex<MarketplaceRegistry>,
     /// Mirrors the `arbor://boot-progress` / `arbor://boot-done` event stream
     /// in shared state as a safety net for dev-mode HMR remounts where the
@@ -392,7 +392,7 @@ impl AppState {
             cloud_cancellations:    Arc::new(Mutex::new(HashMap::new())),
             cloud_pending_ops:      Arc::new(Mutex::new(HashMap::new())),
             brp:                    Mutex::new(BrpRegistry::default()),
-            marketplace:            Mutex::new(MarketplaceRegistry::new()),
+            marketplace:            Mutex::new(crate::marketplace::build_registry()),
             boot_done:              Arc::new(AtomicBool::new(false)),
             boot_progress:          Arc::new(Mutex::new(None)),
             frontend_ready:         Arc::new((Mutex::new(false), Condvar::new())),
@@ -552,7 +552,7 @@ pub fn run() {
                     // root so `arbor-plugin-core` itself stays free of any
                     // marketplace coupling.
                     host.set_extra_plugin_roots(vec![
-                        crate::marketplace::installs::marketplace_plugin_dir(),
+                        arbor_plugin_marketplace::prelude::plugins_dir(),
                     ]);
                 }
 
@@ -1426,7 +1426,7 @@ pub fn run() {
             commands::brp_commands::brp_disconnect,
             commands::brp_commands::brp_status,
             commands::brp_commands::brp_call,
-            // Marketplace (Phase 1 — in-memory stub)
+            // Marketplace
             commands::marketplace_commands::marketplace_list_installed,
             commands::marketplace_commands::marketplace_fetch_registry,
             commands::marketplace_commands::marketplace_refresh_registry,

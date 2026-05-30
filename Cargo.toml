@@ -13,6 +13,7 @@ members = [
     "crates/core",
     "crates/plugin/api",
     "crates/plugin/core",
+    "crates/plugin/marketplace",
     "crates/plugin/types",
     "crates/scheduler",
 ]
