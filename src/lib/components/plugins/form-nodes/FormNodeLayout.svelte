@@ -6,7 +6,7 @@
     tree_layout, wizard, card_row, cfg_list, switch, breadcrumb,
     url_block, monogram, state_block, step_indicator, status_list,
     copy_button, experimental_badge, section_header, filter_button,
-    panel_shell, bottom_panel_header.
+    panel_shell, bottom_panel_header, tooltip.
 
   Receives:
     · node       — the FormNode to render
@@ -580,6 +580,38 @@
       {@render renderNode(child)}
     {/each}
   </PanelShell>
+
+<!-- ── tooltip (wrap children with the host's singleton tooltip) ─────── -->
+{:else if node.type === 'tooltip'}
+  {@const tt    = node as any}
+  {@const ttOpts = {
+    content:     String(tt.content ?? ''),
+    description: tt.description,
+    shortcut:    tt.shortcut,
+    placement:   tt.placement ?? 'auto',
+    delay:       tt.delay,
+    offset:      tt.offset,
+    maxWidth:    tt.max_width,
+    maxHeight:   tt.max_height,
+    markdown:    tt.markdown,
+  }}
+  {#if tt.display === 'block'}
+    <div class="pf-tooltip-wrap pf-tooltip-wrap-block {(node as any).class ?? ''}"
+         style={(node as any).style}
+         use:tooltip={ttOpts}>
+      {#each (tt.children ?? []) as child (child.id)}
+        {@render renderNode(child)}
+      {/each}
+    </div>
+  {:else}
+    <span class="pf-tooltip-wrap {(node as any).class ?? ''}"
+          style={(node as any).style}
+          use:tooltip={ttOpts}>
+      {#each (tt.children ?? []) as child (child.id)}
+        {@render renderNode(child)}
+      {/each}
+    </span>
+  {/if}
 
 <!-- ── filter_button (action-only chip; active flag is patched in) ───── -->
 {:else if node.type === 'filter_button'}

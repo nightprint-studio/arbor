@@ -394,6 +394,19 @@
   }
   .pf-action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+  /* Tooltip wrapper — behavioural-only element added by the `tooltip` FormNode
+     so `use:tooltip` has a real box to attach hover/focus listeners to.
+     `display: contents` would short-circuit mouseenter (no box), so we always
+     paint a real box. Inline default fits buttons/badges/icons; the block
+     variant is opt-in for wrapping a section/panel/info_card subtree. */
+  .pf-tooltip-wrap {
+    display: inline-block;
+    max-width: 100%;
+  }
+  .pf-tooltip-wrap-block {
+    display: block;
+  }
+
   /* Click-to-copy link — looks like a subdued link, the trailing Copy glyph
      signals the action. Kept inline-flex so plugins can drop it alongside
      buttons in a row without alignment drift. */

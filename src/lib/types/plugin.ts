@@ -1915,6 +1915,54 @@ export interface FormNodeFilterButton extends FormNodeBase {
   extra?:   Record<string, unknown>;
 }
 
+// ─── tooltip ──────────────────────────────────────────────────────────────────
+/**
+ * Wraps one or more child nodes with a hover/focus tooltip — same singleton
+ * popover the host uses everywhere (smart placement, viewport-aware flipping,
+ * keyboard focus, optional shortcut hint, optional Markdown body). The wrapper
+ * is purely behavioural: it renders an extra element around its children so
+ * the tooltip action has somewhere to attach.
+ *
+ * Display defaults to `"inline"` (a `<span>` with `display: inline-block`) —
+ * ideal for wrapping a `button`, `monogram`, `copy_button`, `icon`, badge, or
+ * any other inline-sized widget. Set `display = "block"` to render a `<div>`
+ * wrapper instead — needed when wrapping a block-level subtree like a
+ * `section`, `panel_shell`, `info_card`, or any node that paints with its own
+ * width / margins.
+ *
+ * The tooltip is fired by hover and by keyboard focus on any focusable
+ * descendant (buttons, links, focusable inputs). Children render at their
+ * normal size; the wrapper adds no chrome of its own.
+ */
+export interface FormNodeTooltip extends FormNodeBase {
+  type:         'tooltip';
+  children:     FormNode[];
+  /** Primary tooltip text. Required — the wrapper is a no-op when empty. */
+  content:      string;
+  /** Secondary line shown dimmer / smaller under `content`. */
+  description?: string;
+  /** Keyboard shortcut hint rendered as `<kbd>` chips. Either a "+"-joined
+   *  string (`"Ctrl+K"`) or an explicit array (`["Ctrl", "K"]`). */
+  shortcut?:    string | string[];
+  /** Preferred side; the renderer auto-flips on viewport collision. Default
+   *  `"auto"` (top, then bottom / right / left). */
+  placement?:   'top' | 'bottom' | 'left' | 'right' | 'auto';
+  /** Open delay in ms on hover. Default 350. Focus opens immediately. */
+  delay?:       number;
+  /** Distance in px between the trigger and the tooltip. Default 8. */
+  offset?:      number;
+  /** Max width in px. Default 320. */
+  max_width?:   number;
+  /** Max height in px; longer content is clipped with a fade. Default 280. */
+  max_height?:  number;
+  /** Render `content` as sanitised Markdown. Default false (plain text). */
+  markdown?:    boolean;
+  /** Wrapper element. `"inline"` (default) renders a `<span>` with
+   *  `display: inline-block`; `"block"` renders a `<div>` and is required when
+   *  wrapping a block-level subtree (section, panel_shell, info_card, …). */
+  display?:     'inline' | 'block';
+}
+
 export type FormLayoutNode =
   | FormNodeContainer
   | FormNodeRow
@@ -1955,6 +2003,7 @@ export type FormLayoutNode =
   | FormNodeFilterButton
   | FormNodePanelShell
   | FormNodeBottomPanelHeader
+  | FormNodeTooltip
   | FormNodeDiff;
 
 export type FormNode = FormFieldNode | FormLayoutNode;

@@ -2715,6 +2715,15 @@ function FormBuilder:panel_shell(cfg) end
 ---@return arbor.FormBuilder
 function FormBuilder:bottom_panel_header(cfg) end
 
+---Wraps one or more child nodes with the host's singleton tooltip — smart
+---placement, viewport-aware flipping, keyboard focus, optional shortcut
+---hint, optional Markdown body. `display` defaults to `"inline"` (`<span>`,
+---fits buttons / badges / icons); pass `display = "block"` when wrapping a
+---block-level subtree. See `arbor.FormNodeTooltip`.
+---@param  cfg arbor.FormNodeTooltip
+---@return arbor.FormBuilder
+function FormBuilder:tooltip(cfg) end
+
 ---Escape hatch — push an arbitrary node table (any `type`, any extra fields).
 ---@param  node table
 ---@return arbor.FormBuilder
@@ -3410,6 +3419,27 @@ function CoreAssert.register() end
 ---@field scrollable  boolean|nil  Body scrolls. Default true.
 ---@field hide_header boolean|nil  Skip the default header (when outer chrome owns the title bar). Default false.
 ---@field variant     "plain"|"plugin"|nil   Default "plain". `"plugin"` enables the floating-card chrome (elevated header / rounded outer border / `--bg-base` inset body) used by the Plugin Manager and `arbor.ui.add_view` bodies.
+
+---Wraps one or more child nodes with the host's singleton hover/focus
+---tooltip (smart placement, viewport-aware flipping, keyboard focus,
+---optional shortcut hint, optional Markdown body). Display defaults to
+---`"inline"` (a `<span>` with `display: inline-block`) — fits a button,
+---monogram, copy_button, icon, or badge. Set `display = "block"` to render
+---a `<div>` wrapper instead, required when wrapping a block-level subtree
+---(section, panel_shell, info_card, …).
+---@class arbor.FormNodeTooltip : arbor.FormNodeBase
+---@field type        "tooltip"
+---@field children    table[]                      Child node(s) the tooltip attaches to.
+---@field content     string                       Primary tooltip text. Required (the wrapper is a no-op when empty).
+---@field description string|nil                   Secondary line shown dimmer / smaller under `content`.
+---@field shortcut    string|string[]|nil          Keyboard shortcut hint (`"Ctrl+K"` or `{ "Ctrl", "K" }`).
+---@field placement   "top"|"bottom"|"left"|"right"|"auto"|nil   Preferred side; auto-flips on viewport collision. Default `"auto"`.
+---@field delay       integer|nil                  Hover open-delay in ms. Default 350. Focus opens immediately.
+---@field offset      integer|nil                  Distance in px between trigger and tooltip. Default 8.
+---@field max_width   integer|nil                  Max width in px. Default 320.
+---@field max_height  integer|nil                  Max height in px; longer content fades. Default 280.
+---@field markdown    boolean|nil                  Render `content` as sanitised Markdown. Default false.
+---@field display     "inline"|"block"|nil         Wrapper element. `"inline"` (default) → `<span>` (inline-block). `"block"` → `<div>`.
 
 
 -- =============================================================================
