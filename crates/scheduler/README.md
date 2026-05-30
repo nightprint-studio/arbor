@@ -86,15 +86,24 @@ External: `tokio`, `cron`, `chrono`, `tracing`, `thiserror`,
 **Must NOT depend on `mlua`.** The Lua-bridge action lives in
 `arbor-plugin-core`; this crate just exposes the `Action` trait.
 
-## Consumed by (planned migration)
+## Consumed by
 
 - `arbor-plugin-core` — `arbor.scheduler.register` from Lua, via an
-  `Action` impl that wraps `hook_router::fire_on`.
-- `arbor-plugin-marketplace` — auto-refresh task, a single `FixedDelay`
-  entry with a `gate` that re-reads `marketplace.refresh_hours`.
+  `Action` impl that wraps `hook_router::fire_on`. Namespace: `plugin`.
+- `src-tauri/src/marketplace/scheduler.rs` — catalog auto-refresh, a
+  single `FixedDelay` entry with a `gate` that re-reads
+  `marketplace.refresh_hours`. Namespace: `marketplace`.
+
+### Planned
+
 - `arbor-pipeline-core` — scheduled pipeline runs.
 - Any future host loop that wants cancel + focus-gating + on-the-fly
   reconfiguration.
+
+A read-only "Active Schedules" surface in the Arbor UI (Command Palette
+→ *Show Active Schedules*) renders `Scheduler::list()` so users can see
+every currently-registered schedule across namespaces — that's why
+`ScheduleSnapshot` is `Serialize`.
 
 ## Semantics notes
 

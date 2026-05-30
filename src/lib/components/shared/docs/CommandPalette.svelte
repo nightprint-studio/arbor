@@ -78,7 +78,7 @@
   <li><strong>Rebase / Merge</strong> — Continue / Skip / Abort Rebase, Abort Merge (visible only while the repo is in that state)</li>
   <li><strong>Panels</strong> — Toggle Stage / Detail / Terminal / Jobs / Notifications / Sidebar; Show Branches / Git Flow / MRs / Issues / Files / Reflog / Stats / Pipelines</li>
   <li><strong>Copy</strong> — Copy Current Branch Name, Copy Current SHA, Copy <code>origin</code> URL, <em>Copy arbor:// Link to Open Repository</em></li>
-  <li><strong>System</strong> — Settings, Plugin Manager, Reload Plugins, Documentation, About Arbor</li>
+  <li><strong>System</strong> — Settings, Plugin Manager, Reload Plugins, Show Active Schedules, Documentation, About Arbor</li>
   <li><strong>Submodules</strong> — Update All Submodules</li>
   <li><strong>Navigation</strong> — Jump to HEAD, Open in IDE</li>
   <li><strong>Open With</strong> — one entry per detected / custom IDE (only when a repo is open)</li>

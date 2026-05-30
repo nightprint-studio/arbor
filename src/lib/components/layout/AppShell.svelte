@@ -2623,6 +2623,15 @@
     onClose={() => uiStore.closeMarketplace()}
   />
 
+  <!-- Modal: Active Schedules — read-only inspector for arbor-scheduler.
+       Opened from the Command Palette only (no shortcut). Lazy-loaded;
+       the snapshot list is fetched on mount, no background polling. -->
+  <Lazy
+    gate={uiStore.activeSchedulesOpen}
+    loader={() => import('../shared/ActiveSchedulesModal.svelte')}
+    onClose={() => uiStore.closeActiveSchedules()}
+  />
+
   <!-- Modal: Linked Worktrees (cross-project sync) -->
   <WorktreeLinkManagerModal />
   <AddToWorktreeLinkModal />

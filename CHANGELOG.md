@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Command Palette → *Show Active Schedules*: read-only modal listing every currently-registered timer (plugin actions, marketplace auto-refresh, …) grouped by namespace, with trigger cadence, enabled state, and focus-gating / fire-on-load flags.
 - Commit graph splits into six fully reorderable columns — Graph, Branches / Tags, Subject, Author, Date, Hash. Any column (including Graph) can be dragged to any position; edge-dragging resizes; right-click offers hide / show / reset. The Graph column itself is adaptive (auto-sizes to the lanes, capped by its stored width which acts as a maximum). Drag uses a mouse-pointer pattern (no native HTML5 DnD) so the forbidden cursor never shows up. Branch and tag chips live in their own dedicated column. Layout is persisted host-wide in `~/.config/arbor/graph_columns.toml`, separate from the main settings file.
 
 ### Changed

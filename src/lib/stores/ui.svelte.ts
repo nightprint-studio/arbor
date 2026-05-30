@@ -173,6 +173,10 @@ function createUiStore() {
    *  opening Plugin Manager. */
   let marketplaceOpen         = $state(false);
 
+  /** True while ActiveSchedulesModal is mounted (rendered in AppShell).
+   *  Driven by the Command Palette only — no shortcut, no menu entry. */
+  let activeSchedulesOpen     = $state(false);
+
   let appFocused        = $state(true);   // tracks window focus / visibility
 
   let toastCounter = 0;
@@ -511,6 +515,8 @@ function createUiStore() {
   }
   function openMarketplace()  { marketplaceOpen = true; }
   function closeMarketplace() { marketplaceOpen = false; }
+  function openActiveSchedules()  { activeSchedulesOpen = true; }
+  function closeActiveSchedules() { activeSchedulesOpen = false; }
 
   return {
     get sidebarWidth()           { return sidebarWidth; },
@@ -554,9 +560,11 @@ function createUiStore() {
     get addToLinkModalOpen()      { return addToLinkModalOpen; },
     get addToLinkRepoId()         { return addToLinkRepoId; },
     get marketplaceOpen()         { return marketplaceOpen; },
+    get activeSchedulesOpen()     { return activeSchedulesOpen; },
     openLinkManager, closeLinkManager,
     openAddToLink, closeAddToLink,
     openMarketplace, closeMarketplace,
+    openActiveSchedules, closeActiveSchedules,
     setPanel, setSidebarWidth, setRightSidebarWidth, setBottomHeight,
     setAppFocused,
     setActiveSidebarSection, toggleSidebarSection, toggleSidebarVisibility,

@@ -988,6 +988,7 @@ pub fn run() {
             commands::plugin_commands::plugin_dependents,
             commands::plugin_commands::start_plugin_scheduler,
             commands::plugin_commands::stop_plugin_scheduler,
+            commands::scheduler_commands::list_schedules,
             commands::plugin_commands::plugin_settings_get,
             commands::plugin_commands::plugin_settings_set_all,
             commands::plugin_template_commands::export_plugin_template_to_path,
