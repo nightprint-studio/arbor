@@ -1807,6 +1807,114 @@ export interface FormNodeSectionHeader extends FormNodeBase {
   description?: string;
 }
 
+// ─── filter_button ────────────────────────────────────────────────────────────
+/**
+ * Action-only chip-style filter button. Renders the same pill chrome as the
+ * built-in `<FilterButton>` widget (rounded, accent when active, optional
+ * count badge), but clicking it fires a plugin action instead of opening a
+ * dropdown panel.
+ *
+ * Not value-bearing: the active/inactive look is driven by the `active` flag
+ * (and `count > 0`) in the node config, which the plugin flips at runtime via
+ * `arbor.ui.form.patch({ id = "…", merge = { active = … } })`. This keeps
+ * ephemeral filter state out of `values` — the plugin owns it.
+ */
+// ─── bottom_panel_header ──────────────────────────────────────────────────────
+/**
+ * Title bar styled like the host's `<BottomPanelHeader>` — the chrome that
+ * sits at the top of a bottom-docked panel (build output, run console, …).
+ * Standalone header: icon + uppercase title + count badge + optional inline
+ * `children` (status / tab strip) + right-aligned action slot + a mac-style
+ * close affordance when `close_action` is set.
+ *
+ * Distinct from `panel_shell`: that one is a full panel wrapper with body
+ * and footer; `bottom_panel_header` is just the header bar — pair it with
+ * sibling layout nodes when the host owns the body.
+ */
+export interface FormNodeBottomPanelHeader extends FormNodeBase {
+  type:        'bottom_panel_header';
+  title?:      string;
+  /** Lucide icon name shown in the accent slot to the left of the title. */
+  icon?:       string;
+  /** Optional count badge after the title (visible when > 0). */
+  count?:      number;
+  /** Inline content placed after the title and before the spacer. Use for
+   *  status lines / breadcrumb / tab strips. */
+  children?:   FormNode[];
+  /** Right-aligned action nodes, just before the close button. Typically
+   *  `button` / `menu_button` with `class = "ps-btn"`. */
+  actions?:    FormNode[];
+  /** When set, renders the close button on the far right; clicking fires
+   *  this plugin action. When omitted, the close button is hidden. */
+  close_action?: string;
+}
+
+// ─── panel_shell ──────────────────────────────────────────────────────────────
+/**
+ * Panel chrome wrapper — same look as the host's `<PanelShell>` widget used
+ * by every sidebar / main panel (issues, branches, reflog, plugin panels …).
+ * Renders:
+ *   · a header row (icon + uppercase title + count badge + right-aligned
+ *     action buttons),
+ *   · an optional toolbar row below the header (filters / tabs / search …),
+ *   · a scrollable body that hosts the form children,
+ *   · an optional fixed footer.
+ *
+ * Useful inside an `arbor.ui.add_view` body or any plugin modal that wants
+ * to mirror the IntelliJ-style panel chrome rather than the looser form
+ * default flow. Display-only (not value-bearing) — child nodes carry their
+ * own values like anywhere else.
+ *
+ * Pick `variant` to switch chrome:
+ *   - `"plain"` (default) — transparent header, no border around the panel
+ *     (blends inside a modal / parent surface).
+ *   - `"plugin"` — floating-card look: elevated header bar, rounded outer
+ *     border, body rendered as a `--bg-base` inset card. Equivalent of the
+ *     `plugin-panel-shell` class the Plugin Manager and view body use.
+ */
+export interface FormNodePanelShell extends FormNodeBase {
+  type:        'panel_shell';
+  title:       string;
+  /** Lucide icon name shown in the accent slot to the left of the title. */
+  icon?:       string;
+  /** Optional count badge after the title (> 0 to be visible). */
+  count?:      number;
+  /** Right-aligned action nodes on the header row (typically `button` /
+   *  `menu_button` with `class = "ps-btn"`). */
+  actions?:    FormNode[];
+  /** Optional second-row content below the header — search input, filter
+   *  chips, tab bar, etc. */
+  toolbar?:    FormNode[];
+  /** Main body. Scrolls inside the panel when overflow exceeds the body
+   *  height (unless `scrollable = false`). */
+  children:    FormNode[];
+  /** Optional fixed footer below the scrollable body. */
+  footer?:     FormNode[];
+  /** Body scrolls. Default `true`. */
+  scrollable?: boolean;
+  /** Skip the default header (when an outer chrome owns the title bar).
+   *  Default `false`. */
+  hide_header?: boolean;
+  /** Visual variant. Default `"plain"`. */
+  variant?:    'plain' | 'plugin';
+}
+
+export interface FormNodeFilterButton extends FormNodeBase {
+  type:     'filter_button';
+  label:    string;
+  /** Lucide icon name shown before the label. */
+  icon?:    string;
+  /** Numeric badge shown after the label; > 0 also forces the active look
+   *  unless `active` is set explicitly. */
+  count?:   number;
+  /** Active-state override. When unset, falls back to `count > 0`. */
+  active?:  boolean;
+  /** Plugin action fired on click. Merges `extra` into the payload. */
+  action:   string;
+  /** Extra data merged into the action payload. */
+  extra?:   Record<string, unknown>;
+}
+
 export type FormLayoutNode =
   | FormNodeContainer
   | FormNodeRow
@@ -1844,6 +1952,9 @@ export type FormLayoutNode =
   | FormNodeCopyButton
   | FormNodeExperimentalBadge
   | FormNodeSectionHeader
+  | FormNodeFilterButton
+  | FormNodePanelShell
+  | FormNodeBottomPanelHeader
   | FormNodeDiff;
 
 export type FormNode = FormFieldNode | FormLayoutNode;

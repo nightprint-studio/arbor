@@ -869,6 +869,7 @@
     'breadcrumb', 'url_block', 'monogram', 'state_block',
     'step_indicator', 'status_list',
     'copy_button', 'experimental_badge', 'section_header',
+    'filter_button', 'panel_shell', 'bottom_panel_header',
   ]);
   const BUTTON_TYPES = new Set(['button', 'menu_button', 'suggest_grid']);
   const CHART_TYPES  = new Set([

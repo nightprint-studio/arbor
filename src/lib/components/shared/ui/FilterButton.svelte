@@ -21,6 +21,14 @@
     loading?: boolean;
     /** Fired when the panel opens (use for lazy-loading filter options) */
     onopen?: () => void;
+    /**
+     * When set, clicking the chip fires this callback **instead** of opening
+     * the dropdown panel. The chip becomes a pure action toggle — its
+     * active/inactive look is still driven by the `active` / `count` props.
+     * Use this for filters whose state is owned upstream (eg. plugin
+     * form-node "filter_button" patched via `arbor.ui.form.patch`).
+     */
+    onClick?: () => void;
     children?: Snippet<[{ filter: string; close: () => void }]>;
     class?: string;
   }
@@ -35,6 +43,7 @@
     searchPlaceholder = 'Filter…',
     loading = false,
     onopen,
+    onClick,
     children,
     class: rootClass = '',
   }: Props = $props();
@@ -48,6 +57,7 @@
   const isActive = $derived(active !== undefined ? active : count > 0);
 
   function toggle(e: MouseEvent) {
+    if (onClick) { onClick(); return; }
     if (open) { close(); return; }
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     anchor = { x: r.left, y: r.bottom + 4 };
@@ -90,7 +100,7 @@
     {#if Icon}<Icon size={10} />{/if}
     {label}
     {#if count > 0}<span class="chip-badge">{count}</span>{/if}
-    <ChevronDown size={9} />
+    {#if !onClick}<ChevronDown size={9} />{/if}
   </button>
 
   {#if open && anchor}

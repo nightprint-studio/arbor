@@ -5,7 +5,8 @@
     code, label, divider, info_card, chip_bar, form_field, tabs,
     tree_layout, wizard, card_row, cfg_list, switch, breadcrumb,
     url_block, monogram, state_block, step_indicator, status_list,
-    copy_button, experimental_badge, section_header.
+    copy_button, experimental_badge, section_header, filter_button,
+    panel_shell, bottom_panel_header.
 
   Receives:
     · node       — the FormNode to render
@@ -33,6 +34,9 @@
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import ExperimentalBadge from '$lib/components/shared/ui/ExperimentalBadge.svelte';
   import SectionHeader     from '$lib/components/shared/ui/SectionHeader.svelte';
+  import FilterButton      from '$lib/components/shared/ui/FilterButton.svelte';
+  import PanelShell        from '$lib/components/shared/ui/PanelShell.svelte';
+  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
   import InfoCard  from '$lib/components/shared/ui/InfoCard.svelte';
   import ChipBar   from '$lib/components/shared/ui/ChipBar.svelte';
@@ -506,6 +510,90 @@
   <div class={(node as any).class ?? ''} style={(node as any).style}>
     <SectionHeader title={sh.title ?? ''} description={sh.description} />
   </div>
+
+<!-- ── bottom_panel_header (header bar only; pair with siblings) ─────── -->
+{:else if node.type === 'bottom_panel_header'}
+  {@const bp     = node as any}
+  {@const BpIcon = bp.icon ? PLUGIN_ICONS[bp.icon] : null}
+  <div class={(node as any).class ?? ''} style={(node as any).style}>
+    <BottomPanelHeader
+      title={bp.title}
+      count={bp.count ?? null}
+      hideClose={!bp.close_action}
+      onClose={bp.close_action
+        ? () => ctx.handleButtonAction(bp.close_action, false)
+        : undefined}
+    >
+      {#if BpIcon}
+        {#snippet icon()}<BpIcon size={13} />{/snippet}
+      {/if}
+      {#if Array.isArray(bp.actions) && bp.actions.length > 0}
+        {#snippet actions()}
+          {#each bp.actions as actNode (actNode.id)}
+            {@render renderNode(actNode)}
+          {/each}
+        {/snippet}
+      {/if}
+      {#each (bp.children ?? []) as child (child.id)}
+        {@render renderNode(child)}
+      {/each}
+    </BottomPanelHeader>
+  </div>
+
+<!-- ── panel_shell (PanelShell chrome around children) ───────────────── -->
+{:else if node.type === 'panel_shell'}
+  {@const ps     = node as any}
+  {@const PsIcon = ps.icon ? PLUGIN_ICONS[ps.icon] : null}
+  {@const psClass = (ps.variant === 'plugin' ? 'plugin-panel-shell ' : '') + ((node as any).class ?? '')}
+  <PanelShell
+    title={ps.title ?? ''}
+    count={ps.count ?? null}
+    scrollable={ps.scrollable !== false}
+    hideHeader={!!ps.hide_header}
+    class={psClass}
+  >
+    {#if PsIcon}
+      {#snippet icon()}<PsIcon size={13} />{/snippet}
+    {/if}
+    {#if Array.isArray(ps.actions) && ps.actions.length > 0}
+      {#snippet actions()}
+        {#each ps.actions as actNode (actNode.id)}
+          {@render renderNode(actNode)}
+        {/each}
+      {/snippet}
+    {/if}
+    {#if Array.isArray(ps.toolbar) && ps.toolbar.length > 0}
+      {#snippet toolbar()}
+        {#each ps.toolbar as tbNode (tbNode.id)}
+          {@render renderNode(tbNode)}
+        {/each}
+      {/snippet}
+    {/if}
+    {#if Array.isArray(ps.footer) && ps.footer.length > 0}
+      {#snippet footer()}
+        {#each ps.footer as ftNode (ftNode.id)}
+          {@render renderNode(ftNode)}
+        {/each}
+      {/snippet}
+    {/if}
+    {#each (ps.children ?? []) as child (child.id)}
+      {@render renderNode(child)}
+    {/each}
+  </PanelShell>
+
+<!-- ── filter_button (action-only chip; active flag is patched in) ───── -->
+{:else if node.type === 'filter_button'}
+  {@const fb = node as any}
+  {@const FbIcon = fb.icon ? PLUGIN_ICONS[fb.icon] : null}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <FilterButton
+      label={fb.label ?? ''}
+      icon={FbIcon ?? undefined}
+      count={fb.count ?? 0}
+      active={fb.active}
+      onClick={() => ctx.handleButtonAction(fb.action, false, fb.extra)}
+    />
+  </span>
 
 <!-- ── form_field ────────────────────────────────────────────────────── -->
 {:else if node.type === 'form_field'}

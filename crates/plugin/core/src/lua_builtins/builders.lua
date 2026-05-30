@@ -390,6 +390,9 @@ FormBuilder.chip_bar           = _make_display("chip_bar")
 FormBuilder.copy_button        = _make_display("copy_button")
 FormBuilder.experimental_badge = _make_display("experimental_badge")
 FormBuilder.section_header     = _make_display("section_header")
+FormBuilder.filter_button      = _make_display("filter_button")
+FormBuilder.panel_shell        = _make_display("panel_shell")
+FormBuilder.bottom_panel_header = _make_display("bottom_panel_header")
 
 ---Escape hatch — push an arbitrary node table (any `type`, any extra fields).
 function FormBuilder:field(node)

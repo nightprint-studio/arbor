@@ -2697,6 +2697,24 @@ function FormBuilder:experimental_badge(cfg) end
 ---@return arbor.FormBuilder
 function FormBuilder:section_header(cfg) end
 
+---Action-only chip-style filter button. See `arbor.FormNodeFilterButton`.
+---@param  cfg arbor.FormNodeFilterButton
+---@return arbor.FormBuilder
+function FormBuilder:filter_button(cfg) end
+
+---Panel chrome wrapper (icon + title + count + actions + toolbar + body +
+---footer) — same look as the host's `<PanelShell>` widget. See
+---`arbor.FormNodePanelShell`.
+---@param  cfg arbor.FormNodePanelShell
+---@return arbor.FormBuilder
+function FormBuilder:panel_shell(cfg) end
+
+---Bottom-panel title bar (header only — pair with sibling layout nodes
+---for the body). See `arbor.FormNodeBottomPanelHeader`.
+---@param  cfg arbor.FormNodeBottomPanelHeader
+---@return arbor.FormBuilder
+function FormBuilder:bottom_panel_header(cfg) end
+
 ---Escape hatch — push an arbitrary node table (any `type`, any extra fields).
 ---@param  node table
 ---@return arbor.FormBuilder
@@ -3343,6 +3361,55 @@ function CoreAssert.register() end
 ---@field type        "section_header"
 ---@field title       string
 ---@field description string|nil
+
+---Action-only chip-style filter button. Same pill chrome as the host's
+---`<FilterButton>` widget (rounded outline, accent when active, optional
+---count badge). Clicking fires `action` — NOT value-bearing, no submit.
+---The active look is driven by the `active` flag (or `count > 0`), which
+---the plugin flips at runtime via
+---`arbor.ui.form.patch({ id = "…", merge = { active = … } })`.
+---@class arbor.FormNodeFilterButton : arbor.FormNodeBase
+---@field type    "filter_button"
+---@field label   string
+---@field icon    string|nil   Lucide icon name shown before the label.
+---@field count   integer|nil  Badge after the label; > 0 forces the active look unless `active` is set.
+---@field active  boolean|nil  Active-state override. Falls back to `count > 0`.
+---@field action  string       Plugin action fired on click.
+---@field extra   table|nil    Extra data merged into the action payload.
+
+---Bottom-panel title bar — same look as the host's `<BottomPanelHeader>`.
+---Standalone header (no body, no footer): icon + uppercase title + count
+---badge + inline `children` + right-aligned actions + a mac-style close
+---button when `close_action` is set. Distinct from `panel_shell` (full
+---wrapper with body); pair this with sibling layout nodes when the host
+---owns the body content.
+---@class arbor.FormNodeBottomPanelHeader : arbor.FormNodeBase
+---@field type         "bottom_panel_header"
+---@field title        string|nil
+---@field icon         string|nil    Lucide icon name shown before the title.
+---@field count        integer|nil   Count badge after the title (visible when > 0).
+---@field children     table[]|nil   Inline content placed after the title (status / breadcrumb / tab strip).
+---@field actions      table[]|nil   Right-aligned action nodes (typically `button` with `class = "ps-btn"`).
+---@field close_action string|nil    When set, renders the close button on the far right; fires this action on click.
+
+---Panel chrome wrapper — same look as the host's `<PanelShell>` widget used
+---by every sidebar / main panel. Header (icon + uppercase title + count
+---badge + right-aligned actions) on top, optional toolbar row, scrollable
+---body, and optional fixed footer. Use inside `arbor.ui.add_view` bodies
+---or plugin modals that want IntelliJ-style panel chrome. Display-only
+---(child nodes still carry their own values).
+---@class arbor.FormNodePanelShell : arbor.FormNodeBase
+---@field type        "panel_shell"
+---@field title       string
+---@field icon        string|nil   Lucide icon name shown to the left of the title.
+---@field count       integer|nil  Count badge after the title (visible when > 0).
+---@field actions     table[]|nil  Right-aligned action nodes (typically `button` with `class = "ps-btn"`).
+---@field toolbar     table[]|nil  Second-row content (search input / filter chips / tab bar / …).
+---@field children    table[]      Main body — nodes laid out as in any other container.
+---@field footer      table[]|nil  Fixed footer below the scrolling body.
+---@field scrollable  boolean|nil  Body scrolls. Default true.
+---@field hide_header boolean|nil  Skip the default header (when outer chrome owns the title bar). Default false.
+---@field variant     "plain"|"plugin"|nil   Default "plain". `"plugin"` enables the floating-card chrome (elevated header / rounded outer border / `--bg-base` inset body) used by the Plugin Manager and `arbor.ui.add_view` bodies.
 
 
 -- =============================================================================
