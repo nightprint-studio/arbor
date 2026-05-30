@@ -66,7 +66,7 @@ html, body { height: 100%; overflow: hidden; }
   --graph-lane-0:    #3d7fff;
   --graph-lane-1:    #ff8c00;
   --graph-lane-2:    #4db84d;
-  --graph-lane-3:    #b06fd4;
+  --graph-lane-3:    #7873e6;
   --graph-lane-4:    #ff4444;
   --graph-lane-5:    #00d4cc;
   --graph-lane-6:    #ffcc00;
@@ -463,10 +463,10 @@ input[type="number"]::-webkit-outer-spin-button {
   text-overflow: ellipsis;
   letter-spacing: 0.1px;
 }
-.badge-branch   { background: color-mix(in srgb, var(--graph-lane-0) 28%, transparent); color: var(--graph-lane-0); border: 1px solid color-mix(in srgb, var(--graph-lane-0) 55%, transparent); font-weight: 600; letter-spacing: 0.3px; padding: 0 8px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--graph-lane-0) 12%, transparent); }
+.badge-branch   { background: color-mix(in srgb, var(--graph-lane-0) 28%, transparent); color: var(--graph-lane-0); border: 1px solid color-mix(in srgb, var(--graph-lane-0) 55%, transparent); border-radius: 3px; font-weight: 600; letter-spacing: 0.3px; padding: 0 6px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--graph-lane-0) 12%, transparent); }
 .badge-remote   { background: color-mix(in srgb, var(--graph-lane-1) 20%, transparent); color: var(--graph-lane-1); border: 1px solid color-mix(in srgb, var(--graph-lane-1) 40%, transparent); }
 .badge-tag      { background: color-mix(in srgb, var(--color-tag) 18%, transparent); color: var(--color-tag); border: 1px solid color-mix(in srgb, var(--color-tag) 38%, transparent); border-radius: 3px; }
-.badge-head     { background: color-mix(in srgb, var(--success) 30%, transparent);   color: var(--success);   border: 1px solid color-mix(in srgb, var(--success) 60%, transparent); font-weight: 600; letter-spacing: 0.3px; padding: 0 8px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 15%, transparent); }
+.badge-head     { background: color-mix(in srgb, var(--success) 30%, transparent);   color: var(--success);   border: 1px solid color-mix(in srgb, var(--success) 60%, transparent); border-radius: 3px; font-weight: 600; letter-spacing: 0.3px; padding: 0 6px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 15%, transparent); }
 
 /* ---- Dividers ---- */
 .divider {

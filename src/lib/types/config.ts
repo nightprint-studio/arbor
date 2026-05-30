@@ -35,6 +35,27 @@ export interface GraphConfig {
   ticket_links_enabled: boolean;
 }
 
+/** Stable id of a commit-graph column.
+ *  `graph` is the SVG lane diagram; the rest are text cells. */
+export type GraphColumnId = 'graph' | 'refs' | 'subject' | 'author' | 'date' | 'hash';
+
+export interface GraphColumn {
+  id: GraphColumnId;
+  /** Track width in px. Semantics depend on the id:
+   *  - `graph`   → MAX width; the track auto-sizes to `svgW + 12` and
+   *                caps at this value (cap softens when the natural lane
+   *                count would exceed it, so no lanes get clipped).
+   *  - `subject` → MIN width; column flex-grows past it via `minmax(W, 1fr)`.
+   *  - everything else → fixed track width. */
+  width: number;
+  visible: boolean;
+}
+
+export interface GraphColumnsConfig {
+  /** Ordered column list. Index 0 is leftmost; last is rightmost. */
+  columns: GraphColumn[];
+}
+
 export interface CacheConfig {
   enabled: boolean;
   max_tabs: number;

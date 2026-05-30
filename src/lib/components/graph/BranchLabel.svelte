@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Tag, GitBranch } from 'lucide-svelte';
+  import { Tag, Monitor, Globe } from 'lucide-svelte';
   import { laneColor } from '$lib/utils/graph-renderer';
   import { tooltip } from '$lib/actions/tooltip';
   import { copyToClipboard } from '$lib/utils/clipboard';
@@ -61,7 +61,12 @@
   </span>
 {:else}
   <span class={cls} style={laneStyle} use:tooltip={ref.name}>
-    <GitBranch size={10} /><span class="label-text">{displayName}</span>
+    {#if isRemoteBranch}
+      <Globe size={10} />
+    {:else}
+      <Monitor size={10} />
+    {/if}
+    <span class="label-text">{displayName}</span>
   </span>
 {/if}
 
@@ -70,9 +75,10 @@
     color: var(--lc);
     background: color-mix(in srgb, var(--lc) 28%, transparent);
     border: 1px solid color-mix(in srgb, var(--lc) 55%, transparent);
+    border-radius: 3px;
     font-weight: 600;
     letter-spacing: 0.3px;
-    padding: 0 8px;
+    padding: 0 6px;
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--lc) 12%, transparent);
   }
 
@@ -80,17 +86,27 @@
      a tag at small sizes, not a chevron.
      Long names are truncated from the LEFT (via `direction: rtl` +
      `text-align: left`) so the meaningful suffix — e.g. the bit after
-     `feature/` — stays visible when the row runs out of room. */
+     `feature/` — stays visible when the row runs out of room.
+     No explicit `max-width` — the label fills whatever the parent column
+     gives it, so resizing the Branches/Tags column expands the visible name. */
   .label-text {
     margin-left: 3px;
-    display: inline-block;
-    max-width: 180px;
-    vertical-align: bottom;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     direction: rtl;
     text-align: left;
+  }
+
+  /* Lock the leading icon to its declared size. Without an explicit
+     `flex-shrink: 0` the SVG (which is a flex item alongside `.label-text`)
+     gets compressed when the chip shrinks to fit a narrow Branches/Tags
+     column — the user reported icons squashed into thin slivers. The label
+     is the only thing that should shrink; the glyph stays crisp. */
+  .badge :global(svg) {
+    flex-shrink: 0;
   }
 
   /* Tag chips are click-to-copy — give them cursor + hover affordance. */

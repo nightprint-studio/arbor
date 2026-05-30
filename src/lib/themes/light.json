@@ -47,7 +47,7 @@
     "--graph-lane-9":     "#64748b",
     "--graph-glow-intensity": "0",
     "--graph-halo-intensity": "0",
-    "--graph-row-bg-opacity": "0.18",
+    "--graph-row-bg-opacity": "0.55",
     "--ws-color-0":       "#2563eb",
     "--ws-color-1":       "#ea580c",
     "--ws-color-2":       "#16a34a",

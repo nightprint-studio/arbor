@@ -7,9 +7,17 @@ export const NODE_RADIUS     = 10;
  *  The path is centered in the inter-node gap; any extension beyond the
  *  natural gap sits behind the opaque node circle and is invisible. */
 export const MIN_EDGE_LENGTH = 8;
+/** Left-side padding (px) baked into every node x-coordinate so the
+ *  outermost ring of a HEAD commit on lane 0 (`r = NODE_RADIUS + 8 = 18`)
+ *  doesn't get clipped by the lane-pane's `overflow: hidden`. Without
+ *  this offset lane 0 sits at `x = 13` and the halo's left edge falls at
+ *  `x = -5`, drawing onto the previous column. Adds a constant offset to
+ *  every consumer (CommitGraph SVG nodes/edges, WipRow dashed circle,
+ *  edge-path drawer) automatically. */
+export const GRAPH_LEFT_PAD  = 8;
 
 export function nodeX(lane: number): number {
-  return LANE_WIDTH * lane + LANE_WIDTH / 2;
+  return LANE_WIDTH * lane + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
 }
 
 export function nodeY(row: number): number {

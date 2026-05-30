@@ -1038,6 +1038,9 @@ pub fn run() {
             // Graph config
             commands::config_commands::get_graph_config,
             commands::config_commands::set_graph_config,
+            // Graph column layout (separate TOML)
+            commands::config_commands::get_graph_columns,
+            commands::config_commands::set_graph_columns,
             // Cache config
             commands::config_commands::get_cache_config,
             commands::config_commands::set_cache_config,

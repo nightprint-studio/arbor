@@ -2,6 +2,7 @@ use tauri::State;
 use crate::error::AppError;
 use crate::config::repo_config::{BranchGroupingConfig, RepoConfig, load as load_repo_config, save as save_repo_config};
 use crate::config::app_config::{self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, OnboardingConfig, PipelinesConfig, RecoveryConfig, StudioSettings};
+use crate::config::graph_columns::{self, GraphColumnsConfig};
 use crate::AppState;
 
 // Cap the persisted recent-repo list. With WelcomeScreen showing 6 and the
@@ -168,6 +169,26 @@ pub fn mark_tag_pushed(
         save_repo_config(&repo.path, &config)?;
     }
     Ok(())
+}
+
+// ── Graph columns (separate TOML, not part of AppConfig) ────────────────────
+//
+// Layout of the commit-graph header — column order, per-column width,
+// visibility, plus the lane-track width. Persisted standalone in
+// `~/.config/arbor/graph_columns.toml` so it can be reset without touching
+// the rest of `config.toml`.
+
+/// Return the persisted graph column layout, falling back to defaults when
+/// the file is missing or unreadable.
+#[tauri::command]
+pub fn get_graph_columns() -> Result<GraphColumnsConfig, AppError> {
+    Ok(graph_columns::load())
+}
+
+/// Persist a new graph column layout.
+#[tauri::command]
+pub fn set_graph_columns(config: GraphColumnsConfig) -> Result<(), AppError> {
+    graph_columns::save(&config).map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// Return the current graph configuration.

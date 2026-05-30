@@ -109,13 +109,19 @@
       opacity={dotOpacity}
     />
 
-    <!-- Avatar image — clipped by the <clipPath id="ac-{oid}"> defined in CommitGraph -->
+    <!-- Avatar image — clipped by the <clipPath id="ac-{oid}"> defined in
+         CommitGraph. The image box is `(NODE_RADIUS + 1) * 2` wide so the
+         scaled-up initials/Gravatar circle fills the entire clipped area
+         (now r = NODE_RADIUS + 1) and slips under the colored border ring.
+         Without this 1px extension the ring's inner edge sat outside the
+         avatar and a sliver of row background leaked through as a dark
+         anti-aliased line. -->
     <image
       href={avatarUrl(node.author.email, node.author.name)}
-      x={cx - NODE_RADIUS}
-      y={cy - NODE_RADIUS}
-      width={NODE_RADIUS * 2}
-      height={NODE_RADIUS * 2}
+      x={cx - NODE_RADIUS - 1}
+      y={cy - NODE_RADIUS - 1}
+      width={NODE_RADIUS * 2 + 2}
+      height={NODE_RADIUS * 2 + 2}
       clip-path="url(#ac-{node.oid})"
       preserveAspectRatio="xMidYMid slice"
       opacity={dotOpacity}

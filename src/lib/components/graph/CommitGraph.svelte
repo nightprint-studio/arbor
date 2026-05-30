@@ -6,12 +6,16 @@
   import GraphSearch from './GraphSearch.svelte';
   import GraphContextMenu from './GraphContextMenu.svelte';
   import WipRow from './WipRow.svelte';
+  import CommitGraphHeader from './CommitGraphHeader.svelte';
+  import { graphColumnsStore } from '$lib/stores/graphColumns.svelte';
+  import type { GraphColumnId } from '$lib/types/config';
   import CreateBranchModal from './CreateBranchModal.svelte';
   import CreateTagModal from './CreateTagModal.svelte';
   import TicketChip from './TicketChip.svelte';
   import TicketPickerModal from '../shared/TicketPickerModal.svelte';
   import NotesModal from './NotesModal.svelte';
-  import { PanelBottom, X, ArrowUpToLine, FileSearch, Archive, StickyNote, Download, Layers, Loader, Link2, Globe } from 'lucide-svelte';
+  import { PanelBottom, X, ArrowUpToLine, FileSearch, Archive, StickyNote, Download, Layers, Loader, Link2, Globe, Tag, Tags } from 'lucide-svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
@@ -45,7 +49,7 @@
   import { ensureAvatar } from '$lib/stores/avatars.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   import { tooltip } from '$lib/actions/tooltip';
-  import type { CommitNode, GraphEdge as GraphEdgeData, RepoStatus, TicketLink, StashRef } from '$lib/types/git';
+  import type { CommitNode, GraphEdge as GraphEdgeData, RepoStatus, TicketLink, StashRef, RefLabel } from '$lib/types/git';
   import type { MergedMrHint } from '$lib/types/mr';
   import RepoActions from '../sidebar/RepoActions.svelte';
 
@@ -244,6 +248,49 @@
   const totalRows = $derived(data?.nodes.length ?? 0);
   const svgW = $derived(svgWidth(data?.lane_count ?? 1));
 
+  // ── Column tracks (grid layout) ────────────────────────────────────────────
+  // One unified grid template covers EVERY visible column, including the
+  // SVG lane column (`graph`). That way the user can drag `graph` to any
+  // position in the row — first, middle, last — and the SVG track moves
+  // with it. The graph column is adaptive: its track auto-sizes to `svgW
+  // + LANE_GUTTER_PX`, capped at the column's stored `width` (= the cap).
+  // When the natural lane count would exceed the cap, the cap softens so
+  // no lanes ever get clipped.
+  // The subject column is the flex track: `minmax(width, 1fr)` absorbs
+  // whatever horizontal slack remains. Every other column is fixed-px.
+  const LANE_GUTTER_PX = 12;
+  const visibleCols    = $derived(graphColumnsStore.columns.filter(c => c.visible));
+  /** 0-based index of the `graph` column within `visibleCols`, or -1 if
+   *  the user has hidden it. Used to grid-place the SVG. */
+  const graphColIdx    = $derived(visibleCols.findIndex(c => c.id === 'graph'));
+  /** Effective px width of the graph track, taking the adaptive formula
+   *  into account. -1 when the column is hidden. */
+  const graphTrackWidth = $derived.by(() => {
+    if (graphColIdx < 0) return 0;
+    const cap = visibleCols[graphColIdx].width;
+    return Math.max(svgW, Math.min(svgW + LANE_GUTTER_PX, cap));
+  });
+  const gridTemplate = $derived(
+    visibleCols
+      .map(c => {
+        // `graph`   → adaptive cap, computed above.
+        // `subject` → pure flex (`minmax(0, 1fr)`): absorbs leftover space
+        //             when there's room, and yields when other columns
+        //             would otherwise force the body wider than the
+        //             viewport. No grip — the column has no meaningful
+        //             width to set.
+        // `hash`    → `max-content`: short-OID is a fixed 7 chars so an
+        //             auto-sized track is both predictable and minimal.
+        //             Also gripless.
+        // everything else → fixed-px track sized by the stored width.
+        if (c.id === 'graph')   return `${graphTrackWidth}px`;
+        if (c.id === 'subject') return 'minmax(0, 1fr)';
+        if (c.id === 'hash')    return 'max-content';
+        return `${c.width}px`;
+      })
+      .join(' ')
+  );
+
   // ── Stash markers ──────────────────────────────────────────────────────────
   // GitKraken-style: a small dashed line + bubble anchored on the commit the
   // stash was created from. Parent OIDs come straight from the backend's
@@ -332,12 +379,59 @@
     }
   }
 
+  // ── Tag stack popup ──────────────────────────────────────────────────────
+  // When a commit carries multiple tags — or even a single tag *together*
+  // with one or more branches — the refs cell renders one compact "Tags
+  // (N)" chip instead of stacking every tag inline (where they'd fight
+  // the branch labels for horizontal space). Clicking the chip opens a
+  // ContextMenu listing each tag; clicking a row copies the tag name.
+  let tagsPopup = $state<{ x: number; y: number; tags: RefLabel[] } | null>(null);
+
+  const tagsPopupItems = $derived.by<MenuItem[]>(() => {
+    if (!tagsPopup) return [];
+    const items: MenuItem[] = [];
+    tagsPopup.tags.forEach((t, i) => {
+      if (i > 0) items.push({ id: `sep-${t.name}`, label: '', separator: true });
+      items.push({
+        id:        `tag-${t.name}`,
+        label:     t.name,
+        subtitle:  'Click to copy',
+        icon:      Tag,
+        iconColor: 'var(--color-tag)',
+      });
+    });
+    return items;
+  });
+
+  function openTagsPopupAt(x: number, y: number, tags: RefLabel[]) {
+    tagsPopup = { x, y, tags };
+  }
+
+  async function handleTagsPopupSelect(id: string) {
+    const name = id.replace(/^tag-/, '');
+    tagsPopup = null;
+    if (!name) return;
+    await copyToClipboard(name, { successToast: `Copied "${name}"`, errorToast: 'Copy failed' });
+  }
+
   // Resolves ANY ref name (local or remote) to the color_index that should be
   // used to render its label. Centralised on the graph store so the sidebar's
   // BranchTree reads from the same source — without that, the sidebar's branch
   // icon colour drifts from the pill colour in the graph.
   const refColorByName = $derived(graphStore.refColorByName);
   const svgH = $derived(svgHeight(totalRows));
+  /**
+   * Top / bottom breathing room inside the graph body so HEAD halos,
+   * triangle pins, and the soft outer rings of the first / last commit
+   * have somewhere to render. Without this padding the lane-pane's
+   * `overflow: hidden` cropped the very top edge of the first node
+   * (`r = NODE_RADIUS + 8`) into a flat line.
+   *
+   * Applied symmetrically to: graph-body height, SVG height + viewBox y
+   * origin, and every commit row's `top:`. The three offsets must stay
+   * in sync — pin the constant here and read it from one place.
+   */
+  const GRAPH_VPAD = 10;
 
   $effect(() => {
     graphStore.refreshTick;         // re-run when auto-fetch or manual refresh fires
@@ -449,20 +543,22 @@
   let pendingScrollOid = $state<string | null>(null);
   let loadingFullForScroll = $state(false);
   /** scrollTop value that places `nodeY` centred in the visible area.
-   *  Accounts for `.scroll-area`'s `padding-top` — the padding scrolls with
-   *  the content, so `nodeY(row)` (relative to the SVG body) is offset by
-   *  `padding-top` inside the scrollable coordinate system.  Without this
-   *  fix the target lands `padding-top` below visual centre. */
+   *  Accounts for `.scroll-area`'s `padding-top` AND the extra `GRAPH_VPAD`
+   *  applied inside the graph body so HEAD halos / triangle pins don't
+   *  clip — both offsets scroll with the content, so any row's actual
+   *  position in the scrollable coordinate system is `padTop + GRAPH_VPAD
+   *  + nodeY(row) - ROW_HEIGHT/2`. (Header + sticky WIP heights are still
+   *  approximated away — they're sticky so they don't push content). */
   function centerScrollTop(rowY: number): number {
     const padTop = scrollEl ? parseFloat(getComputedStyle(scrollEl).paddingTop) || 0 : 0;
-    return Math.max(0, rowY + padTop - viewportH / 2);
+    return Math.max(0, rowY + padTop + GRAPH_VPAD - viewportH / 2);
   }
   /** Same idea as `centerScrollTop` but biases the target toward the top of
    *  the viewport (used by HEAD-scroll: HEAD lives at the bottom of the
    *  history so we want it ~1/3 down rather than centred). */
   function topThirdScrollTop(rowY: number): number {
     const padTop = scrollEl ? parseFloat(getComputedStyle(scrollEl).paddingTop) || 0 : 0;
-    return Math.max(0, rowY + padTop - viewportH / 3);
+    return Math.max(0, rowY + padTop + GRAPH_VPAD - viewportH / 3);
   }
 
   // Debounce timer for clearing `scrollToCommitOid` — see effect below.
@@ -764,7 +860,9 @@
     const el = scrollEl;
     if (!el) return false;
     const padTop = parseFloat(getComputedStyle(el).paddingTop) || 0;
-    const yMid = nodeY(row) + padTop;
+    // Same offset accounting as `centerScrollTop`: pad-top + GRAPH_VPAD
+    // sit before the first row in the scrollable coordinate system.
+    const yMid = nodeY(row) + padTop + GRAPH_VPAD;
     const top = el.scrollTop;
     const bottom = top + viewportH;
     const margin = ROW_HEIGHT;
@@ -1344,18 +1442,6 @@
     </div>
   {/if}
 
-  <!-- WIP node: shown above the graph when there are uncommitted changes -->
-  {#if showWip}
-    <WipRow
-      {svgW}
-      {wipCounts}
-      {status}
-      active={graphStore.panelMode === 'workdir'}
-      onclick={handleSelectWip}
-      oncontextmenu={handleWipContextMenu}
-    />
-  {/if}
-
   <!-- Virtual scroll area — custom keyboard-driven widget (arrow keys walk
        lanes, PgUp/Dn jump viewports, Home/End jump to newest/oldest). The
        `role="application"` is correct but svelte-a11y still flags the div
@@ -1365,20 +1451,51 @@
   <div class="scroll-area" role="application" aria-label="Commit graph" tabindex="0"
        bind:this={scrollEl} onscroll={handleScroll} onkeydown={handleGraphKeydown}
        oncontextmenu={handleBgContextMenu}>
+    <CommitGraphHeader {gridTemplate} />
+    <!-- WIP node lives just below the sticky header so it scrolls with
+         the columns (horizontal alignment stays correct on narrow
+         viewports) but pinned via `position: sticky; top: <header-h>` so
+         it's always visible while walking the history vertically. -->
+    {#if showWip}
+      <WipRow
+        {gridTemplate}
+        {visibleCols}
+        {graphTrackWidth}
+        {wipCounts}
+        {status}
+        active={graphStore.panelMode === 'workdir'}
+        onclick={handleSelectWip}
+        oncontextmenu={handleWipContextMenu}
+      />
+    {/if}
     {#if graphStore.isLoading}
       <div class="center-msg">
         <div class="spinner"></div>
         <span>Loading graph…</span>
       </div>
     {:else if data && totalRows > 0}
-      <div class="graph-body" style="height: {svgH}px">
+      <div
+        class="graph-body"
+        style="height: {svgH + 2 * GRAPH_VPAD}px; grid-template-columns: {gridTemplate}"
+      >
 
-        <!-- Left column: SVG lanes (fixed width) -->
+        <!-- Lane pane: placed in the grid track corresponding to the
+             current position of the `graph` column. CSS `z-index` lifts
+             this pane ABOVE the rows-pane (DOM order is the other way,
+             but z-index wins) so the SVG visually overlays the rows —
+             the row's hover / selected / is-head colour can fill the
+             whole row uninterrupted while the SVG (with `pointer-events:
+             none` on the pane itself) draws lanes on top. Click targets
+             — graph nodes, stash markers — opt back into pointer events
+             individually so they stay interactive. -->
+        {#if graphColIdx >= 0}
+        <div class="lane-pane" style="grid-column: {graphColIdx + 1};">
         <svg
           class="graph-svg"
-          width={svgW}
-          height={svgH}
-          style="width: {svgW}px; min-width: {svgW}px"
+          width={graphTrackWidth}
+          height={svgH + 2 * GRAPH_VPAD}
+          viewBox={`0 ${-GRAPH_VPAD} ${graphTrackWidth} ${svgH + 2 * GRAPH_VPAD}`}
+          style="width: {graphTrackWidth}px; min-width: {graphTrackWidth}px"
           overflow="visible"
         >
           <defs>
@@ -1401,11 +1518,16 @@
               blend where lanes run close together — the same technique GitKraken uses.
               Large x/y padding prevents clipping on diagonal crossing edges.
             -->
-            <!-- clipPaths for avatar images — one per visible non-merge node -->
+            <!-- clipPaths for avatar images — one per visible non-merge node.
+                 Radius is `NODE_RADIUS + 1` so the avatar reaches under the
+                 colored border ring (which sits at the same r=11 with stroke
+                 1.8); without that 1px of overlap the ring's inner edge sat
+                 just outside the avatar's edge and a hair-thin sliver of row
+                 background showed through as a dark anti-aliased ring. -->
             {#each visibleNodes as node (node.oid)}
               {#if !node.is_merge}
                 <clipPath id="ac-{node.oid}">
-                  <circle cx={nodeX(node.lane)} cy={nodeY(node.row)} r={NODE_RADIUS} />
+                  <circle cx={nodeX(node.lane)} cy={nodeY(node.row)} r={NODE_RADIUS + 1} />
                 </clipPath>
               {/if}
             {/each}
@@ -1421,7 +1543,7 @@
           {#each visibleNodes as node (node.oid)}
             {@const rx = nodeX(node.lane)}
             {@const ry = nodeY(node.row) - ROW_HEIGHT / 2}
-            {@const rw = svgW - rx}
+            {@const rw = graphTrackWidth - rx}
             {@const isSelected = node.oid === graphStore.selectedOid}
             {#if rw > 0}
               <rect
@@ -1431,10 +1553,11 @@
                 style="opacity: {isSelected ? 1.0 : 'var(--graph-row-bg-opacity, 0.7)'}"
                 pointer-events="none"
               />
-              <!-- Thin right-edge accent line (the "bordatura") -->
+              <!-- Thin right-edge accent line (the "bordatura") — sits on
+                   the SAME x as the column divider in the header above. -->
               <line
-                x1={svgW - 1} y1={ry + 3}
-                x2={svgW - 1} y2={ry + ROW_HEIGHT - 3}
+                x1={graphTrackWidth - 1} y1={ry + 3}
+                x2={graphTrackWidth - 1} y2={ry + ROW_HEIGHT - 3}
                 stroke={laneColor(node.color_index)}
                 stroke-width="1.5"
                 stroke-linecap="round"
@@ -1493,7 +1616,7 @@
             {@const stashes = stashesByParentOid.get(node.oid)}
             {#if stashes && stashes.length > 0}
               {@const by  = nodeY(node.row)}
-              {@const bx  = svgW - 12}
+              {@const bx  = graphTrackWidth - 12}
               {@const nx  = nodeX(node.lane) + NODE_RADIUS + 2}
               {@const tip = stashes.length === 1
                 ? `${stashes[0].message} — click per aprire`
@@ -1559,9 +1682,17 @@
             {/if}
           {/each}
         </svg>
+        </div>
+        {/if}
 
-        <!-- Right column: commit text rows -->
-        <div class="rows-panel">
+        <!-- Rows overlay: spans EVERY column so reordering the graph
+             column doesn't require shuffling parents. Each row is
+             absolute-positioned over the overlay (virtual scrolling stays
+             cheap) and uses the SAME grid template as the body, so the
+             SVG drawn beneath the graph cell aligns with every text cell.
+             The cell at the `graph` column is left transparent — the
+             SVG's row gradient + per-row accent shines through. -->
+        <div class="rows-pane">
           {#each visibleNodes as node (node.oid)}
             <div
               class="commit-row"
@@ -1570,59 +1701,87 @@
               class:highlighted={graphStore.highlightedOids.has(node.oid)}
               class:dimmed={searchActive && !graphStore.highlightedOids.has(node.oid)}
               class:synced={syncedRow >= 0 && node.row >= syncedRow}
-              style="top: {nodeY(node.row) - ROW_HEIGHT / 2}px; height: {ROW_HEIGHT}px"
+              style="top: {nodeY(node.row) - ROW_HEIGHT / 2 + GRAPH_VPAD}px; height: {ROW_HEIGHT}px; grid-template-columns: {gridTemplate}"
               onclick={() => handleSelectCommit(node)}
               oncontextmenu={(e) => handleContextMenu(e, node)}
               role="row"
               tabindex="0"
               onkeydown={(e) => e.key === 'Enter' && handleSelectCommit(node)}
             >
-              {#if node.refs.length > 0 || node.is_head}
-                <div class="commit-labels">
-                  {#if node.is_head}
-                    <span class="head-badge">HEAD</span>
-                  {/if}
-                  {#each node.refs as ref}
-                    <BranchLabel {ref} colorIndex={refColorByName.get(ref.name) ?? node.color_index} />
-                  {/each}
-                </div>
-              {/if}
-
-              <span class="commit-summary-wrap">
-                <span class="commit-summary">{node.summary}</span>
-                {#if notesStore.hasNotes(node.oid)}
-                  <button
-                    class="note-badge"
-                    use:tooltip={`${notesStore.noteCount(node.oid)} note${notesStore.noteCount(node.oid) !== 1 ? 's' : ''}`}
-                    onclick={(e) => { e.stopPropagation(); openNotes(node); }}
-                  >
-                    <StickyNote size={10} />
-                    <span>{notesStore.noteCount(node.oid)}</span>
-                  </button>
+              {#each visibleCols as col (col.id)}
+                {@const cid = col.id as GraphColumnId}
+                {#if cid === 'graph'}
+                  <!-- Transparent placeholder so the row's grid template
+                       lines up with the body grid (and the sticky header).
+                       The SVG drawn behind shines through this cell. -->
+                  <div class="cell cell-graph" aria-hidden="true"></div>
+                {:else if cid === 'refs'}
+                  {@const branches = node.refs.filter(r =>
+                    r.ref_type !== 'tag'
+                    // Drop the symbolic `<remote>/HEAD` pointer — it always
+                    // duplicates the default branch label that sits on the
+                    // same commit (e.g. `origin/HEAD` next to `origin/main`),
+                    // so showing it just wastes horizontal space.
+                    && !(r.ref_type === 'remote_branch' && /\/HEAD$/.test(r.name))
+                  )}
+                  {@const tags     = node.refs.filter(r => r.ref_type === 'tag')}
+                  {@const collapseTags = tags.length > 1 || (branches.length > 0 && tags.length > 0)}
+                  <div class="cell cell-refs">
+                    {#each branches as ref (ref.name)}
+                      <BranchLabel {ref} colorIndex={refColorByName.get(ref.name) ?? node.color_index} />
+                    {/each}
+                    {#if collapseTags}
+                      <button
+                        type="button"
+                        class="tag-stack"
+                        use:tooltip={`${tags.length} tag${tags.length !== 1 ? 's' : ''} on this commit — click to expand`}
+                        onclick={(e) => { e.stopPropagation(); openTagsPopupAt(e.clientX, e.clientY, tags); }}
+                      >
+                        <Tags size={11} />
+                        <span class="tag-stack-count">{tags.length}</span>
+                      </button>
+                    {:else if tags.length === 1}
+                      <BranchLabel ref={tags[0]} />
+                    {/if}
+                  </div>
+                {:else if cid === 'subject'}
+                  <div class="cell cell-subject">
+                    <span class="commit-summary">{node.summary}</span>
+                    {#if notesStore.hasNotes(node.oid)}
+                      <button
+                        class="note-badge"
+                        use:tooltip={`${notesStore.noteCount(node.oid)} note${notesStore.noteCount(node.oid) !== 1 ? 's' : ''}`}
+                        onclick={(e) => { e.stopPropagation(); openNotes(node); }}
+                      >
+                        <StickyNote size={10} />
+                        <span>{notesStore.noteCount(node.oid)}</span>
+                      </button>
+                    {/if}
+                    {#if ticketLinksStore.isEnabled()}
+                      {@const nodeLinks = ticketLinksStore.getLinks(node.oid)}
+                      {#if nodeLinks.length > 0}
+                        <span class="commit-tickets">
+                          {#each nodeLinks as link (link.ticket_id)}
+                            <TicketChip
+                              {link}
+                              onclick={handleChipClick}
+                              onRemove={link.source === 'manual' && tab
+                                ? (l) => ticketLinksStore.removeLink(tab.id, node.oid, l.ticket_id).catch(err => uiStore.showToast(`${err}`, 'error'))
+                                : undefined}
+                            />
+                          {/each}
+                        </span>
+                      {/if}
+                    {/if}
+                  </div>
+                {:else if cid === 'author'}
+                  <div class="cell cell-author">{node.author.name}</div>
+                {:else if cid === 'date'}
+                  <div class="cell cell-date">{formatCommitDate(node.timestamp)}</div>
+                {:else if cid === 'hash'}
+                  <div class="cell cell-hash">{node.oid.slice(0, 7)}</div>
                 {/if}
-              </span>
-
-              {#if ticketLinksStore.isEnabled()}
-                {@const nodeLinks = ticketLinksStore.getLinks(node.oid)}
-                <div class="commit-tickets">
-                  {#each nodeLinks as link (link.ticket_id)}
-                    <TicketChip
-                      {link}
-                      onclick={handleChipClick}
-                      onRemove={link.source === 'manual' && tab
-                        ? (l) => ticketLinksStore.removeLink(tab.id, node.oid, l.ticket_id).catch(err => uiStore.showToast(`${err}`, 'error'))
-                        : undefined}
-                    />
-                  {/each}
-                </div>
-              {/if}
-
-              <span class="commit-meta">
-                {node.author.name}
-                <span class="commit-date"> · {formatCommitDate(node.timestamp)}</span>
-              </span>
-
-              <span class="commit-oid">{node.oid.slice(0, 7)}</span>
+              {/each}
             </div>
           {/each}
         </div>
@@ -1674,6 +1833,16 @@
       items={stashPopupItems}
       onSelect={handleStashPopupSelect}
       onClose={() => (stashPopup = null)}
+    />
+  {/if}
+
+  {#if tagsPopup}
+    <ContextMenu
+      x={tagsPopup.x}
+      y={tagsPopup.y}
+      items={tagsPopupItems}
+      onSelect={handleTagsPopupSelect}
+      onClose={() => (tagsPopup = null)}
     />
   {/if}
 </div>
@@ -1891,8 +2060,25 @@
     flex: 1;
     overflow: auto;
     position: relative;
-    padding-left: 8px;
+    /* 4px lateral borders showing `var(--bg-base)` through, mirroring the
+       toolbar above so the sticky header, the WIP row and every commit
+       row sit at the same horizontal inset as the toolbar buttons. */
+    border-left:  4px solid var(--bg-base);
+    border-right: 4px solid var(--bg-base);
     padding-top: .5em;
+  }
+
+  /* WIP row sits flush against the bottom of the sticky header. The
+     header is 26px tall + 1px bottom border, so `top: 27px` parks WIP
+     immediately under it. `z-index: 3` puts it above the lane-pane SVG
+     (z=2) so it stays crisp while scrolling — same z as the header, but
+     they never overlap visually (header at top: 0, WIP at top: 27px).
+     The opaque background lives in WipRow.svelte's own scope so its
+     hover / active overrides keep precedence. */
+  .scroll-area :global(.wip-row) {
+    position: sticky;
+    top: 27px;
+    z-index: 3;
   }
 
   /* Hide the default outline (mouse focus) but keep a visible ring when the
@@ -1906,54 +2092,69 @@
   }
 
   .graph-body {
-    display: flex;
-    flex-direction: row;
+    display: grid;
     align-items: stretch;
     min-width: 100%;
   }
 
-  .graph-svg { flex-shrink: 0; display: block; overflow: visible; }
+  .graph-svg { display: block; overflow: visible; }
 
-  .rows-panel { flex: 1; position: relative; min-width: 0; }
+  /* grid-column is set inline based on the current position of the
+     `graph` column in the user's ordering; everything else stays here.
+     The pane sits on top of the rows-pane via `z-index` so the SVG
+     visually overlays the row backgrounds (so hover / selected / is-head
+     can fill the whole row uninterrupted), while `pointer-events: none`
+     lets clicks pass through to the rows beneath. Individual SVG nodes
+     and stash markers opt back into pointer events to stay interactive. */
+  .lane-pane {
+    grid-row: 1;
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .lane-pane :global(.graph-node),
+  .lane-pane :global(.stash-marker) {
+    pointer-events: auto;
+  }
+
+  /* Rows overlay covers the FULL body width so reordering the `graph`
+     column is just a grid-template change. Its `z-index` is BELOW
+     `.lane-pane` so the SVG always paints on top — that way the row's
+     own background (hover / selected / is-head / highlighted) can fill
+     every cell uninterrupted and the SVG draws lane visuals over it. */
+  .rows-pane  { grid-column: 1 / -1; grid-row: 1; position: relative; min-width: 0; z-index: 1; }
 
   .commit-row {
     position: absolute;
     left: 0; right: 0;
-    display: flex;
+    display: grid;
     align-items: center;
-    gap: 8px;
-    padding: 0 12px 0 8px;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: background var(--transition-fast), opacity var(--transition-fast);
-    overflow: hidden;
+    transition: background-color var(--transition-fast), opacity var(--transition-fast);
   }
 
-  .commit-row:hover    {
-    background: var(--bg-hover);
-  }
-  /* Explicit selectors instead of `:hover *` so style recalc touches ~4
-     elements per hover instead of cascading across every descendant. */
-  .commit-row:hover .commit-summary,
-  .commit-row:hover .commit-meta,
-  .commit-row:hover .commit-date,
-  .commit-row:hover .commit-oid {
-    color: white;
-  }
-  .commit-row.selected { background: var(--bg-selected); }
-  .commit-row.highlighted { background: rgba(77, 120, 204, 0.10); }
+  /* Row-level backgrounds — the SVG (lane-pane) sits on top so these fills
+     stay visible under the lane drawings without a gap at the graph cell. */
+  .commit-row:hover         { background-color: var(--bg-hover); }
+  .commit-row.is-head       { background-color: rgba(77, 120, 204, 0.16); }
+  .commit-row.highlighted   { background-color: rgba(77, 120, 204, 0.22); }
+  .commit-row.selected      { background-color: var(--bg-selected); }
 
   /* Dim non-matching commits during search */
-  .commit-row.dimmed {
-    opacity: 0.28;
-  }
-  .commit-row.dimmed .commit-summary {
-    color: var(--text-muted);
-  }
+  .commit-row.dimmed { opacity: 0.28; }
+  .commit-row.dimmed .commit-summary { color: var(--text-muted); }
 
-  .commit-row.is-head {
-    background: rgba(77, 120, 204, 0.07);
-  }
+  /* Pushed commits — slightly dimmed to distinguish from unpushed (ahead) */
+  .commit-row.synced { opacity: 0.85; }
+  .commit-row.synced .commit-summary { color: var(--text-secondary); }
+
+  .commit-row.is-head .commit-summary { font-weight: 600; }
+  /* HEAD accent stripe — sits at the row's leftmost edge regardless of
+     which column is currently first; rendered above the row bg but below
+     the SVG pane so it stays crisp against any background colour. */
   .commit-row.is-head::before {
     content: '';
     position: absolute;
@@ -1963,63 +2164,117 @@
     width: 2px;
     background: var(--accent);
     border-radius: 0 2px 2px 0;
-  }
-  .commit-row.is-head .commit-summary { font-weight: 600; }
-
-  .head-badge {
-    font-family: var(--font-code);
-    font-size: 9px;
-    font-weight: 700;
-    color: var(--accent);
-    background: var(--accent-subtle);
-    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-    border-radius: var(--radius-sm);
-    padding: 1px 5px;
-    letter-spacing: 0.6px;
-    flex-shrink: 0;
-    white-space: nowrap;
+    z-index: 1;
+    pointer-events: none;
   }
 
-  /* Pushed commits — slightly dimmed to distinguish from unpushed (ahead) */
-  .commit-row.synced { opacity: 0.85; }
-  .commit-row.synced .commit-summary { color: var(--text-secondary); }
-
-  .commit-labels {
-    display: flex;
-    gap: 3px;
-    flex-shrink: 1;
-    min-width: 0;
-    max-width: 50%;
-    overflow: hidden;
+  .commit-row:hover .commit-summary,
+  .commit-row:hover .cell-author,
+  .commit-row:hover .cell-date,
+  .commit-row:hover .cell-hash {
+    color: white;
   }
 
-  .commit-tickets {
-    display: flex;
-    gap: 3px;
-    flex: 0 0 130px;
-    justify-content: flex-end;
-    overflow: hidden;
-  }
-
-  .commit-summary-wrap {
-    flex: 1;
+  /* ── Grid cells ──────────────────────────────────────────────────────────
+     One per visible column. Each cell handles its own padding, overflow,
+     and ellipsis. Backgrounds live on the row (above), not here, so the
+     SVG pane (z-indexed above the rows) can render lane drawings over a
+     single uninterrupted row colour. */
+  .cell {
     display: flex;
     align-items: center;
-    gap: 6px;
     min-width: 0;
     overflow: hidden;
-  }
-
-  .commit-summary {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    padding: 0 8px;
     font-family: var(--font-ui-sans);
     font-size: var(--font-size-sm);
     color: var(--text-primary);
-    min-width: 0;
+    white-space: nowrap;
     transition: color var(--transition-fast);
+  }
+  /* The graph cell carries no content of its own — the SVG draws in the
+     same grid track on top. No padding so its left edge sits exactly on
+     the column track boundary. */
+  .cell-graph { padding: 0; }
+
+  .cell-refs {
+    gap: 4px;
+  }
+  /* Let branch / tag chips grow with the column. The global `.badge` style
+     hard-caps each chip at 140px so badges scattered around the app stay
+     compact, but in the refs column we want the user-resizable width to
+     fully control how much of the branch name is visible. */
+  .cell-refs :global(.badge) {
+    max-width: none;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  /* Compact "N tags" chip used when a commit has multiple tags, or any tag
+     combined with one or more branches. Visually matches `.badge-tag`
+     (same tag-coloured fill / border) so users read it as "tags collapsed
+     here" without needing a legend. */
+  .tag-stack {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 17px;
+    padding: 0 6px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--color-tag) 18%, transparent);
+    color: var(--color-tag);
+    border: 1px solid color-mix(in srgb, var(--color-tag) 38%, transparent);
+    font-family: var(--font-ui-sans);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: filter var(--transition-fast), transform var(--transition-fast);
+  }
+  .tag-stack:hover  { filter: brightness(1.15); }
+  .tag-stack:active { transform: translateY(1px); }
+  .tag-stack:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .tag-stack-count {
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .cell-subject {
+    gap: 6px;
+  }
+  .cell-subject .commit-summary {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cell-subject .commit-tickets {
+    display: flex;
+    gap: 3px;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .cell-author,
+  .cell-date {
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    text-overflow: ellipsis;
+    border-left: 1px solid var(--border-subtle);
+  }
+  .cell-date { color: var(--text-disabled); }
+
+  .cell-hash {
+    justify-content: flex-end;
+    font-family: var(--font-code);
+    font-size: 10px;
+    color: var(--text-disabled);
+    letter-spacing: 0.3px;
+    border-left: 1px solid var(--border-subtle);
   }
 
   .note-badge {
@@ -2040,35 +2295,6 @@
     transition: opacity var(--transition-fast), background var(--transition-fast);
   }
   .note-badge:hover { opacity: 1; background: rgba(77,120,204,0.25); }
-
-  .commit-meta {
-    font-family: var(--font-ui-sans);
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    white-space: nowrap;
-    flex: 0 0 200px;
-    display: flex;
-    align-items: center;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-left: 8px;
-    padding-left: 10px;
-    border-left: 1px solid var(--border-subtle);
-  }
-
-  .commit-date { color: var(--text-disabled); }
-
-.commit-oid {
-    font-family: var(--font-code);
-    font-size: 10px;
-    color: var(--text-disabled);
-    white-space: nowrap;
-    flex-shrink: 0;
-    letter-spacing: 0.3px;
-    min-width: 54px;
-    text-align: right;
-    padding-left: 6px;
-  }
 
   .center-msg {
     display: flex;

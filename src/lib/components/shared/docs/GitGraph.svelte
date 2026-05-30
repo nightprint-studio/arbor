@@ -46,13 +46,23 @@
 <p>Avatars are cached in memory for the session — each email is fetched at most once.</p>
 
 <h2>Branch labels</h2>
-<p>Labels appear inline on each commit row:</p>
+<p>Labels render inside the dedicated <strong>Branches / Tags</strong> column on each commit row. A <em>monitor</em> icon marks local branches, a <em>globe</em> icon marks remote tracking branches, and tags use the classic tag glyph in the tag colour.</p>
 <p>
   <span class="chip chip-local">feature/login</span>&ensp;local branch&ensp;·&ensp;
   <span class="chip chip-remote">origin/main</span>&ensp;remote tracking&ensp;·&ensp;
   <span class="chip chip-tag">v2.1.0</span>&ensp;tag&ensp;·&ensp;
-  <span class="chip chip-head">HEAD</span>&ensp;checked-out commit
+  <span class="chip chip-head">main</span>&ensp;HEAD branch (green)
 </p>
+<p>When a commit carries more than one tag — or any tag alongside one or more branches — the tags collapse into a single compact chip (e.g. <code>🏷 3</code>). Click the chip to open a list of every tag on that commit; clicking a tag copies its name. Branch labels stretch to fill whatever width the Branches / Tags column allows, so resizing the column wider un-truncates long names.</p>
+
+<h2>Columns</h2>
+<p>The history view splits into six fully reorderable columns: <strong>Graph</strong>, <strong>Branches / Tags</strong>, <strong>Subject</strong>, <strong>Author</strong>, <strong>Date</strong>, and <strong>Hash</strong>. Any of them can be moved to any position — including the Graph column itself, which can sit second, last, or anywhere in between.</p>
+<ul>
+  <li><strong>Resize</strong> — drag the right edge of any text column header. The Graph column is <em>adaptive</em>: it auto-sizes to the lanes and caps at its stored width (which behaves as a maximum, not a fixed size).</li>
+  <li><strong>Reorder</strong> — drag a header onto another header; a blue marker shows the drop position</li>
+  <li><strong>Hide / show / reset</strong> — right-click any header for <em>Move left</em>, <em>Move right</em>, <em>Hide</em>, the list of hidden columns to bring back, and <em>Reset to defaults</em></li>
+</ul>
+<p>Layout is persisted host-wide in <code>~/.config/arbor/graph_columns.toml</code>, separate from the main settings file so it can be reset independently. The Graph column's <code>width</code> in that file is the adaptive cap — when a repo's natural lane count would exceed it, the cap softens so lanes are never clipped.</p>
 
 <h2>Graph rendering</h2>
 <p>The lane layout is computed in Rust (<code>src-tauri/src/git/graph.rs</code>) using a gitk-style topological lane assignment. The frontend renders the result as an SVG with:</p>
