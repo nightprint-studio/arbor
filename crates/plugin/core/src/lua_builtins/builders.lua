@@ -365,6 +365,32 @@ function FormBuilder:form_field(cfg_or_label, maybe_cfg)
   return self
 end
 
+-- Display-only widgets ─────────────────────────────────────────────────────
+-- Same shape for all of them: take a cfg table, stamp the `type`, push.
+local function _make_display(type_name)
+  return function(self, cfg)
+    if type(cfg) ~= "table" then
+      error("form builder: :" .. type_name .. " expects a cfg table", 2)
+    end
+    local n = { type = type_name }
+    for k, v in pairs(cfg) do n[k] = v end
+    _push_node(self, n)
+    return self
+  end
+end
+FormBuilder.breadcrumb         = _make_display("breadcrumb")
+FormBuilder.url_block          = _make_display("url_block")
+FormBuilder.monogram           = _make_display("monogram")
+FormBuilder.state_block        = _make_display("state_block")
+FormBuilder.step_indicator     = _make_display("step_indicator")
+FormBuilder.status_list        = _make_display("status_list")
+FormBuilder.alert              = _make_display("alert")
+FormBuilder.info_card          = _make_display("info_card")
+FormBuilder.chip_bar           = _make_display("chip_bar")
+FormBuilder.copy_button        = _make_display("copy_button")
+FormBuilder.experimental_badge = _make_display("experimental_badge")
+FormBuilder.section_header     = _make_display("section_header")
+
 ---Escape hatch — push an arbitrary node table (any `type`, any extra fields).
 function FormBuilder:field(node)
   if type(node) ~= "table" then

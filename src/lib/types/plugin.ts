@@ -983,6 +983,17 @@ export interface FormNodeAlert extends FormNodeBase {
   type:     'alert';
   text:     string;
   variant?: 'info' | 'warning' | 'error' | 'success';
+  /**
+   * Visual mode.
+   *   - `banner` (default) — full-width tinted block with leading icon (Alert.svelte).
+   *     Use for transient app messages (save / error / loading) that need to
+   *     stand out at the top of a form or panel.
+   *   - `inline` — compact callout with a coloured leading bar (Callout.svelte).
+   *     Use for in-document hints, onboarding notes, and "by-the-way" call-outs
+   *     embedded in body copy. `variant = "error"` maps to the danger styling,
+   *     `variant = "success"` maps to the tip styling.
+   */
+  style?:   'banner' | 'inline';
 }
 
 export interface FormNodeCode extends FormNodeBase {
@@ -1581,6 +1592,221 @@ export interface FormNodeChipBar extends FormNodeBase {
   items:    ChipItem[];
 }
 
+// ─── breadcrumb ───────────────────────────────────────────────────────────────
+/**
+ * Display-only horizontal trail of chip-style segments. Useful as a path
+ * indicator in plugin views / studio-like modals. Clicking an interactive
+ * segment fires `action` with `{ value, index }` merged into the payload.
+ */
+export interface FormNodeBreadcrumbSegment {
+  label:        string;
+  /** Lucide name, emoji, or `plugin:<plugin>:<icon_id>` reference. */
+  icon?:        string;
+  /** Tiny pill rendered after the label (e.g. "current"). */
+  badge?:       string;
+  tooltip?:     string;
+  /** When false, segment is dimmed and not clickable. Default: true. */
+  interactive?: boolean;
+  /** Opaque value echoed back to the plugin in the action payload. */
+  value?:       string | number;
+}
+
+export interface FormNodeBreadcrumb extends FormNodeBase {
+  type:        'breadcrumb';
+  segments:    FormNodeBreadcrumbSegment[];
+  /** Soft cap on visible segments; middle collapses to ellipsis. Default: 6. */
+  max?:        number;
+  /** Fired when an interactive segment is clicked. Payload merges
+   *  `{ value, index, label }`. */
+  action?:     string;
+  /** When true a pencil button appears on the right; double-clicking the
+   *  trail also enters edit mode. Submitted path is sent via `commit_action`
+   *  as `{ path }`. */
+  editable?:        boolean;
+  edit_value?:      string;
+  edit_placeholder?: string;
+  commit_action?:   string;
+}
+
+// ─── url_block ────────────────────────────────────────────────────────────────
+/**
+ * Monospace readable display for a URL or any opaque identifier the user
+ * needs to verify verbatim. Wraps long values; never truncates with
+ * ellipsis. `copyable` adds a small copy-to-clipboard button.
+ */
+export interface FormNodeUrlBlock extends FormNodeBase {
+  type:      'url_block';
+  value:     string;
+  label?:    string;
+  copyable?: boolean;
+}
+
+// ─── monogram ─────────────────────────────────────────────────────────────────
+/**
+ * 1-2 letter monogram tile used to brand workspaces / projects / plugins.
+ * For person identity use the `avatar` node (coming separately). When
+ * `initials` is omitted the renderer derives them from `name`.
+ */
+export interface FormNodeMonogram extends FormNodeBase {
+  type:      'monogram';
+  /** Used for the tooltip and as the source for auto-derived initials. */
+  name:      string;
+  /** Override the auto-derived initials (e.g. show just one letter). */
+  initials?: string;
+  /** Any CSS color or `var(--…)` reference; defaults to `var(--accent)`. */
+  color?:    string;
+  /** Pixel size of the shorter edge. Reasonable range: 12-48. */
+  size?:     number;
+  variant?:  'square' | 'circle' | 'outline' | 'dot';
+  /** Greyed-out look — used to indicate disabled/unavailable items. */
+  disabled?: boolean;
+  /** Foreground override (for square/circle/outline). */
+  fg?:       string;
+  /** Tooltip override; falls back to `name`. */
+  tooltip?:  string;
+}
+
+// ─── state_block ──────────────────────────────────────────────────────────────
+/**
+ * Centered block-level status message for a content pane (loading / error /
+ * empty / success). Stretches to fill its parent unless `fill = false`.
+ */
+export interface FormNodeStateBlock extends FormNodeBase {
+  type:    'state_block';
+  tone?:   'loading' | 'error' | 'success' | 'info' | 'neutral';
+  label?:  string;
+  /** When `tone === "loading"`, shows a built-in spinner instead of the
+   *  default tone icon. Other tones ignore it. */
+  spinner?: boolean;
+  /** Override the default tone icon (Lucide name). */
+  icon?:    string;
+  fill?:    boolean;
+}
+
+// ─── step_indicator ───────────────────────────────────────────────────────────
+/**
+ * Wizard-style step navigation breadcrumb. Distinct from the `wizard`
+ * container node — this one is a pure VISUAL indicator without the
+ * children-routing. Useful for plugin onboarding / setup screens that
+ * own their step navigation.
+ */
+export interface FormNodeStepIndicatorStep {
+  id:    string;
+  label: string;
+  /** Optional Lucide icon name shown in pending/active state. */
+  icon?: string;
+}
+
+export interface FormNodeStepIndicator extends FormNodeBase {
+  type:    'step_indicator';
+  steps:   FormNodeStepIndicatorStep[];
+  current: string;
+  layout?: 'horizontal' | 'vertical';
+  size?:   'sm' | 'md';
+  variant?: 'flat' | 'pill';
+  separator?: boolean;
+  collapse_labels?: boolean;
+  /** Fired with `{ id, index }` when the user clicks a step. Click-back
+   *  is allowed for done + active steps by default. */
+  action?: string;
+}
+
+// ─── status_list ──────────────────────────────────────────────────────────────
+/**
+ * Itemised "preview before bulk action" panel — header with summary pills,
+ * scrollable body of rows, optional footnote. Display-only; the plugin
+ * recomputes `items` and patches the node when the underlying state changes.
+ */
+export interface FormNodeStatusListChip {
+  severity: 'block' | 'warn' | 'info' | 'success';
+  text:     string;
+  /** Lucide icon name shown before the text. */
+  icon?:    string;
+}
+
+export interface FormNodeStatusListItem {
+  id:    string;
+  label: string;
+  chips: FormNodeStatusListChip[];
+}
+
+export interface FormNodeStatusList extends FormNodeBase {
+  type:           'status_list';
+  items:          FormNodeStatusListItem[];
+  /** Total considered (≥ items with chips). Drives the "N of M" header. */
+  total_count?:   number;
+  scanning?:      boolean;
+  scanning_label?: string;
+  clean_label?:   string;
+  /** Drives the default header/clean copy. */
+  noun?:          { singular: string; plural: string };
+  footnote?:      string;
+  /** Pixel cap on the scrolling list. Default: 160. */
+  max_list_height?: number;
+}
+
+// ─── copy_button ──────────────────────────────────────────────────────────────
+/**
+ * Click-to-copy button with chrome (border, hover). Mirrors the host's
+ * `<CopyButton>` widget. Distinct from `copy_link` — `copy_link` is a
+ * subtle inline pseudo-link with a glyph; `copy_button` is a standalone
+ * action button (icon square or icon + label).
+ *
+ * The value is copied client-side via the browser clipboard API — no
+ * plugin action round-trip. Pass an absolute string in `value`; for
+ * computed values (rare), copy via a plugin action instead.
+ */
+export interface FormNodeCopyButton extends FormNodeBase {
+  type:           'copy_button';
+  /** The string copied to the clipboard on click. */
+  value:          string;
+  /** `icon` (default) renders a 22×22 square icon-only button; `inline`
+   *  renders a leading icon + label. */
+  variant?:       'icon' | 'inline';
+  /** Inline label (default "Copy"). Ignored when `variant === "icon"`. */
+  label?:         string;
+  /** Inline label shown in the success state (default "Copied"). */
+  copied_label?:  string;
+  /** Tooltip text. Default "Copy to clipboard". */
+  tooltip?:       string;
+  /** Toast text shown on successful copy. Omit to suppress the toast. */
+  toast_success?: string;
+  /** Show a generic error toast on copy failure. Default true. */
+  show_error_toast?: boolean;
+}
+
+// ─── experimental_badge ───────────────────────────────────────────────────────
+/**
+ * Small "Experimental" pill — flag features that are still being shaped.
+ * Soft amber→coral gradient with a flask icon. Designed for modal headers
+ * (`md`) and list rows (`sm`).
+ */
+export interface FormNodeExperimentalBadge extends FormNodeBase {
+  type:         'experimental_badge';
+  /** Tooltip title. Default "Experimental". */
+  title?:       string;
+  /** Longer description shown under the tooltip title. */
+  description?: string;
+  /** `md` (default) for modal headers; `sm` for list rows. */
+  size?:        'sm' | 'md';
+  /** Override the visible label. Default "Experimental". */
+  label?:       string;
+}
+
+// ─── section_header ───────────────────────────────────────────────────────────
+/**
+ * Standalone section title bar — just the headline + optional secondary
+ * description, without wrapping any children. Distinct from the `section`
+ * container which has its own body. Use `section_header` to anchor a
+ * region whose body is laid out by sibling nodes (e.g. a settings page
+ * where the heading sits above a free-form layout).
+ */
+export interface FormNodeSectionHeader extends FormNodeBase {
+  type:         'section_header';
+  title:        string;
+  description?: string;
+}
+
 export type FormLayoutNode =
   | FormNodeContainer
   | FormNodeRow
@@ -1609,6 +1835,15 @@ export type FormLayoutNode =
   | FormNodeFormField
   | FormNodeInfoCard
   | FormNodeChipBar
+  | FormNodeBreadcrumb
+  | FormNodeUrlBlock
+  | FormNodeMonogram
+  | FormNodeStateBlock
+  | FormNodeStepIndicator
+  | FormNodeStatusList
+  | FormNodeCopyButton
+  | FormNodeExperimentalBadge
+  | FormNodeSectionHeader
   | FormNodeDiff;
 
 export type FormNode = FormFieldNode | FormLayoutNode;

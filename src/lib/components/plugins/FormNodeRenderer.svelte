@@ -866,6 +866,9 @@
     'paragraph', 'alert', 'code', 'label', 'divider', 'info_card',
     'chip_bar', 'form_field', 'tabs', 'tree_layout', 'wizard',
     'card_row', 'cfg_list', 'switch',
+    'breadcrumb', 'url_block', 'monogram', 'state_block',
+    'step_indicator', 'status_list',
+    'copy_button', 'experimental_badge', 'section_header',
   ]);
   const BUTTON_TYPES = new Set(['button', 'menu_button', 'suggest_grid']);
   const CHART_TYPES  = new Set([

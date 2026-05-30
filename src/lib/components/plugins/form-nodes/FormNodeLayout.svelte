@@ -3,7 +3,9 @@
   don't carry an editable value of their own:
     container, row, section, copy_link, icon, separator, paragraph, alert,
     code, label, divider, info_card, chip_bar, form_field, tabs,
-    tree_layout, wizard, card_row, cfg_list, switch.
+    tree_layout, wizard, card_row, cfg_list, switch, breadcrumb,
+    url_block, monogram, state_block, step_indicator, status_list,
+    copy_button, experimental_badge, section_header.
 
   Receives:
     · node       — the FormNode to render
@@ -27,6 +29,10 @@
   import { highlightCode } from '$lib/utils/highlight';
 
   import Alert     from '$lib/components/shared/ui/Alert.svelte';
+  import Callout   from '$lib/components/shared/ui/Callout.svelte';
+  import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
+  import ExperimentalBadge from '$lib/components/shared/ui/ExperimentalBadge.svelte';
+  import SectionHeader     from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
   import InfoCard  from '$lib/components/shared/ui/InfoCard.svelte';
   import ChipBar   from '$lib/components/shared/ui/ChipBar.svelte';
@@ -34,6 +40,15 @@
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import StepIndicator from '$lib/components/shared/ui/StepIndicator.svelte';
   import type { Step as StepIndicatorStep } from '$lib/components/shared/ui/StepIndicator.svelte';
+  import Breadcrumb from '$lib/components/shared/ui/Breadcrumb.svelte';
+  import type { BreadcrumbSegment } from '$lib/components/shared/ui/Breadcrumb.svelte';
+  import UrlBlock     from '$lib/components/shared/ui/UrlBlock.svelte';
+  import Monogram     from '$lib/components/shared/ui/Monogram.svelte';
+  import StateBlock   from '$lib/components/shared/ui/StateBlock.svelte';
+  import StatusList   from '$lib/components/shared/ui/StatusList.svelte';
+  import type { StatusItem, StatusChip, Severity as StatusSeverity } from '$lib/components/shared/ui/StatusList.svelte';
+  import Spinner      from '$lib/components/shared/ui/Spinner.svelte';
+  import { AlertCircle, CheckCircle2, Info as InfoIcon } from 'lucide-svelte';
 
   import type { FormNode } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
@@ -255,10 +270,17 @@
     style={(node as any).style}
   >{(node as any).content ?? (node as any).text ?? ''}</p>
 
-<!-- ── alert ─────────────────────────────────────────────────────────── -->
+<!-- ── alert (banner: Alert; inline: Callout) ────────────────────────── -->
 {:else if node.type === 'alert'}
+  {@const an = node as any}
+  {@const av = (an.variant ?? 'info') as 'info' | 'warning' | 'error' | 'success'}
   <div class={(node as any).class} style={(node as any).style}>
-    <Alert variant={(node as any).variant ?? 'info'} text={(node as any).text} />
+    {#if an.style === 'inline'}
+      {@const cv = av === 'error' ? 'danger' : av === 'success' ? 'tip' : av}
+      <Callout variant={cv}>{an.text ?? ''}</Callout>
+    {:else}
+      <Alert variant={av} text={an.text} />
+    {/if}
   </div>
 
 <!-- ── code ──────────────────────────────────────────────────────────── -->
@@ -332,6 +354,157 @@
         if (cb.action) ctx.handleButtonAction(cb.action, false, { name: cb.name, value: sel });
       }}
     />
+  </div>
+
+<!-- ── breadcrumb ────────────────────────────────────────────────────── -->
+{:else if node.type === 'breadcrumb'}
+  {@const bc = node as any}
+  <div class={(node as any).class ?? ''} style={(node as any).style}>
+    <Breadcrumb
+      segments={(bc.segments ?? []) as BreadcrumbSegment<any>[]}
+      max={bc.max ?? 6}
+      editable={!!bc.editable}
+      editValue={bc.edit_value ?? ''}
+      editPlaceholder={bc.edit_placeholder ?? 'Type a path (e.g. x/y/z)'}
+      onSelect={(value, segment, index) => {
+        if (bc.action) ctx.handleButtonAction(bc.action, false, {
+          value, index, label: segment.label,
+        });
+      }}
+      onCommit={(path) => {
+        if (bc.commit_action) ctx.handleButtonAction(bc.commit_action, false, { path });
+      }}
+    />
+  </div>
+
+<!-- ── url_block ─────────────────────────────────────────────────────── -->
+{:else if node.type === 'url_block'}
+  {@const ub = node as any}
+  <div class={(node as any).class ?? ''} style={(node as any).style}>
+    <UrlBlock label={ub.label} value={ub.value ?? ''} copyable={!!ub.copyable} />
+  </div>
+
+<!-- ── monogram ──────────────────────────────────────────────────────── -->
+{:else if node.type === 'monogram'}
+  {@const mg = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <Monogram
+      name={mg.name ?? '?'}
+      initials={mg.initials}
+      color={mg.color ?? 'var(--accent)'}
+      size={mg.size ?? 18}
+      variant={mg.variant ?? 'square'}
+      disabled={!!mg.disabled}
+      title={mg.tooltip}
+      fg={mg.fg}
+    />
+  </span>
+
+<!-- ── state_block ───────────────────────────────────────────────────── -->
+{:else if node.type === 'state_block'}
+  {@const sb = node as any}
+  {@const sbTone = (sb.tone ?? 'neutral') as 'loading' | 'error' | 'success' | 'info' | 'neutral'}
+  <div class={(node as any).class ?? ''} style={(node as any).style}>
+    <StateBlock tone={sbTone} label={sb.label} fill={sb.fill !== false}>
+      {#snippet spinner()}
+        {#if sbTone === 'loading' && sb.spinner !== false}
+          <Spinner size={16} />
+        {/if}
+      {/snippet}
+      {#snippet icon()}
+        {#if sb.icon}
+          <PluginIcon name={sb.icon} size={16} />
+        {:else if sbTone === 'error'}
+          <AlertCircle size={16} />
+        {:else if sbTone === 'success'}
+          <CheckCircle2 size={16} />
+        {:else if sbTone === 'info'}
+          <InfoIcon size={16} />
+        {/if}
+      {/snippet}
+    </StateBlock>
+  </div>
+
+<!-- ── step_indicator (visual-only; sibling of the `wizard` container) ─ -->
+{:else if node.type === 'step_indicator'}
+  {@const si = node as any}
+  {@const siSteps = (si.steps ?? []).map((s: any) => ({
+    id:    s.id,
+    label: s.label,
+    icon:  s.icon ? (PLUGIN_ICONS as any)[s.icon] : undefined,
+  })) as StepIndicatorStep[]}
+  <div class={(node as any).class ?? ''} style={(node as any).style}>
+    <StepIndicator
+      steps={siSteps}
+      current={si.current ?? siSteps[0]?.id ?? ''}
+      layout={si.layout ?? 'horizontal'}
+      size={si.size ?? 'md'}
+      variant={si.variant ?? 'flat'}
+      separator={si.separator}
+      collapseLabels={!!si.collapse_labels}
+      onStepClick={si.action ? (id, index) => ctx.handleButtonAction(si.action, false, { id, index }) : undefined}
+    />
+  </div>
+
+<!-- ── status_list ───────────────────────────────────────────────────── -->
+{:else if node.type === 'status_list'}
+  {@const sl = node as any}
+  {@const slItems = (sl.items ?? []).map((it: any) => ({
+    id:    String(it.id ?? ''),
+    label: String(it.label ?? ''),
+    chips: (it.chips ?? []).map((c: any) => ({
+      severity: c.severity as StatusSeverity,
+      text:     String(c.text ?? ''),
+      // Icon: plugin sends a Lucide name string; we map it via PLUGIN_ICONS
+      // so unknown names degrade to "no icon" silently rather than crash.
+      icon:     c.icon ? (PLUGIN_ICONS as any)[c.icon] : undefined,
+    })),
+  })) as StatusItem[]}
+  <div class={(node as any).class ?? ''} style={(node as any).style}>
+    <StatusList
+      items={slItems}
+      totalCount={sl.total_count}
+      scanning={!!sl.scanning}
+      scanningLabel={sl.scanning_label}
+      cleanLabel={sl.clean_label}
+      noun={sl.noun}
+      footnote={sl.footnote}
+      maxListHeight={sl.max_list_height ?? 160}
+    />
+  </div>
+
+<!-- ── copy_button ───────────────────────────────────────────────────── -->
+{:else if node.type === 'copy_button'}
+  {@const cb = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <CopyButton
+      value={cb.value ?? ''}
+      variant={cb.variant ?? 'icon'}
+      label={cb.label}
+      copiedLabel={cb.copied_label}
+      title={cb.tooltip ?? 'Copy to clipboard'}
+      toastSuccess={cb.toast_success}
+      showErrorToast={cb.show_error_toast !== false}
+    />
+  </span>
+
+<!-- ── experimental_badge ────────────────────────────────────────────── -->
+{:else if node.type === 'experimental_badge'}
+  {@const eb = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <ExperimentalBadge
+      title={eb.title}
+      description={eb.description}
+      size={eb.size ?? 'md'}
+      label={eb.label}
+    />
+  </span>
+
+<!-- ── section_header ────────────────────────────────────────────────── -->
+{:else if node.type === 'section_header'}
+  {@const sh = node as any}
+  <div class={(node as any).class ?? ''} style={(node as any).style}>
+    <SectionHeader title={sh.title ?? ''} description={sh.description} />
   </div>
 
 <!-- ── form_field ────────────────────────────────────────────────────── -->

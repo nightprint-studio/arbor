@@ -2631,6 +2631,72 @@ function FormBuilder:heading(text) end
 ---@return arbor.FormBuilder
 function FormBuilder:button(cfg) end
 
+---Display-only horizontal trail. See `arbor.FormNodeBreadcrumb`.
+---@param  cfg arbor.FormNodeBreadcrumb
+---@return arbor.FormBuilder
+function FormBuilder:breadcrumb(cfg) end
+
+---Monospace URL/identifier block. See `arbor.FormNodeUrlBlock`.
+---@param  cfg arbor.FormNodeUrlBlock
+---@return arbor.FormBuilder
+function FormBuilder:url_block(cfg) end
+
+---1-2 letter monogram tile. See `arbor.FormNodeMonogram`.
+---@param  cfg arbor.FormNodeMonogram
+---@return arbor.FormBuilder
+function FormBuilder:monogram(cfg) end
+
+---Centered status message (loading / error / empty / success / info).
+---See `arbor.FormNodeStateBlock`.
+---@param  cfg arbor.FormNodeStateBlock
+---@return arbor.FormBuilder
+function FormBuilder:state_block(cfg) end
+
+---Wizard-style step indicator (visual-only). See `arbor.FormNodeStepIndicator`.
+---@param  cfg arbor.FormNodeStepIndicator
+---@return arbor.FormBuilder
+function FormBuilder:step_indicator(cfg) end
+
+---"Preview before bulk action" panel with severity-coded chips.
+---See `arbor.FormNodeStatusList`.
+---@param  cfg arbor.FormNodeStatusList
+---@return arbor.FormBuilder
+function FormBuilder:status_list(cfg) end
+
+---App-message banner (default) OR in-document callout (`style = "inline"`).
+---See `arbor.FormNodeAlert`.
+---@param  cfg arbor.FormNodeAlert
+---@return arbor.FormBuilder
+function FormBuilder:alert(cfg) end
+
+---Hero header card (avatar + title + meta + actions).
+---See `arbor.FormNodeInfoCard`.
+---@param  cfg arbor.FormNodeInfoCard
+---@return arbor.FormBuilder
+function FormBuilder:info_card(cfg) end
+
+---Horizontal pill selector (filter / category chips). See `arbor.FormNodeChipBar`.
+---@param  cfg arbor.FormNodeChipBar
+---@return arbor.FormBuilder
+function FormBuilder:chip_bar(cfg) end
+
+---Standalone click-to-copy button with chrome.
+---See `arbor.FormNodeCopyButton`.
+---@param  cfg arbor.FormNodeCopyButton
+---@return arbor.FormBuilder
+function FormBuilder:copy_button(cfg) end
+
+---Small "Experimental" pill. See `arbor.FormNodeExperimentalBadge`.
+---@param  cfg arbor.FormNodeExperimentalBadge
+---@return arbor.FormBuilder
+function FormBuilder:experimental_badge(cfg) end
+
+---Standalone section title bar (no children body).
+---See `arbor.FormNodeSectionHeader`.
+---@param  cfg arbor.FormNodeSectionHeader
+---@return arbor.FormBuilder
+function FormBuilder:section_header(cfg) end
+
 ---Escape hatch — push an arbitrary node table (any `type`, any extra fields).
 ---@param  node table
 ---@return arbor.FormBuilder
@@ -3046,6 +3112,237 @@ function CoreAssert.register() end
 ---@field icon_only    boolean|nil            Hide label, render only icon (+ chevron)
 ---@field show_chevron boolean|nil            Default: true unless icon_only is true
 ---@field options      arbor.FormMenuOption[]
+
+
+-- =============================================================================
+-- Display-only widgets (no value, no submit). Patch them live via
+-- `arbor.ui.form.patch{ { id = "...", merge = { ... } } }`.
+-- =============================================================================
+
+---One segment of a `breadcrumb` node. Click on an `interactive` segment fires
+---the node's `action` with `{ value, index, label }` merged into the payload.
+---@class arbor.FormBreadcrumbSegment
+---@field label       string
+---@field icon        string|nil    Lucide name, emoji, or "plugin:<plugin>:<icon_id>"
+---@field badge       string|nil    Small chip rendered after the label (e.g. "current")
+---@field tooltip     string|nil
+---@field interactive boolean|nil   Default true. When false the segment is dim and not clickable.
+---@field value       string|number|nil  Opaque value echoed back to the action.
+
+---Horizontal trail of chip-style segments. Useful as a path indicator in
+---plugin views / studio-like modals. With `editable = true` a pencil button
+---and a "type a path" mode are enabled.
+---@class arbor.FormNodeBreadcrumb : arbor.FormNodeBase
+---@field type             "breadcrumb"
+---@field segments         arbor.FormBreadcrumbSegment[]
+---@field max              integer|nil           Soft cap on visible segments (default 6). Middle collapses to "…".
+---@field action           string|nil            Fired on segment click; ctx merges `{ value, index, label }`.
+---@field editable         boolean|nil
+---@field edit_value       string|nil            Prefilled string in edit mode.
+---@field edit_placeholder string|nil
+---@field commit_action    string|nil            Fired when the user submits the edited path; ctx contains `{ path }`.
+
+---Monospace readable display for a URL or any opaque identifier. Never
+---truncates with ellipsis — the user is expected to read it verbatim.
+---@class arbor.FormNodeUrlBlock : arbor.FormNodeBase
+---@field type     "url_block"
+---@field value    string
+---@field label    string|nil
+---@field copyable boolean|nil    When true, renders a copy-to-clipboard button on the right.
+
+---1-2 letter monogram tile used to brand workspaces / projects / plugins.
+---For person identity use the `avatar` node (separate). When `initials` is
+---omitted the renderer derives them from `name`.
+---@class arbor.FormNodeMonogram : arbor.FormNodeBase
+---@field type     "monogram"
+---@field name     string                                            Tooltip source + initials derivation
+---@field initials string|nil                                        Override the auto-derived initials
+---@field color    string|nil                                        Any CSS color or `var(--…)`; default `var(--accent)`
+---@field size     integer|nil                                       Pixel size of the shorter edge (12-48, default 18)
+---@field variant  "square"|"circle"|"outline"|"dot"|nil             Default "square"
+---@field disabled boolean|nil                                       Greyed-out look
+---@field fg       string|nil                                        Foreground override (square/circle/outline)
+---@field tooltip  string|nil                                        Tooltip override; falls back to `name`
+
+---Centered block-level status message for a content pane. Tones drive the
+---default icon: error → AlertCircle, success → CheckCircle2, info → Info,
+---loading → built-in Spinner. Override with `icon` (Lucide name).
+---@class arbor.FormNodeStateBlock : arbor.FormNodeBase
+---@field type    "state_block"
+---@field tone    "loading"|"error"|"success"|"info"|"neutral"|nil   Default "neutral"
+---@field label   string|nil
+---@field spinner boolean|nil    Only honoured when tone == "loading". Default true.
+---@field icon    string|nil    Override the tone icon (Lucide name).
+---@field fill    boolean|nil    Stretch to fill the parent (default true).
+
+---@class arbor.FormStepIndicatorStep
+---@field id    string
+---@field label string
+---@field icon  string|nil   Lucide icon name shown in pending/active state
+
+---Wizard-style step navigation breadcrumb. PURE VISUAL — distinct from the
+---`wizard` container node which routes between child trees. Use this when
+---you own the step navigation yourself and just want the indicator.
+---@class arbor.FormNodeStepIndicator : arbor.FormNodeBase
+---@field type            "step_indicator"
+---@field steps           arbor.FormStepIndicatorStep[]
+---@field current         string                              Id of the active step
+---@field layout          "horizontal"|"vertical"|nil         Default "horizontal"
+---@field size            "sm"|"md"|nil                       Default "md"
+---@field variant         "flat"|"pill"|nil                   Default "flat"
+---@field separator       boolean|nil                         Default: true for flat, false for pill
+---@field collapse_labels boolean|nil                         Collapse to badge-only below 768px viewport
+---@field action          string|nil                          Fired with `{ id, index }` on step click (done + active only)
+
+---@class arbor.FormStatusListChip
+---@field severity "block"|"warn"|"info"|"success"
+---@field text     string
+---@field icon     string|nil   Lucide icon name shown before the text
+
+---@class arbor.FormStatusListItem
+---@field id    string
+---@field label string
+---@field chips arbor.FormStatusListChip[]
+
+---Itemised "preview before bulk action" panel — header with summary pills,
+---scrollable body of rows, optional footnote. Display-only; recompute
+---`items` and patch the node when state changes.
+---@class arbor.FormNodeStatusList : arbor.FormNodeBase
+---@field type            "status_list"
+---@field items           arbor.FormStatusListItem[]
+---@field total_count     integer|nil                         "N of M" header denominator
+---@field scanning        boolean|nil                         Show a "scanning…" header with a spinner
+---@field scanning_label  string|nil                          Default "Scanning…"
+---@field clean_label     string|nil                          Override the all-clean header message
+---@field noun            { singular: string, plural: string }|nil  Default { singular = "item", plural = "items" }
+---@field footnote        string|nil
+---@field max_list_height integer|nil                         Pixel cap on the scrolling body (default 160)
+
+---App-message banner OR in-document callout — picked by `style`. `banner`
+---(default) renders the full-width tinted block (`Alert.svelte`) you use for
+---transient app messages; `inline` renders the in-document callout
+---(`Callout.svelte`) you embed in body copy / docs. When style is `inline`,
+---`variant = "error"` maps to the danger styling, `variant = "success"` maps
+---to the tip styling.
+---@class arbor.FormNodeAlert : arbor.FormNodeBase
+---@field type    "alert"
+---@field text    string
+---@field variant "info"|"warning"|"error"|"success"|nil   Default "info"
+---@field style   "banner"|"inline"|nil                    Default "banner"
+
+---Vertical labeled wrapper around `children`. Same chrome the host uses on
+---built-in form fields: label on top, content below, optional description /
+---hint / error / leading icon / right-aligned actions on the label row.
+---Useful around non-field content (button, copy_link), to enrich a single
+---field with affordances the type doesn't expose (icon, action button next
+---to the label), or to surface a computed error/hint that doesn't come from
+---per-field validation.
+---@class arbor.FormNodeFormField : arbor.FormNodeBase
+---@field type          "form_field"
+---@field label         string|nil    Omit (together with `icon`/`actions`) to render without the label row.
+---@field optional_text string|nil    Small muted text after the label (e.g. "(optional)").
+---@field required      boolean|nil   Show a red asterisk after the label.
+---@field description   string|nil    Description shown between label and content.
+---@field hint          string|nil    Hint shown below the content, muted.
+---@field error         string|nil    Error shown below the content (replaces hint when set).
+---@field icon          string|nil    Lucide icon name shown before the label text.
+---@field actions       table[]|nil   Right-aligned action nodes on the same row as the label (typically `button` nodes).
+---@field children      table[]
+---@field for           string|nil    htmlFor target on the underlying <label>.
+
+---@alias arbor.InfoCardBadgeKind "info"|"success"|"warning"|"error"|"accent"|"muted"
+
+---@class arbor.InfoCardBadge
+---@field text string
+---@field kind arbor.InfoCardBadgeKind|nil
+
+---@class arbor.InfoCardMeta
+---@field label   string|nil   ALL-CAPS dim label shown before the value.
+---@field value   string       Mono-styled value.
+---@field tooltip string|nil   Tooltip — typical use is showing the full type path when value is shortened.
+
+---@class arbor.InfoCardAction
+---@field icon    string         Lucide icon name.
+---@field label   string|nil
+---@field tooltip string|nil
+---@field variant "default"|"primary"|"danger"|nil
+---@field disabled boolean|nil
+---@field action  string         Plugin action fired on click.
+---@field extra   table|nil      Extra data merged into the action payload.
+
+---Hero header card. Use as the FIRST node of a tab body, panel section or
+---modal to anchor "what am I looking at" context — title, status pill,
+---type badges, key:value meta pills, and a row of action icons.
+---@class arbor.FormNodeInfoCard : arbor.FormNodeBase
+---@field type      "info_card"
+---@field title     string
+---@field subtitle  string|nil
+---@field icon      string|nil     Lucide icon name (mutually exclusive with `monogram`).
+---@field monogram  string|nil     1-2 letter tile (mutually exclusive with `icon`).
+---@field accent    string|nil     Avatar accent override; defaults to `var(--accent)`.
+---@field status    { text: string, kind: arbor.InfoCardBadgeKind|nil }|nil   Right-aligned status pill next to the title.
+---@field badges    arbor.InfoCardBadge[]|nil
+---@field meta      arbor.InfoCardMeta[]|nil
+---@field actions   arbor.InfoCardAction[]|nil
+
+---@alias arbor.ChipTone "accent"|"info"|"success"|"warning"|"error"|"muted"|"neutral"
+
+---@class arbor.ChipItem
+---@field id       string
+---@field label    string
+---@field count    integer|nil
+---@field tone     arbor.ChipTone|nil
+---@field icon     string|nil   Lucide icon name.
+---@field tooltip  string|nil
+---@field disabled boolean|nil
+
+---Horizontal pill selector. The current selection is exposed as a regular
+---form value (so it can be read in submit and echoed back through
+---`liveState`). In multi mode the value is `string[]`, otherwise a single
+---`string`. Typical use: filter row above a list of `section` cards gated
+---with `show_if = { field, value }` so flipping a chip narrows the visible
+---cards without a round-trip.
+---@class arbor.FormNodeChipBar : arbor.FormNodeBase
+---@field type     "chip_bar"
+---@field name     string                       Selection stored at `values[name]`.
+---@field default  string|string[]|nil          Default-selected id(s).
+---@field multi    boolean|nil
+---@field size     "sm"|"md"|nil                Default "md".
+---@field action   string|nil                   Fired with `{ name, value }` on selection change (useful when no parent uses `show_if`).
+---@field items    arbor.ChipItem[]
+
+---Standalone click-to-copy button with chrome (border, hover). Distinct
+---from `copy_link` — `copy_link` is a subtle inline pseudo-link with a
+---glyph; `copy_button` is a real action button (icon square or icon +
+---label). Copy happens client-side via the browser clipboard API.
+---@class arbor.FormNodeCopyButton : arbor.FormNodeBase
+---@field type             "copy_button"
+---@field value            string                The exact string copied on click.
+---@field variant          "icon"|"inline"|nil   Default "icon" (square 22×22). "inline" renders icon + label.
+---@field label            string|nil            Inline label (default "Copy"). Ignored when variant is "icon".
+---@field copied_label     string|nil            Inline success label (default "Copied").
+---@field tooltip          string|nil            Hover tooltip + aria-label (default "Copy to clipboard").
+---@field toast_success    string|nil            Toast text on successful copy; omit to suppress.
+---@field show_error_toast boolean|nil           Show a generic error toast on copy failure. Default true.
+
+---Small "Experimental" pill — flag features still being shaped. Amber→coral
+---gradient with a flask icon. `md` (default) fits modal headers; `sm` fits
+---list rows.
+---@class arbor.FormNodeExperimentalBadge : arbor.FormNodeBase
+---@field type        "experimental_badge"
+---@field title       string|nil   Tooltip title. Default "Experimental".
+---@field description string|nil   Longer description under the tooltip title.
+---@field size        "sm"|"md"|nil   Default "md".
+---@field label       string|nil   Override the visible label (default "Experimental").
+
+---Standalone section title bar — headline + optional secondary description,
+---without wrapping any children. Distinct from the `section` container which
+---owns a body. Use this to anchor a region whose body is laid out by sibling
+---nodes (settings page with a free-form layout below the heading).
+---@class arbor.FormNodeSectionHeader : arbor.FormNodeBase
+---@field type        "section_header"
+---@field title       string
+---@field description string|nil
 
 
 -- =============================================================================
