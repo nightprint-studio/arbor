@@ -762,10 +762,26 @@
           .catch(() => { /* network failure is non-fatal — no ghost edges */ });
       }
 
-      const [gd, s] = await Promise.all([
-        cacheStore.loadGraph(tabId, 0, limit, filter),
-        getStatus(tabId),
-      ]);
+      // Status drives the WIP row (counts + merge/conflict badges) but the
+      // graph itself doesn't need it. On big repos `get_status` enumerates the
+      // whole workdir (untracked recursion + rename detection) and can take
+      // seconds — blocking the graph render on it freezes the whole view.
+      // Fire it in the background; the WIP row materialises reactively when
+      // `repoStore.setStatus` lands. The `beginStatusReload()` call flips the
+      // WIP row into spinner mode so the new tab doesn't briefly show the
+      // previous tab's modified/added/deleted counts while the IPC is in
+      // flight.
+      repoStore.beginStatusReload();
+      getStatus(tabId)
+        .then(s => {
+          if (tabId === tabsStore.activeTabId) {
+            repoStore.setStatus(s);
+            tabsStore.updateTab(tabId, { status: s });
+          }
+        })
+        .catch(() => { /* non-fatal — the sidebar's own fetch will retry */ });
+
+      const gd = await cacheStore.loadGraph(tabId, 0, limit, filter);
 
       // Guard: tab changed while we were awaiting — discard stale response.
       if (tabId !== tabsStore.activeTabId) { stale = true; return; }
@@ -774,7 +790,6 @@
       // dispatcher's awaitGraphLoaded) can distinguish "graph for this tab
       // is loaded" from "previous tab's graph is still in memory".
       graphStore.setGraph(gd, tabId);
-      repoStore.setStatus(s);
       // Drop the loading flag NOW (before awaiting the fingerprint or notifying
       // waiters): the template gates `<div class="graph-body" style="height:
       // {svgH}px">` on `!isLoading`, so until this flips the scroll-area's
@@ -1243,7 +1258,10 @@
 
   const wipCounts = $derived(status ? getWipCounts(status) : null);
   const wipCount  = $derived(wipCounts?.total ?? 0);
-  const showWip   = $derived(wipCount > 0 && !!tab);
+  // Keep the row visible while the post-switch status fetch is in flight, so
+  // the user sees a spinner instead of either an empty graph (if the new tab
+  // ends up having WIP) or — worse — a momentary disappear/reappear flicker.
+  const showWip   = $derived((wipCount > 0 || repoStore.statusLoading) && !!tab);
 
   function handleWipContextMenu(e: MouseEvent) {
     e.preventDefault();
@@ -1464,6 +1482,7 @@
         {wipCounts}
         {status}
         active={graphStore.panelMode === 'workdir'}
+        loading={repoStore.statusLoading}
         onclick={handleSelectWip}
         oncontextmenu={handleWipContextMenu}
       />

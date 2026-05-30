@@ -14,6 +14,13 @@ function describeOp(s: RepoStatus): string {
 
 function createRepoStore() {
   let status = $state<RepoStatus | null>(null);
+  // True while a `get_status` IPC is in flight AFTER the active tab changed.
+  // The WIP row reads this to render a spinner instead of leaking the old
+  // tab's modified/added/deleted counts during the ~1s the new tab's status
+  // is being fetched. NOT used for background refreshes of the active tab
+  // (those keep the previous counts visible until the new ones land — no
+  // flicker).
+  let statusLoading = $state(false);
   let localBranches = $state<BranchInfo[]>([]);
   let remoteBranches = $state<BranchInfo[]>([]);
   let stashes = $state<StashEntry[]>([]);
@@ -45,8 +52,17 @@ function createRepoStore() {
     });
   }
 
+  /** Invalidate the current status and switch the WIP row into spinner
+   *  mode. Call this at the start of any tab-switch refresh so the new
+   *  tab's WIP row doesn't briefly render the previous tab's counts. */
+  function beginStatusReload() {
+    status = null;
+    statusLoading = true;
+  }
+
   function setStatus(s: RepoStatus | null) {
     status = s;
+    statusLoading = false;
     if (!s) return;
     // Attribute the alert to whichever tab is currently active.  In
     // Arbor `repoStore.status` always reflects the active tab's state,
@@ -84,6 +100,7 @@ function createRepoStore() {
 
   function clear() {
     status = null;
+    statusLoading = false;
     localBranches = [];
     remoteBranches = [];
     stashes = [];
@@ -96,6 +113,7 @@ function createRepoStore() {
 
   return {
     get status() { return status; },
+    get statusLoading() { return statusLoading; },
     get localBranches() { return localBranches; },
     get remoteBranches() { return remoteBranches; },
     get stashes() { return stashes; },
@@ -103,6 +121,7 @@ function createRepoStore() {
     get tags() { return tags; },
     get nearestTag() { return nearestTag; },
     get isRefreshing() { return isRefreshing; },
+    beginStatusReload,
     setStatus,
     setLocalBranches,
     setRemoteBranches,

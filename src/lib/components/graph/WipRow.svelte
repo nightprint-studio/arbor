@@ -3,6 +3,7 @@
   import { nodeX, ROW_HEIGHT } from '$lib/utils/graph-renderer';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import type { GraphColumn } from '$lib/types/config';
   import type { RepoStatus } from '$lib/types/git';
 
@@ -13,6 +14,7 @@
     wipCounts,
     status,
     active,
+    loading = false,
     onclick,
     oncontextmenu,
   }: {
@@ -30,6 +32,10 @@
     wipCounts: { modified: number; added: number; deleted: number; total: number } | null;
     status: RepoStatus | null;
     active: boolean;
+    /** True while the status fetch for the active tab is in flight after a
+     *  tab switch. Renders a spinner where the counts would go, so the row
+     *  never leaks the previous tab's modified/added/deleted numbers. */
+    loading?: boolean;
     onclick: () => void;
     oncontextmenu?: (e: MouseEvent) => void;
   } = $props();
@@ -75,7 +81,11 @@
       </div>
     {:else if col.id === 'subject'}
       <div class="cell wip-info">
-        {#if isMerging && conflictCount > 0}
+        {#if loading}
+          <HardDriveDownload size={11} class="wip-icon" />
+          <span class="wip-label">Working Directory</span>
+          <Spinner size="xs" variant="dots" ariaLabel="Loading working directory status" />
+        {:else if isMerging && conflictCount > 0}
           <AlertTriangle size={11} class="wip-icon-conflict" />
           <span class="wip-label wip-label-conflict">Merge in corso</span>
           <span class="wip-pill wip-conflict" use:tooltip={`${conflictCount} file in conflitto`}>

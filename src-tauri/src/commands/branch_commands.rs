@@ -52,16 +52,16 @@ pub struct CheckoutResult {
 
 /// Stash-safe checkout core: stash dirty workdir → run `do_checkout` → apply stash.
 ///
-/// `op_desc` is used in the recovery snapshot label. `do_checkout` performs the
-/// actual ref/HEAD move on a `&mut Repository` and optionally returns a
-/// resolved local branch name (used by `checkout_remote_as_local_safe`).
+/// `do_checkout` performs the actual ref/HEAD move on a `&mut Repository` and
+/// optionally returns a resolved local branch name (used by
+/// `checkout_remote_as_local_safe`). The recovery snapshot is taken inside the
+/// inner `branch::checkout_*` helpers — not here — so we don't pay for it twice.
 ///
 /// Mirrors the pull auto-stash dance (stash → mutate → apply, never pop, so
 /// the stash survives conflicts and apply errors).
 fn safe_checkout_with_stash<F>(
     state: &AppState,
     tab_id: &str,
-    op_desc: &str,
     do_checkout: F,
 ) -> Result<CheckoutResult, AppError>
 where
@@ -94,15 +94,11 @@ where
     };
 
     // Step 3: checkout + stash re-apply (mutable borrow).
+    // The recovery snapshot is taken inside the inner `branch::checkout_*`
+    // helpers (called via `do_checkout`), so we don't take a second one here.
     let mut mgr = state.lock_repos()?;
     let repo = mgr.get_mut(tab_id)?;
     let r = repo.inner_mut();
-
-    crate::git::recovery::try_snapshot(
-        r,
-        crate::git::recovery::RecoveryKind::Checkout,
-        op_desc.to_string(),
-    );
 
     let did_stash = stash_entry.is_some();
 
@@ -374,7 +370,6 @@ pub fn checkout_branch_safe(
     let result = safe_checkout_with_stash(
         &state,
         &tab_id,
-        &format!("checkout branch '{name}' (safe)"),
         |r| {
             crate::git::branch::checkout_branch(r, &name_for_checkout)?;
             Ok(None)
@@ -439,7 +434,6 @@ pub fn checkout_remote_as_local_safe(
     let result = safe_checkout_with_stash(
         &state,
         &tab_id,
-        &format!("checkout remote '{remote_name}' as local (safe)"),
         |r| {
             let local = crate::git::branch::checkout_remote_as_local(r, &remote_for_checkout)?;
             Ok(Some(local))
@@ -490,11 +484,9 @@ pub fn checkout_commit_safe(
     oid: String,
 ) -> Result<CheckoutResult, AppError> {
     let oid_for_checkout = oid.clone();
-    let short = oid.get(..7).unwrap_or(&oid).to_string();
     let result = safe_checkout_with_stash(
         &state,
         &tab_id,
-        &format!("checkout commit {short} (detached, safe)"),
         |r| {
             crate::git::branch::checkout_commit_detached(r, &oid_for_checkout)?;
             Ok(None)

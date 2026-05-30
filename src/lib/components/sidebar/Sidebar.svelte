@@ -84,20 +84,33 @@
 
   async function loadSidebarData(tabId: string) {
     try {
-      // Branches, stashes, tags, submodules go through the cache.
-      // Status is always fetched live (not cached — changes constantly).
-      const [sidebar, status] = await Promise.all([
-        cacheStore.loadSidebarData(tabId),
-        getStatus(tabId),
-      ]);
+      // Status is always fetched live (not cached — changes constantly), and
+      // on big repos it's the slowest single call in the boot path (untracked
+      // recursion + rename detection). The sidebar's own branch / stash / tag
+      // / submodule lists DON'T depend on it, so we fire it in the background
+      // and let the WIP row + uncommitted badge appear reactively when it
+      // lands. Without this, opening a heavy repo froze the whole sidebar
+      // while git enumerated the workdir. `beginStatusReload()` flips the WIP
+      // row into spinner mode for the in-flight window so the new tab never
+      // briefly renders the previous tab's counts (no-op if CommitGraph's
+      // sibling fetch already called it on this tab switch).
+      repoStore.beginStatusReload();
+      getStatus(tabId)
+        .then(status => {
+          if (tabsStore.activeTabId !== tabId) return;
+          repoStore.setStatus(status);
+          tabsStore.updateTab(tabId, { status });
+        })
+        .catch(() => { /* non-fatal — CommitGraph's own fetch will retry */ });
+
+      const sidebar = await cacheStore.loadSidebarData(tabId);
+      if (tabsStore.activeTabId !== tabId) return;
       repoStore.setLocalBranches(sidebar.localBranches);
       repoStore.setRemoteBranches(sidebar.remoteBranches);
       repoStore.setStashes(sidebar.stashes);
-      repoStore.setStatus(status);
       repoStore.setSubmodules(sidebar.submodules);
       repoStore.setTags(sidebar.tags);
       repoStore.setNearestTag(sidebar.nearestTag);
-      tabsStore.updateTab(tabId, { status });
       // Worktrees loaded independently (not cached — quick git CLI call)
       worktreeStore.load(tabId);
       // Local-only tag set: refresh from .arbor/config.toml (best-effort —
