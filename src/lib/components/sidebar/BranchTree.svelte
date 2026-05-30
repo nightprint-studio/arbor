@@ -35,6 +35,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { laneColor } from '$lib/utils/graph-renderer';
 
   let {
     branches,
@@ -50,15 +51,15 @@
   const groupingEnabled = $derived(branchGroupingStore.isEnabled(tab?.id));
   const groupingRecursive = $derived(branchesConfigStore.groupingRecursive);
 
-  const LANE_COLORS = [
-    '#4d78cc', '#cc7832', '#6a9956', '#9876aa',
-    '#c75450', '#20b2aa', '#ffc66d', '#e08060',
-  ];
-
+  // Branch icon colour mirrors the colour of the same ref's pill on the graph
+  // (so the sidebar and the graph stay visually paired). The source of truth
+  // is `graphStore.refColorByName`, which maps every visible ref name to its
+  // host node's `color_index`. When the branch tip isn't on the loaded graph
+  // page (paginated history, refs reachable only from off-page commits) we
+  // fall back to a neutral muted tint instead of inventing a colour.
   function branchColor(name: string): string {
-    let h = 0;
-    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-    return LANE_COLORS[h % LANE_COLORS.length];
+    const idx = graphStore.refColorByName.get(name);
+    return idx === undefined ? 'var(--text-muted)' : laneColor(idx);
   }
 
   // Folder colour for grouped view. We don't hash random colours — the
@@ -604,7 +605,7 @@
         tabindex="0"
         onkeydown={(e) => e.key === 'Enter' && handleClick(branch)}
       >
-        <span class="branch-icon" style="color: {branch.is_head ? 'var(--accent)' : color}">
+        <span class="branch-icon" style="color: {color}">
           <GitBranch size={12} />
         </span>
 
@@ -693,7 +694,7 @@
               tabindex="0"
               onkeydown={(e) => e.key === 'Enter' && handleClick(branch)}
             >
-              <span class="branch-icon" style="color: {branch.is_head ? 'var(--accent)' : color}">
+              <span class="branch-icon" style="color: {color}">
                 <GitBranch size={12} />
               </span>
               <span class="branch-name truncate">{splitSegments(branch.name, groupingRecursive).at(-1)}</span>

@@ -92,6 +92,38 @@ function createGraphStore() {
     graphData?.nodes.find(n => n.oid === selectedOid) ?? null
   );
 
+  // Single source of truth for "what color does ref X have in the graph".
+  // Built by walking visible nodes' refs: local branches map directly to
+  // their host node's color_index; remote branches inherit the bare-name
+  // local color when there is one (so `develop` and `origin/develop` stay
+  // visually paired even when they sit on different lanes), otherwise fall
+  // back to their own host node's color_index.
+  //
+  // Both CommitGraph (for ref pills) and BranchTree (for sidebar icons)
+  // read this map — keeping them on a hash-of-name palette here is what
+  // caused the sidebar colour to diverge from the graph.
+  const refColorByName = $derived.by<Map<string, number>>(() => {
+    const map = new Map<string, number>();
+    if (!graphData) return map;
+    for (const node of graphData.nodes) {
+      for (const ref of node.refs) {
+        if (ref.ref_type === 'local_branch') {
+          map.set(ref.name, node.color_index);
+        }
+      }
+    }
+    for (const node of graphData.nodes) {
+      for (const ref of node.refs) {
+        if (ref.ref_type === 'remote_branch') {
+          const slash = ref.name.indexOf('/');
+          const bare  = slash >= 0 ? ref.name.slice(slash + 1) : ref.name;
+          map.set(ref.name, map.get(bare) ?? node.color_index);
+        }
+      }
+    }
+    return map;
+  });
+
   // Filtered list uses the *debounced* query so O(n) filtering only happens
   // once the user pauses typing (150ms window) — prevents input lag on repos
   // with tens of thousands of commits.
@@ -281,6 +313,7 @@ function createGraphStore() {
     get selectedOid()        { return selectedOid; },
     get selectedDetail()     { return selectedDetail; },
     get selectedNode()       { return selectedNode; },
+    get refColorByName()     { return refColorByName; },
     get isLoading()          { return isLoading; },
     get searchQuery()        { return searchQuery; },
     get highlightedOids()    { return highlightedOids; },

@@ -332,47 +332,11 @@
     }
   }
 
-  // Maps local branch names to their lane color_index so that remote tracking
-  // branches (e.g. "origin/develop") can inherit the same color as the local
-  // branch ("develop") even when they point to different commits on different lanes.
-  const localBranchColorMap = $derived.by((): Map<string, number> => {
-    const map = new Map<string, number>();
-    if (!data) return map;
-    for (const node of data.nodes) {
-      for (const ref of node.refs) {
-        if (ref.ref_type === 'local_branch') {
-          map.set(ref.name, node.color_index);
-        }
-      }
-    }
-    return map;
-  });
-
   // Resolves ANY ref name (local or remote) to the color_index that should be
-  // used to render its label. Pre-computed once per graphData change so the
-  // template hot path avoids both the regex strip and the `.get()` fallback
-  // chain — it's a single Map lookup per ref per render.
-  const refColorByName = $derived.by((): Map<string, number> => {
-    const map = new Map<string, number>();
-    if (!data) return map;
-    for (const node of data.nodes) {
-      for (const ref of node.refs) {
-        if (ref.ref_type === 'local_branch') {
-          map.set(ref.name, node.color_index);
-        }
-      }
-    }
-    for (const node of data.nodes) {
-      for (const ref of node.refs) {
-        if (ref.ref_type === 'remote_branch') {
-          const slash = ref.name.indexOf('/');
-          const bare  = slash >= 0 ? ref.name.slice(slash + 1) : ref.name;
-          map.set(ref.name, map.get(bare) ?? node.color_index);
-        }
-      }
-    }
-    return map;
-  });
+  // used to render its label. Centralised on the graph store so the sidebar's
+  // BranchTree reads from the same source — without that, the sidebar's branch
+  // icon colour drifts from the pill colour in the graph.
+  const refColorByName = $derived(graphStore.refColorByName);
   const svgH = $derived(svgHeight(totalRows));
 
   $effect(() => {
