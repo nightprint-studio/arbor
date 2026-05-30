@@ -13,6 +13,34 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Opening a repo no longer freezes the commit graph and sidebar while git enumerates the working directory: the WIP status fetch (untracked recursion + rename detection — the slowest single call on big repos) now runs in the background, so the graph and sidebar render immediately. While the scan is in flight after a tab switch, the WIP row renders a spinner instead of the previous tab's modified/added/deleted counts. Same for safe-checkout flows, which no longer take a duplicate recovery snapshot.
+- Title bar gains a Command Palette icon button (next to the Documentation entry) for click-discoverable access to `Ctrl+K`. The Theme switcher moves out of its own title-bar icon into the Settings menu as a hover entry — built-in and custom themes are still one mouse move away, plus "Edit themes…" at the bottom.
+- Marketplace auto-refresh toggles (refresh interval, poll cadence) now
+  take effect on the running schedule immediately instead of waiting for
+  the next poll cycle.
+- HTTP requests to Jira, Linear, and the GitHub releases API used by the
+  PortableGit downloader now share a uniform `Arbor-Git-GUI/<version>`
+  user-agent. Jira and Linear requests share a 30s timeout (was 30s and
+  20s respectively); the PortableGit download stays untimed since the
+  same connection streams a multi-MB archive.
+- Markdown editor live preview: GFM tables render as a real HTML table
+  with framed cells, header row and column alignment from the
+  `|:--:|--:|` markers; cell content supports bold, italic,
+  strikethrough, inline code, and links. An all-empty header row
+  renders as a headerless grid. The caret entering the block flips it
+  back to source mode for editing. Unordered list markers (`-` / `*`
+  / `+`) show as a proper bullet glyph off the active line, and
+  ordered list numbers align tabularly.
+- Status bar slimmed down: repo path moved to the left segment; Fetch and
+  "Open in browser" relocated to the graph toolbar; version pill removed
+  (About still reachable from the Command Palette and the menu).
+- Issue detail dialog is now self-contained: the tracker, API routing,
+  and linked-commits source repo are pinned at open time, so a Linear
+  ticket stays usable from a Jira-configured repo (and vice versa), and
+  restoring from the parked-dialog dock no longer forces a checkout back
+  to the source repo. The Linked Commits section explains itself when
+  the original tab is no longer open and offers a one-click fallback to
+  the current repo.
 - Branches / Tags column rendering: local branches use a monitor icon, remote branches a globe icon; chips are now squared off (matching tag shape); branch names stretch with the column width instead of capping at 180px; multiple tags on a single commit collapse into a click-to-expand chip (also triggered when any tag shares a row with one or more branches). The standalone HEAD pill is gone — the HEAD branch is already styled green so the duplicate badge was noise. Default dark theme's lane-3 colour shifted from magenta-purple to indigo, and the four community themes that shipped `lane-3` literally identical to `color-tag` (Ayu Dark/Light, Solarized Dark/Light) were also retuned so branch chips on that lane don't read as tags.
 - The WIP (working directory) row now lives inside the scrolling history pane, pinned just below the sticky column header. It uses the same grid layout as the commit rows so the dashed lane node lines up with the lane SVG behind it, and the "Working Directory" label / change pills sit in the Subject column — wherever the user has dragged it. It stays visible while exploring older history. Scroll-area lateral inset bumped to match the toolbar's so header, WIP and rows share the same 4 px left/right gap as the toolbar above.
 - Branches sidebar groups local & remote branches and worktrees by their `/` path segments — GitKraken / Fork style folder tree with collapsible, lane-colour-matched folders. On by default; toggle from the folder-tree icon in the sidebar header (always visible, next to refresh), the **Alt+Shift+G** shortcut, or the Command Palette entry *Branches: Group by Path*. The on/off and collapsed-folder state is per-repo (saved in `.arbor/config.toml`); a host-wide `branches.grouping_recursive` knob flips between deep split and single-level.
@@ -60,37 +88,6 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   WebView), so the system browser handles playback while the rest of
   the README stays in the editor. Caret on the source reveals the
   raw `![…](…)` for editing.
-
-### Changed
-
-- Opening a repo no longer freezes the commit graph and sidebar while git enumerates the working directory: the WIP status fetch (untracked recursion + rename detection — the slowest single call on big repos) now runs in the background, so the graph and sidebar render immediately. While the scan is in flight after a tab switch, the WIP row renders a spinner instead of the previous tab's modified/added/deleted counts. Same for safe-checkout flows, which no longer take a duplicate recovery snapshot.
-- Title bar gains a Command Palette icon button (next to the Documentation entry) for click-discoverable access to `Ctrl+K`. The Theme switcher moves out of its own title-bar icon into the Settings menu as a hover entry — built-in and custom themes are still one mouse move away, plus "Edit themes…" at the bottom.
-- Marketplace auto-refresh toggles (refresh interval, poll cadence) now
-  take effect on the running schedule immediately instead of waiting for
-  the next poll cycle.
-- HTTP requests to Jira, Linear, and the GitHub releases API used by the
-  PortableGit downloader now share a uniform `Arbor-Git-GUI/<version>`
-  user-agent. Jira and Linear requests share a 30s timeout (was 30s and
-  20s respectively); the PortableGit download stays untimed since the
-  same connection streams a multi-MB archive.
-- Markdown editor live preview: GFM tables render as a real HTML table
-  with framed cells, header row and column alignment from the
-  `|:--:|--:|` markers; cell content supports bold, italic,
-  strikethrough, inline code, and links. An all-empty header row
-  renders as a headerless grid. The caret entering the block flips it
-  back to source mode for editing. Unordered list markers (`-` / `*`
-  / `+`) show as a proper bullet glyph off the active line, and
-  ordered list numbers align tabularly.
-- Status bar slimmed down: repo path moved to the left segment; Fetch and
-  "Open in browser" relocated to the graph toolbar; version pill removed
-  (About still reachable from the Command Palette and the menu).
-- Issue detail dialog is now self-contained: the tracker, API routing,
-  and linked-commits source repo are pinned at open time, so a Linear
-  ticket stays usable from a Jira-configured repo (and vice versa), and
-  restoring from the parked-dialog dock no longer forces a checkout back
-  to the source repo. The Linked Commits section explains itself when
-  the original tab is no longer open and offers a one-click fallback to
-  the current repo.
 
 ### Fixed
 
