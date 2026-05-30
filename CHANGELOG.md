@@ -63,6 +63,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Title bar gains a Command Palette icon button (next to the Documentation entry) for click-discoverable access to `Ctrl+K`. The Theme switcher moves out of its own title-bar icon into the Settings menu as a hover entry — built-in and custom themes are still one mouse move away, plus "Edit themes…" at the bottom.
 - Marketplace auto-refresh toggles (refresh interval, poll cadence) now
   take effect on the running schedule immediately instead of waiting for
   the next poll cycle.

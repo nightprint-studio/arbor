@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Settings, BookOpen, LayoutDashboard, Palette, Check } from 'lucide-svelte';
+  import { Settings, BookOpen, LayoutDashboard, Palette, Check, Command, ChevronLeft } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
@@ -37,23 +37,53 @@
   let settingsMenuAnchor       = $state<{ x: number; y: number } | null>(null);
   let customizeActivityBarOpen = $state(false);
 
-  // ── Theme switcher dropdown ─────────────────────────────────────────────
-  let themeMenuOpen   = $state(false);
-  let themeMenuAnchor = $state<{ x: number; y: number } | null>(null);
+  // ── Theme hover submenu (opens off the Settings menu's "Theme" row) ─────
+  // Submenu sits to the LEFT of the Settings menu, aligned with the Theme
+  // row. A short close-timer gives the cursor time to bridge the gap
+  // between the row and the submenu without it snapping shut.
+  const SUBMENU_CLOSE_DELAY_MS = 150;
+  let themeSubmenuOpen   = $state(false);
+  let themeSubmenuAnchor = $state<{ right: number; top: number } | null>(null);
+  let themeSubmenuTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function openThemeMenu(e: MouseEvent) {
-    const btn  = e.currentTarget as HTMLElement;
-    const rect = btn.getBoundingClientRect();
-    themeMenuAnchor = { x: window.innerWidth - rect.right, y: rect.bottom + 6 };
-    themeMenuOpen   = true;
+  function cancelThemeSubmenuClose() {
+    if (themeSubmenuTimer !== null) {
+      clearTimeout(themeSubmenuTimer);
+      themeSubmenuTimer = null;
+    }
   }
-  function closeThemeMenu() {
-    themeMenuOpen   = false;
-    themeMenuAnchor = null;
+  function openThemeSubmenu(e: MouseEvent) {
+    cancelThemeSubmenuClose();
+    const row  = e.currentTarget as HTMLElement;
+    const rect = row.getBoundingClientRect();
+    themeSubmenuAnchor = {
+      right: window.innerWidth - rect.left + 4,   // 4 px gap between menus
+      top:   rect.top - 5,                         // line up with row's padding
+    };
+    themeSubmenuOpen = true;
+  }
+  function scheduleThemeSubmenuClose() {
+    cancelThemeSubmenuClose();
+    themeSubmenuTimer = setTimeout(() => {
+      themeSubmenuOpen   = false;
+      themeSubmenuAnchor = null;
+      themeSubmenuTimer  = null;
+    }, SUBMENU_CLOSE_DELAY_MS);
+  }
+  function closeThemeSubmenuNow() {
+    cancelThemeSubmenuClose();
+    themeSubmenuOpen   = false;
+    themeSubmenuAnchor = null;
   }
   async function selectTheme(id: string) {
-    closeThemeMenu();
+    closeThemeSubmenuNow();
+    closeSettingsMenu();
     await themeStore.setActive(id);
+  }
+  function openThemeEditorFromSubmenu() {
+    closeThemeSubmenuNow();
+    closeSettingsMenu();
+    onOpenThemeEditor();
   }
 
   function openSettingsMenu(e: MouseEvent) {
@@ -65,6 +95,9 @@
   function closeSettingsMenu() {
     settingsMenuOpen   = false;
     settingsMenuAnchor = null;
+    // Drop the theme submenu with its parent — otherwise it hangs in the
+    // void after the user dismisses the Settings menu via the backdrop.
+    closeThemeSubmenuNow();
   }
   function handleSettingsMenuSelect(id: string) {
     closeSettingsMenu();
@@ -197,13 +230,12 @@
 
     <button
       class="icon-btn"
-      class:active={themeMenuOpen}
-      use:tooltip={'Switch theme'}
-      aria-haspopup="menu"
-      aria-expanded={themeMenuOpen}
-      onclick={openThemeMenu}
+      class:active={uiStore.commandPaletteOpen}
+      use:tooltip={tooltipForAction('Command palette', 'command_palette')}
+      aria-pressed={uiStore.commandPaletteOpen}
+      onclick={() => uiStore.toggleCommandPalette()}
     >
-      <Palette size={16} />
+      <Command size={18} />
     </button>
 
     <button
@@ -360,6 +392,23 @@
 
   .theme-menu { min-width: 180px; }
 
+  /* Theme row inside the Settings menu — same shape as the surrounding
+     menu items but hover-driven (the click target lives in the submenu).
+     Chevron points LEFT because the submenu opens leftward (Settings menu
+     hugs the right window edge, so there's no room to expand rightward). */
+  .theme-row { cursor: default; }
+  :global(.theme-row-arrow) {
+    color: var(--text-muted);
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .theme-row:hover :global(.theme-row-arrow),
+  .theme-row.active :global(.theme-row-arrow) { color: var(--text-primary); }
+
+  /* Theme submenu floats off the Settings menu — needs its own stacking
+     context above the backdrop (z 490) and the parent menu (z 491). */
+  .theme-submenu { z-index: 492; }
+
   .theme-menu-section-label {
     padding: 4px 10px 2px;
     font-size: 10px;
@@ -471,6 +520,27 @@
       <LayoutDashboard size={14} />
       <span>Customize Activity Bar…</span>
     </button>
+    <!-- Theme row — hover entry that opens the theme submenu to the left
+         of this menu (built-in + custom themes for quick switching). Click
+         is also wired so keyboard users can Tab here and press Enter/Space
+         to pin the submenu open — otherwise the submenu would be reachable
+         only with a mouse. -->
+    <button
+      type="button"
+      class="settings-menu-item theme-row"
+      class:active={themeSubmenuOpen}
+      role="menuitem"
+      aria-haspopup="menu"
+      aria-expanded={themeSubmenuOpen}
+      onmouseenter={openThemeSubmenu}
+      onmouseleave={scheduleThemeSubmenuClose}
+      onfocus={openThemeSubmenu}
+      onclick={openThemeSubmenu}
+    >
+      <Palette size={14} />
+      <span>Theme</span>
+      <ChevronLeft size={12} class="theme-row-arrow" />
+    </button>
   </div>
 {/if}
 
@@ -478,21 +548,17 @@
   <CustomizeActivityBarModal onClose={() => customizeActivityBarOpen = false} />
 {/if}
 
-<!-- ── Theme switcher dropdown ──────────────────────────────────────────────── -->
-{#if themeMenuOpen && themeMenuAnchor}
-  <button
-    type="button"
-    aria-label="Close menu"
-    class="settings-menu-backdrop"
-    onclick={closeThemeMenu}
-    transition:fade={{ duration: animStore.dFast }}
-  ></button>
+<!-- ── Theme hover submenu (anchored off the Settings menu's Theme row) ───── -->
+{#if themeSubmenuOpen && themeSubmenuAnchor}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="settings-menu theme-menu"
-    style="right: {themeMenuAnchor.x}px; top: {themeMenuAnchor.y}px;"
+    class="settings-menu theme-menu theme-submenu"
+    style="right: {themeSubmenuAnchor.right}px; top: {themeSubmenuAnchor.top}px;"
     role="menu"
-    aria-label="Theme switcher"
-    transition:fly={{ y: -6, duration: animStore.dFast, easing: cubicOut }}
+    aria-label="Theme submenu"
+    onmouseenter={cancelThemeSubmenuClose}
+    onmouseleave={scheduleThemeSubmenuClose}
+    transition:fly={{ x: 6, duration: animStore.dFast, easing: cubicOut }}
   >
     <div class="theme-menu-section-label">Built-in</div>
     {#each themeStore.builtIn as theme}
@@ -538,7 +604,7 @@
     <button
       class="settings-menu-item"
       role="menuitem"
-      onclick={() => { closeThemeMenu(); onOpenThemeEditor(); }}
+      onclick={openThemeEditorFromSubmenu}
     >
       <Settings size={14} />
       <span>Edit themes…</span>
