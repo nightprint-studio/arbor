@@ -161,7 +161,8 @@
   // handler so the spinner + toast feedback is identical regardless of entry
   // point. Only fetches refs — graph topology reload happens via
   // `cacheStore.refreshIfChanged`, which is a no-op when the fingerprint
-  // didn't move.
+  // didn't move. The trailing `arbor:reload-diff` makes F5 also refresh the
+  // currently visible diff panel so externally-modified files appear updated.
   async function handleFetch() {
     if (!tab || isFetching) return;
     isFetching = true;
@@ -171,6 +172,7 @@
       const s = await getStatus(tab.id);
       repoStore.setStatus(s);
       await cacheStore.refreshIfChanged(tab.id);
+      window.dispatchEvent(new CustomEvent('arbor:reload-diff'));
     } catch (err) {
       uiStore.showToast(`Fetch failed: ${err}`, 'error');
     } finally {

@@ -94,6 +94,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- F5 (refresh) now also reloads the currently visible diff panel, so externally-modified files appear updated without needing to click off and back on the file.
 - Plugin forms no longer silently ignore a click on a menu item, list/card row action, or suggest-grid entry while another action is still running — they now show a brief "action already running" notice (buttons already disabled themselves with a spinner).
 - Title bar app mark, hamburger menu, and workspace monogram are now the
   same height, so the left cluster reads as one aligned row.
