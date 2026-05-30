@@ -43,6 +43,7 @@ export function permissionChips(p: MarketplacePlugin): PermissionChip[] {
 
 export function sourceBadgeLabel(s: MarketplaceSource): string {
   switch (s) {
+    case 'official':  return 'Official';
     case 'community': return 'Community';
     case 'custom':    return 'Custom source';
     case 'local':     return 'Local';
@@ -51,8 +52,10 @@ export function sourceBadgeLabel(s: MarketplaceSource): string {
 
 export function sourceBadgeTooltip(s: MarketplaceSource): string {
   switch (s) {
+    case 'official':
+      return 'Authored and maintained inside the arbor-extensions registry by the Arbor team.';
     case 'community':
-      return 'Listed on the arbor-extensions registry — vetted via PR review.';
+      return 'Listed on the arbor-extensions registry (PR-vetted), but the source code lives in a third-party repo.';
     case 'custom':
       return 'Third-party git URL you added by hand. Inspect before enabling.';
     case 'local':
@@ -61,9 +64,10 @@ export function sourceBadgeTooltip(s: MarketplaceSource): string {
 }
 
 /** Icon component picked by source — used for the compact row marker that
- *  replaces the verbose Community/Custom/Local pills inline. */
+ *  replaces the verbose Official/Community/Custom/Local pills inline. */
 export function sourceIcon(s: MarketplaceSource): typeof Globe {
   switch (s) {
+    case 'official':  return Shield;
     case 'community': return Globe;
     case 'custom':    return LinkIcon;
     case 'local':     return Package;

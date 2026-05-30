@@ -63,6 +63,24 @@ the catalog layer. Auto-refresh scheduling stays in the shell crate
   commands for the FE's Marketplace modal, installs the auto-refresh
   trigger against `arbor-scheduler`.
 
+## Source classification
+
+`MarketplaceSource` carries the trust tier the FE renders as a badge:
+
+- **Official** — Internal entry of the curated registry: the plugin lives
+  in the registry repo itself, authored by the registry maintainers.
+- **Community** — External entry of the curated registry: listed (and
+  PR-vetted) there but the source code lives in a third-party repo.
+- **Custom** — a user-added GitHub URL. Unverified.
+- **Local** — hand-copied dev plugin in the host plugin dir. No
+  marketplace ledger entry.
+
+The Official / Community split is decided at fetch time in
+`index::fetch_catalog`: Internal `IndexEntry` items get promoted to
+`Official`; External ones stay `Community`. Custom-source fetches don't
+get the promotion — every entry from a user-added URL is uniformly
+`Custom`.
+
 ## Notes
 
 - The installer does NOT load the installed plugin into the runtime.

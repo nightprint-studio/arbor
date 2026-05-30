@@ -184,13 +184,23 @@ pub async fn fetch_catalog(
         .filter_map(|e| keep_entry("theme",  e)).collect();
 
     // Plugins — fetched in parallel.
+    //
+    // Source promotion: inside a curated-registry fetch (source_kind =
+    // Community), Internal entries become `Official` (the plugin lives
+    // in the registry repo itself, authored by the maintainers). External
+    // entries stay `Community` — they're PR-vetted but the source is in
+    // a third-party repo. Custom-source fetches don't get the promotion:
+    // every entry from a user-added URL is uniformly `Custom`. We inline
+    // the rule rather than capture an outer closure because `async move`
+    // futures don't compose cleanly with closure captures.
     let plugin_futs = plugin_entries.iter().cloned().map(|entry| {
         let http       = http.clone();
         let host_owner = owner.clone();
         let host_repo  = repo.clone();
-        let src        = source_kind;
+        let src_kind   = source_kind;
         async move {
-            let t = resolve_entry_target(&entry, &host_owner, &host_repo);
+            let t   = resolve_entry_target(&entry, &host_owner, &host_repo);
+            let src = promote_source(src_kind, t.external);
             let mut p = fetch_plugin(&http, &t.owner, &t.repo, &t.r#ref, &t.subpath, src).await?;
             p.entry.external = t.external;
             if let Some(pin) = t.pinned_sha.as_deref() {
@@ -204,9 +214,10 @@ pub async fn fetch_catalog(
         let http       = http.clone();
         let host_owner = owner.clone();
         let host_repo  = repo.clone();
-        let src        = source_kind;
+        let src_kind   = source_kind;
         async move {
-            let t = resolve_entry_target(&entry, &host_owner, &host_repo);
+            let t   = resolve_entry_target(&entry, &host_owner, &host_repo);
+            let src = promote_source(src_kind, t.external);
             if t.subpath.is_empty() {
                 return Err(MarketplaceError::Other(
                     "theme entry has no subpath (need the .json filename)".into(),
@@ -244,4 +255,20 @@ pub async fn fetch_catalog(
     themes .sort_by(|a, b| a.name.cmp(&b.name));
 
     Ok(MarketplaceCatalog { plugins, themes })
+}
+
+// ---------------------------------------------------------------------------
+// Source promotion (see fetch_catalog for the policy comment)
+// ---------------------------------------------------------------------------
+
+/// Apply the Community → Official promotion rule. Free function (not a
+/// closure) so the rule composes cleanly with `async move` futures that
+/// run concurrently — closure captures of an outer closure don't
+/// auto-Copy in every Rust version we support and the resulting compile
+/// surface is fragile.
+fn promote_source(kind: MarketplaceSource, external: bool) -> MarketplaceSource {
+    match (kind, external) {
+        (MarketplaceSource::Community, false) => MarketplaceSource::Official,
+        (other, _)                            => other,
+    }
 }

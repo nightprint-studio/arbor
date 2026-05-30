@@ -17,13 +17,18 @@ export type MarketplaceTab = 'plugins' | 'themes';
 
 /**
  * Where a listing came from.
- *  - `community` — listed in the `arbor-extensions` repo (vetted via PR review).
+ *  - `official`  — Internal entry in the curated registry: lives inside
+ *                  `arbor-extensions` itself, authored by the registry
+ *                  maintainers. Strongest provenance.
+ *  - `community` — External entry in the curated registry: listed (and
+ *                  PR-vetted) there but the code lives in a third-party
+ *                  repo.
  *  - `custom`    — the user added the git URL by hand.
  *  - `local`     — installed on disk with no matching marketplace entry (zip
  *                  sideload, dev folder, …). Surfaces only for plugins that
  *                  the host already has but the registry doesn't know about.
  */
-export type MarketplaceSource = 'community' | 'custom' | 'local';
+export type MarketplaceSource = 'official' | 'community' | 'custom' | 'local';
 
 // ─── Registry pointer ────────────────────────────────────────────────────────
 
@@ -59,10 +64,12 @@ export interface RegistryEntry {
   pinned_sha?: string;
   /**
    * True when the entry points at a third-party repo (the registry just
-   * lists it). `source` stays `community` because the entry was vetted via
-   * PR; the flag drives the "Unpinned" hint when `pinned_sha` is absent.
-   * Always false for entries that live inside the registry repo and for
-   * `custom` / `local` sources.
+   * lists it). Internal entries (`external = false`) inside the curated
+   * registry are surfaced as `source = 'official'`; external ones become
+   * `'community'`. Always false for `custom` / `local` sources (`custom`
+   * pointers are user-added so there's no separate "in the registry"
+   * concept). The flag still drives the "Unpinned" hint when
+   * `pinned_sha` is absent on a community entry.
    */
   external?: boolean;
 }

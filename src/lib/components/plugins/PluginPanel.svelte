@@ -488,7 +488,7 @@
                         use:tooltip={schedRunning
                           ? `${plugin.schedulers_running}/${plugin.scheduler_count} scheduler(s) running`
                           : 'All schedulers stopped'}
-                      >{schedRunning ? 'â—' : 'â—‹'}</span>
+                      >{schedRunning ? '●' : '○'}</span>
                     {/if}
                   </div>
                   <span class="plugin-desc truncate">{plugin.description}</span>

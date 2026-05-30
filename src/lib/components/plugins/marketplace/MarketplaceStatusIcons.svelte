@@ -99,6 +99,7 @@
   .rowicon-off          { color: var(--text-muted);  }
   .rowicon-update       { color: var(--color-stash); }
   .rowicon-experimental { color: var(--warning);     }
+  .rowicon-official     { color: var(--success);     }
   .rowicon-community    { color: var(--accent);      }
   .rowicon-custom       { color: var(--warning);     }
   .rowicon-local        { color: var(--info);        }

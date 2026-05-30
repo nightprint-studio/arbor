@@ -28,12 +28,16 @@
   {/if}
   <div class="hints">
     <div class="hint">
+      <MarketplaceBadge tone="official">Official</MarketplaceBadge>
+      Authored inside the <code>arbor-extensions</code> registry by the Arbor team.
+    </div>
+    <div class="hint">
       <MarketplaceBadge tone="community">Community</MarketplaceBadge>
-      Listed on the official <code>arbor-extensions</code> repo.
+      Listed on the registry (PR-vetted), but the source lives in a third-party repo.
     </div>
     <div class="hint">
       <MarketplaceBadge tone="custom">Custom source</MarketplaceBadge>
-      Third-party git URL — inspect the source before enabling.
+      Third-party git URL you added — inspect the source before enabling.
     </div>
     <div class="hint">
       <MarketplaceBadge tone="local">Local</MarketplaceBadge>

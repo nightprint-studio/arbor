@@ -7,7 +7,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  type Tone = 'community' | 'custom' | 'local' | 'experimental' | 'variant' | 'unpinned';
+  type Tone = 'official' | 'community' | 'custom' | 'local' | 'experimental' | 'variant' | 'unpinned';
 
   interface Props {
     tone:     Tone;
@@ -30,6 +30,15 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.3px;
+  }
+  /* Official — strongest "trust" tier, painted with the success palette so
+     it reads as "first-party, vouched for by the maintainers". Distinct
+     from Community (accent) so the two read differently at a glance even
+     in the same list. */
+  .badge-official {
+    background: color-mix(in srgb, var(--success) 16%, transparent);
+    color: var(--success);
+    border: 1px solid color-mix(in srgb, var(--success) 38%, transparent);
   }
   .badge-community {
     background: var(--accent-subtle);

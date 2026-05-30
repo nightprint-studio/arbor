@@ -459,6 +459,26 @@ function Repo.commits(opts) end
 ---@return string|nil   err
 function Repo.untracked() end
 
+---@class arbor.StagedFile
+---@field path   string   Repo-relative path. Renames report the NEW path.
+---@field status "added"|"modified"|"deleted"|"renamed"|"typechange"
+
+---Return every file whose **index** differs from HEAD — exactly what
+---`git diff --cached --name-only` would list. Each entry carries the
+---path and the kind of change ("added", "modified", "deleted",
+---"renamed", "typechange") so the caller can filter (e.g. skip
+---deletions when inspecting file contents).
+---
+---The canonical caller is an `on_pre_commit` hook: this is the precise
+---set about to enter the next commit. Working-tree-only changes
+---(`git add` not yet run) are NOT included.
+---
+---Requires `git = "read"` (or higher). Empty array when the index is
+---clean. `(nil, err)` on libgit2 failure.
+---@return arbor.StagedFile[]|nil files
+---@return string|nil             err
+function Repo.staged_files() end
+
 ---Drop every libgit2 `Repository` handle Arbor currently holds. libgit2
 ---memory-maps packfiles and some index files; on Windows those handles
 ---block other processes (`git clone`, `rm -rf`, `mv …`, Explorer) from

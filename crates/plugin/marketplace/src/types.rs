@@ -16,7 +16,14 @@ use arbor_plugin_types::prelude::{Dependency, Permissions};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MarketplaceSource {
-    /// Listed in the curated `arbor-extensions` repo (vetted via PR review).
+    /// First-party entry that lives inside the curated registry repo
+    /// itself (Internal `index.json` entry). Authored by the registry
+    /// maintainers — strongest provenance available.
+    Official,
+    /// External entry — listed in the curated registry (vetted via PR
+    /// review) but the source lives in a third-party GitHub repo. The
+    /// registry vouches, but the code isn't under the maintainers' direct
+    /// control.
     Community,
     /// User-supplied git URL — third-party, unverified.
     Custom,

@@ -30,6 +30,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
     install_tags(ctx, lua, &repo_table)?;
     install_commits(ctx, lua, &repo_table)?;
     install_untracked(ctx, lua, &repo_table)?;
+    install_staged_files(ctx, lua, &repo_table)?;
     install_clone(ctx, lua, &repo_table)?;
 
     arbor.set("repo", repo_table).map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -440,6 +441,77 @@ fn install_untracked(ctx: &ApiCtx, lua: &Lua, repo_table: &Table) -> Result<()> 
         ok2(lua_ctx, out)
     }).map_err(|e| AppError::Plugin(e.to_string()))?;
     repo_table.set("untracked", fn_)
+        .map_err(|e| AppError::Plugin(e.to_string()))?;
+    Ok(())
+}
+
+fn install_staged_files(ctx: &ApiCtx, lua: &Lua, repo_table: &Table) -> Result<()> {
+    // staged_files() → ({path, status}[], nil) | (nil, err)
+    //
+    // Files whose INDEX differs from HEAD — i.e. everything `git diff
+    // --cached --name-only` would report. The entry's `status` is one of
+    // "added" | "modified" | "deleted" | "renamed" | "typechange" so the
+    // plugin can filter (e.g. encoding-guardian skips deletions).
+    //
+    // Pre-commit hooks are the canonical caller: this is the exact set
+    // about to enter the next commit.
+    let git_read = ctx.git_read;
+    let fn_ = lua.create_function(move |lua_ctx, ()| -> LuaTuple {
+        if !git_read {
+            return Err(mlua::Error::RuntimeError(
+                "arbor.repo.staged_files: requires git = \"read\" (or higher)".to_string()
+            ));
+        }
+        let Some(path) = lua_ctx.globals()
+            .get::<Option<String>>("__arbor_current_repo__").unwrap_or(None)
+        else { return ok2(lua_ctx, lua_ctx.create_table()?); };
+
+        let repo = match git2::Repository::open(&path) {
+            Ok(r)  => r,
+            Err(e) => return err2(lua_ctx, format!("repo.staged_files open: {e}")),
+        };
+        // Untracked files default to off — we only want what's actually
+        // staged, not the rest of the working-tree noise. Renames are
+        // detected so a `git mv`-style change reports the new path.
+        let mut opts = git2::StatusOptions::new();
+        opts.include_untracked(false)
+            .include_ignored(false)
+            .renames_head_to_index(true);
+        let statuses = match repo.statuses(Some(&mut opts)) {
+            Ok(s)  => s,
+            Err(e) => return err2(lua_ctx, format!("repo.staged_files statuses: {e}")),
+        };
+
+        let out = lua_ctx.create_table()?;
+        let mut idx = 1usize;
+        for entry in statuses.iter() {
+            let status = entry.status();
+            // INDEX_* bits = staged half. We need any one of them set.
+            let label = if status.is_index_new()         { "added" }
+                   else if status.is_index_modified()    { "modified" }
+                   else if status.is_index_deleted()     { "deleted" }
+                   else if status.is_index_renamed()     { "renamed" }
+                   else if status.is_index_typechange()  { "typechange" }
+                   else { continue };
+
+            // Prefer the renamed new-path when available; fall back to the
+            // generic `path()` for non-rename cases.
+            let rel_path = entry
+                .head_to_index()
+                .as_ref()
+                .and_then(|d| d.new_file().path().map(|p| p.to_string_lossy().to_string()))
+                .or_else(|| entry.path().map(|p| p.to_string()));
+
+            let Some(rel) = rel_path else { continue };
+            let row = lua_ctx.create_table()?;
+            row.set("path",   rel)?;
+            row.set("status", label)?;
+            out.set(idx, row)?;
+            idx += 1;
+        }
+        ok2(lua_ctx, out)
+    }).map_err(|e| AppError::Plugin(e.to_string()))?;
+    repo_table.set("staged_files", fn_)
         .map_err(|e| AppError::Plugin(e.to_string()))?;
     Ok(())
 }

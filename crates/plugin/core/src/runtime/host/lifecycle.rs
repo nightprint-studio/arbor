@@ -663,6 +663,17 @@ pub fn load_plugin(
     let installer: Arc<dyn LuaApiInstaller> = api_installer
         .unwrap_or_else(|| Arc::new(crate::sandbox::NoopApiInstaller));
 
+    // Snapshot of the active repo path before app_ctx is moved into the
+    // sandbox — used a few lines down to seed `__arbor_current_repo__`.
+    // Without this seed, a freshly-loaded plugin sees a nil active repo
+    // until the next `on_repo_open` / `on_tab_switch` fires (those are the
+    // only events that refresh the global today). That broke commands
+    // invoked right after enable / install / hot reload.
+    let initial_repo_path: Option<String> = app_ctx
+        .as_ref()
+        .and_then(|c| c.active_repo_path())
+        .map(|p| p.to_string_lossy().to_string());
+
     let sandbox_started = std::time::Instant::now();
     let lua = crate::sandbox::create_sandbox(
         &manifest,
@@ -678,6 +689,13 @@ pub fn load_plugin(
         enabled.clone(),
     )?;
     let sandbox_ms = sandbox_started.elapsed().as_millis();
+
+    // Seed the active-repo global so `arbor.repo.current()` and the
+    // `__arbor_current_repo__`-backed fs sandbox return the right thing
+    // from the very first script line (and from `on_plugin_load` itself).
+    if let Some(ref path) = initial_repo_path {
+        let _ = lua.globals().set("__arbor_current_repo__", path.as_str());
+    }
 
     // Load the entry point.
     let exec_started = std::time::Instant::now();

@@ -523,11 +523,12 @@
   ];
 
   // Source filter — single-select. Only the marketplace-tracked origins
-  // (Community / Custom) get their own chip; "Local" isn't a category, it's
-  // just the visual marker for plugins the user installed by hand. Such
-  // plugins surface naturally in the Installed tab regardless.
+  // (Official / Community / Custom) get their own chip; "Local" isn't a
+  // category, it's just the visual marker for plugins the user installed
+  // by hand. Such plugins surface naturally in the Installed tab regardless.
   const sourceTabs: TabItem[] = [
     { id: 'all',       label: 'All sources' },
+    { id: 'official',  label: 'Official' },
     { id: 'community', label: 'Community' },
     { id: 'custom',    label: 'Custom' },
   ];

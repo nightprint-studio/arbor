@@ -181,7 +181,20 @@ local commits, err = arbor.repo.commits({
 
 -- List untracked-and-not-ignored paths in the working tree.
 -- Useful for housekeeping plugins (e.g. proposing .gitignore entries).
-local paths = arbor.repo.untracked()           -- ["target/foo.bin", ".env", ...]`, '.lua')}</pre>
+local paths = arbor.repo.untracked()           -- ["target/foo.bin", ".env", ...]
+
+-- List staged files — exactly what \`git diff --cached --name-only\` would
+-- list. Each entry is { path, status } where status is one of
+-- "added" | "modified" | "deleted" | "renamed" | "typechange". The
+-- canonical caller is an on_pre_commit hook checking the files about
+-- to enter the next commit.
+local staged, err = arbor.repo.staged_files()
+for _, file in ipairs(staged or {}) do
+  if file.status ~= "deleted" then
+    local body = arbor.fs.read(file.path)      -- inspect the staged content
+    -- ...
+  end
+end`, '.lua')}</pre>
 
 <h3>arbor.repo.clone — background clone</h3>
 <p>
