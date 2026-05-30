@@ -9,6 +9,10 @@
   function launchTour() {
     window.dispatchEvent(new CustomEvent('arbor:open-onboarding'));
   }
+
+  function openWhatsNew() {
+    window.dispatchEvent(new CustomEvent('arbor:open-whats-new'));
+  }
 </script>
 
 <span class="eyebrow">Welcome</span>
@@ -43,6 +47,11 @@
   Re-open the first-run walkthrough any time —
   <button class="tour-link" type="button" onclick={launchTour}>Launch the welcome tour</button>
   — or find it in the Command Palette under <em>Welcome Tour</em>.
+</Callout>
+
+<Callout variant="info" title="What's new">
+  Release notes for the version of Arbor you are running are available from the Command Palette under <em>Show What's New</em>, from the <em>About</em> panel, or
+  <button class="tour-link" type="button" onclick={openWhatsNew}>open them now</button>. The dialog auto-pops once after every upgrade.
 </Callout>
 
 <h2>Opening a repository</h2>

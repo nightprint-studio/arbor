@@ -111,6 +111,24 @@ pub struct AppConfig {
     /// fields here decide *how* (e.g. recursive vs single-level split).
     #[serde(default)]
     pub branches: BranchesConfig,
+    /// "What's New" modal state. Tracks the last app version the user has
+    /// already seen the release notes for, so the modal only auto-opens
+    /// the first time after an upgrade.
+    #[serde(default)]
+    pub whats_new: WhatsNewConfig,
+}
+
+/// "What's New" modal state. The frontend compares the current app version
+/// (from `tauri.conf.json` via `get_app_info`) against `last_seen_version`
+/// on boot and auto-opens the modal when they differ. A fresh install
+/// (no stored value) saves the current version silently — first-time users
+/// don't get a popup on initial launch.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WhatsNewConfig {
+    /// Last app version the user has been shown the What's New modal for.
+    /// `None` means the user has never seen it (fresh install).
+    #[serde(default)]
+    pub last_seen_version: Option<String>,
 }
 
 /// Global Branches-sidebar behaviour. Per-repo on/off lives in
@@ -892,6 +910,7 @@ impl Default for AppConfig {
             commit: CommitConfig::default(),
             onboarding: OnboardingConfig::default(),
             branches: BranchesConfig::default(),
+            whats_new: WhatsNewConfig::default(),
         }
     }
 }

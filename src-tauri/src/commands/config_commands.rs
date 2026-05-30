@@ -1,7 +1,7 @@
 use tauri::State;
 use crate::error::AppError;
 use crate::config::repo_config::{BranchGroupingConfig, RepoConfig, load as load_repo_config, save as save_repo_config};
-use crate::config::app_config::{self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, OnboardingConfig, PipelinesConfig, RecoveryConfig, StudioSettings};
+use crate::config::app_config::{self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, IssuesConfig, MissingProjectsConfig, MrConfig, OAuthOverrides, OnboardingConfig, PipelinesConfig, RecoveryConfig, StudioSettings, WhatsNewConfig};
 use crate::config::graph_columns::{self, GraphColumnsConfig};
 use crate::AppState;
 
@@ -473,6 +473,27 @@ pub fn set_onboarding_config(
 ) -> Result<(), AppError> {
     let mut cfg = state.lock_config()?;
     cfg.onboarding = config;
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Return the "What's New" state (last app version the user has been
+/// shown the release notes for).
+#[tauri::command]
+pub fn get_whats_new_config(state: State<'_, AppState>) -> Result<WhatsNewConfig, AppError> {
+    let config = state.lock_config()?;
+    Ok(config.whats_new.clone())
+}
+
+/// Persist the "What's New" state after the modal is dismissed.
+#[tauri::command]
+pub fn set_whats_new_config(
+    state: State<'_, AppState>,
+    config: WhatsNewConfig,
+) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    cfg.whats_new = config;
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))

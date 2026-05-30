@@ -119,6 +119,16 @@ function extractAllowedTags(s: string, store: string[]): string {
   });
 }
 
+/** Inline-only markdown → HTML (no block elements, no fenced code blocks).
+ *  Exposed for consumers that want to render markdown inside an existing
+ *  block container (list items, table cells, …) without `renderMarkdown`
+ *  wrapping the output in `<p>` tags.  Supports the same inline subset as
+ *  the block renderer: `**bold**`, `*em*`, `\`code\``, `[link](url)`, and
+ *  emoji shortcodes. Output reuses the shared `md-*` classes. */
+export function renderInlineMarkdown(s: string): string {
+  return inline(s);
+}
+
 function inline(s: string): string {
   const inlineCodes: string[] = [];
   // Pull inline-code segments out first — they must NOT be touched by the

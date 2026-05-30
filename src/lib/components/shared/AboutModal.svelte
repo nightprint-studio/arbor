@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Layers, Cpu, Keyboard, Building2 } from 'lucide-svelte';
+  import { Layers, Cpu, Keyboard, Building2, Gift } from 'lucide-svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import Modal from './Modal.svelte';
   import ModalHeader from './ModalHeader.svelte';
@@ -27,6 +27,11 @@
     { label: 'Git engine', value: 'libgit2 (vendored)' },
     { label: 'Platform',   value: appInfo ? `${appInfo.os} · ${appInfo.arch}` : '—' },
   ]);
+
+  function openWhatsNew() {
+    onClose();
+    window.dispatchEvent(new CustomEvent('arbor:open-whats-new'));
+  }
 
   const techStack = [
     { badge: 'Rust',      cls: 'rust',   desc: 'Backend · git2 · mlua · keyring' },
@@ -74,6 +79,16 @@
           </div>
         {/each}
       </div>
+
+      <button
+        type="button"
+        class="whats-new-cta"
+        onclick={openWhatsNew}
+        use:tooltip={"Open the release notes for this version of Arbor"}
+      >
+        <Gift size={11} />
+        <span>What's new in this version</span>
+      </button>
 
       <div class="group-label"><Cpu size={10} /> Technology</div>
       <div class="tech-strip">
@@ -364,4 +379,31 @@
   .about-footer .muted { color: var(--text-disabled); }
 
   .sep { opacity: 0.4; }
+
+  /* "What's new" link styled as a subtle accent CTA right under build info —
+     keeps the build-info card visually paired with its discoverable companion. */
+  .whats-new-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 6px 10px;
+    background: var(--accent-subtle);
+    border: 1px solid rgba(77, 120, 204, 0.3);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    font-size: 11px;
+    font-family: var(--font-ui-sans);
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+    align-self: flex-start;
+  }
+  .whats-new-cta:hover {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    border-color: rgba(77, 120, 204, 0.55);
+  }
+  .whats-new-cta:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 2px;
+  }
 </style>

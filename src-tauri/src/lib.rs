@@ -1069,6 +1069,9 @@ pub fn run() {
             // First-run onboarding tour state
             commands::config_commands::get_onboarding_config,
             commands::config_commands::set_onboarding_config,
+            // "What's New" modal state (last-seen app version)
+            commands::config_commands::get_whats_new_config,
+            commands::config_commands::set_whats_new_config,
             // Branches sidebar (global behaviour + per-repo grouping state)
             commands::config_commands::get_branches_config,
             commands::config_commands::set_branches_config,

@@ -169,6 +169,14 @@ export interface OnboardingConfig {
   version:   number;
 }
 
+/** "What's New" modal state. The frontend compares the current app version
+ *  against `last_seen_version` on boot and auto-opens the modal when they
+ *  differ. `null` means the user has never been shown the modal — treated
+ *  as a fresh install (no popup, just records the current version). */
+export interface WhatsNewConfig {
+  last_seen_version: string | null;
+}
+
 export interface AppConfig {
   theme: ThemeConfig;
   diff: DiffConfig;

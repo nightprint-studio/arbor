@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig } from '$lib/types/config';
+import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, WhatsNewConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
 export type { TicketLinksRepoConfig };
@@ -136,6 +136,14 @@ export const getOnboardingConfig = () =>
 
 export const setOnboardingConfig = (config: OnboardingConfig) =>
   invoke<void>('set_onboarding_config', { config });
+
+// ── What's New modal state (last-seen app version) ──────────────────────────
+
+export const getWhatsNewConfig = () =>
+  invoke<WhatsNewConfig>('get_whats_new_config');
+
+export const setWhatsNewConfig = (config: WhatsNewConfig) =>
+  invoke<void>('set_whats_new_config', { config });
 
 // ── Branches sidebar (global recursive split + per-repo grouping state) ──────
 

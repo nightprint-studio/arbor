@@ -65,7 +65,9 @@
   import CloneRepoModal from '../shared/CloneRepoModal.svelte';
   import GitSetupModal from '../shared/GitSetupModal.svelte';
   import OnboardingModal from '../shared/OnboardingModal.svelte';
+  import WhatsNewModal from '../shared/whats-new/WhatsNewModal.svelte';
   import { onboardingStore } from '$lib/stores/onboarding.svelte';
+  import { whatsNewStore } from '$lib/stores/whats_new.svelte';
   import { gitCliStore } from '$lib/stores/gitCli.svelte';
   import RepoBrowserModal from '../shared/RepoBrowserModal.svelte';
   // Cloud bulk transfers surface via the standard JobRegistry → JobsOverlay
@@ -593,6 +595,44 @@
     function open() { onboardingStore.show(); }
     window.addEventListener('arbor:open-onboarding', open);
     return () => window.removeEventListener('arbor:open-onboarding', open);
+  });
+
+  // ── What's New modal ────────────────────────────────────────────────────
+  // Loads `last_seen_version` from disk plus the current app version. Auto-
+  // opens once per version bump; fresh installs (no stored value) record
+  // the current version silently so the user only sees the modal AFTER an
+  // actual upgrade — never on first launch.
+  onMount(() => { void whatsNewStore.loadConfig(); });
+
+  let _whatsNewAutoFired = $state(false);
+  $effect(() => {
+    if (_whatsNewAutoFired)              return;
+    if (!whatsNewStore.loaded)           return;
+    // Wait for git detection AND the onboarding decision to settle:
+    //   - GitSetupModal bouncer is dismissable, but stacking on top of it
+    //     mid-boot is noisy.
+    //   - Onboarding wins priority — if the user is on a fresh install or
+    //     a tour version bump, let the tour finish (or be skipped) before
+    //     we surface release notes on top of it.
+    if (!onboardingStore.loaded)         return;
+    const phase = gitCliStore.phase;
+    if (phase !== 'ready' && phase !== 'error' && phase !== 'missing') return;
+    if (onboardingStore.open || onboardingStore.shouldAutoOpen()) return;
+    _whatsNewAutoFired = true;
+    if (whatsNewStore.shouldAutoOpen()) {
+      whatsNewStore.autoShow();
+    } else if (whatsNewStore.lastSeen === null) {
+      // Fresh install — record the current version so the next genuine
+      // upgrade triggers the modal.
+      whatsNewStore.silentlyAcknowledge();
+    }
+  });
+
+  // Manual re-entry from Command Palette / About panel.
+  $effect(() => {
+    function open() { whatsNewStore.showManual(); }
+    window.addEventListener('arbor:open-whats-new', open);
+    return () => window.removeEventListener('arbor:open-whats-new', open);
   });
 
   // Initialise the data cache and run one-time IDE detection at startup.
@@ -2661,6 +2701,12 @@
        dispatches the `arbor:open-onboarding` window event. -->
   {#if onboardingStore.open}
     <OnboardingModal />
+  {/if}
+
+  <!-- What's New — auto-opens after every version bump (silent on fresh
+       install). Re-entry via `arbor:open-whats-new` (Command Palette / About). -->
+  {#if whatsNewStore.open}
+    <WhatsNewModal />
   {/if}
 </div>
 
