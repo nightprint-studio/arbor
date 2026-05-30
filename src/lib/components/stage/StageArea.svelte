@@ -612,9 +612,15 @@
           <span class="count" class:nonzero={unstagedEntries.length > 0}>{unstagedEntries.length}</span>
 
           <div class="header-right">
-            <!-- view mode toggle -->
-            <button class="icon-action" class:active={listViewMode === 'list'} onclick={(e) => { e.stopPropagation(); listViewMode = 'list'; }} use:tooltip={'List view'}><List size={11} /></button>
-            <button class="icon-action" class:active={listViewMode === 'tree'} onclick={(e) => { e.stopPropagation(); listViewMode = 'tree'; }} use:tooltip={'Tree view'}><FolderTree size={11} /></button>
+            <!-- view mode toggle (single button, icon reflects target state) -->
+            <button
+              class="icon-action"
+              class:active={listViewMode === 'tree'}
+              onclick={(e) => { e.stopPropagation(); listViewMode = listViewMode === 'tree' ? 'list' : 'tree'; }}
+              use:tooltip={listViewMode === 'tree' ? 'Switch to flat list' : 'Group files by folder'}
+            >
+              {#if listViewMode === 'tree'}<List size={11} />{:else}<FolderTree size={11} />{/if}
+            </button>
             <span class="header-sep"></span>
             <!-- git actions -->
             <button class="icon-action" onclick={(e) => { e.stopPropagation(); handleStageAll(); }} use:tooltip={'Stage all'}><CheckSquare size={13} /></button>
@@ -706,9 +712,15 @@
           <span class="count staged-count" class:nonzero={stagedEntries.length > 0}>{stagedEntries.length}</span>
 
           <div class="header-right">
-            <!-- view mode toggle -->
-            <button class="icon-action" class:active={listViewMode === 'list'} onclick={(e) => { e.stopPropagation(); listViewMode = 'list'; }} use:tooltip={'List view'}><List size={11} /></button>
-            <button class="icon-action" class:active={listViewMode === 'tree'} onclick={(e) => { e.stopPropagation(); listViewMode = 'tree'; }} use:tooltip={'Tree view'}><FolderTree size={11} /></button>
+            <!-- view mode toggle (single button, icon reflects target state) -->
+            <button
+              class="icon-action"
+              class:active={listViewMode === 'tree'}
+              onclick={(e) => { e.stopPropagation(); listViewMode = listViewMode === 'tree' ? 'list' : 'tree'; }}
+              use:tooltip={listViewMode === 'tree' ? 'Switch to flat list' : 'Group files by folder'}
+            >
+              {#if listViewMode === 'tree'}<List size={11} />{:else}<FolderTree size={11} />{/if}
+            </button>
             <span class="header-sep"></span>
             <!-- git actions -->
             <button class="icon-action" onclick={(e) => { e.stopPropagation(); handleUnstageAll(); }} use:tooltip={'Unstage all'}><Square size={13} /></button>

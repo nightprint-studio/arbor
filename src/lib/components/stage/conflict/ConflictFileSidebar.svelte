@@ -72,21 +72,12 @@
     <span class="sidebar-label">{label}</span>
     <button
       class="sidebar-toggle-btn"
-      class:active={viewMode === 'list'}
-      use:tooltip={'Show file names'}
-      onclick={() => viewMode = 'list'}
-      aria-label="List view"
-    >
-      <List size={12} />
-    </button>
-    <button
-      class="sidebar-toggle-btn"
       class:active={viewMode === 'tree'}
-      use:tooltip={'Show tree structure'}
-      onclick={() => viewMode = 'tree'}
-      aria-label="Tree view"
+      use:tooltip={viewMode === 'tree' ? 'Switch to flat list' : 'Group files by folder'}
+      onclick={() => viewMode = viewMode === 'tree' ? 'list' : 'tree'}
+      aria-label={viewMode === 'tree' ? 'Switch to flat list' : 'Group files by folder'}
     >
-      <FolderTree size={12} />
+      {#if viewMode === 'tree'}<List size={12} />{:else}<FolderTree size={12} />{/if}
     </button>
   </div>
   <div class="sidebar-divider"></div>
