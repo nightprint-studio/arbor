@@ -2560,6 +2560,12 @@ function FormBuilder:password(name_or_cfg, opts) end
 ---@return arbor.FormBuilder
 function FormBuilder:textarea(name_or_cfg, opts) end
 
+---Click-to-edit single-line field. See `arbor.FormFieldInlineEdit`.
+---@param  name_or_cfg string|table
+---@param  opts        table|nil
+---@return arbor.FormBuilder
+function FormBuilder:inline_edit(name_or_cfg, opts) end
+
 ---@param  name_or_cfg string|table
 ---@param  opts        table|nil
 ---@return arbor.FormBuilder
@@ -2826,6 +2832,26 @@ function CoreAssert.register() end
 ---@field start_step  string|nil    Initial step id
 ---@field next_label  string|nil    Default: "Next"
 ---@field back_label  string|nil    Default: "Back"
+
+---Click-to-edit single-line field. Renders the current value as a clickable
+---label; activating it (click / Enter / Space) swaps in the host's
+---<InlineEdit> widget — Enter commits, Esc reverts, the explicit ✓ / ✕
+---buttons mirror those keys. No blur-commit semantics; dismissing focus
+---reverts the in-progress draft. Use this for header titles, row names, or
+---anywhere a text input would be too noisy.
+---@class arbor.FormFieldInlineEdit : arbor.FormNodeBase
+---@field type                "inline_edit"
+---@field name                string
+---@field label               string|nil
+---@field default             string|nil
+---@field placeholder         string|nil    Placeholder inside the editing input
+---@field display_placeholder string|nil    Text shown when value is empty in display mode (default: "—")
+---@field size                "sm"|"md"|nil Default: "sm"
+---@field maxlength           integer|nil
+---@field require_value       boolean|nil   Block commit when empty (default true)
+---@field readonly            boolean|nil
+---@field required            boolean|nil
+---@field hint                string|nil
 
 ---@class arbor.FormFieldFile : arbor.FormNodeBase
 ---@field type        "file"

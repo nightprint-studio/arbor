@@ -466,6 +466,27 @@ export interface FormFieldTextarea extends FormFieldBase {
   rows?:        number;
 }
 
+/**
+ * Click-to-edit single-line field. Renders the current value as a clickable
+ * label; activating it (click / Enter / Space) swaps in the host's
+ * `<InlineEdit>` widget — `Enter` commits, `Esc` reverts, and the explicit
+ * check / X buttons mirror those keys. There is no blur-commits behaviour;
+ * dismissing focus reverts the in-progress edit. Use this for header titles,
+ * row names, or anywhere a text input would be too noisy.
+ */
+export interface FormFieldInlineEdit extends FormFieldBase {
+  type:                 'inline_edit';
+  default?:             string;
+  /** Placeholder inside the editing input. */
+  placeholder?:         string;
+  /** Text shown when the value is empty in display mode. Default `'—'`. */
+  display_placeholder?: string;
+  size?:                'sm' | 'md';
+  maxlength?:           number;
+  /** Block commit when the value is empty after trimming (default true). */
+  require_value?:       boolean;
+}
+
 export interface FormFieldNumber extends FormFieldBase {
   type:     'number';
   default?: number;
@@ -892,6 +913,7 @@ export interface FormNodeDiff extends FormNodeBase {
 export type FormFieldNode =
   | FormFieldText
   | FormFieldTextarea
+  | FormFieldInlineEdit
   | FormFieldNumber
   | FormFieldRange
   | FormFieldCheckbox

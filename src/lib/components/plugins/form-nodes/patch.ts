@@ -62,6 +62,23 @@ function locate(roots: FormNode[], id: string): Located | null {
   return rec(roots);
 }
 
+/** Keys whose value, when assigned via merge/set, holds a child-node subtree
+ *  that must be passed through `normalizeNode` so freshly-emitted nodes pick
+ *  up auto-IDs (FormNodeLayout iterates with `{#each ... (child.id)}` — an
+ *  array of un-ID'd siblings would all key as `undefined` and the renderer
+ *  would keep the stale markup). Mirrors the arrays `childArraysOf` walks. */
+const CHILD_ARRAY_KEYS = new Set<string>([
+  'children',
+  'nav_children', 'nav_footer_children', 'content_children',
+  'nodes',
+  'step_detail_form',
+]);
+
+function normalizeChildSlot(key: string, value: unknown): unknown {
+  if (!CHILD_ARRAY_KEYS.has(key) || !Array.isArray(value)) return value;
+  return (value as FormNode[]).map(normalizeNode);
+}
+
 /** Assign `value` at a path of segments inside `obj`, creating intermediate
  *  containers (object or array, inferred from the next segment) as needed. */
 function setDeep(obj: any, path: (string | number)[], value: unknown): void {
@@ -94,11 +111,13 @@ export function applyPatchOps(roots: FormNode[], ops: FormPatchOp[]): void {
       continue;
     }
     if ('merge' in op && op.merge && typeof op.merge === 'object') {
-      for (const [k, v] of Object.entries(op.merge)) node[k] = v;
+      for (const [k, v] of Object.entries(op.merge)) node[k] = normalizeChildSlot(k, v);
       continue;
     }
     if ('set' in op && Array.isArray(op.set)) {
-      setDeep(node, op.set, op.value);
+      const last = op.set[op.set.length - 1];
+      const value = typeof last === 'string' ? normalizeChildSlot(last, op.value) : op.value;
+      setDeep(node, op.set, value);
       continue;
     }
     if ('append' in op && op.append) {

@@ -273,10 +273,11 @@ local function _make_field(kind)
   end
 end
 
-FormBuilder.text     = _make_field("text")
-FormBuilder.password = _make_field("password")
-FormBuilder.textarea = _make_field("textarea")
-FormBuilder.number   = _make_field("number")
+FormBuilder.text        = _make_field("text")
+FormBuilder.password    = _make_field("password")
+FormBuilder.textarea    = _make_field("textarea")
+FormBuilder.inline_edit = _make_field("inline_edit")
+FormBuilder.number      = _make_field("number")
 FormBuilder.select   = _make_field("select")
 FormBuilder.checkbox = _make_field("checkbox")
 FormBuilder.toggle   = _make_field("toggle")

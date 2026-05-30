@@ -1087,6 +1087,7 @@ local mode = arbor.settings.read("my-plugin", "mode") or "balanced"`, '.lua')}</
   <tbody>
     <tr><td><code>text</code></td><td>name, label, placeholder, default, pattern, pattern_hint, readonly</td><td>Also: password, email, url</td></tr>
     <tr><td><code>textarea</code></td><td>name, label, placeholder, default, rows</td><td></td></tr>
+    <tr><td><code>inline_edit</code></td><td>name, label, default, placeholder, display_placeholder, size (sm/md), maxlength, require_value, readonly</td><td>Click-to-edit single-line field. Renders the current value as a clickable label; activating it (click / Enter / Space) swaps in the host's <code>&lt;InlineEdit&gt;</code> — Enter commits, Esc reverts, ✓ / ✕ buttons mirror those keys. NO blur-commit (dismissing focus reverts the draft). <code>display_placeholder</code> is shown when the value is empty in display mode. Use for header titles, row names, or anywhere a full text input would be too noisy.</td></tr>
     <tr><td><code>number</code></td><td>name, label, default, min, max, step</td><td></td></tr>
     <tr><td><code>range</code></td><td>name, label, default, min, max, step, show_value, value_format</td><td>value_format: "&#123;v&#125;ms"</td></tr>
     <tr><td><code>checkbox</code></td><td>name, label, default</td><td></td></tr>

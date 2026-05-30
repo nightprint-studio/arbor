@@ -29,11 +29,12 @@
   } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
-  import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
-  import Dropdown      from '$lib/components/shared/ui/Dropdown.svelte';
-  import RadioGroup    from '$lib/components/shared/ui/RadioGroup.svelte';
-  import Toggle        from '$lib/components/shared/ui/Toggle.svelte';
-  import TypePill      from '$lib/components/shared/internal/TypePill.svelte';
+  import NumberStepper     from '$lib/components/shared/ui/NumberStepper.svelte';
+  import Dropdown          from '$lib/components/shared/ui/Dropdown.svelte';
+  import RadioGroup        from '$lib/components/shared/ui/RadioGroup.svelte';
+  import Toggle            from '$lib/components/shared/ui/Toggle.svelte';
+  import TypePill          from '$lib/components/shared/internal/TypePill.svelte';
+  import FormNodeInlineEdit from './FormNodeInlineEdit.svelte';
 
   import type {
     FormNode, FormFieldRange,
@@ -177,6 +178,18 @@
         disabled={ctx.resolvedDisabled(n)}
         bind:value={ctx.values[n.name]}
       ></textarea>
+
+    {:else if node.type === 'inline_edit'}
+      <FormNodeInlineEdit
+        value={String(ctx.values[n.name] ?? '')}
+        placeholder={n.placeholder}
+        size={n.size ?? 'sm'}
+        maxlength={n.maxlength}
+        requireValue={n.require_value ?? true}
+        readonly={(n.readonly ?? false) || ctx.resolvedDisabled(n)}
+        displayPlaceholder={n.display_placeholder ?? n.placeholder ?? '—'}
+        onCommit={(v) => { ctx.values[n.name] = v; ctx.notifyChange(n.name, v); }}
+      />
 
     {:else if node.type === 'date' || node.type === 'datetime' || node.type === 'time'}
       <input
