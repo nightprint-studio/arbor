@@ -1008,6 +1008,31 @@ function Ui.form.set_state_path(segments, value) end
 ---@param arg boolean|string|table|nil
 function Ui.form.set_loading(arg) end
 
+---Switch the active activity-bar sidecar in a Studio-shaped modal. Pass
+---`nil` to close any open pane (only effective when `activity_bar.always_open`
+---is not set). Passing an unknown id logs a host-side warning and is a no-op.
+---
+---  arbor.ui.form.set_sidecar("inspector")
+---  arbor.ui.form.set_sidecar(nil)             -- close the rail
+---@param id string|nil
+function Ui.form.set_sidecar(id) end
+
+---Substitute the body of a Studio-shaped modal with a fallback block
+---(loading / error / empty). Mutually exclusive at render time — calling
+---this with a non-nil `name` switches to that block; calling with `nil`
+---clears the override and renders the body again.
+---
+---  arbor.ui.form.set_state_block("loading", { label = "Parsing…" })
+---  arbor.ui.form.set_state_block("error",   { label = "Parse failed" })
+---  arbor.ui.form.set_state_block("empty",   {
+---    title = "No document", body = "Use Open file…",
+---    cta_label = "Open file…", cta_action = "open_file",
+---  })
+---  arbor.ui.form.set_state_block(nil)         -- back to the body
+---@param name string|nil  "loading" / "error" / "empty" / nil
+---@param cfg  table|nil   Shape depends on `name` (see arbor.FormStateBlockCfg).
+function Ui.form.set_state_block(name, cfg) end
+
 ---Open a confirmation dialog. Returns a Promise that resolves with `true`
 ---when the user clicks the confirm button and `false` on cancel.
 ---@param  config arbor.UiConfirmConfig
@@ -2210,6 +2235,85 @@ function Event.emit(event, payload) end
 ---@field type         "tabs"
 ---@field tabs         arbor.FormTab[]
 ---@field default_tab  string|nil   Initial active tab id (defaults to first tab)
+---@field persist_key  string|nil   When set, the active tab id is mirrored to `localStorage[persist_key]` so the user's selection survives reopening the modal. Restoration is guarded against stale ids (an id that no longer exists in the current `tabs` falls back to `default_tab`, then to the first tab).
+
+-- =============================================================================
+-- Studio-shaped modal chrome (`arbor.ui.form{...}` top-level subkeys)
+-- =============================================================================
+
+---Icon shown next to the title in a Studio-shaped modal header. Exactly one
+---variant must be present. Raw SVG markup is intentionally not accepted —
+---use `image` (URL: `file://`, `data:`, `https://`) for custom pictograms.
+---@class arbor.FormHeaderIcon
+---@field lucide string|nil   Lucide icon name (mutually exclusive with brand / image)
+---@field brand  string|nil   Provider brand id — one of "github" / "gitlab" / "bitbucket" / "linear" / "jira"
+---@field image  string|nil   URL pointing at a PNG / SVG file (file:// / data: / https://)
+
+---Studio-shaped modal header. When set on `arbor.ui.form{...}`, replaces the
+---default `<ModalHeader>` (plugin tag + title) with a richer header that
+---mirrors the host's Studio modals (icon · title · meta · left / centre /
+---right zones · close).
+---@class arbor.FormHeaderCfg
+---@field icon         arbor.FormHeaderIcon|nil  Pictogram before the title.
+---@field subtitle     string|nil                Secondary single-line caption (muted), e.g. file path.
+---@field dirty        boolean|nil               Render a `●` dirty marker after the title.
+---@field tooltip      string|nil                Tooltip on the title (typically the full file path).
+---@field size_meta    string|nil                Right-aligned meta pill (e.g. "12.4 KB · 412 lines").
+---@field left         table[]|nil               FormNodes rendered after the title, before centre.
+---@field centre       table[]|nil               FormNodes rendered in the centre — typically a `tabs` for view-mode switching.
+---@field right        table[]|nil               FormNodes rendered before the host-owned close button.
+---@field experimental table|nil                 When set (`{ description = "…" }`), render an ExperimentalBadge next to the title.
+
+---One item in a Studio-shaped modal's right (or left) activity bar.
+---Activity-bar items are ROUTING-ONLY — clicking one opens / focuses the
+---sidecar with the same `id`. Items that need to fire an action (Open file…,
+---Save As…) belong in `header.left` / `header.right` as `button` FormNodes.
+---Use `{ separator = true }` to insert a thin divider between groups.
+---@class arbor.FormActivityBarItem
+---@field id        string|nil   Stable id; must match a key in `sidecars`. Required unless `separator = true`.
+---@field icon      string|nil   Lucide icon name. Required unless `separator = true`.
+---@field label     string|nil   Sidecar label (shown as tooltip + aria-label).
+---@field tooltip   string|nil   Override tooltip (defaults to `label`).
+---@field count     number|nil   Numeric badge shown on the icon (omit / 0 = hidden).
+---@field dot       boolean|nil  Accent dot for "has unread content / dirty pane".
+---@field tone      string|nil   Override badge / dot tone — "info" / "success" / "warning" / "error" / "accent" / "muted".
+---@field disabled  boolean|nil  Render as disabled (click no-ops).
+---@field separator boolean|nil  When true, render as a thin divider line instead of a button.
+
+---Activity-bar configuration. Items map 1:1 to sidecars — every item's `id`
+---must match a key in `sidecars` or a console warning fires at mount.
+---@class arbor.FormActivityBarCfg
+---@field side         string|nil                       "left" / "right" (default) / "both".
+---@field items        arbor.FormActivityBarItem[]|nil  When `side` is left or right.
+---@field left_items   arbor.FormActivityBarItem[]|nil  When `side` is "both".
+---@field right_items  arbor.FormActivityBarItem[]|nil  When `side` is "both".
+---@field default      string|nil                       Item id active on first mount (when no stored history).
+---@field storage_key  string|nil                       When set, the active sidecar id is mirrored to `localStorage[storage_key]`.
+---@field always_open  boolean|nil                      When true, one item is always selected (cannot close to nil). Default: false.
+
+---Sidecar pane keyed by activity-bar item id. The pane is a FormNode subtree;
+---value-bearing nodes participate in the modal's shared submit payload.
+---Sidecars are always mounted (children survive close + reopen); the
+---collapse / expand happens via CSS width transition.
+---@class arbor.FormSidecarCfg
+---@field width    number|nil  Pixel width of the pane. Default: 320.
+---@field title    string|nil  Optional header line above the pane contents.
+---@field children table[]     Pane contents as FormNodes.
+
+---Modal footer override. Each zone is a FormNode list rendered horizontally;
+---unset zones fall through to the default Submit / Cancel / wizard chrome.
+---@class arbor.FormFooterCfg
+---@field status table[]|nil  Left status row — typically state_block_pill + breadcrumb.
+---@field center table[]|nil  Centre — typically undo / redo + Format / Convert tool buttons.
+---@field right  table[]|nil  Right — replaces the default Submit / Cancel cluster. Pass `{}` to hide all right-side controls.
+
+---Optional full-body fallback state — when any subkey is set, the body
+---`nodes` are hidden and the matching block is rendered instead. Flip live
+---with `arbor.ui.form.set_state_block(name, cfg?)` (`name = nil` clears).
+---@class arbor.FormStateBlockCfg
+---@field loading table|nil  Spinner overlay — `{ label?: string }`.
+---@field error   table|nil  Error block — `{ label: string }` (required).
+---@field empty   table|nil  Empty-doc state — `{ title?, body?, cta_label?, cta_action? }`.
 
 
 -- =============================================================================

@@ -1727,6 +1727,13 @@ export interface FormNodeTabs extends FormNodeBase {
   type:         'tabs';
   tabs:         FormTab[];
   default_tab?: string;
+  /**
+   * When set, the active tab id is mirrored to `localStorage[persist_key]`
+   * — the user's selection survives the modal closing and reopening.
+   * Ignored when set on a `tabs` rendered as sidebar nav (the sidebar
+   * has its own selection model via `default_tab` + show_if).
+   */
+  persist_key?: string;
   /** Sidebar mode only — show a filter input at the top of the nav that
    *  case-insensitively matches `label`, `group` and `meta` against the
    *  user's query. Tabs that don't match are hidden; empty groups
@@ -2567,6 +2574,144 @@ export type FormLayoutNode =
 
 export type FormNode = FormFieldNode | FormLayoutNode;
 
+// ─── Studio-shaped modal sub-configs ──────────────────────────────────────────
+
+/**
+ * Icon shown next to the title in the modal header. Exactly one variant must be
+ * present — `lucide` (Lucide icon name), `brand` (provider brand id), or
+ * `image` (URL: `file://`, `data:`, `https://`). Raw SVG markup is intentionally
+ * not accepted to avoid XSS surface from plugin-supplied HTML.
+ */
+export type FormHeaderIcon =
+  | { lucide: string }
+  | { brand:  ProviderBrandName }
+  | { image:  string };
+
+/**
+ * Optional header zone for `arbor.ui.form{...}`. When set, replaces the default
+ * `<ModalHeader>` chrome (plugin tag + title + close button) with a richer
+ * header that mirrors the Studio modals (icon + title + meta + left/centre/
+ * right snippet zones). Subkey defaults all reduce to "render nothing".
+ */
+export interface FormHeaderCfg {
+  /** Pictogram before the title. See FormHeaderIcon for accepted variants. */
+  icon?:     FormHeaderIcon;
+  /** Secondary single-line caption shown next to the title (muted). */
+  subtitle?: string;
+  /** Render a `●` dirty marker after the title when true. */
+  dirty?:    boolean;
+  /** Tooltip on the title (typically the full file path). */
+  tooltip?:  string;
+  /** Right-aligned meta pill rendered after the title (e.g. "12.4 KB · 412 lines"). */
+  size_meta?: string;
+  /** FormNodes rendered after the title cluster, before the centre zone. */
+  left?:     FormNode[];
+  /** FormNodes rendered in the centre — typically a `tabs` for view-mode switching. */
+  centre?:   FormNode[];
+  /** FormNodes rendered before the host-owned close button. */
+  right?:    FormNode[];
+  /** When set, render an ExperimentalBadge next to the title. */
+  experimental?: { description: string };
+}
+
+/**
+ * One item in the modal's right (or left) activity bar. Activity-bar items
+ * are ROUTING-ONLY — clicking one opens / focuses the sidecar with the same
+ * `id`. Items that need to fire an action (Open file…, Save As…) belong in
+ * `header.left` / `header.right` as `button` FormNodes.
+ */
+export type FormActivityBarItem =
+  | {
+      /** Stable id; must match a key in `sidecars`. */
+      id:       string;
+      /** Lucide icon name. */
+      icon:     string;
+      /** Sidecar label (shown as tooltip and aria-label). */
+      label:    string;
+      /** Optional override tooltip (defaults to `label`). */
+      tooltip?: string;
+      /** Numeric badge shown on the icon (omit / 0 = hidden). */
+      count?:   number;
+      /** Accent dot for "has unread content / dirty pane". */
+      dot?:     boolean;
+      /** Override the badge / dot tone. */
+      tone?:    'info' | 'success' | 'warning' | 'error' | 'accent' | 'muted';
+      disabled?: boolean;
+    }
+  | {
+      /** Thin separator line between groups in the bar. */
+      separator: true;
+    };
+
+export interface FormActivityBarCfg {
+  /** Which side of the modal the bar lives on. Default: 'right'. */
+  side?:    'left' | 'right' | 'both';
+  /** Items when `side` is 'left' or 'right'. */
+  items?:   FormActivityBarItem[];
+  /** Items when `side` is 'both'. */
+  left_items?:  FormActivityBarItem[];
+  right_items?: FormActivityBarItem[];
+  /** Which item id is active on first mount (no localStorage history). */
+  default?: string;
+  /**
+   * When set, the active sidecar id is mirrored to `localStorage[storage_key]`
+   * — the user's selection survives across modal opens.
+   */
+  storage_key?: string;
+  /** When true, one item is always selected (cannot close to null). Default: false. */
+  always_open?: boolean;
+}
+
+/**
+ * Sidecar pane keyed by activity-bar item id. Rendered as an animated slide-in
+ * panel to the right (or left) of the body. The pane is a FormNode subtree —
+ * value-bearing nodes participate in the same submit payload as the body
+ * (collisions on `name` are a plugin error: last-write-wins + warning).
+ */
+export interface FormSidecarCfg {
+  /** Pixel width of the pane. Default: 320. */
+  width?:    number;
+  /** Optional header line above the pane contents. */
+  title?:    string;
+  /** Pane contents as FormNodes. */
+  children:  FormNode[];
+}
+
+/**
+ * Modal footer override. Each zone is a FormNode list rendered horizontally;
+ * unset zones fall through to the default chrome (Submit/Cancel + wizard).
+ */
+export interface FormFooterCfg {
+  /** Left status row — typically `state_block_pill` + `breadcrumb`. */
+  status?: FormNode[];
+  /** Centre — typically undo/redo + Format/Convert tool buttons. */
+  center?: FormNode[];
+  /**
+   * Right — replaces the default Submit/Cancel/wizard cluster. Pass an empty
+   * array to render no right-side controls.
+   */
+  right?:  FormNode[];
+}
+
+/**
+ * Optional full-body fallback state — when any subkey is set, the body
+ * `nodes` are hidden and the matching block is rendered instead. Flip in/out
+ * live with `arbor.ui.form.set_state_block(name, cfg)`.
+ */
+export interface FormStateBlockCfg {
+  /** Spinner overlay with a label. Equivalent to top-level `loading = true`. */
+  loading?: { label?: string };
+  /** Error block with a tone="error" StateBlock. */
+  error?:   { label: string };
+  /** Empty-doc state with optional CTA. */
+  empty?:   {
+    title?:      string;
+    body?:       string;
+    cta_label?:  string;
+    cta_action?: string;
+  };
+}
+
 // ─── Top-level config ─────────────────────────────────────────────────────────
 
 export interface PluginFormConfig {
@@ -2583,6 +2728,33 @@ export interface PluginFormConfig {
   height?:        string;
   /** Enable two-column sidebar layout. The first root `tabs` node becomes the left nav. */
   sidebar?:       boolean;
+  /**
+   * Studio-shaped header (icon + title + meta + left/centre/right zones).
+   * When absent, the default `<ModalHeader>` (plugin tag + title) is used.
+   */
+  header?:        FormHeaderCfg;
+  /**
+   * Right (or left, or both) activity bar with routing-only items. Each item's
+   * `id` must match a key in `sidecars`.
+   */
+  activity_bar?:  FormActivityBarCfg;
+  /**
+   * Sidecar panes keyed by activity-bar item id. Each pane is a FormNode
+   * subtree; its value-bearing nodes participate in the modal's shared values
+   * payload (collisions on `name` across regions are a plugin error).
+   */
+  sidecars?:      Record<string, FormSidecarCfg>;
+  /**
+   * Three-zone footer (status / center / right). Unset zones fall through to
+   * the default Submit/Cancel/wizard chrome.
+   */
+  footer?:        FormFooterCfg;
+  /**
+   * Optional fallback state(s) shown in place of the body — loading / error /
+   * empty. Mutually exclusive at render time (first set wins). Live-updatable
+   * via `arbor.ui.form.set_state_block(name, cfg)`.
+   */
+  state_block?:   FormStateBlockCfg;
   /**
    * When true, the modal stays open after the submit handler runs. Use
    * this when the submit triggers a follow-up flow (file picker, confirm

@@ -13,6 +13,10 @@
 //!   arbor.ui.form.replace(partial_cfg)
 //!   arbor.ui.form.patch(ops)               -- granular node-tree mutations
 //!   arbor.ui.form.set_state_path(segs, v)  -- mutate one liveState slice
+//!   arbor.ui.form.set_sidecar(id|nil)      -- switch active activity-bar pane
+//!   arbor.ui.form.set_state_block(name, cfg?)
+//!                                          -- swap body for a loading / error
+//!                                             / empty fallback (nil = clear)
 //!
 //! Both shapes are accepted on `set_value` / `set_options` / `set_disabled`:
 //!   - `(name, payload)` — legacy positional shortcut (field NAME, not node id).
@@ -89,6 +93,8 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     install_patch(ctx, lua, &form_table)?;
     install_set_state_path(ctx, lua, &form_table)?;
     install_set_loading(ctx, lua, &form_table)?;
+    install_set_sidecar(ctx, lua, &form_table)?;
+    install_set_state_block(ctx, lua, &form_table)?;
     install_close(ctx, lua, &form_table)?;
 
     // Attach __call metatable so arbor.ui.form(config) still works.
@@ -305,6 +311,79 @@ fn install_set_loading(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     form_table.set("set_loading", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    Ok(())
+}
+
+fn install_set_sidecar(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
+    // set_sidecar("inspector")  — switch the active activity-bar pane
+    // set_sidecar(nil)          — close any open pane (when `always_open = false`)
+    //
+    // Sugar over set_state_path({"active_sidecar"}, id_or_nil): kept as a
+    // dedicated op so the rendered modal can react with the slide animation
+    // (a plain set_state_path is a generic state mutation; the dedicated op
+    // also lets the host clamp to the available sidecar ids).
+    let handle = ctx.app_ctx.clone();
+    let pname  = ctx.plugin_name.clone();
+    let fn_ = lua.create_function(move |_, arg: mlua::Value| {
+        let id: Option<String> = match arg {
+            mlua::Value::String(s) => Some(s.to_str()?.to_string()),
+            mlua::Value::Nil       => None,
+            _ => return Err(mlua::Error::RuntimeError(
+                "arbor.ui.form.set_sidecar: expected string or nil".into()
+            )),
+        };
+        if let Some(ref h) = handle {
+            let _ = h.emit("plugin:form-update", serde_json::json!({
+                "plugin_name": pname,
+                "op":          "set_sidecar",
+                "id":          id,
+            }));
+        }
+        Ok(())
+    }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    form_table.set("set_sidecar", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    Ok(())
+}
+
+fn install_set_state_block(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
+    // set_state_block("loading", { label = "Fetching…" })
+    // set_state_block("error",   { label = "Parse failed: …" })
+    // set_state_block("empty",   { title = "…", body = "…", cta_label = "…", cta_action = "…" })
+    // set_state_block(nil)                              -- clear, render body
+    //
+    // Mutually exclusive at render time: only one of loading/error/empty
+    // is shown at a time. Calling with a non-nil `name` switches to that
+    // block; calling with nil clears the override and renders the body.
+    let handle = ctx.app_ctx.clone();
+    let pname  = ctx.plugin_name.clone();
+    let fn_ = lua.create_function(move |lua_ctx, args: MultiValue| {
+        let mut iter = args.into_iter();
+        let first = iter.next().unwrap_or(mlua::Value::Nil);
+        let second = iter.next().unwrap_or(mlua::Value::Nil);
+        let (name, cfg_json) = match first {
+            mlua::Value::Nil => (None, serde_json::Value::Null),
+            mlua::Value::String(s) => {
+                let name = s.to_str()?.to_string();
+                let cfg: serde_json::Value = lua_ctx
+                    .from_value(second)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                (Some(name), cfg)
+            }
+            _ => return Err(mlua::Error::RuntimeError(
+                "arbor.ui.form.set_state_block: expected (name, cfg?) or nil".into()
+            )),
+        };
+        if let Some(ref h) = handle {
+            let _ = h.emit("plugin:form-update", serde_json::json!({
+                "plugin_name": pname,
+                "op":          "set_state_block",
+                "name":        name,
+                "cfg":         cfg_json,
+            }));
+        }
+        Ok(())
+    }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    form_table.set("set_state_block", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     Ok(())
 }
 

@@ -47,6 +47,8 @@
     footer,
     leftRail,
     rightRail,
+    showLeftRail,
+    showRightRail,
     size            = 'sm',
     width,
     height,
@@ -77,6 +79,14 @@
      *  margins automatically adjust to make room. */
     leftRail?:        Snippet;
     rightRail?:       Snippet;
+    /** Explicit override for whether to render the left ActivityBar shell.
+     *  When `undefined` (default), the shell renders whenever `leftRail` is
+     *  defined — matching the historic behaviour. Pass `false` to suppress
+     *  the shell even when the snippet is declared (callers that always
+     *  declare the snippet but conditionally render content). Symmetric to
+     *  `showRightRail`. */
+    showLeftRail?:    boolean;
+    showRightRail?:   boolean;
     size?:            Size;
     /** Optional CSS width override (e.g. `"700px"`, `"min(1480px, 97vw)"`).
      *  When set, takes precedence over `size`. */
@@ -312,7 +322,7 @@
          previous header/body/footer layout (which had the body as
          the modal's direct child). -->
     <div class="modal-mid">
-      {#if leftRail}
+      {#if leftRail && showLeftRail !== false}
         <ActivityBar side="left" ariaLabel="Modal tool rail">
           {#snippet top()}{@render leftRail()}{/snippet}
         </ActivityBar>
@@ -320,7 +330,7 @@
       <div class="modal-body" class:has-footer={!!footer} class:no-pad={!padBody} class:top-gap={topGap}>
         {@render children()}
       </div>
-      {#if rightRail}
+      {#if rightRail && showRightRail !== false}
         <ActivityBar side="right" ariaLabel="Modal tool rail">
           {#snippet top()}{@render rightRail()}{/snippet}
         </ActivityBar>

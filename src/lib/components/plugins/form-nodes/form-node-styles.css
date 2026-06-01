@@ -1849,6 +1849,11 @@
     background: var(--bg-base);
   }
 
+  /* `chrome="inline"` — used by Studio-shaped header / footer / sidecar
+     zones where the renderer's nodes must flow into the parent's flex
+     layout without their own box, padding, or background card. */
+  .pf-body-inline { display: contents; }
+
   /* ── Tree item extras: description + tag pill ────────────────────────────── */
 
   .pf-tree-label-text {

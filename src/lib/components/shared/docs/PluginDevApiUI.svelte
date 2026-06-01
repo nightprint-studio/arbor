@@ -40,6 +40,8 @@
     <tr><td><code>arbor.ui.form.patch(ops)</code></td><td>Granular node-tree mutations addressed by stable <code>id</code> — no re-mount. Each op picks one verb: <code>merge</code> / <code>set</code> / <code>append</code> / <code>remove</code>. See <em>Granular patches</em>.</td></tr>
     <tr><td><code>arbor.ui.form.set_state_path(segs, v)</code></td><td>Set (or, on <code>nil</code>, delete) one slice of the opaque liveState without replacing the whole blob. <code>segs</code> is an array of keys, e.g. <code>&#123; "filters", "branch" &#125;</code>.</td></tr>
     <tr><td><code>arbor.ui.form.set_loading(arg)</code></td><td>Toggle the loading overlay without re-rendering the form. <code>arg</code> can be <code>true</code> / <code>false</code>, a label string (implies <code>true</code>), or <code>&#123; loading, label &#125;</code>. Cheap — use it for per-step progress ticks during a fan-out loop.</td></tr>
+    <tr><td><code>arbor.ui.form.set_sidecar(id|nil)</code></td><td>Switch the active sidecar in a Studio-shaped modal (when <code>activity_bar</code> is configured). Pass <code>nil</code> to close any open pane. Unknown <code>id</code> logs a host warning + no-op. See <em>Studio-shaped modal chrome</em> below.</td></tr>
+    <tr><td><code>arbor.ui.form.set_state_block(name, cfg?)</code></td><td>Swap the modal body for a fallback block. <code>name</code> ∈ <code>"loading"</code> / <code>"error"</code> / <code>"empty"</code>; <code>nil</code> clears and renders the body again. Mutually exclusive at render time.</td></tr>
     <tr><td><code>arbor.ui.form.close()</code></td><td>Programmatically dismiss the currently-open form. Pair with <code>keep_open = true</code> on the form config when submit launches a follow-up flow (file picker, second form): the modal stays mounted while the secondary flow is up, and you call <code>close()</code> once it completes.</td></tr>
     <tr><td><code>arbor.ui.operation.start&#123;…&#125;</code></td><td>Push a progress card into the operations overlay (same widget used by Pull / Fetch-all / Pull-all). Config: <code>&#123;id, title, subtitle?, steps[&#123;key,label&#125;], current?&#125;</code>. The id is plugin-scoped server-side — collisions across plugins are impossible.</td></tr>
     <tr><td><code>arbor.ui.operation.set_current(id, step_key, detail?)</code></td><td>Move the active-step pointer; auto-completes earlier rows and leaves later ones pending.</td></tr>
@@ -2025,6 +2027,88 @@ end)`, '.lua')}</pre>
 <p>
   Supported <code>icon</code> names (Lucide): <code>Settings</code>, <code>Wrench</code>, <code>Cog</code>, <code>Bell</code>, <code>Folder</code>, <code>Package</code>, <code>GitBranch</code>, <code>Play</code>, <code>Code</code>, <code>FileText</code>, <code>Zap</code>, <code>Users</code>, <code>Key</code>, <code>List</code>, <code>AlertTriangle</code>, <code>Info</code>. Omit <code>icon</code> to show a text-only tab. Omit <code>default_tab</code> to open on the first tab.
 </p>
+
+<h2>Studio-shaped modal chrome</h2>
+<p>
+  Five optional top-level subkeys on <code>arbor.ui.form&#123;…&#125;</code> turn a plain form into a Studio-shaped modal that mirrors the host's <em>.properties / JSON / TOML / YAML / RON</em> Studio dialogs: icon + view-mode tabs in the header, a routing-only activity bar on the right edge, animated sidecars per pane, a three-zone footer, and full-body loading / error / empty fallback states. All are additive — when absent, the plain Submit / Cancel chrome is used.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Subkey</th><th>Type</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>header</code></td><td><code>arbor.FormHeaderCfg</code></td><td>Replaces the plain <code>&lt;ModalHeader&gt;</code> with <em>icon · title · subtitle · dirty · size_meta · experimental · left · centre · right</em>. <code>icon</code> = <code>&#123; lucide = "…" &#125;</code> / <code>&#123; brand = "github|gitlab|bitbucket|linear|jira" &#125;</code> / <code>&#123; image = "file://…" &#125;</code>. Raw SVG markup is not accepted.</td></tr>
+    <tr><td><code>activity_bar</code></td><td><code>arbor.FormActivityBarCfg</code></td><td>Routing-only IDE-style rail of icon buttons; <code>side</code> = "right" (default) / "left" / "both"; every <code>items[i].id</code> must match a key in <code>sidecars</code>. Use <code>storage_key</code> to persist the user's pick across modal opens. For action buttons (Open file…) use a <code>button</code> FormNode in <code>header.left</code> / <code>header.right</code> instead.</td></tr>
+    <tr><td><code>sidecars</code></td><td><code>&#123; [id] = arbor.FormSidecarCfg &#125;</code></td><td>One pane per activity-bar id. Always mounted (children survive close / reopen); opening / closing animates the width. Value-bearing nodes inside a sidecar contribute to the same shared submit payload as the body (<code>name</code> collisions across regions warn — last-write-wins).</td></tr>
+    <tr><td><code>footer</code></td><td><code>arbor.FormFooterCfg</code></td><td>Three zones: <code>status</code> (left, status pills), <code>center</code> (tool buttons), <code>right</code> (replaces Submit / Cancel). Pass <code>right = &#123;&#125;</code> to render no right-side controls. Unset zones fall through to the default chrome.</td></tr>
+    <tr><td><code>state_block</code></td><td><code>arbor.FormStateBlockCfg</code></td><td>Substitutes the body with a fallback when set. Subkeys: <code>loading = &#123; label? &#125;</code>, <code>error = &#123; label &#125;</code>, <code>empty = &#123; title?, body?, cta_label?, cta_action? &#125;</code>. Flip live via <code>arbor.ui.form.set_state_block(name, cfg?)</code>.</td></tr>
+  </tbody>
+</table>
+<p>
+  Pair with <code>tabs.persist_key = "…"</code> on a <code>tabs</code> placed in <code>header.centre</code> to persist the active view-mode tab. Cross-region <code>show_if</code> is <strong>not supported</strong>: each region's renderer keeps its own field values; if you need cross-region reactivity, model the whole flow inside a single body with <code>tree_layout</code> instead.
+</p>
+<pre class="language-lua">{@html highlight(`arbor.ui.form({
+  title         = "Properties Studio",
+  submit_action = "ps:save",
+  hide_submit   = true,                          -- footer.right is custom
+
+  header = {
+    icon     = { lucide = "FileText" },
+    subtitle = "config/app.properties",
+    dirty    = is_dirty,
+    centre = {
+      { type = "tabs", id = "view_mode",
+        persist_key = "plug:propstudio:viewmode",
+        tabs = {
+          { id = "tree",   label = "Tree",   icon = "ListTree" },
+          { id = "text",   label = "Text",   icon = "FileText" },
+          { id = "errors", label = "!",      icon = "AlertCircle" },
+        },
+      },
+    },
+    experimental = { description = "Alpha — schema rules may shift." },
+  },
+
+  activity_bar = {
+    side = "right",
+    items = {
+      { id = "inspector", icon = "ScanSearch", label = "Inspector" },
+      { id = "schema",    icon = "BookOpen",   label = "Schema",
+        count = schema_warning_count, tone = "warning" },
+      { separator = true },
+      { id = "tools",     icon = "Wrench",     label = "Tools" },
+    },
+    default     = "inspector",
+    storage_key = "plug:propstudio:rightpane",
+  },
+
+  sidecars = {
+    inspector = { width = 320, title = "Inspector", children = build_inspector() },
+    schema    = { width = 360, title = "Schema",    children = build_schema()    },
+    tools     = { width = 280, title = "Tools",     children = build_tools()     },
+  },
+
+  footer = {
+    status = { { type = "paragraph", text = footer_status_text() } },
+    center = {
+      { type = "button", icon = "Undo2", action = "undo", size = "xs", variant = "ghost" },
+      { type = "button", icon = "Redo2", action = "redo", size = "xs", variant = "ghost" },
+    },
+    right = {
+      { type = "button", label = "Save", icon = "Save",
+        action = "ps:save", variant = "primary", size = "md" },
+    },
+  },
+
+  state_block = {
+    empty = (not has_doc) and {
+      title = "No document",
+      body  = "Open a .properties file to begin.",
+      cta_label = "Open file…",
+      cta_action = "open_file",
+    } or nil,
+  },
+
+  nodes = build_body(view_mode),                 -- the main scrolling region
+})`, '.lua')}</pre>
 
 <h2>Dynamic form updates</h2>
 <p>

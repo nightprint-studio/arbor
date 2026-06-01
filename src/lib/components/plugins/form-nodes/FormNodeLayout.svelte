@@ -840,7 +840,17 @@
       value={ctx.activeTabMap[node.id!] ?? null}
       variant="underline"
       size="md"
-      onSelect={(id) => { ctx.activeTabMap[node.id!] = id; }}
+      onSelect={(id) => {
+        ctx.activeTabMap[node.id!] = id;
+        // Persist the user's pick when the node opted in. `persist_key`
+        // survives the modal closing and reopening; restoration happens in
+        // `buildActiveTabMap`. localStorage write is cheap (single string)
+        // so no debounce.
+        const pk = (tn as any).persist_key;
+        if (typeof pk === 'string' && pk && typeof window !== 'undefined') {
+          try { window.localStorage.setItem(pk, id); } catch { /* ignore */ }
+        }
+      }}
     />
     {#each tn.tabs as tab (tab.id)}
       <div

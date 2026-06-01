@@ -235,7 +235,18 @@ export function buildActiveTabMap(ns: FormNode[]): Record<string, string> {
       if (n.type === 'tabs') {
         const t = n as any;
         const first = t.tabs?.[0]?.id ?? '';
-        m[n.id!] = t.default_tab ?? first;
+        // `persist_key` (when set) restores the last user-picked tab from
+        // localStorage. Falls back to `default_tab`, then to the first tab.
+        // Guarded against a stale stored value pointing to a tab id that
+        // no longer exists in this revision of the form.
+        let stored: string | null = null;
+        if (typeof t.persist_key === 'string' && t.persist_key && typeof window !== 'undefined') {
+          try { stored = window.localStorage.getItem(t.persist_key); } catch { /* ignore */ }
+          if (stored && !(t.tabs ?? []).some((tab: any) => tab?.id === stored)) {
+            stored = null;
+          }
+        }
+        m[n.id!] = stored ?? t.default_tab ?? first;
         for (const tab of t.tabs ?? []) walk(tab.children ?? []);
       } else if (n.type === 'switch') {
         const s = n as any;

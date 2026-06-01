@@ -85,6 +85,26 @@
     validationErrors?: Record<string, string>;
     disabled?:         boolean;
     sidebarLayout?:    boolean;
+    /**
+     * Used by PluginFormModal when mounting one renderer per Studio-shaped
+     * zone (`body`, `header.left/centre/right`, `footer.status/center/right`,
+     * sidecars). Only `body` reacts to whole-tree ops (`replace`,
+     * `set_state_path`) — others would otherwise overwrite their region's
+     * nodes with the body's payload. Granular ops (`patch` by id, `set_value`
+     * by name, …) keep working everywhere because they naturally no-op on
+     * non-matching trees.
+     */
+    region?:           'body' | string;
+    /**
+     * Outer wrapper style. `body` (default) emits a padded scrollable
+     * `.pf-body` flex column — the form's main content area. `inline` skips
+     * the wrapper entirely (`display: contents`) so children flow directly
+     * into the parent's layout — used by PluginFormModal for Studio-shaped
+     * header / footer / sidebar zones where a 18px-padded card-like box
+     * would be visually wrong. The renderer's own UI state (autocomplete
+     * portal, file picker, etc.) follows after the children regardless.
+     */
+    chrome?:           'body' | 'inline';
     onValueChange?:    (name: string, value: unknown) => void;
     onNodesChange?:    (newNodes: FormNode[], reason?: 'replace' | 'patch') => void;
     onClose?:          () => void;
@@ -107,6 +127,8 @@
     validationErrors = {},
     disabled = false,
     sidebarLayout = false,
+    region = 'body',
+    chrome = 'body',
     onValueChange,
     onNodesChange,
     onClose,
@@ -420,6 +442,10 @@
       if (p.plugin_name !== pluginName) return;
 
       if (p.op === 'replace') {
+        // `replace` swaps the body's node tree. Non-body zones (header /
+        // footer / sidecars) ignore it — their structure is meant to be
+        // patched by id-addressed `patch` ops instead.
+        if (region !== 'body') return;
         const cfg = (p.payload ?? {}) as {
           nodes?: FormNode[];
           state?: Record<string, unknown>;
@@ -485,7 +511,10 @@
       }
 
       // Granular liveState slice — set or (on `delete`) drop one path.
+      // liveState only lives in the body renderer; non-body zones don't
+      // get an `initialState` prop so this op is a no-op for them.
       if (p.op === 'set_state_path') {
+        if (region !== 'body') return;
         const segs: (string | number)[] =
           Array.isArray(p.path) ? p.path
           : typeof p.path === 'string' ? [p.path]
@@ -731,6 +760,16 @@
   }
   export function getLiveState(): Record<string, unknown> | undefined {
     return liveState;
+  }
+  /**
+   * Names of the value-bearing nodes DECLARED in this region's own subtree.
+   * Distinct from `Object.keys(getValues())` because `set_value` with an
+   * unknown name writes through to `values` (preserves legacy semantics).
+   * PluginFormModal uses this for cross-region collision detection so a
+   * spurious set_value broadcast doesn't produce false-positive warnings.
+   */
+  export function getOwnedFieldNames(): string[] {
+    return collectFields(nodes).map(([n]) => n);
   }
 
   // ── Inline action plumbing ──────────────────────────────────────────────
@@ -1091,6 +1130,15 @@
         {/each}
       {/if}
     </div>
+  </div>
+{:else if chrome === 'inline'}
+  <!-- `display: contents` — the wrapper has no box of its own, so the nodes
+       flow into the parent (typically a Studio-shaped header / footer /
+       sidecar zone) without the 18px-padded `.pf-body` card. -->
+  <div class="pf-body-inline">
+    {#each nodes as node (node.id)}
+      {@render renderNode(node)}
+    {/each}
   </div>
 {:else}
   {@const bodyFlush = nodes.length === 1 && nodes[0].type === 'tree_layout'}
