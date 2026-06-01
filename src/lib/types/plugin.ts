@@ -1030,6 +1030,51 @@ export interface FormFieldKvList extends FormFieldBase {
  *  action string or a `DispatchTarget` (so an edit/selection can drive a
  *  command). `scope_state` (on the field base) declares the state slice that
  *  rides along. */
+/** One diagnostic / lint marker driven by the plugin. Address a range with
+ *  document offsets (`from`/`to`, UTF-16 code units, CodeMirror native) or
+ *  with a 1-based `line` for a whole-line marker. Out-of-range positions are
+ *  clamped; entries with no addressable range are silently dropped. */
+export interface FormEditorDiagnostic {
+  /** Document offset of the marker start. */
+  from?:     number;
+  /** Document offset of the marker end (defaults to `from` when omitted). */
+  to?:       number;
+  /** 1-based line number — used when `from`/`to` are absent. */
+  line?:     number;
+  severity:  'error' | 'warning' | 'info' | 'hint';
+  message:   string;
+  /** Optional short identifier of the producer (shown in the tooltip). */
+  source?:   string;
+}
+
+/** One static completion item supplied by the plugin. */
+export interface FormEditorCompletion {
+  label:    string;
+  /** Short detail shown on the right of the label (e.g. `"keyword"`). */
+  detail?:  string;
+  /** Longer description shown in a side panel. */
+  info?:    string;
+  /** CodeMirror completion `type` (`keyword`, `variable`, `function`, …)
+   *  — drives the icon shown in the popup. */
+  type?:    string;
+  /** Text to insert when this entry is picked. Defaults to `label`. */
+  apply?:   string;
+  /** Score boost (positive = higher in the list). */
+  boost?:   number;
+}
+
+/** One snippet template supplied by the plugin. Uses CodeMirror's
+ *  `${1:placeholder}` syntax for tab stops. */
+export interface FormEditorSnippet {
+  label:    string;
+  /** Snippet body. `${1:name}` defines tab stop 1 with default `"name"`. */
+  template: string;
+  detail?:  string;
+  info?:    string;
+  type?:    string;
+  boost?:   number;
+}
+
 export interface FormFieldEditor extends FormFieldBase {
   type:          'editor';
   /** Initial document (used when `values[name]` is otherwise unset). */
@@ -1043,6 +1088,17 @@ export interface FormFieldEditor extends FormFieldBase {
   line_numbers?: boolean;
   /** Highlight the active line (default `true`). */
   active_line?:  boolean;
+  /** Plugin-supplied diagnostics — gutter markers, squiggles, and hover
+   *  tooltips. Reactive: patching the array via `arbor.ui.form.patch{ … }`
+   *  re-renders the markers. */
+  diagnostics?:  FormEditorDiagnostic[];
+  /** Force the lint gutter on/off. Defaults to "on when `diagnostics` is non-empty". */
+  lint_gutter?:  boolean;
+  /** Static completion items merged into the autocomplete popup. */
+  completions?:  FormEditorCompletion[];
+  /** Static snippets merged into the autocomplete popup (each one expands
+   *  into the editor with tab stops at `${1:…}` placeholders). */
+  snippets?:     FormEditorSnippet[];
   /** Scoped, debounced slot fired on content edit. Payload value = full text. */
   on_edit?:      string | DispatchTarget;
   /** Debounce (ms) for `on_edit`. Default `300`. */

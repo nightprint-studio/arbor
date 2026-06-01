@@ -18,7 +18,12 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import StudioTextPane from '$lib/components/shared/studio/StudioTextPane.svelte';
-  import type { StudioLanguage } from '$lib/utils/studio-codemirror';
+  import type {
+    StudioLanguage,
+    StudioDiagnostic,
+    StudioCompletionItem,
+    StudioSnippetItem,
+  } from '$lib/utils/studio-codemirror';
   import TypePill from '$lib/components/shared/internal/TypePill.svelte';
   import type { FormNode } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
@@ -48,6 +53,19 @@
     n.height == null ? '240px'
     : typeof n.height === 'number' ? `${n.height}px`
     : String(n.height),
+  );
+
+  // Plugin extensions — pass-through. Each is a plain array shipped from the
+  // host over IPC, so we accept anything assignable to T[] and let CodeMirror
+  // tolerate missing optional fields.
+  const diagnostics = $derived(
+    Array.isArray(n.diagnostics) ? (n.diagnostics as StudioDiagnostic[]) : undefined,
+  );
+  const completions = $derived(
+    Array.isArray(n.completions) ? (n.completions as StudioCompletionItem[]) : undefined,
+  );
+  const snippets = $derived(
+    Array.isArray(n.snippets) ? (n.snippets as StudioSnippetItem[]) : undefined,
   );
 
   // ── Edit slot — debounced scoped dispatch ───────────────────────────────
@@ -96,6 +114,10 @@
       readOnly={isReadOnly}
       showLineNumbers={n.line_numbers ?? true}
       showActiveLine={n.active_line ?? true}
+      {diagnostics}
+      {completions}
+      {snippets}
+      showLintGutter={n.lint_gutter}
       oninput={onInput}
       onselect={onSelect}
     />

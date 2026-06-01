@@ -36,6 +36,21 @@ import {
   indentWithTab,
 } from '@codemirror/commands';
 import {
+  autocompletion,
+  completionKeymap,
+  snippetCompletion,
+  type Completion,
+  type CompletionContext,
+  type CompletionResult,
+  type CompletionSource,
+} from '@codemirror/autocomplete';
+import {
+  linter,
+  lintGutter,
+  lintKeymap,
+  type Diagnostic,
+} from '@codemirror/lint';
+import {
   HighlightStyle,
   StreamLanguage,
   type StreamParser,
@@ -528,20 +543,174 @@ export interface StudioExtensionsOptions {
   readOnly?: boolean;
   showLineNumbers?: boolean;
   showActiveLine?: boolean;
+  /** Initial diagnostics. Reconfigure via `compartments.diagnostics`. */
+  diagnostics?: StudioDiagnostic[];
+  /** Initial static completions (plugin-supplied). Reconfigure via `compartments.completion`. */
+  completions?: StudioCompletionItem[];
+  /** Initial static snippets (plugin-supplied). Reconfigure via `compartments.completion`. */
+  snippets?: StudioSnippetItem[];
+  /** Show the diagnostics gutter (square markers next to line numbers). Default: true when `diagnostics` is non-empty. */
+  showLintGutter?: boolean;
 }
 
 /** Compartments exposed so callers can reconfigure language / readOnly
- *  without tearing the EditorView down. */
+ *  / diagnostics / completion source without tearing the EditorView down. */
 export interface StudioCompartments {
-  language: Compartment;
-  readOnly: Compartment;
+  language:    Compartment;
+  readOnly:    Compartment;
+  diagnostics: Compartment;
+  completion:  Compartment;
 }
 
 export function makeStudioCompartments(): StudioCompartments {
   return {
-    language: new Compartment(),
-    readOnly: new Compartment(),
+    language:    new Compartment(),
+    readOnly:    new Compartment(),
+    diagnostics: new Compartment(),
+    completion:  new Compartment(),
   };
+}
+
+// ─── Plugin-supplied diagnostics ────────────────────────────────────────
+// Diagnostics arrive as plain data from a plugin (JSON over IPC). Each
+// entry can address a range by `from`/`to` document offsets, or by a
+// 1-based `line` (whole-line marker). Lines / offsets out of range are
+// clamped to the document; entries that resolve to a zero-length range
+// past EOF are dropped silently — better than throwing on a stale patch.
+
+export type StudioDiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
+
+export interface StudioDiagnostic {
+  /** Document offset (UTF-16 code units, CodeMirror native). */
+  from?:     number;
+  to?:       number;
+  /** 1-based line number — used when `from`/`to` are absent. Maps to
+   *  the whole line range (without the trailing newline). */
+  line?:     number;
+  severity:  StudioDiagnosticSeverity;
+  message:   string;
+  /** Optional short identifier of the producer (shown in the tooltip). */
+  source?:   string;
+}
+
+function toCmSeverity(s: StudioDiagnosticSeverity): Diagnostic['severity'] {
+  // CodeMirror accepts 'error' | 'warning' | 'info' | 'hint'.
+  return s;
+}
+
+/** Build a CM6 linter extension from a snapshot of plugin-supplied
+ *  diagnostics. The plugin owns the list; we just translate. */
+export function diagnosticsExtension(items: StudioDiagnostic[] | undefined): Extension {
+  if (!items || items.length === 0) return [];
+  return linter(view => {
+    const doc = view.state.doc;
+    const out: Diagnostic[] = [];
+    for (const d of items) {
+      let from: number | undefined;
+      let to:   number | undefined;
+      if (typeof d.from === 'number' && typeof d.to === 'number') {
+        from = Math.max(0, Math.min(d.from, doc.length));
+        to   = Math.max(from, Math.min(d.to, doc.length));
+      } else if (typeof d.line === 'number') {
+        const ln = Math.max(1, Math.min(d.line, doc.lines));
+        const line = doc.line(ln);
+        from = line.from;
+        to   = line.to;
+      } else if (typeof d.from === 'number') {
+        from = Math.max(0, Math.min(d.from, doc.length));
+        to   = from;
+      } else {
+        continue;
+      }
+      out.push({
+        from,
+        to,
+        severity: toCmSeverity(d.severity),
+        message:  d.message,
+        source:   d.source,
+      });
+    }
+    return out;
+  }, { delay: 0 });
+}
+
+// ─── Plugin-supplied completions / snippets ────────────────────────────
+
+export interface StudioCompletionItem {
+  label:    string;
+  detail?:  string;
+  info?:    string;
+  type?:    string;
+  /** Text to insert (defaults to `label`). */
+  apply?:   string;
+  boost?:   number;
+}
+
+export interface StudioSnippetItem {
+  label:    string;
+  /** CodeMirror snippet template — `${1:name}` style placeholders. */
+  template: string;
+  detail?:  string;
+  info?:    string;
+  type?:    string;
+  boost?:   number;
+}
+
+/** Build a static `CompletionSource` from plugin-supplied items + snippets.
+ *  Identifier-prefix matching is delegated to CM via `matchBefore`. */
+export function buildCompletionSource(
+  items:    StudioCompletionItem[] | undefined,
+  snippets: StudioSnippetItem[]    | undefined,
+): CompletionSource | null {
+  const list: Completion[] = [];
+  if (items) {
+    for (const it of items) {
+      list.push({
+        label:  it.label,
+        detail: it.detail,
+        info:   it.info,
+        type:   it.type,
+        apply:  it.apply ?? it.label,
+        boost:  it.boost,
+      });
+    }
+  }
+  if (snippets) {
+    for (const s of snippets) {
+      list.push(snippetCompletion(s.template, {
+        label:  s.label,
+        detail: s.detail,
+        info:   s.info,
+        type:   s.type ?? 'text',
+        boost:  s.boost,
+      }));
+    }
+  }
+  if (list.length === 0) return null;
+
+  return (context: CompletionContext): CompletionResult | null => {
+    const word = context.matchBefore(/[\w$.-]*/);
+    // If nothing typed yet, only fire when explicitly invoked (Ctrl-Space).
+    if (!word || (word.from === word.to && !context.explicit)) return null;
+    return {
+      from:    word.from,
+      to:      word.to,
+      options: list,
+      validFor: /^[\w$.-]*$/,
+    };
+  };
+}
+
+/** Bundle the autocomplete extension wired to a (possibly-null) source.
+ *  When `source` is null the autocomplete UI is still wired up (Ctrl-Space
+ *  is a no-op) — keeps the compartment shape stable so reconfigure works. */
+export function completionExtension(source: CompletionSource | null): Extension {
+  if (!source) return [];
+  return autocompletion({
+    override:        [source],
+    closeOnBlur:     true,
+    activateOnTyping: true,
+  });
 }
 
 /** Resolve a language to its CM extension (or empty for `plain`). */
@@ -561,7 +730,14 @@ export function createStudioExtensions(
     readOnly = false,
     showLineNumbers = true,
     showActiveLine = true,
+    diagnostics,
+    completions,
+    snippets,
+    showLintGutter,
   } = opts;
+
+  const completionSource = buildCompletionSource(completions, snippets);
+  const wantLintGutter = showLintGutter ?? !!(diagnostics && diagnostics.length);
 
   const extensions: Extension[] = [
     studioTheme,
@@ -578,14 +754,21 @@ export function createStudioExtensions(
       ...historyKeymap,
       ...searchKeymap,
       ...foldKeymap,
+      ...completionKeymap,
+      ...lintKeymap,
       indentWithTab,
     ]),
     compartments.language.of(languageExtension(language)),
     compartments.readOnly.of(EditorState.readOnly.of(readOnly)),
+    compartments.diagnostics.of(diagnosticsExtension(diagnostics)),
+    compartments.completion.of(completionExtension(completionSource)),
   ];
 
   if (showLineNumbers) {
     extensions.unshift(lineNumbers(), foldGutter());
+  }
+  if (wantLintGutter) {
+    extensions.push(lintGutter());
   }
   if (showActiveLine) {
     extensions.push(highlightActiveLine(), highlightActiveLineGutter());

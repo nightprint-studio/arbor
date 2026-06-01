@@ -3109,6 +3109,39 @@ function CoreAssert.register() end
 ---@field suggestions string[]|nil      When set, acts as an allowlist (multi-select)
 ---@field max         integer|nil
 
+---One diagnostic / lint marker for an `editor` FormNode. Address a range
+---either with document offsets (`from`/`to`, UTF-16 code units, CodeMirror
+---native) or with a 1-based `line` for a whole-line marker. Out-of-range
+---positions are clamped to the document; entries with no addressable range
+---are silently dropped.
+---@class arbor.FormEditorDiagnostic
+---@field from     integer|nil   Document offset of the marker start
+---@field to       integer|nil   Document offset of the marker end (defaults to `from`)
+---@field line     integer|nil   1-based line — used when `from`/`to` are absent
+---@field severity "error"|"warning"|"info"|"hint"
+---@field message  string
+---@field source   string|nil    Short identifier of the producer (shown in the tooltip)
+
+---One static completion item supplied by the plugin.
+---@class arbor.FormEditorCompletion
+---@field label   string
+---@field detail  string|nil    Short detail shown next to the label (e.g. "keyword")
+---@field info    string|nil    Longer description shown in a side panel
+---@field type    string|nil    CodeMirror type → icon ("keyword"|"variable"|"function"|"class"|"constant"|"property"|"method"|"enum"|"interface"|"text"|"type")
+---@field apply   string|nil    Text to insert when picked (defaults to `label`)
+---@field boost   number|nil    Score boost (positive = higher in the list)
+
+---One snippet template — uses CodeMirror's `${1:placeholder}` syntax for
+---tab stops. Picking the snippet expands into the editor with the cursor
+---at the first tab stop.
+---@class arbor.FormEditorSnippet
+---@field label    string
+---@field template string         Snippet body, e.g. "for (${1:i} = 0; ${1:i} < ${2:n}; ${1:i}++) ${3}"
+---@field detail   string|nil
+---@field info     string|nil
+---@field type     string|nil
+---@field boost    number|nil
+
 ---@class arbor.FormFieldEditor : arbor.FormNodeBase
 ---Multi-line code/text editor (CodeMirror 6). Value-bearing: the document is
 ---submitted as the field value and can be pushed from the host with
@@ -3117,6 +3150,14 @@ function CoreAssert.register() end
 ---value = full text) and `on_select` (value = `{ from, to, text }`). Both
 ---slots accept a bare action string or an `arbor.DispatchTarget` (so an edit /
 ---selection can drive a command); `scope_state` rides a slice of form state.
+---
+---Plugins can drive the editor's diagnostics, completions and snippets:
+---  · `diagnostics`  — gutter markers + squiggles + hover tooltip. Patch the
+---                     array live with `arbor.ui.form.patch{…}` to re-render.
+---  · `completions`  — static items merged into the autocomplete popup
+---                     (Ctrl-Space, or auto-fires while typing identifier chars).
+---  · `snippets`     — static snippet templates (CodeMirror `${1:name}` style
+---                     placeholders) merged into the autocomplete popup.
 ---@field type         "editor"
 ---@field name         string
 ---@field label        string|nil
@@ -3126,6 +3167,10 @@ function CoreAssert.register() end
 ---@field line_numbers  boolean|nil                      Show the gutter (default true)
 ---@field active_line   boolean|nil                      Highlight the active line (default true)
 ---@field readonly      boolean|nil
+---@field diagnostics   arbor.FormEditorDiagnostic[]|nil Lint markers driven by the plugin (patchable live)
+---@field lint_gutter   boolean|nil                      Force the lint gutter on/off (default: on when `diagnostics` is non-empty)
+---@field completions   arbor.FormEditorCompletion[]|nil Static completion items merged into the autocomplete popup
+---@field snippets      arbor.FormEditorSnippet[]|nil    Static snippet templates (CodeMirror `${1:name}` placeholders)
 ---@field on_edit       string|arbor.DispatchTarget|nil  Debounced scoped slot, slot "edit", value = full text
 ---@field debounce_ms   integer|nil                      Debounce for on_edit (default 300)
 ---@field on_select     string|arbor.DispatchTarget|nil  Scoped slot, slot "select", value = { from, to, text }

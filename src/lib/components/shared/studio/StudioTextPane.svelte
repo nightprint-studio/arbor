@@ -13,7 +13,12 @@
 -->
 <script lang="ts" module>
   import type { Snippet } from 'svelte';
-  import type { StudioLanguage } from '$lib/utils/studio-codemirror';
+  import type {
+    StudioLanguage,
+    StudioDiagnostic,
+    StudioCompletionItem,
+    StudioSnippetItem,
+  } from '$lib/utils/studio-codemirror';
 
   export interface StudioTextPaneProps {
     /** Current text content. Treated as the source of truth from the parent's
@@ -40,6 +45,14 @@
     showLineNumbers?: boolean;
     /** Highlight the active line (default true). */
     showActiveLine?: boolean;
+    /** Plugin-supplied diagnostics. Reactive: a new array → re-render markers. */
+    diagnostics?: StudioDiagnostic[];
+    /** Plugin-supplied static completions. */
+    completions?: StudioCompletionItem[];
+    /** Plugin-supplied static snippets (CodeMirror `${1:placeholder}` syntax). */
+    snippets?: StudioSnippetItem[];
+    /** Force the lint gutter on/off (defaults to "on when diagnostics is non-empty"). */
+    showLintGutter?: boolean;
   }
 
   export interface StudioTextPaneController {
@@ -59,6 +72,9 @@
     createStudioExtensions,
     languageExtension,
     makeStudioCompartments,
+    diagnosticsExtension,
+    buildCompletionSource,
+    completionExtension,
   } from '$lib/utils/studio-codemirror';
 
   let {
@@ -71,6 +87,10 @@
     footer,
     showLineNumbers = true,
     showActiveLine = true,
+    diagnostics,
+    completions,
+    snippets,
+    showLintGutter,
   }: StudioTextPaneProps = $props();
 
   let hostEl: HTMLDivElement | undefined = $state();
@@ -106,7 +126,10 @@
       doc: value,
       extensions: [
         createStudioExtensions(
-          { language, readOnly, showLineNumbers, showActiveLine },
+          {
+            language, readOnly, showLineNumbers, showActiveLine,
+            diagnostics, completions, snippets, showLintGutter,
+          },
           compartments,
         ),
         updateListener,
@@ -159,6 +182,25 @@
       effects: compartments.readOnly.reconfigure(
         EditorState.readOnly.of(readOnly),
       ),
+    });
+  });
+
+  // ── diagnostics → compartment ─────────────────────────────────────────
+  $effect(() => {
+    if (!view) return;
+    view.dispatch({
+      effects: compartments.diagnostics.reconfigure(
+        diagnosticsExtension(diagnostics),
+      ),
+    });
+  });
+
+  // ── completions / snippets → compartment ──────────────────────────────
+  $effect(() => {
+    if (!view) return;
+    const src = buildCompletionSource(completions, snippets);
+    view.dispatch({
+      effects: compartments.completion.reconfigure(completionExtension(src)),
     });
   });
 
