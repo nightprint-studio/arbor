@@ -6,7 +6,9 @@
     tree_layout, wizard, card_row, cfg_list, switch, breadcrumb,
     url_block, monogram, state_block, step_indicator, status_list,
     copy_button, experimental_badge, section_header, filter_button,
-    panel_shell, bottom_panel_header, tooltip.
+    panel_shell, bottom_panel_header, tooltip, color_swatch,
+    kbd, type_pill, encoding_pill, avatar, brand_icon, brand_tile,
+    provider_user_badge.
 
   Receives:
     · node       — the FormNode to render
@@ -51,6 +53,14 @@
   import StateBlock   from '$lib/components/shared/ui/StateBlock.svelte';
   import StatusList   from '$lib/components/shared/ui/StatusList.svelte';
   import type { StatusItem, StatusChip, Severity as StatusSeverity } from '$lib/components/shared/ui/StatusList.svelte';
+  import ColorSwatch  from '$lib/components/shared/ui/ColorSwatch.svelte';
+  import Kbd          from '$lib/components/shared/internal/Kbd.svelte';
+  import TypePill     from '$lib/components/shared/internal/TypePill.svelte';
+  import EncodingPill from '$lib/components/shared/internal/EncodingPill.svelte';
+  import Avatar       from '$lib/components/shared/internal/Avatar.svelte';
+  import BrandIcon    from '$lib/components/shared/internal/BrandIcon.svelte';
+  import BrandTile    from '$lib/components/shared/internal/BrandTile.svelte';
+  import ProviderUserBadge from '$lib/components/shared/internal/ProviderUserBadge.svelte';
   import Spinner      from '$lib/components/shared/ui/Spinner.svelte';
   import { AlertCircle, CheckCircle2, Info as InfoIcon } from 'lucide-svelte';
 
@@ -332,6 +342,8 @@
       status={ic.status}
       badges={ic.badges ?? []}
       meta={ic.meta ?? []}
+      variant={ic.variant ?? 'elevated'}
+      bordered={ic.bordered ?? true}
       actions={(ic.actions ?? []).map((a: any) => ({
         icon: a.icon,
         label: a.label,
@@ -509,6 +521,106 @@
   {@const sh = node as any}
   <div class={(node as any).class ?? ''} style={(node as any).style}>
     <SectionHeader title={sh.title ?? ''} description={sh.description} />
+  </div>
+
+<!-- ── color_swatch ──────────────────────────────────────────────────── -->
+{:else if node.type === 'color_swatch'}
+  {@const cs = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <ColorSwatch
+      color={cs.color ?? ''}
+      label={cs.label}
+      caption={cs.caption}
+      noCaption={!!cs.no_caption}
+      chipSize={cs.chip_size}
+      tooltip={cs.tooltip}
+      glyph={cs.glyph}
+    />
+  </span>
+
+<!-- ── kbd ──────────────────────────────────────────────────────────── -->
+{:else if node.type === 'kbd'}
+  {@const kb = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <Kbd
+      action={kb.action}
+      binding={kb.binding}
+      label={kb.label}
+      keys={kb.keys}
+      size={kb.size ?? 'md'}
+      tone={kb.tone ?? 'default'}
+      variant={kb.variant ?? 'box'}
+    />
+  </span>
+
+<!-- ── type_pill ────────────────────────────────────────────────────── -->
+{:else if node.type === 'type_pill'}
+  {@const tp = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <TypePill
+      label={tp.label}
+      kind={tp.kind}
+      tone={tp.tone}
+      tooltip={tp.tooltip}
+    />
+  </span>
+
+<!-- ── encoding_pill ────────────────────────────────────────────────── -->
+{:else if node.type === 'encoding_pill'}
+  {@const ep = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <EncodingPill
+      encoding={ep.encoding ?? ''}
+      overridden={!!ep.overridden}
+      compact={!!ep.compact}
+    />
+  </span>
+
+<!-- ── avatar ───────────────────────────────────────────────────────── -->
+{:else if node.type === 'avatar'}
+  {@const av = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <Avatar
+      name={av.name ?? ''}
+      email={av.email ?? ''}
+      size={av.size ?? 24}
+    />
+  </span>
+
+<!-- ── brand_icon (monochrome, currentColor) ─────────────────────────── -->
+{:else if node.type === 'brand_icon'}
+  {@const bi = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <BrandIcon
+      brand={bi.brand}
+      size={bi.size ?? 20}
+      title={bi.title}
+    />
+  </span>
+
+<!-- ── brand_tile (brand-coloured square) ───────────────────────────── -->
+{:else if node.type === 'brand_tile'}
+  {@const bt = node as any}
+  <span class={(node as any).class ?? ''} style={(node as any).style}>
+    <BrandTile
+      brand={bt.brand}
+      size={bt.size ?? 20}
+      tileSize={bt.tile_size}
+      disabled={!!bt.disabled}
+      title={bt.title}
+    />
+  </span>
+
+<!-- ── provider_user_badge (avatar + name + secondary, click-to-copy) ─ -->
+{:else if node.type === 'provider_user_badge'}
+  {@const pb = node as any}
+  <div class={(node as any).class ?? ''} style={(node as any).style}>
+    <ProviderUserBadge
+      name={pb.name ?? ''}
+      secondary={pb.secondary}
+      avatarUrl={pb.avatar_url}
+      copyable={pb.copyable !== false}
+    />
   </div>
 
 <!-- ── bottom_panel_header (header bar only; pair with siblings) ─────── -->

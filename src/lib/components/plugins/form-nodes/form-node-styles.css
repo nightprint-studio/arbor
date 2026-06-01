@@ -94,6 +94,35 @@
   }
   .pf-select-trigger-empty .pf-select-trigger-label { color: var(--text-muted); }
 
+  /* Optional × button overlaid on the right edge of the trigger when the
+     field is `clearable` and has a value. Sits just inside the chevron — the
+     trigger button's right-padding is bumped so the label can't slide under
+     it. The clear button stops propagation so clicking it doesn't toggle
+     the dropdown open. */
+  .pf-select-trigger-wrap { position: relative; display: block; width: 100%; }
+  .pf-select-trigger-wrap-clearable .pf-select-trigger { padding-right: 38px; }
+  .pf-select-clear {
+    position: absolute;
+    right: 22px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .pf-select-clear:hover {
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+    color: var(--error);
+  }
+
   /* ── Range ────────────────────────────────────────────────────────────────── */
 
   .pf-range-row {
@@ -536,6 +565,47 @@
     display: flex;
     align-items: center;
     animation: spin 1s linear infinite;
+  }
+
+  /* ── Button sizes (sz-{xs|sm|md|lg}). Default `sz-sm` matches the legacy
+     `.pf-action-btn` baseline (padding 4px 10px / font-size 12px) — so opting
+     into a size only changes layout if you pick xs/md/lg. */
+  .pf-action-btn.pf-action-sz-xs { padding: 2px 6px;   font-size: var(--font-size-xs); gap: 4px; }
+  .pf-action-btn.pf-action-sz-sm { padding: 4px 10px;  font-size: 12px;                gap: 6px; }
+  .pf-action-btn.pf-action-sz-md { padding: 5px 12px;  font-size: var(--font-size-sm); gap: 6px; }
+  .pf-action-btn.pf-action-sz-lg { padding: 7px 16px;  font-size: var(--font-size-md); gap: 8px; }
+
+  /* Icon-only buttons stay square per size. */
+  .pf-action-btn.pf-action-icon-only.pf-action-sz-xs { width: 18px; height: 18px; padding: 0; }
+  .pf-action-btn.pf-action-icon-only.pf-action-sz-sm { width: 22px; height: 22px; padding: 0; }
+  .pf-action-btn.pf-action-icon-only.pf-action-sz-md { width: 24px; height: 24px; padding: 0; }
+  .pf-action-btn.pf-action-icon-only.pf-action-sz-lg { width: 30px; height: 30px; padding: 0; }
+
+  /* Full-width (centred label). */
+  .pf-action-btn.pf-action-block { width: 100%; justify-content: center; }
+
+  /* Color override (`color` prop → `--pf-btn-color`). Mirrors the shared
+     `Button.svelte` behaviour: brand-coloured fills auto-pick black/white
+     foreground via oklch so themes with light brand tokens stay readable. */
+  .pf-action-btn.pf-action-primary.pf-action-colored {
+    background: var(--pf-btn-color);
+    border-color: var(--pf-btn-color);
+    color: #fff;
+  }
+  @supports (color: oklch(from red l c h)) {
+    .pf-action-btn.pf-action-primary.pf-action-colored {
+      color: oklch(from var(--pf-btn-color) clamp(0, (l - 0.6) * -10, 1) 0 0);
+    }
+  }
+  .pf-action-btn.pf-action-primary.pf-action-colored:hover:not(:disabled) {
+    filter: brightness(1.12);
+  }
+  .pf-action-btn.pf-action-ghost.pf-action-colored,
+  .pf-action-btn.pf-action-default.pf-action-colored { color: var(--pf-btn-color); }
+  .pf-action-btn.pf-action-danger.pf-action-colored { color: var(--pf-btn-color); }
+  .pf-action-btn.pf-action-danger.pf-action-colored:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--pf-btn-color) 15%, transparent);
+    border-color: var(--pf-btn-color);
   }
 
   /* ── kv_list ──────────────────────────────────────────────────────────────── */

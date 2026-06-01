@@ -2545,6 +2545,12 @@ function FormBuilder:section(title_or_cfg) end
 ---@return arbor.FormBuilder
 function FormBuilder:end_section() end
 
+---Single-line text input — also reused for `password` / `email` / `url`.
+---Live-edit hook: set `actions = { change = "ns:on_query" }` (string action or
+---`DispatchTarget`) to dispatch the new value on each keystroke, trailing-edge
+---debounced by `debounce_ms` (default 250). The scoped payload is
+---`{ node_id, slot = "change", value, state? }`; the legacy whole-form payload
+---fires when `change` is a bare string. Use this for filters / live search.
 ---@param  name_or_cfg string|table
 ---@param  opts        table|nil
 ---@return arbor.FormBuilder
@@ -2555,6 +2561,7 @@ function FormBuilder:text(name_or_cfg, opts) end
 ---@return arbor.FormBuilder
 function FormBuilder:password(name_or_cfg, opts) end
 
+---Multi-line text input. Same `actions.change` + `debounce_ms` shape as `:text`.
 ---@param  name_or_cfg string|table
 ---@param  opts        table|nil
 ---@return arbor.FormBuilder
@@ -2566,6 +2573,8 @@ function FormBuilder:textarea(name_or_cfg, opts) end
 ---@return arbor.FormBuilder
 function FormBuilder:inline_edit(name_or_cfg, opts) end
 
+---Numeric stepper input. Same `actions.change` + `debounce_ms` live-edit
+---shape as `:text`. Use for filters that scrub a numeric range.
 ---@param  name_or_cfg string|table
 ---@param  opts        table|nil
 ---@return arbor.FormBuilder
@@ -2575,6 +2584,12 @@ function FormBuilder:number(name_or_cfg, opts) end
 ---@param  opts        table|nil
 ---@return arbor.FormBuilder
 function FormBuilder:select(name_or_cfg, opts) end
+
+---Multi-value variant of `select`. See `arbor.FormFieldMultiselect`.
+---@param  name_or_cfg string|table
+---@param  opts        table|nil
+---@return arbor.FormBuilder
+function FormBuilder:multiselect(name_or_cfg, opts) end
 
 ---@param  name_or_cfg string|table
 ---@param  opts        table|nil
@@ -2595,6 +2610,16 @@ function FormBuilder:radio(name_or_cfg, opts) end
 ---@param  opts        table|nil
 ---@return arbor.FormBuilder
 function FormBuilder:kv_list(name_or_cfg, opts) end
+
+---Value-bearing git branch picker — same chrome as the host's
+---`<BranchSelect>` (monospace dropdown, search above 12 entries, sticky
+---entry for a value not in the list). The plugin owns the `branches` list;
+---typical call: `arbor.repo.branches()` → map `.name`. See
+---`arbor.FormFieldBranchSelect`.
+---@param  name_or_cfg string|table
+---@param  opts        table|nil
+---@return arbor.FormBuilder
+function FormBuilder:branch_select(name_or_cfg, opts) end
 
 ---CodeMirror 6 editor field. See `arbor.FormFieldEditor` for the full shape
 ---(language, height, on_edit / on_select scoped slots, …).
@@ -2730,6 +2755,68 @@ function FormBuilder:bottom_panel_header(cfg) end
 ---@return arbor.FormBuilder
 function FormBuilder:tooltip(cfg) end
 
+---Display-only colour swatch — chip-only or labelled card row. Distinct
+---from the value-bearing `color` field (HTML5 input). See
+---`arbor.FormNodeColorSwatch`.
+---@param  cfg arbor.FormNodeColorSwatch
+---@return arbor.FormBuilder
+function FormBuilder:color_swatch(cfg) end
+
+---Display-only keybinding badge — boxed `<kbd>` chrome or plain inline
+---monospace text (IntelliJ-menu style). Resolves the visible label from
+---`action` (live lookup against the user's keybindings) → `binding` →
+---`keys` → `label`. See `arbor.FormNodeKbd`.
+---@param  cfg arbor.FormNodeKbd
+---@return arbor.FormBuilder
+function FormBuilder:kbd(cfg) end
+
+---Display-only uppercase type pill — one-word type hint with curated
+---palette (`kind`) or explicit semantic tone (`tone`). See
+---`arbor.FormNodeTypePill`.
+---@param  cfg arbor.FormNodeTypePill
+---@return arbor.FormBuilder
+function FormBuilder:type_pill(cfg) end
+
+---Display-only charset indicator — small monospace pill, warning-tinted
+---when overridden. Presentational only; pair with a sibling `select` to
+---let the user pick. See `arbor.FormNodeEncodingPill`.
+---@param  cfg arbor.FormNodeEncodingPill
+---@return arbor.FormBuilder
+function FormBuilder:encoding_pill(cfg) end
+
+---Display-only round avatar — initials from `name`, stable hue from
+---`email` or `name`. For people; for entities (workspaces, plugins) use
+---`monogram` instead. See `arbor.FormNodeAvatar`.
+---@param  cfg arbor.FormNodeAvatar
+---@return arbor.FormBuilder
+function FormBuilder:avatar(cfg) end
+
+---Display-only monochrome provider brand glyph — same chrome as the host's
+---`<BrandIcon>`. Renders the canonical `simple-icons` mark in
+---`currentColor`, so it inherits the surrounding text colour. Use for
+---activity bar / inline glyphs; for branded swatches with the brand
+---background colour use `brand_tile` instead. See `arbor.FormNodeBrandIcon`.
+---@param  cfg arbor.FormNodeBrandIcon
+---@return arbor.FormBuilder
+function FormBuilder:brand_icon(cfg) end
+
+---Display-only branded square tile — same chrome as the host's
+---`<BrandTile>`. Composes the brand glyph on the brand's hard-coded
+---background colour (GitHub dark, GitLab orange, …) with a fixed bright
+---foreground (brand contrast does not borrow theme tokens). Use for auth
+---tiles / provider cards / welcome screens. See `arbor.FormNodeBrandTile`.
+---@param  cfg arbor.FormNodeBrandTile
+---@return arbor.FormBuilder
+function FormBuilder:brand_tile(cfg) end
+
+---Display-only provider user identity row — avatar + name + optional
+---secondary line (email / @handle / domain), with click-to-copy on each
+---line. Same chrome as the host's `<ProviderUserBadge>` used in provider
+---settings cards. See `arbor.FormNodeProviderUserBadge`.
+---@param  cfg arbor.FormNodeProviderUserBadge
+---@return arbor.FormBuilder
+function FormBuilder:provider_user_badge(cfg) end
+
 ---Escape hatch — push an arbitrary node table (any `type`, any extra fields).
 ---@param  node table
 ---@return arbor.FormBuilder
@@ -2833,6 +2920,94 @@ function CoreAssert.register() end
 ---@field next_label  string|nil    Default: "Next"
 ---@field back_label  string|nil    Default: "Back"
 
+---Single-line text input — backs `text` / `password` / `email` / `url`. Wraps
+---the shared `<Input>` widget, so `icon` / `icon_end` / `prefix` / `suffix`
+---/ `size` / `clearable` mirror its affordances. Live-edit dispatch via
+---`actions.change` (debounced by `debounce_ms`, default 250 ms).
+---@class arbor.FormFieldText : arbor.FormNodeBase
+---@field type         "text"|"password"|"email"|"url"
+---@field name         string
+---@field label        string|nil
+---@field default      string|nil
+---@field placeholder  string|nil
+---@field pattern      string|nil    Regex / Lua pattern for inline validation
+---@field pattern_hint string|nil
+---@field size         "sm"|"md"|"lg"|nil   Padding tier. Default "md".
+---@field icon         string|nil    Leading Lucide icon name (rendered inside the input chrome)
+---@field icon_end     string|nil    Trailing Lucide icon name. The clear-× takes precedence when `clearable` is set and the field has a value.
+---@field prefix       string|nil    Leading text affix (e.g. "$", "https://", "@") — muted, non-editable
+---@field suffix       string|nil    Trailing text affix (e.g. "kg", "%", ".com") — muted, non-editable
+---@field clearable    boolean|nil   Show a × button while the field has a value. Default false.
+---@field actions      { change: string|arbor.DispatchTarget|nil }|nil
+---@field debounce_ms  integer|nil   Trailing-edge debounce for `actions.change`. Default 250 ms; 0 fires on every keystroke.
+---@field required     boolean|nil
+---@field readonly     boolean|nil
+---@field hint         string|nil
+
+---Numeric input with a built-in stepper column — wraps the shared
+---`<NumberStepper>` widget. Same `icon` / `icon_end` / `prefix` / `suffix`
+---/ `size` surface as `text`. Live-edit dispatch via `actions.change`.
+---@class arbor.FormFieldNumber : arbor.FormNodeBase
+---@field type         "number"
+---@field name         string
+---@field label        string|nil
+---@field default      number|nil
+---@field placeholder  string|nil
+---@field min          number|nil
+---@field max          number|nil
+---@field step         number|nil
+---@field size         "sm"|"md"|"lg"|nil   Padding tier. Default "md".
+---@field icon         string|nil    Leading Lucide icon name
+---@field icon_end     string|nil    Trailing Lucide icon name (between the digits and the stepper column)
+---@field prefix       string|nil    Leading text affix (e.g. "$")
+---@field suffix       string|nil    Trailing text affix (e.g. "kg", "%", "ms")
+---@field actions      { change: string|arbor.DispatchTarget|nil }|nil
+---@field debounce_ms  integer|nil   Default 250 ms.
+---@field required     boolean|nil
+---@field readonly     boolean|nil
+---@field hint         string|nil
+
+---Single-value picker. Renders as a dropdown trigger with a chevron; opens
+---a menu of `options` (auto-searchable past 12 entries). Each option is a
+---bare string, an `arbor.SelectOption`, or one of the richer shapes
+---(group / separator / item with icon+description+meta) accepted by the
+---host. Live-edit dispatch via `actions.change` — fires on every pick
+---(scoped `DispatchTarget` ships only `{ node_id, slot:'change', value,
+---state? }`; bare-string action keeps the legacy whole-form payload).
+---@class arbor.FormFieldSelect : arbor.FormNodeBase
+---@field type          "select"
+---@field name          string
+---@field options       arbor.FormOptionInput[]
+---@field label         string|nil
+---@field default       string|nil
+---@field placeholder   string|nil    Trigger placeholder when nothing is selected. Default "— select —".
+---@field searchable    boolean|nil   Force the filter input on/off. Default: auto-on past 12 options.
+---@field empty_message string|nil    Shown when filter yields no matches. Default "No options".
+---@field clearable     boolean|nil   Show a × button inside the trigger when a value is selected; clicking it resets the field to "" and fires `actions.change`. Default false.
+---@field actions       { change: string|arbor.DispatchTarget|nil }|nil
+---@field required      boolean|nil
+---@field readonly      boolean|nil
+---@field hint          string|nil
+
+---Multi-value variant of `select`. Stored as `string[]`. Each option in the
+---menu carries a checkbox; the trigger shows the count once more than one
+---entry is picked. Same `searchable` / `empty_message` defaults as `select`.
+---@class arbor.FormFieldMultiselect : arbor.FormNodeBase
+---@field type          "multiselect"
+---@field name          string
+---@field options       arbor.FormOptionInput[]
+---@field label         string|nil
+---@field default       string[]|nil
+---@field placeholder   string|nil    Trigger placeholder when the list is empty. Default "— select —".
+---@field searchable    boolean|nil   Force the filter input on/off. Default: auto-on past 12 options.
+---@field empty_message string|nil    Shown when filter yields no matches.
+---@field min           integer|nil   Min selected count (validation).
+---@field max           integer|nil   Max selected count (validation).
+---@field clearable     boolean|nil   Show a × button inside the trigger when at least one option is selected; clicking it resets the field to []. Default false.
+---@field required      boolean|nil
+---@field readonly      boolean|nil
+---@field hint          string|nil
+
 ---Click-to-edit single-line field. Renders the current value as a clickable
 ---label; activating it (click / Enter / Space) swaps in the host's
 ---<InlineEdit> widget — Enter commits, Esc reverts, the explicit ✓ / ✕
@@ -2852,6 +3027,27 @@ function CoreAssert.register() end
 ---@field readonly            boolean|nil
 ---@field required            boolean|nil
 ---@field hint                string|nil
+
+---Value-bearing git branch picker — same chrome as the host's
+---`<BranchSelect>` widget (monospace dropdown trigger, search input above
+---the menu past `search_threshold`, sticky entry for a value not in the
+---list). Submitted as the picked branch name. The plugin owns the
+---branches list; pass it explicitly via `branches`. Typical use: call
+---`arbor.repo.branches()` (requires `git = "read"`) on form open and map
+---`.name`. The host does not auto-load or watch the active repo's branch
+---list; push it back with `arbor.ui.form.patch` when it changes.
+---@class arbor.FormFieldBranchSelect : arbor.FormNodeBase
+---@field type              "branch_select"
+---@field name              string
+---@field branches          string[]      Available branches.
+---@field label             string|nil
+---@field default           string|nil
+---@field placeholder       string|nil    Trigger placeholder when nothing is picked. Default "— pick a branch —".
+---@field loading           boolean|nil   Render the trigger as a loading shell (label "Loading…", disabled).
+---@field search_threshold  integer|nil   Show a search input above the menu once `#branches` exceeds this. Default 12.
+---@field required          boolean|nil
+---@field readonly          boolean|nil
+---@field hint              string|nil
 
 ---@class arbor.FormFieldFile : arbor.FormNodeBase
 ---@field type        "file"
@@ -2939,6 +3135,21 @@ function CoreAssert.register() end
 ---@field empty_text       string|nil   Shown when there are no hunks (default "No changes")
 ---@field virtualize_threshold integer|nil  Total-line count above which the virtualized renderer kicks in (default 600)
 
+---One item in a tree row's right-click context menu. Render order matches
+---the array order; mix interactive items with `separator` / `header` rows.
+---Each item carries its own `action` / `dispatch`; falls back to the
+---tree-level `on_context_menu` slot when neither is set.
+---@class arbor.FormTreeMenuItem
+---@field id        string|nil                              Stable id (surfaced as `item_id` in the payload)
+---@field label     string|nil                              Omit (with `separator = true`) to render a divider
+---@field icon      string|nil                              Lucide icon name (curated subset)
+---@field action    string|nil                              Sugar for `dispatch = { kind = "action", name = action }`
+---@field dispatch  arbor.DispatchTarget|nil                Explicit dispatch target — wins over `action`
+---@field danger    boolean|nil                             Render in destructive (red) styling
+---@field disabled  boolean|nil                             Render disabled (no hover, no click)
+---@field separator boolean|nil                             Render as a divider line
+---@field header    boolean|nil                             Non-clickable bold section header
+
 ---@class arbor.FormTreeNode
 ---@field value       string
 ---@field label       string
@@ -2951,6 +3162,9 @@ function CoreAssert.register() end
 ---@field id          string|nil    Stable id — required to patch this row (lazy children, inline updates)
 ---@field has_children boolean|nil  Advertise (lazy) children before they load: shows an expander, fires on_expand on first open
 ---@field loading     boolean|nil   Show a spinner on this row (clear it with the patch that fills the children)
+---@field draggable   boolean|nil   Per-row override; defaults to true when tree's `reorderable` is on and the row isn't a group
+---@field drop_target boolean|nil   Per-row override; defaults to true when tree's `reorderable` is on
+---@field menu_items  arbor.FormTreeMenuItem[]|nil   Per-row context menu — wins over the tree-level `menu_items` when set
 
 ---@class arbor.FormFieldTree : arbor.FormNodeBase
 ---@field type       "tree"
@@ -2971,6 +3185,12 @@ function CoreAssert.register() end
 ---@field virtualize_threshold integer|nil  Window the rows above this many visible rows (default 400)
 ---@field row_height  integer|nil   Fixed row height (px) for the virtualized window (default 24)
 ---@field height      string|integer|nil  Fixed viewport height (px or CSS length); falls back to max_height
+---@field searchable  boolean|nil   Inline filter input at the top of the tree (local UI state; matches label + description, auto-expands ancestors of matches, highlights the substring)
+---@field search_placeholder string|nil  Placeholder for the filter input (default "Filter…")
+---@field reorderable boolean|nil   Enable HTML5 drag-drop reorder among rows. Non-group rows are draggable + drop-targets by default; override per row via `tnode.draggable` / `tnode.drop_target`
+---@field on_reorder  string|arbor.DispatchTarget|nil  Scoped slot fired on drop — payload `{ source = { id?, value, path }, target = { id?, value, path }, position = "before"|"inside"|"after" }`
+---@field menu_items  arbor.FormTreeMenuItem[]|nil     Default right-click menu items (per-row `tnode.menu_items` wins)
+---@field on_context_menu string|arbor.DispatchTarget|nil  Fallback scoped slot fired when a menu item without its own action is picked — payload `{ item_id, value, path }`
 
 ---@class arbor.FormTableColumn
 ---@field key         string
@@ -3066,8 +3286,12 @@ function CoreAssert.register() end
 ---@field variant     "default"|"primary"|"danger"|"ghost"|nil
 ---@field close_after boolean|nil
 ---@field disabled    boolean|nil
----@field icon        string|nil                Lucide icon name
+---@field icon        string|nil                Lucide icon name (leading)
+---@field icon_end    string|nil                Lucide icon name (trailing — chevron, external-link, …). Suppressed when icon_only
 ---@field icon_only   boolean|nil               Hide label, render only icon
+---@field size        "xs"|"sm"|"md"|"lg"|nil   Visual size. Default "sm" (matches legacy baseline)
+---@field block       boolean|nil               Stretch to full container width with centred label
+---@field color       string|nil                CSS colour override (hex, var(--…), color-mix(...)). Filled bg for primary; text for ghost/danger
 ---@field tooltip     string|nil                Hover tooltip (esp. useful when icon_only)
 ---@field extra       table|nil                 Merged into the action payload
 
@@ -3337,6 +3561,8 @@ function CoreAssert.register() end
 ---@field badges    arbor.InfoCardBadge[]|nil
 ---@field meta      arbor.InfoCardMeta[]|nil
 ---@field actions   arbor.InfoCardAction[]|nil
+---@field variant   ("elevated"|"flat"|"subtle")|nil   Card chrome tone. Default `"elevated"`; use `"flat"` when nesting inside another elevated surface.
+---@field bordered  boolean|nil   Show the 1px border. Default `true`.
 
 ---@alias arbor.ChipTone "accent"|"info"|"success"|"warning"|"error"|"muted"|"neutral"
 
@@ -3466,6 +3692,130 @@ function CoreAssert.register() end
 ---@field max_height  integer|nil                  Max height in px; longer content fades. Default 280.
 ---@field markdown    boolean|nil                  Render `content` as sanitised Markdown. Default false.
 ---@field display     "inline"|"block"|nil         Wrapper element. `"inline"` (default) → `<span>` (inline-block). `"block"` → `<div>`.
+
+---Display-only colour swatch — chip-only or labelled card row. Mirrors the
+---host's `<ColorSwatch>` widget used by the Marketplace palette and theme-
+---preview surfaces. Distinct from the value-bearing `color` field (HTML5
+---colour input) — `color_swatch` is presentational only: the plugin owns
+---the `color` value (any CSS expression — hex, `rgb()`, `var(--…)`,
+---`color-mix(...)`) and the chip renders accordingly. To make it editable,
+---pair it with a sibling `color` field and patch the swatch's `color` from
+---the field's `change` action.
+---
+---When `label` is set the widget renders as a labelled card row
+---`[chip] Label   #caption`; when `label` is absent only the chip is
+---rendered (use this inside a custom grid where the label lives elsewhere).
+---Set `glyph` (a single character like `"#"`, `"n"`, `"T"`) to render a
+---centred marker instead of a colour fill — useful when the swatch doubles
+---as a typed-token indicator.
+---@class arbor.FormNodeColorSwatch : arbor.FormNodeBase
+---@field type       "color_swatch"
+---@field color      string         Any CSS colour value — hex, `rgb()`, `var(--token)`, `color-mix(...)`, …
+---@field label      string|nil     Display name. When set, renders as a labelled card row; when absent, only the chip is rendered.
+---@field caption    string|nil     Right-hand caption in labelled mode. Defaults to the raw `color`.
+---@field no_caption boolean|nil    Hide the caption in labelled mode.
+---@field chip_size  integer|nil    Chip width/height in px. Defaults to 18 (labelled) / 22 (chip-only).
+---@field tooltip    string|nil     Tooltip override; defaults to the colour value.
+---@field glyph      string|nil     Single-character marker shown instead of the colour fill (e.g. `"#"`, `"n"`, `"T"`).
+
+---Display-only keybinding badge — same chrome as the host's `<Kbd>` used in
+---Shortcuts / Command Palette / footer hints. Resolves the visible label
+---live from the user's keybindings:
+---  · `action`  → built-in or plugin-registered action id (re-renders on
+---                rebind in Settings → Keybindings).
+---  · `binding` → explicit `{ key, modifiers, scope? }` object.
+---  · `keys`    → array of chord parts (`{ "Ctrl", "K" }`).
+---  · `label`   → single string `"Ctrl+K"` (split on `+`).
+---When `action` / `binding` resolves to nothing the widget renders nothing —
+---safe to drop next to a label without a guard.
+---@class arbor.FormNodeKbd : arbor.FormNodeBase
+---@field type     "kbd"
+---@field action   string|nil                          Built-in or plugin-registered action id.
+---@field binding  table|nil                           Explicit keybinding object `{ key, ctrl?, shift?, alt? }`. Wins over `keys`/`label`.
+---@field label    string|nil                          Single label like `"Ctrl+K"`; split on `+` if `keys` isn't supplied.
+---@field keys     string[]|nil                        Explicit chord parts. Wins over `label`.
+---@field size     "sm"|"md"|nil                       Badge size. Default `"md"`.
+---@field tone     "default"|"accent"|"muted"|nil      Visual tone. Default `"default"`.
+---@field variant  "box"|"inline"|nil                  `"box"` (default) → boxed `<kbd>` badges; `"inline"` → plain monospace text (IntelliJ-menu style).
+
+---Display-only uppercase type pill — one-word type hint, same chrome as the
+---host's `<TypePill>` used in component cards and field rows. Two ways to
+---drive the colour: `kind` picks from a curated palette (vector / numeric /
+---bool / enum / handle / entity / option / string / array / struct /
+---unknown — case-insensitive), or `tone` for an explicit semantic
+---override (`accent`, `info`, `success`, `warning`, `error`, `muted`).
+---@class arbor.FormNodeTypePill : arbor.FormNodeBase
+---@field type    "type_pill"
+---@field label   string|nil                                                   Visible text. When omitted, the resolved `kind` is shown as-is.
+---@field kind    string|nil                                                   Curated kind — picks a palette. Case-insensitive; unknown values fall through to neutral / dim.
+---@field tone    "accent"|"info"|"success"|"warning"|"error"|"muted"|nil      Explicit tone override. Wins over `kind`.
+---@field tooltip string|nil                                                   Tooltip on hover.
+
+---Display-only charset indicator — same chrome as the host's
+---`<EncodingPill>` used in the diff toolbar / file-list rows. Small
+---monospace pill; warning-tinted when `overridden` is true to surface
+---that the user pinned a non-auto value. Presentational only — the plugin
+---owns the label and the override flag. Pair with a sibling `select` to
+---let the user pick a charset, then patch the pill via
+---`arbor.ui.form.patch` to reflect the choice.
+---@class arbor.FormNodeEncodingPill : arbor.FormNodeBase
+---@field type       "encoding_pill"
+---@field encoding   string         Encoding label currently in effect (e.g. `"UTF-8"`, `"windows-1252"`).
+---@field overridden boolean|nil    True when the user has pinned a non-auto encoding — drives the warning tint.
+---@field compact    boolean|nil    Compact 14px variant for cramped headers. Default false.
+
+---Display-only round avatar — same chrome as the host's `<Avatar>` widget
+---used for committer rows / reviewer chips. Initials derived from `name`
+---(first letter of the first two words); stable hue derived from `email`
+---(preferred) or `name`. Tooltip is `name` + optional `email`. Distinct
+---from `monogram`, which is square / outline-styled and meant for entities
+---(workspaces, plugins), not people.
+---@class arbor.FormNodeAvatar : arbor.FormNodeBase
+---@field type  "avatar"
+---@field name  string|nil    Display name — also the source of the initials when no other text is supplied.
+---@field email string|nil    Email address — preferred hue source; appears in the tooltip description.
+---@field size  integer|nil   Avatar diameter in px. Default 24.
+
+---Provider brand identifier shared by `brand_icon` and `brand_tile`.
+---@alias arbor.ProviderBrand "github"|"gitlab"|"bitbucket"|"linear"|"jira"
+
+---Display-only monochrome brand glyph — canonical `simple-icons` mark
+---rendered in `currentColor`, so it inherits the surrounding text colour.
+---Useful when a coloured tile would clash with the rest of the icon set
+---(activity bar, inline glyphs, sidebar). For owned-swatch surfaces (auth
+---tiles, settings cards) use `brand_tile`.
+---@class arbor.FormNodeBrandIcon : arbor.FormNodeBase
+---@field type  "brand_icon"
+---@field brand arbor.ProviderBrand                       Provider brand to render.
+---@field size  integer|nil                               Pixel size of the glyph. Default 20.
+---@field title string|nil                                Override the title attribute / tooltip (defaults to the capitalised brand name).
+
+---Display-only branded square tile — composes the canonical `simple-icons`
+---mark on the brand's hard-coded background colour (GitHub dark, GitLab
+---orange, Bitbucket / Jira blue, Linear indigo) with a fixed bright
+---foreground. Brand contrast does NOT borrow theme tokens. Use for auth
+---tiles, provider cards, welcome screens; for monochrome marks that
+---inherit the surrounding colour use `brand_icon`.
+---@class arbor.FormNodeBrandTile : arbor.FormNodeBase
+---@field type      "brand_tile"
+---@field brand     arbor.ProviderBrand     Provider brand to render.
+---@field size      integer|nil             Pixel size of the inner glyph. Default 20.
+---@field tile_size integer|nil             Pixel size of the outer square. Defaults to `max(size + 16, 36)`.
+---@field disabled  boolean|nil             Greyed-out look — used to indicate disabled / unavailable items.
+---@field title     string|nil              Override the title attribute / tooltip (defaults to the capitalised brand name).
+
+---Display-only two-line user identity row — avatar (or initial monogram)
+---+ primary name line + optional secondary line (email / @handle / domain).
+---When `copyable` is true (default) both lines are click-to-copy with a
+---hover affordance and a transient ✓ confirmation. Presentational only —
+---the plugin owns the data (typically populated from `arbor.http.*` calls
+---against the provider's user API).
+---@class arbor.FormNodeProviderUserBadge : arbor.FormNodeBase
+---@field type       "provider_user_badge"
+---@field name       string         Primary line — typically display name or login.
+---@field avatar_url string|nil     Avatar URL; falls back to a circled monogram of the first initial.
+---@field secondary  string|nil     Secondary line — email, domain, @handle, …
+---@field copyable   boolean|nil    When true (default), clicking the name / secondary copies it to the clipboard.
 
 
 -- =============================================================================

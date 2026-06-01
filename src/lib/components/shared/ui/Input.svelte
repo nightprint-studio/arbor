@@ -31,6 +31,13 @@
     iconStart?: Snippet;
     /** Trailing icon snippet (rendered inside the input on the right, before the clear button). */
     iconEnd?: Snippet;
+    /** Leading text affix (e.g. "$", "https://", "@"). Distinct from `iconStart`:
+     *  this renders as a muted text span, not a Snippet. Use for short
+     *  units / scheme prefixes / sigils. */
+    prefix?: string;
+    /** Trailing text affix (e.g. "kg", "%", ".com"). Muted text span after the
+     *  input, before the clear button / iconEnd. */
+    suffix?: string;
     onchange?: (value: string) => void;
     oninput?: (value: string) => void;
     onkeydown?: (e: KeyboardEvent) => void;
@@ -56,6 +63,7 @@
     name, id,
     ariaLabel,
     iconStart, iconEnd,
+    prefix, suffix,
     onchange, oninput, onkeydown, onfocus, onblur, onclear,
   }: Props = $props();
 
@@ -85,6 +93,9 @@
   {#if iconStart}
     <span class="input-icon-start">{@render iconStart()}</span>
   {/if}
+  {#if prefix}
+    <span class="input-affix input-affix-start">{prefix}</span>
+  {/if}
 
   <input
     class="text-input"
@@ -108,6 +119,9 @@
     {onblur}
   />
 
+  {#if suffix}
+    <span class="input-affix input-affix-end">{suffix}</span>
+  {/if}
   {#if showClear}
     <button
       type="button"
@@ -169,6 +183,18 @@
     color: var(--text-muted);
     flex-shrink: 0;
   }
+  /* Text affixes — kept visually lighter than the typed value so the user
+     reads them as units / sigils, not as part of the editable text. */
+  .input-affix {
+    color: var(--text-muted);
+    font-family: var(--font-ui-sans);
+    flex-shrink: 0;
+    user-select: none;
+    pointer-events: none;
+  }
+  .sz-sm .input-affix { font-size: var(--font-size-xs); }
+  .sz-md .input-affix { font-size: var(--font-size-sm); }
+  .sz-lg .input-affix { font-size: var(--font-size-md); }
   .input-clear {
     display: inline-flex;
     align-items: center;

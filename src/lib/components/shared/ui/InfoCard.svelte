@@ -43,6 +43,7 @@
 <script lang="ts">
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import Badge from './Badge.svelte';
+  import Card from './Card.svelte';
 
   interface Props {
     title:       string;
@@ -57,18 +58,24 @@
     actions?:    InfoAction[];
     /** Custom accent for the avatar — defaults to --accent. */
     accentColor?: string;
+    /** Card chrome tone. Defaults to 'elevated'. Use 'flat' when nesting inside another elevated surface. */
+    variant?:    'elevated' | 'flat' | 'subtle';
+    /** Show the 1px border. Defaults to true. */
+    bordered?:   boolean;
   }
 
   let {
     title, subtitle, icon, monogram, status,
     badges = [], meta = [], actions = [],
     accentColor,
+    variant  = 'elevated',
+    bordered = true,
   }: Props = $props();
 
   const IconComp = $derived(icon ? PLUGIN_ICONS[icon] : null);
 </script>
 
-<div class="info-card">
+<Card {variant} {bordered} padding="none" class="info-card">
   {#if IconComp || monogram}
     <div
       class="info-avatar"
@@ -128,18 +135,20 @@
       {/each}
     </div>
   {/if}
-</div>
+</Card>
 
 <style>
-  .info-card {
+  /* Card provides the panel chrome (bg / border / radius / overflow).
+     Subtle bottom drop-shadow on the outer Card; inner body holds the
+     3-column flex layout (avatar | main | actions). */
+  :global(.info-card) {
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  }
+  :global(.info-card .card-body) {
     display: flex;
     align-items: center;
     gap: 14px;
     padding: 14px 16px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
   }
 
   .info-avatar {

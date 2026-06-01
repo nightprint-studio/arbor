@@ -26,9 +26,12 @@
   {@const pendingKey = n.dispatch ? ctx.dispatchKey(n.dispatch) : n.action}
   {@const isLoading = ctx.actionPending === pendingKey}
   {@const BIcon = n.icon ? PLUGIN_ICONS[n.icon] : null}
+  {@const BIconEnd = n.icon_end ? PLUGIN_ICONS[n.icon_end] : null}
+  {@const size = n.size ?? 'sm'}
+  {@const iconPx = size === 'xs' ? 11 : size === 'md' ? 14 : size === 'lg' ? 16 : 12}
   <button
-    class="pf-action-btn pf-action-{n.variant ?? 'default'} {n.icon_only ? 'pf-action-icon-only' : ''} {(node as any).class ?? ''}"
-    style={(node as any).style}
+    class="pf-action-btn pf-action-{n.variant ?? 'default'} pf-action-sz-{size} {n.icon_only ? 'pf-action-icon-only' : ''} {n.block ? 'pf-action-block' : ''} {n.color ? 'pf-action-colored' : ''} {(node as any).class ?? ''}"
+    style={[n.color ? `--pf-btn-color:${n.color}` : null, (node as any).style].filter(Boolean).join(';')}
     type="button"
     use:tooltip={n.tooltip ?? (n.icon_only ? (n.label ?? '') : '')}
     disabled={!!(n.disabled) || !!ctx.actionPending}
@@ -37,11 +40,14 @@
       : ctx.handleButtonAction(n.action, n.close_after ?? false, n.extra)}
   >
     {#if isLoading}
-      <span class="pf-btn-spin"><Loader size={12} /></span>
+      <span class="pf-btn-spin"><Loader size={iconPx} /></span>
     {:else if BIcon}
-      <BIcon size={12} />
+      <BIcon size={iconPx} />
     {/if}
     {#if !n.icon_only}{n.label ?? ''}{/if}
+    {#if BIconEnd && !n.icon_only && !isLoading}
+      <BIconEnd size={iconPx} />
+    {/if}
   </button>
 
 {:else if node.type === 'menu_button'}

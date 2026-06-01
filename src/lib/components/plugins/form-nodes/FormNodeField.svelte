@@ -30,11 +30,14 @@
   import { tooltip } from '$lib/actions/tooltip';
 
   import NumberStepper     from '$lib/components/shared/ui/NumberStepper.svelte';
+  import Input             from '$lib/components/shared/ui/Input.svelte';
   import Dropdown          from '$lib/components/shared/ui/Dropdown.svelte';
   import RadioGroup        from '$lib/components/shared/ui/RadioGroup.svelte';
   import Toggle            from '$lib/components/shared/ui/Toggle.svelte';
   import TypePill          from '$lib/components/shared/internal/TypePill.svelte';
+  import BranchSelect      from '$lib/components/shared/internal/BranchSelect.svelte';
   import FormNodeInlineEdit from './FormNodeInlineEdit.svelte';
+  import { PLUGIN_ICONS }  from '$lib/utils/plugin-icons';
 
   import type {
     FormNode, FormFieldRange,
@@ -156,15 +159,29 @@
     {/if}
 
     {#if node.type === 'text' || node.type === 'password' || node.type === 'email' || node.type === 'url'}
-      <input
+      {@const IconL = n.icon ? PLUGIN_ICONS[n.icon] : null}
+      {@const IconR = n.icon_end ? PLUGIN_ICONS[n.icon_end] : null}
+      {@const sz    = (n.size as 'sm' | 'md' | 'lg' | undefined) ?? 'md'}
+      {@const ipx   = sz === 'sm' ? 12 : sz === 'lg' ? 16 : 14}
+      {#snippet textIconStart()}{#if IconL}<IconL size={ipx} />{/if}{/snippet}
+      {#snippet textIconEnd()}{#if IconR}<IconR size={ipx} />{/if}{/snippet}
+      <Input
         id="pf-{n.name}"
-        class="pf-input"
-        class:pf-input-error={!!ctx.validationErrors[n.name]}
         type={node.type}
+        size={sz}
+        prefix={n.prefix}
+        suffix={n.suffix}
+        iconStart={IconL ? textIconStart : undefined}
+        iconEnd={IconR ? textIconEnd : undefined}
         placeholder={n.placeholder ?? ''}
         readonly={n.readonly ?? false}
         disabled={ctx.resolvedDisabled(n)}
-        oninput={() => ctx.notifyChange(n.name, ctx.values[n.name])}
+        clearable={n.clearable ?? false}
+        error={ctx.validationErrors[n.name] ?? null}
+        oninput={(v) => {
+          ctx.notifyChange(n.name, v);
+          if (n.actions?.change) ctx.fireFieldChangeDebounced(n, v, n.debounce_ms ?? 250);
+        }}
         bind:value={ctx.values[n.name]}
       />
 
@@ -176,6 +193,11 @@
         rows={n.rows ?? 4}
         readonly={n.readonly ?? false}
         disabled={ctx.resolvedDisabled(n)}
+        oninput={() => {
+          const v = ctx.values[n.name];
+          ctx.notifyChange(n.name, v);
+          if (n.actions?.change) ctx.fireFieldChangeDebounced(n, v, n.debounce_ms ?? 250);
+        }}
         bind:value={ctx.values[n.name]}
       ></textarea>
 
@@ -204,6 +226,12 @@
       />
 
     {:else if node.type === 'number'}
+      {@const IconLn = n.icon ? PLUGIN_ICONS[n.icon] : null}
+      {@const IconRn = n.icon_end ? PLUGIN_ICONS[n.icon_end] : null}
+      {@const szn    = (n.size as 'sm' | 'md' | 'lg' | undefined) ?? 'md'}
+      {@const ipxn   = szn === 'sm' ? 12 : szn === 'lg' ? 16 : 14}
+      {#snippet numIconStart()}{#if IconLn}<IconLn size={ipxn} />{/if}{/snippet}
+      {#snippet numIconEnd()}{#if IconRn}<IconRn size={ipxn} />{/if}{/snippet}
       <NumberStepper
         id="pf-{n.name}"
         bind:value={ctx.values[n.name]}
@@ -213,8 +241,17 @@
         readonly={n.readonly ?? false}
         disabled={ctx.resolvedDisabled(n)}
         narrow={false}
+        size={szn}
+        prefix={n.prefix}
+        suffix={n.suffix}
+        iconStart={IconLn ? numIconStart : undefined}
+        iconEnd={IconRn ? numIconEnd : undefined}
         ariaLabel={n.label ?? n.name}
         placeholder={n.placeholder}
+        oninput={(v) => {
+          ctx.notifyChange(n.name, v);
+          if (n.actions?.change) ctx.fireFieldChangeDebounced(n, v, n.debounce_ms ?? 250);
+        }}
       />
 
     {:else if node.type === 'range'}
@@ -227,6 +264,11 @@
           max={n.max ?? 100}
           step={n.step ?? 1}
           disabled={(n.readonly ?? false) || ctx.resolvedDisabled(n)}
+          oninput={() => {
+            const v = ctx.values[n.name];
+            ctx.notifyChange(n.name, v);
+            if (n.actions?.change) ctx.fireFieldChangeDebounced(n, v, n.debounce_ms ?? 250);
+          }}
           bind:value={ctx.values[n.name]}
         />
         {#if n.show_value !== false}
@@ -262,11 +304,13 @@
                               n,
                             )}
       {@const placeholder = (n as any).placeholder ?? '— select —'}
-      {@const selectedLabel = (ctx.values[n.name] != null && ctx.values[n.name] !== '')
+      {@const hasValue    = ctx.values[n.name] != null && ctx.values[n.name] !== ''}
+      {@const selectedLabel = hasValue
                                 ? (ctx.selectLabelOf(rawOpts, ctx.values[n.name] as string) ?? String(ctx.values[n.name]))
                                 : null}
       {@const isDisabled  = (n.readonly ?? false) || ctx.resolvedDisabled(n)}
       {@const itemCount   = ctx.selectItemCount(rawOpts)}
+      {@const showClear   = !!n.clearable && hasValue && !isDisabled}
       <Dropdown
         position="fixed"
         direction="down"
@@ -277,19 +321,36 @@
         emptyMessage={(n as any).empty_message ?? 'No options'}
       >
         {#snippet trigger({ open, toggle })}
-          <button
-            id="pf-{n.name}"
-            class="pf-input pf-select-trigger"
-            class:pf-select-trigger-empty={selectedLabel === null}
-            onclick={toggle}
-            disabled={isDisabled}
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded={open}
-          >
-            <span class="pf-select-trigger-label">{selectedLabel ?? placeholder}</span>
-            <ChevronDown size={11} />
-          </button>
+          <div class="pf-select-trigger-wrap" class:pf-select-trigger-wrap-clearable={showClear}>
+            <button
+              id="pf-{n.name}"
+              class="pf-input pf-select-trigger"
+              class:pf-select-trigger-empty={selectedLabel === null}
+              onclick={toggle}
+              disabled={isDisabled}
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={open}
+            >
+              <span class="pf-select-trigger-label">{selectedLabel ?? placeholder}</span>
+              <ChevronDown size={11} />
+            </button>
+            {#if showClear}
+              <button
+                class="pf-select-clear"
+                type="button"
+                tabindex={-1}
+                aria-label="Clear selection"
+                use:tooltip={'Clear'}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  ctx.values[n.name] = '';
+                  ctx.notifyChange(n.name, '');
+                  ctx.fireFieldChange(node, '');
+                }}
+              ><XIcon size={11} /></button>
+            {/if}
+          </div>
         {/snippet}
       </Dropdown>
 
@@ -301,6 +362,7 @@
       {@const summary     = ctx.multiselectSummary(rawOpts, cur, placeholder)}
       {@const isDisabled  = (n.readonly ?? false) || ctx.resolvedDisabled(n)}
       {@const itemCount   = ctx.selectItemCount(rawOpts)}
+      {@const showClear   = !!n.clearable && cur.length > 0 && !isDisabled}
       <Dropdown
         position="fixed"
         direction="down"
@@ -312,19 +374,35 @@
         emptyMessage={(n as any).empty_message ?? 'No options'}
       >
         {#snippet trigger({ open, toggle })}
-          <button
-            id="pf-{n.name}"
-            class="pf-input pf-select-trigger"
-            class:pf-select-trigger-empty={cur.length === 0}
-            onclick={toggle}
-            disabled={isDisabled}
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded={open}
-          >
-            <span class="pf-select-trigger-label">{summary}</span>
-            <ChevronDown size={11} />
-          </button>
+          <div class="pf-select-trigger-wrap" class:pf-select-trigger-wrap-clearable={showClear}>
+            <button
+              id="pf-{n.name}"
+              class="pf-input pf-select-trigger"
+              class:pf-select-trigger-empty={cur.length === 0}
+              onclick={toggle}
+              disabled={isDisabled}
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={open}
+            >
+              <span class="pf-select-trigger-label">{summary}</span>
+              <ChevronDown size={11} />
+            </button>
+            {#if showClear}
+              <button
+                class="pf-select-clear"
+                type="button"
+                tabindex={-1}
+                aria-label="Clear selection"
+                use:tooltip={'Clear'}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  ctx.values[n.name] = [];
+                  ctx.notifyChange(n.name, []);
+                }}
+              ><XIcon size={11} /></button>
+            {/if}
+          </div>
         {/snippet}
       </Dropdown>
 
@@ -462,6 +540,16 @@
           </div>
         {/if}
       </div>
+
+    {:else if node.type === 'branch_select'}
+      <BranchSelect
+        bind:value={ctx.values[n.name]}
+        branches={Array.isArray(n.branches) ? n.branches : []}
+        loading={!!n.loading}
+        disabled={(n.readonly ?? false) || ctx.resolvedDisabled(n)}
+        placeholder={n.placeholder ?? '— pick a branch —'}
+        searchThreshold={typeof n.search_threshold === 'number' ? n.search_threshold : 12}
+      />
 
     {:else if node.type === 'tags'}
       {@const tagsArr = Array.isArray(ctx.values[n.name]) ? ctx.values[n.name] as string[] : []}

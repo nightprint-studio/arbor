@@ -20,7 +20,10 @@
    * separate "Reset" button.  The keyboard ↑ / ↓ keys still increment
    * natively because the underlying element is `<input type="number">`.
    */
+  import type { Snippet } from 'svelte';
   import { ChevronUp, ChevronDown } from 'lucide-svelte';
+
+  type Size = 'sm' | 'md' | 'lg';
 
   interface Props {
     value:        number | null | undefined;
@@ -45,6 +48,22 @@
     /** Optional placeholder forwarded to the inner input. Renders only
      *  when the value is null/undefined/empty. */
     placeholder?: string;
+    /** Padding / font-size tier — mirrors `<Input size>` so a plugin form
+     *  can render number fields at the same height as adjacent text inputs.
+     *  Default `md`. */
+    size?:        Size;
+    /** Leading icon snippet (rendered inside the input on the left). Mirrors
+     *  `<Input iconStart>` so the two widgets compose at the same baseline. */
+    iconStart?:   Snippet;
+    /** Trailing icon snippet (rendered between the input and the stepper
+     *  column). */
+    iconEnd?:     Snippet;
+    /** Leading text affix (e.g. "$"). Distinct from `iconStart`: muted text,
+     *  not a Snippet. */
+    prefix?:      string;
+    /** Trailing text affix (e.g. "kg", "%"). Sits between the input and the
+     *  stepper column. */
+    suffix?:      string;
     /** Per-keystroke change.  Most callers want `onchange` instead so
      *  the orchestrator isn't churned on intermediate values. */
     oninput?:     (v: number) => void;
@@ -64,6 +83,9 @@
     ariaLabel,
     id,
     placeholder,
+    size = 'md',
+    iconStart, iconEnd,
+    prefix, suffix,
     oninput, onchange, onblur, onkeydown,
   }: Props = $props();
 
@@ -102,11 +124,19 @@
 </script>
 
 <span
-  class="num-stepper"
+  class="num-stepper sz-{size}"
   class:narrow
   class:disabled
   class:readonly
+  class:has-icon-start={!!iconStart || !!prefix}
+  class:has-icon-end={!!iconEnd || !!suffix}
 >
+  {#if iconStart}
+    <span class="num-icon-start">{@render iconStart()}</span>
+  {/if}
+  {#if prefix}
+    <span class="num-affix num-affix-start">{prefix}</span>
+  {/if}
   <input
     class="num-value"
     type="number"
@@ -124,6 +154,12 @@
     {onblur}
     {onkeydown}
   />
+  {#if suffix}
+    <span class="num-affix num-affix-end">{suffix}</span>
+  {/if}
+  {#if iconEnd}
+    <span class="num-icon-end">{@render iconEnd()}</span>
+  {/if}
   <span class="num-ctrls" aria-hidden="true">
     <!-- tabindex=-1 keeps Tab focus on the input, not the steppers —
          keyboard users get ↑/↓ via the native number-input behavior. -->
@@ -167,6 +203,15 @@
     transition: border-color var(--transition-fast);
     overflow: hidden; /* keep the inner button column inside rounded corners */
   }
+  /* Sizes mirror <Input> — height + value font-size only. The stepper
+     column width stays constant so the chevrons keep the same hit-target
+     across tiers. */
+  .num-stepper.sz-sm { height: 22px; }
+  .num-stepper.sz-md { height: 26px; }
+  .num-stepper.sz-lg { height: 32px; }
+  .sz-sm .num-value { font-size: var(--font-size-xs); padding: 0 6px 0 7px; }
+  .sz-md .num-value { font-size: var(--font-size-sm); padding: 0 6px 0 8px; }
+  .sz-lg .num-value { font-size: var(--font-size-md); padding: 0 8px 0 12px; }
   .num-stepper.narrow {
     display: inline-flex;
     width: 80px;
@@ -192,9 +237,37 @@
     outline: none;
     color: var(--text-primary);
     font-family: var(--font-ui-sans);
-    font-size: var(--font-size-sm);
-    padding: 0 6px 0 8px;
   }
+  /* Trim the typed-text left padding when an icon / prefix is in front, so
+     the digits don't drift right of the leading affix. Mirror logic on the
+     right when a suffix / iconEnd sits between the digits and the stepper
+     column. */
+  .num-stepper.has-icon-start .num-value { padding-left: 4px; }
+  .num-stepper.has-icon-end .num-value { padding-right: 4px; }
+
+  .num-icon-start, .num-icon-end {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    padding: 0 4px;
+  }
+  .num-icon-start { padding-left: 7px; }
+  .num-icon-end { padding-right: 4px; }
+  .num-affix {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-muted);
+    font-family: var(--font-ui-sans);
+    flex-shrink: 0;
+    user-select: none;
+    pointer-events: none;
+  }
+  .num-affix-start { padding-left: 7px; }
+  .num-affix-end { padding-right: 4px; }
+  .sz-sm .num-affix { font-size: var(--font-size-xs); }
+  .sz-md .num-affix { font-size: var(--font-size-sm); }
+  .sz-lg .num-affix { font-size: var(--font-size-md); }
   /* Native spinners are already suppressed in app.css. The selector
      here is a defensive duplicate so the widget renders correctly even
      if it is ever extracted into a standalone component package. */

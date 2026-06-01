@@ -273,17 +273,21 @@ local function _make_field(kind)
   end
 end
 
-FormBuilder.text        = _make_field("text")
-FormBuilder.password    = _make_field("password")
-FormBuilder.textarea    = _make_field("textarea")
-FormBuilder.inline_edit = _make_field("inline_edit")
-FormBuilder.number      = _make_field("number")
-FormBuilder.select   = _make_field("select")
-FormBuilder.checkbox = _make_field("checkbox")
-FormBuilder.toggle   = _make_field("toggle")
-FormBuilder.radio    = _make_field("radio")
-FormBuilder.kv_list  = _make_field("kv_list")
-FormBuilder.editor   = _make_field("editor")
+FormBuilder.text          = _make_field("text")
+FormBuilder.password      = _make_field("password")
+FormBuilder.textarea      = _make_field("textarea")
+FormBuilder.inline_edit   = _make_field("inline_edit")
+FormBuilder.number        = _make_field("number")
+FormBuilder.select        = _make_field("select")
+FormBuilder.multiselect   = _make_field("multiselect")
+FormBuilder.checkbox      = _make_field("checkbox")
+FormBuilder.toggle        = _make_field("toggle")
+FormBuilder.radio         = _make_field("radio")
+FormBuilder.kv_list       = _make_field("kv_list")
+FormBuilder.editor        = _make_field("editor")
+-- Value-bearing branch picker — the plugin supplies the branch list via
+-- the `branches` cfg key (e.g. arbor.repo.branches() then map .name).
+FormBuilder.branch_select = _make_field("branch_select")
 -- `tree` is value-bearing (selected value(s) → values[name]). Pass a cfg table
 -- with `nodes`; opt into the dynamic data-tree with `lazy = true` + `on_expand`
 -- (+ optional `on_select` / `virtualize_threshold` / `row_height`).
@@ -395,6 +399,14 @@ FormBuilder.filter_button      = _make_display("filter_button")
 FormBuilder.panel_shell        = _make_display("panel_shell")
 FormBuilder.bottom_panel_header = _make_display("bottom_panel_header")
 FormBuilder.tooltip            = _make_display("tooltip")
+FormBuilder.color_swatch       = _make_display("color_swatch")
+FormBuilder.kbd                = _make_display("kbd")
+FormBuilder.type_pill          = _make_display("type_pill")
+FormBuilder.encoding_pill      = _make_display("encoding_pill")
+FormBuilder.avatar             = _make_display("avatar")
+FormBuilder.brand_icon         = _make_display("brand_icon")
+FormBuilder.brand_tile         = _make_display("brand_tile")
+FormBuilder.provider_user_badge = _make_display("provider_user_badge")
 
 ---Escape hatch — push an arbitrary node table (any `type`, any extra fields).
 function FormBuilder:field(node)

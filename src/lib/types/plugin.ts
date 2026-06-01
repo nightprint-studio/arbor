@@ -457,6 +457,29 @@ export interface FormFieldText extends FormFieldBase {
   /** Regex pattern for inline validation (Lua pattern on the backend, JS regex on frontend). */
   pattern?:     string;
   pattern_hint?: string;
+  /** Padding / font-size tier — matches the shared `<Input size>` widget.
+   *  Default `'md'`. Use `'sm'` for dense filter rows. */
+  size?:        'sm' | 'md' | 'lg';
+  /** Leading Lucide icon name (rendered inside the input chrome). */
+  icon?:        string;
+  /** Trailing Lucide icon name. Mutually visible with `clearable` — the
+   *  clear-× takes precedence when the value is non-empty. */
+  icon_end?:    string;
+  /** Leading text affix (e.g. `"$"`, `"https://"`, `"@"`). Muted, non-editable. */
+  prefix?:      string;
+  /** Trailing text affix (e.g. `"kg"`, `"%"`, `".com"`). Muted, non-editable. */
+  suffix?:      string;
+  /** Show a × button while the field has a value. Default `false`. */
+  clearable?:   boolean;
+  /** Fire a slot live on each keystroke (debounced), without waiting for
+   *  Submit. Same shape as `FormFieldSelect.actions.change`: a bare string
+   *  keeps the legacy whole-form payload; a `DispatchTarget` object goes
+   *  scoped (`{ node_id, slot: 'change', value, state? }`) and can target a
+   *  command. `scope_state` (on the field base) declares the state slice. */
+  actions?:     { change?: string | DispatchTarget };
+  /** Debounce window in ms for `actions.change` (trailing-edge). Default
+   *  `250`. Use `0` to fire on every input. */
+  debounce_ms?: number;
 }
 
 export interface FormFieldTextarea extends FormFieldBase {
@@ -464,6 +487,11 @@ export interface FormFieldTextarea extends FormFieldBase {
   placeholder?: string;
   default?:     string;
   rows?:        number;
+  /** Fire a slot live on every input (debounced). Same shape as
+   *  `FormFieldText.actions.change`. */
+  actions?:     { change?: string | DispatchTarget };
+  /** Debounce window in ms for `actions.change` (trailing-edge). Default `250`. */
+  debounce_ms?: number;
 }
 
 /**
@@ -488,11 +516,27 @@ export interface FormFieldInlineEdit extends FormFieldBase {
 }
 
 export interface FormFieldNumber extends FormFieldBase {
-  type:     'number';
-  default?: number;
-  min?:     number;
-  max?:     number;
-  step?:    number;
+  type:        'number';
+  default?:    number;
+  min?:        number;
+  max?:        number;
+  step?:       number;
+  placeholder?: string;
+  /** Padding tier — matches the shared `<NumberStepper size>` widget. Default `'md'`. */
+  size?:       'sm' | 'md' | 'lg';
+  /** Leading Lucide icon name (rendered inside the stepper chrome). */
+  icon?:       string;
+  /** Trailing Lucide icon name (between the digits and the stepper column). */
+  icon_end?:   string;
+  /** Leading text affix (e.g. `"$"`). */
+  prefix?:     string;
+  /** Trailing text affix (e.g. `"kg"`, `"%"`, `"ms"`). */
+  suffix?:     string;
+  /** Fire a slot live on every keystroke / stepper click (debounced).
+   *  Same shape as `FormFieldText.actions.change`. */
+  actions?:     { change?: string | DispatchTarget };
+  /** Debounce window in ms for `actions.change` (trailing-edge). Default `250`. */
+  debounce_ms?: number;
 }
 
 export interface FormFieldRange extends FormFieldBase {
@@ -503,6 +547,11 @@ export interface FormFieldRange extends FormFieldBase {
   step?:         number;
   show_value?:   boolean;
   value_format?: string;
+  /** Fire a slot live as the user drags the slider (debounced). Same shape
+   *  as `FormFieldText.actions.change`. */
+  actions?:      { change?: string | DispatchTarget };
+  /** Debounce window in ms for `actions.change` (trailing-edge). Default `250`. */
+  debounce_ms?:  number;
 }
 
 export interface FormFieldCheckbox extends FormFieldBase {
@@ -583,6 +632,10 @@ export interface FormFieldSelect extends FormFieldBase {
   placeholder?:   string;
   /** Empty-state message (no items match / list empty). */
   empty_message?: string;
+  /** Show a × button inside the trigger when a value is selected. Clicking
+   *  it resets the field to the empty string and fires `actions.change`
+   *  (when present) so live consumers see the cleared state. Default false. */
+  clearable?:     boolean;
   /** Live action slots. `change` fires on every selection (not just Submit).
    *  A string keeps the legacy whole-form payload; a `DispatchTarget` object
    *  goes scoped (`{ node_id, slot:'change', value, state? }`) and can target
@@ -602,6 +655,10 @@ export interface FormFieldMultiselect extends FormFieldBase {
   min?:           number;
   /** Max selected count (validation). */
   max?:           number;
+  /** Show a × button inside the trigger when at least one option is
+   *  selected. Clicking it resets the field to an empty array. Default
+   *  false. */
+  clearable?:     boolean;
 }
 
 export interface FormFieldRadio extends FormFieldBase {
@@ -659,6 +716,32 @@ export interface FormFieldAutocomplete extends FormFieldBase {
   debounce_ms?:   number;
 }
 
+/**
+ * Git branch picker — same chrome as the host's `<BranchSelect>` widget
+ * (monospace dropdown trigger, search input above the menu past the
+ * `search_threshold`, sticky entry for a value not in the list). Submitted
+ * as the picked branch name (`string`).
+ *
+ * The plugin owns the branch list — pass it explicitly via `branches`.
+ * Typical use: call `arbor.repo.branches()` (requires `git = "read"`) on
+ * form open, map `b.name`, and supply the array. The host does not
+ * auto-load or watch the active repo's branches; if the underlying list
+ * changes, push it back with `arbor.ui.form.patch` (`merge = { branches }`).
+ */
+export interface FormFieldBranchSelect extends FormFieldBase {
+  type:              'branch_select';
+  /** Available branches to pick from. */
+  branches:          string[];
+  default?:          string;
+  /** Trigger placeholder when no branch is selected. Default `'— pick a branch —'`. */
+  placeholder?:      string;
+  /** Render the trigger as a loading shell (label "Loading…", disabled). */
+  loading?:          boolean;
+  /** Show a search input above the menu once `branches.length` exceeds this.
+   *  Default `12`. */
+  search_threshold?: number;
+}
+
 /** Tag / chip input — submitted as string[]. */
 export interface FormFieldTags extends FormFieldBase {
   type:        'tags';
@@ -670,6 +753,33 @@ export interface FormFieldTags extends FormFieldBase {
   suggestions?: string[];
   /** Maximum number of tags. */
   max?:        number;
+}
+
+/** One item in a tree row's right-click context menu. Render order matches
+ *  the array order; mix interactive items with `separator`/`header` rows.
+ *  Each item carries its own dispatch — falls back to the tree-level
+ *  `on_context_menu` slot when neither `action` nor `dispatch` is set. */
+export interface FormTreeMenuItem {
+  /** Stable id surfaced in the dispatched payload as `item_id`. When omitted
+   *  the widget synthesises a positional id (`__item_<index>`); set it
+   *  explicitly when the same handler dispatches multiple item kinds. */
+  id?:        string;
+  /** Label text. Omit (+ `separator = true`) to render a divider. */
+  label?:     string;
+  /** Icon name (curated Lucide subset — see PLUGIN_ICONS). */
+  icon?:      string;
+  /** Legacy slot — sugar for `dispatch = { kind: 'action', name: action }`. */
+  action?:    string;
+  /** Explicit dispatch target — takes precedence over `action`. */
+  dispatch?:  DispatchTarget;
+  /** Style the row as destructive (red). */
+  danger?:    boolean;
+  /** Render the row disabled (no hover, no click). */
+  disabled?:  boolean;
+  /** Render a separator line. Alternative: omit `label` + `action`. */
+  separator?: boolean;
+  /** Render a non-clickable section header (bold, small caps). */
+  header?:    boolean;
 }
 
 /** A single node in the tree selector. */
@@ -698,6 +808,16 @@ export interface FormTreeNode {
   /** Show a spinner on this row (e.g. while children are being fetched). The
    *  plugin clears it — usually with the same patch that appends the children. */
   loading?:     boolean;
+  /** Per-row drag-drop override. When the tree's `reorderable = true`, every
+   *  non-group row is draggable by default; set `false` here to pin a row. */
+  draggable?:   boolean;
+  /** Per-row drop-target override. When the tree's `reorderable = true`,
+   *  every row accepts drops by default; set `false` to refuse drops on this
+   *  row (e.g. for read-only sections inside an otherwise mutable tree). */
+  drop_target?: boolean;
+  /** Per-row context menu — wins over the tree-level `menu_items` when set.
+   *  Empty array suppresses the menu for this row even if the tree has one. */
+  menu_items?:  FormTreeMenuItem[];
 }
 
 /**
@@ -754,6 +874,35 @@ export interface FormFieldTree extends FormFieldBase {
   /** Optional fixed viewport height (px or CSS length); falls back to
    *  `max_height`. Useful for virtualized trees. */
   height?:      number | string;
+  /** Render an inline filter input at the top of the tree. Matches `label`
+   *  and `description` case-insensitively, dims non-matching ancestors,
+   *  auto-expands subtrees that contain matches, and highlights the matched
+   *  substring. Local UI state — no plugin round-trip. */
+  searchable?:  boolean;
+  /** Placeholder for the filter input. Default `"Filter…"`. */
+  search_placeholder?: string;
+  /** Enable HTML5 drag-drop reorder among rows. Group rows (expansion
+   *  headers) are non-draggable by default; per-row overrides via
+   *  `tnode.draggable` / `tnode.drop_target`. Drop landing zone resolves
+   *  from the cursor's vertical position over the target row:
+   *    · top third  → `before` (sibling above)
+   *    · middle third → `inside` (child) — only on group/expandable rows
+   *    · bottom third → `after`  (sibling below)
+   *  Leaves only emit `before` / `after`. */
+  reorderable?: boolean;
+  /** Scoped slot fired when a reorder completes. Payload:
+   *    `{ source: { id?, value, path }, target: { id?, value, path },
+   *       position: "before" | "inside" | "after" }`
+   *  The plugin mutates its model and patches the tree's `nodes`. */
+  on_reorder?:  string | DispatchTarget;
+  /** Default right-click context menu items. Per-row `tnode.menu_items`
+   *  wins when set. Each item carries its own `action` / `dispatch` — the
+   *  tree-level `on_context_menu` slot is the fallback handler for items
+   *  without one (use it to fan out by `item_id` in a single handler). */
+  menu_items?:      FormTreeMenuItem[];
+  /** Fallback scoped slot fired when a context-menu item without its own
+   *  `action`/`dispatch` is picked. Payload: `{ item_id, value, path }`. */
+  on_context_menu?: string | DispatchTarget;
 }
 
 /** Column definition for the table field. */
@@ -930,6 +1079,7 @@ export type FormFieldNode =
   | FormFieldFile
   | FormFieldAutocomplete
   | FormFieldTags
+  | FormFieldBranchSelect
   | FormFieldTree
   | FormFieldTable;
 
@@ -1046,8 +1196,19 @@ export interface FormNodeButton extends FormNodeBase {
   extra?:       Record<string, unknown>;
   /** Optional Lucide icon shown before the label. */
   icon?:        string;
+  /** Optional Lucide icon shown after the label (e.g. chevron, external-link).
+   *  Suppressed when `icon_only = true`. */
+  icon_end?:    string;
   /** Hide the label and render only the icon. */
   icon_only?:   boolean;
+  /** Visual size — mirrors `shared/ui/Button` sizes. Default `'sm'`. */
+  size?:        'xs' | 'sm' | 'md' | 'lg';
+  /** Stretch to full container width (centered label). */
+  block?:       boolean;
+  /** Optional CSS colour override (hex, `var(--…)`, `color-mix(...)`). Applied
+   *  to background for `variant = 'primary'`, to text/border for `'ghost'` /
+   *  `'danger'`. Foreground auto-picks black/white via `oklch` for brand fills. */
+  color?:       string;
   /** Tooltip on hover (useful for icon-only buttons). */
   tooltip?:     string;
 }
@@ -1574,6 +1735,11 @@ export interface FormNodeInfoCard extends FormNodeBase {
   badges?:     InfoCardBadge[];
   meta?:       InfoCardMeta[];
   actions?:    InfoCardAction[];
+  /** Card chrome tone. Defaults to `'elevated'`. Use `'flat'` when nesting
+   *  inside another elevated surface. */
+  variant?:    'elevated' | 'flat' | 'subtle';
+  /** Show the 1px border. Defaults to `true`. */
+  bordered?:   boolean;
 }
 
 // ─── Filter / category chips ────────────────────────────────────────────────
@@ -1937,6 +2103,228 @@ export interface FormNodeFilterButton extends FormNodeBase {
   extra?:   Record<string, unknown>;
 }
 
+// ─── color_swatch ─────────────────────────────────────────────────────────────
+/**
+ * Display-only colour swatch — chip-only or labelled card row. Mirrors the
+ * host's `<ColorSwatch>` widget used in the Marketplace palette and
+ * theme-preview surfaces. Distinct from the value-bearing `color` field
+ * (HTML5 colour input) — `color_swatch` is presentational only: the plugin
+ * supplies the `color` value (any CSS expression — hex, `rgb()`, `var(--…)`,
+ * `color-mix(...)`) and the chip renders accordingly. To edit a swatch, pair
+ * it with a sibling `color` field and patch the swatch's `color` from the
+ * field's `change` action.
+ *
+ * When `label` is set the widget renders as a labelled card row
+ * `[chip] Label   #caption`; when `label` is absent only the chip is
+ * rendered (use this inside a custom grid where the label lives elsewhere).
+ * Set `glyph` (a single character like `"#"`, `"n"`, `"T"`) to render a
+ * centred marker instead of a colour fill — useful when the swatch doubles
+ * as a typed-token indicator.
+ */
+export interface FormNodeColorSwatch extends FormNodeBase {
+  type:        'color_swatch';
+  /** Any CSS colour value — hex, `rgb()`, `var(--token)`, `color-mix(...)`, … */
+  color:       string;
+  /** Display name. When set, renders as a labelled card row; when absent,
+   *  only the chip is rendered. */
+  label?:      string;
+  /** Right-hand caption in labelled mode. Defaults to the raw `color`. */
+  caption?:    string;
+  /** Hide the caption in labelled mode. */
+  no_caption?: boolean;
+  /** Chip width/height in px. Defaults to 18 (labelled) / 22 (chip-only). */
+  chip_size?:  number;
+  /** Tooltip override; defaults to the colour value. */
+  tooltip?:    string;
+  /** Single-character marker shown instead of the colour fill. Used for
+   *  non-colour tokens (e.g. `"#"` for lengths, `"n"` for numbers,
+   *  `"T"` for typography). */
+  glyph?:      string;
+}
+
+// ─── kbd ──────────────────────────────────────────────────────────────────────
+/**
+ * Display-only keybinding badge — same chrome as the host's `<Kbd>` widget
+ * used throughout Shortcuts / Command Palette / footer hints. Renders a
+ * boxed monospace badge per chord part (`box`, default) or plain inline
+ * monospace text (`inline`, IntelliJ-menu style).
+ *
+ * Resolution priority: `action` (looked up live in the user's
+ * keybindings — remaps in Settings flow through) → `binding` (explicit
+ * `{ key, modifiers }` object) → `keys` (array of chord parts like
+ * `["Ctrl", "K"]`) → `label` (single string, split on `+`).
+ *
+ * When `action` resolves to nothing (action not registered, or its binding
+ * is cleared) the widget renders nothing — safe to drop next to a label
+ * without guarding it.
+ */
+export interface FormNodeKbd extends FormNodeBase {
+  type:     'kbd';
+  /** Built-in or plugin-registered action id; resolved live against the
+   *  user's keybindings. */
+  action?:  string;
+  /** Explicit keybinding object: `{ key, ctrl?, shift?, alt? }`. Wins over
+   *  `keys` / `label` when set. */
+  binding?: { key: string; ctrl?: boolean; shift?: boolean; alt?: boolean };
+  /** Single label like `"Ctrl+K"`; split on `+` if `keys` isn't supplied. */
+  label?:   string;
+  /** Explicit chord parts. Wins over `label`. */
+  keys?:    string[];
+  /** Badge size. Default `"md"`. */
+  size?:    'sm' | 'md';
+  /** Visual tone. Default `"default"`. `"accent"` tints with `--accent`;
+   *  `"muted"` drops the chrome to a dim hint. */
+  tone?:    'default' | 'accent' | 'muted';
+  /** `"box"` (default) → boxed `<kbd>` badges; `"inline"` → plain monospace
+   *  text without border / bg (IntelliJ-menu style). */
+  variant?: 'box' | 'inline';
+}
+
+// ─── type_pill ────────────────────────────────────────────────────────────────
+/**
+ * Display-only uppercase type pill — same chrome as the host's `<TypePill>`
+ * widget used in component cards (Bevy-style reflection panels) and field
+ * rows. Tags a value with a one-word type hint (`Vec3`, `Quat`, `u32`,
+ * `enum`, `Handle`, …) without taking real estate.
+ *
+ * Two ways to drive the colour:
+ *   · `kind` picks from a curated palette keyed by the type bucket
+ *     (numeric / vector / bool / enum / handle / entity / option /
+ *      string / array / struct / unknown). Case-insensitive.
+ *   · `tone` is the explicit semantic override (`accent`, `info`,
+ *      `success`, `warning`, `error`, `muted`) — wins over `kind`.
+ */
+export interface FormNodeTypePill extends FormNodeBase {
+  type:     'type_pill';
+  /** Visible text. When omitted, the resolved `kind` is shown as-is. */
+  label?:   string;
+  /** Curated kind — picks a palette. Case-insensitive; unknown values
+   *  fall through to a neutral / dim look. */
+  kind?:    string;
+  /** Explicit tone override. Wins over `kind`. */
+  tone?:    'accent' | 'info' | 'success' | 'warning' | 'error' | 'muted';
+  /** Tooltip on hover. */
+  tooltip?: string;
+}
+
+// ─── encoding_pill ────────────────────────────────────────────────────────────
+/**
+ * Display-only charset indicator — same chrome as the host's
+ * `<EncodingPill>` used in the diff toolbar / file-list rows. Renders the
+ * encoding label inside a small monospace pill; warning-tinted when
+ * `overridden` is true to surface that the user pinned a non-auto value.
+ *
+ * Presentational only — the plugin owns the encoding string and the
+ * override flag. Pair with a sibling `select` field to let the user pick a
+ * charset, then patch the pill to reflect the choice.
+ */
+export interface FormNodeEncodingPill extends FormNodeBase {
+  type:        'encoding_pill';
+  /** Encoding label currently in effect (e.g. `"UTF-8"`, `"windows-1252"`). */
+  encoding:    string;
+  /** True when the user has pinned a non-auto encoding — drives the
+   *  warning tint. */
+  overridden?: boolean;
+  /** Compact 14px variant for cramped headers. Default false. */
+  compact?:    boolean;
+}
+
+// ─── avatar ───────────────────────────────────────────────────────────────────
+/**
+ * Display-only round avatar — same chrome as the host's `<Avatar>` widget
+ * used for committer rows / reviewer chips. Derives initials from `name`
+ * (first letter of the first two words) and a stable hue from the bytes of
+ * `email` (preferred) or `name`. Tooltip is `name` + optional `email`
+ * description. Distinct from `monogram`, which is square / outline-styled
+ * and meant for workspaces and plugins (entities), not people.
+ */
+export interface FormNodeAvatar extends FormNodeBase {
+  type:    'avatar';
+  /** Display name — also the source of the initials when no other text is
+   *  supplied. */
+  name?:   string;
+  /** Email address — preferred hue source; appears in the tooltip
+   *  description. */
+  email?:  string;
+  /** Avatar diameter in px. Default 24. */
+  size?:   number;
+}
+
+// ─── brand_icon / brand_tile ─────────────────────────────────────────────────
+/** Provider brand identifier shared by `brand_icon` and `brand_tile`. */
+export type ProviderBrandName = 'github' | 'gitlab' | 'bitbucket' | 'linear' | 'jira';
+
+/**
+ * Display-only monochrome brand glyph — same chrome as the host's
+ * `<BrandIcon>`. Renders the canonical `simple-icons` mark in
+ * `currentColor`, so it inherits the surrounding text colour (sidebar /
+ * toolbar / activity bar). Use this when a coloured brand square would
+ * clash with the rest of the icon set; for owned-swatch surfaces (auth
+ * tiles, settings cards, welcome screens) use `brand_tile` instead.
+ */
+export interface FormNodeBrandIcon extends FormNodeBase {
+  type:    'brand_icon';
+  /** Provider brand to render. */
+  brand:   ProviderBrandName;
+  /** Pixel size of the glyph. Default 20. */
+  size?:   number;
+  /** Override the title attribute / tooltip (defaults to the capitalised
+   *  brand name). */
+  title?:  string;
+}
+
+/**
+ * Display-only branded square tile — same chrome as the host's
+ * `<BrandTile>`. Composes the canonical `simple-icons` mark on the brand's
+ * hard-coded background colour (`#24292e` GitHub, `#fc6d26` GitLab,
+ * `#0052cc` Bitbucket / Jira, `#5e6ad2` Linear) with a fixed bright
+ * foreground — brand contrast does NOT borrow theme tokens. Use this for
+ * auth tiles, settings provider cards, welcome screens. For monochrome
+ * brand marks that inherit the surrounding text colour (activity bar,
+ * inline glyphs) use `brand_icon` instead.
+ */
+export interface FormNodeBrandTile extends FormNodeBase {
+  type:      'brand_tile';
+  /** Provider brand to render. */
+  brand:     ProviderBrandName;
+  /** Pixel size of the inner glyph. Default 20. */
+  size?:     number;
+  /** Pixel size of the outer square. Defaults to `max(size + 16, 36)`. */
+  tile_size?: number;
+  /** Greyed-out look — used to indicate disabled / unavailable items. */
+  disabled?: boolean;
+  /** Override the title attribute / tooltip (defaults to the capitalised
+   *  brand name). */
+  title?:    string;
+}
+
+// ─── provider_user_badge ──────────────────────────────────────────────────────
+/**
+ * Display-only two-line user identity row — same chrome as the host's
+ * `<ProviderUserBadge>` used in the provider settings cards (GitHub /
+ * GitLab / Linear / Jira account rows). Avatar (or circled monogram of the
+ * first initial when no URL) + primary name line + optional secondary line
+ * (email / @handle / domain). When `copyable` is true (the default) both
+ * lines are click-to-copy with a hover affordance and a transient ✓
+ * confirmation.
+ *
+ * Presentational only — the plugin owns the data. Pair with `arbor.http.*`
+ * to fetch the user, then push the value into the form. To make the badge
+ * non-interactive set `copyable = false`.
+ */
+export interface FormNodeProviderUserBadge extends FormNodeBase {
+  type:        'provider_user_badge';
+  /** Primary line — typically display name or login. */
+  name:        string;
+  /** Avatar URL — falls back to a circled monogram of the first initial. */
+  avatar_url?: string;
+  /** Secondary line — email, domain, @handle, … */
+  secondary?:  string;
+  /** When true (default), clicking the name / secondary copies it to the
+   *  clipboard. */
+  copyable?:   boolean;
+}
+
 // ─── tooltip ──────────────────────────────────────────────────────────────────
 /**
  * Wraps one or more child nodes with a hover/focus tooltip — same singleton
@@ -2026,6 +2414,14 @@ export type FormLayoutNode =
   | FormNodePanelShell
   | FormNodeBottomPanelHeader
   | FormNodeTooltip
+  | FormNodeColorSwatch
+  | FormNodeKbd
+  | FormNodeTypePill
+  | FormNodeEncodingPill
+  | FormNodeAvatar
+  | FormNodeBrandIcon
+  | FormNodeBrandTile
+  | FormNodeProviderUserBadge
   | FormNodeDiff;
 
 export type FormNode = FormFieldNode | FormLayoutNode;

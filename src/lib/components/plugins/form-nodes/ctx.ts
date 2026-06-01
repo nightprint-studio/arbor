@@ -101,6 +101,12 @@ export interface FormNodeCtx {
    *  one wired into select items, but exposed so checkbox/toggle (and any
    *  future opt-in field) can dispatch live without going through Submit. */
   fireFieldChange:   (node: any, value: unknown) => void;
+  /** Trailing-edge debounced variant of `fireFieldChange` — keyed per
+   *  node.id (falls back to node.name) so concurrent edits on different
+   *  fields don't share a timer. Use for text/textarea/number/range where
+   *  every keystroke would otherwise dispatch. `ms <= 0` fires immediately
+   *  (and still cancels any pending dispatch for the same key). */
+  fireFieldChangeDebounced: (node: any, value: unknown, ms: number) => void;
   multiselectSummary:(raw: FormSelectOption[] | undefined, selected: string[], placeholder: string) => string;
   selectLabelOf:     (raw: FormSelectOption[] | undefined, value: string) => string | undefined;
   selectItemCount:   (raw: FormSelectOption[] | undefined) => number;

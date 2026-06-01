@@ -772,6 +772,33 @@
   // previously named after its sole caller.
   const selectChange = fireFieldChange;
 
+  // Trailing-edge debounce of `fireFieldChange`. Keyed per node.id (or .name
+  // when no id) so concurrent edits on different fields don't share a timer.
+  // Used by text/textarea/number/range where each keystroke would otherwise
+  // dispatch — caller passes `n.debounce_ms ?? 250`.
+  const fieldChangeDebounce: Record<string, ReturnType<typeof setTimeout>> = {};
+  function fieldChangeKey(node: any): string {
+    return String(node?.id ?? node?.name ?? '');
+  }
+  function fireFieldChangeDebounced(node: any, value: unknown, ms: number) {
+    if (!node?.actions?.change) return;
+    const key = fieldChangeKey(node);
+    const prev = key && fieldChangeDebounce[key];
+    if (prev) clearTimeout(prev);
+    if (!key || ms <= 0) {
+      if (key) delete fieldChangeDebounce[key];
+      fireFieldChange(node, value);
+      return;
+    }
+    fieldChangeDebounce[key] = setTimeout(() => {
+      delete fieldChangeDebounce[key];
+      fireFieldChange(node, value);
+    }, ms);
+  }
+  onDestroy(() => {
+    for (const t of Object.values(fieldChangeDebounce)) clearTimeout(t);
+  });
+
   function notifyChange(name: string, value: unknown) {
     onValueChange?.(name, value);
   }
@@ -843,6 +870,7 @@
     wrapSelectChange: (items, node) =>
       wrapSelectChange(items, node?.actions?.change ? (v) => selectChange(node, v) : undefined),
     fireFieldChange,
+    fireFieldChangeDebounced,
     multiselectSummary,
     selectLabelOf,
     selectItemCount,
@@ -870,7 +898,9 @@
     'step_indicator', 'status_list',
     'copy_button', 'experimental_badge', 'section_header',
     'filter_button', 'panel_shell', 'bottom_panel_header',
-    'tooltip',
+    'tooltip', 'color_swatch',
+    'kbd', 'type_pill', 'encoding_pill', 'avatar',
+    'brand_icon', 'brand_tile', 'provider_user_badge',
   ]);
   const BUTTON_TYPES = new Set(['button', 'menu_button', 'suggest_grid']);
   const CHART_TYPES  = new Set([
