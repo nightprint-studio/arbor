@@ -246,6 +246,63 @@
     } catch { /* private mode / quota — ignore */ }
   }
 
+  // tree_layout nav width (resizable): persisted in localStorage as a number.
+  // Keyed by node id; anonymous nodes get a session-only random key so the
+  // drag still works but width doesn't persist across sessions.
+  const LS_NAV_W_PREFIX = 'arbor:tree-layout-nav-w:';
+  let treeLayoutNavWidth = $state<Record<string, number>>({});
+
+  function parsePxLength(v: unknown, fallback: number): number {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const m = v.match(/^\s*(-?\d+(?:\.\d+)?)\s*px\s*$/i);
+      if (m) return Number(m[1]);
+      const raw = Number(v);
+      if (Number.isFinite(raw)) return raw;
+    }
+    return fallback;
+  }
+
+  (function initTreeLayoutNavWidth(ns: FormNode[]) {
+    const walk = (list: FormNode[]) => {
+      if (!Array.isArray(list)) return;
+      for (const n of list) {
+        if (n.type === 'tree_layout' && (n as any).nav_resizable) {
+          const id      = n.id ?? '';
+          const initial = parsePxLength((n as any).nav_width, 240);
+          const minW    = parsePxLength((n as any).nav_min_width, 160);
+          const maxW    = parsePxLength((n as any).nav_max_width, 480);
+          const clamp   = (w: number) => Math.max(minW, Math.min(maxW, w));
+          if (id) {
+            const stored = typeof window !== 'undefined'
+              ? window.localStorage.getItem(LS_NAV_W_PREFIX + id) : null;
+            const parsed = stored != null ? Number(stored) : NaN;
+            treeLayoutNavWidth[id] = clamp(Number.isFinite(parsed) ? parsed : initial);
+          } else {
+            treeLayoutNavWidth['_anon_' + Math.random().toString(36).slice(2, 8)] =
+              clamp(initial);
+          }
+        }
+        if ('children' in n && Array.isArray((n as any).children)) walk((n as any).children);
+        if (n.type === 'tabs')   for (const t of (n as any).tabs ?? []) walk(t.children ?? []);
+        if (n.type === 'wizard') for (const s of (n as any).steps ?? []) walk(s.children ?? []);
+        if (n.type === 'tree_layout') {
+          walk((n as any).nav_children ?? []);
+          walk((n as any).content_children ?? []);
+        }
+      }
+    };
+    walk(ns);
+  })(untrack(() => nodes));
+
+  function setTreeLayoutNavWidth(id: string, w: number) {
+    if (!id) return;
+    treeLayoutNavWidth[id] = w;
+    try {
+      window.localStorage.setItem(LS_NAV_W_PREFIX + id, String(Math.round(w)));
+    } catch { /* private mode / quota — ignore */ }
+  }
+
   // Unnamed filter_bars store their state per-node here; named ones write
   // into `values[name]` like any other field.
   let filterBarState = $state<Record<string, { search: string; filters: Record<string, string[]> }>>({});
@@ -858,6 +915,7 @@
     get wizardStepMap()       { return wizardStepMap; },
     get treeExpanded()        { return treeExpanded; },
     get treeLayoutCollapsed() { return treeLayoutCollapsed; },
+    get treeLayoutNavWidth()  { return treeLayoutNavWidth; },
     get filterBarState()      { return filterBarState; },
     get autoOpen()            { return autoOpen; },
     get autoDynOptions()      { return autoDynOptions; },
@@ -886,6 +944,7 @@
     openFilePicker,
 
     toggleTreeLayoutCollapsed,
+    setTreeLayoutNavWidth,
     wizardStepIndex,
 
     filterAutocomplete,

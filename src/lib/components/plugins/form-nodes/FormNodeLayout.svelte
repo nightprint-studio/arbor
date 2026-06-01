@@ -73,6 +73,54 @@
     renderNode: Snippet<[FormNode]>;
   }
   let { node, ctx, renderNode }: Props = $props();
+
+  // ── tree_layout: resizable nav width helpers ─────────────────────────────
+  function parseTlPx(v: unknown, fallback: number): number {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const m = v.match(/^\s*(-?\d+(?:\.\d+)?)\s*px\s*$/i);
+      if (m) return Number(m[1]);
+      const raw = Number(v);
+      if (Number.isFinite(raw)) return raw;
+    }
+    return fallback;
+  }
+  let navResizeDragging = $state(false);
+  function startNavResize(e: MouseEvent, id: string, minPx: number, maxPx: number) {
+    if (!id) return;
+    e.preventDefault();
+    navResizeDragging = true;
+    const aside = (e.currentTarget as HTMLElement).closest('.pf-tl-nav') as HTMLElement | null;
+    const startX = e.clientX;
+    const startW = ctx.treeLayoutNavWidth[id] ?? aside?.getBoundingClientRect().width ?? 240;
+    let pending  = startW;
+
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.max(minPx, Math.min(maxPx, startW + (ev.clientX - startX)));
+      pending = next;
+      // Mutate the CSS var directly for zero-cost drag feedback.
+      if (aside) aside.style.setProperty('--pf-tl-nav-w', `${next}px`);
+    };
+    const onUp = () => {
+      navResizeDragging = false;
+      ctx.setTreeLayoutNavWidth(id, pending);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup',   onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup',   onUp);
+  }
+  function onNavResizeKey(e: KeyboardEvent, id: string, minPx: number, maxPx: number) {
+    if (!id) return;
+    const fwd  = e.key === 'ArrowRight';
+    const back = e.key === 'ArrowLeft';
+    if (!fwd && !back) return;
+    e.preventDefault();
+    const step  = e.shiftKey ? 32 : 8;
+    const cur   = ctx.treeLayoutNavWidth[id] ?? 240;
+    const next  = Math.max(minPx, Math.min(maxPx, cur + (fwd ? step : -step)));
+    ctx.setTreeLayoutNavWidth(id, next);
+  }
 </script>
 
 {#if node.type === 'container'}
@@ -814,13 +862,23 @@
   {@const tlId = node.id ?? ''}
   {@const collapsible = !!tl.nav_collapsible}
   {@const isCollapsed = collapsible && !!ctx.treeLayoutCollapsed[tlId]}
+  {@const resizable = !!tl.nav_resizable && !isCollapsed}
+  {@const navMinPx = parseTlPx(tl.nav_min_width, 160)}
+  {@const navMaxPx = parseTlPx(tl.nav_max_width, 480)}
+  {@const navWPx = tlId && ctx.treeLayoutNavWidth[tlId] != null
+                     ? ctx.treeLayoutNavWidth[tlId]
+                     : null}
+  {@const navWidthCss = resizable
+                          ? `${navWPx ?? parseTlPx(tl.nav_width, 240)}px`
+                          : (tl.nav_width ?? '240px')}
   <div class="pf-tree-layout {(node as any).class ?? ''}"
        class:pf-tl-collapsed={isCollapsed}
        style={(node as any).style}>
     <aside
       class="pf-tl-nav"
       class:pf-tl-nav-collapsed={isCollapsed}
-      style="--pf-tl-nav-w:{tl.nav_width ?? '240px'};--pf-tl-anim:{animStore.dPanel}ms;"
+      class:pf-tl-nav-resizable={resizable}
+      style="--pf-tl-nav-w:{navWidthCss};--pf-tl-anim:{animStore.dPanel}ms;"
     >
       {#if collapsible}
         <button type="button" class="pf-tl-toggle pf-tl-toggle-float"
@@ -845,6 +903,21 @@
             {@render renderNode(child)}
           {/each}
         </div>
+      {/if}
+      {#if resizable}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="pf-tl-nav-resize-handle"
+          role="slider"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuenow={navWPx ?? parseTlPx(tl.nav_width, 240)}
+          aria-valuemin={navMinPx}
+          aria-valuemax={navMaxPx}
+          tabindex="0"
+          onmousedown={(e) => startNavResize(e, tlId, navMinPx, navMaxPx)}
+          onkeydown={(e) => onNavResizeKey(e, tlId, navMinPx, navMaxPx)}
+        ></div>
       {/if}
     </aside>
     <div class="pf-tl-content">

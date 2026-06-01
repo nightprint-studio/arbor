@@ -1532,8 +1532,13 @@ export interface FormNodeTreeLayout extends FormNodeBase {
   nav_children:     FormNode[];
   /** Right-panel nodes (form content, typically gated with show_if). */
   content_children: FormNode[];
-  /** Left-panel width. Default: "240px". */
-  nav_width?:       string;
+  /**
+   * Left-panel width.
+   *  - Without `nav_resizable`: any CSS length ("240px", "20rem", "30%"…).
+   *  - With `nav_resizable`: parsed as pixels (string `"NNNpx"` or number);
+   *    used as the initial width when no stored preference exists. Default 240.
+   */
+  nav_width?:       string | number;
   /**
    * When true, renders a toggle in the top-right of the nav (and a thin rail
    * on the content side when collapsed) so the user can hide the sidebar and
@@ -1547,6 +1552,25 @@ export interface FormNodeTreeLayout extends FormNodeBase {
    * localStorage already has a preference for this `id`. Default: false.
    */
   nav_collapsed_default?: boolean;
+  /**
+   * When true, renders a drag handle on the right edge of the nav so the
+   * user can resize the sidebar (clamped to `nav_min_width` / `nav_max_width`).
+   * Arrow keys nudge by 8px (Shift = 32px). Width persists in localStorage
+   * under `arbor:tree-layout-nav-w:<id>` when an `id` is set on the node
+   * (anonymous nav stays resizable but the size is session-only).
+   * Default: false.
+   */
+  nav_resizable?:         boolean;
+  /**
+   * Minimum width when `nav_resizable` is on. Pixels (number or `"NNNpx"`).
+   * Default: 160.
+   */
+  nav_min_width?:         string | number;
+  /**
+   * Maximum width when `nav_resizable` is on. Pixels (number or `"NNNpx"`).
+   * Default: 480.
+   */
+  nav_max_width?:         string | number;
 }
 
 /** Plain label — static text, no field. Alias for a minimal paragraph. */

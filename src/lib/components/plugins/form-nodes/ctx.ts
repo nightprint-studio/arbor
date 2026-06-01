@@ -27,6 +27,7 @@ export interface FormNodeCtx {
   wizardStepMap:     Record<string, string>;
   treeExpanded:      Record<string, boolean>;
   treeLayoutCollapsed: Record<string, boolean>;
+  treeLayoutNavWidth: Record<string, number>;
   filterBarState:    Record<string, { search: string; filters: Record<string, string[]> }>;
   autoOpen:          Record<string, boolean>;
   autoDynOptions:    Record<string, { value: string; label: string; group?: string }[]>;
@@ -80,6 +81,9 @@ export interface FormNodeCtx {
   openFilePicker:    (name: string) => void;
 
   toggleTreeLayoutCollapsed: (id: string) => void;
+  /** Commit a new resizable nav width (clamped by the caller). Persists to
+   *  localStorage under `arbor:tree-layout-nav-w:<id>` when id is set. */
+  setTreeLayoutNavWidth: (id: string, w: number) => void;
 
   wizardStepIndex:   (w: any) => number;
 

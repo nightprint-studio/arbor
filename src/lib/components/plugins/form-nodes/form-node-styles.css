@@ -1716,6 +1716,47 @@
   /* .pf-tl-rail / .pf-tl-toggle-rail removed — the collapsed state is now
      the same <aside> at 34px width (see .pf-tl-nav-collapsed). */
 
+  /* ── Resizable nav: drag handle pinned on the right edge ───────────────── */
+  /* The handle is 4px wide (comfortable hit area) but transparent. A 1px
+     pseudo-element paints the visible separator at its center, accenting on
+     hover/drag — same idiom as the global ResizablePanel. While the user is
+     dragging, the parent <aside> animation must NOT compete with the cursor:
+     we cancel its width transition so movement feels 1:1. */
+  .pf-tl-nav-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -2px;
+    width: 4px;
+    cursor: ew-resize;
+    z-index: 3;
+    background: transparent;
+    outline: none;
+  }
+  .pf-tl-nav-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    transform: translateX(-0.5px);
+    background: var(--border-subtle);
+    transition: background var(--transition-base);
+    pointer-events: none;
+  }
+  .pf-tl-nav-resize-handle:hover::after,
+  .pf-tl-nav-resize-handle:focus-visible::after,
+  .pf-tl-nav-resize-handle:active::after {
+    background: var(--accent);
+  }
+  /* Disable the width transition on the aside while a drag is in progress so
+     the rail tracks the cursor without easing. We mark the aside with
+     `pf-tl-nav-resizable`; the transition stays on for the collapse toggle. */
+  .pf-tl-nav.pf-tl-nav-resizable:has(.pf-tl-nav-resize-handle:active) {
+    transition: none;
+  }
+
   .pf-tl-content {
     flex: 1;
     min-width: 0;

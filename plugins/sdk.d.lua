@@ -3386,9 +3386,12 @@ function CoreAssert.register() end
 ---@field type                  "tree_layout"
 ---@field nav_children          table[]        Left-panel nodes
 ---@field content_children      table[]        Right-panel nodes
----@field nav_width             string|nil     CSS width (default: "240px")
+---@field nav_width             string|number|nil  Width of the nav rail. Without `nav_resizable`: any CSS length ("240px", "20rem", "30%"…). With `nav_resizable`: parsed as pixels ("NNNpx" or a raw number) and used as the initial width when no stored preference exists. Default "240px".
 ---@field nav_collapsible       boolean|nil    Render a round toggle in the top-right corner to hide the sidebar. Preference persists under `arbor:tree-layout-collapsed:<id>` when the node has an `id`. When collapsed, a 34 px rail with a round reopen button is shown in place of the sidebar. Default false.
 ---@field nav_collapsed_default boolean|nil    Initial state on first open (overridden by stored preference). Default false.
+---@field nav_resizable         boolean|nil    Render a drag handle on the right edge of the nav so the user can resize the sidebar (clamped to `nav_min_width` / `nav_max_width`). Arrow keys nudge by 8 px (Shift = 32 px). Width persists under `arbor:tree-layout-nav-w:<id>` when the node has an `id`. Default false.
+---@field nav_min_width         string|number|nil  Minimum width when `nav_resizable` is on. Pixels ("NNNpx" or a raw number). Default 160.
+---@field nav_max_width         string|number|nil  Maximum width when `nav_resizable` is on. Pixels ("NNNpx" or a raw number). Default 480.
 
 -- ─── Reusable CSS utility classes exposed by the form renderer ──────────────
 -- Apply via the `class` field on any node (most useful on `container`) to get
