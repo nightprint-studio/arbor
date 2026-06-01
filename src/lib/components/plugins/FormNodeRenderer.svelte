@@ -438,8 +438,35 @@
         return;
       }
 
-      const name = String(p.name ?? '');
+      // set_* ops target either a field NAME (legacy positional form) or a
+      // node ID (cfg form `{ id = "…" }`). Resolve id → name by walking the
+      // node tree and matching nodes that carry a `name`. The two paths are
+      // mutually exclusive; whichever the Lua side sent wins.
+      let name = String(p.name ?? '');
+      if (!name && typeof p.id === 'string' && p.id) {
+        const targetId = p.id;
+        for (const n of nodes.flatMap(flattenAll)) {
+          if ((n as any).id === targetId && typeof (n as any).name === 'string') {
+            name = (n as any).name;
+            break;
+          }
+        }
+        if (!name) {
+          console.warn(
+            `[arbor.ui.form.${p.op}] id="${targetId}" did not resolve to any value-bearing node — payload dropped.`,
+          );
+          return;
+        }
+      }
       if (!name) return;
+      // Warn (don't abort) when the resolved name isn't a known field — usually
+      // a typo or a field that hasn't been mounted yet. The write still goes
+      // through so latent code paths keep their semantics.
+      if (!(name in values)) {
+        console.warn(
+          `[arbor.ui.form.${p.op}] name="${name}" doesn't match any current form field — writing anyway. Check for a typo, or that the target field is mounted.`,
+        );
+      }
       switch (p.op) {
         case 'set_options': {
           const prev = fieldOverrides[name] ?? {};

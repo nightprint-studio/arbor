@@ -748,6 +748,91 @@
      right under the empty-state placeholder without a stray spacer. */
   .pf-list-empty .pf-list-add { margin-top: 0; }
 
+  /* Scrollable rows region. Transparent by default (`display: contents`)
+     so the simple-case CSS keeps working unchanged; opt-in turns it into
+     a max-height-bounded scroll container so the Add button can sit
+     anchored below the scroll viewport. */
+  .pf-list-scrollable { display: contents; }
+  .pf-list-scrollable-active {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: var(--pf-list-max-h, none);
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  /* Sticky header: pins the column labels to the top of the scroll
+     viewport. The opaque bg masks rows scrolling under it; the bottom
+     border keeps the visual separation from the first row. */
+  .pf-list-header-sticky {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-base);
+  }
+
+  /* Per-cell display-only render (readonly columns or table-wide
+     `readonly`). Mirrors the input padding so toggling readonly doesn't
+     shift the row layout; `min-width: 0` lets the ellipsis truncation
+     kick in on overflow. */
+  .pf-list-readonly {
+    padding: 4px 7px;
+    font-size: 12px;
+    color: var(--text-primary);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pf-list-readonly-num { font-variant-numeric: tabular-nums; }
+  .pf-list-readonly-bool {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 0;
+    color: var(--accent);
+  }
+
+  /* Trailing-cell flex for row actions + trash. Each button is 24px
+     square, gap matches the grid gap so cells align visually. */
+  .pf-list-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+  }
+  .pf-row-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-muted);
+    line-height: 1;
+    flex-shrink: 0;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .pf-row-action:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .pf-row-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+  .pf-row-action:disabled:hover { background: transparent; color: var(--text-muted); }
+  .pf-row-action-danger:hover {
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+    color: var(--error);
+  }
+  .pf-list-row:hover .pf-row-action { color: var(--text-secondary); }
+  .pf-row-action-spacer { width: 24px; height: 24px; flex-shrink: 0; }
+
   /* ── Validation ───────────────────────────────────────────────────────────── */
 
   .pf-input-error {

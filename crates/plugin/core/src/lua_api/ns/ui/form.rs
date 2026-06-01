@@ -4,20 +4,79 @@
 //! preserved via the `__call` metamethod). The table also exposes helpers
 //! to mutate fields in the currently-open form:
 //!
-//!   arbor.ui.form.set_options(name, opts)
-//!   arbor.ui.form.set_disabled(name, bool)
-//!   arbor.ui.form.set_value(name, value)
+//!   arbor.ui.form.set_options(name, opts)            -- legacy
+//!   arbor.ui.form.set_options({ id|name, options })  -- explicit
+//!   arbor.ui.form.set_disabled(name, bool)           -- legacy
+//!   arbor.ui.form.set_disabled({ id|name, disabled })
+//!   arbor.ui.form.set_value(name, value)             -- legacy
+//!   arbor.ui.form.set_value({ id|name, value })      -- explicit
 //!   arbor.ui.form.replace(partial_cfg)
 //!   arbor.ui.form.patch(ops)               -- granular node-tree mutations
 //!   arbor.ui.form.set_state_path(segs, v)  -- mutate one liveState slice
 //!
+//! Both shapes are accepted on `set_value` / `set_options` / `set_disabled`:
+//!   - `(name, payload)` — legacy positional shortcut (field NAME, not node id).
+//!   - `{ name = "…", <payload_key> = … }` — explicit cfg form, NAME-keyed.
+//!   - `{ id = "…",   <payload_key> = … }` — explicit cfg form, NODE-ID-keyed
+//!     (the renderer resolves id → field name by walking the node tree).
+//! `<payload_key>` is `value` / `options` / `disabled` respectively. Picking
+//! `id` over `name` is the recommended pattern when the calling code already
+//! tracks the node id (the same key it uses for `patch`), removing the need
+//! to remember a separate field-name table.
+//!
 //! Each helper emits `plugin:form-update`; the modal applies the op only
 //! when the open form belongs to this plugin.
 
-use mlua::{Lua, LuaSerdeExt, Table};
+use mlua::{Lua, LuaSerdeExt, MultiValue, Table};
 
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
+
+/// Parsed `(name, payload)` / cfg-table for set_value / set_options / set_disabled.
+/// Exactly one of `name` / `id` is guaranteed to be `Some` (the other may be `None`).
+struct SetArgs {
+    name:    Option<String>,
+    id:      Option<String>,
+    payload: serde_json::Value,
+}
+
+/// Accept either `(name_str, payload_value)` or a single cfg table
+/// `{ name | id, <payload_key> = ... }`. `payload_key` is the explicit field
+/// name inside the cfg table (`value` / `options` / `disabled`).
+fn parse_set_args(
+    lua: &Lua,
+    args: MultiValue,
+    payload_key: &'static str,
+) -> mlua::Result<SetArgs> {
+    let usage = || format!(
+        "expected (name, {p}) or cfg table {{ id|name, {p} }}",
+        p = payload_key
+    );
+    let mut iter = args.into_iter();
+    let first = iter.next().ok_or_else(|| mlua::Error::RuntimeError(usage()))?;
+    let second = iter.next();
+    match first {
+        mlua::Value::String(s) => {
+            let name = s.to_str()?.to_string();
+            let value = second.unwrap_or(mlua::Value::Nil);
+            let payload: serde_json::Value = lua.from_value(value)?;
+            Ok(SetArgs { name: Some(name), id: None, payload })
+        }
+        mlua::Value::Table(t) => {
+            let name = t.get::<Option<String>>("name").ok().flatten();
+            let id   = t.get::<Option<String>>("id").ok().flatten();
+            if name.is_none() && id.is_none() {
+                return Err(mlua::Error::RuntimeError(
+                    "cfg table must carry either `id` or `name`".into()
+                ));
+            }
+            let value: mlua::Value = t.get(payload_key)?;
+            let payload: serde_json::Value = lua.from_value(value)?;
+            Ok(SetArgs { name, id, payload })
+        }
+        _ => Err(mlua::Error::RuntimeError(usage())),
+    }
+}
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     let form_table = lua.create_table().map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -60,16 +119,16 @@ fn build_open_fn(ctx: &ApiCtx, lua: &Lua) -> Result<mlua::Function> {
 fn install_set_options(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
     let handle = ctx.app_ctx.clone();
     let pname  = ctx.plugin_name.clone();
-    let fn_ = lua.create_function(move |lua_ctx, (name, value): (String, mlua::Value)| {
-        let payload_json: serde_json::Value = lua_ctx
-            .from_value(value)
-            .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+    let fn_ = lua.create_function(move |lua_ctx, args: MultiValue| {
+        let parsed = parse_set_args(lua_ctx, args, "options")
+            .map_err(|e| mlua::Error::RuntimeError(format!("arbor.ui.form.set_options: {}", e)))?;
         if let Some(ref h) = handle {
             let _ = h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "set_options",
-                "name":        name,
-                "payload":     payload_json,
+                "name":        parsed.name,
+                "id":          parsed.id,
+                "payload":     parsed.payload,
             }));
         }
         Ok(())
@@ -81,13 +140,16 @@ fn install_set_options(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()
 fn install_set_disabled(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
     let handle = ctx.app_ctx.clone();
     let pname  = ctx.plugin_name.clone();
-    let fn_ = lua.create_function(move |_, (name, disabled): (String, bool)| {
+    let fn_ = lua.create_function(move |lua_ctx, args: MultiValue| {
+        let parsed = parse_set_args(lua_ctx, args, "disabled")
+            .map_err(|e| mlua::Error::RuntimeError(format!("arbor.ui.form.set_disabled: {}", e)))?;
         if let Some(ref h) = handle {
             let _ = h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "set_disabled",
-                "name":        name,
-                "payload":     disabled,
+                "name":        parsed.name,
+                "id":          parsed.id,
+                "payload":     parsed.payload,
             }));
         }
         Ok(())
@@ -99,16 +161,16 @@ fn install_set_disabled(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<(
 fn install_set_value(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
     let handle = ctx.app_ctx.clone();
     let pname  = ctx.plugin_name.clone();
-    let fn_ = lua.create_function(move |lua_ctx, (name, value): (String, mlua::Value)| {
-        let payload_json: serde_json::Value = lua_ctx
-            .from_value(value)
-            .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+    let fn_ = lua.create_function(move |lua_ctx, args: MultiValue| {
+        let parsed = parse_set_args(lua_ctx, args, "value")
+            .map_err(|e| mlua::Error::RuntimeError(format!("arbor.ui.form.set_value: {}", e)))?;
         if let Some(ref h) = handle {
             let _ = h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "set_value",
-                "name":        name,
-                "payload":     payload_json,
+                "name":        parsed.name,
+                "id":          parsed.id,
+                "payload":     parsed.payload,
             }));
         }
         Ok(())

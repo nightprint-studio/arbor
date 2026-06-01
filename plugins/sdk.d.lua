@@ -832,14 +832,27 @@ local Ui = {}
 ---open or when the open form belongs to another plugin.
 ---
 ---Available helpers:
----  arbor.ui.form.set_options(name, options)   -- refresh select/radio/autocomplete options
----  arbor.ui.form.set_disabled(name, bool)     -- disable/enable a field
----  arbor.ui.form.set_value(name, value)       -- programmatically set a field value
+---  arbor.ui.form.set_options(name, options)            -- legacy positional (field name)
+---  arbor.ui.form.set_options({ id|name = "…", options = … })  -- explicit cfg form
+---  arbor.ui.form.set_disabled(name, bool)              -- legacy positional
+---  arbor.ui.form.set_disabled({ id|name = "…", disabled = … })
+---  arbor.ui.form.set_value(name, value)                -- legacy positional
+---  arbor.ui.form.set_value({ id|name = "…", value = … })      -- explicit cfg form
 ---  arbor.ui.form.replace(cfg)                -- swap the whole node tree in-place
 ---  arbor.ui.form.patch(ops)                  -- granular node-tree mutations (no re-mount)
 ---  arbor.ui.form.set_state_path(segs, value) -- mutate one slice of the opaque state
 ---  arbor.ui.form.set_loading(arg)            -- toggle the busy overlay (cheap, no re-render)
 ---  arbor.ui.form.close()                     -- programmatically dismiss the modal
+---
+---`set_value` / `set_options` / `set_disabled` accept BOTH a legacy
+---`(name, payload)` positional call (field NAME — not node id) and a single
+---cfg-table call `{ name | id, <payload_key> = ... }`. The cfg form is the
+---recommended pattern when the caller already tracks the node id (same key
+---used by `arbor.ui.form.patch`): the host resolves id → field name by
+---walking the node tree, so plugins don't need a parallel "field names"
+---table. Passing a name / id that doesn't match any current field logs a
+---warning in the host devtools console (the write still goes through) so
+---typos surface immediately.
 ---
 ---Top-level config fields include `title`, `description`, `submit_action`,
 ---`submit_label`, `cancel_action`, `cancel_label`, `width`, `height`,
@@ -896,16 +909,31 @@ function Ui.form(config) end
 
 ---Replace the option list of a select / radio / autocomplete field in the
 ---currently-open form of this plugin.
+---
+---Accepts either positional `(name, options)` or a cfg table
+---`{ name | id, options }`. Pass `id` when the caller already tracks the
+---node id (same key used by `patch`) — the host resolves id → field name.
+---@overload fun(cfg: { id?: string, name?: string, options: arbor.FormOptionInput[] })
 ---@param name    string  Field name (matches the node's `name` attribute)
 ---@param options arbor.FormOptionInput[]
 function Ui.form.set_options(name, options) end
 
 ---Toggle the disabled state of a field in the currently-open form.
+---
+---Accepts either positional `(name, disabled)` or a cfg table
+---`{ name | id, disabled }`. See `set_options` for the id-vs-name guidance.
+---@overload fun(cfg: { id?: string, name?: string, disabled: boolean })
 ---@param name     string
 ---@param disabled boolean
 function Ui.form.set_disabled(name, disabled) end
 
 ---Programmatically set the value of a field in the currently-open form.
+---
+---Accepts either positional `(name, value)` or a cfg table
+---`{ name | id, value }`. The cfg form with `id` is the recommended pattern
+---when the caller already tracks the node id (same key used by `patch`):
+---the host resolves id → field name by walking the node tree.
+---@overload fun(cfg: { id?: string, name?: string, value: any })
 ---@param name  string
 ---@param value any
 function Ui.form.set_value(name, value) end
@@ -3199,16 +3227,32 @@ function CoreAssert.register() end
 ---@field options     arbor.FormOptionInput[]|nil              Required for type="select"
 ---@field placeholder string|nil
 ---@field width       string|nil                                CSS width (e.g. "120px", "2fr")
+---@field readonly    boolean|nil   Render this column as display-only (plain text / checked glyph / select label) even when the rest of the table is editable
+---@field align       "left"|"center"|"right"|nil  Cell alignment. Default: "left" (text/select), "center" (checkbox), "right" (number)
+
+---@class arbor.FormTableRowAction
+---@field id        string|nil   Stable id surfaced as `action_id` in the dispatched payload (default: positional `__action_<index>`)
+---@field icon      string|nil   Lucide icon name (curated subset — see PLUGIN_ICONS)
+---@field label     string|nil   Tooltip / aria-label
+---@field danger    boolean|nil  Style as destructive (red on hover)
+---@field action    string|nil   Legacy slot — sugar for dispatch = { kind = "action", name = action }. Payload: { row_index, row, action_id }
+---@field dispatch  arbor.DispatchTarget|nil  Explicit dispatch target (wins over action)
+---@field disabled  boolean|nil
 
 ---@class arbor.FormFieldTable : arbor.FormNodeBase
----@field type      "table"
----@field name      string
----@field label     string|nil
----@field columns   arbor.FormTableColumn[]
----@field default   table[]|nil     Array of row objects (keys match column.key)
----@field min_rows  integer|nil
----@field max_rows  integer|nil
----@field add_label string|nil      Default: "Add row"
+---@field type          "table"
+---@field name          string
+---@field label         string|nil
+---@field columns       arbor.FormTableColumn[]
+---@field default       table[]|nil     Array of row objects (keys match column.key)
+---@field min_rows      integer|nil
+---@field max_rows      integer|nil
+---@field add_label     string|nil      Default: "Add row"
+---@field row_actions   arbor.FormTableRowAction[]|nil  Per-row action buttons rendered in the trailing column, before the built-in trash. Payload: { row_index, row, action_id }
+---@field hide_delete   boolean|nil     Drop the built-in row-delete (trash) button (e.g. when a `row_actions` entry takes over the destructive role)
+---@field hide_add      boolean|nil     Drop the built-in "+ Add row" button (e.g. when rows are derived from an external source, or row creation goes through a separate plugin action)
+---@field sticky_header boolean|nil     Make the header stick to the top of the rows region — keeps column labels visible while scrolling. Pairs naturally with `max_height`
+---@field max_height    string|nil      CSS max-height for the rows region (e.g. "260px", "40vh"). The Add button stays anchored below the scroll area
 
 ---Section container. With `card = true` renders with dark title bar, border
 ---and an optional `+` button / counter pill in the title. Use as grouping

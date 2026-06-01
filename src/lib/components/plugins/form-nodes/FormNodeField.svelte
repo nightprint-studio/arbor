@@ -24,7 +24,7 @@
   import { animStore } from '$lib/stores/animations.svelte';
 
   import {
-    ChevronDown, Plus, Trash2, X as XIcon,
+    ChevronDown, Plus, Trash2, X as XIcon, Check,
     File as FileIconLucide, FolderOpen,
   } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -597,51 +597,114 @@
     {:else if node.type === 'table'}
       {@const rows = Array.isArray(ctx.values[n.name]) ? (ctx.values[n.name] as Record<string, any>[]) : []}
       {@const cols = (n.columns ?? []) as FormTableColumn[]}
-      {@const cols_template = cols.map(c => c.width ?? '1fr').join(' ') + ' 28px'}
+      {@const tableReadonly = n.readonly ?? false}
+      {@const rowActions = Array.isArray(n.row_actions) ? n.row_actions : []}
+      {@const showDeleteSlot = !n.hide_delete && !tableReadonly}
+      {@const trailCount = rowActions.length + (showDeleteSlot ? 1 : 0)}
+      {@const trailWidth = trailCount > 0 ? `${trailCount * 24 + Math.max(0, trailCount - 1) * 2 + 4}px` : ''}
+      {@const cols_template = cols.map(c => c.width ?? '1fr').join(' ') + (trailWidth ? ' ' + trailWidth : '')}
       {@const tableEmpty = rows.length === 0}
+      {@const wantsScroll = !!(n.max_height || n.sticky_header)}
       <div class="pf-list" class:pf-list-empty={tableEmpty}>
-        <div class="pf-list-header" style="grid-template-columns:{cols_template}">
-          {#each cols as c}<span class="pf-list-th">{c.label}</span>{/each}
-          <span></span>
-        </div>
-        {#if tableEmpty}
-          <div class="pf-list-empty-state">No rows yet</div>
-        {/if}
-        {#each rows as row, ri (ri)}
-          <div class="pf-list-row" style="grid-template-columns:{cols_template}" in:fly={{ y: -6, duration: animStore.dFast, easing: cubicOut }}>
+        <div
+          class="pf-list-scrollable"
+          class:pf-list-scrollable-active={wantsScroll}
+          style={n.max_height ? `--pf-list-max-h: ${n.max_height}` : ''}
+        >
+          <div
+            class="pf-list-header"
+            class:pf-list-header-sticky={n.sticky_header}
+            style="grid-template-columns:{cols_template}"
+          >
             {#each cols as c (c.key)}
-              {#if c.type === 'checkbox'}
-                <input class="pf-list-cb" type="checkbox" bind:checked={row[c.key]} />
-              {:else if c.type === 'number'}
-                <NumberStepper
-                  bind:value={row[c.key]}
-                  placeholder={c.placeholder ?? ''}
-                  narrow={false}
-                  ariaLabel={c.label}
-                />
-              {:else if c.type === 'select'}
-                {@const copts = ctx.normalizeOptions(c.options)}
-                <select class="pf-select pf-list-cell" bind:value={row[c.key]}>
-                  {#each copts as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
-                </select>
-              {:else}
-                <input class="pf-input pf-list-cell" type="text" placeholder={c.placeholder ?? ''} bind:value={row[c.key]} />
-              {/if}
+              <span class="pf-list-th" style={c.align ? `text-align:${c.align}` : ''}>{c.label}</span>
             {/each}
-            {#if !(n.readonly ?? false) && (!n.min_rows || rows.length > n.min_rows)}
-              <button
-                class="pf-list-del"
-                type="button"
-                aria-label="Remove row"
-                use:tooltip={'Remove'}
-                onclick={() => { ctx.values[n.name] = rows.filter((_, j) => j !== ri); }}
-              ><Trash2 size={11} /></button>
-            {:else}
-              <span></span>
-            {/if}
+            {#if trailCount > 0}<span></span>{/if}
           </div>
-        {/each}
-        {#if !(n.readonly ?? false) && (!n.max_rows || rows.length < n.max_rows)}
+          {#if tableEmpty}
+            <div class="pf-list-empty-state">No rows yet</div>
+          {/if}
+          {#each rows as row, ri (ri)}
+            <div class="pf-list-row" style="grid-template-columns:{cols_template}" in:fly={{ y: -6, duration: animStore.dFast, easing: cubicOut }}>
+              {#each cols as c (c.key)}
+                {@const cellReadonly = c.readonly || tableReadonly}
+                {@const cellAlign = c.align ?? (c.type === 'checkbox' ? 'center' : c.type === 'number' ? 'right' : 'left')}
+                {#if cellReadonly}
+                  {#if c.type === 'checkbox'}
+                    <span class="pf-list-readonly pf-list-readonly-bool" style="text-align:{cellAlign}">
+                      {#if row[c.key]}<Check size={12} />{/if}
+                    </span>
+                  {:else if c.type === 'select'}
+                    {@const lbl = ctx.normalizeOptions(c.options).find(o => o.value === row[c.key])?.label ?? (row[c.key] == null ? '' : String(row[c.key]))}
+                    <span class="pf-list-readonly" style="text-align:{cellAlign}">{lbl}</span>
+                  {:else}
+                    {@const v = row[c.key]}
+                    <span class="pf-list-readonly" class:pf-list-readonly-num={c.type === 'number'} style="text-align:{cellAlign}">
+                      {v == null ? '' : String(v)}
+                    </span>
+                  {/if}
+                {:else if c.type === 'checkbox'}
+                  <input class="pf-list-cb" type="checkbox" bind:checked={row[c.key]} />
+                {:else if c.type === 'number'}
+                  <NumberStepper
+                    bind:value={row[c.key]}
+                    placeholder={c.placeholder ?? ''}
+                    narrow={false}
+                    ariaLabel={c.label}
+                  />
+                {:else if c.type === 'select'}
+                  {@const copts = ctx.normalizeOptions(c.options)}
+                  <select class="pf-select pf-list-cell" bind:value={row[c.key]}>
+                    {#each copts as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+                  </select>
+                {:else}
+                  <input class="pf-input pf-list-cell" type="text" placeholder={c.placeholder ?? ''} bind:value={row[c.key]} />
+                {/if}
+              {/each}
+              {#if trailCount > 0}
+                <div class="pf-list-actions">
+                  {#each rowActions as ra, ai (ra.id ?? ai)}
+                    {@const RaIcon = (ra.icon && PLUGIN_ICONS[ra.icon]) || PLUGIN_ICONS.Circle}
+                    {@const raAriaLabel = ra.label ?? ra.id ?? 'Action'}
+                    <button
+                      class="pf-row-action"
+                      class:pf-row-action-danger={ra.danger}
+                      type="button"
+                      disabled={ra.disabled || tableReadonly}
+                      aria-label={raAriaLabel}
+                      use:tooltip={ra.label ?? ''}
+                      onclick={() => {
+                        const action_id = ra.id ?? `__action_${ai}`;
+                        const payload = { row_index: ri, row, action_id };
+                        if (ra.dispatch) {
+                          ctx.handleScopedDispatch(n.id, 'row_action', ra.dispatch, payload, { stateKeys: n.scope_state });
+                        } else if (typeof ra.action === 'string') {
+                          ctx.firePluginAction(ctx.pluginName, ra.action, JSON.stringify(payload));
+                        }
+                      }}
+                    >
+                      <RaIcon size={12} />
+                    </button>
+                  {/each}
+                  {#if showDeleteSlot}
+                    {#if (!n.min_rows || rows.length > n.min_rows)}
+                      <button
+                        class="pf-list-del"
+                        type="button"
+                        aria-label="Remove row"
+                        use:tooltip={'Remove'}
+                        onclick={() => { ctx.values[n.name] = rows.filter((_, j) => j !== ri); }}
+                      ><Trash2 size={11} /></button>
+                    {:else}
+                      <span class="pf-row-action-spacer"></span>
+                    {/if}
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+        {#if !tableReadonly && !n.hide_add && (!n.max_rows || rows.length < n.max_rows)}
           <button
             class="pf-list-add"
             type="button"

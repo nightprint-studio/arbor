@@ -917,6 +917,37 @@ export interface FormTableColumn {
   placeholder?: string;
   /** CSS width (e.g. "120px", "2fr"). */
   width?:       string;
+  /** Render this column as display-only — the cell shows the row's value
+   *  formatted by `type` (text, number, checked glyph, select label) but
+   *  cannot be edited. Independent of the table-level `readonly`; useful
+   *  for "id" / "computed" / "owner" columns sat next to editable ones. */
+  readonly?:    boolean;
+  /** Cell content alignment. Default: `"left"` for text/select, `"center"`
+   *  for checkbox, `"right"` for number. */
+  align?:       'left' | 'center' | 'right';
+}
+
+/** A per-row action button rendered in the table's trailing column.
+ *  Each button fires its own dispatch with payload
+ *  `{ row_index, row, action_id }`. */
+export interface FormTableRowAction {
+  /** Stable id surfaced in the dispatched payload as `action_id`. When
+   *  omitted the widget synthesises a positional id (`__action_<index>`). */
+  id?:        string;
+  /** Lucide icon name (curated subset — see PLUGIN_ICONS). */
+  icon?:      string;
+  /** Tooltip / aria-label. */
+  label?:     string;
+  /** Style the row button as destructive (red on hover). */
+  danger?:    boolean;
+  /** Legacy slot — sugar for `dispatch = { kind: 'action', name: action }`.
+   *  Fires the owning plugin's handler with payload
+   *  `{ row_index, row, action_id }`. */
+  action?:    string;
+  /** Explicit dispatch target. Takes precedence over `action`. */
+  dispatch?:  DispatchTarget;
+  /** Render the button disabled. */
+  disabled?:  boolean;
 }
 
 /** Tabular input — submitted as Array<Record<string, unknown>>. */
@@ -932,6 +963,25 @@ export interface FormFieldTable extends FormFieldBase {
   max_rows?:    number;
   /** Label for the Add button. Default: "+ Add row". */
   add_label?:   string;
+  /** Per-row action buttons rendered in the trailing column, before the
+   *  built-in trash. Each carries its own dispatch with payload
+   *  `{ row_index, row, action_id }`. */
+  row_actions?:   FormTableRowAction[];
+  /** Hide the built-in row delete (trash) button — useful when a
+   *  `row_actions` entry takes over the destructive role. */
+  hide_delete?:   boolean;
+  /** Hide the built-in "+ Add row" button — useful when the table's rows
+   *  are derived from an external source (and only certain columns are
+   *  user-editable), or when row creation is handled by a plugin action
+   *  outside the table. */
+  hide_add?:      boolean;
+  /** Make the header stick to the top of the rows region — keeps column
+   *  labels visible while scrolling. Pairs naturally with `max_height`. */
+  sticky_header?: boolean;
+  /** CSS max-height for the rows region (e.g. `"260px"`, `"40vh"`). When
+   *  set, the rows scroll vertically while the Add button stays anchored
+   *  below the scroll area. */
+  max_height?:    string;
 }
 
 /** ISO-formatted date, e.g. "2026-04-20". */
