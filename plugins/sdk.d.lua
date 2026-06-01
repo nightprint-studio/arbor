@@ -2235,7 +2235,9 @@ function Event.emit(event, payload) end
 ---@field type         "tabs"
 ---@field tabs         arbor.FormTab[]
 ---@field default_tab  string|nil   Initial active tab id (defaults to first tab)
----@field persist_key  string|nil   When set, the active tab id is mirrored to `localStorage[persist_key]` so the user's selection survives reopening the modal. Restoration is guarded against stale ids (an id that no longer exists in the current `tabs` falls back to `default_tab`, then to the first tab).
+---@field persist_key  string|nil   When set, the active tab id is mirrored to `localStorage[persist_key]` so the user's selection survives reopening the modal. Restoration is guarded against stale ids (an id that no longer exists in the current `tabs` falls back to `default_tab`, then to the first tab). Doubles as the cross-renderer sync key: two `tabs` widgets in the same modal that share a `persist_key` (typically one `strip_only` in `header.centre` and one `panels_only` in `nodes`) read and write the same in-memory slot, so clicking on one updates the other in lock-step.
+---@field strip_only   boolean|nil  When true, render only the tab strip — skip the per-tab panel divs entirely. Designed for the "view-mode switcher in `header.centre`" pattern: the strip lives in the header for the Studio-shaped chrome look, while a second `tabs` widget in the body (same `persist_key`, `panels_only = true`) renders the panel content. Default: false.
+---@field panels_only  boolean|nil  When true, render only the per-tab panel divs — skip the tab strip. Mirror of `strip_only`: typically paired with a `strip_only` tabs in `header.centre` so the body shows panels without a duplicate strip. Default: false.
 
 -- =============================================================================
 -- Studio-shaped modal chrome (`arbor.ui.form{...}` top-level subkeys)

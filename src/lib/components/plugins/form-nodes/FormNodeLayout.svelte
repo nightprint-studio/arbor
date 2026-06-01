@@ -65,6 +65,7 @@
 
   import type { FormNode } from '$lib/types/plugin';
   import type { FormNodeCtx } from './ctx';
+  import { getPersistedActiveTab, setPersistedActiveTab } from './tabs-state.svelte';
 
   interface Props {
     node:       FormNode;
@@ -834,36 +835,59 @@
     icon:     t.icon ? PLUGIN_ICONS[t.icon] : undefined,
     iconSize: 12,
   }))}
-  <div class="pf-tabs {(node as any).class ?? ''}" style={(node as any).style}>
-    <Tabs
-      items={tabItems}
-      value={ctx.activeTabMap[node.id!] ?? null}
-      variant="underline"
-      size="md"
-      onSelect={(id) => {
-        ctx.activeTabMap[node.id!] = id;
-        // Persist the user's pick when the node opted in. `persist_key`
-        // survives the modal closing and reopening; restoration happens in
-        // `buildActiveTabMap`. localStorage write is cheap (single string)
-        // so no debounce.
-        const pk = (tn as any).persist_key;
-        if (typeof pk === 'string' && pk && typeof window !== 'undefined') {
-          try { window.localStorage.setItem(pk, id); } catch { /* ignore */ }
-        }
-      }}
-    />
-    {#each tn.tabs as tab (tab.id)}
-      <div
-        class="pf-tabpanel"
-        class:pf-tabpanel-hidden={ctx.activeTabMap[node.id!] !== tab.id}
-        class:pf-tabpanel-flush={!!(tab as any).flush}
-        role="tabpanel"
-      >
-        {#each tab.children ?? [] as child (child.id)}
-          {@render renderNode(child)}
-        {/each}
-      </div>
-    {/each}
+  {@const pk = (typeof tn.persist_key === 'string' && tn.persist_key) ? tn.persist_key as string : null}
+  {@const stripOnly  = !!tn.strip_only}
+  {@const panelsOnly = !!tn.panels_only && !stripOnly}
+  <!-- Active id resolution order:
+       · When `persist_key` is set, read from the shared store (initialised
+         lazily from localStorage on first access). Reactive — multiple
+         tabs widgets sharing the same key auto-sync on click.
+       · Otherwise fall back to the per-renderer `ctx.activeTabMap`, which
+         `buildActiveTabMap` seeded on mount from `default_tab` / first tab. -->
+  {@const fallbackId = (tn.default_tab ?? tn.tabs?.[0]?.id ?? null) as string | null}
+  {@const activeId = pk
+    ? getPersistedActiveTab(pk, fallbackId)
+    : (ctx.activeTabMap[node.id!] ?? null)}
+  <div class="pf-tabs {(node as any).class ?? ''}"
+       class:pf-tabs-strip-only={stripOnly}
+       class:pf-tabs-panels-only={panelsOnly}
+       style={(node as any).style}>
+    {#if !panelsOnly}
+      <Tabs
+        items={tabItems}
+        value={activeId}
+        variant="underline"
+        size="md"
+        onSelect={(id) => {
+          if (pk) {
+            // Shared store path — writes propagate to every tabs widget in
+            // the same window subscribed to the same key, and to localStorage
+            // for cross-session restore.
+            setPersistedActiveTab(pk, id);
+          } else {
+            ctx.activeTabMap[node.id!] = id;
+          }
+        }}
+      />
+    {/if}
+    <!-- `strip_only` skips the panel divs entirely — designed for the
+         view-mode switcher in `header.centre` paired with a body-side
+         tabs widget that owns the actual content under the same
+         `persist_key`. -->
+    {#if !stripOnly}
+      {#each tn.tabs as tab (tab.id)}
+        <div
+          class="pf-tabpanel"
+          class:pf-tabpanel-hidden={activeId !== tab.id}
+          class:pf-tabpanel-flush={!!(tab as any).flush}
+          role="tabpanel"
+        >
+          {#each tab.children ?? [] as child (child.id)}
+            {@render renderNode(child)}
+          {/each}
+        </div>
+      {/each}
+    {/if}
   </div>
 
 <!-- ── tree_layout (2-col nav + content) ─────────────────────────────── -->

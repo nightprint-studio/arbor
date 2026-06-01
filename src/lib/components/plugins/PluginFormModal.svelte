@@ -73,8 +73,15 @@
 
   function collectValidation(ns: FormNode[]): Record<string, ValidationRule> {
     const acc: Record<string, ValidationRule> = {};
-    function walk(list: FormNode[]) {
-      for (const n of list) {
+    // Defensive: plugins authored in Lua sometimes ship `children = {}` for
+    // never-rendered sub-trees (e.g. `tabs.tabs[].children = {}` on a
+    // `strip_only` tabs). Lua empty tables serialise as JSON `{}` (object,
+    // not array), which is truthy enough to skip the `?? []` fallback and
+    // then chokes the `for (const x of …)` loop with "is not iterable".
+    // Normalising at the walk entry keeps every recursion guarded uniformly.
+    const arr = (v: unknown): FormNode[] => (Array.isArray(v) ? (v as FormNode[]) : []);
+    function walk(list: unknown) {
+      for (const n of arr(list)) {
         if (n.type === 'text' && (n as any).pattern) {
           acc[(n as any).name] = {
             pattern:      (n as any).pattern,
@@ -83,16 +90,16 @@
         }
         if (n.type === 'switch') {
           const s = n as any;
-          for (const arr of Object.values(s.cases ?? {})) walk(arr as FormNode[]);
+          for (const arr2 of Object.values(s.cases ?? {})) walk(arr2);
           if (s.default) walk(s.default);
           continue;
         }
         if (n.type === 'tabs') {
-          for (const t of (n as any).tabs ?? []) walk(t.children ?? []);
+          for (const t of arr((n as any).tabs)) walk(t.children);
           continue;
         }
         if (n.type === 'wizard') {
-          for (const s of (n as any).steps ?? []) walk(s.children ?? []);
+          for (const s of arr((n as any).steps)) walk(s.children);
           continue;
         }
         if ('children' in n) walk((n as any).children);
@@ -506,37 +513,46 @@
   {/snippet}
 
   <div class="pf-modal">
-    {#if stateBlockKind === 'loading'}
-      <div class="pf-state-fill">
-        <StateBlock tone="loading">
-          {#snippet spinner()}<Spinner size="lg" label={stateBlockLoadingLabel} />{/snippet}
-        </StateBlock>
-      </div>
-    {:else if stateBlockKind === 'error'}
-      <div class="pf-state-fill">
-        <StateBlock tone="error" label={stateBlockErrorLabel}>
-          {#snippet icon()}<AlertCircle size={18} />{/snippet}
-        </StateBlock>
-      </div>
-    {:else if stateBlockKind === 'empty'}
-      <div class="pf-state-fill">
-        <div class="pf-empty">
-          {#if stateBlockEmpty?.title}
-            <div class="pf-empty-title">{stateBlockEmpty.title}</div>
-          {/if}
-          {#if stateBlockEmpty?.body}
-            <p class="pf-empty-body">{stateBlockEmpty.body}</p>
-          {/if}
-          {#if stateBlockEmpty?.cta_label && stateBlockEmpty?.cta_action}
-            <div class="pf-empty-cta">
-              <Button variant="primary" onclick={fireEmptyCta}>{stateBlockEmpty.cta_label}</Button>
+    <!-- The body-row + sidecars frame is rendered for EVERY state — loading
+         / error / empty / populated. Without this, the activity bar (which
+         lives outside the body via Modal's rightRail) stays clickable in
+         a state_block but the sidecars don't mount, leaving an `active`
+         icon on the rail with nothing actually shown. Plugins author
+         sidecar children that gracefully handle the no-document case
+         (e.g. a state_block "Open a file to enable filtering"), and the
+         active sidecar slides in over the state-fill the same way it
+         would over a populated body. -->
+    <div class="pf-body-row" class:pf-body-row-sidecars={hasSidecars}>
+      <div class="pf-body-main">
+        {#if stateBlockKind === 'loading'}
+          <div class="pf-state-fill">
+            <StateBlock tone="loading">
+              {#snippet spinner()}<Spinner size="lg" label={stateBlockLoadingLabel} />{/snippet}
+            </StateBlock>
+          </div>
+        {:else if stateBlockKind === 'error'}
+          <div class="pf-state-fill">
+            <StateBlock tone="error" label={stateBlockErrorLabel}>
+              {#snippet icon()}<AlertCircle size={18} />{/snippet}
+            </StateBlock>
+          </div>
+        {:else if stateBlockKind === 'empty'}
+          <div class="pf-state-fill">
+            <div class="pf-empty">
+              {#if stateBlockEmpty?.title}
+                <div class="pf-empty-title">{stateBlockEmpty.title}</div>
+              {/if}
+              {#if stateBlockEmpty?.body}
+                <p class="pf-empty-body">{stateBlockEmpty.body}</p>
+              {/if}
+              {#if stateBlockEmpty?.cta_label && stateBlockEmpty?.cta_action}
+                <div class="pf-empty-cta">
+                  <Button variant="primary" onclick={fireEmptyCta}>{stateBlockEmpty.cta_label}</Button>
+                </div>
+              {/if}
             </div>
-          {/if}
-        </div>
-      </div>
-    {:else}
-      <div class="pf-body-row" class:pf-body-row-sidecars={hasSidecars}>
-        <div class="pf-body-main">
+          </div>
+        {:else}
           {#if form.description && !form.sidebar}
             <p class="pf-desc">{form.description}</p>
           {/if}
@@ -553,43 +569,43 @@
             {onNodesChange}
             {onClose}
           />
-        </div>
-
-        {#if hasSidecars}
-          <!-- Always-mounted sidecars: closing collapses width to 0 (CSS),
-               opening transitions back. The inner pinned-width wrapper keeps
-               the content laid out at the target size during the animation,
-               so the visual reads as "slides in from the right" instead of
-               "content squishes." Field values survive close/open because no
-               renderer is ever unmounted. -->
-          {#each sidecarIds as id (id)}
-            {@const cfg = form.sidecars![id]}
-            {@const w   = sidecarWidth(cfg)}
-            {@const open = activeSidecar === id}
-            <aside class="pf-sidecar" class:pf-sidecar-open={open}
-                   style="--pf-sw:{w}px">
-              <div class="pf-sidecar-inner" style="width:{w}px">
-                {#if cfg.title}
-                  <header class="pf-sidecar-title">{cfg.title}</header>
-                {/if}
-                <div class="pf-sidecar-body">
-                  <FormNodeRenderer
-                    bind:this={sidecarRefs[id]}
-                    pluginName={form.plugin_name}
-                    nodes={cfg.children}
-                    region={`sidecar:${id}`}
-                    {validationErrors}
-                    disabled={submitting || isLoading}
-                    {onValueChange}
-                    {onClose}
-                  />
-                </div>
-              </div>
-            </aside>
-          {/each}
         {/if}
       </div>
-    {/if}
+
+      {#if hasSidecars}
+        <!-- Always-mounted sidecars: closing collapses width to 0 (CSS),
+             opening transitions back. The inner pinned-width wrapper keeps
+             the content laid out at the target size during the animation,
+             so the visual reads as "slides in from the right" instead of
+             "content squishes." Field values survive close/open because no
+             renderer is ever unmounted. -->
+        {#each sidecarIds as id (id)}
+          {@const cfg = form.sidecars![id]}
+          {@const w   = sidecarWidth(cfg)}
+          {@const open = activeSidecar === id}
+          <aside class="pf-sidecar" class:pf-sidecar-open={open}
+                 style="--pf-sw:{w}px">
+            <div class="pf-sidecar-inner" style="width:{w}px">
+              {#if cfg.title}
+                <header class="pf-sidecar-title">{cfg.title}</header>
+              {/if}
+              <div class="pf-sidecar-body">
+                <FormNodeRenderer
+                  bind:this={sidecarRefs[id]}
+                  pluginName={form.plugin_name}
+                  nodes={cfg.children}
+                  region={`sidecar:${id}`}
+                  {validationErrors}
+                  disabled={submitting || isLoading}
+                  {onValueChange}
+                  {onClose}
+                />
+              </div>
+            </div>
+          </aside>
+        {/each}
+      {/if}
+    </div>
 
     {#if isLoading}
       <!-- Translucent loading overlay above the body (legacy `form.loading`

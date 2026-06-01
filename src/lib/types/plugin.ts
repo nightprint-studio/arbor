@@ -1732,8 +1732,37 @@ export interface FormNodeTabs extends FormNodeBase {
    * — the user's selection survives the modal closing and reopening.
    * Ignored when set on a `tabs` rendered as sidebar nav (the sidebar
    * has its own selection model via `default_tab` + show_if).
+   *
+   * Doubles as the cross-renderer sync key: two `tabs` widgets in the same
+   * modal that share a `persist_key` (typically one `strip_only` in
+   * `header.centre` and one full-content in `nodes`) read and write the
+   * same in-memory slot, so clicking a tab on one updates the other in
+   * lock-step.
    */
   persist_key?: string;
+  /**
+   * When true, render only the tab strip — skip the per-tab panel divs
+   * entirely. Designed for the "view-mode switcher in `header.centre`"
+   * pattern: the strip lives in the header for the Studio-shaped chrome
+   * look, while a second `tabs` widget in the body (same `persist_key`,
+   * `panels_only = true`) renders the panel content. Without `strip_only`,
+   * putting `tabs` in `header.centre` would draw the active tab's children
+   * INSIDE the header strip — almost never what you want.
+   *
+   * Plain `strip_only = true` without a matching body `tabs` (or any other
+   * widget reacting to the same shared state) gives a header strip that
+   * only flips its own active highlight — inert until something else
+   * subscribes to the same `persist_key`.
+   */
+  strip_only?: boolean;
+  /**
+   * When true, render only the per-tab panel divs — skip the tab strip.
+   * Mirror of `strip_only`: typically paired with a `strip_only` tabs in
+   * `header.centre` so the body shows panels without a duplicate strip
+   * sitting between the header strip and the active panel. Both widgets
+   * must share the same `persist_key` for the strip to drive the body.
+   */
+  panels_only?: boolean;
   /** Sidebar mode only — show a filter input at the top of the nav that
    *  case-insensitively matches `label`, `group` and `meta` against the
    *  user's query. Tabs that don't match are hidden; empty groups

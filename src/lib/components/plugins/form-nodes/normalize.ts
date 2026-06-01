@@ -6,6 +6,18 @@
  */
 import type { FormNode } from '$lib/types/plugin';
 
+/**
+ * Plugin-supplied node trees frequently arrive with `children = {}` /
+ * `tabs = {}` / `steps = {}` etc. when a Lua author writes `children = {}`
+ * for a never-rendered sub-tree (mlua serialises empty Lua tables as
+ * empty JSON objects, not arrays). The naive `?? []` fallback doesn't
+ * catch that — `{}` is truthy — so every iteration must check `isArray`
+ * explicitly. This helper centralises the guard.
+ */
+function arr<T>(v: unknown): T[] {
+  return Array.isArray(v) ? (v as T[]) : [];
+}
+
 // ── Node normalisation ────────────────────────────────────────────────────
 // Assign stable IDs to every node that lacks one so sections and keyed
 // iterators always have something to reference.
@@ -32,9 +44,9 @@ export function normalizeNode(n: FormNode): FormNode {
     const src = withId as any;
     return {
       ...withId,
-      tabs: (src.tabs ?? []).map((t: any) => ({
+      tabs: arr<any>(src.tabs).map((t: any) => ({
         ...t,
-        children: (t.children ?? []).map(normalizeNode),
+        children: arr<FormNode>(t.children).map(normalizeNode),
       })),
     } as FormNode;
   }
@@ -43,9 +55,9 @@ export function normalizeNode(n: FormNode): FormNode {
     const src = withId as any;
     return {
       ...withId,
-      steps: (src.steps ?? []).map((s: any) => ({
+      steps: arr<any>(src.steps).map((s: any) => ({
         ...s,
-        children: (s.children ?? []).map(normalizeNode),
+        children: arr<FormNode>(s.children).map(normalizeNode),
       })),
     } as FormNode;
   }
@@ -54,9 +66,9 @@ export function normalizeNode(n: FormNode): FormNode {
     const src = withId as any;
     return {
       ...withId,
-      nav_children:        (src.nav_children        ?? []).map(normalizeNode),
-      nav_footer_children: (src.nav_footer_children ?? []).map(normalizeNode),
-      content_children:    (src.content_children    ?? []).map(normalizeNode),
+      nav_children:        arr<FormNode>(src.nav_children       ).map(normalizeNode),
+      nav_footer_children: arr<FormNode>(src.nav_footer_children).map(normalizeNode),
+      content_children:    arr<FormNode>(src.content_children   ).map(normalizeNode),
     } as FormNode;
   }
 
@@ -66,7 +78,7 @@ export function normalizeNode(n: FormNode): FormNode {
     const src = withId as any;
     return {
       ...withId,
-      step_detail_form: (src.step_detail_form ?? []).map(normalizeNode),
+      step_detail_form: arr<FormNode>(src.step_detail_form).map(normalizeNode),
     } as FormNode;
   }
 
@@ -74,7 +86,7 @@ export function normalizeNode(n: FormNode): FormNode {
     const src = withId as any;
     return {
       ...withId,
-      children: (src.children ?? []).map(normalizeNode),
+      children: arr<FormNode>(src.children).map(normalizeNode),
       actions:  Array.isArray(src.actions) ? src.actions.map(normalizeNode) : undefined,
     } as FormNode;
   }
@@ -121,25 +133,25 @@ export function collectFields(ns: FormNode[]): [string, any][] {
       continue;
     }
     if (n.type === 'tabs') {
-      for (const t of (n as any).tabs ?? []) {
-        acc.push(...collectFields(t.children ?? []));
+      for (const t of arr<any>((n as any).tabs)) {
+        acc.push(...collectFields(arr<FormNode>(t.children)));
       }
       continue;
     }
     if (n.type === 'wizard') {
-      for (const s of (n as any).steps ?? []) {
-        acc.push(...collectFields(s.children ?? []));
+      for (const s of arr<any>((n as any).steps)) {
+        acc.push(...collectFields(arr<FormNode>(s.children)));
       }
       continue;
     }
     if (n.type === 'tree_layout') {
       const t = n as any;
-      acc.push(...collectFields(t.nav_children     ?? []));
-      acc.push(...collectFields(t.content_children ?? []));
+      acc.push(...collectFields(arr<FormNode>(t.nav_children)));
+      acc.push(...collectFields(arr<FormNode>(t.content_children)));
       continue;
     }
     if (n.type === 'pipeline_editor') {
-      acc.push(...collectFields((n as any).step_detail_form ?? []));
+      acc.push(...collectFields(arr<FormNode>((n as any).step_detail_form)));
       continue;
     }
     if ('children' in n && Array.isArray((n as any).children)) {
@@ -164,25 +176,25 @@ export function flattenAll(n: FormNode): FormNode[] {
     return out;
   }
   if (n.type === 'tabs') {
-    for (const t of (n as any).tabs ?? []) {
-      for (const c of t.children ?? []) out.push(...flattenAll(c));
+    for (const t of arr<any>((n as any).tabs)) {
+      for (const c of arr<FormNode>(t.children)) out.push(...flattenAll(c));
     }
     return out;
   }
   if (n.type === 'wizard') {
-    for (const s of (n as any).steps ?? []) {
-      for (const c of s.children ?? []) out.push(...flattenAll(c));
+    for (const s of arr<any>((n as any).steps)) {
+      for (const c of arr<FormNode>(s.children)) out.push(...flattenAll(c));
     }
     return out;
   }
   if (n.type === 'tree_layout') {
     const t = n as any;
-    for (const c of t.nav_children     ?? []) out.push(...flattenAll(c));
-    for (const c of t.content_children ?? []) out.push(...flattenAll(c));
+    for (const c of arr<FormNode>(t.nav_children))     out.push(...flattenAll(c));
+    for (const c of arr<FormNode>(t.content_children)) out.push(...flattenAll(c));
     return out;
   }
   if (n.type === 'pipeline_editor') {
-    for (const c of (n as any).step_detail_form ?? []) out.push(...flattenAll(c));
+    for (const c of arr<FormNode>((n as any).step_detail_form)) out.push(...flattenAll(c));
     return out;
   }
   if ('children' in n && Array.isArray((n as any).children)) {
@@ -206,18 +218,18 @@ export function buildCollapseMap(
         walk(sectionBody(n));
       } else if (n.type === 'switch') {
         const s = n as any;
-        for (const arr of Object.values(s.cases ?? {})) walk(arr as FormNode[]);
+        for (const a of Object.values(s.cases ?? {})) walk(a as FormNode[]);
         if (s.default) walk(s.default);
       } else if (n.type === 'tabs') {
-        for (const t of (n as any).tabs ?? []) walk(t.children ?? []);
+        for (const t of arr<any>((n as any).tabs)) walk(arr<FormNode>(t.children));
       } else if (n.type === 'wizard') {
-        for (const s of (n as any).steps ?? []) walk(s.children ?? []);
+        for (const s of arr<any>((n as any).steps)) walk(arr<FormNode>(s.children));
       } else if (n.type === 'tree_layout') {
         const t = n as any;
-        walk(t.nav_children     ?? []);
-        walk(t.content_children ?? []);
+        walk(arr<FormNode>(t.nav_children));
+        walk(arr<FormNode>(t.content_children));
       } else if (n.type === 'pipeline_editor') {
-        walk((n as any).step_detail_form ?? []);
+        walk(arr<FormNode>((n as any).step_detail_form));
       } else if ('children' in n && Array.isArray((n as any).children)) {
         walk((n as any).children);
       }
@@ -234,7 +246,8 @@ export function buildActiveTabMap(ns: FormNode[]): Record<string, string> {
     for (const n of ns) {
       if (n.type === 'tabs') {
         const t = n as any;
-        const first = t.tabs?.[0]?.id ?? '';
+        const tabsList = arr<any>(t.tabs);
+        const first = tabsList[0]?.id ?? '';
         // `persist_key` (when set) restores the last user-picked tab from
         // localStorage. Falls back to `default_tab`, then to the first tab.
         // Guarded against a stale stored value pointing to a tab id that
@@ -242,24 +255,24 @@ export function buildActiveTabMap(ns: FormNode[]): Record<string, string> {
         let stored: string | null = null;
         if (typeof t.persist_key === 'string' && t.persist_key && typeof window !== 'undefined') {
           try { stored = window.localStorage.getItem(t.persist_key); } catch { /* ignore */ }
-          if (stored && !(t.tabs ?? []).some((tab: any) => tab?.id === stored)) {
+          if (stored && !tabsList.some((tab: any) => tab?.id === stored)) {
             stored = null;
           }
         }
         m[n.id!] = stored ?? t.default_tab ?? first;
-        for (const tab of t.tabs ?? []) walk(tab.children ?? []);
+        for (const tab of tabsList) walk(arr<FormNode>(tab.children));
       } else if (n.type === 'switch') {
         const s = n as any;
-        for (const arr of Object.values(s.cases ?? {})) walk(arr as FormNode[]);
+        for (const a of Object.values(s.cases ?? {})) walk(a as FormNode[]);
         if (s.default) walk(s.default);
       } else if (n.type === 'wizard') {
-        for (const s of (n as any).steps ?? []) walk(s.children ?? []);
+        for (const s of arr<any>((n as any).steps)) walk(arr<FormNode>(s.children));
       } else if (n.type === 'tree_layout') {
         const t = n as any;
-        walk(t.nav_children     ?? []);
-        walk(t.content_children ?? []);
+        walk(arr<FormNode>(t.nav_children));
+        walk(arr<FormNode>(t.content_children));
       } else if (n.type === 'pipeline_editor') {
-        walk((n as any).step_detail_form ?? []);
+        walk(arr<FormNode>((n as any).step_detail_form));
       } else if ('children' in n && Array.isArray((n as any).children)) {
         walk((n as any).children);
       }
@@ -276,14 +289,15 @@ export function buildWizardStepMap(ns: FormNode[]): Record<string, string> {
     for (const n of ns) {
       if (n.type === 'wizard') {
         const w = n as any;
-        const first = w.steps?.[0]?.id ?? '';
+        const steps = arr<any>(w.steps);
+        const first = steps[0]?.id ?? '';
         m[n.id!] = w.start_step ?? first;
-        for (const s of w.steps ?? []) walk(s.children ?? []);
+        for (const s of steps) walk(arr<FormNode>(s.children));
       } else if (n.type === 'tabs') {
-        for (const t of (n as any).tabs ?? []) walk(t.children ?? []);
+        for (const t of arr<any>((n as any).tabs)) walk(arr<FormNode>(t.children));
       } else if (n.type === 'switch') {
         const s = n as any;
-        for (const arr of Object.values(s.cases ?? {})) walk(arr as FormNode[]);
+        for (const a of Object.values(s.cases ?? {})) walk(a as FormNode[]);
         if (s.default) walk(s.default);
       } else if ('children' in n && Array.isArray((n as any).children)) {
         walk((n as any).children);

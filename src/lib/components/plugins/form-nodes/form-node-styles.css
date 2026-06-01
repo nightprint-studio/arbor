@@ -882,6 +882,20 @@
     flex: 1 1 auto;
     min-height: 0;
   }
+  /* `strip_only` mode renders just the tab strip — no panels follow, so we
+     don't want the column-stretch (would expand the header zone vertically)
+     and don't need the inter-element gap. Hugs the strip's natural height. */
+  .pf-tabs.pf-tabs-strip-only {
+    flex: 0 0 auto;
+    gap: 0;
+    min-height: 0;
+  }
+  /* `panels_only` mode renders just the panels — no strip on top. Without a
+     leading strip to separate from, the gap is dead weight. The panels keep
+     their own flex behaviour so the active one still fills the height. */
+  .pf-tabs.pf-tabs-panels-only {
+    gap: 0;
+  }
 
   /* The tab strip is now rendered by the shared <Tabs variant="underline">
      widget — only the panel container styles below remain owned here. */
