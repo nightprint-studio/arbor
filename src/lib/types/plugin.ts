@@ -1203,6 +1203,9 @@ export interface FormNodeParagraph extends FormNodeBase {
 
 export interface FormNodeAlert extends FormNodeBase {
   type:     'alert';
+  /** Title rendered bold above the body (optional). Survives `collapsible`
+   *  collapse so the user always sees something to click on. */
+  title?:   string;
   text:     string;
   variant?: 'info' | 'warning' | 'error' | 'success';
   /**
@@ -1216,6 +1219,14 @@ export interface FormNodeAlert extends FormNodeBase {
    *     `variant = "success"` maps to the tip styling.
    */
   style?:   'banner' | 'inline';
+  /** Show an × button on the right. Click hides the alert locally — no
+   *  plugin round-trip. To bring it back, re-render the node via patch. */
+  dismissable?: boolean;
+  /** Show a chevron toggle that hides the body text. The title (and the
+   *  underlying widget chrome) stays visible. */
+  collapsible?: boolean;
+  /** Start in the collapsed state. Only meaningful when `collapsible` is true. */
+  collapsed?: boolean;
 }
 
 export interface FormNodeCode extends FormNodeBase {

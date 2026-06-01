@@ -383,30 +383,20 @@ local function _make_display(type_name)
     return self
   end
 end
-FormBuilder.breadcrumb         = _make_display("breadcrumb")
-FormBuilder.url_block          = _make_display("url_block")
-FormBuilder.monogram           = _make_display("monogram")
-FormBuilder.state_block        = _make_display("state_block")
-FormBuilder.step_indicator     = _make_display("step_indicator")
-FormBuilder.status_list        = _make_display("status_list")
-FormBuilder.alert              = _make_display("alert")
-FormBuilder.info_card          = _make_display("info_card")
-FormBuilder.chip_bar           = _make_display("chip_bar")
-FormBuilder.copy_button        = _make_display("copy_button")
-FormBuilder.experimental_badge = _make_display("experimental_badge")
-FormBuilder.section_header     = _make_display("section_header")
-FormBuilder.filter_button      = _make_display("filter_button")
-FormBuilder.panel_shell        = _make_display("panel_shell")
-FormBuilder.bottom_panel_header = _make_display("bottom_panel_header")
-FormBuilder.tooltip            = _make_display("tooltip")
-FormBuilder.color_swatch       = _make_display("color_swatch")
-FormBuilder.kbd                = _make_display("kbd")
-FormBuilder.type_pill          = _make_display("type_pill")
-FormBuilder.encoding_pill      = _make_display("encoding_pill")
-FormBuilder.avatar             = _make_display("avatar")
-FormBuilder.brand_icon         = _make_display("brand_icon")
-FormBuilder.brand_tile         = _make_display("brand_tile")
-FormBuilder.provider_user_badge = _make_display("provider_user_badge")
+-- Registry of display-only node types. Adding a new one is a single-line
+-- append; the loop below stamps the matching FormBuilder:<name>(cfg) method.
+-- Value-bearing nodes (text/select/table/…) have their own bespoke helpers
+-- above and don't belong here.
+local DISPLAY_NODES = {
+  "breadcrumb", "url_block", "monogram", "state_block", "step_indicator",
+  "status_list", "alert", "info_card", "chip_bar", "copy_button",
+  "experimental_badge", "section_header", "filter_button", "panel_shell",
+  "bottom_panel_header", "tooltip", "color_swatch", "kbd", "type_pill",
+  "encoding_pill", "avatar", "brand_icon", "brand_tile", "provider_user_badge",
+}
+for _, name in ipairs(DISPLAY_NODES) do
+  FormBuilder[name] = _make_display(name)
+end
 
 ---Escape hatch — push an arbitrary node table (any `type`, any extra fields).
 function FormBuilder:field(node)

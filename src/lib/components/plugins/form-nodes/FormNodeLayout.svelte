@@ -31,8 +31,7 @@
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { highlightCode } from '$lib/utils/highlight';
 
-  import Alert     from '$lib/components/shared/ui/Alert.svelte';
-  import Callout   from '$lib/components/shared/ui/Callout.svelte';
+  import FormNodeAlert from './FormNodeAlert.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
   import ExperimentalBadge from '$lib/components/shared/ui/ExperimentalBadge.svelte';
   import SectionHeader     from '$lib/components/shared/ui/SectionHeader.svelte';
@@ -335,15 +334,16 @@
 <!-- ── alert (banner: Alert; inline: Callout) ────────────────────────── -->
 {:else if node.type === 'alert'}
   {@const an = node as any}
-  {@const av = (an.variant ?? 'info') as 'info' | 'warning' | 'error' | 'success'}
-  <div class={(node as any).class} style={(node as any).style}>
-    {#if an.style === 'inline'}
-      {@const cv = av === 'error' ? 'danger' : av === 'success' ? 'tip' : av}
-      <Callout variant={cv}>{an.text ?? ''}</Callout>
-    {:else}
-      <Alert variant={av} text={an.text} />
-    {/if}
-  </div>
+  <FormNodeAlert
+    title={an.title}
+    text={an.text}
+    variant={an.variant ?? 'info'}
+    style={an.style ?? 'banner'}
+    dismissable={!!an.dismissable}
+    collapsible={!!an.collapsible}
+    collapsed={!!an.collapsed}
+    class={an.class}
+  />
 
 <!-- ── code ──────────────────────────────────────────────────────────── -->
 {:else if node.type === 'code'}

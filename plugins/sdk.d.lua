@@ -3548,11 +3548,22 @@ function CoreAssert.register() end
 ---(`Callout.svelte`) you embed in body copy / docs. When style is `inline`,
 ---`variant = "error"` maps to the danger styling, `variant = "success"` maps
 ---to the tip styling.
+---
+---`title` renders bold above `text` and survives `collapsible` collapse so
+---the user always has something to click on. `dismissable = true` adds an ×
+---button (local-only — the alert is removed from the DOM, no plugin
+---round-trip; patch the node back in to restore). `collapsible = true` adds
+---a chevron toggle that hides the body text; pair with `collapsed = true`
+---to start collapsed.
 ---@class arbor.FormNodeAlert : arbor.FormNodeBase
----@field type    "alert"
----@field text    string
----@field variant "info"|"warning"|"error"|"success"|nil   Default "info"
----@field style   "banner"|"inline"|nil                    Default "banner"
+---@field type        "alert"
+---@field title       string|nil
+---@field text        string
+---@field variant     "info"|"warning"|"error"|"success"|nil   Default "info"
+---@field style       "banner"|"inline"|nil                    Default "banner"
+---@field dismissable boolean|nil   Default false. Adds an × button; local-only hide.
+---@field collapsible boolean|nil   Default false. Adds a chevron that hides `text`.
+---@field collapsed   boolean|nil   Default false. Initial collapse state.
 
 ---Vertical labeled wrapper around `children`. Same chrome the host uses on
 ---built-in form fields: label on top, content below, optional description /
