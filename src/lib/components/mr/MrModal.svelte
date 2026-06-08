@@ -38,6 +38,7 @@
   import { renderMarkdown } from '$lib/utils/markdown';
   import { installListAwareCopy } from '$lib/utils/html-to-text';
   import { tooltip } from '$lib/actions/tooltip';
+  import { previewImages } from '$lib/actions/previewImages';
   import { replaceEmojiShortcodes } from '$lib/utils/emoji';
   import { getMrConfig } from '$lib/ipc/config';
   import Button from '$lib/components/shared/ui/Button.svelte';
@@ -123,6 +124,16 @@
   const detail        = $derived(mrStore.detail);
   const detailLoading = $derived(mrStore.detailLoading);
   const detailMr      = $derived(detail?.mr ?? mr);
+
+  // Inline-image proxy context: the provider gates which token the backend
+  // attaches; for GitLab we pass the instance origin (from the MR web URL) so
+  // self-hosted hosts and relative `/uploads/...` paths resolve correctly.
+  const imageOpts = $derived({
+    provider: detailMr.provider,
+    baseUrl: detailMr.provider === 'gitlab' && detailMr.webUrl
+      ? (() => { try { return new URL(detailMr.webUrl).origin; } catch { return null; } })()
+      : null,
+  });
 
   const totalAdd = $derived(files.reduce((a, f) => a + f.additions, 0));
   const totalDel = $derived(files.reduce((a, f) => a + f.deletions, 0));
@@ -902,7 +913,7 @@
               </span>
             </div>
             <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-            <div class="desc-text md-body">{@html renderMarkdown(detailMr.description)}</div>
+            <div class="desc-text md-body" use:previewImages={imageOpts}>{@html renderMarkdown(detailMr.description)}</div>
           </div>
         {/if}
 
@@ -1030,7 +1041,7 @@
                         </span>
                       </div>
                       <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                      <div class="cmt-body md-body">{@html renderMarkdown(c.body)}</div>
+                      <div class="cmt-body md-body" use:previewImages={imageOpts}>{@html renderMarkdown(c.body)}</div>
                     </div>
                   </li>
                 {:else}

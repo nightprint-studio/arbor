@@ -26,6 +26,49 @@ pub fn delete_token() -> Result<()> {
     crate::auth::credential_store::delete(KEYRING_HOST, KEYRING_USER)
 }
 
+/// Fetch an image referenced inline by an issue/comment body for preview.
+///
+/// Linear uploads live under `*.linear.app` and require the bearer token; any
+/// other host (public CDN) is fetched anonymously so the token is never sent
+/// off-host. The bytes are returned in memory for the renderer to turn into a
+/// `data:` URL.
+pub async fn fetch_image_bytes(url: &str) -> Result<(Vec<u8>, Option<String>)> {
+    let is_linear = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_lowercase()))
+        .map(|h| h == "linear.app" || h.ends_with(".linear.app"))
+        .unwrap_or(false);
+
+    let mut req = http_client().get(url).header("Accept", "*/*");
+    if is_linear {
+        if let Some(token) = get_token()? {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| AppError::Other(format!("Image request failed: {e}")))?;
+    let status = resp.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(AppError::AuthFailed("Invalid or expired Linear API key".into()));
+    }
+    if !status.is_success() {
+        return Err(AppError::Other(format!("Image HTTP {status}")));
+    }
+    let ctype = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| AppError::Other(format!("Image read: {e}")))?;
+    Ok((bytes.to_vec(), ctype))
+}
+
 // ---------------------------------------------------------------------------
 // HTTP / GraphQL helper
 // ---------------------------------------------------------------------------

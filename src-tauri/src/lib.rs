@@ -1239,6 +1239,8 @@ pub fn run() {
             commands::issues_commands::jira_download_attachment,
             // Issues / provider-agnostic
             commands::issues_commands::branch_name_for_issue,
+            // Inline image proxy (issue/MR/PR body & comment preview)
+            commands::image_commands::fetch_remote_image,
             // Merge conflict resolution
             commands::merge_commands::merge_branch,
             commands::merge_commands::get_conflict_content,

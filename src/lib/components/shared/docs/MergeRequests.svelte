@@ -52,6 +52,7 @@
   <li><strong>Inline HTML safelist</strong><code>&lt;details&gt;</code> / <code>&lt;summary&gt;</code> (collapsible cards with a chevron), <code>&lt;p&gt;</code>, <code>&lt;blockquote&gt;</code>, <code>&lt;code&gt;</code>, <code>&lt;ul&gt;</code> / <code>&lt;ol&gt;</code>, <code>&lt;table&gt;</code> and friends survive verbatim. Scripts, styles, iframes, event handlers, and raw <code>&lt;a&gt;</code> tags are stripped or rewritten.</li>
   <li><strong>Fence language auto-detect</strong>fenced blocks without an explicit language (<code>```</code> without a tag) are sniffed (<em>Rust, TOML, JSON, YAML, bash, TS/JS, markup</em>) and highlighted deterministically — no more wall-of-grey for bot-generated diffs.</li>
   <li><strong>Markdown also applies to inline contexts</strong>same renderer is wired into the Issues detail modal so Linear / Jira (when ADF returns markdown) get the same treatment.</li>
+  <li><strong>Inline image preview</strong>images in a description or comment render in the body. They're fetched through the provider's authenticated path (the token is only sent to GitHub / the GitLab instance host, never to a third-party CDN), so screenshots attached to private PRs/MRs resolve. Click an image — or focus it and press Enter — to open the full-size preview: <kbd>Esc</kbd> closes, <kbd>←</kbd> / <kbd>→</kbd> page between images in the same body, clicking toggles zoom.</li>
 </ul>
 <div class="feature-grid">
   <div class="feature-card">

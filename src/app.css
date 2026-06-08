@@ -816,6 +816,54 @@ input[type="radio"]:disabled {
 .token.namespace                    { color: var(--syntax-keyword,  #cc7832); }
 .token.entity                       { color: var(--syntax-number,   #9876aa); }
 
+/* ---- Inline markdown images ----
+   Emitted by `renderMarkdown`/`prepareImagesForPreview` and enhanced by the
+   `previewImages` action (which proxies the source through the provider's auth
+   and opens the lightbox on click). Defined globally so every markdown surface
+   (issue/MR/PR descriptions & comments, security findings, …) shares one look
+   instead of each modal re-declaring it. The `data-img-state` attribute is set
+   by the action: loading → shimmer placeholder, error → broken hint. */
+.md-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 8px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  cursor: zoom-in;
+}
+.md-img[data-img-state="loading"] {
+  min-width: 120px;
+  min-height: 80px;
+  cursor: progress;
+  background:
+    linear-gradient(90deg,
+      var(--bg-elevated) 0%,
+      var(--bg-hover) 50%,
+      var(--bg-elevated) 100%);
+  background-size: 200% 100%;
+  animation: md-img-shimmer 1.2s ease-in-out infinite;
+}
+.md-img[data-img-state="error"] {
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: default;
+}
+/* `alt` text is shown by the browser for the error state (no src), styled by
+   the rule above; loaded images hide it. */
+.md-img:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+@keyframes md-img-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
 /* YAML — the Prism yaml grammar emits `.token.key` for map keys
    (`name:` left side), `.token.anchor` / `.token.alias` for `&foo` /
    `*foo`, and `.token.directive` for `%YAML 1.2`.  Without these

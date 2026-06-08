@@ -59,6 +59,7 @@
   import { depsExplorerStore } from '$lib/stores/depsExplorer.svelte';
   import CommandPalette from '../shared/CommandPalette.svelte';
   import Tooltip from '../shared/Tooltip.svelte';
+  import ImageLightbox from '../shared/ImageLightbox.svelte';
   import ConflictResolutionModal from '../stage/conflict/ConflictResolutionModal.svelte';
   import CheckoutConflictModal from '../shared/CheckoutConflictModal.svelte';
   import InitRepoModal from '../shared/InitRepoModal.svelte';
@@ -2456,6 +2457,10 @@
   <!-- Singleton tooltip host: every `use:tooltip` action publishes through
        `tooltipState` and this renders the result. -->
   <Tooltip />
+
+  <!-- Singleton image preview host: inline images in issue/MR/PR bodies open
+       here via `imageLightbox`. -->
+  <ImageLightbox />
 
   <!-- Conflict resolution modal (merge & stash) -->
   {#if uiStore.mergeModalOpen}

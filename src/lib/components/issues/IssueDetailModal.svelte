@@ -9,7 +9,8 @@
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
   import CopyButton from '$lib/components/shared/ui/CopyButton.svelte';
-  import { renderMarkdown } from '$lib/utils/markdown';
+  import { renderMarkdown, prepareImagesForPreview } from '$lib/utils/markdown';
+  import { previewImages } from '$lib/actions/previewImages';
   import { htmlToText, installListAwareCopy } from '$lib/utils/html-to-text';
   import { issuesStore, type IssueProvider } from '$lib/stores/issues.svelte';
   import { branchNameForIssue, jiraDownloadAttachment } from '$lib/ipc/issues';
@@ -37,6 +38,10 @@
     onClose: () => void;
     onRestoreFromScratch?: () => void | Promise<void>;
   } = $props();
+
+  // Inline-image proxy context for `previewImages` (description & comments).
+  // Linear/Jira resolve auth + relative paths backend-side, so no baseUrl.
+  const imageOpts = $derived({ provider });
 
   let mainEl = $state<HTMLElement | null>(null);
 
@@ -546,7 +551,8 @@
             <div class="sk-line" style="width:77%"></div>
           </div>
         {:else if liveIssue.description}
-          <div class="issue-description" class:rich-html={liveIssue.descriptionFormat === 'html'}>
+          <div class="issue-description" class:rich-html={liveIssue.descriptionFormat === 'html'}
+               use:previewImages={imageOpts}>
             <div class="copy-overlay">
               <CopyButton
                 value={() => bodyAsPlainText(liveIssue.description ?? '', liveIssue.descriptionFormat)}
@@ -557,7 +563,7 @@
             </div>
             <!-- eslint-disable-next-line svelte/no-at-html-tags -->
             {@html liveIssue.descriptionFormat === 'html'
-              ? liveIssue.description
+              ? prepareImagesForPreview(liveIssue.description)
               : renderDescription(liveIssue.description)}
           </div>
         {:else}
@@ -743,10 +749,11 @@
                   />
                 </span>
               </div>
-              <div class="comment-body" class:rich-html={comment.bodyFormat === 'html'}>
+              <div class="comment-body" class:rich-html={comment.bodyFormat === 'html'}
+                   use:previewImages={imageOpts}>
                 <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                 {@html comment.bodyFormat === 'html'
-                  ? comment.body
+                  ? prepareImagesForPreview(comment.body)
                   : renderDescription(comment.body)}
               </div>
             </div>

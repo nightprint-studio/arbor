@@ -1265,6 +1265,68 @@ pub async fn download_attachment(content_url: &str, dest_path: &std::path::Path)
     Ok(total)
 }
 
+/// Fetch an image referenced inline by an issue/comment body for preview.
+///
+/// Mirrors `download_attachment`'s auth + host handling but keeps the bytes in
+/// memory (the renderer turns them into a `data:` URL). Relative URLs — Jira's
+/// `renderedFields` HTML sometimes emits `/rest/api/3/attachment/...` paths —
+/// are resolved against the configured base URL. Credentials are attached only
+/// when the target is the Jira host; anything else is fetched anonymously so the
+/// token never leaks to a third-party CDN.
+pub async fn fetch_image_bytes(url: &str) -> Result<(Vec<u8>, Option<String>)> {
+    let cfg = require_config()?;
+
+    let abs = if url.starts_with("http://") || url.starts_with("https://") {
+        url.to_string()
+    } else {
+        let base = cfg.base_url.trim_end_matches('/');
+        if url.starts_with('/') { format!("{base}{url}") } else { format!("{base}/{url}") }
+    };
+
+    let cfg_host = reqwest::Url::parse(&cfg.base_url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_lowercase()));
+    let url_host = reqwest::Url::parse(&abs)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_lowercase()));
+    let same_host = matches!((&cfg_host, &url_host), (Some(a), Some(b)) if a == b);
+
+    let resp = if same_host {
+        jira_send_with_refresh(|c| {
+            http_client()
+                .get(&abs)
+                .header("Authorization", &c.auth_header)
+                .header("X-Atlassian-Token", "no-check")
+                .header("Accept", "*/*")
+        }).await?
+    } else {
+        http_client()
+            .get(&abs)
+            .header("Accept", "*/*")
+            .send()
+            .await
+            .map_err(|e| AppError::Other(format!("Image request failed: {e}")))?
+    };
+
+    let status = resp.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(AppError::AuthFailed("Invalid or expired Jira credentials".into()));
+    }
+    if !status.is_success() {
+        return Err(AppError::Other(format!("Image HTTP {status}")));
+    }
+    let ctype = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| AppError::Other(format!("Image read: {e}")))?;
+    Ok((bytes.to_vec(), ctype))
+}
+
 pub async fn create_issue_req(
     title: &str,
     description: Option<&str>,

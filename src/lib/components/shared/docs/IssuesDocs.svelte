@@ -108,6 +108,7 @@
   <li><strong>Linear</strong>Markdown rendered in-app via the shared sanitised renderer (same used by PR/MR bodies). Inline HTML safelist supports collapsible <code>&lt;details&gt;</code> / <code>&lt;summary&gt;</code>, tables, blockquotes and code; fenced blocks without an explicit language are auto-detected (Rust, TOML, JSON, YAML, bash, TS/JS, markup) and highlighted with Prism.</li>
   <li><strong>Jira</strong>Server-rendered HTML via <code>expand=renderedFields</code> (covers ADF on Cloud and wiki markup on Server / Data Center). HTML is sanitized with <code>ammonia</code> before display — scripts, iframes, event handlers and inline styles are stripped; <code>class</code> survives so syntax highlighting and panel chrome land correctly.</li>
 </ul>
+<p>Inline images embedded in a description or comment render directly in the body. They're fetched through the tracker's authenticated path on the Tokio runtime — so screenshots attached to private Linear / Jira issues resolve instead of showing a broken icon — and the token is only ever sent to the tracker's own host. Click an image (or focus it and press Enter) to open the full-size preview: <kbd>Esc</kbd> closes, <kbd>←</kbd> / <kbd>→</kbd> page between images in the same body, and clicking toggles zoom.</p>
 
 <h3>Attachments</h3>
 <p>Jira issues with attached files show a grid of cards between the description and the linked commits. Each card has a type-aware icon (image / video / audio / pdf / archive / text / generic), filename, size, and MIME type.</p>

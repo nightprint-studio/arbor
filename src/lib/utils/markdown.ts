@@ -83,7 +83,7 @@ function detectLang(code: string): string | null {
 
 const ALLOWED_HTML_TAGS = new Set([
   'a','abbr','b','blockquote','br','code','del','details','div','em',
-  'h1','h2','h3','h4','h5','h6','hr','i','ins','kbd','li','mark',
+  'h1','h2','h3','h4','h5','h6','hr','i','img','ins','kbd','li','mark',
   'ol','p','pre','q','s','small','span','strong','sub','summary','sup',
   'table','tbody','td','tfoot','th','thead','tr','u','ul',
 ]);
@@ -100,8 +100,68 @@ function sanitizeHtml(s: string): string {
   s = s.replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
   s = s.replace(/<a\b[^>]*>/gi, '<span class="md-link">');
   s = s.replace(/<\/a\s*>/gi, '</span>');
-  s = s.replace(/<img\b[^>]*\/?\s*>/gi, '');
+  // `<img>` is intentionally NOT stripped here — it's normalized for inline
+  // preview by `prepareImagesForPreview` (called at the end of `renderMarkdown`).
   return s;
+}
+
+function attrEsc(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function attrDecode(s: string): string {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+/** Inline-image source we're willing to render: http(s), protocol-/root-relative
+ *  (resolved backend-side per provider), or a self-contained `data:image` URL.
+ *  Everything else (javascript:, file:, …) is dropped. */
+function isSafeImgUrl(u: string): boolean {
+  const t = u.trim();
+  return /^https?:\/\//i.test(t)
+    || /^\/\//.test(t)
+    || /^\//.test(t)
+    || /^data:image\//i.test(t);
+}
+
+/**
+ * Normalize every `<img>` in rendered HTML into the deferred-load form the
+ * `previewImages` action understands: the source moves to `data-img-src` so the
+ * WebView never tries to load a (possibly auth-gated) URL directly — the action
+ * fetches it through the provider proxy and swaps in the result. `data:` images
+ * keep a direct `src` (already self-contained, nothing to proxy). Unsafe schemes
+ * are dropped.
+ *
+ * Exported so the issue detail modal can run it over Jira's pre-rendered HTML
+ * descriptions/comments, which don't pass through `renderMarkdown`.
+ */
+export function prepareImagesForPreview(html: string): string {
+  return html.replace(/<img\b([^>]*)>/gi, (_m, attrs: string) => {
+    const rawSrc =
+      attrs.match(/\bsrc\s*=\s*"([^"]*)"/i)?.[1]
+      ?? attrs.match(/\bsrc\s*=\s*'([^']*)'/i)?.[1]
+      ?? attrs.match(/\bdata-img-src\s*=\s*"([^"]*)"/i)?.[1]
+      ?? '';
+    const rawAlt =
+      attrs.match(/\balt\s*=\s*"([^"]*)"/i)?.[1]
+      ?? attrs.match(/\balt\s*=\s*'([^']*)'/i)?.[1]
+      ?? '';
+    const src = attrDecode(rawSrc);
+    if (!src || !isSafeImgUrl(src)) return '';
+    const altAttr = rawAlt ? ` alt="${attrEsc(attrDecode(rawAlt))}"` : '';
+    if (/^data:image\//i.test(src)) {
+      return `<img class="md-img" src="${attrEsc(src)}"${altAttr} />`;
+    }
+    return `<img class="md-img" data-img-src="${attrEsc(src)}"${altAttr} />`;
+  });
 }
 
 function tagName(rawTag: string): string {
@@ -176,6 +236,15 @@ export function renderMarkdown(md: string): string {
   // genuine HTML-comment syntax inside fenced blocks intact.
   text = text.replace(/<!--[\s\S]*?-->/g, '');
 
+  // Markdown image syntax → `<img>`. Done before `extractAllowedTags` so the
+  // generated tags flow through the same HTML path (and `<img>` is now an
+  // allowed tag); `prepareImagesForPreview` normalizes them at the end.
+  text = text.replace(
+    /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g,
+    (_m, alt: string, url: string, title?: string) =>
+      `<img src="${attrEsc(url)}" alt="${attrEsc(alt)}"${title ? ` title="${attrEsc(title)}"` : ''}>`,
+  );
+
   text = sanitizeHtml(text);
   const htmlTags: string[] = [];
   text = extractAllowedTags(text, htmlTags);
@@ -229,5 +298,5 @@ export function renderMarkdown(md: string): string {
   closeList();
   let result = out.join('');
   result = result.replace(/\x00HT(\d+)\x00/g, (_m, i) => htmlTags[parseInt(i)]);
-  return result;
+  return prepareImagesForPreview(result);
 }
