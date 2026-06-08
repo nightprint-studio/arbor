@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { Loader, AlertCircle, User, Calendar } from 'lucide-svelte';
+  import { AlertCircle, User, Calendar } from 'lucide-svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
-  import { getFileBlame } from '$lib/ipc/diff';
+  import { getFileBlameStreaming } from '$lib/ipc/diff';
   import { highlight } from '$lib/utils/diff-formatter';
-  import type { BlameLine } from '$lib/types/git';
+  import type { BlameLine, BlameProgress } from '$lib/types/git';
   import Modal from './Modal.svelte';
   import ModalHeader from './ModalHeader.svelte';
+  import ProgressBar from './ui/ProgressBar.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   let {
@@ -24,18 +25,79 @@
   let loading    = $state(true);
   let error      = $state<string | null>(null);
   let hoveredOid = $state<string | null>(null);
+  // Determinate progress streamed from `git blame --incremental` while the
+  // history walk runs. `null` until the first tick (or for the libgit2
+  // fallback, which never ticks → the bar stays indeterminate).
+  let progress   = $state<BlameProgress | null>(null);
+
+  // Virtualization state — without windowing, files of a few thousand lines
+  // freeze the modal for seconds (Prism highlight + DOM cost per row × N),
+  // and the spinner reads as "loading forever" since the main thread is busy
+  // before the first paint of the table lands.
+  let scrollEl  = $state<HTMLElement | null>(null);
+  let scrollTop = $state(0);
+  let viewportH = $state(640);
 
   // ── Load blame ────────────────────────────────────────────────────────────────
 
+  // Monotonic request id. Every (re)load bumps it; only the callbacks for the
+  // CURRENT generation are allowed to touch state. This is what lets the
+  // spinner reliably clear: the latest request ALWAYS owns `loading`, so a
+  // superseded fetch resolving late can't flip it — and, crucially, can't
+  // leave it stuck either. (The previous tabId/path-equality guard could fail
+  // and strand `loading = true` forever, which read as an eternal spinner.)
+  let loadGen = 0;
+  // Safety net so a genuinely hung backend (a huge repo where libgit2 blame
+  // walks very deep history) surfaces as an actionable error instead of an
+  // infinite spinner.
+  const BLAME_TIMEOUT_MS = 30_000;
+
+  /** Kick off a blame fetch under a fresh generation. Returns the timeout
+   *  handle so the effect can cancel it on re-run; `retry()` lets it self-fire.
+   *  Single source of truth for the load lifecycle — both the mount effect and
+   *  the Retry button go through here. */
+  function runLoad(): ReturnType<typeof setTimeout> {
+    const myTabId = tabId;
+    const myPath  = path;
+    const myGen   = ++loadGen;
+
+    loading   = true;
+    error     = null;
+    lines     = [];
+    progress  = null;
+    scrollTop = 0;
+
+    const timer = setTimeout(() => {
+      if (myGen !== loadGen) return;
+      error   = 'Blame timed out — this file may have very deep history. Retry to try again.';
+      loading = false;
+    }, BLAME_TIMEOUT_MS);
+
+    getFileBlameStreaming(myTabId, myPath, p => {
+      // Drop ticks from a superseded generation; the timer-driven progress
+      // bump also keeps the timeout from firing mid-walk on a healthy backend.
+      if (myGen === loadGen) progress = p;
+    })
+      .then(r => { if (myGen === loadGen) lines = r; })
+      .catch(e => { if (myGen === loadGen) error = String(e); })
+      .finally(() => {
+        if (myGen !== loadGen) return;
+        clearTimeout(timer);
+        loading = false;
+      });
+
+    return timer;
+  }
+
   $effect(() => {
-    loading = true;
-    error   = null;
-    lines   = [];
-    getFileBlame(tabId, path)
-      .then(r => { lines = r; })
-      .catch(e => { error = String(e); })
-      .finally(() => { loading = false; });
+    // Read the props so the effect re-runs when either changes.
+    void tabId; void path;
+    const timer = runLoad();
+    // Drop the timer if the effect re-runs (new file) before this fetch settles.
+    return () => clearTimeout(timer);
   });
+
+  function retry() { runLoad(); }
 
   // ── Commit color palette ──────────────────────────────────────────────────────
 
@@ -88,6 +150,43 @@
 
   const filename = $derived(path.split('/').pop() ?? path);
   const dirpart  = $derived(path !== filename ? path.slice(0, path.lastIndexOf('/')) : '');
+
+  const progressPct = $derived(
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.done / progress.total) * 100))
+      : 0,
+  );
+
+  // Row height matches `.blame-row { min-height: 21px }` + 1px of margin on
+  // group-start rows (counted in the spacer math so the scroll position never
+  // drifts past the actual content). With `white-space: pre` the row height
+  // is uniform regardless of line length.
+  const ROW_HEIGHT = 22;
+  const ROW_BUFFER = 25;
+
+  const visStart = $derived(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - ROW_BUFFER));
+  const visEnd   = $derived(Math.min(
+    lines.length,
+    Math.ceil((scrollTop + viewportH) / ROW_HEIGHT) + ROW_BUFFER,
+  ));
+  const visibleLines = $derived(lines.slice(visStart, visEnd));
+  const topSpacer    = $derived(visStart * ROW_HEIGHT);
+  const bottomSpacer = $derived(Math.max(0, (lines.length - visEnd) * ROW_HEIGHT));
+
+  function onScroll() {
+    if (!scrollEl) return;
+    scrollTop = scrollEl.scrollTop;
+    viewportH = scrollEl.clientHeight;
+  }
+
+  // Initial viewport measure once the scroll container mounts. Without this
+  // the first `visEnd` is computed against the fallback `viewportH = 640` and
+  // tall modals would briefly under-render before the first scroll event.
+  $effect(() => {
+    if (scrollEl) {
+      viewportH = scrollEl.clientHeight;
+    }
+  });
 </script>
 
 <Modal {onClose} width="min(96vw, 1280px)" height="88vh" padBody={false} ariaLabel="Git Blame — {path}">
@@ -102,17 +201,34 @@
     </ModalHeader>
   {/snippet}
 
-  <div class="blame-scroll">
+  <div class="blame-scroll" bind:this={scrollEl} onscroll={onScroll}>
     {#if loading}
-      <div class="state-overlay">
-        <Loader size={20} class="spin" />
-        <span>Loading blame…</span>
+      <div class="state-overlay loading-blame">
+        <span class="loading-title">Walking history…</span>
+        <ProgressBar
+          indeterminate={!progress || progress.total === 0}
+          value={progress?.done ?? 0}
+          max={progress?.total || 1}
+          height={5}
+          ariaLabel="Blame progress"
+        />
+        {#if progress && progress.total > 0}
+          <span class="loading-meta">
+            {progress.done.toLocaleString()} / {progress.total.toLocaleString()} lines ({progressPct}%)
+          </span>
+          {#if progress.currentShort}
+            <span class="loading-commit" use:tooltip={progress.currentSummary ?? ''}>
+              {progress.currentShort}{#if progress.currentDate} · {formatDate(progress.currentDate)}{/if}
+            </span>
+          {/if}
+        {/if}
       </div>
 
     {:else if error}
       <div class="state-overlay err">
         <AlertCircle size={18} />
         <span>{error}</span>
+        <button class="blame-retry" onclick={retry}>Retry</button>
       </div>
 
     {:else if lines.length === 0}
@@ -122,7 +238,8 @@
 
     {:else}
       <div class="blame-table">
-        {#each lines as line (line.line_no)}
+        <div class="blame-spacer" style="height: {topSpacer}px"></div>
+        {#each visibleLines as line (line.line_no)}
           {@const color = oidToColor(line.commit_oid)}
           {@const isHovered = hoveredOid === line.commit_oid}
           <div
@@ -164,6 +281,7 @@
             <code class="line-content">{@html highlight(line.content, path)}</code>
           </div>
         {/each}
+        <div class="blame-spacer" style="height: {bottomSpacer}px"></div>
       </div>
     {/if}
   </div>
@@ -229,12 +347,61 @@
   .state-overlay.err   { color: var(--error, #c75450); }
   .state-overlay.muted { color: var(--text-disabled); }
 
+  /* Determinate loading: progress bar + counters, fixed width so the bar
+     doesn't stretch the full modal. */
+  /* `.state-overlay` is the flex *container* (full width by default), so a
+     fixed width here would left-align the whole block — center it with auto
+     margins while constraining the bar's width. */
+  .loading-blame { gap: 8px; width: 320px; max-width: 80%; margin: 0 auto; }
+  .loading-blame :global(.progress-track) { align-self: stretch; }
+  .loading-title {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .loading-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-code);
+  }
+  .loading-commit {
+    font-size: 11px;
+    color: var(--text-disabled);
+    font-family: var(--font-code);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .blame-retry {
+    margin-top: 2px;
+    padding: 5px 14px;
+    font-size: 12px;
+    font-family: var(--font-ui-sans);
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+  }
+  .blame-retry:hover { background: var(--bg-hover); }
+
 
   /* ── Blame table ── */
   .blame-table {
     display: flex;
     flex-direction: column;
     min-width: max-content;
+  }
+
+  /* Top/bottom spacer for windowed virtualization — its height stands in for
+     the rows we skipped, so scrollHeight matches the full N×ROW_HEIGHT and
+     the scroll-thumb position stays consistent with the line numbers. */
+  .blame-spacer {
+    flex-shrink: 0;
+    width: 1px;
   }
 
   .blame-row {

@@ -41,9 +41,16 @@
       : undefined
   );
 
-  // Remote branches keep the full "origin/branch" name so they're visually
-  // distinct from the matching local branch when both appear in the graph.
-  const displayName = $derived(ref.name);
+  // Remote branches drop the remote-name prefix (`origin/`, `upstream/`, …)
+  // because the Globe icon already says "this is a remote", and on a narrow
+  // Branches column those 8+ characters were just pushing the meaningful
+  // suffix off the right edge. The full ref name still lives in the tooltip
+  // and is what gets copied to the clipboard.
+  const displayName = $derived(
+    isRemoteBranch
+      ? ref.name.slice(ref.name.indexOf('/') + 1) || ref.name
+      : ref.name
+  );
 </script>
 
 {#if isTag}

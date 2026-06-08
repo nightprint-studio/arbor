@@ -180,6 +180,20 @@ function createCacheStore() {
     tabCaches.delete(tabId);
     _cacheVersion++;
     if (tabId === _activeTabId) _activeTabRefreshed = null;
+    // Wake up any per-feature stores that hold their own derived state on top
+    // of the cache. These stores keep an in-memory copy of the snapshot data
+    // (the MR sidebar's `mrs`, the pipeline panel's `ciRuns`), so dropping the
+    // snapshot here is invisible to them until they're told to re-read. The MR
+    // sidebar kept rendering its previous list after createMr/mergeMr/closeMr;
+    // the CI panel stayed frozen on a remote-mutating push until the next
+    // poll. Dynamic imports keep this module decoupled from feature stores at
+    // startup.
+    import('./mr.svelte')
+      .then(m => m.mrStore.onCacheInvalidated(tabId))
+      .catch(() => { /* feature store not loaded yet — nothing to refresh */ });
+    import('./pipelines.svelte')
+      .then(m => m.pipelinesStore.onCacheInvalidated(tabId))
+      .catch(() => { /* feature store not loaded yet — nothing to refresh */ });
   }
 
   function invalidateAll() {

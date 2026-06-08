@@ -40,6 +40,12 @@ function createMrStore() {
   // otherwise overwrite the newer one's data.
   let loadVersion = 0;
 
+  // Bumped on cache invalidation so the sidebar's $effect re-runs and refetches.
+  // The cache store wipes its per-tab snapshot but never told this store, so the
+  // sidebar kept showing the old `mrs` array until the user clicked Refresh or
+  // changed tab. Hooking invalidation through here is how the sidebar learns.
+  let invalidationTick = $state(0);
+
   const provider = $derived(providerInfo?.provider ?? null);
 
   async function detectProvider(tabId: string): Promise<CiProviderInfo | null> {
@@ -163,6 +169,16 @@ function createMrStore() {
     allLoadedTab = null;
   }
 
+  /// Called by the cache invalidation hook when the backend snapshot for a tab
+  /// has been dropped (after createMr / mergeMr / closeMr / ...). Clears the
+  /// "all states" pool and bumps the reactive tick so subscribers (sidebar,
+  /// palette) re-run their load effect against the freshly-empty cache.
+  function onCacheInvalidated(_tabId: string) {
+    allMrs       = [];
+    allLoadedTab = null;
+    invalidationTick++;
+  }
+
   async function loadDetail(tabId: string, number: number) {
     activeNumber = number;
     detail       = null;
@@ -200,9 +216,11 @@ function createMrStore() {
     get allMrs()        { return allMrs; },
     get allLoading()    { return allLoading; },
     get allLoadedTab()  { return allLoadedTab; },
+    get invalidationTick() { return invalidationTick; },
     load,
     loadAll,
     clearAll,
+    onCacheInvalidated,
     loadDetail,
     clearDetail,
     setFilter,

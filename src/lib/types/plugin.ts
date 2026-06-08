@@ -792,6 +792,9 @@ export interface FormTreeNode {
   group?:   boolean;
   /** Icon name (subset of Lucide — see docs). */
   icon?:    string;
+  /** Explicit colour for the row icon (any CSS colour). Use to tint group
+   *  headers per-category so a deep tree doesn't read monochrome. */
+  icon_color?: string;
   /** Small inline pill badge shown after the label (e.g. "Tomcat"). */
   tag?:     string;
   /** Colour variant for `tag`. */
@@ -818,6 +821,31 @@ export interface FormTreeNode {
   /** Per-row context menu — wins over the tree-level `menu_items` when set.
    *  Empty array suppresses the menu for this row even if the tree has one. */
   menu_items?:  FormTreeMenuItem[];
+  /** Inline editor for a leaf row. When set (and the row is not a `group`),
+   *  activating the row swaps its value area for this field node, rendered
+   *  through the normal node dispatcher — so every existing editor (`text`,
+   *  `number`, `select`, `toggle`, `vec_field`, `color`…) works verbatim. The
+   *  editor's own `actions.change` / dispatch fires the mutation on commit;
+   *  the tree just toggles the read ⇄ edit view. Mirrors `PropertyRow.edit_node`. */
+  edit_node?:   FormNode;
+  /** Right-aligned display value for a leaf (shown before the type pill, dim
+   *  monospace). Distinct from `value` (the node's selection key) and
+   *  `description` (which sits under the label). Use for the "key: value"
+   *  source-tree look. */
+  value_display?: string;
+  /** Code-editor colour tone for `value_display` (number / string / enum /
+   *  bool / entity / handle / accent / warn / muted). Default: inherits. */
+  value_tone?:    string;
+  /** Type pill rendered after the value (kind-coloured via the shared
+   *  `TypePill` — richer than the flat `tag`). Use for reflection/source
+   *  trees where each leaf has a type (`Vec3`, `u32`, `enum`, …). */
+  pill?:          string;
+  /** Colour bucket for `pill` (defaults to `pill`). See `TypePill` `kind`. */
+  pill_kind?:     string;
+  /** Explicit semantic tone for `pill` (`accent` / `info` / `success` /
+   *  `warning` / `error` / `muted`). Wins over `pill_kind` — use for badges
+   *  that aren't a value-kind (e.g. a "bevy" provenance badge on a group). */
+  pill_tone?:     'accent' | 'info' | 'success' | 'warning' | 'error' | 'muted';
 }
 
 /**
@@ -874,6 +902,11 @@ export interface FormFieldTree extends FormFieldBase {
   /** Optional fixed viewport height (px or CSS length); falls back to
    *  `max_height`. Useful for virtualized trees. */
   height?:      number | string;
+  /** Make the tree grow to fill the remaining height of its parent flex
+   *  column and own the only scroll region (no `max_height` / fixed
+   *  `height`). Use in a flush modal body so the tree — not the form body —
+   *  scrolls, avoiding a double scrollbar. Default: false. */
+  fill?:        boolean;
   /** Render an inline filter input at the top of the tree. Matches `label`
    *  and `description` case-insensitively, dims non-matching ancestors,
    *  auto-expands subtrees that contain matches, and highlights the matched
@@ -881,6 +914,15 @@ export interface FormFieldTree extends FormFieldBase {
   searchable?:  boolean;
   /** Placeholder for the filter input. Default `"Filter…"`. */
   search_placeholder?: string;
+  /** Enable JSONPath-style navigation in the search box: when the query starts
+   *  with `$` (e.g. `$.gameplay.rt_engine.ActionAbilities`) the substring
+   *  filter is replaced by path matching against the node-label hierarchy —
+   *  segments are prefix-matched as an ordered subsequence of each node's
+   *  ancestor labels. Matches are navigable with F3 / Shift+F3 (and ↑/↓ /
+   *  Enter from the input), a hit counter shows in the search row, and a
+   *  results rail listing the hits opens beside the tree. Plain (non-`$`)
+   *  queries still substring-filter as usual. Requires `searchable`. */
+  path_query?:  boolean;
   /** Enable HTML5 drag-drop reorder among rows. Group rows (expansion
    *  headers) are non-draggable by default; per-row overrides via
    *  `tnode.draggable` / `tnode.drop_target`. Drop landing zone resolves
@@ -1685,6 +1727,8 @@ export interface FormTab {
   badge?:   string;
   /** Variant hint for the badge color. */
   badge_kind?: 'info' | 'success' | 'warning' | 'error' | 'muted' | 'accent';
+  /** Disable the tab — dimmed, not selectable. */
+  disabled?: boolean;
   /** Optional dim subtitle shown under the label — useful when the label
    *  is a short alias and the full identifier (type path, etc.) should
    *  stay visible without truncation. */
@@ -1727,6 +1771,13 @@ export interface FormNodeTabs extends FormNodeBase {
   type:         'tabs';
   tabs:         FormTab[];
   default_tab?: string;
+  /** Render only the active tab's panel; inactive panels render nothing
+   *  until selected (re-mounted on each switch). Use for heavy panels — a
+   *  large syntax-highlighted code dump, hundreds of cards — where mounting
+   *  every panel up-front bloats the DOM and stalls interaction. Field values
+   *  are still collected from every tab regardless (collection walks the node
+   *  tree, not the DOM), so submit is unaffected. Default: false. */
+  lazy?:        boolean;
   /**
    * When set, the active tab id is mirrored to `localStorage[persist_key]`
    * — the user's selection survives the modal closing and reopening.
@@ -1784,6 +1835,85 @@ export interface FormNodeCardRow extends FormNodeBase {
   label?:       string;
   description?: string;
   children:     FormNode[];
+}
+
+/** Responsive card grid container.
+ *
+ *  Lays out `children` in an auto-fit grid where each cell is at least
+ *  `min_card` wide (default `280px`) and expands to fill the available
+ *  width. Children are typically `section variant="component"` cards or
+ *  `info_card`s. Unlike `card_row`, the grid wraps to multiple rows when
+ *  there isn't enough width for all cards side-by-side. */
+export interface FormNodeCardGrid extends FormNodeBase {
+  type:       'card_grid';
+  /** Minimum card width before wrapping (e.g. `"280px"`, `"22ch"`).
+   *  Default: `"280px"`. */
+  min_card?:  string;
+  /** Gap between cards (e.g. `"8px"`). Default: `"8px"`. */
+  gap?:       string;
+  children:   FormNode[];
+}
+
+/** One row in a `property_grid`. Read-only by default: renders
+ *  `label` on the left, the formatted `value` on the right with an optional
+ *  type `pill`. A row is either a leaf (has `value`) or a group (`children`,
+ *  for nested structs / arrays). */
+export interface PropertyRow {
+  /** Stable id — required when the row is editable so the grid can track
+   *  which row is open for editing. Falls back to `label` + index. */
+  id?:        string;
+  label:      string;
+  /** Pre-formatted display string (e.g. `"[ 4.50, 0.00, -2.25 ]"`, `"82"`,
+   *  `"Job::Legionary"`). The plugin owns formatting — the grid never
+   *  interprets the raw value. */
+  value?:     string;
+  /** Syntax-highlight colour for the value text, code-editor style. When
+   *  omitted the value uses the default primary colour. */
+  value_tone?: 'number' | 'string' | 'enum' | 'bool' | 'entity' | 'handle' | 'muted' | 'warn' | 'accent';
+  /** Type pill rendered right-aligned (e.g. `"u32"`, `"Vec3"`, `"enum"`). */
+  pill?:      string;
+  /** Pill colour bucket — defaults to `pill`. Mirrors `TypePill`'s `kind`. */
+  pill_kind?: string;
+  pill_tooltip?: string;
+  /** Tooltip on the value cell (typical use: the full / untruncated value). */
+  tooltip?:   string;
+  /** Dim the value (e.g. `None` / null / default). */
+  muted?:     boolean;
+  /** Click-to-copy the value text (client-side, no plugin round-trip).
+   *  Shows a copy glyph on row hover. */
+  copyable?:  boolean;
+  /** Immutable field — shows a lock glyph and suppresses editing even when
+   *  `edit_node` is present. */
+  locked?:    boolean;
+  /** Nested struct / array rows — rendered indented under this row. */
+  children?:  PropertyRow[];
+  /** Group rows only: render a chevron that folds the children. */
+  collapsible?: boolean;
+  /** Group rows only: initial open state when `collapsible` (default open). */
+  open?:      boolean;
+  /** When present (and not `locked`), the row gains a hover pencil; clicking
+   *  it swaps the value cell for this node rendered inline (a `field`,
+   *  `vec_field`, `color`, `select`, … — the grid delegates to the normal
+   *  node dispatcher, so all existing editors work unchanged). The node's own
+   *  `action` / `dispatch` fires the mutation on commit. */
+  edit_node?: FormNode;
+}
+
+/** Read-only-first property / reflection grid.
+ *
+ *  Renders a dense, IntelliJ-inspector-style list of `label → value` rows
+ *  with right-aligned type pills, nested-struct indentation, lock glyphs for
+ *  immutable fields, and optional per-row click-to-edit (via `edit_node`).
+ *
+ *  Generic — any plugin inspecting structured data (config dumps, JSON,
+ *  ECS reflection, API responses) can use it. The plugin formats the values
+ *  and supplies the editor nodes; the grid owns only the layout and the
+ *  read-only ⇄ edit toggle. */
+export interface FormNodePropertyGrid extends FormNodeBase {
+  type:    'property_grid';
+  rows:    PropertyRow[];
+  /** Empty-state text shown when `rows` is empty. Default: `"(no fields)"`. */
+  empty?:  string;
 }
 
 export interface CfgListItemTag {
@@ -1951,6 +2081,10 @@ export interface FormNodeChipBar extends FormNodeBase {
   default?: string | string[];
   multi?:   boolean;
   size?:    'sm' | 'md';
+  /** Tint inactive chips by their `tone` too (coloured text + border), so the
+   *  bar reads like a legend before selection. Default: false (neutral until
+   *  selected). */
+  tint_inactive?: boolean;
   /** When set, also fires this action with `{ name, value }` whenever the
    *  selection changes (useful when no parent uses `show_if`). */
   action?:  string;
@@ -2565,6 +2699,8 @@ export type FormLayoutNode =
   | FormNodeTabs
   | FormNodeWizard
   | FormNodeCardRow
+  | FormNodeCardGrid
+  | FormNodePropertyGrid
   | FormNodeCfgList
   | FormNodeSuggestGrid
   | FormNodeMenuButton
@@ -2702,6 +2838,13 @@ export interface FormSidecarCfg {
   width?:    number;
   /** Optional header line above the pane contents. */
   title?:    string;
+  /**
+   * Which edge the pane slides in from. Default: `'right'` (back-compat with
+   * the RON/JSON-style sidecars). Use `'left'` to anchor the pane next to a
+   * left-side activity bar (e.g. an entity navigator) — it renders before the
+   * main body and borders on its right edge.
+   */
+  side?:     'left' | 'right';
   /** Pane contents as FormNodes. */
   children:  FormNode[];
 }

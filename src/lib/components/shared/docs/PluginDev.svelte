@@ -508,6 +508,8 @@ end)`, '.lua')}</pre>
     <tr><td><code>menu_button</code></td><td>label?, icon, icon_only, tooltip, options[]</td><td>Button that opens a dropdown menu</td></tr>
     <tr><td><code>tree_layout</code></td><td>nav_children[], content_children[], nav_width</td><td>2-col split (IntelliJ-style run configs)</td></tr>
     <tr><td><code>card_row</code></td><td>label, description, children[]</td><td>Two-column row inside a card section</td></tr>
+    <tr><td><code>card_grid</code></td><td>min_card?, gap?, children[]</td><td>Responsive auto-fit grid of cards — wraps to multiple rows when narrow. Each cell is at least <code>min_card</code> wide (default <code>"280px"</code>).</td></tr>
+    <tr><td><code>property_grid</code></td><td>rows[], empty?</td><td>Read-only-first reflection grid: dense <code>label → value</code> rows with type pills, nested-struct indent, lock glyphs, per-row click-to-edit via <code>edit_node</code>. Generic structured-data inspector.</td></tr>
     <tr><td><code>cfg_list</code></td><td>items[]</td><td>Item rows with active dot + edit/delete on hover</td></tr>
     <tr><td><code>suggest_grid</code></td><td>items[]</td><td>2-col grid of suggestion cards</td></tr>
     <tr><td><code>counter_grid</code></td><td>items[], min_width?, gap?, padding?, actions.select?</td><td>Responsive KPI tile grid; <code>select</code> fires <code>&#123; key &#125;</code></td></tr>

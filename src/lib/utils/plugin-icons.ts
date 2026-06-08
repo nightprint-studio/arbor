@@ -59,7 +59,7 @@ import {
   Fingerprint,
   // Arrows
   ChevronRight, ChevronDown, ChevronUp, ChevronLeft, ChevronsUpDown,
-  ChevronsRight,
+  ChevronsDownUp, ChevronsRight,
   ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
   ArrowUpToLine, ArrowDownToLine, ArrowLeftRight,
   // Layout
@@ -114,7 +114,7 @@ export const PLUGIN_ICONS: Record<string, any> = {
   Shield, ShieldCheck, ShieldAlert, ShieldX, ShieldOff, ShieldQuestion,
   Key, KeyRound, KeySquare,
   Fingerprint,
-  ChevronRight, ChevronDown, ChevronUp, ChevronLeft, ChevronsUpDown, ChevronsRight,
+  ChevronRight, ChevronDown, ChevronUp, ChevronLeft, ChevronsUpDown, ChevronsDownUp, ChevronsRight,
   ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
   ArrowUpToLine, ArrowDownToLine, ArrowLeftRight,
   Workflow, Boxes, Box, Layers, Puzzle, Grid3x3,

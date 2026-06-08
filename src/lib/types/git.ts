@@ -101,6 +101,17 @@ export interface BlameLine {
   is_group_start: boolean;
 }
 
+/** Progress tick streamed while a `git blame --incremental` walk runs.
+ *  `done`/`total` count attributed lines; `current_*` describe the commit the
+ *  walk is currently on. */
+export interface BlameProgress {
+  done: number;
+  total: number;
+  currentShort?: string;
+  currentDate?: number;   // unix seconds
+  currentSummary?: string;
+}
+
 // ---- Git Notes ----
 
 export type NoteRemoteStatus = 'local_only' | 'in_sync' | 'out_of_sync' | 'unknown';

@@ -793,6 +793,10 @@ pub fn get_file_blame(repo: &Repository, path: &str) -> Result<Vec<BlameLine>> {
 
     let mut result: Vec<BlameLine> = Vec::new();
     let mut prev_oid: Option<Oid> = None;
+    // Cache the (short_oid, summary) per commit OID: a single commit usually
+    // owns many hunks, and `find_commit` + `summary()` per hunk was redundant
+    // work that grows with the file's churn.
+    let mut summary_cache: std::collections::HashMap<Oid, (String, String)> = std::collections::HashMap::new();
 
     for hunk in blame.iter() {
         let oid = hunk.final_commit_id();
@@ -806,15 +810,22 @@ pub fn get_file_blame(repo: &Repository, path: &str) -> Result<Vec<BlameLine>> {
 
         // Try to get the commit summary; fall back gracefully.
         let (commit_oid_str, short_oid, summary) = if oid.is_zero() {
-            ("0000000".repeat(1), "0000000".to_string(), "Uncommitted changes".to_string())
+            // Git's canonical null OID is 40 zero hex chars — match that width
+            // so the "uncommitted" sentinel is the same shape as a real OID
+            // (the previous `"0000000".repeat(1)` produced a stray 7-char id).
+            // The frontend detects it via `startsWith('0000000')`.
+            ("0".repeat(40), "0000000".to_string(), "Uncommitted changes".to_string())
         } else {
             let full = oid.to_string();
-            let short = full[..7.min(full.len())].to_string();
-            let summ = repo
-                .find_commit(oid)
-                .ok()
-                .and_then(|c| c.summary().map(|s| s.to_string()))
-                .unwrap_or_default();
+            let (short, summ) = summary_cache.entry(oid).or_insert_with(|| {
+                let short = full[..7.min(full.len())].to_string();
+                let summ = repo
+                    .find_commit(oid)
+                    .ok()
+                    .and_then(|c| c.summary().map(|s| s.to_string()))
+                    .unwrap_or_default();
+                (short, summ)
+            }).clone();
             (full, short, summ)
         };
 

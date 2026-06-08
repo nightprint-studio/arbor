@@ -3,7 +3,7 @@
   don't carry an editable value of their own:
     container, row, section, copy_link, icon, separator, paragraph, alert,
     code, label, divider, info_card, chip_bar, form_field, tabs,
-    tree_layout, wizard, card_row, cfg_list, switch, breadcrumb,
+    tree_layout, wizard, card_row, card_grid, cfg_list, switch, breadcrumb,
     url_block, monogram, state_block, step_indicator, status_list,
     copy_button, experimental_badge, section_header, filter_button,
     panel_shell, bottom_panel_header, tooltip, color_swatch,
@@ -350,8 +350,13 @@
 {:else if node.type === 'code'}
   {@const cdn = node as any}
   {@const lang = cdn.language as string | undefined}
+  {@const tooLargeToHighlight = (cdn.text?.length ?? 0) > 40000}
+  <!-- Prism tokenises synchronously on the main thread and wraps every token
+       in a span — on a large dump (a full ECS entity, a big API response) that
+       both freezes the UI and bloats the DOM. Above ~40k chars we render the
+       text plain (still monospace). -->
   <div class="pf-code-wrap {(node as any).class ?? ''}" style={(node as any).style}>
-    {#if lang}
+    {#if lang && !tooLargeToHighlight}
       <pre class="pf-code language-{lang}"><code class="language-{lang}">{@html highlightCode(cdn.text ?? '', lang)}</code></pre>
     {:else}
       <pre class="pf-code"><code>{cdn.text}</code></pre>
@@ -413,6 +418,7 @@
       selected={ctx.values[cb.name] as any}
       multi={!!cb.multi}
       size={cb.size ?? 'md'}
+      tintInactive={!!cb.tint_inactive}
       onSelect={(sel) => {
         ctx.values[cb.name] = sel as any;
         ctx.notifyChange(cb.name, sel);
@@ -829,15 +835,19 @@
 <!-- ── tabs ──────────────────────────────────────────────────────────── -->
 {:else if node.type === 'tabs'}
   {@const tn = node as any}
-  {@const tabItems = ((tn.tabs ?? []) as Array<{ id: string; label: string; icon?: string }>).map((t): TabItem => ({
+  {@const tabItems = ((tn.tabs ?? []) as Array<{ id: string; label: string; icon?: string; badge?: string | number; disabled?: boolean; tooltip?: string }>).map((t): TabItem => ({
     id:       t.id,
     label:    t.label,
     icon:     t.icon ? PLUGIN_ICONS[t.icon] : undefined,
     iconSize: 12,
+    badge:    t.badge,
+    disabled: t.disabled,
+    title:    t.tooltip,
   }))}
   {@const pk = (typeof tn.persist_key === 'string' && tn.persist_key) ? tn.persist_key as string : null}
   {@const stripOnly  = !!tn.strip_only}
   {@const panelsOnly = !!tn.panels_only && !stripOnly}
+  {@const lazy       = !!tn.lazy}
   <!-- Active id resolution order:
        · When `persist_key` is set, read from the shared store (initialised
          lazily from localStorage on first access). Reactive — multiple
@@ -882,9 +892,14 @@
           class:pf-tabpanel-flush={!!(tab as any).flush}
           role="tabpanel"
         >
-          {#each tab.children ?? [] as child (child.id)}
-            {@render renderNode(child)}
-          {/each}
+          <!-- `lazy` keeps only the active panel in the DOM — critical when a
+               panel is heavy (a big syntax-highlighted code dump, hundreds of
+               cards). Inactive panels render nothing until selected. -->
+          {#if !lazy || activeId === tab.id}
+            {#each tab.children ?? [] as child (child.id)}
+              {@render renderNode(child)}
+            {/each}
+          {/if}
         </div>
       {/each}
     {/if}
@@ -1004,6 +1019,20 @@
         {@render renderNode(child)}
       {/each}
     </div>
+  </div>
+
+<!-- ── card_grid ─────────────────────────────────────────────────────── -->
+{:else if node.type === 'card_grid'}
+  {@const n = node as any}
+  {@const minc = (typeof n.min_card === 'string' && n.min_card) ? n.min_card : '280px'}
+  {@const gap  = (typeof n.gap === 'string' && n.gap) ? n.gap : '8px'}
+  <div
+    class="pf-card-grid {(node as any).class ?? ''}"
+    style="--pf-card-grid-min:{minc}; --pf-card-grid-gap:{gap}; {(node as any).style ?? ''}"
+  >
+    {#each n.children ?? [] as child (child.id)}
+      {@render renderNode(child)}
+    {/each}
   </div>
 
 <!-- ── cfg_list ──────────────────────────────────────────────────────── -->

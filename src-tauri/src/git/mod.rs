@@ -1,6 +1,7 @@
 pub mod repo;
 pub mod graph;
 pub mod diff;
+pub mod blame_incremental;
 pub mod encoding;
 pub mod status;
 pub mod branch;

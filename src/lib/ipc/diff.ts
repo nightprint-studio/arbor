@@ -1,5 +1,5 @@
-import { invoke } from '@tauri-apps/api/core';
-import type { BlameLine, DiffFile } from '../types/git';
+import { invoke, Channel } from '@tauri-apps/api/core';
+import type { BlameLine, BlameProgress, DiffFile } from '../types/git';
 import { diffStore } from '$lib/stores/diff.svelte';
 import { tabsStore } from '$lib/stores/tabs.svelte';
 import { encodingOverrides } from '$lib/stores/encodingOverrides.svelte';
@@ -88,6 +88,22 @@ export const getFileAtCommit = (tabId: string, oid: string, path: string) => {
 
 export const getFileBlame = (tabId: string, path: string) =>
   invoke<BlameLine[]>('get_file_blame', { tabId, path });
+
+/**
+ * Streaming blame. Resolves with the full line list once the history walk
+ * finishes; `onProgress` fires with a determinate `done/total` tick at each
+ * step so the UI can show a real progress bar on large files. Falls back to a
+ * single final result (no ticks) on machines without a `git` binary.
+ */
+export const getFileBlameStreaming = (
+  tabId: string,
+  path: string,
+  onProgress: (p: BlameProgress) => void,
+) => {
+  const onEvent = new Channel<BlameProgress>();
+  onEvent.onmessage = onProgress;
+  return invoke<BlameLine[]>('get_file_blame_streaming', { tabId, path, onEvent });
+};
 
 export const getBranchDiff = (tabId: string, fromRef: string, toRef: string) =>
   invoke<DiffFile[]>('get_branch_diff', {

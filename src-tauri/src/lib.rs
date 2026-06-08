@@ -877,6 +877,7 @@ pub fn run() {
             commands::diff_commands::get_branch_diff,
             commands::diff_commands::get_file_at_commit,
             commands::diff_commands::get_file_blame,
+            commands::diff_commands::get_file_blame_streaming,
             // Stage
             commands::stage_commands::stage_file,
             commands::stage_commands::unstage_file,

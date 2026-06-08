@@ -102,6 +102,20 @@ function createPipelinesStore() {
   let ciLoading   = $state(false);
   let ciError     = $state<string | null>(null);
 
+  // Bumped when the cache invalidates a tab (push, fetch, branch op…), paired
+  // with the tab that was hit. The CI panel watches this to refetch the run
+  // list when the *active* tab's snapshot is dropped — a push can spawn a new
+  // remote pipeline, and without this the panel sat on the pre-push list until
+  // its own poll timer happened to fire. Guard-by-tab so a background tab's
+  // invalidation doesn't burn the active tab's API rate limit.
+  let ciInvalidationTick  = $state(0);
+  let lastInvalidatedTab  = $state<string | null>(null);
+
+  function onCacheInvalidated(tabId: string) {
+    lastInvalidatedTab = tabId;
+    ciInvalidationTick++;
+  }
+
   function activeRun(): PipelineRun | null {
     return runs.find(r => r.id === activeRunId) ?? null;
   }
@@ -307,6 +321,8 @@ function createPipelinesStore() {
     get ciRuns()      { return ciRuns; },
     get ciLoading()   { return ciLoading; },
     get ciError()     { return ciError; },
+    get ciInvalidationTick() { return ciInvalidationTick; },
+    get lastInvalidatedTab() { return lastInvalidatedTab; },
     activeRun,
     load,
     reload,
@@ -315,6 +331,7 @@ function createPipelinesStore() {
     runsFor,
     loadCi,
     refreshCiRuns,
+    onCacheInvalidated,
   };
 }
 

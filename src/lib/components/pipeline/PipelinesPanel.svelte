@@ -332,6 +332,24 @@
     if (tabId) await pipelinesStore.refreshCiRuns(tabId);
   }
 
+  // Refetch CI runs when the active tab's cache is invalidated (push / fetch /
+  // branch op) while the CI sub-tab is open — a push can spawn a new remote
+  // pipeline that the panel would otherwise miss until its poll timer fires.
+  // Gated on `lastInvalidatedTab === active tab` so a background tab's
+  // invalidation can't spend the active repo's API rate limit, and on
+  // `activeTab === 'ci'` so it never fetches while the panel isn't shown.
+  let lastSeenInvTick = 0;
+  $effect(() => {
+    const tick = pipelinesStore.ciInvalidationTick;
+    if (tick === lastSeenInvTick) return; // initial run / unrelated re-eval
+    lastSeenInvTick = tick;
+    if (activeTab !== 'ci') return;
+    const tabId = tabsStore.activeTabId;
+    if (!tabId || pipelinesStore.lastInvalidatedTab !== tabId) return;
+    if (!pipelinesStore.ciProvider?.has_token) return;
+    pipelinesStore.refreshCiRuns(tabId).catch(() => { /* ignore */ });
+  });
+
   // Auto-refresh the CI run list while the user is actively watching it.
   // Gated on three conditions to avoid burning the GitHub rate limit (5000/h)
   // or wasting bandwidth when the user can't see the panel:

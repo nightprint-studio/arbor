@@ -130,9 +130,10 @@
   .b-quat  { color: #b288f0; background: color-mix(in srgb, #b288f0 12%, transparent); border-color: color-mix(in srgb, #b288f0 28%, transparent); }
   .b-mat   { color: #8ad0c9; background: color-mix(in srgb, #8ad0c9 12%, transparent); border-color: color-mix(in srgb, #8ad0c9 28%, transparent); }
 
-  /* Numeric primitives — yellows / oranges */
+  /* Numeric primitives — integers stay gold (discrete), floats read violet
+     (continuous), so the two scalar families are tellable apart at a glance. */
   .b-int   { color: #e0b86e; background: color-mix(in srgb, #e0b86e 12%, transparent); border-color: color-mix(in srgb, #e0b86e 28%, transparent); }
-  .b-float { color: #f0a55a; background: color-mix(in srgb, #f0a55a 12%, transparent); border-color: color-mix(in srgb, #f0a55a 28%, transparent); }
+  .b-float { color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent); border-color: color-mix(in srgb, #a78bfa 30%, transparent); }
 
   /* Boolean — clear blue */
   .b-bool  { color: #62a0ea; background: color-mix(in srgb, #62a0ea 12%, transparent); border-color: color-mix(in srgb, #62a0ea 28%, transparent); }

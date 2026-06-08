@@ -2229,12 +2229,16 @@ function Event.emit(event, payload) end
 ---@field id       string
 ---@field label    string
 ---@field icon     string|nil   Lucide icon name (limited set; see docs)
+---@field badge    string|number|nil  Small badge after the label (counts / warnings).
+---@field disabled boolean|nil  Dim + non-selectable.
+---@field tooltip  string|nil   Native tooltip on the tab.
 ---@field children table[]
 
 ---@class arbor.FormNodeTabs : arbor.FormNodeBase
 ---@field type         "tabs"
 ---@field tabs         arbor.FormTab[]
 ---@field default_tab  string|nil   Initial active tab id (defaults to first tab)
+---@field lazy         boolean|nil  Render only the active tab's panel (inactive panels render nothing until selected, re-mounted on switch). Use for heavy panels — a big highlighted code dump, hundreds of cards — to keep the DOM small and interaction snappy. Field values are still collected from every tab. Default false.
 ---@field persist_key  string|nil   When set, the active tab id is mirrored to `localStorage[persist_key]` so the user's selection survives reopening the modal. Restoration is guarded against stale ids (an id that no longer exists in the current `tabs` falls back to `default_tab`, then to the first tab). Doubles as the cross-renderer sync key: two `tabs` widgets in the same modal that share a `persist_key` (typically one `strip_only` in `header.centre` and one `panels_only` in `nodes`) read and write the same in-memory slot, so clicking on one updates the other in lock-step.
 ---@field strip_only   boolean|nil  When true, render only the tab strip — skip the per-tab panel divs entirely. Designed for the "view-mode switcher in `header.centre`" pattern: the strip lives in the header for the Studio-shaped chrome look, while a second `tabs` widget in the body (same `persist_key`, `panels_only = true`) renders the panel content. Default: false.
 ---@field panels_only  boolean|nil  When true, render only the per-tab panel divs — skip the tab strip. Mirror of `strip_only`: typically paired with a `strip_only` tabs in `header.centre` so the body shows panels without a duplicate strip. Default: false.
@@ -2300,6 +2304,7 @@ function Event.emit(event, payload) end
 ---@class arbor.FormSidecarCfg
 ---@field width    number|nil  Pixel width of the pane. Default: 320.
 ---@field title    string|nil  Optional header line above the pane contents.
+---@field side     string|nil  Edge the pane slides in from: "right" (default) or "left". Use "left" to sit beside a left-side activity bar (e.g. an entity navigator).
 ---@field children table[]     Pane contents as FormNodes.
 
 ---Modal footer override. Each zone is a FormNode list rendered horizontally;
@@ -3335,6 +3340,7 @@ function CoreAssert.register() end
 ---@field children    arbor.FormTreeNode[]|nil
 ---@field group       boolean|nil   Non-selectable header (still expandable). Click toggles expansion.
 ---@field icon        string|nil    Lucide icon name shown before the label
+---@field icon_color  string|nil    Explicit CSS colour for the row icon — tint group headers per-category so a deep tree isn't monochrome
 ---@field tag         string|nil    Small pill badge after the label (e.g. "Tomcat")
 ---@field tag_variant "neutral"|"ok"|"warn"|"error"|"accent"|"dev"|"prod"|"test"|nil
 ---@field description string|nil    Dim caption under the label
@@ -3344,6 +3350,12 @@ function CoreAssert.register() end
 ---@field draggable   boolean|nil   Per-row override; defaults to true when tree's `reorderable` is on and the row isn't a group
 ---@field drop_target boolean|nil   Per-row override; defaults to true when tree's `reorderable` is on
 ---@field menu_items  arbor.FormTreeMenuItem[]|nil   Per-row context menu — wins over the tree-level `menu_items` when set
+---@field value_display string|nil  Right-aligned leaf display value (dim monospace, before the pill) — the "key: value" source-tree look. Distinct from `value` (the selection key).
+---@field value_tone  string|nil    Colour tone for `value_display`: number / string / enum / bool / entity / handle / accent / warn / muted
+---@field pill        string|nil    Type pill rendered after the value, kind-coloured via the shared `TypePill` (richer than the flat `tag`)
+---@field pill_kind   string|nil    Colour bucket for `pill` (defaults to `pill`)
+---@field pill_tone   "accent"|"info"|"success"|"warning"|"error"|"muted"|nil  Explicit semantic tone for `pill` (wins over `pill_kind`) — use for provenance/state badges that aren't a value-kind
+---@field edit_node   arbor.FormNode|nil  Inline editor for a leaf. Activating the row swaps its value cell for this field node (rendered through the normal dispatcher — text / number / select / vec_field / color all work). The editor's own `actions.change` / dispatch fires the mutation; the tree just toggles read ⇄ edit.
 
 ---@class arbor.FormFieldTree : arbor.FormNodeBase
 ---@field type       "tree"
@@ -3364,8 +3376,10 @@ function CoreAssert.register() end
 ---@field virtualize_threshold integer|nil  Window the rows above this many visible rows (default 400)
 ---@field row_height  integer|nil   Fixed row height (px) for the virtualized window (default 24)
 ---@field height      string|integer|nil  Fixed viewport height (px or CSS length); falls back to max_height
+---@field fill        boolean|nil   Grow to fill the parent flex column and own the only scroll region (no max_height / fixed height). Use in a flush modal body to avoid a double scrollbar (default: false)
 ---@field searchable  boolean|nil   Inline filter input at the top of the tree (local UI state; matches label + description, auto-expands ancestors of matches, highlights the substring)
 ---@field search_placeholder string|nil  Placeholder for the filter input (default "Filter…")
+---@field path_query  boolean|nil   Enable JSONPath-style navigation in the search box: a query starting with `$` (e.g. `$.category.crate.Component`) prefix-matches its segments as an ordered subsequence of each node's ancestor labels instead of substring-filtering. Matches are navigable with F3 / Shift+F3 (+ ↑/↓ / Enter from the input), a hit counter shows in the search row, and a results rail opens beside the tree. Requires `searchable`.
 ---@field reorderable boolean|nil   Enable HTML5 drag-drop reorder among rows. Non-group rows are draggable + drop-targets by default; override per row via `tnode.draggable` / `tnode.drop_target`
 ---@field on_reorder  string|arbor.DispatchTarget|nil  Scoped slot fired on drop — payload `{ source = { id?, value, path }, target = { id?, value, path }, position = "before"|"inside"|"after" }`
 ---@field menu_items  arbor.FormTreeMenuItem[]|nil     Default right-click menu items (per-row `tnode.menu_items` wins)
@@ -3427,6 +3441,51 @@ function CoreAssert.register() end
 ---@field label       string|nil
 ---@field description string|nil
 ---@field children    table[]
+
+---Responsive card grid container — lays out `children` in an auto-fit grid
+---that wraps to multiple rows when the available width is too narrow. Each
+---column is at least `min_card` wide (default `"280px"`) and expands to
+---fill the row. Children are typically `section variant="component"` cards
+---or `info_card`s. Unlike `card_row` (a single horizontal flex row),
+---`card_grid` wraps to multiple rows — use it to render dashboard-style
+---layouts.
+---@class arbor.FormNodeCardGrid : arbor.FormNodeBase
+---@field type     "card_grid"
+---@field min_card string|nil   Minimum card width before wrapping (e.g. `"280px"`, `"22ch"`). Default `"280px"`.
+---@field gap      string|nil   Gap between cards (e.g. `"8px"`). Default `"8px"`.
+---@field children table[]
+
+---One row in a `property_grid`. A row is either a leaf (carries `value`) or a
+---group (carries `children`, for nested structs / arrays rendered indented).
+---@class arbor.PropertyRow
+---@field id          string|nil   Stable id — required when editable so the grid can track the open row.
+---@field label       string       Field name (left column).
+---@field value       string|nil   Pre-formatted display string (e.g. `"[ 4.50, 0.00, -2.25 ]"`, `"82"`, `"Job::Legionary"`). The plugin owns formatting; the grid never interprets the raw value.
+---@field value_tone  "number"|"string"|"enum"|"bool"|"entity"|"handle"|"muted"|"warn"|"accent"|nil  Syntax-highlight colour for the value text (code-editor style). Omit for the default primary colour.
+---@field pill        string|nil   Type pill rendered right-aligned (e.g. `"u32"`, `"Vec3"`, `"enum"`).
+---@field pill_kind   string|nil   Pill colour bucket — defaults to `pill`.
+---@field pill_tooltip string|nil
+---@field tooltip     string|nil   Tooltip on the value cell (typical use: the full / untruncated value).
+---@field muted       boolean|nil  Dim the value (e.g. `None` / null / default).
+---@field copyable    boolean|nil  Click-to-copy the value (client-side); shows a copy glyph on row hover.
+---@field locked      boolean|nil  Immutable — shows a lock glyph and suppresses editing even with `edit_node`.
+---@field children    arbor.PropertyRow[]|nil  Nested rows, rendered indented under this row.
+---@field collapsible boolean|nil  Group rows only: render a chevron that folds the children.
+---@field open        boolean|nil  Group rows only: initial open state when `collapsible` (default open).
+---@field edit_node   table|nil    When present (and not `locked`), the row gains a hover pencil; clicking swaps the value cell for this node rendered inline (a `field` / `vec_field` / `select` / … — all existing editors work unchanged). The node's own `action` / `dispatch` fires the mutation on commit.
+
+---Read-only-first property / reflection grid. Renders a dense
+---IntelliJ-inspector-style list of `label → value` rows with right-aligned
+---type pills, nested-struct indentation, lock glyphs for immutable fields,
+---and optional per-row click-to-edit via `edit_node`. Generic — any plugin
+---inspecting structured data (config dumps, JSON, ECS reflection, API
+---responses) can use it. The plugin formats the values and supplies the
+---editor nodes; the grid owns only the layout and the read-only ⇄ edit
+---toggle.
+---@class arbor.FormNodePropertyGrid : arbor.FormNodeBase
+---@field type  "property_grid"
+---@field rows  arbor.PropertyRow[]
+---@field empty string|nil   Empty-state text when `rows` is empty. Default `"(no fields)"`.
 
 ---@class arbor.CfgListItemTag
 ---@field text    string
@@ -3796,6 +3855,7 @@ function CoreAssert.register() end
 ---@field default  string|string[]|nil          Default-selected id(s).
 ---@field multi    boolean|nil
 ---@field size     "sm"|"md"|nil                Default "md".
+---@field tint_inactive boolean|nil             Tint inactive chips by their `tone` too (coloured text + border), so the bar reads like a legend before selection. Default false (neutral until selected).
 ---@field action   string|nil                   Fired with `{ name, value }` on selection change (useful when no parent uses `show_if`).
 ---@field items    arbor.ChipItem[]
 

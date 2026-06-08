@@ -147,6 +147,11 @@
 
   // ── Activity-bar + sidecar state ────────────────────────────────────────
   const sidecarIds = $derived(Object.keys(form.sidecars ?? {}));
+  // Sidecars anchor to the right edge by default (RON/JSON convention); a pane
+  // can opt into the left edge (`side = "left"`) to sit beside a left-side
+  // activity bar — rendered before the main body, bordered on its right.
+  const leftSidecarIds  = $derived(sidecarIds.filter(id => form.sidecars?.[id]?.side === 'left'));
+  const rightSidecarIds = $derived(sidecarIds.filter(id => form.sidecars?.[id]?.side !== 'left'));
   const activityBar = $derived(form.activity_bar);
   const activityBarSide = $derived(activityBar?.side ?? 'right');
 
@@ -512,6 +517,38 @@
     {/if}
   {/snippet}
 
+  <!-- Always-mounted sidecar: closing collapses width to 0 (CSS), opening
+       transitions back. The inner pinned-width wrapper keeps the content laid
+       out at the target size during the animation, so the visual reads as
+       "slides in" instead of "content squishes." Field values survive
+       close/open because the renderer is never unmounted. `side` decides the
+       border edge (left panes border-right, beside a left activity bar). -->
+  {#snippet sidecar(id: string, side: 'left' | 'right')}
+    {@const cfg = form.sidecars![id]}
+    {@const w   = sidecarWidth(cfg)}
+    {@const open = activeSidecar === id}
+    <aside class="pf-sidecar" class:pf-sidecar-open={open} class:pf-sidecar-left={side === 'left'}
+           style="--pf-sw:{w}px">
+      <div class="pf-sidecar-inner" style="width:{w}px">
+        {#if cfg.title}
+          <header class="pf-sidecar-title">{cfg.title}</header>
+        {/if}
+        <div class="pf-sidecar-body">
+          <FormNodeRenderer
+            bind:this={sidecarRefs[id]}
+            pluginName={form.plugin_name}
+            nodes={cfg.children}
+            region={`sidecar:${id}`}
+            {validationErrors}
+            disabled={submitting || isLoading}
+            {onValueChange}
+            {onClose}
+          />
+        </div>
+      </div>
+    </aside>
+  {/snippet}
+
   <div class="pf-modal">
     <!-- The body-row + sidecars frame is rendered for EVERY state — loading
          / error / empty / populated. Without this, the activity bar (which
@@ -523,6 +560,11 @@
          active sidecar slides in over the state-fill the same way it
          would over a populated body. -->
     <div class="pf-body-row" class:pf-body-row-sidecars={hasSidecars}>
+      {#if hasSidecars}
+        {#each leftSidecarIds as id (id)}
+          {@render sidecar(id, 'left')}
+        {/each}
+      {/if}
       <div class="pf-body-main">
         {#if stateBlockKind === 'loading'}
           <div class="pf-state-fill">
@@ -573,36 +615,8 @@
       </div>
 
       {#if hasSidecars}
-        <!-- Always-mounted sidecars: closing collapses width to 0 (CSS),
-             opening transitions back. The inner pinned-width wrapper keeps
-             the content laid out at the target size during the animation,
-             so the visual reads as "slides in from the right" instead of
-             "content squishes." Field values survive close/open because no
-             renderer is ever unmounted. -->
-        {#each sidecarIds as id (id)}
-          {@const cfg = form.sidecars![id]}
-          {@const w   = sidecarWidth(cfg)}
-          {@const open = activeSidecar === id}
-          <aside class="pf-sidecar" class:pf-sidecar-open={open}
-                 style="--pf-sw:{w}px">
-            <div class="pf-sidecar-inner" style="width:{w}px">
-              {#if cfg.title}
-                <header class="pf-sidecar-title">{cfg.title}</header>
-              {/if}
-              <div class="pf-sidecar-body">
-                <FormNodeRenderer
-                  bind:this={sidecarRefs[id]}
-                  pluginName={form.plugin_name}
-                  nodes={cfg.children}
-                  region={`sidecar:${id}`}
-                  {validationErrors}
-                  disabled={submitting || isLoading}
-                  {onValueChange}
-                  {onClose}
-                />
-              </div>
-            </div>
-          </aside>
+        {#each rightSidecarIds as id (id)}
+          {@render sidecar(id, 'right')}
         {/each}
       {/if}
     </div>
@@ -830,6 +844,12 @@
     background: var(--bg-elevated);
   }
   .pf-sidecar-open { width: var(--pf-sw, 320px); }
+  /* Left-anchored pane sits before the main body, so its divider is on the
+     right edge (towards the body) rather than the default left. */
+  .pf-sidecar-left {
+    border-left: none;
+    border-right: 1px solid var(--border-subtle);
+  }
   .pf-sidecar-inner {
     height: 100%;
     flex-shrink: 0;

@@ -737,6 +737,15 @@
     graphStore.setLoading(true);
     let stale  = false;
     let loaded = false;
+    // Capture the request generation BEFORE any await so a fileFilter toggle
+    // (or refresh / clearFileFilter) that fires while we're in flight bumps
+    // refreshTick, the $effect spawns a fresh loadGraph, and this stale call
+    // can discard its now-irrelevant response instead of overwriting the new
+    // one. Without this guard, opening "Show Commits Touching File" and
+    // immediately dismissing it (or starting a 2nd filter before the 1st
+    // returns) would still apply the in-flight filtered result over the
+    // unfiltered graph.
+    const myTick = graphStore.refreshTick;
     try {
       const filter = graphStore.fileFilter;
 
@@ -785,6 +794,10 @@
 
       // Guard: tab changed while we were awaiting — discard stale response.
       if (tabId !== tabsStore.activeTabId) { stale = true; return; }
+      // Guard: filter (or any refresh trigger) changed while we were awaiting
+      // — a fresher loadGraph is already in flight. Drop this response so it
+      // can't overwrite the new graph with a stale filtered/unfiltered view.
+      if (myTick !== graphStore.refreshTick) { stale = true; return; }
 
       // Tag the data with its owning tab so tab-aware consumers (deep-link
       // dispatcher's awaitGraphLoaded) can distinguish "graph for this tab

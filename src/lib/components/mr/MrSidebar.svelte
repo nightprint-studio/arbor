@@ -67,8 +67,12 @@
     );
   });
 
-  // Load on mount + tab change
+  // Load on mount + tab change + cache invalidation.
+  // `invalidationTick` is bumped by the cache store whenever a mutation
+  // (createMr / mergeMr / closeMr / ...) wipes this tab's snapshot, so the
+  // sidebar re-fetches instead of showing stale rows from before the change.
   $effect(() => {
+    mrStore.invalidationTick;
     if (tabId) mrStore.load(tabId);
   });
 

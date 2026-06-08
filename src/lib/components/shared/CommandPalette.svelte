@@ -9,6 +9,7 @@
   // built in code) goes through the shared PLUGIN_ICONS registry — no
   // duplicate per-component map allowed (PLUGIN_ICONS is the single source).
   import { Zap, Search, ChevronRight } from 'lucide-svelte';
+  import { laneColor } from '$lib/utils/graph-renderer';
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { invoke } from '@tauri-apps/api/core';
@@ -99,6 +100,10 @@
     title:     string;
     subtitle?: string;
     icon:      string;        // lucide component name key
+    /** Optional CSS color applied to the icon + title — used to mirror the
+     *  graph's lane palette for branches and the `--color-tag` accent for
+     *  tags, so the palette feels visually paired with the graph. */
+    iconColor?: string;
     shortcut?: string;
     score:     number;
     action: () => void | Promise<void>;
@@ -1795,15 +1800,23 @@
 
     if (verb.targetKind === 'branch') {
       const items: PaletteItem[] = branches
-        .map(b => ({
-          id:       `target:${verb.id}:${b.name}`,
-          kind:     'branch' as PaletteItemKind,
-          icon:     'GitBranch',
-          title:    b.name,
-          subtitle: b.is_head ? 'current branch' : (b.upstream ?? undefined),
-          score:    score(b.name, q),
-          action:   () => executeVerb(verb, b),
-        }))
+        .map(b => {
+          // Mirror the graph's lane palette so the same branch shows the
+          // same colour in the palette and in the graph (BranchTree uses
+          // the identical lookup — see `branchColor()` there).
+          const idx = graphStore.refColorByName.get(b.name);
+          const color = idx === undefined ? undefined : laneColor(idx);
+          return {
+            id:        `target:${verb.id}:${b.name}`,
+            kind:      'branch' as PaletteItemKind,
+            icon:      'GitBranch',
+            title:     b.name,
+            subtitle:  b.is_head ? 'current branch' : (b.upstream ?? undefined),
+            iconColor: color,
+            score:     score(b.name, q),
+            action:    () => executeVerb(verb, b),
+          };
+        })
         .filter(i => i.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, 12);
@@ -1813,13 +1826,14 @@
     if (verb.targetKind === 'tag') {
       const items: PaletteItem[] = tags
         .map(t => ({
-          id:       `target:${verb.id}:${t.name}`,
-          kind:     'commit' as PaletteItemKind,
-          icon:     'Tag',
-          title:    t.name,
-          subtitle: t.message?.split('\n')[0] ?? t.target_oid.slice(0, 8),
-          score:    score(t.name + ' ' + (t.message ?? ''), q),
-          action:   () => executeVerb(verb, t),
+          id:        `target:${verb.id}:${t.name}`,
+          kind:      'tag' as PaletteItemKind,
+          icon:      'Tag',
+          title:     t.name,
+          subtitle:  t.message?.split('\n')[0] ?? t.target_oid.slice(0, 8),
+          iconColor: 'var(--color-tag)',
+          score:     score(t.name + ' ' + (t.message ?? ''), q),
+          action:    () => executeVerb(verb, t),
         }))
         .filter(i => i.score > 0)
         .sort((a, b) => b.score - a.score)
@@ -2643,16 +2657,18 @@
               <button
                 class="palette-item"
                 class:selected={isSelected}
+                class:item-branch={item.kind === 'branch'}
+                class:item-tag={item.kind === 'tag'}
                 data-idx={idx}
                 onmouseenter={() => { selectedIdx = idx; }}
                 onclick={() => item.action()}
                 use:tooltip={item.subtitle ?? item.title}
               >
-                <span class="item-icon">
+                <span class="item-icon" style={item.iconColor ? `color: ${item.iconColor}` : ''}>
                   <ItemIcon size={14} />
                 </span>
                 <span class="item-body">
-                  <span class="item-title">
+                  <span class="item-title" style={item.iconColor ? `color: ${item.iconColor}` : ''}>
                     {@html highlightTitle(item.title, query)}
                   </span>
                   {#if item.subtitle}
@@ -2926,6 +2942,15 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* Branch/tag titles are identifiers, not prose — monospace makes them
+     instantly recognisable next to plain-text commands and tightens the
+     visual link with the graph's branch labels. */
+  .palette-item.item-branch .item-title,
+  .palette-item.item-tag    .item-title {
+    font-family: var(--font-code);
+    font-size: 12.5px;
   }
 
   :global(.item-title .hl) {

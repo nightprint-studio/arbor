@@ -118,16 +118,28 @@ export function tooltip(node: HTMLElement, input: TooltipInput) {
       const nextOpts = normalizeOptions(next);
       // Cheap structural skip: if nothing meaningful changed, don't churn the store.
       if (sameOpts(opts, nextOpts)) return;
-      opts = nextOpts;
-      // Disabled OR content went empty/falsy → hide if currently shown for this trigger.
-      if (opts.disabled || !opts.content) {
-        hide();
-        return;
-      }
-      tooltipState.update(node, opts);
+      opts = nextOpts; // local var (not $state) — safe to assign synchronously.
+      // Defer the singleton-store write to a microtask. The action's `update`
+      // runs inside Svelte's reactive flush (a re-eval of the `use:tooltip`
+      // param can coincide with a `$derived` recompute elsewhere — e.g. a
+      // sidebar repaint that re-renders tooltipped rows). Writing `$state`
+      // synchronously there trips `state_unsafe_mutation` and the uncaught
+      // error breaks the render (the visible "freeze"). One microtask hop
+      // moves the write past the frame — imperceptible for a tooltip.
+      queueMicrotask(() => {
+        // Disabled OR content went empty/falsy → hide if currently shown for this trigger.
+        if (opts.disabled || !opts.content) { tooltipState.hide(node); return; }
+        tooltipState.update(node, opts);
+      });
     },
     destroy() {
-      hide();
+      clearOpenTimer();
+      // Same reasoning as `update`: `destroy` runs during effect teardown,
+      // which is inside the flush — defer the `active` write so it never
+      // lands during a derived/teardown. `hide(node)` is a no-op once another
+      // trigger owns the tooltip, so the deferral is safe even if the node is
+      // already detached by the time the microtask runs.
+      queueMicrotask(() => tooltipState.hide(node));
       node.removeEventListener('mouseenter', onMouseEnter);
       node.removeEventListener('mouseleave', onMouseLeave);
       node.removeEventListener('mousedown', onMouseDown);

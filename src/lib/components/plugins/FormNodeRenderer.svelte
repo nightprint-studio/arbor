@@ -73,6 +73,7 @@
   import FormNodeDiff          from './form-nodes/FormNodeDiff.svelte';
   import FormNodeTree          from './form-nodes/FormNodeTree.svelte';
   import FormNodeVecField      from './form-nodes/FormNodeVecField.svelte';
+  import FormNodePropertyGrid  from './form-nodes/FormNodePropertyGrid.svelte';
   import FormNodePipelineEditor from './form-nodes/FormNodePipelineEditor.svelte';
 
   import './form-nodes/form-node-styles.css';
@@ -1018,7 +1019,7 @@
     'container', 'row', 'section', 'copy_link', 'icon', 'separator',
     'paragraph', 'alert', 'code', 'label', 'divider', 'info_card',
     'chip_bar', 'form_field', 'tabs', 'tree_layout', 'wizard',
-    'card_row', 'cfg_list', 'switch',
+    'card_row', 'card_grid', 'cfg_list', 'switch',
     'breadcrumb', 'url_block', 'monogram', 'state_block',
     'step_indicator', 'status_list',
     'copy_button', 'experimental_badge', 'section_header',
@@ -1219,9 +1220,11 @@
     {:else if (node.type as string) === 'diff'}
       <FormNodeDiff {node} {ctx} />
     {:else if (node.type as string) === 'tree'}
-      <FormNodeTree {node} {ctx} />
+      <FormNodeTree {node} {ctx} {renderNode} />
     {:else if (node.type as string) === 'vec_field'}
       <FormNodeVecField {node} {ctx} />
+    {:else if (node.type as string) === 'property_grid'}
+      <FormNodePropertyGrid {node} {ctx} {renderNode} />
     {:else}
       <FormNodeField {node} {ctx} />
     {/if}

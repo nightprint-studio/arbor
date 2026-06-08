@@ -349,15 +349,21 @@ pub async fn create_github_pr(
         "draft": params.is_draft,
     });
     let client = reqwest::Client::new();
-    let resp = client
-        .post(format!("https://api.github.com/repos/{owner}/{repo}/pulls"))
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "arbor-git-gui/1.0")
-        .json(&body)
-        .send().await
-        .map_err(|e| AppError::Other(format!("GitHub create PR failed: {e}")))?;
+    let url    = format!("https://api.github.com/repos/{owner}/{repo}/pulls");
+    // Route through the refresh wrapper so an expired OAuth access token gets
+    // rotated and the create retried, matching every other GitHub call. Before
+    // this, opening a PR after the token expired surfaced a raw 401 to the
+    // user and forced a manual reconnect from Settings.
+    let resp = crate::git_provider::ci_impl::github_send_with_refresh(
+        |tok| client
+            .post(&url)
+            .header("Authorization", format!("Bearer {tok}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", "arbor-git-gui/1.0")
+            .json(&body),
+        token,
+    ).await?;
 
     if !resp.status().is_success() {
         let s = resp.status();
@@ -475,7 +481,8 @@ pub async fn enable_github_auto_merge(
     if !resp.status().is_success() {
         let s = resp.status();
         let b = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!("GitHub auto-merge {s}: {b}")));
+        return Err(map_auto_merge_error(&b)
+            .unwrap_or_else(|| AppError::Other(format!("GitHub auto-merge {s}: {b}"))));
     }
 
     let data: serde_json::Value = resp.json().await
@@ -487,9 +494,58 @@ pub async fn enable_github_auto_merge(
             .and_then(|m| m.as_str())
             .unwrap_or(&errs.to_string())
             .to_string();
-        return Err(AppError::Other(msg));
+        return Err(map_auto_merge_error(&msg).unwrap_or_else(|| AppError::Other(msg)));
     }
     Ok(())
+}
+
+/// Detect the well-known "PR/MR is not mergeable" failure modes from a raw
+/// provider error message and re-phrase them so the user understands *why*
+/// auto-merge couldn't be armed. Returns `None` when the message doesn't match
+/// any recognised shape — the caller falls back to surfacing the raw response.
+///
+/// GitHub variants (GraphQL + REST):
+///   - "Pull request is in clean status"  → no protection, no checks pending
+///   - "Pull request is in unstable status" / "is in dirty status" → conflicts
+///   - "Pull request Pull Request is not in the correct state"
+/// GitLab variants (REST `merge` endpoint response body):
+///   - "Branch cannot be merged"
+///   - "merge request is not mergeable"
+///   - JSON {"message":"406 Branch cannot be merged"} / {"message":"...conflict..."}
+fn map_auto_merge_error(raw: &str) -> Option<AppError> {
+    // Try JSON first — GitLab + GitHub REST both wrap the message.
+    let probe: String = if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
+        v.get("message")
+            .and_then(|m| m.as_str())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| raw.to_string())
+    } else {
+        raw.to_string()
+    };
+    let lower = probe.to_lowercase();
+
+    if lower.contains("dirty") || lower.contains("conflict")
+        || lower.contains("cannot be merged") || lower.contains("not mergeable")
+    {
+        return Some(AppError::Other(
+            "This pull request has conflicts that must be resolved before \
+             auto-merge can be enabled. Rebase or merge the target branch in, \
+             fix the conflicts, then push.".into()
+        ));
+    }
+    if lower.contains("clean status") {
+        return Some(AppError::Other(
+            "Auto-merge needs a pending check or required review to gate on. \
+             This pull request is already mergeable — merge it directly instead.".into()
+        ));
+    }
+    if lower.contains("auto_merge") && lower.contains("disabled") {
+        return Some(AppError::Other(
+            "Auto-merge is disabled for this repository. Enable it in the \
+             repository settings, then try again.".into()
+        ));
+    }
+    None
 }
 
 pub async fn merge_github_pr(
@@ -948,7 +1004,8 @@ pub async fn enable_gitlab_auto_merge(
     if resp.status().is_success() { return Ok(()); }
     let s = resp.status();
     let b = resp.text().await.unwrap_or_default();
-    Err(AppError::Other(format!("GitLab auto-merge {s}: {b}")))
+    Err(map_auto_merge_error(&b)
+        .unwrap_or_else(|| AppError::Other(format!("GitLab auto-merge {s}: {b}"))))
 }
 
 /// Cancel "merge when pipeline succeeds" on a GitLab MR.

@@ -49,8 +49,13 @@
   type RightPane = 'inspector' | 'schema' | 'bindings' | 'query' | 'tools' | null;
 
   interface Props {
-    formatId:                 StudioFormat;
-    backend:                  StudioBackend<TKind>;
+    /** Format id / backend are part of the API surface for the text-document
+     *  Studio wrappers (RON / JSON / TOML / YAML / .properties) but are NOT
+     *  consumed by the shell itself — it only renders chrome + the wrapper's
+     *  snippets. They're optional so non-document hosts (e.g. a live-data
+     *  inspector) can reuse the shell without a parse/serialize backend. */
+    formatId?:                StudioFormat;
+    backend?:                 StudioBackend<TKind>;
     open:                     boolean;
     loading?:                 boolean;
     loadingLabel?:            string;

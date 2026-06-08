@@ -42,10 +42,14 @@
     size?:     'sm' | 'md';
     /** When set, the chip's count badge uses the chip's own tone instead of neutral. */
     tintCount?: boolean;
+    /** Tint inactive chips by their `tone` too (coloured text + border + count),
+     *  not just the active one. Off by default so existing filter bars keep
+     *  the neutral-until-selected look. */
+    tintInactive?: boolean;
     onSelect:  (sel: string | string[]) => void;
   }
 
-  let { items, selected, multi = false, size = 'md', tintCount = true, onSelect }: Props = $props();
+  let { items, selected, multi = false, size = 'md', tintCount = true, tintInactive = false, onSelect }: Props = $props();
 
   function isActive(id: string): boolean {
     if (multi) return Array.isArray(selected) && selected.includes(id);
@@ -63,7 +67,7 @@
   }
 </script>
 
-<div class="chip-bar sz-{size}" role="toolbar">
+<div class="chip-bar sz-{size}" class:tint-inactive={tintInactive} role="toolbar">
   {#each items as it (it.id)}
     {@const Icon = it.icon ? PLUGIN_ICONS[it.icon] : null}
     {@const active = isActive(it.id)}
@@ -139,6 +143,18 @@
   .chip.active[data-tone="error"]   { color: var(--error);   background: color-mix(in srgb, var(--error)   14%, transparent); border-color: color-mix(in srgb, var(--error)   36%, transparent); }
   .chip.active[data-tone="muted"]   { color: var(--text-secondary); background: var(--bg-overlay); border-color: var(--border); }
   .chip.active[data-tone="neutral"] { color: var(--text-primary);   background: var(--bg-overlay); border-color: var(--border-strong, var(--border)); }
+
+  /* ── Inactive-chip tinting (opt-in via tintInactive) ─────────────────── */
+  /* Colours inactive chips by their data-tone so a filter bar reads like a
+     legend even before selection. The active state above still wins. */
+  .tint-inactive .chip[data-tone="accent"]:not(.active)  { color: color-mix(in srgb, var(--accent)  82%, var(--text-secondary)); border-color: color-mix(in srgb, var(--accent)  30%, var(--border)); }
+  .tint-inactive .chip[data-tone="info"]:not(.active)    { color: color-mix(in srgb, var(--info)    82%, var(--text-secondary)); border-color: color-mix(in srgb, var(--info)    30%, var(--border)); }
+  .tint-inactive .chip[data-tone="success"]:not(.active) { color: color-mix(in srgb, var(--success) 82%, var(--text-secondary)); border-color: color-mix(in srgb, var(--success) 30%, var(--border)); }
+  .tint-inactive .chip[data-tone="warning"]:not(.active) { color: color-mix(in srgb, var(--warning) 82%, var(--text-secondary)); border-color: color-mix(in srgb, var(--warning) 30%, var(--border)); }
+  .tint-inactive .chip[data-tone="error"]:not(.active)   { color: color-mix(in srgb, var(--error)   82%, var(--text-secondary)); border-color: color-mix(in srgb, var(--error)   30%, var(--border)); }
+  .tint-inactive .chip:not(.active):hover {
+    background: var(--bg-hover);
+  }
 
   :global(.chip-icon) { opacity: 0.9; flex-shrink: 0; }
 

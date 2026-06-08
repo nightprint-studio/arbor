@@ -1505,6 +1505,18 @@
 
   /* Tighter field spacing inside card rows */
   .pf-row-ctrl .pf-field { margin: 0; }
+
+  /* ── Card grid (responsive auto-fit) ──────────────────────────────────────── */
+
+  .pf-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(var(--pf-card-grid-min, 280px), 1fr));
+    gap: var(--pf-card-grid-gap, 8px);
+    width: 100%;
+    min-width: 0;
+    align-items: start;
+  }
+  .pf-card-grid > .pf-card { min-width: 0; }
   .pf-row-ctrl .pf-label { display: none; }
   .pf-row-ctrl .pf-input { font-size: 11.5px; }
 
@@ -1989,14 +2001,35 @@
     padding: 6px 10px;
     border-radius: var(--radius-md) var(--radius-md) 0 0;
     gap: 6px;
+    /* Group chevron + dot + title flush-left; the actions cluster is pushed
+       right via margin-left:auto. (The shared rule uses space-between, which
+       with 4 children would scatter them across the bar.) */
+    justify-content: flex-start;
   }
+  .pf-card-component .pf-card-title-actions { margin-left: auto; }
   .pf-card-component .pf-card-title-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    /* Type paths are case-sensitive Rust identifiers — never uppercase them.
+       The leaf name is dimmed/bright via the ns + name spans. */
+    text-transform: none;
+    letter-spacing: 0.1px;
     font-family: var(--font-mono);
     font-size: 11.5px;
-    letter-spacing: 0.1px;
+    /* Flex row so the dimmed namespace prefix clips first while the bright
+       leaf name always stays fully visible (the name is what matters). */
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    white-space: nowrap;
+    flex: 0 1 auto;
+  }
+  .pf-card-component .pf-card-title-ns {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .pf-card-component .pf-card-title-name {
+    flex: 0 0 auto;
   }
   .pf-card-title-ns {
     color: var(--text-disabled);
