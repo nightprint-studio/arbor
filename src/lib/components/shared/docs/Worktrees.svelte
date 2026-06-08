@@ -36,6 +36,17 @@
   <li>Click <strong>Add Worktree</strong> — Git creates the linked worktree immediately.</li>
 </ol>
 
+<p>You can also start the same dialog pre-seeded from a right-click:</p>
+<ul>
+  <li><strong>On a branch</strong> — right-click any branch in the Branches &amp; Stashes sidebar →
+      <strong>Create worktree…</strong>. The picker opens with that branch selected (a remote
+      branch creates a tracking branch).</li>
+  <li><strong>On a commit</strong> — right-click any commit in the graph →
+      <strong>New worktree here…</strong>. The start point is locked to that commit; the worktree
+      starts a new branch from it by default, or a detached HEAD if you uncheck
+      <strong>Create a new branch</strong>.</li>
+</ul>
+
 <h2>Switching worktrees</h2>
 <ul>
   <li><strong>Double-click</strong> a row — opens the worktree path as a new tab (equivalent to <em>Open Recent</em>).</li>

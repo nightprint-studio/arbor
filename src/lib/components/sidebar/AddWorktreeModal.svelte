@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Layers, FolderOpen, ChevronDown } from 'lucide-svelte';
+  import { Layers, FolderOpen, ChevronDown, GitCommit } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import { addWorktree } from '$lib/ipc/worktree';
   import { repoStore } from '$lib/stores/repo.svelte';
@@ -15,23 +15,33 @@
   let {
     tabId,
     initialBranch,
+    startCommit,
     onClose,
     onAdded,
   }: {
     tabId: string;
     /** Optional pre-selected branch (local short name OR `origin/foo` remote
      *  ref). Used by the deep-link router to seed the picker for
-     *  `arbor://branch/<name>?…&worktree=1` flows. */
+     *  `arbor://branch/<name>?…&worktree=1` flows and by the branches sidebar
+     *  context menu ("Create worktree…"). */
     initialBranch?: string;
+    /** Optional fixed commit start point (from the graph context menu). When
+     *  set, the branch picker is replaced by a locked display of the commit;
+     *  the worktree is created from that commit — either as a new branch (the
+     *  default) or, if "Create a new branch" is unchecked, a detached HEAD. */
+    startCommit?: { oid: string; shortOid: string; summary?: string };
     onClose: () => void;
     onAdded: () => void;
   } = $props();
 
-  // `branchValue` carries either a local branch name ("feature") or a remote
-  // ref ("origin/feature"). The submit logic distinguishes the two.
+  // `branchValue` carries a local branch name ("feature"), a remote ref
+  // ("origin/feature"), OR a raw commit OID (when seeded from `startCommit`).
+  // The submit logic distinguishes them; the backend `branch` arg accepts all.
   let destPath     = $state('');
-  let branchValue  = $state(untrack(() => initialBranch ?? ''));
-  let createBranch = $state(false);
+  let branchValue  = $state(untrack(() => startCommit?.oid ?? initialBranch ?? ''));
+  // A commit start point is most often used to spin up a fresh branch, so
+  // default the toggle on; the user can uncheck for a detached-HEAD worktree.
+  let createBranch = $state(untrack(() => !!startCommit));
   let newBranch    = $state('');
   let busy              = $state(false);
   let error             = $state<string | null>(null);
@@ -171,39 +181,51 @@
       </div>
     </FormField>
 
-    <FormField label="Checkout branch">
-      <div class="branch-select-wrap">
-        <Dropdown
-          position="fixed"
-          direction="down"
-          matchTriggerWidth
-          searchable={localBranches.length + remoteOnlyBranches.length > 8}
-          searchPlaceholder="Filter branches…"
-          items={branchItems}
-          emptyMessage="No branches match"
-        >
-          {#snippet trigger({ open, toggle })}
-            <button
-              class="input branch-trigger"
-              onclick={toggle}
-              disabled={createBranch}
-              type="button"
-              aria-expanded={open}
-            >
-              <span class="branch-trigger-value" class:branch-trigger-placeholder={!branchValue}>
-                {branchValue || '— select a branch —'}
-              </span>
-              <ChevronDown size={12} />
-            </button>
-          {/snippet}
-        </Dropdown>
-      </div>
-      {#if isRemoteSelected && !createBranch}
-        <span class="field-hint">
-          A new local branch <strong>{tailOf(branchValue)}</strong> will be created tracking <strong>{branchValue}</strong>.
-        </span>
-      {/if}
-    </FormField>
+    {#if startCommit}
+      <FormField label="Start point">
+        <div class="commit-pill">
+          <GitCommit size={13} />
+          <code class="commit-sha">{startCommit.shortOid}</code>
+          {#if startCommit.summary}
+            <span class="commit-summary truncate">{startCommit.summary}</span>
+          {/if}
+        </div>
+      </FormField>
+    {:else}
+      <FormField label="Checkout branch">
+        <div class="branch-select-wrap">
+          <Dropdown
+            position="fixed"
+            direction="down"
+            matchTriggerWidth
+            searchable={localBranches.length + remoteOnlyBranches.length > 8}
+            searchPlaceholder="Filter branches…"
+            items={branchItems}
+            emptyMessage="No branches match"
+          >
+            {#snippet trigger({ open, toggle })}
+              <button
+                class="input branch-trigger"
+                onclick={toggle}
+                disabled={createBranch}
+                type="button"
+                aria-expanded={open}
+              >
+                <span class="branch-trigger-value" class:branch-trigger-placeholder={!branchValue}>
+                  {branchValue || '— select a branch —'}
+                </span>
+                <ChevronDown size={12} />
+              </button>
+            {/snippet}
+          </Dropdown>
+        </div>
+        {#if isRemoteSelected && !createBranch}
+          <span class="field-hint">
+            A new local branch <strong>{tailOf(branchValue)}</strong> will be created tracking <strong>{branchValue}</strong>.
+          </span>
+        {/if}
+      </FormField>
+    {/if}
 
     <label class="toggle-row">
       <input type="checkbox" bind:checked={createBranch} />
@@ -220,9 +242,13 @@
           bind:value={newBranch}
         />
         {#if branchValue}
-          <span class="field-hint">Starting from <strong>{branchValue}</strong></span>
+          <span class="field-hint">Starting from <strong>{startCommit ? startCommit.shortOid : branchValue}</strong></span>
         {/if}
       </FormField>
+    {:else if startCommit}
+      <span class="field-hint">
+        The worktree will check out a detached HEAD at <strong>{startCommit.shortOid}</strong>.
+      </span>
     {/if}
 
     {#if error}
@@ -269,6 +295,33 @@
 
   .branch-select-wrap { width: 100%; }
   .branch-select-wrap :global(.dd-root) { width: 100%; }
+
+  /* Locked commit start point (graph context-menu entry) — read-only display
+     mirroring the `.input` chrome so it sits flush with the other fields. */
+  .commit-pill {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 5px 9px;
+    color: var(--text-secondary);
+    min-width: 0;
+  }
+  .commit-pill > :global(svg) { color: var(--accent); flex-shrink: 0; }
+  .commit-sha {
+    font-family: var(--font-code);
+    font-size: 12px;
+    color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .commit-summary {
+    font-size: 12px;
+    color: var(--text-muted);
+    min-width: 0;
+  }
+  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .branch-trigger {
     display: flex;

@@ -2,7 +2,7 @@
   import {
     GitBranch, Tag, RotateCcw, Copy,
     GitCommit, ArrowDown, CornerDownLeft, Zap, ArrowUpToLine, ExternalLink, TicketCheck, StickyNote,
-    Search, Check, X, SkipForward, Link2,
+    Search, Check, X, SkipForward, Link2, Layers,
   } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import { copyToClipboard } from '$lib/utils/clipboard';
@@ -27,6 +27,7 @@
   let {
     node, x, y, onClose,
     onShowCreateBranch,
+    onShowCreateWorktree,
     onShowCreateTag,
     onShowLinkTicket,
     onShowNotes,
@@ -35,10 +36,11 @@
     x: number; y: number;
     onClose: () => void;
     /** Lifted to parent — prevents modal from being destroyed with the context menu. */
-    onShowCreateBranch: (n: CommitNode) => void;
-    onShowCreateTag:    (n: CommitNode) => void;
-    onShowLinkTicket?:  (n: CommitNode) => void;
-    onShowNotes?:       (n: CommitNode) => void;
+    onShowCreateBranch:   (n: CommitNode) => void;
+    onShowCreateWorktree: (n: CommitNode) => void;
+    onShowCreateTag:      (n: CommitNode) => void;
+    onShowLinkTicket?:    (n: CommitNode) => void;
+    onShowNotes?:         (n: CommitNode) => void;
   } = $props();
 
   const tab    = $derived(tabsStore.activeTab);
@@ -56,6 +58,7 @@
   const items: MenuItem[] = $derived([
     { id: 'checkout',      label: 'Checkout (detached HEAD)', icon: CornerDownLeft, iconColor: 'var(--accent)', disabled: node.is_head },
     { id: 'create-branch', label: 'New branch here…',         icon: GitBranch,      iconColor: 'var(--success)' },
+    { id: 'create-worktree', label: 'New worktree here…',     icon: Layers,         iconColor: 'var(--accent)' },
     // Push only makes sense at HEAD
     ...(node.is_head ? [
       { id: 'sep-push', label: '', separator: true },
@@ -134,6 +137,10 @@
         case 'create-branch':
           onShowCreateBranch(node);
           return; // intentionally skip onClose() — parent owns the flow
+
+        case 'create-worktree':
+          onShowCreateWorktree(node);
+          return; // parent owns the modal flow
 
         case 'create-tag':
           onShowCreateTag(node);

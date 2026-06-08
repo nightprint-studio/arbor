@@ -13,7 +13,7 @@
   import {
     GitBranch, ArrowUp, ArrowDown, RotateCcw, ArrowUpToLine, Trash2, ExternalLink, Pencil,
     GitMerge, ArrowLeftRight, Link2, Combine, FastForward, Folder, FolderOpen,
-    ChevronsDown, ChevronsUp, Cloud,
+    ChevronsDown, ChevronsUp, Cloud, Layers,
   } from 'lucide-svelte';
   import type { MergeStrategy } from '$lib/ipc/branch';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
@@ -24,6 +24,8 @@
   import { repoStore } from '$lib/stores/repo.svelte';
   import { branchGroupingStore } from '$lib/stores/branch-grouping.svelte';
   import { branchesConfigStore } from '$lib/stores/branches-config.svelte';
+  import { worktreeStore } from '$lib/stores/worktree.svelte';
+  import AddWorktreeModal from './AddWorktreeModal.svelte';
   import { checkoutBranchSafe, checkoutRemoteAsLocalSafe, deleteBranch, deleteRemoteBranches, mergeBranch } from '$lib/ipc/branch';
   import { applyPostCheckout } from '$lib/utils/applyPostCheckout';
   import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
@@ -126,6 +128,7 @@
   let ctxMenu = $state<BranchCtx | null>(null);
   let confirmRemoteDelete = $state<BranchInfo | null>(null);
   let renameRemoteTarget  = $state<BranchInfo | null>(null);
+  let worktreeBranch      = $state<BranchInfo | null>(null);
 
   function openBranchCtx(e: MouseEvent, branch: BranchInfo) {
     e.preventDefault();
@@ -138,6 +141,7 @@
     if (type === 'remote') {
       return [
         { id: 'checkout',       label: 'Checkout as local branch', icon: RotateCcw },
+        { id: 'create-worktree', label: 'Create worktree…',        icon: Layers, iconColor: 'var(--accent)' },
         { id: 'sep',            label: '',                          separator: true },
         { id: 'rename-remote',  label: 'Rename…',                  icon: Pencil },
         { id: 'sep1',           label: '',                          separator: true },
@@ -151,6 +155,7 @@
       { id: 'checkout',      label: 'Checkout',              icon: RotateCcw,   disabled: branch.is_head },
       { id: 'push',          label: 'Push to remote',        icon: ArrowUpToLine, action: branch.is_head ? 'push' : undefined },
       { id: 'create-branch', label: 'Create branch from here…', icon: GitBranch, action: 'new_branch' },
+      { id: 'create-worktree', label: 'Create worktree…',     icon: Layers, iconColor: 'var(--accent)' },
       { id: 'sep',           label: '',                      separator: true },
       { id: 'rename',        label: 'Rename…',               icon: Pencil },
       { id: 'sep1',         label: '',               separator: true },
@@ -212,6 +217,8 @@
       onRename?.(branch);
     } else if (id === 'create-branch') {
       onCreateBranch?.(branch);
+    } else if (id === 'create-worktree') {
+      worktreeBranch = branch;
     } else if (id === 'open-browser') {
       try {
         await openInBrowser(tab.id, `branch:${branch.name}`);
@@ -954,5 +961,20 @@
     fromRef={compareModal.fromRef}
     toRef={compareModal.toRef}
     onClose={() => compareModal = null}
+  />
+{/if}
+
+{#if worktreeBranch && tab}
+  {@const wbranch = worktreeBranch}
+  {@const wtab = tab}
+  <AddWorktreeModal
+    tabId={wtab.id}
+    initialBranch={wbranch.name}
+    onClose={() => worktreeBranch = null}
+    onAdded={() => {
+      worktreeBranch = null;
+      worktreeStore.load(wtab.id);
+      graphStore.refresh();
+    }}
   />
 {/if}

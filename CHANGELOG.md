@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Worktrees: create a new worktree straight from a right-click — on any commit in the graph ("New worktree here…", starting a branch or detached HEAD from that commit) or on any branch in the Branches & Stashes sidebar ("Create worktree…", pre-selecting that branch).
 - Plugin form-DSL: `card_grid` layout node — responsive auto-fit grid of cards that wraps to multiple rows when narrow. Pass `min_card` (default `"280px"`) to control the wrap threshold and `gap` for spacing. Use for dashboard layouts of `section variant="component"` or `info_card` children — unlike `card_row` (single flex row), `card_grid` wraps.
 - Plugin form-DSL: `property_grid` display node — read-only-first reflection grid (dense `label → value` rows, right-aligned type pills, nested-struct indentation, lock glyphs for immutable fields, per-row click-to-edit). Rows support `value_tone` (code-editor value colouring), `copyable` (hover copy glyph) and collapsible group rows. Editing reuses the existing field editors via each row's `edit_node`. Generic — for any structured-data inspector (config dumps, JSON, ECS reflection, API responses).
 - Plugin form-DSL: `chip_bar` gains `tint_inactive` — colours inactive chips by their `tone` so a filter bar reads like a legend before selection. `tabs` tab items now honour `badge` (count/warning), `disabled`, and `tooltip`.

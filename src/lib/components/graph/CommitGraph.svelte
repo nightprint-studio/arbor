@@ -14,6 +14,7 @@
   import TicketChip from './TicketChip.svelte';
   import TicketPickerModal from '../shared/TicketPickerModal.svelte';
   import NotesModal from './NotesModal.svelte';
+  import AddWorktreeModal from '../sidebar/AddWorktreeModal.svelte';
   import { PanelBottom, X, ArrowUpToLine, FileSearch, Archive, StickyNote, Download, Layers, Loader, Link2, Globe, Tag, Tags } from 'lucide-svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
@@ -41,6 +42,7 @@
   import { ticketLinksStore } from '$lib/stores/ticket_links.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
+  import { worktreeStore } from '$lib/stores/worktree.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import {
     svgWidth, svgHeight, ROW_HEIGHT, NODE_RADIUS,
@@ -104,6 +106,8 @@
   let ticketPickerNode = $state<CommitNode | null>(null);
   // Notes modal
   let notesNode = $state<CommitNode | null>(null);
+  // Add-worktree modal (right-click → New worktree here…)
+  let worktreeNode = $state<CommitNode | null>(null);
 
   const tab = $derived(tabsStore.activeTab);
   const data = $derived(graphStore.graphData);
@@ -1151,6 +1155,11 @@
     modalBranchNode = node;
   }
 
+  function openCreateWorktree(node: CommitNode) {
+    contextMenu = null;
+    worktreeNode = node;
+  }
+
   function openCreateTag(node: CommitNode) {
     contextMenu = null;
     modalTagNode = node;
@@ -1832,6 +1841,7 @@
       y={cm.y}
       onClose={() => (contextMenu = null)}
       onShowCreateBranch={openCreateBranch}
+      onShowCreateWorktree={openCreateWorktree}
       onShowCreateTag={openCreateTag}
       onShowLinkTicket={openLinkTicket}
       onShowNotes={openNotes}
@@ -1902,6 +1912,21 @@
     commitOid={notesNode.oid}
     shortOid={notesNode.short_oid}
     onClose={() => (notesNode = null)}
+  />
+{/if}
+
+{#if worktreeNode && tab}
+  {@const wn = worktreeNode}
+  {@const wtab = tab}
+  <AddWorktreeModal
+    tabId={wtab.id}
+    startCommit={{ oid: wn.oid, shortOid: wn.short_oid, summary: wn.summary }}
+    onClose={() => (worktreeNode = null)}
+    onAdded={() => {
+      worktreeNode = null;
+      worktreeStore.load(wtab.id);
+      graphStore.refresh();
+    }}
   />
 {/if}
 
