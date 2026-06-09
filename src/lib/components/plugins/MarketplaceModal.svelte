@@ -27,7 +27,8 @@
   import MarketplacePluginDetail          from './marketplace/MarketplacePluginDetail.svelte';
   import MarketplaceThemeDetail           from './marketplace/MarketplaceThemeDetail.svelte';
   import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
-  import { openUrl, openPath } from '@tauri-apps/plugin-opener';
+  import { openUrl } from '@tauri-apps/plugin-opener';
+  import { openFolder } from '$lib/utils/reveal';
   import { tooltip }     from '$lib/actions/tooltip';
   import { uiStore }     from '$lib/stores/ui.svelte';
   import { importPluginZipFromPath, reloadPlugins, pluginEnablePreview, pluginDisablePreview, getInstalledPluginPath } from '$lib/ipc/plugin';
@@ -670,7 +671,7 @@
   async function revealPluginFolder(p: MarketplacePlugin) {
     try {
       const dir = await getInstalledPluginPath(p.name);
-      await openPath(dir);
+      await openFolder(dir);
     } catch (err) {
       uiStore.showToast(`Could not open plugin folder: ${err}`, 'error');
     }

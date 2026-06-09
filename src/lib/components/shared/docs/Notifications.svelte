@@ -25,7 +25,7 @@
     <tr><td><code>open-link-manager</code></td><td><code>label</code>, <code>link_id</code></td><td>Opens the Linked Worktrees manager pre-selected on that link.</td></tr>
     <tr><td><code>open-tab-by-repo-id</code></td><td><code>label</code>, <code>repo_id</code></td><td>Activates the matching open tab; no-op if not currently open.</td></tr>
     <tr><td><code>open-url</code></td><td><code>label</code>, <code>url</code></td><td>Opens the URL in the user's default <strong>browser</strong>. Use <code>open-path</code> instead for local files (<code>file://</code> URLs are silently ignored by the opener plugin).</td></tr>
-    <tr><td><code>open-path</code></td><td><code>label</code>, <code>path</code>, <code>reveal?</code></td><td>Hands the path to the OS' default handler (folder → Explorer/Finder, file → default editor). Set <code>reveal = true</code> to open the file's parent folder instead — the cross-platform "reveal in Explorer".</td></tr>
+    <tr><td><code>open-path</code></td><td><code>label</code>, <code>path</code>, <code>reveal?</code></td><td>Hands the path to the OS' default handler (folder → Explorer/Finder, file → default editor). Set <code>reveal = true</code> to reveal the file in its folder instead — this honours the user's <em>Open in the built-in explorer</em> setting (Settings → File Explorer), so it lands in Arbor's own explorer when that's enabled, otherwise the OS file manager.</td></tr>
     <tr><td><code>plugin-action</code></td><td><code>label</code>, <code>plugin</code>, <code>action</code>, <code>ctx?</code></td><td>Fires <code>arbor.events.on(action, …)</code> in the named plugin with the optional <code>ctx</code> table — round-trip back to a plugin handler from the click.</td></tr>
   </tbody>
 </table>

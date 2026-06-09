@@ -31,6 +31,7 @@
   import { activityBarConfigStore } from '$lib/stores/activityBarConfig.svelte';
   import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
   import { openExplorerWindow } from '$lib/ipc/app';
+  import { openFolder } from '$lib/utils/reveal';
   import {
     checkoutBranch, checkoutBranchSafe, mergeBranch, deleteBranch, createBranch,
     stashApply, stashPop, stashDrop, resetToCommit,
@@ -334,6 +335,9 @@
         { id: 'action:reload-repo', kind: 'action', icon: 'RefreshCw',   group: 'Repository',
           title: 'Reload Repository', subtitle: 'Re-read git state for the current tab',
           action: () => closeAndDispatch('arbor:reload-repo') },
+        { id: 'action:reveal-repo', kind: 'action', icon: 'FolderOpen',  group: 'Repository',
+          title: 'Open in File Explorer', subtitle: 'Reveal the current repo folder',
+          action: () => { const t = tabsStore.activeTab; if (t) void openFolder(t.path); onClose(); } },
       );
     }
 

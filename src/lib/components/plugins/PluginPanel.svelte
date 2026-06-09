@@ -20,7 +20,7 @@
   import { listMarketplaceInstalledNames } from '$lib/ipc/marketplace';
   import { tooltip } from '$lib/actions/tooltip';
   import { invoke } from '@tauri-apps/api/core';
-  import { openPath } from '@tauri-apps/plugin-opener';
+  import { openFolder } from '$lib/utils/reveal';
   import { pluginStore } from '$lib/stores/plugin.svelte';
   import { containerStore } from '$lib/stores/container.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -108,13 +108,13 @@
     }
   }
 
-  // Reveal the plugins directory in the OS file manager. The backend
-  // command ensures the directory exists first (since a fresh install
-  // has none), so opening never fails with "not found".
+  // Reveal the plugins directory in the file explorer (OS or built-in per
+  // settings). The backend command ensures the directory exists first (since a
+  // fresh install has none), so opening never fails with "not found".
   async function openPluginsDirectory() {
     try {
       const dir = await invoke<string>('get_plugin_directory');
-      await openPath(dir);
+      await openFolder(dir);
     } catch (err) {
       uiStore.showToast(`Impossibile aprire la cartella plugins: ${err}`, 'error');
     }

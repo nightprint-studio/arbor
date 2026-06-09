@@ -21,6 +21,7 @@
   import { SvelteMap } from 'svelte/reactivity';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { highlightCode } from '$lib/utils/highlight';
   import {
     ArrowLeft, ArrowRight, ArrowUp, RefreshCw, Search, X, Eye, Info,
@@ -44,8 +45,9 @@
     fsZip, fsUnzip, fsSetWallpaper, fsSearch,
     fsReadTextFile, fsWatchStart, fsWatchStop,
     fsGitStatus, fsGitStage, fsGitUnstage, fsGitDiscard, fsGitIgnore, fsOpenInArbor, fsGitChanges,
-    fsGitBranches, fsGitCheckout, fsGitRemoteUrl,
+    fsGitBranches, fsGitCheckout, fsGitRemoteUrl, takeExplorerReveal,
     type FsEntry, type FsRoot, type FsGitStatus, type GitBadge, type GitRepoMarker, type GitChange, type GitChanges, type FsBranch,
+    type ExplorerRevealPayload,
   } from '$lib/ipc/fs';
   import { listRegistryRepos, listWorkspaces } from '$lib/ipc/workspace';
   import { workspaceColorVar, type RepoRegistryEntry, type WorkspaceDef } from '$lib/types/workspace';
@@ -415,6 +417,35 @@
     }
   }
 
+  /** Standalone window: handle an app-wide "reveal in built-in explorer"
+   *  request. Focuses an existing tab already at the folder, otherwise opens a
+   *  fresh browse tab there; then selects the file (when one was given) and
+   *  brings this window forward. Routed from `reveal_in_explorer` (backend) via
+   *  a pending pull on mount and the `arbor://explorer-reveal` event. */
+  async function revealHere(payload: ExplorerRevealPayload) {
+    if (!payload?.dir) return;
+    const target = normPath(payload.dir);
+    const existing = tabs.find(t => t.view === 'browse' && normPath(t.path) === target);
+    if (existing) {
+      // Focus the tab already at this folder and reload it (no history push).
+      activeTabId = existing.id;
+      await navigate(payload.dir, false);
+    } else if (tabs.length === 1 && activeTab.view !== 'browse') {
+      // Fresh window (lone Overview/Settings tab): reuse it instead of stacking
+      // a second tab — navigate converts it into the revealed browse location.
+      await navigate(payload.dir);
+    } else {
+      // Open a fresh browse tab so the reveal never disturbs the current one.
+      const t = mkTab('browse', '');
+      tabs = [...tabs, t];
+      activeTabId = t.id;
+      await navigate(payload.dir);
+    }
+    // `revealPath` waits a tick for the listing, then selects + scrolls to it.
+    if (payload.select) await revealPath(joinPath(payload.dir, payload.select));
+    try { await getCurrentWindow().setFocus(); } catch { /* ignore */ }
+  }
+
   // ── Branch switch (checkout) ───────────────────────────────────────────────
   // Filterable, keyboard-first branch picker anchored at a screen point, opened
   // from the footer branch chip or the repo context menu. `repoPath` is any path
@@ -656,8 +687,12 @@
   let addressFetchSeq = 0;
 
   function startAddressEdit() {
-    if (view === 'overview') return;
-    addressInput = view === 'settings' ? 'arbor://settings' : currentPath;
+    // The Overview and Settings views are addressable as `arbor://overview` /
+    // `arbor://settings`, so the path is editable from them too (no need to
+    // first navigate to a real folder just to type a new path).
+    addressInput = view === 'settings' ? 'arbor://settings'
+                 : view === 'overview' ? 'arbor://overview'
+                 : currentPath;
     addressEditing = true;
     tick().then(() => (document.getElementById('fx-addr') as HTMLInputElement)?.select());
   }
@@ -672,8 +707,10 @@
     // URL handling is browse-only — in picker mode the address bar is purely a
     // path entry (deep links / external links would be disruptive mid-pick).
     if (!isPicker) {
-      // `arbor://settings` opens the in-explorer settings view (body swap), like
-      // a browser's settings page — instead of navigating to a filesystem path.
+      // `arbor://overview` / `arbor://settings` open the in-explorer Overview /
+      // Settings views (body swap), like a browser's special pages — instead of
+      // navigating to a filesystem path.
+      if (/^arbor:\/\/overview\/?$/i.test(t)) { showOverview(); return; }
       if (/^arbor:\/\/settings\/?$/i.test(t)) { showSettings(); return; }
       // Other `arbor://…` → route to the deep-link dispatcher (which applies its
       // own enable/confirm gating). Works from the standalone window too.
@@ -1382,6 +1419,12 @@
       if (view === 'settings') exitSettings(); else showSettings();
       return;
     }
+    // Ctrl+L — edit the path. Works in any view: Overview / Settings are
+    // addressable (arbor://overview · arbor://settings), so there's no need to
+    // first navigate to a folder just to type a new path.
+    if (mod && !inInput && e.key.toLowerCase() === 'l') {
+      e.preventDefault(); e.stopImmediatePropagation(); startAddressEdit(); return;
+    }
     if (view !== 'browse') return;
     if (mod && !inInput) {
       const k = e.key.toLowerCase();
@@ -1389,7 +1432,6 @@
       if (k === 'c') { e.preventDefault(); e.stopImmediatePropagation(); doCopy(); return; }
       if (k === 'x') { e.preventDefault(); e.stopImmediatePropagation(); doCut();  return; }
       if (k === 'v') { e.preventDefault(); e.stopImmediatePropagation(); doPaste(); return; }
-      if (k === 'l') { e.preventDefault(); e.stopImmediatePropagation(); startAddressEdit(); return; }
     }
     // Focus-zone gate: the bare-key navigation below drives the FILE LIST, so it
     // only runs when focus is in the list (or unfocused). When focus is parked on
@@ -1707,6 +1749,7 @@
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
   let unlisten: UnlistenFn | null = null;
+  let revealUnlisten: UnlistenFn | null = null;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   function scheduleRefresh() { if (refreshTimer) clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { refreshTimer = null; refreshCurrent(); }, 200); }
   onMount(async () => {
@@ -1732,6 +1775,18 @@
       }
     } catch { /* ignore */ }
     try { unlisten = await listen('arbor://fs-changed', () => scheduleRefresh()); } catch { /* ignore */ }
+    // Standalone window: pick up a pending "reveal in built-in explorer" request
+    // (handed over when this window was spawned for a reveal) and keep listening
+    // for further reveals targeting the already-open window.
+    if (standalone) {
+      try {
+        const pending = await takeExplorerReveal(getCurrentWindow().label);
+        if (pending) await revealHere(pending);
+      } catch { /* ignore */ }
+      try {
+        revealUnlisten = await listen<ExplorerRevealPayload>('arbor://explorer-reveal', ev => { void revealHere(ev.payload); });
+      } catch { /* ignore */ }
+    }
     // Keyboard-first: park focus on the right control so navigation is live the
     // moment the explorer opens — save pickers focus the filename field (what
     // you came to type); any other browse view focuses the list so the arrow
@@ -1742,7 +1797,7 @@
       else if (view === 'browse') listEl?.focus();
     });
   });
-  onDestroy(() => { unlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); fsWatchStop().catch(() => {}); });
+  onDestroy(() => { unlisten?.(); revealUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); fsWatchStop().catch(() => {}); });
 </script>
 
 {#snippet sbLabel(id: string, Ico: typeof Folder, text: string)}
@@ -1926,7 +1981,7 @@
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div class="fx-address" class:editing={addressEditing} onclick={startAddressEdit} role="button" tabindex="-1"
            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startAddressEdit(); } }}
-           use:tooltip={{ content: 'Edit path', description: 'Type a path with Tab autocomplete', shortcut: 'Ctrl+L', delay: 1200, disabled: addressEditing || view === 'overview' }}>
+           use:tooltip={{ content: 'Edit path', description: 'Type a path with Tab autocomplete', shortcut: 'Ctrl+L', delay: 1200, disabled: addressEditing }}>
         {#if addressEditing}
           <div class="fx-addr-wrap">
             <input id="fx-addr" class="fx-addr-input" type="text" bind:value={addressInput} onblur={commitAddress} autocomplete="off" spellcheck="false"

@@ -2,7 +2,7 @@
   import { GitBranch, FolderOpen, Hash, Lock, Cpu, ExternalLink, Layers, ArrowUp, ArrowDown, FileDiff, Link2 } from 'lucide-svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
-  import { openPath } from '@tauri-apps/plugin-opener';
+  import { openFolder } from '$lib/utils/reveal';
   import type { WorktreeInfo } from '$lib/types/git';
   import { uiStore } from '$lib/stores/ui.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -70,13 +70,12 @@
     return parts.length <= 2 ? p : '…/' + parts.slice(-2).join('/');
   }
 
-  // Open the worktree directory in the OS file explorer (Explorer on Windows,
-  // Finder on macOS, xdg-open on Linux). The opener plugin already has the
-  // `opener:allow-open-path` permission for `**` in the default capability,
-  // so any absolute path the backend returned is fair game.
+  // Open the worktree directory in the file explorer. Routed through the shared
+  // helper so it lands in either the OS file manager or Arbor's built-in
+  // explorer depending on the user's File Explorer settings.
   async function openInExplorer() {
     try {
-      await openPath(worktree.path);
+      await openFolder(worktree.path);
     } catch (err) {
       uiStore.showToast(`Failed to open folder: ${err}`, 'error');
     }

@@ -17,6 +17,7 @@ const DEFAULT: ExplorerConfig = {
   open_external_links:   false,
   open_web_links:        false,
   remembered_external_schemes: [],
+  reveal_in_builtin:     false,
 };
 
 export const MAX_RECENTS_MIN = 1;
@@ -91,6 +92,7 @@ function createExplorerStore() {
   let openExternalLinks   = $state<boolean>(DEFAULT.open_external_links);
   let openWebLinks        = $state<boolean>(DEFAULT.open_web_links);
   let rememberedSchemes   = $state<string[]>([]);
+  let revealInBuiltin     = $state<boolean>(DEFAULT.reveal_in_builtin);
   let loaded              = $state(false);
 
   async function loadConfig() {
@@ -110,6 +112,7 @@ function createExplorerStore() {
       sidebarSections     = Array.isArray(cfg.sidebar_sections) ? cfg.sidebar_sections : [];
       openExternalLinks   = !!cfg.open_external_links;
       openWebLinks        = !!cfg.open_web_links;
+      revealInBuiltin     = !!cfg.reveal_in_builtin;
       rememberedSchemes   = Array.isArray(cfg.remembered_external_schemes)
         ? cfg.remembered_external_schemes.filter((s): s is string => typeof s === 'string').map(s => s.toLowerCase())
         : [];
@@ -136,6 +139,7 @@ function createExplorerStore() {
       open_external_links:   openExternalLinks,
       open_web_links:        openWebLinks,
       remembered_external_schemes: rememberedSchemes,
+      reveal_in_builtin:     revealInBuiltin,
     };
   }
 
@@ -159,6 +163,9 @@ function createExplorerStore() {
   // ── Generic external-link opening (address bar) ──────────────────────────
   function setOpenExternalLinks(on: boolean) { if (openExternalLinks === on) return; openExternalLinks = on; persist(); }
   function setOpenWebLinks(on: boolean)      { if (openWebLinks === on) return;      openWebLinks = on;      persist(); }
+  /** Route app-wide "Open / Reveal in File Explorer" actions into the built-in
+   *  explorer window instead of the OS file manager. */
+  function setRevealInBuiltin(on: boolean)   { if (revealInBuiltin === on) return;   revealInBuiltin = on;   persist(); }
   /** True when `scheme` (case-insensitive) was previously remembered. */
   function isSchemeRemembered(scheme: string): boolean { return rememberedSchemes.includes(scheme.toLowerCase()); }
   /** Persist a "remember this scheme" choice from the confirm prompt. */
@@ -209,6 +216,7 @@ function createExplorerStore() {
     get openExternalLinks()   { return openExternalLinks; },
     get openWebLinks()        { return openWebLinks; },
     get rememberedSchemes()   { return rememberedSchemes; },
+    get revealInBuiltin()     { return revealInBuiltin; },
     get loaded()              { return loaded; },
     loadConfig,
     setGitAwareness,
@@ -223,6 +231,7 @@ function createExplorerStore() {
     setSidebarSections,
     setOpenExternalLinks,
     setOpenWebLinks,
+    setRevealInBuiltin,
     isSchemeRemembered,
     rememberScheme,
     forgetRememberedSchemes,

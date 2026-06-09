@@ -11,6 +11,11 @@
   let gitAwareness = $state(explorerStore.gitAwareness);
   $effect(() => { explorerStore.setGitAwareness(gitAwareness); });
 
+  // Route the app's "Open / Reveal in File Explorer" actions into the built-in
+  // explorer window instead of the OS file manager.
+  let revealInBuiltin = $state(explorerStore.revealInBuiltin);
+  $effect(() => { explorerStore.setRevealInBuiltin(revealInBuiltin); });
+
   // The global shortcut goes through async setters (the backend register can
   // fail on a taken combo); read straight from the store and toast on error.
   async function toggleShortcut(on: boolean) {
@@ -39,6 +44,12 @@
     description="Register a system-wide hotkey that opens the dedicated explorer window even when Arbor isn't focused. Off by default. Click the chord to rebind it.">
     <GlobalShortcutCapture accel={explorerStore.globalShortcutAccel} disabled={!explorerStore.globalShortcut} onChange={rebind} />
     <Toggle checked={explorerStore.globalShortcut} onchange={toggleShortcut} />
+  </FormRow>
+
+  <FormRow
+    label="Open in the built-in explorer"
+    description="Route the app's “Open / Reveal in File Explorer” actions (worktree info, plugin folders, notification reveals…) into Arbor's own explorer window instead of the OS file manager. Off by default. The explorer's own “Reveal in File Explorer” item always uses the OS.">
+    <Toggle bind:checked={revealInBuiltin} />
   </FormRow>
 </div>
 

@@ -58,6 +58,17 @@ export const fsSetWallpaper = (path: string) => invoke<void>('fs_set_wallpaper',
 export const fsOpenDefault = (path: string) => invoke<void>('fs_open_default', { path });
 /** Reveal a path in the OS file manager, selecting it. */
 export const fsRevealInDir = (path: string) => invoke<void>('fs_reveal_in_dir', { path });
+/** Open the built-in explorer window at a path (focusing/reusing it per the
+ *  one-window setting). `reveal = true` selects the file inside its folder;
+ *  `reveal = false` just opens the folder. Used when the user routes the app's
+ *  "Open / Reveal in File Explorer" actions to the built-in explorer. */
+export const revealInExplorerWindow = (path: string, reveal: boolean) =>
+  invoke<void>('reveal_in_explorer', { path, reveal });
+/** A pending reveal handed to a freshly-opened explorer window. */
+export interface ExplorerRevealPayload { dir: string; select: string | null; }
+/** Drain the pending reveal for a window label (explorer window, on mount). */
+export const takeExplorerReveal = (label: string) =>
+  invoke<ExplorerRevealPayload | null>('take_explorer_reveal', { label });
 /** Open the OS-native Properties dialog for a path (Windows property sheet /
  *  macOS Finder Get Info / Linux FileManager1 D-Bus). */
 export const fsShowProperties = (path: string) => invoke<void>('fs_show_properties', { path });

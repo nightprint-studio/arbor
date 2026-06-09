@@ -198,6 +198,13 @@ pub struct ExplorerConfig {
     /// remembered scheme open without prompting.
     #[serde(default)]
     pub remembered_external_schemes: Vec<String>,
+    /// Route the app's "Open / Reveal in File Explorer" actions (worktree info,
+    /// plugin folders, notification reveals, …) into Arbor's built-in explorer
+    /// window instead of the OS file manager. Off by default — when off, those
+    /// actions hand the path to the platform shell as before. The explorer's
+    /// own "Reveal in File Explorer" item always uses the OS (escape hatch).
+    #[serde(default)]
+    pub reveal_in_builtin: bool,
 }
 
 /// One sidebar section's persisted order + visibility. Mirrors
@@ -235,6 +242,7 @@ impl Default for ExplorerConfig {
             open_external_links:  false,
             open_web_links:       false,
             remembered_external_schemes: Vec::new(),
+            reveal_in_builtin:    false,
         }
     }
 }

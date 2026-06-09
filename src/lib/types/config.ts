@@ -199,6 +199,9 @@ export interface ExplorerConfig {
   /** Schemes (lower-cased) the user chose to remember, so they open without
    *  prompting (e.g. ["vscode", "https"]). */
   remembered_external_schemes: string[];
+  /** Route the app's "Open / Reveal in File Explorer" actions into the built-in
+   *  explorer window instead of the OS file manager. Off by default. */
+  reveal_in_builtin: boolean;
 }
 
 /** UI animation preferences. `enabled=false` collapses every transition

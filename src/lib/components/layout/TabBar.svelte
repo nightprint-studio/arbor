@@ -3,6 +3,7 @@
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
+  import { openFolder } from '$lib/utils/reveal';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import { closeRepo } from '$lib/ipc/graph';
   import ContextMenu, { type MenuItem } from '../shared/ContextMenu.svelte';
@@ -64,6 +65,7 @@
       { id: 'close-all',    label: 'Close All Tabs' },
       { id: 'sep',          label: '', separator: true },
       ...(isCross ? [{ id: 'add-to-active', label: 'Add to Active Workspace' }] : []),
+      { id: 'reveal',       label: 'Open in File Explorer' },
       { id: 'copy-path',    label: 'Copy Path' },
     ];
   }
@@ -79,6 +81,12 @@
       for (const t of tabsStore.tabs.filter(t => t.id !== tabId)) await handleClose(t.id);
     } else if (id === 'close-all') {
       for (const t of [...tabsStore.tabs]) await handleClose(t.id);
+    } else if (id === 'reveal') {
+      const tab = tabsStore.tabs.find(t => t.id === tabId);
+      if (tab) {
+        try { await openFolder(tab.path); }
+        catch (e) { uiStore.showToast(`Failed to open folder: ${e}`, 'error'); }
+      }
     } else if (id === 'copy-path') {
       const tab = tabsStore.tabs.find(t => t.id === tabId);
       if (tab) {

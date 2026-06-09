@@ -67,7 +67,7 @@
   <li><strong>Merge Requests</strong> — <em>View MR / PR Detail</em> (opens the detail modal for a pull / merge request), <em>Open Pull / Merge Request</em> (opens the create MR/PR modal)</li>
   <li><strong>Issues</strong> — <em>Linear Issue</em>, <em>Jira Issue</em> (each visible only when signed in to the corresponding tracker). Searches across the whole tracker — no per-project scoping — and opens the detail modal pinned to the picked provider. The query box honors the same prefixes as the Issues sidebar: <code>#</code> for code-only (ticket key), <code>~</code> for text-only (titles &amp; comments).</li>
   <li><strong>Appearance</strong> — <em>Switch Theme</em></li>
-  <li><strong>Repository actions (leaves)</strong> — Open / Init / Clone / Reload Repository</li>
+  <li><strong>Repository actions (leaves)</strong> — Open / Init / Clone / Reload Repository, and <em>Open in File Explorer</em> (reveal the current repo folder in the OS file manager — or Arbor's built-in explorer, per your File Explorer setting)</li>
   <li><strong>Workspaces</strong> — <em>Switch Workspace</em>, <em>Open Project</em>, <em>Open from Workspace</em>, Manage Workspaces, Create Workspace</li>
   <li><strong>Worktrees</strong> — <em>Worktree Info</em>, <em>Switch Worktree</em></li>
   <li><strong>Deep Links</strong> — <em>Copy arbor:// Link to Commit / Checkout Branch / Branch Worktree / MR</em> (the <em>Open Repository</em> link is a leaf action under <strong>Copy</strong>)</li>

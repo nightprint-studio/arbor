@@ -10,9 +10,29 @@
 //! (`ExplorerWindow.svelte`) instead of `AppShell`. This avoids a second
 //! SvelteKit route / prerender entirely — both windows share one entry point.
 
+use std::collections::HashMap;
 use std::str::FromStr;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::Shortcut;
+
+/// A pending "reveal this path" request handed to a freshly-opened explorer
+/// window. The frontend pulls it on mount (via [`take_explorer_reveal`]) once
+/// its listeners are wired — avoiding the emit-before-listen race a new window
+/// would otherwise hit. Already-open windows get the same payload by event.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RevealPayload {
+    /// Folder the explorer should navigate to.
+    pub dir: String,
+    /// File name to select inside `dir` once it loads (None ⇒ just open the
+    /// folder, no selection — used for "open folder" as opposed to "reveal").
+    pub select: Option<String>,
+}
+
+/// Per-window pending reveals, keyed by window label. Populated when a reveal
+/// spawns a NEW explorer window; drained by the window's frontend on mount.
+#[derive(Default)]
+pub struct PendingReveals(pub Mutex<HashMap<String, RevealPayload>>);
 
 /// Window label for the dedicated explorer window. The frontend reads
 /// `getCurrentWindow().label` and matches this to switch into explorer mode.
@@ -80,11 +100,17 @@ fn create_or_focus(app: &AppHandle) {
     }
 
     let label = next_explorer_label(app);
-    // `WebviewUrl::default()` resolves to the app's index (`index.html`) — the
-    // same entry the main window uses — so the load path is identical in dev
-    // (Vite) and packaged builds. Frameless to match Arbor's main window; the
-    // standalone shell paints its own titlebar + WindowControls.
-    let res = WebviewWindowBuilder::new(app, &label, WebviewUrl::default())
+    build_explorer_window(app, &label);
+}
+
+/// Build a frameless explorer window with the given label.
+///
+/// `WebviewUrl::default()` resolves to the app's index (`index.html`) — the
+/// same entry the main window uses — so the load path is identical in dev
+/// (Vite) and packaged builds. Frameless to match Arbor's main window; the
+/// standalone shell paints its own titlebar + WindowControls.
+fn build_explorer_window(app: &AppHandle, label: &str) {
+    let res = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
         .title("File Explorer — Arbor")
         .inner_size(1100.0, 720.0)
         .min_inner_size(720.0, 460.0)
@@ -99,6 +125,83 @@ fn create_or_focus(app: &AppHandle) {
     if let Err(e) = res {
         tracing::error!("failed to open explorer window: {e}");
     }
+}
+
+/// Open the explorer at a folder (and optionally select a file), reusing the
+/// existing window when one-window mode is on. Mirrors [`open_or_focus`]'s
+/// thread hop (WebView2 window ops must run on the main thread).
+fn open_or_focus_reveal(app: &AppHandle, payload: RevealPayload) {
+    let handle = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || create_or_focus_reveal(&handle, payload)) {
+        tracing::error!("failed to dispatch explorer reveal to main thread: {e}");
+    }
+}
+
+/// Main-thread body of [`open_or_focus_reveal`].
+///
+/// One-window mode (default): focus the single explorer window and hand it the
+/// reveal by event — it reuses an open tab for that folder or opens a new one.
+/// New-window mode: spawn a fresh window with the reveal stashed for the
+/// frontend to pull on mount (no cross-window tab dedup in this mode).
+fn create_or_focus_reveal(app: &AppHandle, payload: RevealPayload) {
+    let always_new = crate::config::app_config::load()
+        .map(|c| c.explorer.always_new_window)
+        .unwrap_or(false);
+
+    if !always_new {
+        if let Some(w) = app.get_webview_window(EXPLORER_WINDOW_LABEL) {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
+            let _ = w.emit("arbor://explorer-reveal", &payload);
+            return;
+        }
+    }
+
+    let label = next_explorer_label(app);
+    if let Some(state) = app.try_state::<PendingReveals>() {
+        if let Ok(mut map) = state.0.lock() {
+            map.insert(label.clone(), payload);
+        }
+    }
+    build_explorer_window(app, &label);
+}
+
+/// Resolve a raw path + `reveal` flag into a [`RevealPayload`]: when revealing a
+/// file, navigate to its parent and select it; otherwise open the folder
+/// itself with no selection. The file/dir check is a single `stat`.
+fn resolve_reveal(path: &str, reveal: bool) -> RevealPayload {
+    let p = std::path::Path::new(path);
+    if reveal && p.is_file() {
+        let dir = p
+            .parent()
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string());
+        let select = p.file_name().map(|n| n.to_string_lossy().into_owned());
+        RevealPayload { dir, select }
+    } else {
+        RevealPayload { dir: path.to_string(), select: None }
+    }
+}
+
+/// IPC entry point for the app-wide "Open / Reveal in File Explorer" actions
+/// when the user routes them to the built-in explorer
+/// (`explorer.reveal_in_builtin`). `reveal = true` selects the file inside its
+/// folder; `reveal = false` just opens the folder. Async for the same
+/// main-thread-hop reason as [`open_explorer_window`].
+#[tauri::command]
+#[allow(clippy::unused_async)]
+pub async fn reveal_in_explorer(app: AppHandle, path: String, reveal: bool) {
+    let payload = resolve_reveal(&path, reveal);
+    open_or_focus_reveal(&app, payload);
+}
+
+/// Drain the pending reveal for a window label (called by a freshly-opened
+/// explorer window's frontend on mount). Returns `None` when there's nothing
+/// pending (normal global-shortcut / palette opens).
+#[tauri::command]
+pub fn take_explorer_reveal(state: State<'_, PendingReveals>, label: String) -> Option<RevealPayload> {
+    state.0.lock().ok()?.remove(&label)
 }
 
 /// Pick a free window label: the canonical `explorer` when available, otherwise

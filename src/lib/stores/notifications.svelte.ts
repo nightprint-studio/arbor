@@ -160,16 +160,20 @@ export async function dispatchNotificationAction(action: NotificationAction): Pr
       return;
     }
     case 'open-path': {
-      // openPath hands the path to the OS' default handler (folder →
-      // Explorer/Finder, file → default editor). When `reveal` is set
-      // we walk up to the parent directory so Explorer opens AT the
-      // file's containing folder — the closest the cross-platform
-      // opener plugin gets to "select in Explorer". Empty path is a
+      // A `reveal` action means "show this in the file explorer" → route it
+      // through the shared helper, which picks the OS file manager or Arbor's
+      // built-in explorer (selecting the file) per the user's settings. A
+      // plain open hands the path to the OS default handler (folder →
+      // Explorer/Finder, file → default editor) unchanged. Empty path is a
       // no-op (caller bug, but better than throwing).
-      const target = action.reveal
-        ? action.path.replace(/[\\/][^\\/]+$/, '') || action.path
-        : action.path;
-      try { await openPath(target); } catch { /* ignore */ }
+      try {
+        if (action.reveal) {
+          const { revealFile } = await import('$lib/utils/reveal');
+          await revealFile(action.path);
+        } else {
+          await openPath(action.path);
+        }
+      } catch { /* ignore */ }
       return;
     }
     case 'plugin-action': {

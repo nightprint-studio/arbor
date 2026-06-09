@@ -480,6 +480,7 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::new())
+        .manage(explorer_window::PendingReveals::default())
         .setup(|app| {
             // Wire the `arbor-cloud` crate against AppState: registers the
             // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
@@ -1513,6 +1514,8 @@ pub fn run() {
             commands::marketplace_commands::marketplace_add_custom_source,
             // Dedicated File Explorer window
             explorer_window::open_explorer_window,
+            explorer_window::reveal_in_explorer,
+            explorer_window::take_explorer_reveal,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");
