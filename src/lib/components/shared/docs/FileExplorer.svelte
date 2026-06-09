@@ -20,7 +20,8 @@
     <tr><td>Global shortcut <Kbd label="Ctrl+Shift+E" /></td><td>Opens / focuses the window even when Arbor isn't focused — <em>opt-in</em>, enable it in Settings → File Explorer</td></tr>
   </tbody>
 </table>
-<p>By default, re-summoning <strong>focuses the existing window</strong> instead of opening a second one. Turn on <strong>Always open a new window</strong> (in the explorer's settings) if you prefer a fresh window each time.</p>
+<p>By default, re-summoning <strong>focuses the existing window</strong> instead of opening a second one. Turn on <strong>Always open a new window</strong> (in the explorer's settings) if you prefer a fresh window each time. Closing a window (its close button or <Kbd label="Ctrl+W" /> on the last tab) closes it for good — the next open starts fresh.</p>
+<p>Open windows work <strong>together</strong>: the clipboard is shared, so you can copy in one and paste in another, and you can <strong>drag items from one explorer window onto another</strong> to move them into the folder it's showing — a ghost follows the cursor across the desktop, and the target window comes forward on drop.</p>
 
 <h2>Layout</h2>
 <ul class="step-list">
@@ -49,6 +50,7 @@
     <tr><td>Edit the address</td><td><Kbd label="Ctrl+L" /></td></tr>
     <tr><td>Type-ahead filter</td><td>Just start typing — then <Kbd label="Down" /> steps into the list (or <Kbd label="Enter" /> opens the first match)</td></tr>
     <tr><td>Select all</td><td><Kbd label="Ctrl+A" /></td></tr>
+    <tr><td>Close the tab (or the explorer, if it's the last)</td><td><Kbd label="Ctrl+W" /></td></tr>
     <tr><td>Open the explorer settings</td><td><Kbd label="Ctrl+," /></td></tr>
   </tbody>
 </table>

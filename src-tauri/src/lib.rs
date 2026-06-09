@@ -481,6 +481,8 @@ pub fn run() {
         )
         .manage(AppState::new())
         .manage(explorer_window::PendingReveals::default())
+        .manage(explorer_window::ExplorerClipboard::default())
+        .manage(explorer_window::DragOverlayText::default())
         .setup(|app| {
             // Wire the `arbor-cloud` crate against AppState: registers the
             // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
@@ -847,8 +849,15 @@ pub fn run() {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     #[cfg(not(debug_assertions))]
                     {
-                        api.prevent_close();
-                        let _ = window.hide();
+                        // Close-to-tray applies ONLY to the main window. Auxiliary
+                        // windows (the dedicated File Explorer, the drag-ghost
+                        // overlay) close for real — otherwise a closed explorer is
+                        // merely hidden and reopening re-summons the same stale
+                        // window instead of a fresh one.
+                        if window.label() == "main" {
+                            api.prevent_close();
+                            let _ = window.hide();
+                        }
                     }
                     #[cfg(debug_assertions)]
                     let _ = api;
@@ -1516,6 +1525,16 @@ pub fn run() {
             explorer_window::open_explorer_window,
             explorer_window::reveal_in_explorer,
             explorer_window::take_explorer_reveal,
+            // Cross-window clipboard + drag/drop (between explorer windows)
+            explorer_window::explorer_clip_set,
+            explorer_window::explorer_clip_get,
+            explorer_window::explorer_clip_clear,
+            explorer_window::get_drag_overlay_text,
+            explorer_window::ensure_drag_overlay,
+            explorer_window::drag_overlay_show,
+            explorer_window::drag_overlay_move,
+            explorer_window::drag_overlay_hide,
+            explorer_window::explorer_drop_dispatch,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");

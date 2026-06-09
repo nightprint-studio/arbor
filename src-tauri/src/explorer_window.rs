@@ -38,6 +38,18 @@ pub struct PendingReveals(pub Mutex<HashMap<String, RevealPayload>>);
 /// `getCurrentWindow().label` and matches this to switch into explorer mode.
 pub const EXPLORER_WINDOW_LABEL: &str = "explorer";
 
+/// Label for the shared drag-ghost overlay window. A single, transparent,
+/// click-through, always-on-top window (created lazily, then reused + hidden)
+/// that renders the dragged item label and follows the cursor — so a drag that
+/// leaves its source window's bounds keeps a visible ghost across the desktop,
+/// which a DOM-only ghost (clipped to the source webview) cannot do.
+pub const DRAG_OVERLAY_LABEL: &str = "drag-overlay";
+
+/// True for any dedicated explorer window label (`explorer` or `explorer-N`).
+fn is_explorer_label(label: &str) -> bool {
+    label == EXPLORER_WINDOW_LABEL || label.starts_with(&format!("{EXPLORER_WINDOW_LABEL}-"))
+}
+
 /// WebView2 additional browser args. **Must match the `main` window's
 /// `additionalBrowserArgs` in `tauri.conf.json`** — every WebView2 instance in
 /// the process shares one user-data-folder + environment, and creating a second
@@ -279,4 +291,173 @@ pub fn reconcile_global_shortcut(
         }
     }
     Ok(())
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  Cross-window clipboard (copy / cut / paste between Arbor explorer windows)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Each explorer window is its own JS context, so a per-window in-memory
+// clipboard can't be pasted into another window. The OS clipboard's file
+// formats (CF_HDROP & friends) aren't reachable from the WebView either. Since
+// every window lives in ONE process, we keep the clipboard in shared Tauri
+// state and broadcast changes so every open explorer mirrors it — copy in one
+// window, paste in another. The actual copy/move is a plain `fs_copy`/`fs_move`
+// the pasting window runs; this state only carries the intent (paths + op).
+
+/// The shared clipboard payload. `op` is `"copy"` or `"cut"`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ClipData {
+    pub op: String,
+    pub paths: Vec<String>,
+}
+
+/// Process-wide explorer clipboard, shared by every window via Tauri state.
+#[derive(Default)]
+pub struct ExplorerClipboard(pub Mutex<Option<ClipData>>);
+
+/// Store `op`+`paths` as the active clipboard and broadcast the new contents to
+/// every window (so each explorer's "cut" dimming + footer chip stay in sync).
+#[tauri::command]
+pub fn explorer_clip_set(app: AppHandle, state: State<'_, ExplorerClipboard>, op: String, paths: Vec<String>) {
+    let data = ClipData { op, paths };
+    if let Ok(mut g) = state.0.lock() { *g = Some(data.clone()); }
+    let _ = app.emit("arbor://explorer-clip-changed", Some(data));
+}
+
+/// Read the current clipboard (an explorer window seeds its local mirror with
+/// this on mount so it knows about a copy made before it opened).
+#[tauri::command]
+pub fn explorer_clip_get(state: State<'_, ExplorerClipboard>) -> Option<ClipData> {
+    state.0.lock().ok().and_then(|g| g.clone())
+}
+
+/// Clear the clipboard (after a cut→paste move completes) and broadcast the
+/// cleared state so every window drops its "cut" dimming.
+#[tauri::command]
+pub fn explorer_clip_clear(app: AppHandle, state: State<'_, ExplorerClipboard>) {
+    if let Ok(mut g) = state.0.lock() { *g = None; }
+    let _ = app.emit("arbor://explorer-clip-changed", None::<ClipData>);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  Cross-window drag & drop (overlay ghost + drop hit-testing)
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Label shown on the drag-ghost overlay (e.g. `"3 items"`). The overlay window
+/// pulls this on mount and re-reads it on the `arbor://drag-overlay-set` event,
+/// avoiding an emit-before-listen race the first time it's shown.
+#[derive(Default)]
+pub struct DragOverlayText(pub Mutex<String>);
+
+/// Drain the current overlay label (called by the overlay window's frontend on
+/// mount). Subsequent updates arrive via `arbor://drag-overlay-set`.
+#[tauri::command]
+pub fn get_drag_overlay_text(state: State<'_, DragOverlayText>) -> String {
+    state.0.lock().map(|g| g.clone()).unwrap_or_default()
+}
+
+/// Build the shared drag-ghost overlay window: transparent, frameless,
+/// always-on-top, skip-taskbar, unfocusable and click-through, created hidden
+/// (shown only for the duration of a drag — a *visible* window parked off-screen
+/// gets yanked back on-screen by the Windows WM at creation). Mirrors the
+/// explorer windows' WebView2 env (see [`WEBVIEW_BROWSER_ARGS`]) — a mismatched
+/// second webview fails with `HRESULT 0x8007139F`.
+fn build_drag_overlay(app: &AppHandle) {
+    let res = WebviewWindowBuilder::new(app, DRAG_OVERLAY_LABEL, WebviewUrl::default())
+        .title("")
+        .inner_size(360.0, 52.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .focused(false)
+        .visible(false)
+        .additional_browser_args(WEBVIEW_BROWSER_ARGS)
+        .build();
+    match res {
+        Ok(w) => { let _ = w.set_ignore_cursor_events(true); }
+        Err(e) => tracing::error!("failed to build drag overlay window: {e}"),
+    }
+}
+
+/// Ensure the drag-ghost overlay exists (build it on the main thread on first
+/// use, then reuse). Async so it runs off the main thread, like
+/// [`open_explorer_window`]; blocks briefly until the window is registered so
+/// the caller can immediately position + show it.
+#[tauri::command]
+#[allow(clippy::unused_async)]
+pub async fn ensure_drag_overlay(app: AppHandle) {
+    if app.get_webview_window(DRAG_OVERLAY_LABEL).is_some() { return; }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = app.clone();
+    if app
+        .run_on_main_thread(move || { build_drag_overlay(&handle); let _ = tx.send(()); })
+        .is_ok()
+    {
+        let _ = rx.recv();
+    }
+}
+
+/// Overlay offset from the cursor (logical px) so the ghost trails the pointer
+/// instead of sitting under it (and stealing nothing, being click-through).
+const DRAG_OVERLAY_DX: f64 = 14.0;
+const DRAG_OVERLAY_DY: f64 = 16.0;
+
+/// Set the ghost label, move the overlay to the cursor and show it (drag start).
+/// `x`/`y` are LOGICAL screen coordinates (a `MouseEvent`'s `screenX`/`screenY`).
+/// Position is set BEFORE showing so it never flashes at a stale location.
+#[tauri::command]
+pub fn drag_overlay_show(app: AppHandle, state: State<'_, DragOverlayText>, text: String, x: f64, y: f64) {
+    if let Ok(mut g) = state.0.lock() { *g = text.clone(); }
+    if let Some(w) = app.get_webview_window(DRAG_OVERLAY_LABEL) {
+        let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x + DRAG_OVERLAY_DX, y + DRAG_OVERLAY_DY)));
+        let _ = w.show();
+        let _ = w.emit("arbor://drag-overlay-set", text);
+    }
+}
+
+/// Move the overlay to follow the cursor (logical screen coordinates).
+#[tauri::command]
+pub fn drag_overlay_move(app: AppHandle, x: f64, y: f64) {
+    if let Some(w) = app.get_webview_window(DRAG_OVERLAY_LABEL) {
+        let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x + DRAG_OVERLAY_DX, y + DRAG_OVERLAY_DY)));
+    }
+}
+
+/// Hide the overlay (drag ended).
+#[tauri::command]
+pub fn drag_overlay_hide(app: AppHandle) {
+    if let Some(w) = app.get_webview_window(DRAG_OVERLAY_LABEL) {
+        let _ = w.hide();
+    }
+}
+
+/// On drop, find a DIFFERENT explorer window whose bounds contain the cursor
+/// (logical screen coordinates) and hand it the dragged paths via
+/// `arbor://explorer-external-drop` — that window moves them into its current
+/// folder. Returns true when a target window was found & notified (the source
+/// then just clears its selection); false ⇒ dropped on the desktop / a
+/// non-explorer window, so the source handles it as an in-window drop.
+#[tauri::command]
+pub fn explorer_drop_dispatch(app: AppHandle, source_label: String, x: f64, y: f64, paths: Vec<String>) -> bool {
+    for (label, w) in app.webview_windows() {
+        if label == source_label || !is_explorer_label(&label) { continue; }
+        let pos = match w.outer_position() { Ok(p) => p, Err(_) => continue };
+        let size = match w.outer_size() { Ok(s) => s, Err(_) => continue };
+        // Compare in logical space, scaling each window by ITS OWN factor so
+        // multi-monitor / mixed-DPI setups hit-test correctly.
+        let scale = w.scale_factor().unwrap_or(1.0);
+        let (lx, ly) = (pos.x as f64 / scale, pos.y as f64 / scale);
+        let (lw, lh) = (size.width as f64 / scale, size.height as f64 / scale);
+        if x >= lx && x <= lx + lw && y >= ly && y <= ly + lh {
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+            let _ = w.emit("arbor://explorer-external-drop", paths);
+            return true;
+        }
+    }
+    false
 }

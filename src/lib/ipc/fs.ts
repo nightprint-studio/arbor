@@ -69,6 +69,36 @@ export interface ExplorerRevealPayload { dir: string; select: string | null; }
 /** Drain the pending reveal for a window label (explorer window, on mount). */
 export const takeExplorerReveal = (label: string) =>
   invoke<ExplorerRevealPayload | null>('take_explorer_reveal', { label });
+
+// ── Cross-window clipboard (copy / cut / paste between explorer windows) ─────
+export type ClipOp = 'copy' | 'cut';
+/** The shared explorer clipboard payload (process-wide, mirrored per window). */
+export interface ClipData { op: ClipOp; paths: string[]; }
+/** Set the shared clipboard; broadcasts `arbor://explorer-clip-changed`. */
+export const explorerClipSet = (op: ClipOp, paths: string[]) =>
+  invoke<void>('explorer_clip_set', { op, paths });
+/** Read the shared clipboard (seed a window's local mirror on mount). */
+export const explorerClipGet = () => invoke<ClipData | null>('explorer_clip_get');
+/** Clear the shared clipboard (after a cut→paste move); broadcasts the change. */
+export const explorerClipClear = () => invoke<void>('explorer_clip_clear');
+
+// ── Cross-window drag & drop (overlay ghost + drop hit-testing) ──────────────
+/** Ensure the shared drag-ghost overlay window exists (built once, reused). */
+export const ensureDragOverlay = () => invoke<void>('ensure_drag_overlay');
+/** Show the overlay with `text` at logical screen coordinates `x`/`y`. */
+export const dragOverlayShow = (text: string, x: number, y: number) =>
+  invoke<void>('drag_overlay_show', { text, x, y });
+/** Move the overlay to logical screen coordinates `x`/`y`. */
+export const dragOverlayMove = (x: number, y: number) =>
+  invoke<void>('drag_overlay_move', { x, y });
+/** Hide the overlay (drag ended, or cursor re-entered the source window). */
+export const dragOverlayHide = () => invoke<void>('drag_overlay_hide');
+/** Drain the current overlay label (overlay window pulls this on mount). */
+export const getDragOverlayText = () => invoke<string>('get_drag_overlay_text');
+/** On drop, hand the dragged paths to another explorer window under the cursor
+ *  (logical screen coords). Returns true when a target window was notified. */
+export const explorerDropDispatch = (sourceLabel: string, x: number, y: number, paths: string[]) =>
+  invoke<boolean>('explorer_drop_dispatch', { sourceLabel, x, y, paths });
 /** Open the OS-native Properties dialog for a path (Windows property sheet /
  *  macOS Finder Get Info / Linux FileManager1 D-Bus). */
 export const fsShowProperties = (path: string) => invoke<void>('fs_show_properties', { path });

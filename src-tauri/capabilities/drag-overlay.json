@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "drag-overlay",
+  "description": "Capability for the shared drag-ghost overlay window (transparent, click-through, follows the cursor during cross-window drags).",
+  "windows": ["drag-overlay"],
+  "permissions": [
+    "core:default"
+  ]
+}

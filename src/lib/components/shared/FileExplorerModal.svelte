@@ -46,8 +46,10 @@
     fsReadTextFile, fsWatchStart, fsWatchStop,
     fsGitStatus, fsGitStage, fsGitUnstage, fsGitDiscard, fsGitIgnore, fsOpenInArbor, fsGitChanges,
     fsGitBranches, fsGitCheckout, fsGitRemoteUrl, takeExplorerReveal,
+    explorerClipSet, explorerClipGet, explorerClipClear,
+    ensureDragOverlay, dragOverlayShow, dragOverlayMove, dragOverlayHide, explorerDropDispatch,
     type FsEntry, type FsRoot, type FsGitStatus, type GitBadge, type GitRepoMarker, type GitChange, type GitChanges, type FsBranch,
-    type ExplorerRevealPayload,
+    type ExplorerRevealPayload, type ClipData,
   } from '$lib/ipc/fs';
   import { listRegistryRepos, listWorkspaces } from '$lib/ipc/workspace';
   import { workspaceColorVar, type RepoRegistryEntry, type WorkspaceDef } from '$lib/types/workspace';
@@ -519,6 +521,13 @@
     const idx = tabs.findIndex(t => t.id === id);
     tabs = tabs.filter(t => t.id !== id);
     if (activeTabId === id) { activeTabId = tabs[Math.min(idx, tabs.length - 1)].id; syncActive(); }
+  }
+  /** Ctrl+W: close the active tab, or — when it's the last one — the whole
+   *  explorer (the standalone window closes; a modal explorer dismisses). */
+  async function closeActiveTabOrWindow() {
+    if (tabs.length > 1) { closeTab(activeTabId); return; }
+    if (standalone) { try { await getCurrentWindow().close(); } catch { /* ignore */ } }
+    else dismiss();
   }
 
   // ── Navigation ─────────────────────────────────────────────────────────
@@ -1015,31 +1024,45 @@
     fsShowProperties(path).catch(e => uiStore.showToast(`${e}`, 'error'));
   }
 
-  // ── Clipboard ──────────────────────────────────────────────────────────
-  function doCopy() { const p = actionPaths(); if (!p.length) return; clipboard = { op: 'copy', paths: p }; uiStore.showToast(`Copied ${p.length} item${p.length !== 1 ? 's' : ''}`, 'info'); }
-  function doCut()  { const p = actionPaths(); if (!p.length) return; clipboard = { op: 'cut', paths: p }; }
+  // ── Clipboard (shared across all explorer windows) ─────────────────────────
+  // Set the local mirror immediately (snappy UI), then push to the process-wide
+  // clipboard so other open explorer windows mirror it via the
+  // `arbor://explorer-clip-changed` broadcast — copy here, paste there.
+  function doCopy() { const p = actionPaths(); if (!p.length) return; clipboard = { op: 'copy', paths: p }; void explorerClipSet('copy', p); uiStore.showToast(`Copied ${p.length} item${p.length !== 1 ? 's' : ''}`, 'info'); }
+  function doCut()  { const p = actionPaths(); if (!p.length) return; clipboard = { op: 'cut', paths: p }; void explorerClipSet('cut', p); }
   async function doPaste() {
     if (!clipboard || !currentPath || view !== 'browse') return;
     const { op, paths } = clipboard;
     try {
       if (op === 'copy') await fsCopy(paths, currentPath);
-      else { await fsMove(paths, currentPath); clipboard = null; }
+      else { await fsMove(paths, currentPath); clipboard = null; void explorerClipClear(); }
       await refreshCurrent();
     } catch (e) { uiStore.showToast(`Paste failed: ${e}`, 'error'); }
   }
 
-  // ── Drag & drop (move entries into a folder) ───────────────────────────────
+  // ── Drag & drop (move entries into a folder, or onto another window) ────────
   // Mouse-event based, NOT native HTML5 DnD: on Windows WebView2 the OS drag
   // handler (Tauri `dragDropEnabled`, on by default) swallows the DOM `drop`
   // event, so native DnD silently fails. Same approach as Tabs.svelte. Bonus:
   // re-rendering the dragged row mid-drag (selection/virtualization) can't
   // cancel the gesture, since the listeners live on `window`, not the node.
+  //
+  // The drag ghost is ALWAYS rendered in the shared overlay window (a top-level
+  // OS window), never as a DOM node — so it's never clipped by this window's
+  // edges (a DOM ghost vanishes near the right margin) and stays visible across
+  // the desktop. Implicit pointer capture keeps mousemove/up flowing here even
+  // when the cursor leaves our bounds; on drop the backend checks whether
+  // another explorer window is under the cursor and, if so, moves the items
+  // into its folder.
   let dragging      = $state(false);
   let dragOverDir   = $state<string | null>(null);
-  let dragGhost     = $state<{ x: number; y: number; label: string } | null>(null);
   let dragPaths: string[] = [];
   let dragPathSet   = new Set<string>();
   let suppressClick = false;
+
+  // This window's Tauri label — excludes self from cross-window drop targeting.
+  let selfLabel = 'main';
+  try { selfLabel = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
 
   /** True (and clears the flag) when a click is the tail of a finished drag. */
   function consumeDragClick(): boolean {
@@ -1053,6 +1076,14 @@
     suppressClick = false;
     const startX = e.clientX, startY = e.clientY;
     let started = false;
+    let lastInside = true;             // cursor inside this window at last move
+    let lastSX = e.screenX, lastSY = e.screenY;
+    let moveRaf = 0;                   // rAF throttle for overlay repositioning
+
+    /** Cursor inside this window's viewport? (logical CSS px both sides) */
+    const isInside = (ev: MouseEvent) =>
+      ev.clientX >= 0 && ev.clientY >= 0 && ev.clientX <= window.innerWidth && ev.clientY <= window.innerHeight;
+
     const onMove = (ev: MouseEvent) => {
       if (!started) {
         if (Math.abs(ev.clientX - startX) < 5 && Math.abs(ev.clientY - startY) < 5) return;
@@ -1062,27 +1093,59 @@
         dragPaths   = selected.has(entry.path) && selected.size > 0 ? [...selected] : [entry.path];
         dragPathSet = new Set(dragPaths);
         dragging    = true;
-        dragGhost   = { x: ev.clientX, y: ev.clientY, label: dragPaths.length === 1 ? baseName(dragPaths[0]) : `${dragPaths.length} items` };
         document.body.style.cursor = 'grabbing';
         document.body.style.userSelect = 'none';
+        const label = dragPaths.length === 1 ? baseName(dragPaths[0]) : `${dragPaths.length} items`;
+        const sx = ev.screenX, sy = ev.screenY;
+        void (async () => { try { await ensureDragOverlay(); await dragOverlayShow(label, sx, sy); } catch { /* ignore */ } })();
       }
-      if (dragGhost) dragGhost = { ...dragGhost, x: ev.clientX, y: ev.clientY };
-      updateDropTarget(ev.clientX, ev.clientY);
+      lastSX = ev.screenX; lastSY = ev.screenY;
+      lastInside = isInside(ev);
+      // Folder drop targeting only applies while the cursor is over our list.
+      if (lastInside) updateDropTarget(ev.clientX, ev.clientY); else dragOverDir = null;
+      if (!moveRaf) moveRaf = requestAnimationFrame(() => { moveRaf = 0; void dragOverlayMove(lastSX, lastSY); });
     };
-    const onUp = () => {
+
+    const onUp = (ev: MouseEvent) => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }
       if (started) {
-        const target = dragOverDir;
+        void dragOverlayHide();           // park the overlay off-screen
         suppressClick = true;             // swallow the click the browser fires next
-        if (target) void moveInto(target);
+        if (lastInside) {
+          if (dragOverDir) void moveInto(dragOverDir);
+        } else {
+          // Dropped outside this window → maybe onto another explorer window.
+          const sx = ev.screenX ?? lastSX, sy = ev.screenY ?? lastSY;
+          const paths = [...dragPaths];
+          void (async () => {
+            try { if (await explorerDropDispatch(selfLabel, sx, sy, paths)) clearSelection(); }
+            catch { /* dropped on the desktop / a non-explorer window */ }
+          })();
+        }
       }
-      dragging = false; dragOverDir = null; dragGhost = null;
+      dragging = false; dragOverDir = null;
       dragPaths = []; dragPathSet = new Set();
       document.body.style.cursor = ''; document.body.style.userSelect = '';
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+  }
+
+  /** Receive a cross-window drop: another explorer window dragged these paths
+   *  onto this one — move them into the current folder. Wired in onMount. */
+  async function acceptExternalDrop(paths: string[]) {
+    if (!paths?.length || view !== 'browse' || !currentPath) return;
+    // Skip items already living in this folder (a no-op move).
+    const toMove = paths.filter(p => normPath(parentOf(p) ?? '') !== normPath(currentPath));
+    if (!toMove.length) { try { await getCurrentWindow().setFocus(); } catch { /* ignore */ } return; }
+    try {
+      await fsMove(toMove, currentPath);
+      await refreshCurrent();
+      uiStore.showToast(`Moved ${toMove.length} item${toMove.length !== 1 ? 's' : ''} here`, 'success');
+    } catch (e) { uiStore.showToast(`Move failed: ${e}`, 'error'); }
+    try { await getCurrentWindow().setFocus(); } catch { /* ignore */ }
   }
 
   /** Hit-test the row under the cursor; highlight it only when it's a folder
@@ -1425,6 +1488,10 @@
     if (mod && !inInput && e.key.toLowerCase() === 'l') {
       e.preventDefault(); e.stopImmediatePropagation(); startAddressEdit(); return;
     }
+    // Ctrl+W — close the active tab; when it's the last one, close the explorer.
+    if (mod && !inInput && !isPicker && e.key.toLowerCase() === 'w') {
+      e.preventDefault(); e.stopImmediatePropagation(); void closeActiveTabOrWindow(); return;
+    }
     if (view !== 'browse') return;
     if (mod && !inInput) {
       const k = e.key.toLowerCase();
@@ -1750,7 +1817,22 @@
   // ── Lifecycle ──────────────────────────────────────────────────────────
   let unlisten: UnlistenFn | null = null;
   let revealUnlisten: UnlistenFn | null = null;
+  let clipUnlisten: UnlistenFn | null = null;
+  let dropUnlisten: UnlistenFn | null = null;
+  let focusUnlisten: UnlistenFn | null = null;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let rootsTimer: ReturnType<typeof setInterval> | null = null;
+
+  // Quick-access roots (favourites + drives) are static except for removable
+  // media: a plugged/unplugged USB doesn't fire any event we listen to, so we
+  // poll `listFsRoots` on a light interval and on window focus, reassigning only
+  // when the drive set actually changed (no needless sidebar re-render).
+  async function refreshRoots() {
+    try {
+      const next = await listFsRoots();
+      if (next.map(r => r.path).join('|') !== roots.map(r => r.path).join('|')) roots = next;
+    } catch { /* ignore */ }
+  }
   function scheduleRefresh() { if (refreshTimer) clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { refreshTimer = null; refreshCurrent(); }, 200); }
   onMount(async () => {
     // Picker: jump straight to the requested folder (eager, before roots load)
@@ -1775,6 +1857,13 @@
       }
     } catch { /* ignore */ }
     try { unlisten = await listen('arbor://fs-changed', () => scheduleRefresh()); } catch { /* ignore */ }
+    // Shared clipboard: seed the local mirror from the process-wide clipboard
+    // (a copy may predate this window) and track changes so copy/cut/paste work
+    // across every open explorer window.
+    try { clipboard = await explorerClipGet(); } catch { /* ignore */ }
+    try {
+      clipUnlisten = await listen<ClipData | null>('arbor://explorer-clip-changed', ev => { clipboard = ev.payload; });
+    } catch { /* ignore */ }
     // Standalone window: pick up a pending "reveal in built-in explorer" request
     // (handed over when this window was spawned for a reveal) and keep listening
     // for further reveals targeting the already-open window.
@@ -1786,7 +1875,19 @@
       try {
         revealUnlisten = await listen<ExplorerRevealPayload>('arbor://explorer-reveal', ev => { void revealHere(ev.payload); });
       } catch { /* ignore */ }
+      // Cross-window drops land here; pre-warm the shared drag overlay so the
+      // first drag out of this window shows its ghost without a build delay.
+      try {
+        dropUnlisten = await listen<string[]>('arbor://explorer-external-drop', ev => { void acceptExternalDrop(ev.payload); });
+      } catch { /* ignore */ }
+      void ensureDragOverlay();
     }
+    // Keep the Devices list current: poll for removable-media changes and
+    // refresh the instant the window regains focus (e.g. after plugging a USB).
+    rootsTimer = setInterval(() => { void refreshRoots(); }, 4000);
+    try {
+      focusUnlisten = await getCurrentWindow().onFocusChanged(({ payload }) => { if (payload) void refreshRoots(); });
+    } catch { /* ignore */ }
     // Keyboard-first: park focus on the right control so navigation is live the
     // moment the explorer opens — save pickers focus the filename field (what
     // you came to type); any other browse view focuses the list so the arrow
@@ -1797,7 +1898,7 @@
       else if (view === 'browse') listEl?.focus();
     });
   });
-  onDestroy(() => { unlisten?.(); revealUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); fsWatchStop().catch(() => {}); });
+  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); });
 </script>
 
 {#snippet sbLabel(id: string, Ico: typeof Folder, text: string)}
@@ -2470,10 +2571,6 @@
   />
 {/if}
 
-{#if dragGhost}
-  <div class="fx-drag-ghost" style="left: {dragGhost.x}px; top: {dragGhost.y}px;">{dragGhost.label}</div>
-{/if}
-
 <style>
   /* ══ Standalone window shell (dedicated explorer window) ══ */
   /* Mirrors the modal's chrome rhythm: bg-elevated frame, body floats as a
@@ -2666,16 +2763,6 @@
   .fx-gi-label { font-size: 11.5px; color: var(--text-primary); font-family: var(--font-ui-sans); text-align: center; line-height: 1.25; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
   .fx-inline-grid { width: 92%; text-align: center; }
 
-  /* Floating drag indicator following the cursor (mouse-based DnD) */
-  .fx-drag-ghost {
-    position: fixed; z-index: 100000; pointer-events: none;
-    transform: translate(12px, 10px);
-    max-width: 280px; padding: 4px 10px;
-    background: var(--accent); color: var(--text-on-accent);
-    border-radius: var(--radius-sm); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    font-family: var(--font-ui-sans); font-size: 11.5px; font-weight: 550;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
   .fx-entry-name { font-size: 12px; color: var(--text-primary); font-family: var(--font-ui-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
   .fx-entry-loc { font-size: 10.5px; color: var(--text-disabled); font-family: var(--font-code); margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
   .fx-col-date, .fx-col-type, .fx-col-size { font-size: 11px; color: var(--text-muted); }
