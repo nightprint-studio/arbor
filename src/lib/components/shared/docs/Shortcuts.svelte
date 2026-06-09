@@ -185,16 +185,23 @@
     <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>Create a new file in the current folder</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>Create a new folder in the current folder</td></tr>
     <tr><td><Kbd action="toggle_sidebar" size="sm" /></td><td>Collapse / expand the picker sidebar (same global shortcut)</td></tr>
-    <tr><td><kbd>F6</kbd> / <kbd>Shift</kbd>+<kbd>F6</kbd></td><td>Cycle focus between file list, sidebar (locations) and address bar</td></tr>
-    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd> in sidebar</td><td>Move between locations once focus is on the sidebar</td></tr>
+    <tr><td><kbd>F6</kbd> / <kbd>Shift</kbd>+<kbd>F6</kbd></td><td>Cycle focus across the panes — sidebar → file list → right panel → right activity bar (no Tab needed)</td></tr>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd> in sidebar</td><td>Move between section headers and locations once focus is on the sidebar</td></tr>
+    <tr><td><kbd>→</kbd> / <kbd>←</kbd> in sidebar</td><td>Expand / collapse the focused section or workspace group</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>Alt</kbd>+<kbd>→</kbd></td><td>Back / Forward through navigation history</td></tr>
     <tr><td><kbd>Backspace</kbd></td><td>Go up one folder</td></tr>
-    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Move selection in the file list</td></tr>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Move the cursor in the file list (also <kbd>←</kbd> / <kbd>→</kbd> in icon grids)</td></tr>
+    <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>First / last item</td></tr>
+    <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>Jump a page in the file list</td></tr>
+    <tr><td><kbd>Shift</kbd>+ arrows</td><td>Extend the selection while moving the cursor</td></tr>
     <tr><td><kbd>F2</kbd></td><td>Rename the selected entry</td></tr>
-    <tr><td><kbd>Delete</kbd></td><td>Delete the selected entry (asks for confirmation)</td></tr>
+    <tr><td><kbd>Delete</kbd> / <kbd>Shift</kbd>+<kbd>Delete</kbd></td><td>Delete to Recycle Bin / permanently (asks for confirmation)</td></tr>
     <tr><td><kbd>Enter</kbd></td><td>Open folder · open file · confirm pick · confirm delete</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Confirm the pick from anywhere (including the save-name field)</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd></td><td>Open the Properties (Info) panel for the cursor item</td></tr>
+    <tr><td><kbd>Menu</kbd> / <kbd>Shift</kbd>+<kbd>F10</kbd></td><td>Open the context menu on the cursor item</td></tr>
     <tr><td>Type any letter</td><td>Type-ahead — keystrokes route into the filter field automatically</td></tr>
-    <tr><td><kbd>↓</kbd> in filter field</td><td>Jump focus to the first matching entry</td></tr>
+    <tr><td><kbd>↓</kbd> in filter field</td><td>Step into the file list (cursor sits on the first match)</td></tr>
   </tbody>
 </table>
 
@@ -206,8 +213,15 @@
     <tr><td>Branch (sidebar)</td><td>Right-click branch item</td></tr>
     <tr><td>File (stage area / diff list)</td><td>Right-click file entry</td></tr>
     <tr><td>Tab (tab bar)</td><td>Right-click tab</td></tr>
+    <tr><td>File Explorer entry (keyboard)</td><td><kbd>Menu</kbd> key or <kbd>Shift</kbd>+<kbd>F10</kbd> on the cursor row</td></tr>
   </tbody>
 </table>
+<p class="hint">
+  Context menus are keyboard-operable once open: <kbd>↑</kbd> / <kbd>↓</kbd> move,
+  type a letter to jump, <kbd>→</kbd> / <kbd>←</kbd> open / close a submenu,
+  <kbd>Enter</kbd> activates, <kbd>Esc</kbd> closes. Focus is trapped inside the
+  menu, so <kbd>Tab</kbd> cycles its items instead of leaving the menu.
+</p>
 
 <h2>Where shortcuts surface in the UI</h2>
 <p>Built-in shortcuts are rendered live next to the action wherever it appears:</p>
