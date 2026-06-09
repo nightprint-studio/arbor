@@ -121,8 +121,18 @@ fn next_explorer_label(app: &AppHandle) -> String {
 
 /// IPC entry point so the in-app Command Palette ("Open File Explorer in New
 /// Window") can summon the same window the global shortcut does.
+///
+/// MUST be `async`: Tauri runs synchronous commands on the **main thread**,
+/// and dispatching WebView2 window creation via `run_on_main_thread` from the
+/// main thread (while it's blocked inside this command) leaves the new window
+/// with an uninitialised webview — a blank window with no devtools. As an async
+/// command it runs on the async runtime (a background thread), so the
+/// `run_on_main_thread` hop in `open_or_focus` behaves exactly like the
+/// global-shortcut handler (which also runs off the main thread).
 #[tauri::command]
-pub fn open_explorer_window(app: AppHandle) {
+#[allow(clippy::unused_async)] // async is load-bearing here: it moves the
+// handler off the main thread (see doc comment) — there's nothing to await.
+pub async fn open_explorer_window(app: AppHandle) {
     open_or_focus(&app);
 }
 
