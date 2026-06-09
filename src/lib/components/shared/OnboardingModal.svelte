@@ -17,7 +17,7 @@
   import {
     Sparkles, Compass, GitBranch, Plug, Network, Folders, Ticket,
     Command as CommandIcon, Github, Gitlab, FolderOpen, FolderPlus, Download,
-    ArrowLeft, ArrowRight, Check,
+    HardDrive, ArrowLeft, ArrowRight, Check,
   } from 'lucide-svelte';
 
   import Modal         from './Modal.svelte';
@@ -33,6 +33,7 @@
 
   import { onboardingStore } from '$lib/stores/onboarding.svelte';
   import { uiStore }         from '$lib/stores/ui.svelte';
+  import { openExplorerWindow } from '$lib/ipc/app';
 
   // ── Step model ─────────────────────────────────────────────────────────────
 
@@ -105,6 +106,12 @@
     queueMicrotask(() => uiStore.openMarketplace());
   }
 
+  function openExplorer() {
+    // Opens the dedicated File Explorer in its own OS window — the tour stays
+    // put in the main window and is right there when the user comes back.
+    queueMicrotask(() => { void openExplorerWindow(); });
+  }
+
   function dispatchRepoVerb(verb: 'open-repo' | 'clone-repo' | 'init-repo') {
     // The sub-modal (FilePicker / Clone / Init) mounts on top of the tour
     // via the modal stack. After it closes, the tour stays put so the user
@@ -155,6 +162,7 @@
   height="560px"
   padBody={false}
   ariaLabel="Welcome to Arbor"
+  zIndex="var(--z-onboarding)"
 >
   {#snippet header()}
     <ModalHeader onClose={requestSkip}>
@@ -350,6 +358,17 @@
               {#snippet icon()}<Plug size={18} />{/snippet}
               {#snippet titleExtra()}<Kbd action="open_marketplace" size="sm" />{/snippet}
               {#snippet trailing()}<Button variant="secondary" size="sm" onclick={openMarketplace}>Browse</Button>{/snippet}
+            </IconCard>
+          </li>
+          <li>
+            <IconCard
+              size="sm"
+              tone="accent"
+              title="Built-in File Explorer"
+              description="Browse your real filesystem without leaving Arbor — git status overlays, previews and a Changes panel — in its own window. It also powers every file & folder picker in the app."
+            >
+              {#snippet icon()}<HardDrive size={18} />{/snippet}
+              {#snippet trailing()}<Button variant="secondary" size="sm" onclick={openExplorer}>Try it</Button>{/snippet}
             </IconCard>
           </li>
           <li>

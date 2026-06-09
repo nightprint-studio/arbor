@@ -252,6 +252,7 @@
   // Each follow-up that needs a modal is wired through callbacks below.
   onMount(() => {
     let unlistenDl: (() => void) | null = null;
+    let unlistenDlManual: (() => void) | null = null;
 
     deepLinkDispatcher.wire({
       openWorktreeModal: (tabId, branch) => {
@@ -336,10 +337,15 @@
       unlistenDl = await listen<string>('arbor://deep-link', ev => {
         void deepLinkDispatcher.dispatch(ev.payload);
       });
+      // Manual channel: links typed in the File Explorer address bar are
+      // trusted (explicit user intent) → dispatch bypasses the enable gates.
+      unlistenDlManual = await listen<string>('arbor://deep-link-manual', ev => {
+        void deepLinkDispatcher.dispatch(ev.payload, { trusted: true });
+      });
       try { await deepLinkReady(); } catch { /* IPC bridge broken — nothing else works either */ }
     })();
 
-    return () => { unlistenDl?.(); };
+    return () => { unlistenDl?.(); unlistenDlManual?.(); };
   });
 
   // The File Explorer (possibly its own dedicated window) delegates heavy git
@@ -2691,15 +2697,6 @@
     gate={uiStore.activeSchedulesOpen}
     loader={() => import('../shared/ActiveSchedulesModal.svelte')}
     onClose={() => uiStore.closeActiveSchedules()}
-  />
-
-  <!-- Modal: File Explorer — built-in file explorer (real FS) with copy/move,
-       trash, live watcher and preview. Opened from the Command Palette only.
-       Not yet wired as the production file/folder picker. Lazy-loaded. -->
-  <Lazy
-    gate={uiStore.fileExplorerOpen}
-    loader={() => import('../shared/FileExplorerModal.svelte')}
-    onClose={() => uiStore.closeFileExplorer()}
   />
 
   <!-- Modal: Linked Worktrees (cross-project sync) -->

@@ -105,6 +105,10 @@
     <div class="fc-title">Status Bar</div>
     <div class="fc-desc">Current branch, ahead/behind indicators, repo path, and quick-access buttons for fetch, notifications, docs, and settings.</div>
   </div>
+  <div class="feature-card">
+    <div class="fc-title">File Explorer <Kbd label="Ctrl+Shift+E" /></div>
+    <div class="fc-desc">A built-in explorer for your real filesystem — drives, folders and files, with git overlays and previews — in its own window. It also powers every file/folder picker in the app. See the <em>File Explorer</em> section.</div>
+  </div>
 </div>
 
 <h2>Command Palette</h2>

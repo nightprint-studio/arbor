@@ -181,6 +181,23 @@ pub struct ExplorerConfig {
     /// their built-in position and shown.
     #[serde(default)]
     pub sidebar_sections: Vec<ExplorerSectionConfig>,
+    /// Allow opening generic external links typed in the explorer address bar
+    /// (custom schemes like `vscode://`, `mailto:`, `slack://`) via the OS
+    /// default handler. Off by default — each open still prompts unless the
+    /// scheme was remembered. `arbor://` deep links are handled separately.
+    #[serde(default)]
+    pub open_external_links: bool,
+    /// Additionally allow plain web links (`http://`, `https://`) from the
+    /// address bar to open in the default browser. Gated behind
+    /// `open_external_links` AND off by default (web links are the broadest
+    /// surface, so they're opt-in on top of the master switch).
+    #[serde(default)]
+    pub open_web_links: bool,
+    /// Schemes the user chose "remember" for in the external-link confirm
+    /// prompt (lower-cased, e.g. `["vscode", "https"]`). Future links of a
+    /// remembered scheme open without prompting.
+    #[serde(default)]
+    pub remembered_external_schemes: Vec<String>,
 }
 
 /// One sidebar section's persisted order + visibility. Mirrors
@@ -215,6 +232,9 @@ impl Default for ExplorerConfig {
             always_new_window:    false,
             max_recents:          default_max_recents(),
             sidebar_sections:     Vec::new(),
+            open_external_links:  false,
+            open_web_links:       false,
+            remembered_external_schemes: Vec::new(),
         }
     }
 }

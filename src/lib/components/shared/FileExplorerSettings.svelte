@@ -8,7 +8,7 @@
    * main SettingsPanel → File Explorer section. Reset actions are owned by the
    * parent explorer (it holds the ephemeral localStorage state) and passed in.
    */
-  import { ArrowLeft, GitCompare, LayoutGrid, Keyboard, RotateCcw, PanelLeft, Eye, EyeOff, ChevronUp, ChevronDown } from 'lucide-svelte';
+  import { ArrowLeft, GitCompare, LayoutGrid, Keyboard, RotateCcw, PanelLeft, Eye, EyeOff, ChevronUp, ChevronDown, Link2 } from 'lucide-svelte';
   import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS, MAX_RECENTS_MIN, MAX_RECENTS_MAX } from '$lib/stores/explorer.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -47,6 +47,8 @@
   let sortDir         = $state(explorerStore.sortAscending ? 'asc' : 'desc');
   let startup         = $state<string>(explorerStore.startup);
   let alwaysNewWindow = $state(explorerStore.alwaysNewWindow);
+  let openExternalLinks = $state(explorerStore.openExternalLinks);
+  let openWebLinks      = $state(explorerStore.openWebLinks);
 
   $effect(() => { explorerStore.setGitAwareness(gitAwareness); });
   $effect(() => { explorerStore.setDefaultView(defaultView as ExplorerView); });
@@ -56,6 +58,8 @@
   $effect(() => { explorerStore.setSortAscending(sortDir === 'asc'); });
   $effect(() => { explorerStore.setStartup(startup as ExplorerStartup); });
   $effect(() => { explorerStore.setAlwaysNewWindow(alwaysNewWindow); });
+  $effect(() => { explorerStore.setOpenExternalLinks(openExternalLinks); });
+  $effect(() => { explorerStore.setOpenWebLinks(openWebLinks); });
 
   // Global shortcut goes through async setters (the backend register can fail
   // on a taken combo); read from the store and toast + revert on error.
@@ -189,6 +193,21 @@
       </FormRow>
     </div>
 
+    <!-- ── Address bar ── -->
+    <h3 class="fxs-group"><Link2 size={13} /> Address bar</h3>
+    <div class="fxs-card">
+      <FormRow
+        label="Open external links"
+        description="Let the address bar open generic external links (custom schemes like vscode://, mailto:, slack://) in the associated app. Each open asks for confirmation unless you choose to remember that scheme. arbor:// deep links are always handled.">
+        <Toggle bind:checked={openExternalLinks} />
+      </FormRow>
+      <FormRow
+        label="Open web links (http / https)"
+        description="Also allow plain web URLs typed in the address bar to open in your default browser. Requires “Open external links”.">
+        <Toggle bind:checked={openWebLinks} disabled={!openExternalLinks} />
+      </FormRow>
+    </div>
+
     <!-- ── Reset ── -->
     <h3 class="fxs-group"><RotateCcw size={13} /> Reset</h3>
     <div class="fxs-card">
@@ -205,6 +224,11 @@
       <FormRow label="Sidebar & panel layout" description="Reset collapsed sidebar sections, expanded workspace groups, the sidebar collapse state and the right-panel width.">
         <Button variant="secondary" size="sm" disabled={!onResetLayout} onclick={() => onResetLayout?.()}>
           Reset
+        </Button>
+      </FormRow>
+      <FormRow label="Remembered external links" description="Forget the link schemes you chose to always allow — they'll prompt again next time.">
+        <Button variant="secondary" size="sm" disabled={explorerStore.rememberedSchemes.length === 0} onclick={() => explorerStore.forgetRememberedSchemes()}>
+          Clear{explorerStore.rememberedSchemes.length ? ` (${explorerStore.rememberedSchemes.length})` : ''}
         </Button>
       </FormRow>
     </div>

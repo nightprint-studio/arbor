@@ -17,6 +17,16 @@ export const findRepoByRemoteUrl = (url: string) =>
 export const deepLinkReady = () =>
   invoke<void>('deep_link_ready');
 
+/**
+ * Dispatch an `arbor://…` deep link the user typed MANUALLY into the File
+ * Explorer address bar. Brings the main window forward and emits the trusted
+ * `arbor://deep-link-manual` channel: the dispatcher treats it as explicit
+ * intent and skips the enable gates (the per-action confirm still applies).
+ * Works from the standalone explorer window too (no dispatcher of its own).
+ */
+export const dispatchDeepLink = (url: string) =>
+  invoke<void>('dispatch_deep_link', { url });
+
 export const getDeepLinkConfig = () =>
   invoke<DeepLinkConfig>('get_deep_link_config');
 

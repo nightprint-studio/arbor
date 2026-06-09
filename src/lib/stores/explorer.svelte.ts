@@ -14,6 +14,9 @@ const DEFAULT: ExplorerConfig = {
   always_new_window:     false,
   max_recents:           10,
   sidebar_sections:      [],
+  open_external_links:   false,
+  open_web_links:        false,
+  remembered_external_schemes: [],
 };
 
 export const MAX_RECENTS_MIN = 1;
@@ -85,6 +88,9 @@ function createExplorerStore() {
   let alwaysNewWindow     = $state<boolean>(DEFAULT.always_new_window);
   let maxRecents          = $state<number>(DEFAULT.max_recents);
   let sidebarSections     = $state<ExplorerSectionConfig[]>([]);
+  let openExternalLinks   = $state<boolean>(DEFAULT.open_external_links);
+  let openWebLinks        = $state<boolean>(DEFAULT.open_web_links);
+  let rememberedSchemes   = $state<string[]>([]);
   let loaded              = $state(false);
 
   async function loadConfig() {
@@ -102,6 +108,11 @@ function createExplorerStore() {
       alwaysNewWindow     = !!cfg.always_new_window;
       maxRecents          = clampRecents(cfg.max_recents);
       sidebarSections     = Array.isArray(cfg.sidebar_sections) ? cfg.sidebar_sections : [];
+      openExternalLinks   = !!cfg.open_external_links;
+      openWebLinks        = !!cfg.open_web_links;
+      rememberedSchemes   = Array.isArray(cfg.remembered_external_schemes)
+        ? cfg.remembered_external_schemes.filter((s): s is string => typeof s === 'string').map(s => s.toLowerCase())
+        : [];
       loaded = true;
     } catch {
       // First-run / backend not ready — keep defaults; next call retries.
@@ -122,6 +133,9 @@ function createExplorerStore() {
       always_new_window:     alwaysNewWindow,
       max_recents:           maxRecents,
       sidebar_sections:      sidebarSections,
+      open_external_links:   openExternalLinks,
+      open_web_links:        openWebLinks,
+      remembered_external_schemes: rememberedSchemes,
     };
   }
 
@@ -141,6 +155,25 @@ function createExplorerStore() {
   function setMaxRecents(n: number)        { const c = clampRecents(n); if (maxRecents === c) return; maxRecents = c; persist(); }
   /** Replace the sidebar section order/visibility (already a resolved list). */
   function setSidebarSections(list: ExplorerSectionConfig[]) { sidebarSections = list; persist(); }
+
+  // ── Generic external-link opening (address bar) ──────────────────────────
+  function setOpenExternalLinks(on: boolean) { if (openExternalLinks === on) return; openExternalLinks = on; persist(); }
+  function setOpenWebLinks(on: boolean)      { if (openWebLinks === on) return;      openWebLinks = on;      persist(); }
+  /** True when `scheme` (case-insensitive) was previously remembered. */
+  function isSchemeRemembered(scheme: string): boolean { return rememberedSchemes.includes(scheme.toLowerCase()); }
+  /** Persist a "remember this scheme" choice from the confirm prompt. */
+  function rememberScheme(scheme: string) {
+    const s = scheme.toLowerCase();
+    if (!s || rememberedSchemes.includes(s)) return;
+    rememberedSchemes = [...rememberedSchemes, s];
+    persist();
+  }
+  /** Clear all remembered schemes (Reset action in settings). */
+  function forgetRememberedSchemes() {
+    if (rememberedSchemes.length === 0) return;
+    rememberedSchemes = [];
+    persist();
+  }
 
   /** Enable/disable the global shortcut. Reverts on a registration conflict. */
   async function setGlobalShortcut(on: boolean) {
@@ -173,6 +206,9 @@ function createExplorerStore() {
     get alwaysNewWindow()     { return alwaysNewWindow; },
     get maxRecents()          { return maxRecents; },
     get sidebarSections()     { return sidebarSections; },
+    get openExternalLinks()   { return openExternalLinks; },
+    get openWebLinks()        { return openWebLinks; },
+    get rememberedSchemes()   { return rememberedSchemes; },
     get loaded()              { return loaded; },
     loadConfig,
     setGitAwareness,
@@ -185,6 +221,11 @@ function createExplorerStore() {
     setAlwaysNewWindow,
     setMaxRecents,
     setSidebarSections,
+    setOpenExternalLinks,
+    setOpenWebLinks,
+    isSchemeRemembered,
+    rememberScheme,
+    forgetRememberedSchemes,
     setGlobalShortcut,
     setGlobalShortcutAccel,
   };

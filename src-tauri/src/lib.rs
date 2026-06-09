@@ -1394,6 +1394,7 @@ pub fn run() {
             // Deep-link router (arbor:// URLs)
             commands::deep_link_commands::find_repo_by_remote_url,
             commands::deep_link_commands::deep_link_ready,
+            commands::deep_link_commands::dispatch_deep_link,
             commands::deep_link_commands::get_deep_link_config,
             commands::deep_link_commands::set_deep_link_config,
             // Missing-repo tombstone + locate

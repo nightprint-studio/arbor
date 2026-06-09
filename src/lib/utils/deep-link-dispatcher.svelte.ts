@@ -242,8 +242,18 @@ function createDispatcher() {
 
   function wire(b: DeepLinkBindings) { bindings = b; }
 
-  /** Parse + route a single URL.  Logs and toasts on malformed input. */
-  async function dispatch(rawUrl: string): Promise<void> {
+  /**
+   * Parse + route a single URL.  Logs and toasts on malformed input.
+   *
+   * `opts.trusted` is set when the link was entered MANUALLY by the user (the
+   * File Explorer address bar) rather than arriving from an external source
+   * (clicked in a browser/chat). The enable gates exist to stop an *untrusted*
+   * link from silently acting; a hand-typed `arbor://…` is explicit intent, so
+   * trusted dispatch bypasses both the master switch and the per-action enable
+   * toggles. The per-action confirm prompt is still honoured.
+   */
+  async function dispatch(rawUrl: string, opts: { trusted?: boolean } = {}): Promise<void> {
+    const trusted = !!opts.trusted;
     const parsed = parseDeepLink(rawUrl);
     if (!parsed) {
       console.warn('[deep-link] unrecognised URL:', rawUrl);
@@ -257,15 +267,19 @@ function createDispatcher() {
     try {
       cfg = await getDeepLinkConfig();
     } catch {
-      // Config IPC failed (very rare).  Treat as default-disabled to err on
-      // the side of safety — the user should never have a deep-link silently
-      // execute because we couldn't read the config.
-      pendingDisabled = {
-        title:   'Deep links unavailable',
-        message: 'Arbor couldn\'t read the deep-link configuration. Open Settings → Tools → Deep Links to verify the feature is set up.',
-        url:     parsed.url,
-        onClose: () => { pendingDisabled = null; },
-      };
+      // Config IPC failed (very rare).  For untrusted links treat as
+      // default-disabled to err on the side of safety; a trusted (hand-typed)
+      // link still runs with built-in defaults (no worktree rewrite).
+      if (!trusted) {
+        pendingDisabled = {
+          title:   'Deep links unavailable',
+          message: 'Arbor couldn\'t read the deep-link configuration. Open Settings → Tools → Deep Links to verify the feature is set up.',
+          url:     parsed.url,
+          onClose: () => { pendingDisabled = null; },
+        };
+        return;
+      }
+      await runAction(parsed);
       return;
     }
 
@@ -276,27 +290,30 @@ function createDispatcher() {
       action = { kind: 'branch_worktree', url: parsed.url, branch: parsed.branch };
     }
 
-    // Master kill-switch — always wins.
-    if (!cfg.enabled) {
-      pendingDisabled = {
-        title:   'Deep links are disabled',
-        message: 'Arbor received an arbor:// link but the deep-link feature is turned off. Enable it in Settings → Tools → Deep Links to allow incoming links.',
-        url:     action.url,
-        onClose: () => { pendingDisabled = null; },
-      };
-      return;
-    }
+    // Enable gates only apply to untrusted (externally-delivered) links.
+    if (!trusted) {
+      // Master kill-switch — always wins.
+      if (!cfg.enabled) {
+        pendingDisabled = {
+          title:   'Deep links are disabled',
+          message: 'Arbor received an arbor:// link but the deep-link feature is turned off. Enable it in Settings → Tools → Deep Links to allow incoming links.',
+          url:     action.url,
+          onClose: () => { pendingDisabled = null; },
+        };
+        return;
+      }
 
-    // Per-action enable.  Even with the master on, each action kind is opt-in
-    // — sharing a link should never silently mutate a workspace.
-    if (!cfg.enable[enableKey(action)]) {
-      pendingDisabled = {
-        title:   `${actionKindLabel(action)} links are disabled`,
-        message: `Arbor received a ${actionKindLabel(action).toLowerCase()} deep link but this action kind is turned off. Enable it in Settings → Tools → Deep Links → Enabled actions.`,
-        url:     action.url,
-        onClose: () => { pendingDisabled = null; },
-      };
-      return;
+      // Per-action enable.  Even with the master on, each action kind is opt-in
+      // — sharing a link should never silently mutate a workspace.
+      if (!cfg.enable[enableKey(action)]) {
+        pendingDisabled = {
+          title:   `${actionKindLabel(action)} links are disabled`,
+          message: `Arbor received a ${actionKindLabel(action).toLowerCase()} deep link but this action kind is turned off. Enable it in Settings → Tools → Deep Links → Enabled actions.`,
+          url:     action.url,
+          onClose: () => { pendingDisabled = null; },
+        };
+        return;
+      }
     }
 
     const needsConfirm = cfg.confirm[confirmKey(action)];

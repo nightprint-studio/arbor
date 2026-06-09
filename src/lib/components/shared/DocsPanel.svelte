@@ -27,7 +27,7 @@
     Package, TerminalSquare, Loader, ChevronRight,
     Bell, FolderGit2, Workflow,
     GitPullRequest, Search, FolderPlus, Download, Settings, TicketCheck,
-    FileDown, StickyNote, FolderTree, History, Bug, BarChart2,
+    FileDown, StickyNote, FolderTree, FolderOpen, History, Bug, BarChart2,
     Monitor, Database, Shield, ShieldCheck, Cloud, Tag, Share2, FolderX,
     Palette, Link2, Store,
   } from 'lucide-svelte';
@@ -71,6 +71,7 @@
   import LinkedWorktrees  from './docs/LinkedWorktrees.svelte';
   import Worktrees        from './docs/Worktrees.svelte';
   import FileTree       from './docs/FileTree.svelte';
+  import FileExplorer   from './docs/FileExplorer.svelte';
   import Reflog         from './docs/Reflog.svelte';
   import Recovery       from './docs/Recovery.svelte';
   import MissingProjects from './docs/MissingProjects.svelte';
@@ -122,6 +123,7 @@
     {
       id: 'tools', label: 'Tools', icon: Zap,
       items: [
+        { id: 'file-explorer',   label: 'File Explorer',      icon: FolderOpen     },
         { id: 'marketplace',     label: 'Marketplace',        icon: Store          },
         { id: 'terminal',        label: 'Terminal',           icon: TerminalSquare },
         { id: 'command-palette', label: 'Command Palette',    icon: Search         },
@@ -178,6 +180,7 @@
     'linked-worktrees': LinkedWorktrees,
     'worktrees':        Worktrees,
     'file-tree':       FileTree,
+    'file-explorer':   FileExplorer,
     'reflog':          Reflog,
     'recovery':        Recovery,
     'missing-projects': MissingProjects,

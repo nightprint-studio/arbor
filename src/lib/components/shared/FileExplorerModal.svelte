@@ -50,9 +50,12 @@
   import { listRegistryRepos, listWorkspaces } from '$lib/ipc/workspace';
   import { workspaceColorVar, type RepoRegistryEntry, type WorkspaceDef } from '$lib/types/workspace';
   import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS } from '$lib/stores/explorer.svelte';
+  import { openUrl } from '@tauri-apps/plugin-opener';
+  import { dispatchDeepLink } from '$lib/ipc/deep-link';
   import Modal from './Modal.svelte';
   import FileExplorerSettings from './FileExplorerSettings.svelte';
   import ConfirmModal from './ConfirmModal.svelte';
+  import ExternalLinkConfirmModal from './ExternalLinkConfirmModal.svelte';
   import BranchSwitchPopup from './BranchSwitchPopup.svelte';
   import ModalHeader from './ModalHeader.svelte';
   import ModalFooter from './ModalFooter.svelte';
@@ -657,13 +660,64 @@
     tick().then(() => (document.getElementById('fx-addr') as HTMLInputElement)?.select());
   }
   async function commitAddress() {
+    // Guard re-entrancy: pressing Enter calls this AND unmounts the input,
+    // whose `blur` would call it again — double-dispatching the URL. Bailing
+    // when we're no longer editing also stops Escape from navigating on blur.
+    if (!addressEditing) return;
     addressEditing = false;
     const t = addressInput.trim();
     if (!t) return;
-    // `arbor://settings` opens the in-explorer settings view (body swap), like
-    // a browser's settings page — instead of navigating to a filesystem path.
-    if (!isPicker && /^arbor:\/\/settings\/?$/i.test(t)) { showSettings(); return; }
+    // URL handling is browse-only — in picker mode the address bar is purely a
+    // path entry (deep links / external links would be disruptive mid-pick).
+    if (!isPicker) {
+      // `arbor://settings` opens the in-explorer settings view (body swap), like
+      // a browser's settings page — instead of navigating to a filesystem path.
+      if (/^arbor:\/\/settings\/?$/i.test(t)) { showSettings(); return; }
+      // Other `arbor://…` → route to the deep-link dispatcher (which applies its
+      // own enable/confirm gating). Works from the standalone window too.
+      if (/^arbor:\/\//i.test(t)) { void dispatchDeepLink(t); return; }
+      // Generic external link (custom scheme, or http/https) → maybe open it.
+      const scheme = externalScheme(t);
+      if (scheme) { handleExternalLink(t, scheme); return; }
+    }
     if (t !== currentPath) await navigate(t);
+  }
+
+  // ── External / deep links from the address bar ─────────────────────────────
+  /** The scheme of an external URL, or null when `s` is a filesystem path.
+   *  Requires a ≥2-char scheme so Windows drive letters (`C:\…`) never match;
+   *  `arbor:` is handled separately by the caller. */
+  function externalScheme(s: string): string | null {
+    const m = /^([a-zA-Z][a-zA-Z0-9+.-]+):/.exec(s);
+    if (!m) return null;
+    const scheme = m[1].toLowerCase();
+    return scheme === 'arbor' ? null : scheme;
+  }
+  /** Confirm/open prompt state for a generic external link. */
+  let extLinkReq = $state<{ url: string; scheme: string } | null>(null);
+  function handleExternalLink(url: string, scheme: string) {
+    const isWeb = scheme === 'http' || scheme === 'https';
+    if (!explorerStore.openExternalLinks) {
+      uiStore.showToast('External links are off — enable them in File Explorer settings', 'info');
+      return;
+    }
+    if (isWeb && !explorerStore.openWebLinks) {
+      uiStore.showToast('Web links are off — enable them in File Explorer settings', 'info');
+      return;
+    }
+    if (explorerStore.isSchemeRemembered(scheme)) { void openExternalNow(url); return; }
+    extLinkReq = { url, scheme };
+  }
+  async function openExternalNow(url: string) {
+    try { await openUrl(url); }
+    catch (e) { uiStore.showToast(`Couldn't open link: ${e}`, 'error'); }
+  }
+  function confirmExternalLink(remember: boolean) {
+    const req = extLinkReq;
+    extLinkReq = null;
+    if (!req) return;
+    if (remember) explorerStore.rememberScheme(req.scheme);
+    void openExternalNow(req.url);
   }
   function normParentKey(p: string): string { return p.replace(/\\/g, '/').replace(/\/+$/, ''); }
   function lastSepIdx(s: string): number { return Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/')); }
@@ -2103,6 +2157,15 @@
     items={[{ id: 'hide', label: `Hide “${sectionLabel(sectionCtx.id)}”`, icon: EyeOff }]}
     onSelect={(id) => { if (id === 'hide' && sectionCtx) hideSection(sectionCtx.id); sectionCtx = null; }}
     onClose={() => sectionCtx = null} />
+{/if}
+
+{#if extLinkReq}
+  <ExternalLinkConfirmModal
+    url={extLinkReq.url}
+    scheme={extLinkReq.scheme}
+    onConfirm={confirmExternalLink}
+    onCancel={() => extLinkReq = null}
+  />
 {/if}
 
 {#if discardReq}

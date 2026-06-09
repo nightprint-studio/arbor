@@ -189,6 +189,16 @@ export interface ExplorerConfig {
   max_recents: number;
   /** Sidebar section order + visibility. Empty → built-in order, all shown. */
   sidebar_sections: ExplorerSectionConfig[];
+  /** Allow opening generic external links (custom schemes) typed in the
+   *  address bar via the OS handler. Off by default; each open still prompts
+   *  unless the scheme was remembered. */
+  open_external_links: boolean;
+  /** Additionally allow http/https links from the address bar to open in the
+   *  browser. Gated behind `open_external_links`; off by default. */
+  open_web_links: boolean;
+  /** Schemes (lower-cased) the user chose to remember, so they open without
+   *  prompting (e.g. ["vscode", "https"]). */
+  remembered_external_schemes: string[];
 }
 
 /** UI animation preferences. `enabled=false` collapses every transition
