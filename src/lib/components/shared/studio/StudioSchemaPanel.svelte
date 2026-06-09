@@ -3,7 +3,7 @@
 
   The strip renders:
     · Empty state: a format-flavored intro + a "pick schema source"
-      button that opens an internal `FilePickerModal`.
+      button that opens an internal `FileExplorerModal`.
     · Loaded state: file/crate/root metadata, a root-type Dropdown
       backed by the latest `CrateProbe`, action buttons (Load schema /
       Change file), an inline error banner, coverage stats (three
@@ -75,7 +75,7 @@
     // ── Format-specific copy ───────────────────────────────────────
     /** Title for the file picker modal. Default: 'Pick schema source'. */
     pickerTitle?:       string;
-    /** Extension filter passed to `FilePickerModal`. Default: `['rs']`. */
+    /** Extension filter passed to `FileExplorerModal`. Default: `['rs']`. */
     pickerExtensions?:  string[];
     /** Button label used in both the empty-state CTA and the
      *  Change-file action. Default: 'Pick file'. */
@@ -99,7 +99,7 @@
   import Spinner from '../ui/Spinner.svelte';
   import Alert from '../ui/Alert.svelte';
   import Dropdown, { type DropdownItem } from '../ui/Dropdown.svelte';
-  import FilePickerModal from '../FilePickerModal.svelte';
+  import FileExplorerModal from '../FileExplorerModal.svelte';
   import PanelShell from '../ui/PanelShell.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -336,7 +336,7 @@
 </PanelShell>
 
 {#if pickerOpen}
-  <FilePickerModal
+  <FileExplorerModal
     mode="file"
     title={pickerTitle}
     extensions={pickerExtensions}

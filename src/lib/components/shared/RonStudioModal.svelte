@@ -43,7 +43,7 @@
   import StateBlock from '$lib/components/shared/ui/StateBlock.svelte';
   import TypePill from '$lib/components/shared/internal/TypePill.svelte';
   import ConfirmModal from './ConfirmModal.svelte';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import { type MenuItem } from './ContextMenu.svelte';
   import { type RowSnippetCtx } from './ui/Tree.svelte';
   import Dropdown, { type DropdownItem } from './ui/Dropdown.svelte';
@@ -2212,7 +2212,7 @@
 
   {#snippet auxiliary()}
     {#if saveFlow.savePickerOpen}
-      <FilePickerModal
+      <FileExplorerModal
         mode="save"
         title="Save RON document as"
         extensions={['ron']}
@@ -2224,7 +2224,7 @@
     {/if}
 
     {#if diskFilePicking}
-      <FilePickerModal
+      <FileExplorerModal
         mode="file"
         title="Open .ron from disk"
         extensions={['ron']}

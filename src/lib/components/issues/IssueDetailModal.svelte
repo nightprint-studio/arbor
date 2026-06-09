@@ -15,7 +15,7 @@
   import { issuesStore, type IssueProvider } from '$lib/stores/issues.svelte';
   import { branchNameForIssue, jiraDownloadAttachment } from '$lib/ipc/issues';
   import { findCommitsForTicket } from '$lib/ipc/ticket_links';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { tabsStore } from '$lib/stores/tabs.svelte';
@@ -55,7 +55,7 @@
   // Per-attachment download state (id → 'idle' | 'downloading' | 'done' | 'error')
   let downloadStates  = $state<Record<string, 'idle' | 'downloading' | 'done' | 'error'>>({});
   // Currently open save picker (null when closed). The picker is the in-app
-  // FilePickerModal — never the native OS dialog.
+  // FileExplorerModal — never the native OS dialog.
   let pickerForAtt    = $state<IssueAttachment | null>(null);
 
   let commentBody          = $state('');
@@ -301,7 +301,7 @@
     return undefined;
   }
 
-  /** Open the in-app FilePickerModal (save mode) for this attachment.
+  /** Open the in-app FileExplorerModal (save mode) for this attachment.
    *  No file is fetched until the user confirms a destination. */
   function requestDownload(att: IssueAttachment) {
     if (downloadStates[att.id] === 'downloading') return;
@@ -825,7 +825,7 @@
 </Modal>
 
 {#if pickerForAtt}
-  <FilePickerModal
+  <FileExplorerModal
     mode="save"
     title={`Save attachment — ${pickerForAtt.filename}`}
     initialFilename={pickerForAtt.filename}

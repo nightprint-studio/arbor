@@ -18,7 +18,7 @@
   import Input           from '$lib/components/shared/ui/Input.svelte';
   import Select          from '$lib/components/shared/ui/Select.svelte';
   import Spinner         from '$lib/components/shared/ui/Spinner.svelte';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import MarketplaceInstallConfirm        from './marketplace/MarketplaceInstallConfirm.svelte';
   import MarketplaceAddCustomSourceModal  from './marketplace/MarketplaceAddCustomSourceModal.svelte';
   import MarketplacePluginRow             from './marketplace/MarketplacePluginRow.svelte';
@@ -1050,7 +1050,7 @@
 {/if}
 
 {#if zipPickerOpen}
-  <FilePickerModal
+  <FileExplorerModal
     mode="file"
     title="Import plugin (.zip)"
     extensions={['zip']}

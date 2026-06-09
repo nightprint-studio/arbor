@@ -5,7 +5,7 @@
   import { worktreeStore } from '$lib/stores/worktree.svelte';
   import { getIdeConfig, setIdeConfig, startIdeDetection } from '$lib/ipc/worktree';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import type { IdeConfig, IdeEntry } from '$lib/types/git';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
@@ -138,7 +138,7 @@
 </script>
 
 {#if filePickerIdeId}
-  <FilePickerModal
+  <FileExplorerModal
     mode="file"
     title="Select IDE Executable"
     onConfirm={(path) => {

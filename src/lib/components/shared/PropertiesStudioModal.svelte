@@ -47,7 +47,7 @@
   import Alert from './ui/Alert.svelte';
   import StateBlock from './ui/StateBlock.svelte';
   import TypePill from './internal/TypePill.svelte';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import { type MenuItem } from './ContextMenu.svelte';
   import { type RowSnippetCtx } from './ui/Tree.svelte';
   import { type TabItem } from './ui/Tabs.svelte';
@@ -1166,7 +1166,7 @@
 
   {#snippet auxiliary()}
     {#if saveFlow.savePickerOpen}
-      <FilePickerModal
+      <FileExplorerModal
         mode="save"
         title="Save .properties document as"
         extensions={['properties']}

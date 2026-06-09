@@ -8,7 +8,7 @@
     getTerminalsConfig, setTerminalsConfig, startShellDetection,
   } from '$lib/ipc/terminal';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
@@ -117,7 +117,7 @@
 </script>
 
 {#if filePickerShellId}
-  <FilePickerModal
+  <FileExplorerModal
     mode="file"
     title="Select Shell Executable"
     onConfirm={(path) => {

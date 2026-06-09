@@ -215,7 +215,7 @@ export interface ImportPluginResult {
 
 /**
  * Build a plugin template zip from the modal form and write it directly to
- * `targetPath` (the path returned by Arbor's FilePickerModal in save mode).
+ * `targetPath` (the path returned by Arbor's FileExplorerModal in save mode).
  * Returns the absolute path that was actually written — when the picker
  * handed back a directory the backend appends `<slug>.zip`.
  */

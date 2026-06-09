@@ -1,7 +1,7 @@
 <script lang="ts">
   import { GitBranch, Download, FolderOpen, RefreshCw, Loader, AlertTriangle, Check, ExternalLink, X } from 'lucide-svelte';
   import { gitCliStore } from '$lib/stores/gitCli.svelte';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import Modal from './Modal.svelte';
   import ModalHeader from './ModalHeader.svelte';
@@ -201,7 +201,7 @@
 </Modal>
 
 {#if pickerOpen}
-  <FilePickerModal
+  <FileExplorerModal
     mode="file"
     title="Select Git Executable"
     extensions={isWindows ? ['exe'] : undefined}

@@ -16,7 +16,7 @@
 
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import SeverityCounterGrid from './SeverityCounterGrid.svelte';
   import SecurityNoTokenState from './SecurityNoTokenState.svelte';
   import SecurityEmptyState from './SecurityEmptyState.svelte';
@@ -131,7 +131,7 @@
   }
 
   // ── Export ──────────────────────────────────────────────────────────────
-  // Header dropdown → in-app `FilePickerModal` (mode='save') → backend
+  // Header dropdown → in-app `FileExplorerModal` (mode='save') → backend
   // `export_security_report` command. The success/failure toast is emitted
   // by the backend on `arbor://job-done`, so we only surface IPC errors here.
   let exportFormat = $state<'html' | 'csv' | null>(null);
@@ -307,7 +307,7 @@
 {/if}
 
 {#if showPicker && exportFormat}
-  <FilePickerModal
+  <FileExplorerModal
     mode="save"
     title={exportFormat === 'csv' ? 'Export Security CSV' : 'Export Security Report'}
     extensions={exportExtensions}

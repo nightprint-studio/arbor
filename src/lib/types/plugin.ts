@@ -1,4 +1,4 @@
-﻿// ── Manifest types ─────────────────────────────────────────────────────────────
+// ── Manifest types ─────────────────────────────────────────────────────────────
 
 /** Generic 3-tier read/write capability. Higher implies lower. */
 export type AccessLevel = 'none' | 'read' | 'write';
@@ -678,7 +678,7 @@ export interface FormFieldRadio extends FormFieldBase {
   actions?: { change?: string | DispatchTarget };
 }
 
-/** File / folder picker — opens the existing FilePickerModal on click. */
+/** File / folder picker — opens the existing FileExplorerModal on click. */
 export interface FormFieldFile extends FormFieldBase {
   type:        'file';
   /** "file" picks an existing file, "folder" picks a directory, "save" picks an output path. */

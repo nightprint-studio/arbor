@@ -11,7 +11,7 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { notificationsStore } from '$lib/stores/notifications.svelte';
   import { fsReadTextFile, fsWriteTextFile } from '$lib/ipc/fs';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import ColorSwatch from '$lib/components/shared/ui/ColorSwatch.svelte';
   import type { Theme } from '$lib/types/theme';
   import { tooltip } from '$lib/actions/tooltip';
@@ -19,7 +19,7 @@
   let { onClose }: { onClose: () => void } = $props();
 
   // ── Import / Export pickers ───────────────────────────────────────────────
-  // Use the in-app FilePickerModal — never the OS dialog — for all path
+  // Use the in-app FileExplorerModal — never the OS dialog — for all path
   // selection so the picker stays themed and consistent across the app.
   let showImportPicker = $state(false);
   let showExportPicker = $state(false);
@@ -674,7 +674,7 @@
 
 <!-- ── In-app pickers ──────────────────────────────────────────────────── -->
 {#if showImportPicker}
-  <FilePickerModal
+  <FileExplorerModal
     mode="file"
     multiple={true}
     extensions={['json']}
@@ -685,7 +685,7 @@
 {/if}
 
 {#if showExportPicker && exportTarget}
-  <FilePickerModal
+  <FileExplorerModal
     mode="save"
     extensions={['json']}
     title={`Export Theme — ${exportTarget.name}`}

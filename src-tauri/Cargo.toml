@@ -227,7 +227,7 @@ windows-sys = { version = "0.52", features = [
   "Win32_Foundation",                   # BOOL, HANDLE, CloseHandle — base types
   "Win32_System_Threading",             # EcoQoS — SetProcessInformation, SetPriorityClass
   "Win32_System_Diagnostics_ToolHelp",  # EcoQoS — apply throttling to child processes (WebView2 renderers)
-  "Win32_Storage_FileSystem",           # FilePickerModal — GetLogicalDrives (enumerate drive letters)
+  "Win32_Storage_FileSystem",           # FileExplorerModal — GetLogicalDrives (enumerate drive letters)
   "Win32_System_Power",                 # taskbar_icon_refresh — PowerRegisterSuspendResumeNotification
   "Win32_UI_Shell",                     # fs_show_properties — SHObjectProperties (native Properties sheet)
   "Win32_System_Com",                   # fs_show_properties — CoInitializeEx/CoUninitialize for the property sheet's STA

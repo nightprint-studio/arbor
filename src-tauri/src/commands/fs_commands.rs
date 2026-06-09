@@ -45,7 +45,7 @@ pub fn fs_write_text_file(path: String, content: String) -> Result<(), AppError>
 
 /// Read a text file from disk and return its contents as a UTF-8 string.
 /// Errors out for non-UTF-8 files; suitable for JSON / TOML / config files
-/// chosen via the in-app FilePickerModal (e.g. theme imports).
+/// chosen via the in-app FileExplorerModal (e.g. theme imports).
 #[tauri::command]
 pub fn fs_read_text_file(path: String) -> Result<String, AppError> {
     std::fs::read_to_string(&path)

@@ -8,7 +8,11 @@
    * `notify` watcher, an editable address bar with ghost-text autocomplete,
    * and a collapsible sidebar with collapsible sections + workspace groups.
    *
-   * NOTE: this does NOT replace the production file/folder pickers yet.
+   * Doubles as the app's file/folder picker: pass `mode` ('folder' | 'file' |
+   * 'save') plus the usual picker props (extensions, multiple, initialPath,
+   * initialFilename, onConfirm/onConfirmMulti/onCancel) and it renders as a
+   * focused single-tab picker with a confirm/cancel footer instead of the full
+   * multi-tab explorer.
    *
    * Performance: the dir is read once (incl. hidden) and filtered on the FE;
    * the list is virtualised; the watcher is debounced; sort/filter memoised.
@@ -26,7 +30,7 @@
     ExternalLink, Link2, AlertCircle, Maximize2, Minimize2, Settings2,
     Archive, PackageOpen, Image as ImageIcon, FolderSearch,
     List, LayoutGrid, Grid2x2, Grid3x3,
-    Plus, Minus, Undo2, EyeOff, GitCompare, CheckCircle2,
+    Plus, Minus, Undo2, EyeOff, GitCompare, CheckCircle2, Save,
   } from 'lucide-svelte';
   import Icon from '@iconify/svelte';
   import { getFileIcon, getFolderIcon } from '$lib/utils/file-icons';
@@ -71,7 +75,58 @@
   // `onClose` drives the modal usage (Esc / backdrop / header close button).
   // In `standalone` mode the explorer fills a dedicated OS window and is
   // dismissed via its own WindowControls, so `onClose` defaults to a no-op.
-  let { onClose = () => {}, standalone = false }: { onClose?: () => void; standalone?: boolean } = $props();
+  //
+  // ── Picker mode ────────────────────────────────────────────────────────────
+  // When `mode` is non-null the explorer runs as a focused file/folder picker
+  // (single browse tab, no Overview/Settings/tab-strip, confirm/cancel footer).
+  // The prop surface mirrors the legacy file picker exactly so call sites
+  // are a pure tag swap. `null` = the full multi-tab explorer (window or modal).
+  let {
+    onClose = () => {},
+    standalone = false,
+    mode = null,
+    extensions,
+    title,
+    initialPath,
+    initialFilename,
+    multiple = false,
+    onConfirm,
+    onConfirmMulti,
+    onCancel,
+  }: {
+    onClose?:         () => void;
+    standalone?:      boolean;
+    mode?:            'folder' | 'file' | 'save' | null;
+    extensions?:      string[];
+    title?:           string;
+    initialPath?:     string;
+    initialFilename?: string;
+    multiple?:        boolean;
+    onConfirm?:       (path: string) => void;
+    onConfirmMulti?:  (paths: string[]) => void;
+    onCancel?:        () => void;
+  } = $props();
+
+  // Picker flags are static for the component's life (the mode/multiple props
+  // never change after creation), so they're plain consts read once.
+  // svelte-ignore state_referenced_locally
+  const isPicker = mode !== null;
+  // svelte-ignore state_referenced_locally
+  const pickerMulti = isPicker && mode === 'file' && multiple && !!onConfirmMulti;
+  // Save-mode filename (editable in the footer). Clicking/double-clicking a file
+  // populates it; Enter / the Save button commit `currentPath + filename`.
+  // svelte-ignore state_referenced_locally
+  let saveFilename = $state(initialFilename ?? '');
+
+  /** Esc / backdrop / close button: cancel the picker, or close the explorer. */
+  function dismiss() { if (isPicker) onCancel?.(); else onClose(); }
+
+  const dialogTitle = $derived(
+    title ?? (mode === 'folder' ? 'Select Folder' : mode === 'save' ? 'Save As' : 'Select File'),
+  );
+  const confirmLabel = $derived(
+    mode === 'save' ? 'Save' : mode === 'folder' ? 'Select Folder' : pickerMulti ? 'Select Files' : 'Select File',
+  );
 
   // ── localStorage helpers ──────────────────────────────────────────────────
   function lsGet<T>(key: string, fallback: T): T {
@@ -89,7 +144,9 @@
   let tabSeq = 0;
   const mkTab = (view: View, path: string): ExpTab =>
     ({ id: `t${tabSeq++}`, view, path, history: path ? [path] : [], historyIdx: path ? 0 : -1 });
-  const initialTab = mkTab('overview', '');
+  // Picker opens straight into browse (no Overview landing); onMount navigates
+  // to the requested/fallback folder.
+  const initialTab = mkTab(isPicker ? 'browse' : 'overview', '');
   let tabs        = $state<ExpTab[]>([initialTab]);
   let activeTabId = $state(initialTab.id);
   const activeTab = $derived(tabs.find(t => t.id === activeTabId) ?? tabs[0]);
@@ -605,7 +662,7 @@
     if (!t) return;
     // `arbor://settings` opens the in-explorer settings view (body swap), like
     // a browser's settings page — instead of navigating to a filesystem path.
-    if (/^arbor:\/\/settings\/?$/i.test(t)) { showSettings(); return; }
+    if (!isPicker && /^arbor:\/\/settings\/?$/i.test(t)) { showSettings(); return; }
     if (t !== currentPath) await navigate(t);
   }
   function normParentKey(p: string): string { return p.replace(/\\/g, '/').replace(/\/+$/, ''); }
@@ -698,7 +755,13 @@
   /** Recursive mode is active only with a non-empty query in browse view. */
   const recursiveActive = $derived(recursiveSearch && view === 'browse' && filterQuery.trim().length > 0);
 
-  const entries = $derived(rawEntries.filter(e => showHidden || !e.name.startsWith('.')));
+  const entries = $derived(rawEntries.filter(e => {
+    if (!showHidden && e.name.startsWith('.')) return false;
+    // File-picker extension whitelist hides non-matching files (folders stay
+    // navigable). Save mode shows everything — the whitelist only seeds the name.
+    if (isPicker && mode === 'file' && !e.is_dir && !extOk(e.name)) return false;
+    return true;
+  }));
   const sorted = $derived.by(() => {
     // Recursive results arrive already filtered (and hidden-aware) from the
     // backend; the local list is filtered here with the same matcher.
@@ -755,6 +818,8 @@
   function clickEntry(entry: FsEntry, ev?: MouseEvent) {
     if (consumeDragClick()) return;
     cancelCreate();
+    // Save-mode picker: selecting a file seeds the filename (Explorer-style).
+    if (isPicker && mode === 'save' && !entry.is_dir) saveFilename = entry.name;
     if (ev && (ev.ctrlKey || ev.metaKey)) {
       const next = new Set(selected);
       if (next.has(entry.path)) next.delete(entry.path); else next.add(entry.path);
@@ -775,9 +840,62 @@
   function selectAll() { selected = new Set(sorted.map(e => e.path)); if (sorted.length) { anchor = sorted[0].path; lead = sorted[sorted.length - 1].path; } }
   function actionPaths(): string[] { return selected.size > 0 ? [...selected] : (lead ? [lead] : []); }
 
+  // ── Picker resolution (mode-constrained target + confirm) ──────────────────
+  /** In file/save picker mode, is `name`'s extension allowed (when a whitelist
+   *  was given)? Always true outside file mode or with no whitelist. */
+  function extOk(name: string): boolean {
+    if (!isPicker || mode !== 'file' || !extensions || extensions.length === 0) return true;
+    return extensions.includes(extOf(name));
+  }
+  /** Folder mode target: a selected sub-folder, else the folder we're in. */
+  const pickerFolder = $derived.by(() => (leadEntry?.is_dir ? leadEntry.path : currentPath));
+  /** File mode (single) target: the selected matching file, or '' if none. */
+  const pickerFile = $derived.by(() => (leadEntry && !leadEntry.is_dir && extOk(leadEntry.name) ? leadEntry.path : ''));
+  /** File mode (multiple) targets: every selected matching file. */
+  const pickerFiles = $derived(
+    pickerMulti ? sorted.filter(e => selected.has(e.path) && !e.is_dir && extOk(e.name)).map(e => e.path) : [],
+  );
+  /** Save mode: a same-named file already exists in this folder (overwrite). */
+  const saveFileExists = $derived(
+    isPicker && mode === 'save' && saveFilename.trim() !== '' &&
+    entries.some(e => !e.is_dir && e.name.toLowerCase() === saveFilename.trim().toLowerCase()),
+  );
+  const canConfirm = $derived.by(() => {
+    if (!isPicker || view !== 'browse' || !currentPath) return false;
+    if (mode === 'save')   return saveFilename.trim() !== '';
+    if (mode === 'folder') return !!pickerFolder;
+    if (pickerMulti)       return pickerFiles.length > 0;
+    return pickerFile !== '';
+  });
+  /** Short footer summary of what would be returned. */
+  const pickerInfo = $derived.by(() => {
+    if (!isPicker) return '';
+    if (mode === 'folder') return pickerFolder ? `Folder: ${baseName(pickerFolder)}` : 'Select a folder';
+    if (pickerMulti) return pickerFiles.length
+      ? `${pickerFiles.length} file${pickerFiles.length !== 1 ? 's' : ''} selected`
+      : 'Select one or more files';
+    return pickerFile ? baseName(pickerFile) : 'Select a file';
+  });
+  function pickerConfirm() {
+    if (!canConfirm) return;
+    if (mode === 'save')   { onConfirm?.(joinPath(currentPath, saveFilename.trim())); return; }
+    if (mode === 'folder') { onConfirm?.(pickerFolder); return; }
+    if (pickerMulti)       { onConfirmMulti?.(pickerFiles); return; }
+    onConfirm?.(pickerFile);
+  }
+
   function openEntry(entry: FsEntry) {
-    if (entry.is_dir) navigate(entry.path);
-    else fsOpenDefault(entry.path).catch(e => uiStore.showToast(`Cannot open: ${e}`, 'error'));
+    if (entry.is_dir) { navigate(entry.path); return; }
+    if (isPicker) {
+      // Activating a file: confirm it (file mode) or load its name (save mode).
+      if (mode === 'file' && extOk(entry.name)) {
+        if (pickerMulti) onConfirmMulti?.([entry.path]); else onConfirm?.(entry.path);
+      } else if (mode === 'save') {
+        saveFilename = entry.name;
+      }
+      return;
+    }
+    fsOpenDefault(entry.path).catch(e => uiStore.showToast(`Cannot open: ${e}`, 'error'));
   }
   /** Open the OS-native Properties sheet for a path (Windows). */
   function openSystemProperties(path: string) {
@@ -1121,6 +1239,8 @@
     if (renamingPath || createKind || addressEditing) return;
     const inInput = (e.target as HTMLElement).tagName === 'INPUT';
     const mod = e.ctrlKey || e.metaKey;
+    // Picker: Ctrl/⌘+Enter always submits (even from the save-name input).
+    if (isPicker && mod && e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); pickerConfirm(); return; }
     // Panel toggles — work in any view. Ctrl+B: left sidebar; Ctrl+Shift+B: right panel.
     if (mod && !inInput && e.key.toLowerCase() === 'b') {
       e.preventDefault(); e.stopImmediatePropagation();
@@ -1129,7 +1249,7 @@
       return;
     }
     // Ctrl+, — open the in-explorer settings view (toggles back out if already there).
-    if (mod && !inInput && e.key === ',') {
+    if (mod && !inInput && !isPicker && e.key === ',') {
       e.preventDefault(); e.stopImmediatePropagation();
       if (view === 'settings') exitSettings(); else showSettings();
       return;
@@ -1144,7 +1264,16 @@
       if (k === 'l') { e.preventDefault(); e.stopImmediatePropagation(); startAddressEdit(); return; }
     }
     switch (e.key) {
-      case 'Enter': { if (inInput) return; e.preventDefault(); if (deleteReq) { confirmDelete(); return; } if (leadEntry) openEntry(leadEntry); return; }
+      case 'Enter': {
+        if (inInput) return; e.preventDefault();
+        if (deleteReq) { confirmDelete(); return; }
+        if (isPicker) {
+          // Drill into a selected sub-folder; otherwise commit the picker.
+          if (leadEntry?.is_dir) openEntry(leadEntry); else pickerConfirm();
+          return;
+        }
+        if (leadEntry) openEntry(leadEntry); return;
+      }
       case 'Delete': { if (inInput) return; e.preventDefault(); askDelete(e.shiftKey); return; }
       case 'F2': { if (inInput) return; e.preventDefault(); if (leadEntry) startRename(leadEntry); return; }
       case 'Backspace': if (!inInput) { e.preventDefault(); goUp(); } return;
@@ -1325,7 +1454,16 @@
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   function scheduleRefresh() { if (refreshTimer) clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { refreshTimer = null; refreshCurrent(); }, 200); }
   onMount(async () => {
+    // Picker: jump straight to the requested folder (eager, before roots load)
+    // so there's no Overview/empty flash.
+    if (isPicker && initialPath) await navigate(initialPath);
     try { roots = await listFsRoots(); } catch { /* ignore */ }
+    // Picker fallback: if no initial path (or it failed to open), land on the
+    // first favourite/drive so the user is never stranded on an empty view.
+    if (isPicker && (!currentPath || loadError)) {
+      const fb = defaultBrowsePath;
+      if (fb) await navigate(fb);
+    }
     try {
       const [repos, snap] = await Promise.all([listRegistryRepos(), listWorkspaces()]);
       projects = repos; workspaces = snap.workspaces; activeWorkspaceId = snap.active_workspace_id;
@@ -1580,7 +1718,7 @@
 
       {#each orderedSidebar as s (s.id)}
         {#if s.visible}
-          {#if s.id === 'library'}{@render secLibrary()}
+          {#if s.id === 'library'}{#if !isPicker}{@render secLibrary()}{/if}
           {:else if s.id === 'recents'}{@render secRecents()}
           {:else if s.id === 'favourites'}{@render secFavourites()}
           {:else if s.id === 'devices'}{@render secDevices()}
@@ -1592,9 +1730,11 @@
 
     <!-- ══ Main ══ -->
     <div class="fx-main" class:fx-narrow={previewBig}>
-      <div class="fx-tabbar">
-        <Tabs items={tabItems} value={activeTabId} variant="panel" overflow onSelect={switchTab} onClose={closeTab} onAdd={addTab} addLabel="New tab" ariaLabel="Explorer tabs" />
-      </div>
+      {#if !isPicker}
+        <div class="fx-tabbar">
+          <Tabs items={tabItems} value={activeTabId} variant="panel" overflow onSelect={switchTab} onClose={closeTab} onAdd={addTab} addLabel="New tab" ariaLabel="Explorer tabs" />
+        </div>
+      {/if}
 
       {#if view === 'overview'}
         <div class="fx-overview">
@@ -1867,6 +2007,24 @@
           <Button variant="danger" size="sm" onclick={confirmDelete}>{deleteReq.permanent ? 'Delete' : 'Move to Recycle Bin'}</Button>
         </span>
       </ModalFooter>
+    {:else if isPicker}
+      <ModalFooter align="between">
+        <span class="fx-foot-info fx-picker-foot">
+          {#if mode === 'save'}
+            <label class="fx-save-label" for="fx-save-name">Name</label>
+            <input id="fx-save-name" class="fx-save-input" type="text" bind:value={saveFilename}
+                   placeholder="filename" spellcheck="false" autocomplete="off"
+                   onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); pickerConfirm(); } if (e.key === 'Escape') { e.preventDefault(); dismiss(); } }} />
+            {#if saveFileExists}<span class="fx-save-warn" use:tooltip={'A file with this name already exists and will be overwritten'}>Overwrite</span>{/if}
+          {:else}
+            <span class="fx-picker-target">{pickerInfo}</span>
+          {/if}
+        </span>
+        <span class="fx-foot-actions">
+          <Button variant="ghost" size="sm" onclick={dismiss}>Cancel</Button>
+          <Button variant="primary" size="sm" disabled={!canConfirm} onclick={pickerConfirm}>{confirmLabel}</Button>
+        </span>
+      </ModalFooter>
     {:else if view === 'browse'}
       <ModalFooter align="between">
         <span class="fx-foot-info">{footerInfo}{#if clipboard}<span class="fx-clip"> · {clipboard.op === 'cut' ? 'Cut' : 'Copied'} {clipboard.paths.length}</span>{/if}</span>
@@ -1912,11 +2070,18 @@
     <footer class="fx-win-foot">{@render footerBody()}</footer>
   </div>
 {:else}
-  <Modal onClose={onClose} width="1240px" height="720px" padBody={false} bodyBorder={false} topGap
-         showRightRail={view === 'browse'} zIndex="var(--z-modal-picker)" ariaLabel="File Explorer">
+  <Modal onClose={dismiss} width={isPicker ? '960px' : '1240px'} height={isPicker ? '620px' : '720px'}
+         padBody={false} bodyBorder={false} topGap
+         showRightRail={view === 'browse'} zIndex="var(--z-modal-picker)" ariaLabel={isPicker ? dialogTitle : 'File Explorer'}>
     {#snippet rightRail()}{@render railButtons()}{/snippet}
     {#snippet header()}
-      <ModalHeader onClose={onClose}>
+      <ModalHeader onClose={dismiss}>
+        {#if isPicker}
+          <span class="fx-picker-title" use:tooltip={dialogTitle}>
+            {#if mode === 'folder'}<Folder size={14} />{:else if mode === 'save'}<Save size={14} />{:else}<FileText size={14} />{/if}
+            <span class="fx-picker-title-text">{dialogTitle}</span>
+          </span>
+        {/if}
         {@render headerNavButtons()}
         {@render headerAddress()}
         {#snippet actions()}{@render headerActions()}{/snippet}
@@ -2212,6 +2377,18 @@
   .fx-del-confirm { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); overflow: hidden; min-width: 0; }
   :global(.fx-del-ico) { color: var(--error); flex-shrink: 0; }
   .fx-del-confirm strong { color: var(--text-primary); }
+
+  /* ── Picker mode ─────────────────────────────────────────────────────────── */
+  /* Header title chip (mode icon + dialog title), shown only as a picker. */
+  .fx-picker-title { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text-secondary); padding-right: 4px; }
+  .fx-picker-title-text { font-size: 12.5px; font-weight: 600; color: var(--text-primary); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  /* Footer: target summary on the left, Cancel/Confirm on the right. */
+  .fx-picker-foot { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
+  .fx-picker-target { font-size: 11.5px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx-save-label { font-size: 11.5px; color: var(--text-muted); flex-shrink: 0; }
+  .fx-save-input { width: 260px; max-width: 42vw; background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-ui-sans); font-size: 12px; padding: 3px 7px; outline: none; transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+  .fx-save-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(61,127,255,0.2); }
+  .fx-save-warn { font-size: 10.5px; font-weight: 600; color: var(--warning); text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0; }
 
   /* ── Git status overlays (TortoiseGit-style) ─────────────────────────────── */
   .fx-badge {

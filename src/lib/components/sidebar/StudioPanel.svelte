@@ -25,7 +25,7 @@
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import BindSchemaModal from '$lib/components/shared/BindSchemaModal.svelte';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { studioStore } from '$lib/stores/studio.svelte';
   import { ronStudioStore } from '$lib/stores/ron-studio.svelte';
@@ -101,7 +101,7 @@
   }
 
   /** "+" launcher state — picker mode (file vs folder) drives the
-   *  FilePickerModal's `mode` prop. `null` ⇒ launcher closed. */
+   *  FileExplorerModal's `mode` prop. `null` ⇒ launcher closed. */
   let externalPicker = $state<{ mode: 'file' | 'folder' } | null>(null);
 
   function openExternalPicker(mode: 'file' | 'folder'): void {
@@ -893,7 +893,7 @@
 {/if}
 
 {#if externalPicker}
-  <FilePickerModal
+  <FileExplorerModal
     mode={externalPicker.mode}
     title={externalPicker.mode === 'folder'
       ? 'Pick external folder'

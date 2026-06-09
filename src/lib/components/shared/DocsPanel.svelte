@@ -6,7 +6,7 @@
   import { animStore }      from '$lib/stores/animations.svelte';
   import { fsWriteTextFile } from '$lib/ipc/fs';
   import { notificationsStore } from '$lib/stores/notifications.svelte';
-  import FilePickerModal     from './FilePickerModal.svelte';
+  import FileExplorerModal     from './FileExplorerModal.svelte';
   import Modal               from './Modal.svelte';
   import ModalHeader         from './ModalHeader.svelte';
   import SearchBar           from './ui/SearchBar.svelte';
@@ -875,7 +875,7 @@
 <!-- Rendered AFTER the main <Modal> so the file picker stacks ON TOP of
      the docs panel (both share the same --z-modal-bg, so DOM order wins). -->
 {#if pendingExport}
-  <FilePickerModal
+  <FileExplorerModal
     mode="save"
     title="Export Documentation"
     initialFilename={pendingExport.defaultName}

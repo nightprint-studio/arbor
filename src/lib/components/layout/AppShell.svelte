@@ -78,7 +78,7 @@
   // JobsOverlay and gets per-file detail in JobOutputPanel.
   import CloudChunkOrderModal from '../shared/CloudChunkOrderModal.svelte';
   import { repoBrowserStore } from '$lib/stores/repoBrowser.svelte';
-  import FilePickerModal from '../shared/FilePickerModal.svelte';
+  import FileExplorerModal from '../shared/FileExplorerModal.svelte';
   import BisectBanner from '../shared/BisectBanner.svelte';
   import { bisectStore } from '$lib/stores/bisect.svelte';
   import StatsPanel from '../sidebar/StatsPanel.svelte';
@@ -1477,7 +1477,7 @@
       {
         // File/folder/save picker opened by a plugin via `arbor.ui.pick_file`.
         // The payload carries the plugin name + the requested options + a
-        // callback action name; we show FilePickerModal and round-trip the
+        // callback action name; we show FileExplorerModal and round-trip the
         // chosen path back as a plugin action (empty path on cancel).
         event: 'plugin:pick-file',
         handler: (e: { payload: PluginPickFile }) => {
@@ -2508,7 +2508,7 @@
 
   <!-- Open Repository file picker -->
   {#if openPickerOpen}
-    <FilePickerModal
+    <FileExplorerModal
       mode="folder"
       title="Open Repository"
       initialPath={uiStore.recentRepos[0]?.replace(/[\\/][^\\/]+$/, '') || undefined}
@@ -2633,7 +2633,7 @@
        behind the modal that triggered it (visible on Windows/WebView2). -->
   {#if pluginPickFile}
     {@const req = pluginPickFile}
-    <FilePickerModal
+    <FileExplorerModal
       mode={req.mode ?? 'file'}
       title={req.title ?? 'Select a file'}
       extensions={req.extensions}

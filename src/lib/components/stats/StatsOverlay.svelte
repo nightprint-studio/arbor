@@ -10,7 +10,7 @@
   import TimeDistribution from './TimeDistribution.svelte';
   import ContributorBar   from './ContributorBar.svelte';
   import FileTypeChart    from './FileTypeChart.svelte';
-  import FilePickerModal  from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal  from '$lib/components/shared/FileExplorerModal.svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -276,7 +276,7 @@
 </Modal>
 
 {#if showExportPicker && exportFormat}
-  <FilePickerModal
+  <FileExplorerModal
     mode="save"
     extensions={exportExtensions}
     initialFilename={exportFilename}

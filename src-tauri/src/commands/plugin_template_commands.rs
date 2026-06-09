@@ -361,7 +361,7 @@ fn build_template_zip(opts: &ExportPluginTemplateOpts, slug: &str) -> Result<Vec
 }
 
 /// Generate the plugin template and write it to `target_path`. The frontend
-/// passes the path it got back from Arbor's `FilePickerModal` (mode='save').
+/// passes the path it got back from Arbor's `FileExplorerModal` (mode='save').
 /// Returns the absolute path written to so the UI can show it in the toast.
 #[tauri::command]
 pub fn export_plugin_template_to_path(

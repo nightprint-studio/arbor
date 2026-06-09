@@ -15,7 +15,7 @@
   } from '$lib/ipc/workspace';
   import { fsReadTextFile } from '$lib/ipc/fs';
   import { type ExportedWorkspace, workspaceColorVar } from '$lib/types/workspace';
-  import FilePickerModal from '../shared/FilePickerModal.svelte';
+  import FileExplorerModal from '../shared/FileExplorerModal.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
 
@@ -418,7 +418,7 @@
 
 {#if picker !== null}
   {#if picker.kind === 'json'}
-    <FilePickerModal
+    <FileExplorerModal
       mode="file"
       extensions={['json']}
       title="Choose workspace JSON"
@@ -426,14 +426,14 @@
       onCancel={() => picker = null}
     />
   {:else if picker.kind === 'locate'}
-    <FilePickerModal
+    <FileExplorerModal
       mode="folder"
       title="Locate repository"
       onConfirm={onPickerConfirm}
       onCancel={() => picker = null}
     />
   {:else}
-    <FilePickerModal
+    <FileExplorerModal
       mode="folder"
       title="Choose clone destination"
       onConfirm={onPickerConfirm}

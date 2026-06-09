@@ -1,4 +1,4 @@
-//! `arbor.ui.pick_file` — opens the native-feeling FilePickerModal.
+//! `arbor.ui.pick_file` — opens the native-feeling FileExplorerModal.
 //!
 //! Example (Lua):
 //!   arbor.ui.pick_file({

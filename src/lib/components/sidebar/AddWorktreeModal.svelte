@@ -6,7 +6,7 @@
   import { repoStore } from '$lib/stores/repo.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
@@ -149,7 +149,7 @@
 </script>
 
 {#if showFolderPicker}
-  <FilePickerModal
+  <FileExplorerModal
     mode="folder"
     title="Select Destination Folder"
     onConfirm={(path) => { destPath = path; showFolderPicker = false; }}

@@ -18,7 +18,7 @@
   import Modal from './Modal.svelte';
   import ModalHeader from './ModalHeader.svelte';
   import FormField from './ui/FormField.svelte';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import UrlBlock from './ui/UrlBlock.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { cloneRepo, openRepo, closeRepo } from '$lib/ipc/graph';
@@ -113,7 +113,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 {#if showPicker}
-  <FilePickerModal
+  <FileExplorerModal
     mode="folder"
     title="Choose destination folder"
     initialPath={baseTrimmed || undefined}

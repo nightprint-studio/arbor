@@ -19,7 +19,7 @@
     · Schema-aware tree decoration: type chips, named-type chip, ↗
       cross-ref chip with Ctrl+click jump.
     · YAML ↔ .properties converter (5.b extension) in the footer.
-    · Save + Save As via the standard `<FilePickerModal>` flow.
+    · Save + Save As via the standard `<FileExplorerModal>` flow.
 
   YAML supports first-class null (`null_handling = Native`), so the
   bulk-edit modal uses `nullPolicy = "as_null"`. Schema sources are
@@ -46,7 +46,7 @@
   import yamlIcon from '@iconify-icons/vscode-icons/file-type-yaml';
   import Spinner from './ui/Spinner.svelte';
   import PanelShell from './ui/PanelShell.svelte';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import { type MenuItem } from './ContextMenu.svelte';
   import { type RowSnippetCtx } from './ui/Tree.svelte';
   import Dropdown from './ui/Dropdown.svelte';
@@ -1271,7 +1271,7 @@
 
   {#snippet auxiliary()}
     {#if saveFlow.savePickerOpen}
-      <FilePickerModal
+      <FileExplorerModal
         mode="save"
         title="Save YAML document as"
         extensions={['yaml', 'yml']}
@@ -1283,7 +1283,7 @@
     {/if}
 
     {#if importPickerOpen}
-      <FilePickerModal
+      <FileExplorerModal
         mode="file"
         title="Pick a .properties file to convert"
         extensions={['properties']}

@@ -5,7 +5,7 @@
 
   Three actions:
     · Copy — copy the converted text to clipboard.
-    · Save As… — open a FilePickerModal to pick a destination path.
+    · Save As… — open a FileExplorerModal to pick a destination path.
     · Replace — call back into the caller with the converted text so
       it can swap the open doc's buffer (history-tracked via the
       backend's normal setText flow).
@@ -18,7 +18,7 @@
   import Alert from '../ui/Alert.svelte';
   import Button from '../ui/Button.svelte';
   import StudioTextPane from './StudioTextPane.svelte';
-  import FilePickerModal from '../FilePickerModal.svelte';
+  import FileExplorerModal from '../FileExplorerModal.svelte';
   import {
     yamlToProperties,
     propertiesToYaml,
@@ -190,7 +190,7 @@
 </Modal>
 
 {#if savePickerOpen}
-  <FilePickerModal
+  <FileExplorerModal
     mode="save"
     title={`Save ${outExtension === 'properties' ? '.properties' : 'YAML'} as`}
     extensions={outExtension === 'properties' ? ['properties'] : ['yaml', 'yml']}

@@ -12,7 +12,7 @@
     validateRepoPaths, validateRepoPath, removeRecentRepo, relocateRepo,
     type RepoPathStatus,
   } from '$lib/ipc/missing';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import Contribution    from './Contribution.svelte';
   import PluginIcon      from '$lib/components/plugins/PluginIcon.svelte';
   import ArborLogo       from './internal/ArborLogo.svelte';
@@ -353,7 +353,7 @@
 </div>
 
 {#if locating}
-  <FilePickerModal
+  <FileExplorerModal
     mode="folder"
     title="Locate project folder"
     onConfirm={handleLocateConfirm}

@@ -5,7 +5,7 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import SectionHeader from '$lib/components/shared/ui/SectionHeader.svelte';
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
@@ -180,7 +180,7 @@
 </div>
 
 {#if pickerOpen}
-  <FilePickerModal
+  <FileExplorerModal
     mode="file"
     title="Select Git Executable"
     extensions={isWindows ? ['exe'] : undefined}

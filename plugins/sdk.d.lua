@@ -1039,7 +1039,7 @@ function Ui.form.set_state_block(name, cfg) end
 ---@return arbor.Promise
 function Ui.confirm(config) end
 
----Open the native-feeling FilePickerModal and round-trip the chosen path back
+---Open the native-feeling FileExplorerModal and round-trip the chosen path back
 ---to the plugin via a fire-and-forget action. On cancel, the action is still
 ---fired but with `path = ""` so the plugin can distinguish it from a successful
 ---pick without wiring two handlers.

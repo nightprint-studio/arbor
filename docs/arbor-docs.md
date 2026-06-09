@@ -7231,7 +7231,7 @@ The Plugin Manager also exposes a **Clear cache** button
 | `switch` | field, cases, default | Renders one branch based on another field's value |
 | `tabs` | tabs[], default_tab | Tab strip; all fields inside always collected for submit |
 | `wizard` | steps[], start_step, next_label, back_label | Multi-step form with Back/Next footer |
-| `file` | name, label, pick_mode, extensions, placeholder | Opens FilePickerModal — submits path string |
+| `file` | name, label, pick_mode, extensions, placeholder | Opens FileExplorerModal — submits path string |
 | `autocomplete` | name, id, options?, source_action?, debounce_ms, free_form | Static or dynamic suggestions |
 | `tags` | name, default, suggestions, max | Submits `string[]` |
 | `tree` | name, nodes[], multi, expanded, bordered, max_height | Hierarchical selector. Nodes: `value, label, icon?, group?, tag?, tag_variant?, description?, children?` |

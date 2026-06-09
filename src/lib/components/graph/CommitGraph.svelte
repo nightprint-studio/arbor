@@ -19,7 +19,7 @@
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import FilePickerModal from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { bisectStore } from '$lib/stores/bisect.svelte';
@@ -1931,7 +1931,7 @@
 {/if}
 
 {#if showExportModal && tab}
-  <FilePickerModal
+  <FileExplorerModal
     mode="save"
     extensions={['svg']}
     title="Export Graph as SVG"

@@ -19,7 +19,7 @@
 
   import { untrack } from 'svelte';
   import Modal from './Modal.svelte';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import Spinner from './ui/Spinner.svelte';
   import { FolderOpen, FileCode, Link2, AlertCircle, Check, X, Plus, Info } from 'lucide-svelte';
   import { studioBackend, type RootCandidate, type StudioFormat } from '$lib/ipc/studio-format';
@@ -316,7 +316,7 @@
 </Modal>
 
 {#if pickerOpen}
-  <FilePickerModal
+  <FileExplorerModal
     mode="file"
     title={pickerConfig.pickerTitle}
     extensions={pickerConfig.extensions}

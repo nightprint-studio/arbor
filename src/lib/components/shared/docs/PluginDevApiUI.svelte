@@ -1114,7 +1114,7 @@ local mode = arbor.settings.read("my-plugin", "mode") or "balanced"`, '.lua')}</
     <tr><td><code>date</code></td><td>name, label, default, min, max, readonly, required</td><td>Submits ISO "YYYY-MM-DD"</td></tr>
     <tr><td><code>datetime</code></td><td>name, label, default, min, max, readonly, required</td><td>Submits "YYYY-MM-DDTHH:MM" (local, no TZ)</td></tr>
     <tr><td><code>time</code></td><td>name, label, default, min, max, readonly, required</td><td>Submits "HH:MM"</td></tr>
-    <tr><td><code>file</code></td><td>name, label, pick_mode, extensions, placeholder</td><td>Opens FilePickerModal — submits path string</td></tr>
+    <tr><td><code>file</code></td><td>name, label, pick_mode, extensions, placeholder</td><td>Opens FileExplorerModal — submits path string</td></tr>
     <tr><td><code>autocomplete</code></td><td>name, id, options?, source_action?, debounce_ms, free_form</td><td>Static or dynamic suggestions</td></tr>
     <tr><td><code>tags</code></td><td>name, default, suggestions, max</td><td>Submits <code>string[]</code></td></tr>
     <tr><td><code>branch_select</code></td><td>name, branches[], default, placeholder?, loading?, search_threshold?</td><td>Value-bearing git branch picker — same chrome as the host's <code>&lt;BranchSelect&gt;</code> (monospace trigger, search input above the menu past <code>search_threshold</code> (default 12), sticky entry for a value not in the list). Plugin owns the list: call <code>arbor.repo.branches()</code> (requires <code>git = "read"</code>) and map <code>.name</code>. The host does not auto-load or watch the active repo — push the list back via <code>arbor.ui.form.patch</code> when it changes.</td></tr>

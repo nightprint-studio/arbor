@@ -8,7 +8,7 @@
     relocateRepo, validateRepoPath, removeRecentRepo,
     type MissingProjectsConfig,
   } from '$lib/ipc/missing';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import { closeRepo } from '$lib/ipc/graph';
 
   let { tab, config }: { tab: RepoTab; config: MissingProjectsConfig } = $props();
@@ -180,7 +180,7 @@
 </div>
 
 {#if pickerOpen}
-  <FilePickerModal
+  <FileExplorerModal
     mode="folder"
     title="Locate '{tab.name}'"
     initialPath={tab.path}

@@ -17,7 +17,7 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { cloneRepo, openRepo, closeRepo } from '$lib/ipc/graph';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import type { RemoteRepo, RemoteTreeEntry, NamespaceTreeNode } from '$lib/types/repoBrowser';
   import { animStore } from '$lib/stores/animations.svelte';
   import { keybindingsStore } from '$lib/stores/keybindings.svelte';
@@ -833,7 +833,7 @@
      these before the Modal causes the picker dialog to render UNDER the
      repository browser. -->
 {#if showClonePicker && cloneTargetRepo}
-  <FilePickerModal
+  <FileExplorerModal
     mode="folder"
     title="Choose clone destination"
     onConfirm={onClonePickerConfirm}
@@ -842,7 +842,7 @@
 {/if}
 
 {#if showDownloadPicker && store.selectedFile}
-  <FilePickerModal
+  <FileExplorerModal
     mode="folder"
     title="Save to folder"
     onConfirm={onDownloadPickerConfirm}

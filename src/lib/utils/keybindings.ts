@@ -43,7 +43,7 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // F6 cycles focus across the major layout zones (titlebar, tabs, activity
   // bars, sidebar, graph, bottom panel, status bar) so the whole UI is
   // reachable from the keyboard without dedicated per-zone shortcuts.
-  // Mirrors the same chord already used by FilePickerModal.
+  // Mirrors the same chord already used by FileExplorerModal.
   cycle_focus:         { key: 'F6',                              description: 'Cycle focus to next panel',     group: 'Navigation' },
   cycle_focus_reverse: { key: 'F6',                shift: true,  description: 'Cycle focus to previous panel', group: 'Navigation' },
   // Workspace-aware project pickers (pre-fill the command palette).

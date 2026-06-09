@@ -52,7 +52,7 @@
   import { applyPatchOps } from './form-nodes/patch';
   import { uiStore }          from '$lib/stores/ui.svelte';
   import { tooltip }          from '$lib/actions/tooltip';
-  import FilePickerModal      from '$lib/components/shared/FilePickerModal.svelte';
+  import FileExplorerModal      from '$lib/components/shared/FileExplorerModal.svelte';
 
   import type { FormNodeCtx } from './form-nodes/ctx';
   import {
@@ -1194,7 +1194,7 @@
 <!-- ── File picker portal (opened by `file` field nodes) ────────────────── -->
 {#if filePickerOpenFor && filePickerField}
   {@const pm = (filePickerField.pick_mode ?? 'file') as 'file' | 'folder' | 'save'}
-  <FilePickerModal
+  <FileExplorerModal
     mode={pm}
     title={filePickerField.label ?? (pm === 'folder' ? 'Select Folder' : pm === 'save' ? 'Save As' : 'Select File')}
     extensions={filePickerField.extensions}

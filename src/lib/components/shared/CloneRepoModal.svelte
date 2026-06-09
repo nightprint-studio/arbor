@@ -7,7 +7,7 @@
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import FilePickerModal from './FilePickerModal.svelte';
+  import FileExplorerModal from './FileExplorerModal.svelte';
   import Modal from './Modal.svelte';
   import ModalHeader from './ModalHeader.svelte';
   import FormField from './ui/FormField.svelte';
@@ -192,7 +192,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 {#if showPicker}
-  <FilePickerModal
+  <FileExplorerModal
     mode="folder"
     title="Choose destination folder"
     initialPath={pickerInitialPath()}
