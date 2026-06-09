@@ -18,13 +18,17 @@
     /** When set, the confirm button is disabled and the component shows a
      *  subtle loading state.  Useful while the parent awaits an async op. */
     busy?:        boolean;
+    /** Override the backdrop z-index — forwarded to Modal. Pass e.g.
+     *  `"var(--z-menu)"` when the confirm must float ABOVE another modal
+     *  (such as the File Explorer's `--z-modal-picker` overlay). */
+    zIndex?:      string;
   }
   let {
     title, message, detail,
     variant = 'default',
     confirmLabel = 'Confirm',
     cancelLabel  = 'Cancel',
-    onConfirm, onCancel, busy = false,
+    onConfirm, onCancel, busy = false, zIndex,
   }: Props = $props();
 
   const Icon = $derived(
@@ -47,7 +51,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<Modal onClose={onCancel} width="440px" ariaLabel={title}>
+<Modal onClose={onCancel} width="440px" ariaLabel={title} {zIndex}>
   {#snippet header()}
     <div class="confirm-icon" class:danger={variant === 'danger'} class:warning={variant === 'warning'} class:info={variant === 'info'}>
       <Icon size={20} />

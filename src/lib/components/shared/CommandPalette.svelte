@@ -30,6 +30,7 @@
   import type { WorkspaceDef, RepoRegistryEntry } from '$lib/types/workspace';
   import { activityBarConfigStore } from '$lib/stores/activityBarConfig.svelte';
   import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
+  import { openExplorerWindow } from '$lib/ipc/app';
   import {
     checkoutBranch, checkoutBranchSafe, mergeBranch, deleteBranch, createBranch,
     stashApply, stashPop, stashDrop, resetToCommit,
@@ -613,6 +614,14 @@
         title: 'Show Active Schedules',
         subtitle: 'Plugin timers, marketplace auto-refresh and other registered schedules',
         action: () => { uiStore.openActiveSchedules(); onClose(); } },
+      { id: 'action:file-explorer', kind: 'action', icon: 'FolderOpen', group: 'System',
+        title: 'Open File Explorer',
+        subtitle: 'Built-in file explorer — browse, copy/move, delete, preview',
+        action: () => { uiStore.openFileExplorer(); onClose(); } },
+      { id: 'action:file-explorer-window', kind: 'action', icon: 'ExternalLink', group: 'System',
+        title: 'Open File Explorer in New Window',
+        subtitle: 'Standalone explorer window — also opens with Ctrl+Shift+E (global)',
+        action: () => { void openExplorerWindow(); onClose(); } },
       { id: 'action:docs',         kind: 'action', icon: 'FileText',  group: 'System',
         title: 'Documentation',
         action: () => { uiStore.setPanel('docs'); onClose(); } },

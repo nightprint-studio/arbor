@@ -56,6 +56,7 @@
     <tr><td><Kbd action="workspace_manager" size="sm" /></td><td>Open Workspace Manager</td></tr>
     <tr><td><Kbd action="settings" size="sm" /></td><td>Open Settings</td></tr>
     <tr><td><Kbd action="toggle_docs" size="sm" /></td><td>Toggle Documentation</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></td><td>Open the File Explorer in a dedicated window — registered system-wide, so it works even when Arbor isn't focused</td></tr>
     <tr><td><kbd>Escape</kbd></td><td>Close current panel / search / modal</td></tr>
   </tbody>
 </table>

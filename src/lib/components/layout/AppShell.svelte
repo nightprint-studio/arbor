@@ -193,6 +193,7 @@
   import type { Issue } from '$lib/types/issues';
   import { getDeepLinkRemoteUrl } from '$lib/utils/deep-link-builder';
   import { openRepoFromUrl } from '$lib/utils/openRepoFromUrl';
+  import { openRepoFromPath } from '$lib/utils/openRepoFromPath';
   import { getRepoConfig } from '$lib/ipc/config';
 
   // Font scale + theme-font opt-in live in `appearanceStore` (persisted in
@@ -338,6 +339,19 @@
     })();
 
     return () => { unlistenDl?.(); };
+  });
+
+  // The File Explorer (possibly its own dedicated window) delegates heavy git
+  // operations here: the backend focuses this window and emits the repo to open.
+  let unlistenExplorerRepo: (() => void) | null = null;
+  onMount(() => {
+    (async () => {
+      unlistenExplorerRepo = await listen<{ repoRoot: string }>('arbor://explorer-open-repo', ev => {
+        const root = ev.payload?.repoRoot;
+        if (root) void openRepoFromPath(root).catch(e => uiStore.showToast(`Open in Arbor failed: ${e}`, 'error'));
+      });
+    })();
+    return () => { unlistenExplorerRepo?.(); };
   });
 
   /** Re-classify every tombstoned tab.  Called when the window regains
@@ -2675,6 +2689,15 @@
     gate={uiStore.activeSchedulesOpen}
     loader={() => import('../shared/ActiveSchedulesModal.svelte')}
     onClose={() => uiStore.closeActiveSchedules()}
+  />
+
+  <!-- Modal: File Explorer — built-in file explorer (real FS) with copy/move,
+       trash, live watcher and preview. Opened from the Command Palette only.
+       Not yet wired as the production file/folder picker. Lazy-loaded. -->
+  <Lazy
+    gate={uiStore.fileExplorerOpen}
+    loader={() => import('../shared/FileExplorerModal.svelte')}
+    onClose={() => uiStore.closeFileExplorer()}
   />
 
   <!-- Modal: Linked Worktrees (cross-project sync) -->

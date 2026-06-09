@@ -54,6 +54,7 @@
     height,
     closeOnBackdrop = true,
     padBody         = true,
+    bodyBorder      = true,
     topGap          = false,
     zIndex,
     ariaLabel,
@@ -97,6 +98,10 @@
     /** When false, the body card has no inner padding — useful for modals
      *  that render their own split panes / lists / diff viewer edge-to-edge. */
     padBody?:         boolean;
+    /** When false, the body card drops its 1px border — for modals whose body
+     *  paints its own full-bleed chrome (e.g. the file explorer) and doesn't
+     *  want the default card outline. */
+    bodyBorder?:      boolean;
     /** When true, the body card gets a 4px top gap exposing a chrome strip
      *  between the header and the body — the body's rounded top corners then
      *  read clearly. Off by default to keep existing modals flush. */
@@ -327,7 +332,7 @@
           {#snippet top()}{@render leftRail()}{/snippet}
         </ActivityBar>
       {/if}
-      <div class="modal-body" class:has-footer={!!footer} class:no-pad={!padBody} class:top-gap={topGap}>
+      <div class="modal-body" class:has-footer={!!footer} class:no-pad={!padBody} class:no-border={!bodyBorder} class:top-gap={topGap}>
         {@render children()}
       </div>
       {#if rightRail && showRightRail !== false}
@@ -427,6 +432,8 @@
   }
   .modal-body.has-footer { margin: 0 4px; }
   .modal-body.no-pad     { padding: 0; }
+  /* Keep the 1px box (no layout shift) but make it invisible. */
+  .modal-body.no-border  { border-color: transparent; }
   /* topGap exposes a 4px chrome strip between header and body so the
      body card's rounded top corners read clearly. */
   .modal-body.top-gap            { margin-top: 4px; }

@@ -21,6 +21,7 @@ import 'prismjs/components/prism-scss';
 import 'prismjs/components/prism-bash';
 import 'prismjs/components/prism-batch';
 import 'prismjs/components/prism-toml';
+import 'prismjs/components/prism-ini';
 import 'prismjs/components/prism-markdown';
 import 'prismjs/components/prism-yaml';
 import 'prismjs/components/prism-java';

@@ -13,3 +13,9 @@ export interface AppInfo {
 export function getAppInfo(): Promise<AppInfo> {
   return invoke('get_app_info');
 }
+
+/** Open (or focus, if already open) the dedicated File Explorer window — the
+ *  same standalone window the global Ctrl+Shift+E shortcut summons. */
+export function openExplorerWindow(): Promise<void> {
+  return invoke('open_explorer_window');
+}

@@ -177,6 +177,10 @@ function createUiStore() {
    *  Driven by the Command Palette only — no shortcut, no menu entry. */
   let activeSchedulesOpen     = $state(false);
 
+  /** True while the FileExplorerModal is mounted (rendered in AppShell).
+   *  Driven by the Command Palette only — no shortcut, no menu entry. */
+  let fileExplorerOpen        = $state(false);
+
   let appFocused        = $state(true);   // tracks window focus / visibility
 
   let toastCounter = 0;
@@ -517,6 +521,8 @@ function createUiStore() {
   function closeMarketplace() { marketplaceOpen = false; }
   function openActiveSchedules()  { activeSchedulesOpen = true; }
   function closeActiveSchedules() { activeSchedulesOpen = false; }
+  function openFileExplorer()  { fileExplorerOpen = true; }
+  function closeFileExplorer() { fileExplorerOpen = false; }
 
   return {
     get sidebarWidth()           { return sidebarWidth; },
@@ -561,10 +567,12 @@ function createUiStore() {
     get addToLinkRepoId()         { return addToLinkRepoId; },
     get marketplaceOpen()         { return marketplaceOpen; },
     get activeSchedulesOpen()     { return activeSchedulesOpen; },
+    get fileExplorerOpen()        { return fileExplorerOpen; },
     openLinkManager, closeLinkManager,
     openAddToLink, closeAddToLink,
     openMarketplace, closeMarketplace,
     openActiveSchedules, closeActiveSchedules,
+    openFileExplorer, closeFileExplorer,
     setPanel, setSidebarWidth, setRightSidebarWidth, setBottomHeight,
     setAppFocused,
     setActiveSidebarSection, toggleSidebarSection, toggleSidebarVisibility,

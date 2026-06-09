@@ -21,6 +21,7 @@ pub mod submodule_commands;
 pub mod pipeline_commands;
 pub mod mr_commands;
 pub mod fs_commands;
+pub mod fs_git_commands;
 pub mod issues_commands;
 pub mod merge_commands;
 pub mod ticket_commands;

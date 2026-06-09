@@ -7,6 +7,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 mod app_ctx;
 mod error;
+mod explorer_window;
 mod process_ext;
 mod platform;
 mod taskbar_icon_refresh;
@@ -451,6 +452,21 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        // OS-global shortcut (Ctrl+Shift+E) → dedicated File Explorer window.
+        // The handler only reacts on key-down for our one registered combo;
+        // the combo itself is registered in `setup()` below.
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    if event.state() == ShortcutState::Pressed
+                        && shortcut == &crate::explorer_window::explorer_shortcut()
+                    {
+                        crate::explorer_window::open_or_focus(app);
+                    }
+                })
+                .build(),
+        )
         .manage(AppState::new())
         .setup(|app| {
             // Wire the `arbor-cloud` crate against AppState: registers the
@@ -460,6 +476,20 @@ pub fn run() {
             // here because commands only route once `Builder::run()` enters
             // its event loop, which happens after `setup()` returns.
             crate::cloud::install(&app.handle());
+
+            // Register the OS-global `Ctrl+Shift+E` shortcut that opens the
+            // dedicated File Explorer window. The press handler is wired on
+            // the plugin builder above; here we just claim the combo.
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                if let Err(e) = app
+                    .global_shortcut()
+                    .register(crate::explorer_window::explorer_shortcut())
+                {
+                    tracing::warn!("failed to register explorer global shortcut: {e}");
+                }
+            }
 
             // Register the `arbor://` URI scheme at runtime.  This is what
             // makes deep links work in `--no-bundle` builds where there is no
@@ -1195,6 +1225,31 @@ pub fn run() {
             commands::fs_commands::fs_read_text_file,
             commands::fs_commands::fs_rename,
             commands::fs_commands::fs_delete,
+            commands::fs_commands::fs_copy,
+            commands::fs_commands::fs_move,
+            commands::fs_commands::fs_trash,
+            commands::fs_commands::fs_delete_many,
+            commands::fs_commands::fs_search,
+            commands::fs_commands::fs_zip,
+            commands::fs_commands::fs_unzip,
+            commands::fs_commands::fs_set_wallpaper,
+            commands::fs_commands::fs_open_default,
+            commands::fs_commands::fs_reveal_in_dir,
+            commands::fs_commands::fs_show_properties,
+            commands::fs_commands::fs_icon,
+            commands::fs_commands::fs_watch_start,
+            commands::fs_commands::fs_watch_stop,
+            // File Explorer git awareness — status overlays, inline actions,
+            // and "Open in Arbor" delegation for the heavy git operations.
+            commands::fs_git_commands::fs_git_status,
+            commands::fs_git_commands::fs_git_stage,
+            commands::fs_git_commands::fs_git_unstage,
+            commands::fs_git_commands::fs_git_discard,
+            commands::fs_git_commands::fs_git_ignore,
+            commands::fs_git_commands::fs_git_changes,
+            commands::fs_git_commands::fs_git_branches,
+            commands::fs_git_commands::fs_git_checkout,
+            commands::fs_git_commands::fs_open_in_arbor,
             // Avatar resolution via GitProvider (GitHub + GitLab)
             commands::avatar_commands::resolve_avatar_for_email,
             // Merge Requests / Pull Requests (GitHub + GitLab)
@@ -1445,6 +1500,8 @@ pub fn run() {
             commands::marketplace_commands::marketplace_install_theme,
             commands::marketplace_commands::marketplace_uninstall_theme,
             commands::marketplace_commands::marketplace_add_custom_source,
+            // Dedicated File Explorer window
+            explorer_window::open_explorer_window,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");

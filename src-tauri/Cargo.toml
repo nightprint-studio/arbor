@@ -67,6 +67,10 @@ tauri-plugin-notification = "2.3.3"
 # always on; debug only with the `deep-link-dev` Cargo feature).
 tauri-plugin-deep-link        = "2"
 tauri-plugin-single-instance  = { version = "2", features = ["deep-link"] }
+# OS-global hotkey (Ctrl+Shift+E) that opens the dedicated File Explorer
+# window — see `explorer_window.rs`. Desktop-only plugin; the app is
+# desktop-only so no extra cfg gating is needed.
+tauri-plugin-global-shortcut  = "2"
 
 # --- Git ---
 git2    = { version = "0.20.4", features = ["vendored-libgit2"] }
@@ -171,6 +175,21 @@ cron = "0.13"
 # --- File watch ---
 notify = "6"
 
+# --- Trash / Recycle Bin ---
+# Cross-platform move-to-trash for the built-in file explorer's Delete action
+# (Recycle Bin on Windows, Trash on macOS, freedesktop trash on Linux).
+# Shift+Delete bypasses this and removes permanently via std::fs.
+trash = "5"
+
+# --- Native system icons ---
+# Real shell/desktop icon for a file extension, returned as PNG bytes, for the
+# built-in file explorer's `fs_icon` command. Windows → shell icons (pulls in
+# the full `windows` crate + `image` transitively, Windows-only); macOS →
+# NSWorkspace; Linux → GTK icon theme (needs GTK dev libs at build time).
+# Folders aren't covered (the crate resolves by file attribute) — the explorer
+# keeps its themed folder icon for those.
+systemicons = "0.9"
+
 # --- Error handling ---
 thiserror = { workspace = true }
 
@@ -210,6 +229,9 @@ windows-sys = { version = "0.52", features = [
   "Win32_System_Diagnostics_ToolHelp",  # EcoQoS — apply throttling to child processes (WebView2 renderers)
   "Win32_Storage_FileSystem",           # FilePickerModal — GetLogicalDrives (enumerate drive letters)
   "Win32_System_Power",                 # taskbar_icon_refresh — PowerRegisterSuspendResumeNotification
+  "Win32_UI_Shell",                     # fs_show_properties — SHObjectProperties (native Properties sheet)
+  "Win32_System_Com",                   # fs_show_properties — CoInitializeEx/CoUninitialize for the property sheet's STA
+  "Win32_UI_WindowsAndMessaging",       # fs_set_wallpaper — SystemParametersInfoW(SPI_SETDESKWALLPAPER)
 ] }
 
 # Optional, target-gated openssl-sys. Activated by the `vendored-openssl`

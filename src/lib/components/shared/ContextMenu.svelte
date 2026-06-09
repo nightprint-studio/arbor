@@ -3,7 +3,23 @@
   import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import Kbd from '$lib/components/shared/internal/Kbd.svelte';
+
+  /**
+   * A compact icon-only action shown in the horizontal quick-action bar at the
+   * top of the menu (Windows-11 style: Cut / Copy / Rename / Delete …). The
+   * `label` doubles as tooltip + aria-label. Selecting one fires `onSelect(id)`
+   * and closes the menu, exactly like a regular item.
+   */
+  export interface MenuAction {
+    id: string;
+    label: string;
+    icon: any;
+    shortcut?: string;
+    disabled?: boolean;
+    danger?: boolean;
+  }
 
   export interface MenuItem {
     id: string;
@@ -41,12 +57,15 @@
 
   let {
     items,
+    actions,
     x = 0,
     y = 0,
     onSelect,
     onClose,
   }: {
     items: MenuItem[];
+    /** Optional icon-only quick-action bar pinned to the top of the menu. */
+    actions?: MenuAction[];
     x?: number;
     y?: number;
     onSelect: (id: string) => void;
@@ -72,6 +91,12 @@
   function handleItem(item: MenuItem) {
     if (item.disabled || item.separator) return;
     onSelect(item.id);
+    onClose();
+  }
+
+  function handleAction(action: MenuAction) {
+    if (action.disabled) return;
+    onSelect(action.id);
     onClose();
   }
 
@@ -113,6 +138,25 @@
   in:fly={{ y: -6, duration: animStore.dFast, easing: cubicOut }}
   out:fade={{ duration: animStore.dFast }}
 >
+  {#if actions && actions.length}
+    <div class="quick-actions" role="group" aria-label="Quick actions">
+      {#each actions as action (action.id)}
+        {@const ActionIcon = action.icon}
+        <button
+          class="quick-action"
+          class:danger={action.danger}
+          disabled={action.disabled}
+          onclick={() => handleAction(action)}
+          role="menuitem"
+          aria-label={action.label}
+          use:tooltip={action.shortcut ? { content: action.label, shortcut: action.shortcut } : { content: action.label }}
+        >
+          <ActionIcon size={16} />
+        </button>
+      {/each}
+    </div>
+    {#if items.length}<div class="separator" role="separator"></div>{/if}
+  {/if}
   {#each items as item (item.id)}
     {#if item.separator}
       <div class="separator" role="separator"></div>
@@ -175,6 +219,32 @@
     max-width: 280px;
     z-index: var(--z-menu);
   }
+
+  /* Windows-11-style horizontal icon bar pinned to the top of the menu. */
+  .quick-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+  }
+  .quick-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    height: 30px;
+    min-width: 38px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .quick-action:hover:not(:disabled) { background: var(--bg-selected); }
+  .quick-action:disabled { opacity: 0.4; cursor: not-allowed; }
+  .quick-action.danger { color: var(--error); }
+  .quick-action.danger:hover:not(:disabled) { background: var(--error-subtle); }
 
   .menu-item {
     display: flex;
