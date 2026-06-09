@@ -137,3 +137,6 @@ export const fsGitBranches = (path: string) => invoke<FsBranch[]>('fs_git_branch
 /** Switch the repo enclosing `path` to `branch` (safe checkout — fails on
  *  conflicting uncommitted changes). */
 export const fsGitCheckout = (path: string, branch: string) => invoke<void>('fs_git_checkout', { path, branch });
+/** Remote URL (origin, else first remote) of the repo enclosing `path`, or
+ *  `null` when there's no repo / no remote. Used to build "Copy project link". */
+export const fsGitRemoteUrl = (path: string) => invoke<string | null>('fs_git_remote_url', { path });

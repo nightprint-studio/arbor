@@ -672,6 +672,31 @@ pub async fn fs_git_checkout(path: String, branch: String) -> Result<(), AppErro
     .map_err(|e| AppError::Other(format!("fs_git_checkout task panicked: {e}")))?
 }
 
+/// Resolve the remote URL of the repo enclosing `path` (a file or directory),
+/// for the explorer's "Copy project link". Prefers the remote named `origin`,
+/// falling back to the first remote. Returns `None` when `path` isn't inside a
+/// repo or the repo has no remote — the FE then toasts instead of copying a
+/// non-shareable link. `Repository::discover` walks up from any subpath, so the
+/// caller can pass the right-clicked entry directly.
+#[tauri::command]
+pub async fn fs_git_remote_url(path: String) -> Result<Option<String>, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let Ok(repo) = Repository::discover(&path) else { return Ok(None) };
+        let remotes = repo.remotes()?;
+        let pick = remotes.iter().flatten().find(|n| *n == "origin")
+            .or_else(|| remotes.iter().flatten().next());
+        let Some(name) = pick else { return Ok(None) };
+        let url = repo
+            .find_remote(name)
+            .ok()
+            .and_then(|r| r.url().map(str::to_string))
+            .filter(|u| !u.trim().is_empty());
+        Ok(url)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("fs_git_remote_url task panicked: {e}")))?
+}
+
 // ---------------------------------------------------------------------------
 // Command — heavy-action delegation ("Open in Arbor")
 // ---------------------------------------------------------------------------

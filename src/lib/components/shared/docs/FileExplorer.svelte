@@ -24,7 +24,7 @@
 
 <h2>Layout</h2>
 <ul class="step-list">
-  <li><strong>Sidebar</strong> — Library (Overview / Settings), Recents, Favourites, Devices, and Projects (your Arbor-registered repos, grouped by workspace). Sections can be <strong>reordered and hidden</strong> from the settings page, or right-click a section header to hide it. Toggle the whole sidebar with <Kbd label="Ctrl+B" />.</li>
+  <li><strong>Sidebar</strong> — Library (Overview / Settings), Recents, Favourites, Devices, and Projects (your Arbor-registered repos, grouped by workspace). Sections can be <strong>reordered and hidden</strong> from the settings page, or right-click a section header to hide it. It's fully arrow-navigable: reach it with <Kbd label="F6" />, which cycles focus across the explorer's panes — sidebar → list → right panel → right activity bar (<Kbd label="Shift+F6" /> goes back), no Tab needed. Within the sidebar, <Kbd label="Up" /> / <Kbd label="Down" /> move between headers and items, <Kbd label="Right" /> / <Kbd label="Left" /> expand / collapse a section or workspace group, <Kbd label="Enter" /> opens. Toggle the whole sidebar with <Kbd label="Ctrl+B" />.</li>
   <li><strong>Tabs</strong> — open several locations at once; each tab keeps its own history.</li>
   <li><strong>Address bar</strong> — click it (or <Kbd label="Ctrl+L" />) to type a path, with <strong>ghost-text autocomplete</strong> (press <Kbd label="Tab" /> to complete). The breadcrumb is clickable.</li>
   <li><strong>Views</strong> — Details list or Medium / Large / Extra-large icon grids; the choice is remembered per folder. Large grids show image thumbnails.</li>
@@ -32,22 +32,29 @@
 </ul>
 
 <h2>Navigation &amp; keyboard</h2>
+<p>The explorer is fully keyboard-driven — no mouse required. It opens with a cursor already on the first item (and focus on the list, or the filename field in a save dialog), so you can start arrowing around or typing immediately. As a picker, the whole flow is "type to filter → <Kbd label="Down" /> → <Kbd label="Enter" /> / <Kbd label="Ctrl+Enter" />".</p>
 <table class="shortcuts-table">
   <thead><tr><th>Action</th><th>Keys</th></tr></thead>
   <tbody>
     <tr><td>Back / Forward</td><td><Kbd label="Alt+Left" /> / <Kbd label="Alt+Right" /></td></tr>
     <tr><td>Up one folder</td><td><Kbd label="Backspace" /></td></tr>
-    <tr><td>Move selection</td><td><Kbd label="Up" /> / <Kbd label="Down" /> (and <Kbd label="Left" /> / <Kbd label="Right" /> in icon grids)</td></tr>
+    <tr><td>Move the cursor</td><td><Kbd label="Up" /> / <Kbd label="Down" /> (and <Kbd label="Left" /> / <Kbd label="Right" /> in icon grids)</td></tr>
+    <tr><td>First / last item</td><td><Kbd label="Home" /> / <Kbd label="End" /></td></tr>
+    <tr><td>Jump a page</td><td><Kbd label="PageUp" /> / <Kbd label="PageDown" /></td></tr>
+    <tr><td>Extend the selection</td><td>Hold <Kbd label="Shift" /> while moving the cursor</td></tr>
     <tr><td>Open folder / file</td><td><Kbd label="Enter" /> or double-click</td></tr>
+    <tr><td>Open the context menu</td><td><Kbd label="Menu" /> or <Kbd label="Shift+F10" /></td></tr>
+    <tr><td>Properties (Info panel)</td><td><Kbd label="Alt+Enter" /></td></tr>
+    <tr><td>Cycle panes (sidebar · list · panel · activity bar)</td><td><Kbd label="F6" /> / <Kbd label="Shift+F6" /></td></tr>
     <tr><td>Edit the address</td><td><Kbd label="Ctrl+L" /></td></tr>
-    <tr><td>Type-ahead filter</td><td>Just start typing</td></tr>
+    <tr><td>Type-ahead filter</td><td>Just start typing — then <Kbd label="Down" /> steps into the list (or <Kbd label="Enter" /> opens the first match)</td></tr>
     <tr><td>Select all</td><td><Kbd label="Ctrl+A" /></td></tr>
     <tr><td>Open the explorer settings</td><td><Kbd label="Ctrl+," /></td></tr>
   </tbody>
 </table>
 
 <h2>Managing files</h2>
-<p>Right-click an item (or the background) for the full menu; common actions are also on the keyboard:</p>
+<p>Right-click an item (or the background) for the full menu — or open it from the keyboard on the cursor row with the <Kbd label="Menu" /> key or <Kbd label="Shift+F10" />. The menu is fully keyboard-driven: <Kbd label="Up" /> / <Kbd label="Down" /> move, type a letter to jump, <Kbd label="Right" /> / <Kbd label="Left" /> open / close a submenu (e.g. <strong>Git</strong>), <Kbd label="Enter" /> activates, <Kbd label="Esc" /> closes. Common actions are also on the keyboard directly:</p>
 <ul class="step-list">
   <li><strong>New folder / file</strong>, <strong>Rename</strong> (<Kbd label="F2" />), <strong>Cut / Copy / Paste</strong> (<Kbd label="Ctrl+X" /> / <Kbd label="Ctrl+C" /> / <Kbd label="Ctrl+V" />).</li>
   <li><strong>Delete</strong> to Recycle Bin (<Kbd label="Delete" />) or permanently (<Kbd label="Shift+Delete" />).</li>
@@ -56,15 +63,15 @@
 </ul>
 
 <h2>Right rail: Preview, Info, Changes</h2>
-<p>The right rail renders a live <strong>Preview</strong> of the selected file (image, video, audio, or syntax-highlighted text), an <strong>Info</strong> panel with size / dates / path (and a repository section for repo folders), and a <strong>Changes</strong> panel when inside a git repo. Resize or expand the rail; toggle the preview with <Kbd label="Ctrl+Shift+B" />.</p>
+<p>The right rail renders a live <strong>Preview</strong> of the selected file (image, video, audio, or syntax-highlighted text), an <strong>Info</strong> panel with size / dates / path (and a repository section for repo folders), and a <strong>Changes</strong> panel when inside a git repo. Resize or expand the rail; toggle the preview with <Kbd label="Ctrl+Shift+B" />. <Kbd label="Alt+Enter" /> opens the Info panel for the cursor item (Windows-style Properties); from there a button opens the OS-native Properties sheet.</p>
 
 <h2>Git awareness</h2>
 <p>Inside a git repository the explorer overlays each row with a status badge — <strong>modified</strong>, <strong>staged</strong>, <strong>untracked</strong>, <strong>deleted</strong>, <strong>renamed</strong>, <strong>conflicted</strong> (ignored items are dimmed) — and folders roll up to their strongest descendant state. The footer shows the current branch with ahead / behind counts.</p>
+<p>Right-clicking an entry inside (or that is) a repository shows a single <strong>Git</strong> entry that expands into two grouped sections:</p>
 <ul class="step-list">
-  <li><strong>Stage</strong>, <strong>Unstage</strong>, <strong>Discard changes</strong> (with confirmation), and <strong>Add to .gitignore</strong> from the right-click menu.</li>
-  <li><strong>Switch branch</strong> — click the footer branch chip (or right-click a repo) for a filterable, keyboard-first branch picker. Uses a safe checkout that refuses to overwrite uncommitted changes.</li>
+  <li><strong>Project</strong> — actions on the whole repository: <strong>Checkout branch…</strong> (a filterable, keyboard-first picker using a safe checkout that refuses to overwrite uncommitted changes; also reachable from the footer branch chip), <strong>Open in Arbor</strong> (brings the main window forward and opens the repo there, so the heavy operations — diff, log, blame, commit — happen in Arbor's full git UI), and <strong>Copy project link</strong> (a shareable <code>arbor://</code> link to open the repo, built from its remote).</li>
+  <li><strong>Element</strong> — actions scoped to the right-clicked file(s) / folder(s): <strong>Stage</strong>, <strong>Unstage</strong>, <strong>Discard changes</strong> (with confirmation), and <strong>Add to .gitignore</strong>.</li>
   <li>A folder that is itself a repository is flagged when browsing its parent (branch chip / corner badge), with coloured workspace dots when it's registered in Arbor.</li>
-  <li><strong>Open in Arbor</strong> brings the main window forward and opens the repo, so the heavy operations (diff, log, blame, commit) happen in Arbor's full git UI.</li>
 </ul>
 <Callout variant="tip" title="Off by default">
   Git awareness is behind a master switch and starts <strong>off</strong>, so plain browsing issues no git checks and stays fast. Turn it on in the explorer's settings or in Settings → File Explorer.

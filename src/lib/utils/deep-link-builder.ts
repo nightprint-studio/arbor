@@ -179,6 +179,23 @@ export async function copyDeepLink(
     uiStore.showToast('This repository has no remote configured', 'warning');
     return null;
   }
+  return copyDeepLinkFromRemote(spec, remoteUrl);
+}
+
+/**
+ * Like {@link copyDeepLink} but for callers that already hold the repo's
+ * **remote URL** rather than an Arbor tab id — e.g. the File Explorer, which
+ * browses arbitrary on-disk repos (resolving the remote via `fs_git_remote_url`)
+ * with no tab to look up. `null` remote → warning toast, no copy.
+ */
+export async function copyDeepLinkFromRemote(
+  spec: DeepLinkSpec,
+  remoteUrl: string | null,
+): Promise<string | null> {
+  if (!remoteUrl) {
+    uiStore.showToast('This repository has no remote configured', 'warning');
+    return null;
+  }
   const workerBaseUrl = await getWorkerBaseUrl();
   const link = buildDeepLink(spec, remoteUrl, workerBaseUrl);
   const ok = await copyToClipboard(link, {

@@ -44,7 +44,7 @@
     fsZip, fsUnzip, fsSetWallpaper, fsSearch,
     fsReadTextFile, fsWatchStart, fsWatchStop,
     fsGitStatus, fsGitStage, fsGitUnstage, fsGitDiscard, fsGitIgnore, fsOpenInArbor, fsGitChanges,
-    fsGitBranches, fsGitCheckout,
+    fsGitBranches, fsGitCheckout, fsGitRemoteUrl,
     type FsEntry, type FsRoot, type FsGitStatus, type GitBadge, type GitRepoMarker, type GitChange, type GitChanges, type FsBranch,
   } from '$lib/ipc/fs';
   import { listRegistryRepos, listWorkspaces } from '$lib/ipc/workspace';
@@ -52,6 +52,7 @@
   import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS } from '$lib/stores/explorer.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { dispatchDeepLink } from '$lib/ipc/deep-link';
+  import { copyDeepLinkFromRemote } from '$lib/utils/deep-link-builder';
   import Modal from './Modal.svelte';
   import FileExplorerSettings from './FileExplorerSettings.svelte';
   import ConfirmModal from './ConfirmModal.svelte';
@@ -267,6 +268,7 @@
   let discardBusy = $state(false);
 
   let listEl = $state<HTMLElement | null>(null);
+  let sidebarEl = $state<HTMLElement | null>(null);
 
   // ── Sidebar collapse + per-section collapse (persisted) ───────────────────
   let sidebarCollapsed = $state<boolean>(lsGet('arbor:explorer-sidebar-collapsed', false));
@@ -681,6 +683,9 @@
       if (scheme) { handleExternalLink(t, scheme); return; }
     }
     if (t !== currentPath) await navigate(t);
+    // Hand focus back to the list so arrow-key navigation continues right after
+    // a typed path, instead of stranding focus on the unmounted address input.
+    tick().then(() => { if (view === 'browse') listEl?.focus(); });
   }
 
   // ── External / deep links from the address bar ─────────────────────────────
@@ -866,6 +871,23 @@
 
   const cutSet = $derived(clipboard?.op === 'cut' ? new Set(clipboard.paths) : new Set<string>());
   const leadEntry = $derived(sorted.find(e => e.path === lead) ?? null);
+  /** Index of the keyboard cursor in the sorted list (-1 when none / off-list).
+   *  Drives `aria-activedescendant` and the per-row option ids. */
+  const leadIdx = $derived(sorted.findIndex(e => e.path === lead));
+
+  // Keyboard-first: keep a visible cursor on the list so arrows / Enter work the
+  // instant a folder loads — no click required. Sets only the lead (a focus
+  // ring), never the selection, so opening a folder shows *where you are*
+  // without pre-selecting anything. Re-homes to the first row whenever the
+  // current cursor falls out of the list (navigation, filtering, sort change).
+  $effect(() => {
+    if (view !== 'browse' || !sorted.length) return;
+    if (sorted.some(e => e.path === lead)) return;
+    const first = sorted[0].path;
+    // Seed the anchor too so an immediate Shift+Arrow extends from the cursor
+    // rather than collapsing to a single item.
+    untrack(() => { lead = first; anchor = first; });
+  });
 
   // ── Selection ──────────────────────────────────────────────────────────
   function clearSelection() { selected = new Set(); anchor = ''; lead = ''; }
@@ -1165,6 +1187,26 @@
     if (entry && !selected.has(entry.path)) { selected = new Set([entry.path]); anchor = entry.path; lead = entry.path; }
     ctxMenu = { x: e.clientX, y: e.clientY, entry };
   }
+  // The ContextMenu key / Shift+F10 fire a *native* `contextmenu` event on the
+  // focused element (the list container) in addition to our keydown — which
+  // would re-open a background menu over the one we just placed. This one-shot
+  // flag lets the container's `oncontextmenu` swallow that synthetic event.
+  let kbdCtxGuard = false;
+  /** Open the context menu from the keyboard (ContextMenu key / Shift+F10) on the
+   *  cursor row — anchored to that row's rect — or, with no cursor, as a
+   *  background menu near the top of the list. */
+  function openCtxKeyboard() {
+    cancelCreate(); cancelRename();
+    kbdCtxGuard = true;
+    setTimeout(() => { kbdCtxGuard = false; }, 300);
+    const entry = leadEntry;
+    const rowEl = entry && leadIdx >= 0 ? document.getElementById(`fx-opt-${leadIdx}`) : null;
+    const r = (rowEl ?? listEl)?.getBoundingClientRect();
+    const x = r ? r.left + 24 : 200;
+    const y = r ? (rowEl ? r.bottom - 4 : r.top + 12) : 200;
+    if (entry && !selected.has(entry.path)) { selected = new Set([entry.path]); anchor = entry.path; lead = entry.path; }
+    ctxMenu = { x, y, entry };
+  }
   /** Top icon-bar quick actions (Cut/Copy/Rename/Delete) — only on an entry. */
   function ctxActions(entry: FsEntry | null): MenuAction[] | undefined {
     if (!entry) return undefined;
@@ -1199,26 +1241,34 @@
       if (!singleCompressed) items.push({ id: 'compress', label: multi ? `Compress ${selected.size} to ZIP` : 'Compress to ZIP', icon: Archive });
       if (imageTarget) items.push({ id: 'wallpaper', label: 'Set as desktop background', icon: ImageIcon });
     }
-    // Git section. File-level actions (stage/unstage/discard/ignore) show when
-    // the current directory is inside a repo; repo-level ones (Switch branch,
-    // Open in Arbor) also show on a folder that IS a repo root — so you can act
-    // on a project from its parent without entering it first.
+    // Git section. One "Git" record that expands into two grouped sub-sections:
+    //   • Project — repo-level actions (checkout, open in Arbor, copy link).
+    //     Shown on a folder that IS a repo root *or* on any entry inside a repo.
+    //   • Element — actions scoped to the right-clicked file(s)/folder(s)
+    //     (stage / unstage / discard / ignore). Only when inside a repo.
+    // Switch-branch + element actions are real git operations → gated on git
+    // awareness; Open in Arbor / Copy project link are plain conveniences (no
+    // git status walk) and stay available whenever the entry resolves a repo.
     const repoFolder = entry?.is_dir ? repoInfoFor(entry) : null;
     if (entry && (inRepo || repoFolder)) {
       const n = multi ? ` ${selected.size}` : '';
-      items.push({ id: 'sep-git', label: '', separator: true });
+      const git: MenuItem[] = [{ id: 'git-h-project', label: 'Project', header: true }];
+      if (gitOn) git.push({ id: 'git-switch', label: 'Checkout branch…', icon: GitBranch });
+      git.push(
+        { id: 'git-open',      label: 'Open in Arbor',    icon: ExternalLink, iconColor: 'var(--accent)' },
+        { id: 'git-copy-link', label: 'Copy project link', icon: Link2 },
+      );
       if (inRepo) {
-        items.push(
+        git.push(
+          { id: 'git-h-element', label: 'Element', header: true },
           { id: 'git-stage',   label: `Stage${n}`,            icon: Plus,  iconColor: 'var(--success)' },
           { id: 'git-unstage', label: `Unstage${n}`,          icon: Minus },
           { id: 'git-discard', label: `Discard changes${n}`,  icon: Undo2, danger: true },
           { id: 'git-ignore',  label: 'Add to .gitignore',    icon: EyeOff },
         );
       }
-      // Switch branch is a git action → only with git awareness on. Open in
-      // Arbor is a plain convenience (no git checks) → always available here.
-      if (gitOn) items.push({ id: 'git-switch', label: 'Switch branch…', icon: GitBranch });
-      items.push({ id: 'git-open', label: 'Open in Arbor', icon: ExternalLink, iconColor: 'var(--accent)' });
+      items.push({ id: 'sep-git', label: '', separator: true });
+      items.push({ id: 'git', label: 'Git', icon: GitBranch, children: git });
     }
     items.push(
       { id: 'sep2', label: '', separator: true },
@@ -1253,6 +1303,20 @@
       case 'git-ignore':  void runGit(fsGitIgnore,  'Added to .gitignore'); break;
       case 'git-switch':  if (entry) void openBranchSwitch(entry.path, px, py); break;
       case 'git-open':    if (entry) fsOpenInArbor(entry.path).catch(e => uiStore.showToast(`${e}`, 'error')); break;
+      case 'git-copy-link': if (entry) void copyProjectLink(entry); break;
+    }
+  }
+
+  /** Copy a shareable `arbor://repo/open` link for the repo `entry` belongs to.
+   *  Resolves the repo's remote URL on disk (origin, else first remote) and
+   *  builds the link via the shared deep-link builder — toasts when the repo has
+   *  no remote (a non-shareable link) instead of copying garbage. */
+  async function copyProjectLink(entry: FsEntry) {
+    try {
+      const remoteUrl = await fsGitRemoteUrl(entry.path);
+      await copyDeepLinkFromRemote({ kind: 'repo_open' }, remoteUrl);
+    } catch (e) {
+      uiStore.showToast(`${e}`, 'error');
     }
   }
 
@@ -1293,6 +1357,16 @@
     if (renamingPath || createKind || addressEditing) return;
     const inInput = (e.target as HTMLElement).tagName === 'INPUT';
     const mod = e.ctrlKey || e.metaKey;
+    // F6 / Shift+F6: cycle focus across the explorer's panes — left sidebar →
+    // file list → right panel (when open) → right activity bar → wrap. Tab is
+    // avoided for this on purpose: in the frameless window it lands on the
+    // titlebar / window controls (Tab+Enter on Close is a trap), and the panes
+    // aren't in a Tab-friendly DOM order anyway.
+    if (e.key === 'F6') {
+      e.preventDefault(); e.stopImmediatePropagation();
+      cyclePane(e.shiftKey ? -1 : 1);
+      return;
+    }
     // Picker: Ctrl/⌘+Enter always submits (even from the save-name input).
     if (isPicker && mod && e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); pickerConfirm(); return; }
     // Panel toggles — work in any view. Ctrl+B: left sidebar; Ctrl+Shift+B: right panel.
@@ -1317,9 +1391,31 @@
       if (k === 'v') { e.preventDefault(); e.stopImmediatePropagation(); doPaste(); return; }
       if (k === 'l') { e.preventDefault(); e.stopImmediatePropagation(); startAddressEdit(); return; }
     }
+    // Focus-zone gate: the bare-key navigation below drives the FILE LIST, so it
+    // only runs when focus is in the list (or unfocused). When focus is parked on
+    // the right activity bar, ↑/↓ move between its buttons; when it's on the
+    // sidebar or the right panel, the keys are left to that pane (its own
+    // handlers / native button activation) instead of leaking to the list.
+    const zone = e.target as HTMLElement;
+    const railBtn = zone.closest?.('.fx-rail-btn') as HTMLElement | null;
+    if (railBtn) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const btns = Array.from(document.querySelectorAll<HTMLElement>('.fx-rail-btn'));
+        const idx = btns.indexOf(railBtn);
+        btns[Math.max(0, Math.min(idx + (e.key === 'ArrowDown' ? 1 : -1), btns.length - 1))]?.focus();
+      }
+      return;
+    }
+    if (zone.closest?.('.fx-sidebar') || zone.closest?.('.fx-preview')) return;
+    // Open the context menu from the keyboard, on the cursor row.
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) { e.preventDefault(); openCtxKeyboard(); return; }
     switch (e.key) {
       case 'Enter': {
         if (inInput) return; e.preventDefault();
+        // Alt+Enter — Windows-style Properties: open the Info panel (the same
+        // "Properties" the context menu opens) for the cursor item.
+        if (e.altKey) { rightPanel = 'info'; return; }
         if (deleteReq) { confirmDelete(); return; }
         if (isPicker) {
           // Drill into a selected sub-folder; otherwise commit the picker.
@@ -1345,12 +1441,116 @@
       case 'ArrowUp':
         if (inInput) return;
         e.preventDefault(); moveLead(isGrid ? -cols : -1, e.shiftKey); return;
+      case 'Home':
+        if (inInput) return;
+        e.preventDefault(); moveLead(-sorted.length, e.shiftKey); return;
+      case 'End':
+        if (inInput) return;
+        e.preventDefault(); moveLead(sorted.length, e.shiftKey); return;
+      case 'PageDown':
+        if (inInput) return;
+        e.preventDefault(); moveLead(pageStep, e.shiftKey); return;
+      case 'PageUp':
+        if (inInput) return;
+        e.preventDefault(); moveLead(-pageStep, e.shiftKey); return;
     }
     if (!inInput && !mod && !e.altKey && e.key.length === 1) {
       e.preventDefault();
       filterQuery += e.key;
       tick().then(() => { const i = document.querySelector('.fx-filter-input') as HTMLInputElement | null; i?.focus(); if (i) i.setSelectionRange(filterQuery.length, filterQuery.length); });
     }
+  }
+
+  // ── Sidebar keyboard nav ────────────────────────────────────────────────────
+  // Arrow-key navigation across the sidebar's section headers, workspace headers
+  // and items. Implemented as an `action` (not an `on:keydown`) so it adds no a11y
+  // warning, and it reads the *live* DOM via querySelectorAll — which means it
+  // automatically respects the current section order, visibility, collapse state,
+  // rail (collapsed-sidebar) mode and picker mode without a parallel model that
+  // could drift from the markup. Enter/Space already activate a focused <button>
+  // natively; this only adds movement + left/right expand-collapse.
+  const SB_NAV_SEL = '.fx-sb-label, .fx-sb-item, .fx-ws-header';
+  function sidebarNav(node: HTMLElement) {
+    const OWNED = new Set(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End']);
+    const onKey = (e: KeyboardEvent) => {
+      if (!OWNED.has(e.key)) return;
+      const btns = Array.from(node.querySelectorAll<HTMLElement>(SB_NAV_SEL));
+      if (!btns.length) return;
+      // The sidebar owns these keys while focus is inside it — swallow them so
+      // the window-level list navigation doesn't also react to the same press.
+      e.preventDefault();
+      e.stopPropagation();
+      const cur = (e.target as HTMLElement).closest<HTMLElement>(SB_NAV_SEL);
+      const idx = cur ? btns.indexOf(cur) : -1;
+      const focusAt = (i: number) => btns[Math.max(0, Math.min(i, btns.length - 1))]?.focus();
+      switch (e.key) {
+        case 'ArrowDown': focusAt(idx < 0 ? 0 : idx + 1); return;
+        case 'ArrowUp':   focusAt(idx < 0 ? btns.length - 1 : idx - 1); return;
+        case 'Home':      focusAt(0); return;
+        case 'End':       focusAt(btns.length - 1); return;
+        case 'ArrowRight': {
+          if (idx < 0) return;
+          const exp = cur?.getAttribute('aria-expanded');
+          // Collapsed header → expand; open header → step onto its first child;
+          // leaf item → no-op (key already swallowed).
+          if (exp === 'false') cur!.click();
+          else if (exp === 'true') focusAt(idx + 1);
+          return;
+        }
+        case 'ArrowLeft': {
+          if (idx < 0) return;
+          const exp = cur?.getAttribute('aria-expanded');
+          if (exp === 'true') { cur!.click(); return; } // open header → collapse
+          // Item or already-collapsed header → jump up to the nearest header.
+          for (let j = idx - 1; j >= 0; j--) {
+            if (btns[j].hasAttribute('aria-expanded')) { btns[j].focus(); return; }
+          }
+          focusAt(idx - 1);
+          return;
+        }
+      }
+    };
+    node.addEventListener('keydown', onKey);
+    return { destroy() { node.removeEventListener('keydown', onKey); } };
+  }
+  /** Move focus into the sidebar — the active location if there is one, else its
+   *  first control. */
+  function focusSidebar() {
+    const el = sidebarEl?.querySelector<HTMLElement>('.fx-sb-item.active')
+            ?? sidebarEl?.querySelector<HTMLElement>(SB_NAV_SEL);
+    el?.focus();
+  }
+
+  // ── F6 pane cycle ───────────────────────────────────────────────────────────
+  // The explorer's keyboard-reachable panes, left-to-right, in the order F6
+  // visits them. Each pane declares how to tell whether focus is currently in it
+  // and how to focus its entry control. Built fresh per keypress so it reflects
+  // the live layout (right panel only when open, activity bar only in browse,
+  // etc.). `.fx-rail-btn` / `.fx-preview` are explorer-unique classes, so the
+  // document-scoped lookups can't collide with the main window's activity bar.
+  function explorerPanes(): { in: (n: Element) => boolean; focus: () => void }[] {
+    const panes: { in: (n: Element) => boolean; focus: () => void }[] = [];
+    const visible = (el: HTMLElement | null) => !!el && el.offsetParent !== null;
+    if (visible(sidebarEl)) panes.push({ in: n => !!n.closest('.fx-sidebar'), focus: focusSidebar });
+    if (visible(listEl))    panes.push({ in: n => !!n.closest('.fx-list'),    focus: () => listEl!.focus() });
+    const panel = document.querySelector<HTMLElement>('.fx-preview');
+    const panelEntry = panel?.querySelector<HTMLElement>('button, a[href]');
+    if (visible(panel) && panelEntry) panes.push({ in: n => !!n.closest('.fx-preview'), focus: () => panelEntry.focus() });
+    const rail = () => Array.from(document.querySelectorAll<HTMLElement>('.fx-rail-btn'));
+    if (rail().length) panes.push({
+      in: n => !!n.closest('.fx-rail-btn'),
+      focus: () => { const b = rail(); (b.find(x => x.classList.contains('ab-active')) ?? b[0])?.focus(); },
+    });
+    return panes;
+  }
+  /** Move focus to the next/previous pane (F6 / Shift+F6), wrapping around. */
+  function cyclePane(dir: 1 | -1) {
+    const panes = explorerPanes();
+    if (!panes.length) return;
+    const active = document.activeElement;
+    let cur = active instanceof Element ? panes.findIndex(p => p.in(active)) : -1;
+    if (cur < 0) cur = dir === 1 ? -1 : 0; // forward → first pane; backward → last
+    panes[(cur + dir + panes.length) % panes.length].focus();
   }
 
   // ── Virtual scroll ─────────────────────────────────────────────────────────
@@ -1373,6 +1573,8 @@
   const cols     = $derived(isGrid ? Math.max(1, Math.floor((vsListW || 1) / tile.w)) : 1);
   const cellH    = $derived(isGrid ? tile.h : VS_ROW);
   const ovRows   = $derived(isGrid ? 3 : VS_OVERSCAN);
+  // PageUp/PageDown jump: one viewport of rows minus one for visual continuity.
+  const pageStep = $derived(Math.max(1, Math.floor((vsClient || cellH) / cellH) - 1) * cols);
   const rowCount = $derived(Math.ceil(sorted.length / cols));
   const vsTotalH = $derived(rowCount * cellH);
   const vsStartRow = $derived(Math.max(0, Math.floor(vsScrollTop / cellH) - ovRows));
@@ -1530,6 +1732,15 @@
       }
     } catch { /* ignore */ }
     try { unlisten = await listen('arbor://fs-changed', () => scheduleRefresh()); } catch { /* ignore */ }
+    // Keyboard-first: park focus on the right control so navigation is live the
+    // moment the explorer opens — save pickers focus the filename field (what
+    // you came to type); any other browse view focuses the list so the arrow
+    // keys work without a click. (Window-level keys work regardless, but this
+    // gives Tab a sane starting point and lets screen readers announce the list.)
+    tick().then(() => {
+      if (mode === 'save') document.getElementById('fx-save-name')?.focus();
+      else if (view === 'browse') listEl?.focus();
+    });
   });
   onDestroy(() => { unlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); fsWatchStop().catch(() => {}); });
 </script>
@@ -1690,14 +1901,14 @@
 {/snippet}
 
 {#snippet railButtons()}
-    <button class="ab-btn" class:ab-active={rightPanel === 'preview'} aria-pressed={rightPanel === 'preview'}
+    <button class="ab-btn fx-rail-btn" class:ab-active={rightPanel === 'preview'} aria-pressed={rightPanel === 'preview'}
             onclick={() => rightPanel = rightPanel === 'preview' ? null : 'preview'}
             use:tooltip={{ content: 'Preview', description: 'Render the selected file', placement: 'left' }} aria-label="Preview"><Eye size={20} /></button>
-    <button class="ab-btn" class:ab-active={rightPanel === 'info'} aria-pressed={rightPanel === 'info'}
+    <button class="ab-btn fx-rail-btn" class:ab-active={rightPanel === 'info'} aria-pressed={rightPanel === 'info'}
             onclick={() => rightPanel = rightPanel === 'info' ? null : 'info'}
             use:tooltip={{ content: 'Info', description: 'File details', placement: 'left' }} aria-label="Info"><Info size={20} /></button>
     {#if inRepo}
-      <button class="ab-btn" class:ab-active={rightPanel === 'changes'} aria-pressed={rightPanel === 'changes'}
+      <button class="ab-btn fx-rail-btn" class:ab-active={rightPanel === 'changes'} aria-pressed={rightPanel === 'changes'}
               onclick={() => rightPanel = rightPanel === 'changes' ? null : 'changes'}
               use:tooltip={{ content: 'Changes', description: 'Staged & unstaged files', placement: 'left' }} aria-label="Changes"><GitCompare size={20} /></button>
     {/if}
@@ -1764,7 +1975,7 @@
   <div class="fx-root">
   <div class="fx-body">
     <!-- ══ Sidebar ══ -->
-    <aside class="fx-sidebar" class:collapsed={sidebarCollapsed}>
+    <aside class="fx-sidebar" class:collapsed={sidebarCollapsed} bind:this={sidebarEl} use:sidebarNav aria-label="Locations">
       <div class="fx-sb-top">
         {#if !sidebarCollapsed}<span class="fx-sb-title">Locations</span>{/if}
         <ModalSidebarToggle collapsed={sidebarCollapsed} onToggle={() => sidebarCollapsed = !sidebarCollapsed} />
@@ -1831,7 +2042,14 @@
         <div class="fx-filter-row">
           <Search size={11} class="fx-filter-ico" />
           <input class="fx-filter-input" type="text" placeholder={recursiveSearch ? 'Search subfolders — wildcards * ?' : 'Filter files — wildcards * ?'} bind:value={filterQuery} spellcheck="false" autocomplete="off"
-                 onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Escape' && filterQuery) { filterQuery = ''; e.preventDefault(); } }} />
+                 onkeydown={(e) => {
+                   e.stopPropagation();
+                   if (e.key === 'Escape' && filterQuery) { filterQuery = ''; e.preventDefault(); return; }
+                   // Step from the filter straight into the list: ↓/↑ move focus
+                   // to the cursor (already on the first match), Enter opens it.
+                   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); listEl?.focus(); return; }
+                   if (e.key === 'Enter' && leadEntry) { e.preventDefault(); openEntry(leadEntry); listEl?.focus(); }
+                 }} />
           {#if filterQuery}<button class="fx-filter-clear" onclick={() => filterQuery = ''} aria-label="Clear filter" use:tooltip={'Clear filter'}><X size={11} /></button>{/if}
           <span class="fx-filter-divider"></span>
           <button class="fx-toggle" class:active={recursiveSearch} aria-pressed={recursiveSearch} onclick={() => explorerStore.setRecursiveSearch(!recursiveSearch)}
@@ -1860,8 +2078,15 @@
           </div>
         {/if}
 
-        <div class="fx-list" class:fx-dragging={dragging} bind:this={listEl} bind:clientHeight={vsClient} bind:clientWidth={vsListW} role="presentation" onscroll={onScroll}
-             oncontextmenu={(e) => { if (!(e.target as HTMLElement).closest('.fx-row')) openCtx(e, null); }}
+        <!-- One tab stop for the whole list (ARIA listbox): Tab lands here, then
+             arrows / Home / End / PageUp·Dn move the cursor (handled at the
+             window level so it works even without focus). Rows are options with
+             roving virtual focus via aria-activedescendant. -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -- list keyboard ops live in the window-level onKeydown; this click only clears selection on empty-area clicks. -->
+        <div class="fx-list" class:fx-dragging={dragging} bind:this={listEl} bind:clientHeight={vsClient} bind:clientWidth={vsListW}
+             role="listbox" tabindex="0" aria-multiselectable="true" aria-label="Files"
+             aria-activedescendant={leadIdx >= 0 ? `fx-opt-${leadIdx}` : undefined} onscroll={onScroll}
+             oncontextmenu={(e) => { if (kbdCtxGuard) { kbdCtxGuard = false; e.preventDefault(); return; } if (!(e.target as HTMLElement).closest('.fx-row')) openCtx(e, null); }}
              onclick={(e) => { if (consumeDragClick()) return; if (!(e.target as HTMLElement).closest('.fx-row')) clearSelection(); }}>
           {#if loading}
             <div class="fx-state"><Spinner size="sm" /> Loading…</div>
@@ -1875,17 +2100,17 @@
           {:else}
             <div class="fx-vs" style="height: {vsTotalH}px;">
               <div class="fx-vs-win" class:grid={isGrid} style="transform: translateY({vsOffset}px); {isGrid ? `grid-template-columns: repeat(${cols}, 1fr); grid-auto-rows: ${cellH}px;` : ''}">
-                {#each vsItems as entry (entry.path)}
+                {#each vsItems as entry, i (entry.path)}
                   {@const nIco = isGrid ? null : nativeIconSrc(entry)}
                   {@const badge = inRepo ? badgeFor(entry) : null}
                   {@const repoInfo = repoInfoFor(entry)}
                   <div class="fx-row" class:fx-gi={isGrid} class:fx-ignored={badge === 'ignored'} style={isGrid ? '' : `height: ${VS_ROW}px;`}
+                       id={`fx-opt-${vsStart + i}`}
                        data-path={entry.path} data-dir={entry.is_dir}
                        class:selected={selected.has(entry.path)} class:lead={lead === entry.path} class:cut={cutSet.has(entry.path)} class:drop-target={dragOverDir === entry.path}
                        onmousedown={(e) => startRowDrag(e, entry)}
                        onclick={(ev) => clickEntry(entry, ev)} ondblclick={() => openEntry(entry)} oncontextmenu={(e) => openCtx(e, entry)}
-                       role="option" aria-selected={selected.has(entry.path)} tabindex="0"
-                       onkeydown={(e) => { if (e.key === 'Enter') openEntry(entry); if (e.key === 'F2') startRename(entry); }}>
+                       role="option" aria-selected={selected.has(entry.path)} tabindex="-1">
                     {#if isGrid}
                       {@const showThumb = thumbsOn && !entry.is_dir && isImage(entry.name)}
                       <span class="fx-gi-img" class:thumb={showThumb} style={showThumb ? `width:${tile.thumb}px;height:${tile.thumb}px` : ''}>
@@ -2279,6 +2504,15 @@
   .fx-ws-header:hover { background: var(--bg-overlay); color: var(--text-primary); }
   .fx-ws-header.active .fx-ws-name { color: var(--accent); }
   .fx-ws-header.synthetic { color: var(--text-muted); font-style: italic; }
+
+  /* Keyboard focus ring for arrow-navigated sidebar controls — the accent
+     inset mirrors the list cursor (.fx-row.lead) so the focused item reads the
+     same whether you're in the list or the sidebar. */
+  .fx-sb-label:focus-visible,
+  .fx-sb-item:focus-visible,
+  .fx-ws-header:focus-visible { outline: none; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--text-primary); }
+  /* Keyboard focus ring on the right activity-bar buttons (F6 pane cycle). */
+  .fx-rail-btn:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); border-radius: var(--radius-sm); }
   .fx-ws-chev { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex-shrink: 0; color: var(--text-muted); }
   .fx-ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fx-ws-count { font-family: var(--font-code); font-size: 10px; color: var(--text-disabled); background: var(--bg-overlay); padding: 1px 6px; border-radius: 8px; flex-shrink: 0; }
@@ -2349,6 +2583,10 @@
   .fx-sort { color: var(--accent); font-size: 9px; }
 
   .fx-list { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; position: relative; }
+  /* The list is one focusable listbox; the active option (.fx-row.lead) is the
+     visible cursor, so the container itself needs no focus outline. */
+  .fx-list:focus { outline: none; }
+  .fx-list:focus-visible { outline: none; }
   .fx-vs { position: relative; }
   .fx-vs-win { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
   .fx-row { display: flex; align-items: center; cursor: default; outline: none; transition: background var(--transition-fast); }

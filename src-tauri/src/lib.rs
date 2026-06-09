@@ -426,16 +426,26 @@ pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
 
-    // Deep-link + single-instance: always on in release, opt-in for debug
-    // via the `deep-link-dev` Cargo feature (default-on for now; remove from
-    // `default` features when you want it opt-in for dev).
+    // Single-instance + deep-link: the main Arbor UI must never run as a second
+    // process / second window — a duplicate launch (incl. every `arbor://…` URL
+    // invocation) short-circuits and just focuses the running instance's `main`
+    // window. Only the dedicated File Explorer window (`explorer-*`) is allowed
+    // to be multi-window, and that's an in-process concern, not a second
+    // instance.
     //
-    // Single-instance must be the FIRST plugin: a duplicate launch (incl.
-    // every `arbor://…` URL invocation) needs to short-circuit and forward
-    // its argv to the running process before any other setup runs.  The
-    // `deep-link` feature on `tauri-plugin-single-instance` makes the
-    // forwarded argv flow straight into the deep-link plugin's `on_open_url`
-    // callback registered in `setup()`.
+    // This is **always on in release** (the actual app the user runs), but
+    // intentionally **OFF in plain `cargo tauri dev`**: the single-instance lock
+    // fights the dev runner's rebuild/relaunch cycle — on relaunch the new
+    // process detects the still-running prior dev process as the primary, calls
+    // the callback and exits immediately, leaving the terminal detached and a
+    // stale (blank) webview behind. Opt in for dev with the `deep-link-dev`
+    // Cargo feature when you specifically need to test single-instance / deep
+    // links.
+    //
+    // Single-instance MUST be the FIRST plugin: a duplicate launch needs to
+    // short-circuit before any other setup runs. The `deep-link` feature on
+    // `tauri-plugin-single-instance` makes the forwarded argv flow straight into
+    // the deep-link plugin's `on_open_url` callback registered in `setup()`.
     #[cfg(any(not(debug_assertions), feature = "deep-link-dev"))]
     {
         builder = builder
@@ -1248,6 +1258,7 @@ pub fn run() {
             commands::fs_git_commands::fs_git_changes,
             commands::fs_git_commands::fs_git_branches,
             commands::fs_git_commands::fs_git_checkout,
+            commands::fs_git_commands::fs_git_remote_url,
             commands::fs_git_commands::fs_open_in_arbor,
             // Avatar resolution via GitProvider (GitHub + GitLab)
             commands::avatar_commands::resolve_avatar_for_email,
