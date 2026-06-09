@@ -116,6 +116,107 @@ pub struct AppConfig {
     /// the first time after an upgrade.
     #[serde(default)]
     pub whats_new: WhatsNewConfig,
+    /// Built-in File Explorer preferences (git awareness, global shortcut,
+    /// display defaults). The two host-level switches are surfaced both in the
+    /// SettingsPanel and in the explorer's own in-window settings page.
+    #[serde(default)]
+    pub explorer: ExplorerConfig,
+}
+
+/// Built-in File Explorer preferences.
+///
+/// `git_awareness` and `global_shortcut` are "host-level" switches — also
+/// editable from the SettingsPanel. The display defaults (`default_view`,
+/// `show_hidden`, `recursive_search`) used to live in `localStorage`; they are
+/// persisted here so the in-explorer settings page can edit them coherently.
+/// Purely ephemeral per-path state (e.g. the per-folder view-mode memory) stays
+/// in `localStorage`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplorerConfig {
+    /// Master switch for TortoiseGit-style git awareness in the file explorer
+    /// (status overlays, repo-root markers, the Changes panel, branch switch).
+    /// Off by default — when off the explorer issues no git IPC at all, so a
+    /// plain file browse never pays a per-navigation status walk.
+    #[serde(default)]
+    pub git_awareness: bool,
+    /// Register the OS-global `Ctrl+Shift+E` shortcut that opens the dedicated
+    /// explorer window. Off by default (opt-in, so Arbor doesn't claim a
+    /// system-wide hotkey unprompted); toggling re-registers at runtime.
+    #[serde(default)]
+    pub global_shortcut: bool,
+    /// Default view mode applied to not-yet-visited folders:
+    /// `details` | `medium` | `large` | `xlarge`.
+    #[serde(default = "default_explorer_view")]
+    pub default_view: String,
+    /// Show dot-prefixed (hidden) entries by default.
+    #[serde(default)]
+    pub show_hidden: bool,
+    /// Default state of recursive (subfolder) search.
+    #[serde(default)]
+    pub recursive_search: bool,
+    /// Accelerator string for the global shortcut (Tauri format, e.g.
+    /// `"Ctrl+Shift+E"`). Only consulted when `global_shortcut` is true.
+    #[serde(default = "default_shortcut_accel")]
+    pub global_shortcut_accel: String,
+    /// Default column the listing sorts by: `name` | `modified` | `size`.
+    #[serde(default = "default_explorer_sort")]
+    pub default_sort: String,
+    /// Default sort direction (ascending when true).
+    #[serde(default = "default_true_sort")]
+    pub sort_ascending: bool,
+    /// What a freshly-opened explorer tab shows: `overview` (the dashboard) or
+    /// `last` (re-open the most recent folder, if any).
+    #[serde(default = "default_explorer_startup")]
+    pub startup: String,
+    /// When true, opening the explorer (shortcut / Command Palette) always
+    /// spawns a NEW window; when false (default) a single window is reused and
+    /// re-summoning just focuses it.
+    #[serde(default)]
+    pub always_new_window: bool,
+    /// Maximum number of recent folders kept in the sidebar (clamped 1–50).
+    #[serde(default = "default_max_recents")]
+    pub max_recents: u32,
+    /// Sidebar section order + visibility. Empty → built-in order, all shown.
+    /// Unknown ids are ignored; sections missing from the list are appended in
+    /// their built-in position and shown.
+    #[serde(default)]
+    pub sidebar_sections: Vec<ExplorerSectionConfig>,
+}
+
+/// One sidebar section's persisted order + visibility. Mirrors
+/// [`ActivityBarItemConfig`] for the explorer's own sidebar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplorerSectionConfig {
+    /// Section id: `library` | `recents` | `favourites` | `devices` | `projects`.
+    pub id: String,
+    /// Whether the section is shown.
+    pub visible: bool,
+}
+
+fn default_explorer_view() -> String { "details".into() }
+fn default_shortcut_accel() -> String { "Ctrl+Shift+E".into() }
+fn default_explorer_sort() -> String { "name".into() }
+fn default_true_sort() -> bool { true }
+fn default_explorer_startup() -> String { "overview".into() }
+fn default_max_recents() -> u32 { 10 }
+
+impl Default for ExplorerConfig {
+    fn default() -> Self {
+        Self {
+            git_awareness:        false,
+            global_shortcut:      false,
+            default_view:         default_explorer_view(),
+            show_hidden:          false,
+            recursive_search:     false,
+            global_shortcut_accel: default_shortcut_accel(),
+            default_sort:         default_explorer_sort(),
+            sort_ascending:       true,
+            startup:              default_explorer_startup(),
+            always_new_window:    false,
+            max_recents:          default_max_recents(),
+            sidebar_sections:     Vec::new(),
+        }
+    }
 }
 
 /// "What's New" modal state. The frontend compares the current app version
@@ -911,6 +1012,7 @@ impl Default for AppConfig {
             onboarding: OnboardingConfig::default(),
             branches: BranchesConfig::default(),
             whats_new: WhatsNewConfig::default(),
+            explorer: ExplorerConfig::default(),
         }
     }
 }

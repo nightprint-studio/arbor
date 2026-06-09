@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -847,28 +848,48 @@ async fn icon_png_bytes(
 
 // ---------------------------------------------------------------------------
 // Filesystem watcher — live updates for the explorer's current directory.
-// A single watcher slot: starting a watch replaces (and drops) the previous
-// one, so we only ever watch the directory currently on screen. The watcher
-// emits `arbor://fs-changed` (debounced on the frontend) instead of a
-// per-event payload — the explorer just refetches the current dir.
+// One watcher PER WINDOW, keyed by window label: every explorer window (the
+// canonical `explorer`, any `explorer-N`, and the in-app modal hosted by
+// `main`) watches its own current directory independently. Starting a watch
+// replaces only the calling window's previous watcher; stopping removes only
+// its entry. The change signal is emitted to the originating window ALONE
+// (`emit_to(label)`) — never broadcast — so one window's change can't make
+// every other explorer window refetch + recompute git status. Coalescing
+// happens on the frontend; the payload is empty (just "something changed").
 // ---------------------------------------------------------------------------
 
-fn watcher_slot() -> &'static Mutex<Option<notify::RecommendedWatcher>> {
-    static SLOT: OnceLock<Mutex<Option<notify::RecommendedWatcher>>> = OnceLock::new();
-    SLOT.get_or_init(|| Mutex::new(None))
+fn watchers() -> &'static Mutex<HashMap<String, notify::RecommendedWatcher>> {
+    static SLOT: OnceLock<Mutex<HashMap<String, notify::RecommendedWatcher>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[tauri::command]
-pub fn fs_watch_start(app: tauri::AppHandle, path: String) -> Result<(), AppError> {
+pub fn fs_watch_start(window: tauri::WebviewWindow, path: String) -> Result<(), AppError> {
     use notify::{RecursiveMode, Watcher};
-    use tauri::Emitter;
+    use tauri::{Emitter, Manager};
 
-    let app_for_events = app.clone();
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    let emit_label = label.clone();
+    // Source-side throttle: an active directory (a build writing files, a repo's
+    // index churning) makes the OS watcher fire hundreds of events per second.
+    // Emitting one IPC message per raw event floods the owning window's event
+    // loop — the frontend debounces the *refresh*, but the `listen` callback
+    // itself still fires per message, saturating the renderer (the window stops
+    // responding, drag included) and, with several explorer windows open, every
+    // renderer at once. Collapse bursts to at most one signal per interval; the
+    // frontend's own 200 ms debounce coalesces the rest.
+    let mut last_emit: Option<std::time::Instant> = None;
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if res.is_ok() {
-            // Coalescing happens on the frontend; we only signal "something
-            // changed in the watched dir" so the explorer can refetch.
-            let _ = app_for_events.emit("arbor://fs-changed", ());
+            let now = std::time::Instant::now();
+            let due = last_emit.map_or(true, |t| now.duration_since(t) >= std::time::Duration::from_millis(120));
+            if !due { return; }
+            last_emit = Some(now);
+            // Target the owning window only — broadcasting would refresh every
+            // open explorer window (each doing a full git recompute) on one
+            // window's change.
+            let _ = app.emit_to(emit_label.as_str(), "arbor://fs-changed", ());
         }
     })
     .map_err(|e| AppError::Other(format!("Cannot create watcher: {e}")))?;
@@ -877,17 +898,22 @@ pub fn fs_watch_start(app: tauri::AppHandle, path: String) -> Result<(), AppErro
         .watch(Path::new(&path), RecursiveMode::NonRecursive)
         .map_err(|e| AppError::Other(format!("Cannot watch path: {e}")))?;
 
-    // Replacing the slot drops the previous watcher, stopping the old watch.
-    *watcher_slot()
+    // Drop watchers whose window has since closed (no reliable stop on window
+    // teardown), then store this window's — replacing its own previous watch
+    // without touching any other window's.
+    let live: std::collections::HashSet<String> = window.app_handle().webview_windows().into_keys().collect();
+    let mut map = watchers()
         .lock()
-        .map_err(|_| AppError::Other("watcher lock poisoned".into()))? = Some(watcher);
+        .map_err(|_| AppError::Other("watcher map poisoned".into()))?;
+    map.retain(|k, _| live.contains(k));
+    map.insert(label, watcher);
     Ok(())
 }
 
 #[tauri::command]
-pub fn fs_watch_stop() {
-    if let Ok(mut slot) = watcher_slot().lock() {
-        *slot = None;
+pub fn fs_watch_stop(window: tauri::WebviewWindow) {
+    if let Ok(mut map) = watchers().lock() {
+        map.remove(window.label());
     }
 }
 

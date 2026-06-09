@@ -459,10 +459,12 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     use tauri_plugin_global_shortcut::ShortcutState;
-                    if event.state() == ShortcutState::Pressed
-                        && shortcut == &crate::explorer_window::explorer_shortcut()
-                    {
-                        crate::explorer_window::open_or_focus(app);
+                    if event.state() == ShortcutState::Pressed {
+                        if let Some(sc) = crate::explorer_window::current_explorer_shortcut() {
+                            if shortcut == &sc {
+                                crate::explorer_window::open_or_focus(app);
+                            }
+                        }
                     }
                 })
                 .build(),
@@ -477,19 +479,11 @@ pub fn run() {
             // its event loop, which happens after `setup()` returns.
             crate::cloud::install(&app.handle());
 
-            // Register the OS-global `Ctrl+Shift+E` shortcut that opens the
-            // dedicated File Explorer window. The press handler is wired on
-            // the plugin builder above; here we just claim the combo.
+            // Register the configured OS-global File-Explorer shortcut (opt-in;
+            // no-op when disabled or unset). The press handler is wired on the
+            // plugin builder above; here we just claim the configured combo.
             #[cfg(desktop)]
-            {
-                use tauri_plugin_global_shortcut::GlobalShortcutExt;
-                if let Err(e) = app
-                    .global_shortcut()
-                    .register(crate::explorer_window::explorer_shortcut())
-                {
-                    tracing::warn!("failed to register explorer global shortcut: {e}");
-                }
-            }
+            crate::explorer_window::register_configured(app.handle());
 
             // Register the `arbor://` URI scheme at runtime.  This is what
             // makes deep links work in `--no-bundle` builds where there is no
@@ -789,12 +783,14 @@ pub fn run() {
             // System tray — only in release builds
             #[cfg(not(debug_assertions))]
             {
-                use tauri::menu::{Menu, MenuItem};
+                use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
                 let show = MenuItem::with_id(app, "show", "Show Arbor", true, None::<&str>)?;
+                let explorer = MenuItem::with_id(app, "explorer", "Open File Explorer", true, None::<&str>)?;
+                let sep = PredefinedMenuItem::separator(app)?;
                 let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-                let menu = Menu::with_items(app, &[&show, &quit])?;
+                let menu = Menu::with_items(app, &[&show, &explorer, &sep, &quit])?;
 
                 TrayIconBuilder::new()
                     .icon(app.default_window_icon().unwrap().clone())
@@ -808,6 +804,7 @@ pub fn run() {
                                 let _ = w.set_focus();
                             }
                         }
+                        "explorer" => crate::explorer_window::open_or_focus(app),
                         "quit" => app.exit(0),
                         _ => {}
                     })
@@ -1091,6 +1088,8 @@ pub fn run() {
             // Appearance preferences (window control style, font scale, …)
             commands::config_commands::get_appearance_config,
             commands::config_commands::set_appearance_config,
+            commands::config_commands::get_explorer_config,
+            commands::config_commands::set_explorer_config,
             // UI animations preferences (enabled, speed)
             commands::config_commands::get_animations_config,
             commands::config_commands::set_animations_config,

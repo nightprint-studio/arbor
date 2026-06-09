@@ -163,6 +163,7 @@
   import { jobsStore } from '$lib/stores/jobs.svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
+  import { explorerStore } from '$lib/stores/explorer.svelte';
   import { commitConfigStore } from '$lib/stores/commit_config.svelte';
   import { branchesConfigStore } from '$lib/stores/branches-config.svelte';
   import { branchGroupingStore } from '$lib/stores/branch-grouping.svelte';
@@ -576,6 +577,7 @@
   onMount(() => { void animStore.loadConfig(); });
   onMount(() => { void commitConfigStore.loadConfig(); });
   onMount(() => { void branchesConfigStore.loadConfig(); });
+  onMount(() => { void explorerStore.loadConfig(); });
 
   // ── Onboarding tour ──────────────────────────────────────────────────────
   // Load the persisted onboarding state up front. The auto-open trigger is

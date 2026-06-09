@@ -145,6 +145,52 @@ export interface AppearanceConfig {
   compact_file_tree_dirs: boolean;
 }
 
+/** View mode for the built-in file explorer's listing. */
+export type ExplorerView = 'details' | 'medium' | 'large' | 'xlarge';
+/** Column the explorer listing sorts by. */
+export type ExplorerSort = 'name' | 'modified' | 'size';
+/** What a freshly-opened explorer tab shows. */
+export type ExplorerStartup = 'overview' | 'last';
+
+/** One explorer sidebar section's persisted order + visibility. */
+export interface ExplorerSectionConfig {
+  id: string;
+  visible: boolean;
+}
+
+/** Built-in file explorer preferences. `git_awareness` + `global_shortcut`
+ *  are host-level switches (also editable from the SettingsPanel); the display
+ *  defaults are edited from the explorer's own in-window settings page. */
+export interface ExplorerConfig {
+  /** Master switch for git awareness (status overlays, repo markers, Changes
+   *  panel, branch switch). Off by default — when off, no git IPC is issued. */
+  git_awareness: boolean;
+  /** Register the OS-global shortcut that opens the explorer window. Off by
+   *  default; toggling re-registers/unregisters at runtime. */
+  global_shortcut: boolean;
+  /** Default view mode for not-yet-visited folders. */
+  default_view: ExplorerView;
+  /** Show dot-prefixed (hidden) entries by default. */
+  show_hidden: boolean;
+  /** Default state of recursive (subfolder) search. */
+  recursive_search: boolean;
+  /** Accelerator for the global shortcut (Tauri format, e.g. "Ctrl+Shift+E"). */
+  global_shortcut_accel: string;
+  /** Default sort column for the listing. */
+  default_sort: ExplorerSort;
+  /** Default sort direction (ascending when true). */
+  sort_ascending: boolean;
+  /** What a freshly-opened explorer tab shows. */
+  startup: ExplorerStartup;
+  /** When true, opening the explorer always spawns a new window instead of
+   *  focusing the existing one. */
+  always_new_window: boolean;
+  /** Maximum number of recent folders kept in the sidebar (1–50). */
+  max_recents: number;
+  /** Sidebar section order + visibility. Empty → built-in order, all shown. */
+  sidebar_sections: ExplorerSectionConfig[];
+}
+
 /** UI animation preferences. `enabled=false` collapses every transition
  *  duration to 0ms; `speed` scales the base durations otherwise. */
 export interface AnimationsConfig {

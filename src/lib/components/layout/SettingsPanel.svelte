@@ -38,13 +38,14 @@
   import DeepLinkSection                from './settings/DeepLinkSection.svelte';
   import StudioSection                  from './settings/StudioSection.svelte';
   import MarketplaceSection              from './settings/MarketplaceSection.svelte';
+  import ExplorerSection                 from './settings/ExplorerSection.svelte';
 
   let { onClose, onOpenThemeEditor }: {
     onClose: () => void;
     onOpenThemeEditor: () => void;
   } = $props();
 
-  type Section = 'appearance' | 'animations' | 'keystrokes' | 'graph' | 'diff' | 'git' | 'git-cli' | 'issue-trackers' | 'repository' | 'project-issue-tracker' | 'project-gitflow' | 'project-ext-integrations' | 'keybindings' | 'gitflow' | 'experimental' | 'cache' | 'ide' | 'terminals' | 'stats' | 'recovery' | 'missing-projects' | 'mr' | 'pipelines' | 'deep-link' | 'studio' | 'marketplace';
+  type Section = 'appearance' | 'animations' | 'keystrokes' | 'graph' | 'diff' | 'explorer' | 'git' | 'git-cli' | 'issue-trackers' | 'repository' | 'project-issue-tracker' | 'project-gitflow' | 'project-ext-integrations' | 'keybindings' | 'gitflow' | 'experimental' | 'cache' | 'ide' | 'terminals' | 'stats' | 'recovery' | 'missing-projects' | 'mr' | 'pipelines' | 'deep-link' | 'studio' | 'marketplace';
   let activeSection = $state<Section>('appearance');
 
   const sectionComponents: Record<Section, any> = {
@@ -54,6 +55,7 @@
     graph:                       GraphSection,
     diff:                        DiffSection,
     keybindings:                 KeybindingsSection,
+    explorer:                    ExplorerSection,
     git:                         GitSection,
     'git-cli':                   GitCliSection,
     'issue-trackers':            IssueTrackersSection,
@@ -85,6 +87,7 @@
         { id: 'keystrokes',  label: 'Keyboard Inputs', icon: Command },
         { id: 'graph',       label: 'Graph',        icon: GitBranch },
         { id: 'diff',        label: 'Diff & Stage', icon: Code      },
+        { id: 'explorer',    label: 'File Explorer', icon: FolderGit2 },
         { id: 'keybindings', label: 'Keybindings',  icon: Keyboard  },
       ],
     },

@@ -15,6 +15,7 @@
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { explorerStore } from '$lib/stores/explorer.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
@@ -25,6 +26,7 @@
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
+    void explorerStore.loadConfig();
   });
 </script>
 

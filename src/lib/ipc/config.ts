@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, WhatsNewConfig } from '$lib/types/config';
+import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, ExplorerConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, WhatsNewConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
 export type { TicketLinksRepoConfig };
@@ -68,6 +68,14 @@ export const getAppearanceConfig = () =>
 
 export const setAppearanceConfig = (config: AppearanceConfig) =>
   invoke<void>('set_appearance_config', { config });
+
+// ── File explorer preferences (git awareness, global shortcut, display) ──────
+
+export const getExplorerConfig = () =>
+  invoke<ExplorerConfig>('get_explorer_config');
+
+export const setExplorerConfig = (config: ExplorerConfig) =>
+  invoke<void>('set_explorer_config', { config });
 
 // ── Recent repos (persisted in config.toml via backend) ──────────────────────
 

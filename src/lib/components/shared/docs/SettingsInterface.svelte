@@ -170,6 +170,28 @@
   <li><strong>Auto-focus</strong> — opening a file (or staging a line) lands the view on the first remaining change instead of the top of the file.</li>
 </ul>
 
+<h3>File Explorer</h3>
+<p>
+  Host-level switches for the built-in file explorer. The detailed display
+  preferences live <em>inside</em> the explorer itself: open its address bar and
+  type <code>arbor://settings</code>, click the <strong>Settings</strong> item in
+  its sidebar, or press <kbd>Ctrl</kbd>+<kbd>,</kbd> while it's focused — the body
+  swaps to a settings page, browser-style.
+</p>
+<ul>
+  <li><strong>Git awareness</strong> — master switch for TortoiseGit-style git integration while browsing: status overlays on files, repo-root markers, the staged/unstaged Changes panel, and branch switching. <em>Off by default</em> — when off the explorer issues no git checks at all, so plain file browsing never pays a per-folder status walk.</li>
+  <li><strong>Global shortcut</strong> — register a system-wide hotkey (default <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>) that opens the dedicated explorer window even when Arbor isn't focused. <em>Off by default</em> (opt-in, so Arbor doesn't claim a system-wide hotkey unprompted); toggling registers / unregisters it immediately. Click the chord to <strong>rebind</strong> it to any combination — if the new combo is invalid or already claimed by another app, the change is rejected with a message and the previous one is kept.</li>
+  <li><strong>Always open a new window</strong> — when on, the shortcut, the Command Palette action, and the system-tray <em>Open File Explorer</em> entry open a fresh explorer window every time; when off (default), a single window is reused and re-summoning focuses it.</li>
+  <li><strong>Default view</strong> — layout for not-yet-visited folders: Details, Medium, Large, or Extra-large icons. Individual folders remember their own view on top of this default.</li>
+  <li><strong>Default sort</strong> &amp; <strong>direction</strong> — the column (name / date modified / size) and order new folders are sorted by.</li>
+  <li><strong>On open</strong> — whether a freshly-opened explorer shows the Overview dashboard or re-opens your most recent folder.</li>
+  <li><strong>Show hidden files</strong> and <strong>Recursive search</strong> — defaults for revealing dot-prefixed entries and for searching inside subfolders.</li>
+  <li><strong>Recent folders</strong> — how many recently-visited folders the sidebar keeps (1–50).</li>
+  <li><strong>Sidebar sections</strong> — reorder the sidebar sections (Library, Recents, Favourites, Devices, Projects) and show / hide each. You can also <strong>right-click a section header</strong> in the sidebar to hide it; bring it back from here.</li>
+  <li><strong>Reset</strong> — clear the per-folder view-mode memory, the recent-folders list, or the sidebar / panel layout (collapsed sections, expanded workspace groups, sidebar state, panel width). These are local UI caches; clearing them never touches your files or Arbor config.</li>
+</ul>
+<p>All explorer preferences persist to <code>~/.config/arbor/config.toml</code> under <code>[explorer]</code> and are shared between the in-app explorer and the standalone window.</p>
+
 <h3>Keybindings</h3>
 <p>
   Click any shortcut chip to record a new key combination. Press <kbd>Escape</kbd> while recording to cancel.

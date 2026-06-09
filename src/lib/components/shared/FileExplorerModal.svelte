@@ -13,7 +13,7 @@
    * Performance: the dir is read once (incl. hidden) and filtered on the FE;
    * the list is virtualised; the watcher is debounced; sort/filter memoised.
    */
-  import { tick, onMount, onDestroy } from 'svelte';
+  import { tick, untrack, onMount, onDestroy } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -45,7 +45,9 @@
   } from '$lib/ipc/fs';
   import { listRegistryRepos, listWorkspaces } from '$lib/ipc/workspace';
   import { workspaceColorVar, type RepoRegistryEntry, type WorkspaceDef } from '$lib/types/workspace';
+  import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS } from '$lib/stores/explorer.svelte';
   import Modal from './Modal.svelte';
+  import FileExplorerSettings from './FileExplorerSettings.svelte';
   import ConfirmModal from './ConfirmModal.svelte';
   import BranchSwitchPopup from './BranchSwitchPopup.svelte';
   import ModalHeader from './ModalHeader.svelte';
@@ -63,7 +65,7 @@
   import ContextMenu, { type MenuItem, type MenuAction } from './ContextMenu.svelte';
   import { overviewStats, kindBreakdown, totalFiles } from '$lib/mocks/fileExplorerMock';
 
-  type View = 'overview' | 'browse';
+  type View = 'overview' | 'browse' | 'settings';
   interface ExpTab { id: string; view: View; path: string; history: string[]; historyIdx: number; }
 
   // `onClose` drives the modal usage (Esc / backdrop / header close button).
@@ -117,14 +119,13 @@
   const previewBig = $derived(rightPanel !== null && view === 'browse' && previewExpanded);
 
   let filterQuery = $state('');
-  // Show-hidden + recursive-search are global toggles, persisted in localStorage
-  // (UI-state tier). Not path-based — they apply across all folders.
-  let showHidden  = $state<boolean>(lsGet('arbor:explorer-show-hidden', false));
-  $effect(() => lsSet('arbor:explorer-show-hidden', showHidden));
+  // Show-hidden + recursive-search are global toggles persisted in ExplorerConfig
+  // (FS, via explorerStore) — not path-based, they apply across all folders.
+  // Read through the store; flip via its setters (see the toggle handlers).
+  const showHidden      = $derived(explorerStore.showHidden);
   // Recursive search: when on (with a non-empty query) the list shows matches
   // from all subfolders (backend walk) instead of filtering the current dir.
-  let recursiveSearch = $state<boolean>(lsGet('arbor:explorer-recursive-search', false));
-  $effect(() => lsSet('arbor:explorer-recursive-search', recursiveSearch));
+  const recursiveSearch = $derived(explorerStore.recursiveSearch);
   let searchResults = $state<FsEntry[]>([]);
   let searching     = $state(false);
 
@@ -153,12 +154,13 @@
   // folder's view also updates the default applied to not-yet-visited folders.
   type ViewMode = 'details' | 'medium' | 'large' | 'xlarge';
   const VIEW_CAP = 200;
-  let viewDefault = $state<ViewMode>(lsGet('arbor:explorer-view-mode', 'details'));
+  // Global default lives in ExplorerConfig (FS); the per-folder LRU memory below
+  // is ephemeral UI state and stays in localStorage.
   let viewByPath  = $state<Map<string, ViewMode>>(new Map(lsGet<[string, ViewMode][]>('arbor:explorer-view-modes', [])));
   const viewKey  = $derived(currentPath ? normParentKey(currentPath) : '');
-  const viewMode = $derived(viewByPath.get(viewKey) ?? viewDefault);
+  const viewMode = $derived(viewByPath.get(viewKey) ?? explorerStore.defaultView);
   function setViewMode(m: ViewMode) {
-    viewDefault = m;
+    explorerStore.setDefaultView(m);
     const key = viewKey;
     if (key) {
       const map = new Map(viewByPath);
@@ -172,7 +174,6 @@
       viewByPath = map;
     }
   }
-  $effect(() => lsSet('arbor:explorer-view-mode', viewDefault));
   $effect(() => lsSet('arbor:explorer-view-modes', [...viewByPath]));
   // Single titlebar dropdown (Windows-style) listing the four view modes.
   const VIEW_OPTIONS = [
@@ -231,13 +232,17 @@
 
   // ── Recents ────────────────────────────────────────────────────────────────
   const RECENTS_KEY = 'arbor:explorer-recents';
-  const MAX_RECENTS = 10;
   let recents = $state<string[]>(lsGet<string[]>(RECENTS_KEY, []).filter(x => typeof x === 'string'));
   function addRecent(path: string) {
     if (!path) return;
-    recents = [path, ...recents.filter(p => p !== path)].slice(0, MAX_RECENTS);
+    recents = [path, ...recents.filter(p => p !== path)].slice(0, explorerStore.maxRecents);
     lsSet(RECENTS_KEY, recents);
   }
+  // Trim live when the cap is lowered from settings.
+  $effect(() => {
+    const cap = explorerStore.maxRecents;
+    if (recents.length > cap) { recents = recents.slice(0, cap); lsSet(RECENTS_KEY, recents); }
+  });
 
   // ── Active-tab projections ────────────────────────────────────────────────
   const view        = $derived(activeTab.view);
@@ -250,6 +255,9 @@
   function normPath(p: string): string { return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase(); }
 
   // ── Git status fetch + lookup ──────────────────────────────────────────────
+  // Master switch (ExplorerConfig.git_awareness): when off, the explorer issues
+  // no git IPC at all — no status walk, no overlays, no Changes/branch actions.
+  const gitOn = $derived(explorerStore.gitAwareness);
   const inRepo = $derived(!!gitStatus?.in_repo);
   /** Overlay badge for `entry`, or null when clean / outside a repo. Keyed by
    *  `normPath` to match the backend, which mirrors this normalization. */
@@ -317,7 +325,7 @@
   // navigation (currentPath dep). Watcher-driven refreshes go through
   // refreshCurrent(), which reloads explicitly (same path → no dep change here).
   $effect(() => {
-    if (rightPanel === 'changes' && view === 'browse' && currentPath) void loadGitChanges(currentPath);
+    if (gitOn && rightPanel === 'changes' && view === 'browse' && currentPath) void loadGitChanges(currentPath);
   });
   // Stepping out of a repo hides both the rail button and the footer chip that
   // toggle this panel, so close it to avoid a stuck, un-dismissable state.
@@ -402,8 +410,8 @@
   // ── Explorer tab strip ────────────────────────────────────────────────────
   const tabItems = $derived<TabItem[]>(tabs.map(t => ({
     id: t.id,
-    label: t.view === 'overview' ? 'Overview' : (t.path.split(/[\\/]/).filter(Boolean).pop() || t.path || 'Browse'),
-    icon: t.view === 'overview' ? LayoutDashboard : Folder,
+    label: t.view === 'overview' ? 'Overview' : t.view === 'settings' ? 'Settings' : (t.path.split(/[\\/]/).filter(Boolean).pop() || t.path || 'Browse'),
+    icon: t.view === 'overview' ? LayoutDashboard : t.view === 'settings' ? Settings2 : Folder,
     closable: tabs.length > 1,
   })));
   function syncActive() {
@@ -445,7 +453,8 @@
     }
     addRecent(path);
     fsWatchStart(path).catch(() => {});
-    void loadGitStatus(path);
+    if (gitOn) void loadGitStatus(path);
+    else gitStatus = null;
   }
   async function refreshCurrent() {
     if (activeTab.view !== 'browse' || !activeTab.path) return;
@@ -457,8 +466,10 @@
       const exist = new Set(raw.map(e => e.path));
       selected = new Set([...selected].filter(p => exist.has(p)));
       if (lead && !exist.has(lead)) lead = '';
-      void loadGitStatus(activeTab.path, true);
-      if (rightPanel === 'changes') void loadGitChanges(activeTab.path);
+      if (gitOn) {
+        void loadGitStatus(activeTab.path, true);
+        if (rightPanel === 'changes') void loadGitChanges(activeTab.path);
+      }
     } catch { /* keep stale view */ }
   }
   function showOverview() {
@@ -467,6 +478,60 @@
     gitStatus = null;
     fsWatchStop().catch(() => {});
   }
+  // Settings view (Windows-Terminal style: swaps the whole body). Keeps the
+  // tab's `path` so exitSettings() can return to the folder it came from.
+  function showSettings() {
+    cancelCreate(); cancelRename(); ctxMenu = null; deleteReq = null; addressEditing = false; clearSelection();
+    activeTab.view = 'settings';
+    gitStatus = null;
+    fsWatchStop().catch(() => {});
+  }
+  function exitSettings() {
+    if (activeTab.path) navigate(activeTab.path, false);
+    else showOverview();
+  }
+
+  // Reset actions for the in-explorer settings page. These own the ephemeral
+  // localStorage state the modal holds in memory (view memory, recents, layout).
+  function resetViewMemory() { viewByPath = new Map(); }          // $effect persists []
+  function resetRecents()    { recents = []; lsSet(RECENTS_KEY, []); }
+  function resetLayout() {
+    collapsedSections = new Set(); lsSet('arbor:explorer-collapsed-sections', []);
+    wsExpanded        = new Set(); lsSet('arbor:explorer-ws-expanded', []);
+    sidebarCollapsed  = false;     // persisted by its $effect
+    previewWidth      = 300;       // persisted by its $effect
+  }
+
+  // ── Sidebar section order + visibility (configurable) ─────────────────────
+  // Resolved list (built-in order + saved overrides). The sidebar renders in
+  // this order, skipping hidden sections; the settings page edits it.
+  const orderedSidebar = $derived(mergeSidebarSections(explorerStore.sidebarSections));
+  let sectionCtx = $state<{ x: number; y: number; id: string } | null>(null);
+  function openSectionCtx(e: MouseEvent, id: string) {
+    e.preventDefault(); e.stopPropagation();
+    ctxMenu = null;
+    sectionCtx = { x: e.clientX, y: e.clientY, id };
+  }
+  function hideSection(id: string) {
+    explorerStore.setSidebarSections(orderedSidebar.map(s => s.id === id ? { ...s, visible: false } : s));
+  }
+  const sectionLabel = (id: string) => EXPLORER_SECTIONS.find(x => x.id === id)?.label ?? id;
+
+  // Seed the session sort + startup folder from ExplorerConfig once it has
+  // loaded — one-shot, so in-session sort toggles aren't clobbered and we only
+  // auto-open the last folder before the user has navigated anywhere.
+  let _bootApplied = false;
+  $effect(() => {
+    if (_bootApplied || !explorerStore.loaded) return;
+    _bootApplied = true;
+    untrack(() => {
+      sortKey = explorerStore.defaultSort as SortKey;
+      sortAsc = explorerStore.sortAscending;
+      if (explorerStore.startup === 'last' && activeTab.view === 'overview' && recents.length) {
+        navigate(recents[0]);
+      }
+    });
+  });
 
   const canBack    = $derived(activeTab.historyIdx > 0);
   const canForward = $derived(activeTab.historyIdx < activeTab.history.length - 1);
@@ -529,14 +594,19 @@
   let addressFetchSeq = 0;
 
   function startAddressEdit() {
-    if (view !== 'browse') return;
-    addressInput = currentPath; addressEditing = true;
+    if (view === 'overview') return;
+    addressInput = view === 'settings' ? 'arbor://settings' : currentPath;
+    addressEditing = true;
     tick().then(() => (document.getElementById('fx-addr') as HTMLInputElement)?.select());
   }
   async function commitAddress() {
     addressEditing = false;
     const t = addressInput.trim();
-    if (t && t !== currentPath) await navigate(t);
+    if (!t) return;
+    // `arbor://settings` opens the in-explorer settings view (body swap), like
+    // a browser's settings page — instead of navigating to a filesystem path.
+    if (/^arbor:\/\/settings\/?$/i.test(t)) { showSettings(); return; }
+    if (t !== currentPath) await navigate(t);
   }
   function normParentKey(p: string): string { return p.replace(/\\/g, '/').replace(/\/+$/, ''); }
   function lastSepIdx(s: string): number { return Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/')); }
@@ -973,10 +1043,10 @@
           { id: 'git-ignore',  label: 'Add to .gitignore',    icon: EyeOff },
         );
       }
-      items.push(
-        { id: 'git-switch', label: 'Switch branch…', icon: GitBranch },
-        { id: 'git-open',   label: 'Open in Arbor',  icon: ExternalLink, iconColor: 'var(--accent)' },
-      );
+      // Switch branch is a git action → only with git awareness on. Open in
+      // Arbor is a plain convenience (no git checks) → always available here.
+      if (gitOn) items.push({ id: 'git-switch', label: 'Switch branch…', icon: GitBranch });
+      items.push({ id: 'git-open', label: 'Open in Arbor', icon: ExternalLink, iconColor: 'var(--accent)' });
     }
     items.push(
       { id: 'sep2', label: '', separator: true },
@@ -1056,6 +1126,12 @@
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.shiftKey) { if (view === 'browse') rightPanel = rightPanel === null ? 'preview' : null; }
       else sidebarCollapsed = !sidebarCollapsed;
+      return;
+    }
+    // Ctrl+, — open the in-explorer settings view (toggles back out if already there).
+    if (mod && !inInput && e.key === ',') {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (view === 'settings') exitSettings(); else showSettings();
       return;
     }
     if (view !== 'browse') return;
@@ -1267,11 +1343,126 @@
 </script>
 
 {#snippet sbLabel(id: string, Ico: typeof Folder, text: string)}
-  <button class="fx-sb-label" class:rail={sidebarCollapsed} onclick={() => { if (!sidebarCollapsed) toggleSection(id); }} aria-expanded={!collapsedSections.has(id)}>
+  <button class="fx-sb-label" class:rail={sidebarCollapsed} onclick={() => { if (!sidebarCollapsed) toggleSection(id); }}
+          oncontextmenu={(e) => openSectionCtx(e, id)}
+          use:tooltip={sidebarCollapsed ? '' : { content: text, description: 'Right-click to hide · reorder in Settings', delay: 1400 }}
+          aria-expanded={!collapsedSections.has(id)}>
     {#if !sidebarCollapsed}<span class="fx-sb-chev">{#if collapsedSections.has(id)}<ChevronRight size={10} strokeWidth={2.4} />{:else}<ChevronDown size={10} strokeWidth={2.4} />{/if}</span>{/if}
     <Ico size={11} class="fx-sb-label-ico" />
     {#if !sidebarCollapsed}<span class="fx-sb-label-text">{text}</span>{/if}
   </button>
+{/snippet}
+
+<!-- Sidebar sections, each wrapped so the configured order/visibility loop can
+     render them by id. Availability {#if}s stay inside so an empty section
+     renders nothing. -->
+{#snippet secLibrary()}
+  {@render sbLabel('library', LayoutDashboard, 'Library')}
+  {#if sectionOpen('library')}
+    <div class="fx-sb-list">
+      <button class="fx-sb-item" class:active={view === 'overview'} onclick={showOverview} use:tooltip={sidebarCollapsed ? 'Overview' : ''}>
+        <span class="fx-sb-ico"><LayoutDashboard size={14} /></span><span class="fx-sb-text">Overview</span>
+      </button>
+      <button class="fx-sb-item" class:active={view === 'settings'} onclick={showSettings} use:tooltip={sidebarCollapsed ? { content: 'Settings', shortcut: 'Ctrl+,' } : ''}>
+        <span class="fx-sb-ico"><Settings2 size={14} /></span><span class="fx-sb-text">Settings</span>
+      </button>
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet secRecents()}
+  {#if recents.length}
+    {@render sbLabel('recents', History, 'Recents')}
+    {#if sectionOpen('recents')}
+      <div class="fx-sb-list">
+        {#each recents as p (p)}
+          {@const name = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p}
+          <button class="fx-sb-item" class:active={view === 'browse' && currentPath === p} onclick={() => navigate(p)} use:tooltip={sidebarCollapsed ? `${name} — ${p}` : p}>
+            <span class="fx-sb-ico"><Folder size={14} /></span><span class="fx-sb-text">{name}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet secFavourites()}
+  {#if favourites.length}
+    {@render sbLabel('favourites', Star, 'Favourites')}
+    {#if sectionOpen('favourites')}
+      <div class="fx-sb-list">
+        {#each favourites as r (r.path)}
+          {@const I = rootIcon(r.kind)}
+          <button class="fx-sb-item" class:active={view === 'browse' && currentPath === r.path} onclick={() => navigate(r.path)} use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : r.path}>
+            <span class="fx-sb-ico"><I size={14} /></span><span class="fx-sb-text">{r.name}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet secDevices()}
+  {#if drives.length}
+    {@render sbLabel('devices', HardDrive, 'Devices')}
+    {#if sectionOpen('devices')}
+      <div class="fx-sb-list">
+        {#each drives as r (r.path)}
+          <button class="fx-sb-item" class:active={view === 'browse' && currentPath.startsWith(r.path)} onclick={() => navigate(r.path)} use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : r.path}>
+            <span class="fx-sb-ico"><HardDrive size={14} /></span><span class="fx-sb-text">{r.name}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet secProjects()}
+  {#if activeProject || wsGroups.length}
+    {@render sbLabel('projects', GitBranch, 'Projects')}
+    {#if sectionOpen('projects')}
+      {#if sidebarCollapsed}
+        <!-- icon-rail: flat project icons, no workspace headers -->
+        <div class="fx-sb-list">
+          {#each projects as p (p.id)}
+            {@const isActive = activeRepoPath != null && normPath(p.path) === normPath(activeRepoPath)}
+            <button class="fx-sb-item fx-sb-project" class:fx-active-repo={isActive} onclick={() => navigate(p.path)} use:tooltip={`${p.display_name}${isActive ? ' (active)' : ''} — ${p.path}`}>
+              <span class="fx-sb-ico">{#if isActive}<Box size={14} />{:else}<GitBranch size={14} />{/if}</span>
+            </button>
+          {/each}
+        </div>
+      {:else}
+        {#if activeProject}
+          {@const ap = activeProject}
+          {@const isCurrent = normPath(currentPath) === normPath(ap.path) || normPath(currentPath).startsWith(normPath(ap.path) + '/')}
+          <div class="fx-sb-list">
+            <button class="fx-sb-item fx-sb-project fx-active-repo" class:active={view === 'browse' && isCurrent} onclick={() => navigate(ap.path)} use:tooltip={`${ap.path} — open in active tab`}>
+              <span class="fx-sb-ico"><Box size={14} /></span><span class="fx-sb-text">{ap.display_name}</span><span class="fx-sb-dot" aria-hidden="true"></span>
+            </button>
+          </div>
+        {/if}
+        {#each wsGroups as ws (ws.id)}
+          {@const expanded = isWsExpanded(ws.id)}
+          <button class="fx-ws-header" class:active={ws.isActive} class:synthetic={ws.synthetic} onclick={() => toggleWs(ws.id)} aria-expanded={expanded}>
+            <span class="fx-ws-chev">{#if expanded}<ChevronDown size={11} strokeWidth={2.2} />{:else}<ChevronRight size={11} strokeWidth={2.2} />{/if}</span>
+            <span class="fx-ws-name">{ws.name}</span><span class="fx-ws-count">{ws.repos.length}</span>
+          </button>
+          {#if expanded}
+            <div class="fx-sb-list fx-ws-list">
+              {#each ws.repos as p (p.id)}
+                {@const isActiveRepo = activeRepoPath != null && normPath(p.path) === normPath(activeRepoPath)}
+                {@const isCurrent = normPath(currentPath) === normPath(p.path) || normPath(currentPath).startsWith(normPath(p.path) + '/')}
+                <button class="fx-sb-item fx-sb-project" class:fx-active-repo={isActiveRepo} class:active={view === 'browse' && isCurrent} onclick={() => navigate(p.path)} use:tooltip={isActiveRepo ? `${p.path} — open in active tab` : p.path}>
+                  <span class="fx-sb-ico">{#if isActiveRepo}<Box size={14} />{:else}<GitBranch size={14} />{/if}</span>
+                  <span class="fx-sb-text">{p.display_name}</span>{#if isActiveRepo}<span class="fx-sb-dot" aria-hidden="true"></span>{/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        {/each}
+      {/if}
+    {/if}
+  {/if}
 {/snippet}
 
 {#snippet gitBadge(b: GitBadge)}
@@ -1349,6 +1540,8 @@
           </div>
         {:else if view === 'overview'}
           <span class="fx-crumb-single">Overview</span>
+        {:else if view === 'settings'}
+          <span class="fx-crumb-single">Settings</span>
         {:else}
           <div class="fx-breadcrumb">
             {#each breadcrumbs as crumb, i (crumb.path)}
@@ -1385,101 +1578,16 @@
         <ModalSidebarToggle collapsed={sidebarCollapsed} onToggle={() => sidebarCollapsed = !sidebarCollapsed} />
       </div>
 
-      {@render sbLabel('library', LayoutDashboard, 'Library')}
-      {#if sectionOpen('library')}
-        <div class="fx-sb-list">
-          <button class="fx-sb-item" class:active={view === 'overview'} onclick={showOverview} use:tooltip={sidebarCollapsed ? 'Overview' : ''}>
-            <span class="fx-sb-ico"><LayoutDashboard size={14} /></span><span class="fx-sb-text">Overview</span>
-          </button>
-        </div>
-      {/if}
-
-      {#if recents.length}
-        {@render sbLabel('recents', History, 'Recents')}
-        {#if sectionOpen('recents')}
-          <div class="fx-sb-list">
-            {#each recents as p (p)}
-              {@const name = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p}
-              <button class="fx-sb-item" class:active={view === 'browse' && currentPath === p} onclick={() => navigate(p)} use:tooltip={sidebarCollapsed ? `${name} — ${p}` : p}>
-                <span class="fx-sb-ico"><Folder size={14} /></span><span class="fx-sb-text">{name}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      {/if}
-
-      {#if favourites.length}
-        {@render sbLabel('favourites', Star, 'Favourites')}
-        {#if sectionOpen('favourites')}
-          <div class="fx-sb-list">
-            {#each favourites as r (r.path)}
-              {@const I = rootIcon(r.kind)}
-              <button class="fx-sb-item" class:active={view === 'browse' && currentPath === r.path} onclick={() => navigate(r.path)} use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : r.path}>
-                <span class="fx-sb-ico"><I size={14} /></span><span class="fx-sb-text">{r.name}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      {/if}
-
-      {#if drives.length}
-        {@render sbLabel('devices', HardDrive, 'Devices')}
-        {#if sectionOpen('devices')}
-          <div class="fx-sb-list">
-            {#each drives as r (r.path)}
-              <button class="fx-sb-item" class:active={view === 'browse' && currentPath.startsWith(r.path)} onclick={() => navigate(r.path)} use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : r.path}>
-                <span class="fx-sb-ico"><HardDrive size={14} /></span><span class="fx-sb-text">{r.name}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      {/if}
-
-      {#if activeProject || wsGroups.length}
-        {@render sbLabel('projects', GitBranch, 'Projects')}
-        {#if sectionOpen('projects')}
-          {#if sidebarCollapsed}
-            <!-- icon-rail: flat project icons, no workspace headers -->
-            <div class="fx-sb-list">
-              {#each projects as p (p.id)}
-                {@const isActive = activeRepoPath != null && normPath(p.path) === normPath(activeRepoPath)}
-                <button class="fx-sb-item fx-sb-project" class:fx-active-repo={isActive} onclick={() => navigate(p.path)} use:tooltip={`${p.display_name}${isActive ? ' (active)' : ''} — ${p.path}`}>
-                  <span class="fx-sb-ico">{#if isActive}<Box size={14} />{:else}<GitBranch size={14} />{/if}</span>
-                </button>
-              {/each}
-            </div>
-          {:else}
-            {#if activeProject}
-              {@const ap = activeProject}
-              {@const isCurrent = normPath(currentPath) === normPath(ap.path) || normPath(currentPath).startsWith(normPath(ap.path) + '/')}
-              <div class="fx-sb-list">
-                <button class="fx-sb-item fx-sb-project fx-active-repo" class:active={view === 'browse' && isCurrent} onclick={() => navigate(ap.path)} use:tooltip={`${ap.path} — open in active tab`}>
-                  <span class="fx-sb-ico"><Box size={14} /></span><span class="fx-sb-text">{ap.display_name}</span><span class="fx-sb-dot" aria-hidden="true"></span>
-                </button>
-              </div>
-            {/if}
-            {#each wsGroups as ws (ws.id)}
-              {@const expanded = isWsExpanded(ws.id)}
-              <button class="fx-ws-header" class:active={ws.isActive} class:synthetic={ws.synthetic} onclick={() => toggleWs(ws.id)} aria-expanded={expanded}>
-                <span class="fx-ws-chev">{#if expanded}<ChevronDown size={11} strokeWidth={2.2} />{:else}<ChevronRight size={11} strokeWidth={2.2} />{/if}</span>
-                <span class="fx-ws-name">{ws.name}</span><span class="fx-ws-count">{ws.repos.length}</span>
-              </button>
-              {#if expanded}
-                <div class="fx-sb-list fx-ws-list">
-                  {#each ws.repos as p (p.id)}
-                    {@const isActiveRepo = activeRepoPath != null && normPath(p.path) === normPath(activeRepoPath)}
-                    {@const isCurrent = normPath(currentPath) === normPath(p.path) || normPath(currentPath).startsWith(normPath(p.path) + '/')}
-                    <button class="fx-sb-item fx-sb-project" class:fx-active-repo={isActiveRepo} class:active={view === 'browse' && isCurrent} onclick={() => navigate(p.path)} use:tooltip={isActiveRepo ? `${p.path} — open in active tab` : p.path}>
-                      <span class="fx-sb-ico">{#if isActiveRepo}<Box size={14} />{:else}<GitBranch size={14} />{/if}</span>
-                      <span class="fx-sb-text">{p.display_name}</span>{#if isActiveRepo}<span class="fx-sb-dot" aria-hidden="true"></span>{/if}
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-            {/each}
+      {#each orderedSidebar as s (s.id)}
+        {#if s.visible}
+          {#if s.id === 'library'}{@render secLibrary()}
+          {:else if s.id === 'recents'}{@render secRecents()}
+          {:else if s.id === 'favourites'}{@render secFavourites()}
+          {:else if s.id === 'devices'}{@render secDevices()}
+          {:else if s.id === 'projects'}{@render secProjects()}
           {/if}
         {/if}
-      {/if}
+      {/each}
     </aside>
 
     <!-- ══ Main ══ -->
@@ -1516,6 +1624,14 @@
             </section>
           {/if}
         </div>
+      {:else if view === 'settings'}
+        <FileExplorerSettings
+          onExit={exitSettings}
+          onResetViewMemory={resetViewMemory}
+          onResetRecents={resetRecents}
+          onResetLayout={resetLayout}
+          viewMemoryCount={viewByPath.size}
+          recentsCount={recents.length} />
       {:else}
         <!-- ── Browser ── -->
         <div class="fx-filter-row">
@@ -1524,9 +1640,9 @@
                  onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Escape' && filterQuery) { filterQuery = ''; e.preventDefault(); } }} />
           {#if filterQuery}<button class="fx-filter-clear" onclick={() => filterQuery = ''} aria-label="Clear filter" use:tooltip={'Clear filter'}><X size={11} /></button>{/if}
           <span class="fx-filter-divider"></span>
-          <button class="fx-toggle" class:active={recursiveSearch} aria-pressed={recursiveSearch} onclick={() => recursiveSearch = !recursiveSearch}
+          <button class="fx-toggle" class:active={recursiveSearch} aria-pressed={recursiveSearch} onclick={() => explorerStore.setRecursiveSearch(!recursiveSearch)}
                   use:tooltip={{ content: recursiveSearch ? 'Recursive search on' : 'Recursive search off', description: 'Search inside all subfolders' }}><FolderSearch size={13} /></button>
-          <button class="fx-toggle" class:active={showHidden} aria-pressed={showHidden} onclick={() => showHidden = !showHidden}
+          <button class="fx-toggle" class:active={showHidden} aria-pressed={showHidden} onclick={() => explorerStore.setShowHidden(!showHidden)}
                   use:tooltip={{ content: showHidden ? 'Hide hidden files' : 'Show hidden files', description: 'Files starting with a dot' }}><Eye size={13} /></button>
         </div>
 
@@ -1817,6 +1933,13 @@
   <ContextMenu x={ctxMenu.x} y={ctxMenu.y} items={ctxItems(ctxMenu.entry)} actions={ctxActions(ctxMenu.entry)} onSelect={handleCtx} onClose={() => ctxMenu = null} />
 {/if}
 
+{#if sectionCtx}
+  <ContextMenu x={sectionCtx.x} y={sectionCtx.y}
+    items={[{ id: 'hide', label: `Hide “${sectionLabel(sectionCtx.id)}”`, icon: EyeOff }]}
+    onSelect={(id) => { if (id === 'hide' && sectionCtx) hideSection(sectionCtx.id); sectionCtx = null; }}
+    onClose={() => sectionCtx = null} />
+{/if}
+
 {#if discardReq}
   <ConfirmModal
     title="Discard changes?"
@@ -1847,7 +1970,12 @@
   /* ══ Standalone window shell (dedicated explorer window) ══ */
   /* Mirrors the modal's chrome rhythm: bg-elevated frame, body floats as a
      bg-base card with the same 4px insets that expose the rounded corners. */
-  .fx-win { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg-elevated); overflow: hidden; }
+  /* NO `overflow: hidden` here. On WebView2/Chromium a `position:fixed` flex
+     column with `overflow:hidden` collapses its flex children (header + body)
+     to ~0 height on some relayouts — e.g. the re-render after a settings
+     toggle. It isn't needed at this level: the inner panels (.fx-win-mid /
+     .fx-win-body) clip their own overflow and the page never scrolls. */
+  .fx-win { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg-elevated); }
   .fx-win-bar { display: flex; align-items: center; gap: 8px; height: 38px; flex-shrink: 0; padding-left: 10px; }
   /* Interactive islands opt out of the titlebar drag region. */
   .fx-win-island { display: flex; align-items: center; gap: 8px; flex-shrink: 0; -webkit-app-region: no-drag; }
