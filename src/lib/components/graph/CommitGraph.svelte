@@ -30,6 +30,7 @@
   import { themeStore } from '$lib/stores/theme.svelte';
   import { graphConfigStore } from '$lib/stores/graph_config.svelte';
   import { getStatus } from '$lib/ipc/stage';
+  import { validateRepoPath, reportRepoMissing } from '$lib/ipc/missing';
   import { getCommitDiffMeta, getWorkdirDiff } from '$lib/ipc/diff';
   import { createBranch, createTag, checkoutBranch, stashSave } from '$lib/ipc/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
@@ -833,6 +834,25 @@
       } catch { /* non-critical */ }
     } catch (err) {
       if (tabId !== tabsStore.activeTabId) { stale = true; return; }
+      // If the load failed because the repo's folder vanished at runtime
+      // (moved / deleted after the tab was opened), degrade to the tombstone
+      // state — the Locate / Retry / Remove UI — instead of spamming a raw
+      // error toast. From there Locate fires `on_project_relocated`, which
+      // the AppShell listener turns back into a healthy reopened tab.
+      const t = tabsStore.tabs.find(t => t.id === tabId);
+      if (t) {
+        try {
+          const v = await validateRepoPath(t.path);
+          if (v.status !== 'ok') {
+            tabsStore.setTombstone(tabId, { reason: v.status, message: v.message, checkedAt: Date.now() });
+            // Notify plugins the project went missing at runtime (same hook the
+            // restore-time path fires). CommitGraph unmounts once the tombstone
+            // shows, so this fires once per episode, not on every switch.
+            void reportRepoMissing(tabId, t.path, v.status).catch(() => {});
+            return;
+          }
+        } catch { /* validator itself failed — fall through to the toast */ }
+      }
       uiStore.showToast(`Failed to load graph: ${err}`, 'error');
     } finally {
       // Safety net: if we threw before reaching the in-try setLoading(false),

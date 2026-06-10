@@ -1057,6 +1057,36 @@
           }
         },
       },
+      {
+        // A repo was relocated to a new path — from the workspace manager's
+        // Locate/Clone, the welcome screen, or a plugin. If it's currently
+        // open as a tab (typically sitting in the tombstone state), reopen it
+        // at the new path so the tab refreshes in place instead of forcing a
+        // workspace round-trip or app restart. Guarded on an actual path
+        // change so the in-tab Locate flow (which reopens its own tab) doesn't
+        // double-open.
+        event: 'arbor://repo-relocated',
+        handler: async (e: { payload: { repo_id: string; old_path: string; new_path: string } }) => {
+          const { repo_id, new_path } = e.payload ?? {};
+          if (!repo_id || !new_path) return;
+          const tab = tabsStore.tabs.find(t => t.id === repo_id);
+          if (!tab) return;
+          const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+          if (!tab.tombstone && norm(tab.path) === norm(new_path)) return;
+          try {
+            const info = await openRepo(new_path, repo_id);
+            tabsStore.updateTab(repo_id, {
+              info,
+              path:          info.path,
+              name:          info.name,
+              currentBranch: info.current_branch ?? null,
+              tombstone:     null,
+            });
+          } catch (err) {
+            uiStore.showToast(`Failed to refresh relocated repo: ${err}`, 'error');
+          }
+        },
+      },
     ]);
   });
 

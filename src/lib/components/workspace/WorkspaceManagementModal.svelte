@@ -2,9 +2,9 @@
   import { onMount, tick } from 'svelte';
   import { slide } from 'svelte/transition';
   import {
-    X, Search, Plus, ChevronDown, ChevronRight, Folder, FolderPlus, Download,
-    RefreshCw, Loader, Pencil, Trash2, ExternalLink, Copy, MapPin, ArrowRightLeft,
-    FileDown, FileUp, GripVertical, AlertTriangle, LayoutPanelLeft, ArrowDownToLine,
+    X, Search, Plus, ChevronDown, ChevronRight, Folder, FolderPlus, FolderX, FolderSearch,
+    RefreshCw, Loader, Pencil, Trash2, ExternalLink, Copy, ArrowRightLeft,
+    FileDown, FileUp, AlertTriangle, LayoutPanelLeft, ArrowDownToLine,
     CircleDot, ArrowUp, ArrowDown, Check, AlertCircle, Tag, Layers,
   } from 'lucide-svelte';
   import Modal from '../shared/Modal.svelte';
@@ -23,11 +23,13 @@
   } from '$lib/types/workspace';
   import {
     workspaceHealthScan, workspaceFetchAll, workspacePullAll,
-    exportWorkspace, importWorkspacePreview,
+    exportWorkspace, importWorkspacePreview, registerRepoPath,
   } from '$lib/ipc/workspace';
   import {
     startWorkspaceFetchOperation, startWorkspacePullOperation,
   } from '$lib/utils/operations-bridge';
+  import { validateRepoPaths, validateRepoPath, type RepoPathStatus } from '$lib/ipc/missing';
+  import RepoRelinkActions from './RepoRelinkActions.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
   import Contribution from '../shared/Contribution.svelte';
   import PluginIcon from '../plugins/PluginIcon.svelte';
@@ -36,6 +38,7 @@
   import GroupFormModal from './GroupFormModal.svelte';
   import WorkspaceTagAllModal from './WorkspaceTagAllModal.svelte';
   import ConfirmModal from '../shared/ConfirmModal.svelte';
+  import FileExplorerModal from '../shared/FileExplorerModal.svelte';
 
   interface Props {
     onClose:  () => void;
@@ -85,6 +88,84 @@
     }
   });
 
+  // ── Path status (cheap, registry-wide) ──────────────────────────────
+  // The full health scan opens each repo with libgit2 and only runs lazily
+  // on expand.  To flag "unlocated" repos on *every* (even collapsed)
+  // workspace header we need a much cheaper signal — `validate_repo_paths`
+  // does at most a handful of stat() calls per repo and never opens it.  We
+  // run it once over the whole registry when the modal mounts and refresh it
+  // after a relink/clone resolves a row.
+  let pathStatus = $state<Map<string, RepoPathStatus>>(new Map());
+
+  async function loadPathStatus() {
+    const reg = workspacesStore.registry;
+    if (reg.length === 0) { pathStatus = new Map(); return; }
+    try {
+      const res = await validateRepoPaths(reg.map(r => r.path));
+      const m = new Map<string, RepoPathStatus>();
+      reg.forEach((r, i) => m.set(r.id, res[i]?.status ?? 'ok'));
+      pathStatus = m;
+    } catch { /* non-critical — rows just won't show the relink affordance */ }
+  }
+
+  /** A registry-known repo whose path no longer resolves to a git repo on
+   *  disk (missing / unreachable / not_a_repo).  Drives the warning row state,
+   *  the inline Locate/Clone buttons and the per-workspace count badge. */
+  function needsRelink(repoId: string): boolean {
+    const s = pathStatus.get(repoId);
+    return s !== undefined && s !== 'ok';
+  }
+
+  function relinkLabel(repoId: string): string {
+    switch (pathStatus.get(repoId)) {
+      case 'unreachable': return 'unreachable';
+      case 'not_a_repo':  return 'not a repo';
+      default:            return 'missing';
+    }
+  }
+
+  /** Refresh after a row is relinked: re-validate paths (the resolved repo
+   *  flips to ok) and drop the workspace's cached health so its row picks up
+   *  the now-available branch / sync info. */
+  async function afterRelink(wsId: string) {
+    await loadPathStatus();
+    const next = new Map(health); next.delete(wsId); health = next;
+    void loadHealth(wsId);
+  }
+
+  // ── Orphan relink ───────────────────────────────────────────────────
+  // An orphan row references a repo_id that has no registry entry at all
+  // (e.g. a worktree that was deregistered), so there's nothing to relocate
+  // in place.  Locating one registers the picked folder as a fresh entry and
+  // swaps the dead id out of the workspace for the new one.
+  let orphanPicker = $state<{ wsId: string; repoId: string } | null>(null);
+
+  async function locateOrphan(wsId: string, orphanId: string, path: string) {
+    orphanPicker = null;
+    try {
+      const v = await validateRepoPath(path);
+      if (v.status !== 'ok') {
+        uiStore.showToast(v.message || 'The selected folder is not a git repository', 'error');
+        return;
+      }
+      // Register the folder (probes its origin URL).  This auto-adds the new
+      // entry to the ACTIVE workspace, so when the orphan lived elsewhere we
+      // graft it onto the right one and undo the unintended active membership.
+      const res = await registerRepoPath(path, null, null);
+      if (wsId !== workspacesStore.activeId) {
+        await workspacesStore.addRepoTo(wsId, res.id);
+        if (res.added_to_ws && workspacesStore.activeId) {
+          try { await workspacesStore.removeRepoFrom(workspacesStore.activeId, res.id); } catch { /* ignore */ }
+        }
+      }
+      await workspacesStore.removeRepoFrom(wsId, orphanId);
+      await afterRelink(wsId);
+      uiStore.showToast('Repository relinked', 'success');
+    } catch (e) {
+      uiStore.showToast(`Locate failed: ${e}`, 'error');
+    }
+  }
+
   // ── Fetch / Pull progress ───────────────────────────────────────────
   // Both fetch-all and pull-all emit per-repo progress on separate event
   // streams but share the same UI state shape.  A workspace can have at
@@ -116,6 +197,7 @@
   let pullOutcomes = $state<Map<string, Map<string, PullOutcome>>>(new Map());
 
   onMount(() => {
+    void loadPathStatus();
     const offFetchProgress = workspacesStore.onFetchProgress(ev => applyProgress(ev, fetchStates, m => fetchStates = m));
     const offFetchDone     = workspacesStore.onFetchDone(({ workspace_id }) => {
       // Refresh health after the fetch-all completes.
@@ -430,6 +512,9 @@
   function onRepoRowKeydown(e: KeyboardEvent, entry: RepoRegistryEntry, wsId: string) {
     if (e.key === 'Enter') {
       e.preventDefault();
+      // A missing repo can't be opened — pressing Enter would only error.
+      // The row's Locate / Clone buttons are the way to recover it.
+      if (needsRelink(entry.id)) return;
       openRepoTab(entry, wsId);
     }
   }
@@ -545,6 +630,7 @@
        version) the keyed each below would silently drop rows.  Computing
        once here keeps the header count and the body in lock-step. -->
   {@const uniqIds     = Array.from(new Set(ws.repo_ids))}
+  {@const unlocated   = uniqIds.filter(id => needsRelink(id) || !workspacesStore.registryById.has(id)).length}
   <div class="ws-block" class:in-group={inGroup} class:scratch={ws.id === SCRATCH_ID} class:has-conflict={hasConflict}>
     <!-- Entire header row is the click target for expand/collapse — dot,
          name, count, progress area all count.  Action buttons on the right
@@ -577,6 +663,14 @@
           <span class="ws-count" use:tooltip={uniqIds.length !== ws.repo_ids.length
             ? `${ws.repo_ids.length} entries (${ws.repo_ids.length - uniqIds.length} duplicate${ws.repo_ids.length - uniqIds.length === 1 ? '' : 's'} hidden)`
             : ''}>{uniqIds.length}</span>
+          {#if unlocated > 0}
+            <span
+              class="ws-unlocated-badge"
+              use:tooltip={`${unlocated} repositor${unlocated === 1 ? 'y' : 'ies'} not found on disk — use Locate or Clone to restore ${unlocated === 1 ? 'it' : 'them'}`}
+            >
+              <FolderX size={10} /> {unlocated}
+            </span>
+          {/if}
           {#if wsHealthMap && (wsAhead > 0 || wsBehind > 0)}
             <span class="ws-sync-agg" use:tooltip={`${wsAhead} commit in avanti · ${wsBehind} indietro (totale repo)`}>
               {#if wsAhead > 0}<span class="agg-ahead"><ArrowUp size={9} />{wsAhead}</span>{/if}
@@ -680,9 +774,10 @@
             {@const pending = fetchState?.pending.has(repoId) || pullState?.pending.has(repoId)}
             {@const outcome = wsOutcomes?.get(repoId)}
             {#if entry}
+              {@const relink = needsRelink(repoId)}
               <div
                 class="repo-row"
-                class:missing={hp?.missing}
+                class:missing={relink}
                 class:conflicted={hp?.conflicted}
                 role="treeitem"
                 aria-level="3"
@@ -693,8 +788,8 @@
               >
                 {#if pending}
                   <Loader size={10} class="spin" />
-                {:else if hp?.missing}
-                  <AlertTriangle size={12} class="repo-icon missing-icon" />
+                {:else if relink}
+                  <FolderX size={12} class="repo-icon missing-icon" />
                 {:else if hp?.conflicted}
                   <AlertTriangle size={12} class="repo-icon conflict-icon" />
                 {:else if hp?.detached}
@@ -716,9 +811,15 @@
                     bind:this={renameInputEl}
                   />
                 {:else}
-                  <button class="repo-name-btn" ondblclick={() => startRenameRepo(entry.id, entry.display_name)} onclick={() => openRepoTab(entry, ws.id)} use:tooltip={{ content: 'Open', description: 'Double-click to rename' }}>
+                  <button class="repo-name-btn" ondblclick={() => startRenameRepo(entry.id, entry.display_name)} onclick={() => { if (!relink) openRepoTab(entry, ws.id); }} use:tooltip={relink ? { content: entry.display_name, description: 'Not found on disk — Locate or Clone to restore. Double-click to rename.' } : { content: 'Open', description: 'Double-click to rename' }}>
                     {entry.display_name}
                   </button>
+                {/if}
+
+                {#if relink}
+                  <span class="repo-missing-pill" use:tooltip={'This repository was not found at its registered path'}>
+                    {relinkLabel(repoId)}
+                  </span>
                 {/if}
 
                 {#if hp?.branch}
@@ -775,14 +876,22 @@
                   </span>
                 {/if}
 
-                <span class="repo-path" use:tooltip={entry.path}>{entry.path}</span>
+                <span class="repo-path" class:bad-path={relink} use:tooltip={entry.path}>{entry.path}</span>
 
-                <div class="repo-actions">
-                  <button class="icon-btn" onclick={() => openRepoTab(entry, ws.id)} use:tooltip={'Open'}><ExternalLink size={11} /></button>
-                  <button class="icon-btn" onclick={(e) => openMovePopover(e, entry.id, ws.id)} use:tooltip={'Move to…'}><ArrowRightLeft size={11} /></button>
-                  <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
-                  <button class="icon-btn" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
-                </div>
+                {#if relink}
+                  <RepoRelinkActions {entry} onResolved={() => afterRelink(ws.id)} />
+                  <div class="repo-actions">
+                    <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
+                    <button class="icon-btn" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
+                  </div>
+                {:else}
+                  <div class="repo-actions">
+                    <button class="icon-btn" onclick={() => openRepoTab(entry, ws.id)} use:tooltip={'Open'}><ExternalLink size={11} /></button>
+                    <button class="icon-btn" onclick={(e) => openMovePopover(e, entry.id, ws.id)} use:tooltip={'Move to…'}><ArrowRightLeft size={11} /></button>
+                    <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
+                    <button class="icon-btn" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
+                  </div>
+                {/if}
               </div>
             {:else}
               <!-- Orphan member: workspace references this repo_id but the
@@ -795,6 +904,9 @@
                 <span class="repo-path orphan-hint">
                   Registry entry missing — likely a worktree that was deregistered.
                 </span>
+                <button class="orphan-locate-btn" onclick={() => orphanPicker = { wsId: ws.id, repoId }}>
+                  <FolderSearch size={12} /> Locate…
+                </button>
                 <div class="repo-actions">
                   <button class="icon-btn" onclick={() => removeFromWorkspace(ws.id, repoId)} use:tooltip={'Remove orphan from workspace'}>
                     <Trash2 size={11} />
@@ -837,6 +949,16 @@
 <!-- Import sub-modal -->
 {#if importModalOpen}
   <ImportWorkspaceModal onClose={() => importModalOpen = false} />
+{/if}
+
+<!-- Orphan locate picker: register a folder and swap it in for the dead id. -->
+{#if orphanPicker}
+  <FileExplorerModal
+    mode="folder"
+    title="Locate repository"
+    onConfirm={(path) => locateOrphan(orphanPicker!.wsId, orphanPicker!.repoId, path)}
+    onCancel={() => orphanPicker = null}
+  />
 {/if}
 
 <!-- Group create / edit modal -->
@@ -1109,6 +1231,22 @@
     background: var(--accent-subtle);
     border-radius: var(--radius-sm);
   }
+  /* Count of members whose path no longer resolves on disk — visible even
+     while the workspace is collapsed so the user can spot broken workspaces
+     at a glance. */
+  .ws-unlocated-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    padding: 1px 6px 1px 4px;
+    border-radius: var(--radius-md);
+    font-variant-numeric: tabular-nums;
+  }
   .ws-progress {
     font-size: 10px;
     color: var(--text-muted);
@@ -1155,7 +1293,36 @@
     background: var(--bg-hover);
     box-shadow: inset 0 0 0 1.5px var(--accent);
   }
-  .repo-row.missing { opacity: 0.66; }
+  /* Missing member: don't fade the whole row (that would dim the Locate /
+     Clone buttons we want the user to press).  Instead flag it with a warning
+     left accent + tinted background, and mute only the inert bits (name,
+     path). */
+  .repo-row.missing {
+    background: color-mix(in srgb, var(--warning) 6%, transparent);
+    box-shadow: inset 2px 0 0 var(--warning);
+  }
+  .repo-row.missing:hover { background: color-mix(in srgb, var(--warning) 11%, transparent); }
+  .repo-row.missing .repo-name-btn { color: var(--text-secondary); }
+  .repo-row.missing .repo-name-btn:hover { color: var(--text-secondary); text-decoration: none; cursor: default; }
+  .repo-path.bad-path { color: var(--text-disabled); text-decoration: line-through; }
+  /* The relink row keeps its actions visible at all times (they're the point
+     of the row), so the Copy / Remove icon toolbar shouldn't hide either. */
+  .repo-row.missing .repo-actions { opacity: 1; }
+  .repo-missing-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    padding: 1px 6px;
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+  }
+
   .repo-row.orphan { opacity: 0.85; font-style: italic; }
   .orphan-label {
     font-size: var(--font-size-sm);
@@ -1171,6 +1338,27 @@
     border-radius: var(--radius-sm);
   }
   .orphan-hint { color: var(--text-muted); font-style: italic; }
+  /* Orphan rows have no registry entry to relocate, so they get their own
+     Locate that registers the picked folder and swaps it in.  Styled like the
+     relink Locate button so the affordance reads the same everywhere. */
+  .orphan-locate-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: var(--text-on-accent);
+    font-family: var(--font-ui-sans);
+    font-size: 11px;
+    font-weight: 500;
+    font-style: normal;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: filter var(--transition-fast);
+  }
+  .orphan-locate-btn:hover { filter: brightness(1.08); }
 
   /* Inline pill that travels with the branch label so worktree members
      stay flagged even when they're dirty / behind / etc. */

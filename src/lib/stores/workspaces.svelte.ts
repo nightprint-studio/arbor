@@ -445,10 +445,6 @@ function createWorkspacesStore() {
     }
     return res.id;
   }
-  async function relocateRepo(repoId: string, newPath: string): Promise<void> {
-    await ipcUpdateRepo(repoId, { path: newPath });
-    await reloadRegistry();
-  }
   async function deregisterRepo(repoId: string): Promise<void> {
     await ipcDeleteRepo(repoId);
     await load();
@@ -565,7 +561,7 @@ function createWorkspacesStore() {
     createWorkspace, updateWorkspace, deleteWorkspace, reorderWorkspaces,
     createGroup, updateGroup, deleteGroup, reorderGroups, assignGroup, toggleGroupCollapsed,
     addRepoTo, removeRepoFrom, moveRepoBetween,
-    renameRepo, relocateRepo, deregisterRepo, ensureRepoRegistered, registerPathTransient,
+    renameRepo, deregisterRepo, ensureRepoRegistered, registerPathTransient,
 
     // fetch events
     onFetchProgress, onFetchDone,

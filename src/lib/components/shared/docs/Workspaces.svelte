@@ -145,6 +145,33 @@
   <li><strong>Create tag &amp; push</strong> — creates the tag, then pushes <code>refs/tags/&lt;name&gt;</code> to each member's preferred remote.</li>
 </ul>
 
+<h2>Missing repositories</h2>
+<p>
+  When a member's folder has been moved or deleted, its row in the management
+  modal is flagged: a folder-x icon, a tinted warning accent, a
+  <code>missing</code> / <code>unreachable</code> / <code>not a repo</code>
+  tag, and a struck-through path. The workspace header also carries a small
+  count badge — visible even while the workspace is collapsed — so you can
+  spot a broken workspace at a glance.
+</p>
+<p>Each flagged row offers two ways to restore it in place:</p>
+<ul>
+  <li><strong>Locate…</strong> — point Arbor at the folder where the repo now lives. The existing registry entry is re-pointed, so the repo id, its workspace membership and tab snapshot all survive.</li>
+  <li><strong>Clone…</strong> — pick a destination and Arbor re-clones from the member's remote URL, then relinks the entry to the fresh checkout (only shown when a remote URL is on record).</li>
+</ul>
+<p>
+  Both routes update the central registry and let path-keyed plugins rebase
+  their bookkeeping. The same Locate flow is available on a repository's own
+  tab when it opens to a missing path — see <em>Missing projects</em>.
+</p>
+<p>
+  A row whose registry entry has vanished entirely (shown as an
+  <em>unknown repository</em> — typically a worktree that was deregistered)
+  also offers a <strong>Locate…</strong> that re-registers the folder you
+  point it at and swaps it back into the workspace in place of the dead
+  reference.
+</p>
+
 <h2>Worktrees and workspace membership</h2>
 <p>
   A workspace lists <strong>root repositories</strong>, not the individual
