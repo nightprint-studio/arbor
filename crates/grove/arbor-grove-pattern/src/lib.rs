@@ -32,7 +32,9 @@
 //!
 //! // "a b c" in one cycle, reversed → c, b, a
 //! let p = fastcat(vec![pure("a"), pure("b"), pure("c")]).rev();
-//! let haps = p.query(TimeSpan::cycle(0));
+//! let mut haps = p.query(TimeSpan::cycle(0));
+//! // Query results aren't time-ordered (Tidal-style); sort by onset to read them.
+//! haps.sort_by_key(|h| h.part.begin);
 //! assert_eq!(haps.iter().map(|h| h.value).collect::<Vec<_>>(), vec!["c", "b", "a"]);
 //! ```
 
