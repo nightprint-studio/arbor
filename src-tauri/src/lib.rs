@@ -1040,6 +1040,7 @@ pub fn run() {
             commands::workspace_commands::remove_repo_from_workspace,
             commands::workspace_commands::move_repo_between_workspaces,
             commands::workspace_commands::register_repo_path,
+            commands::workspace_commands::register_pending_repo,
             commands::workspace_commands::update_registry_repo,
             commands::workspace_commands::delete_registry_repo,
             commands::workspace_commands::export_workspace,

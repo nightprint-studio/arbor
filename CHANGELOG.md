@@ -10,6 +10,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ### Added
 
 - Repository Management: members whose folder was moved or deleted are now flagged inline with **Locate…** and **Clone…** buttons to restore them in place (re-pointing the existing entry, so membership and tab state survive), and each workspace header shows a count badge of its not-found repositories — visible even while collapsed.
+- Workspace import is no longer all-or-nothing: you can create the workspace with repositories left unresolved — they're added as **not cloned** placeholders and you clone or locate them later from Repository Management (where they show a distinct info-toned state with Clone as the primary action). Rows without a remote URL can be imported too and located afterwards.
 
 ### Fixed
 

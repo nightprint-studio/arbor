@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { slide } from 'svelte/transition';
   import {
-    X, Search, Plus, ChevronDown, ChevronRight, Folder, FolderPlus, FolderX, FolderSearch,
+    X, Search, Plus, ChevronDown, ChevronRight, Folder, FolderPlus, FolderX, FolderSearch, Download,
     RefreshCw, Loader, Pencil, Trash2, ExternalLink, Copy, ArrowRightLeft,
     FileDown, FileUp, AlertTriangle, LayoutPanelLeft, ArrowDownToLine,
     CircleDot, ArrowUp, ArrowDown, Check, AlertCircle, Tag, Layers,
@@ -98,20 +98,32 @@
   let pathStatus = $state<Map<string, RepoPathStatus>>(new Map());
 
   async function loadPathStatus() {
-    const reg = workspacesStore.registry;
-    if (reg.length === 0) { pathStatus = new Map(); return; }
+    // Pending ("not cloned") members have an empty path — they're their own
+    // state (see isPending), so we don't validate them here.
+    const withPath = workspacesStore.registry.filter(r => r.path.trim() !== '');
+    if (withPath.length === 0) { pathStatus = new Map(); return; }
     try {
-      const res = await validateRepoPaths(reg.map(r => r.path));
+      const res = await validateRepoPaths(withPath.map(r => r.path));
       const m = new Map<string, RepoPathStatus>();
-      reg.forEach((r, i) => m.set(r.id, res[i]?.status ?? 'ok'));
+      withPath.forEach((r, i) => m.set(r.id, res[i]?.status ?? 'ok'));
       pathStatus = m;
     } catch { /* non-critical — rows just won't show the relink affordance */ }
   }
 
+  /** A declared-but-not-yet-on-disk member: a registry entry with an empty
+   *  path (e.g. imported unresolved).  Rendered as "not cloned" with Clone as
+   *  the primary action. */
+  function isPending(repoId: string): boolean {
+    const e = workspacesStore.registryById.get(repoId);
+    return !!e && e.path.trim() === '';
+  }
+
   /** A registry-known repo whose path no longer resolves to a git repo on
    *  disk (missing / unreachable / not_a_repo).  Drives the warning row state,
-   *  the inline Locate/Clone buttons and the per-workspace count badge. */
+   *  the inline Locate/Clone buttons and the per-workspace count badge.
+   *  Pending entries are excluded — they're the distinct "not cloned" state. */
   function needsRelink(repoId: string): boolean {
+    if (isPending(repoId)) return false;
     const s = pathStatus.get(repoId);
     return s !== undefined && s !== 'ok';
   }
@@ -512,9 +524,9 @@
   function onRepoRowKeydown(e: KeyboardEvent, entry: RepoRegistryEntry, wsId: string) {
     if (e.key === 'Enter') {
       e.preventDefault();
-      // A missing repo can't be opened — pressing Enter would only error.
-      // The row's Locate / Clone buttons are the way to recover it.
-      if (needsRelink(entry.id)) return;
+      // A missing or not-yet-cloned repo can't be opened — pressing Enter
+      // would only error. The row's Locate / Clone buttons recover it.
+      if (needsRelink(entry.id) || isPending(entry.id)) return;
       openRepoTab(entry, wsId);
     }
   }
@@ -630,7 +642,7 @@
        version) the keyed each below would silently drop rows.  Computing
        once here keeps the header count and the body in lock-step. -->
   {@const uniqIds     = Array.from(new Set(ws.repo_ids))}
-  {@const unlocated   = uniqIds.filter(id => needsRelink(id) || !workspacesStore.registryById.has(id)).length}
+  {@const unlocated   = uniqIds.filter(id => needsRelink(id) || isPending(id) || !workspacesStore.registryById.has(id)).length}
   <div class="ws-block" class:in-group={inGroup} class:scratch={ws.id === SCRATCH_ID} class:has-conflict={hasConflict}>
     <!-- Entire header row is the click target for expand/collapse — dot,
          name, count, progress area all count.  Action buttons on the right
@@ -666,7 +678,7 @@
           {#if unlocated > 0}
             <span
               class="ws-unlocated-badge"
-              use:tooltip={`${unlocated} repositor${unlocated === 1 ? 'y' : 'ies'} not found on disk — use Locate or Clone to restore ${unlocated === 1 ? 'it' : 'them'}`}
+              use:tooltip={`${unlocated} repositor${unlocated === 1 ? 'y' : 'ies'} not available locally — use Clone or Locate to set ${unlocated === 1 ? 'it' : 'them'} up`}
             >
               <FolderX size={10} /> {unlocated}
             </span>
@@ -774,10 +786,12 @@
             {@const pending = fetchState?.pending.has(repoId) || pullState?.pending.has(repoId)}
             {@const outcome = wsOutcomes?.get(repoId)}
             {#if entry}
-              {@const relink = needsRelink(repoId)}
+              {@const relink    = needsRelink(repoId)}
+              {@const notCloned = isPending(repoId)}
               <div
                 class="repo-row"
                 class:missing={relink}
+                class:notcloned={notCloned}
                 class:conflicted={hp?.conflicted}
                 role="treeitem"
                 aria-level="3"
@@ -788,6 +802,8 @@
               >
                 {#if pending}
                   <Loader size={10} class="spin" />
+                {:else if notCloned}
+                  <Download size={12} class="repo-icon notcloned-icon" />
                 {:else if relink}
                   <FolderX size={12} class="repo-icon missing-icon" />
                 {:else if hp?.conflicted}
@@ -811,12 +827,16 @@
                     bind:this={renameInputEl}
                   />
                 {:else}
-                  <button class="repo-name-btn" ondblclick={() => startRenameRepo(entry.id, entry.display_name)} onclick={() => { if (!relink) openRepoTab(entry, ws.id); }} use:tooltip={relink ? { content: entry.display_name, description: 'Not found on disk — Locate or Clone to restore. Double-click to rename.' } : { content: 'Open', description: 'Double-click to rename' }}>
+                  <button class="repo-name-btn" ondblclick={() => startRenameRepo(entry.id, entry.display_name)} onclick={() => { if (!relink && !notCloned) openRepoTab(entry, ws.id); }} use:tooltip={notCloned ? { content: entry.display_name, description: 'Not cloned yet — Clone or Locate to set it up. Double-click to rename.' } : relink ? { content: entry.display_name, description: 'Not found on disk — Locate or Clone to restore. Double-click to rename.' } : { content: 'Open', description: 'Double-click to rename' }}>
                     {entry.display_name}
                   </button>
                 {/if}
 
-                {#if relink}
+                {#if notCloned}
+                  <span class="repo-notcloned-pill" use:tooltip={'Declared in this workspace but not yet on disk — clone or locate it'}>
+                    not cloned
+                  </span>
+                {:else if relink}
                   <span class="repo-missing-pill" use:tooltip={'This repository was not found at its registered path'}>
                     {relinkLabel(repoId)}
                   </span>
@@ -876,9 +896,19 @@
                   </span>
                 {/if}
 
-                <span class="repo-path" class:bad-path={relink} use:tooltip={entry.path}>{entry.path}</span>
+                {#if notCloned}
+                  <span class="repo-path notcloned-hint">Not cloned yet</span>
+                {:else}
+                  <span class="repo-path" class:bad-path={relink} use:tooltip={entry.path}>{entry.path}</span>
+                {/if}
 
-                {#if relink}
+                {#if notCloned}
+                  <RepoRelinkActions {entry} primaryAction="clone" onResolved={() => afterRelink(ws.id)} />
+                  <div class="repo-actions">
+                    <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
+                    <button class="icon-btn" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
+                  </div>
+                {:else if relink}
                   <RepoRelinkActions {entry} onResolved={() => afterRelink(ws.id)} />
                   <div class="repo-actions">
                     <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
@@ -1318,6 +1348,34 @@
     text-transform: uppercase;
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 14%, transparent);
+    padding: 1px 6px;
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+  }
+
+  /* "Not cloned" member (imported unresolved): an info-toned, calm state —
+     it's expected to be set up via Clone/Locate, not an error like a missing
+     repo (which is warning-toned). */
+  .repo-row.notcloned {
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .repo-row.notcloned:hover { background: color-mix(in srgb, var(--accent) 11%, transparent); }
+  .repo-row.notcloned .repo-name-btn { color: var(--text-secondary); }
+  .repo-row.notcloned .repo-name-btn:hover { color: var(--text-secondary); text-decoration: none; cursor: default; }
+  .repo-row.notcloned .repo-actions { opacity: 1; }
+  .repo-path.notcloned-hint { color: var(--text-disabled); font-style: italic; }
+  :global(.repo-icon.notcloned-icon) { color: var(--accent); }
+  .repo-notcloned-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-subtle);
     padding: 1px 6px;
     border-radius: var(--radius-md);
     flex-shrink: 0;

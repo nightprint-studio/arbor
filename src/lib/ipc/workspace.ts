@@ -70,6 +70,14 @@ export const registerRepoPath = (
 ): Promise<RepoRegistrationResult> =>
   invoke('register_repo_path', { path, remoteUrl, displayName });
 
+/** Register a "pending" repo (declared via name + optional remote URL, not yet
+ *  on disk). Returns the new registry id. Used by the non-blocking import so a
+ *  member can be cloned / located later from Repository Management. */
+export const registerPendingRepo = (
+  name: string, remoteUrl: string | null,
+): Promise<string> =>
+  invoke('register_pending_repo', { name, remoteUrl });
+
 export const updateRegistryRepo = (
   repoId: string,
   patch: { display_name?: string; remote_url?: string | null; path?: string },

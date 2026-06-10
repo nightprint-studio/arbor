@@ -11,7 +11,7 @@
   import { uiStore } from '$lib/stores/ui.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import {
-    importWorkspacePreview, importWorkspaceCommit, registerRepoPath,
+    importWorkspacePreview, importWorkspaceCommit, registerRepoPath, registerPendingRepo,
   } from '$lib/ipc/workspace';
   import { fsReadTextFile } from '$lib/ipc/fs';
   import { type ExportedWorkspace, workspaceColorVar } from '$lib/types/workspace';
@@ -216,19 +216,38 @@
   const resolvedCount = $derived(rows.filter(r => r.action === 'skip' || r.resolvedId).length);
   const totalCount    = $derived(rows.length);
   const skippedCount  = $derived(rows.filter(r => r.action === 'skip').length);
-  const importCount   = $derived(rows.filter(r => r.action !== 'skip' && r.resolvedId).length);
-  const canCreate = $derived(previewMeta !== null && rows.length > 0 && resolvedCount === totalCount);
+  // Members that will actually land in the workspace = every non-skipped row.
+  // Resolved ones reference an existing/located/cloned repo; the rest are
+  // imported as "pending" entries you clone or locate later from the manager.
+  const memberCount   = $derived(rows.filter(r => r.action !== 'skip').length);
+  const pendingCount  = $derived(rows.filter(r => r.action !== 'skip' && !r.resolvedId).length);
+  // Import is non-blocking: it's enough to keep at least one member (the rest
+  // can stay unresolved and be resolved later). Only an all-skipped preview
+  // has nothing to create.
+  const canCreate = $derived(previewMeta !== null && memberCount > 0);
 
   async function commit() {
     if (!previewMeta || !canCreate) return;
     creating = true;
     try {
-      const repoIds = rows
-        .filter(r => r.action !== 'skip' && r.resolvedId)
-        .map(r => r.resolvedId as string);
+      // Build the member list: resolved rows reference their repo id directly;
+      // unresolved (non-skipped) rows become "pending" registry entries so the
+      // workspace can be created now and those repos cloned / located later.
+      const repoIds: string[] = [];
+      for (const r of rows) {
+        if (r.action === 'skip') continue;
+        if (r.resolvedId) { repoIds.push(r.resolvedId); continue; }
+        repoIds.push(await registerPendingRepo(r.name, r.remote_url));
+      }
       const ws = await importWorkspaceCommit(previewMeta.name, previewMeta.color_idx, repoIds, null);
       await workspacesStore.load();
-      uiStore.showToast(`Imported workspace "${ws.name}" with ${repoIds.length} repos`, 'success');
+      const pending = repoIds.length - rows.filter(r => r.action !== 'skip' && r.resolvedId).length;
+      uiStore.showToast(
+        pending > 0
+          ? `Imported "${ws.name}" — ${repoIds.length} repos (${pending} to clone/locate later)`
+          : `Imported workspace "${ws.name}" with ${repoIds.length} repos`,
+        'success',
+      );
       onClose();
     } catch (e) {
       uiStore.showToast(`Import failed: ${e}`, 'error');
@@ -307,6 +326,10 @@
               <span>{totalCount} repositor{totalCount === 1 ? 'y' : 'ies'}</span>
               <span class="dot">·</span>
               <span class="resolved-count">{resolvedCount}/{totalCount} resolved</span>
+              {#if pendingCount > 0}
+                <span class="dot">·</span>
+                <span class="pending-count">{pendingCount} pending</span>
+              {/if}
               {#if skippedCount > 0}
                 <span class="dot">·</span>
                 <span class="skipped-count">{skippedCount} skipped</span>
@@ -339,7 +362,7 @@
                   {:else if row.resolvedId}
                     <span class="status-pill ok"><Check size={10} /> Ready</span>
                   {:else}
-                    <span class="status-pill pending">Action needed</span>
+                    <span class="status-pill pending" use:tooltip={'Will be imported unresolved — clone or locate it later from Repository Management'}>Pending</span>
                   {/if}
                 </div>
                 <button
@@ -450,7 +473,7 @@
       </Button>
     {:else}
       <Button variant="primary" onclick={commit} disabled={!canCreate || creating} loading={creating}>
-        {creating ? 'Creating…' : `Create Workspace (${importCount}/${totalCount - skippedCount})`}
+        {creating ? 'Creating…' : `Create Workspace (${memberCount})`}
       </Button>
     {/if}
   {/snippet}
@@ -611,6 +634,7 @@
   }
   .meta-stats .dot { opacity: 0.5; }
   .meta-stats .resolved-count { color: var(--accent); font-weight: 500; }
+  .meta-stats .pending-count { color: var(--text-secondary); }
   .meta-stats .skipped-count { color: var(--text-disabled); }
   .progress-ring { flex-shrink: 0; }
 
@@ -666,9 +690,11 @@
     background: color-mix(in srgb, var(--success) 18%, transparent);
     color: var(--success);
   }
+  /* "Pending" is now a fine, non-blocking outcome (imported unresolved), so
+     it reads as a calm deferred state rather than an alarming "action needed". */
   .status-pill.pending {
-    background: color-mix(in srgb, var(--status-warning, #fbbf24) 14%, transparent);
-    color: var(--status-warning, #fbbf24);
+    background: var(--bg-overlay);
+    color: var(--text-secondary);
   }
   .status-pill.skip {
     background: var(--bg-overlay);

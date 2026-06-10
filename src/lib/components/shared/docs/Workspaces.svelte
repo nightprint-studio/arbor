@@ -94,7 +94,13 @@
   <li><strong>Clone…</strong> — type a destination path; Arbor shells out to <code>git clone</code>.</li>
   <li><strong>Skip</strong> — leave this one out of the imported workspace.</li>
 </ul>
-<p>The <strong>Create Workspace</strong> button stays disabled until every row is resolved.</p>
+<p>
+  Resolving every row up front is optional. You can <strong>Create Workspace</strong>
+  as soon as it has at least one member: any row you leave unresolved is imported
+  as a <em>not cloned</em> member — a placeholder you clone or locate later from
+  Repository Management. Only a preview where every row is skipped has nothing to
+  create.
+</p>
 
 <h2>Bulk operations</h2>
 <p>
@@ -170,6 +176,14 @@
   also offers a <strong>Locate…</strong> that re-registers the folder you
   point it at and swaps it back into the workspace in place of the dead
   reference.
+</p>
+<p>
+  Members imported without a local copy show up as <strong>not cloned</strong>
+  (an info-toned row, distinct from the warning shown for moved/deleted
+  repos). They offer the same actions with <strong>Clone</strong> as the
+  primary one — pick a destination and Arbor clones from the recorded remote,
+  or Locate it if you already have it on disk. Both also count toward the
+  header's not-available badge.
 </p>
 
 <h2>Worktrees and workspace membership</h2>

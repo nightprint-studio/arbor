@@ -490,6 +490,26 @@ pub fn register_repo_path(
     Ok(RepoRegistrationResult { id, existed, added_to_ws })
 }
 
+/// Create a "pending" registry entry for a repo that's declared (name +
+/// optional remote URL) but not yet on disk — used by the non-blocking
+/// workspace import.  Returns the new id so the caller can drop it straight
+/// into the imported workspace's member list; the manager then renders it as
+/// "not cloned" and offers Clone / Locate to resolve it.
+#[tauri::command]
+pub fn register_pending_repo(
+    state: State<'_, AppState>,
+    name: String,
+    remote_url: Option<String>,
+) -> Result<String> {
+    let id = {
+        let mut reg = state.lock_repo_registry()?;
+        let id = reg.insert_pending(remote_url, &name);
+        registry_io::save(&reg)?;
+        id
+    };
+    Ok(id)
+}
+
 #[tauri::command]
 pub fn update_registry_repo(
     state: State<'_, AppState>,

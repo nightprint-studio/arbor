@@ -18,8 +18,14 @@
     /** Called after a successful relink so the parent can refresh health /
      *  path-status and drop the warning state for this row. */
     onResolved: () => void;
+    /** Which action reads as primary (accent). 'clone' for a never-cloned
+     *  ("not cloned") member, 'locate' for a moved/deleted one. Falls back to
+     *  'locate' when there's no remote URL to clone from. */
+    primaryAction?: 'locate' | 'clone';
   }
-  let { entry, onResolved }: Props = $props();
+  let { entry, onResolved, primaryAction = 'locate' }: Props = $props();
+
+  const cloneIsPrimary = $derived(primaryAction === 'clone' && !!entry.remote_url);
 
   let picker = $state<null | 'locate' | 'clone-dest'>(null);
   let busy   = $state<null | 'locate' | 'clone'>(null);
@@ -81,15 +87,26 @@
 </script>
 
 <div class="relink-actions">
-  <button class="relink-btn locate" onclick={() => picker = 'locate'} disabled={busy !== null}>
-    {#if busy === 'locate'}<RefreshCw size={12} class="spin" />{:else}<FolderSearch size={12} />{/if}
-    <span>Locate…</span>
-  </button>
-  {#if entry.remote_url}
-    <button class="relink-btn clone" onclick={() => picker = 'clone-dest'} disabled={busy !== null} use:tooltip={`Clone from ${entry.remote_url}`}>
+  {#if entry.remote_url && cloneIsPrimary}
+    <button class="relink-btn primary-btn" onclick={() => picker = 'clone-dest'} disabled={busy !== null} use:tooltip={`Clone from ${entry.remote_url}`}>
       {#if busy === 'clone'}<RefreshCw size={12} class="spin" />{:else}<Download size={12} />{/if}
       <span>Clone…</span>
     </button>
+    <button class="relink-btn secondary-btn" onclick={() => picker = 'locate'} disabled={busy !== null}>
+      {#if busy === 'locate'}<RefreshCw size={12} class="spin" />{:else}<FolderSearch size={12} />{/if}
+      <span>Locate…</span>
+    </button>
+  {:else}
+    <button class="relink-btn primary-btn" onclick={() => picker = 'locate'} disabled={busy !== null}>
+      {#if busy === 'locate'}<RefreshCw size={12} class="spin" />{:else}<FolderSearch size={12} />{/if}
+      <span>Locate…</span>
+    </button>
+    {#if entry.remote_url}
+      <button class="relink-btn secondary-btn" onclick={() => picker = 'clone-dest'} disabled={busy !== null} use:tooltip={`Clone from ${entry.remote_url}`}>
+        {#if busy === 'clone'}<RefreshCw size={12} class="spin" />{:else}<Download size={12} />{/if}
+        <span>Clone…</span>
+      </button>
+    {/if}
   {/if}
 </div>
 
@@ -130,16 +147,16 @@
                 color var(--transition-fast), filter var(--transition-fast);
   }
   .relink-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-  .relink-btn.locate {
+  .relink-btn.primary-btn {
     background: var(--accent);
     border: 1px solid var(--accent);
     color: var(--text-on-accent);
   }
-  .relink-btn.locate:hover:not(:disabled) { filter: brightness(1.08); }
-  .relink-btn.clone {
+  .relink-btn.primary-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .relink-btn.secondary-btn {
     background: transparent;
     border: 1px solid var(--border);
     color: var(--text-primary);
   }
-  .relink-btn.clone:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent); }
+  .relink-btn.secondary-btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent); }
 </style>

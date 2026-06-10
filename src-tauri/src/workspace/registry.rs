@@ -78,6 +78,24 @@ impl RepoRegistry {
         id
     }
 
+    /// Register a "pending" repo — declared via name + optional remote URL
+    /// (e.g. from a non-blocking workspace import) but not yet present on
+    /// disk.  Stored with an empty `path`; the UI renders it as "not cloned"
+    /// and the user resolves it later via Clone / Locate, which relocates the
+    /// entry to a real path.  Unlike `upsert_by_path` this NEVER dedupes —
+    /// every call mints a fresh entry, so two pending repos can't collapse
+    /// onto the same empty path.
+    pub fn insert_pending(&mut self, remote_url: Option<String>, name: &str) -> String {
+        let id = Uuid::new_v4().to_string();
+        self.entries.insert(id.clone(), RepoRegistryEntry {
+            id:           id.clone(),
+            path:         String::new(),
+            remote_url,
+            display_name: name.to_string(),
+        });
+        id
+    }
+
     pub fn get(&self, id: &str) -> Option<&RepoRegistryEntry> { self.entries.get(id) }
 
     pub fn find_by_path(&self, path: &str) -> Option<&RepoRegistryEntry> {
