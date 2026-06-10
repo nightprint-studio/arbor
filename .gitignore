@@ -15,6 +15,9 @@ assets/hero.mp4
 # ── Arbor app data (per-repo config, not source) ──────────────────────────────
 .arbor/
 
+# ── Design notes / scratch (not source) ───────────────────────────────────────
+design/
+
 # ── Arbor plugins (root files like sdk.d.lua / .luarc.json stay tracked;
 #     individual plugin folders are user/marketplace installs, not source) ────
 plugins/*/
