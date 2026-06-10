@@ -1,0 +1,200 @@
+<script lang="ts">
+  /**
+   * Grove titlebar — mirrors Arbor's chrome so the window feels native:
+   *   logo · hamburger (file/project actions) · project fast-swap …
+   *   … Run/Stop + log-level (IntelliJ-style) · gear (settings) · window controls
+   *
+   * Reuses Arbor shell pieces (ArborLogo, WindowControls — settings-driven
+   * mac/windows, custom tooltips) rather than duplicating them; only the grove
+   * domain (project/transport/log) is local.
+   */
+  import {
+    Play, Square, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
+    PanelLeft, PanelRight, Minimize2,
+  } from 'lucide-svelte';
+  import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
+  import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
+  import WindowControls from '$lib/components/layout/WindowControls.svelte';
+  import GroveMenuBar from './GroveMenuBar.svelte';
+  // Titlebar lives at the very top — tooltips fly downward so they don't get
+  // clipped by the window edge.
+  import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
+  import { groveStore, LOG_LEVELS } from '../grove-store.svelte';
+  import { MOCK_PROJECT, RECENT_PROJECTS } from '../mock/data';
+  import type { LogLevel } from '../mock/types';
+
+  // ── Settings (gear) ─────────────────────────────────────────────────────────
+  const settingsMenu: DropdownItem[] = [
+    { kind: 'item', id: 'zen', label: 'Zen mode', icon: Minimize2, shortcut: 'Ctrl+Shift+Z', onclick: () => groveStore.toggleZen() },
+    { kind: 'separator' },
+    { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings, onclick: () => {} },
+    { kind: 'item', id: 'shortcuts', label: 'Keyboard Shortcuts…', icon: Keyboard, onclick: () => {} },
+  ];
+
+  // ── Project fast-swap ───────────────────────────────────────────────────────
+  const projectItems = $derived<DropdownItem[]>(
+    RECENT_PROJECTS.map(p => ({
+      kind: 'item', id: p.id, label: p.name, subtitle: p.audience,
+      icon: FolderGit2, active: p.id === MOCK_PROJECT.id, onclick: () => {},
+    })),
+  );
+
+  // ── Log threshold ───────────────────────────────────────────────────────────
+  const logItems = $derived<DropdownItem[]>(
+    LOG_LEVELS.map(l => ({
+      kind: 'item', id: l, label: l, active: groveStore.logLevel === l,
+      onclick: () => groveStore.setLogLevel(l as LogLevel),
+    })),
+  );
+</script>
+
+<div class="gtb" data-tauri-drag-region role="banner">
+  <!-- Brand + hamburger -->
+  <div class="no-drag brand" use:tooltip={'grove — music live-coding'}>
+    <ArborLogo size={22} />
+  </div>
+  <div class="no-drag">
+    <GroveMenuBar />
+  </div>
+
+  <!-- Project fast-swap -->
+  <div class="no-drag">
+    <Dropdown items={projectItems} position="fixed" direction="down" width="240px">
+      {#snippet trigger({ open, toggle })}
+        <button class="gtb-project" class:open onclick={toggle} use:tooltip={'Switch project'} aria-haspopup="menu" aria-expanded={open}>
+          <FolderGit2 size={14} />
+          <span class="gtb-project-name">{MOCK_PROJECT.name}</span>
+          <ChevronDown size={12} />
+        </button>
+      {/snippet}
+    </Dropdown>
+  </div>
+
+  <div class="gtb-spacer" data-tauri-drag-region></div>
+
+  <!-- Run cluster (IntelliJ-style) + log level, sitting right-of-centre -->
+  <div class="no-drag gtb-run-cluster">
+    <button
+      class="gtb-run"
+      class:running={groveStore.running}
+      onclick={() => groveStore.toggleRun()}
+      use:tooltip={groveStore.running ? 'Stop (Ctrl+Space)' : 'Run (Ctrl+Space)'}
+      aria-label={groveStore.running ? 'Stop' : 'Run'}
+    >
+      {#if groveStore.running}<Square size={14} fill="currentColor" />{:else}<Play size={14} fill="currentColor" />{/if}
+    </button>
+    <button class="gtb-run-icon" use:tooltip={'Render to WAV (mock)'} aria-label="Render to WAV"><Download size={14} /></button>
+
+    <div class="gtb-sep"></div>
+
+    <Dropdown items={logItems} position="fixed" direction="down" width="160px">
+      {#snippet trigger({ open, toggle })}
+        <button class="gtb-log" class:open onclick={toggle} use:tooltip={'Log threshold'} aria-haspopup="menu" aria-expanded={open}>
+          <ScrollText size={13} />
+          <span>{groveStore.logLevel}</span>
+          <ChevronDown size={11} />
+        </button>
+      {/snippet}
+    </Dropdown>
+  </div>
+
+  <!-- Right cluster: layout toggles + settings gear + window controls -->
+  <div class="no-drag gtb-right">
+    <button
+      class="gtb-icon" class:active={!groveStore.collapseUi}
+      onclick={() => groveStore.toggleCollapseUi()}
+      use:tooltip={groveStore.collapseUi ? 'Show arrangement' : 'Hide arrangement'}
+      aria-label="Toggle arrangement" aria-pressed={!groveStore.collapseUi}
+    ><PanelLeft size={17} /></button>
+    <button
+      class="gtb-icon" class:active={!groveStore.collapseTabpane}
+      onclick={() => groveStore.toggleCollapseTabpane()}
+      use:tooltip={groveStore.collapseTabpane ? 'Show editor' : 'Hide editor'}
+      aria-label="Toggle editor" aria-pressed={!groveStore.collapseTabpane}
+    ><PanelRight size={17} /></button>
+
+    <div class="gtb-sep"></div>
+
+    <Dropdown items={settingsMenu} position="fixed" direction="down" width="220px">
+      {#snippet trigger({ open, toggle })}
+        <button class="gtb-icon" class:active={open} onclick={toggle} use:tooltip={'Settings'} aria-label="Settings" aria-haspopup="menu" aria-expanded={open}><Settings size={17} /></button>
+      {/snippet}
+    </Dropdown>
+    <div class="gtb-sep"></div>
+    <WindowControls />
+  </div>
+</div>
+
+<style>
+  .gtb {
+    display: flex;
+    align-items: center;
+    height: var(--titlebar-h, 42px);
+    background: var(--bg-elevated);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 100;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+  .no-drag { -webkit-app-region: no-drag; display: flex; align-items: center; }
+  .gtb-spacer { flex: 1; min-width: 24px; height: 100%; }
+
+  .brand { padding: 0 8px; }
+
+  .gtb-icon {
+    display: flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    background: transparent; border: none; border-radius: var(--radius-sm);
+    color: var(--text-secondary); cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    -webkit-app-region: no-drag;
+  }
+  .gtb-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .gtb-icon.active { color: var(--accent); }
+
+  .gtb-project {
+    display: flex; align-items: center; gap: 7px;
+    height: 28px; margin-left: 4px; padding: 0 9px;
+    background: var(--bg-input); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md); color: var(--text-primary);
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    transition: border-color var(--transition-fast);
+    -webkit-app-region: no-drag;
+  }
+  .gtb-project:hover, .gtb-project.open { border-color: var(--border-focus); }
+  .gtb-project-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gtb-project :global(svg:first-child) { color: var(--accent); }
+
+  /* ── Run cluster ── */
+  .gtb-run-cluster { gap: 2px; height: 100%; padding-right: 4px; }
+  .gtb-run, .gtb-run-icon {
+    display: flex; align-items: center; justify-content: center;
+    width: 30px; height: 28px;
+    background: transparent; border: none; border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    -webkit-app-region: no-drag;
+  }
+  .gtb-run { color: var(--success); }
+  .gtb-run:hover { background: color-mix(in srgb, var(--success) 16%, transparent); }
+  .gtb-run.running { color: var(--error); }
+  .gtb-run.running:hover { background: color-mix(in srgb, var(--error) 16%, transparent); }
+  .gtb-run-icon { color: var(--text-muted); }
+  .gtb-run-icon:hover { background: var(--bg-hover); color: var(--text-secondary); }
+
+  .gtb-log {
+    display: flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 9px;
+    background: transparent; border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md); color: var(--text-secondary);
+    font-size: 11.5px; cursor: pointer;
+    transition: border-color var(--transition-fast), color var(--transition-fast);
+    -webkit-app-region: no-drag;
+  }
+  .gtb-log span { text-transform: capitalize; }
+  .gtb-log:hover, .gtb-log.open { border-color: var(--border-focus); color: var(--text-primary); }
+
+  .gtb-right { height: 100%; }
+  .gtb-sep { width: 1px; height: 18px; background: var(--border); margin: 0 6px; flex-shrink: 0; }
+</style>

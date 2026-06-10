@@ -19,3 +19,9 @@ export function getAppInfo(): Promise<AppInfo> {
 export function openExplorerWindow(): Promise<void> {
   return invoke('open_explorer_window');
 }
+
+/** Open (or focus, if already open) the dedicated grove window — the standalone
+ *  music live-coding DAW shell. */
+export function openGroveWindow(): Promise<void> {
+  return invoke('open_grove_window');
+}

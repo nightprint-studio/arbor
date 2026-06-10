@@ -8,6 +8,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 mod app_ctx;
 mod error;
 mod explorer_window;
+mod grove_window;
 mod process_ext;
 mod platform;
 mod efficiency;
@@ -1516,6 +1517,8 @@ pub fn run() {
             explorer_window::drag_overlay_move,
             explorer_window::drag_overlay_hide,
             explorer_window::explorer_drop_dispatch,
+            // Dedicated grove (music live-coding) window
+            grove_window::open_grove_window,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");
