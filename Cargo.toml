@@ -16,6 +16,7 @@ members = [
     "crates/plugin/marketplace",
     "crates/plugin/types",
     "crates/scheduler",
+    "crates/grove/arbor-grove-pattern",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────
