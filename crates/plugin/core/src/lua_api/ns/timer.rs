@@ -34,8 +34,11 @@ fn install_after(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
             let hook_id = id.clone();
             let tc      = cancels.clone();
             std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                if cancel.load(Ordering::Relaxed) { return; }
+                // Interruptible park — wakes instantly on cancel, no busy-poll.
+                if cancel.sleep_or_cancel(std::time::Duration::from_millis(delay_ms)) {
+                    if let Ok(mut tc) = tc.lock() { tc.remove(&hook_id); }
+                    return;
+                }
                 if let Some(arc) = weak.upgrade() {
                     if let Ok(host) = arc.lock() {
                         crate::hook_router::fire_on(&host, &pn, &hook_id, "{}");
@@ -66,12 +69,10 @@ fn install_every(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
             let hook_id = id.clone();
             std::thread::spawn(move || {
                 loop {
-                    // Sleep in 50 ms increments to check cancel flag.
-                    let mut slept = 0u64;
-                    while slept < interval_ms {
-                        std::thread::sleep(std::time::Duration::from_millis(50));
-                        if cancel.load(Ordering::Relaxed) { return; }
-                        slept += 50;
+                    // Park for the whole interval; wakes instantly on cancel.
+                    // System sleep freezes the park (no missed-tick backlog).
+                    if cancel.sleep_or_cancel(std::time::Duration::from_millis(interval_ms)) {
+                        return;
                     }
                     if let Some(arc) = weak.upgrade() {
                         if let Ok(host) = arc.lock() {
@@ -94,7 +95,7 @@ fn install_cancel(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
     let cancel_fn = lua.create_function(move |_, id: String| {
         if let Ok(map) = cancels.lock() {
             if let Some(token) = map.get(&id) {
-                token.store(true, Ordering::Relaxed);
+                token.cancel();
             }
         }
         Ok(())

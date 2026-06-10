@@ -49,6 +49,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- UI no longer freezes after the PC wakes from sleep or sits in the background for a long time: the OS power-throttling logic that scanned every process on the machine on each focus/resize event was moved off the UI thread and now coalesces the burst of events that a resume generates, re-applying throttling without stalling the window. The throttle state is also reconciled on wake so the app doesn't stay stuck at reduced priority.
 - Context menu submenus (e.g. the File Explorer's **Git** menu) no longer get clipped at the bottom of the window — a flyout opened near the bottom edge now shifts up to stay fully on screen (and scrolls if taller than the window), in addition to the existing left/right flip.
 - Graph: "Show Commits Touching File" no longer races with itself — starting a filter and clearing it (or starting a second one) before the first response arrives no longer lets the stale filtered result overwrite the live graph.
 - Sidebar: the Pull / Merge Requests panel now refreshes automatically after creating, merging, or closing a PR/MR instead of holding on to the pre-mutation list until the next tab switch or manual refresh.

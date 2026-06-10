@@ -55,6 +55,12 @@ mod imp {
     ) -> u32 {
         if event_type == PBT_APMRESUMEAUTOMATIC || event_type == PBT_APMRESUMESUSPEND {
             refresh_taskbar_icon();
+            // Reconcile OS power-throttling: the suspend/resume transition can
+            // reset process priorities (and spawn fresh WebView2 renderers),
+            // and no fresh focus event is guaranteed on wake. Force the
+            // efficiency worker to re-apply the current desired state off the
+            // UI thread so we don't come back stuck at IDLE priority.
+            crate::efficiency::force_reapply();
         }
         0 // ERROR_SUCCESS
     }

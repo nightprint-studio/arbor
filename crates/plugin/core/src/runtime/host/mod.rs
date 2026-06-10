@@ -153,7 +153,7 @@ impl PluginHost {
             // Cancel all Lua timers.
             if let Ok(tc) = plugin.timer_cancels.lock() {
                 for cancel in tc.values() {
-                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                    cancel.cancel();
                 }
             }
         }

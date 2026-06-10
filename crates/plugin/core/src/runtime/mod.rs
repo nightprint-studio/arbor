@@ -38,7 +38,7 @@ pub use manifest::{
 pub use manifest::info::{ComboOption, PluginInfo};
 
 // ── Loaded-plugin state ──────────────────────────────────────────────────────
-pub use loaded::{DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter};
+pub use loaded::{DormantPlugin, LoadedPlugin, TimerCancel, TimerCancels, TimerCounter};
 
 // ── Host (registry, lifecycle, hooks, service, pipeline-op, introspection) ──
 pub use host::PluginHost;

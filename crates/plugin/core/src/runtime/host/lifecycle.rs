@@ -470,7 +470,7 @@ impl PluginHost {
         // Cancel all Lua timers for this plugin.
         if let Ok(tc) = plugin.timer_cancels.lock() {
             for cancel in tc.values() {
-                cancel.store(true, Ordering::Relaxed);
+                cancel.cancel();
             }
         }
 
@@ -537,7 +537,7 @@ impl PluginHost {
             let _ = crate::hook_router::fire(&plugin.lua, "on_plugin_unload", "{}");
             // Cancel Lua timers.
             if let Ok(tc) = plugin.timer_cancels.lock() {
-                for cancel in tc.values() { cancel.store(true, Ordering::Relaxed); }
+                for cancel in tc.values() { cancel.cancel(); }
             }
             // Cancel schedulers belonging to this plugin.
             if let Some(sched) = &self.scheduler {

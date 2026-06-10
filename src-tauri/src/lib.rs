@@ -10,6 +10,7 @@ mod error;
 mod explorer_window;
 mod process_ext;
 mod platform;
+mod efficiency;
 mod taskbar_icon_refresh;
 mod git;
 mod git_cli;
@@ -759,33 +760,13 @@ pub fn run() {
                 .recv()
                 .expect("arbor-plugin-boot thread exited before signalling lock acquisition");
 
-            // Periodic efficiency-mode re-apply.  When the app is unfocused we
-            // re-scan child processes (WebView2 renderers and any subprocess
-            // spawned since the last focus-change) and re-apply throttling.
-            // Without this, renderers created while the app was already in the
-            // background never receive EcoQoS and keep using full CPU.
-            {
-                let app_for_thread = app.handle().clone();
-                std::thread::Builder::new()
-                    .name("arbor-efficiency-periodic".to_string())
-                    .spawn(move || {
-                        loop {
-                            std::thread::sleep(std::time::Duration::from_secs(30));
-                            let state = app_for_thread.state::<AppState>();
-                            let focused = state.app_focused.load(std::sync::atomic::Ordering::Relaxed);
-                            if !focused {
-                                let t = std::time::Instant::now();
-                                crate::platform::set_efficiency_mode(true);
-                                tracing::info!(
-                                    target: "arbor::focus",
-                                    "periodic re-apply set_efficiency_mode(true) took={}ms",
-                                    t.elapsed().as_millis(),
-                                );
-                            }
-                        }
-                    })
-                    .expect("failed to spawn efficiency-periodic thread");
-            }
+            // Efficiency-mode driver. The whole-system process scan that
+            // applies EcoQoS runs on a dedicated worker thread that coalesces
+            // focus/resize bursts and re-scans periodically while unfocused
+            // (to catch renderers spawned in the background). Window events
+            // below only signal the desired state — they never scan on the
+            // UI/event thread, which previously froze the app on resume.
+            crate::efficiency::init();
 
             // Re-apply the main window icon after sleep/resume — works
             // around a Windows + WebView2 quirk that drops the taskbar's
@@ -864,22 +845,16 @@ pub fn run() {
                 }
                 tauri::WindowEvent::Focused(focused) => {
                     let focused = *focused;
-                    let t_evt = std::time::Instant::now();
                     // Update the app-focused flag so focus-gated schedulers work correctly.
                     let state = window.app_handle().state::<AppState>();
                     state.app_focused.store(focused, std::sync::atomic::Ordering::Relaxed);
-                    // Toggle OS-level power throttling (EcoQoS on Windows, nice/sched on
-                    // Linux/macOS).  Handled here in the native window-event callback rather
-                    // than via a frontend IPC call so that minimize / Alt-Tab / window-switch
-                    // are all caught reliably via Win32 WM_SETFOCUS / WM_KILLFOCUS messages.
-                    let t_eff = std::time::Instant::now();
-                    crate::platform::set_efficiency_mode(!focused);
-                    tracing::info!(
-                        target: "arbor::focus",
-                        "WindowEvent::Focused({focused}) handler total={}ms (set_efficiency_mode={}ms)",
-                        t_evt.elapsed().as_millis(),
-                        t_eff.elapsed().as_millis(),
-                    );
+                    // Signal the desired OS power-throttle state (EcoQoS on Windows,
+                    // nice/sched on Linux/macOS). Handled here in the native
+                    // window-event callback rather than via a frontend IPC call so
+                    // minimize / Alt-Tab / window-switch are all caught reliably via
+                    // Win32 WM_SETFOCUS / WM_KILLFOCUS messages. The actual (expensive)
+                    // process scan runs off-thread in the efficiency worker.
+                    crate::efficiency::request(!focused);
                 }
                 tauri::WindowEvent::Resized(size) => {
                     // Windows reports minimize as a Resized event with width=0, height=0.
@@ -889,7 +864,7 @@ pub fn run() {
                     if size.width == 0 && size.height == 0 {
                         let state = window.app_handle().state::<AppState>();
                         state.app_focused.store(false, std::sync::atomic::Ordering::Relaxed);
-                        crate::platform::set_efficiency_mode(true);
+                        crate::efficiency::request(true);
                     }
                 }
                 _ => {}

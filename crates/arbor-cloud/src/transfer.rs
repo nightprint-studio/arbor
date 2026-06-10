@@ -360,6 +360,10 @@ async fn run_download_many(
     let prog_done_w = prog_done.clone();
     let progress_task = tokio::spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(PROGRESS_AGGREGATE_MS as u64));
+        // Skip (don't replay) ticks missed while the machine was asleep mid
+        // transfer — otherwise the default Burst behavior fires every missed
+        // tick back-to-back on resume, flooding the webview with progress events.
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
             if prog_done_w.load(Ordering::Relaxed) { break; }

@@ -38,7 +38,7 @@ pub use crate::runtime::{
     discover_in_roots, discover_plugins, load_plugin_states, plugin_dir,
     save_plugin_states,
     ComboOption, PluginInfo,
-    DormantPlugin, LoadedPlugin, TimerCancels, TimerCounter,
+    DormantPlugin, LoadedPlugin, TimerCancel, TimerCancels, TimerCounter,
     PluginHost, load_plugin, PipelineOpResult, ServiceError, CommandError,
     host_command_required,
 };
