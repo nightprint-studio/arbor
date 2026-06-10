@@ -127,6 +127,31 @@ impl WorkspaceStore {
         self.get(id)
     }
 
+    /// Find a workspace by case-insensitive name within a group scope.
+    /// `group_id == None` matches top-level (ungrouped) workspaces only.
+    /// Used by idempotent import to merge into an existing workspace instead
+    /// of creating a duplicate.
+    pub fn find_by_name_in_group(&self, name: &str, group_id: Option<&str>) -> Option<&WorkspaceDef> {
+        let name = name.trim();
+        self.workspaces.iter().find(|w|
+            w.name.trim().eq_ignore_ascii_case(name) && w.group_id.as_deref() == group_id
+        )
+    }
+
+    /// Union `repo_ids` into an existing workspace.  Existing members are
+    /// kept; only ids not already present are appended — so re-importing the
+    /// same bundle is a no-op.
+    pub fn merge_repos_into(&mut self, workspace_id: &str, repo_ids: &[String]) -> Result<()> {
+        let ws = self.get_mut(workspace_id)
+            .ok_or_else(|| AppError::Other(format!("workspace not found: {workspace_id}")))?;
+        for id in repo_ids {
+            if !ws.repo_ids.iter().any(|x| x == id) {
+                ws.repo_ids.push(id.clone());
+            }
+        }
+        Ok(())
+    }
+
     pub fn create(
         &mut self,
         name: String,

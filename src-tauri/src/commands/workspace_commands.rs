@@ -647,6 +647,10 @@ pub struct ImportPreviewRepo {
 pub struct ImportPreview {
     pub name:      String,
     pub color_idx: u8,
+    /// Id of an existing top-level workspace with the same (case-insensitive)
+    /// name — lets the UI offer "merge" (union repos) instead of creating a
+    /// duplicate.
+    pub existing_workspace_id: Option<String>,
     pub repos:     Vec<ImportPreviewRepo>,
 }
 
@@ -655,7 +659,10 @@ pub fn import_workspace_preview(
     state: State<'_, AppState>,
     payload: ExportedWorkspace,
 ) -> Result<ImportPreview> {
-    let reg = state.lock_repo_registry()?;
+    let store = state.lock_workspaces()?;
+    let reg   = state.lock_repo_registry()?;
+    let existing_workspace_id = store.find_by_name_in_group(&payload.name, None)
+        .map(|w| w.id.clone());
     let repos = payload.repos.into_iter().map(|r| {
         let matched = r.remote_url.as_deref().and_then(|u| reg.find_by_remote_url(u));
         ImportPreviewRepo {
@@ -668,13 +675,15 @@ pub fn import_workspace_preview(
     Ok(ImportPreview {
         name:      payload.name,
         color_idx: payload.color_idx,
+        existing_workspace_id,
         repos,
     })
 }
 
-/// Create a workspace from a list of already-resolved repo ids.  The
-/// frontend does the per-repo Locate/Clone/Skip dance and passes us the
-/// final list of registry ids to wrap up.
+/// Create a workspace from a list of already-resolved repo ids — or, when
+/// `merge_into` names an existing workspace, union the ids into it instead of
+/// creating a duplicate.  The frontend does the per-repo Locate/Clone/Skip
+/// dance and passes us the final list of registry ids to wrap up.
 #[tauri::command]
 pub fn import_workspace_commit(
     app: AppHandle,
@@ -683,15 +692,248 @@ pub fn import_workspace_commit(
     color_idx: u8,
     repo_ids: Vec<String>,
     group_id: Option<String>,
+    merge_into: Option<String>,
 ) -> Result<WorkspaceDef> {
-    let ws = {
+    let (ws, merged) = {
         let mut store = state.lock_workspaces()?;
-        let ws = store.create(name, color_idx, repo_ids, group_id);
+        let result = match merge_into.filter(|id| store.get(id).is_some()) {
+            Some(id) => {
+                store.merge_repos_into(&id, &repo_ids)?;
+                let ws = store.get(&id).cloned()
+                    .ok_or_else(|| AppError::Other(format!("workspace not found: {id}")))?;
+                (ws, true)
+            }
+            None => (store.create(name, color_idx, repo_ids, group_id), false),
+        };
         store_io::save(&store)?;
-        ws
+        result
     };
-    fire_hook(&app, "on_workspace_created", workspace_payload(&ws));
+    fire_hook(
+        &app,
+        if merged { "on_workspace_updated" } else { "on_workspace_created" },
+        workspace_payload(&ws),
+    );
     Ok(ws)
+}
+
+// ---------------------------------------------------------------------------
+// Import / export — workspace GROUPS.
+//
+// A group bundle is just the group's cosmetic data plus a self-contained
+// `ExportedWorkspace`-shaped block per child workspace (each carrying its own
+// repo list), so a single workspace can still be lifted out of the bundle by
+// hand.  Dedup of repos shared across several member workspaces happens at
+// preview time, keyed on remote URL (falling back to display name for
+// local-only repos), so the user resolves each repo once.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExportedGroupMember {
+    pub name:      String,
+    pub color_idx: u8,
+    pub repos:     Vec<ExportedRepo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExportedWorkspaceGroup {
+    pub arbor_workspace_group_version: u32,
+    pub name:       String,
+    pub color_idx:  u8,
+    pub workspaces: Vec<ExportedGroupMember>,
+}
+
+#[tauri::command]
+pub fn export_workspace_group(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> Result<ExportedWorkspaceGroup> {
+    let store = state.lock_workspaces()?;
+    let reg   = state.lock_repo_registry()?;
+    let group = store.get_group(&group_id)
+        .ok_or_else(|| AppError::Other(format!("group not found: {group_id}")))?;
+    // Child workspaces in dropdown order.  Scratch can never live in a group,
+    // so no explicit filter for it is needed.
+    let mut members: Vec<&WorkspaceDef> = store.workspaces.iter()
+        .filter(|w| w.group_id.as_deref() == Some(group_id.as_str()))
+        .collect();
+    members.sort_by_key(|w| (w.order, w.name.to_lowercase()));
+    let workspaces = members.into_iter().map(|ws| {
+        let repos = ws.repo_ids.iter()
+            .filter_map(|id| reg.get(id))
+            .map(|e| ExportedRepo {
+                name:       e.display_name.clone(),
+                remote_url: e.remote_url.clone(),
+            })
+            .collect();
+        ExportedGroupMember {
+            name:      ws.name.clone(),
+            color_idx: ws.color_idx,
+            repos,
+        }
+    }).collect();
+    Ok(ExportedWorkspaceGroup {
+        arbor_workspace_group_version: 1,
+        name:       group.name.clone(),
+        color_idx:  group.color_idx,
+        workspaces,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportGroupPreviewWorkspace {
+    pub name:         String,
+    pub color_idx:    u8,
+    /// Indices into `ImportGroupPreview.repos` — the (deduped) repos this
+    /// member workspace contains, in declaration order.
+    pub repo_indices: Vec<usize>,
+    /// Id of a same-named workspace already inside the target group (only set
+    /// when merging into an existing group) — the UI flags it and the commit
+    /// unions repos into it instead of creating a duplicate.
+    pub existing_workspace_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportGroupPreview {
+    pub name:      String,
+    pub color_idx: u8,
+    /// Id of an existing group with the same (case-insensitive) name, when one
+    /// exists — lets the UI offer "merge into existing group" instead of
+    /// silently creating a duplicate.
+    pub existing_group_id: Option<String>,
+    /// Deduped union of every member's repos.  Resolve each exactly once.
+    pub repos:      Vec<ImportPreviewRepo>,
+    pub workspaces: Vec<ImportGroupPreviewWorkspace>,
+}
+
+#[tauri::command]
+pub fn import_workspace_group_preview(
+    state: State<'_, AppState>,
+    payload: ExportedWorkspaceGroup,
+) -> Result<ImportGroupPreview> {
+    let store = state.lock_workspaces()?;
+    let reg   = state.lock_repo_registry()?;
+
+    let existing_group_id = store.groups.iter()
+        .find(|g| g.name.eq_ignore_ascii_case(payload.name.trim()))
+        .map(|g| g.id.clone());
+
+    let dedup_key = |r: &ExportedRepo| -> String {
+        match r.remote_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            Some(u) => format!("url:{}", u.to_lowercase()),
+            None    => format!("name:{}", r.name.trim().to_lowercase()),
+        }
+    };
+
+    let mut repos: Vec<ImportPreviewRepo> = Vec::new();
+    let mut key_to_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut workspaces = Vec::with_capacity(payload.workspaces.len());
+
+    for ws in &payload.workspaces {
+        let mut repo_indices: Vec<usize> = Vec::with_capacity(ws.repos.len());
+        for r in &ws.repos {
+            let key = dedup_key(r);
+            let idx = *key_to_idx.entry(key).or_insert_with(|| {
+                let matched = r.remote_url.as_deref()
+                    .map(str::trim)
+                    .filter(|u| !u.is_empty())
+                    .and_then(|u| reg.find_by_remote_url(u));
+                let i = repos.len();
+                repos.push(ImportPreviewRepo {
+                    existing_id:   matched.map(|e| e.id.clone()),
+                    existing_path: matched.map(|e| e.path.clone()),
+                    name:          r.name.clone(),
+                    remote_url:    r.remote_url.clone(),
+                });
+                i
+            });
+            // A workspace may list the same repo twice; keep its row once.
+            if !repo_indices.contains(&idx) { repo_indices.push(idx); }
+        }
+        // Only meaningful when we'd merge into an existing group: a same-named
+        // member already in it is updated rather than duplicated.
+        let existing_workspace_id = existing_group_id.as_deref()
+            .and_then(|gid| store.find_by_name_in_group(&ws.name, Some(gid)))
+            .map(|w| w.id.clone());
+        workspaces.push(ImportGroupPreviewWorkspace {
+            name:      ws.name.clone(),
+            color_idx: ws.color_idx,
+            repo_indices,
+            existing_workspace_id,
+        });
+    }
+
+    Ok(ImportGroupPreview {
+        name:      payload.name,
+        color_idx: payload.color_idx,
+        existing_group_id,
+        repos,
+        workspaces,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ImportGroupWorkspaceCommit {
+    pub name:      String,
+    pub color_idx: u8,
+    pub repo_ids:  Vec<String>,
+    /// Existing workspace id to union repos into (idempotent merge). Honoured
+    /// only when the group itself is being merged into.
+    #[serde(default)]
+    pub merge_into: Option<String>,
+}
+
+/// Create (or merge into) a group and all of its member workspaces from the
+/// already-resolved repo ids the frontend produced.  When `existing_group_id`
+/// names a still-present group the members are merged into it (same-named
+/// workspaces have their repos unioned, the rest are added); otherwise a fresh
+/// group with all-new workspaces is created.
+#[tauri::command]
+pub fn import_workspace_group_commit(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    color_idx: u8,
+    existing_group_id: Option<String>,
+    workspaces: Vec<ImportGroupWorkspaceCommit>,
+) -> Result<()> {
+    // (workspace, was_merged) for each member, to fire the right hook after.
+    let touched: Vec<(WorkspaceDef, bool)> = {
+        let mut store = state.lock_workspaces()?;
+        let (group_id, merged_group) = match existing_group_id.filter(|id| store.get_group(id).is_some()) {
+            Some(id) => (id, true),
+            None     => (store.create_group(name, color_idx).id, false),
+        };
+        let mut touched = Vec::with_capacity(workspaces.len());
+        for w in workspaces {
+            // Merge only when reusing the existing group AND the target still
+            // exists — otherwise the id could point at an orphaned workspace.
+            let target = if merged_group {
+                w.merge_into.filter(|id| store.get(id).is_some())
+            } else {
+                None
+            };
+            match target {
+                Some(id) => {
+                    store.merge_repos_into(&id, &w.repo_ids)?;
+                    if let Some(ws) = store.get(&id).cloned() { touched.push((ws, true)); }
+                }
+                None => {
+                    let ws = store.create(w.name, w.color_idx, w.repo_ids, Some(group_id.clone()));
+                    touched.push((ws, false));
+                }
+            }
+        }
+        store_io::save(&store)?;
+        touched
+    };
+    for (ws, merged) in &touched {
+        fire_hook(
+            &app,
+            if *merged { "on_workspace_updated" } else { "on_workspace_created" },
+            workspace_payload(ws),
+        );
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

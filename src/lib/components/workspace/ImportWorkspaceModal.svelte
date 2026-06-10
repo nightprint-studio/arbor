@@ -3,6 +3,7 @@
   import {
     FileDown, Check, MapPin, Download, SkipForward, AlertCircle,
     ClipboardPaste, FolderOpen, FileJson, RefreshCw, ArrowLeft,
+    Layers, Link2, GitMerge,
   } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -12,9 +13,12 @@
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import {
     importWorkspacePreview, importWorkspaceCommit, registerRepoPath, registerPendingRepo,
+    importWorkspaceGroupPreview, importWorkspaceGroupCommit,
   } from '$lib/ipc/workspace';
   import { fsReadTextFile } from '$lib/ipc/fs';
-  import { type ExportedWorkspace, workspaceColorVar } from '$lib/types/workspace';
+  import {
+    type ExportedWorkspace, type ExportedWorkspaceGroup, workspaceColorVar,
+  } from '$lib/types/workspace';
   import FileExplorerModal from '../shared/FileExplorerModal.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
@@ -30,9 +34,11 @@
   // exact set of keys (+ skeleton snippets) as completions. Type a key inside
   // a string, or `workspace` / `repo` in an empty spot, then Ctrl-Space.
   const WS_COMPLETIONS: StudioCompletionItem[] = [
-    { label: 'arbor_workspace_version', detail: 'number', type: 'property', info: 'Export format version (currently 1).' },
-    { label: 'name',                    detail: 'string', type: 'property', info: 'Workspace display name.' },
-    { label: 'color_idx',               detail: 'number', type: 'property', info: 'Workspace color index.' },
+    { label: 'arbor_workspace_version',       detail: 'number', type: 'property', info: 'Single-workspace export format version (currently 1).' },
+    { label: 'arbor_workspace_group_version', detail: 'number', type: 'property', info: 'Group export format version (currently 1).' },
+    { label: 'name',                    detail: 'string', type: 'property', info: 'Workspace / group display name.' },
+    { label: 'color_idx',               detail: 'number', type: 'property', info: 'Workspace / group color index.' },
+    { label: 'workspaces',              detail: 'array',  type: 'property', info: 'Member workspaces of a group bundle.' },
     { label: 'repos',                   detail: 'array',  type: 'property', info: 'List of repositories in the workspace.' },
     { label: 'remote_url',              detail: 'string | null', type: 'property', info: 'Repository clone URL (null if local-only).' },
   ];
@@ -49,6 +55,26 @@
         '  "color_idx": ${2:0},\n' +
         '  "repos": [\n' +
         '    { "name": "${3:repo-name}", "remote_url": ${4:null} }\n' +
+        '  ]\n' +
+        '}',
+    },
+    {
+      label: 'group',
+      detail: 'group export skeleton',
+      type: 'keyword',
+      template:
+        '{\n' +
+        '  "arbor_workspace_group_version": 1,\n' +
+        '  "name": "${1:My Group}",\n' +
+        '  "color_idx": ${2:0},\n' +
+        '  "workspaces": [\n' +
+        '    {\n' +
+        '      "name": "${3:Workspace}",\n' +
+        '      "color_idx": ${4:0},\n' +
+        '      "repos": [\n' +
+        '        { "name": "${5:repo-name}", "remote_url": ${6:null} }\n' +
+        '      ]\n' +
+        '    }\n' +
         '  ]\n' +
         '}',
     },
@@ -78,14 +104,42 @@
     | { kind: 'locate';     idx: number }
     | { kind: 'clone-dest'; idx: number };
 
+  /** Member workspace inside a group bundle. `repoIndices` point into the
+   *  shared, deduped `rows` array so a repo used by several workspaces is
+   *  resolved exactly once. */
+  interface GroupWorkspaceState {
+    name:             string;
+    color_idx:        number;
+    repoIndices:      number[];
+    existingWsId:     string | null;
+  }
+
   let jsonText        = $state('');
   let parseError      = $state<string | null>(null);
-  let previewMeta     = $state<{ name: string; color_idx: number } | null>(null);
+  let mode            = $state<'single' | 'group'>('single');
+  let previewMeta     = $state<{ name: string; color_idx: number; existingWsId: string | null } | null>(null);
+  // Group-import state (only meaningful when mode === 'group').
+  let groupMeta       = $state<{ name: string; color_idx: number; existingGroupId: string | null } | null>(null);
+  let groupWorkspaces = $state<GroupWorkspaceState[]>([]);
   let rows            = $state<RowState[]>([]);
   let cloneInProgress = $state<Set<number>>(new Set());
   let creating        = $state(false);
   let previewing      = $state(false);
   let picker          = $state<PickerTarget | null>(null);
+
+  // True once a preview (single or group) is on screen.
+  const inPreview = $derived(previewMeta !== null || groupMeta !== null);
+
+  // For each shared repo index, the position of the FIRST member workspace
+  // that references it — that occurrence renders the full interactive row,
+  // later occurrences render a compact "resolved elsewhere" mirror.
+  const firstOwnerOf = $derived.by(() => {
+    const m = new Map<number, number>();
+    groupWorkspaces.forEach((w, wi) => {
+      for (const idx of w.repoIndices) if (!m.has(idx)) m.set(idx, wi);
+    });
+    return m;
+  });
 
   async function paste() {
     try { jsonText = await navigator.clipboard.readText(); } catch { /* ignore */ }
@@ -103,31 +157,45 @@
     }
   }
 
+  // Map a backend preview repo onto an editable row.
+  function toRow(r: { name: string; remote_url: string | null; existing_id: string | null; existing_path: string | null }): RowState {
+    return {
+      name:        r.name,
+      remote_url:  r.remote_url,
+      existing_id: r.existing_id,
+      locatedPath: r.existing_path,
+      cloneDest:   '',
+      action:      r.existing_id ? 'use-existing' : (r.remote_url ? 'clone' : 'locate'),
+      resolvedId:  r.existing_id,
+    };
+  }
+
   async function runPreview() {
     parseError = null;
-    let payload: ExportedWorkspace;
+    let parsed: unknown;
     try {
-      payload = JSON.parse(jsonText) as ExportedWorkspace;
-      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.repos)) {
-        throw new Error('not a valid workspace export');
-      }
+      parsed = JSON.parse(jsonText);
     } catch (e) {
       parseError = String(e);
       return;
     }
+    if (!parsed || typeof parsed !== 'object') {
+      parseError = 'not a valid workspace export';
+      return;
+    }
+    const obj = parsed as Record<string, unknown>;
+    // A group bundle carries a `workspaces` array; a single workspace a `repos`
+    // array. Detect on shape so either flavour can be pasted.
+    const isGroup = Array.isArray(obj.workspaces) || typeof obj.arbor_workspace_group_version !== 'undefined';
     previewing = true;
     try {
-      const preview = await importWorkspacePreview(payload);
-      previewMeta = { name: preview.name, color_idx: preview.color_idx };
-      rows = preview.repos.map(r => ({
-        name:        r.name,
-        remote_url:  r.remote_url,
-        existing_id: r.existing_id,
-        locatedPath: r.existing_path,
-        cloneDest:   '',
-        action:      r.existing_id ? 'use-existing' : (r.remote_url ? 'clone' : 'locate'),
-        resolvedId:  r.existing_id,
-      }));
+      if (isGroup) {
+        await runGroupPreview(parsed as ExportedWorkspaceGroup);
+      } else if (Array.isArray(obj.repos)) {
+        await runSinglePreview(parsed as ExportedWorkspace);
+      } else {
+        parseError = 'not a valid workspace or group export';
+      }
     } catch (e) {
       parseError = `Preview failed: ${e}`;
     } finally {
@@ -135,9 +203,40 @@
     }
   }
 
+  async function runSinglePreview(payload: ExportedWorkspace) {
+    const preview = await importWorkspacePreview(payload);
+    mode = 'single';
+    previewMeta = {
+      name:         preview.name,
+      color_idx:    preview.color_idx,
+      existingWsId: preview.existing_workspace_id,
+    };
+    rows = preview.repos.map(toRow);
+  }
+
+  async function runGroupPreview(payload: ExportedWorkspaceGroup) {
+    const preview = await importWorkspaceGroupPreview(payload);
+    mode = 'group';
+    groupMeta = {
+      name:            preview.name,
+      color_idx:       preview.color_idx,
+      existingGroupId: preview.existing_group_id,
+    };
+    groupWorkspaces = preview.workspaces.map(w => ({
+      name:         w.name,
+      color_idx:    w.color_idx,
+      repoIndices:  w.repo_indices,
+      existingWsId: w.existing_workspace_id,
+    }));
+    rows = preview.repos.map(toRow);
+  }
+
   function backToPaste() {
     previewMeta = null;
+    groupMeta = null;
+    groupWorkspaces = [];
     rows = [];
+    mode = 'single';
   }
 
   function setAction(i: number, action: RowAction) {
@@ -223,10 +322,27 @@
   const pendingCount  = $derived(rows.filter(r => r.action !== 'skip' && !r.resolvedId).length);
   // Import is non-blocking: it's enough to keep at least one member (the rest
   // can stay unresolved and be resolved later). Only an all-skipped preview
-  // has nothing to create.
-  const canCreate = $derived(previewMeta !== null && memberCount > 0);
+  // has nothing to create. A group import just needs at least one member
+  // workspace (which may itself end up empty — empty workspaces are valid).
+  const canCreate = $derived(
+    mode === 'group'
+      ? groupWorkspaces.length > 0
+      : previewMeta !== null && memberCount > 0,
+  );
+
+  // Resolve every (deduped) row to a repo id, minting pending entries for
+  // unresolved ones. Skipped rows resolve to null. Index-aligned with `rows`.
+  async function resolveRows(): Promise<(string | null)[]> {
+    const out: (string | null)[] = [];
+    for (const r of rows) {
+      if (r.action === 'skip') { out.push(null); continue; }
+      out.push(r.resolvedId ?? await registerPendingRepo(r.name, r.remote_url));
+    }
+    return out;
+  }
 
   async function commit() {
+    if (mode === 'group') { await commitGroup(); return; }
     if (!previewMeta || !canCreate) return;
     creating = true;
     try {
@@ -239,13 +355,48 @@
         if (r.resolvedId) { repoIds.push(r.resolvedId); continue; }
         repoIds.push(await registerPendingRepo(r.name, r.remote_url));
       }
-      const ws = await importWorkspaceCommit(previewMeta.name, previewMeta.color_idx, repoIds, null);
+      const merging = previewMeta.existingWsId !== null;
+      const ws = await importWorkspaceCommit(
+        previewMeta.name, previewMeta.color_idx, repoIds, null, previewMeta.existingWsId,
+      );
       await workspacesStore.load();
       const pending = repoIds.length - rows.filter(r => r.action !== 'skip' && r.resolvedId).length;
+      const tail = pending > 0 ? ` (${pending} to clone/locate later)` : '';
       uiStore.showToast(
-        pending > 0
-          ? `Imported "${ws.name}" — ${repoIds.length} repos (${pending} to clone/locate later)`
-          : `Imported workspace "${ws.name}" with ${repoIds.length} repos`,
+        merging
+          ? `Merged into "${ws.name}" — ${repoIds.length} repos${tail}`
+          : `Imported workspace "${ws.name}" with ${repoIds.length} repos${tail}`,
+        'success',
+      );
+      onClose();
+    } catch (e) {
+      uiStore.showToast(`Import failed: ${e}`, 'error');
+    } finally {
+      creating = false;
+    }
+  }
+
+  async function commitGroup() {
+    if (!groupMeta || groupWorkspaces.length === 0) return;
+    creating = true;
+    try {
+      const rowRepoId = await resolveRows();
+      const payload = groupWorkspaces.map(w => ({
+        name:       w.name,
+        color_idx:  w.color_idx,
+        repo_ids:   w.repoIndices
+          .map(i => rowRepoId[i])
+          .filter((id): id is string => id !== null),
+        merge_into: w.existingWsId,
+      }));
+      await importWorkspaceGroupCommit(
+        groupMeta.name, groupMeta.color_idx, groupMeta.existingGroupId, payload,
+      );
+      await workspacesStore.load();
+      const merged = groupMeta.existingGroupId !== null;
+      const wsCount = payload.length;
+      uiStore.showToast(
+        `${merged ? 'Merged into' : 'Imported'} group "${groupMeta.name}" — ${wsCount} workspace${wsCount === 1 ? '' : 's'}`,
         'success',
       );
       onClose();
@@ -266,21 +417,26 @@
 >
   {#snippet header()}
     <ModalHeader {onClose}>
-      {#if previewMeta}
+      {#if inPreview}
         <button class="back-btn" onclick={backToPaste} use:tooltip={'Back'} aria-label="Back">
           <ArrowLeft size={13} />
         </button>
       {/if}
-      <FileDown size={14} strokeWidth={2} />
-      <span class="modal-title">Import Workspace</span>
+      {#if mode === 'group' && groupMeta}
+        <Layers size={14} strokeWidth={2} />
+        <span class="modal-title">Import Group</span>
+      {:else}
+        <FileDown size={14} strokeWidth={2} />
+        <span class="modal-title">Import Workspace</span>
+      {/if}
     </ModalHeader>
   {/snippet}
 
-  <div class="iw-body" class:behind={picker !== null} class:body-paste={!previewMeta} class:body-preview={previewMeta !== null}>
-      {#if !previewMeta}
+  <div class="iw-body" class:behind={picker !== null} class:body-paste={!inPreview} class:body-preview={inPreview}>
+      {#if !inPreview}
         <p class="lead">
-          Import a workspace from an exported JSON. Pick the file from disk
-          or paste its contents below.
+          Import a workspace — or a whole group of workspaces — from an
+          exported JSON. Pick the file from disk or paste its contents below.
         </p>
 
         <div class="source-actions">
@@ -300,7 +456,7 @@
           </button>
         </div>
 
-        <FormField label="Workspace JSON" hint="Type “workspace” then Ctrl-Space for a ready-made skeleton.">
+        <FormField label="Workspace JSON" hint="Type “workspace” or “group” then Ctrl-Space for a ready-made skeleton.">
           <div class="json-editor">
             <StudioTextPane
               value={jsonText}
@@ -317,11 +473,89 @@
             </div>
           {/if}
         </FormField>
-      {:else}
+      {:else if mode === 'group' && groupMeta}
+        <div class="preview-meta">
+          <Monogram name={groupMeta.name} color={workspaceColorVar(groupMeta.color_idx)} size={26} />
+          <div class="meta-text">
+            <div class="meta-name">
+              <span class="name-text">{groupMeta.name}</span>
+              {#if groupMeta.existingGroupId}
+                <span class="merge-badge" use:tooltip={'A group with this name already exists — its workspaces will be added to it'}>
+                  <GitMerge size={10} /> Merge
+                </span>
+              {/if}
+            </div>
+            <div class="meta-stats">
+              <span>{groupWorkspaces.length} workspace{groupWorkspaces.length === 1 ? '' : 's'}</span>
+              <span class="dot">·</span>
+              <span>{totalCount} unique repositor{totalCount === 1 ? 'y' : 'ies'}</span>
+              <span class="dot">·</span>
+              <span class="resolved-count">{resolvedCount}/{totalCount} resolved</span>
+              {#if pendingCount > 0}
+                <span class="dot">·</span>
+                <span class="pending-count">{pendingCount} pending</span>
+              {/if}
+              {#if skippedCount > 0}
+                <span class="dot">·</span>
+                <span class="skipped-count">{skippedCount} skipped</span>
+              {/if}
+            </div>
+          </div>
+          <div class="progress-ring">
+            <svg viewBox="0 0 36 36" width="36" height="36">
+              <circle cx="18" cy="18" r="15" stroke="var(--border)" stroke-width="3" fill="none" />
+              <circle
+                cx="18" cy="18" r="15"
+                stroke="var(--accent)" stroke-width="3" fill="none"
+                stroke-dasharray={`${(resolvedCount / Math.max(1, totalCount)) * 94.25} 94.25`}
+                stroke-linecap="round"
+                transform="rotate(-90 18 18)"
+              />
+            </svg>
+          </div>
+        </div>
+
+        <div class="group-tree">
+          {#each groupWorkspaces as gw, wi (wi)}
+            <div class="ws-section">
+              <div class="ws-section-header">
+                <Monogram name={gw.name} color={workspaceColorVar(gw.color_idx)} size={18} />
+                <span class="ws-section-name">{gw.name}</span>
+                {#if gw.existingWsId}
+                  <span class="merge-badge" use:tooltip={'Exists in this group — repos merged in, no duplicate'}>
+                    <GitMerge size={10} /> Merge
+                  </span>
+                {/if}
+                <span class="ws-section-count">{gw.repoIndices.length} repo{gw.repoIndices.length === 1 ? '' : 's'}</span>
+              </div>
+              {#if gw.repoIndices.length === 0}
+                <div class="ws-empty">Empty workspace — no repositories.</div>
+              {:else}
+                <div class="ws-section-body">
+                  {#each gw.repoIndices as idx (idx)}
+                    {#if firstOwnerOf.get(idx) === wi}
+                      {@render repoRow(idx)}
+                    {:else}
+                      {@render sharedRef(idx, firstOwnerOf.get(idx) ?? wi)}
+                    {/if}
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {:else if previewMeta}
         <div class="preview-meta">
           <Monogram name={previewMeta.name} color={workspaceColorVar(previewMeta.color_idx)} size={26} />
           <div class="meta-text">
-            <div class="meta-name">{previewMeta.name}</div>
+            <div class="meta-name">
+              <span class="name-text">{previewMeta.name}</span>
+              {#if previewMeta.existingWsId}
+                <span class="merge-badge" use:tooltip={'A workspace with this name exists — its repos will be merged in, no duplicate created'}>
+                  <GitMerge size={10} /> Merge
+                </span>
+              {/if}
+            </div>
             <div class="meta-stats">
               <span>{totalCount} repositor{totalCount === 1 ? 'y' : 'ies'}</span>
               <span class="dot">·</span>
@@ -351,129 +585,164 @@
         </div>
 
         <div class="rows">
-          {#each rows as row, i (i)}
-            {@const cloning = cloneInProgress.has(i)}
-            <div class="row" class:resolved={row.resolvedId !== null} class:skipped={row.action === 'skip'}>
-              <div class="row-header">
-                <div class="row-info">
-                  <span class="row-name">{row.name}</span>
-                  {#if row.action === 'skip'}
-                    <span class="status-pill skip">Skipped</span>
-                  {:else if row.resolvedId}
-                    <span class="status-pill ok"><Check size={10} /> Ready</span>
-                  {:else}
-                    <span class="status-pill pending" use:tooltip={'Will be imported unresolved — clone or locate it later from Repository Management'}>Pending</span>
-                  {/if}
-                </div>
-                <button
-                  class="row-skip"
-                  class:active={row.action === 'skip'}
-                  onclick={() => setAction(i, row.action === 'skip' ? (row.existing_id ? 'use-existing' : (row.remote_url ? 'clone' : 'locate')) : 'skip')}
-                  use:tooltip={row.action === 'skip' ? 'Don\'t skip' : 'Skip this repo'}
-                >
-                  <SkipForward size={11} />
-                  {row.action === 'skip' ? 'Unskip' : 'Skip'}
-                </button>
-              </div>
-
-              {#if row.remote_url}
-                <div class="row-meta">
-                  <span class="meta-label">Remote</span>
-                  <code class="meta-value">{row.remote_url}</code>
-                </div>
-              {/if}
-              {#if row.locatedPath}
-                <div class="row-meta">
-                  <span class="meta-label"><MapPin size={10} /> Path</span>
-                  <code class="meta-value path">{row.locatedPath}</code>
-                </div>
-              {/if}
-
-              {#if row.action !== 'skip'}
-                <div class="action-tabs">
-                  {#if row.existing_id}
-                    <button
-                      class="action-tab"
-                      class:active={row.action === 'use-existing'}
-                      onclick={() => setAction(i, 'use-existing')}
-                    >
-                      <Check size={11} /> Use existing
-                    </button>
-                  {/if}
-                  {#if row.remote_url}
-                    <button
-                      class="action-tab"
-                      class:active={row.action === 'clone'}
-                      onclick={() => setAction(i, 'clone')}
-                      disabled={!!row.resolvedId && row.action === 'use-existing'}
-                    >
-                      <Download size={11} /> Clone
-                    </button>
-                  {/if}
-                  <button
-                    class="action-tab"
-                    class:active={row.action === 'locate'}
-                    onclick={() => setAction(i, 'locate')}
-                    disabled={!!row.resolvedId && row.action === 'use-existing'}
-                  >
-                    <MapPin size={11} /> Locate
-                  </button>
-                </div>
-
-                {#if row.action === 'clone' && !row.resolvedId}
-                  <div class="action-pane">
-                    <div class="input-with-action">
-                      <input
-                        class="input"
-                        placeholder="Destination folder…"
-                        bind:value={rows[i].cloneDest}
-                        spellcheck="false"
-                        autocomplete="off"
-                      />
-                      <button
-                        class="input-action-btn"
-                        onclick={() => picker = { kind: 'clone-dest', idx: i }}
-                        use:tooltip={'Browse…'}
-                        aria-label="Browse for folder"
-                      >
-                        <FolderOpen size={13} />
-                      </button>
-                    </div>
-                    <button
-                      class="primary-mini"
-                      onclick={() => cloneRow(i)}
-                      disabled={cloning || !row.cloneDest || !row.remote_url}
-                    >
-                      {#if cloning}
-                        <RefreshCw size={11} class="spin" /> Cloning…
-                      {:else}
-                        <Download size={11} /> Clone
-                      {/if}
-                    </button>
-                  </div>
-                {:else if row.action === 'locate' && !row.resolvedId}
-                  <div class="action-pane">
-                    <button class="primary-mini wide" onclick={() => picker = { kind: 'locate', idx: i }}>
-                      <FolderOpen size={11} /> Choose folder…
-                    </button>
-                  </div>
-                {/if}
-              {/if}
-            </div>
+          {#each rows as _row, i (i)}
+            {@render repoRow(i)}
           {/each}
         </div>
       {/if}
   </div>
 
+  <!-- A single editable repo row, shared by the single-workspace list and the
+       group tree.  Keyed by index into `rows` so a repo deduped across several
+       member workspaces stays one row resolved once. -->
+  {#snippet repoRow(i: number)}
+    {@const row = rows[i]}
+    {@const cloning = cloneInProgress.has(i)}
+    <div class="row" class:resolved={row.resolvedId !== null} class:skipped={row.action === 'skip'}>
+      <div class="row-header">
+        <div class="row-info">
+          <span class="row-name">{row.name}</span>
+          {#if row.action === 'skip'}
+            <span class="status-pill skip">Skipped</span>
+          {:else if row.resolvedId}
+            <span class="status-pill ok"><Check size={10} /> Ready</span>
+          {:else}
+            <span class="status-pill pending" use:tooltip={'Will be imported unresolved — clone or locate it later from Repository Management'}>Pending</span>
+          {/if}
+        </div>
+        <button
+          class="row-skip"
+          class:active={row.action === 'skip'}
+          onclick={() => setAction(i, row.action === 'skip' ? (row.existing_id ? 'use-existing' : (row.remote_url ? 'clone' : 'locate')) : 'skip')}
+          use:tooltip={row.action === 'skip' ? 'Don\'t skip' : 'Skip this repo'}
+        >
+          <SkipForward size={11} />
+          {row.action === 'skip' ? 'Unskip' : 'Skip'}
+        </button>
+      </div>
+
+      {#if row.remote_url}
+        <div class="row-meta">
+          <span class="meta-label">Remote</span>
+          <code class="meta-value">{row.remote_url}</code>
+        </div>
+      {/if}
+      {#if row.locatedPath}
+        <div class="row-meta">
+          <span class="meta-label"><MapPin size={10} /> Path</span>
+          <code class="meta-value path">{row.locatedPath}</code>
+        </div>
+      {/if}
+
+      {#if row.action !== 'skip'}
+        <div class="action-tabs">
+          {#if row.existing_id}
+            <button
+              class="action-tab"
+              class:active={row.action === 'use-existing'}
+              onclick={() => setAction(i, 'use-existing')}
+            >
+              <Check size={11} /> Use existing
+            </button>
+          {/if}
+          {#if row.remote_url}
+            <button
+              class="action-tab"
+              class:active={row.action === 'clone'}
+              onclick={() => setAction(i, 'clone')}
+              disabled={!!row.resolvedId && row.action === 'use-existing'}
+            >
+              <Download size={11} /> Clone
+            </button>
+          {/if}
+          <button
+            class="action-tab"
+            class:active={row.action === 'locate'}
+            onclick={() => setAction(i, 'locate')}
+            disabled={!!row.resolvedId && row.action === 'use-existing'}
+          >
+            <MapPin size={11} /> Locate
+          </button>
+        </div>
+
+        {#if row.action === 'clone' && !row.resolvedId}
+          <div class="action-pane">
+            <div class="input-with-action">
+              <input
+                class="input"
+                placeholder="Destination folder…"
+                bind:value={rows[i].cloneDest}
+                spellcheck="false"
+                autocomplete="off"
+              />
+              <button
+                class="input-action-btn"
+                onclick={() => picker = { kind: 'clone-dest', idx: i }}
+                use:tooltip={'Browse…'}
+                aria-label="Browse for folder"
+              >
+                <FolderOpen size={13} />
+              </button>
+            </div>
+            <button
+              class="primary-mini"
+              onclick={() => cloneRow(i)}
+              disabled={cloning || !row.cloneDest || !row.remote_url}
+            >
+              {#if cloning}
+                <RefreshCw size={11} class="spin" /> Cloning…
+              {:else}
+                <Download size={11} /> Clone
+              {/if}
+            </button>
+          </div>
+        {:else if row.action === 'locate' && !row.resolvedId}
+          <div class="action-pane">
+            <button class="primary-mini wide" onclick={() => picker = { kind: 'locate', idx: i }}>
+              <FolderOpen size={11} /> Choose folder…
+            </button>
+          </div>
+        {/if}
+      {/if}
+    </div>
+  {/snippet}
+
+  <!-- Compact mirror for a repo that another member workspace already owns the
+       interactive controls for — keeps the dedup promise (resolve once) while
+       still showing the repo under every workspace that contains it. -->
+  {#snippet sharedRef(idx: number, ownerWi: number)}
+    {@const row = rows[idx]}
+    <div class="shared-ref" class:skipped={row.action === 'skip'}>
+      <Link2 size={12} />
+      <span class="shared-name">{row.name}</span>
+      {#if row.action === 'skip'}
+        <span class="status-pill skip">Skipped</span>
+      {:else if row.resolvedId}
+        <span class="status-pill ok"><Check size={10} /> Ready</span>
+      {:else}
+        <span class="status-pill pending">Pending</span>
+      {/if}
+      <span class="shared-hint">set in “{groupWorkspaces[ownerWi]?.name ?? '—'}”</span>
+    </div>
+  {/snippet}
+
   {#snippet footer()}
     <Button variant="secondary" onclick={onClose}>Cancel</Button>
-    {#if !previewMeta}
+    {#if !inPreview}
       <Button variant="primary" onclick={runPreview} disabled={!jsonText.trim() || previewing} loading={previewing}>
         {previewing ? 'Loading…' : 'Preview'}
       </Button>
+    {:else if mode === 'group'}
+      <Button variant="primary" onclick={commit} disabled={!canCreate || creating} loading={creating}>
+        {creating
+          ? (groupMeta?.existingGroupId ? 'Merging…' : 'Creating…')
+          : `${groupMeta?.existingGroupId ? 'Merge into Group' : 'Create Group'} (${groupWorkspaces.length})`}
+      </Button>
     {:else}
       <Button variant="primary" onclick={commit} disabled={!canCreate || creating} loading={creating}>
-        {creating ? 'Creating…' : `Create Workspace (${memberCount})`}
+        {creating
+          ? (previewMeta?.existingWsId ? 'Merging…' : 'Creating…')
+          : `${previewMeta?.existingWsId ? 'Merge into Workspace' : 'Create Workspace'} (${memberCount})`}
       </Button>
     {/if}
   {/snippet}
@@ -624,7 +893,30 @@
     border-radius: var(--radius-md);
   }
   .meta-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
-  .meta-name { font-weight: 600; font-size: 14px; color: var(--text-primary); }
+  .meta-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+    min-width: 0;
+  }
+  .meta-name .name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .merge-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: color-mix(in srgb, var(--info) 18%, transparent);
+    color: var(--info);
+    flex-shrink: 0;
+  }
   .meta-stats {
     display: flex;
     align-items: center;
@@ -637,6 +929,81 @@
   .meta-stats .pending-count { color: var(--text-secondary); }
   .meta-stats .skipped-count { color: var(--text-disabled); }
   .progress-ring { flex-shrink: 0; }
+
+  /* ── Group tree (group import) ── */
+  .group-tree { display: flex; flex-direction: column; gap: 12px; }
+  .ws-section {
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .ws-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .ws-section-name {
+    font-weight: 600;
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ws-section-count {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .ws-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+  }
+  .ws-empty {
+    padding: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  /* Compact mirror of a repo configured under another workspace. */
+  .shared-ref {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--bg-overlay);
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+  }
+  .shared-ref :global(svg) { color: var(--text-muted); flex-shrink: 0; }
+  .shared-ref.skipped { opacity: 0.55; }
+  .shared-name {
+    font-weight: 500;
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .shared-hint {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 50%;
+  }
 
   /* ── Rows ── */
   .rows { display: flex; flex-direction: column; gap: 8px; }

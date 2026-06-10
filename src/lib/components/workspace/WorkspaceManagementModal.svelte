@@ -23,7 +23,7 @@
   } from '$lib/types/workspace';
   import {
     workspaceHealthScan, workspaceFetchAll, workspacePullAll,
-    exportWorkspace, importWorkspacePreview, registerRepoPath,
+    exportWorkspace, exportWorkspaceGroup, registerRepoPath,
   } from '$lib/ipc/workspace';
   import {
     startWorkspaceFetchOperation, startWorkspacePullOperation,
@@ -448,6 +448,14 @@
     } catch (e) { uiStore.showToast(`Export failed: ${e}`, 'error'); }
   }
 
+  async function exportGroup(g: WorkspaceGroup) {
+    try {
+      const payload = await exportWorkspaceGroup(g.id);
+      const text = JSON.stringify(payload, null, 2);
+      await copyToClipboard(text, { successToast: 'Group JSON copied to clipboard', errorToast: true });
+    } catch (e) { uiStore.showToast(`Export failed: ${e}`, 'error'); }
+  }
+
   // ── Filtering ───────────────────────────────────────────────────────
   const lowerQuery = $derived(query.trim().toLowerCase());
 
@@ -604,6 +612,7 @@
                 <span class="group-name">{entry.group.name}</span>
                 <span class="group-count">{entry.children.length} workspace{entry.children.length === 1 ? '' : 's'}</span>
                 <div class="group-actions" onclick={(e) => e.stopPropagation()} role="toolbar" tabindex="-1" aria-label="Group actions">
+                  <button class="icon-btn" onclick={() => exportGroup(entry.group)} use:tooltip={'Export group as JSON'}><FileUp size={12} /></button>
                   <button class="icon-btn" onclick={() => openEditGroup(entry.group)} use:tooltip={'Edit group'}><Pencil size={12} /></button>
                   <button class="icon-btn" onclick={() => askDeleteGroup(entry.group)} use:tooltip={'Delete group'}><Trash2 size={12} /></button>
                 </div>

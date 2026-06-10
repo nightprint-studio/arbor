@@ -79,6 +79,9 @@
   copies a portable JSON blob to the clipboard containing the workspace
   name, colour, and each member's <em>display name and remote URL</em>
   (paths are intentionally omitted so the file works across machines).
+  The export button on a <strong>group</strong> header does the same for the
+  whole group — it bundles the group's name and colour together with every
+  child workspace and its repos in one JSON.
 </p>
 <p>
   <strong>Import</strong> takes that JSON — paste it, or load a file — into a
@@ -100,6 +103,28 @@
   as a <em>not cloned</em> member — a placeholder you clone or locate later from
   Repository Management. Only a preview where every row is skipped has nothing to
   create.
+</p>
+<p>
+  Importing is <strong>idempotent</strong>. If a workspace with the same name
+  already exists, the preview flags it with a <strong>Merge</strong> badge and
+  the button reads <em>Merge into Workspace</em>: the imported repos are unioned
+  into the existing workspace (repos already there are left alone, missing ones
+  added) instead of creating a duplicate. Re-importing the same bundle changes
+  nothing.
+</p>
+<p>
+  Pasting a <strong>group bundle</strong> is detected automatically and the
+  preview switches to a <em>group → workspace → repo</em> tree: the group
+  header on top, each member workspace as a sub-section, and its repos
+  underneath. A repo shared by several workspaces is shown once with its
+  Clone / Locate controls and mirrored (read-only) under the others, so you
+  <strong>resolve it a single time</strong>. If a group with the same name
+  already exists, the imported workspaces are <strong>merged</strong> into it
+  rather than duplicating the group — and within that group, each same-named
+  member workspace is itself merged (repos unioned) while genuinely new ones
+  are added. Otherwise a fresh group with all-new workspaces is created.
+  Committing builds (or updates) everything at once, with the same non-blocking
+  rule (unresolved repos land as <em>not cloned</em>).
 </p>
 
 <h2>Bulk operations</h2>

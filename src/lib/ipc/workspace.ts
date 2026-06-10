@@ -3,6 +3,7 @@ import type {
   WorkspacesSnapshot, WorkspaceDef, WorkspaceGroup, WorkspacePatch, WorkspaceGroupPatch,
   RepoRegistryEntry, RepoRegistryEntryWithRoot, RepoRegistrationResult, TabSnapshot,
   CrossWsTabRef, TabMeta, ExportedWorkspace, ImportPreview, RepoHealth,
+  ExportedWorkspaceGroup, ImportGroupPreview,
   WorkspaceFetchStartResult, MigrationReport,
 } from '../types/workspace';
 
@@ -113,8 +114,21 @@ export const importWorkspacePreview = (payload: ExportedWorkspace): Promise<Impo
 
 export const importWorkspaceCommit = (
   name: string, colorIdx: number, repoIds: string[], groupId: string | null,
+  mergeInto: string | null = null,
 ): Promise<WorkspaceDef> =>
-  invoke('import_workspace_commit', { name, colorIdx, repoIds, groupId });
+  invoke('import_workspace_commit', { name, colorIdx, repoIds, groupId, mergeInto });
+
+export const exportWorkspaceGroup = (groupId: string): Promise<ExportedWorkspaceGroup> =>
+  invoke('export_workspace_group', { groupId });
+
+export const importWorkspaceGroupPreview = (payload: ExportedWorkspaceGroup): Promise<ImportGroupPreview> =>
+  invoke('import_workspace_group_preview', { payload });
+
+export const importWorkspaceGroupCommit = (
+  name: string, colorIdx: number, existingGroupId: string | null,
+  workspaces: { name: string; color_idx: number; repo_ids: string[]; merge_into: string | null }[],
+): Promise<void> =>
+  invoke('import_workspace_group_commit', { name, colorIdx, existingGroupId, workspaces });
 
 // ── Health + fetch-all ──────────────────────────────────────────────────────
 

@@ -11,6 +11,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - Repository Management: members whose folder was moved or deleted are now flagged inline with **Locate…** and **Clone…** buttons to restore them in place (re-pointing the existing entry, so membership and tab state survive), and each workspace header shows a count badge of its not-found repositories — visible even while collapsed.
 - Workspace import is no longer all-or-nothing: you can create the workspace with repositories left unresolved — they're added as **not cloned** placeholders and you clone or locate them later from Repository Management (where they show a distinct info-toned state with Clone as the primary action). Rows without a remote URL can be imported too and located afterwards.
+- Export and import whole **workspace groups**: the export button on a group header bundles the group and all its child workspaces into one JSON. Importing it shows a group → workspace → repo tree where a repo shared across workspaces is resolved once.
+- Importing is now **idempotent**: a workspace (or group) whose name already exists is merged — its repos are unioned into the existing one rather than creating a duplicate — flagged with a Merge badge in the preview. Re-importing the same bundle changes nothing.
 
 ### Fixed
 

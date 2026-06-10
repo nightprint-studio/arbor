@@ -121,7 +121,42 @@ export interface ImportPreviewRepo {
 export interface ImportPreview {
   name:      string;
   color_idx: number;
+  /** Existing top-level workspace with the same name → offer "merge". */
+  existing_workspace_id: string | null;
   repos:     ImportPreviewRepo[];
+}
+
+/** One member workspace inside an exported group bundle — shaped like a
+ *  single-workspace export minus the version tag (the group carries it). */
+export interface ExportedGroupMember {
+  name:      string;
+  color_idx: number;
+  repos:     ExportedRepo[];
+}
+
+export interface ExportedWorkspaceGroup {
+  arbor_workspace_group_version: number;
+  name:       string;
+  color_idx:  number;
+  workspaces: ExportedGroupMember[];
+}
+
+export interface ImportGroupPreviewWorkspace {
+  name:         string;
+  color_idx:    number;
+  /** Indices into `ImportGroupPreview.repos` (deduped union). */
+  repo_indices: number[];
+  /** Same-named workspace already in the target group → merge into it. */
+  existing_workspace_id: string | null;
+}
+
+export interface ImportGroupPreview {
+  name:              string;
+  color_idx:         number;
+  /** Set when a group with this name already exists → offer "merge". */
+  existing_group_id: string | null;
+  repos:             ImportPreviewRepo[];
+  workspaces:        ImportGroupPreviewWorkspace[];
 }
 
 export interface RepoHealth {
