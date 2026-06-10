@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Workspaces can now be exported **to a file**, not just the clipboard: the export menu on a workspace (or group) header offers *Copy JSON to clipboard* or *Save to file…*.
 - Repository Management: members whose folder was moved or deleted are now flagged inline with **Locate…** and **Clone…** buttons to restore them in place (re-pointing the existing entry, so membership and tab state survive), and each workspace header shows a count badge of its not-found repositories — visible even while collapsed.
 - Workspace import is no longer all-or-nothing: you can create the workspace with repositories left unresolved — they're added as **not cloned** placeholders and you clone or locate them later from Repository Management (where they show a distinct info-toned state with Clone as the primary action). Rows without a remote URL can be imported too and located afterwards.
 - Export and import whole **workspace groups**: the export button on a group header bundles the group and all its child workspaces into one JSON. Importing it shows a group → workspace → repo tree where a repo shared across workspaces is resolved once.
@@ -49,6 +50,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Repositories are now **forgotten** once they no longer belong to any workspace: deleting a workspace (or removing a repo from its last one) drops the repo from Arbor's registry and recent list, so a later import stops proposing it as "use existing". A repo still in another workspace, or currently open in a tab, is kept; folders on disk are never deleted.
+- Repository Management: the per-workspace header toolbar is less crowded — the three bulk git actions (Fetch all, Pull all, Tag all) are now grouped under a single **Sync** menu (its icon spins while any run), and Export is a menu offering clipboard or file.
 - File/folder pickers now use the built-in File Explorer everywhere — every "choose a file", "choose a folder", and "save as" dialog (open repository, clone destination, import/export themes & workspaces, pick an executable, export the graph/docs/stats, save a Studio document, plugin file pickers, …) opens the explorer in a focused picker mode with a Cancel/Confirm footer, so picking a path gets the same sidebar, breadcrumb, search, git overlays, and keyboard navigation as browsing. Multi-file selection and save-as (with overwrite warning) are preserved; **Ctrl/Cmd+Enter** confirms.
 - File Explorer: git awareness (status overlays, repo markers, the Changes panel, branch switching) is now **off by default** behind a master switch — when off the explorer issues no git checks, so plain browsing stays fast. Turn it on in Settings → File Explorer or the explorer's own settings page. The system-wide Ctrl+Shift+E shortcut is likewise off by default now and enabled in the same place.
 - Git Blame: large files now show a real progress bar (lines attributed / total, plus the commit the walk is on) instead of an indeterminate spinner — blame streams incrementally as it walks history. Falls back to the previous one-shot load when no `git` binary is available.

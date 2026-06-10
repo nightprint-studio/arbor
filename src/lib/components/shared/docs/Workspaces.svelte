@@ -26,7 +26,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Membership is many-to-many</div>
-    <div class="fc-desc">A repo can belong to several workspaces at once — membership is just a reference. Removing it from one workspace never deletes the repo or its path on disk.</div>
+    <div class="fc-desc">A repo can belong to several workspaces at once — membership is just a reference. Removing it from one workspace leaves it in the others; once it belongs to none, Arbor forgets it (drops the registry entry and recent-list pointer). Your folder on disk is never touched.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Tab snapshots</div>
@@ -42,7 +42,7 @@
 <ol class="step-list">
   <li>Click the workspace dropdown → <strong>Manage Workspaces…</strong> (or use your keybinding).</li>
   <li>Hit <strong>+ New Workspace</strong>. Give it a name, a palette colour, an optional group, and tick the repos that should belong to it.</li>
-  <li>Use the management modal to rename, reorder, move repos between workspaces, or delete workspaces you don't need any more. Deleting a workspace never removes the repos themselves.</li>
+  <li>Use the management modal to rename, reorder, move repos between workspaces, or delete workspaces you don't need any more. Deleting a workspace keeps any member that also lives in another workspace and forgets the rest (registry + recent list) — your folders on disk are never deleted.</li>
 </ol>
 
 <p>
@@ -75,11 +75,12 @@
 
 <h2>Import / export</h2>
 <p>
-  <strong>Export</strong> a workspace from the management modal: Arbor
-  copies a portable JSON blob to the clipboard containing the workspace
-  name, colour, and each member's <em>display name and remote URL</em>
-  (paths are intentionally omitted so the file works across machines).
-  The export button on a <strong>group</strong> header does the same for the
+  <strong>Export</strong> a workspace from the management modal: the export
+  menu offers <em>Copy JSON to clipboard</em> or <em>Save to file…</em>, both
+  producing the same portable JSON blob containing the workspace name, colour,
+  and each member's <em>display name and remote URL</em> (paths are
+  intentionally omitted so the file works across machines).
+  The export menu on a <strong>group</strong> header does the same for the
   whole group — it bundles the group's name and colour together with every
   child workspace and its repos in one JSON.
 </p>
@@ -129,10 +130,10 @@
 
 <h2>Bulk operations</h2>
 <p>
-  Each workspace header carries a small toolbar of bulk actions. They all
-  share the same engine: a single aggregated background job that walks the
-  workspace's repos sequentially, logging per-repo progress to the Job Output
-  panel. Individual repo rows show a spinner while queued and flip back to a
+  Each workspace header carries a <strong>Sync</strong> menu grouping the bulk
+  actions below. They all share the same engine: a single aggregated background
+  job that walks the workspace's repos sequentially, logging per-repo progress
+  to the Job Output panel. The Sync icon spins while any of them runs. Individual repo rows show a spinner while queued and flip back to a
   branch / ahead-behind chip when their step completes.
 </p>
 <table class="shortcuts-table">
@@ -155,7 +156,7 @@
 
 <h2>Tag all (release)</h2>
 <p>
-  The tag icon on the workspace header opens a pre-flight modal that scans
+  <strong>Tag all</strong> in the Sync menu opens a pre-flight modal that scans
   every member and surfaces any conditions you'd want to know about
   <em>before</em> stamping a release tag across the whole group:
 </p>

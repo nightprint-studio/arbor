@@ -5,12 +5,14 @@
     X, Search, Plus, ChevronDown, ChevronRight, Folder, FolderPlus, FolderX, FolderSearch, Download,
     RefreshCw, Loader, Pencil, Trash2, ExternalLink, Copy, ArrowRightLeft,
     FileDown, FileUp, AlertTriangle, LayoutPanelLeft, ArrowDownToLine,
-    CircleDot, ArrowUp, ArrowDown, Check, AlertCircle, Tag, Layers,
+    CircleDot, ArrowUp, ArrowDown, ArrowDownUp, Check, AlertCircle, Tag, Layers,
   } from 'lucide-svelte';
   import Modal from '../shared/Modal.svelte';
   import ModalHeader from '../shared/ModalHeader.svelte';
+  import Dropdown from '../shared/ui/Dropdown.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { copyToClipboard } from '$lib/utils/clipboard';
+  import { fsWriteTextFile } from '$lib/ipc/fs';
   import { animStore } from '$lib/stores/animations.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
@@ -456,6 +458,42 @@
     } catch (e) { uiStore.showToast(`Export failed: ${e}`, 'error'); }
   }
 
+  // ── Export to file ──────────────────────────────────────────────────
+  // The two export entry points (workspace / group) share one save picker.
+  // The clipboard variants live above; this one writes the same JSON to a
+  // user-picked path via fs_write_text_file.
+  let exportFilePicker = $state<
+    | { kind: 'workspace'; ws: WorkspaceDef }
+    | { kind: 'group';     g:  WorkspaceGroup }
+    | null
+  >(null);
+
+  /** Strip filesystem-unsafe chars so the suggested filename is always valid. */
+  function exportFilename(name: string, kind: 'workspace' | 'group'): string {
+    const safe = name.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-').toLowerCase() || kind;
+    return `${safe}.${kind}.json`;
+  }
+  const exportFileName = $derived(
+    exportFilePicker
+      ? exportFilePicker.kind === 'workspace'
+        ? exportFilename(exportFilePicker.ws.name, 'workspace')
+        : exportFilename(exportFilePicker.g.name, 'group')
+      : ''
+  );
+
+  async function exportToFile(path: string) {
+    const target = exportFilePicker;
+    if (!target) return;
+    exportFilePicker = null;
+    try {
+      const payload = target.kind === 'workspace'
+        ? await exportWorkspace(target.ws.id)
+        : await exportWorkspaceGroup(target.g.id);
+      await fsWriteTextFile(path, JSON.stringify(payload, null, 2));
+      uiStore.showToast('Exported to file', 'success');
+    } catch (e) { uiStore.showToast(`Export failed: ${e}`, 'error'); }
+  }
+
   // ── Filtering ───────────────────────────────────────────────────────
   const lowerQuery = $derived(query.trim().toLowerCase());
 
@@ -612,9 +650,23 @@
                 <span class="group-name">{entry.group.name}</span>
                 <span class="group-count">{entry.children.length} workspace{entry.children.length === 1 ? '' : 's'}</span>
                 <div class="group-actions" onclick={(e) => e.stopPropagation()} role="toolbar" tabindex="-1" aria-label="Group actions">
-                  <button class="icon-btn" onclick={() => exportGroup(entry.group)} use:tooltip={'Export group as JSON'}><FileUp size={12} /></button>
+                  <Dropdown
+                    position="fixed"
+                    width="230px"
+                    items={[
+                      { kind: 'item', id: 'clip', label: 'Copy JSON to clipboard', icon: Copy,     onclick: () => exportGroup(entry.group) },
+                      { kind: 'item', id: 'file', label: 'Save to file…',          icon: FileDown, onclick: () => exportFilePicker = { kind: 'group', g: entry.group } },
+                    ]}
+                  >
+                    {#snippet trigger({ open, toggle })}
+                      <button class="icon-btn caret-btn" class:active={open} onclick={toggle} use:tooltip={'Export group'}>
+                        <FileUp size={12} />
+                        <ChevronDown size={9} class="caret" />
+                      </button>
+                    {/snippet}
+                  </Dropdown>
                   <button class="icon-btn" onclick={() => openEditGroup(entry.group)} use:tooltip={'Edit group'}><Pencil size={12} /></button>
-                  <button class="icon-btn" onclick={() => askDeleteGroup(entry.group)} use:tooltip={'Delete group'}><Trash2 size={12} /></button>
+                  <button class="icon-btn danger" onclick={() => askDeleteGroup(entry.group)} use:tooltip={'Delete group'}><Trash2 size={12} /></button>
                 </div>
               </div>
               {#if !entry.group.collapsed}
@@ -735,33 +787,50 @@
         {/if}
       </div>
       <div class="ws-actions" onclick={(e) => e.stopPropagation()} onkeydown={null} role="toolbar" tabindex="-1" aria-label="Workspace actions">
-        <button
-          class="icon-btn"
-          onclick={() => startFetchAll(ws)}
-          disabled={busy || uniqIds.length === 0}
-          use:tooltip={fetchState ? 'Fetch in progress…' : 'Fetch all'}
+        <!-- Sync menu: groups the three bulk git ops (fetch / pull / tag) that
+             used to be three separate icon buttons.  The trigger spins while
+             any of them runs; items disable while busy or on an empty ws. -->
+        <Dropdown
+          position="fixed"
+          width="210px"
+          items={[
+            { kind: 'item', id: 'fetch', label: fetchState ? 'Fetching…' : 'Fetch all',     icon: RefreshCw,      disabled: busy || uniqIds.length === 0, onclick: () => startFetchAll(ws) },
+            { kind: 'item', id: 'pull',  label: pullState  ? 'Pulling…'  : 'Pull all',      icon: ArrowDownToLine, disabled: busy || uniqIds.length === 0, onclick: () => startPullAll(ws) },
+            { kind: 'separator' },
+            { kind: 'item', id: 'tag',   label: tagState   ? 'Tagging…'  : 'Tag all (release)', icon: Tag,        disabled: busy || uniqIds.length === 0, onclick: () => tagModalWs = ws },
+          ]}
         >
-          {#if fetchState}<Loader size={12} class="spin" />{:else}<RefreshCw size={12} />{/if}
-        </button>
-        <button
-          class="icon-btn"
-          onclick={() => startPullAll(ws)}
-          disabled={busy || uniqIds.length === 0}
-          use:tooltip={pullState ? 'Pull in progress…' : 'Pull all'}
-        >
-          {#if pullState}<Loader size={12} class="spin" />{:else}<ArrowDownToLine size={12} />{/if}
-        </button>
-        <button
-          class="icon-btn"
-          onclick={() => tagModalWs = ws}
-          disabled={busy || uniqIds.length === 0}
-          use:tooltip={tagState ? 'Tag in progress…' : 'Tag all (release)'}
-        >
-          {#if tagState}<Loader size={12} class="spin" />{:else}<Tag size={12} />{/if}
-        </button>
+          {#snippet trigger({ open, toggle })}
+            <button
+              class="icon-btn caret-btn"
+              class:active={open}
+              onclick={toggle}
+              disabled={uniqIds.length === 0}
+              use:tooltip={busy ? 'Sync in progress…' : 'Sync · fetch, pull, tag'}
+            >
+              {#if busy}<Loader size={12} class="spin" />{:else}<ArrowDownUp size={12} />{/if}
+              <ChevronDown size={9} class="caret" />
+            </button>
+          {/snippet}
+        </Dropdown>
         <button class="icon-btn" onclick={() => startEditWs(ws.id)} use:tooltip={'Edit workspace'} disabled={ws.id === SCRATCH_ID}><Pencil size={12} /></button>
-        <button class="icon-btn" onclick={() => exportWs(ws)} use:tooltip={'Export as JSON'}><FileUp size={12} /></button>
-        <button class="icon-btn" onclick={() => askDeleteWs(ws)} disabled={ws.id === SCRATCH_ID} use:tooltip={'Delete workspace'}><Trash2 size={12} /></button>
+        <!-- Export menu: clipboard (existing) + save-to-file (new). -->
+        <Dropdown
+          position="fixed"
+          width="230px"
+          items={[
+            { kind: 'item', id: 'clip', label: 'Copy JSON to clipboard', icon: Copy,     onclick: () => exportWs(ws) },
+            { kind: 'item', id: 'file', label: 'Save to file…',          icon: FileDown, onclick: () => exportFilePicker = { kind: 'workspace', ws } },
+          ]}
+        >
+          {#snippet trigger({ open, toggle })}
+            <button class="icon-btn caret-btn" class:active={open} onclick={toggle} use:tooltip={'Export workspace'}>
+              <FileUp size={12} />
+              <ChevronDown size={9} class="caret" />
+            </button>
+          {/snippet}
+        </Dropdown>
+        <button class="icon-btn danger" onclick={() => askDeleteWs(ws)} disabled={ws.id === SCRATCH_ID} use:tooltip={'Delete workspace'}><Trash2 size={12} /></button>
         <Contribution point="arbor:workspace-row">
           {#snippet item({ payload, fire })}
             {@const p = payload as { icon?: string; label?: string; tooltip?: string; color?: string }}
@@ -915,20 +984,20 @@
                   <RepoRelinkActions {entry} primaryAction="clone" onResolved={() => afterRelink(ws.id)} />
                   <div class="repo-actions">
                     <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
-                    <button class="icon-btn" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
+                    <button class="icon-btn danger" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
                   </div>
                 {:else if relink}
                   <RepoRelinkActions {entry} onResolved={() => afterRelink(ws.id)} />
                   <div class="repo-actions">
                     <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
-                    <button class="icon-btn" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
+                    <button class="icon-btn danger" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
                   </div>
                 {:else}
                   <div class="repo-actions">
                     <button class="icon-btn" onclick={() => openRepoTab(entry, ws.id)} use:tooltip={'Open'}><ExternalLink size={11} /></button>
                     <button class="icon-btn" onclick={(e) => openMovePopover(e, entry.id, ws.id)} use:tooltip={'Move to…'}><ArrowRightLeft size={11} /></button>
                     <button class="icon-btn" onclick={() => copyUrl(entry)} use:tooltip={'Copy URL/path'}><Copy size={11} /></button>
-                    <button class="icon-btn" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
+                    <button class="icon-btn danger" onclick={() => removeFromWorkspace(ws.id, entry.id)} use:tooltip={'Remove from workspace'}><Trash2 size={11} /></button>
                   </div>
                 {/if}
               </div>
@@ -947,7 +1016,7 @@
                   <FolderSearch size={12} /> Locate…
                 </button>
                 <div class="repo-actions">
-                  <button class="icon-btn" onclick={() => removeFromWorkspace(ws.id, repoId)} use:tooltip={'Remove orphan from workspace'}>
+                  <button class="icon-btn danger" onclick={() => removeFromWorkspace(ws.id, repoId)} use:tooltip={'Remove orphan from workspace'}>
                     <Trash2 size={11} />
                   </button>
                 </div>
@@ -1000,6 +1069,18 @@
   />
 {/if}
 
+<!-- Export-to-file save picker (workspace or group) -->
+{#if exportFilePicker}
+  <FileExplorerModal
+    mode="save"
+    extensions={['json']}
+    initialFilename={exportFileName}
+    title={exportFilePicker.kind === 'workspace' ? 'Export workspace' : 'Export group'}
+    onConfirm={exportToFile}
+    onCancel={() => exportFilePicker = null}
+  />
+{/if}
+
 <!-- Group create / edit modal -->
 {#if groupFormOpen}
   <GroupFormModal
@@ -1034,7 +1115,7 @@
       ? `"${confirmDelete.ws.name}" will be removed from the list.`
       : `"${confirmDelete.g.name}" will be removed from the list.`}
     detail={confirmDelete.kind === 'workspace'
-      ? 'The repositories inside it stay registered in Arbor and on disk — they just lose this workspace membership.'
+      ? 'Repositories that also belong to another workspace are kept. Any that don\'t are forgotten by Arbor — removed from its registry and recent list — but never deleted from disk.'
       : 'Member workspaces move back to the top level; no workspace is deleted.'}
     variant="danger"
     confirmLabel="Delete"
@@ -1620,6 +1701,26 @@
   }
   .icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
   .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  /* Trigger highlighted while its dropdown menu is open. */
+  .icon-btn.active { background: var(--bg-hover); color: var(--text-primary); }
+  /* Destructive actions (delete / remove): neutral at rest, red on hover so
+     the danger reads as severity, not decoration. Matches ConfirmModal's
+     danger variant that these buttons open. */
+  .icon-btn.danger:hover:not(:disabled) { background: var(--error-subtle); color: var(--error); }
+  /* Dropdown trigger: icon + a small caret so the button reads as a menu,
+     not a one-shot action. Auto width to fit the extra glyph. */
+  .icon-btn.caret-btn {
+    width: auto;
+    min-width: 24px;
+    gap: 1px;
+    padding: 0 3px;
+  }
+  .icon-btn.caret-btn :global(.caret) {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .icon-btn.caret-btn:hover:not(:disabled) :global(.caret),
+  .icon-btn.caret-btn.active :global(.caret) { color: var(--text-secondary); }
 
 
   .popover-backdrop {

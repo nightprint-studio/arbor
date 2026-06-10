@@ -45,6 +45,82 @@ fn workspace_payload(ws: &WorkspaceDef) -> serde_json::Value {
     })
 }
 
+/// Normalise a path for recent-repos comparison (mirror of the helper in
+/// `missing_commands`): forward slashes, no trailing slash, lower-cased on
+/// Windows so `C:\Foo` and `c:/foo/` collapse to the same key.
+fn norm_path(p: &str) -> String {
+    let s = p.replace('\\', "/");
+    let s = s.trim_end_matches('/').to_string();
+    if cfg!(windows) { s.to_lowercase() } else { s }
+}
+
+/// Drop a path from the recent-repos list (best-effort, no-op when absent or
+/// when the repo has no on-disk path). Centralised so every "forget a repo"
+/// path cleans the same surface.
+fn forget_recent_repo(state: &State<'_, AppState>, path: &str) -> Result<()> {
+    if path.trim().is_empty() { return Ok(()); }
+    let mut cfg = state.lock_config()?;
+    let target = norm_path(path);
+    let before = cfg.recent_repos.len();
+    cfg.recent_repos.retain(|p| norm_path(p) != target);
+    if cfg.recent_repos.len() != before {
+        let _ = crate::config::app_config::save(&cfg);
+    }
+    Ok(())
+}
+
+/// "Forget" a repo once it's no longer a member of any workspace.
+///
+/// When the user removes a repo from its last workspace — or deletes the
+/// workspace that held it — Arbor drops the registry entry and its recent-repos
+/// pointer, so a later import no longer matches it as "use existing". The folder
+/// on disk is never touched: this is purely about Arbor forgetting it.
+///
+/// Guards:
+/// - still referenced by another workspace → not an orphan, left alone.
+/// - currently open in a tab → kept (a tab whose repo vanished from the registry
+///   would break); it'll be cleaned up the normal way when the tab is closed.
+///
+/// Fires `on_repo_deregistered` (so plugins drop per-repo caches) and returns
+/// `true` when the entry was actually removed. The caller must hold no locks.
+fn forget_repo_if_orphaned(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    repo_id: &str,
+    reason: &str,
+) -> Result<bool> {
+    // Still a member somewhere? Then it's not an orphan.
+    if state.lock_workspaces()?.repo_is_in_any_workspace(repo_id) {
+        return Ok(false);
+    }
+    // Need path + name for the recent-repos cleanup and the hook payload.
+    let entry = {
+        let reg = state.lock_repo_registry()?;
+        reg.get(repo_id).map(|e| (e.path.clone(), e.display_name.clone()))
+    };
+    let Some((path, name)) = entry else { return Ok(false); };
+    // Don't yank a repo out from under an open tab.
+    let in_open_tab = state.lock_repos()
+        .map(|mgr| mgr.all_info().iter().any(|i| i.path == path))
+        .unwrap_or(false);
+    if in_open_tab { return Ok(false); }
+    // Drop the registry entry.
+    {
+        let mut reg = state.lock_repo_registry()?;
+        reg.remove(repo_id);
+        registry_io::save(&reg)?;
+    }
+    // Drop the recent-repos pointer too.
+    let _ = forget_recent_repo(state, &path);
+    fire_hook(app, "on_repo_deregistered", serde_json::json!({
+        "repo_id": repo_id,
+        "path":    path,
+        "name":    name,
+        "reason":  reason,
+    }));
+    Ok(true)
+}
+
 // ---------------------------------------------------------------------------
 // Aggregate DTO — single round-trip to hydrate the workspace dropdown.
 // ---------------------------------------------------------------------------
@@ -212,9 +288,13 @@ pub fn delete_workspace(
     if workspace_id == SCRATCH_ID {
         return Err(AppError::Other("cannot delete the Scratch workspace".into()));
     }
-    let deleted_payload = {
+    // Capture the payload and the member list before mutating: the members are
+    // the GC candidates once the workspace is gone.
+    let (deleted_payload, member_ids) = {
         let store = state.lock_workspaces()?;
-        store.get(&workspace_id).map(workspace_payload)
+        let payload = store.get(&workspace_id).map(workspace_payload);
+        let members = store.get(&workspace_id).map(|w| w.repo_ids.clone()).unwrap_or_default();
+        (payload, members)
     };
     {
         let mut store = state.lock_workspaces()?;
@@ -225,6 +305,11 @@ pub fn delete_workspace(
     let _ = snapshot_io::delete(&workspace_id);
     if let Some(payload) = deleted_payload {
         fire_hook(&app, "on_workspace_deleted", payload);
+    }
+    // Forget every member that's no longer referenced by another workspace, so
+    // Arbor stops proposing it as "use existing" on a later import.
+    for repo_id in member_ids {
+        let _ = forget_repo_if_orphaned(&app, &state, &repo_id, "workspace_deleted");
     }
     Ok(())
 }
@@ -369,43 +454,20 @@ pub fn remove_repo_from_workspace(
     workspace_id: String,
     repo_id: String,
 ) -> Result<()> {
-    // Was this the last workspace the repo lived in? Capture before mutating
-    // so we can decide whether to fire on_repo_deregistered after the save.
-    let was_orphaned = {
+    {
         let mut store = state.lock_workspaces()?;
         store.remove_repo(&workspace_id, &repo_id)?;
-        let orphaned = !store.repo_is_in_any_workspace(&repo_id);
         store_io::save(&store)?;
-        orphaned
-    };
+    }
     fire_hook(&app, "on_workspace_repo_removed", serde_json::json!({
         "workspace_id": workspace_id,
         "repo_id":      repo_id,
     }));
 
-    // Repo is no longer in any workspace. If it's also not currently open in
-    // any tab, treat it as deregistered so plugins can drop their per-repo
-    // caches. The registry entry itself stays (the user can re-add it later)
-    // — this hook is purely for cache cleanup.
-    if was_orphaned {
-        let path_name = {
-            let reg = state.lock_repo_registry()?;
-            reg.get(&repo_id).map(|e| (e.path.clone(), e.display_name.clone()))
-        };
-        if let Some((path, name)) = path_name {
-            let in_open_tab = state.lock_repos()
-                .map(|mgr| mgr.all_info().iter().any(|i| i.path == path))
-                .unwrap_or(false);
-            if !in_open_tab {
-                fire_hook(&app, "on_repo_deregistered", serde_json::json!({
-                    "repo_id": repo_id,
-                    "path":    path,
-                    "name":    name,
-                    "reason":  "removed_from_last_workspace",
-                }));
-            }
-        }
-    }
+    // If that was the repo's last workspace, forget it entirely (drop the
+    // registry entry + recent-repos pointer, fire on_repo_deregistered). Kept
+    // when it's still open in a tab. See forget_repo_if_orphaned.
+    let _ = forget_repo_if_orphaned(&app, &state, &repo_id, "removed_from_last_workspace");
     Ok(())
 }
 
@@ -555,6 +617,7 @@ pub fn delete_registry_repo(
         registry_io::save(&reg)?;
     }
     if let Some((path, name)) = path_name {
+        let _ = forget_recent_repo(&state, &path);
         fire_hook(&app, "on_repo_deregistered", serde_json::json!({
             "repo_id": repo_id,
             "path":    path,
