@@ -127,6 +127,16 @@
   Committing builds (or updates) everything at once, with the same non-blocking
   rule (unresolved repos land as <em>not cloned</em>).
 </p>
+<p>
+  <strong>Full backup.</strong> <em>Export all</em> in the management toolbar writes
+  every group and top-level workspace (Scratch excluded) to a single bundle file.
+  Importing one is detected automatically and restores the whole set in one shot:
+  it's non-blocking and idempotent — groups and workspaces are merged by name (no
+  duplicates, re-importing the same file changes nothing), repositories Arbor
+  already knows are linked, and the rest land as <em>not cloned</em> to clone or
+  locate later. The restore screen shows a count summary and the group → workspace
+  tree before you confirm.
+</p>
 
 <h2>Bulk operations</h2>
 <p>

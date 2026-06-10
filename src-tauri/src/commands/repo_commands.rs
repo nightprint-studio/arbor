@@ -46,37 +46,20 @@ pub fn close_repo(state: State<'_, AppState>, tab_id: String) -> Result<(), AppE
         serde_json::json!({ "tab_id": &tab_id, "path": &path, "name": &name }),
     );
 
-    // After the close, decide whether the repo is now orphaned:
-    //   · not open in any other tab, AND
-    //   · not present in any workspace (or not in the registry at all).
-    // When that's the case, fire `on_repo_deregistered` so plugins can drop
-    // their per-repo caches. We don't touch the registry entry itself —
-    // the user can re-add the path later and the cache stays cleared.
+    // After the close, if the repo is now orphaned — no other tab open AND not a
+    // member of any workspace — forget it: drop the registry entry + recent-list
+    // pointer and fire `on_repo_deregistered`. This is the deferred half of the
+    // workspace GC: deleting a workspace (or removing a repo from its last one)
+    // keeps the entry while a tab is still open, and closing that tab finishes
+    // the job here. The shared helper re-checks both conditions itself.
     if !path.is_empty() {
-        let still_open = state.lock_repos()
-            .map(|mgr| mgr.all_info().iter().any(|i| i.path == path))
-            .unwrap_or(false);
-        if !still_open {
-            let repo_id = state.lock_repo_registry()
-                .ok()
-                .and_then(|reg| reg.find_by_path(&path).map(|e| e.id.clone()));
-            let in_any_ws = match &repo_id {
-                Some(id) => state.lock_workspaces()
-                    .map(|store| store.repo_is_in_any_workspace(id))
-                    .unwrap_or(true), // assume in_any if lookup fails — safer default
-                None => false, // not in registry → definitely not in any workspace
-            };
-            if !in_any_ws {
-                state.fire_hook(
-                    "on_repo_deregistered",
-                    serde_json::json!({
-                        "repo_id": repo_id,
-                        "path":    &path,
-                        "name":    &name,
-                        "reason":  "tab_closed_when_orphan",
-                    }),
-                );
-            }
+        let repo_id = state.lock_repo_registry()
+            .ok()
+            .and_then(|reg| reg.find_by_path(&path).map(|e| e.id.clone()));
+        if let Some(id) = repo_id {
+            let _ = crate::commands::workspace_commands::forget_repo_if_orphaned(
+                &state, &id, "tab_closed_when_orphan",
+            );
         }
     }
     Ok(())

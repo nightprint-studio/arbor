@@ -3,7 +3,7 @@ import type {
   WorkspacesSnapshot, WorkspaceDef, WorkspaceGroup, WorkspacePatch, WorkspaceGroupPatch,
   RepoRegistryEntry, RepoRegistryEntryWithRoot, RepoRegistrationResult, TabSnapshot,
   CrossWsTabRef, TabMeta, ExportedWorkspace, ImportPreview, RepoHealth,
-  ExportedWorkspaceGroup, ImportGroupPreview,
+  ExportedWorkspaceGroup, ImportGroupPreview, ExportedBundle, ImportBundleResult,
   WorkspaceFetchStartResult, MigrationReport,
 } from '../types/workspace';
 
@@ -129,6 +129,14 @@ export const importWorkspaceGroupCommit = (
   workspaces: { name: string; color_idx: number; repo_ids: string[]; merge_into: string | null }[],
 ): Promise<void> =>
   invoke('import_workspace_group_commit', { name, colorIdx, existingGroupId, workspaces });
+
+/** Export every group + top-level workspace into one portable backup bundle. */
+export const exportAllWorkspaces = (): Promise<ExportedBundle> =>
+  invoke('export_all_workspaces');
+
+/** Restore a backup bundle (non-blocking: unknown repos land as "not cloned"). */
+export const importBundleCommit = (payload: ExportedBundle): Promise<ImportBundleResult> =>
+  invoke('import_bundle_commit', { payload });
 
 // ── Health + fetch-all ──────────────────────────────────────────────────────
 

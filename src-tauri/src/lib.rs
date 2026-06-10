@@ -1049,6 +1049,8 @@ pub fn run() {
             commands::workspace_commands::export_workspace_group,
             commands::workspace_commands::import_workspace_group_preview,
             commands::workspace_commands::import_workspace_group_commit,
+            commands::workspace_commands::export_all_workspaces,
+            commands::workspace_commands::import_bundle_commit,
             commands::workspace_commands::workspace_health_scan,
             commands::workspace_commands::workspace_fetch_all,
             commands::workspace_commands::workspace_pull_all,

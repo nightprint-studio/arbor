@@ -83,8 +83,10 @@ fn forget_recent_repo(state: &State<'_, AppState>, path: &str) -> Result<()> {
 ///
 /// Fires `on_repo_deregistered` (so plugins drop per-repo caches) and returns
 /// `true` when the entry was actually removed. The caller must hold no locks.
-fn forget_repo_if_orphaned(
-    app: &AppHandle,
+///
+/// `pub(crate)` so `repo_commands::close_repo` can run the same GC when an
+/// orphan's last tab closes — keeping "forget an orphan" in one place.
+pub(crate) fn forget_repo_if_orphaned(
     state: &State<'_, AppState>,
     repo_id: &str,
     reason: &str,
@@ -112,7 +114,7 @@ fn forget_repo_if_orphaned(
     }
     // Drop the recent-repos pointer too.
     let _ = forget_recent_repo(state, &path);
-    fire_hook(app, "on_repo_deregistered", serde_json::json!({
+    state.fire_hook("on_repo_deregistered", serde_json::json!({
         "repo_id": repo_id,
         "path":    path,
         "name":    name,
@@ -309,7 +311,7 @@ pub fn delete_workspace(
     // Forget every member that's no longer referenced by another workspace, so
     // Arbor stops proposing it as "use existing" on a later import.
     for repo_id in member_ids {
-        let _ = forget_repo_if_orphaned(&app, &state, &repo_id, "workspace_deleted");
+        let _ = forget_repo_if_orphaned(&state, &repo_id, "workspace_deleted");
     }
     Ok(())
 }
@@ -466,8 +468,8 @@ pub fn remove_repo_from_workspace(
 
     // If that was the repo's last workspace, forget it entirely (drop the
     // registry entry + recent-repos pointer, fire on_repo_deregistered). Kept
-    // when it's still open in a tab. See forget_repo_if_orphaned.
-    let _ = forget_repo_if_orphaned(&app, &state, &repo_id, "removed_from_last_workspace");
+    // when it's still open in a tab — close_repo runs the same GC on tab close.
+    let _ = forget_repo_if_orphaned(&state, &repo_id, "removed_from_last_workspace");
     Ok(())
 }
 
@@ -997,6 +999,179 @@ pub fn import_workspace_group_commit(
         );
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Full backup — every group (with members) + every top-level workspace in one
+// portable bundle.  Scratch is excluded (it's an ephemeral catch-all, not a
+// curated workspace worth restoring).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExportedBundle {
+    pub arbor_workspace_bundle_version: u32,
+    pub groups:     Vec<ExportedWorkspaceGroup>,
+    pub workspaces: Vec<ExportedWorkspace>,
+}
+
+#[tauri::command]
+pub fn export_all_workspaces(state: State<'_, AppState>) -> Result<ExportedBundle> {
+    let store = state.lock_workspaces()?;
+    let reg   = state.lock_repo_registry()?;
+    let repos_of = |ws: &WorkspaceDef| -> Vec<ExportedRepo> {
+        ws.repo_ids.iter()
+            .filter_map(|id| reg.get(id))
+            .map(|e| ExportedRepo { name: e.display_name.clone(), remote_url: e.remote_url.clone() })
+            .collect()
+    };
+    // Groups (sorted) each carrying their member workspaces (sorted).
+    let mut sorted_groups = store.groups.clone();
+    sorted_groups.sort_by_key(|g| (g.order, g.name.to_lowercase()));
+    let groups = sorted_groups.iter().map(|g| {
+        let mut members: Vec<&WorkspaceDef> = store.workspaces.iter()
+            .filter(|w| w.group_id.as_deref() == Some(g.id.as_str()))
+            .collect();
+        members.sort_by_key(|w| (w.order, w.name.to_lowercase()));
+        ExportedWorkspaceGroup {
+            arbor_workspace_group_version: 1,
+            name:       g.name.clone(),
+            color_idx:  g.color_idx,
+            workspaces: members.into_iter().map(|ws| ExportedGroupMember {
+                name: ws.name.clone(), color_idx: ws.color_idx, repos: repos_of(ws),
+            }).collect(),
+        }
+    }).collect();
+    // Top-level (ungrouped) workspaces, excluding Scratch.
+    let mut top: Vec<&WorkspaceDef> = store.workspaces.iter()
+        .filter(|w| w.group_id.is_none() && w.id != SCRATCH_ID)
+        .collect();
+    top.sort_by_key(|w| (w.order, w.name.to_lowercase()));
+    let workspaces = top.into_iter().map(|ws| ExportedWorkspace {
+        arbor_workspace_version: 1,
+        name: ws.name.clone(), color_idx: ws.color_idx, repos: repos_of(ws),
+    }).collect();
+    Ok(ExportedBundle { arbor_workspace_bundle_version: 1, groups, workspaces })
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct ImportBundleResult {
+    pub groups_created:     usize,
+    pub groups_merged:      usize,
+    pub workspaces_created: usize,
+    pub workspaces_merged:  usize,
+    pub repos_linked:       usize,
+    pub repos_pending:      usize,
+}
+
+/// Restore a full bundle in one shot.  Non-blocking, like the single-workspace
+/// import: every repo is resolved against the registry by remote URL; matches
+/// are linked, the rest land as "pending" (not-cloned) entries to clone/locate
+/// later.  Groups and workspaces are reconciled by name (idempotent merge), so
+/// re-restoring the same bundle changes nothing.
+#[tauri::command]
+pub fn import_bundle_commit(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    payload: ExportedBundle,
+) -> Result<ImportBundleResult> {
+    // Dedup key: prefer the remote URL, fall back to the display name.
+    fn dedup_key(r: &ExportedRepo) -> String {
+        match r.remote_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            Some(u) => format!("url:{}", u.to_lowercase()),
+            None    => format!("name:{}", r.name.trim().to_lowercase()),
+        }
+    }
+
+    let mut result = ImportBundleResult::default();
+
+    // Pass 1 — resolve every distinct repo across the bundle to a registry id
+    // (existing match, or a fresh pending entry). One registry write for all.
+    let mut key_to_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    {
+        let mut reg = state.lock_repo_registry()?;
+        let mut all: Vec<&ExportedRepo> = Vec::new();
+        for g in &payload.groups { for w in &g.workspaces { all.extend(w.repos.iter()); } }
+        for w in &payload.workspaces { all.extend(w.repos.iter()); }
+        for r in all {
+            let key = dedup_key(r);
+            if key_to_id.contains_key(&key) { continue; }
+            // Clone the matched id up front so the immutable registry borrow
+            // ends before the (mutable) insert_pending in the None arm.
+            let existing = r.remote_url.as_deref().map(str::trim).filter(|u| !u.is_empty())
+                .and_then(|u| reg.find_by_remote_url(u))
+                .map(|e| e.id.clone());
+            let id = match existing {
+                Some(id) => { result.repos_linked += 1; id }
+                None     => { result.repos_pending += 1; reg.insert_pending(r.remote_url.clone(), &r.name) }
+            };
+            key_to_id.insert(key, id);
+        }
+        registry_io::save(&reg)?;
+    }
+
+    let ids_of = |repos: &[ExportedRepo]| -> Vec<String> {
+        let mut out = Vec::new();
+        for r in repos {
+            if let Some(id) = key_to_id.get(&dedup_key(r)) {
+                if !out.contains(id) { out.push(id.clone()); }
+            }
+        }
+        out
+    };
+
+    // Pass 2 — rebuild groups + workspaces (idempotent merge by name).
+    let mut touched: Vec<(WorkspaceDef, bool)> = Vec::new();
+    {
+        let mut store = state.lock_workspaces()?;
+        for g in &payload.groups {
+            let existing_gid = store.groups.iter()
+                .find(|x| x.name.eq_ignore_ascii_case(g.name.trim()))
+                .map(|x| x.id.clone());
+            let (gid, merged_group) = match existing_gid {
+                Some(id) => { result.groups_merged += 1; (id, true) }
+                None     => { result.groups_created += 1; (store.create_group(g.name.clone(), g.color_idx).id, false) }
+            };
+            for w in &g.workspaces {
+                let ids = ids_of(&w.repos);
+                let target = if merged_group {
+                    store.find_by_name_in_group(&w.name, Some(&gid)).map(|x| x.id.clone())
+                } else { None };
+                match target {
+                    Some(id) => {
+                        store.merge_repos_into(&id, &ids)?;
+                        if let Some(ws) = store.get(&id).cloned() { touched.push((ws, true)); }
+                        result.workspaces_merged += 1;
+                    }
+                    None => {
+                        let ws = store.create(w.name.clone(), w.color_idx, ids, Some(gid.clone()));
+                        touched.push((ws, false));
+                        result.workspaces_created += 1;
+                    }
+                }
+            }
+        }
+        for w in &payload.workspaces {
+            let ids = ids_of(&w.repos);
+            let target = store.find_by_name_in_group(&w.name, None).map(|x| x.id.clone());
+            match target {
+                Some(id) => {
+                    store.merge_repos_into(&id, &ids)?;
+                    if let Some(ws) = store.get(&id).cloned() { touched.push((ws, true)); }
+                    result.workspaces_merged += 1;
+                }
+                None => {
+                    let ws = store.create(w.name.clone(), w.color_idx, ids, None);
+                    touched.push((ws, false));
+                    result.workspaces_created += 1;
+                }
+            }
+        }
+        store_io::save(&store)?;
+    }
+    for (ws, merged) in &touched {
+        fire_hook(&app, if *merged { "on_workspace_updated" } else { "on_workspace_created" }, workspace_payload(ws));
+    }
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------

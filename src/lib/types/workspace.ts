@@ -159,6 +159,23 @@ export interface ImportGroupPreview {
   workspaces:        ImportGroupPreviewWorkspace[];
 }
 
+/** Full backup: every group (with members) + every top-level workspace. */
+export interface ExportedBundle {
+  arbor_workspace_bundle_version: number;
+  groups:     ExportedWorkspaceGroup[];
+  workspaces: ExportedWorkspace[];
+}
+
+/** Counts returned by a bundle restore, for the summary toast. */
+export interface ImportBundleResult {
+  groups_created:     number;
+  groups_merged:      number;
+  workspaces_created: number;
+  workspaces_merged:  number;
+  repos_linked:       number;
+  repos_pending:      number;
+}
+
 export interface RepoHealth {
   repo_id:      string;
   path:         string;

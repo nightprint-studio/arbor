@@ -3,7 +3,7 @@
   import {
     FileDown, Check, MapPin, Download, SkipForward, AlertCircle,
     ClipboardPaste, FolderOpen, FileJson, RefreshCw, ArrowLeft,
-    Layers, Link2, GitMerge,
+    Layers, Link2, GitMerge, Archive, FolderGit2,
   } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
@@ -13,11 +13,12 @@
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import {
     importWorkspacePreview, importWorkspaceCommit, registerRepoPath, registerPendingRepo,
-    importWorkspaceGroupPreview, importWorkspaceGroupCommit,
+    importWorkspaceGroupPreview, importWorkspaceGroupCommit, importBundleCommit,
   } from '$lib/ipc/workspace';
   import { fsReadTextFile } from '$lib/ipc/fs';
   import {
-    type ExportedWorkspace, type ExportedWorkspaceGroup, workspaceColorVar,
+    type ExportedWorkspace, type ExportedWorkspaceGroup, type ExportedBundle,
+    type ExportedRepo, workspaceColorVar,
   } from '$lib/types/workspace';
   import FileExplorerModal from '../shared/FileExplorerModal.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
@@ -36,9 +37,11 @@
   const WS_COMPLETIONS: StudioCompletionItem[] = [
     { label: 'arbor_workspace_version',       detail: 'number', type: 'property', info: 'Single-workspace export format version (currently 1).' },
     { label: 'arbor_workspace_group_version', detail: 'number', type: 'property', info: 'Group export format version (currently 1).' },
+    { label: 'arbor_workspace_bundle_version', detail: 'number', type: 'property', info: 'Full-backup bundle format version (currently 1).' },
     { label: 'name',                    detail: 'string', type: 'property', info: 'Workspace / group display name.' },
     { label: 'color_idx',               detail: 'number', type: 'property', info: 'Workspace / group color index.' },
-    { label: 'workspaces',              detail: 'array',  type: 'property', info: 'Member workspaces of a group bundle.' },
+    { label: 'groups',                  detail: 'array',  type: 'property', info: 'Exported groups in a full backup bundle.' },
+    { label: 'workspaces',              detail: 'array',  type: 'property', info: 'Member workspaces of a group, or top-level workspaces in a backup bundle.' },
     { label: 'repos',                   detail: 'array',  type: 'property', info: 'List of repositories in the workspace.' },
     { label: 'remote_url',              detail: 'string | null', type: 'property', info: 'Repository clone URL (null if local-only).' },
   ];
@@ -116,7 +119,7 @@
 
   let jsonText        = $state('');
   let parseError      = $state<string | null>(null);
-  let mode            = $state<'single' | 'group'>('single');
+  let mode            = $state<'single' | 'group' | 'bundle'>('single');
   let previewMeta     = $state<{ name: string; color_idx: number; existingWsId: string | null } | null>(null);
   // Group-import state (only meaningful when mode === 'group').
   let groupMeta       = $state<{ name: string; color_idx: number; existingGroupId: string | null } | null>(null);
@@ -127,8 +130,14 @@
   let previewing      = $state(false);
   let picker          = $state<PickerTarget | null>(null);
 
-  // True once a preview (single or group) is on screen.
-  const inPreview = $derived(previewMeta !== null || groupMeta !== null);
+  // Bundle-restore state (only meaningful when mode === 'bundle'). A full backup
+  // is restored non-blocking — no per-repo resolution UI — so we keep the raw
+  // payload plus a counts summary for the confirmation screen.
+  let bundlePayload   = $state<ExportedBundle | null>(null);
+  let bundleMeta      = $state<{ groups: number; workspaces: number; repos: number } | null>(null);
+
+  // True once a preview (single / group / bundle) is on screen.
+  const inPreview = $derived(previewMeta !== null || groupMeta !== null || bundleMeta !== null);
 
   // For each shared repo index, the position of the FIRST member workspace
   // that references it — that occurrence renders the full interactive row,
@@ -184,23 +193,48 @@
       return;
     }
     const obj = parsed as Record<string, unknown>;
-    // A group bundle carries a `workspaces` array; a single workspace a `repos`
-    // array. Detect on shape so either flavour can be pasted.
-    const isGroup = Array.isArray(obj.workspaces) || typeof obj.arbor_workspace_group_version !== 'undefined';
+    // Format detection on shape:
+    //  · a full backup bundle carries a top-level `groups` array (or the
+    //    version tag) — check it FIRST since it also has a `workspaces` array;
+    //  · a group export carries `workspaces`; a single workspace carries `repos`.
+    const isBundle = typeof obj.arbor_workspace_bundle_version !== 'undefined' || Array.isArray(obj.groups);
+    const isGroup  = Array.isArray(obj.workspaces) || typeof obj.arbor_workspace_group_version !== 'undefined';
     previewing = true;
     try {
-      if (isGroup) {
+      if (isBundle) {
+        runBundlePreview(parsed as ExportedBundle);
+      } else if (isGroup) {
         await runGroupPreview(parsed as ExportedWorkspaceGroup);
       } else if (Array.isArray(obj.repos)) {
         await runSinglePreview(parsed as ExportedWorkspace);
       } else {
-        parseError = 'not a valid workspace or group export';
+        parseError = 'not a valid workspace, group or backup export';
       }
     } catch (e) {
       parseError = `Preview failed: ${e}`;
     } finally {
       previewing = false;
     }
+  }
+
+  /** A bundle restore is non-blocking, so the "preview" is just a local count
+   *  summary — no backend round-trip, no per-repo resolution. */
+  function runBundlePreview(payload: ExportedBundle) {
+    mode = 'bundle';
+    bundlePayload = payload;
+    const groups     = Array.isArray(payload.groups) ? payload.groups : [];
+    const standalone = Array.isArray(payload.workspaces) ? payload.workspaces : [];
+    const keys = new Set<string>();
+    const addRepos = (repos: ExportedRepo[] | undefined) => {
+      for (const r of repos ?? []) {
+        const u = (r.remote_url ?? '').trim().toLowerCase();
+        keys.add(u ? `url:${u}` : `name:${(r.name ?? '').trim().toLowerCase()}`);
+      }
+    };
+    let wsCount = standalone.length;
+    for (const g of groups) for (const w of (g.workspaces ?? [])) { wsCount++; addRepos(w.repos); }
+    for (const w of standalone) addRepos(w.repos);
+    bundleMeta = { groups: groups.length, workspaces: wsCount, repos: keys.size };
   }
 
   async function runSinglePreview(payload: ExportedWorkspace) {
@@ -236,6 +270,8 @@
     groupMeta = null;
     groupWorkspaces = [];
     rows = [];
+    bundlePayload = null;
+    bundleMeta = null;
     mode = 'single';
   }
 
@@ -342,7 +378,8 @@
   }
 
   async function commit() {
-    if (mode === 'group') { await commitGroup(); return; }
+    if (mode === 'bundle') { await commitBundle(); return; }
+    if (mode === 'group')  { await commitGroup(); return; }
     if (!previewMeta || !canCreate) return;
     creating = true;
     try {
@@ -371,6 +408,27 @@
       onClose();
     } catch (e) {
       uiStore.showToast(`Import failed: ${e}`, 'error');
+    } finally {
+      creating = false;
+    }
+  }
+
+  async function commitBundle() {
+    if (!bundlePayload) return;
+    creating = true;
+    try {
+      const res = await importBundleCommit(bundlePayload);
+      await workspacesStore.load();
+      const groups = res.groups_created + res.groups_merged;
+      const ws     = res.workspaces_created + res.workspaces_merged;
+      const tail   = res.repos_pending > 0 ? ` · ${res.repos_pending} to clone/locate later` : '';
+      uiStore.showToast(
+        `Backup restored — ${groups} group${groups === 1 ? '' : 's'}, ${ws} workspace${ws === 1 ? '' : 's'}${tail}`,
+        'success',
+      );
+      onClose();
+    } catch (e) {
+      uiStore.showToast(`Restore failed: ${e}`, 'error');
     } finally {
       creating = false;
     }
@@ -422,7 +480,10 @@
           <ArrowLeft size={13} />
         </button>
       {/if}
-      {#if mode === 'group' && groupMeta}
+      {#if mode === 'bundle' && bundleMeta}
+        <Archive size={14} strokeWidth={2} />
+        <span class="modal-title">Restore Backup</span>
+      {:else if mode === 'group' && groupMeta}
         <Layers size={14} strokeWidth={2} />
         <span class="modal-title">Import Group</span>
       {:else}
@@ -435,7 +496,7 @@
   <div class="iw-body" class:behind={picker !== null} class:body-paste={!inPreview} class:body-preview={inPreview}>
       {#if !inPreview}
         <p class="lead">
-          Import a workspace — or a whole group of workspaces — from an
+          Import a workspace, a whole group, or a full backup — from an
           exported JSON. Pick the file from disk or paste its contents below.
         </p>
 
@@ -473,6 +534,51 @@
             </div>
           {/if}
         </FormField>
+      {:else if mode === 'bundle' && bundleMeta}
+        <div class="preview-meta">
+          <span class="bundle-icon"><Archive size={20} /></span>
+          <div class="meta-text">
+            <div class="meta-name"><span class="name-text">Full backup</span></div>
+            <div class="meta-stats">
+              <span>{bundleMeta.groups} group{bundleMeta.groups === 1 ? '' : 's'}</span>
+              <span class="dot">·</span>
+              <span>{bundleMeta.workspaces} workspace{bundleMeta.workspaces === 1 ? '' : 's'}</span>
+              <span class="dot">·</span>
+              <span>{bundleMeta.repos} repositor{bundleMeta.repos === 1 ? 'y' : 'ies'}</span>
+            </div>
+          </div>
+        </div>
+        <p class="bundle-note">
+          Restoring merges into your current setup by name — nothing is duplicated, and
+          re-importing the same file changes nothing. Repositories Arbor already knows are
+          linked automatically; the rest are added as <strong>not cloned</strong> for you to
+          clone or locate later from Repository Management.
+        </p>
+        {#if bundlePayload}
+          <div class="bundle-tree">
+            {#each bundlePayload.groups ?? [] as g, gi (gi)}
+              <div class="bundle-line group">
+                <Layers size={13} />
+                <span class="bl-name">{g.name}</span>
+                <span class="bl-count">{(g.workspaces ?? []).length} ws</span>
+              </div>
+              {#each g.workspaces ?? [] as w, wi (`${gi}:${wi}`)}
+                <div class="bundle-line child">
+                  <FolderGit2 size={12} />
+                  <span class="bl-name">{w.name}</span>
+                  <span class="bl-count">{(w.repos ?? []).length} repo{(w.repos ?? []).length === 1 ? '' : 's'}</span>
+                </div>
+              {/each}
+            {/each}
+            {#each bundlePayload.workspaces ?? [] as w, wi (`top:${wi}`)}
+              <div class="bundle-line">
+                <FolderGit2 size={12} />
+                <span class="bl-name">{w.name}</span>
+                <span class="bl-count">{(w.repos ?? []).length} repo{(w.repos ?? []).length === 1 ? '' : 's'}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
       {:else if mode === 'group' && groupMeta}
         <div class="preview-meta">
           <Monogram name={groupMeta.name} color={workspaceColorVar(groupMeta.color_idx)} size={26} />
@@ -731,6 +837,10 @@
     {#if !inPreview}
       <Button variant="primary" onclick={runPreview} disabled={!jsonText.trim() || previewing} loading={previewing}>
         {previewing ? 'Loading…' : 'Preview'}
+      </Button>
+    {:else if mode === 'bundle'}
+      <Button variant="primary" onclick={commit} disabled={!bundleMeta || creating} loading={creating}>
+        {creating ? 'Restoring…' : 'Restore backup'}
       </Button>
     {:else if mode === 'group'}
       <Button variant="primary" onclick={commit} disabled={!canCreate || creating} loading={creating}>
@@ -1212,5 +1322,68 @@
   .primary-mini:hover:not(:disabled) { background: var(--accent-hover); }
   .primary-mini:disabled { opacity: 0.5; cursor: not-allowed; }
   .primary-mini.wide { flex: 1; justify-content: center; }
+
+  /* ── Bundle restore ── */
+  .bundle-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-subtle);
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .bundle-note {
+    margin: 0;
+    padding: 9px 11px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .bundle-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .bundle-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+  }
+  .bundle-line :global(svg) { color: var(--text-muted); flex-shrink: 0; }
+  .bundle-line.group {
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 11px;
+    margin-top: 4px;
+  }
+  .bundle-line.group :global(svg) { color: var(--accent); }
+  /* Member workspaces sit indented under their group header. */
+  .bundle-line.child { padding-left: 26px; }
+  .bl-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bl-count {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
 
 </style>

@@ -25,7 +25,7 @@
   } from '$lib/types/workspace';
   import {
     workspaceHealthScan, workspaceFetchAll, workspacePullAll,
-    exportWorkspace, exportWorkspaceGroup, registerRepoPath,
+    exportWorkspace, exportWorkspaceGroup, exportAllWorkspaces, registerRepoPath,
   } from '$lib/ipc/workspace';
   import {
     startWorkspaceFetchOperation, startWorkspacePullOperation,
@@ -465,6 +465,7 @@
   let exportFilePicker = $state<
     | { kind: 'workspace'; ws: WorkspaceDef }
     | { kind: 'group';     g:  WorkspaceGroup }
+    | { kind: 'bundle' }
     | null
   >(null);
 
@@ -474,11 +475,15 @@
     return `${safe}.${kind}.json`;
   }
   const exportFileName = $derived(
-    exportFilePicker
-      ? exportFilePicker.kind === 'workspace'
-        ? exportFilename(exportFilePicker.ws.name, 'workspace')
-        : exportFilename(exportFilePicker.g.name, 'group')
-      : ''
+    exportFilePicker === null            ? ''
+      : exportFilePicker.kind === 'workspace' ? exportFilename(exportFilePicker.ws.name, 'workspace')
+      : exportFilePicker.kind === 'group'     ? exportFilename(exportFilePicker.g.name, 'group')
+      : 'arbor-workspaces.backup.json'
+  );
+  const exportPickerTitle = $derived(
+    exportFilePicker?.kind === 'bundle' ? 'Export all workspaces'
+      : exportFilePicker?.kind === 'group' ? 'Export group'
+      : 'Export workspace'
   );
 
   async function exportToFile(path: string) {
@@ -486,11 +491,11 @@
     if (!target) return;
     exportFilePicker = null;
     try {
-      const payload = target.kind === 'workspace'
-        ? await exportWorkspace(target.ws.id)
-        : await exportWorkspaceGroup(target.g.id);
+      const payload = target.kind === 'workspace' ? await exportWorkspace(target.ws.id)
+        : target.kind === 'group'                 ? await exportWorkspaceGroup(target.g.id)
+        :                                           await exportAllWorkspaces();
       await fsWriteTextFile(path, JSON.stringify(payload, null, 2));
-      uiStore.showToast('Exported to file', 'success');
+      uiStore.showToast(target.kind === 'bundle' ? 'Backup exported' : 'Exported to file', 'success');
     } catch (e) { uiStore.showToast(`Export failed: ${e}`, 'error'); }
   }
 
@@ -598,6 +603,9 @@
       <div class="tool-divider"></div>
       <button class="tool-btn" onclick={() => importModalOpen = true}>
         <FileDown size={13} /> Import
+      </button>
+      <button class="tool-btn" onclick={() => exportFilePicker = { kind: 'bundle' }} use:tooltip={'Export all groups and workspaces to one backup file'}>
+        <FileUp size={13} /> Export all
       </button>
     </div>
 
@@ -1075,7 +1083,7 @@
     mode="save"
     extensions={['json']}
     initialFilename={exportFileName}
-    title={exportFilePicker.kind === 'workspace' ? 'Export workspace' : 'Export group'}
+    title={exportPickerTitle}
     onConfirm={exportToFile}
     onCancel={() => exportFilePicker = null}
   />
