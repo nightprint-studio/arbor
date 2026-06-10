@@ -154,6 +154,7 @@
   import AddToWorktreeLinkModal from '../linked-worktrees/AddToWorktreeLinkModal.svelte';
   import WorktreeLinkSyncSummary from '../linked-worktrees/WorktreeLinkSyncSummary.svelte';
   import CreateWorkspaceModal from '../workspace/CreateWorkspaceModal.svelte';
+  import ImportWorkspaceModal from '../workspace/ImportWorkspaceModal.svelte';
   import { graphStore } from '$lib/stores/graph.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { pluginStore } from '$lib/stores/plugin.svelte';
@@ -1114,6 +1115,7 @@
     }
     function onManageWorkspacesEvt() { workspaceManagerOpen = true; }
     function onCreateWorkspaceEvt()  { createWorkspaceOpen = true; }
+    function onImportWorkspaceEvt()  { importWorkspaceOpen = true; }
     window.addEventListener('arbor:open-repo',         onOpenRepoEvt);
     window.addEventListener('arbor:clone-repo',        onCloneRepo);
     window.addEventListener('arbor:init-repo',         onOpenRepoEvt); // picker handles non-git folders
@@ -1124,6 +1126,7 @@
     window.addEventListener('arbor:open-ws-repo',      onOpenWsRepoEvt);
     window.addEventListener('arbor:manage-workspaces', onManageWorkspacesEvt);
     window.addEventListener('arbor:create-workspace',  onCreateWorkspaceEvt);
+    window.addEventListener('arbor:import-workspace',  onImportWorkspaceEvt);
     return () => {
       window.removeEventListener('arbor:open-repo',         onOpenRepoEvt);
       window.removeEventListener('arbor:clone-repo',        onCloneRepo);
@@ -1135,6 +1138,7 @@
       window.removeEventListener('arbor:open-ws-repo',      onOpenWsRepoEvt);
       window.removeEventListener('arbor:manage-workspaces', onManageWorkspacesEvt);
       window.removeEventListener('arbor:create-workspace',  onCreateWorkspaceEvt);
+      window.removeEventListener('arbor:import-workspace',  onImportWorkspaceEvt);
     };
   });
 
@@ -1240,6 +1244,7 @@
         initModalOpen ||
         createWorkspaceOpen ||
         workspaceManagerOpen ||
+        importWorkspaceOpen ||
         uiStore.repoBrowserOpen ||
         uiStore.marketplaceOpen ||
         statsOverlayOpen ||
@@ -1780,6 +1785,7 @@
   // Workspace modal state
   let workspaceManagerOpen = $state(false);
   let createWorkspaceOpen  = $state(false);
+  let importWorkspaceOpen  = $state(false);
 
   // Deep-link follow-up modal state.  These two host the modals that the
   // deep-link dispatcher needs but that aren't normally rendered top-level
@@ -2600,6 +2606,13 @@
   {#if createWorkspaceOpen}
     <CreateWorkspaceModal
       onClose={() => createWorkspaceOpen = false}
+    />
+  {/if}
+
+  <!-- Modal: Import Workspace (from exported JSON) -->
+  {#if importWorkspaceOpen}
+    <ImportWorkspaceModal
+      onClose={() => importWorkspaceOpen = false}
     />
   {/if}
 

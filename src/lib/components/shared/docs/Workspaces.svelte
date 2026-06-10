@@ -81,8 +81,12 @@
   (paths are intentionally omitted so the file works across machines).
 </p>
 <p>
-  <strong>Import</strong> takes that JSON and shows a preview table. For
-  each repo the row proposes an action:
+  <strong>Import</strong> takes that JSON — paste it, or load a file — into a
+  code editor with syntax highlighting, line numbers, and autocompletion of the
+  export's fixed keys (type <code>workspace</code> and press
+  <Kbd keys={['Ctrl', 'Space']} /> for a ready-made skeleton). Preview it to get
+  a table where each repo row proposes an action. Open it from the workspace
+  manager, or straight from the Command Palette (<em>Import Workspace</em>):
 </p>
 <ul>
   <li><strong>Use existing</strong> — if Arbor already has a matching repo (matched by remote URL) locally.</li>

@@ -349,6 +349,9 @@
       { id: 'action:create-workspace', kind: 'action', icon: 'Plus', group: 'Workspaces',
         title: 'Create Workspace', subtitle: 'Create a new workspace',
         action: () => closeAndDispatch('arbor:create-workspace') },
+      { id: 'action:import-workspace', kind: 'action', icon: 'FileDown', group: 'Workspaces',
+        title: 'Import Workspace', subtitle: 'Import a workspace from exported JSON',
+        action: () => closeAndDispatch('arbor:import-workspace') },
     );
 
     // ── Tabs ────────────────────────────────────────────────────────────────

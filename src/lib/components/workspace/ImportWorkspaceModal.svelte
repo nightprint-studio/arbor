@@ -18,9 +18,47 @@
   import FileExplorerModal from '../shared/FileExplorerModal.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
+  import StudioTextPane from '$lib/components/shared/studio/StudioTextPane.svelte';
+  import type {
+    StudioCompletionItem, StudioSnippetItem,
+  } from '$lib/utils/studio-codemirror';
 
   interface Props { onClose: () => void; }
   let { onClose }: Props = $props();
+
+  // The exported-workspace schema is fixed, so the JSON editor can offer the
+  // exact set of keys (+ skeleton snippets) as completions. Type a key inside
+  // a string, or `workspace` / `repo` in an empty spot, then Ctrl-Space.
+  const WS_COMPLETIONS: StudioCompletionItem[] = [
+    { label: 'arbor_workspace_version', detail: 'number', type: 'property', info: 'Export format version (currently 1).' },
+    { label: 'name',                    detail: 'string', type: 'property', info: 'Workspace display name.' },
+    { label: 'color_idx',               detail: 'number', type: 'property', info: 'Workspace color index.' },
+    { label: 'repos',                   detail: 'array',  type: 'property', info: 'List of repositories in the workspace.' },
+    { label: 'remote_url',              detail: 'string | null', type: 'property', info: 'Repository clone URL (null if local-only).' },
+  ];
+
+  const WS_SNIPPETS: StudioSnippetItem[] = [
+    {
+      label: 'workspace',
+      detail: 'full export skeleton',
+      type: 'keyword',
+      template:
+        '{\n' +
+        '  "arbor_workspace_version": 1,\n' +
+        '  "name": "${1:My Workspace}",\n' +
+        '  "color_idx": ${2:0},\n' +
+        '  "repos": [\n' +
+        '    { "name": "${3:repo-name}", "remote_url": ${4:null} }\n' +
+        '  ]\n' +
+        '}',
+    },
+    {
+      label: 'repo',
+      detail: 'repo entry',
+      type: 'keyword',
+      template: '{ "name": "${1:repo-name}", "remote_url": "${2:https://…}" }',
+    },
+  ];
 
   type RowAction = 'use-existing' | 'locate' | 'clone' | 'skip' | 'pending';
   interface RowState {
@@ -243,14 +281,16 @@
           </button>
         </div>
 
-        <FormField label="Workspace JSON" for="ws-json">
-          <textarea
-            id="ws-json"
-            class="json-area"
-            bind:value={jsonText}
-            placeholder={'{ "arbor_workspace_version": 1, "name": "Project X", "color_idx": 3, "repos": [...] }'}
-            spellcheck="false"
-          ></textarea>
+        <FormField label="Workspace JSON" hint="Type “workspace” then Ctrl-Space for a ready-made skeleton.">
+          <div class="json-editor">
+            <StudioTextPane
+              value={jsonText}
+              language="json"
+              completions={WS_COMPLETIONS}
+              snippets={WS_SNIPPETS}
+              oninput={(t) => { jsonText = t; if (parseError) parseError = null; }}
+            />
+          </div>
           {#if parseError}
             <div class="inline-error">
               <AlertCircle size={12} />
@@ -516,25 +556,25 @@
   .big-action-sub { font-size: 11px; color: var(--text-muted); }
 
   /* ── Fields ── */
-  .json-area {
-    resize: vertical;
+  /* CodeMirror host: the editor (StudioTextPane) flexes to fill this box.
+     Vertically resizable like the old textarea; the border + focus ring live
+     here since the editor itself is borderless. */
+  .json-editor {
+    display: flex;
+    flex-direction: column;
+    height: 240px;
     min-height: 160px;
-    padding: 10px 12px;
-    background: var(--bg-input);
-    color: var(--text-primary);
+    resize: vertical;
+    overflow: hidden;
+    background: var(--bg-base);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-family: var(--font-code);
-    font-size: 12px;
-    line-height: 1.5;
-    outline: none;
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   }
-  .json-area:focus {
+  .json-editor:focus-within {
     border-color: var(--border-focus);
     box-shadow: 0 0 0 2px rgba(61,127,255,0.15);
   }
-  .json-area::placeholder { color: var(--text-disabled); }
 
   .inline-error {
     display: flex;
