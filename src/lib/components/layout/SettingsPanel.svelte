@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    Monitor, GitBranch, Code, Keyboard, Github, TicketCheck, FolderGit2, ChevronRight, Sparkles, GitMerge, FlaskConical, Database, Layers, BarChart2, ShieldCheck, FolderX, Terminal, GitPullRequest, Settings, Workflow, ExternalLink, Link2, Boxes, Command, Store,
+    Monitor, GitBranch, Code, Github, TicketCheck, FolderGit2, ChevronRight, Sparkles, GitMerge, FlaskConical, Database, Layers, BarChart2, ShieldCheck, FolderX, Terminal, GitPullRequest, Settings, Workflow, ExternalLink, Link2, Boxes, Command, Store,
   } from 'lucide-svelte';
   import { fade } from 'svelte/transition';
   import { tick, untrack } from 'svelte';
@@ -15,7 +15,6 @@
   import AppearanceSection            from './settings/AppearanceSection.svelte';
   import GraphSection                 from './settings/GraphSection.svelte';
   import DiffSection                  from './settings/DiffSection.svelte';
-  import KeybindingsSection           from './settings/KeybindingsSection.svelte';
   import GitSection                   from './settings/GitSection.svelte';
   import IssueTrackersSection         from './settings/IssueTrackersSection.svelte';
   import RepositorySection            from './settings/RepositorySection.svelte';
@@ -45,7 +44,7 @@
     onOpenThemeEditor: () => void;
   } = $props();
 
-  type Section = 'appearance' | 'animations' | 'keystrokes' | 'graph' | 'diff' | 'explorer' | 'git' | 'git-cli' | 'issue-trackers' | 'repository' | 'project-issue-tracker' | 'project-gitflow' | 'project-ext-integrations' | 'keybindings' | 'gitflow' | 'experimental' | 'cache' | 'ide' | 'terminals' | 'stats' | 'recovery' | 'missing-projects' | 'mr' | 'pipelines' | 'deep-link' | 'studio' | 'marketplace';
+  type Section = 'appearance' | 'animations' | 'keystrokes' | 'graph' | 'diff' | 'explorer' | 'git' | 'git-cli' | 'issue-trackers' | 'repository' | 'project-issue-tracker' | 'project-gitflow' | 'project-ext-integrations' | 'gitflow' | 'experimental' | 'cache' | 'ide' | 'terminals' | 'stats' | 'recovery' | 'missing-projects' | 'mr' | 'pipelines' | 'deep-link' | 'studio' | 'marketplace';
   let activeSection = $state<Section>('appearance');
 
   const sectionComponents: Record<Section, any> = {
@@ -54,7 +53,6 @@
     keystrokes:                  KeystrokesSection,
     graph:                       GraphSection,
     diff:                        DiffSection,
-    keybindings:                 KeybindingsSection,
     explorer:                    ExplorerSection,
     git:                         GitSection,
     'git-cli':                   GitCliSection,
@@ -88,7 +86,6 @@
         { id: 'graph',       label: 'Graph',        icon: GitBranch },
         { id: 'diff',        label: 'Diff & Stage', icon: Code      },
         { id: 'explorer',    label: 'File Explorer', icon: FolderGit2 },
-        { id: 'keybindings', label: 'Keybindings',  icon: Keyboard  },
       ],
     },
     {

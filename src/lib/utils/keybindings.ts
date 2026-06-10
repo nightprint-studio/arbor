@@ -64,6 +64,11 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   open_marketplace: { key: 'm',                 shift: true, alt: true, description: 'Open Plugin Marketplace', group: 'Panels' },
   stage_view:     { key: 's',     ctrl: true,  shift: true,  description: 'Toggle stage area',     group: 'Panels' },
   toggle_docs:    { key: 'F1',                               description: 'Toggle documentation',  group: 'Panels' },
+  // Quick keyboard-shortcuts cheat-sheet (ShortcutsModal). Sibling of F1
+  // (full documentation): F1 → docs, Shift+F1 → the searchable shortcut
+  // reference. Shift+F1 is the universal "context help" convention and is
+  // free across the existing bindings.
+  open_shortcuts: { key: 'F1',                  shift: true, description: 'Show keyboard shortcuts', group: 'Panels' },
   // Avoid Ctrl+Alt+letter — on Italian / German / French / Spanish keyboards
   // Windows synthesises AltGr as Ctrl+Alt and Chromium suppresses the
   // shortcut so the user can still type AltGr-mapped characters (@ \ ~ …).

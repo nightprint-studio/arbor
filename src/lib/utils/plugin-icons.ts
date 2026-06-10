@@ -33,7 +33,7 @@ import {
   File, FilePlus, FilePlus2, FileText, FileCode, FileJson, FileCog, FileCheck2,
   FileType, FileDown, FileUp, FileSymlink, Files,
   // Code / terminal
-  Terminal, TerminalSquare, Code, Code2, Bug, Braces,
+  Terminal, TerminalSquare, Code, Code2, Bug, Braces, Keyboard,
   // Time
   Clock, Calendar, Timer, History,
   // Charts
@@ -99,7 +99,7 @@ export const PLUGIN_ICONS: Record<string, any> = {
   FileType, FileDown, FileUp, FileSymlink, Files,
   // Aliases retained for plugins that picked these names early on.
   FileCopy2: Files, FileOutput: FileDown,
-  Terminal, TerminalSquare, Code, Code2, Bug, Braces,
+  Terminal, TerminalSquare, Code, Code2, Bug, Braces, Keyboard,
   Clock, Calendar, Timer, History,
   BarChart2, LineChart, PieChart, Activity, TrendingUp, TrendingDown,
   CheckCircle, CheckCircle2, XCircle, AlertTriangle, AlertCircle, AlertOctagon,

@@ -55,7 +55,7 @@
    * Returns a `Map` keyed by group label (insertion-ordered as encountered),
    * with the contributions inside each bucket preserved in priority order.
    *
-   * Reserved for Phase 6 callers (KeybindingsSection, CommandPalette) that
+   * Reserved for grouped-layout callers (ShortcutsModal, CommandPalette) that
    * want grouped layouts; the per-item `<Contribution>` render path doesn't
    * need it.
    */

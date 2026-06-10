@@ -417,7 +417,7 @@ end`, '.lua')}</pre>
 </p>
 
 <h2>arbor.keybinding — plugin keyboard shortcuts</h2>
-<p>Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the <strong>Plugins</strong> group in <strong>Settings → Keybindings</strong> (read-only).</p>
+<p>Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the <strong>Plugins</strong> group in the <strong>Keyboard Shortcuts</strong> panel (read-only).</p>
 <pre class="language-lua">{@html highlight(`-- Call once during on_plugin_load.
 arbor.events.on("on_plugin_load", function(_ctx)
   arbor.keybinding.register({
@@ -440,7 +440,7 @@ arbor.events.on("compile:run", function(ctx)
 end)`, '.lua')}</pre>
 <p><strong>Note:</strong> plugin keybindings take priority over unbound app keys when the shortcut matches. They do <em>not</em> override user-customised app keybindings.</p>
 <p>
-  Registered shortcuts surface automatically in <strong>Settings → Keybindings</strong>
+  Registered shortcuts surface automatically in the <strong>Keyboard Shortcuts</strong> panel
   (read-only "Plugins" section) and the <strong>Shortcuts</strong> documentation page.
   No extra UI wiring is required from the plugin side.
 </p>

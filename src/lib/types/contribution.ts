@@ -35,7 +35,7 @@ export interface PluginContribution {
    *  unregister/re-register. */
   disabled?:   boolean;
   /** Optional group label for consumers that bucket contributions
-   *  (CommandPalette sections, KeybindingsSection groups, …). */
+   *  (CommandPalette sections, ShortcutsModal groups, …). */
   group?:      string;
 }
 

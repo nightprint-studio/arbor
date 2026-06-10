@@ -177,6 +177,12 @@ function createUiStore() {
    *  Driven by the Command Palette only — no shortcut, no menu entry. */
   let activeSchedulesOpen     = $state(false);
 
+  /** True while the keyboard-shortcuts cheat-sheet (ShortcutsModal) is mounted
+   *  in AppShell. Driven by the gear menu, the Command Palette and the
+   *  open_shortcuts shortcut (Shift+F1) — so it floats over whatever panel is
+   *  active instead of replacing it. */
+  let shortcutsHelpOpen       = $state(false);
+
   let appFocused        = $state(true);   // tracks window focus / visibility
 
   let toastCounter = 0;
@@ -517,6 +523,9 @@ function createUiStore() {
   function closeMarketplace() { marketplaceOpen = false; }
   function openActiveSchedules()  { activeSchedulesOpen = true; }
   function closeActiveSchedules() { activeSchedulesOpen = false; }
+  function openShortcutsHelp()    { shortcutsHelpOpen = true; }
+  function closeShortcutsHelp()   { shortcutsHelpOpen = false; }
+  function toggleShortcutsHelp()  { shortcutsHelpOpen = !shortcutsHelpOpen; }
 
   return {
     get sidebarWidth()           { return sidebarWidth; },
@@ -561,10 +570,12 @@ function createUiStore() {
     get addToLinkRepoId()         { return addToLinkRepoId; },
     get marketplaceOpen()         { return marketplaceOpen; },
     get activeSchedulesOpen()     { return activeSchedulesOpen; },
+    get shortcutsHelpOpen()       { return shortcutsHelpOpen; },
     openLinkManager, closeLinkManager,
     openAddToLink, closeAddToLink,
     openMarketplace, closeMarketplace,
     openActiveSchedules, closeActiveSchedules,
+    openShortcutsHelp, closeShortcutsHelp, toggleShortcutsHelp,
     setPanel, setSidebarWidth, setRightSidebarWidth, setBottomHeight,
     setAppFocused,
     setActiveSidebarSection, toggleSidebarSection, toggleSidebarVisibility,

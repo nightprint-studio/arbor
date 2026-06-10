@@ -256,8 +256,8 @@
   // Maps a palette leaf-action id to the matching built-in keybinding action
   // id (in keybindings.ts). The palette renders the live shortcut next to
   // the row so users discover the kbd as they hunt for the command — and a
-  // user remap in Settings → Keybindings flows here automatically through
-  // `shortcutFor`. Items without an entry here intentionally have no kbd.
+  // user remap in the Keyboard Shortcuts panel flows here automatically
+  // through `shortcutFor`. Items without an entry here intentionally have no kbd.
   const LEAF_TO_KEYBINDING: Record<string, string> = {
     'action:open-repo':          'open_repo',
     'action:clone-repo':         'clone_repo',
@@ -280,6 +280,7 @@
     'action:plugins':            'plugins',
     'action:marketplace':        'open_marketplace',
     'action:docs':               'toggle_docs',
+    'action:shortcuts':          'open_shortcuts',
     'action:jump-head':          'jump_to_head',
     // Sidebar / bottom section toggles — auto-generated `action:show-<id>` rows
     'action:show-branches':      'toggle_branches_sidebar',
@@ -628,6 +629,10 @@
       { id: 'action:docs',         kind: 'action', icon: 'FileText',  group: 'System',
         title: 'Documentation',
         action: () => { uiStore.setPanel('docs'); onClose(); } },
+      { id: 'action:shortcuts',    kind: 'action', icon: 'Keyboard',  group: 'System',
+        title: 'Keyboard Shortcuts',
+        subtitle: 'Search and rebind every shortcut',
+        action: () => { uiStore.openShortcutsHelp(); onClose(); } },
       { id: 'action:welcome-tour', kind: 'action', icon: 'Sparkles',  group: 'System',
         title: 'Welcome Tour',
         subtitle: 'Re-open the first-run onboarding walkthrough',

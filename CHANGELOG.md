@@ -9,12 +9,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Keyboard Shortcuts panel**: a searchable, floating panel to look up *and* rebind every shortcut in one place — open with **Shift+F1**, the gear menu (*Keyboard Shortcuts…*), or the Command Palette. Filter by action, click a shortcut to record a new combination, reset one binding or all to defaults; plugin-registered shortcuts are listed read-only.
 - **Full backup / restore**: *Export all* in the Repository Management toolbar writes every group and workspace to one bundle file, and importing such a file restores the whole set in one shot — idempotent (merged by name) and non-blocking (unknown repos land as *not cloned*).
 - Workspaces can now be exported **to a file**, not just the clipboard: the export menu on a workspace (or group) header offers *Copy JSON to clipboard* or *Save to file…*.
 - Repository Management: members whose folder was moved or deleted are now flagged inline with **Locate…** and **Clone…** buttons to restore them in place (re-pointing the existing entry, so membership and tab state survive), and each workspace header shows a count badge of its not-found repositories — visible even while collapsed.
 - Workspace import is no longer all-or-nothing: you can create the workspace with repositories left unresolved — they're added as **not cloned** placeholders and you clone or locate them later from Repository Management (where they show a distinct info-toned state with Clone as the primary action). Rows without a remote URL can be imported too and located afterwards.
 - Export and import whole **workspace groups**: the export button on a group header bundles the group and all its child workspaces into one JSON. Importing it shows a group → workspace → repo tree where a repo shared across workspaces is resolved once.
 - Importing is now **idempotent**: a workspace (or group) whose name already exists is merged — its repos are unioned into the existing one rather than creating a duplicate — flagged with a Merge badge in the preview. Re-importing the same bundle changes nothing.
+
+### Changed
+
+- Keybindings are no longer a Settings section — viewing and customising shortcuts now live together in the dedicated Keyboard Shortcuts panel (**Shift+F1**).
 
 ### Fixed
 

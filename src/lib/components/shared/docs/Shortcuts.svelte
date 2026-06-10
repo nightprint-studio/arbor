@@ -39,7 +39,9 @@
 
 <h1>Keyboard Shortcuts</h1>
 
-<p class="doc-lead">Arbor is designed to be fully keyboard-navigable. Most actions have a default shortcut, and every built-in binding is rebindable from Settings → Keybindings.</p>
+<p class="doc-lead">Arbor is designed to be fully keyboard-navigable. Most actions have a default shortcut, and every built-in binding is rebindable.</p>
+
+<p class="hint">The <strong>Keyboard Shortcuts</strong> panel is where you both look up and rebind shortcuts — open it with <Kbd action="open_shortcuts" size="sm" />, from the gear menu, or the Command Palette. It's searchable, floats over whatever you're doing, and a click on any shortcut records a new combination. This documentation page is the full reference: it additionally covers contextual keys that can't be rebound, such as commit-graph navigation, the diff viewer and the file picker.</p>
 
 <h2>Global shortcuts</h2>
 <table class="shortcuts-table">
@@ -56,6 +58,7 @@
     <tr><td><Kbd action="workspace_manager" size="sm" /></td><td>Open Workspace Manager</td></tr>
     <tr><td><Kbd action="settings" size="sm" /></td><td>Open Settings</td></tr>
     <tr><td><Kbd action="toggle_docs" size="sm" /></td><td>Toggle Documentation</td></tr>
+    <tr><td><Kbd action="open_shortcuts" size="sm" /></td><td>Open the searchable Keyboard Shortcuts cheat-sheet</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></td><td>Open the File Explorer in a dedicated window — registered system-wide so it works even when Arbor isn't focused. Off by default and rebindable; enable / change it in Settings → File Explorer (or the explorer's own settings page)</td></tr>
     <tr><td><kbd>Escape</kbd></td><td>Close current panel / search / modal</td></tr>
   </tbody>
@@ -231,13 +234,13 @@
   <li><strong>Right-click context menus</strong> — branch, commit, tab, stage entries.</li>
   <li><strong>Tooltips</strong> on Activity Bar, Status Bar and TitleBar buttons (e.g. hovering the Fetch button shows <em>Fetch from remote (Ctrl+Shift+F)</em>).</li>
 </ul>
-<p>All bindings flow from a single source of truth, so a remap in <strong>Settings → Keybindings</strong> updates every hint in place — no restart required.</p>
+<p>All bindings flow from a single source of truth, so a rebind in the <strong>Keyboard Shortcuts</strong> panel updates every hint in place — no restart required.</p>
 
 <h2>Customizing shortcuts</h2>
-<p>All built-in shortcuts are rebindable via <strong>Settings → Keybindings</strong>. Click any shortcut chip to record a new key combination; press <kbd>Escape</kbd> while recording to cancel. A reset icon appears next to modified bindings.</p>
+<p>All built-in shortcuts are rebindable from the <strong>Keyboard Shortcuts</strong> panel (<Kbd action="open_shortcuts" size="sm" />). Click any shortcut chip to record a new key combination; press <kbd>Escape</kbd> while recording to cancel. A reset icon appears next to modified bindings, and <strong>Reset all</strong> restores every default.</p>
 
 <h2>Plugin shortcuts</h2>
-<p>Plugins can register their own keybindings using <code>arbor.keybinding.register()</code>. Plugin shortcuts also appear in a read-only <strong>Plugins</strong> section at the bottom of Settings → Keybindings. They fire the associated Lua action directly and take priority if no built-in binding is mapped to the same combination.</p>
+<p>Plugins can register their own keybindings using <code>arbor.keybinding.register()</code>. Plugin shortcuts also appear in a read-only <strong>Plugins</strong> section at the bottom of the <strong>Keyboard Shortcuts</strong> panel. They fire the associated Lua action directly and take priority if no built-in binding is mapped to the same combination.</p>
 
 {#if pluginKeybindings.length > 0}
   <p>Currently registered by enabled plugins:</p>

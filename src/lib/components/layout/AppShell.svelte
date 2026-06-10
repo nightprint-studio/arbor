@@ -1324,6 +1324,9 @@
         const ALLOWED_OFF_GRAPH = new Set([
           'settings', 'plugins', 'open_marketplace', 'toggle_docs',
           'command_palette', 'open_project', 'open_from_workspace',
+          // The shortcuts cheat-sheet is a floating overlay — reachable from
+          // anywhere, including Settings/Docs/Plugin Manager.
+          'open_shortcuts',
           'next_tab', 'prev_tab', 'close_tab',
           // Bottom-panel toggles are independent from the active main panel —
           // the user should be able to flip them from inside Settings, Plugin
@@ -1374,6 +1377,7 @@
         case 'search':           uiStore.setSearchVisible(!uiStore.searchVisible); break;
         case 'stage_view':       uiStore.toggleBottomSection('stage'); break;
         case 'toggle_docs':      uiStore.setPanel(uiStore.activePanel === 'docs' ? 'graph' : 'docs'); break;
+        case 'open_shortcuts':   uiStore.toggleShortcutsHelp(); break;
         case 'toggle_terminal':  uiStore.toggleBottomSection('terminal'); break;
         case 'plugin_logs':      uiStore.toggleBottomSection('plugin-logs'); break;
         case 'toggle_plugin_view': uiStore.toggleMainViewVisibility(); break;
@@ -2619,6 +2623,14 @@
     gate={showDocs}
     loader={() => import('../shared/DocsPanel.svelte')}
     onClose={() => uiStore.setPanel('graph')}
+  />
+
+  <!-- Keyboard-shortcuts cheat-sheet — a floating overlay (not a panel) so it
+       can be popped over any active panel for a quick lookup. -->
+  <Lazy
+    gate={uiStore.shortcutsHelpOpen}
+    loader={() => import('../shared/ShortcutsModal.svelte')}
+    onClose={() => uiStore.closeShortcutsHelp()}
   />
 
   <!-- Modal: Workspace Manager.

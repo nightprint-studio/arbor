@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Settings, BookOpen, LayoutDashboard, Palette, Check, Command, ChevronLeft } from 'lucide-svelte';
+  import { Settings, BookOpen, LayoutDashboard, Palette, Check, Command, ChevronLeft, Keyboard } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
@@ -103,6 +103,8 @@
     closeSettingsMenu();
     if (id === 'settings') {
       uiStore.setPanel(uiStore.activePanel === 'settings' ? 'graph' : 'settings');
+    } else if (id === 'shortcuts') {
+      uiStore.openShortcutsHelp();
     } else if (id === 'customize-activity-bar') {
       customizeActivityBarOpen = true;
     }
@@ -511,6 +513,15 @@
       <Settings size={14} />
       <span>Settings…</span>
       <span class="menu-shortcut"><Kbd action="settings" variant="inline" /></span>
+    </button>
+    <button
+      class="settings-menu-item"
+      role="menuitem"
+      onclick={() => handleSettingsMenuSelect('shortcuts')}
+    >
+      <Keyboard size={14} />
+      <span>Keyboard Shortcuts…</span>
+      <span class="menu-shortcut"><Kbd action="open_shortcuts" variant="inline" /></span>
     </button>
     <button
       class="settings-menu-item"

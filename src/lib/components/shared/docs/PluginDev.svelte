@@ -320,7 +320,7 @@ end)
 arbor.command.unregister("my-action")`, '.lua')}</pre>
 
 <h2>arbor.keybinding — plugin keyboard shortcuts</h2>
-<p>Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the <strong>Plugins</strong> group in <strong>Settings → Keybindings</strong> (read-only).</p>
+<p>Register keyboard shortcuts that fire a Lua action when triggered anywhere in the app. Plugin shortcuts are visible under the <strong>Plugins</strong> group in the <strong>Keyboard Shortcuts</strong> panel (read-only).</p>
 <pre class="language-lua">{@html highlight(`-- arbor.keybinding.register(config)
 -- config: { key, action, description?, ctrl?, shift?, alt? }
 -- Call once during on_plugin_load.

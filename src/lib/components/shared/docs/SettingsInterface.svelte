@@ -195,11 +195,7 @@
 
 <h3>Keybindings</h3>
 <p>
-  Click any shortcut chip to record a new key combination. Press <kbd>Escape</kbd> while recording to cancel.
-  Use the reset icon to restore a single binding to its default. <strong>Reset all</strong> restores every binding at once.
-</p>
-<p>
-  The <strong>Plugins</strong> group at the bottom of the list shows keybindings registered by plugins — these are read-only.
+  Keyboard shortcuts are customised from the dedicated <strong>Keyboard Shortcuts</strong> panel — open it with <kbd>Shift</kbd>+<kbd>F1</kbd>, the title-bar gear menu, or the Command Palette. Search for an action, click its chip to record a new combination (<kbd>Escape</kbd> cancels), use the reset icon to restore a single default, or <strong>Reset all</strong> to restore every default. Plugin-registered shortcuts appear there too, read-only.
 </p>
 
 <h3>Activity Bar</h3>

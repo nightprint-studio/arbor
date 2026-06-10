@@ -4,7 +4,7 @@
    *
    * Resolution priority (first non-empty wins):
    *   1. `action`  — built-in action id, looked up live in keybindingsStore
-   *                  (so user remaps in Settings → Keybindings flow through)
+   *                  (so user remaps in the Keyboard Shortcuts panel flow through)
    *   2. `binding` — explicit Keybinding object (e.g. plugin-registered)
    *   3. `keys`    — array of chord parts ['Ctrl','K']
    *   4. `label`   — single string ("Ctrl+K"), split on '+'
