@@ -6,9 +6,44 @@
 //! so the same cycle always makes the same choices and a re-eval never disturbs
 //! cycles already played.
 
-use crate::combinators::compose::stack;
+use crate::combinators::compose::{fastcat, silence, stack};
 use crate::pattern::Pattern;
 use crate::rng::{time_to_rand, SEED_DEGRADE, SEED_SOMETIMES};
+
+/// Bjorklund's algorithm: spread `pulses` onsets as evenly as possible across
+/// `steps` slots, returning the on/off mask (the classic Euclidean rhythm).
+/// `pulses` is clamped to `steps`.
+fn bjorklund(pulses: u32, steps: u32) -> Vec<bool> {
+    let steps = steps as usize;
+    let pulses = (pulses as usize).min(steps);
+    if steps == 0 {
+        return Vec::new();
+    }
+    if pulses == 0 {
+        return vec![false; steps];
+    }
+    // Repeatedly pair the longer run of sequences onto the shorter one until at
+    // most one remainder sequence is left — the standard pairing construction.
+    let mut a: Vec<Vec<bool>> = vec![vec![true]; pulses];
+    let mut b: Vec<Vec<bool>> = vec![vec![false]; steps - pulses];
+    while b.len() > 1 {
+        let n = a.len().min(b.len());
+        let mut paired = Vec::with_capacity(n);
+        for i in 0..n {
+            let mut seq = a[i].clone();
+            seq.extend_from_slice(&b[i]);
+            paired.push(seq);
+        }
+        let remainder = if a.len() > b.len() {
+            a[n..].to_vec()
+        } else {
+            b[n..].to_vec()
+        };
+        a = paired;
+        b = remainder;
+    }
+    a.into_iter().chain(b).flatten().collect()
+}
 
 impl<T: Clone + Send + Sync + 'static> Pattern<T> {
     /// Keep each event with probability `1 - prob` (drop a `prob` fraction),
@@ -54,6 +89,22 @@ impl<T: Clone + Send + Sync + 'static> Pattern<T> {
     /// Apply `f` to ~50% of events.
     pub fn sometimes(self, f: impl FnOnce(Pattern<T>) -> Pattern<T>) -> Pattern<T> {
         self.sometimes_by(0.5, f)
+    }
+
+    /// Euclidean rhythm: play this pattern on the `pulses`-of-`steps` onsets
+    /// (Bjorklund), resting on the others; `rotation` rotates the mask left.
+    /// Mini-notation `bd(3,8)` / `bd(3,8,2)`. `steps == 0` → silence.
+    pub fn euclid(self, pulses: u32, steps: u32, rotation: i32) -> Pattern<T> {
+        if steps == 0 {
+            return silence();
+        }
+        let mut mask = bjorklund(pulses, steps);
+        mask.rotate_left(rotation.rem_euclid(steps as i32) as usize);
+        let slots = mask
+            .into_iter()
+            .map(|on| if on { self.clone() } else { silence() })
+            .collect();
+        fastcat(slots)
     }
 }
 
@@ -101,5 +152,39 @@ mod tests {
         // + affected partition the originals).
         let p = pure("x").fast(Time::int(8)).sometimes(|q| q);
         assert_eq!(onset_count(&p, 8), 8 * 8);
+    }
+
+    #[test]
+    fn bjorklund_classic_patterns() {
+        let t = true;
+        let f = false;
+        assert_eq!(bjorklund(3, 8), vec![t, f, f, t, f, f, t, f]); // tresillo
+        assert_eq!(bjorklund(0, 4), vec![f, f, f, f]);
+        assert_eq!(bjorklund(4, 4), vec![t, t, t, t]);
+        assert_eq!(bjorklund(5, 3).len(), 3); // pulses clamped to steps
+    }
+
+    #[test]
+    fn euclid_places_onsets_evenly() {
+        let p = pure("x").euclid(3, 8, 0);
+        let mut starts: Vec<_> = p
+            .query(TimeSpan::cycle(0))
+            .into_iter()
+            .filter(|h| h.has_onset())
+            .map(|h| h.whole.unwrap().begin)
+            .collect();
+        starts.sort();
+        assert_eq!(starts, vec![Time::ZERO, Time::new(3, 8), Time::new(6, 8)]);
+    }
+
+    #[test]
+    fn euclid_rotation_shifts_the_mask() {
+        // rotate the tresillo left by one step → first onset moves off the downbeat.
+        let p = pure("x").euclid(3, 8, 1);
+        let has_downbeat = p
+            .query(TimeSpan::cycle(0))
+            .into_iter()
+            .any(|h| h.has_onset() && h.whole.unwrap().begin == Time::ZERO);
+        assert!(!has_downbeat);
     }
 }

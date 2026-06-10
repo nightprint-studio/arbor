@@ -214,6 +214,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-grove-lang"
+version = "0.3.0"
+dependencies = [
+ "arbor-grove-pattern",
+]
+
+[[package]]
 name = "arbor-grove-pattern"
 version = "0.3.0"
 

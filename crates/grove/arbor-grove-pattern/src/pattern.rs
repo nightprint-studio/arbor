@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use crate::hap::Hap;
-use crate::span::TimeSpan;
+use crate::span::{SourceSpan, TimeSpan};
 use crate::time::Time;
 
 /// The boxed query function. `Send + Sync` so the engine can drive a pattern
@@ -148,6 +148,26 @@ impl<T: Clone + Send + Sync + 'static> Pattern<T> {
     pub fn filter_onsets(self) -> Pattern<T> {
         self.filter_haps(|h| h.has_onset())
     }
+
+    /// Stamp `span` onto every hap that doesn't already carry one.
+    ///
+    /// The language layer (Fase 1) builds each mini-notation leaf as a pattern
+    /// and tags it so every event points back at the exact source bytes for live
+    /// highlight. An inner leaf's own span is preserved (it wins over an outer
+    /// container's), so tagging a group only fills the gaps.
+    pub fn tag_span(self, span: SourceSpan) -> Pattern<T> {
+        Pattern::new(move |q| {
+            self.query(q)
+                .into_iter()
+                .map(|mut h| {
+                    if h.span.is_none() {
+                        h.span = Some(span);
+                    }
+                    h
+                })
+                .collect()
+        })
+    }
 }
 
 #[cfg(test)]
@@ -181,5 +201,21 @@ mod tests {
     fn fmap_changes_payload() {
         let p = pure(3).fmap(|n| n * 10);
         assert_eq!(p.value_at(Time::ZERO), Some(30));
+    }
+
+    #[test]
+    fn tag_span_fills_only_missing_spans() {
+        use crate::span::SourceSpan;
+        let outer = SourceSpan::new(0, 10);
+        let inner = SourceSpan::new(2, 4);
+        // A hap that already carries a span keeps it; a bare one gets `outer`.
+        let p = pure(1)
+            .tag_span(inner) // inner wins where present
+            .tag_span(outer); // fills the rest
+        let h = &p.query(TimeSpan::cycle(0))[0];
+        assert_eq!(h.span, Some(inner));
+
+        let bare = pure(1).tag_span(outer);
+        assert_eq!(bare.query(TimeSpan::cycle(0))[0].span, Some(outer));
     }
 }

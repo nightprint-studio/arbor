@@ -20,8 +20,8 @@ pub use crate::time::Time;
 
 // ── Combinators: composition ─────────────────────────────────────────────────
 pub use crate::combinators::compose::{
-    arrange, cat, cycles, fastcat, par, pure, seq, silence, slowcat, stack, track, tracks, Section,
-    Track, Tracks,
+    arrange, cat, cycles, fastcat, par, pure, seq, silence, slowcat, stack, timecat, track, tracks,
+    Section, Track, Tracks,
 };
 
 // ── Combinators: generative & voice param ────────────────────────────────────

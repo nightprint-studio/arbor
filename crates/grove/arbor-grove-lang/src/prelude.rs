@@ -1,0 +1,27 @@
+//! Canonical entry point for `arbor-grove-lang`'s public API.
+//!
+//! Workspace convention: every Arbor library crate exposes its public surface
+//! through a `prelude` module. Consumers reach it via
+//! `arbor_grove_lang::prelude::...` (or `use ...prelude::*;` once per file)
+//! rather than the per-feature submodule paths. The submodules stay `pub` for
+//! rustdoc navigation only.
+
+// ── AST ──────────────────────────────────────────────────────────────────────
+pub use crate::ast::{
+    BinOp, Expr, ExprKind, FnDef, Ident, Import, Island, IslandKind, Item, Leaf, LetBind, Mini,
+    MiniKind, Postfix, Program, UnOp,
+};
+
+// ── Errors ───────────────────────────────────────────────────────────────────
+pub use crate::error::{LangError, LangErrorKind, Result};
+
+// ── Evaluation ────────────────────────────────────────────────────────────────
+pub use crate::config::EvalConfig;
+pub use crate::env::Env;
+pub use crate::eval::{evaluate, Ctx};
+pub use crate::inject::{LogLevel, LogSink, NoImports, SilentLog, SourceLoader};
+pub use crate::parse::parse;
+pub use crate::value::{EvalOutput, Func, Transform, Value};
+
+// ── Re-exported pattern surface (so consumers need one `use`) ─────────────────
+pub use arbor_grove_pattern::prelude::{ControlMap, Pattern, SourceSpan, TimeSpan};

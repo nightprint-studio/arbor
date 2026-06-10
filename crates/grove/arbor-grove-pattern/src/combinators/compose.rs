@@ -84,6 +84,53 @@ pub fn seq<T: Clone + Send + Sync + 'static>(pats: Vec<Pattern<T>>) -> Pattern<T
     fastcat(pats)
 }
 
+/// Lay patterns in **weighted** slots inside one cycle: slot `i` spans the
+/// fraction `weight_i / Σweights` of the cycle. With all weights equal this is
+/// exactly [`fastcat`]; the weighted form is what the language layer needs for
+/// mini-notation's `@n` (elongate) and `_` (extend the previous slot).
+///
+/// Each slot plays **one cycle** of its pattern, compressed into the slot and
+/// silent outside it (Tidal's `timeCat`). Zero total weight → silence.
+pub fn timecat<T: Clone + Send + Sync + 'static>(weighted: Vec<(u32, Pattern<T>)>) -> Pattern<T> {
+    let total: i64 = weighted.iter().map(|(w, _)| *w as i64).sum();
+    if total == 0 {
+        return silence();
+    }
+    // Precompute each slot's sub-arc within the unit cycle [0, 1).
+    let mut slots: Vec<(Time, Time, Pattern<T>)> = Vec::with_capacity(weighted.len());
+    let mut acc = 0i64;
+    for (w, p) in weighted {
+        let begin = Time::new(acc, total);
+        acc += w as i64;
+        let end = Time::new(acc, total);
+        slots.push((begin, end, p));
+    }
+    Pattern::new(move |span: TimeSpan| {
+        // `split_queries` guarantees a single-cycle span, so this floor is exact.
+        let cyc = Time::int(span.begin.floor());
+        let mut out = Vec::new();
+        for (b, e, p) in &slots {
+            let width = *e - *b;
+            if width == Time::ZERO {
+                continue; // zero-weight slot (guarded; total > 0)
+            }
+            let slot_begin = cyc + *b;
+            let slot = TimeSpan::new(slot_begin, cyc + *e);
+            let Some(qpart) = span.sect(slot) else {
+                continue;
+            };
+            // Map slot-space ↔ the pattern's own cycle [0, 1).
+            let to_inner = move |t: Time| (t - slot_begin) / width;
+            let from_inner = move |t: Time| slot_begin + t * width;
+            for h in p.query(qpart.with_time(to_inner)) {
+                out.push(h.map_time(from_inner));
+            }
+        }
+        out
+    })
+    .split_queries()
+}
+
 /// A timeline section: `pattern` occupies `cycles` whole cycles. Produced by
 /// [`cycles`], consumed by [`arrange`].
 #[derive(Clone, Debug)]
@@ -200,6 +247,37 @@ mod tests {
         assert_eq!(p.query(TimeSpan::cycle(1))[0].value, "b");
         assert_eq!(p.query(TimeSpan::cycle(2))[0].value, "a"); // wraps
         assert_eq!(p.query(TimeSpan::cycle(3))[0].value, "b");
+    }
+
+    fn sorted_by_onset<T: Clone + Send + Sync + 'static>(p: &Pattern<T>) -> Vec<Hap<T>> {
+        let mut haps = first_cycle(p);
+        haps.sort_by_key(|h| h.part.begin);
+        haps
+    }
+
+    #[test]
+    fn timecat_gives_each_slot_its_weighted_share() {
+        // weights 3 and 1 → "a" fills the first 3/4, "b" the last 1/4.
+        let p = timecat(vec![(3, pure("a")), (1, pure("b"))]);
+        let haps = sorted_by_onset(&p);
+        assert_eq!(haps.len(), 2);
+        assert_eq!(haps[0].value, "a");
+        assert_eq!(haps[0].whole.unwrap(), TimeSpan::new(Time::ZERO, Time::new(3, 4)));
+        assert_eq!(haps[1].value, "b");
+        assert_eq!(haps[1].whole.unwrap(), TimeSpan::new(Time::new(3, 4), Time::ONE));
+    }
+
+    #[test]
+    fn timecat_with_equal_weights_matches_fastcat() {
+        let weighted = timecat(vec![(1, pure("a")), (1, pure("b")), (1, pure("c"))]);
+        let equal = fastcat(vec![pure("a"), pure("b"), pure("c")]);
+        let a = sorted_by_onset(&weighted);
+        let b = sorted_by_onset(&equal);
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(b.iter()) {
+            assert_eq!(x.value, y.value);
+            assert_eq!(x.whole, y.whole);
+        }
     }
 
     #[test]

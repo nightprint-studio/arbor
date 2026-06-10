@@ -21,7 +21,8 @@ crates.
   Looping is a transform (`arrange`'s wrap), not a baked-in behaviour — that's what enables long-form
   arrangements without a refactor.
 - **Source spans from day one.** Every `Hap` carries an optional `SourceSpan` (byte offsets) so the
-  live editor can highlight exactly the characters that are sounding.
+  live editor can highlight exactly the characters that are sounding; the language layer stamps them
+  with `Pattern::tag_span` (inner leaf spans win over outer containers).
 - **Per-cycle seeded RNG.** `rand`, `choose`, `degrade`, `sometimes` derive randomness from the
   event's onset time — the same cycle always makes the same choices, so a loop is bit-identical and a
   re-eval after an edit never disturbs cycles already fixed.
@@ -47,9 +48,9 @@ A hap **has an onset** in a query when `part.begin == whole.begin`.
 
 | Group | Items |
 |---|---|
-| Composition | `pure` · `silence` · `stack`/`par` · `fastcat`/`seq` · `slowcat`/`cat` · `arrange` · `cycles` · `tracks` · `track` |
+| Composition | `pure` · `silence` · `stack`/`par` · `fastcat`/`seq` · `timecat` · `slowcat`/`cat` · `arrange` · `cycles` · `tracks` · `track` |
 | Time/structure | `fast` · `slow` · `rev` · `every` · `off` · `late` · `early` |
-| Rhythm/probability | `degrade` · `degrade_by` · `sometimes` · `sometimes_by` |
+| Rhythm/probability | `degrade` · `degrade_by` · `sometimes` · `sometimes_by` · `euclid` |
 | Voice/mix | `gain` · `pan` · `room` · `lpf` · `hpf` · `shift` · `speed` · `crush` · `shape` · `inst` · `scale` · `jux` |
 | Generative | `rand` · `choose` |
 | File sources | `sample` · `audio` (markers only — decode/playback is the audio crate) |
