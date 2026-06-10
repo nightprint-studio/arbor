@@ -22,8 +22,12 @@ The layers never reach across each other (`design/grove/editing-model.md`):
   `design/grove/grammar.md` one-to-one; every node carries a `SourceSpan`.
 - **Evaluator** — `AST → Pattern<ControlMap>`. Resolves the host language (let/fn/lambda/range/map,
   arithmetic, the closed stdlib of combinators + transforms) and the mini-notation islands.
-- **Emitter** — `AST → source` (pretty-printer). The enabler for the future editor's surgical edits
-  and *materialisation* (evaluate a generative sub-tree, re-emit it as a literal).
+- **Emitter** (`emit.rs`) — `AST → source` (pretty-printer). Deterministic, minimal-paren, semantic
+  round-trip (comments/whitespace are not in the AST, so they are not recovered). The enabler for the
+  future editor's surgical edits and for *materialisation*.
+- **Materialiser** (`materialize.rs`) — evaluated haps → mini-notation AST: the value→AST half of
+  *materialisation* (evaluate a generative sub-tree, re-emit it as a literal). Base scope: one cycle,
+  discrete events, overlap split into `&` lanes, uniform grid with `~`/`@`.
 
 ## Build workflow (Tree-sitter)
 
@@ -61,14 +65,16 @@ Present:
   mini-notation islands (`island`), totality (`totality` + a runtime depth guard), and injected
   capabilities (`SourceLoader` for `import`, `LogSink` for logging). Exercised by `tests/eval.rs`,
   which builds ASTs by hand and asserts on the resulting haps.
+- the **emitter** (`AST → source`) and **materialiser** (haps → mini-notation AST). Exercised by
+  `tests/emit.rs` (golden strings on hand-built ASTs) and `tests/materialize.rs`.
 
 Coming next, against this AST:
 
-- the **emitter** (`AST → source`);
 - the **Tree-sitter front end** — `grammar.js` + external `scanner.c` + `build.rs` + the CST→AST
   walker (filling in `parse.rs`), at which point `tree-sitter` (runtime) and `cc` (build-dep) join
   `Cargo.toml`. Until then `parse()` returns a "not wired" error, so `import` (which parses loaded
-  modules) is plumbed but inert.
+  modules) is plumbed but inert. It also closes the round-trip the emitter targets:
+  `parse(emit(ast))` ≈ `ast` modulo spans.
 
 Reach the API through the prelude (workspace convention): `use arbor_grove_lang::prelude::*;`.
 

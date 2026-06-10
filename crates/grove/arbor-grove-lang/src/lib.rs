@@ -17,9 +17,11 @@
 //! ## Status (staged build)
 //!
 //! - [`ast`] + [`error`] — the typed tree and span-aware diagnostics (present).
-//! - evaluator (`AST → Pattern`), emitter (`AST → source`), and the Tree-sitter
-//!   front end (`grammar.js` + external `scanner.c` + generated `parser.c`,
-//!   compiled by `build.rs` via the `cc` crate) are wired in following steps.
+//! - [`eval`] (`AST → Pattern`), [`emit`] (`AST → source`), and
+//!   [`materialize`] (evaluated haps → mini-notation AST) are present.
+//! - the Tree-sitter front end (`grammar.js` + external `scanner.c` + generated
+//!   `parser.c`, compiled by `build.rs` via the `cc` crate) is wired in a
+//!   following step; until then [`parse`] returns a "not wired" error.
 //!
 //! ## Entry point
 //!
@@ -28,10 +30,12 @@
 pub mod ast;
 pub mod config;
 pub(crate) mod convert;
+pub mod emit;
 pub mod env;
 pub mod error;
 pub mod eval;
 pub mod inject;
+pub mod materialize;
 pub mod parse;
 pub mod prelude;
 pub mod value;

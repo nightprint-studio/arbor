@@ -23,5 +23,9 @@ pub use crate::inject::{LogLevel, LogSink, NoImports, SilentLog, SourceLoader};
 pub use crate::parse::parse;
 pub use crate::value::{EvalOutput, Func, Transform, Value};
 
+// ── Emit / materialise (AST → source, haps → mini-notation) ──────────────────
+pub use crate::emit::{emit, emit_expr};
+pub use crate::materialize::{materialize_island, materialize_source};
+
 // ── Re-exported pattern surface (so consumers need one `use`) ─────────────────
 pub use arbor_grove_pattern::prelude::{ControlMap, Pattern, SourceSpan, TimeSpan};
