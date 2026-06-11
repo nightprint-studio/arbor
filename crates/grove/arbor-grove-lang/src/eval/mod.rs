@@ -18,7 +18,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use arbor_grove_pattern::prelude::{
-    cat, parse_note, pure, seq, stack, ControlMap, Pattern, Tracks,
+    cat, parse_note, pure, seq, stack, ControlMap, Pattern, TempoMap, Tracks,
 };
 
 use crate::ast::{BinOp, Expr, ExprKind, Import, Item, Program, UnOp};
@@ -46,6 +46,8 @@ pub struct Ctx {
     pub config: EvalConfig,
     /// Set by `cps(...)`.
     pub cps: Cell<Option<f64>>,
+    /// Set by `tempo(...)` — piecewise-constant tempo automation (empty = unset).
+    pub tempo: RefCell<TempoMap>,
     /// Current call depth (runtime totality guard).
     depth: Cell<u32>,
     /// Import path stack for cycle detection.
@@ -73,6 +75,7 @@ pub fn evaluate(
         log,
         config,
         cps: Cell::new(None),
+        tempo: RefCell::new(TempoMap::none()),
         depth: Cell::new(0),
         import_stack: RefCell::new(Vec::new()),
     });
@@ -103,8 +106,12 @@ pub fn evaluate(
         }
     }
 
+    // Bind before the struct literal so the `Ref` is dropped here, not held into
+    // the tail expression (which would outlive `ctx`).
+    let tempo = ctx.tempo.borrow().clone();
     Ok(EvalOutput {
         cps: ctx.cps.get(),
+        tempo,
         tracks: outputs_to_tracks(outputs)?,
     })
 }
@@ -237,6 +244,12 @@ fn eval_method(
 ) -> Result<Value> {
     match recv {
         Value::Pattern(p) => {
+            let tf = transforms::make_transform(ctx, name, &args, span)?;
+            Ok(Value::Pattern(tf.apply(p)?))
+        }
+        // A transform after `arrange(...)` drops the section layout (the result
+        // is no longer a straight arrangement) — operate on its pattern.
+        Value::Arrangement(p, _, _) => {
             let tf = transforms::make_transform(ctx, name, &args, span)?;
             Ok(Value::Pattern(tf.apply(p)?))
         }
@@ -411,13 +424,17 @@ pub(crate) fn call_func(
 /// Fold the top-level output expressions into the channel list. A bare pattern
 /// becomes one anonymous track; multiple outputs concatenate their channels.
 fn outputs_to_tracks(outputs: Vec<Value>) -> Result<Tracks<ControlMap>> {
-    use arbor_grove_pattern::prelude::{track, tracks};
+    use arbor_grove_pattern::prelude::{track, track_with_sections, tracks};
     let mut channels = Vec::new();
     for v in outputs {
         match v {
             Value::Tracks(t) => channels.extend(t.tracks),
             Value::Track(t) => channels.push(t),
             Value::Pattern(p) => channels.push(track("", p)),
+            // A bare top-level `arrange(...)` is one anonymous track; keep its bands.
+            Value::Arrangement(p, sections, period) => {
+                channels.push(track_with_sections("", p, sections, period))
+            }
             other => {
                 return Err(LangError::unlocated(LangErrorKind::Type {
                     expected: "tracks, track or pattern".to_string(),
@@ -478,6 +495,7 @@ fn load_module(ctx: &Rc<Ctx>, path: &str) -> Result<HashMap<String, Value>> {
         log: ctx.log.clone(),
         config: ctx.config,
         cps: Cell::new(None),
+        tempo: RefCell::new(TempoMap::none()),
         depth: Cell::new(0),
         import_stack: RefCell::new(ctx.import_stack.borrow().clone()),
     });

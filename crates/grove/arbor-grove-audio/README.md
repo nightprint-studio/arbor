@@ -66,7 +66,8 @@ SFZ region vs. fallback) is the registry's job — the engine only forwards symb
   (`strings.violin`, `synth.pad`) → a synth preset / one-shot sample / SFZ instrument; unresolved →
   the default synth. Resolves `art` (articulations) + round-robin per onset. Manifest + articulation
   schema in the module docs (see "Registry articulations + round-robin" below). `instruments_list()`
-  enumerates every resolvable instrument (name + kind) for the sound-bank UI.
+  enumerates every resolvable instrument (name + kind + the articulation names it exposes) for the
+  sound-bank UI.
 - `voice.rs` — the per-voice DSP chain (source → hpf → lpf → shape → crush → gain×vel → pan → dry +
   room send + per-track delay send) and the fixed-capacity **voice pool** with the design's
   voice-stealing policy (quietest-releasing first, else oldest).

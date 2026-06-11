@@ -69,6 +69,11 @@
     {/snippet}
     <span class="bank-name">{inst.name}</span>
   </SidebarItem>
+  {#if inst.articulations.length}
+    <div class="arts" use:tooltip={'Articulations — use .art("…") on this instrument'}>
+      {#each inst.articulations as a (a)}<span class="art-chip">{a}</span>{/each}
+    </div>
+  {/if}
 {/snippet}
 
 <PanelShell title="Sound bank" count={soundsStore.instruments.length}>
@@ -137,6 +142,15 @@
 <style>
   .bank { padding: 4px 0; }
   .bank-name { font-family: var(--font-code); font-size: 11.5px; }
+
+  /* Articulation chips under an SFZ voice (legato / staccato / …). */
+  .arts { display: flex; flex-wrap: wrap; gap: 3px; padding: 0 10px 5px 30px; }
+  .art-chip {
+    font-family: var(--font-code); font-size: 9px; line-height: 1.5;
+    padding: 0 5px; border-radius: var(--radius-sm);
+    color: var(--text-muted); background: var(--bg-overlay);
+    border: 1px solid var(--border-subtle);
+  }
 
   .loading { padding: 24px 12px; }
 

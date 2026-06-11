@@ -301,9 +301,24 @@ export interface GroveQueryHap {
   gain: number | null;
 }
 
-/** `grove_query` result: every hap over the requested cycle window. */
+/** One named arrangement section, tiled to an absolute cycle range within the
+ *  queried window (the arrangement loops, so a section repeats every period). */
+export interface GroveQuerySection {
+  /** Owning mixer-strip / arrangement-lane index (0-based). */
+  track: number;
+  /** Section label (`section("INTRO", …)`). */
+  name: string;
+  /** Start cycle (absolute, inclusive). */
+  start: number;
+  /** End cycle (absolute, exclusive). */
+  end: number;
+}
+
+/** `grove_query` result: every hap + every named section over the window. */
 export interface GroveQueryHaps {
   haps: GroveQueryHap[];
+  /** Named section bands (empty unless a track uses `arrange(section(...))`). */
+  sections: GroveQuerySection[];
 }
 
 /** Query the last-evaluated arrangement over `[0, cycles)`. Empty until an eval
@@ -321,6 +336,9 @@ export interface GroveInstrument {
   /** Dotted registry name (`strings.violin`) or a short bank name (`bd`). */
   name: string;
   kind: GroveInstrumentKind;
+  /** Named articulations the instrument exposes (`.art("…")`), sorted; empty for
+   *  synth / sample voices. */
+  articulations: string[];
 }
 
 /** `grove_sounds` result. Always includes the built-in default synth. */

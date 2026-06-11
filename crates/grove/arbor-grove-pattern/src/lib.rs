@@ -47,4 +47,5 @@ pub mod pitch;
 pub mod prelude;
 pub mod rng;
 pub mod span;
+pub mod tempo;
 pub mod time;

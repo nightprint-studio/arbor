@@ -199,6 +199,9 @@ pub enum InstrumentKind {
 pub struct InstrumentInfo {
     pub name: String,
     pub kind: InstrumentKind,
+    /// Named articulations the instrument exposes (`.art("legato")`), sorted.
+    /// Empty for synth / sample voices and SFZ instruments with no `art.*` decls.
+    pub articulations: Vec<String>,
 }
 
 /// The resolved sound registry: name → entry, plus resident SFZ + samples.
@@ -494,13 +497,18 @@ impl Registry {
         let mut list: Vec<InstrumentInfo> = self
             .entries
             .iter()
-            .map(|(name, entry)| InstrumentInfo {
-                name: name.clone(),
-                kind: match entry {
+            .map(|(name, entry)| {
+                let kind = match entry {
                     Entry::Synth(_) => InstrumentKind::Synth,
                     Entry::Sample { .. } => InstrumentKind::Sample,
                     Entry::Sfz { .. } => InstrumentKind::Sfz,
-                },
+                };
+                let mut articulations: Vec<String> = match entry {
+                    Entry::Sfz { articulations, .. } => articulations.keys().cloned().collect(),
+                    _ => Vec::new(),
+                };
+                articulations.sort();
+                InstrumentInfo { name: name.clone(), kind, articulations }
             })
             .collect();
         list.sort_by(|a, b| a.name.cmp(&b.name));

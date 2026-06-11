@@ -14,20 +14,29 @@
  * the arrangement headers (Step 3a) and these strips stay in sync; toggling here
  * also pushes the live audio override.
  *
- * Room / send are **per-event (code-first)** — there is no track-level audio
- * command for them (the surgical "knob → source literal" round-trip is the
- * future `grove_set_literal`), so the mixer renders them disabled.
+ * Room / delay are **code-first**: no track-level audio command, so their knobs
+ * are not live overrides — they reflect the literal in the source and commit
+ * straight back to it (`grove_set_literal` via the editor's Tree-sitter tree).
+ * `room` is a single value in the mixer; `delay`'s three params (time/fb/mix)
+ * live in the Inspector. gain / pan keep their live ephemeral override and gain
+ * an explicit **commit** that writes the current value into the source.
  */
 
 import { groveSetTrack } from '$lib/ipc/grove';
 import { arrangementStore, noteName, type VizLane } from '../viz/arrangement.svelte';
 import { projectStore } from './project.svelte';
 import { groveStore } from '../grove-store.svelte';
+import { controlsStore } from './controls.svelte';
 import { laneColor } from '../palette';
+import {
+  DELAY_DEFAULT_FB, DELAY_DEFAULT_MIX, type ControlEdit, type DelayValues,
+} from '../editor/grove-edit';
 
 /** Neutral baselines — a fresh strip is unity gain, centre pan. */
 export const GAIN_UNITY = 1;
 export const PAN_CENTER = 0.5;
+/** A fresh delay (knob seed when the source has none): a quarter-cycle echo. */
+export const DELAY_DEFAULT: DelayValues = { t: 0.25, fb: DELAY_DEFAULT_FB, mix: DELAY_DEFAULT_MIX };
 
 /** One mixer strip = one arrangement lane, enriched with a display name. */
 export interface MixerTrack {
@@ -76,6 +85,30 @@ function createMixerStore() {
   let pans   = $state<Record<number, number>>({});
   let master = $state(GAIN_UNITY);
 
+  // Code-first knob buffers (index → value). These mirror the SOURCE literal
+  // (seeded from controlsStore) and commit back to it; the buffer just holds the
+  // value mid-drag until the eval/re-parse round-trip catches up. Cleared on
+  // rebaseline (the source becomes authoritative again).
+  let roomBuf  = $state<Record<number, number>>({});
+  let delayBuf = $state<Record<number, DelayValues>>({});
+
+  // Debounced commit: a knob drag fires many onchange; commit (which re-evals)
+  // once the gesture settles. Holds the latest pending edit per (index,control).
+  let commitTimer: ReturnType<typeof setTimeout> | null = null;
+  const pendingEdits = new Map<number, Map<string, ControlEdit>>();
+  function scheduleCommit(index: number, edit: ControlEdit) {
+    let m = pendingEdits.get(index);
+    if (!m) { m = new Map(); pendingEdits.set(index, m); }
+    m.set(edit.kind, edit);
+    if (commitTimer) clearTimeout(commitTimer);
+    commitTimer = setTimeout(flushCommits, 280);
+  }
+  function flushCommits() {
+    commitTimer = null;
+    for (const [index, m] of pendingEdits) groveStore.requestCommit(index, [...m.values()]);
+    pendingEdits.clear();
+  }
+
   const tracks = $derived.by<MixerTrack[]>(() => {
     const names = trackNames(projectStore.activeSource);
     return arrangementStore.lanes.map((l) => ({
@@ -96,11 +129,49 @@ function createMixerStore() {
     get tracks() { return tracks; },
     byIndex(i: number): MixerTrack | null { return tracks.find((t) => t.index === i) ?? null; },
 
-    // ── gain / pan: live ephemeral overrides (gate 2) ──
+    // ── gain / pan: live ephemeral overrides + explicit commit ──
     gain(i: number) { return gains[i] ?? GAIN_UNITY; },
     pan(i: number)  { return pans[i]  ?? PAN_CENTER; },
     setGain(i: number, v: number) { gains = { ...gains, [i]: v }; void groveSetTrack('gain', i, v); },
     setPan(i: number, v: number)  { pans  = { ...pans,  [i]: v }; void groveSetTrack('pan', i, v); },
+    /** Whether strip `i` has an uncommitted gain/pan override (commit affordance). */
+    hasOverride(i: number) { return gains[i] != null || pans[i] != null; },
+    /** Commit strip `i`'s current gain/pan override into the source as literals.
+     *  The eval that follows re-baselines, so the override resets and the value
+     *  now lives in the `.grove`. */
+    commit(i: number) {
+      const edits: ControlEdit[] = [];
+      if (gains[i] != null) edits.push({ kind: 'gain', value: gains[i] });
+      if (pans[i]  != null) edits.push({ kind: 'pan',  value: pans[i]  });
+      if (edits.length) groveStore.requestCommit(i, edits);
+    },
+    /** Commit every overridden strip (Command Palette / shortcut). */
+    commitAll() {
+      const indices = new Set<number>([...Object.keys(gains), ...Object.keys(pans)].map(Number));
+      for (const i of indices) this.commit(i);
+    },
+    /** Number of strips with a pending gain/pan override. */
+    get overrideCount() {
+      return new Set<number>([...Object.keys(gains), ...Object.keys(pans)].map(Number)).size;
+    },
+
+    // ── room / delay: code-first knobs (seed from source, commit to source) ──
+    room(i: number) { return roomBuf[i] ?? controlsStore.room(i); },
+    roomCalculated(i: number) { return controlsStore.isCalculated(i, 'room'); },
+    setRoom(i: number, v: number) {
+      roomBuf = { ...roomBuf, [i]: v };
+      scheduleCommit(i, { kind: 'room', value: v });
+    },
+    delay(i: number): DelayValues { return delayBuf[i] ?? controlsStore.delay(i) ?? DELAY_DEFAULT; },
+    delayActive(i: number) { return delayBuf[i] != null || controlsStore.delay(i) != null; },
+    delayCalculated(i: number) { return controlsStore.isCalculated(i, 'delay'); },
+    /** Set one delay parameter, merging with the current triple, and commit. */
+    setDelayParam(i: number, key: keyof DelayValues, v: number) {
+      const cur = this.delay(i);
+      const next = { ...cur, [key]: v };
+      delayBuf = { ...delayBuf, [i]: next };
+      scheduleCommit(i, { kind: 'delay', ...next });
+    },
 
     get masterGain() { return master; },
     setMasterGain(v: number) { master = v; void groveSetTrack('master_gain', null, v); },
@@ -134,9 +205,13 @@ function createMixerStore() {
     },
     select(i: number) { groveStore.selectTrack(String(i)); },
 
-    /** Drop all gain/pan/master overrides back to neutral — call on each eval
-     *  (the engine re-baselines from source, so the deltas no longer apply). */
-    rebaseline() { gains = {}; pans = {}; master = GAIN_UNITY; },
+    /** Drop all overrides + code-first buffers — call on each eval (the source
+     *  is authoritative again: gain/pan re-baseline to neutral, room/delay reflect
+     *  the freshly-parsed literals via controlsStore). */
+    rebaseline() {
+      gains = {}; pans = {}; master = GAIN_UNITY;
+      roomBuf = {}; delayBuf = {};
+    },
   };
 }
 

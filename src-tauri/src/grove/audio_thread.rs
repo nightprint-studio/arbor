@@ -118,11 +118,18 @@ fn apply(
     msg: GroveControl,
 ) -> bool {
     match msg {
-        GroveControl::SetTracks { tracks, cps } => {
+        GroveControl::SetTracks { tracks, cps, tempo } => {
             *current = tracks.clone();
             transport.set_tracks(tracks);
-            if let Some(c) = cps {
-                transport.set_cps(c);
+            // A tempo-map drives the clock when present; otherwise the script's
+            // constant `cps(...)` applies. Always push the map (empty clears any
+            // previous automation back to a constant clock).
+            let has_tempo = !tempo.is_empty();
+            transport.set_tempo_map(tempo);
+            if !has_tempo {
+                if let Some(c) = cps {
+                    transport.set_cps(c);
+                }
             }
         }
         GroveControl::Play => transport.play(),

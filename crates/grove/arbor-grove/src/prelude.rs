@@ -19,9 +19,10 @@ pub use crate::error::{GroveError, Result};
 // `Result` intentionally omitted (see above); `PatternError` kept by name.
 pub use arbor_grove_pattern::prelude::{
     arrange, audio, cat, choose, cycles, euclid_with, fast_with, fastcat, isaw, par, parse_note,
-    polymeter, pure, rand, sample, saw, seq, silence, sine, slow_with, slowcat, square, stack,
-    time_to_index, time_to_rand, timecat, track, tracks, tri, ControlMap, Hap, Param, Pattern,
-    PatternError, Scale, Section, SourceKind, SourceSpan, Time, TimeSpan, Track, Tracks, MIDDLE_C,
+    polymeter, pure, rand, sample, saw, section, section_layout, seq, silence, sine, slow_with,
+    slowcat, square, stack, time_to_index, time_to_rand, timecat, track, track_with_sections,
+    tracks, tri, ControlMap, Hap, Param, Pattern, PatternError, Scale, Section, SectionSpan,
+    SourceKind, SourceSpan, TempoMap, Time, TimeSpan, Track, Tracks, MIDDLE_C,
 };
 
 // ── arbor-grove-lang — text ↔ Pattern ────────────────────────────────────────

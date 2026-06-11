@@ -15,13 +15,14 @@
     Play, Square, FolderPlus, FolderOpen, FilePlus2, Save, Download,
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
-    Keyboard, Command,
+    Keyboard, Command, ArrowDownToLine,
   } from 'lucide-svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { groveStore } from '../grove-store.svelte';
   import { groveEngine } from '../stores/engine.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
+  import { mixerStore } from '../stores/mixer.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -52,6 +53,7 @@
     { id: 'p_outline',   label: 'Toggle Outline',    group: 'View', icon: ListTree,         run: () => groveStore.toggleLeft('outline') },
     { id: 'p_sounds',    label: 'Toggle Sound bank', group: 'View', icon: Music4,           run: () => groveStore.toggleLeft('soundbank') },
     { id: 'p_mixer',     label: 'Toggle Mixer',      group: 'View', icon: SlidersHorizontal, run: () => groveStore.toggleBottom('mixer') },
+    { id: 'commit_overrides', label: 'Commit mixer overrides to source', group: 'Mixer', icon: ArrowDownToLine, keys: 'Alt+Shift+C', run: () => mixerStore.commitAll() },
     { id: 'p_console',   label: 'Toggle Console',    group: 'View', icon: Terminal,         run: () => groveStore.toggleBottom('console') },
     { id: 'p_problems',  label: 'Toggle Problems',   group: 'View', icon: AlertTriangle,    run: () => groveStore.toggleBottom('problems') },
     { id: 'p_inspector', label: 'Toggle Inspector',  group: 'View', icon: Crosshair,        run: () => groveStore.toggleRight('inspector') },

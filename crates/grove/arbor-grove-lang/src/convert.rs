@@ -51,10 +51,12 @@ pub fn as_str(v: &Value, span: SourceSpan) -> Result<String> {
     }
 }
 
-/// Require a musical pattern.
+/// Require a musical pattern. An `arrange(...)` result coerces to its flattened
+/// pattern (its section layout is only meaningful when fed straight to `track`).
 pub fn as_pattern(v: Value, span: SourceSpan) -> Result<Pattern<ControlMap>> {
     match v {
         Value::Pattern(p) => Ok(p),
+        Value::Arrangement(p, _, _) => Ok(p),
         other => Err(type_err(span, "pattern", &other)),
     }
 }

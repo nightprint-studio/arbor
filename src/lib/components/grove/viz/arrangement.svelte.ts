@@ -12,7 +12,7 @@
  * query); the arrangement is static between evals, so the playhead never re-queries.
  */
 
-import { groveQuery, type GroveQueryHap } from '$lib/ipc/grove';
+import { groveQuery, type GroveQueryHap, type GroveQuerySection } from '$lib/ipc/grove';
 
 /** Cycle window queried + drawn (matches the arrangement grid width). */
 export const VIEW_CYCLES = 96;
@@ -24,6 +24,8 @@ export interface VizLane {
   track: number;
   /** This lane's haps, sorted by onset. */
   haps: GroveQueryHap[];
+  /** This lane's named section bands (tiled across the window), by start. */
+  sections: GroveQuerySection[];
   /** Distinct sound names, most-frequent first (sample/drum character). */
   sounds: string[];
   /** Lowest / highest MIDI note across the lane, or null when unpitched. */
@@ -44,18 +46,28 @@ export function noteName(midi: number): string {
 }
 
 /** Group the flat hap list into per-track lanes, deriving each lane's character
- *  (sounds / pitch range) so the header + roll can render without re-scanning. */
-function buildLanes(haps: GroveQueryHap[]): VizLane[] {
+ *  (sounds / pitch range) so the header + roll can render without re-scanning.
+ *  Named section bands are attached to their owning lane (by track index). */
+function buildLanes(haps: GroveQueryHap[], allSections: GroveQuerySection[]): VizLane[] {
   const byTrack = new Map<number, GroveQueryHap[]>();
   for (const h of haps) {
     const arr = byTrack.get(h.track);
     if (arr) arr.push(h);
     else byTrack.set(h.track, [h]);
   }
+  const secByTrack = new Map<number, GroveQuerySection[]>();
+  for (const s of allSections) {
+    const arr = secByTrack.get(s.track);
+    if (arr) arr.push(s);
+    else secByTrack.set(s.track, [s]);
+    // A section-only track (e.g. a silent intro) still deserves a lane.
+    if (!byTrack.has(s.track)) byTrack.set(s.track, []);
+  }
 
   const lanes: VizLane[] = [];
   for (const track of [...byTrack.keys()].sort((a, b) => a - b)) {
     const hs = byTrack.get(track)!.slice().sort((a, b) => a.start - b.start);
+    const sections = (secByTrack.get(track) ?? []).slice().sort((a, b) => a.start - b.start);
     const counts = new Map<string, number>();
     let noteLo: number | null = null;
     let noteHi: number | null = null;
@@ -71,27 +83,34 @@ function buildLanes(haps: GroveQueryHap[]): VizLane[] {
       if (!h.has_onset) hasContinuous = true;
     }
     const sounds = [...counts.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0]);
-    lanes.push({ track, haps: hs, sounds, noteLo, noteHi, hasContinuous, noteCount });
+    lanes.push({ track, haps: hs, sections, sounds, noteLo, noteHi, hasContinuous, noteCount });
   }
   return lanes;
 }
 
 function createArrangementStore() {
-  let haps    = $state<GroveQueryHap[]>([]);
-  let loading = $state(false);
-  let loaded  = $state(false);
+  let haps     = $state<GroveQueryHap[]>([]);
+  let sections = $state<GroveQuerySection[]>([]);
+  let loading  = $state(false);
+  let loaded   = $state(false);
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const lanes      = $derived(buildLanes(haps));
+  const lanes      = $derived(buildLanes(haps, sections));
   const contentEnd = $derived(haps.reduce((m, h) => Math.max(m, h.end), 0));
+  /** The section bands of the first lane that has any — a representative song
+   *  structure for the ruler chip strip (per-lane bands draw on each lane). */
+  const rulerSections = $derived(lanes.find((l) => l.sections.length)?.sections ?? []);
 
   async function run(cycles: number) {
     loading = true;
     try {
-      haps = (await groveQuery(cycles)).haps;
+      const res = await groveQuery(cycles);
+      haps = res.haps;
+      sections = res.sections;
       loaded = true;
     } catch {
       haps = [];
+      sections = [];
     } finally {
       loading = false;
     }
@@ -100,6 +119,8 @@ function createArrangementStore() {
   return {
     get haps()       { return haps; },
     get lanes()      { return lanes; },
+    /** Representative section bands for the ruler chip strip. */
+    get rulerSections() { return rulerSections; },
     get loading()    { return loading; },
     get loaded()     { return loaded; },
     get empty()      { return haps.length === 0; },

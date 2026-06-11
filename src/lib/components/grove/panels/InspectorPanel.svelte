@@ -15,13 +15,27 @@
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
+  import Knob from '$lib/components/shared/ui/Knob.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import PeakMeter from './PeakMeter.svelte';
-  import { mixerStore, PAN_CENTER } from '../stores/mixer.svelte';
-  import { metersStore } from '../stores/engine.svelte';
-  import { noteName } from '../viz/arrangement.svelte';
+  import { mixerStore, PAN_CENTER, DELAY_DEFAULT } from '../stores/mixer.svelte';
+  import { metersStore, diagnosticsStore } from '../stores/engine.svelte';
+  import { arrangementStore, noteName } from '../viz/arrangement.svelte';
+  import { controlsStore } from '../stores/controls.svelte';
 
   const index = $derived(mixerStore.selectedIndex);
   const track = $derived(index == null ? null : mixerStore.byIndex(index));
+
+  // Self-sufficient on the right rail: re-query the track model + re-parse the
+  // source controls on every eval, so the delay/room readouts are correct even
+  // when the mixer/arrangement panels aren't mounted.
+  $effect(() => {
+    void diagnosticsStore.errors;
+    arrangementStore.schedule();
+    controlsStore.schedule();
+  });
+
+  const DELAY_CALC = 'Delay is a calculated value here — edit it in the source.';
 
   const pct = (x: number) => `${Math.round(Math.max(0, Math.min(1, x)) * 100)}%`;
   function panLabel(p: number): string {
@@ -44,6 +58,8 @@
     {@const pan = mixerStore.pan(track.index)}
     {@const muted = mixerStore.isMuted(track.index)}
     {@const soloed = mixerStore.isSoloed(track.index)}
+    {@const dl = mixerStore.delay(track.index)}
+    {@const dCalc = mixerStore.delayCalculated(track.index)}
     <div class="insp" style="--c: {track.color}">
       <!-- Identity -->
       <div class="insp-head">
@@ -75,9 +91,37 @@
         <div class="pan"><span class="pan-mid"></span><span class="pan-dot" style="left: {pct(pan)}"></span></div>
         <code>{panLabel(pan)}</code>
       </div>
-      <div class="insp-row code-first">
-        <span>room / send</span><code>code-first</code>
+      <div class="insp-row">
+        <span>room</span>
+        <code>{mixerStore.roomCalculated(track.index) ? 'calculated' : mixerStore.room(track.index).toFixed(2)}</code>
       </div>
+
+      <!-- Delay (code-first): the three params edit the .delay(t, fb, mix) literal. -->
+      <div class="insp-section">Delay · code-first</div>
+      {#if dCalc}
+        <div class="insp-row code-first"><span use:tooltip={DELAY_CALC}>delay</span><code>calculated</code></div>
+      {:else}
+        <div class="insp-delay">
+          <div class="dknob">
+            <Knob value={dl.t} min={0} max={1} default={DELAY_DEFAULT.t} size={30} color={track.color}
+                  label="time" ariaLabel="{track.name} delay time" onchange={(v) => mixerStore.setDelayParam(track.index, 't', v)} />
+            <span class="dval">{dl.t.toFixed(3)}</span>
+          </div>
+          <div class="dknob">
+            <Knob value={dl.fb} min={0} max={1} default={DELAY_DEFAULT.fb} size={30} color={track.color}
+                  label="fb" ariaLabel="{track.name} delay feedback" onchange={(v) => mixerStore.setDelayParam(track.index, 'fb', v)} />
+            <span class="dval">{dl.fb.toFixed(2)}</span>
+          </div>
+          <div class="dknob">
+            <Knob value={dl.mix} min={0} max={1} default={DELAY_DEFAULT.mix} size={30} color={track.color}
+                  label="mix" ariaLabel="{track.name} delay mix" onchange={(v) => mixerStore.setDelayParam(track.index, 'mix', v)} />
+            <span class="dval">{dl.mix.toFixed(2)}</span>
+          </div>
+        </div>
+        {#if !mixerStore.delayActive(track.index)}
+          <p class="insp-subhint">No delay in source — turning a knob adds <code>.delay(…)</code> to this track.</p>
+        {/if}
+      {/if}
 
       <div class="insp-section">Pattern</div>
       <div class="insp-row"><span>haps / window</span><code>{track.hapCount}</code></div>
@@ -86,9 +130,10 @@
       {#if track.hasContinuous}<div class="insp-row"><span>signal</span><code>continuous</code></div>{/if}
 
       <p class="insp-hint">
-        Gain &amp; pan are <strong>live session overrides</strong> on top of the source;
-        each eval re-baselines them. Room/send are per-event — edit them in the
-        <code>.grove</code> source.
+        Gain &amp; pan are <strong>live session overrides</strong> — commit them to
+        source with the ↧ button on the mixer strip. Room &amp; delay are
+        <strong>code-first</strong>: their knobs edit the <code>.grove</code> source
+        literal directly.
       </p>
     </div>
   {/if}
@@ -128,6 +173,12 @@
   .insp-row { display: flex; align-items: center; justify-content: space-between; padding: 3px 12px; font-size: 12px; color: var(--text-secondary); }
   .insp-row code { font-family: var(--font-code); font-size: 11px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
   .insp-row.code-first code { color: var(--text-muted); }
+
+  .insp-delay { display: flex; align-items: flex-start; justify-content: center; gap: 14px; padding: 6px 12px 2px; }
+  .dknob { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .dval { font-size: 9px; color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
+  .insp-subhint { margin: 2px 12px 0; font-size: 10.5px; color: var(--text-muted); line-height: 1.4; }
+  .insp-subhint code { font-family: var(--font-code); color: var(--text-secondary); }
 
   .insp-hint {
     margin: 12px 12px 0; padding-top: 10px;

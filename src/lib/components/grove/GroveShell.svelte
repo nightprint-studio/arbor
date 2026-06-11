@@ -42,6 +42,7 @@
   import { workspaceStore } from './stores/workspace.svelte';
   import { projectStore } from './stores/project.svelte';
   import { projectActions } from './stores/project-actions.svelte';
+  import { mixerStore } from './stores/mixer.svelte';
   import GroveProjectActions from './shell/GroveProjectActions.svelte';
   import GroveSettingsModal from './shell/GroveSettingsModal.svelte';
   import GroveShortcutsModal from './shell/GroveShortcutsModal.svelte';
@@ -110,6 +111,7 @@
       else if (b.id === 'open_file') projectActions.openFile();
       else if (b.id === 'save') projectActions.save();
       else if (b.id === 'render_wav') projectActions.exportWav();
+      else if (b.id === 'commit_overrides') mixerStore.commitAll();
       return;
     }
   }

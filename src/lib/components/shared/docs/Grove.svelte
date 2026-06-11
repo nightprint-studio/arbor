@@ -24,11 +24,11 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Arrangement</div>
-    <div class="fc-desc">A read-only, Logic-style timeline of the evaluated tracks, with a playhead that follows the transport. Click the ruler to seek; right-click a lane to mute / solo.</div>
+    <div class="fc-desc">A read-only, Logic-style timeline of the evaluated tracks, with a playhead that follows the transport. Named <code>section(…)</code> blocks show as coloured ruler chips and tinted lane bands. Click the ruler to seek; right-click a lane to mute / solo.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Mixer</div>
-    <div class="fc-desc">One strip per track with live meters and gain / pan knobs. Knob tweaks are live overrides on top of the source — every re-evaluation re-establishes the source as the baseline.</div>
+    <div class="fc-desc">One strip per track with live meters and gain / pan knobs (live overrides on top of the source). The room knob and the Inspector's delay knobs are <strong>code-first</strong> — they write the value straight into the <code>.grove</code> source. Commit a gain / pan override to source with the ↧ button on the strip.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Console &amp; Problems</div>
@@ -36,7 +36,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Sound bank</div>
-    <div class="fc-desc">The instruments the engine can resolve — built-in synth presets and the VSCO 2 orchestral samplers. Download / manage the VSCO 2 bank from here.</div>
+    <div class="fc-desc">The instruments the engine can resolve — built-in synth presets and the VSCO 2 orchestral samplers, each listing the articulations it exposes for <code>.art("…")</code>. Download / manage the VSCO 2 bank from here.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Outline</div>
@@ -44,13 +44,28 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Inspector</div>
-    <div class="fc-desc">Read-only detail for the selected track: voice, meters, the live mix values, and pattern statistics (hap count, pitch range).</div>
+    <div class="fc-desc">Detail for the selected track: voice, meters, the live mix values, pattern statistics (hap count, pitch range), and the code-first <strong>delay</strong> knobs (time / feedback / mix) that write a <code>.delay(…)</code> into the source.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Zen &amp; collapse</div>
     <div class="fc-desc">Zen mode (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>) hides the chrome; the title-bar toggles collapse the arrangement or the editor so one fills the body.</div>
   </div>
 </div>
+
+<h2>Editing from the panels</h2>
+<p>The mixer and inspector knobs are a surgical bridge back to the source — the code stays the single source of truth:</p>
+<ul class="prop-list">
+  <li><code>gain</code> / <code>pan</code> are <strong>live overrides</strong>: drag to hear the change instantly; each re-evaluation re-baselines them to the source. Press the ↧ button on a strip (or <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> for all strips) to <strong>commit</strong> the current value into the source as a <code>.gain(…)</code> / <code>.pan(…)</code> literal.</li>
+  <li><code>room</code> (mixer) and <code>delay</code> (inspector: time / feedback / mix) are <strong>code-first</strong>: turning a knob writes the literal straight into the track's <code>.grove</code> source — adding the method to the chain if it isn't there yet — and re-evaluates.</li>
+  <li>A knob whose value is <em>calculated</em> in the source (e.g. <code>.gain(rand(0,1))</code>) is shown read-only: there is no single literal to rewrite.</li>
+</ul>
+<div class="hint">Commits are ordinary editor edits — one <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes them.</div>
+
+<h2>Sections</h2>
+<p>Wrap an arrangement block in <code>section("NAME", cycles, pattern)</code> — the named counterpart of <code>cycles(…)</code> inside <code>arrange(…)</code> — to label a stretch of the timeline. Named sections surface in the arrangement as coloured ruler chips and tinted lane bands, tiled across the loop, so the song's macro-structure (intro / build / drop / outro) reads at a glance.</p>
+
+<h2>Tempo</h2>
+<p><code>cps(n)</code> sets a constant clock (cycles-per-second). For tempo that changes over the song, use a <strong>tempo map</strong>: <code>tempo(cycles(8, 0.5), cycles(16, 0.6))</code> plays 8 cycles at 0.5 cps, then 16 at 0.6, then loops. The tempo changes on whole-cycle boundaries and the playhead position stays continuous; the footer shows the live tempo. (Smooth accelerando / rubato is a future addition — for now tempo steps between segments.)</p>
 
 <h2>Playing &amp; rendering</h2>
 <ol class="step-list">
@@ -78,6 +93,7 @@
     <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration (incl. cross-file)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Search the Console / Problems</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></td><td>Commit mixer overrides to source</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Toggle Zen mode</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd> / <kbd>F1</kbd></td><td>Settings / keyboard shortcuts</td></tr>
   </tbody>

@@ -161,16 +161,56 @@ pub fn polymeter<T: Clone + Send + Sync + 'static>(
 }
 
 /// A timeline section: `pattern` occupies `cycles` whole cycles. Produced by
-/// [`cycles`], consumed by [`arrange`].
+/// [`cycles`] (anonymous) or [`section`] (named), consumed by [`arrange`].
 #[derive(Clone, Debug)]
 pub struct Section<T> {
+    /// Display name (`section("INTRO", …)`), or `None` for a bare [`cycles`].
+    pub name: Option<String>,
     pub cycles: u32,
     pub pattern: Pattern<T>,
 }
 
-/// Mark that `pattern` occupies `n` cycles in an [`arrange`].
+/// Mark that `pattern` occupies `n` cycles in an [`arrange`] (unnamed).
 pub fn cycles<T: Clone + Send + Sync + 'static>(n: u32, pattern: Pattern<T>) -> Section<T> {
-    Section { cycles: n, pattern }
+    Section { name: None, cycles: n, pattern }
+}
+
+/// A **named** arrange section (`section("INTRO", n, pattern)`) — identical to
+/// [`cycles`] for playback, but carries a label the arrangement view shows as a
+/// band. The names surface via [`section_layout`] on the owning [`Track`].
+pub fn section<T: Clone + Send + Sync + 'static>(
+    name: impl Into<String>,
+    n: u32,
+    pattern: Pattern<T>,
+) -> Section<T> {
+    Section { name: Some(name.into()), cycles: n, pattern }
+}
+
+/// A named span on a track's timeline (one named arrange [`section`]). Cycles are
+/// within a single arrangement period; the arrangement loops, so the view tiles
+/// the layout across the timeline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SectionSpan {
+    pub name: String,
+    /// First cycle of the section (inclusive).
+    pub start: u32,
+    /// One past the last cycle (exclusive).
+    pub end: u32,
+}
+
+/// The named-section layout of a section list: the absolute cycle range of each
+/// `section(...)` (bare `cycles(...)` are skipped — they have no label). Computed
+/// alongside [`arrange`] so a track can expose where its sections fall.
+pub fn section_layout<T>(sections: &[Section<T>]) -> Vec<SectionSpan> {
+    let mut out = Vec::new();
+    let mut acc = 0u32;
+    for s in sections {
+        if let Some(name) = &s.name {
+            out.push(SectionSpan { name: name.clone(), start: acc, end: acc + s.cycles });
+        }
+        acc += s.cycles;
+    }
+    out
 }
 
 /// Concatenate sections on the absolute timeline; the whole arrangement loops
@@ -209,9 +249,18 @@ pub fn arrange<T: Clone + Send + Sync + 'static>(sections: Vec<Section<T>>) -> P
 pub struct Track<T> {
     pub name: String,
     pub pattern: Pattern<T>,
+    /// Named-section layout when the track's pattern is an [`arrange`] of
+    /// [`section`]s (else empty). Spans are within one arrangement period; the
+    /// arrangement loops, so the view tiles them by [`Track::period`]. Drives the
+    /// arrangement-view bands; does not affect playback.
+    pub sections: Vec<SectionSpan>,
+    /// Total cycles of the track's arrangement (the loop period), `0` when the
+    /// track isn't an arrangement. Lets the view tile [`Track::sections`] across
+    /// the timeline.
+    pub period: u32,
 }
 
-/// Build a named track.
+/// Build a named track (no section layout).
 pub fn track<T: Clone + Send + Sync + 'static>(
     name: impl Into<String>,
     pattern: Pattern<T>,
@@ -219,6 +268,24 @@ pub fn track<T: Clone + Send + Sync + 'static>(
     Track {
         name: name.into(),
         pattern,
+        sections: Vec::new(),
+        period: 0,
+    }
+}
+
+/// Build a named track that carries an arrangement's named-section layout (from
+/// [`section_layout`]) + loop `period` (total cycles), for the view.
+pub fn track_with_sections<T: Clone + Send + Sync + 'static>(
+    name: impl Into<String>,
+    pattern: Pattern<T>,
+    sections: Vec<SectionSpan>,
+    period: u32,
+) -> Track<T> {
+    Track {
+        name: name.into(),
+        pattern,
+        sections,
+        period,
     }
 }
 
@@ -339,6 +406,37 @@ mod tests {
     fn polymeter_default_steps_zero_is_silent() {
         let p = polymeter(0, vec![(2, fastcat(vec![pure("a"), pure("b")]))]);
         assert!(p.query(TimeSpan::cycle(0)).is_empty());
+    }
+
+    #[test]
+    fn section_layout_records_named_spans_skipping_anonymous() {
+        // intro (named, 4) · build (anonymous, 2) · drop (named, 8)
+        let sections = vec![
+            section("INTRO", 4, pure("i")),
+            cycles(2, pure("b")),
+            section("DROP", 8, pure("d")),
+        ];
+        let layout = section_layout(&sections);
+        assert_eq!(
+            layout,
+            vec![
+                SectionSpan { name: "INTRO".into(), start: 0, end: 4 },
+                SectionSpan { name: "DROP".into(), start: 6, end: 14 },
+            ]
+        );
+    }
+
+    #[test]
+    fn named_section_plays_like_cycles() {
+        // A named section is identical to `cycles` for playback.
+        let named = arrange(vec![section("A", 2, pure("x")), section("B", 1, pure("y"))]);
+        let anon = arrange(vec![cycles(2, pure("x")), cycles(1, pure("y"))]);
+        for c in 0..6 {
+            assert_eq!(
+                named.query(TimeSpan::cycle(c))[0].value,
+                anon.query(TimeSpan::cycle(c))[0].value,
+            );
+        }
     }
 
     #[test]

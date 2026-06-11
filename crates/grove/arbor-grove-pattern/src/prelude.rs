@@ -16,12 +16,14 @@ pub use crate::hap::Hap;
 pub use crate::pattern::Pattern;
 pub use crate::pitch::{parse_note, Scale, MIDDLE_C};
 pub use crate::span::{SourceSpan, TimeSpan};
+pub use crate::tempo::TempoMap;
 pub use crate::time::Time;
 
 // ── Combinators: composition ─────────────────────────────────────────────────
 pub use crate::combinators::compose::{
-    arrange, cat, cycles, fastcat, par, polymeter, pure, seq, silence, slowcat, stack, timecat,
-    track, tracks, Section, Track, Tracks,
+    arrange, cat, cycles, fastcat, par, polymeter, pure, section, section_layout, seq, silence,
+    slowcat, stack, timecat, track, track_with_sections, tracks, Section, SectionSpan, Track,
+    Tracks,
 };
 
 // ── Combinators: patternised postfix args (mini-notation `bd*<2 3>`) ──────────

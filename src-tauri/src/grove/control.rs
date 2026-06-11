@@ -5,16 +5,19 @@
 //! the thread drains each tick — so the transport needs no lock and the real-time
 //! path is never blocked by IPC.
 
-use arbor_grove::prelude::{ControlMap, Tracks};
+use arbor_grove::prelude::{ControlMap, TempoMap, Tracks};
 
 /// A control message for the audio thread.
 pub enum GroveControl {
     /// Replace the playing arrangement (a re-eval). The transport applies it
-    /// quantized at the next cycle boundary. `cps` carries an optional tempo from
-    /// the script's `cps(...)`, applied (also quantized) alongside.
+    /// quantized at the next cycle boundary. `cps` carries an optional constant
+    /// tempo from the script's `cps(...)`; `tempo` carries a piecewise-constant
+    /// tempo automation from `tempo(...)` (empty = none, in which case `cps`
+    /// applies). Both are applied (quantized) alongside the tracks.
     SetTracks {
         tracks: Tracks<ControlMap>,
         cps: Option<f64>,
+        tempo: TempoMap,
     },
     /// Start the scheduler.
     Play,

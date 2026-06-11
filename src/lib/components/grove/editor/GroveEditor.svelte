@@ -18,6 +18,7 @@
   import { createGroveExtensions, setActiveHaps, toActiveHapMarks, toCmDiagnostics, getGroveTree }
     from './grove-cm';
   import { extractSymbols } from './grove-lang';
+  import { buildControlEdits, type ControlEdit } from './grove-edit';
   import { diagnosticsStore, activeHapsStore } from '../stores/engine.svelte';
 
   let {
@@ -154,6 +155,24 @@
 
   export function getValue(): string {
     return view?.state.doc.toString() ?? value;
+  }
+
+  /** Commit mixer/inspector control values into the source as literals (one
+   *  undoable transaction; the resulting edit re-evals via `oninput`). Resolves
+   *  spans against the live tree — returns `treeReady: false` when the grammar
+   *  hasn't loaded yet (the caller retries), and lists any controls skipped
+   *  because their argument is calculated (not a literal). */
+  export function commitControls(
+    index: number,
+    edits: ControlEdit[],
+  ): { treeReady: boolean; applied: number; skipped: string[] } {
+    if (!view) return { treeReady: false, applied: 0, skipped: [] };
+    const tree = getGroveTree(view);
+    if (!tree) return { treeReady: false, applied: 0, skipped: [] };
+    const src = view.state.doc.toString();
+    const { changes, skipped } = buildControlEdits(tree, src, index, edits);
+    if (changes.length) view.dispatch({ changes });
+    return { treeReady: true, applied: changes.length, skipped };
   }
 </script>
 

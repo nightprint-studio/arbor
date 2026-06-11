@@ -38,6 +38,7 @@ crates.
 | `Time` | exact rational number of cycles |
 | `TimeSpan { begin, end }` | half-open window `[begin, end)` — a query window, or a hap's `whole`/`part` |
 | `Hap<T> { whole, part, value, span }` | one event: `whole` = full extent (`None` for continuous signals), `part` = the queried fragment, `value` = payload, `span` = source bytes |
+| `TempoMap { points, period }` | piecewise-constant tempo automation — `(start_cycle, cps)` anchors looping every `period` cycles; `cps_at(cycle)` reads the active tempo. Produced by lang `tempo(…)`, consumed by the engine transport |
 
 A hap **has an onset** in a query when `part.begin == whole.begin`.
 
@@ -48,7 +49,7 @@ A hap **has an onset** in a query when `part.begin == whole.begin`.
 
 | Group | Items |
 |---|---|
-| Composition | `pure` · `silence` · `stack`/`par` · `fastcat`/`seq` · `timecat` · `polymeter` · `slowcat`/`cat` · `arrange` · `cycles` · `tracks` · `track` |
+| Composition | `pure` · `silence` · `stack`/`par` · `fastcat`/`seq` · `timecat` · `polymeter` · `slowcat`/`cat` · `arrange` · `cycles` · `section` · `tracks` · `track` |
 | Time/structure | `fast` · `slow` · `rev` · `every` · `off` · `late` · `early` |
 | Structural | `within` · `inside` · `iter` · `palindrome` · `chunk` · `swing_by` |
 | Patternised args | `inner_join_with` · `fast_with` · `slow_with` · `euclid_with` (mini-notation `bd*<2 3>`) |

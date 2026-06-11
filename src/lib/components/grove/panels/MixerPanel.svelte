@@ -11,12 +11,14 @@
    * neutral. Mute/solo round-trip through the shared store (so the arrangement
    * headers + Inspector mirror them) and push the live audio override too.
    *
-   * Room/send are per-event (code-first): there is no track-level audio command
-   * for them yet (the future `grove_set_literal`), so those knobs are disabled.
+   * `room` is a code-first knob (seeded from the source literal, commits back to
+   * it); `delay`'s three params live in the Inspector. gain/pan keep their live
+   * override plus an explicit commit-to-source affordance (the ↧ button, shown
+   * when a strip has a pending override).
    *
    * Imports only shared/ui (+ the tooltip action) + grove-local.
    */
-  import { SlidersHorizontal, VolumeX, Headphones } from 'lucide-svelte';
+  import { SlidersHorizontal, VolumeX, Headphones, ArrowDownToLine } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Knob from '$lib/components/shared/ui/Knob.svelte';
@@ -25,20 +27,22 @@
   import { mixerStore, GAIN_UNITY, PAN_CENTER } from '../stores/mixer.svelte';
   import { metersStore, diagnosticsStore } from '../stores/engine.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
+  import { controlsStore } from '../stores/controls.svelte';
 
   const tracks = $derived(mixerStore.tracks);
 
-  // Re-query the arrangement + drop the live overrides on every eval (a fresh
-  // diagnostics array is pushed each time). Keeps the mixer correct even when
-  // the arrangement view is collapsed/unmounted; the query is debounced so the
-  // arrangement view firing too only coalesces.
+  // Re-query the arrangement, re-parse the source controls + drop the live
+  // overrides on every eval (a fresh diagnostics array is pushed each time).
+  // Keeps the mixer correct even when the arrangement view is collapsed; the
+  // query/parse are debounced so the arrangement view firing too only coalesces.
   $effect(() => {
     void diagnosticsStore.errors; // dep: reassigned on each eval
     arrangementStore.schedule();
+    controlsStore.schedule();
     mixerStore.rebaseline();
   });
 
-  const CODE_FIRST = 'Per-event (code-first) — set it in the source. A live track override is coming with grove_set_literal.';
+  const ROOM_CALC = 'Room is a calculated value here — edit it in the source.';
 
   function panLabel(p: number): string {
     if (Math.abs(p - PAN_CENTER) < 0.02) return 'C';
@@ -77,8 +81,15 @@
                     label="pan" ariaLabel="{t.name} pan" onchange={(v) => mixerStore.setPan(t.index, v)} />
               <span class="kval">{panLabel(mixerStore.pan(t.index))}</span>
             </div>
-            <span use:tooltip={CODE_FIRST}><Knob value={0} disabled size={24} label="room" ariaLabel="{t.name} room (code-first)" /></span>
-            <span use:tooltip={CODE_FIRST}><Knob value={0} disabled size={24} label="send" ariaLabel="{t.name} send (code-first)" /></span>
+            {#if mixerStore.roomCalculated(t.index)}
+              <span use:tooltip={ROOM_CALC}><Knob value={0} disabled size={24} label="room" ariaLabel="{t.name} room (calculated)" /></span>
+            {:else}
+              <div class="kcol">
+                <Knob value={mixerStore.room(t.index)} default={0} size={24} color={t.color}
+                      label="room" ariaLabel="{t.name} room" onchange={(v) => mixerStore.setRoom(t.index, v)} />
+                <span class="kval">{mixerStore.room(t.index).toFixed(2)}</span>
+              </div>
+            {/if}
           </div>
 
           <div class="ms-row">
@@ -86,6 +97,10 @@
                     onclick={() => mixerStore.toggleMute(t.index)}><VolumeX size={11} /></button>
             <button class="ms solo" class:on={soloed} use:tooltip={'Solo'} aria-label="{t.name} solo" aria-pressed={soloed}
                     onclick={() => mixerStore.toggleSolo(t.index)}><Headphones size={11} /></button>
+            {#if mixerStore.hasOverride(t.index)}
+              <button class="ms commit" use:tooltip={'Commit gain/pan to source'} aria-label="{t.name} commit to source"
+                      onclick={() => mixerStore.commit(t.index)}><ArrowDownToLine size={11} /></button>
+            {/if}
           </div>
         </div>
       {/each}
@@ -157,6 +172,8 @@
   .ms:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
   .ms.on { background: var(--warning); color: #1a1b1e; border-color: transparent; }
   .ms.solo.on { background: var(--info); color: #fff; }
+  .ms.commit { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border-subtle)); }
+  .ms.commit:hover { background: var(--accent); color: #fff; border-color: transparent; }
 
   .dsp { font-size: 9.5px; font-family: var(--font-code); color: var(--text-muted); }
 </style>

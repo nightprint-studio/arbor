@@ -182,6 +182,7 @@
     <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration — fn / let / import, incl. cross-file</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Search the Console / Problems</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></td><td>Commit mixer gain / pan overrides to source</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Toggle Zen mode</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Open grove Settings</td></tr>
     <tr><td><kbd>F1</kbd></td><td>Show grove keyboard shortcuts</td></tr>

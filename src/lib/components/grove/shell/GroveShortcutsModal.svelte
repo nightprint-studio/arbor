@@ -19,10 +19,11 @@
     return k; // F1, …
   }
 
-  /** The chord pieces, in render order (Ctrl · Shift · key). */
+  /** The chord pieces, in render order (Ctrl · Alt · Shift · key). */
   function chord(b: GroveBinding): string[] {
     const parts: string[] = [];
     if (b.ctrl) parts.push('Ctrl');
+    if (b.alt) parts.push('Alt');
     if (b.shift) parts.push('Shift');
     parts.push(keyLabel(b.key));
     return parts;

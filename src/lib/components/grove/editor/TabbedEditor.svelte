@@ -30,6 +30,10 @@
     scrollToLineCol: (line: number, col?: number) => void;
     scrollToOffset: (offset: number, select?: boolean) => void;
     gotoSymbol: (name: string) => boolean;
+    commitControls: (
+      index: number,
+      edits: import('./grove-edit').ControlEdit[],
+    ) => { treeReady: boolean; applied: number; skipped: string[] };
   };
   let editorComp = $state<EditorController | null>(null);
 
@@ -108,6 +112,24 @@
     const apply = () => {
       comp.scrollToOffset(req.offset, true);   // no-ops until the CM view exists
       if (++tries < 3) requestAnimationFrame(apply);
+    };
+    apply();
+  });
+
+  // ── Mixer / Inspector → editor commit (one-shot relay) ───────────────────────
+  // A knob commit needs the editor's live Tree-sitter tree to resolve spans, so
+  // it is routed here. Retried across frames until the grammar/tree is ready
+  // (the editor may have just been revealed from a collapsed pane).
+  let lastCommitSeq = 0;
+  $effect(() => {
+    const req = groveStore.commitRequest;
+    const comp = editorComp;
+    if (!req || req.seq === lastCommitSeq || !comp) return;
+    lastCommitSeq = req.seq;
+    let tries = 0;
+    const apply = () => {
+      const r = comp.commitControls(req.index, req.edits);
+      if (!r.treeReady && ++tries < 24) requestAnimationFrame(apply);
     };
     apply();
   });

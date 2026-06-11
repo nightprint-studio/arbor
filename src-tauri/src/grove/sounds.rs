@@ -21,6 +21,9 @@ pub struct Instrument {
     pub name: String,
     /// `synth` | `sample` | `sfz`.
     pub kind: &'static str,
+    /// Named articulations the instrument exposes (`.art("…")`), sorted; empty
+    /// for synth / sample voices.
+    pub articulations: Vec<String>,
 }
 
 /// The `grove_sounds` result. Always includes the built-in default synth.
@@ -45,6 +48,7 @@ pub async fn grove_sounds(state: State<'_, AppState>) -> Result<SoundList, AppEr
         .map(|i| Instrument {
             name: i.name,
             kind: kind_str(i.kind),
+            articulations: i.articulations,
         })
         .collect();
     instruments.sort_by(|a, b| a.name.cmp(&b.name));
@@ -57,6 +61,7 @@ pub async fn grove_sounds(state: State<'_, AppState>) -> Result<SoundList, AppEr
             Instrument {
                 name: "synth".to_string(),
                 kind: "synth",
+                articulations: Vec::new(),
             },
         );
     }

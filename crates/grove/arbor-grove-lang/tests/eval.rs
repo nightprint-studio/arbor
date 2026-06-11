@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use arbor_grove_lang::ast::*;
 use arbor_grove_lang::prelude::{evaluate, EvalConfig, NoImports, SilentLog};
-use arbor_grove_pattern::prelude::{ControlMap, Hap, Pattern, Time, TimeSpan, Tracks};
+use arbor_grove_pattern::prelude::{ControlMap, Hap, Pattern, TempoMap, Time, TimeSpan, Tracks};
 
 // ── AST builders ──────────────────────────────────────────────────────────────
 
@@ -362,6 +362,30 @@ fn cps_is_captured() {
     .expect("eval ok");
     assert_eq!(out.cps, Some(0.5));
     assert_eq!(out.tracks.tracks.len(), 1);
+}
+
+#[test]
+fn tempo_builds_a_piecewise_map() {
+    // tempo(cycles(8, 0.5), cycles(16, 0.6)) → a 24-cycle looping tempo map.
+    let out = evaluate(
+        &Program {
+            items: vec![Item::Expr(call(
+                "tempo",
+                vec![
+                    call("cycles", vec![num(8.0), num(0.5)]),
+                    call("cycles", vec![num(16.0), num(0.6)]),
+                ],
+            ))],
+        },
+        Rc::new(NoImports),
+        Arc::new(SilentLog),
+        EvalConfig::default(),
+    )
+    .expect("eval ok");
+    assert_eq!(out.tempo, TempoMap::from_segments(&[(8, 0.5), (16, 0.6)]));
+    assert_eq!(out.tempo.period, 24);
+    assert_eq!(out.tempo.cps_at(0), Some(0.5));
+    assert_eq!(out.tempo.cps_at(10), Some(0.6));
 }
 
 #[test]

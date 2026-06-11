@@ -28,4 +28,4 @@ pub use crate::emit::{emit, emit_expr};
 pub use crate::materialize::{materialize_island, materialize_source};
 
 // ── Re-exported pattern surface (so consumers need one `use`) ─────────────────
-pub use arbor_grove_pattern::prelude::{ControlMap, Pattern, SourceSpan, TimeSpan};
+pub use arbor_grove_pattern::prelude::{ControlMap, Pattern, SourceSpan, TempoMap, TimeSpan};

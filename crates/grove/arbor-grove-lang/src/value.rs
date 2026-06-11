@@ -16,7 +16,9 @@
 use std::fmt;
 use std::rc::Rc;
 
-use arbor_grove_pattern::prelude::{ControlMap, Pattern, Section, Track, Tracks};
+use arbor_grove_pattern::prelude::{
+    ControlMap, Pattern, Section, SectionSpan, TempoMap, Track, Tracks,
+};
 
 use crate::ast::Expr;
 use crate::env::Env;
@@ -90,8 +92,16 @@ pub enum Value {
     },
     /// A log level keyword used as a value (`.log(info)`).
     Level(LogLevel),
-    /// An `arrange` section (`cycles(n, pat)`).
+    /// An `arrange` section (`cycles(n, pat)` / `section(name, n, pat)`).
     Section(Section<ControlMap>),
+    /// A tempo-map segment (`cycles(n, cps)` inside `tempo(...)`): `n` cycles at
+    /// `cps` cycles-per-second.
+    TempoSeg { cycles: u32, cps: f64 },
+    /// An `arrange(...)` result: the flattened pattern, the named-section layout,
+    /// and the loop period (total cycles). Coerces to its pattern everywhere a
+    /// pattern is needed; the layout + period are captured by `track(...)` for the
+    /// arrangement view.
+    Arrangement(Pattern<ControlMap>, Vec<SectionSpan>, u32),
     /// One named channel (`track(name, pat)`).
     Track(Track<ControlMap>),
     /// The track list output (`tracks(...)`).
@@ -114,6 +124,8 @@ impl Value {
             Value::Range { .. } => "range",
             Value::Level(_) => "log level",
             Value::Section(_) => "section",
+            Value::TempoSeg { .. } => "tempo segment",
+            Value::Arrangement(..) => "arrangement",
             Value::Track(_) => "track",
             Value::Tracks(_) => "tracks",
             Value::Unit => "unit",
@@ -122,11 +134,14 @@ impl Value {
 }
 
 /// The result of evaluating a whole program: the clock rate (if `cps(...)` was
-/// called) and the output channels.
+/// called), the tempo automation (if `tempo(...)` was called), and the output
+/// channels.
 #[derive(Clone, Debug)]
 pub struct EvalOutput {
-    /// Cycles per second, if set by `cps(...)`.
+    /// Cycles per second, if set by `cps(...)`. Ignored when `tempo` is non-empty.
     pub cps: Option<f64>,
+    /// Piecewise-constant tempo automation from `tempo(...)`; empty when unset.
+    pub tempo: TempoMap,
     /// The output channels (a bare top-level pattern becomes one anonymous track).
     pub tracks: Tracks<ControlMap>,
 }

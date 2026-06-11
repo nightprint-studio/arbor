@@ -9,8 +9,9 @@
    *
    * A frozen, collapsible track-header column (sticky-left) and a fixed
    * pixels-per-cycle timeline that continues into empty bars past the song
-   * (spreadsheet-like). Section markers are integrated as tinted background bands
-   * plus coloured ruler chips (Step-0 song structure — no BE source for these).
+   * (spreadsheet-like). Named sections (`section("INTRO", …)` in the source) are
+   * drawn as tinted per-lane background bands plus coloured ruler chips, tiled
+   * across the timeline by `grove_query`.
    *
    * Mute/solo live in the mixer (Step 3b); the headers show **read-only status
    * icons**. Right-click a header/lane toggles mute/solo via the shared store
@@ -29,7 +30,7 @@
   import { projectStore } from '../stores/project.svelte';
   import { groveStore } from '../grove-store.svelte';
   import { groveSetTrack } from '$lib/ipc/grove';
-  import { laneColor } from '../palette';
+  import { laneColor, sectionColor } from '../palette';
 
   const PX = 26;
   const VIEW = VIEW_CYCLES;
@@ -185,6 +186,11 @@
         </div>
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div class="arr-ruler" bind:this={rulerEl} onclick={setStartFromEvent} use:tooltip={'Click to seek'}>
+          {#each arrangementStore.rulerSections as s (s.name + '@' + s.start)}
+            <div class="ruler-chip" style="left: {s.start * PX}px; width: {(s.end - s.start) * PX}px; --sc: {sectionColor(s.name)}">
+              <span>{s.name}</span>
+            </div>
+          {/each}
           {#each bars as b (b)}
             <div class="ruler-tick" style="left: {b * PX}px;" class:strong={b % 8 === 0}><span>{b}</span></div>
           {/each}
@@ -215,6 +221,9 @@
             </div>
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <div class="arr-lane" onclick={() => (selectedPos = pos)} oncontextmenu={(e) => openMenu(e, lane.track)}>
+              {#each lane.sections as s (s.name + '@' + s.start)}
+                <div class="lane-band" style="left: {s.start * PX}px; width: {(s.end - s.start) * PX}px; --sc: {sectionColor(s.name)}"></div>
+              {/each}
               {#each bars as b (b)}
                 <div class="lane-grid" style="left: {b * PX}px;" class:strong={b % 8 === 0}></div>
               {/each}
@@ -300,6 +309,19 @@
   .ruler-tick.strong { border-left-color: var(--border-subtle); }
   .ruler-tick span { position: absolute; bottom: 1px; left: 3px; font-size: 8.5px; color: var(--text-disabled); font-variant-numeric: tabular-nums; }
 
+  /* Named-section chips: a coloured label strip along the top of the ruler. */
+  .ruler-chip {
+    position: absolute; top: 2px; height: 13px;
+    background: color-mix(in srgb, var(--sc) 26%, transparent);
+    border-left: 2px solid var(--sc); border-radius: 0 3px 3px 0;
+    overflow: hidden; pointer-events: none;
+  }
+  .ruler-chip span {
+    display: block; padding: 0 5px; line-height: 13px;
+    font-size: 8.5px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+    color: var(--text-secondary); white-space: nowrap;
+  }
+
   /* ── Rows ── */
   .arr-rows { display: flex; flex-direction: column; }
   .arr-row { display: flex; height: 72px; border-bottom: 1px solid var(--border-subtle); }
@@ -330,6 +352,11 @@
 
   /* ── Lane ── */
   .arr-lane { position: relative; width: var(--tl-w); flex-shrink: 0; cursor: pointer; }
+  /* Section backdrop band — drawn first (DOM order) so it sits under the grid +
+     haps without needing an explicit z-index. */
+  .lane-band { position: absolute; top: 0; bottom: 0; pointer-events: none;
+    background: color-mix(in srgb, var(--sc) 8%, transparent);
+    border-left: 1px solid color-mix(in srgb, var(--sc) 38%, transparent); }
   .lane-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--border-subtle) 35%, transparent); }
   .lane-grid.strong { background: color-mix(in srgb, var(--border-subtle) 70%, transparent); }
 

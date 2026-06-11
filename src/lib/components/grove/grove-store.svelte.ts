@@ -16,6 +16,7 @@
 import { LOG_LEVELS, type GroveLogThreshold } from './stores/config.svelte';
 import { transportStore } from './stores/engine.svelte';
 import type { GroveLayoutState } from '$lib/ipc/grove';
+import type { ControlEdit } from './editor/grove-edit';
 
 /** Left-rail panels (top group = side panels, bottom group = bottom panel). */
 export type LeftPanel = 'files' | 'outline' | 'soundbank';
@@ -32,6 +33,17 @@ export interface GotoRequest {
   /** 1-based line (fallback when the offset can't be resolved). */
   line: number;
   /** Monotonic id so the same target fired twice still re-triggers. */
+  seq: number;
+}
+
+/** A one-shot request to commit mixer/inspector knob values into the source as
+ *  literals (the editor resolves spans + applies the edit — see grove-edit). */
+export interface CommitRequest {
+  /** Track index (declaration order) whose pattern chain to edit. */
+  index: number;
+  /** The control literals to write (`gain`/`pan`/`room`/`delay`). */
+  edits: ControlEdit[];
+  /** Monotonic id so an identical commit still re-triggers. */
   seq: number;
 }
 
@@ -69,6 +81,10 @@ function createGroveStore() {
   // ── Outline → editor jump relay (one-shot) ───────────────────────────────────
   let gotoRequest = $state<GotoRequest | null>(null);
   let gotoSeq = 0;
+
+  // ── Mixer/Inspector → editor commit relay (one-shot) ─────────────────────────
+  let commitRequest = $state<CommitRequest | null>(null);
+  let commitSeq = 0;
 
   // ── Live editor caret (footer Ln/Col) ────────────────────────────────────────
   let caretLine = $state(1);
@@ -160,6 +176,16 @@ function createGroveStore() {
       // Jumping to source implies showing the editor — un-hide it if collapsed.
       if (collapseTabpane) collapseTabpane = false;
       gotoRequest = { offset, line, seq: ++gotoSeq };
+    },
+
+    // ── Mixer / Inspector → editor commit (one-shot; TabbedEditor consumes) ──
+    // Writing a knob value into the source needs the editor's live tree, so the
+    // request is relayed here and the editor resolves + applies it (one undo).
+    get commitRequest() { return commitRequest; },
+    requestCommit(index: number, edits: ControlEdit[]) {
+      if (!edits.length) return;
+      if (collapseTabpane) collapseTabpane = false; // editor must be mounted to apply
+      commitRequest = { index, edits, seq: ++commitSeq };
     },
 
     // ── live caret (footer) ──

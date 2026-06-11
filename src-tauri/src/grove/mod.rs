@@ -34,7 +34,7 @@ use std::thread::JoinHandle;
 
 use tauri::{AppHandle, Manager, State};
 
-use arbor_grove::prelude::{ControlMap, Tracks};
+use arbor_grove::prelude::{ControlMap, TempoMap, Tracks};
 
 use crate::config::app_config;
 use crate::error::AppError;
@@ -73,6 +73,7 @@ struct Session {
 struct Latest {
     tracks: Tracks<ControlMap>,
     cps: Option<f64>,
+    tempo: TempoMap,
 }
 
 impl GroveState {
@@ -153,11 +154,13 @@ pub async fn grove_eval(
                 *latest = Some(Latest {
                     tracks: output.tracks.clone(),
                     cps: output.cps,
+                    tempo: output.tempo.clone(),
                 });
             }
             grove.send_if_live(GroveControl::SetTracks {
                 tracks: output.tracks,
                 cps: output.cps,
+                tempo: output.tempo,
             });
             GroveDiagnostics::ok()
         }
@@ -190,6 +193,7 @@ pub async fn grove_transport(
                     let _ = tx.send(GroveControl::SetTracks {
                         tracks: l.tracks.clone(),
                         cps: l.cps,
+                        tempo: l.tempo.clone(),
                     });
                 }
             }
@@ -277,7 +281,16 @@ pub async fn grove_render(
         }
     };
 
-    let cps = output.cps.unwrap_or(cfg.default_cps);
+    // Offline render runs at a constant tempo. When a `tempo(...)` map is present
+    // we render at its starting tempo (full offline tempo automation is a future
+    // refinement); otherwise the script's `cps(...)`, else the configured default.
+    let cps = output
+        .tempo
+        .points
+        .first()
+        .map(|p| p.1)
+        .or(output.cps)
+        .unwrap_or(cfg.default_cps);
     let render_cfg = render::resolve_config(cfg.render.render_config(), &opts);
     let job_id = render::spawn_render(
         &app,

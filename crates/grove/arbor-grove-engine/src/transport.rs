@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use arbor_grove_audio::prelude::{AudioCommand, AudioSink, DelayConfig, TrackConfig, VoiceSource};
-use arbor_grove_pattern::prelude::{ControlMap, SourceKind, Time, Tracks};
+use arbor_grove_pattern::prelude::{ControlMap, SourceKind, TempoMap, Time, Tracks};
 
 use crate::clock::Epoch;
 use crate::schedule::{delay_config_for, schedule_span};
@@ -52,8 +52,15 @@ pub struct Transport<S: AudioSink> {
     /// Highest frame already scheduled (exclusive); the next tick resumes here.
     scheduled_through: u64,
     playing: bool,
-    /// Staged tempo change, applied at the next unscheduled cycle boundary.
+    /// Live tempo override (UI `set_cps`), applied at the next unscheduled cycle
+    /// boundary. Ignored while a [`TempoMap`] drives the tempo.
     pending_cps: Option<f64>,
+    /// Active piecewise-constant tempo automation; empty = constant clock. When
+    /// non-empty the transport re-anchors the epoch at each cycle boundary to the
+    /// map's `cps`, so the scripted tempo plays itself.
+    tempo: TempoMap,
+    /// Staged tempo-map (a re-eval), applied at the next unscheduled cycle boundary.
+    pending_tempo: Option<TempoMap>,
     /// Staged re-eval, applied at the next unscheduled cycle boundary.
     pending_tracks: Option<Tracks<ControlMap>>,
     /// Cross-tick dedup of sustained stems, keyed by `(track, path)`. A stem
@@ -76,6 +83,8 @@ impl<S: AudioSink> Transport<S> {
             scheduled_through: 0,
             playing: false,
             pending_cps: None,
+            tempo: TempoMap::none(),
+            pending_tempo: None,
             pending_tracks: None,
             sustained_started: HashSet::new(),
             delay_state: HashMap::new(),
@@ -87,10 +96,18 @@ impl<S: AudioSink> Transport<S> {
         self.pending_tracks = Some(tracks);
     }
 
-    /// Change tempo. Applied quantized at the next cycle boundary, re-anchoring
-    /// the [`Epoch`] so the position stays continuous.
+    /// Change tempo (a live UI override). Applied quantized at the next cycle
+    /// boundary, re-anchoring the [`Epoch`] so the position stays continuous. A
+    /// no-op effect while a [`TempoMap`] is driving the tempo.
     pub fn set_cps(&mut self, cps: f64) {
         self.pending_cps = Some(cps);
+    }
+
+    /// Install a piecewise-constant tempo automation (from the script's
+    /// `tempo(...)`). An empty map clears automation back to the constant clock.
+    /// Applied quantized at the next cycle boundary (like a re-eval).
+    pub fn set_tempo_map(&mut self, map: TempoMap) {
+        self.pending_tempo = Some(map);
     }
 
     /// Start scheduling from the sink's current frame.
@@ -99,6 +116,11 @@ impl<S: AudioSink> Transport<S> {
         self.scheduled_through = self.sink.now_frame();
         self.sustained_started.clear();
         self.delay_state.clear();
+        // A (re)start promotes a staged tempo-map immediately — the tempo is then
+        // anchored at the first scheduled cycle boundary by `tick`/`apply_boundary`.
+        if let Some(m) = self.pending_tempo.take() {
+            self.tempo = m;
+        }
         let _ = self.send_track_config();
     }
 
@@ -124,48 +146,51 @@ impl<S: AudioSink> Transport<S> {
     }
 
     /// Refill the look-ahead window: schedule newly-due cycles and push their
-    /// events, applying any pending tempo/track swap at the boundary.
+    /// events, applying any pending swap and the tempo automation at cycle
+    /// boundaries.
     ///
-    /// Schedules `[scheduled_through, now + lookahead)`, but only up to the next
-    /// unscheduled cycle boundary when a swap is pending — the swap is then applied
-    /// (re-anchoring the clock for a tempo change, re-`ConfigureTracks` for a track
-    /// change) and the remainder of the window is scheduled under the new state.
-    /// Stops early (without advancing past the unsent frame) if the sink queue
-    /// fills, so the same window is retried next tick.
+    /// Walks `[scheduled_through, now + lookahead)` in segments delimited by whole
+    /// cycle boundaries. At each boundary it applies a due track/tempo-map swap and
+    /// re-anchors the clock to the tempo map's `cps` (a no-op when the tempo is
+    /// unchanged), so a scripted `tempo(...)` plays itself and an event never
+    /// straddles a tempo change. Stops early (without advancing past the unsent
+    /// frame) if the sink queue fills, so the same window is retried next tick.
     pub fn tick(&mut self) {
         if !self.playing {
             return;
         }
+        let sr = self.sink.sample_rate();
         let now = self.sink.now_frame();
-        let lookahead_frames = lookahead_frames(self.sink.sample_rate());
-        let target = now + lookahead_frames;
+        let target = now + lookahead_frames(sr);
 
         // Nothing newly due (clock hasn't advanced past what we already scheduled).
         if target <= self.scheduled_through {
             return;
         }
 
-        // Walk the window in segments delimited by cycle boundaries where a pending
-        // swap is due. A swap applies at the first cycle boundary at/after
-        // `scheduled_through`; if `scheduled_through` already sits exactly on a
-        // boundary, the swap takes effect *there*, before that segment is scheduled.
         while self.scheduled_through < target {
-            // Apply a swap that is due exactly at the current (already-on-boundary)
-            // frame before scheduling the upcoming segment.
-            if self.has_pending() {
-                if let Some(b) = self.next_swap_boundary_frame() {
-                    if b == self.scheduled_through {
-                        self.apply_pending_at(b);
-                    }
-                }
+            // If we sit exactly on a cycle boundary, apply swaps + re-anchor tempo
+            // there before scheduling the upcoming segment. `scheduled_through` is
+            // always a boundary frame or the previous window's target; the *nearest*
+            // integer cycle (round, robust to the frame_of rounding for non-integer
+            // frames-per-cycle) identifies a real boundary by an exact frame match.
+            let nearest = self.epoch.cycle_of(self.scheduled_through, sr).round() as i64;
+            if self.epoch.frame_of(Time::int(nearest), sr) == self.scheduled_through {
+                self.apply_boundary(nearest, self.scheduled_through);
             }
 
-            // Schedule up to the next pending-swap boundary inside the window, else
-            // the full target.
-            let segment_end = match (self.has_pending(), self.next_swap_boundary_frame()) {
-                (true, Some(b)) if b > self.scheduled_through && b < target => b,
-                _ => target,
-            };
+            // Schedule up to the next whole cycle boundary strictly ahead, or the
+            // window target — whichever is first. The epoch may have just been
+            // re-anchored, so recompute; the loop guarantees the boundary frame is
+            // strictly greater (frame_of can round onto the current frame).
+            let pos = self.epoch.cycle_of(self.scheduled_through, sr);
+            let mut next_cycle = pos.floor() as i64 + 1;
+            let mut next_frame = self.epoch.frame_of(Time::int(next_cycle), sr);
+            while next_frame <= self.scheduled_through {
+                next_cycle += 1;
+                next_frame = self.epoch.frame_of(Time::int(next_cycle), sr);
+            }
+            let segment_end = next_frame.min(target);
 
             if !self.schedule_segment(self.scheduled_through..segment_end) {
                 // Back-pressure: queue full. Leave `scheduled_through` unmoved so the
@@ -200,34 +225,18 @@ impl<S: AudioSink> Transport<S> {
 
     // ── Internals ────────────────────────────────────────────────────────────
 
-    /// Whether any quantized swap is staged.
-    fn has_pending(&self) -> bool {
-        self.pending_cps.is_some() || self.pending_tracks.is_some()
-    }
-
-    /// Absolute frame of the first integer cycle boundary at or after
-    /// `scheduled_through` — the earliest point a staged swap may take effect
-    /// without cutting an already-scheduled event. If `scheduled_through` sits
-    /// exactly on a boundary, that boundary is returned (the swap applies there).
-    fn next_swap_boundary_frame(&self) -> Option<u64> {
-        let sr = self.sink.sample_rate();
-        let pos = self.epoch.cycle_of(self.scheduled_through, sr);
-        // `ceil` rounds a fractional position up to the next whole cycle; an exact
-        // integer boundary maps to itself. A tiny epsilon absorbs float slop so a
-        // boundary we are exactly on is recognised rather than skipped to the next.
-        let next_cycle = (pos - 1e-9).ceil() as i64;
-        let boundary = Time::int(next_cycle);
-        Some(self.epoch.frame_of(boundary, sr))
-    }
-
-    /// Apply the staged tempo / track swap at boundary frame `at`.
-    fn apply_pending_at(&mut self, at: u64) {
-        let sr = self.sink.sample_rate();
-        // The cycle that `at` represents under the *current* epoch.
-        let boundary_cycle = Time::int(self.epoch.cycle_of(at, sr).round() as i64);
-
-        if let Some(cps) = self.pending_cps.take() {
-            self.epoch = self.epoch.reanchor(boundary_cycle, at, cps);
+    /// Apply everything due at the whole-cycle boundary `cycle` (frame `at`):
+    /// staged track / tempo-map swaps first, then re-anchor the clock to the tempo
+    /// in force. Called once per boundary the scheduler crosses.
+    ///
+    /// Tempo precedence: a non-empty [`TempoMap`] drives the tempo (re-anchor to
+    /// `cps_at(cycle)`, usually a no-op since the `cps` is unchanged mid-segment); a
+    /// live `set_cps` override applies only when no map is active. Re-anchoring with
+    /// the same `cps` is exact (frame continuous), so per-boundary calls don't drift.
+    fn apply_boundary(&mut self, cycle: i64, at: u64) {
+        // A staged tempo-map (live re-eval) takes effect here.
+        if let Some(m) = self.pending_tempo.take() {
+            self.tempo = m;
         }
         if let Some(tracks) = self.pending_tracks.take() {
             self.tracks = tracks;
@@ -235,6 +244,16 @@ impl<S: AudioSink> Transport<S> {
             self.sustained_started.clear();
             self.delay_state.clear();
             let _ = self.send_track_config();
+        }
+        // The map drives the tempo when present; else a one-shot live override.
+        let next_cps = self
+            .tempo
+            .cps_at(cycle)
+            .or_else(|| self.pending_cps.take());
+        if let Some(cps) = next_cps {
+            if cps != self.epoch.cps {
+                self.epoch = self.epoch.reanchor(Time::int(cycle), at, cps);
+            }
         }
     }
 
@@ -316,7 +335,7 @@ fn lookahead_frames(sample_rate: u32) -> u64 {
 mod tests {
     use super::*;
     use arbor_grove_audio::prelude::RecordingSink;
-    use arbor_grove_pattern::prelude::{audio, pure, seq, track, tracks};
+    use arbor_grove_pattern::prelude::{audio, pure, seq, track, tracks, TempoMap};
 
     const SR: u32 = 48_000;
 
@@ -383,6 +402,27 @@ mod tests {
         assert_eq!(e.frame, 96_000);
         assert_eq!(e.cycle, Time::int(2));
         // Cycle 3 is now one half-second later: 24_000 frames past the boundary.
+        assert_eq!(e.frame_of(Time::int(3), SR), 96_000 + 24_000);
+    }
+
+    #[test]
+    fn tempo_map_reanchors_at_segment_boundaries() {
+        let mut tr = Transport::new(RecordingSink::new(SR), 1.0);
+        tr.set_tracks(drum_tracks("d", "bd", 1));
+        // 1 cps for cycles 0–1, then 2 cps for cycles 2–3, looping every 4 cycles.
+        tr.set_tempo_map(TempoMap::from_segments(&[(2, 1.0), (2, 2.0)]));
+        tr.play();
+        // Sweep the clock across the cycle-2 boundary (frame 96_000 at cps=1).
+        for now in [0u64, 48_000, 96_000, 140_000] {
+            tr.sink_mut().set_now(now);
+            tr.tick();
+        }
+        let e = tr.epoch();
+        // The tempo doubled at cycle 2, anchored at frame 96_000 (frame-continuous).
+        assert_eq!(e.cps, 2.0);
+        assert_eq!(e.frame, 96_000);
+        assert_eq!(e.cycle, Time::int(2));
+        // Cycle 3 is now half a cycle-second later: 24_000 frames past the boundary.
         assert_eq!(e.frame_of(Time::int(3), SR), 96_000 + 24_000);
     }
 

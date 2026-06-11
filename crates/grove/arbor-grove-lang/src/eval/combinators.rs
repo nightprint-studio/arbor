@@ -2,9 +2,9 @@
 //! whose `name(args)` form produces a value rather than a transform.
 
 use arbor_grove_pattern::prelude::{
-    arrange, audio, cat, choose, cycles, isaw, rand, sample, saw, seq, sine, square, stack,
-    time_to_index, track, tracks, tri, ControlMap, Hap, Pattern, Section, SourceSpan, TimeSpan,
-    Track,
+    arrange, audio, cat, choose, cycles, isaw, rand, sample, saw, section, section_layout, seq,
+    sine, square, stack, time_to_index, track, track_with_sections, tracks, tri, ControlMap, Hap,
+    Pattern, Section, SourceSpan, TempoMap, TimeSpan, Track,
 };
 
 use crate::convert::{as_int, as_number, as_pattern, as_str};
@@ -23,9 +23,9 @@ const SEED_CHOOSE_PATTERNS: u64 = 0xc4_05e_9a77e_5_u64;
 pub fn is_combinator(name: &str) -> bool {
     matches!(
         name,
-        "par" | "stack" | "seq" | "cat" | "arrange" | "cycles" | "track" | "tracks"
+        "par" | "stack" | "seq" | "cat" | "arrange" | "cycles" | "section" | "track" | "tracks"
             | "rand" | "choose" | "sample" | "audio"
-            | "cps"
+            | "cps" | "tempo"
             | "trace" | "debug" | "info" | "warn" | "error"
     )
 }
@@ -61,19 +61,44 @@ pub fn eval_builtin_call(
                 .into_iter()
                 .map(|v| as_section(v, span))
                 .collect::<Result<Vec<Section<ControlMap>>>>()?;
-            Ok(Value::Pattern(arrange(sections)))
+            // Keep the named-section layout + loop period alongside the flattened
+            // pattern so a wrapping `track(...)` can surface the bands to the view.
+            let layout = section_layout(&sections);
+            let period: u32 = sections.iter().map(|s| s.cycles).sum();
+            Ok(Value::Arrangement(arrange(sections), layout, period))
         }
         "cycles" => {
             arity("cycles", &args, 2, span)?;
-            let n = as_int(&args[0], span)?;
-            let pat = as_pattern(args.into_iter().nth(1).unwrap(), span)?;
-            Ok(Value::Section(cycles(n.max(0) as u32, pat)))
+            let n = as_int(&args[0], span)?.max(0) as u32;
+            // `cycles(n, x)` is overloaded by the 2nd argument: a **number** is a
+            // tempo segment (`n` cycles at that `cps`, used inside `tempo(...)`); a
+            // **pattern** is an arrange section. A bare number was never a valid
+            // arrange section, so there is no ambiguity.
+            let second = args.into_iter().nth(1).unwrap();
+            match second {
+                Value::Number(cps) => Ok(Value::TempoSeg { cycles: n, cps }),
+                other => Ok(Value::Section(cycles(n, as_pattern(other, span)?))),
+            }
+        }
+        "section" => {
+            arity("section", &args, 3, span)?;
+            let name = as_str(&args[0], span)?;
+            let n = as_int(&args[1], span)?;
+            let pat = as_pattern(args.into_iter().nth(2).unwrap(), span)?;
+            Ok(Value::Section(section(name, n.max(0) as u32, pat)))
         }
         "track" => {
             arity("track", &args, 2, span)?;
             let name = as_str(&args[0], span)?;
-            let pat = as_pattern(args.into_iter().nth(1).unwrap(), span)?;
-            Ok(Value::Track(track(name, pat)))
+            // A track over an `arrange(...)` carries its section layout; over a
+            // plain pattern it has none.
+            let chan = match args.into_iter().nth(1).unwrap() {
+                Value::Arrangement(pat, sections, period) => {
+                    track_with_sections(name, pat, sections, period)
+                }
+                other => track(name, as_pattern(other, span)?),
+            };
+            Ok(Value::Track(chan))
         }
         "tracks" => {
             let chans = flatten_varargs(args)
@@ -102,6 +127,16 @@ pub fn eval_builtin_call(
         "cps" => {
             arity("cps", &args, 1, span)?;
             ctx.cps.set(Some(as_number(&args[0], span)?));
+            Ok(Value::Unit)
+        }
+        // `tempo(cycles(n, cps), …)` — piecewise-constant tempo automation. Each
+        // arg is a `cycles(n, cps)` tempo segment; the map loops over their total.
+        "tempo" => {
+            let segs = flatten_varargs(args)
+                .into_iter()
+                .map(|v| as_tempo_seg(v, span))
+                .collect::<Result<Vec<(u32, f64)>>>()?;
+            *ctx.tempo.borrow_mut() = TempoMap::from_segments(&segs);
             Ok(Value::Unit)
         }
 
@@ -160,6 +195,13 @@ fn as_track(v: Value, span: SourceSpan) -> Result<Track<ControlMap>> {
     match v {
         Value::Track(t) => Ok(t),
         other => Err(type_err(span, "track (track(...))", &other)),
+    }
+}
+
+fn as_tempo_seg(v: Value, span: SourceSpan) -> Result<(u32, f64)> {
+    match v {
+        Value::TempoSeg { cycles, cps } => Ok((cycles, cps)),
+        other => Err(type_err(span, "tempo segment (cycles(n, cps))", &other)),
     }
 }
 
