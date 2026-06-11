@@ -27,8 +27,8 @@ pub const EVT_METERS: &str = "grove:meters";
 pub const EVT_TRANSPORT: &str = "grove:transport";
 /// A log line from the running script (`debug`/`info`/… or per-hap `.log`).
 pub const EVT_LOG: &str = "grove:log";
-/// VSCO 2 download/extract progress (during an install job).
-pub const EVT_VSCO_PROGRESS: &str = "grove:vsco_progress";
+/// Sample-pack download/extract progress (during any pack install job).
+pub const EVT_PACK_PROGRESS: &str = "grove:pack_progress";
 /// The audio device failed to open on the session thread (terminal for the play).
 pub const EVT_AUDIO_ERROR: &str = "grove:audio_error";
 
@@ -118,11 +118,14 @@ pub struct LogLine {
     pub message: String,
 }
 
-/// The `grove:vsco_progress` payload during a VSCO 2 install job. `pct` is `-1`
-/// when the total is unknown (a pre-sizing phase).
+/// The `grove:pack_progress` payload during any sample-pack install job. Carries
+/// the `pack_id` so the front end can route progress to the right pack card.
+/// `pct` is `-1` when the total is unknown (a pre-sizing phase).
 #[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct VscoProgress {
+pub struct PackProgress {
     pub job_id: String,
+    /// The installing pack's id (`vsco` | `dirt-samples` | `drum-machines`).
+    pub pack_id: String,
     /// `downloading` | `extracting`.
     pub phase: String,
     pub done: u64,

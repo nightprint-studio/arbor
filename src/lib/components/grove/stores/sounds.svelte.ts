@@ -1,10 +1,10 @@
 /**
  * grove sounds store — the resolvable instrument list (registry introspection
  * via `grove_sounds`). Reflects what the engine can *actually* play: the
- * built-in synth presets are always present; the VSCO 2 samplers appear once
- * the bank is installed. Not a static list — it tracks the live registry.
+ * built-in synth presets are always present; sampler voices appear once a sample
+ * pack is installed. Not a static list — it tracks the live registry.
  *
- * Refresh on mount and whenever the registry can change (a VSCO install
+ * Refresh on mount and whenever the registry can change (a pack install
  * completing). Imports only the IPC seam — grove stays extractable.
  */
 
@@ -21,7 +21,7 @@ function createSoundsStore() {
     get loaded()      { return loaded; },
     /** Built-in synth presets. */
     get synths()   { return instruments.filter((i) => i.kind === 'synth'); },
-    /** Sample/SFZ voices (the VSCO bank + any manifest entries). */
+    /** Sample/SFZ voices from any installed sample pack. */
     get samplers() { return instruments.filter((i) => i.kind !== 'synth'); },
 
     /** Re-read the registry. Keeps the last list on failure (engine not ready). */

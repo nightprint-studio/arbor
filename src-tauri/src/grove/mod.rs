@@ -10,8 +10,9 @@
 //! - orchestrate re-eval: `lang(source)` → `Tracks` → `Transport::set_tracks`
 //!   (quantized at the next cycle boundary), with span-located diagnostics
 //!   ([`eval`]).
-//! - manage the VSCO 2 sample bank: download/extract/index via the job system,
-//!   wire the resulting sound registry into the audio session ([`vsco`]).
+//! - manage downloadable sample packs (VSCO 2, Dirt-Samples, drum machines, …):
+//!   download/extract/index via the job system, merge their sound registries
+//!   into the audio session ([`packs`]).
 //! - offline render to WAV via a background job ([`render`]).
 //! - push throttled BE→FE events (`grove:diagnostics`/`active_haps`/`meters`/
 //!   `transport`/`log`, [`events`]).
@@ -21,13 +22,13 @@ pub mod config;
 mod control;
 mod eval;
 mod events;
+mod packs;
 pub mod project;
 pub mod query;
 mod render;
 pub mod sounds;
 pub mod state;
 mod validate;
-mod vsco;
 
 use std::sync::mpsc::{self, Sender};
 use std::sync::Mutex;
@@ -45,7 +46,6 @@ pub use config::GroveConfig;
 use control::GroveControl;
 use events::{emit, GroveDiagnostics, EVT_DIAGNOSTICS};
 use render::RenderOpts;
-use vsco::VscoStatus;
 
 // The additive Fase-4 commands live in their own modules (`query`/`sounds`/
 // `state`/`project`, all `pub`). The invoke handler references them by full path
@@ -309,24 +309,26 @@ pub async fn grove_render(
     Ok(job_id)
 }
 
-/// Read the VSCO 2 sample-bank install status.
+/// List every downloadable sample pack (VSCO, Dirt-Samples, drum machines, …)
+/// with its current install status.
 #[tauri::command]
-pub async fn grove_vsco_status(
+pub async fn grove_packs(
     state: State<'_, AppState>,
-) -> Result<VscoStatus, AppError> {
+) -> Result<Vec<packs::PackStatus>, AppError> {
     let cfg = grove_config(&state)?;
-    Ok(vsco::status(&cfg))
+    Ok(packs::list(&cfg))
 }
 
-/// Start downloading + installing the VSCO 2 sample bank (job-tracked). Returns
-/// the job id; cancel via the standard `cancel_job`.
+/// Start downloading + installing a sample pack by id (job-tracked). Returns the
+/// job id; cancel via the standard `cancel_job`.
 #[tauri::command]
-pub async fn grove_vsco_download(
+pub async fn grove_pack_download(
     app: AppHandle,
     state: State<'_, AppState>,
+    pack_id: String,
 ) -> Result<String, AppError> {
     let cfg = grove_config(&state)?;
-    Ok(vsco::start_download(&app, &cfg))
+    packs::start_download(&app, &cfg, &pack_id).map_err(AppError::Grove)
 }
 
 /// Read the grove config (`[grove]` in the global config.toml).

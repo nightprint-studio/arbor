@@ -25,6 +25,9 @@ pub struct GroveConfig {
     /// Override for the VSCO 2 install directory. `None` → the default under the
     /// OS data dir (`<data>/arbor/grove/vsco`).
     pub vsco_dir: Option<String>,
+    /// Override for the directory holding downloadable sample packs (Dirt-Samples,
+    /// drum machines, GM). `None` → the default (`<data>/arbor/grove/packs`).
+    pub packs_dir: Option<String>,
 }
 
 impl Default for GroveConfig {
@@ -35,6 +38,7 @@ impl Default for GroveConfig {
             log_threshold: "info".to_string(),
             render: GroveRenderConfig::default(),
             vsco_dir: None,
+            packs_dir: None,
         }
     }
 }

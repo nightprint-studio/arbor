@@ -25,7 +25,7 @@ pub use crate::meters::{MeterSnapshot, MeterTap, MAX_METER_TRACKS};
 // The engine/shell build a `Registry` (load a TOML manifest, or install synth
 // presets) and hand it to the `Renderer`; resolution itself is internal.
 pub use crate::registry::{InstrumentInfo, InstrumentKind, Registry, SynthPreset};
-pub use crate::synth::Waveform;
+pub use crate::synth::{NoiseColor, SynthShape, Waveform};
 
 // ── Test / offline recorder sink ─────────────────────────────────────────────
 pub use crate::testing::RecordingSink;

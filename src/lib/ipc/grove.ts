@@ -6,11 +6,11 @@
  * serde struct in `src-tauri/src/grove/` 1:1, **field-for-field in snake_case**
  * (the Rust wire shape is authoritative; do not camelCase the payloads).
  *
- * - Commands: `grove_eval` / `grove_transport` / `grove_render` / VSCO status +
- *   download / get + set config. Command argument keys are snake_case to match
- *   the Rust parameter names exactly.
+ * - Commands: `grove_eval` / `grove_transport` / `grove_render` / sample-pack
+ *   list + download / get + set config. Command argument keys are snake_case to
+ *   match the Rust parameter names exactly.
  * - Events (grove-window scoped): `grove:diagnostics` / `active_haps` / `meters`
- *   / `transport` / `log` / `vsco_progress` / `audio_error`. The audio thread
+ *   / `transport` / `log` / `pack_progress` / `audio_error`. The audio thread
  *   throttles `transport`/`meters` to ~30 fps and emits `active_haps` only when
  *   the sounding set changes; `log` is gated at the source by the threshold.
  */
@@ -26,7 +26,7 @@ export const GROVE_EVENTS = {
   meters:      'grove:meters',
   transport:   'grove:transport',
   log:         'grove:log',
-  vscoProgress:'grove:vsco_progress',
+  packProgress:'grove:pack_progress',
   audioError:  'grove:audio_error',
 } as const;
 
@@ -99,9 +99,11 @@ export interface GroveLogLine {
   message: string;
 }
 
-/** `grove:vsco_progress` payload; `pct` is `-1` when the total is unknown. */
-export interface GroveVscoProgress {
+/** `grove:pack_progress` payload; `pct` is `-1` when the total is unknown. */
+export interface GrovePackProgress {
   job_id: string;
+  /** Which pack is installing (`vsco` | `dirt-samples` | `drum-machines` | …). */
+  pack_id: string;
   /** `downloading` | `extracting`. */
   phase: string;
   done: number;
@@ -116,8 +118,12 @@ export interface GroveAudioError {
 
 // ── Command request / response types ──────────────────────────────────────────
 
-/** VSCO 2 sample-bank install status (`grove_vsco_status`). */
-export interface GroveVscoStatus {
+/** One downloadable sample pack with its install status (`grove_packs`). */
+export interface GrovePack {
+  /** Stable id used in commands (`vsco` | `dirt-samples` | `drum-machines` | …). */
+  id: string;
+  /** Human label for the UI. */
+  name: string;
   installed: boolean;
   path: string;
   size_bytes: number;
@@ -141,6 +147,7 @@ export interface GroveConfig {
   log_threshold: string;
   render: GroveRenderConfig;
   vsco_dir: string | null;
+  packs_dir: string | null;
 }
 
 /** Options for `grove_render`. `cycles` is required (a Pattern has no length). */
@@ -205,14 +212,14 @@ export function groveRender(
   return invoke('grove_render', { source, project_dir: projectDir ?? null, path, opts });
 }
 
-/** Read the VSCO 2 sample-bank install status. */
-export function groveVscoStatus(): Promise<GroveVscoStatus> {
-  return invoke('grove_vsco_status');
+/** List every downloadable sample pack with its install status. */
+export function grovePacks(): Promise<GrovePack[]> {
+  return invoke('grove_packs');
 }
 
-/** Start downloading + installing the VSCO 2 bank (job-tracked). Returns job id. */
-export function groveVscoDownload(): Promise<string> {
-  return invoke('grove_vsco_download');
+/** Start downloading + installing a sample pack by id (job-tracked). Returns job id. */
+export function grovePackDownload(packId: string): Promise<string> {
+  return invoke('grove_pack_download', { pack_id: packId });
 }
 
 /** Read the grove config (`[grove]` in the global config.toml). */
@@ -255,9 +262,9 @@ export function onGroveLog(cb: (l: GroveLogLine) => void): Promise<UnlistenFn> {
   return listen<GroveLogLine>(GROVE_EVENTS.log, (e) => cb(e.payload));
 }
 
-/** Subscribe to VSCO 2 install progress. */
-export function onGroveVscoProgress(cb: (p: GroveVscoProgress) => void): Promise<UnlistenFn> {
-  return listen<GroveVscoProgress>(GROVE_EVENTS.vscoProgress, (e) => cb(e.payload));
+/** Subscribe to sample-pack install progress (carries `pack_id`). */
+export function onGrovePackProgress(cb: (p: GrovePackProgress) => void): Promise<UnlistenFn> {
+  return listen<GrovePackProgress>(GROVE_EVENTS.packProgress, (e) => cb(e.payload));
 }
 
 /** Subscribe to a fatal audio-device error (the session thread exited). */
@@ -346,9 +353,9 @@ export interface GroveSoundList {
   instruments: GroveInstrument[];
 }
 
-/** List the instruments the engine can currently resolve (default synth + any
- *  installed VSCO/manifest entries). Reflects the real registry, not a static
- *  list, so it tracks what's actually installed. */
+/** List the instruments the engine can currently resolve (built-in synths + any
+ *  installed sample pack). Reflects the real registry, not a static list, so it
+ *  tracks what's actually installed. */
 export function groveSounds(): Promise<GroveSoundList> {
   return invoke('grove_sounds');
 }

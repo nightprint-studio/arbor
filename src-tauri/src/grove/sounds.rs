@@ -1,7 +1,7 @@
 //! Registry introspection for the sound-bank UI.
 //!
-//! Builds the same sound registry the audio thread would (a loaded VSCO manifest
-//! if installed, else the empty default bank) and enumerates its resolvable
+//! Builds the same sound registry the audio thread would (built-in synths plus
+//! every installed sample pack) and enumerates its resolvable
 //! instruments. Reflects the *real* registry, not a static list, so it tracks
 //! exactly what's installed. The built-in default synth (`synth`) — grove's
 //! universal fallback for any unresolved name — is always present.
@@ -37,10 +37,10 @@ pub struct SoundList {
 #[tauri::command]
 pub async fn grove_sounds(state: State<'_, AppState>) -> Result<SoundList, AppError> {
     let cfg = super::grove_config(&state)?;
-    let mut registry = super::vsco::load_registry(&cfg).unwrap_or_else(Registry::new);
-    // Match the audio thread: the built-in `synth.*` presets are always resolvable,
-    // so the sound-bank UI lists them too.
+    // Match the audio thread exactly: built-in synths, then every installed pack.
+    let mut registry = Registry::new();
     registry.install_builtin_synths();
+    super::packs::load_into(&cfg, &mut registry);
 
     let mut instruments: Vec<Instrument> = registry
         .instruments_list()

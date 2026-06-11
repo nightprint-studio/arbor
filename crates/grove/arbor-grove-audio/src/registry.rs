@@ -30,6 +30,11 @@
 //! kind = "sample"
 //! file = "drums/bd.wav"
 //!
+//! # A folder of variant samples (`s("hh:2")` selects one; round-robin otherwise).
+//! [hh]
+//! kind = "sample"
+//! dir = "drums/hh"
+//!
 //! # An SFZ instrument (a whole multisampled instrument).
 //! [strings.violin]
 //! kind = "sfz"
@@ -46,12 +51,12 @@ use std::path::{Path, PathBuf};
 use crate::error::{AudioError, Result};
 use crate::sampler::{Sample, SampleBank};
 use crate::sfz::{self, SfzInstrument};
-use crate::synth::Waveform;
+use crate::synth::{NoiseColor, SynthShape, Waveform};
 
-/// A synth preset: oscillator shape + ADSR (seconds / `0..1` sustain).
+/// A synth preset: a sound [`SynthShape`] + ADSR (seconds / `0..1` sustain).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SynthPreset {
-    pub waveform: Waveform,
+    pub shape: SynthShape,
     pub attack: f32,
     pub decay: f32,
     pub sustain: f32,
@@ -64,7 +69,7 @@ impl Default for SynthPreset {
     /// stays clean across the whole register even with no VSCO installed.
     fn default() -> Self {
         SynthPreset {
-            waveform: Waveform::Triangle,
+            shape: SynthShape::Wave(Waveform::Triangle),
             attack: 0.005,
             decay: 0.15,
             sustain: 0.6,
@@ -73,27 +78,57 @@ impl Default for SynthPreset {
     }
 }
 
-/// The built-in `synth.*` presets, installed by [`Registry::install_builtin_synths`].
-/// All shapes are band-limited (see [`crate::synth`]), so even the saw voices stay
-/// clean across the register. Tuned to read distinctly: a punchy saw bass, a soft
-/// triangle pad, a short square pluck, a sustained saw lead.
-const BUILTIN_SYNTHS: [(&str, SynthPreset); 4] = [
-    (
-        "synth.bass",
-        SynthPreset { waveform: Waveform::Saw, attack: 0.005, decay: 0.12, sustain: 0.70, release: 0.18 },
-    ),
-    (
-        "synth.pad",
-        SynthPreset { waveform: Waveform::Triangle, attack: 0.08, decay: 0.25, sustain: 0.85, release: 0.5 },
-    ),
-    (
-        "synth.pluck",
-        SynthPreset { waveform: Waveform::Square, attack: 0.002, decay: 0.14, sustain: 0.0, release: 0.12 },
-    ),
-    (
-        "synth.lead",
-        SynthPreset { waveform: Waveform::Saw, attack: 0.01, decay: 0.10, sustain: 0.75, release: 0.2 },
-    ),
+/// Build a preset with an explicit ADSR (keeps the tables below terse).
+const fn preset(shape: SynthShape, attack: f32, decay: f32, sustain: f32, release: f32) -> SynthPreset {
+    SynthPreset { shape, attack, decay, sustain, release }
+}
+
+/// A neutral *gate* envelope for the bare shape instruments: near-instant
+/// attack, full sustain, short release — the note rings for its whole duration
+/// then releases cleanly. This mirrors how a plain gated source behaves in
+/// Strudel (`s("sawtooth")` holds the note rather than plucking it), so the same
+/// patches sound the way someone coming from Strudel expects.
+const fn gated(shape: SynthShape) -> SynthPreset {
+    preset(shape, 0.005, 0.0, 1.0, 0.06)
+}
+
+/// The named `synth.*` presets — distinct, ready-to-play voices across the whole
+/// palette (oscillators, supersaw, noise). All band-limited (see [`crate::synth`]).
+const PRESET_SYNTHS: [(&str, SynthPreset); 8] = [
+    ("synth.bass",     preset(SynthShape::Wave(Waveform::Saw),      0.005, 0.12, 0.70, 0.18)),
+    ("synth.sub",      preset(SynthShape::Wave(Waveform::Sine),     0.005, 0.10, 0.90, 0.20)),
+    ("synth.pad",      preset(SynthShape::Wave(Waveform::Triangle), 0.08,  0.25, 0.85, 0.50)),
+    ("synth.pluck",    preset(SynthShape::Wave(Waveform::Square),   0.002, 0.14, 0.00, 0.12)),
+    ("synth.lead",     preset(SynthShape::Wave(Waveform::Saw),      0.01,  0.10, 0.75, 0.20)),
+    ("synth.supersaw", preset(SynthShape::Supersaw,                 0.02,  0.10, 0.85, 0.30)),
+    ("synth.noise",    preset(SynthShape::Noise(NoiseColor::White), 0.001, 0.08, 0.00, 0.06)),
+    ("synth.hat",      preset(SynthShape::Noise(NoiseColor::Pink),  0.001, 0.04, 0.00, 0.04)),
+];
+
+/// The bare **oscillator** instruments: the raw waveform names usable directly
+/// as an instrument (`s("sawtooth")`, `.inst("sine")`), matching Strudel's
+/// oscillator vocabulary — the canonical names plus the short aliases. All map
+/// onto grove's four band-limited shapes; `pulse` aliases `square` (no PWM yet).
+const OSCILLATOR_SYNTHS: [(&str, SynthPreset); 9] = [
+    ("sine",     gated(SynthShape::Wave(Waveform::Sine))),
+    ("sin",      gated(SynthShape::Wave(Waveform::Sine))),
+    ("sawtooth", gated(SynthShape::Wave(Waveform::Saw))),
+    ("saw",      gated(SynthShape::Wave(Waveform::Saw))),
+    ("square",   gated(SynthShape::Wave(Waveform::Square))),
+    ("sqr",      gated(SynthShape::Wave(Waveform::Square))),
+    ("pulse",    gated(SynthShape::Wave(Waveform::Square))),
+    ("triangle", gated(SynthShape::Wave(Waveform::Triangle))),
+    ("tri",      gated(SynthShape::Wave(Waveform::Triangle))),
+];
+
+/// The bare names for the non-oscillator shapes — the detuned `supersaw` and the
+/// noise colours — again matching Strudel (`s("supersaw")`, `s("white")`, …).
+const SHAPE_SYNTHS: [(&str, SynthPreset); 5] = [
+    ("supersaw", gated(SynthShape::Supersaw)),
+    ("white",    gated(SynthShape::Noise(NoiseColor::White))),
+    ("pink",     gated(SynthShape::Noise(NoiseColor::Pink))),
+    ("brown",    gated(SynthShape::Noise(NoiseColor::Brown))),
+    ("crackle",  gated(SynthShape::Noise(NoiseColor::Crackle))),
 ];
 
 /// How a named articulation re-targets sample selection on an SFZ instrument.
@@ -115,8 +150,10 @@ enum Articulation {
 enum Entry {
     /// A built-in synth preset.
     Synth(SynthPreset),
-    /// A one-shot sample, resident under `bank_key`.
-    Sample { bank_key: String },
+    /// A one-shot sample with one or more **variants** (resident bank keys). A
+    /// single-file entry has one; a `dir =` entry collects every decodable file
+    /// in a folder (Strudel's Dirt-Samples model: `s("bd:3")` selects a variant).
+    Sample { variants: Vec<String> },
     /// An SFZ instrument (index into `instruments`) plus its named articulations.
     Sfz {
         instrument: usize,
@@ -235,9 +272,19 @@ impl Registry {
     /// `file =` paths; samples + SFZ instruments are decoded eagerly here
     /// (non-RT) so the callback only reads resident data.
     pub fn load_manifest(path: &Path) -> Result<Registry> {
+        let mut reg = Registry::new();
+        reg.load_manifest_into(path)?;
+        Ok(reg)
+    }
+
+    /// Merge a manifest file's entries into this registry (additive; a later
+    /// entry overrides an earlier same-named one). Lets the shell stack several
+    /// installed sample packs onto the built-in synths in a single registry —
+    /// each pack's `registry.toml` is merged in turn. Decodes eagerly (non-RT).
+    pub fn load_manifest_into(&mut self, path: &Path) -> Result<()> {
         let text = std::fs::read_to_string(path).map_err(|e| AudioError::Io(e.to_string()))?;
         let base = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
-        Registry::from_toml(&text, &base)
+        self.add_manifest_text(&text, &base)
     }
 
     /// Register a synth preset under `name` (non-RT). Lets the engine/shell wire
@@ -246,14 +293,26 @@ impl Registry {
         self.entries.insert(name.into(), Entry::Synth(preset));
     }
 
-    /// Install grove's built-in `synth.*` presets (the names the language and the
-    /// docs/examples reference: `synth.bass` / `synth.pad` / `synth.pluck` /
-    /// `synth.lead`). Always available, with **no manifest and no VSCO** — so a
-    /// patch that asks for one of them sounds as intended instead of falling back
-    /// to the default voice. Existing same-named entries are overwritten (the
-    /// `synth.*` namespace is ours; VSCO ships orchestral instruments, not these).
+    /// Install grove's always-available built-in voices, with **no manifest and
+    /// no VSCO**, so a patch that asks for one sounds as intended instead of
+    /// falling back to the default voice:
+    ///
+    /// * the named `synth.*` presets — `synth.bass` / `synth.sub` / `synth.pad`
+    ///   / `synth.pluck` / `synth.lead` / `synth.supersaw` / `synth.noise` /
+    ///   `synth.hat` (the names the language and docs/examples reference);
+    /// * the bare **shape** names matching Strudel's vocabulary — the oscillators
+    ///   `sine` / `sawtooth` / `square` / `triangle` / `pulse` (+ aliases `saw` /
+    ///   `tri` / `sqr` / `sin`), the detuned `supersaw`, and the noise colours
+    ///   `white` / `pink` / `brown` / `crackle`.
+    ///
+    /// Existing same-named entries are overwritten (these namespaces are ours;
+    /// VSCO ships orchestral instruments, not these).
     pub fn install_builtin_synths(&mut self) {
-        for (name, preset) in BUILTIN_SYNTHS {
+        let all = PRESET_SYNTHS
+            .into_iter()
+            .chain(OSCILLATOR_SYNTHS)
+            .chain(SHAPE_SYNTHS);
+        for (name, preset) in all {
             self.insert_synth(name, preset);
         }
     }
@@ -264,12 +323,18 @@ impl Registry {
     /// dependency — the audio crate's dep set is frozen). The schema is flat
     /// `[name]` tables with `kind` + a couple of keys; see the module docs.
     pub fn from_toml(text: &str, base_dir: &Path) -> Result<Registry> {
-        let tables = parse_toml_tables(text)?;
         let mut reg = Registry::new();
-        for (name, kv) in tables {
-            reg.add_entry(&name, &kv, base_dir)?;
-        }
+        reg.add_manifest_text(text, base_dir)?;
         Ok(reg)
+    }
+
+    /// Parse manifest TOML text and merge its entries into this registry.
+    fn add_manifest_text(&mut self, text: &str, base_dir: &Path) -> Result<()> {
+        let tables = parse_toml_tables(text)?;
+        for (name, kv) in tables {
+            self.add_entry(&name, &kv, base_dir)?;
+        }
+        Ok(())
     }
 
     /// Register one manifest entry, loading any referenced files (non-RT).
@@ -278,7 +343,7 @@ impl Registry {
         match kind {
             "synth" => {
                 let preset = SynthPreset {
-                    waveform: parse_waveform(kv.get("waveform").map(String::as_str)),
+                    shape: SynthShape::Wave(parse_waveform(kv.get("waveform").map(String::as_str))),
                     attack: parse_f32(kv, "attack", 0.005),
                     decay: parse_f32(kv, "decay", 0.15),
                     sustain: parse_f32(kv, "sustain", 0.6),
@@ -287,15 +352,24 @@ impl Registry {
                 self.entries.insert(name.to_string(), Entry::Synth(preset));
             }
             "sample" => {
-                let file = kv.get("file").ok_or_else(|| AudioError::Io(format!(
-                    "registry entry `{name}` is kind=sample but has no `file`"
-                )))?;
-                let full = resolve_path(base, file);
-                let sample = self.bank.load(&full)?;
-                let key = full.to_string_lossy().into_owned();
-                self.bank.insert(key.clone(), sample);
+                // `dir =` collects a folder of variant samples; `file =` is the
+                // single-sample case (one variant). Exactly one must be present.
+                let variants = if let Some(dir) = kv.get("dir") {
+                    self.load_sample_dir(&resolve_path(base, dir))?
+                } else if let Some(file) = kv.get("file") {
+                    vec![self.load_sample_file(&resolve_path(base, file))?]
+                } else {
+                    return Err(AudioError::Io(format!(
+                        "registry entry `{name}` is kind=sample but has neither `file` nor `dir`"
+                    )));
+                };
+                if variants.is_empty() {
+                    return Err(AudioError::Io(format!(
+                        "registry entry `{name}` (kind=sample) resolved to zero samples"
+                    )));
+                }
                 self.entries
-                    .insert(name.to_string(), Entry::Sample { bank_key: key });
+                    .insert(name.to_string(), Entry::Sample { variants });
             }
             "sfz" => {
                 let file = kv.get("file").ok_or_else(|| AudioError::Io(format!(
@@ -319,6 +393,34 @@ impl Registry {
             }
         }
         Ok(())
+    }
+
+    /// Decode one sample file into the bank, returning its (absolute-path) key.
+    fn load_sample_file(&mut self, full: &Path) -> Result<String> {
+        let sample = self.bank.load(full)?;
+        let key = full.to_string_lossy().into_owned();
+        self.bank.insert(key.clone(), sample);
+        Ok(key)
+    }
+
+    /// Decode every decodable file directly under `dir` (sorted by name) as sample
+    /// variants, returning their bank keys. A file that fails to decode is skipped
+    /// rather than failing the whole pack — sample folders sometimes carry stray
+    /// non-audio files. Sorting makes `:n` indices stable across installs.
+    fn load_sample_dir(&mut self, dir: &Path) -> Result<Vec<String>> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+            .map_err(|e| AudioError::Io(format!("reading sample dir {}: {e}", dir.display())))?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.is_file() && is_decodable(p))
+            .collect();
+        files.sort();
+        let mut keys = Vec::with_capacity(files.len());
+        for f in &files {
+            if let Ok(key) = self.load_sample_file(f) {
+                keys.push(key);
+            }
+        }
+        Ok(keys)
     }
 
     /// Parse an SFZ file and decode every sample it references (non-RT). Returns
@@ -378,17 +480,18 @@ impl Registry {
     /// Resolve a named source to a concrete voice.
     ///
     /// `inst` takes priority over `sound` (a melodic instrument over a drum
-    /// leaf); `variant` selects a sample bank variant (currently unused beyond
-    /// the lookup key); `note`/`vel` choose the SFZ region; `art` selects an
-    /// articulation (keyswitch or alternate region set); `seed` is the
-    /// deterministic onset seed driving round-robin variant choice. Anything
-    /// unresolved → the fallback synth. **RT-safe**: reads resident state only.
+    /// leaf); `variant` is the `:n` sample-variant index (`None` → round-robin by
+    /// `seed`); `note`/`vel` choose the SFZ region; `art` selects an articulation
+    /// (keyswitch or alternate region set); `seed` is the deterministic onset seed
+    /// driving round-robin variant choice. Anything unresolved → the fallback
+    /// synth. **RT-safe**: reads resident state only.
     ///
     /// Crate-internal: called by the renderer per voice trigger.
     pub(crate) fn resolve(
         &self,
         sound: Option<&str>,
         inst: Option<&str>,
+        variant: Option<u32>,
         note: Option<f32>,
         vel: f32,
         art: Option<&str>,
@@ -400,13 +503,9 @@ impl Registry {
 
         match entry {
             Some(Entry::Synth(preset)) => ResolvedVoice::Synth(*preset),
-            Some(Entry::Sample { bank_key }) => match self.bank.get(bank_key) {
-                Some(sample) => ResolvedVoice::Sample {
-                    sample,
-                    region: SampleParams::default(),
-                },
-                None => ResolvedVoice::Synth(self.fallback),
-            },
+            Some(Entry::Sample { variants }) => self
+                .resolve_sample(variants, variant, seed)
+                .unwrap_or(ResolvedVoice::Synth(self.fallback)),
             Some(Entry::Sfz {
                 instrument,
                 articulations,
@@ -415,6 +514,30 @@ impl Registry {
                 .unwrap_or(ResolvedVoice::Synth(self.fallback)),
             None => ResolvedVoice::Synth(self.fallback),
         }
+    }
+
+    /// Pick a sample variant and bind its resident sample. An explicit `:n`
+    /// (`variant`) indexes the list (wrapped); without one, the onset `seed`
+    /// drives a deterministic round-robin — the same onset picks the same variant
+    /// every loop, mirroring the SFZ round-robin policy.
+    fn resolve_sample(
+        &self,
+        variants: &[String],
+        variant: Option<u32>,
+        seed: u64,
+    ) -> Option<ResolvedVoice> {
+        if variants.is_empty() {
+            return None;
+        }
+        let idx = match variant {
+            Some(n) => n as usize % variants.len(),
+            None => (seed as usize) % variants.len(),
+        };
+        let sample = self.bank.get(&variants[idx])?;
+        Some(ResolvedVoice::Sample {
+            sample,
+            region: SampleParams::default(),
+        })
     }
 
     /// Pick the SFZ region for `(note, vel)`, honouring the requested articulation
@@ -534,6 +657,19 @@ fn region_loop_spec(region: &crate::sfz::Region) -> Option<crate::sampler::LoopS
     }
 }
 
+/// Whether a path looks like an audio file grove's decoder can read (WAV via
+/// `hound`, the rest via `symphonia`). Used to filter a sample `dir` so stray
+/// non-audio files (READMEs, `.DS_Store`) don't become phantom variants.
+fn is_decodable(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some("wav" | "wave" | "flac" | "ogg" | "mp3")
+    )
+}
+
 /// Resolve a possibly-relative `file` against the manifest base directory.
 fn resolve_path(base: &Path, file: &str) -> PathBuf {
     let p = Path::new(file);
@@ -550,9 +686,10 @@ fn parse_f32(kv: &HashMap<String, String>, key: &str, default: f32) -> f32 {
 
 fn parse_waveform(s: Option<&str>) -> Waveform {
     match s {
-        Some("square") => Waveform::Square,
-        Some("sine") => Waveform::Sine,
-        Some("triangle") => Waveform::Triangle,
+        Some("square" | "sqr" | "pulse") => Waveform::Square,
+        Some("sine" | "sin") => Waveform::Sine,
+        Some("triangle" | "tri") => Waveform::Triangle,
+        // `saw` | `sawtooth` | anything unrecognised.
         _ => Waveform::Saw,
     }
 }
@@ -652,7 +789,7 @@ file = \"drums/bd.wav\"
     #[test]
     fn unresolved_name_falls_back_to_synth() {
         let reg = Registry::new();
-        match reg.resolve(Some("nope"), None, Some(60.0), 0.8, None, 0) {
+        match reg.resolve(Some("nope"), None, None, Some(60.0), 0.8, None, 0) {
             ResolvedVoice::Synth(_) => {}
             _ => panic!("expected synth fallback"),
         }
@@ -663,19 +800,64 @@ file = \"drums/bd.wav\"
         let mut reg = Registry::new();
         reg.install_builtin_synths();
         for name in ["synth.bass", "synth.pad", "synth.pluck", "synth.lead"] {
-            match reg.resolve(None, Some(name), Some(60.0), 0.8, None, 0) {
+            match reg.resolve(None, Some(name), None, Some(60.0), 0.8, None, 0) {
                 ResolvedVoice::Synth(_) => {}
                 other => panic!("`{name}` should resolve to a synth preset, got {other:?}"),
             }
         }
         // The pad is the soft triangle; the bass is the saw.
-        match reg.resolve(None, Some("synth.pad"), Some(60.0), 0.8, None, 0) {
-            ResolvedVoice::Synth(p) => assert_eq!(p.waveform, Waveform::Triangle),
+        match reg.resolve(None, Some("synth.pad"), None, Some(60.0), 0.8, None, 0) {
+            ResolvedVoice::Synth(p) => assert_eq!(p.shape, SynthShape::Wave(Waveform::Triangle)),
             _ => unreachable!(),
         }
-        match reg.resolve(None, Some("synth.bass"), Some(60.0), 0.8, None, 0) {
-            ResolvedVoice::Synth(p) => assert_eq!(p.waveform, Waveform::Saw),
+        match reg.resolve(None, Some("synth.bass"), None, Some(60.0), 0.8, None, 0) {
+            ResolvedVoice::Synth(p) => assert_eq!(p.shape, SynthShape::Wave(Waveform::Saw)),
             _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn oscillator_names_resolve_to_their_waveform() {
+        let mut reg = Registry::new();
+        reg.install_builtin_synths();
+        // Bare names + aliases all resolve to a synth on the expected shape.
+        for (name, want) in [
+            ("sine", Waveform::Sine),
+            ("sin", Waveform::Sine),
+            ("sawtooth", Waveform::Saw),
+            ("saw", Waveform::Saw),
+            ("square", Waveform::Square),
+            ("sqr", Waveform::Square),
+            ("pulse", Waveform::Square),
+            ("triangle", Waveform::Triangle),
+            ("tri", Waveform::Triangle),
+        ] {
+            match reg.resolve(Some(name), None, None, Some(60.0), 0.8, None, 0) {
+                ResolvedVoice::Synth(p) => {
+                    assert_eq!(p.shape, SynthShape::Wave(want), "`{name}` should be {want:?}");
+                    // Gate envelope: full sustain so the note holds for its duration.
+                    assert_eq!(p.sustain, 1.0, "`{name}` should use the gate envelope");
+                }
+                other => panic!("`{name}` should resolve to a synth, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn noise_and_supersaw_names_resolve() {
+        let mut reg = Registry::new();
+        reg.install_builtin_synths();
+        for (name, want) in [
+            ("supersaw", SynthShape::Supersaw),
+            ("white", SynthShape::Noise(NoiseColor::White)),
+            ("pink", SynthShape::Noise(NoiseColor::Pink)),
+            ("brown", SynthShape::Noise(NoiseColor::Brown)),
+            ("crackle", SynthShape::Noise(NoiseColor::Crackle)),
+        ] {
+            match reg.resolve(Some(name), None, None, Some(60.0), 0.8, None, 0) {
+                ResolvedVoice::Synth(p) => assert_eq!(p.shape, want, "`{name}`"),
+                other => panic!("`{name}` should resolve to a synth, got {other:?}"),
+            }
         }
     }
 
@@ -685,14 +867,52 @@ file = \"drums/bd.wav\"
         reg.insert_synth(
             "synth.pad",
             SynthPreset {
-                waveform: Waveform::Triangle,
+                shape: SynthShape::Wave(Waveform::Triangle),
                 ..SynthPreset::default()
             },
         );
-        match reg.resolve(None, Some("synth.pad"), Some(60.0), 0.8, None, 0) {
-            ResolvedVoice::Synth(p) => assert_eq!(p.waveform, Waveform::Triangle),
+        match reg.resolve(None, Some("synth.pad"), None, Some(60.0), 0.8, None, 0) {
+            ResolvedVoice::Synth(p) => assert_eq!(p.shape, SynthShape::Wave(Waveform::Triangle)),
             _ => panic!("expected synth"),
         }
+    }
+
+    #[test]
+    fn sample_variants_select_by_index_and_round_robin() {
+        use crate::decode::DecodedAudio;
+        let mut reg = Registry::new();
+        // Three resident samples, each tagged by a distinct (dummy) sample rate
+        // so the test can tell which variant was picked.
+        let tag = |rate: u32| Sample::from_decoded(DecodedAudio { samples: vec![0.0; 4], sample_rate: rate });
+        reg.bank.insert("a", tag(1));
+        reg.bank.insert("b", tag(2));
+        reg.bank.insert("c", tag(3));
+        reg.entries.insert(
+            "hh".to_string(),
+            Entry::Sample { variants: vec!["a".into(), "b".into(), "c".into()] },
+        );
+        let pick = |variant, seed| match reg.resolve(Some("hh"), None, variant, None, 0.8, None, seed) {
+            ResolvedVoice::Sample { sample, .. } => sample.sample_rate,
+            other => panic!("expected a sample, got {other:?}"),
+        };
+        // Explicit `:n` indexes, wrapping past the end.
+        assert_eq!(pick(Some(0), 0), 1);
+        assert_eq!(pick(Some(1), 0), 2);
+        assert_eq!(pick(Some(2), 0), 3);
+        assert_eq!(pick(Some(3), 0), 1); // 3 % 3
+        // No `:n` → deterministic round-robin by onset seed.
+        assert_eq!(pick(None, 0), 1); // 0 % 3
+        assert_eq!(pick(None, 1), 2);
+        assert_eq!(pick(None, 5), 3); // 5 % 3 == 2
+    }
+
+    #[test]
+    fn sample_entry_requires_file_or_dir() {
+        // kind=sample with neither `file` nor `dir` is a manifest error.
+        let mut reg = Registry::new();
+        let mut kv = HashMap::new();
+        kv.insert("kind".to_string(), "sample".to_string());
+        assert!(reg.add_entry("bd", &kv, Path::new(".")).is_err());
     }
 
     #[test]

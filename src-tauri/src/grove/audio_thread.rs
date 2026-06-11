@@ -26,7 +26,7 @@ use super::events::{
     emit, ActiveHap, ActiveHaps, AudioErrorEvent, Meters, TransportState, EVT_ACTIVE_HAPS,
     EVT_AUDIO_ERROR, EVT_METERS, EVT_TRANSPORT,
 };
-use super::vsco;
+use super::packs;
 
 /// Driver tick / control-drain cadence. Well under the 100 ms look-ahead (≈5×
 /// headroom) so a missed wake never starves the scheduler.
@@ -46,10 +46,12 @@ const EMIT_INTERVAL: Duration = Duration::from_millis(33);
 /// keep it off the command thread.
 pub fn run(app: AppHandle, rx: Receiver<GroveControl>, cfg: GroveConfig) {
     let init_cps = cfg.default_cps;
-    let mut registry = vsco::load_registry(&cfg).unwrap_or_else(Registry::new);
-    // The built-in `synth.*` presets are always available (no VSCO needed), so a
-    // patch using `synth.lead`/`synth.bass`/… sounds as intended.
+    // The built-in `synth.*` presets are always available (no pack needed), so a
+    // patch using `synth.lead`/`synth.bass`/… sounds as intended; every installed
+    // sample pack is then merged on top.
+    let mut registry = Registry::new();
     registry.install_builtin_synths();
+    packs::load_into(&cfg, &mut registry);
 
     // `_stream` keeps cpal alive; dropping it at function exit stops audio on
     // this (the owning) thread.

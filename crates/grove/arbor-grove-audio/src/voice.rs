@@ -139,7 +139,8 @@ impl Voice {
         // Total pitch offset in semitones: note offset from middle reference +
         // `shift`. `speed` is a separate rate multiply handled by the player.
         let shift = params.shift;
-        let source = build_source(resolved, note, shift, params.speed, sample_rate);
+        // The voice id seeds noise generators so repeated hits decorrelate.
+        let source = build_source(resolved, note, shift, params.speed, sample_rate, id.0);
 
         let hpf = params
             .hpf
@@ -246,13 +247,15 @@ impl Voice {
     }
 }
 
-/// Build the [`Source`] for a resolved voice, applying note → pitch.
+/// Build the [`Source`] for a resolved voice, applying note → pitch. `seed` (the
+/// voice id) decorrelates noise synths across repeated triggers.
 fn build_source(
     resolved: ResolvedVoice,
     note: Option<f32>,
     shift: f32,
     speed: f32,
     sample_rate: f32,
+    seed: u64,
 ) -> Source {
     match resolved {
         ResolvedVoice::Synth(preset) => {
@@ -269,7 +272,7 @@ fn build_source(
             // `speed` on a synth maps to a frequency multiply (it has no buffer
             // to resample) — keeps pitch+speed coupled like a sampler.
             let freq = freq * speed.max(0.001);
-            Source::Synth(SynthVoice::new(preset.waveform, freq, env, sample_rate))
+            Source::Synth(SynthVoice::new(preset.shape, freq, env, sample_rate, seed))
         }
         ResolvedVoice::Sample { sample, region } => {
             build_sample_source(&sample, region, note, shift, speed, sample_rate)

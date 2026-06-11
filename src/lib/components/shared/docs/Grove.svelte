@@ -36,7 +36,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Sound bank</div>
-    <div class="fc-desc">The instruments the engine can resolve — built-in synth presets and the VSCO 2 orchestral samplers, each listing the articulations it exposes for <code>.art("…")</code>. Download / manage the VSCO 2 bank from here.</div>
+    <div class="fc-desc">The instruments the engine can resolve — the bare oscillators (<code>sine</code>, <code>sawtooth</code>, <code>square</code>, <code>triangle</code>, <code>pulse</code> + <code>saw</code> / <code>tri</code> / <code>sqr</code> / <code>sin</code> aliases), the detuned <code>supersaw</code>, the noise colours (<code>white</code>, <code>pink</code>, <code>brown</code>, <code>crackle</code>), the <code>synth.*</code> presets, and the samplers from any installed <strong>sample bank</strong>. Download / manage the banks (VSCO 2, Dirt-Samples, drum machines, General MIDI) from here.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Outline</div>
@@ -109,6 +109,13 @@
   <li><code>Reverb tail</code> Extra seconds rendered after the last event so reverb / delay tails aren't cut off.</li>
 </ul>
 
-<h2>VSCO 2 samples</h2>
-<p>The default synth voices are always available. The VSCO 2 Community Edition sample bank adds orchestral sampler instruments (strings, brass, winds, percussion). Download it from the <strong>Sound bank</strong> panel — it installs on a background job with a progress bar you can cancel, and the new instruments appear automatically once extraction finishes.</p>
+<h2>Sample banks</h2>
+<p>The synth voices are always available. <strong>Sample banks</strong> add sampled instruments, downloaded on demand from the <strong>Sound bank</strong> panel — each installs on a background job with a progress bar you can cancel, and its instruments appear once extraction finishes:</p>
+<ul class="prop-list">
+  <li><strong>VSCO 2</strong> — orchestral samplers (strings, brass, winds, percussion), each exposing articulations for <code>.art("…")</code>.</li>
+  <li><strong>Dirt-Samples</strong> — the Tidal/Strudel sample set (<code>bd</code>, <code>sd</code>, <code>hh</code>, <code>casio</code>, <code>jazz</code>, …).</li>
+  <li><strong>Drum machines</strong> — classic boxes (<code>RolandTR808_bd</code>, <code>RolandTR909_sd</code>, <code>LinnDrum_*</code>, …).</li>
+  <li><strong>General MIDI</strong> — the 128 GM instruments from a soundfont, converted to samplers on install (<code>gm_acoustic_grand_piano</code>, <code>gm_violin</code>, … and <code>gm_drums</code>).</li>
+</ul>
+<p>A sound that ships several samples exposes <strong>variants</strong>: <code>s("bd:3")</code> plays the fourth; with no index they round-robin per onset so repeats vary.</p>
 <p>A <code>.inst("…")</code> or <code>s("…")</code> name the engine can't resolve to a built-in synth or an installed instrument is underlined as an <strong>error</strong> in the editor, so a typo surfaces immediately instead of silently playing a fallback voice.</p>

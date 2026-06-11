@@ -1,18 +1,18 @@
 <script lang="ts">
   /**
-   * Sound bank — the engine's resolvable voices, grouped: the built-in synth
-   * presets (always present) and the VSCO 2 samplers (present once the bank is
-   * installed). Driven by the **real registry** (`soundsStore` ← `grove_sounds`),
-   * not a static list, so it tracks what's actually installed.
+   * Sound bank — the engine's resolvable voices plus the downloadable sample
+   * packs. Driven by the **real registry** (`soundsStore` ← `grove_sounds`), not
+   * a static list, so it tracks what's actually installed.
    *
-   * The VSCO block manages the sample bank: install status (count + size) when
-   * present, or a Download button that kicks off the job-tracked install with a
-   * live progress bar (+ Cancel) while it runs. The download is async (a job) —
-   * the UI never blocks.
+   * Three sections: the built-in synth presets (always present), the resolved
+   * sampler voices (filled once any pack is installed), and the **Sample banks**
+   * — one download card per pack (VSCO 2, Dirt-Samples, drum machines, …) with a
+   * job-tracked install + live progress bar (+ Cancel). Downloads are async — the
+   * UI never blocks.
    *
    * Imports only shared/ui (+ the tooltip action) + grove-local stores.
    */
-  import { Music4, Waves, Piano, Download, Check, RefreshCw } from 'lucide-svelte';
+  import { Music4, Waves, Piano, Download, Check, RefreshCw, Boxes } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
@@ -23,19 +23,21 @@
   import ProgressBar from '$lib/components/shared/ui/ProgressBar.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { soundsStore } from '../stores/sounds.svelte';
-  import { vscoStore } from '../stores/vsco.svelte';
-  import type { GroveInstrument } from '$lib/ipc/grove';
+  import { packsStore } from '../stores/packs.svelte';
+  import type { GroveInstrument, GrovePack } from '$lib/ipc/grove';
 
   const synths   = $derived(soundsStore.synths);
   const samplers = $derived(soundsStore.samplers);
   let openSynth   = $state(true);
-  let openSampler = $state(true);
+  // Samplers can run to the hundreds (Dirt-Samples), so start collapsed.
+  let openSampler = $state(false);
+  let openBanks   = $state(true);
 
-  // The VSCO subscription is owned by the GroveShell; here we just (re)read the
-  // registry on mount and again whenever an install completes (the registry
-  // gains the sampler voices only after extraction).
+  // The pack subscription is owned by the GroveShell; here we just (re)read the
+  // registry on mount and again whenever the pack set changes (an install adds
+  // sampler voices to the registry only after extraction).
   $effect(() => {
-    void vscoStore.installed; // dep: flips true when an install finishes
+    void packsStore.packs; // dep: re-read after an install completes
     void soundsStore.refresh();
   });
 
@@ -49,9 +51,6 @@
     }
     slowLoad = false;
   });
-
-  const progress  = $derived(vscoStore.progress);
-  const phaseLabel = $derived(progress?.phase === 'extracting' ? 'Extracting…' : 'Downloading…');
 
   function formatBytes(n: number): string {
     if (n <= 0) return '—';
@@ -76,6 +75,37 @@
   {/if}
 {/snippet}
 
+{#snippet packCard(pack: GrovePack)}
+  {@const prog = packsStore.progressOf(pack.id)}
+  <div class="pack">
+    <div class="pack-head">
+      <span class="pack-name">{pack.name}</span>
+      {#if pack.installed}
+        <Badge variant="tone" tone="success" size="sm"><Check size={9} /> installed</Badge>
+      {/if}
+    </div>
+    {#if pack.installed}
+      <span class="pack-meta">{pack.instrument_count} instruments · {formatBytes(pack.size_bytes)}</span>
+    {:else if packsStore.downloadingOf(pack.id)}
+      <div class="pack-dl">
+        <div class="pack-dl-head">
+          <span class="pack-phase">{prog?.phase === 'extracting' ? 'Extracting…' : 'Downloading…'}</span>
+          {#if prog && prog.pct >= 0}<span class="pack-pct">{Math.round(prog.pct)}%</span>{/if}
+        </div>
+        <ProgressBar pct={prog && prog.pct >= 0 ? prog.pct : undefined}
+                     indeterminate={!prog || prog.pct < 0}
+                     ariaLabel={`${pack.name} download progress`} />
+        <Button size="xs" variant="ghost" block onclick={() => packsStore.cancel(pack.id)}>Cancel</Button>
+      </div>
+    {:else}
+      <Button size="sm" variant="secondary" block onclick={() => packsStore.download(pack.id)}>
+        {#snippet iconStart()}<Download size={13} />{/snippet}
+        Download
+      </Button>
+    {/if}
+  </div>
+{/snippet}
+
 <PanelShell title="Sound bank" count={soundsStore.instruments.length}>
   {#snippet icon()}<Music4 size={13} />{/snippet}
   {#snippet actions()}
@@ -96,44 +126,20 @@
         {/if}
       </SidebarSection>
 
-      <SidebarSection label="VSCO 2 samplers" bind:expanded={openSampler} badge={samplers.length}>
+      <SidebarSection label="Samplers" bind:expanded={openSampler} badge={samplers.length}>
         {#snippet icon()}<Piano size={13} />{/snippet}
-
-        <!-- Bank management: status / download / progress. -->
-        <div class="vsco">
-          {#if vscoStore.installed}
-            <div class="vsco-status">
-              <Badge variant="tone" tone="success" size="sm"><Check size={9} /> installed</Badge>
-              <span class="vsco-meta">{vscoStore.instrumentCount} instruments · {formatBytes(vscoStore.sizeBytes)}</span>
-            </div>
-          {:else if vscoStore.downloading}
-            <div class="vsco-dl">
-              <div class="vsco-dl-head">
-                <span class="vsco-phase">{phaseLabel}</span>
-                {#if progress && progress.pct >= 0}<span class="vsco-pct">{Math.round(progress.pct)}%</span>{/if}
-              </div>
-              <ProgressBar pct={progress && progress.pct >= 0 ? progress.pct : undefined}
-                           indeterminate={!progress || progress.pct < 0}
-                           ariaLabel="VSCO 2 download progress" />
-              <Button size="xs" variant="ghost" block onclick={() => vscoStore.cancel()}>Cancel</Button>
-            </div>
-          {:else}
-            <div class="vsco-empty">
-              <p class="vsco-hint">The VSCO 2 orchestral bank isn't installed. Download it to unlock the sampler voices.</p>
-              <Button size="sm" variant="secondary" block onclick={() => vscoStore.download()}>
-                {#snippet iconStart()}<Download size={13} />{/snippet}
-                Download VSCO 2
-              </Button>
-            </div>
-          {/if}
-        </div>
-
-        <!-- Resolved sampler voices (present only once installed). -->
         {#if samplers.length}
           {#each samplers as inst (inst.name)}{@render voiceRow(inst)}{/each}
-        {:else if vscoStore.installed}
-          <EmptyState compact message="No sampler voices in the registry." />
+        {:else}
+          <EmptyState compact message="No sampler voices yet — install a sample bank below." />
         {/if}
+      </SidebarSection>
+
+      <SidebarSection label="Sample banks" bind:expanded={openBanks} badge={packsStore.packs.length}>
+        {#snippet icon()}<Boxes size={13} />{/snippet}
+        <div class="banks">
+          {#each packsStore.packs as pack (pack.id)}{@render packCard(pack)}{/each}
+        </div>
       </SidebarSection>
     </div>
   {/if}
@@ -154,16 +160,15 @@
 
   .loading { padding: 24px 12px; }
 
-  .vsco { padding: 4px 10px 8px; display: flex; flex-direction: column; gap: 6px; }
+  /* Sample-bank download cards. */
+  .banks { display: flex; flex-direction: column; gap: 8px; padding: 6px 10px 8px; }
+  .pack { display: flex; flex-direction: column; gap: 6px; }
+  .pack-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .pack-name { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-primary); }
+  .pack-meta { font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code); }
 
-  .vsco-status { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .vsco-meta { font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code); }
-
-  .vsco-empty { display: flex; flex-direction: column; gap: 7px; }
-  .vsco-hint { margin: 0; font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.4; }
-
-  .vsco-dl { display: flex; flex-direction: column; gap: 5px; }
-  .vsco-dl-head { display: flex; align-items: baseline; justify-content: space-between; }
-  .vsco-phase { font-size: var(--font-size-xs); color: var(--text-secondary); }
-  .vsco-pct { font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code); }
+  .pack-dl { display: flex; flex-direction: column; gap: 5px; }
+  .pack-dl-head { display: flex; align-items: baseline; justify-content: space-between; }
+  .pack-phase { font-size: var(--font-size-xs); color: var(--text-secondary); }
+  .pack-pct { font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code); }
 </style>

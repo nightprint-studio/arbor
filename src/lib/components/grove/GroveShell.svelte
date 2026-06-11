@@ -38,7 +38,7 @@
   import { groveStore } from './grove-store.svelte';
   import { groveEngine } from './stores/engine.svelte';
   import { configStore } from './stores/config.svelte';
-  import { vscoStore } from './stores/vsco.svelte';
+  import { packsStore } from './stores/packs.svelte';
   import { workspaceStore } from './stores/workspace.svelte';
   import { projectStore } from './stores/project.svelte';
   import { projectActions } from './stores/project-actions.svelte';
@@ -50,14 +50,14 @@
   import { GROVE_BINDINGS, matchesGrove } from './grove-keybindings';
 
   let unEngine: UnlistenFn | null = null;
-  let unVsco:   UnlistenFn | null = null;
+  let unPacks:  UnlistenFn | null = null;
 
   onMount(async () => {
-    // Live engine + VSCO streams (each grove window owns its own listeners).
+    // Live engine + sample-pack streams (each grove window owns its listeners).
     unEngine = await groveEngine.subscribe();
-    unVsco   = await vscoStore.subscribe();
+    unPacks  = await packsStore.subscribe();
     void configStore.loadConfig();
-    void vscoStore.refresh();
+    void packsStore.refresh();
     // Restore the persisted layout, then best-effort reopen the last project.
     await workspaceStore.load();
     groveStore.applyLayout(workspaceStore.layout);
@@ -68,7 +68,7 @@
 
   onDestroy(() => {
     unEngine?.();
-    unVsco?.();
+    unPacks?.();
   });
 
   // Mirror layout changes to the persisted window state (debounced in the

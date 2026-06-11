@@ -15,7 +15,7 @@ use arbor_grove::prelude::{ControlMap, Registry, Time, TimeSpan, Tracks};
 
 use super::config::GroveConfig;
 use super::events::Diagnostic;
-use super::vsco;
+use super::packs;
 
 /// Cycles probed for instrument references. A handful catches leaves that only
 /// appear on later cycles (`arrange`/`cat`/cycle-seeded choice) while staying
@@ -23,14 +23,14 @@ use super::vsco;
 const PROBE_CYCLES: i64 = 8;
 
 /// The names the live registry can resolve: the built-in `synth.*` presets
-/// (always present, no VSCO) plus every entry of the installed VSCO manifest
+/// (always present, no pack) plus every entry of each installed sample pack
 /// (read by name only — no sample decode, so it stays cheap to call per eval).
 pub fn known_instruments(cfg: &GroveConfig) -> HashSet<String> {
     let mut known: HashSet<String> = HashSet::new();
     let mut builtins = Registry::new();
     builtins.install_builtin_synths();
     known.extend(builtins.instruments_list().into_iter().map(|i| i.name));
-    known.extend(vsco::installed_instrument_names(cfg));
+    known.extend(packs::installed_instrument_names(cfg));
     known
 }
 

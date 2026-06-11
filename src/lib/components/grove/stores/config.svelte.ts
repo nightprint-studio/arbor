@@ -19,6 +19,7 @@ function createConfigStore() {
   let logThreshold  = $state<string>('info');
   let render        = $state<GroveRenderConfig>({ ...DEFAULT_RENDER });
   let vscoDir       = $state<string | null>(null);
+  let packsDir      = $state<string | null>(null);
   let loaded        = $state(false);
 
   function snapshot(): GroveConfig {
@@ -28,6 +29,7 @@ function createConfigStore() {
       log_threshold:  logThreshold,
       render:         { ...render },
       vsco_dir:       vscoDir,
+      packs_dir:      packsDir,
     };
   }
 
@@ -39,6 +41,7 @@ function createConfigStore() {
     get logThreshold()  { return logThreshold; },
     get render()        { return render; },
     get vscoDir()       { return vscoDir; },
+    get packsDir()      { return packsDir; },
     get loaded()        { return loaded; },
 
     async loadConfig() {
@@ -49,6 +52,7 @@ function createConfigStore() {
         logThreshold  = cfg.log_threshold;
         render        = { ...cfg.render };
         vscoDir       = cfg.vsco_dir;
+        packsDir      = cfg.packs_dir;
         loaded = true;
       } catch {
         // First-run / backend not ready — keep defaults; next call retries.

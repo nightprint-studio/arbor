@@ -1527,12 +1527,12 @@ pub fn run() {
             explorer_window::explorer_drop_dispatch,
             // Dedicated grove (music live-coding) window
             grove_window::open_grove_window,
-            // grove engine: eval / transport / render / VSCO / config
+            // grove engine: eval / transport / render / sample packs / config
             grove::grove_eval,
             grove::grove_transport,
             grove::grove_render,
-            grove::grove_vsco_status,
-            grove::grove_vsco_download,
+            grove::grove_packs,
+            grove::grove_pack_download,
             grove::get_grove_config,
             grove::set_grove_config,
             // grove Fase 4: arrangement query / sound bank / live mixer /

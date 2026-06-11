@@ -395,7 +395,10 @@ impl Renderer {
     fn resolve_source(&self, ev: &VoiceEvent) -> ResolvedVoice {
         match &ev.source {
             VoiceSource::Named {
-                sound, inst, art, ..
+                sound,
+                variant,
+                inst,
+                art,
             } => {
                 // Deterministic per-onset seed for round-robin: derived from the
                 // voice id (the engine assigns ids stably per onset, so a given
@@ -404,6 +407,7 @@ impl Renderer {
                 self.registry.resolve(
                     sound.as_deref(),
                     inst.as_deref(),
+                    *variant,
                     ev.note,
                     ev.params.vel,
                     art.as_deref(),

@@ -71,6 +71,52 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
     }
 }
 
+/// The colour of a noise generator — the spectral tilt that distinguishes the
+/// classic noise sources. All are pitch-independent (a noise voice ignores its
+/// note); they're shaped by the voice's filters + envelope like any other tone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoiseColor {
+    /// Flat spectrum — the raw random source. Bright, hissy (cymbals, FX).
+    White,
+    /// −3 dB/oct tilt — equal energy per octave. Natural, "full" hiss.
+    Pink,
+    /// −6 dB/oct tilt — bass-heavy, dark (wind, rumble).
+    Brown,
+    /// Sparse random impulses — vinyl-style crackle / dust.
+    Crackle,
+}
+
+/// What a synth voice actually generates. Broader than a single [`Waveform`]:
+/// grove's built-in palette also exposes a detuned-saw **supersaw** and the
+/// **noise** colours, so a `synth.*` preset (or a bare Strudel-style name like
+/// `supersaw` / `white`) selects one of these uniformly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SynthShape {
+    /// A single band-limited oscillator of the given shape.
+    Wave(Waveform),
+    /// A stack of slightly-detuned saws — wide, lush (trance leads / pads).
+    Supersaw,
+    /// A noise generator of the given colour (pitch-independent).
+    Noise(NoiseColor),
+}
+
+impl SynthShape {
+    /// A human label for the sound-bank UI / diagnostics.
+    pub fn label(self) -> &'static str {
+        match self {
+            SynthShape::Wave(Waveform::Saw) => "sawtooth",
+            SynthShape::Wave(Waveform::Square) => "square",
+            SynthShape::Wave(Waveform::Sine) => "sine",
+            SynthShape::Wave(Waveform::Triangle) => "triangle",
+            SynthShape::Supersaw => "supersaw",
+            SynthShape::Noise(NoiseColor::White) => "white noise",
+            SynthShape::Noise(NoiseColor::Pink) => "pink noise",
+            SynthShape::Noise(NoiseColor::Brown) => "brown noise",
+            SynthShape::Noise(NoiseColor::Crackle) => "crackle",
+        }
+    }
+}
+
 /// A single phase-accumulating oscillator at a fixed frequency.
 #[derive(Clone, Copy, Debug)]
 pub struct Oscillator {
@@ -83,9 +129,16 @@ pub struct Oscillator {
 impl Oscillator {
     /// Build an oscillator at `freq` Hz for `sample_rate`.
     pub fn new(waveform: Waveform, freq: f32, sample_rate: f32) -> Self {
+        Oscillator::with_phase(waveform, freq, sample_rate, 0.0)
+    }
+
+    /// Build an oscillator with an explicit initial phase `∈ [0, 1)`. Used by the
+    /// supersaw to spread its detuned voices so they don't start phase-aligned
+    /// (which would sum to a click and lose the wide, swirly character).
+    pub fn with_phase(waveform: Waveform, freq: f32, sample_rate: f32, phase: f32) -> Self {
         Oscillator {
             waveform,
-            phase: 0.0,
+            phase: phase - phase.floor(),
             step: freq / sample_rate,
         }
     }
@@ -240,24 +293,176 @@ impl Adsr {
     }
 }
 
-/// A complete default-synth voice generator: oscillator + its own envelope.
+/// A bank of slightly-detuned saw oscillators summed to one wide voice — the
+/// classic "supersaw". Detuning is symmetric around the played pitch; the
+/// voices start at spread phases so the onset is wide instead of a single click.
+#[derive(Clone, Copy, Debug)]
+pub struct SuperSaw {
+    oscs: [Oscillator; SUPERSAW_VOICES],
+    /// Output scale so the summed voices stay roughly within `[-1, 1]`.
+    norm: f32,
+}
+
+/// How many detuned saws make up a supersaw. Odd so one voice sits dead-centre.
+const SUPERSAW_VOICES: usize = 7;
+
+/// Per-voice detune in cents, symmetric about 0 (the centre voice is in tune).
+/// A moderate spread — wide enough to swirl, narrow enough to stay musical.
+const SUPERSAW_DETUNE_CENTS: [f32; SUPERSAW_VOICES] =
+    [-22.0, -14.0, -7.0, 0.0, 7.0, 14.0, 22.0];
+
+impl SuperSaw {
+    /// Build a supersaw centred on `freq` Hz.
+    pub fn new(freq: f32, sample_rate: f32) -> Self {
+        // Spread the start phases evenly so the stack opens wide, not in a spike.
+        let oscs = std::array::from_fn(|i| {
+            let cents = SUPERSAW_DETUNE_CENTS[i];
+            let detuned = freq * 2.0_f32.powf(cents / 1200.0);
+            let phase = i as f32 / SUPERSAW_VOICES as f32;
+            Oscillator::with_phase(Waveform::Saw, detuned, sample_rate, phase)
+        });
+        SuperSaw {
+            oscs,
+            // Saws are uncorrelated once detuned, so energy grows ~√N; normalise
+            // by that (a touch of extra headroom) to keep the sum bounded.
+            norm: 0.8 / (SUPERSAW_VOICES as f32).sqrt(),
+        }
+    }
+
+    /// Sum the detuned voices for the next sample.
+    pub fn next_sample(&mut self) -> f32 {
+        let mut sum = 0.0;
+        for osc in &mut self.oscs {
+            sum += osc.next_sample();
+        }
+        sum * self.norm
+    }
+}
+
+/// A noise generator: a fast deterministic PRNG shaped to the requested
+/// [`NoiseColor`]. Seeded per voice so repeated hits decorrelate (and offline
+/// renders stay reproducible). Allocation-free; ticked one sample at a time.
+#[derive(Clone, Copy, Debug)]
+pub struct NoiseGen {
+    color: NoiseColor,
+    /// xorshift32 state (kept non-zero).
+    rng: u32,
+    /// Pink-noise filter memory (Paul Kellet's economy method).
+    pink: [f32; 7],
+    /// Brown-noise running integrator.
+    brown: f32,
+}
+
+impl NoiseGen {
+    /// Build a noise generator of `color`, seeded from the voice id.
+    pub fn new(color: NoiseColor, seed: u64) -> Self {
+        // Fold the 64-bit id into a non-zero 32-bit xorshift seed.
+        let mixed = (seed ^ (seed >> 32)) as u32;
+        NoiseGen {
+            color,
+            rng: mixed | 1,
+            pink: [0.0; 7],
+            brown: 0.0,
+        }
+    }
+
+    /// Next xorshift32 word.
+    fn next_u32(&mut self) -> u32 {
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.rng = x;
+        x
+    }
+
+    /// A flat-spectrum white sample in `[-1, 1)`.
+    fn white(&mut self) -> f32 {
+        (self.next_u32() as f32 / u32::MAX as f32) * 2.0 - 1.0
+    }
+
+    /// Produce the next noise sample for this colour.
+    pub fn next_sample(&mut self) -> f32 {
+        match self.color {
+            NoiseColor::White => self.white(),
+            NoiseColor::Pink => {
+                // Paul Kellet's economy pink filter: six one-pole sections plus a
+                // delayed white term, summed and scaled back to ~unit range.
+                let w = self.white();
+                let p = &mut self.pink;
+                p[0] = 0.99886 * p[0] + w * 0.0555179;
+                p[1] = 0.99332 * p[1] + w * 0.0750759;
+                p[2] = 0.96900 * p[2] + w * 0.1538520;
+                p[3] = 0.86650 * p[3] + w * 0.3104856;
+                p[4] = 0.55000 * p[4] + w * 0.5329522;
+                p[5] = -0.7616 * p[5] - w * 0.0168980;
+                let out = p[0] + p[1] + p[2] + p[3] + p[4] + p[5] + p[6] + w * 0.5362;
+                p[6] = w * 0.115926;
+                out * 0.11
+            }
+            NoiseColor::Brown => {
+                // Leaky integrator: −6 dB/oct. The leak keeps it from wandering to
+                // a DC rail; the gain brings the quiet result back to unit range.
+                let w = self.white();
+                self.brown = (self.brown + 0.02 * w).clamp(-1.0, 1.0);
+                self.brown * 3.5
+            }
+            NoiseColor::Crackle => {
+                // Sparse impulses: most samples are silent, an occasional spike is
+                // the "crackle". A second draw sets the spike's height/sign.
+                if self.next_u32() < (u32::MAX as f64 * CRACKLE_DENSITY) as u32 {
+                    self.white()
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+}
+
+/// Fraction of samples that fire an impulse in [`NoiseColor::Crackle`].
+const CRACKLE_DENSITY: f64 = 0.012;
+
+/// The sound generator backing a [`SynthVoice`]: a single oscillator, a detuned
+/// supersaw stack, or a noise source. All produce one mono sample per tick.
+#[derive(Clone, Copy, Debug)]
+enum Tone {
+    Osc(Oscillator),
+    Super(SuperSaw),
+    Noise(NoiseGen),
+}
+
+impl Tone {
+    fn next_sample(&mut self) -> f32 {
+        match self {
+            Tone::Osc(o) => o.next_sample(),
+            Tone::Super(s) => s.next_sample(),
+            Tone::Noise(n) => n.next_sample(),
+        }
+    }
+}
+
+/// A complete default-synth voice generator: a tone source + its own envelope.
 ///
 /// Produced by [`crate::registry`] when resolving a synth preset (or as the
 /// universal fallback). The amplitude envelope here is the voice's dynamics
 /// shape; the [`crate::voice`] DSP chain multiplies it by the post-`vel` gain.
 #[derive(Clone, Copy, Debug)]
 pub struct SynthVoice {
-    osc: Oscillator,
+    tone: Tone,
     env: Adsr,
 }
 
 impl SynthVoice {
-    /// Build a synth voice playing `freq` Hz with the given waveform and ADSR.
-    pub fn new(waveform: Waveform, freq: f32, env: Adsr, sample_rate: f32) -> Self {
-        SynthVoice {
-            osc: Oscillator::new(waveform, freq, sample_rate),
-            env,
-        }
+    /// Build a synth voice for `shape` playing `freq` Hz with the given ADSR.
+    /// `seed` (the voice id) decorrelates noise voices; tonal shapes ignore it.
+    pub fn new(shape: SynthShape, freq: f32, env: Adsr, sample_rate: f32, seed: u64) -> Self {
+        let tone = match shape {
+            SynthShape::Wave(w) => Tone::Osc(Oscillator::new(w, freq, sample_rate)),
+            SynthShape::Supersaw => Tone::Super(SuperSaw::new(freq, sample_rate)),
+            SynthShape::Noise(c) => Tone::Noise(NoiseGen::new(c, seed)),
+        };
+        SynthVoice { tone, env }
     }
 
     /// Begin the release phase of the amplitude envelope.
@@ -281,9 +486,9 @@ impl SynthVoice {
         self.env.is_releasing()
     }
 
-    /// Produce the next mono sample (oscillator × envelope).
+    /// Produce the next mono sample (tone × envelope).
     pub fn next_sample(&mut self) -> f32 {
-        let s = self.osc.next_sample();
+        let s = self.tone.next_sample();
         s * self.env.next_level()
     }
 }
@@ -371,6 +576,59 @@ mod tests {
         assert!(poly_blep(0.999, dt) != 0.0);
         // A degenerate increment is a no-op (avoids divide-by-zero).
         assert_eq!(poly_blep(0.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn supersaw_sums_detuned_voices_and_stays_bounded() {
+        // A second of supersaw at A4 must stay bounded (no runaway / NaN) and
+        // actually move (the detuned stack is never silent once running).
+        let mut s = SuperSaw::new(440.0, SR);
+        let mut peak = 0.0_f32;
+        for _ in 0..SR as usize {
+            let v = s.next_sample();
+            assert!(v.is_finite(), "supersaw produced a non-finite sample");
+            peak = peak.max(v.abs());
+        }
+        assert!(peak > 0.1, "supersaw should be audible, peak was {peak}");
+        assert!(peak <= 1.2, "supersaw should stay roughly bounded, peak was {peak}");
+    }
+
+    #[test]
+    fn noise_colours_are_bounded_and_audible() {
+        for color in [
+            NoiseColor::White,
+            NoiseColor::Pink,
+            NoiseColor::Brown,
+            NoiseColor::Crackle,
+        ] {
+            let mut n = NoiseGen::new(color, 0x1234_5678);
+            let mut peak = 0.0_f32;
+            let mut energy = 0.0_f64;
+            for _ in 0..SR as usize {
+                let v = n.next_sample();
+                assert!(v.is_finite(), "{color:?} produced a non-finite sample");
+                peak = peak.max(v.abs());
+                energy += (v * v) as f64;
+            }
+            // Even sparse crackle fires often enough over a second to register.
+            assert!(energy > 0.0, "{color:?} should produce signal");
+            assert!(peak <= 2.0, "{color:?} should stay bounded, peak was {peak}");
+        }
+    }
+
+    #[test]
+    fn noise_seed_decorrelates_repeated_voices() {
+        // Two different seeds (voice ids) must not produce the identical stream —
+        // that's what keeps repeated hi-hat hits from sounding mechanically equal.
+        let mut a = NoiseGen::new(NoiseColor::White, 1);
+        let mut b = NoiseGen::new(NoiseColor::White, 2);
+        let mut differing = 0;
+        for _ in 0..256 {
+            if a.next_sample() != b.next_sample() {
+                differing += 1;
+            }
+        }
+        assert!(differing > 200, "distinct seeds should diverge, differed {differing}/256");
     }
 
     #[test]
