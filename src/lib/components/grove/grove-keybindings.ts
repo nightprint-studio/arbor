@@ -3,8 +3,8 @@
  * pane-scoped where it matters. Never `Ctrl+Alt+<letter>` (Arbor hard rule):
  * Chromium drops those on IT/DE/FR/ES layouts to preserve AltGr.
  *
- * Ctrl+Click (go-to-declaration) is handled inside CodeView (it needs the click
- * target), so it isn't a keydown binding here.
+ * Ctrl+Click (go-to-declaration) is handled inside the GroveEditor CodeMirror
+ * mousedown handler (it needs the click target), so it isn't a keydown binding here.
  */
 
 export interface GroveBinding {

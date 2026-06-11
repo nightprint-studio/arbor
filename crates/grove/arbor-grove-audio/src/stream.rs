@@ -202,17 +202,25 @@ fn choose_output_config(
         .map_err(|e| AudioError::Device(format!("query configs: {e}")))?
         .collect();
 
-    // Prefer a range that covers 48 kHz with 2 channels.
+    // Prefer a range that covers 48 kHz with 2 channels, and — among equally
+    // valid ranges — the highest-fidelity sample format the callback can write
+    // (so a device that *also* exposes U8/U16 isn't picked at 8-bit). Falls back
+    // to any stereo range, then any range at all.
     let target = cpal::SampleRate(TARGET_SAMPLE_RATE);
+    let covers_target = |c: &&cpal::SupportedStreamConfigRange| {
+        c.channels() == 2 && c.min_sample_rate() <= target && c.max_sample_rate() >= target
+    };
     let pick = supported
         .iter()
-        .find(|c| {
-            c.channels() == 2
-                && c.min_sample_rate() <= target
-                && c.max_sample_rate() >= target
+        .filter(covers_target)
+        .min_by_key(|c| format_rank(c.sample_format()))
+        .or_else(|| {
+            supported
+                .iter()
+                .filter(|c| c.channels() == 2)
+                .min_by_key(|c| format_rank(c.sample_format()))
         })
-        .or_else(|| supported.iter().find(|c| c.channels() == 2))
-        .or_else(|| supported.first());
+        .or_else(|| supported.iter().min_by_key(|c| format_rank(c.sample_format())));
 
     match pick {
         Some(range) => {
@@ -222,6 +230,27 @@ fn choose_output_config(
         None => device
             .default_output_config()
             .map_err(|e| AudioError::Device(format!("default config: {e}"))),
+    }
+}
+
+/// Output-format preference (lower = better): float first, then the wider
+/// integer formats, with 8-bit last. Drives `choose_output_config` so we open
+/// the best format the device offers and the callback can write. The catch-all
+/// keeps any future (cpal is `#[non_exhaustive]`) format selectable but least
+/// preferred.
+fn format_rank(f: cpal::SampleFormat) -> u8 {
+    match f {
+        cpal::SampleFormat::F32 => 0,
+        cpal::SampleFormat::F64 => 1,
+        cpal::SampleFormat::I16 => 2,
+        cpal::SampleFormat::I32 => 3,
+        cpal::SampleFormat::I64 => 4,
+        cpal::SampleFormat::U16 => 5,
+        cpal::SampleFormat::U32 => 6,
+        cpal::SampleFormat::U64 => 7,
+        cpal::SampleFormat::I8 => 8,
+        cpal::SampleFormat::U8 => 9,
+        _ => 10,
     }
 }
 
@@ -264,10 +293,20 @@ fn build_stream(
         }};
     }
 
+    // Every primitive cpal sample type implements `SizedSample + FromSample<f32>`,
+    // so the callback (which renders f32 and converts per channel) can target any
+    // of them — cover them all so no real device's default format is rejected.
     let stream = match sample_format {
         cpal::SampleFormat::F32 => build!(f32),
+        cpal::SampleFormat::F64 => build!(f64),
+        cpal::SampleFormat::I8 => build!(i8),
         cpal::SampleFormat::I16 => build!(i16),
+        cpal::SampleFormat::I32 => build!(i32),
+        cpal::SampleFormat::I64 => build!(i64),
+        cpal::SampleFormat::U8 => build!(u8),
         cpal::SampleFormat::U16 => build!(u16),
+        cpal::SampleFormat::U32 => build!(u32),
+        cpal::SampleFormat::U64 => build!(u64),
         other => {
             return Err(AudioError::Device(format!(
                 "unsupported sample format: {other:?}"

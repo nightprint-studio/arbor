@@ -1,64 +1,119 @@
 <script lang="ts">
   /**
    * Editor pane: a JetBrains-style tab strip over the open `.grove` files, a
-   * code-block toolbar (breadcrumb · goto-line · copy · read-only), and the
-   * read-only CodeView. All mocked — files don't save; "new file" appends an
-   * untitled tab. The whole pane sits on --bg-base like Arbor's editor card.
+   * code-block toolbar (breadcrumb · goto-line · copy), and the CodeMirror 6
+   * editor (`GroveEditor`) with Tree-sitter highlight + lint + active-hap. Drives
+   * off the real `projectStore` (path-keyed source model from Step 1).
    *
-   * Imports only shared/ui/ (Tabs) + grove-local code + Arbor's tooltip action.
+   * Edits flow `GroveEditor → projectStore.setSource` and trigger a debounced
+   * re-eval (`groveEngine.eval`) whose diagnostics come back through the store;
+   * switching tabs re-evals immediately so lint matches the visible file. Exposes
+   * `openGoto()` + `newFile()` for the GroveShell keybindings (Ctrl+G / Ctrl+N).
+   *
+   * Imports only shared/ui (Tabs, EmptyState) + grove-local code + the tooltip
+   * action — the domain editor lives entirely under grove/.
    */
+  import { untrack } from 'svelte';
   import { Hash, FileMusic, BookLock, Copy, ChevronRight } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
+  import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import CodeView from './CodeView.svelte';
-  import { groveStore } from '../grove-store.svelte';
-  import { MOCK_PROJECT, MOCK_OUTLINE } from '../mock/data';
-  import type { GroveFile } from '../mock/types';
+  import GroveEditor from './GroveEditor.svelte';
+  import { projectStore } from '../stores/project.svelte';
+  import { projectActions } from '../stores/project-actions.svelte';
+  import { groveEngine } from '../stores/engine.svelte';
 
-  let untitled = $state<GroveFile[]>([]);
-  const allFiles = $derived<GroveFile[]>([...MOCK_PROJECT.files, ...untitled]);
-  const openFiles = $derived(
-    groveStore.openFileIds
-      .map(id => allFiles.find(f => f.id === id))
-      .filter((f): f is GroveFile => !!f),
-  );
-  const active = $derived(allFiles.find(f => f.id === groveStore.activeFileId) ?? openFiles[0]);
+  type EditorController = {
+    focus: () => void;
+    scrollToLineCol: (line: number, col?: number) => void;
+    gotoSymbol: (name: string) => boolean;
+  };
+  let editorComp = $state<EditorController | null>(null);
+
+  const activePath = $derived(projectStore.activeFilePath);
+  const openPaths = $derived(projectStore.openFilePaths);
+
+  /** File metadata for a path — from the project manifest, else derived from the
+   *  path (a file opened from outside the project). */
+  function fileMeta(path: string) {
+    const f = projectStore.files.find((x) => x.path === path);
+    if (f) return { name: f.name, rel: f.rel, library: f.library };
+    const name = path.split(/[\\/]/).pop() ?? path;
+    return { name, rel: name, library: false };
+  }
 
   const tabs = $derived<TabItem[]>(
-    openFiles.map(f => ({
-      id: f.id, label: f.name,
-      icon: f.library ? BookLock : FileMusic, iconSize: 13, title: f.path,
-    })),
+    openPaths.map((p) => {
+      const m = fileMeta(p);
+      return { id: p, label: m.name, icon: m.library ? BookLock : FileMusic, iconSize: 13, title: p };
+    }),
   );
 
-  // Breadcrumb segments of the active file path.
-  const crumbs = $derived(active ? active.path.split('/') : []);
+  const crumbs = $derived(activePath ? fileMeta(activePath).rel.split('/') : []);
 
-  // ── Goto-line (Ctrl+G) ──────────────────────────────────────────────────────
+  // ── Re-eval: debounced on edit, immediate on tab switch ──────────────────────
+  let evalTimer: ReturnType<typeof setTimeout> | null = null;
+  function evalActive() {
+    void groveEngine.eval(projectStore.activeSource, projectStore.project?.path);
+  }
+  function scheduleEval() {
+    if (evalTimer) clearTimeout(evalTimer);
+    evalTimer = setTimeout(evalActive, 300);
+  }
+
+  function onInput(text: string) {
+    if (!activePath) return;
+    projectStore.setSource(activePath, text);
+    scheduleEval();   // async — never blocks typing
+  }
+
+  // Switching the active file re-evals it so diagnostics/active-haps line up
+  // with the visible source (the highlight itself is client-side, no eval).
+  // Track ONLY the path — reading the source is untracked so edits go through
+  // the debounced `scheduleEval`, not this immediate one.
+  $effect(() => {
+    if (projectStore.activeFilePath) untrack(() => evalActive());
+  });
+
+  // ── Cross-file go-to-declaration ─────────────────────────────────────────────
+  function crossFileGoto(word: string, importPath: string) {
+    const target = projectStore.files.find(
+      (f) => f.rel === importPath || f.rel.endsWith(importPath) || f.path.endsWith(importPath),
+    );
+    if (!target) return;
+    void projectStore.openFile(target.path).then(() => gotoWhenReady(word, 0));
+  }
+  function gotoWhenReady(word: string, tries: number) {
+    if (editorComp?.gotoSymbol(word)) return;
+    if (tries >= 24) return;   // give up after ~0.4s of frames
+    requestAnimationFrame(() => gotoWhenReady(word, tries + 1));
+  }
+
+  // ── Goto-line overlay (Ctrl+G) ───────────────────────────────────────────────
   let gotoOpen = $state(false);
   let gotoValue = $state('');
-  let flashLine = $state<number | null>(null);
   let gotoInputEl = $state<HTMLInputElement | null>(null);
   let copied = $state(false);
 
   export function openGoto() {
+    if (!activePath) return;
     gotoOpen = true; gotoValue = '';
     queueMicrotask(() => gotoInputEl?.focus());
   }
-  export function newFile() {
-    const n = untitled.length + 1;
-    const f: GroveFile = {
-      id: `f-untitled-${n}`, name: `untitled-${n}.grove`, path: `untitled-${n}.grove`,
-      library: false, source: 'cps(0.5)\n\ntracks(\n  track("main", n(c4 e4 g4).inst("synth.pluck")),\n)\n',
-    };
-    untitled = [...untitled, f];
-    groveStore.openFile(f.id);
-  }
+
+  /** New `.grove` — delegated to the centralised project-action picker (writes a
+   *  starter file into the project, opens it). Falls back to New Project when no
+   *  project is open. */
+  export function newFile() { projectActions.newFile(); }
 
   function commitGoto() {
-    const ln = parseInt(gotoValue.replace(/[^0-9]/g, ''), 10);
-    if (!Number.isNaN(ln) && ln > 0) flashLine = ln;
+    const m = gotoValue.match(/(\d+)(?:\s*[:,]\s*(\d+))?/);
+    if (m) {
+      const line = parseInt(m[1], 10);
+      const col = m[2] ? parseInt(m[2], 10) : 1;
+      if (line > 0) editorComp?.scrollToLineCol(line, col);
+    }
     gotoOpen = false;
   }
   function onGotoKey(e: KeyboardEvent) {
@@ -66,59 +121,67 @@
     else if (e.key === 'Escape') { e.preventDefault(); gotoOpen = false; }
   }
 
-  function gotoDecl(word: string) {
-    const hit = MOCK_OUTLINE.find(o => o.label === word || o.label.startsWith(word + '('));
-    if (hit) flashLine = hit.line;
-  }
-
   async function copySource() {
-    if (!active) return;
-    try { await navigator.clipboard.writeText(active.source); copied = true; setTimeout(() => copied = false, 1200); }
-    catch { /* clipboard blocked — mock, ignore */ }
+    if (!activePath) return;
+    try {
+      await navigator.clipboard.writeText(projectStore.activeSource);
+      copied = true; setTimeout(() => copied = false, 1200);
+    } catch { /* clipboard blocked — ignore */ }
   }
 </script>
 
 <div class="ed">
-  <!-- Tab strip -->
-  <div class="ed-tabs">
-    <Tabs
-      items={tabs}
-      value={active?.id ?? null}
-      variant="panel"
-      size="sm"
-      closable
-      overflow
-      onSelect={(id) => groveStore.setActiveFile(id)}
-      onClose={(id) => groveStore.closeFile(id)}
-      onAdd={newFile}
-      addLabel="New .grove (Ctrl+N)"
-    />
-  </div>
-
-  <!-- Code-block toolbar -->
-  <div class="ed-toolbar">
-    <div class="ed-crumbs">
-      {#each crumbs as c, i (i)}
-        {#if i > 0}<ChevronRight size={12} class="crumb-sep" />{/if}
-        <span class="crumb" class:last={i === crumbs.length - 1}>{c}</span>
-      {/each}
+  {#if openPaths.length > 0}
+    <div class="ed-tabs">
+      <Tabs
+        items={tabs}
+        value={activePath}
+        variant="panel"
+        size="sm"
+        closable
+        overflow
+        onSelect={(id) => projectStore.openFile(id)}
+        onClose={(id) => projectStore.closeFile(id)}
+        onAdd={newFile}
+        addLabel="New .grove (Ctrl+N)"
+      />
     </div>
-    <div class="ed-actions">
-      <button class="ed-tool" use:tooltip={'Go to line (Ctrl+G)'} aria-label="Go to line" onclick={openGoto}><Hash size={13} /></button>
-      <button class="ed-tool" use:tooltip={copied ? 'Copied!' : 'Copy source'} aria-label="Copy source" onclick={copySource}><Copy size={13} /></button>
-      <span class="ed-ro" use:tooltip={'Step 0 — editor is read-only (no engine yet)'}>read-only</span>
-    </div>
-  </div>
 
-  {#if active}
-    <CodeView source={active.source} {flashLine} onGotoDecl={gotoDecl} />
+    <div class="ed-toolbar">
+      <div class="ed-crumbs">
+        {#each crumbs as c, i (i)}
+          {#if i > 0}<ChevronRight size={12} class="crumb-sep" />{/if}
+          <span class="crumb" class:last={i === crumbs.length - 1}>{c}</span>
+        {/each}
+      </div>
+      <div class="ed-actions">
+        <button class="ed-tool" use:tooltip={'Go to line (Ctrl+G)'} aria-label="Go to line" onclick={openGoto}><Hash size={13} /></button>
+        <button class="ed-tool" use:tooltip={copied ? 'Copied!' : 'Copy source'} aria-label="Copy source" onclick={copySource}><Copy size={13} /></button>
+      </div>
+    </div>
+  {/if}
+
+  {#if activePath}
+    {#key activePath}
+      <GroveEditor
+        bind:this={editorComp}
+        value={projectStore.sourceOf(activePath)}
+        oninput={onInput}
+        onCrossFileGoto={crossFileGoto}
+      />
+    {/key}
+  {:else}
+    <div class="ed-empty">
+      <EmptyState
+        message="No file open. Open a project (Ctrl+O) or create a new .grove (Ctrl+Shift+N)."
+      />
+    </div>
   {/if}
 
   {#if gotoOpen}
     <div class="ed-goto" role="dialog" aria-label="Go to line">
       <Hash size={13} />
-      <!-- svelte-ignore a11y_autofocus -->
-      <input bind:this={gotoInputEl} bind:value={gotoValue} onkeydown={onGotoKey} onblur={() => gotoOpen = false} placeholder="Line number…" inputmode="numeric" />
+      <input bind:this={gotoInputEl} bind:value={gotoValue} onkeydown={onGotoKey} onblur={() => gotoOpen = false} placeholder="Line or line:col…" inputmode="numeric" />
     </div>
   {/if}
 </div>
@@ -131,8 +194,6 @@
     position: relative;
   }
 
-  /* Tab strip + toolbar on bg-base (the whole editor pane is one bg-base card,
-     matching the arrangement). Hairline dividers separate the chrome rows. */
   .ed-tabs {
     display: flex; align-items: stretch;
     height: 32px; min-height: 32px;
@@ -141,7 +202,6 @@
   }
   .ed-tabs :global(.tabs) { flex: 1; min-width: 0; }
 
-  /* Code-block toolbar — breadcrumb + actions. */
   .ed-toolbar {
     display: flex; align-items: center;
     height: 28px; min-height: 28px;
@@ -163,12 +223,8 @@
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .ed-tool:hover { background: var(--bg-hover); color: var(--text-primary); }
-  .ed-ro {
-    font-size: 10px; color: var(--text-muted);
-    text-transform: uppercase; letter-spacing: 0.4px;
-    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-    padding: 1px 5px; margin-left: 2px;
-  }
+
+  .ed-empty { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
 
   .ed-goto {
     position: absolute; top: 64px; right: 14px;
@@ -180,7 +236,7 @@
   .ed-goto input {
     background: transparent; border: none; outline: none;
     color: var(--text-primary); font-family: var(--font-ui-sans);
-    font-size: 12px; width: 120px;
+    font-size: 12px; width: 140px;
   }
   .ed-goto input::placeholder { color: var(--text-disabled); }
 </style>

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "grove",
+      "camelcase": "Grove",
+      "scope": "source.grove",
+      "path": ".",
+      "file-types": ["grove"],
+      "injection-regex": "^grove$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "GPL-3.0-only",
+    "description": "Tree-sitter grammar for the grove music DSL",
+    "authors": [
+      { "name": "Nightprint Studio" }
+    ]
+  },
+  "bindings": {
+    "c": true,
+    "go": false,
+    "node": false,
+    "python": false,
+    "rust": true,
+    "swift": false
+  }
+}

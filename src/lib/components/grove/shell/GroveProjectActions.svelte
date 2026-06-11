@@ -18,6 +18,17 @@
     onCancel={projectActions.cancel}
     onClose={projectActions.cancel}
   />
+{:else if projectActions.picker === 'new-file'}
+  <FileExplorerModal
+    mode="save"
+    title="New .grove file"
+    extensions={['grove']}
+    initialFilename="untitled.grove"
+    initialPath={projectStore.project?.path}
+    onConfirm={projectActions.onConfirm}
+    onCancel={projectActions.cancel}
+    onClose={projectActions.cancel}
+  />
 {:else if projectActions.picker === 'open-file'}
   <FileExplorerModal
     mode="file"

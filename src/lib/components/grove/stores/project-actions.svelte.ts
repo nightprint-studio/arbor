@@ -11,14 +11,23 @@
 
 import { projectStore } from './project.svelte';
 import { groveRender } from '$lib/ipc/grove';
+import { fsWriteTextFile } from '$lib/ipc/fs';
 
-export type GrovePicker = 'new' | 'open-project' | 'open-file' | 'export' | null;
+export type GrovePicker = 'new' | 'new-file' | 'open-project' | 'open-file' | 'export' | null;
 
 /** Last path segment (forward- or back-slash). */
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
+
+/** Starter content for a freshly-created `.grove` file. */
+const STARTER_GROVE = `cps(0.5)
+
+tracks(
+  track("main", n(c4 e4 g4).inst("synth.pluck")),
+)
+`;
 
 function createProjectActions() {
   // One picker at a time; the mode decides what a confirmed path means.
@@ -31,6 +40,14 @@ function createProjectActions() {
       // Minimal scaffold: folder name as project name, blank audience (a proper
       // name + "for whom" form is a follow-up). Writes grove.toml + a starter.
       void projectStore.createProject(path, basename(path), '').catch(() => {});
+    } else if (mode === 'new-file') {
+      // Write a starter into the chosen path, then open it as a tab.
+      void (async () => {
+        try {
+          await fsWriteTextFile(path, STARTER_GROVE);
+          await projectStore.openFile(path);
+        } catch { /* write failed — surfaced by the picker toast host */ }
+      })();
     } else if (mode === 'open-project') {
       void projectStore.open(path).catch(() => {});
     } else if (mode === 'open-file') {
@@ -45,6 +62,9 @@ function createProjectActions() {
 
     /** Open the "new grove project" folder picker. */
     newProject()  { picker = 'new'; },
+    /** Open the "new .grove file" save picker (in the open project). With no
+     *  project open there's nowhere to put it, so fall back to New Project. */
+    newFile()     { picker = projectStore.project ? 'new-file' : 'new'; },
     /** Open the "open grove project" folder picker. */
     openProject() { picker = 'open-project'; },
     /** Open the "open .grove file" picker. */
