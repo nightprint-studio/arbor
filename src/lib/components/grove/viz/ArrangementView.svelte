@@ -1,14 +1,21 @@
 <script lang="ts">
   /**
-   * Read-only arrangement view — Logic Pro-style. A frozen, collapsible
-   * track-header column (sticky-left) and a fixed pixels-per-cycle timeline that
-   * continues into empty bars past the song (spreadsheet-like) and scrolls
-   * horizontally. Section markers are integrated as tinted background bands plus
-   * coloured ruler chips. A position cursor + playhead. Hovering a region shows
-   * the track summary.
+   * Read-only arrangement view — Logic Pro-style, driven by the **real engine**.
+   * Lanes come from `grove_query` (the last-evaluated arrangement, grouped per
+   * mixer strip); each lane draws its real haps (see HapLane). The playhead +
+   * cursor follow the transport store (real cycle position, not a mock RAF), the
+   * ruler seeks for real (`groveSeek`), and the timeline gently auto-follows the
+   * playhead during playback.
    *
-   * Mute/solo live in the mixer; the track headers only show **read-only status
-   * icons**. Right-click a header/lane to toggle mute/solo via a context menu.
+   * A frozen, collapsible track-header column (sticky-left) and a fixed
+   * pixels-per-cycle timeline that continues into empty bars past the song
+   * (spreadsheet-like). Section markers are integrated as tinted background bands
+   * plus coloured ruler chips (Step-0 song structure — no BE source for these).
+   *
+   * Mute/solo live in the mixer (Step 3b); the headers show **read-only status
+   * icons**. Right-click a header/lane toggles mute/solo via the shared store
+   * (keyed by strip index) and pushes a live `grove_set_track` override so the
+   * audio responds from here too.
    *
    * Imports only shared/ui (+ the shared ContextMenu overlay) + grove-local.
    */
@@ -16,105 +23,169 @@
   import { tooltip } from '$lib/actions/tooltip';
   import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import Region from './Region.svelte';
-  import type { WaveKind } from './waveform';
+  import HapLane from './HapLane.svelte';
+  import { arrangementStore, noteName, VIEW_CYCLES, type VizLane } from './arrangement.svelte';
+  import { transportStore, groveEngine, diagnosticsStore } from '../stores/engine.svelte';
+  import { projectStore } from '../stores/project.svelte';
   import { groveStore } from '../grove-store.svelte';
-  import { MOCK_TRACKS, MOCK_SECTIONS, TIMELINE_CYCLES, MOCK_PROJECT } from '../mock/data';
+  import { groveSetTrack } from '$lib/ipc/grove';
+  import { MOCK_SECTIONS } from '../mock/data';
   import { laneColor, sectionColor } from '../mock/colors';
 
   const PX = 26;
-  const CONTENT = TIMELINE_CYCLES;
-  const VIEW = 96;
+  const VIEW = VIEW_CYCLES;
   const timelineW = VIEW * PX;
 
   let collapsed = $state(false);
   const headW = $derived(collapsed ? 48 : 184);
 
-  let startCycle = $state(0);
-  let playCycle = $state(0);
-  const playStart = $derived(startCycle < CONTENT ? startCycle : 0);
-
+  // ── Live data: re-query on every eval (diagnostics reassign = eval happened) ──
   $effect(() => {
-    if (!groveStore.running) return;
-    playCycle = playStart;
-    let raf = 0; let last = performance.now();
-    const tick = (now: number) => {
-      const dt = now - last; last = now;
-      playCycle += dt / 2000;
-      if (playCycle >= CONTENT) playCycle = playStart;
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    void diagnosticsStore.errors; // dep: a fresh array reference is pushed on each eval
+    arrangementStore.schedule(VIEW);
   });
 
-  const soloActive = $derived(groveStore.anySolo);
-  const bars = Array.from({ length: VIEW / 4 + 1 }, (_, i) => i * 4);
+  const lanes = $derived(arrangementStore.lanes);
 
-  function kindFor(name: string): WaveKind {
-    if (name === 'drums') return 'percussive';
-    if (name === 'pad') return 'sustained';
-    return 'tonal';
+  // ── Track names: best-effort from the evaluated source (BE gives only indices).
+  // The evaluated source is the active tab; `tracks(...)` order == strip order.
+  const trackNames = $derived(extractTrackNames(projectStore.activeSource));
+  function extractTrackNames(src: string): string[] {
+    const names: string[] = [];
+    const re = /\btrack\(\s*"([^"]+)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src)) !== null) names.push(m[1]);
+    return names;
   }
 
+  /** Stable mute/solo key for a strip — numeric so it never collides with the
+   *  Step-0 mock track ids ('t-bass', …) still seeded in the shared store. */
+  const laneKey = (track: number) => String(track);
+
+  function laneTitle(l: VizLane): string {
+    return trackNames[l.track] ?? `Track ${l.track + 1}`;
+  }
+  function laneVoice(l: VizLane): string {
+    if (l.sounds.length) return l.sounds.slice(0, 3).join(' ');
+    if (l.noteCount && l.noteLo != null && l.noteHi != null) {
+      return `${noteName(l.noteLo)}–${noteName(l.noteHi)} · ${l.noteCount}♪`;
+    }
+    if (l.hasContinuous) return 'signal';
+    return '—';
+  }
+  function laneInfo(l: VizLane) {
+    const parts = [laneVoice(l), `${l.haps.length} haps`];
+    if (groveStore.isMuted(laneKey(l.track))) parts.push('muted');
+    if (groveStore.isSoloed(laneKey(l.track))) parts.push('solo');
+    parts.push('right-click for mute / solo');
+    return { content: laneTitle(l), description: parts.join(' · ') };
+  }
+
+  // Solo dimming computed over the REAL lanes only (the shared store is also
+  // seeded with stale mock solo state, which would otherwise dim everything).
+  const soloActive = $derived(lanes.some((l) => groveStore.isSoloed(laneKey(l.track))));
+
+  // ── Transport-driven playhead + seek cursor ──────────────────────────────────
+  const playCycle = $derived(transportStore.cycle);
+  const playing   = $derived(transportStore.playing);
+  let   cursorCycle = $state(0); // seek anchor (last ruler click / arrow seek)
+
+  const playX   = $derived(headW + playCycle * PX);
+  const cursorX = $derived(headW + cursorCycle * PX);
+  const endX    = $derived(headW + arrangementStore.contentEnd * PX);
+
+  const bars = Array.from({ length: VIEW / 4 + 1 }, (_, i) => i * 4);
+
   let rulerEl = $state<HTMLElement | null>(null);
+  function seekTo(cyc: number) {
+    cursorCycle = Math.max(0, Math.round(cyc * 4) / 4);
+    void groveEngine.seek(cursorCycle);
+  }
   function setStartFromEvent(e: MouseEvent) {
     if (!rulerEl) return;
     const r = rulerEl.getBoundingClientRect();
-    const cyc = Math.max(0, Math.min(VIEW, (e.clientX - r.left) / PX));
-    startCycle = Math.round(cyc * 4) / 4;
-    if (!groveStore.running) playCycle = playStart;
+    seekTo(Math.max(0, Math.min(VIEW, (e.clientX - r.left) / PX)));
   }
 
-  const startX = $derived(headW + startCycle * PX);
-  const playX = $derived(headW + playCycle * PX);
+  // ── Auto-follow: keep the playhead in view while playing (re-armed on each
+  // play start; a manual wheel pins it until the next start). ───────────────────
+  let scrollEl = $state<HTMLElement | null>(null);
+  let userPinned = $state(false);
+  let prevPlaying = false;
+  $effect(() => {
+    const p = transportStore.playing;
+    if (p && !prevPlaying) userPinned = false;
+    prevPlaying = p;
+  });
+  $effect(() => {
+    const x = playX; // dep — ~30 fps
+    if (!playing || userPinned || !scrollEl) return;
+    const vw = scrollEl.clientWidth;
+    const sl = scrollEl.scrollLeft;
+    if (x < sl + headW + 24 || x > sl + vw - 48) {
+      scrollEl.scrollLeft = Math.max(0, x - headW - vw / 3);
+    }
+  });
+  function onWheel() { if (playing) userPinned = true; }
 
-  function trackInfo(t: typeof MOCK_TRACKS[number]) {
-    const parts = [t.voice, `gain ${t.gain.toFixed(2)}`];
-    if (groveStore.isMuted(t.id)) parts.push('muted');
-    if (groveStore.isSoloed(t.id)) parts.push('solo');
-    parts.push('right-click for mute / solo');
-    return { content: t.name, description: parts.join(' · ') };
+  // ── Keyboard: ↑/↓ select lanes · ←/→ nudge + seek the cursor · Home → start ───
+  let selectedPos = $state(0);
+  function onKeydown(e: KeyboardEvent) {
+    if (!lanes.length) return;
+    if (e.key === 'ArrowDown')      { selectedPos = Math.min(lanes.length - 1, selectedPos + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowUp')   { selectedPos = Math.max(0, selectedPos - 1); e.preventDefault(); }
+    else if (e.key === 'ArrowRight'){ seekTo(cursorCycle + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { seekTo(cursorCycle - 1); e.preventDefault(); }
+    else if (e.key === 'Home')      { seekTo(0); e.preventDefault(); }
   }
 
-  // ── Right-click context menu (toggle mute / solo) ──────────────────────────
-  let ctx = $state<{ x: number; y: number; trackId: string } | null>(null);
-  function openMenu(e: MouseEvent, t: typeof MOCK_TRACKS[number]) {
+  // ── Right-click context menu (toggle mute / solo) ─────────────────────────────
+  let ctx = $state<{ x: number; y: number; track: number } | null>(null);
+  function openMenu(e: MouseEvent, track: number) {
     e.preventDefault();
-    ctx = { x: e.clientX, y: e.clientY, trackId: t.id };
+    ctx = { x: e.clientX, y: e.clientY, track };
   }
   const ctxItems = $derived<MenuItem[]>(
-    ctx ? [
-      { id: 'mute', label: groveStore.isMuted(ctx.trackId) ? 'Unmute' : 'Mute', icon: VolumeX },
-      { id: 'solo', label: groveStore.isSoloed(ctx.trackId) ? 'Unsolo' : 'Solo', icon: Headphones },
-    ] : [],
+    ctx
+      ? [
+          { id: 'mute', label: groveStore.isMuted(laneKey(ctx.track)) ? 'Unmute' : 'Mute', icon: VolumeX },
+          { id: 'solo', label: groveStore.isSoloed(laneKey(ctx.track)) ? 'Unsolo' : 'Solo', icon: Headphones },
+        ]
+      : [],
   );
   function onCtxSelect(id: string) {
     if (!ctx) return;
-    if (id === 'mute') groveStore.toggleMute(ctx.trackId);
-    else if (id === 'solo') groveStore.toggleSolo(ctx.trackId);
+    const key = laneKey(ctx.track);
+    if (id === 'mute') {
+      groveStore.toggleMute(key);
+      void groveSetTrack('mute', ctx.track, groveStore.isMuted(key) ? 1 : 0);
+    } else if (id === 'solo') {
+      groveStore.toggleSolo(key);
+      void groveSetTrack('solo', ctx.track, groveStore.isSoloed(key) ? 1 : 0);
+    }
     ctx = null;
   }
 </script>
 
-<div class="arr">
-  <div class="arr-scroll">
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<div class="arr" tabindex="0" role="group" aria-label="Arrangement" onkeydown={onKeydown}>
+  <div class="arr-scroll" bind:this={scrollEl} onwheel={onWheel}>
     <div class="arr-inner" style="--head-w: {headW}px; --tl-w: {timelineW}px;">
       <!-- Ruler -->
       <div class="arr-top">
         <div class="arr-corner">
           {#if !collapsed}
             <div class="corner-id">
-              <span class="corner-title">{MOCK_PROJECT.name}</span>
-              <span class="corner-sub">{MOCK_TRACKS.length} tracks</span>
+              <span class="corner-title">{projectStore.project?.name ?? 'grove'}</span>
+              <span class="corner-sub">{lanes.length} {lanes.length === 1 ? 'track' : 'tracks'}</span>
             </div>
           {/if}
-          <button class="corner-toggle" use:tooltip={collapsed ? 'Expand tracks' : 'Collapse tracks'} aria-label="Toggle track headers" onclick={() => collapsed = !collapsed}>
+          <button class="corner-toggle" use:tooltip={collapsed ? 'Expand tracks' : 'Collapse tracks'} aria-label="Toggle track headers" onclick={() => (collapsed = !collapsed)}>
             {#if collapsed}<PanelRightClose size={14} />{:else}<PanelLeftClose size={14} />{/if}
           </button>
         </div>
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="arr-ruler" bind:this={rulerEl} onclick={setStartFromEvent} use:tooltip={'Click to set playback position'}>
+        <div class="arr-ruler" bind:this={rulerEl} onclick={setStartFromEvent} use:tooltip={'Click to seek'}>
           {#each MOCK_SECTIONS as s, i (s.label)}
             <div class="sec-chip" style="left: {s.start * PX}px; width: {s.len * PX}px; --m: {sectionColor(i)};"><span>{s.label}</span></div>
           {/each}
@@ -126,19 +197,19 @@
 
       <!-- Track rows -->
       <div class="arr-rows">
-        {#each MOCK_TRACKS as track, ti (track.id)}
-          {@const color = laneColor(track.colorIdx)}
-          {@const muted = groveStore.isMuted(track.id)}
-          {@const soloed = groveStore.isSoloed(track.id)}
+        {#each lanes as lane, pos (lane.track)}
+          {@const color = laneColor(lane.track)}
+          {@const muted = groveStore.isMuted(laneKey(lane.track))}
+          {@const soloed = groveStore.isSoloed(laneKey(lane.track))}
           {@const dimmed = muted || (soloActive && !soloed)}
-          <div class="arr-row" class:selected={groveStore.selectedTrackId === track.id} style="--c: {color}">
+          <div class="arr-row" class:selected={selectedPos === pos} style="--c: {color}">
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="arr-head" class:collapsed onclick={() => groveStore.selectTrack(track.id)} oncontextmenu={(e) => openMenu(e, track)} use:tooltip={trackInfo(track)}>
+            <div class="arr-head" class:collapsed onclick={() => (selectedPos = pos)} oncontextmenu={(e) => openMenu(e, lane.track)} use:tooltip={laneInfo(lane)}>
               <span class="arr-colorbar"></span>
               {#if !collapsed}
                 <div class="arr-head-info">
-                  <span class="arr-name">{track.name}</span>
-                  <span class="arr-voice">{track.voice}</span>
+                  <span class="arr-name">{laneTitle(lane)}</span>
+                  <span class="arr-voice">{laneVoice(lane)}</span>
                 </div>
               {/if}
               <div class="arr-status">
@@ -147,35 +218,46 @@
               </div>
             </div>
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="arr-lane" onclick={() => groveStore.selectTrack(track.id)} oncontextmenu={(e) => openMenu(e, track)}>
+            <div class="arr-lane" onclick={() => (selectedPos = pos)} oncontextmenu={(e) => openMenu(e, lane.track)}>
               {#each MOCK_SECTIONS as s, i (s.label)}
                 <div class="lane-band" style="left: {s.start * PX}px; width: {s.len * PX}px; --m: {sectionColor(i)};"></div>
               {/each}
               {#each bars as b (b)}
                 <div class="lane-grid" style="left: {b * PX}px;" class:strong={b % 8 === 0}></div>
               {/each}
-              {#each track.regions as r, i (i)}
-                <Region region={r} totalCycles={VIEW} {color} kind={kindFor(track.name)} seed={ti * 97 + i * 31 + r.start} {dimmed} info={trackInfo(track)} />
-              {/each}
+              <HapLane {lane} {color} view={VIEW} px={PX} {dimmed} {playCycle} {playing} />
             </div>
           </div>
         {/each}
+
+        {#if !lanes.length}
+          <div class="arr-empty">
+            {#if arrangementStore.loaded}
+              <span>No arrangement yet — evaluate a <code>.grove</code> file to see its tracks.</span>
+            {:else}
+              <span>Loading arrangement…</span>
+            {/if}
+          </div>
+        {/if}
       </div>
 
       <!-- Overlays -->
-      {#if groveStore.running && playX > startX}
-        <div class="arr-progress" style="left: {startX}px; width: {playX - startX}px;"></div>
-      {/if}
-      <div class="arr-cursor" style="left: {startX}px;"><span class="cursor-flag"></span></div>
-      {#if groveStore.running}
-        <div class="arr-playhead" style="left: {playX}px;"><span class="playhead-flag"></span></div>
+      {#if lanes.length}
+        {#if arrangementStore.contentEnd > 0 && arrangementStore.contentEnd < VIEW}
+          <div class="arr-end" style="left: {endX}px;"></div>
+        {/if}
+        {#if playing && playX > cursorX}
+          <div class="arr-progress" style="left: {cursorX}px; width: {playX - cursorX}px;"></div>
+        {/if}
+        <div class="arr-cursor" style="left: {cursorX}px;"><span class="cursor-flag"></span></div>
+        <div class="arr-playhead" class:idle={!playing} style="left: {playX}px;"><span class="playhead-flag"></span></div>
       {/if}
     </div>
   </div>
 </div>
 
 {#if ctx}
-  <ContextMenu items={ctxItems} x={ctx.x} y={ctx.y} onSelect={onCtxSelect} onClose={() => ctx = null} />
+  <ContextMenu items={ctxItems} x={ctx.x} y={ctx.y} onSelect={onCtxSelect} onClose={() => (ctx = null)} />
 {/if}
 
 <style>
@@ -186,7 +268,9 @@
     display: flex;
     flex: 1; min-width: 0; min-height: 0;
     background: var(--bg-base);
+    outline: none;
   }
+  .arr:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
   .arr-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
   .arr-inner { position: relative; width: calc(var(--head-w) + var(--tl-w)); }
 
@@ -267,10 +351,23 @@
   .lane-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--border-subtle) 35%, transparent); }
   .lane-grid.strong { background: color-mix(in srgb, var(--border-subtle) 70%, transparent); }
 
+  /* ── Empty state ── */
+  /* Sticky-left + bounded width so it stays in view (the inner timeline is far
+     wider than the viewport). */
+  .arr-empty {
+    position: sticky; left: 0;
+    display: flex; align-items: center; justify-content: flex-start;
+    width: 520px; height: 160px; padding: 0 28px;
+    color: var(--text-muted); font-size: 12px;
+  }
+  .arr-empty code { font-family: var(--font-code); font-size: 11px; color: var(--text-secondary); }
+
   /* ── Overlays ── */
+  .arr-end { position: absolute; top: var(--ruler-h); bottom: 0; width: 1px; background: color-mix(in srgb, var(--border-strong, var(--text-disabled)) 60%, transparent); border-left: 1px dashed color-mix(in srgb, var(--text-disabled) 60%, transparent); pointer-events: none; z-index: 2; }
   .arr-progress { position: absolute; top: var(--ruler-h); bottom: 0; background: color-mix(in srgb, var(--accent) 7%, transparent); pointer-events: none; z-index: 3; }
   .arr-cursor { position: absolute; top: var(--ruler-h); bottom: 0; width: 1px; background: color-mix(in srgb, var(--accent) 70%, transparent); pointer-events: none; z-index: 4; }
   .cursor-flag { position: absolute; top: 0; left: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid var(--accent); }
-  .arr-playhead { position: absolute; top: var(--ruler-h); bottom: 0; width: 1.5px; background: var(--text-primary); opacity: 0.7; pointer-events: none; z-index: 4; }
+  .arr-playhead { position: absolute; top: var(--ruler-h); bottom: 0; width: 1.5px; background: var(--text-primary); opacity: 0.7; pointer-events: none; z-index: 4; transition: opacity var(--transition-fast); }
+  .arr-playhead.idle { opacity: 0.32; }
   .playhead-flag { position: absolute; top: 0; left: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid var(--text-primary); }
 </style>
