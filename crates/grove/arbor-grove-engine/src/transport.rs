@@ -70,6 +70,12 @@ pub struct Transport<S: AudioSink> {
     /// Last delay-bus config sent per track, so `SetTrackDelay` is re-emitted only
     /// when a track's delay line actually changes. Cleared on swap / seek.
     delay_state: HashMap<u32, DelayConfig>,
+    /// Reported playhead cycle while **stopped**. The sink's sample clock keeps
+    /// free-running after [`stop`](Self::stop), so reading the live position would
+    /// make the UI ruler crawl on past a stop; instead [`position_cycle`] reports
+    /// this frozen value when not playing. Updated on stop (freeze where we are)
+    /// and seek (jump to the target), and used by [`play`](Self::play) to resume.
+    paused_cycle: f64,
 }
 
 impl<S: AudioSink> Transport<S> {
@@ -88,6 +94,7 @@ impl<S: AudioSink> Transport<S> {
             pending_tracks: None,
             sustained_started: HashSet::new(),
             delay_state: HashMap::new(),
+            paused_cycle: 0.0,
         }
     }
 
@@ -110,10 +117,21 @@ impl<S: AudioSink> Transport<S> {
         self.pending_tempo = Some(map);
     }
 
-    /// Start scheduling from the sink's current frame.
+    /// Start scheduling, resuming from the frozen playhead (`paused_cycle`).
+    ///
+    /// The sink's sample clock free-runs even while stopped, so we re-anchor the
+    /// [`Epoch`] here: `paused_cycle` is pinned to the current frame, keeping the
+    /// position continuous across a stop/play (and starting at cycle 0 on the very
+    /// first play, regardless of how long the device has been open).
     pub fn play(&mut self) {
+        let sr = self.sink.sample_rate();
+        let now = self.sink.now_frame();
+        let fpc = self.epoch.frames_per_cycle(sr);
+        let delta = self.paused_cycle - self.epoch.cycle.to_f64();
+        let anchor = (now as f64 - delta * fpc).round();
+        self.epoch.frame = if anchor <= 0.0 { 0 } else { anchor as u64 };
         self.playing = true;
-        self.scheduled_through = self.sink.now_frame();
+        self.scheduled_through = now;
         self.sustained_started.clear();
         self.delay_state.clear();
         // A (re)start promotes a staged tempo-map immediately — the tempo is then
@@ -124,10 +142,25 @@ impl<S: AudioSink> Transport<S> {
         let _ = self.send_track_config();
     }
 
-    /// Stop and release all voices.
+    /// Stop and release all voices. Freezes the reported playhead where it is, so
+    /// the UI ruler holds still instead of tracking the free-running sink clock.
     pub fn stop(&mut self) {
+        self.paused_cycle = self
+            .epoch
+            .cycle_of(self.sink.now_frame(), self.sink.sample_rate());
         self.playing = false;
         let _ = self.sink.send(AudioCommand::StopAll);
+    }
+
+    /// The playhead cycle to report to the UI: the live clock position while
+    /// playing, the frozen [`paused_cycle`](Self::paused_cycle) while stopped.
+    pub fn position_cycle(&self) -> f64 {
+        if self.playing {
+            self.epoch
+                .cycle_of(self.sink.now_frame(), self.sink.sample_rate())
+        } else {
+            self.paused_cycle
+        }
     }
 
     /// Jump the cycle clock so cycle `cycle` aligns with the sink's current frame.
@@ -139,6 +172,8 @@ impl<S: AudioSink> Transport<S> {
             cps: self.epoch.cps,
         };
         self.scheduled_through = now;
+        // Jump the frozen playhead too, so a seek while stopped moves the ruler.
+        self.paused_cycle = cycle.to_f64();
         // A seek discontinues the timeline: any sustained stem must be free to
         // restart at its new position, and the delay buses re-arm from scratch.
         self.sustained_started.clear();
@@ -476,6 +511,43 @@ mod tests {
             .commands()
             .iter()
             .any(|c| matches!(c, AudioCommand::StopAll)));
+    }
+
+    #[test]
+    fn stop_freezes_reported_position() {
+        let mut tr = Transport::new(RecordingSink::new(SR), 1.0);
+        tr.set_tracks(drum_tracks("d", "bd", 4));
+        tr.play();
+        tr.sink_mut().set_now(24_000); // half a cycle in (cps=1 → 48_000 frames/cycle)
+        tr.tick();
+        let at_stop = tr.position_cycle();
+        assert!((at_stop - 0.5).abs() < 1e-6, "playing position should track the clock");
+        tr.stop();
+        // The sink clock keeps free-running after stop…
+        tr.sink_mut().set_now(72_000);
+        // …but the reported playhead must hold where it stopped.
+        assert!(
+            (tr.position_cycle() - at_stop).abs() < 1e-6,
+            "stopped playhead must freeze, not crawl with the free-running clock"
+        );
+    }
+
+    #[test]
+    fn play_resumes_from_frozen_position() {
+        let mut tr = Transport::new(RecordingSink::new(SR), 1.0);
+        tr.set_tracks(drum_tracks("d", "bd", 4));
+        tr.play();
+        tr.sink_mut().set_now(24_000);
+        tr.tick();
+        tr.stop();
+        let frozen = tr.position_cycle();
+        // Clock free-runs a full cycle while stopped, then we hit play again.
+        tr.sink_mut().set_now(72_000);
+        tr.play();
+        assert!(
+            (tr.position_cycle() - frozen).abs() < 1e-6,
+            "play must resume from the frozen playhead, not the drifted clock"
+        );
     }
 
     /// A sink that accepts at most `voice_cap` **voice** commands before reporting

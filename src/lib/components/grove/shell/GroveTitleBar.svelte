@@ -10,10 +10,11 @@
    */
   import {
     Play, Square, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
-    PanelLeft, PanelRight, Minimize2, Command,
+    PanelLeft, PanelRight, Minimize2, Command, Check, AlertTriangle,
   } from 'lucide-svelte';
   import { FolderOpen } from 'lucide-svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
   import WindowControls from '$lib/components/layout/WindowControls.svelte';
@@ -27,6 +28,16 @@
   import { workspaceStore } from '../stores/workspace.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
+  import { renderStore } from '../stores/render.svelte';
+
+  // Export button reflects the render job: spinner while bouncing, then a brief
+  // ✓ / ⚠ so the user sees it finished (or why it didn't) instead of nothing.
+  const exportTip = $derived(
+    renderStore.status === 'rendering' ? `Rendering ${renderStore.file ?? 'WAV'}…`
+    : renderStore.status === 'done'    ? `Exported ${renderStore.file ?? 'WAV'}`
+    : renderStore.status === 'failed'  ? `Render failed${renderStore.error ? `: ${renderStore.error}` : ''}`
+    : 'Render to WAV (Ctrl+Shift+R)',
+  );
 
   /** Last path segment (forward- or back-slash) for a recents label. */
   function basename(path: string): string {
@@ -100,7 +111,21 @@
     >
       {#if groveEngine.running}<Square size={14} fill="currentColor" />{:else}<Play size={14} fill="currentColor" />{/if}
     </button>
-    <button class="gtb-run-icon" onclick={() => projectActions.exportWav()} use:tooltip={'Render to WAV (Ctrl+Shift+R)'} aria-label="Render to WAV"><Download size={14} /></button>
+    <button
+      class="gtb-run-icon"
+      class:rendering={renderStore.active}
+      class:ok={renderStore.status === 'done'}
+      class:err={renderStore.status === 'failed'}
+      onclick={() => projectActions.exportWav()}
+      disabled={renderStore.active}
+      use:tooltip={exportTip}
+      aria-label="Render to WAV"
+    >
+      {#if renderStore.status === 'rendering'}<Spinner size={13} />
+      {:else if renderStore.status === 'done'}<Check size={14} />
+      {:else if renderStore.status === 'failed'}<AlertTriangle size={14} />
+      {:else}<Download size={14} />{/if}
+    </button>
 
     <div class="gtb-sep"></div>
 
@@ -198,6 +223,12 @@
   .gtb-run.running:hover { background: color-mix(in srgb, var(--error) 16%, transparent); }
   .gtb-run-icon { color: var(--text-muted); }
   .gtb-run-icon:hover { background: var(--bg-hover); color: var(--text-secondary); }
+  /* Render-job feedback: busy (accent), succeeded (success), failed (error). */
+  .gtb-run-icon.rendering { color: var(--accent); }
+  .gtb-run-icon.rendering:hover { background: transparent; }
+  .gtb-run-icon.ok { color: var(--success); }
+  .gtb-run-icon.err { color: var(--error); }
+  .gtb-run-icon:disabled { cursor: default; }
 
   .gtb-log {
     display: flex; align-items: center; gap: 6px;

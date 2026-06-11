@@ -29,6 +29,7 @@
   import { transportStore, groveEngine, diagnosticsStore } from '../stores/engine.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { groveStore } from '../grove-store.svelte';
+  import { mixerStore } from '../stores/mixer.svelte';
   import { groveSetTrack } from '$lib/ipc/grove';
   import { laneColor, sectionColor } from '../palette';
 
@@ -128,12 +129,24 @@
   });
   function onWheel() { if (playing) userPinned = true; }
 
-  // ── Keyboard: ↑/↓ select lanes · ←/→ nudge + seek the cursor · Home → start ───
-  let selectedPos = $state(0);
+  // ── Selection: shared with the mixer + inspector via the grove store (keyed by
+  // strip index), so clicking/▲▼ here drives the Inspector too. ↑/↓ move the
+  // selection; ←/→ nudge + seek the cursor; Home → start. ───────────────────────
+  const selectedTrack = $derived(mixerStore.selectedIndex);
+  function selectLaneAt(pos: number) {
+    const lane = lanes[pos];
+    if (lane) mixerStore.select(lane.track);
+  }
   function onKeydown(e: KeyboardEvent) {
     if (!lanes.length) return;
-    if (e.key === 'ArrowDown')      { selectedPos = Math.min(lanes.length - 1, selectedPos + 1); e.preventDefault(); }
-    else if (e.key === 'ArrowUp')   { selectedPos = Math.max(0, selectedPos - 1); e.preventDefault(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const cur  = lanes.findIndex((l) => l.track === selectedTrack);
+      const base = cur < 0 ? 0 : cur;
+      selectLaneAt(e.key === 'ArrowDown'
+        ? Math.min(lanes.length - 1, base + 1)
+        : Math.max(0, base - 1));
+      e.preventDefault();
+    }
     else if (e.key === 'ArrowRight'){ seekTo(cursorCycle + 1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft') { seekTo(cursorCycle - 1); e.preventDefault(); }
     else if (e.key === 'Home')      { seekTo(0); e.preventDefault(); }
@@ -199,14 +212,14 @@
 
       <!-- Track rows -->
       <div class="arr-rows">
-        {#each lanes as lane, pos (lane.track)}
+        {#each lanes as lane (lane.track)}
           {@const color = laneColor(lane.track)}
           {@const muted = groveStore.isMuted(laneKey(lane.track))}
           {@const soloed = groveStore.isSoloed(laneKey(lane.track))}
           {@const dimmed = muted || (soloActive && !soloed)}
-          <div class="arr-row" class:selected={selectedPos === pos} style="--c: {color}">
+          <div class="arr-row" class:selected={selectedTrack === lane.track} style="--c: {color}">
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="arr-head" class:collapsed onclick={() => (selectedPos = pos)} oncontextmenu={(e) => openMenu(e, lane.track)} use:tooltip={laneInfo(lane)}>
+            <div class="arr-head" class:collapsed onclick={() => mixerStore.select(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)} use:tooltip={laneInfo(lane)}>
               <span class="arr-colorbar"></span>
               {#if !collapsed}
                 <div class="arr-head-info">
@@ -220,7 +233,7 @@
               </div>
             </div>
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="arr-lane" onclick={() => (selectedPos = pos)} oncontextmenu={(e) => openMenu(e, lane.track)}>
+            <div class="arr-lane" onclick={() => mixerStore.select(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)}>
               {#each lane.sections as s (s.name + '@' + s.start)}
                 <div class="lane-band" style="left: {s.start * PX}px; width: {(s.end - s.start) * PX}px; --sc: {sectionColor(s.name)}"></div>
               {/each}

@@ -26,6 +26,7 @@ pub mod query;
 mod render;
 pub mod sounds;
 pub mod state;
+mod validate;
 mod vsco;
 
 use std::sync::mpsc::{self, Sender};
@@ -148,6 +149,11 @@ pub async fn grove_eval(
 
     let diagnostics = match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
         Ok(output) => {
+            // Surface sound/instrument references the registry can't resolve as
+            // editor errors (the renderer would silently fall back to the synth).
+            // Done before the arrangement is moved to the live session below.
+            let known = validate::known_instruments(&cfg);
+            let errors = validate::validate_instruments(&output.tracks, &known);
             // Stash for replay on the next play, and push live if already running.
             {
                 let mut latest = grove.latest.lock().unwrap_or_else(|e| e.into_inner());
@@ -162,7 +168,7 @@ pub async fn grove_eval(
                 cps: output.cps,
                 tempo: output.tempo,
             });
-            GroveDiagnostics::ok()
+            GroveDiagnostics { errors }
         }
         Err(diags) => diags,
     };

@@ -82,14 +82,22 @@ pub fn spawn_render(
     if let Err(e) = std::thread::Builder::new()
         .name(format!("grove-render-{job_id}"))
         .spawn(move || {
-            let result = render_offline(&tracks, cps, cycles, &cfg, &out_path);
+            // Catch a panic in the render core so the job reports Failed (with a
+            // surfaced message) instead of hanging on Running and leaving an
+            // unfinalized, unplayable WAV with no explanation.
+            let outcome: Result<(), String> = match std::panic::catch_unwind(
+                std::panic::AssertUnwindSafe(|| {
+                    render_offline(&tracks, cps, cycles, &cfg, &out_path)
+                }),
+            ) {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err("render thread panicked (see the log for details)".to_string()),
+            };
             let state = app.state::<crate::AppState>();
-            let (status, success, error) = match result {
+            let (status, success, error) = match outcome {
                 Ok(()) => (JobStatus::Completed { exit_code: 0 }, true, None),
-                Err(e) => {
-                    let msg = e.to_string();
-                    (JobStatus::Failed { error: msg.clone() }, false, Some(msg))
-                }
+                Err(msg) => (JobStatus::Failed { error: msg.clone() }, false, Some(msg)),
             };
             if let Ok(mut jobs) = state.jobs.lock() {
                 jobs.set_status(&job_id_thread, status);

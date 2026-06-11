@@ -81,6 +81,32 @@ pub fn status(cfg: &GroveConfig) -> VscoStatus {
     }
 }
 
+/// The instrument names declared by the installed VSCO manifest, read cheaply
+/// (registry table headers only — no sample decode). Empty when VSCO isn't
+/// installed. Used by the eval validator to know which dotted names resolve,
+/// without paying the cost of a full [`Registry::load_manifest`].
+pub fn installed_instrument_names(cfg: &GroveConfig) -> Vec<String> {
+    let dir = vsco_dir(cfg);
+    let Some(manifest) = read_manifest(&dir) else {
+        return Vec::new();
+    };
+    let registry_path = dir.join(&manifest.registry_rel);
+    let Ok(text) = std::fs::read_to_string(&registry_path) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        let Some(inner) = line.strip_prefix('[') else { continue };
+        let Some(header) = inner.strip_suffix(']') else { continue };
+        let name = header.trim().trim_matches('"').to_string();
+        if !name.is_empty() {
+            names.push(name);
+        }
+    }
+    names
+}
+
 /// Load the VSCO sound registry, if installed. Built on the audio thread and
 /// handed to `open_output_stream`; `None` → the default synth bank.
 pub fn load_registry(cfg: &GroveConfig) -> Option<Registry> {

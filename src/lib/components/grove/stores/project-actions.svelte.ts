@@ -10,6 +10,7 @@
  */
 
 import { projectStore } from './project.svelte';
+import { renderStore } from './render.svelte';
 import { groveRender } from '$lib/ipc/grove';
 import { fsWriteTextFile } from '$lib/ipc/fs';
 
@@ -53,7 +54,12 @@ function createProjectActions() {
     } else if (mode === 'open-file') {
       void projectStore.openFile(path).catch(() => {});
     } else if (mode === 'export') {
-      void groveRender(projectStore.activeSource, path, { cycles: 32 }, projectStore.project?.path);
+      // The render runs as a background job; the store reports start/done/fail
+      // via the title-bar badge (the job resolves with an id, not the WAV).
+      void renderStore.track(
+        groveRender(projectStore.activeSource, path, { cycles: 32 }, projectStore.project?.path),
+        path,
+      );
     }
   }
 

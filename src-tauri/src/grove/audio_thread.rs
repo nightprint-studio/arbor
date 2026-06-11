@@ -178,7 +178,9 @@ fn emit_transport_and_meters(
         EVT_TRANSPORT,
         TransportState {
             playing: transport.is_playing(),
-            cycle: epoch.cycle_of(now, sr),
+            // The transport freezes this when stopped (the sink clock keeps
+            // running), so the FE ruler holds still after a stop.
+            cycle: transport.position_cycle(),
             frame: now,
             cps: epoch.cps,
             sample_rate: sr,

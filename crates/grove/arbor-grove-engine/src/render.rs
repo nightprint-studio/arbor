@@ -121,6 +121,11 @@ pub fn render_offline(
     // Mixer layout up front, then one Voice-bearing block at a time.
     let mut initial = Some(AudioCommand::ConfigureTracks(track_configs.clone()));
 
+    // Capture (don't `?`) a mid-loop write error so we can still finalize: a WAV
+    // whose header is never written back (RIFF/`data` chunk sizes) is unplayable
+    // even though megabytes of samples reached disk. A short, *valid* file (and a
+    // surfaced error) beats a large corrupt one.
+    let mut write_err: Option<EngineError> = None;
     while frame_cursor < total_frames {
         let block_len = ((total_frames - frame_cursor) as usize).min(BLOCK_FRAMES);
         let block_end = frame_cursor + block_len as u64;
@@ -160,15 +165,22 @@ pub fn render_offline(
 
         let out = &mut block[..block_len];
         renderer.process(&mut cmds, out);
-        write_block(&mut writer, cfg, out)?;
+        if let Err(e) = write_block(&mut writer, cfg, out) {
+            write_err = Some(e);
+            break;
+        }
 
         frame_cursor = block_end;
     }
 
-    writer
+    // Always finalize, even after a write error, so the file is a valid WAV.
+    let finalized = writer
         .finalize()
-        .map_err(|e| EngineError::Render(format!("finalizing WAV: {e}")))?;
-    Ok(())
+        .map_err(|e| EngineError::Render(format!("finalizing WAV: {e}")));
+    match write_err {
+        Some(e) => Err(e),
+        None => finalized,
+    }
 }
 
 /// Scan `cycles` cycles of `tracks` for distinct file-source paths and preload

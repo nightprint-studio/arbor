@@ -111,3 +111,4 @@
 
 <h2>VSCO 2 samples</h2>
 <p>The default synth voices are always available. The VSCO 2 Community Edition sample bank adds orchestral sampler instruments (strings, brass, winds, percussion). Download it from the <strong>Sound bank</strong> panel — it installs on a background job with a progress bar you can cancel, and the new instruments appear automatically once extraction finishes.</p>
+<p>A <code>.inst("…")</code> or <code>s("…")</code> name the engine can't resolve to a built-in synth or an installed instrument is underlined as an <strong>error</strong> in the editor, so a typo surfaces immediately instead of silently playing a fallback voice.</p>

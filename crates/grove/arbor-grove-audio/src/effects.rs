@@ -396,6 +396,13 @@ pub struct ConvReverb {
     history: Vec<Frame>,
     /// Write cursor into `history`.
     pos: usize,
+    /// Consecutive silent input frames processed. Once it reaches the IR length
+    /// the `history` ring is fully flushed (all zeros), so the wet output is
+    /// *exactly* zero and [`process`](Self::process) can skip the O(IR) convolution
+    /// until non-silent input returns. The `room` send is exactly `0.0` whenever no
+    /// voice feeds the bus (the common case — no `.room()`), so this removes a large
+    /// constant per-frame cost with no change to the output.
+    silent_for: usize,
 }
 
 impl std::fmt::Debug for ConvReverb {
@@ -420,6 +427,8 @@ impl ConvReverb {
             ir,
             history: vec![[0.0; 2]; len],
             pos: 0,
+            // History starts all-zero, so the bus is gated until input arrives.
+            silent_for: len,
         }
     }
 
@@ -441,8 +450,21 @@ impl ConvReverb {
     }
 
     /// Convolve one stereo input frame against the IR, returning the wet output.
+    ///
+    /// Gated: once the input has been silent for a full IR length the ring is all
+    /// zeros and the wet output is exactly zero, so the convolution (the dominant
+    /// per-frame cost) is skipped until non-silent input returns — bit-identical to
+    /// running it, just without the wasted work when the `room` bus is quiet.
     pub fn process(&mut self, input: Frame) -> Frame {
         let len = self.ir.len();
+        if input[0] == 0.0 && input[1] == 0.0 {
+            if self.silent_for >= len {
+                return [0.0, 0.0];
+            }
+            self.silent_for += 1;
+        } else {
+            self.silent_for = 0;
+        }
         // Store the newest input at the cursor.
         self.history[self.pos] = input;
 
@@ -578,5 +600,38 @@ impl DelayLine {
         self.input = [0.0; 2];
         self.pos = (self.pos + 1) % len;
         echo
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The silence gate must not change the output: a reverb driven by a signal,
+    /// then gated through silence, then re-excited, matches one that never gates
+    /// (here: re-excitation after a full flush produces exactly `ir[0]`, and a
+    /// fully-silent run stays at zero).
+    #[test]
+    fn reverb_gate_is_output_identical() {
+        let mut rv = ConvReverb::from_buffer(vec![[0.5, 0.4], [0.3, 0.2], [0.1, 0.05]]);
+        let len = rv.len();
+
+        // Impulse → first tap is the dry-ish onset.
+        let y0 = rv.process([1.0, 1.0]);
+        assert!((y0[0] - 0.5).abs() < 1e-6 && (y0[1] - 0.4).abs() < 1e-6);
+
+        // Run silence well past the IR length: the tail decays to exact zero.
+        for _ in 0..(len * 3) {
+            let y = rv.process([0.0, 0.0]);
+            let _ = y;
+        }
+        assert_eq!(rv.process([0.0, 0.0]), [0.0, 0.0], "fully flushed bus is exactly zero");
+
+        // Re-excite: with the ring flushed, the impulse again yields ir[0].
+        let y = rv.process([1.0, 1.0]);
+        assert!(
+            (y[0] - 0.5).abs() < 1e-6 && (y[1] - 0.4).abs() < 1e-6,
+            "re-excitation after a gated flush must match a fresh impulse",
+        );
     }
 }
