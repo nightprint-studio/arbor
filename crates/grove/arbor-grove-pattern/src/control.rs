@@ -67,6 +67,20 @@ pub struct ControlMap {
     pub crush: Option<f64>,
     /// Waveshaper distortion amount `0..1`.
     pub shape: Option<f64>,
+
+    // ── Delay (feedback echo) ─────────────────────────────────────────────────
+    // A real feedback echo, distinct from `off` (which retriggers the *pattern*).
+    // The three controls travel per-event but the audio engine realises them as a
+    // **per-track delay bus** (Fase 5): `delay_mix` is the send into the bus,
+    // while `delay`/`feedback` configure that bus's line — so the echoes ring on
+    // independently of the source voice's lifetime. All override on `combine`.
+    /// Delay time in **fractions of a cycle** (e.g. `0.25` = a quarter-cycle).
+    pub delay: Option<f64>,
+    /// Delay feedback `0..1` — how much of the echo feeds back into the line.
+    pub feedback: Option<f64>,
+    /// Delay send / wet mix `0..1` — how much of this event feeds the delay bus.
+    pub delay_mix: Option<f64>,
+
     /// Velocity `0..1`: selects the sampled velocity-layer (timbre) + dynamics.
     /// Distinct from `gain` (output amplitude) — set per the sampled layer.
     pub vel: Option<f64>,
@@ -131,6 +145,9 @@ impl ControlMap {
             speed: other.speed.or(self.speed),
             crush: other.crush.or(self.crush),
             shape: other.shape.or(self.shape),
+            delay: other.delay.or(self.delay),
+            feedback: other.feedback.or(self.feedback),
+            delay_mix: other.delay_mix.or(self.delay_mix),
             vel: other.vel.or(self.vel),
             inst: other.inst.or(self.inst),
             art: other.art.or(self.art),
@@ -172,5 +189,20 @@ mod tests {
         let mut only = ControlMap::default();
         only.gain = Some(0.4);
         assert_eq!(ControlMap::default().combine(only).gain, Some(0.4));
+    }
+
+    #[test]
+    fn delay_fields_override_and_carry_through() {
+        // Right wins when set; left kept when right is unset (no multiply).
+        let mut base = ControlMap::default();
+        base.delay = Some(0.25);
+        base.feedback = Some(0.3);
+        base.delay_mix = Some(0.5);
+        let mut overlay = ControlMap::default();
+        overlay.feedback = Some(0.6); // only feedback overridden
+        let merged = base.combine(overlay);
+        assert_eq!(merged.delay, Some(0.25));
+        assert_eq!(merged.feedback, Some(0.6));
+        assert_eq!(merged.delay_mix, Some(0.5));
     }
 }

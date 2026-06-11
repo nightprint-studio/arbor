@@ -17,7 +17,7 @@ Tracks<ControlMap> ──query look-ahead──▶ VoiceEvents ──AudioSink�
 | `clock` | `Epoch` — maps cycle-time ↔ output frames (`frames_per_cycle = sample_rate / cps`). Audio owns the sample clock; the engine owns `cps` and re-anchors on tempo change so the position stays continuous. |
 | `schedule` | `schedule_span(tracks, epoch, sample_rate, frames, &mut next_id)` — the **pure** look-ahead core: query the window, emit a `VoiceEvent` per onset. Shared by live + offline. |
 | `transport` | `Transport<S: AudioSink>` — the real-time driver. Periodic `tick()` schedules `[now, now+lookahead]`; `set_cps` / `set_tracks` stage changes applied **quantized** at the next cycle boundary (no glitch, no clock reset). |
-| `render` | `render_offline(tracks, cps, &RenderConfig, path)` — non-real-time driver reusing the same scheduling + `Renderer`, writing WAV (24-bit/48k default) via `hound`. Fine under Arbor's job system. |
+| `render` | `render_offline(tracks, cps, cycles, &RenderConfig, path)` — non-real-time driver reusing the same scheduling + `Renderer`, writing WAV (24-bit/48k default) via `hound`. Pre-scans the arrangement and preloads every `sample`/`audio` file source (best-effort) so file voices decode instead of falling back to synth. Length is an explicit `cycles` count + tail. Fine under Arbor's job system. |
 
 ## Why it's testable headless
 
@@ -44,10 +44,9 @@ which is how Stage B is built before the real audio path exists.
 ## Status
 
 **Stage B implemented.** `clock::Epoch`, `schedule_span` / `voice_event_from_hap`, `Transport::tick`
-(look-ahead refill + quantized swaps + back-pressure), and `render_offline` (block loop →
-`Renderer::process` → WAV via `hound`) are written, with unit tests over `RecordingSink`. The audio
-`Renderer::process` is still `unimplemented!` (Stage A, parallel), so the offline render path compiles
-but cannot produce audio until that lands.
+(look-ahead refill + quantized swaps + back-pressure), and `render_offline` (file-source preload →
+block loop → `Renderer::process` → WAV via `hound`) are written, with unit tests over `RecordingSink`.
+The audio `Renderer::process` (Stage A) has since landed, so the offline path can produce audio.
 
 Part of the grove crate stack: `arbor-grove-pattern` → `arbor-grove-audio` → `arbor-grove-engine`.
 See [`design/grove/architecture.md`](../../../design/grove/architecture.md).

@@ -59,6 +59,11 @@ Constructors and generators are free functions; transforms are methods on `Patte
 transform-value / partial-application duality (`fast(2)` as a standalone value) is a language-layer
 concern — here a "transform value" passed to `every`/`off`/`sometimes`/`jux` is a Rust closure.
 
+`ControlMap` also carries the **delay** controls (`delay` time, `feedback`, `delay_mix` send) — a
+feedback echo, distinct from `off`. They have no pure pattern-layer transform: the language layer
+sets them and the audio engine realises them as a per-track delay bus. They `combine` by override
+(unlike `gain`, which multiplies).
+
 ## Usage
 
 Reach the API through the prelude (workspace convention):

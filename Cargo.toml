@@ -20,6 +20,7 @@ members = [
     "crates/grove/arbor-grove-lang",
     "crates/grove/arbor-grove-audio",
     "crates/grove/arbor-grove-engine",
+    "crates/grove/arbor-grove",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────

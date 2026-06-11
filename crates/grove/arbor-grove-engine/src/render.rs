@@ -14,7 +14,7 @@ use std::path::Path;
 use arbor_grove_audio::prelude::{
     AudioCommand, Frame, Renderer, SourceKind, TrackConfig, VoiceSource,
 };
-use arbor_grove_pattern::prelude::{ControlMap, Tracks};
+use arbor_grove_pattern::prelude::{ControlMap, Time, TimeSpan, Tracks};
 use std::collections::HashSet;
 
 use crate::clock::Epoch;
@@ -86,6 +86,15 @@ pub fn render_offline(
         .collect();
     let mut renderer = Renderer::new(sr, &track_configs);
 
+    // Preload every file source up front. The real-time path can't decode in the
+    // callback; offline we have no such constraint, but the `Renderer` still only
+    // plays a `File` voice if its path was preloaded (otherwise it falls back to
+    // the synth). So scan the whole arrangement for `sample`/`audio` markers and
+    // preload them before the block loop — without this, file sources render as
+    // synth. Best-effort: a missing/undecodable file is left to the synth
+    // fallback rather than aborting the bounce.
+    preload_file_sources(&mut renderer, tracks, cycles);
+
     // Total length: the requested cycles + a tail for releases / reverb.
     let arrangement_frames = (cycles as f64 * epoch.frames_per_cycle(sr)).round() as u64;
     let tail_frames = (cfg.tail_max_secs.max(0.0) as f64 * sr as f64).round() as u64;
@@ -143,6 +152,32 @@ pub fn render_offline(
         .finalize()
         .map_err(|e| EngineError::Render(format!("finalizing WAV: {e}")))?;
     Ok(())
+}
+
+/// Scan `cycles` cycles of `tracks` for distinct file-source paths and preload
+/// each into the `Renderer`, so `sample`/`audio` voices decode at trigger time
+/// instead of falling back to the synth.
+///
+/// One query over the whole `[0, cycles)` window catches sources that only appear
+/// on some cycles (`cat`, `arrange`, cycle-seeded choice). Paths are deduped, and
+/// preload is **best-effort**: the `Renderer` keys files by the exact path string
+/// `resolve_source` stamps on `VoiceSource::File`, so a successful preload always
+/// hits, and a failure (missing/undecodable file) is left to the synth fallback.
+fn preload_file_sources(renderer: &mut Renderer, tracks: &Tracks<ControlMap>, cycles: u32) {
+    if cycles == 0 {
+        return;
+    }
+    let span = TimeSpan::new(Time::int(0), Time::int(cycles as i64));
+    let mut seen: HashSet<String> = HashSet::new();
+    for t in &tracks.tracks {
+        for hap in t.pattern.query(span) {
+            if let Some(path) = &hap.value.source_file {
+                if seen.insert(path.clone()) {
+                    let _ = renderer.preload_file(Path::new(path));
+                }
+            }
+        }
+    }
 }
 
 /// Open a `hound` WAV writer matching `cfg`'s format (stereo, `cfg.sample_rate`).
@@ -220,5 +255,20 @@ mod tests {
         assert_eq!(to_i24(-1.0), -8_388_607);
         assert_eq!(to_i24(2.0), 8_388_607); // clipped
         assert_eq!(to_i24(-2.0), -8_388_607);
+    }
+
+    #[test]
+    fn render_with_missing_file_source_falls_back_and_succeeds() {
+        use arbor_grove_pattern::prelude::{sample, track, tracks};
+
+        // A `sample(...)` pointing at a non-existent file: preload fails, and the
+        // best-effort scan must not abort the bounce — the voice falls back to the
+        // synth and the render still writes a valid WAV.
+        let t = tracks(vec![track("chop", sample("does-not-exist.wav"))]);
+        let out = std::env::temp_dir().join("grove_render_missing_source.wav");
+        let res = render_offline(&t, 1.0, 1, &RenderConfig::default(), &out);
+        let cleanup = std::fs::remove_file(&out);
+        assert!(res.is_ok(), "missing file source must not abort the render");
+        assert!(cleanup.is_ok(), "render should have produced the WAV file");
     }
 }
