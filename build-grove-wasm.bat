@@ -19,6 +19,7 @@ set "ROOT=%~dp0"
 set "CRATE=%ROOT%crates\grove\arbor-grove-lang"
 set "DEST=%ROOT%static\grove"
 set "CORE=%ROOT%node_modules\web-tree-sitter\tree-sitter.wasm"
+set "CORE_MAP=%ROOT%node_modules\web-tree-sitter\tree-sitter.wasm.map"
 
 echo.
 echo === grove wasm build ===
@@ -46,6 +47,16 @@ if not exist "%CORE%" goto :no_core
 copy /Y "%CORE%" "%DEST%\tree-sitter.wasm" >nul
 if errorlevel 1 goto :copy_failed
 echo       OK -^> static\grove\tree-sitter.wasm
+
+rem  Also copy the runtime sourcemap so devtools stop 404ing on
+rem  /grove/tree-sitter.wasm.map (the wasm embeds a sourceMappingURL).
+rem  Optional: a missing map only costs a harmless devtools 404, never fail here.
+if exist "%CORE_MAP%" (
+  copy /Y "%CORE_MAP%" "%DEST%\tree-sitter.wasm.map" >nul
+  echo       OK -^> static\grove\tree-sitter.wasm.map
+) else (
+  echo       (no tree-sitter.wasm.map in node_modules - skipping^)
+)
 
 echo.
 echo === Done. static\grove\ now contains: ===
