@@ -1,13 +1,16 @@
 <script lang="ts">
   /**
    * Problems — parser / eval diagnostics, with a text search (Ctrl+F focuses it)
-   * and severity filter chips (errors / warnings). Click to "jump to span"
-   * (mocked).
+   * and severity filter chips (errors / warnings). Click (or Enter) a row to jump
+   * the editor to the diagnostic's source span.
    */
   import { AlertTriangle, CircleAlert, CircleCheckBig, Search, X } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { groveStore } from '../grove-store.svelte';
+  import { projectStore } from '../stores/project.svelte';
   import { diagnosticsStore } from '../stores/engine.svelte';
+  import { makeByteToU16 } from '../editor/grove-lang';
+  import type { GroveDiagnostic } from '$lib/ipc/grove';
 
   let query = $state('');
   let searchEl = $state<HTMLInputElement | null>(null);
@@ -40,6 +43,15 @@
   });
 
   function clearSearch() { query = ''; searchEl?.focus(); }
+
+  /** Jump the editor to a diagnostic's span. The backend reports byte offsets;
+   *  the editor wants UTF-16 — convert against the active source (the eval'd
+   *  file). The relay then scrolls + selects there. */
+  function jumpTo(p: GroveDiagnostic) {
+    if (p.start == null) return;
+    const offset = makeByteToU16(projectStore.activeSource)(p.start);
+    groveStore.requestGoto(offset, 1);
+  }
 </script>
 
 <div class="prob">
@@ -73,14 +85,13 @@
     {:else}
       {#each visible as p, i (i)}
         {@const sevClass = isError(p.severity) ? 'error' : 'warning'}
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="prob-line" onclick={() => { /* TODO: jump to span */ }}>
+        <button class="prob-line" onclick={() => jumpTo(p)} disabled={p.start == null} use:tooltip={p.start != null ? 'Jump to source' : undefined}>
           <span class="prob-icon sev-{sevClass}">
             {#if isError(p.severity)}<CircleAlert size={13} />{:else}<AlertTriangle size={13} />{/if}
           </span>
           <span class="prob-msg">{p.message}</span>
           <span class="prob-loc">{loc(p.start, p.end)}</span>
-        </div>
+        </button>
       {/each}
     {/if}
   </div>
@@ -143,10 +154,14 @@
   .prob-empty { padding: 14px 16px; font-size: 11.5px; color: var(--text-muted); font-style: italic; }
   .prob-line {
     display: flex; align-items: center; gap: 8px;
+    width: 100%; text-align: left;
     padding: 5px 12px; font-size: 12px; cursor: pointer;
+    background: transparent; border: none;
+    font-family: var(--font-ui-sans);
     transition: background var(--transition-fast);
   }
-  .prob-line:hover { background: var(--bg-hover); }
+  .prob-line:hover:not(:disabled) { background: var(--bg-hover); }
+  .prob-line:disabled { cursor: default; }
   .prob-icon { display: flex; flex-shrink: 0; }
   .sev-error { color: var(--error); }
   .sev-warning { color: var(--warning); }

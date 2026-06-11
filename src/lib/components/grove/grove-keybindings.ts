@@ -18,12 +18,18 @@ export interface GroveBinding {
 }
 
 export const GROVE_BINDINGS: GroveBinding[] = [
+  // Editor-scoped (only when the tab pane has focus).
   { id: 'goto_line',    key: 'g', ctrl: true,  scope: 'editor', description: 'Go to line' },
   { id: 'new_file',     key: 'n', ctrl: true,  scope: 'editor', description: 'New .grove in the tab pane' },
+  // Transport.
   { id: 'run_stop',     key: ' ', ctrl: true,  scope: 'global', description: 'Toggle Run / Stop' },
+  // Window — discovery + layout.
+  { id: 'command_palette', key: 'p', ctrl: true, shift: true, scope: 'global', description: 'Open the Command Palette' },
+  { id: 'shortcuts',    key: 'F1', scope: 'global', description: 'Show the keyboard shortcuts' },
+  { id: 'settings',     key: ',', ctrl: true,  scope: 'global', description: 'Open Settings' },
   { id: 'zen',          key: 'z', ctrl: true, shift: true, scope: 'global', description: 'Toggle Zen mode' },
   { id: 'find',         key: 'f', ctrl: true,  scope: 'global', description: 'Search in the Console / Problems' },
-  // Project / transport — global so they work from any pane.
+  // Project / file.
   { id: 'new_project',  key: 'n', ctrl: true, shift: true, scope: 'global', description: 'New project' },
   { id: 'open_project', key: 'o', ctrl: true,  scope: 'global', description: 'Open project' },
   { id: 'open_file',    key: 'o', ctrl: true, shift: true, scope: 'global', description: 'Open file' },

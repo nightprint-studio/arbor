@@ -10,7 +10,7 @@
    */
   import {
     Play, Square, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
-    PanelLeft, PanelRight, Minimize2,
+    PanelLeft, PanelRight, Minimize2, Command,
   } from 'lucide-svelte';
   import { FolderOpen } from 'lucide-svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
@@ -36,10 +36,11 @@
 
   // ── Settings (gear) ─────────────────────────────────────────────────────────
   const settingsMenu: DropdownItem[] = [
+    { kind: 'item', id: 'palette', label: 'Command Palette…', icon: Command, shortcut: 'Ctrl+Shift+P', onclick: () => groveStore.openPalette() },
     { kind: 'item', id: 'zen', label: 'Zen mode', icon: Minimize2, shortcut: 'Ctrl+Shift+Z', onclick: () => groveStore.toggleZen() },
     { kind: 'separator' },
-    { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings, onclick: () => {} },
-    { kind: 'item', id: 'shortcuts', label: 'Keyboard Shortcuts…', icon: Keyboard, onclick: () => {} },
+    { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings,  shortcut: 'Ctrl+,', onclick: () => groveStore.openSettings() },
+    { kind: 'item', id: 'shortcuts', label: 'Keyboard Shortcuts…', icon: Keyboard,  shortcut: 'F1',     onclick: () => groveStore.openShortcuts() },
   ];
 
   // ── Project fast-swap (recents + open) ────────────────────────────────────────

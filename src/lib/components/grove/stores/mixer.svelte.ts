@@ -23,7 +23,7 @@ import { groveSetTrack } from '$lib/ipc/grove';
 import { arrangementStore, noteName, type VizLane } from '../viz/arrangement.svelte';
 import { projectStore } from './project.svelte';
 import { groveStore } from '../grove-store.svelte';
-import { laneColor } from '../mock/colors';
+import { laneColor } from '../palette';
 
 /** Neutral baselines — a fresh strip is unity gain, centre pan. */
 export const GAIN_UNITY = 1;
@@ -118,8 +118,9 @@ function createMixerStore() {
       groveStore.toggleSolo(k);
       void groveSetTrack('solo', i, groveStore.isSoloed(k) ? 1 : 0);
     },
-    /** Solo computed over the REAL strips only — the shared store still carries
-     *  stale Step-0 mock solo state which would otherwise dim every lane. */
+    /** Solo computed over the REAL strips only — the shared mute/solo map can
+     *  retain keys for indices no longer present after a re-eval with fewer
+     *  tracks, which would otherwise dim every visible lane. */
     get anySolo() { return tracks.some((t) => groveStore.isSoloed(String(t.index))); },
     /** Whether a strip should be visually dimmed (muted, or solo-excluded). */
     isDimmed(i: number) { return this.isMuted(i) || (this.anySolo && !this.isSoloed(i)); },

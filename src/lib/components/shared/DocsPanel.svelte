@@ -29,7 +29,7 @@
     GitPullRequest, Search, FolderPlus, Download, Settings, TicketCheck,
     FileDown, StickyNote, FolderTree, FolderOpen, History, Bug, BarChart2,
     Monitor, Database, Shield, ShieldCheck, Cloud, Tag, Share2, FolderX,
-    Palette, Link2, Store,
+    Palette, Link2, Store, Music4,
   } from 'lucide-svelte';
 
   // ── Section components ───────────────────────────────────────────────────────
@@ -82,6 +82,7 @@
   import Security       from './docs/Security.svelte';
   import DeepLinks      from './docs/DeepLinks.svelte';
   import Marketplace    from './docs/Marketplace.svelte';
+  import Grove          from './docs/Grove.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -128,6 +129,7 @@
         { id: 'terminal',        label: 'Terminal',           icon: TerminalSquare },
         { id: 'command-palette', label: 'Command Palette',    icon: Search         },
         { id: 'shortcuts',       label: 'Keyboard Shortcuts', icon: Keyboard       },
+        { id: 'grove',           label: 'grove (Music)',      icon: Music4         },
         { id: 'statistics',      label: 'Statistics',         icon: BarChart2      },
       ],
     },
@@ -192,6 +194,7 @@
     'terminal':        Terminal,
     'command-palette': CommandPalette,
     'shortcuts':       Shortcuts,
+    'grove':           Grove,
     'jobs':            BackgroundJobs,
     'notifications':   Notifications,
     'pipelines':       Pipelines,

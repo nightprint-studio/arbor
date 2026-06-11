@@ -154,12 +154,11 @@ export function makeByteToU16(src: string): (byte: number) => number {
 
 // ── Symbols + outline (one shared tree walk) ──────────────────────────────────
 
-/** Kind of an outline / declaration symbol. Mirrors the mock `OutlineEntry`. */
+/** Kind of an outline / declaration symbol. */
 export type GroveSymbolKind = 'track' | 'fn' | 'let' | 'import';
 
-/** A declared symbol the editor can jump to (go-to-decl) and Step 4 lists in
- *  the Outline. Superset of the mock `OutlineEntry` (adds the UTF-16 `offset`
- *  so the jump is exact, not line-rounded). */
+/** A declared symbol the editor can jump to (go-to-decl) and the Outline panel
+ *  lists. Carries a UTF-16 `offset` so the jump is exact, not line-rounded. */
 export interface GroveSymbol {
   id: string;
   kind: GroveSymbolKind;

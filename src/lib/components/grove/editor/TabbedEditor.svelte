@@ -23,10 +23,12 @@
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { groveEngine } from '../stores/engine.svelte';
+  import { groveStore } from '../grove-store.svelte';
 
   type EditorController = {
     focus: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
+    scrollToOffset: (offset: number, select?: boolean) => void;
     gotoSymbol: (name: string) => boolean;
   };
   let editorComp = $state<EditorController | null>(null);
@@ -89,6 +91,26 @@
     if (tries >= 24) return;   // give up after ~0.4s of frames
     requestAnimationFrame(() => gotoWhenReady(word, tries + 1));
   }
+
+  // ── Outline / Problems → editor jump (one-shot relay from the GroveShell store) ─
+  // The Outline panel (left rail) and Problems panel (bottom) ask the editor to
+  // jump to a source offset. Tracked by `seq` so the same target fired twice still
+  // re-triggers. `seq` is consumed only once the editor is mounted (it may have
+  // been collapsed) — and re-applied across a few frames to beat the CodeMirror
+  // view-ready race when the pane was just revealed.
+  let lastGotoSeq = 0;
+  $effect(() => {
+    const req = groveStore.gotoRequest;
+    const comp = editorComp;
+    if (!req || req.seq === lastGotoSeq || !comp) return;
+    lastGotoSeq = req.seq;
+    let tries = 0;
+    const apply = () => {
+      comp.scrollToOffset(req.offset, true);   // no-ops until the CM view exists
+      if (++tries < 3) requestAnimationFrame(apply);
+    };
+    apply();
+  });
 
   // ── Goto-line overlay (Ctrl+G) ───────────────────────────────────────────────
   let gotoOpen = $state(false);
@@ -167,6 +189,7 @@
         bind:this={editorComp}
         value={projectStore.sourceOf(activePath)}
         oninput={onInput}
+        oncaret={(line, col) => groveStore.setCaret(line, col)}
         onCrossFileGoto={crossFileGoto}
       />
     {/key}

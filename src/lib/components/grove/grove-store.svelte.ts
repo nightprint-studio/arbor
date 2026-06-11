@@ -1,10 +1,12 @@
 /**
  * GroveShell UI state — the panel/layout/selection spine. The transport (run /
- * cycle), the log threshold and the diagnostics/log streams now live in the
- * engine + config stores (`stores/engine.svelte`, `stores/config.svelte`); this
- * store owns only the window-local UI: which side panels are open, the active
- * file/track selection, per-track mute/solo, the collapse/zen toggles and the
- * Ctrl+F find relay. Follows Arbor's rune-store pattern (factory + getters).
+ * cycle), the log threshold and the diagnostics/log streams live in the engine +
+ * config stores (`stores/engine.svelte`, `stores/config.svelte`); the open
+ * project + its `.grove` sources live in `stores/project.svelte`. This store owns
+ * only the window-local UI: which side panels are open, per-track mute/solo, the
+ * collapse/zen toggles, the Ctrl+F find relay, the overlay (settings / shortcuts
+ * / command palette) toggles, the Outline→editor jump relay and the live caret
+ * position. Follows Arbor's rune-store pattern (factory + getters).
  *
  * Layout (panel choices + collapse flags) is mirrored to the persisted grove
  * window state via `layoutSnapshot()` / `applyLayout()` (GroveShell wires the
@@ -14,7 +16,6 @@
 import { LOG_LEVELS, type GroveLogThreshold } from './stores/config.svelte';
 import { transportStore } from './stores/engine.svelte';
 import type { GroveLayoutState } from '$lib/ipc/grove';
-import { MOCK_PROJECT, MOCK_TRACKS } from './mock/data';
 
 /** Left-rail panels (top group = side panels, bottom group = bottom panel). */
 export type LeftPanel = 'files' | 'outline' | 'soundbank';
@@ -24,19 +25,27 @@ export type BottomPanel = 'console' | 'problems' | 'mixer';
 /** Right-rail panels. */
 export type RightPanel = 'inspector' | 'docs';
 
+/** A one-shot request to jump the editor to a source offset (Outline click). */
+export interface GotoRequest {
+  /** UTF-16 offset of the symbol's name token. */
+  offset: number;
+  /** 1-based line (fallback when the offset can't be resolved). */
+  line: number;
+  /** Monotonic id so the same target fired twice still re-triggers. */
+  seq: number;
+}
+
 function createGroveStore() {
   // ── Selection ──────────────────────────────────────────────────────────────
-  // The real file/source model lives in `stores/project.svelte` (path-keyed).
-  // The Step-0 mock panels (Files / Outline / TabbedEditor) still drive off the
-  // mock id-keyed selection below; the editor fan-out (Step 2/3) migrates them
-  // onto the project store. Track selection likewise keys off mock track ids.
-  let activeFileId  = $state<string>(MOCK_PROJECT.files[0].id);
-  let openFileIds   = $state<string[]>([MOCK_PROJECT.files[0].id]);
-  let selectedTrackId = $state<string | null>('t-bass');
+  // Track selection is keyed by the BE-stable strip INDEX (as a string), shared
+  // with the mixer + inspector (`stores/mixer.svelte`). The file/source model
+  // lives entirely in `stores/project.svelte` (path-keyed).
+  let selectedTrackId = $state<string | null>(null);
   // Per-track mute/solo — single source of truth so the arrangement headers and
-  // the mixer strips stay in sync (toggling in one reflects in the other).
-  let muted  = $state<Record<string, boolean>>(Object.fromEntries(MOCK_TRACKS.map(t => [t.id, t.muted])));
-  let soloed = $state<Record<string, boolean>>(Object.fromEntries(MOCK_TRACKS.map(t => [t.id, t.soloed])));
+  // the mixer strips stay in sync (toggling one reflects in the other). Keyed by
+  // `String(stripIndex)`; starts empty (the live arrangement seeds nothing).
+  let muted  = $state<Record<string, boolean>>({});
+  let soloed = $state<Record<string, boolean>>({});
 
   // ── Rails / panels ─────────────────────────────────────────────────────────
   let leftPanel   = $state<LeftPanel | null>('files');
@@ -52,27 +61,20 @@ function createGroveStore() {
   // search input; the panel clears it once focused. */
   let findPending     = $state(false);
 
-  return {
-    // mock file selection (Step-0 panels) — see note above.
-    get activeFileId() { return activeFileId; },
-    setActiveFile(id: string) {
-      activeFileId = id;
-      if (!openFileIds.includes(id)) openFileIds = [...openFileIds, id];
-    },
-    get openFileIds() { return openFileIds; },
-    openFile(id: string) {
-      if (!openFileIds.includes(id)) openFileIds = [...openFileIds, id];
-      activeFileId = id;
-    },
-    closeFile(id: string) {
-      const idx = openFileIds.indexOf(id);
-      if (idx === -1) return;
-      openFileIds = openFileIds.filter(x => x !== id);
-      if (activeFileId === id && openFileIds.length) {
-        activeFileId = openFileIds[Math.min(idx, openFileIds.length - 1)];
-      }
-    },
+  // ── Overlays (single mount in GroveShell; opened from menu + shortcuts) ──────
+  let settingsOpen  = $state(false);
+  let shortcutsOpen = $state(false);
+  let paletteOpen   = $state(false);
 
+  // ── Outline → editor jump relay (one-shot) ───────────────────────────────────
+  let gotoRequest = $state<GotoRequest | null>(null);
+  let gotoSeq = 0;
+
+  // ── Live editor caret (footer Ln/Col) ────────────────────────────────────────
+  let caretLine = $state(1);
+  let caretCol  = $state(1);
+
+  return {
     // per-track mute / solo
     isMuted(id: string)  { return !!muted[id]; },
     isSoloed(id: string) { return !!soloed[id]; },
@@ -81,8 +83,6 @@ function createGroveStore() {
     get anySolo() { return Object.values(soloed).some(Boolean); },
 
     // Transport read-throughs (no local state — the engine stream owns these).
-    // Kept so the Step-0 viz panel (ArrangementView) compiles unchanged until
-    // the fan-out migrates it onto `transportStore` directly.
     get running() { return transportStore.playing; },
     get cycle()   { return transportStore.cycle; },
 
@@ -101,6 +101,10 @@ function createGroveStore() {
     toggleBottom(p: BottomPanel) { bottomPanel = bottomPanel === p ? null : p; },
     get rightPanel()  { return rightPanel; },
     toggleRight(p: RightPanel)  { rightPanel  = rightPanel  === p ? null : p; },
+    /** Ensure a side panel is shown (used by shortcuts that focus a panel). */
+    showLeft(p: LeftPanel)   { leftPanel = p; },
+    showRight(p: RightPanel) { rightPanel = p; },
+    showBottom(p: BottomPanel) { bottomPanel = p; },
 
     // layout
     get collapseUi()      { return collapseUi; },
@@ -137,6 +141,31 @@ function createGroveStore() {
       findPending = true;
     },
     clearFind() { findPending = false; },
+
+    // ── overlays ──
+    get settingsOpen()  { return settingsOpen; },
+    openSettings()  { settingsOpen = true; },
+    closeSettings() { settingsOpen = false; },
+    get shortcutsOpen() { return shortcutsOpen; },
+    openShortcuts()  { shortcutsOpen = true; },
+    closeShortcuts() { shortcutsOpen = false; },
+    get paletteOpen() { return paletteOpen; },
+    openPalette()   { paletteOpen = true; },
+    closePalette()  { paletteOpen = false; },
+    togglePalette() { paletteOpen = !paletteOpen; },
+
+    // ── Outline / Problems → editor jump (one-shot; TabbedEditor consumes) ──
+    get gotoRequest() { return gotoRequest; },
+    requestGoto(offset: number, line: number) {
+      // Jumping to source implies showing the editor — un-hide it if collapsed.
+      if (collapseTabpane) collapseTabpane = false;
+      gotoRequest = { offset, line, seq: ++gotoSeq };
+    },
+
+    // ── live caret (footer) ──
+    get caretLine() { return caretLine; },
+    get caretCol()  { return caretCol; },
+    setCaret(line: number, col: number) { caretLine = line; caretCol = col; },
   };
 }
 

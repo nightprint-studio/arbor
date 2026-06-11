@@ -9,6 +9,8 @@
   import { Activity, Cpu, AudioWaveform, MapPin, AlertTriangle } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { transportStore, metersStore, audioErrorStore } from '../stores/engine.svelte';
+  import { groveStore } from '../grove-store.svelte';
+  import { projectStore } from '../stores/project.svelte';
 
   // cps: 2-3 significant digits, trimming trailing zeros (0.5, 0.35, 1.25…).
   const cpsLabel = $derived(Number(transportStore.cps.toPrecision(3)).toString());
@@ -36,9 +38,10 @@
 
   <span class="gf-spacer"></span>
 
-  <!-- TODO editor fan-out: wire Ln/Col to the live editor caret. -->
-  <span class="gf-item"><MapPin size={12} /> Ln 1, Col 1</span>
-  <span class="gf-sep"></span>
+  {#if projectStore.activeFilePath}
+    <span class="gf-item"><MapPin size={12} /> Ln {groveStore.caretLine}, Col {groveStore.caretCol}</span>
+    <span class="gf-sep"></span>
+  {/if}
   <span class="gf-item gf-render">{transportStore.playing ? 'playing' : 'idle'}</span>
 </div>
 

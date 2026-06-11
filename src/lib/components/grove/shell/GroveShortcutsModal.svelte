@@ -1,0 +1,113 @@
+<script lang="ts">
+  /**
+   * Grove keyboard-shortcuts cheat-sheet. Read-only reference for the grove
+   * window's bindings (the canonical set is `grove-keybindings.ts`). Grove keeps
+   * its own binding registry — separate from Arbor's rebindable `keybindings.ts`
+   * — so the window stays self-contained / extractable; these aren't rebindable.
+   */
+  import { Keyboard } from 'lucide-svelte';
+  import Modal from '$lib/components/shared/Modal.svelte';
+  import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
+  import { GROVE_BINDINGS, type GroveBinding } from '../grove-keybindings';
+
+  let { onClose }: { onClose: () => void } = $props();
+
+  /** Human key label for a single binding key (Space / letter / fn / punctuation). */
+  function keyLabel(k: string): string {
+    if (k === ' ') return 'Space';
+    if (k.length === 1) return k.toUpperCase();
+    return k; // F1, …
+  }
+
+  /** The chord pieces, in render order (Ctrl · Shift · key). */
+  function chord(b: GroveBinding): string[] {
+    const parts: string[] = [];
+    if (b.ctrl) parts.push('Ctrl');
+    if (b.shift) parts.push('Shift');
+    parts.push(keyLabel(b.key));
+    return parts;
+  }
+
+  // Ctrl+Click is handled in the editor mousedown (not a keydown binding), so it
+  // isn't in GROVE_BINDINGS — surface it here as a documented contextual key.
+  const contextual = [
+    { keys: ['Ctrl', 'Click'], description: 'Go to declaration (fn / let / import, incl. cross-file)' },
+    { keys: ['↑', '↓'],        description: 'Arrangement: move between track lanes' },
+    { keys: ['←', '→'],        description: 'Arrangement: nudge + seek the cursor' },
+    { keys: ['Home'],          description: 'Arrangement: seek to the start' },
+  ];
+</script>
+
+<Modal {onClose} width="560px" height="560px" ariaLabel="Keyboard Shortcuts">
+  {#snippet header()}
+    <ModalHeader {onClose}>
+      <Keyboard size={14} />
+      <span class="modal-title">Keyboard Shortcuts</span>
+    </ModalHeader>
+  {/snippet}
+
+  <p class="sc-lead">Grove is fully keyboard-navigable. Editor-scoped keys fire only when the tab pane has focus.</p>
+
+  <table class="sc-table">
+    <tbody>
+      {#each GROVE_BINDINGS as b (b.id)}
+        <tr>
+          <td class="sc-keys">
+            {#each chord(b) as part, i (i)}
+              {#if i > 0}<span class="sc-plus">+</span>{/if}
+              <kbd>{part}</kbd>
+            {/each}
+          </td>
+          <td class="sc-desc">
+            {b.description}
+            {#if b.scope === 'editor'}<span class="sc-scope">editor</span>{/if}
+          </td>
+        </tr>
+      {/each}
+
+      <tr><td colspan="2" class="sc-section">Contextual</td></tr>
+      {#each contextual as c (c.description)}
+        <tr>
+          <td class="sc-keys">
+            {#each c.keys as part, i (i)}
+              {#if i > 0}<span class="sc-plus">+</span>{/if}
+              <kbd>{part}</kbd>
+            {/each}
+          </td>
+          <td class="sc-desc">{c.description}</td>
+        </tr>
+      {/each}
+    </tbody>
+  </table>
+</Modal>
+
+<style>
+  .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .sc-lead { font-size: 12px; color: var(--text-secondary); margin: 0 0 14px; line-height: 1.5; }
+
+  .sc-table { width: 100%; border-collapse: collapse; }
+  .sc-table td { padding: 6px 0; vertical-align: middle; border-bottom: 1px solid var(--border-subtle); }
+  .sc-keys { width: 160px; white-space: nowrap; }
+  .sc-desc { font-size: 12px; color: var(--text-secondary); }
+  .sc-scope {
+    margin-left: 8px; padding: 0 5px; font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    color: var(--text-muted); background: var(--bg-overlay);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  }
+  .sc-plus { color: var(--text-disabled); font-size: 10px; margin: 0 3px; }
+  .sc-section {
+    padding-top: 14px !important; padding-bottom: 4px !important;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--text-muted); border-bottom: none !important;
+  }
+  kbd {
+    display: inline-block;
+    font-family: var(--font-code); font-size: 10.5px; line-height: 1.6;
+    padding: 1px 6px; min-width: 18px; text-align: center;
+    color: var(--text-secondary);
+    background: var(--bg-overlay);
+    border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: var(--radius-sm);
+  }
+</style>

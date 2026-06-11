@@ -25,6 +25,8 @@
     readOnly = false,
     oninput,
     onfocus,
+    /** Live caret position (1-based line/col) — drives the footer Ln/Col. */
+    oncaret,
     /** The word resolved to an imported binding — host opens the source file. */
     onCrossFileGoto,
   }: {
@@ -32,6 +34,7 @@
     readOnly?: boolean;
     oninput?: (text: string) => void;
     onfocus?: () => void;
+    oncaret?: (line: number, col: number) => void;
     onCrossFileGoto?: (word: string, importPath: string) => void;
   } = $props();
 
@@ -59,6 +62,11 @@
         oninput?.(text);
       }
       if (u.focusChanged && u.view.hasFocus) onfocus?.();
+      if (oncaret && (u.selectionSet || u.docChanged)) {
+        const head = u.state.selection.main.head;
+        const line = u.state.doc.lineAt(head);
+        oncaret(line.number, head - line.from + 1);
+      }
     });
 
     const state = EditorState.create({

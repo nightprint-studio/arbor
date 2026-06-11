@@ -43,6 +43,9 @@
   import { projectStore } from './stores/project.svelte';
   import { projectActions } from './stores/project-actions.svelte';
   import GroveProjectActions from './shell/GroveProjectActions.svelte';
+  import GroveSettingsModal from './shell/GroveSettingsModal.svelte';
+  import GroveShortcutsModal from './shell/GroveShortcutsModal.svelte';
+  import GroveCommandPalette from './shell/GroveCommandPalette.svelte';
   import { GROVE_BINDINGS, matchesGrove } from './grove-keybindings';
 
   let unEngine: UnlistenFn | null = null;
@@ -83,14 +86,23 @@
     editorScoped = !!(editorEl && t && editorEl.contains(t));
   }
 
+  // While any overlay (Settings / Shortcuts / Command Palette) is open it owns
+  // the keyboard — Esc (handled by the modal / palette) closes it. Only the
+  // palette toggle is honoured through, so Ctrl+Shift+P also dismisses it.
+  const overlayOpen = $derived(groveStore.settingsOpen || groveStore.shortcutsOpen || groveStore.paletteOpen);
+
   function onKeyDown(e: KeyboardEvent) {
     for (const b of GROVE_BINDINGS) {
       if (b.scope === 'editor' && !editorScoped) continue;
       if (!matchesGrove(e, b)) continue;
+      if (overlayOpen && !(b.id === 'command_palette' && groveStore.paletteOpen)) return;
       e.preventDefault();
       if (b.id === 'goto_line') editor?.openGoto();
       else if (b.id === 'new_file') editor?.newFile();
       else if (b.id === 'run_stop') void groveEngine.toggleRun(projectStore.activeSource, projectStore.project?.path);
+      else if (b.id === 'command_palette') groveStore.togglePalette();
+      else if (b.id === 'shortcuts') groveStore.openShortcuts();
+      else if (b.id === 'settings') groveStore.openSettings();
       else if (b.id === 'zen') groveStore.toggleZen();
       else if (b.id === 'find') groveStore.requestFind();
       else if (b.id === 'new_project') projectActions.newProject();
@@ -233,6 +245,12 @@
 <!-- Project/file pickers (New / Open / Export) — one mount for the whole window;
      menu, titlebar, and keyboard shortcuts all drive these via projectActions. -->
 <GroveProjectActions />
+
+<!-- Window overlays — one mount each; opened from the gear menu, the command
+     palette, and the keyboard shortcuts (all via groveStore). -->
+{#if groveStore.settingsOpen}<GroveSettingsModal onClose={() => groveStore.closeSettings()} />{/if}
+{#if groveStore.shortcutsOpen}<GroveShortcutsModal onClose={() => groveStore.closeShortcuts()} />{/if}
+{#if groveStore.paletteOpen}<GroveCommandPalette onClose={() => groveStore.closePalette()} />{/if}
 
 <style>
   .shell {

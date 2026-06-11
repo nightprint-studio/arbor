@@ -1,16 +1,33 @@
 <script lang="ts">
-  /** Outline panel — symbols of the active file grouped by kind. */
+  /** Outline panel — symbols of the active file (`track` / `fn` / `let` /
+   *  `import`), grouped by kind. Derived from the SAME Tree-sitter grammar the
+   *  editor uses (`outlineFromSource`, gate 3 — client-side, no backend). Click
+   *  a symbol to jump the editor to its declaration (via the GroveShell relay).
+   *  Cross-file go-to-declaration lives in the editor (Ctrl+Click on a name). */
   import { ListTree, Disc3, SquareFunction, Variable, Import } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import { projectStore } from '../stores/project.svelte';
   import { groveStore } from '../grove-store.svelte';
-  import { MOCK_PROJECT, MOCK_OUTLINE } from '../mock/data';
-  import type { OutlineEntry } from '../mock/types';
+  import { outlineFromSource, type GroveSymbol } from '../editor/grove-lang';
 
-  const isSong = $derived(groveStore.activeFileId === MOCK_PROJECT.files[0].id);
-  const entries = $derived<OutlineEntry[]>(isSong ? MOCK_OUTLINE : []);
+  let entries = $state<GroveSymbol[]>([]);
+
+  // Re-derive the outline from the active source, debounced so a burst of edits
+  // coalesces into one parse (the parser is shared + cheap, but no need to spin).
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const src = projectStore.activeSource;
+    const path = projectStore.activeFilePath;
+    if (timer) clearTimeout(timer);
+    if (!path) { entries = []; return; }
+    timer = setTimeout(() => {
+      void outlineFromSource(src).then((syms) => { entries = syms; });
+    }, 200);
+    return () => { if (timer) clearTimeout(timer); };
+  });
 
   const GROUPS = [
     { kind: 'track',  label: 'Tracks',    icon: Disc3,          color: 'var(--color-stash, #82aaff)' },
@@ -27,8 +44,10 @@
 <PanelShell title="Outline" count={entries.length}>
   {#snippet icon()}<ListTree size={13} />{/snippet}
 
-  {#if entries.length === 0}
-    <EmptyState message="Outline shown for song.grove (mock). Open it to see its symbols." />
+  {#if !projectStore.activeFilePath}
+    <EmptyState message="Open a .grove file to see its tracks, functions and constants." />
+  {:else if entries.length === 0}
+    <EmptyState message="No symbols — this file declares no tracks, functions or constants yet." />
   {:else}
     <div class="outline">
       {#each GROUPS as g (g.kind)}
@@ -44,7 +63,7 @@
           >
             {#snippet icon()}<Gi size={13} />{/snippet}
             {#each items as e (e.id)}
-              <SidebarItem onclick={() => { /* mock: jump to e.line */ }}>
+              <SidebarItem onclick={() => groveStore.requestGoto(e.offset, e.line)}>
                 {#snippet icon()}<span style="color: {g.color}; display:flex"><Gi size={12} /></span>{/snippet}
                 {e.label}
                 {#snippet badges()}<span class="ol-line">:{e.line}</span>{/snippet}

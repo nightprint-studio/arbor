@@ -28,7 +28,7 @@ import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirro
 import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { lintGutter, lintKeymap, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
 
-import { laneColor } from '../mock/colors';
+import { laneColor } from '../palette';
 import type { GroveDiagnostic } from '$lib/ipc/grove';
 import {
   classifyToken, makeByteToU16, identifierAt, createGroveParser,

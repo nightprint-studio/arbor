@@ -29,8 +29,7 @@
   import { projectStore } from '../stores/project.svelte';
   import { groveStore } from '../grove-store.svelte';
   import { groveSetTrack } from '$lib/ipc/grove';
-  import { MOCK_SECTIONS } from '../mock/data';
-  import { laneColor, sectionColor } from '../mock/colors';
+  import { laneColor } from '../palette';
 
   const PX = 26;
   const VIEW = VIEW_CYCLES;
@@ -186,9 +185,6 @@
         </div>
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div class="arr-ruler" bind:this={rulerEl} onclick={setStartFromEvent} use:tooltip={'Click to seek'}>
-          {#each MOCK_SECTIONS as s, i (s.label)}
-            <div class="sec-chip" style="left: {s.start * PX}px; width: {s.len * PX}px; --m: {sectionColor(i)};"><span>{s.label}</span></div>
-          {/each}
           {#each bars as b (b)}
             <div class="ruler-tick" style="left: {b * PX}px;" class:strong={b % 8 === 0}><span>{b}</span></div>
           {/each}
@@ -219,9 +215,6 @@
             </div>
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <div class="arr-lane" onclick={() => (selectedPos = pos)} oncontextmenu={(e) => openMenu(e, lane.track)}>
-              {#each MOCK_SECTIONS as s, i (s.label)}
-                <div class="lane-band" style="left: {s.start * PX}px; width: {s.len * PX}px; --m: {sectionColor(i)};"></div>
-              {/each}
               {#each bars as b (b)}
                 <div class="lane-grid" style="left: {b * PX}px;" class:strong={b % 8 === 0}></div>
               {/each}
@@ -303,16 +296,6 @@
     border-bottom: 1px solid var(--border-subtle);
     cursor: text;
   }
-  /* Section chips sit in the upper half; bar numbers beneath. */
-  .sec-chip {
-    position: absolute; top: 5px; height: 14px;
-    display: flex; align-items: center; padding: 0 6px;
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--m) 30%, transparent);
-    border-left: 3px solid var(--m);
-    overflow: hidden; pointer-events: none;
-  }
-  .sec-chip span { font-size: 8.5px; font-weight: 700; letter-spacing: 0.4px; color: color-mix(in srgb, var(--m) 50%, var(--text-primary)); white-space: nowrap; }
   .ruler-tick { position: absolute; top: 21px; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent); }
   .ruler-tick.strong { border-left-color: var(--border-subtle); }
   .ruler-tick span { position: absolute; bottom: 1px; left: 3px; font-size: 8.5px; color: var(--text-disabled); font-variant-numeric: tabular-nums; }
@@ -347,7 +330,6 @@
 
   /* ── Lane ── */
   .arr-lane { position: relative; width: var(--tl-w); flex-shrink: 0; cursor: pointer; }
-  .lane-band { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--m) 7%, transparent); border-right: 1px solid color-mix(in srgb, var(--m) 18%, transparent); }
   .lane-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--border-subtle) 35%, transparent); }
   .lane-grid.strong { background: color-mix(in srgb, var(--border-subtle) 70%, transparent); }
 
