@@ -18,6 +18,8 @@ members = [
     "crates/scheduler",
     "crates/grove/arbor-grove-pattern",
     "crates/grove/arbor-grove-lang",
+    "crates/grove/arbor-grove-audio",
+    "crates/grove/arbor-grove-engine",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────

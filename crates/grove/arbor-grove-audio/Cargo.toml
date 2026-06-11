@@ -1,0 +1,30 @@
+[package]
+name         = "arbor-grove-audio"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "grove — real-time audio: cpal output stream, hand-written SFZ sampler (VSCO 2 subset), default synth, mixer + per-voice/bus effects, and the frozen engine↔audio contract (VoiceEvent / AudioSink / Renderer). Doubles as the offline render DSP core."
+
+# Real-time / DSP layer — the only grove crate that touches the audio hardware.
+# Depends on the pure pattern algebra for the `ControlMap` value (and `SourceKind`
+# carried on the seam). The DSP/codec stack is the set approved for Fase 2:
+#   cpal      output stream + device
+#   hound     WAV decode (samples) / encode is driven by the engine for render
+#   rubato    resampling (pitch `shift` / `speed`, sample-rate match)
+#   rtrb      lock-free SPSC ring for the engine→audio command transport
+#   fundsp    reverb / filters / effects building blocks
+#   symphonia mp3/ogg/flac decode for user `sample`/`audio` imports
+[dependencies]
+arbor-grove-pattern = { path = "../arbor-grove-pattern" }
+thiserror.workspace = true
+cpal      = "0.15"
+hound     = "3"
+rubato    = "0.16"
+rtrb      = "0.3"
+fundsp    = "0.20"
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "vorbis", "flac"] }
+
+[lints.rust]
+missing_debug_implementations = "warn"

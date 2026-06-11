@@ -53,7 +53,7 @@ A hap **has an onset** in a query when `part.begin == whole.begin`.
 | Rhythm/probability | `degrade` · `degrade_by` · `sometimes` · `sometimes_by` · `euclid` |
 | Voice/mix | `gain` · `pan` · `room` · `lpf` · `hpf` · `shift` · `speed` · `crush` · `shape` · `vel` · `inst` · `art` · `scale` · `jux` |
 | Generative | `rand` · `choose` |
-| File sources | `sample` · `audio` (markers only — decode/playback is the audio crate) |
+| File sources | `sample` · `audio` (markers only — decode/playback is the audio crate; they stamp a `SourceKind` one-shot/sustained) |
 
 Constructors and generators are free functions; transforms are methods on `Pattern`. The
 transform-value / partial-application duality (`fast(2)` as a standalone value) is a language-layer

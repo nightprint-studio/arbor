@@ -1,0 +1,19 @@
+//! Canonical entry point for `arbor-grove-engine`'s public API.
+//!
+//! Workspace convention: reach the public surface through `prelude` rather than
+//! per-module paths. The submodules stay `pub` for rustdoc navigation only.
+
+// ── Error ────────────────────────────────────────────────────────────────────
+pub use crate::error::{EngineError, Result};
+
+// ── Clock ────────────────────────────────────────────────────────────────────
+pub use crate::clock::Epoch;
+
+// ── Scheduling core (pure) ───────────────────────────────────────────────────
+pub use crate::schedule::{schedule_span, voice_event_from_hap};
+
+// ── Transport (real-time) ────────────────────────────────────────────────────
+pub use crate::transport::{Transport, LOOKAHEAD_MS};
+
+// ── Offline render ───────────────────────────────────────────────────────────
+pub use crate::render::{render_offline, BitDepth, RenderConfig};

@@ -1,0 +1,22 @@
+[package]
+name         = "arbor-grove-engine"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "grove — timing runtime: look-ahead scheduler (Pattern → sample-accurate VoiceEvents), cps clock with quantized re-eval/tempo swap, transport, and the offline render driver (→ WAV). Depends on pattern + audio, NOT on lang."
+
+# The scheduler/transport over the frozen audio seam. Depends on the pure
+# algebra (`Pattern`/`ControlMap`/`Tracks`) and the audio crate's contract
+# (`VoiceEvent`/`AudioSink`/`Renderer`). It does NOT depend on `arbor-grove-lang`:
+# the shell evaluates source → `Tracks` and hands those in. `hound` is here for
+# the offline render driver (engine-driven, non-real-time → WAV).
+[dependencies]
+arbor-grove-pattern = { path = "../arbor-grove-pattern" }
+arbor-grove-audio   = { path = "../arbor-grove-audio" }
+thiserror.workspace = true
+hound = "3"
+
+[lints.rust]
+missing_debug_implementations = "warn"

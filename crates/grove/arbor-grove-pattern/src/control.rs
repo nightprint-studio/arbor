@@ -8,7 +8,23 @@
 //! it and merging is uniform.
 //!
 //! Sources from files (`sample`/`audio`) are only **markers** here — the actual
-//! decode/playback is `arbor-grove-audio` (Fase 2).
+//! decode/playback is `arbor-grove-audio` (Fase 2). The marker does carry the
+//! [`SourceKind`] so the audio engine knows whether to play it as a one-shot or
+//! a sustained stem — the only thing distinguishing `sample` from `audio`.
+
+/// How a file source ([`ControlMap::source_file`]) should be played back.
+///
+/// The pattern layer can't act on this — both kinds place the same path marker
+/// once per cycle — but it travels on the [`ControlMap`] so the audio engine
+/// (Fase 2) can realise the distinction: a one-shot retriggers per onset, a
+/// sustained stem starts once and rings through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceKind {
+    /// A short hit / chop (`sample(...)`): (re)triggered at each onset.
+    OneShot,
+    /// A long stem / take / ambience (`audio(...)`): played once, sustained.
+    Sustained,
+}
 
 /// A typed bag of controls describing a single event.
 ///
@@ -28,6 +44,9 @@ pub struct ControlMap {
     pub degree: Option<i32>,
     /// A file path marker for an imported source (`sample`/`audio`).
     pub source_file: Option<String>,
+    /// Playback kind of `source_file` — one-shot vs sustained. Only meaningful
+    /// alongside `source_file`; realised by the audio engine.
+    pub source_kind: Option<SourceKind>,
 
     // ── Controls ────────────────────────────────────────────────────────────
     /// Amplitude, multiplicative (default `1`).
@@ -102,6 +121,7 @@ impl ControlMap {
             note: other.note.or(self.note),
             degree: other.degree.or(self.degree),
             source_file: other.source_file.or(self.source_file),
+            source_kind: other.source_kind.or(self.source_kind),
             gain: combine_gain(self.gain, other.gain),
             pan: other.pan.or(self.pan),
             room: other.room.or(self.room),
