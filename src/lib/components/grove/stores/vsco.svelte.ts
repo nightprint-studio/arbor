@@ -10,6 +10,7 @@ import {
   groveVscoStatus, groveVscoDownload, onGroveVscoProgress,
   type GroveVscoStatus, type GroveVscoProgress,
 } from '$lib/ipc/grove';
+import { cancelJob } from '$lib/ipc/job';
 
 function createVscoStore() {
   let status   = $state<GroveVscoStatus | null>(null);
@@ -21,6 +22,7 @@ function createVscoStore() {
     get progress() { return progress; },
     get installed()       { return status?.installed ?? false; },
     get instrumentCount() { return status?.instrument_count ?? 0; },
+    get sizeBytes()       { return status?.size_bytes ?? 0; },
     /** True while a download/extract job is in flight. */
     get downloading()     { return progress !== null && jobId !== null; },
 
@@ -33,6 +35,15 @@ function createVscoStore() {
     async download() {
       progress = null;
       try { jobId = await groveVscoDownload(); } catch { jobId = null; }
+    },
+
+    /** Cancel the in-flight download/extract job (standard job cancellation). */
+    async cancel() {
+      const id = jobId;
+      if (!id) return;
+      try { await cancelJob(id); } catch { /* already gone */ }
+      jobId = null;
+      progress = null;
     },
 
     subscribe(): Promise<UnlistenFn> {
