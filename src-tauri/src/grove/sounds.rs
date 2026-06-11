@@ -34,7 +34,10 @@ pub struct SoundList {
 #[tauri::command]
 pub async fn grove_sounds(state: State<'_, AppState>) -> Result<SoundList, AppError> {
     let cfg = super::grove_config(&state)?;
-    let registry = super::vsco::load_registry(&cfg).unwrap_or_else(Registry::new);
+    let mut registry = super::vsco::load_registry(&cfg).unwrap_or_else(Registry::new);
+    // Match the audio thread: the built-in `synth.*` presets are always resolvable,
+    // so the sound-bank UI lists them too.
+    registry.install_builtin_synths();
 
     let mut instruments: Vec<Instrument> = registry
         .instruments_list()

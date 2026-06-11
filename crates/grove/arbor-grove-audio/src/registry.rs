@@ -59,11 +59,12 @@ pub struct SynthPreset {
 }
 
 impl Default for SynthPreset {
-    /// The universal fallback: a moderately bright saw with a short pluck-ish
-    /// envelope — grove's "electronic default" when no VSCO is installed.
+    /// The universal fallback when no name resolves. A **triangle** (alias-free,
+    /// soft) with a short pluck-ish envelope — a gentle "electronic default" that
+    /// stays clean across the whole register even with no VSCO installed.
     fn default() -> Self {
         SynthPreset {
-            waveform: Waveform::Saw,
+            waveform: Waveform::Triangle,
             attack: 0.005,
             decay: 0.15,
             sustain: 0.6,
@@ -71,6 +72,29 @@ impl Default for SynthPreset {
         }
     }
 }
+
+/// The built-in `synth.*` presets, installed by [`Registry::install_builtin_synths`].
+/// All shapes are band-limited (see [`crate::synth`]), so even the saw voices stay
+/// clean across the register. Tuned to read distinctly: a punchy saw bass, a soft
+/// triangle pad, a short square pluck, a sustained saw lead.
+const BUILTIN_SYNTHS: [(&str, SynthPreset); 4] = [
+    (
+        "synth.bass",
+        SynthPreset { waveform: Waveform::Saw, attack: 0.005, decay: 0.12, sustain: 0.70, release: 0.18 },
+    ),
+    (
+        "synth.pad",
+        SynthPreset { waveform: Waveform::Triangle, attack: 0.08, decay: 0.25, sustain: 0.85, release: 0.5 },
+    ),
+    (
+        "synth.pluck",
+        SynthPreset { waveform: Waveform::Square, attack: 0.002, decay: 0.14, sustain: 0.0, release: 0.12 },
+    ),
+    (
+        "synth.lead",
+        SynthPreset { waveform: Waveform::Saw, attack: 0.01, decay: 0.10, sustain: 0.75, release: 0.2 },
+    ),
+];
 
 /// How a named articulation re-targets sample selection on an SFZ instrument.
 ///
@@ -217,6 +241,18 @@ impl Registry {
     /// built-in voices without a manifest file.
     pub fn insert_synth(&mut self, name: impl Into<String>, preset: SynthPreset) {
         self.entries.insert(name.into(), Entry::Synth(preset));
+    }
+
+    /// Install grove's built-in `synth.*` presets (the names the language and the
+    /// docs/examples reference: `synth.bass` / `synth.pad` / `synth.pluck` /
+    /// `synth.lead`). Always available, with **no manifest and no VSCO** — so a
+    /// patch that asks for one of them sounds as intended instead of falling back
+    /// to the default voice. Existing same-named entries are overwritten (the
+    /// `synth.*` namespace is ours; VSCO ships orchestral instruments, not these).
+    pub fn install_builtin_synths(&mut self) {
+        for (name, preset) in BUILTIN_SYNTHS {
+            self.insert_synth(name, preset);
+        }
     }
 
     /// Parse + load a manifest from already-read TOML text rooted at `base_dir`.
@@ -611,6 +647,27 @@ file = \"drums/bd.wav\"
         match reg.resolve(Some("nope"), None, Some(60.0), 0.8, None, 0) {
             ResolvedVoice::Synth(_) => {}
             _ => panic!("expected synth fallback"),
+        }
+    }
+
+    #[test]
+    fn builtin_synths_resolve_after_install() {
+        let mut reg = Registry::new();
+        reg.install_builtin_synths();
+        for name in ["synth.bass", "synth.pad", "synth.pluck", "synth.lead"] {
+            match reg.resolve(None, Some(name), Some(60.0), 0.8, None, 0) {
+                ResolvedVoice::Synth(_) => {}
+                other => panic!("`{name}` should resolve to a synth preset, got {other:?}"),
+            }
+        }
+        // The pad is the soft triangle; the bass is the saw.
+        match reg.resolve(None, Some("synth.pad"), Some(60.0), 0.8, None, 0) {
+            ResolvedVoice::Synth(p) => assert_eq!(p.waveform, Waveform::Triangle),
+            _ => unreachable!(),
+        }
+        match reg.resolve(None, Some("synth.bass"), Some(60.0), 0.8, None, 0) {
+            ResolvedVoice::Synth(p) => assert_eq!(p.waveform, Waveform::Saw),
+            _ => unreachable!(),
         }
     }
 

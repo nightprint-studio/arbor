@@ -9,8 +9,9 @@
 //! accumulator, the envelope four line segments. The RT renderer ticks them one
 //! sample at a time inside the voice DSP chain (`crate::voice`).
 
-/// The classic four oscillator shapes. Saw/square use a naive (aliasing) form —
-/// adequate for a live-coding default; band-limiting is a later refinement.
+/// The classic four oscillator shapes. Saw/square are **band-limited** via
+/// PolyBLEP (their hard discontinuities are the alias source); sine and triangle
+/// are continuous and alias-free by construction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Waveform {
     /// Bright, buzzy — the default for basses/leads.
@@ -24,20 +25,49 @@ pub enum Waveform {
 }
 
 impl Waveform {
-    /// Evaluate the waveform at phase `p ∈ [0, 1)`, output in `[-1, 1]`.
-    fn sample(self, p: f32) -> f32 {
+    /// Evaluate the waveform at phase `p ∈ [0, 1)`, output in ~`[-1, 1]`.
+    ///
+    /// `dt` is the phase increment per sample (`freq / sample_rate`); it scales
+    /// the PolyBLEP correction band that rounds the saw/square discontinuities so
+    /// they don't fold high harmonics back as aliasing. A naive saw/square sounds
+    /// clean in isolation but turns to harsh "digital interference" across the
+    /// register, especially in the bass — this is the fix. Sine/triangle ignore
+    /// `dt` (no discontinuity to correct).
+    fn sample(self, p: f32, dt: f32) -> f32 {
         match self {
-            Waveform::Saw => 2.0 * p - 1.0,
+            // Naive ramp minus the BLEP residual at the wrap discontinuity.
+            Waveform::Saw => (2.0 * p - 1.0) - poly_blep(p, dt),
             Waveform::Square => {
-                if p < 0.5 {
-                    1.0
-                } else {
-                    -1.0
-                }
+                let naive = if p < 0.5 { 1.0 } else { -1.0 };
+                // Correct both edges: the rising one at p≈0, the falling one at
+                // p≈0.5 (evaluated at the phase shifted half a cycle).
+                let half = if p < 0.5 { p + 0.5 } else { p - 0.5 };
+                naive + poly_blep(p, dt) - poly_blep(half, dt)
             }
             Waveform::Sine => (p * std::f32::consts::TAU).sin(),
             Waveform::Triangle => 4.0 * (p - 0.5).abs() - 1.0,
         }
+    }
+}
+
+/// PolyBLEP (polynomial band-limited step) residual at phase `t ∈ [0, 1)` for a
+/// discontinuity, scaled to the phase increment `dt`. Returns the correction to
+/// add/subtract around a step edge so it is band-limited instead of instantaneous
+/// (the classic 2-sample fit). Zero outside the `dt`-wide window around the wrap.
+fn poly_blep(t: f32, dt: f32) -> f32 {
+    if dt <= 0.0 {
+        return 0.0;
+    }
+    if t < dt {
+        // Just after the edge: rising half of the fit.
+        let x = t / dt;
+        x + x - x * x - 1.0
+    } else if t > 1.0 - dt {
+        // Just before the wrap: falling half of the fit.
+        let x = (t - 1.0) / dt;
+        x * x + x + x + 1.0
+    } else {
+        0.0
     }
 }
 
@@ -60,9 +90,9 @@ impl Oscillator {
         }
     }
 
-    /// Produce the next sample and advance the phase.
+    /// Produce the next (band-limited) sample and advance the phase.
     pub fn next_sample(&mut self) -> f32 {
-        let s = self.waveform.sample(self.phase);
+        let s = self.waveform.sample(self.phase, self.step);
         self.phase += self.step;
         if self.phase >= 1.0 {
             self.phase -= 1.0;
@@ -331,11 +361,27 @@ mod tests {
     }
 
     #[test]
+    fn poly_blep_zero_away_from_edges_active_near_them() {
+        let dt = 0.01;
+        // Mid-cycle: no discontinuity to correct.
+        assert_eq!(poly_blep(0.5, dt), 0.0);
+        assert_eq!(poly_blep(0.25, dt), 0.0);
+        // Just after the wrap and just before it: a non-zero correction.
+        assert!(poly_blep(0.0, dt) != 0.0);
+        assert!(poly_blep(0.999, dt) != 0.0);
+        // A degenerate increment is a no-op (avoids divide-by-zero).
+        assert_eq!(poly_blep(0.0, 0.0), 0.0);
+    }
+
+    #[test]
     fn oscillator_phase_wraps_and_stays_bounded() {
+        // PolyBLEP rounds the saw edge; the corrected output can graze a hair past
+        // ±1 right at the wrap (band-limited Gibbs), so allow a small margin while
+        // still asserting it stays bounded (no runaway / NaN).
         let mut osc = Oscillator::new(Waveform::Saw, 1_000.0, SR);
         for _ in 0..SR as usize {
             let s = osc.next_sample();
-            assert!((-1.0..=1.0).contains(&s), "sample out of range: {s}");
+            assert!((-1.05..=1.05).contains(&s), "sample out of range: {s}");
         }
     }
 }

@@ -86,6 +86,9 @@ pub fn render_offline(
         })
         .collect();
     let mut renderer = Renderer::new(sr, &track_configs);
+    // Built-in `synth.*` presets, same as live playback, so `.inst("synth.lead")`
+    // and friends render as intended instead of the default fallback voice.
+    renderer.registry_mut().install_builtin_synths();
 
     // Preload every file source up front. The real-time path can't decode in the
     // callback; offline we have no such constraint, but the `Renderer` still only

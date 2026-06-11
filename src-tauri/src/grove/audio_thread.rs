@@ -46,7 +46,10 @@ const EMIT_INTERVAL: Duration = Duration::from_millis(33);
 /// keep it off the command thread.
 pub fn run(app: AppHandle, rx: Receiver<GroveControl>, cfg: GroveConfig) {
     let init_cps = cfg.default_cps;
-    let registry = vsco::load_registry(&cfg).unwrap_or_else(Registry::new);
+    let mut registry = vsco::load_registry(&cfg).unwrap_or_else(Registry::new);
+    // The built-in `synth.*` presets are always available (no VSCO needed), so a
+    // patch using `synth.lead`/`synth.bass`/… sounds as intended.
+    registry.install_builtin_synths();
 
     // `_stream` keeps cpal alive; dropping it at function exit stops audio on
     // this (the owning) thread.
