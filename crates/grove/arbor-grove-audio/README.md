@@ -53,8 +53,11 @@ SFZ region vs. fallback) is the registry's job — the engine only forwards symb
   pan/gain with mute/solo, sums to the master strip (EQ → comp → gain), folds in the convolution
   reverb send, and runs the master limiter.
 - `stream.rs` — `StreamSink` (the production `AudioSink`: an `rtrb` SPSC producer + a shared playhead
-  atomic) and `open_output_stream` (cpal device/stream + the draining callback). The callback never
-  allocates, locks, or does IO.
+  atomic + a shared output-peak meter via `StreamSink::peak()`) and `open_output_stream(tracks,
+  registry)` (cpal device/stream + the draining callback; the `registry` is baked into the `Renderer`
+  here because it then lives inside the real-time callback, unreachable for a later swap). The callback
+  never allocates, locks, or does IO; it writes the per-channel output peak out-of-band for the shell's
+  level meter (decayed for smooth ballistics — never fed back into rendering).
 - `registry.rs` — the **TOML sound registry**: short names (`bd`) and dotted names
   (`strings.violin`, `synth.pad`) → a synth preset / one-shot sample / SFZ instrument; unresolved →
   the default synth. Resolves `art` (articulations) + round-robin per onset. Manifest + articulation

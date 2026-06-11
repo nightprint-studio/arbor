@@ -121,6 +121,10 @@ pub struct AppConfig {
     /// SettingsPanel and in the explorer's own in-window settings page.
     #[serde(default)]
     pub explorer: ExplorerConfig,
+    /// grove (music live-coding) engine preferences: octave/tempo defaults, log
+    /// gating, offline-render defaults, and the VSCO 2 sample-bank location.
+    #[serde(default)]
+    pub grove: crate::grove::GroveConfig,
 }
 
 /// Built-in File Explorer preferences.
@@ -1041,6 +1045,7 @@ impl Default for AppConfig {
             branches: BranchesConfig::default(),
             whats_new: WhatsNewConfig::default(),
             explorer: ExplorerConfig::default(),
+            grove: crate::grove::GroveConfig::default(),
         }
     }
 }

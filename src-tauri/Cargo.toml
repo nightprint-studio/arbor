@@ -55,6 +55,8 @@ arbor-plugin-core = { path = "../crates/plugin/core" }
 arbor-plugin-marketplace = { path = "../crates/plugin/marketplace" }
 arbor-plugin-types = { path = "../crates/plugin/types" }
 arbor-scheduler   = { path = "../crates/scheduler" }
+# grove — music live-coding engine (pattern/lang/audio/engine behind one facade).
+arbor-grove       = { path = "../crates/grove/arbor-grove" }
 
 # --- Tauri ---
 tauri             = { workspace = true }

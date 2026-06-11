@@ -6,14 +6,20 @@
 //! consuming callback are stood up by [`open_output_stream`] (Stage A).
 
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::error::AudioError;
+use crate::registry::Registry;
 use crate::renderer::Renderer;
 use crate::seam::{AudioCommand, AudioSink, Frame, TrackConfig};
+
+/// Output-meter ballistics: each device-buffer callback decays the held peak by
+/// this factor before taking the new block max, so the meter falls smoothly
+/// (~150 ms to silence at a 512-frame / 48 kHz buffer) instead of latching.
+const METER_DECAY: f32 = 0.85;
 
 /// Target output sample rate (design: 48 kHz); falls back to the device default
 /// if 48 kHz isn't offered.
@@ -33,19 +39,40 @@ const RING_CAPACITY: usize = 4096;
 pub struct StreamSink {
     tx: rtrb::Producer<AudioCommand>,
     playhead: Arc<AtomicU64>,
+    /// Shared output peak `[L, R]`, each an `f32` stored as bits, written by the
+    /// callback and read non-RT by the shell for the level meter (out-of-band,
+    /// like `playhead` — not part of the engine↔audio command flow).
+    meter: Arc<[AtomicU32; 2]>,
     sample_rate: u32,
 }
 
 impl StreamSink {
-    /// Construct from the ring producer + the shared playhead the callback
-    /// advances. Used by [`open_output_stream`]; exposed so an alternate backend
-    /// can reuse the same engine-facing type.
-    pub fn new(tx: rtrb::Producer<AudioCommand>, playhead: Arc<AtomicU64>, sample_rate: u32) -> Self {
+    /// Construct from the ring producer, the shared playhead the callback
+    /// advances, and the shared output-peak meter it writes. Used by
+    /// [`open_output_stream`]; exposed so an alternate backend can reuse the same
+    /// engine-facing type.
+    pub fn new(
+        tx: rtrb::Producer<AudioCommand>,
+        playhead: Arc<AtomicU64>,
+        meter: Arc<[AtomicU32; 2]>,
+        sample_rate: u32,
+    ) -> Self {
         StreamSink {
             tx,
             playhead,
+            meter,
             sample_rate,
         }
+    }
+
+    /// The most recent output peak `[left, right]` (`0.0..~1.0`, post-limiter),
+    /// for the level meter. Decays smoothly between buffers ([`METER_DECAY`]).
+    /// Lock-free, non-RT read.
+    pub fn peak(&self) -> [f32; 2] {
+        [
+            f32::from_bits(self.meter[0].load(Ordering::Relaxed)),
+            f32::from_bits(self.meter[1].load(Ordering::Relaxed)),
+        ]
     }
 }
 
@@ -100,13 +127,19 @@ impl fmt::Debug for OutputStream {
 /// Open the default output device and start streaming.
 ///
 /// Picks the default output device and a stereo config at (or nearest to) 48 kHz,
-/// builds the `rtrb` command ring, constructs a [`Renderer`], and starts a cpal
-/// output stream whose callback drains the ring into the renderer, calls
-/// [`Renderer::process`], writes the device buffer, and advances the shared
-/// playhead. The returned [`OutputStream`] keeps the cpal `Stream` alive; drop it
-/// to stop audio.
+/// builds the `rtrb` command ring, constructs a [`Renderer`] backed by the given
+/// sound [`Registry`], and starts a cpal output stream whose callback drains the
+/// ring into the renderer, calls [`Renderer::process`], writes the device buffer,
+/// advances the shared playhead, and updates the output meter. The returned
+/// [`OutputStream`] keeps the cpal `Stream` alive; drop it to stop audio.
+///
+/// `registry` resolves symbolic sound names (`bd`, `strings.violin`) to concrete
+/// voices; pass [`Registry::new`] for the default synth bank, or a loaded VSCO
+/// manifest. It must be set here because the [`Renderer`] then lives inside the
+/// real-time callback, unreachable for a later swap.
 pub fn open_output_stream(
     tracks: Vec<TrackConfig>,
+    registry: Registry,
 ) -> Result<(StreamSink, OutputStream), AudioError> {
     let host = cpal::default_host();
     let device = host
@@ -122,11 +155,14 @@ pub fn open_output_stream(
     let mut stream_config: cpal::StreamConfig = config.into();
     stream_config.buffer_size = cpal::BufferSize::Fixed(TARGET_BUFFER_FRAMES);
 
-    // The lock-free command ring (engine → callback) and the shared playhead.
+    // The lock-free command ring (engine → callback), the shared playhead, and
+    // the shared output-peak meter.
     let (tx, rx) = rtrb::RingBuffer::<AudioCommand>::new(RING_CAPACITY);
     let playhead = Arc::new(AtomicU64::new(0));
+    let meter: Arc<[AtomicU32; 2]> = Arc::new([AtomicU32::new(0), AtomicU32::new(0)]);
 
-    let renderer = Renderer::new(sample_rate, &tracks);
+    let mut renderer = Renderer::new(sample_rate, &tracks);
+    renderer.set_registry(registry);
     let stream = build_stream(
         &device,
         &stream_config,
@@ -135,13 +171,14 @@ pub fn open_output_stream(
         rx,
         renderer,
         Arc::clone(&playhead),
+        Arc::clone(&meter),
     )?;
 
     stream
         .play()
         .map_err(|e| AudioError::Device(format!("failed to start stream: {e}")))?;
 
-    let sink = StreamSink::new(tx, playhead, sample_rate);
+    let sink = StreamSink::new(tx, playhead, meter, sample_rate);
     let output = OutputStream {
         _keep_alive: Box::new(stream),
     };
@@ -200,6 +237,7 @@ fn build_stream(
     rx: rtrb::Consumer<AudioCommand>,
     renderer: Renderer,
     playhead: Arc<AtomicU64>,
+    meter: Arc<[AtomicU32; 2]>,
 ) -> Result<cpal::Stream, AudioError> {
     fn err_fn(e: cpal::StreamError) {
         eprintln!("grove audio stream error: {e}");
@@ -207,7 +245,7 @@ fn build_stream(
 
     macro_rules! build {
         ($sample:ty) => {{
-            let mut state = CallbackState::new(renderer, rx, playhead, channels);
+            let mut state = CallbackState::new(renderer, rx, playhead, Arc::clone(&meter), channels);
             device.build_output_stream(
                 config,
                 move |data: &mut [$sample], _| state.fill::<$sample>(data),
@@ -236,6 +274,8 @@ struct CallbackState {
     renderer: Renderer,
     rx: rtrb::Consumer<AudioCommand>,
     playhead: Arc<AtomicU64>,
+    /// Shared output peak `[L, R]` (f32 bits), updated each buffer for the meter.
+    meter: Arc<[AtomicU32; 2]>,
     channels: usize,
     /// Pre-sized stereo scratch; grown only on the (cold) path where the host
     /// hands a bigger buffer than we provisioned.
@@ -247,12 +287,14 @@ impl CallbackState {
         renderer: Renderer,
         rx: rtrb::Consumer<AudioCommand>,
         playhead: Arc<AtomicU64>,
+        meter: Arc<[AtomicU32; 2]>,
         channels: usize,
     ) -> Self {
         CallbackState {
             renderer,
             rx,
             playhead,
+            meter,
             channels,
             scratch: vec![[0.0; 2]; TARGET_BUFFER_FRAMES as usize],
         }
@@ -273,6 +315,20 @@ impl CallbackState {
         // Drain due commands. The ring is SPSC; `pop` is lock-free.
         let mut drained = RingDrain { rx: &mut self.rx };
         self.renderer.process(&mut drained, out);
+
+        // Update the output peak meter: this block's max |sample| per channel,
+        // floored by the decayed previous peak so the meter falls smoothly. Read
+        // out-of-band by the shell — never feeds back into rendering.
+        let mut block_peak = [0.0f32; 2];
+        for frame in out.iter() {
+            block_peak[0] = block_peak[0].max(frame[0].abs());
+            block_peak[1] = block_peak[1].max(frame[1].abs());
+        }
+        for ch in 0..2 {
+            let prev = f32::from_bits(self.meter[ch].load(Ordering::Relaxed));
+            let peak = block_peak[ch].max(prev * METER_DECAY);
+            self.meter[ch].store(peak.to_bits(), Ordering::Relaxed);
+        }
 
         // Interleave the stereo frames into the device buffer.
         for (i, frame) in out.iter().enumerate() {

@@ -8,6 +8,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 mod app_ctx;
 mod error;
 mod explorer_window;
+mod grove;
 mod grove_window;
 mod process_ext;
 mod platform;
@@ -485,6 +486,7 @@ pub fn run() {
         .manage(explorer_window::PendingReveals::default())
         .manage(explorer_window::ExplorerClipboard::default())
         .manage(explorer_window::DragOverlayText::default())
+        .manage(grove::GroveState::default())
         .setup(|app| {
             // Wire the `arbor-cloud` crate against AppState: registers the
             // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
@@ -829,6 +831,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // The grove window closing for real tears down its audio
+                    // session (drops the cpal stream on the audio thread, stops
+                    // sound). Lazy ownership: nothing happens if it never played.
+                    if window.label() == crate::grove_window::GROVE_WINDOW_LABEL {
+                        crate::grove::shutdown(window.app_handle());
+                    }
                     #[cfg(not(debug_assertions))]
                     {
                         // Close-to-tray applies ONLY to the main window. Auxiliary
@@ -1519,6 +1527,14 @@ pub fn run() {
             explorer_window::explorer_drop_dispatch,
             // Dedicated grove (music live-coding) window
             grove_window::open_grove_window,
+            // grove engine: eval / transport / render / VSCO / config
+            grove::grove_eval,
+            grove::grove_transport,
+            grove::grove_render,
+            grove::grove_vsco_status,
+            grove::grove_vsco_download,
+            grove::get_grove_config,
+            grove::set_grove_config,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");

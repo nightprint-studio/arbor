@@ -1,0 +1,196 @@
+//! The dedicated **grove audio thread**.
+//!
+//! One OS thread (never the job system, never the async runtime — hard rule:
+//! the real-time path is sacred) owns the cpal [`OutputStream`] (which is `!Send`
+//! and must live and die on the thread that opened it) and runs the look-ahead
+//! driver: every ~tick it drains pending control messages, calls
+//! [`Transport::tick`], and pushes throttled BE→FE events. The cpal callback runs
+//! on its own internal thread; this thread only stays ~100 ms ahead of it.
+//!
+//! Lifecycle: spawned lazily on the first eval/play, torn down on `Shutdown`
+//! (window close) — at which point dropping [`OutputStream`] here stops cpal.
+
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::time::{Duration, Instant};
+
+use tauri::AppHandle;
+
+use arbor_grove::prelude::{
+    open_output_stream, AudioSink, ControlMap, Epoch, Registry, StreamSink, Time, TimeSpan, Tracks,
+    Transport,
+};
+
+use super::config::GroveConfig;
+use super::control::GroveControl;
+use super::events::{
+    emit, ActiveHaps, Meters, TransportState, EVT_ACTIVE_HAPS, EVT_METERS, EVT_TRANSPORT,
+};
+use super::vsco;
+
+/// Driver tick / control-drain cadence. Well under the 100 ms look-ahead (≈5×
+/// headroom) so a missed wake never starves the scheduler.
+const TICK_MS: u64 = 20;
+
+/// Minimum spacing between `transport`/`meters` emissions (~30 fps). Decoupled
+/// from the tick so a burst of control messages can't flood the front end.
+const EMIT_INTERVAL: Duration = Duration::from_millis(33);
+
+/// Run the audio session until a `Shutdown` (or the channel closing). Builds the
+/// sound registry (a loaded VSCO manifest if installed, else the default synth
+/// bank), opens the stream, then loops on the control channel. Returns when the
+/// session ends; the caller's `JoinHandle` resolves then.
+///
+/// The registry is built **here**, on the owning thread, both because the
+/// `Renderer` it backs then lives inside the cpal callback (no later swap) and to
+/// keep it off the command thread.
+pub fn run(app: AppHandle, rx: Receiver<GroveControl>, cfg: GroveConfig) {
+    let init_cps = cfg.default_cps;
+    let registry = vsco::load_registry(&cfg).unwrap_or_else(Registry::new);
+
+    // `_stream` keeps cpal alive; dropping it at function exit stops audio on
+    // this (the owning) thread.
+    let (sink, _stream) = match open_output_stream(Vec::new(), registry) {
+        Ok(pair) => pair,
+        Err(e) => {
+            tracing::error!("grove: failed to open audio output: {e}");
+            emit(
+                &app,
+                "grove:audio_error",
+                serde_json::json!({ "message": e.to_string() }),
+            );
+            return;
+        }
+    };
+
+    let mut transport = Transport::new(sink, init_cps);
+    // The shell keeps its own clone of the live arrangement so it can compute the
+    // active-hap highlight (the transport does not expose its `Tracks`).
+    let mut current: Tracks<ControlMap> = Tracks { tracks: Vec::new() };
+    let mut last_haps: Vec<[u32; 2]> = Vec::new();
+    let mut last_emit = Instant::now();
+
+    loop {
+        // Block until a message or the tick interval elapses, then drain any
+        // burst non-blocking so a multi-message update (SetTracks + Play) is
+        // applied before the next tick.
+        match rx.recv_timeout(Duration::from_millis(TICK_MS)) {
+            Ok(msg) => {
+                if !apply(&mut transport, &mut current, msg) {
+                    break;
+                }
+                while let Ok(msg) = rx.try_recv() {
+                    if !apply(&mut transport, &mut current, msg) {
+                        return; // Shutdown drained mid-burst: drop _stream, exit.
+                    }
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+
+        transport.tick();
+
+        // Throttled transport + meters.
+        if last_emit.elapsed() >= EMIT_INTERVAL {
+            emit_transport_and_meters(&app, &transport);
+            last_emit = Instant::now();
+        }
+
+        // Active-hap highlight: on change only (cheap query each tick).
+        let haps = active_haps(&transport, &current);
+        if haps != last_haps {
+            emit(&app, EVT_ACTIVE_HAPS, ActiveHaps { spans: haps.clone() });
+            last_haps = haps;
+        }
+    }
+}
+
+/// Apply one control message. Returns `false` on `Shutdown` (caller exits).
+fn apply(
+    transport: &mut Transport<StreamSink>,
+    current: &mut Tracks<ControlMap>,
+    msg: GroveControl,
+) -> bool {
+    match msg {
+        GroveControl::SetTracks { tracks, cps } => {
+            *current = tracks.clone();
+            transport.set_tracks(tracks);
+            if let Some(c) = cps {
+                transport.set_cps(c);
+            }
+        }
+        GroveControl::Play => transport.play(),
+        GroveControl::Stop => transport.stop(),
+        GroveControl::Seek { cycle } => {
+            // Quantize the seek target to a whole cycle (the engine's `Time` is
+            // rational; sub-cycle seeking is a future refinement).
+            transport.seek(Time::int(cycle.round() as i64));
+        }
+        GroveControl::SetCps { cps } => transport.set_cps(cps),
+        GroveControl::Shutdown => return false,
+    }
+    true
+}
+
+/// Emit the current transport position and the output level meter.
+fn emit_transport_and_meters(
+    app: &AppHandle,
+    transport: &Transport<StreamSink>,
+) {
+    let sink = transport.sink();
+    let now = sink.now_frame();
+    let sr = sink.sample_rate();
+    let epoch = transport.epoch();
+
+    emit(
+        app,
+        EVT_TRANSPORT,
+        TransportState {
+            playing: transport.is_playing(),
+            cycle: epoch.cycle_of(now, sr),
+            frame: now,
+        },
+    );
+
+    let [l, r] = sink.peak();
+    emit(app, EVT_METERS, Meters { l, r });
+}
+
+/// Source spans of every hap sounding at the current playhead, for the editor
+/// highlight. Queries the current integer cycle and keeps haps whose `whole`
+/// (frame-mapped) brackets `now`. Empty while stopped.
+fn active_haps(
+    transport: &Transport<StreamSink>,
+    current: &Tracks<ControlMap>,
+) -> Vec<[u32; 2]> {
+    if !transport.is_playing() {
+        return Vec::new();
+    }
+    let sink = transport.sink();
+    let now = sink.now_frame();
+    let sr = sink.sample_rate();
+    let epoch: Epoch = transport.epoch();
+
+    let cyc = epoch.cycle_of(now, sr).floor() as i64;
+    let span = TimeSpan::new(Time::int(cyc), Time::int(cyc + 1));
+
+    let mut spans: Vec<[u32; 2]> = Vec::new();
+    for track in &current.tracks {
+        for hap in track.pattern.query(span) {
+            let Some(src) = hap.span else { continue };
+            // Use `whole` (the event's full extent) when present; a continuous
+            // signal (no onset) has none and is skipped for highlight.
+            let Some(whole) = hap.whole else { continue };
+            let begin = epoch.frame_of(whole.begin, sr);
+            let end = epoch.frame_of(whole.end, sr);
+            if begin <= now && now < end {
+                let pair = [src.start, src.end];
+                if !spans.contains(&pair) {
+                    spans.push(pair);
+                }
+            }
+        }
+    }
+    spans.sort_unstable();
+    spans
+}
