@@ -101,6 +101,6 @@ fn collect_refs(expr: &Expr, out: &mut Vec<String>) {
             collect_refs(hi, out);
         }
         ExprKind::Lambda { body, .. } => collect_refs(body, out),
-        ExprKind::Number(_) | ExprKind::Str(_) | ExprKind::Island(_) => {}
+        ExprKind::Number(_) | ExprKind::Str(_) | ExprKind::Note(_) | ExprKind::Island(_) => {}
     }
 }

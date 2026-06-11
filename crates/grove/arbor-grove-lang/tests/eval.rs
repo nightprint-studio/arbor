@@ -26,6 +26,9 @@ fn string(s: &str) -> Expr {
 fn var(name: &str) -> Expr {
     e(ExprKind::Var(name.to_string()))
 }
+fn note_lit(name: &str) -> Expr {
+    e(ExprKind::Note(name.to_string()))
+}
 fn id(name: &str) -> Ident {
     Ident {
         name: name.to_string(),
@@ -123,6 +126,33 @@ fn note_names_resolve_to_midi() {
     let h = onsets(&p, 0);
     assert_eq!(h[0].value.note, Some(60.0));
     assert_eq!(h[1].value.note, Some(64.0));
+}
+
+#[test]
+fn host_note_literal_is_a_single_note_pattern() {
+    // A host pitch literal (`ef4`, octave mandatory) evaluates to a one-note
+    // pattern: Eb4 = MIDI 63.
+    let p = run_expr(note_lit("ef4"));
+    let h = onsets(&p, 0);
+    assert_eq!(h.len(), 1);
+    assert_eq!(h[0].value.note, Some(63.0));
+    assert!(h[0].span.is_some(), "note literal hap should carry a source span");
+}
+
+#[test]
+fn choose_over_host_note_literals() {
+    // `choose(c4, ef4, g4)` — now expressible thanks to host note literals.
+    // Each cycle picks exactly one of the three pitches (all-pattern path).
+    let p = run_expr(call(
+        "choose",
+        vec![note_lit("c4"), note_lit("ef4"), note_lit("g4")],
+    ));
+    for cyc in 0..6 {
+        let h = onsets(&p, cyc);
+        assert_eq!(h.len(), 1, "exactly one note per cycle");
+        let n = h[0].value.note.expect("a concrete pitch");
+        assert!([60.0, 63.0, 67.0].contains(&n), "unexpected pitch {n}");
+    }
 }
 
 #[test]

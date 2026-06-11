@@ -111,11 +111,27 @@ impl Pattern<ControlMap> {
         self.with_control(x.into(), |c, v| c.shape = Some(v))
     }
 
+    /// Velocity `0..1`: selects the sampled velocity-layer + dynamics (≠ `gain`).
+    pub fn vel(self, x: impl Into<Param>) -> Pattern<ControlMap> {
+        self.with_control(x.into(), |c, v| c.vel = Some(v))
+    }
+
     /// Instrument / voice name (synth preset or sampler bank).
     pub fn inst(self, name: impl Into<String>) -> Pattern<ControlMap> {
         let name = name.into();
         self.fmap(move |mut c| {
             c.inst = Some(name.clone());
+            c
+        })
+    }
+
+    /// Articulation name (`legato`/`staccato`/…), resolved by the instrument.
+    /// Constant like `inst` (not patternised); per-note sequences await the
+    /// value-island.
+    pub fn art(self, name: impl Into<String>) -> Pattern<ControlMap> {
+        let name = name.into();
+        self.fmap(move |mut c| {
+            c.art = Some(name.clone());
             c
         })
     }

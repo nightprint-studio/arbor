@@ -48,8 +48,13 @@ pub struct ControlMap {
     pub crush: Option<f64>,
     /// Waveshaper distortion amount `0..1`.
     pub shape: Option<f64>,
+    /// Velocity `0..1`: selects the sampled velocity-layer (timbre) + dynamics.
+    /// Distinct from `gain` (output amplitude) — set per the sampled layer.
+    pub vel: Option<f64>,
     /// Instrument / voice name (synth preset or sampler bank).
     pub inst: Option<String>,
+    /// Articulation name (`legato`/`staccato`/…), resolved by the instrument.
+    pub art: Option<String>,
 }
 
 impl ControlMap {
@@ -106,7 +111,9 @@ impl ControlMap {
             speed: other.speed.or(self.speed),
             crush: other.crush.or(self.crush),
             shape: other.shape.or(self.shape),
+            vel: other.vel.or(self.vel),
             inst: other.inst.or(self.inst),
+            art: other.art.or(self.art),
         }
     }
 }

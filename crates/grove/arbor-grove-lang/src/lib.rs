@@ -14,14 +14,17 @@
 //! emitter prints it back — so the future editor can evaluate a sub-tree and
 //! re-emit it (materialisation) without cross-layer dependencies.
 //!
-//! ## Status (staged build)
+//! ## Layers
 //!
-//! - [`ast`] + [`error`] — the typed tree and span-aware diagnostics (present).
+//! - [`ast`] + [`error`] — the typed tree and span-aware diagnostics.
+//! - [`parse`] — the Tree-sitter front end (`grammar.js` + external `scanner.c`
+//!   + generated `parser.c`, compiled by `build.rs` via the `cc` crate) and the
+//!   CST→AST walker: `source → Program`.
 //! - [`eval`] (`AST → Pattern`), [`emit`] (`AST → source`), and
-//!   [`materialize`] (evaluated haps → mini-notation AST) are present.
-//! - the Tree-sitter front end (`grammar.js` + external `scanner.c` + generated
-//!   `parser.c`, compiled by `build.rs` via the `cc` crate) is wired in a
-//!   following step; until then [`parse`] returns a "not wired" error.
+//!   [`materialize`] (evaluated haps → mini-notation AST).
+//!
+//! The loop closes: `parse(emit(ast))` ≈ `ast` (modulo spans), and `import`
+//! resolution parses loaded modules through [`parse`].
 //!
 //! ## Entry point
 //!

@@ -79,6 +79,12 @@ pub enum ExprKind {
     Number(f64),
     /// A string literal.
     Str(String),
+    /// A host pitch literal: `c4`, `ef3`, `cs5`. Unlike a mini-notation note
+    /// name, the octave is **mandatory** in the host (so `c`/`ef` stay plain
+    /// identifiers and only `c4`/`ef3` lex as notes — see
+    /// `design/grove/grammar.md`). Evaluates to a single-note pattern, so it
+    /// flows into combinators like `choose(c4, ef4, g4)`.
+    Note(String),
     /// A bare identifier: a variable reference, or a nullary transform (`rev`).
     /// Which one it is is resolved at eval time, not by the parser.
     Var(String),

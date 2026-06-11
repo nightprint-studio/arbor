@@ -24,6 +24,9 @@ fn string(s: &str) -> Expr {
 fn var(name: &str) -> Expr {
     e(ExprKind::Var(name.to_string()))
 }
+fn note_lit(name: &str) -> Expr {
+    e(ExprKind::Note(name.to_string()))
+}
 fn id(name: &str) -> Ident {
     Ident {
         name: name.to_string(),
@@ -107,6 +110,18 @@ fn numbers_are_shortest_round_trip() {
     assert_eq!(emit_expr(&num(0.5)), "0.5");
     assert_eq!(emit_expr(&num(0.125)), "0.125");
     assert_eq!(emit_expr(&num(800.0)), "800");
+}
+
+// ── Host note literals ────────────────────────────────────────────────────────
+
+#[test]
+fn host_note_literals_emit_bare() {
+    // A host pitch literal prints as the bare token — no `n(...)` wrapper.
+    assert_eq!(emit_expr(&note_lit("c4")), "c4");
+    assert_eq!(emit_expr(&note_lit("ef3")), "ef3");
+    // choose(c4, ef4, g4) — the canonical example from transforms.md.
+    let expr = call("choose", vec![note_lit("c4"), note_lit("ef4"), note_lit("g4")]);
+    assert_eq!(emit_expr(&expr), "choose(c4, ef4, g4)");
 }
 
 // ── Arithmetic: tight, minimal parens ─────────────────────────────────────────

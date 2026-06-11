@@ -121,6 +121,7 @@ fn prec(kind: &ExprKind) -> u8 {
         ExprKind::Method { .. } => P_POSTFIX,
         ExprKind::Number(_)
         | ExprKind::Str(_)
+        | ExprKind::Note(_)
         | ExprKind::Var(_)
         | ExprKind::Call { .. }
         | ExprKind::Island(_) => P_ATOM,
@@ -146,6 +147,7 @@ fn write_expr_inner(out: &mut String, e: &Expr, indent: usize) {
     match &e.kind {
         ExprKind::Number(n) => out.push_str(&fmt_number(*n)),
         ExprKind::Str(s) => write_quoted(out, s),
+        ExprKind::Note(name) => out.push_str(name),
         ExprKind::Var(name) => out.push_str(name),
         ExprKind::Call { name, args } => write_call(out, &name.name, args, indent),
         ExprKind::Method { recv, name, args } => {

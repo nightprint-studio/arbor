@@ -17,7 +17,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use arbor_grove_pattern::prelude::{cat, seq, stack, ControlMap, Pattern, Tracks};
+use arbor_grove_pattern::prelude::{
+    cat, parse_note, pure, seq, stack, ControlMap, Pattern, Tracks,
+};
 
 use crate::ast::{BinOp, Expr, ExprKind, Import, Item, Program, UnOp};
 use crate::config::EvalConfig;
@@ -118,6 +120,13 @@ pub(crate) fn eval_expr(ctx: &Rc<Ctx>, env: &Env, e: &Expr) -> Result<Value> {
     match &e.kind {
         ExprKind::Number(n) => Ok(Value::Number(*n)),
         ExprKind::Str(s) => Ok(Value::Str(s.clone())),
+        ExprKind::Note(name) => {
+            // Octave is mandatory in the host, so `default_octave` is never used
+            // here; pass it for the shared parser's signature.
+            let midi = parse_note(name, ctx.config.default_octave)
+                .map_err(|err| LangError::at(e.span, LangErrorKind::Pitch(err)))?;
+            Ok(Value::Pattern(pure(ControlMap::note(midi)).tag_span(e.span)))
+        }
         ExprKind::Var(name) => eval_var(ctx, env, name, e.span),
         ExprKind::Call { name, args } => {
             let argv = eval_args(ctx, env, args)?;

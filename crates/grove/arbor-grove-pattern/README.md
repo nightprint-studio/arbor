@@ -51,7 +51,7 @@ A hap **has an onset** in a query when `part.begin == whole.begin`.
 | Composition | `pure` · `silence` · `stack`/`par` · `fastcat`/`seq` · `timecat` · `slowcat`/`cat` · `arrange` · `cycles` · `tracks` · `track` |
 | Time/structure | `fast` · `slow` · `rev` · `every` · `off` · `late` · `early` |
 | Rhythm/probability | `degrade` · `degrade_by` · `sometimes` · `sometimes_by` · `euclid` |
-| Voice/mix | `gain` · `pan` · `room` · `lpf` · `hpf` · `shift` · `speed` · `crush` · `shape` · `inst` · `scale` · `jux` |
+| Voice/mix | `gain` · `pan` · `room` · `lpf` · `hpf` · `shift` · `speed` · `crush` · `shape` · `vel` · `inst` · `art` · `scale` · `jux` |
 | Generative | `rand` · `choose` |
 | File sources | `sample` · `audio` (markers only — decode/playback is the audio crate) |
 

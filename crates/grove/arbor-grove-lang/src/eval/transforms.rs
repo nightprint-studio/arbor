@@ -25,7 +25,7 @@ pub fn is_transform(name: &str) -> bool {
         "rev" | "degrade"
             | "fast" | "slow"
             | "gain" | "pan" | "room" | "lpf" | "hpf" | "shift" | "speed" | "crush" | "shape"
-            | "inst" | "scale"
+            | "vel" | "inst" | "art" | "scale"
             | "every" | "off" | "sometimes" | "jux"
             | "log"
     )
@@ -112,11 +112,17 @@ pub fn make_transform(
         "speed" => mix(args, span, |p, x| p.speed(x)),
         "crush" => mix(args, span, |p, x| p.crush(x)),
         "shape" => mix(args, span, |p, x| p.shape(x)),
+        "vel" => mix(args, span, |p, x| p.vel(x)),
 
         "inst" => {
             arity(name, args, 1, span)?;
             let s = as_str(&args[0], span)?;
             Ok(Transform::new(move |p| Ok(p.inst(s.clone()))))
+        }
+        "art" => {
+            arity(name, args, 1, span)?;
+            let s = as_str(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.art(s.clone()))))
         }
         "scale" => {
             arity(name, args, 1, span)?;
