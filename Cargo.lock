@@ -128,6 +128,7 @@ dependencies = [
  "arbor-auth",
  "arbor-cloud",
  "arbor-core",
+ "arbor-grove",
  "arbor-plugin-api",
  "arbor-plugin-core",
  "arbor-plugin-marketplace",
