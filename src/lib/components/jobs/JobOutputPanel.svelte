@@ -75,7 +75,7 @@
 </script>
 
 <div class="jop-root">
-  <BottomPanelHeader title={job?.name ?? 'Output'}>
+  <BottomPanelHeader title={job?.name ?? 'Output'} onClose={() => uiStore.setActiveBottomSection(null)}>
     {#snippet icon()}
       <button
         class="ps-btn"

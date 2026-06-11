@@ -7,6 +7,7 @@
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { pluginLogsStore, NON_PIPELINE_SENTINEL } from '$lib/stores/pluginLogs.svelte';
+  import { uiStore } from '$lib/stores/ui.svelte';
   import type { PluginLogEntry, PluginLogLevel } from '$lib/types/plugin-logs';
   import { renderStructuredLogLine, formatLogTime, shortRunId } from '$lib/utils/log-highlight';
   import { copyToClipboard } from '$lib/utils/clipboard';
@@ -271,7 +272,7 @@
 </script>
 
 <div class="pl-root">
-  <BottomPanelHeader title="Plugin Logs" count={filtered.length}>
+  <BottomPanelHeader title="Plugin Logs" count={filtered.length} onClose={() => uiStore.setActiveBottomSection(null)}>
     {#snippet actions()}
     <button
       class="pl-action-btn follow-btn"

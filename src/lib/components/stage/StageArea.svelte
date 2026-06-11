@@ -518,7 +518,7 @@
 </script>
 
 <div class="stage-root">
-  <BottomPanelHeader title="Staging Area">
+  <BottomPanelHeader title="Staging Area" onClose={() => uiStore.setActiveBottomSection(null)}>
     {#snippet icon()}
       <FileDiff size={14} />
     {/snippet}

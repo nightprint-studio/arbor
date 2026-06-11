@@ -7,6 +7,7 @@
    */
   import { Terminal, ArrowDownToLine, Search, X, Trash2 } from 'lucide-svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { groveStore, levelsAtOrAbove, LOG_LEVELS } from '../grove-store.svelte';
   import { configStore } from '../stores/config.svelte';
@@ -38,14 +39,14 @@
 </script>
 
 <div class="con">
-  <div class="con-head">
-    <Terminal size={13} />
-    <span class="con-title">Console</span>
-    <span class="con-meta">{visible.length}/{logStore.count}</span>
-    <span class="con-spacer"></span>
-    <button class="con-btn" onclick={scrollToBottom} use:tooltip={'Scroll to bottom'} aria-label="Scroll to bottom"><ArrowDownToLine size={13} /></button>
-    <button class="con-btn" onclick={() => logStore.clear()} use:tooltip={'Clear console'} aria-label="Clear console"><Trash2 size={13} /></button>
-  </div>
+  <BottomPanelHeader title="Console" onClose={() => groveStore.toggleBottom('console')}>
+    {#snippet icon()}<Terminal size={13} />{/snippet}
+    {#snippet children()}<span class="con-meta">{visible.length}/{logStore.count}</span>{/snippet}
+    {#snippet actions()}
+      <button class="ps-btn" onclick={scrollToBottom} use:tooltip={'Scroll to bottom'} aria-label="Scroll to bottom"><ArrowDownToLine size={13} /></button>
+      <button class="ps-btn" onclick={() => logStore.clear()} use:tooltip={'Clear console'} aria-label="Clear console"><Trash2 size={13} /></button>
+    {/snippet}
+  </BottomPanelHeader>
 
   <div class="con-toolbar">
     <div class="con-search">
@@ -87,22 +88,7 @@
 
 <style>
   .con { display: flex; flex-direction: column; height: 100%; background: var(--bg-base); }
-  .con-head {
-    display: flex; align-items: center; gap: 7px;
-    height: 30px; min-height: 30px; padding: 0 10px;
-    border-bottom: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
-  }
-  .con-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
   .con-meta { font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-  .con-spacer { flex: 1; }
-  .con-btn {
-    display: flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; background: transparent; border: none;
-    border-radius: var(--radius-sm); color: var(--text-muted); cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .con-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   /* ── Toolbar: search + level chips ── */
   .con-toolbar {

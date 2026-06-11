@@ -36,6 +36,7 @@
   import PluginIcon      from './PluginIcon.svelte';
   import PanelShell      from '$lib/components/shared/ui/PanelShell.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
+  import { uiStore } from '$lib/stores/ui.svelte';
   import Tree            from '$lib/components/shared/ui/Tree.svelte';
   import Breadcrumb, { type BreadcrumbSegment as BCSeg } from '$lib/components/shared/ui/Breadcrumb.svelte';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
@@ -466,7 +467,7 @@
      keep the same affordances regardless of dock side. -->
 <div class="plugin-tree-root" class:bottom-stack={bottomMode}>
 {#if bottomMode}
-  <BottomPanelHeader title={title || 'Plugin'}>
+  <BottomPanelHeader title={title || 'Plugin'} onClose={() => uiStore.setActiveBottomSection(null)}>
     {#snippet icon()}
       {#if section?.icon}
         <PluginIcon name={section.icon} size={13} />

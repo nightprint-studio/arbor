@@ -5,6 +5,7 @@
    * the editor to the diagnostic's source span.
    */
   import { AlertTriangle, CircleAlert, CircleCheckBig, Search, X } from 'lucide-svelte';
+  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { groveStore } from '../grove-store.svelte';
   import { projectStore } from '../stores/project.svelte';
@@ -55,11 +56,10 @@
 </script>
 
 <div class="prob">
-  <div class="prob-head">
-    <AlertTriangle size={13} />
-    <span class="prob-title">Problems</span>
-    <span class="prob-meta">{visible.length}/{problems.length}</span>
-  </div>
+  <BottomPanelHeader title="Problems" onClose={() => groveStore.toggleBottom('problems')}>
+    {#snippet icon()}<AlertTriangle size={13} />{/snippet}
+    {#snippet children()}<span class="prob-meta">{visible.length}/{problems.length}</span>{/snippet}
+  </BottomPanelHeader>
 
   <div class="prob-toolbar">
     <div class="prob-search">
@@ -99,13 +99,6 @@
 
 <style>
   .prob { display: flex; flex-direction: column; height: 100%; background: var(--bg-base); }
-  .prob-head {
-    display: flex; align-items: center; gap: 7px;
-    height: 30px; min-height: 30px; padding: 0 10px;
-    border-bottom: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
-  }
-  .prob-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
   .prob-meta { font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
   .prob-toolbar {

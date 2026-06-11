@@ -93,7 +93,7 @@
 </script>
 
 <div class="detail-root">
-  <BottomPanelHeader title="Commit">
+  <BottomPanelHeader title="Commit" onClose={() => uiStore.setActiveBottomSection(null)}>
     {#snippet icon()}<GitCommit size={14} />{/snippet}
     {#snippet children()}
       {#if diffStore.selectedFile && diffApi}

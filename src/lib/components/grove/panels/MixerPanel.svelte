@@ -19,11 +19,12 @@
    * Imports only shared/ui (+ the tooltip action) + grove-local.
    */
   import { SlidersHorizontal, VolumeX, Headphones, ArrowDownToLine } from 'lucide-svelte';
-  import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
+  import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Knob from '$lib/components/shared/ui/Knob.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import PeakMeter from './PeakMeter.svelte';
+  import { groveStore } from '../grove-store.svelte';
   import { mixerStore, GAIN_UNITY, PAN_CENTER } from '../stores/mixer.svelte';
   import { metersStore, diagnosticsStore } from '../stores/engine.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
@@ -50,9 +51,12 @@
   }
 </script>
 
-<PanelShell title="Mixer" count={tracks.length}>
-  {#snippet icon()}<SlidersHorizontal size={13} />{/snippet}
+<div class="mixer-root">
+  <BottomPanelHeader title="Mixer" count={tracks.length} onClose={() => groveStore.toggleBottom('mixer')}>
+    {#snippet icon()}<SlidersHorizontal size={13} />{/snippet}
+  </BottomPanelHeader>
 
+  <div class="mixer-body">
   {#if !tracks.length}
     <EmptyState message="No arrangement yet — Run a .grove file to see its mixer." />
   {:else}
@@ -120,9 +124,12 @@
       </div>
     </div>
   {/if}
-</PanelShell>
+  </div>
+</div>
 
 <style>
+  .mixer-root { display: flex; flex-direction: column; height: 100%; background: var(--bg-base); }
+  .mixer-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .mix { display: flex; gap: 4px; padding: 6px 8px; height: 100%; overflow-x: auto; align-items: stretch; }
 
   .strip {
