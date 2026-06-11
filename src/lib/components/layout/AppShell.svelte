@@ -776,7 +776,7 @@
     }
   });
 
-  // Listen for open-recent events from MenuBar
+  // Listen for open-recent events from the title bar's hamburger menu
   $effect(() => {
     function onOpenRecent(e: Event) {
       handleOpenRepo((e as CustomEvent<string>).detail);

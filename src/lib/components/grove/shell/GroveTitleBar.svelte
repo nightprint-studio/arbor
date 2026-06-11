@@ -1,24 +1,27 @@
 <script lang="ts">
   /**
-   * Grove titlebar — mirrors Arbor's chrome so the window feels native:
+   * Grove titlebar — composes the shared `TitleBar` chrome and fills it with the
+   * grove domain:
    *   logo · hamburger (file/project actions) · project fast-swap …
-   *   … Run/Stop + log-level (IntelliJ-style) · gear (settings) · window controls
+   *   … Run/Stop + log-level (IntelliJ-style) · layout toggles · settings · window controls
    *
-   * Reuses Arbor shell pieces (ArborLogo, WindowControls — settings-driven
-   * mac/windows, custom tooltips) rather than duplicating them; only the grove
-   * domain (project/transport/log) is local.
+   * The bar skeleton, hamburger menu and settings dropdown are all driven
+   * declaratively through the shared widget; only grove-specific controls
+   * (project switcher, transport, log threshold) are authored here as snippets.
    */
   import {
     Play, Square, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
     PanelLeft, PanelRight, Minimize2, Command, Check, AlertTriangle,
+    FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut,
   } from 'lucide-svelte';
-  import { FolderOpen } from 'lucide-svelte';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
   import WindowControls from '$lib/components/layout/WindowControls.svelte';
-  import GroveMenuBar from './GroveMenuBar.svelte';
+  import RecentProjectsModal from './RecentProjectsModal.svelte';
   // Titlebar lives at the very top — tooltips fly downward so they don't get
   // clipped by the window edge.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
@@ -29,6 +32,8 @@
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { renderStore } from '../stores/render.svelte';
+
+  let recentOpen = $state(false);
 
   // Export button reflects the render job: spinner while bouncing, then a brief
   // ✓ / ⚠ so the user sees it finished (or why it didn't) instead of nothing.
@@ -45,14 +50,28 @@
     return parts[parts.length - 1] ?? path;
   }
 
+  // ── Hamburger (file / project actions — absorbed from the old GroveMenuBar) ──
+  const hamburgerMenu = $derived<DropdownItem[]>([
+    { kind: 'separator', label: 'File' },
+    { kind: 'item', id: 'new',      label: 'New Project…',     icon: FolderPlus, shortcut: 'Ctrl+Shift+N', onclick: () => projectActions.newProject() },
+    { kind: 'item', id: 'open',     label: 'Open Project…',    icon: FolderOpen, shortcut: 'Ctrl+O',       onclick: () => projectActions.openProject() },
+    { kind: 'item', id: 'openfile', label: 'Open File…',       icon: FilePlus2,  shortcut: 'Ctrl+Shift+O', onclick: () => projectActions.openFile() },
+    { kind: 'item', id: 'recent',   label: 'Recent Projects…', icon: Clock,                                  onclick: () => { recentOpen = true; } },
+    { kind: 'separator', label: 'Project' },
+    { kind: 'item', id: 'save',   label: 'Save',           icon: Save,     shortcut: 'Ctrl+S',       onclick: () => projectActions.save() },
+    { kind: 'item', id: 'export', label: 'Export to WAV…', icon: Download, shortcut: 'Ctrl+Shift+R', onclick: () => projectActions.exportWav() },
+    { kind: 'separator' },
+    { kind: 'item', id: 'close', label: 'Close Window', icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },
+  ]);
+
   // ── Settings (gear) ─────────────────────────────────────────────────────────
-  const settingsMenu: DropdownItem[] = [
+  const settingsMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'palette', label: 'Command Palette…', icon: Command, shortcut: 'Ctrl+Shift+P', onclick: () => groveStore.openPalette() },
     { kind: 'item', id: 'zen', label: 'Zen mode', icon: Minimize2, shortcut: 'Ctrl+Shift+Z', onclick: () => groveStore.toggleZen() },
     { kind: 'separator' },
     { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings,  shortcut: 'Ctrl+,', onclick: () => groveStore.openSettings() },
     { kind: 'item', id: 'shortcuts', label: 'Keyboard Shortcuts…', icon: Keyboard,  shortcut: 'F1',     onclick: () => groveStore.openShortcuts() },
-  ];
+  ]);
 
   // ── Project fast-swap (recents + open) ────────────────────────────────────────
   const projectName = $derived(projectStore.project?.name ?? 'No project');
@@ -73,20 +92,20 @@
       onclick: () => configStore.setLogThreshold(l),
     })),
   );
-
 </script>
 
-<div class="gtb" data-tauri-drag-region role="banner">
-  <!-- Brand + hamburger -->
-  <div class="no-drag brand" use:tooltip={'grove — music live-coding'}>
+<TitleBar
+  logoTooltip="grove — music live-coding"
+  menu={hamburgerMenu}
+  menuWidth="240px"
+  settings={{ menu: settingsMenu, menuWidth: '220px', tooltip: 'Settings' }}
+>
+  {#snippet logo()}
     <ArborLogo size={22} />
-  </div>
-  <div class="no-drag">
-    <GroveMenuBar />
-  </div>
+  {/snippet}
 
   <!-- Project fast-swap -->
-  <div class="no-drag">
+  {#snippet leading()}
     <Dropdown items={projectItems} position="fixed" direction="down" width="240px">
       {#snippet trigger({ open, toggle })}
         <button class="gtb-project" class:open onclick={toggle} use:tooltip={'Switch project'} aria-haspopup="menu" aria-expanded={open}>
@@ -96,52 +115,52 @@
         </button>
       {/snippet}
     </Dropdown>
-  </div>
+  {/snippet}
 
-  <div class="gtb-spacer" data-tauri-drag-region></div>
+  <!-- Run cluster (IntelliJ-style) + log level -->
+  {#snippet trailing()}
+    <div class="gtb-run-cluster">
+      <button
+        class="gtb-run"
+        class:running={groveEngine.running}
+        onclick={() => void groveEngine.toggleRun(projectStore.activeSource, projectStore.project?.path)}
+        use:tooltip={groveEngine.running ? 'Stop (Ctrl+Space)' : 'Run (Ctrl+Space)'}
+        aria-label={groveEngine.running ? 'Stop' : 'Run'}
+      >
+        {#if groveEngine.running}<Square size={14} fill="currentColor" />{:else}<Play size={14} fill="currentColor" />{/if}
+      </button>
+      <button
+        class="gtb-run-icon"
+        class:rendering={renderStore.active}
+        class:ok={renderStore.status === 'done'}
+        class:err={renderStore.status === 'failed'}
+        onclick={() => projectActions.exportWav()}
+        disabled={renderStore.active}
+        use:tooltip={exportTip}
+        aria-label="Render to WAV"
+      >
+        {#if renderStore.status === 'rendering'}<Spinner size={13} />
+        {:else if renderStore.status === 'done'}<Check size={14} />
+        {:else if renderStore.status === 'failed'}<AlertTriangle size={14} />
+        {:else}<Download size={14} />{/if}
+      </button>
 
-  <!-- Run cluster (IntelliJ-style) + log level, sitting right-of-centre -->
-  <div class="no-drag gtb-run-cluster">
-    <button
-      class="gtb-run"
-      class:running={groveEngine.running}
-      onclick={() => void groveEngine.toggleRun(projectStore.activeSource, projectStore.project?.path)}
-      use:tooltip={groveEngine.running ? 'Stop (Ctrl+Space)' : 'Run (Ctrl+Space)'}
-      aria-label={groveEngine.running ? 'Stop' : 'Run'}
-    >
-      {#if groveEngine.running}<Square size={14} fill="currentColor" />{:else}<Play size={14} fill="currentColor" />{/if}
-    </button>
-    <button
-      class="gtb-run-icon"
-      class:rendering={renderStore.active}
-      class:ok={renderStore.status === 'done'}
-      class:err={renderStore.status === 'failed'}
-      onclick={() => projectActions.exportWav()}
-      disabled={renderStore.active}
-      use:tooltip={exportTip}
-      aria-label="Render to WAV"
-    >
-      {#if renderStore.status === 'rendering'}<Spinner size={13} />
-      {:else if renderStore.status === 'done'}<Check size={14} />
-      {:else if renderStore.status === 'failed'}<AlertTriangle size={14} />
-      {:else}<Download size={14} />{/if}
-    </button>
+      <div class="gtb-sep"></div>
 
-    <div class="gtb-sep"></div>
+      <Dropdown items={logItems} position="fixed" direction="down" width="160px">
+        {#snippet trigger({ open, toggle })}
+          <button class="gtb-log" class:open onclick={toggle} use:tooltip={'Log threshold'} aria-haspopup="menu" aria-expanded={open}>
+            <ScrollText size={13} />
+            <span>{configStore.logThreshold}</span>
+            <ChevronDown size={11} />
+          </button>
+        {/snippet}
+      </Dropdown>
+    </div>
+  {/snippet}
 
-    <Dropdown items={logItems} position="fixed" direction="down" width="160px">
-      {#snippet trigger({ open, toggle })}
-        <button class="gtb-log" class:open onclick={toggle} use:tooltip={'Log threshold'} aria-haspopup="menu" aria-expanded={open}>
-          <ScrollText size={13} />
-          <span>{configStore.logThreshold}</span>
-          <ChevronDown size={11} />
-        </button>
-      {/snippet}
-    </Dropdown>
-  </div>
-
-  <!-- Right cluster: layout toggles + settings gear + window controls -->
-  <div class="no-drag gtb-right">
+  <!-- Layout toggles -->
+  {#snippet actions()}
     <button
       class="gtb-icon" class:active={!groveStore.collapseUi}
       onclick={() => groveStore.toggleCollapseUi()}
@@ -154,35 +173,22 @@
       use:tooltip={groveStore.collapseTabpane ? 'Show editor' : 'Hide editor'}
       aria-label="Toggle editor" aria-pressed={!groveStore.collapseTabpane}
     ><PanelRight size={17} /></button>
-
     <div class="gtb-sep"></div>
+  {/snippet}
 
-    <Dropdown items={settingsMenu} position="fixed" direction="down" width="220px">
-      {#snippet trigger({ open, toggle })}
-        <button class="gtb-icon" class:active={open} onclick={toggle} use:tooltip={'Settings'} aria-label="Settings" aria-haspopup="menu" aria-expanded={open}><Settings size={17} /></button>
-      {/snippet}
-    </Dropdown>
-    <div class="gtb-sep"></div>
+  {#snippet windowControls()}
     <WindowControls />
-  </div>
-</div>
+  {/snippet}
+</TitleBar>
+
+{#if recentOpen}
+  <RecentProjectsModal onClose={() => recentOpen = false} />
+{/if}
 
 <style>
-  .gtb {
-    display: flex;
-    align-items: center;
-    height: var(--titlebar-h, 42px);
-    background: var(--bg-elevated);
-    flex-shrink: 0;
-    position: relative;
-    z-index: 100;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
-  }
-  .no-drag { -webkit-app-region: no-drag; display: flex; align-items: center; }
-  .gtb-spacer { flex: 1; min-width: 24px; height: 100%; }
-
-  .brand { padding: 0 8px; }
-
+  /* Grove-specific controls authored as snippets above. Svelte scopes these
+     rules to the elements declared in this component, so they still apply
+     even though the markup is rendered by the shared TitleBar. */
   .gtb-icon {
     display: flex; align-items: center; justify-content: center;
     width: 34px; height: 34px;
@@ -208,7 +214,7 @@
   .gtb-project :global(svg:first-child) { color: var(--accent); }
 
   /* ── Run cluster ── */
-  .gtb-run-cluster { gap: 2px; height: 100%; padding-right: 4px; }
+  .gtb-run-cluster { display: flex; align-items: center; gap: 2px; height: 100%; padding-right: 4px; }
   .gtb-run, .gtb-run-icon {
     display: flex; align-items: center; justify-content: center;
     width: 30px; height: 28px;
@@ -242,6 +248,5 @@
   .gtb-log span { text-transform: capitalize; }
   .gtb-log:hover, .gtb-log.open { border-color: var(--border-focus); color: var(--text-primary); }
 
-  .gtb-right { height: 100%; }
   .gtb-sep { width: 1px; height: 18px; background: var(--border); margin: 0 6px; flex-shrink: 0; }
 </style>
