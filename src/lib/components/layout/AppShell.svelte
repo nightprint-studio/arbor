@@ -14,7 +14,8 @@
   import PluginSidebarPanel from '../plugins/PluginSidebarPanel.svelte';
   import PluginTreeSidebar from '../plugins/PluginTreeSidebar.svelte';
   import PluginViewPanel from '../plugins/PluginViewPanel.svelte';
-  import ResizablePanel from './ResizablePanel.svelte';
+  import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
+  import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import Sidebar from '../sidebar/Sidebar.svelte';
   import CommitGraph from '../graph/CommitGraph.svelte';
   import CommitDetailPanel from '../graph/CommitDetailPanel.svelte';
@@ -122,25 +123,6 @@
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
 
-  // Custom transition: collapses/expands width (proper IDE sidebar behaviour).
-  function sidebarSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
-    const w = node.getBoundingClientRect().width;
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t: number) => `width: ${t * w}px; min-width: 0; overflow: hidden;`,
-    };
-  }
-
-  // Custom transition: collapses/expands height (IDE bottom panel behaviour).
-  function bottomSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
-    const h = node.getBoundingClientRect().height;
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t: number) => `height: ${t * h}px; min-height: 0; overflow: hidden;`,
-    };
-  }
   import { animStore } from '$lib/stores/animations.svelte';
   import { tabsStore, setTabsPersistHook } from '$lib/stores/tabs.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
@@ -1407,10 +1389,10 @@
     { name: 'titlebar',       selector: '.titlebar' },
     { name: 'tabs',           selector: '.tabbar-wrap' },
     { name: 'activity-left',  selector: '.activity-bar[data-side="left"]' },
-    { name: 'sidebar',        selector: '.sidebar-wrap' },
+    { name: 'sidebar',        selector: '[data-panel="left"]' },
     { name: 'graph',          selector: '.graph-area' },
-    { name: 'bottom',         selector: '.bottom-wrap' },
-    { name: 'right-sidebar',  selector: '.right-sidebar-wrap' },
+    { name: 'bottom',         selector: '[data-panel="bottom"]' },
+    { name: 'right-sidebar',  selector: '[data-panel="right"]' },
     { name: 'activity-right', selector: '.activity-bar[data-side="right"]' },
     { name: 'statusbar',      selector: '.statusbar' },
   ];
@@ -1939,17 +1921,6 @@
     }
   });
 
-  // Custom horizontal-slide transition for the activity bars. Mirrors the
-  // existing `sidebarSlide` helper above but parametrised so it can be
-  // applied to a 38-px wrapper without measuring layout each time.
-  function barSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
-    const w = node.getBoundingClientRect().width || 38;
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t: number) => `width: ${t * w}px; min-width: 0; overflow: hidden;`,
-    };
-  }
 </script>
 
 <!-- Boot-time splash overlay. Self-mounts at startup, listens for
@@ -1976,75 +1947,67 @@
         onManageWorkspaces={() => workspaceManagerOpen = true}
       />
     {:else}
-      <div class="workspace">
-        <!-- Edge hover triggers for the hidden activity-bar mode. Two
-             independent 4-px sliders: hovering the left edge reveals the
-             built-in bar (DOM-leftmost), hovering the right edge reveals
-             the plugin bar (DOM-rightmost). A global mousemove watcher per
-             side clears its flag once the cursor leaves the 38-px peek
-             strip — see `onPeekLeftStart` / `onPeekRightStart` above. -->
-        {#if appearanceStore.activityBarPosition === 'hidden'}
-          <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
-          <div
-            class="activity-bar-edge-trigger edge-left"
-            aria-hidden="true"
-            onmouseenter={onPeekLeftStart}
-          ></div>
-          <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
-          <div
-            class="activity-bar-edge-trigger edge-right"
-            aria-hidden="true"
-            onmouseenter={onPeekRightStart}
-          ></div>
-        {/if}
-        <!-- Built-in activity bar: always mounted unless `hidden` + not peeking.
-             A horizontal-slide transition handles the mount/unmount animation. -->
-        {#if showBuiltinBar}
-          <div class="ab-slot" transition:barSlide={{ duration: animStore.dPanel }}>
-            <ActivityBarLeft />
-          </div>
-        {/if}
+      <WorkspaceShell showLeftRail={showBuiltinBar} showRightRail={showPluginBar}>
+        <!-- Edge hover triggers for the hidden activity-bar mode: two 4-px
+             sliders that reveal the rails on hover when the bars are hidden.
+             The rail slide-in + showBuiltin/showPlugin gating live in
+             <WorkspaceShell>; the peek-state watchers are wired here. -->
+        {#snippet beforeRails()}
+          {#if appearanceStore.activityBarPosition === 'hidden'}
+            <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
+            <div
+              class="activity-bar-edge-trigger edge-left"
+              aria-hidden="true"
+              onmouseenter={onPeekLeftStart}
+            ></div>
+            <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
+            <div
+              class="activity-bar-edge-trigger edge-right"
+              aria-hidden="true"
+              onmouseenter={onPeekRightStart}
+            ></div>
+          {/if}
+        {/snippet}
 
-        <!-- Inset panels container: gaps reveal the workspace bg (IntelliJ-style) -->
-        <div class="panels">
+        {#snippet leftRail()}<ActivityBarLeft />{/snippet}
+        {#snippet rightRail()}<ActivityBarRight />{/snippet}
+
+        {#snippet panels()}
           <!-- Sidebar: shown when a top section is active -->
           {#if showSidebar}
-            <div class="sidebar-wrap"
-                 transition:sidebarSlide={{ duration: animStore.dPanel }}>
-              <ResizablePanel
-                direction="horizontal"
-                initialSize={uiStore.sidebarWidth}
-                minSize={160}
-                maxSize={500}
-                onResize={uiStore.setSidebarWidth}
-              >
-                {#if uiStore.activeSidebarSection === 'gitflow'}
-                  <GitFlowPanel />
-                {:else if uiStore.activeSidebarSection === 'mr'}
-                  <MrSidebar onOpenCreate={openCreateMr} onOpenDetail={openMrDetail} />
-                {:else if uiStore.activeSidebarSection === 'issues'}
-                  <IssuesSidebar />
-                {:else if uiStore.activeSidebarSection === 'files'}
-                  <FileTreePanel />
-                {:else if uiStore.activeSidebarSection === 'reflog'}
-                  <ReflogPanel />
-                {:else if uiStore.activeSidebarSection === 'stats'}
-                  <StatsPanel onOpenFull={() => statsOverlayOpen = true} />
-                {:else if uiStore.activeSidebarSection === 'security'}
-                  <SecurityPanel />
-                {:else if uiStore.activeSidebarSection === 'studio'}
-                  <StudioPanel />
-                {:else if leftPluginKey}
-                  {#if isTreeKind(leftPluginKey)}
-                    <PluginTreeSidebar pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
-                  {:else}
-                    <PluginSidebarPanel pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
-                  {/if}
+            <PanelCard
+              orientation="left"
+              initialSize={uiStore.sidebarWidth}
+              minSize={160}
+              maxSize={500}
+              onResize={uiStore.setSidebarWidth}
+            >
+              {#if uiStore.activeSidebarSection === 'gitflow'}
+                <GitFlowPanel />
+              {:else if uiStore.activeSidebarSection === 'mr'}
+                <MrSidebar onOpenCreate={openCreateMr} onOpenDetail={openMrDetail} />
+              {:else if uiStore.activeSidebarSection === 'issues'}
+                <IssuesSidebar />
+              {:else if uiStore.activeSidebarSection === 'files'}
+                <FileTreePanel />
+              {:else if uiStore.activeSidebarSection === 'reflog'}
+                <ReflogPanel />
+              {:else if uiStore.activeSidebarSection === 'stats'}
+                <StatsPanel onOpenFull={() => statsOverlayOpen = true} />
+              {:else if uiStore.activeSidebarSection === 'security'}
+                <SecurityPanel />
+              {:else if uiStore.activeSidebarSection === 'studio'}
+                <StudioPanel />
+              {:else if leftPluginKey}
+                {#if isTreeKind(leftPluginKey)}
+                  <PluginTreeSidebar pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
                 {:else}
-                  <Sidebar />
+                  <PluginSidebarPanel pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
                 {/if}
-              </ResizablePanel>
-            </div>
+              {:else}
+                <Sidebar />
+              {/if}
+            </PanelCard>
           {/if}
 
           <!-- Main column: editor card (tabs + graph + bisect) + optional
@@ -2100,88 +2063,30 @@
                  or a plugin-registered panel.  Outer div handles open/close
                  animation; inner {#key} fades on panel switch. -->
             {#if showBottomStage || showBottomDetail || showTerminal || showJobOutput || showPipelines || showPluginLogs || showPluginBottom}
-            <div class="bottom-wrap"
-                 data-bottom-panel
-                 transition:bottomSlide={{ duration: animStore.dPanel }}
-                 onintrostart={() => { bottomTransitioning = true; }}
-                 onintroend={() => { bottomTransitioning = false; uiStore.notifyBottomPanelReady(); }}
-                 onoutrostart={() => { bottomTransitioning = true; }}
-                 onoutroend={() => { bottomTransitioning = false; }}>
-              {#if showBottomStage}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={100}
-                  maxSize={600}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+              <PanelCard
+                orientation="bottom"
+                initialSize={uiStore.bottomHeight}
+                minSize={showPipelines ? 140 : (showTerminal || showJobOutput || showPluginLogs) ? 120 : 100}
+                maxSize={(showTerminal || showJobOutput || showPipelines || showPluginLogs) ? 700 : 600}
+                onResize={uiStore.setBottomHeight}
+                onintrostart={() => { bottomTransitioning = true; }}
+                onintroend={() => { bottomTransitioning = false; uiStore.notifyBottomPanelReady(); }}
+                onoutrostart={() => { bottomTransitioning = true; }}
+                onoutroend={() => { bottomTransitioning = false; }}
+              >
+                {#if showBottomStage}
                   <StageArea />
-                </ResizablePanel>
-              {:else if showBottomDetail}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={100}
-                  maxSize={600}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showBottomDetail}
                   <CommitDetailPanel />
-                </ResizablePanel>
-              {:else if showTerminal}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={120}
-                  maxSize={700}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showTerminal}
                   <TerminalPanel />
-                </ResizablePanel>
-              {:else if showJobOutput}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={120}
-                  maxSize={700}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showJobOutput}
                   <JobOutputPanel />
-                </ResizablePanel>
-              {:else if showPipelines}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={140}
-                  maxSize={700}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showPipelines}
                   <PipelinesPanel />
-                </ResizablePanel>
-              {:else if showPluginLogs}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={120}
-                  maxSize={700}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showPluginLogs}
                   <PluginLogsPanel />
-                </ResizablePanel>
-              {:else if showPluginBottom && bottomPluginKey}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={100}
-                  maxSize={600}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showPluginBottom && bottomPluginKey}
                   {#if isTreeKind(bottomPluginKey)}
                     <PluginTreeSidebar
                       pluginName={bottomPluginKey.plugin_name}
@@ -2195,52 +2100,36 @@
                       bottomMode
                     />
                   {/if}
-                </ResizablePanel>
-              {/if}
-            </div>
+                {/if}
+              </PanelCard>
             {/if}
             {/if}
           </div>
 
           <!-- Right sidebar panel — plugin-registered panels (side="right"). -->
           {#if showRightSidebar && rightPluginKey}
-            <div class="right-sidebar-wrap"
-                 transition:sidebarSlide={{ duration: animStore.dPanel }}>
-              <ResizablePanel
-                direction="horizontal"
-                initialSize={uiStore.rightSidebarWidth}
-                minSize={160}
-                maxSize={500}
-                onResize={uiStore.setRightSidebarWidth}
-                reverse
-              >
-                {#if isTreeKind(rightPluginKey)}
-                  <PluginTreeSidebar
-                    pluginName={rightPluginKey.plugin_name}
-                    panelId={rightPluginKey.panel_id}
-                  />
-                {:else}
-                  <PluginSidebarPanel
-                    pluginName={rightPluginKey.plugin_name}
-                    panelId={rightPluginKey.panel_id}
-                  />
-                {/if}
-              </ResizablePanel>
-            </div>
+            <PanelCard
+              orientation="right"
+              initialSize={uiStore.rightSidebarWidth}
+              minSize={160}
+              maxSize={500}
+              onResize={uiStore.setRightSidebarWidth}
+            >
+              {#if isTreeKind(rightPluginKey)}
+                <PluginTreeSidebar
+                  pluginName={rightPluginKey.plugin_name}
+                  panelId={rightPluginKey.panel_id}
+                />
+              {:else}
+                <PluginSidebarPanel
+                  pluginName={rightPluginKey.plugin_name}
+                  panelId={rightPluginKey.panel_id}
+                />
+              {/if}
+            </PanelCard>
           {/if}
-        </div>
-
-        <!-- Right ActivityBar: hidden completely when no plugin has
-             registered a right-side entry. Wrapped in the same slide-in
-             transition as the built-in bar so peeking the right edge
-             animates symmetrically. -->
-        {#if showPluginBar}
-          <div class="ab-slot" transition:barSlide={{ duration: animStore.dPanel }}>
-            <ActivityBarRight />
-          </div>
-        {/if}
-
-      </div>
+        {/snippet}
+      </WorkspaceShell>
     {/if}
   </div>
 
@@ -2709,17 +2598,6 @@
 </div>
 
 <style>
-  /* Activity-bar wrapper. The bar component owns its own 38px width; the
-     wrapper exists purely so the Svelte slide transition can animate
-     `width` on a host element without colliding with the bar's own
-     :global(.activity-bar) rules. flex-shrink:0 keeps the bar from being
-     squeezed when the workspace is narrow. */
-  .ab-slot {
-    display: flex;
-    flex-shrink: 0;
-    overflow: hidden;
-  }
-
   .shell {
     display: flex;
     flex-direction: column;
@@ -2736,32 +2614,6 @@
     flex-direction: column;
     overflow: hidden;
     position: relative;
-  }
-
-  /* ── Workspace: flex row containing ActivityBar + panels container.
-     The workspace background is the "gap" colour revealed between panels,
-     giving the IntelliJ-style soft-rounded inset look.  ActivityBar sits
-     flush against the left edge; the inset starts at `.panels`. */
-  .workspace {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    background: var(--bg-elevated);
-  }
-
-  /* Inset container that holds the sidebar + main column.
-     A small 4px gap between panels reveals the workspace bg colour and
-     keeps the rounded-corner "stacco" visible between sidebar and editor.
-     No top padding: the titlebar flows directly into the panels. */
-  .panels {
-    display: flex;
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-    gap: 4px;
-    padding: 0 4px 4px 4px;
   }
 
   .main-col {
@@ -2792,33 +2644,5 @@
     position: relative;
   }
 
-  /* ── Panel layout wrappers (transitions applied inline via Svelte transition:) ── */
-  .sidebar-wrap {
-    display: flex;
-    height: 100%;
-    flex-shrink: 0;
-    overflow: hidden;
-    background: var(--bg-base);
-    border-radius: var(--radius-lg);
-  }
-  /* Mirror of .sidebar-wrap on the right of .panels. Background + radius
-     match so it reads as a floating card just like the left one. */
-  .right-sidebar-wrap {
-    display: flex;
-    height: 100%;
-    flex-shrink: 0;
-    overflow: hidden;
-    background: var(--bg-base);
-    border-radius: var(--radius-lg);
-  }
-
-  .bottom-wrap {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    overflow: hidden;
-    background: var(--bg-base);
-    border-radius: var(--radius-lg);
-  }
 
 </style>

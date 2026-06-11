@@ -67,7 +67,7 @@
   // Standalone-window chrome (only used when `standalone` — the dedicated
   // File Explorer window opened via the global Ctrl+Shift+E shortcut).
   import WindowControls from '$lib/components/layout/WindowControls.svelte';
-  import ActivityBar from '$lib/components/layout/ActivityBar.svelte';
+  import ActivityBar from '$lib/components/shared/ui/ActivityBar.svelte';
   import ModalSidebarToggle from './ui/ModalSidebarToggle.svelte';
   import Button from './ui/Button.svelte';
   import Card from './ui/Card.svelte';

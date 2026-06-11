@@ -21,7 +21,7 @@
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import ActivityBar from './ActivityBar.svelte';
+  import ActivityBar from '$lib/components/shared/ui/ActivityBar.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   // Activity bar is a narrow vertical rail; tooltips fly out to the right
   // so they don't overlap the bar itself.
@@ -552,7 +552,7 @@
 
 <style>
   /* Container, button, group, spacer, separator and emoji styles live in the
-     shared <ActivityBar> shell (layout/ActivityBar.svelte) as :global() rules
+     shared <ActivityBar> shell (shared/ui/ActivityBar.svelte) as :global() rules
      so they apply equally on the left and right rails. This file only owns
      the combo widget — a left-only construct used by plugin-registered combos
      (e.g. compile-action's run-config picker). */

@@ -14,9 +14,10 @@
     Files, ListTree, Music4, Terminal, AlertTriangle,
     SlidersHorizontal, Crosshair, BookOpen,
   } from 'lucide-svelte';
-  import ActivityBar from '$lib/components/layout/ActivityBar.svelte';
+  import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
   import ResizablePanel from '$lib/components/layout/ResizablePanel.svelte';
-  import { tooltip } from '$lib/actions/tooltip';
+  import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
+  import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
 
   import GroveTitleBar from './shell/GroveTitleBar.svelte';
   import GroveFooter from './shell/GroveFooter.svelte';
@@ -127,33 +128,23 @@
   const showViz    = $derived(!groveStore.collapseUi);
   const showEditor = $derived(!groveStore.collapseTabpane);
 
-  interface Rail { id: string; label: string; icon: any; active: boolean; onclick: () => void; }
-  const leftTop = $derived<Rail[]>([
-    { id: 'files',     label: 'Files',      icon: Files,    active: groveStore.leftPanel === 'files',     onclick: () => groveStore.toggleLeft('files') },
-    { id: 'outline',   label: 'Outline',    icon: ListTree, active: groveStore.leftPanel === 'outline',   onclick: () => groveStore.toggleLeft('outline') },
-    { id: 'soundbank', label: 'Sound bank', icon: Music4,   active: groveStore.leftPanel === 'soundbank', onclick: () => groveStore.toggleLeft('soundbank') },
+  const leftTop = $derived<ActivityRailItem[]>([
+    { id: 'files',     tooltip: 'Files',      icon: Files,    active: groveStore.leftPanel === 'files',     onclick: () => groveStore.toggleLeft('files') },
+    { id: 'outline',   tooltip: 'Outline',    icon: ListTree, active: groveStore.leftPanel === 'outline',   onclick: () => groveStore.toggleLeft('outline') },
+    { id: 'soundbank', tooltip: 'Sound bank', icon: Music4,   active: groveStore.leftPanel === 'soundbank', onclick: () => groveStore.toggleLeft('soundbank') },
   ]);
-  const leftBottom = $derived<Rail[]>([
-    { id: 'mixer',    label: 'Mixer',    icon: SlidersHorizontal, active: groveStore.bottomPanel === 'mixer',    onclick: () => groveStore.toggleBottom('mixer') },
-    { id: 'console',  label: 'Console',  icon: Terminal,      active: groveStore.bottomPanel === 'console',  onclick: () => groveStore.toggleBottom('console') },
-    { id: 'problems', label: 'Problems', icon: AlertTriangle, active: groveStore.bottomPanel === 'problems', onclick: () => groveStore.toggleBottom('problems') },
+  const leftBottom = $derived<ActivityRailItem[]>([
+    { id: 'mixer',    tooltip: 'Mixer',    icon: SlidersHorizontal, active: groveStore.bottomPanel === 'mixer',    onclick: () => groveStore.toggleBottom('mixer') },
+    { id: 'console',  tooltip: 'Console',  icon: Terminal,      active: groveStore.bottomPanel === 'console',  onclick: () => groveStore.toggleBottom('console') },
+    { id: 'problems', tooltip: 'Problems', icon: AlertTriangle, active: groveStore.bottomPanel === 'problems', onclick: () => groveStore.toggleBottom('problems') },
   ]);
-  const rightTop = $derived<Rail[]>([
-    { id: 'inspector', label: 'Inspector', icon: Crosshair, active: groveStore.rightPanel === 'inspector', onclick: () => groveStore.toggleRight('inspector') },
-    { id: 'docs',      label: 'Docs',      icon: BookOpen,  active: groveStore.rightPanel === 'docs',      onclick: () => groveStore.toggleRight('docs') },
+  const rightTop = $derived<ActivityRailItem[]>([
+    { id: 'inspector', tooltip: 'Inspector', icon: Crosshair, active: groveStore.rightPanel === 'inspector', onclick: () => groveStore.toggleRight('inspector') },
+    { id: 'docs',      tooltip: 'Docs',      icon: BookOpen,  active: groveStore.rightPanel === 'docs',      onclick: () => groveStore.toggleRight('docs') },
   ]);
 </script>
 
 <svelte:window onkeydown={onKeyDown} onfocusin={onFocusIn} onpointerdown={onFocusIn} />
-
-{#snippet railButtons(items: Rail[])}
-  {#each items as it (it.id)}
-    {@const Icon = it.icon}
-    <button class="ab-btn" class:ab-active={it.active} onclick={it.onclick} use:tooltip={it.label} aria-pressed={it.active} aria-label={it.label}>
-      <Icon size={18} />
-    </button>
-  {/each}
-{/snippet}
 
 {#snippet leftContent()}
   {#if groveStore.leftPanel === 'files'}<FilesPanel />
@@ -185,21 +176,19 @@
   <GroveTitleBar />
 
   <div class="content-area">
-    <div class="workspace">
-      {#if !groveStore.zen}
-        <ActivityBar side="left" ariaLabel="Navigation rail">
-          {#snippet top()}{@render railButtons(leftTop)}{/snippet}
-          {#snippet bottom()}{@render railButtons(leftBottom)}{/snippet}
-        </ActivityBar>
-      {/if}
+    <WorkspaceShell showLeftRail={!groveStore.zen} showRightRail={!groveStore.zen}>
+      {#snippet leftRail()}
+        <ActivityBar side="left" ariaLabel="Navigation rail" topItems={leftTop} bottomItems={leftBottom} />
+      {/snippet}
+      {#snippet rightRail()}
+        <ActivityBar side="right" ariaLabel="Inspection rail" topItems={rightTop} />
+      {/snippet}
 
-      <div class="panels">
+      {#snippet panels()}
         {#if showLeft}
-          <div class="card">
-            <ResizablePanel direction="horizontal" initialSize={240} minSize={170} maxSize={460}>
-              {@render leftContent()}
-            </ResizablePanel>
-          </div>
+          <PanelCard orientation="left" initialSize={240} minSize={170} maxSize={460}>
+            {@render leftContent()}
+          </PanelCard>
         {/if}
 
         <div class="main-col">
@@ -219,29 +208,19 @@
           </div>
 
           {#if showBottom}
-            <div class="card">
-              <ResizablePanel direction="vertical" reverse initialSize={220} minSize={90} maxSize={560}>
-                {@render bottomContent()}
-              </ResizablePanel>
-            </div>
+            <PanelCard orientation="bottom" initialSize={220} minSize={90} maxSize={560}>
+              {@render bottomContent()}
+            </PanelCard>
           {/if}
         </div>
 
         {#if showRight}
-          <div class="card">
-            <ResizablePanel direction="horizontal" reverse initialSize={300} minSize={210} maxSize={520}>
-              {@render rightContent()}
-            </ResizablePanel>
-          </div>
+          <PanelCard orientation="right" initialSize={300} minSize={210} maxSize={520}>
+            {@render rightContent()}
+          </PanelCard>
         {/if}
-      </div>
-
-      {#if !groveStore.zen}
-        <ActivityBar side="right" ariaLabel="Inspection rail">
-          {#snippet top()}{@render railButtons(rightTop)}{/snippet}
-        </ActivityBar>
-      {/if}
-    </div>
+      {/snippet}
+    </WorkspaceShell>
   </div>
 
   {#if !groveStore.zen}
@@ -268,12 +247,8 @@
   }
   .content-area { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
-  /* Workspace = the bg-elevated "gap" colour revealed between the floating
-     bg-base cards (IntelliJ-style inset). Rails sit flush; inset starts at
-     .panels. Mirrors AppShell exactly. */
-  .workspace { display: flex; flex: 1; min-height: 0; overflow: hidden; background: var(--bg-elevated); }
-  .panels { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; gap: 4px; padding: 0 4px 4px 4px; }
-
+  /* The bg-elevated .workspace + inset .panels live in the shared <WorkspaceShell>.
+     What stays here is grove's own panel arrangement inside the panels snippet. */
   .main-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden; gap: 4px; }
   .body-row { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; gap: 4px; }
 
