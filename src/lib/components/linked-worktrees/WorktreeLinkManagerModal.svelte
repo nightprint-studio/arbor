@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { cubicOut } from 'svelte/easing';
   import {
     Layers, Plus, Trash2, Edit3, Check, X, AlertCircle, GitBranch, Folder,
     RefreshCw, Link2, ChevronDown, Power,
@@ -11,6 +10,7 @@
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { sidebarSlide } from '$lib/utils/panel-transitions';
   import { uiStore }    from '$lib/stores/ui.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
@@ -134,20 +134,6 @@
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
   });
-
-  // Width-collapse transition for the sidebar — drives inline styles
-  // explicitly because CSS flex-basis transitions are unreliable when the
-  // flex layout is rearranging at the same time.  Same approach as
-  // ConflictResolutionModal.sidebarSlide.
-  function sidebarSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
-    const w = node.getBoundingClientRect().width;
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t: number) =>
-        `width: ${t * w}px; min-width: 0; margin-right: ${t * 4}px; opacity: ${t}; overflow: hidden; flex: 0 0 auto;`,
-    };
-  }
 
   function startCreate() {
     creating = true;
@@ -604,7 +590,7 @@
     <div class="split-layout">
           <!-- LEFT: links list -->
           {#if !sidebarCollapsed}
-            <aside class="sidebar" transition:sidebarSlide={{ duration: animStore.dPanel }}>
+            <aside class="sidebar" transition:sidebarSlide={{ duration: animStore.dPanel, gap: 4, fade: true, rigid: true }}>
               <div class="sidebar-header">
                 <span class="sidebar-title">Links</span>
                 <span class="sidebar-count">{links.length}</span>

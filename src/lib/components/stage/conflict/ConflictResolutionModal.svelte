@@ -27,8 +27,8 @@
 -->
 <script lang="ts">
   import { tick } from 'svelte';
-  import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { sidebarSlide } from '$lib/utils/panel-transitions';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalSidebarToggle from '$lib/components/shared/ui/ModalSidebarToggle.svelte';
@@ -960,18 +960,6 @@
     return () => window.removeEventListener('keydown', onKey, { capture: true });
   });
 
-  // Sidebar slide animation — JS-driven (CSS transitions on flex-basis
-  // unreliable across browser versions).
-  function sidebarSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
-    const w = node.getBoundingClientRect().width;
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t: number) =>
-        `width: ${t * w}px; min-width: 0; margin-right: ${t * 4}px; opacity: ${t}; overflow: hidden; flex: 0 0 auto;`,
-    };
-  }
-
   // Label for the action bar 'done' state in blocking mode.
   const blockingDoneLabel = $derived.by(() => {
     if (activeBlockingDecision === 'keep_mine') return 'Resolution: keep mine';
@@ -1046,7 +1034,7 @@
     <div class="cr-body">
 
       {#if !sidebarCollapsed}
-        <div class="sidebar-wrap" transition:sidebarSlide={{ duration: animStore.dPanel }}>
+        <div class="sidebar-wrap" transition:sidebarSlide={{ duration: animStore.dPanel, gap: 4, fade: true, rigid: true }}>
           {#if isBlockingMode}
             <ConflictFileSidebar
               label="Blocking files"

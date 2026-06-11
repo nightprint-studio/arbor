@@ -262,7 +262,7 @@
   }
   /* Only "grow" cards stretch their child to fill. Cards that wrap a
      ResizablePanel must NOT — the panel sizes itself and the card shrink-wraps
-     to it (mirrors AppShell's .sidebar-wrap around ResizablePanel). */
+     to it (same as the shared PanelCard, which these viz/editor cards predate). */
   .card.grow { flex: 1; }
   .card.grow > :global(*) { flex: 1; min-width: 0; min-height: 0; }
 

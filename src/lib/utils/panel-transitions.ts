@@ -15,16 +15,36 @@ interface SlideParams {
   duration?: number;
 }
 
-/** Collapse/expand width — left/right sidebars. */
+interface SidebarSlideParams extends SlideParams {
+  /** Animate a trailing gap (margin-right, px) alongside the width — for
+   *  panels separated from their neighbour by a fixed gap. Default 0. */
+  gap?: number;
+  /** Fade opacity together with the width. Default false. */
+  fade?: boolean;
+  /** Pin `flex: 0 0 auto` during the slide so a flex sibling doesn't reflow
+   *  the collapsing panel mid-transition. Default false. */
+  rigid?: boolean;
+}
+
+/**
+ * Collapse/expand width — left/right sidebars. Defaults match the docked-card
+ * use (PanelCard): plain width collapse. The opt-in `gap`/`fade`/`rigid` flags
+ * cover the in-modal sidebars (conflict resolution, worktree-link manager),
+ * which fade + leave a gap while a flex sibling rearranges.
+ */
 export function sidebarSlide(
   node: HTMLElement,
-  { duration = 200 }: SlideParams = {},
+  { duration = 200, gap = 0, fade = false, rigid = false }: SidebarSlideParams = {},
 ): TransitionConfig {
   const w = node.getBoundingClientRect().width;
   return {
     duration,
     easing: cubicOut,
-    css: (t: number) => `width: ${t * w}px; min-width: 0; overflow: hidden;`,
+    css: (t: number) =>
+      `width: ${t * w}px; min-width: 0; overflow: hidden;`
+      + (gap ? ` margin-right: ${t * gap}px;` : '')
+      + (fade ? ` opacity: ${t};` : '')
+      + (rigid ? ' flex: 0 0 auto;' : ''),
   };
 }
 
