@@ -6,12 +6,14 @@
 //! consuming callback are stood up by [`open_output_stream`] (Stage A).
 
 use std::fmt;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::error::AudioError;
+use crate::meters::{MeterSnapshot, MeterTap};
 use crate::registry::Registry;
 use crate::renderer::Renderer;
 use crate::seam::{AudioCommand, AudioSink, Frame, TrackConfig};
@@ -39,40 +41,44 @@ const RING_CAPACITY: usize = 4096;
 pub struct StreamSink {
     tx: rtrb::Producer<AudioCommand>,
     playhead: Arc<AtomicU64>,
-    /// Shared output peak `[L, R]`, each an `f32` stored as bits, written by the
-    /// callback and read non-RT by the shell for the level meter (out-of-band,
-    /// like `playhead` — not part of the engine↔audio command flow).
-    meter: Arc<[AtomicU32; 2]>,
+    /// Shared audio telemetry (master + per-track peak, voice count, DSP load),
+    /// written by the callback and read non-RT by the shell (out-of-band, like
+    /// `playhead` — not part of the engine↔audio command flow).
+    tap: Arc<MeterTap>,
     sample_rate: u32,
 }
 
 impl StreamSink {
     /// Construct from the ring producer, the shared playhead the callback
-    /// advances, and the shared output-peak meter it writes. Used by
+    /// advances, and the shared telemetry [`MeterTap`] it writes. Used by
     /// [`open_output_stream`]; exposed so an alternate backend can reuse the same
     /// engine-facing type.
     pub fn new(
         tx: rtrb::Producer<AudioCommand>,
         playhead: Arc<AtomicU64>,
-        meter: Arc<[AtomicU32; 2]>,
+        tap: Arc<MeterTap>,
         sample_rate: u32,
     ) -> Self {
         StreamSink {
             tx,
             playhead,
-            meter,
+            tap,
             sample_rate,
         }
     }
 
-    /// The most recent output peak `[left, right]` (`0.0..~1.0`, post-limiter),
-    /// for the level meter. Decays smoothly between buffers ([`METER_DECAY`]).
+    /// The most recent master output peak `[left, right]` (`0.0..~1.0`,
+    /// post-limiter). Decays smoothly between buffers ([`METER_DECAY`]).
     /// Lock-free, non-RT read.
     pub fn peak(&self) -> [f32; 2] {
-        [
-            f32::from_bits(self.meter[0].load(Ordering::Relaxed)),
-            f32::from_bits(self.meter[1].load(Ordering::Relaxed)),
-        ]
+        self.tap.load_master()
+    }
+
+    /// Snapshot the full audio telemetry (master + per-track peak, voice count,
+    /// DSP load) for one front-end frame. Lock-free, non-RT read; the per-track
+    /// `Vec` allocates here, never in the callback.
+    pub fn meters(&self) -> MeterSnapshot {
+        self.tap.snapshot()
     }
 }
 
@@ -156,10 +162,10 @@ pub fn open_output_stream(
     stream_config.buffer_size = cpal::BufferSize::Fixed(TARGET_BUFFER_FRAMES);
 
     // The lock-free command ring (engine → callback), the shared playhead, and
-    // the shared output-peak meter.
+    // the shared telemetry tap (master/per-track peak, voices, DSP load).
     let (tx, rx) = rtrb::RingBuffer::<AudioCommand>::new(RING_CAPACITY);
     let playhead = Arc::new(AtomicU64::new(0));
-    let meter: Arc<[AtomicU32; 2]> = Arc::new([AtomicU32::new(0), AtomicU32::new(0)]);
+    let tap = MeterTap::new();
 
     let mut renderer = Renderer::new(sample_rate, &tracks);
     renderer.set_registry(registry);
@@ -168,17 +174,18 @@ pub fn open_output_stream(
         &stream_config,
         sample_format,
         channels,
+        sample_rate,
         rx,
         renderer,
         Arc::clone(&playhead),
-        Arc::clone(&meter),
+        Arc::clone(&tap),
     )?;
 
     stream
         .play()
         .map_err(|e| AudioError::Device(format!("failed to start stream: {e}")))?;
 
-    let sink = StreamSink::new(tx, playhead, meter, sample_rate);
+    let sink = StreamSink::new(tx, playhead, tap, sample_rate);
     let output = OutputStream {
         _keep_alive: Box::new(stream),
     };
@@ -234,10 +241,11 @@ fn build_stream(
     config: &cpal::StreamConfig,
     sample_format: cpal::SampleFormat,
     channels: usize,
+    sample_rate: u32,
     rx: rtrb::Consumer<AudioCommand>,
     renderer: Renderer,
     playhead: Arc<AtomicU64>,
-    meter: Arc<[AtomicU32; 2]>,
+    tap: Arc<MeterTap>,
 ) -> Result<cpal::Stream, AudioError> {
     fn err_fn(e: cpal::StreamError) {
         eprintln!("grove audio stream error: {e}");
@@ -245,7 +253,8 @@ fn build_stream(
 
     macro_rules! build {
         ($sample:ty) => {{
-            let mut state = CallbackState::new(renderer, rx, playhead, Arc::clone(&meter), channels);
+            let mut state =
+                CallbackState::new(renderer, rx, playhead, Arc::clone(&tap), channels, sample_rate);
             device.build_output_stream(
                 config,
                 move |data: &mut [$sample], _| state.fill::<$sample>(data),
@@ -274,9 +283,12 @@ struct CallbackState {
     renderer: Renderer,
     rx: rtrb::Consumer<AudioCommand>,
     playhead: Arc<AtomicU64>,
-    /// Shared output peak `[L, R]` (f32 bits), updated each buffer for the meter.
-    meter: Arc<[AtomicU32; 2]>,
+    /// Shared telemetry (master/per-track peak, voices, DSP load), updated each
+    /// buffer for the meters.
+    tap: Arc<MeterTap>,
     channels: usize,
+    /// Output rate, for the DSP-load budget (block wall-time = frames / rate).
+    sample_rate: u32,
     /// Pre-sized stereo scratch; grown only on the (cold) path where the host
     /// hands a bigger buffer than we provisioned.
     scratch: Vec<Frame>,
@@ -287,15 +299,17 @@ impl CallbackState {
         renderer: Renderer,
         rx: rtrb::Consumer<AudioCommand>,
         playhead: Arc<AtomicU64>,
-        meter: Arc<[AtomicU32; 2]>,
+        tap: Arc<MeterTap>,
         channels: usize,
+        sample_rate: u32,
     ) -> Self {
         CallbackState {
             renderer,
             rx,
             playhead,
-            meter,
+            tap,
             channels,
+            sample_rate,
             scratch: vec![[0.0; 2]; TARGET_BUFFER_FRAMES as usize],
         }
     }
@@ -312,23 +326,49 @@ impl CallbackState {
         }
         let out = &mut self.scratch[..frames];
 
-        // Drain due commands. The ring is SPSC; `pop` is lock-free.
+        // Drain due commands + render, timing the call for the DSP-load meter.
+        // `Instant::now` is a monotonic clock read — not an alloc/lock/IO, so it's
+        // RT-safe; this is the standard way to meter callback utilisation.
         let mut drained = RingDrain { rx: &mut self.rx };
+        let t0 = Instant::now();
         self.renderer.process(&mut drained, out);
+        let elapsed = t0.elapsed();
 
-        // Update the output peak meter: this block's max |sample| per channel,
-        // floored by the decayed previous peak so the meter falls smoothly. Read
-        // out-of-band by the shell — never feeds back into rendering.
-        let mut block_peak = [0.0f32; 2];
+        // Telemetry tap (out-of-band; never feeds back into rendering). Master +
+        // per-track peaks are this block's max |sample|, floored by the decayed
+        // previous value so the meters fall smoothly; voices/DSP-load reflect the
+        // block just rendered.
+        let mut master_peak = [0.0f32; 2];
         for frame in out.iter() {
-            block_peak[0] = block_peak[0].max(frame[0].abs());
-            block_peak[1] = block_peak[1].max(frame[1].abs());
+            master_peak[0] = master_peak[0].max(frame[0].abs());
+            master_peak[1] = master_peak[1].max(frame[1].abs());
         }
-        for ch in 0..2 {
-            let prev = f32::from_bits(self.meter[ch].load(Ordering::Relaxed));
-            let peak = block_peak[ch].max(prev * METER_DECAY);
-            self.meter[ch].store(peak.to_bits(), Ordering::Relaxed);
+        let prev_master = self.tap.load_master();
+        self.tap.store_master([
+            master_peak[0].max(prev_master[0] * METER_DECAY),
+            master_peak[1].max(prev_master[1] * METER_DECAY),
+        ]);
+
+        let track_peaks = self.renderer.track_peaks();
+        for (i, block) in track_peaks.iter().enumerate() {
+            let prev = self.tap.load_track(i);
+            self.tap.store_track(
+                i,
+                [
+                    block[0].max(prev[0] * METER_DECAY),
+                    block[1].max(prev[1] * METER_DECAY),
+                ],
+            );
         }
+        self.tap.store_track_count(track_peaks.len());
+        self.tap.store_voices(self.renderer.active_voices() as u32);
+
+        // DSP load = compute time / buffer wall-time, EMA-smoothed (a utilisation,
+        // not a peak, so a gentle filter rather than peak-hold-with-decay).
+        let budget = frames.max(1) as f32 / self.sample_rate.max(1) as f32;
+        let instant_load = if budget > 0.0 { elapsed.as_secs_f32() / budget } else { 0.0 };
+        let prev_load = self.tap.load_dsp_load();
+        self.tap.store_dsp_load(prev_load * 0.9 + instant_load * 0.1);
 
         // Interleave the stereo frames into the device buffer.
         for (i, frame) in out.iter().enumerate() {

@@ -17,7 +17,7 @@ use arbor_grove::prelude::{
     evaluate, parse, EvalConfig, EvalOutput, LangError, LogLevel, LogSink, SourceLoader,
 };
 
-use super::events::{emit, Diagnostic, GroveDiagnostics, EVT_LOG};
+use super::events::{emit, Diagnostic, GroveDiagnostics, LogLine, EVT_LOG};
 
 /// A filesystem [`SourceLoader`]: resolves `import` paths against the `.grove`
 /// file's directory. Lives only for the duration of one evaluation (never
@@ -51,7 +51,10 @@ impl LogSink for AppLogSink {
         emit(
             &self.app,
             EVT_LOG,
-            serde_json::json!({ "level": level.as_str(), "message": message }),
+            LogLine {
+                level: level.as_str().to_string(),
+                message: message.to_string(),
+            },
         );
     }
 }

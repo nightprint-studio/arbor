@@ -16,6 +16,11 @@ pub use crate::seam::{
 pub use crate::renderer::{Renderer, DEFAULT_VOICE_CAPACITY};
 pub use crate::stream::{open_output_stream, OutputStream, StreamSink};
 
+// ── Out-of-band telemetry tap (level meters, voices, DSP load) ────────────────
+// Written by the real-time callback, read by the shell; additive, not part of
+// the frozen command seam.
+pub use crate::meters::{MeterSnapshot, MeterTap, MAX_METER_TRACKS};
+
 // ── Sound registry (manifest → voice resolution) ─────────────────────────────
 // The engine/shell build a `Registry` (load a TOML manifest, or install synth
 // presets) and hand it to the `Renderer`; resolution itself is internal.

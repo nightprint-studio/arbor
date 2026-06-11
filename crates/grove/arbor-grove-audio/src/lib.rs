@@ -22,6 +22,7 @@
 //! Reach the public API through [`prelude`] (workspace convention).
 
 pub mod error;
+pub mod meters;
 pub mod prelude;
 pub mod registry;
 pub mod renderer;

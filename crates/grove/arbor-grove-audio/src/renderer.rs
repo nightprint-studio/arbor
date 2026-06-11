@@ -136,6 +136,11 @@ pub struct Renderer {
     track_dry: Vec<Frame>,
     /// Reused per-track delay-bus send accumulator, cleared each frame.
     track_delay_send: Vec<Frame>,
+    /// Per-track post-fader peak `|L|/|R|` over the current `process` block, for
+    /// the out-of-band meter tap. Block-local: cleared at the top of `process`,
+    /// max'd each frame; the callback applies its own decay against the shared
+    /// atomic (so ballistics live in one place, next to the master peak).
+    track_peak: Vec<Frame>,
     master: Master,
     reverb: ConvReverb,
     limiter: Limiter,
@@ -174,6 +179,7 @@ impl Renderer {
             any_soloed: false,
             track_dry: vec![[0.0; 2]; strip_count],
             track_delay_send: vec![[0.0; 2]; strip_count],
+            track_peak: vec![[0.0; 2]; strip_count],
             master: Master::default(),
             reverb: ConvReverb::procedural(DEFAULT_REVERB_SECS, sample_rate as f32),
             limiter: Limiter::new(0.95, 0.05, sample_rate as f32),
@@ -222,6 +228,12 @@ impl Renderer {
     pub fn process(&mut self, commands: &mut dyn Iterator<Item = AudioCommand>, out: &mut [Frame]) {
         let block_end = self.clock + out.len() as u64;
 
+        // Reset the per-track block peak; `render_frame` maxes into it and the
+        // callback reads it after this call (with its own decay).
+        for p in &mut self.track_peak {
+            *p = [0.0; 2];
+        }
+
         // 1. Apply commands. Voice triggers are queued (sample-accurate); mixer
         //    / transport commands take effect immediately.
         for cmd in commands {
@@ -244,6 +256,13 @@ impl Renderer {
     /// Number of currently sounding voices (for meters / tests).
     pub fn active_voices(&self) -> usize {
         self.pool.active()
+    }
+
+    /// Per-track post-fader peak `[L, R]` over the most recent `process` block,
+    /// for the out-of-band meter tap. Indexed by mixer strip; not decayed (the
+    /// caller applies meter ballistics, as with the master peak).
+    pub fn track_peaks(&self) -> &[Frame] {
+        &self.track_peak
     }
 
     // ── internals ────────────────────────────────────────────────────────────
@@ -339,6 +358,7 @@ impl Renderer {
         self.any_soloed = self.strips.iter().any(|s| s.soloed);
         self.track_dry = vec![[0.0; 2]; count];
         self.track_delay_send = vec![[0.0; 2]; count];
+        self.track_peak = vec![[0.0; 2]; count];
     }
 
     /// Start every pending voice whose `start_frame` equals `frame`.
@@ -452,6 +472,7 @@ impl Renderer {
         let strips = &mut self.strips;
         let track_dry = &self.track_dry;
         let track_delay_send = &self.track_delay_send;
+        let track_peak = &mut self.track_peak;
         for (i, strip) in strips.iter_mut().enumerate() {
             // Solo wins over an un-soloed strip; an explicit mute always silences.
             let audible = !strip.muted && (!any_soloed || strip.soloed);
@@ -482,8 +503,18 @@ impl Renderer {
             // Equal-power balance: at centre both gains are ~0.707, so scale by
             // √2 to keep a centred strip unity.
             const CENTER_COMP: f32 = std::f32::consts::SQRT_2;
-            master[0] += s[0] * bl * CENTER_COMP * strip.gain;
-            master[1] += s[1] * br * CENTER_COMP * strip.gain;
+            let contrib = [
+                s[0] * bl * CENTER_COMP * strip.gain,
+                s[1] * br * CENTER_COMP * strip.gain,
+            ];
+            master[0] += contrib[0];
+            master[1] += contrib[1];
+
+            // Post-fader meter: this strip's contribution to the master sum.
+            // Block-max; the callback decays it for the shared tap.
+            let peak = &mut track_peak[i];
+            peak[0] = peak[0].max(contrib[0].abs());
+            peak[1] = peak[1].max(contrib[1].abs());
         }
 
         // Master EQ → compressor → gain.

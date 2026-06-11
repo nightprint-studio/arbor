@@ -23,7 +23,8 @@ use arbor_grove::prelude::{
 use super::config::GroveConfig;
 use super::control::GroveControl;
 use super::events::{
-    emit, ActiveHaps, Meters, TransportState, EVT_ACTIVE_HAPS, EVT_METERS, EVT_TRANSPORT,
+    emit, ActiveHap, ActiveHaps, AudioErrorEvent, Meters, TransportState, EVT_ACTIVE_HAPS,
+    EVT_AUDIO_ERROR, EVT_METERS, EVT_TRANSPORT,
 };
 use super::vsco;
 
@@ -55,8 +56,10 @@ pub fn run(app: AppHandle, rx: Receiver<GroveControl>, cfg: GroveConfig) {
             tracing::error!("grove: failed to open audio output: {e}");
             emit(
                 &app,
-                "grove:audio_error",
-                serde_json::json!({ "message": e.to_string() }),
+                EVT_AUDIO_ERROR,
+                AudioErrorEvent {
+                    message: e.to_string(),
+                },
             );
             return;
         }
@@ -66,7 +69,7 @@ pub fn run(app: AppHandle, rx: Receiver<GroveControl>, cfg: GroveConfig) {
     // The shell keeps its own clone of the live arrangement so it can compute the
     // active-hap highlight (the transport does not expose its `Tracks`).
     let mut current: Tracks<ControlMap> = Tracks { tracks: Vec::new() };
-    let mut last_haps: Vec<[u32; 2]> = Vec::new();
+    let mut last_haps: Vec<ActiveHap> = Vec::new();
     let mut last_emit = Instant::now();
 
     loop {
@@ -99,7 +102,7 @@ pub fn run(app: AppHandle, rx: Receiver<GroveControl>, cfg: GroveConfig) {
         // Active-hap highlight: on change only (cheap query each tick).
         let haps = active_haps(&transport, &current);
         if haps != last_haps {
-            emit(&app, EVT_ACTIVE_HAPS, ActiveHaps { spans: haps.clone() });
+            emit(&app, EVT_ACTIVE_HAPS, ActiveHaps { haps: haps.clone() });
             last_haps = haps;
         }
     }
@@ -132,7 +135,8 @@ fn apply(
     true
 }
 
-/// Emit the current transport position and the output level meter.
+/// Emit the current transport position and the audio telemetry (master +
+/// per-track peak, voice count, DSP load).
 fn emit_transport_and_meters(
     app: &AppHandle,
     transport: &Transport<StreamSink>,
@@ -149,11 +153,22 @@ fn emit_transport_and_meters(
             playing: transport.is_playing(),
             cycle: epoch.cycle_of(now, sr),
             frame: now,
+            cps: epoch.cps,
+            sample_rate: sr,
         },
     );
 
-    let [l, r] = sink.peak();
-    emit(app, EVT_METERS, Meters { l, r });
+    let m = sink.meters();
+    emit(
+        app,
+        EVT_METERS,
+        Meters {
+            master: m.master,
+            tracks: m.tracks,
+            voices: m.voices,
+            dsp_load: m.dsp_load,
+        },
+    );
 }
 
 /// Source spans of every hap sounding at the current playhead, for the editor
@@ -162,7 +177,7 @@ fn emit_transport_and_meters(
 fn active_haps(
     transport: &Transport<StreamSink>,
     current: &Tracks<ControlMap>,
-) -> Vec<[u32; 2]> {
+) -> Vec<ActiveHap> {
     if !transport.is_playing() {
         return Vec::new();
     }
@@ -174,8 +189,9 @@ fn active_haps(
     let cyc = epoch.cycle_of(now, sr).floor() as i64;
     let span = TimeSpan::new(Time::int(cyc), Time::int(cyc + 1));
 
-    let mut spans: Vec<[u32; 2]> = Vec::new();
-    for track in &current.tracks {
+    let mut haps: Vec<ActiveHap> = Vec::new();
+    for (track_idx, track) in current.tracks.iter().enumerate() {
+        let track_id = track_idx as u32;
         for hap in track.pattern.query(span) {
             let Some(src) = hap.span else { continue };
             // Use `whole` (the event's full extent) when present; a continuous
@@ -184,13 +200,18 @@ fn active_haps(
             let begin = epoch.frame_of(whole.begin, sr);
             let end = epoch.frame_of(whole.end, sr);
             if begin <= now && now < end {
-                let pair = [src.start, src.end];
-                if !spans.contains(&pair) {
-                    spans.push(pair);
+                let entry = ActiveHap {
+                    start: src.start,
+                    end: src.end,
+                    track: track_id,
+                };
+                if !haps.contains(&entry) {
+                    haps.push(entry);
                 }
             }
         }
     }
-    spans.sort_unstable();
-    spans
+    // Stable order so the on-change comparison only fires on a real set change.
+    haps.sort_unstable_by_key(|h| (h.track, h.start, h.end));
+    haps
 }

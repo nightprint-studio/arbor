@@ -21,6 +21,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use arbor_grove::prelude::Registry;
 
 use super::config::GroveConfig;
+use super::events::{emit, VscoProgress, EVT_VSCO_PROGRESS};
 use crate::jobs::{JobInfo, JobRegistry, JobStatus};
 
 /// The GitHub archive of the full VSCO 2 CE repo (architecture decision: full
@@ -28,9 +29,6 @@ use crate::jobs::{JobInfo, JobRegistry, JobStatus};
 /// the downloaded sha256 for integrity rather than pinning a known one.
 const VSCO_ARCHIVE_URL: &str =
     "https://github.com/sgossner/VSCO-2-CE/archive/refs/heads/master.zip";
-
-/// Progress event for the grove window during a VSCO download.
-const EVT_VSCO_PROGRESS: &str = "grove:vsco_progress";
 
 /// Install marker, written after a successful extract+index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,10 +359,16 @@ fn emit_progress(
         return;
     }
     *last_pct = pct;
-    let _ = app.emit_to(
-        crate::grove_window::GROVE_WINDOW_LABEL,
+    emit(
+        app,
         EVT_VSCO_PROGRESS,
-        serde_json::json!({ "job_id": job_id, "phase": phase, "done": done, "total": total, "pct": pct }),
+        VscoProgress {
+            job_id: job_id.to_string(),
+            phase: phase.to_string(),
+            done,
+            total,
+            pct,
+        },
     );
     let state = app.state::<crate::AppState>();
     if let Ok(mut jobs) = state.jobs.lock() {
