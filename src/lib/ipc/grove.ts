@@ -264,3 +264,164 @@ export function onGroveVscoProgress(cb: (p: GroveVscoProgress) => void): Promise
 export function onGroveAudioError(cb: (e: GroveAudioError) => void): Promise<UnlistenFn> {
   return listen<GroveAudioError>(GROVE_EVENTS.audioError, (ev) => cb(ev.payload));
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Additive surface (Fase 4 · Step 1) — extends the frozen contract WITHOUT
+// breaking it: new commands only, same snake_case discipline. These feed the
+// Step 2/3 fan-outs (arrangement viz, sound bank, mixer) + the project model.
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── grove_query: the whole arrangement timeline (off-thread Pattern query) ─────
+//
+// `active_haps` only reports what sounds *now*; the arrangement view needs the
+// full timeline. `grove_query` queries the last-evaluated `Tracks` over
+// `[0, cycles)` off the audio thread and returns every hap. Empty when nothing
+// has been evaluated yet.
+
+/** One hap of the queried arrangement. `start`/`end` are in cycles (absolute
+ *  timeline); `has_onset` is false for continuous signals (no `whole`). */
+export interface GroveQueryHap {
+  /** Mixer-strip / arrangement-lane index (0-based). */
+  track: number;
+  /** Onset in cycles (the hap's `whole.begin`, or `part.begin` if continuous). */
+  start: number;
+  /** End in cycles (`whole.end`, or `part.end` if continuous). */
+  end: number;
+  /** True for a discrete event (has a `whole`); false for a continuous signal. */
+  has_onset: boolean;
+  /** Source byte-range start (for editor mapping), or null. */
+  span_start: number | null;
+  /** Source byte-range end, or null. */
+  span_end: number | null;
+  /** Sound name (`bd`, …) if any. */
+  sound: string | null;
+  /** MIDI pitch (C4 = 60) if any. */
+  note: number | null;
+  /** Per-hap gain if any. */
+  gain: number | null;
+}
+
+/** `grove_query` result: every hap over the requested cycle window. */
+export interface GroveQueryHaps {
+  haps: GroveQueryHap[];
+}
+
+/** Query the last-evaluated arrangement over `[0, cycles)`. Empty until an eval
+ *  has succeeded. Off the audio thread — safe to call while playing. */
+export function groveQuery(cycles: number): Promise<GroveQueryHaps> {
+  return invoke('grove_query', { cycles });
+}
+
+// ── grove_sounds: the resolvable instrument list (registry introspection) ──────
+
+export type GroveInstrumentKind = 'synth' | 'sample' | 'sfz';
+
+/** One resolvable voice in the sound registry. */
+export interface GroveInstrument {
+  /** Dotted registry name (`strings.violin`) or a short bank name (`bd`). */
+  name: string;
+  kind: GroveInstrumentKind;
+}
+
+/** `grove_sounds` result. Always includes the built-in default synth. */
+export interface GroveSoundList {
+  instruments: GroveInstrument[];
+}
+
+/** List the instruments the engine can currently resolve (default synth + any
+ *  installed VSCO/manifest entries). Reflects the real registry, not a static
+ *  list, so it tracks what's actually installed. */
+export function groveSounds(): Promise<GroveSoundList> {
+  return invoke('grove_sounds');
+}
+
+// ── grove_set_track: live mixer overrides (ephemeral; eval re-baselines) ───────
+//
+// The source stays authoritative: on every eval the arrangement re-establishes
+// the baseline. These overrides are live session tweaks on top, applied in
+// real-time (smooth knob drag), released at the next eval. Surgical "commit
+// knob → source literal" is the future `grove_set_literal`.
+
+/** A live mixer override target. `master_gain` ignores `track`. */
+export type GroveTrackAction = 'gain' | 'pan' | 'mute' | 'solo' | 'master_gain';
+
+/** Push a live mixer override to the running session (no-op when stopped).
+ *  `value` is 0..1 for gain/pan/master_gain, and 0|1 (off|on) for mute/solo. */
+export function groveSetTrack(action: GroveTrackAction, track: number | null, value: number): Promise<void> {
+  return invoke('grove_set_track', { action, track: track ?? null, value });
+}
+
+// ── Project model: open / create a grove project (folder + grove.toml) ─────────
+
+/** One `.grove` file in a project (source read lazily on the FE via `fs_*`). */
+export interface GroveProjectFile {
+  /** Absolute path. */
+  path: string;
+  /** Project-relative path (forward slashes), e.g. `lib/drums.grove`. */
+  rel: string;
+  /** File name with extension. */
+  name: string;
+  /** Listed under `libraries` in grove.toml: imported-only, its `tracks(…)` ignored. */
+  library: boolean;
+}
+
+/** A grove project manifest (`grove.toml`) + its `.grove` files. */
+export interface GroveProjectInfo {
+  /** Absolute project folder. */
+  path: string;
+  /** `name` from grove.toml (falls back to the folder name). */
+  name: string;
+  /** `audience` ("for whom") from grove.toml. */
+  audience: string;
+  files: GroveProjectFile[];
+}
+
+/** Open a grove project folder: parse `grove.toml`, list its `.grove` files. */
+export function groveOpenProject(dir: string): Promise<GroveProjectInfo> {
+  return invoke('grove_open_project', { dir });
+}
+
+/** Scaffold a new grove project at `dir` (writes `grove.toml` + a starter
+ *  `.grove`), returning the opened manifest. */
+export function groveCreateProject(dir: string, name: string, audience: string): Promise<GroveProjectInfo> {
+  return invoke('grove_create_project', { dir, name, audience });
+}
+
+// ── Persisted grove window state (recents + last project + layout) ─────────────
+//
+// A dedicated grove state file (NOT localStorage, NOT the per-project grove.toml,
+// NOT the typed [grove] settings): recents/last-project are global app state,
+// the layout is the window's panel arrangement.
+
+/** Persisted panel layout of the grove window. */
+export interface GroveLayoutState {
+  /** `files` | `outline` | `soundbank` | null. */
+  left_panel: string | null;
+  /** `console` | `problems` | `mixer` | null. */
+  bottom_panel: string | null;
+  /** `inspector` | `docs` | null. */
+  right_panel: string | null;
+  /** Arrangement (viz) pane hidden. */
+  collapse_viz: boolean;
+  /** Editor pane hidden. */
+  collapse_editor: boolean;
+}
+
+/** The dedicated grove window state file. */
+export interface GroveWorkspaceState {
+  /** Recently-opened project folders, most-recent first. */
+  recent_projects: string[];
+  /** Project folder to reopen on launch, or null. */
+  last_project: string | null;
+  layout: GroveLayoutState;
+}
+
+/** Read the persisted grove window state (recents + last project + layout). */
+export function getGroveState(): Promise<GroveWorkspaceState> {
+  return invoke('get_grove_state');
+}
+
+/** Persist the grove window state. */
+export function setGroveState(state: GroveWorkspaceState): Promise<void> {
+  return invoke('set_grove_state', { state });
+}

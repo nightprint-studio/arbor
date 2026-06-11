@@ -21,7 +21,11 @@ pub mod config;
 mod control;
 mod eval;
 mod events;
+pub mod project;
+pub mod query;
 mod render;
+pub mod sounds;
+pub mod state;
 mod vsco;
 
 use std::sync::mpsc::{self, Sender};
@@ -41,6 +45,14 @@ use control::GroveControl;
 use events::{emit, GroveDiagnostics, EVT_DIAGNOSTICS};
 use render::RenderOpts;
 use vsco::VscoStatus;
+
+// The additive Fase-4 commands live in their own modules (`query`/`sounds`/
+// `state`/`project`, all `pub`). The invoke handler references them by full path
+// (`grove::query::grove_query`, …) like the rest of the app's submodule commands
+// (e.g. `commands::repo_commands::open_repo`) — a `#[tauri::command]` generates
+// helper macros next to the fn, so a bare `pub use` of the fn would not surface
+// them. `grove_set_track` stays defined inline below (referenced as
+// `grove::grove_set_track`).
 
 /// Per-window grove runtime state, managed in Tauri.
 #[derive(Default)]
@@ -196,6 +208,42 @@ pub async fn grove_transport(
         }
         other => return Err(AppError::Unsupported(format!("grove transport: {other}"))),
     }
+    Ok(())
+}
+
+/// Push a **live mixer override** to the running session (no-op when stopped).
+/// `action` ∈ `gain` | `pan` | `mute` | `solo` | `master_gain`. These are
+/// ephemeral session tweaks: the next `grove_eval` re-baselines the mixer from
+/// the source. `value` is `0..1` for gain/pan/master_gain, `0|1` for mute/solo;
+/// `track` is ignored for `master_gain`.
+#[tauri::command]
+pub async fn grove_set_track(
+    grove: State<'_, GroveState>,
+    action: String,
+    track: Option<u32>,
+    value: f64,
+) -> Result<(), AppError> {
+    let msg = match action.as_str() {
+        "gain" => GroveControl::SetTrackGain {
+            track: track.unwrap_or(0),
+            gain: value as f32,
+        },
+        "pan" => GroveControl::SetTrackPan {
+            track: track.unwrap_or(0),
+            pan: value as f32,
+        },
+        "mute" => GroveControl::SetTrackMute {
+            track: track.unwrap_or(0),
+            mute: value != 0.0,
+        },
+        "solo" => GroveControl::SetTrackSolo {
+            track: track.unwrap_or(0),
+            solo: value != 0.0,
+        },
+        "master_gain" => GroveControl::SetMasterGain { gain: value as f32 },
+        other => return Err(AppError::Unsupported(format!("grove set_track: {other}"))),
+    };
+    grove.send_if_live(msg);
     Ok(())
 }
 

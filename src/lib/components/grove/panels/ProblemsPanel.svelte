@@ -7,7 +7,7 @@
   import { AlertTriangle, CircleAlert, CircleCheckBig, Search, X } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { groveStore } from '../grove-store.svelte';
-  import { MOCK_PROBLEMS } from '../mock/data';
+  import { diagnosticsStore } from '../stores/engine.svelte';
 
   let query = $state('');
   let searchEl = $state<HTMLInputElement | null>(null);
@@ -18,32 +18,42 @@
     if (groveStore.findPending) { searchEl?.focus(); searchEl?.select(); groveStore.clearFind(); }
   });
 
-  const errorCount = $derived(MOCK_PROBLEMS.filter(p => p.severity === 'error').length);
-  const warnCount = $derived(MOCK_PROBLEMS.filter(p => p.severity === 'warning').length);
+  // 'info' is folded into the "warnings" bucket (a third minor category with no
+  // dedicated chip yet) so every diagnostic is reachable.
+  const problems = $derived(diagnosticsStore.errors);
+  const isError  = (sev: string) => sev === 'error';
+  const errorCount = $derived(problems.filter(p => isError(p.severity)).length);
+  const warnCount  = $derived(problems.filter(p => !isError(p.severity)).length);
+
+  /** Byte-range location label (the editor/tree-sitter mapping isn't here yet). */
+  function loc(start: number | null, end: number | null): string {
+    if (start === null) return '';
+    return end !== null && end !== start ? `@${start}–${end}` : `@${start}`;
+  }
 
   const visible = $derived.by(() => {
     const q = query.trim().toLowerCase();
-    return MOCK_PROBLEMS.filter(p =>
-      (p.severity === 'error' ? showError : showWarning) &&
-      (!q || p.message.toLowerCase().includes(q) || p.file.toLowerCase().includes(q)),
+    return problems.filter(p =>
+      (isError(p.severity) ? showError : showWarning) &&
+      (!q || p.message.toLowerCase().includes(q)),
     );
   });
 
-  function clear() { query = ''; searchEl?.focus(); }
+  function clearSearch() { query = ''; searchEl?.focus(); }
 </script>
 
 <div class="prob">
   <div class="prob-head">
     <AlertTriangle size={13} />
     <span class="prob-title">Problems</span>
-    <span class="prob-meta">{visible.length}/{MOCK_PROBLEMS.length}</span>
+    <span class="prob-meta">{visible.length}/{problems.length}</span>
   </div>
 
   <div class="prob-toolbar">
     <div class="prob-search">
       <Search size={12} />
       <input bind:this={searchEl} bind:value={query} placeholder="Search… (Ctrl+F)" spellcheck="false" />
-      {#if query}<button class="prob-clear" onclick={clear} aria-label="Clear search"><X size={11} /></button>{/if}
+      {#if query}<button class="prob-clear" onclick={clearSearch} aria-label="Clear search"><X size={11} /></button>{/if}
     </div>
     <div class="prob-filters">
       <button class="sev-chip sev-error" class:off={!showError} onclick={() => showError = !showError} use:tooltip={'Errors'} aria-pressed={showError}>
@@ -56,19 +66,20 @@
   </div>
 
   <div class="prob-body">
-    {#if MOCK_PROBLEMS.length === 0}
+    {#if problems.length === 0}
       <div class="prob-clear-state"><CircleCheckBig size={14} /> No problems detected</div>
     {:else if visible.length === 0}
       <div class="prob-empty">{query ? `No problems match “${query}”.` : 'No problems for the current filter.'}</div>
     {:else}
-      {#each visible as p (p.id)}
+      {#each visible as p, i (i)}
+        {@const sevClass = isError(p.severity) ? 'error' : 'warning'}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="prob-line" onclick={() => { /* mock: jump to span */ }}>
-          <span class="prob-icon sev-{p.severity}">
-            {#if p.severity === 'error'}<CircleAlert size={13} />{:else}<AlertTriangle size={13} />{/if}
+        <div class="prob-line" onclick={() => { /* TODO: jump to span */ }}>
+          <span class="prob-icon sev-{sevClass}">
+            {#if isError(p.severity)}<CircleAlert size={13} />{:else}<AlertTriangle size={13} />{/if}
           </span>
           <span class="prob-msg">{p.message}</span>
-          <span class="prob-loc">{p.file}:{p.line}:{p.col}</span>
+          <span class="prob-loc">{loc(p.start, p.end)}</span>
         </div>
       {/each}
     {/if}

@@ -42,9 +42,9 @@ pub use arbor_grove_lang::prelude::{
 // `AudioError` kept by name.
 pub use arbor_grove_audio::prelude::{
     open_output_stream, AudioCommand, AudioError, AudioSink, CompSettings, DelayConfig, EqBand,
-    EqBandKind, Frame, MeterSnapshot, MeterTap, OutputStream, Registry, Renderer, ReverbIr,
-    StreamSink, SynthPreset, TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource, Waveform,
-    RecordingSink, DEFAULT_VOICE_CAPACITY, MAX_METER_TRACKS,
+    EqBandKind, Frame, InstrumentInfo, InstrumentKind, MeterSnapshot, MeterTap, OutputStream,
+    Registry, Renderer, ReverbIr, StreamSink, SynthPreset, TrackConfig, VoiceEvent, VoiceId,
+    VoiceParams, VoiceSource, Waveform, RecordingSink, DEFAULT_VOICE_CAPACITY, MAX_METER_TRACKS,
 };
 
 // ── arbor-grove-engine — the timing runtime ──────────────────────────────────

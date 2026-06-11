@@ -33,8 +33,46 @@
   import ArrangementView from './viz/ArrangementView.svelte';
   import TabbedEditor from './editor/TabbedEditor.svelte';
 
+  import { onMount, onDestroy } from 'svelte';
+  import type { UnlistenFn } from '@tauri-apps/api/event';
   import { groveStore } from './grove-store.svelte';
+  import { groveEngine } from './stores/engine.svelte';
+  import { configStore } from './stores/config.svelte';
+  import { vscoStore } from './stores/vsco.svelte';
+  import { workspaceStore } from './stores/workspace.svelte';
+  import { projectStore } from './stores/project.svelte';
+  import { projectActions } from './stores/project-actions.svelte';
+  import GroveProjectActions from './shell/GroveProjectActions.svelte';
   import { GROVE_BINDINGS, matchesGrove } from './grove-keybindings';
+
+  let unEngine: UnlistenFn | null = null;
+  let unVsco:   UnlistenFn | null = null;
+
+  onMount(async () => {
+    // Live engine + VSCO streams (each grove window owns its own listeners).
+    unEngine = await groveEngine.subscribe();
+    unVsco   = await vscoStore.subscribe();
+    void configStore.loadConfig();
+    void vscoStore.refresh();
+    // Restore the persisted layout, then best-effort reopen the last project.
+    await workspaceStore.load();
+    groveStore.applyLayout(workspaceStore.layout);
+    if (workspaceStore.lastProject) {
+      projectStore.open(workspaceStore.lastProject).catch(() => {});
+    }
+  });
+
+  onDestroy(() => {
+    unEngine?.();
+    unVsco?.();
+  });
+
+  // Mirror layout changes to the persisted window state (debounced in the
+  // store). Read the snapshot inside the effect so it tracks the panel state.
+  $effect(() => {
+    const snap = groveStore.layoutSnapshot();
+    workspaceStore.persistLayout(snap);
+  });
 
   let editor = $state<{ openGoto: () => void; newFile: () => void } | null>(null);
   let editorEl = $state<HTMLElement | null>(null);
@@ -52,9 +90,14 @@
       e.preventDefault();
       if (b.id === 'goto_line') editor?.openGoto();
       else if (b.id === 'new_file') editor?.newFile();
-      else if (b.id === 'run_stop') groveStore.toggleRun();
+      else if (b.id === 'run_stop') void groveEngine.toggleRun(projectStore.activeSource, projectStore.project?.path);
       else if (b.id === 'zen') groveStore.toggleZen();
       else if (b.id === 'find') groveStore.requestFind();
+      else if (b.id === 'new_project') projectActions.newProject();
+      else if (b.id === 'open_project') projectActions.openProject();
+      else if (b.id === 'open_file') projectActions.openFile();
+      else if (b.id === 'save') projectActions.save();
+      else if (b.id === 'render_wav') projectActions.exportWav();
       return;
     }
   }
@@ -186,6 +229,10 @@
     <GroveFooter />
   {/if}
 </div>
+
+<!-- Project/file pickers (New / Open / Export) — one mount for the whole window;
+     menu, titlebar, and keyboard shortcuts all drive these via projectActions. -->
+<GroveProjectActions />
 
 <style>
   .shell {

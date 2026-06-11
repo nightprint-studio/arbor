@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 use arbor_grove::prelude::{
-    open_output_stream, AudioSink, ControlMap, Epoch, Registry, StreamSink, Time, TimeSpan, Tracks,
-    Transport,
+    open_output_stream, AudioCommand, AudioSink, ControlMap, Epoch, Registry, StreamSink, Time,
+    TimeSpan, Tracks, Transport,
 };
 
 use super::config::GroveConfig;
@@ -130,6 +130,23 @@ fn apply(
             transport.seek(Time::int(cycle.round() as i64));
         }
         GroveControl::SetCps { cps } => transport.set_cps(cps),
+        // Live mixer overrides: forwarded straight to the sink (non-blocking;
+        // dropping the command on a full queue is acceptable for a knob drag).
+        GroveControl::SetTrackGain { track, gain } => {
+            let _ = transport.sink_mut().send(AudioCommand::SetTrackGain(track, gain));
+        }
+        GroveControl::SetTrackPan { track, pan } => {
+            let _ = transport.sink_mut().send(AudioCommand::SetTrackPan(track, pan));
+        }
+        GroveControl::SetTrackMute { track, mute } => {
+            let _ = transport.sink_mut().send(AudioCommand::SetTrackMute(track, mute));
+        }
+        GroveControl::SetTrackSolo { track, solo } => {
+            let _ = transport.sink_mut().send(AudioCommand::SetTrackSolo(track, solo));
+        }
+        GroveControl::SetMasterGain { gain } => {
+            let _ = transport.sink_mut().send(AudioCommand::SetMasterGain(gain));
+        }
         GroveControl::Shutdown => return false,
     }
     true

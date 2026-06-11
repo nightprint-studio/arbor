@@ -5,50 +5,53 @@
    * **text search** (Ctrl+F focuses it) and **per-level filter chips** (e.g.
    * isolate warn/error). Click a warn/error line to "jump to span" (mocked).
    */
-  import { Terminal, ArrowDownToLine, Search, X } from 'lucide-svelte';
+  import { Terminal, ArrowDownToLine, Search, X, Trash2 } from 'lucide-svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { groveStore, levelsAtOrAbove, LOG_LEVELS } from '../grove-store.svelte';
-  import { MOCK_LOGS } from '../mock/data';
-  import type { LogLevel } from '../mock/types';
+  import { configStore } from '../stores/config.svelte';
+  import { logStore } from '../stores/engine.svelte';
 
   let query = $state('');
   let searchEl = $state<HTMLInputElement | null>(null);
+  let bodyEl = $state<HTMLElement | null>(null);
   // Per-level view filter (on top of the emission threshold). Default all on.
-  let levelOn = $state<Record<LogLevel, boolean>>({ trace: true, debug: true, info: true, warn: true, error: true });
+  let levelOn = $state<Record<string, boolean>>({ trace: true, debug: true, info: true, warn: true, error: true });
 
   // Ctrl+F → focus the search field.
   $effect(() => {
     if (groveStore.findPending) { searchEl?.focus(); searchEl?.select(); groveStore.clearFind(); }
   });
 
-  const emitted = $derived(levelsAtOrAbove(groveStore.logLevel));
+  const emitted = $derived(levelsAtOrAbove(configStore.logThreshold));
   const visible = $derived.by(() => {
     const q = query.trim().toLowerCase();
-    return MOCK_LOGS.filter(l =>
-      emitted.has(l.level) && levelOn[l.level] &&
-      (!q || l.text.toLowerCase().includes(q) || l.source.toLowerCase().includes(q)),
+    return logStore.lines.filter(l =>
+      emitted.has(l.level) && (levelOn[l.level] ?? true) &&
+      (!q || l.message.toLowerCase().includes(q)),
     );
   });
 
-  function toggleLevel(l: LogLevel) { levelOn = { ...levelOn, [l]: !levelOn[l] }; }
-  function clear() { query = ''; searchEl?.focus(); }
+  function toggleLevel(l: string) { levelOn = { ...levelOn, [l]: !levelOn[l] }; }
+  function clearSearch() { query = ''; searchEl?.focus(); }
+  function scrollToBottom() { if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight; }
 </script>
 
 <div class="con">
   <div class="con-head">
     <Terminal size={13} />
     <span class="con-title">Console</span>
-    <span class="con-meta">{visible.length}/{MOCK_LOGS.length}</span>
+    <span class="con-meta">{visible.length}/{logStore.count}</span>
     <span class="con-spacer"></span>
-    <button class="con-btn" use:tooltip={'Scroll to bottom'} aria-label="Scroll to bottom"><ArrowDownToLine size={13} /></button>
+    <button class="con-btn" onclick={scrollToBottom} use:tooltip={'Scroll to bottom'} aria-label="Scroll to bottom"><ArrowDownToLine size={13} /></button>
+    <button class="con-btn" onclick={() => logStore.clear()} use:tooltip={'Clear console'} aria-label="Clear console"><Trash2 size={13} /></button>
   </div>
 
   <div class="con-toolbar">
     <div class="con-search">
       <Search size={12} />
       <input bind:this={searchEl} bind:value={query} placeholder="Search… (Ctrl+F)" spellcheck="false" />
-      {#if query}<button class="con-clear" onclick={clear} aria-label="Clear search"><X size={11} /></button>{/if}
+      {#if query}<button class="con-clear" onclick={clearSearch} aria-label="Clear search"><X size={11} /></button>{/if}
     </div>
     <div class="con-levels">
       {#each LOG_LEVELS as l (l)}
@@ -66,18 +69,16 @@
     </div>
   </div>
 
-  <div class="con-body">
+  <div class="con-body" bind:this={bodyEl}>
     {#if visible.length === 0}
       <EmptyState message={query ? `No log lines match “${query}”.` : 'No log lines for the current filter.'} />
     {:else}
       {#each visible as l (l.id)}
         {@const clickable = l.level === 'warn' || l.level === 'error'}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="con-line" class:clickable onclick={() => { /* mock: jump to span */ }}>
-          <span class="con-cycle">c{l.cycle}</span>
+        <div class="con-line" class:clickable onclick={() => { /* TODO: jump to span */ }}>
           <span class="con-level lvl-{l.level}">{l.level}</span>
-          <span class="con-source">{l.source}</span>
-          <span class="con-text">{l.text}</span>
+          <span class="con-text">{l.message}</span>
         </div>
       {/each}
     {/if}
@@ -154,9 +155,7 @@
   }
   .con-line.clickable { cursor: pointer; }
   .con-line.clickable:hover { background: var(--bg-hover); }
-  .con-cycle { color: var(--text-disabled); width: 30px; flex-shrink: 0; }
   .con-level { width: 42px; flex-shrink: 0; font-weight: 600; text-transform: uppercase; font-size: 9.5px; }
-  .con-source { color: var(--text-muted); width: 56px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; }
   .con-text { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
 
   .con-level.lvl-trace { color: var(--text-disabled); }

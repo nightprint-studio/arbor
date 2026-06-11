@@ -1,50 +1,45 @@
 <script lang="ts">
   /**
-   * Grove footer — a grove-specific status strip: transport position · cps ·
-   * active voices · DSP load · sample rate/buffer · cursor row:col · render
-   * state. All mocked; the voices/DSP figures idle when stopped.
+   * Grove footer — a grove-specific status strip wired to the live engine
+   * telemetry: transport position · cps · active voices · DSP load · sample
+   * rate · cursor row:col · render state. All figures come from the transport /
+   * meters streams (no RAF, no mock); they idle naturally when stopped because
+   * the engine stops emitting movement.
    */
-  import { Activity, Cpu, AudioWaveform, MapPin } from 'lucide-svelte';
-  import { groveStore } from '../grove-store.svelte';
+  import { Activity, Cpu, AudioWaveform, MapPin, AlertTriangle } from 'lucide-svelte';
+  import { tooltip } from '$lib/actions/tooltip';
+  import { transportStore, metersStore, audioErrorStore } from '../stores/engine.svelte';
 
-  // Fake but plausible live figures while running.
-  const voices = $derived(groveStore.running ? 14 : 0);
-  const dsp = $derived(groveStore.running ? 23 : 0);
-  // A slowly-advancing cycle/position label while running.
-  let posCycle = $state(0);
-  let posFrac = $state(0);
-  $effect(() => {
-    if (!groveStore.running) return;
-    let raf = 0; let last = performance.now();
-    const tick = (now: number) => {
-      const dt = now - last; last = now;
-      posFrac += dt / 2000;            // cps 0.5 → 2s/cycle
-      while (posFrac >= 1) { posFrac -= 1; posCycle += 1; }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  });
-  const posLabel = $derived(`${posCycle}.${Math.floor(posFrac * 4) + 1}`);
+  // cps: 2-3 significant digits, trimming trailing zeros (0.5, 0.35, 1.25…).
+  const cpsLabel = $derived(Number(transportStore.cps.toPrecision(3)).toString());
+  const dspPct   = $derived(Math.round(metersStore.dspLoad * 100));
+  const srLabel  = $derived(`${transportStore.sampleRate / 1000} kHz`);
 </script>
 
 <div class="gf">
   <span class="gf-item gf-pos">
     <Activity size={12} />
-    <span class:live={groveStore.running}>{posLabel}</span>
+    <span class:live={transportStore.playing}>{transportStore.position}</span>
   </span>
-  <span class="gf-item">cps 0.5</span>
+  <span class="gf-item">cps {cpsLabel}</span>
   <span class="gf-sep"></span>
-  <span class="gf-item"><AudioWaveform size={12} /> {voices} voices</span>
-  <span class="gf-item"><Cpu size={12} /> {dsp}% DSP</span>
+  <span class="gf-item"><AudioWaveform size={12} /> {metersStore.voices} voices</span>
+  <span class="gf-item"><Cpu size={12} /> {dspPct}% DSP</span>
   <span class="gf-sep"></span>
-  <span class="gf-item">48 kHz · 512</span>
+  {#if audioErrorStore.message}
+    <span class="gf-item gf-error" use:tooltip={audioErrorStore.message}>
+      <AlertTriangle size={12} /> audio error
+    </span>
+  {:else}
+    <span class="gf-item">{srLabel}</span>
+  {/if}
 
   <span class="gf-spacer"></span>
 
-  <span class="gf-item"><MapPin size={12} /> Ln 15, Col 3</span>
+  <!-- TODO editor fan-out: wire Ln/Col to the live editor caret. -->
+  <span class="gf-item"><MapPin size={12} /> Ln 1, Col 1</span>
   <span class="gf-sep"></span>
-  <span class="gf-item gf-render">{groveStore.running ? 'playing' : 'idle'}</span>
+  <span class="gf-item gf-render">{transportStore.playing ? 'playing' : 'idle'}</span>
 </div>
 
 <style>
@@ -61,6 +56,8 @@
   .gf-item :global(svg) { color: var(--text-disabled); }
   .gf-pos { font-variant-numeric: tabular-nums; }
   .gf-pos .live { color: var(--success); font-weight: 600; }
+  .gf-error { color: var(--error); }
+  .gf-error :global(svg) { color: var(--error); }
   .gf-spacer { flex: 1; }
   .gf-sep { width: 1px; height: 12px; background: var(--border-subtle); }
   .gf-render { text-transform: uppercase; letter-spacing: 0.4px; font-size: 10px; }

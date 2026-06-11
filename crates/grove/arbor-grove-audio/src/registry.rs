@@ -160,6 +160,23 @@ impl Default for SampleParams {
     }
 }
 
+/// The broad category of a resolvable instrument, for registry introspection
+/// (the sound-bank UI). Mirrors the manifest's `kind`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstrumentKind {
+    Synth,
+    Sample,
+    Sfz,
+}
+
+/// One resolvable instrument: its registry name + how it's voiced. Introspection
+/// only — carries no resident data, so it's cheap to clone across the IPC seam.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InstrumentInfo {
+    pub name: String,
+    pub kind: InstrumentKind,
+}
+
 /// The resolved sound registry: name → entry, plus resident SFZ + samples.
 #[derive(Debug)]
 pub struct Registry {
@@ -433,6 +450,25 @@ impl Registry {
     /// sources too).
     pub(crate) fn fallback(&self) -> SynthPreset {
         self.fallback
+    }
+
+    /// Enumerate every resolvable instrument (sorted by name). Introspection for
+    /// the sound-bank UI; reflects exactly what this registry resolves.
+    pub fn instruments_list(&self) -> Vec<InstrumentInfo> {
+        let mut list: Vec<InstrumentInfo> = self
+            .entries
+            .iter()
+            .map(|(name, entry)| InstrumentInfo {
+                name: name.clone(),
+                kind: match entry {
+                    Entry::Synth(_) => InstrumentKind::Synth,
+                    Entry::Sample { .. } => InstrumentKind::Sample,
+                    Entry::Sfz { .. } => InstrumentKind::Sfz,
+                },
+            })
+            .collect();
+        list.sort_by(|a, b| a.name.cmp(&b.name));
+        list
     }
 }
 

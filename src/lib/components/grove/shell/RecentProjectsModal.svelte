@@ -1,26 +1,38 @@
 <script lang="ts">
   /**
    * Recent Projects — a proper Arbor modal (Modal + ModalHeader) listing the
-   * recent grove projects, searchable, keyboard-navigable. Mocked: picking a
-   * project just closes the modal. Reuses Arbor's modal shell for consistency.
+   * recent grove projects (from the persisted workspace state), searchable and
+   * keyboard-navigable. Picking one opens it via the project store.
    */
   import { FolderGit2, Search } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
-  import { RECENT_PROJECTS, MOCK_PROJECT } from '../mock/data';
+  import { workspaceStore } from '../stores/workspace.svelte';
+  import { projectStore } from '../stores/project.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
   let query = $state('');
+
+  /** Last path segment (forward- or back-slash). */
+  function basename(path: string): string {
+    const parts = path.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] ?? path;
+  }
+
   const filtered = $derived.by(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return RECENT_PROJECTS;
-    return RECENT_PROJECTS.filter(p => p.name.toLowerCase().includes(q) || p.audience.toLowerCase().includes(q));
+    const recents = workspaceStore.recentProjects;
+    if (!q) return recents;
+    return recents.filter(p => p.toLowerCase().includes(q));
   });
 
-  function pick(_id: string) { onClose(); /* mock: would switch project */ }
+  function pick(path: string) {
+    onClose();
+    void projectStore.open(path).catch(() => {});
+  }
 </script>
 
 <Modal {onClose} size="md" ariaLabel="Recent projects">
@@ -36,15 +48,16 @@
     </div>
 
     {#if filtered.length === 0}
-      <EmptyState message="No recent projects match your search." />
+      <EmptyState message={query ? 'No recent projects match your search.' : 'No recent projects yet.'} />
     {:else}
       <div class="rp-list">
-        {#each filtered as p (p.id)}
-          <button class="rp-item" class:current={p.id === MOCK_PROJECT.id} onclick={() => pick(p.id)}>
+        {#each filtered as path (path)}
+          {@const current = path === projectStore.project?.path}
+          <button class="rp-item" class:current onclick={() => pick(path)}>
             <span class="rp-icon"><FolderGit2 size={18} /></span>
             <span class="rp-body">
-              <span class="rp-name">{p.name}{#if p.id === MOCK_PROJECT.id}<span class="rp-open">open</span>{/if}</span>
-              <span class="rp-audience">{p.audience}</span>
+              <span class="rp-name">{basename(path)}{#if current}<span class="rp-open">open</span>{/if}</span>
+              <span class="rp-audience">{path}</span>
             </span>
           </button>
         {/each}

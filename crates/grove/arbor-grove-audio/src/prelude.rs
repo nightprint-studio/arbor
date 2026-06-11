@@ -24,7 +24,7 @@ pub use crate::meters::{MeterSnapshot, MeterTap, MAX_METER_TRACKS};
 // ── Sound registry (manifest → voice resolution) ─────────────────────────────
 // The engine/shell build a `Registry` (load a TOML manifest, or install synth
 // presets) and hand it to the `Renderer`; resolution itself is internal.
-pub use crate::registry::{Registry, SynthPreset};
+pub use crate::registry::{InstrumentInfo, InstrumentKind, Registry, SynthPreset};
 pub use crate::synth::Waveform;
 
 // ── Test / offline recorder sink ─────────────────────────────────────────────

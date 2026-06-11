@@ -18,11 +18,17 @@ export interface GroveBinding {
 }
 
 export const GROVE_BINDINGS: GroveBinding[] = [
-  { id: 'goto_line', key: 'g', ctrl: true,  scope: 'editor', description: 'Go to line' },
-  { id: 'new_file',  key: 'n', ctrl: true,  scope: 'editor', description: 'New .grove in the tab pane' },
-  { id: 'run_stop',  key: ' ', ctrl: true,  scope: 'global', description: 'Toggle Run / Stop' },
-  { id: 'zen',       key: 'z', ctrl: true, shift: true, scope: 'global', description: 'Toggle Zen mode' },
-  { id: 'find',      key: 'f', ctrl: true,  scope: 'global', description: 'Search in the Console / Problems' },
+  { id: 'goto_line',    key: 'g', ctrl: true,  scope: 'editor', description: 'Go to line' },
+  { id: 'new_file',     key: 'n', ctrl: true,  scope: 'editor', description: 'New .grove in the tab pane' },
+  { id: 'run_stop',     key: ' ', ctrl: true,  scope: 'global', description: 'Toggle Run / Stop' },
+  { id: 'zen',          key: 'z', ctrl: true, shift: true, scope: 'global', description: 'Toggle Zen mode' },
+  { id: 'find',         key: 'f', ctrl: true,  scope: 'global', description: 'Search in the Console / Problems' },
+  // Project / transport — global so they work from any pane.
+  { id: 'new_project',  key: 'n', ctrl: true, shift: true, scope: 'global', description: 'New project' },
+  { id: 'open_project', key: 'o', ctrl: true,  scope: 'global', description: 'Open project' },
+  { id: 'open_file',    key: 'o', ctrl: true, shift: true, scope: 'global', description: 'Open file' },
+  { id: 'save',         key: 's', ctrl: true,  scope: 'global', description: 'Save the active file' },
+  { id: 'render_wav',   key: 'r', ctrl: true, shift: true, scope: 'global', description: 'Export / render to WAV' },
 ];
 
 /** True when the event matches the binding (layout-tolerant for letters). */

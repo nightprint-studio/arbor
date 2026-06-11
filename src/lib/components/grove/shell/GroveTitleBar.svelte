@@ -12,6 +12,7 @@
     Play, Square, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
     PanelLeft, PanelRight, Minimize2,
   } from 'lucide-svelte';
+  import { FolderOpen } from 'lucide-svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
@@ -21,8 +22,17 @@
   // clipped by the window edge.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
   import { groveStore, LOG_LEVELS } from '../grove-store.svelte';
-  import { MOCK_PROJECT, RECENT_PROJECTS } from '../mock/data';
-  import type { LogLevel } from '../mock/types';
+  import { groveEngine } from '../stores/engine.svelte';
+  import { configStore } from '../stores/config.svelte';
+  import { workspaceStore } from '../stores/workspace.svelte';
+  import { projectStore } from '../stores/project.svelte';
+  import { projectActions } from '../stores/project-actions.svelte';
+
+  /** Last path segment (forward- or back-slash) for a recents label. */
+  function basename(path: string): string {
+    const parts = path.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] ?? path;
+  }
 
   // ── Settings (gear) ─────────────────────────────────────────────────────────
   const settingsMenu: DropdownItem[] = [
@@ -32,21 +42,26 @@
     { kind: 'item', id: 'shortcuts', label: 'Keyboard Shortcuts…', icon: Keyboard, onclick: () => {} },
   ];
 
-  // ── Project fast-swap ───────────────────────────────────────────────────────
-  const projectItems = $derived<DropdownItem[]>(
-    RECENT_PROJECTS.map(p => ({
-      kind: 'item', id: p.id, label: p.name, subtitle: p.audience,
-      icon: FolderGit2, active: p.id === MOCK_PROJECT.id, onclick: () => {},
+  // ── Project fast-swap (recents + open) ────────────────────────────────────────
+  const projectName = $derived(projectStore.project?.name ?? 'No project');
+  const projectItems = $derived<DropdownItem[]>([
+    ...workspaceStore.recentProjects.map(path => ({
+      kind: 'item' as const, id: path, label: basename(path), subtitle: path,
+      icon: FolderGit2, active: path === projectStore.project?.path,
+      onclick: () => void projectStore.open(path).catch(() => {}),
     })),
-  );
+    ...(workspaceStore.recentProjects.length ? [{ kind: 'separator' as const }] : []),
+    { kind: 'item' as const, id: '__open', label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => projectActions.openProject() },
+  ]);
 
   // ── Log threshold ───────────────────────────────────────────────────────────
   const logItems = $derived<DropdownItem[]>(
     LOG_LEVELS.map(l => ({
-      kind: 'item', id: l, label: l, active: groveStore.logLevel === l,
-      onclick: () => groveStore.setLogLevel(l as LogLevel),
+      kind: 'item', id: l, label: l, active: configStore.logThreshold === l,
+      onclick: () => configStore.setLogThreshold(l),
     })),
   );
+
 </script>
 
 <div class="gtb" data-tauri-drag-region role="banner">
@@ -64,7 +79,7 @@
       {#snippet trigger({ open, toggle })}
         <button class="gtb-project" class:open onclick={toggle} use:tooltip={'Switch project'} aria-haspopup="menu" aria-expanded={open}>
           <FolderGit2 size={14} />
-          <span class="gtb-project-name">{MOCK_PROJECT.name}</span>
+          <span class="gtb-project-name">{projectName}</span>
           <ChevronDown size={12} />
         </button>
       {/snippet}
@@ -77,14 +92,14 @@
   <div class="no-drag gtb-run-cluster">
     <button
       class="gtb-run"
-      class:running={groveStore.running}
-      onclick={() => groveStore.toggleRun()}
-      use:tooltip={groveStore.running ? 'Stop (Ctrl+Space)' : 'Run (Ctrl+Space)'}
-      aria-label={groveStore.running ? 'Stop' : 'Run'}
+      class:running={groveEngine.running}
+      onclick={() => void groveEngine.toggleRun(projectStore.activeSource, projectStore.project?.path)}
+      use:tooltip={groveEngine.running ? 'Stop (Ctrl+Space)' : 'Run (Ctrl+Space)'}
+      aria-label={groveEngine.running ? 'Stop' : 'Run'}
     >
-      {#if groveStore.running}<Square size={14} fill="currentColor" />{:else}<Play size={14} fill="currentColor" />{/if}
+      {#if groveEngine.running}<Square size={14} fill="currentColor" />{:else}<Play size={14} fill="currentColor" />{/if}
     </button>
-    <button class="gtb-run-icon" use:tooltip={'Render to WAV (mock)'} aria-label="Render to WAV"><Download size={14} /></button>
+    <button class="gtb-run-icon" onclick={() => projectActions.exportWav()} use:tooltip={'Render to WAV (Ctrl+Shift+R)'} aria-label="Render to WAV"><Download size={14} /></button>
 
     <div class="gtb-sep"></div>
 
@@ -92,7 +107,7 @@
       {#snippet trigger({ open, toggle })}
         <button class="gtb-log" class:open onclick={toggle} use:tooltip={'Log threshold'} aria-haspopup="menu" aria-expanded={open}>
           <ScrollText size={13} />
-          <span>{groveStore.logLevel}</span>
+          <span>{configStore.logThreshold}</span>
           <ChevronDown size={11} />
         </button>
       {/snippet}

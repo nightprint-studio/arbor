@@ -17,8 +17,10 @@
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { uiStore } from '$lib/stores/ui.svelte';
   import GroveShell from '$lib/components/grove/GroveShell.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
+  import ToastItem from '$lib/components/shared/Toast.svelte';
 
   onMount(() => {
     // Repaint with the active theme + apply persisted user config locally.
@@ -31,3 +33,26 @@
 <GroveShell />
 
 <Tooltip />
+
+<!-- Minimal toast host: the file/folder + save pickers (FileExplorerModal)
+     surface errors via uiStore.showToast; AppShell's full feed stack doesn't
+     run in this window. Mirrors ExplorerWindow. -->
+<div class="grove-toasts" aria-live="polite" aria-atomic="false">
+  {#each uiStore.toasts as toast (toast.id)}
+    <ToastItem {toast} />
+  {/each}
+</div>
+
+<style>
+  .grove-toasts {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: var(--z-toast, 9999);
+    pointer-events: none;
+  }
+  .grove-toasts > :global(*) { pointer-events: auto; }
+</style>

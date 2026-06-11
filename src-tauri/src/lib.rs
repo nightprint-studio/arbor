@@ -1535,6 +1535,15 @@ pub fn run() {
             grove::grove_vsco_download,
             grove::get_grove_config,
             grove::set_grove_config,
+            // grove Fase 4: arrangement query / sound bank / live mixer /
+            // window state / project model (all additive)
+            grove::query::grove_query,
+            grove::sounds::grove_sounds,
+            grove::grove_set_track,
+            grove::state::get_grove_state,
+            grove::state::set_grove_state,
+            grove::project::grove_open_project,
+            grove::project::grove_create_project,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");

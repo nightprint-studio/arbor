@@ -1,15 +1,19 @@
 /**
- * GroveShell UI state (Step 0 — all mocked). Holds which side panels are open,
- * the transport play/stop state, the active file/track selection, the log
- * threshold and the layout toggles (collapse ui / collapse tabpane / zen).
- * Follows Arbor's canonical rune-store pattern (function factory + getters).
+ * GroveShell UI state — the panel/layout/selection spine. The transport (run /
+ * cycle), the log threshold and the diagnostics/log streams now live in the
+ * engine + config stores (`stores/engine.svelte`, `stores/config.svelte`); this
+ * store owns only the window-local UI: which side panels are open, the active
+ * file/track selection, per-track mute/solo, the collapse/zen toggles and the
+ * Ctrl+F find relay. Follows Arbor's rune-store pattern (factory + getters).
  *
- * Nothing here talks to a backend — `running` just flips a flag the footer and
- * Run/Stop button reflect. When the engine lands, the transport actions call
- * IPC; the surface stays identical.
+ * Layout (panel choices + collapse flags) is mirrored to the persisted grove
+ * window state via `layoutSnapshot()` / `applyLayout()` (GroveShell wires the
+ * persistence + restore).
  */
 
-import type { LogLevel } from './mock/types';
+import { LOG_LEVELS, type GroveLogThreshold } from './stores/config.svelte';
+import { transportStore } from './stores/engine.svelte';
+import type { GroveLayoutState } from '$lib/ipc/grove';
 import { MOCK_PROJECT, MOCK_TRACKS } from './mock/data';
 
 /** Left-rail panels (top group = side panels, bottom group = bottom panel). */
@@ -20,12 +24,13 @@ export type BottomPanel = 'console' | 'problems' | 'mixer';
 /** Right-rail panels. */
 export type RightPanel = 'inspector' | 'docs';
 
-const LOG_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
-
 function createGroveStore() {
   // ── Selection ──────────────────────────────────────────────────────────────
+  // The real file/source model lives in `stores/project.svelte` (path-keyed).
+  // The Step-0 mock panels (Files / Outline / TabbedEditor) still drive off the
+  // mock id-keyed selection below; the editor fan-out (Step 2/3) migrates them
+  // onto the project store. Track selection likewise keys off mock track ids.
   let activeFileId  = $state<string>(MOCK_PROJECT.files[0].id);
-  /** Files open as editor tabs (order = tab order). Seeded with song.grove. */
   let openFileIds   = $state<string[]>([MOCK_PROJECT.files[0].id]);
   let selectedTrackId = $state<string | null>('t-bass');
   // Per-track mute/solo — single source of truth so the arrangement headers and
@@ -38,11 +43,6 @@ function createGroveStore() {
   let bottomPanel = $state<BottomPanel | null>('console');
   let rightPanel  = $state<RightPanel | null>('inspector');
 
-  // ── Transport / engine (mocked) ────────────────────────────────────────────
-  let running   = $state(false);
-  let cycle     = $state(0);        // absolute cycle position
-  let logLevel  = $state<LogLevel>('info');
-
   // ── Layout toggles ─────────────────────────────────────────────────────────
   let collapseUi      = $state(false);  // hide the viz pane (editor full width)
   let collapseTabpane = $state(false);  // hide the editor (viz full width)
@@ -53,7 +53,7 @@ function createGroveStore() {
   let findPending     = $state(false);
 
   return {
-    // selection
+    // mock file selection (Step-0 panels) — see note above.
     get activeFileId() { return activeFileId; },
     setActiveFile(id: string) {
       activeFileId = id;
@@ -72,12 +72,19 @@ function createGroveStore() {
         activeFileId = openFileIds[Math.min(idx, openFileIds.length - 1)];
       }
     },
+
     // per-track mute / solo
     isMuted(id: string)  { return !!muted[id]; },
     isSoloed(id: string) { return !!soloed[id]; },
     toggleMute(id: string)  { muted  = { ...muted,  [id]: !muted[id] }; },
     toggleSolo(id: string)  { soloed = { ...soloed, [id]: !soloed[id] }; },
     get anySolo() { return Object.values(soloed).some(Boolean); },
+
+    // Transport read-throughs (no local state — the engine stream owns these).
+    // Kept so the Step-0 viz panel (ArrangementView) compiles unchanged until
+    // the fan-out migrates it onto `transportStore` directly.
+    get running() { return transportStore.playing; },
+    get cycle()   { return transportStore.cycle; },
 
     get selectedTrackId() { return selectedTrackId; },
     selectTrack(id: string | null) {
@@ -95,16 +102,6 @@ function createGroveStore() {
     get rightPanel()  { return rightPanel; },
     toggleRight(p: RightPanel)  { rightPanel  = rightPanel  === p ? null : p; },
 
-    // transport
-    get running() { return running; },
-    // Stopping never resets the clock — the cycle position is preserved, as in
-    // the real engine (re-eval/stop keep continuity).
-    toggleRun()   { running = !running; },
-    get cycle()   { return cycle; },
-    setCycle(c: number) { cycle = c; },
-    get logLevel() { return logLevel; },
-    setLogLevel(l: LogLevel) { logLevel = l; },
-
     // layout
     get collapseUi()      { return collapseUi; },
     toggleCollapseUi()    { collapseUi = !collapseUi; if (collapseUi) collapseTabpane = false; },
@@ -112,6 +109,25 @@ function createGroveStore() {
     toggleCollapseTabpane() { collapseTabpane = !collapseTabpane; if (collapseTabpane) collapseUi = false; },
     get zen() { return zen; },
     toggleZen() { zen = !zen; },
+
+    /** The five persisted layout fields, for mirroring to the workspace state. */
+    layoutSnapshot(): GroveLayoutState {
+      return {
+        left_panel:      leftPanel,
+        bottom_panel:    bottomPanel,
+        right_panel:     rightPanel,
+        collapse_viz:    collapseUi,
+        collapse_editor: collapseTabpane,
+      };
+    },
+    /** Restore the five layout fields from a loaded workspace state. */
+    applyLayout(l: GroveLayoutState) {
+      leftPanel       = (l.left_panel as LeftPanel | null) ?? null;
+      bottomPanel     = (l.bottom_panel as BottomPanel | null) ?? null;
+      rightPanel      = (l.right_panel as RightPanel | null) ?? null;
+      collapseUi      = !!l.collapse_viz;
+      collapseTabpane = !!l.collapse_editor;
+    },
 
     // find (Ctrl+F): ensure a searchable bottom panel is shown, then ask it to
     // focus its search field.
@@ -126,10 +142,12 @@ function createGroveStore() {
 
 export const groveStore = createGroveStore();
 
-/** Levels at or above the current threshold (for the mock console gating). */
-export function levelsAtOrAbove(threshold: LogLevel): Set<LogLevel> {
-  const start = LOG_LEVELS.indexOf(threshold);
-  return new Set(LOG_LEVELS.slice(start));
+/** Levels at or above a threshold (console emission gating). */
+export function levelsAtOrAbove(threshold: string): Set<string> {
+  const start = LOG_LEVELS.indexOf(threshold as GroveLogThreshold);
+  return new Set<string>(LOG_LEVELS.slice(start < 0 ? 0 : start));
 }
 
+// Re-export so ConsolePanel / GroveTitleBar keep a single import site for the
+// canonical level list (the source of truth is the config store).
 export { LOG_LEVELS };

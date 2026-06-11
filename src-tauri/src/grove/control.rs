@@ -24,6 +24,23 @@ pub enum GroveControl {
     Seek { cycle: f64 },
     /// Change tempo (quantized at the next cycle boundary).
     SetCps { cps: f64 },
+
+    // ── Live mixer overrides ───────────────────────────────────────────────
+    // Ephemeral session tweaks on top of the source-derived baseline: applied
+    // to the running transport in real time (smooth knob drag), and released the
+    // next time `SetTracks` re-baselines from the script. The source stays
+    // authoritative; these never persist.
+    /// Override a strip's gain (linear).
+    SetTrackGain { track: u32, gain: f32 },
+    /// Override a strip's stereo pan (`0` left … `1` right).
+    SetTrackPan { track: u32, pan: f32 },
+    /// Mute / unmute a strip.
+    SetTrackMute { track: u32, mute: bool },
+    /// Solo / un-solo a strip (any soloed strip mutes the non-soloed ones).
+    SetTrackSolo { track: u32, solo: bool },
+    /// Override the master-strip gain (linear).
+    SetMasterGain { gain: f32 },
+
     /// Tear the session down (drop the cpal stream on this thread) and exit.
     Shutdown,
 }
