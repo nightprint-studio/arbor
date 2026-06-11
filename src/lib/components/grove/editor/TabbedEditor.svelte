@@ -14,7 +14,7 @@
    * action — the domain editor lives entirely under grove/.
    */
   import { untrack } from 'svelte';
-  import { Hash, FileMusic, BookLock, Copy, ChevronRight } from 'lucide-svelte';
+  import { Hash, FileMusic, BookLock, Copy, ChevronRight, MapPin } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -223,6 +223,12 @@
     </div>
   {/if}
 
+  {#if activePath}
+    <div class="ed-footer">
+      <span class="ed-pos"><MapPin size={11} /> Ln {groveStore.caretLine}, Col {groveStore.caretCol}</span>
+    </div>
+  {/if}
+
   {#if gotoOpen}
     <div class="ed-goto" role="dialog" aria-label="Go to line">
       <Hash size={13} />
@@ -238,6 +244,19 @@
     background: var(--bg-base);
     position: relative;
   }
+
+  /* Editor-local footer: caret position (moved off the window footer). */
+  .ed-footer {
+    display: flex; align-items: center; justify-content: flex-end;
+    height: 22px; min-height: 22px; flex-shrink: 0;
+    padding: 0 10px;
+    background: var(--bg-base);
+    border-top: 1px solid var(--border-subtle);
+    font-size: 11px; color: var(--text-muted);
+    user-select: none;
+  }
+  .ed-pos { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ed-pos :global(svg) { color: var(--text-disabled); }
 
   .ed-tabs {
     display: flex; align-items: stretch;

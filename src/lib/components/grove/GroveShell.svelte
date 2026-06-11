@@ -33,7 +33,7 @@
   import ArrangementView from './viz/ArrangementView.svelte';
   import TabbedEditor from './editor/TabbedEditor.svelte';
 
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, type Snippet } from 'svelte';
   import type { UnlistenFn } from '@tauri-apps/api/event';
   import { groveStore } from './grove-store.svelte';
   import { groveEngine } from './stores/engine.svelte';
@@ -48,6 +48,11 @@
   import GroveShortcutsModal from './shell/GroveShortcutsModal.svelte';
   import GroveCommandPalette from './shell/GroveCommandPalette.svelte';
   import { GROVE_BINDINGS, matchesGrove } from './grove-keybindings';
+
+  // Arbor-specific feedback badges (jobs · notifications) injected by the bridge
+  // (GroveWindow) and rendered in the footer's right cluster — keeps GroveShell
+  // and GroveFooter free of Arbor store imports (extractability).
+  let { footerExtra }: { footerExtra?: Snippet } = $props();
 
   let unEngine: UnlistenFn | null = null;
   let unPacks:  UnlistenFn | null = null;
@@ -240,7 +245,7 @@
   </div>
 
   {#if !groveStore.zen}
-    <GroveFooter />
+    <GroveFooter {footerExtra} />
   {/if}
 </div>
 

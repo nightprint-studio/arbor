@@ -30,6 +30,7 @@
   import NotificationItem from '$lib/components/shared/NotificationItem.svelte';
   import NotificationsOverlay from '$lib/components/shared/NotificationsOverlay.svelte';
   import OperationsOverlay from '$lib/components/shared/OperationsOverlay.svelte';
+  import JobsOverlay from '$lib/components/jobs/JobsOverlay.svelte';
 
   let { id, main = false, children }: { id: string; main?: boolean; children?: Snippet } = $props();
 
@@ -120,6 +121,13 @@
 {#if uiStore.notificationsOverlayOpen}
   <div transition:fly={{ y: 10, duration: animStore.dBase, easing: cubicOut }}>
     <NotificationsOverlay />
+  </div>
+{/if}
+
+<!-- Jobs overlay (floating above the status bar / footer). -->
+{#if uiStore.jobsOverlayOpen}
+  <div transition:fly={{ y: 10, duration: animStore.dBase, easing: cubicOut }}>
+    <JobsOverlay />
   </div>
 {/if}
 

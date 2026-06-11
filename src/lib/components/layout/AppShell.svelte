@@ -41,7 +41,6 @@
   import { markdownStore } from '$lib/stores/markdown.svelte';
   import { hasOpenModal } from '../shared/Modal.svelte';
   import TerminalPanel from '../terminal/TerminalPanel.svelte';
-  import JobsOverlay from '../jobs/JobsOverlay.svelte';
   import JobOutputPanel from '../jobs/JobOutputPanel.svelte';
   import PluginLogsPanel from '../plugins/PluginLogsPanel.svelte';
   import { pluginLogsStore } from '$lib/stores/pluginLogs.svelte';
@@ -2251,12 +2250,6 @@
        listener lives on the store and stays attached only while enabled. -->
   <KeystrokesOverlay />
 
-  <!-- Jobs overlay (floating above statusbar) -->
-  {#if uiStore.jobsOverlayOpen}
-    <div transition:fly={{ y: 10, duration: animStore.dBase, easing: cubicOut }}>
-      <JobsOverlay />
-    </div>
-  {/if}
 
 
   <!-- Security quick-overlay (floating above statusbar, click-outside) -->

@@ -54,6 +54,8 @@ pub fn spawn_render(
     out_path: PathBuf,
 ) -> String {
     let state = app.state::<crate::AppState>();
+    let name = format!("Render {}", out_path.display());
+    let command = format!("render {cycles} cycles @ {cps} cps");
     let job_id = {
         let mut jobs = match state.jobs.lock() {
             Ok(j) => j,
@@ -62,9 +64,9 @@ pub fn spawn_render(
         let id = jobs.new_id();
         jobs.register(JobInfo {
             id: id.clone(),
-            name: format!("Render {}", out_path.display()),
+            name: name.clone(),
             plugin_name: "grove".to_string(),
-            command: format!("render {cycles} cycles @ {cps} cps"),
+            command: command.clone(),
             started_at: JobRegistry::now_secs(),
             status: JobStatus::Running,
             category: Some("Renders".to_string()),
@@ -72,12 +74,22 @@ pub fn spawn_render(
             hidden: false,
             is_system: false,
             finished_at: None,
-            // Renders show in the main Jobs overlay today; route to "grove"
-            // once GroveShell mounts its own feedback host.
-            target: None,
+            // Route to the grove window's feedback host (it mounts
+            // <FeedbackHost id="grove">), so renders surface there, not in main.
+            target: Some("grove".to_string()),
         });
         id
     };
+    // Live-surface the render in the grove window's Jobs overlay / badge.
+    let _ = app.emit("arbor://job-started", serde_json::json!({
+        "job_id":      &job_id,
+        "name":        &name,
+        "plugin_name": "grove",
+        "command":     &command,
+        "category":    "Renders",
+        "hidden":      false,
+        "target":      "grove",
+    }));
 
     let app = app.clone();
     let job_id_thread = job_id.clone();

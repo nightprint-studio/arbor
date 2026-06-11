@@ -1,4 +1,5 @@
 import { openUrl, openPath } from '@tauri-apps/plugin-opener';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 export type NotificationLevel = 'info' | 'success' | 'warning' | 'error';
 
@@ -28,7 +29,18 @@ export interface AppNotification {
   action?:   NotificationAction;
 }
 
-const STORAGE_KEY = 'arbor:notifications';
+// Per-window storage key. localStorage is shared across same-origin Tauri
+// windows, so each window namespaces its bell archive by its label to avoid
+// clobbering the others' persisted list. The main window keeps the original
+// key for back-compat.
+const STORAGE_KEY = (() => {
+  try {
+    const label = getCurrentWindow().label;
+    return label && label !== 'main' ? `arbor:notifications:${label}` : 'arbor:notifications';
+  } catch {
+    return 'arbor:notifications';
+  }
+})();
 const MAX_PERSISTED = 200;
 /** How long a freshly-added notification stays in the transient bottom-right
  *  stack before fading out. The bell archive keeps it forever (until the

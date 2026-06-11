@@ -6,11 +6,14 @@
    * meters streams (no RAF, no mock); they idle naturally when stopped because
    * the engine stops emitting movement.
    */
-  import { Activity, Cpu, AudioWaveform, MapPin, AlertTriangle } from 'lucide-svelte';
+  import { Activity, Cpu, AudioWaveform, AlertTriangle } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { transportStore, metersStore, audioErrorStore } from '../stores/engine.svelte';
-  import { groveStore } from '../grove-store.svelte';
-  import { projectStore } from '../stores/project.svelte';
+  import type { Snippet } from 'svelte';
+
+  // Right-cluster feedback badges (jobs · notifications) injected by the bridge
+  // (GroveWindow) — see GroveShell. Optional so the footer renders standalone.
+  let { footerExtra }: { footerExtra?: Snippet } = $props();
 
   // cps: 2-3 significant digits, trimming trailing zeros (0.5, 0.35, 1.25…).
   const cpsLabel = $derived(Number(transportStore.cps.toPrecision(3)).toString());
@@ -38,11 +41,11 @@
 
   <span class="gf-spacer"></span>
 
-  {#if projectStore.activeFilePath}
-    <span class="gf-item"><MapPin size={12} /> Ln {groveStore.caretLine}, Col {groveStore.caretCol}</span>
-    <span class="gf-sep"></span>
-  {/if}
   <span class="gf-item gf-render">{transportStore.playing ? 'playing' : 'idle'}</span>
+  {#if footerExtra}
+    <span class="gf-sep"></span>
+    {@render footerExtra()}
+  {/if}
 </div>
 
 <style>

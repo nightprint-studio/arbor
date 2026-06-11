@@ -102,6 +102,8 @@ pub fn load_into(cfg: &GroveConfig, pack: &Pack, reg: &mut Registry) {
 pub fn start(app: &AppHandle, cfg: &GroveConfig, pack: &'static Pack) -> String {
     let dir = pack_dir(cfg, pack.id);
     let state = app.state::<crate::AppState>();
+    let name = format!("Download {} sample bank", pack.name);
+    let command = pack.archive_url.to_string();
     let job_id = {
         let mut jobs = match state.jobs.lock() {
             Ok(j) => j,
@@ -110,9 +112,9 @@ pub fn start(app: &AppHandle, cfg: &GroveConfig, pack: &'static Pack) -> String 
         let id = jobs.new_id();
         jobs.register(JobInfo {
             id: id.clone(),
-            name: format!("Download {} sample bank", pack.name),
+            name: name.clone(),
             plugin_name: "grove".to_string(),
-            command: pack.archive_url.to_string(),
+            command: command.clone(),
             started_at: JobRegistry::now_secs(),
             status: JobStatus::Running,
             category: Some("Downloads".to_string()),
@@ -120,12 +122,22 @@ pub fn start(app: &AppHandle, cfg: &GroveConfig, pack: &'static Pack) -> String 
             hidden: false,
             is_system: false,
             finished_at: None,
-            // Downloads show in the main Jobs overlay today; route to "grove"
-            // once GroveShell mounts its own feedback host.
-            target: None,
+            // Route to the grove window's feedback host so downloads surface
+            // there (it also shows inline pack progress), not in main.
+            target: Some("grove".to_string()),
         });
         id
     };
+    // Live-surface the download in the grove window's Jobs overlay / badge.
+    let _ = app.emit("arbor://job-started", serde_json::json!({
+        "job_id":      &job_id,
+        "name":        &name,
+        "plugin_name": "grove",
+        "command":     &command,
+        "category":    "Downloads",
+        "hidden":      false,
+        "target":      "grove",
+    }));
 
     let app = app.clone();
     let job_id_task = job_id.clone();
