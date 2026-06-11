@@ -58,6 +58,9 @@ fn install_spawn(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<()> {
             let on_done_action: Option<String> =
                 config.get::<Option<String>>("on_done_action").unwrap_or(None);
             let hidden: bool = config.get::<Option<bool>>("hidden").unwrap_or(None).unwrap_or(false);
+            // Optional window-routing target. Absent → main window (the only
+            // host that also renders untagged jobs).
+            let target: Option<String> = config.get::<Option<String>>("target").unwrap_or(None);
 
             let env: Vec<(String, String)> = config
                 .get::<Option<mlua::Table>>("env")
@@ -87,6 +90,7 @@ fn install_spawn(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<()> {
                         is_system:       false,
                         finished_at:     None,
                         hidden,
+                        target:          target.clone(),
                     };
                     jobs.register(info);
                     id
@@ -115,6 +119,7 @@ fn install_spawn(ctx: &ApiCtx, lua: &Lua, job_table: &Table) -> Result<()> {
                 "command":     &command,
                 "category":    &category,
                 "hidden":      hidden,
+                "target":      &target,
             }));
 
             crate::jobs::spawn_job(

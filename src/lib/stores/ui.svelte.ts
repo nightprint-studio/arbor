@@ -1,8 +1,8 @@
 import { getRecentRepos, addRecentRepo as addRecentRepoIpc } from '$lib/ipc/config';
 import type { StashEntry } from '$lib/types/git';
+import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
 export type Panel = 'graph' | 'settings' | 'plugins' | 'rebase' | 'about' | 'docs';
-export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 /**
  * Bottom panel slot. Historically an enum of built-in sections; now also accepts
  * plugin-registered bottom panels encoded as `"plugin:<name>:<id>"`. Only ONE
@@ -12,29 +12,6 @@ export type ToastKind = 'info' | 'success' | 'warning' | 'error';
  */
 export type BuiltinBottomSection = 'stage' | 'detail' | 'terminal' | 'jobs' | 'pipelines' | 'plugin-logs';
 export type BottomSection = BuiltinBottomSection | `plugin:${string}`;
-
-export interface ToastAction {
-  label: string;
-  /** Side-effect to run when the user clicks the action button. The toast
-   *  is dismissed automatically afterwards. Kept as a closure (not data)
-   *  because toasts don't survive a reload — for persisted click actions
-   *  use `notificationsStore.add(..., action)` instead. */
-  onClick: () => void;
-}
-
-export interface Toast {
-  id: string;
-  kind: ToastKind;
-  message: string;
-  duration: number;
-  /** Wall-clock ms when the toast was added.  Used by the unified
-   *  bottom-right stack to interleave toasts with notifications in
-   *  chronological order. */
-  addedAt: number;
-  /** Optional clickable action rendered as a button on the right side
-   *  of the toast (e.g. "Open" → deep-links to a pipeline run). */
-  action?: ToastAction;
-}
 
 const SIDEBAR_RATIO_KEY       = 'arbor:sidebar-ratio';
 const RIGHT_SIDEBAR_RATIO_KEY = 'arbor:right-sidebar-ratio';
@@ -157,7 +134,6 @@ function createUiStore() {
   let stashConflictFiles       = $state<string[]>([]);
   let stashBlockingFiles       = $state<string[]>([]);
   let stashBlockingPop         = $state(false);
-  let toasts            = $state<Toast[]>([]);
   let isModalOpen       = $state(false);
   let modalContent      = $state<string | null>(null);
   let recentRepos       = $state<string[]>([]);
@@ -184,8 +160,6 @@ function createUiStore() {
   let shortcutsHelpOpen       = $state(false);
 
   let appFocused        = $state(true);   // tracks window focus / visibility
-
-  let toastCounter = 0;
 
   function setPanel(p: Panel) { activePanel = p; }
   function setAppFocused(v: boolean) { appFocused = v; }
@@ -483,23 +457,6 @@ function createUiStore() {
     addRecentRepoIpc(normalized).catch(() => {});
   }
 
-  function showToast(
-    message: string,
-    kind: ToastKind = 'info',
-    duration = 3500,
-    action?: ToastAction,
-  ): string {
-    const id = `toast-${++toastCounter}`;
-    toasts.push({ id, kind, message, duration, addedAt: Date.now(), action });
-    setTimeout(() => dismissToast(id), duration);
-    return id;
-  }
-
-  function dismissToast(id: string) {
-    const idx = toasts.findIndex(t => t.id === id);
-    if (idx !== -1) toasts.splice(idx, 1);
-  }
-
   function openModal(content: string)  { modalContent = content; isModalOpen = true; }
   function closeModal()                { isModalOpen = false; modalContent = null; }
 
@@ -559,7 +516,9 @@ function createUiStore() {
     get checkoutConflictModalOpen()      { return checkoutConflictModalOpen; },
     get checkoutConflictTabId()          { return checkoutConflictTabId; },
     get checkoutConflictBranch()         { return checkoutConflictBranch; },
-    get toasts()                 { return toasts; },
+    /** Transient toasts for this window — delegated to the feedback toast
+     *  store. `showToast` / `dismissToast` below forward to the same store. */
+    get toasts()                 { return toastStore.toasts; },
     get isModalOpen()            { return isModalOpen; },
     get modalContent()           { return modalContent; },
     get recentRepos()            { return recentRepos; },
@@ -596,7 +555,9 @@ function createUiStore() {
     toggleParkedModalsOverlay, setParkedModalsOverlayOpen,
     toggleRecentQuickSwitch, setRecentQuickSwitchOpen,
     openRepoBrowser, closeRepoBrowser,
-    loadRecentRepos, addRecentRepo, showToast, dismissToast, openModal, closeModal,
+    loadRecentRepos, addRecentRepo, openModal, closeModal,
+    showToast:    toastStore.show,
+    dismissToast: toastStore.dismiss,
   };
 }
 

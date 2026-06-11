@@ -93,7 +93,7 @@
   import { ronStudioWorkspaceStore } from '$lib/stores/ron-studio-workspace.svelte';
   import { studioStore } from '$lib/stores/studio.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import {
     studioBackend,
     type Schema, type TypeDef, type ResolvedType, type VariantDef,

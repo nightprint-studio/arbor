@@ -5,7 +5,7 @@
   import { cubicOut }       from 'svelte/easing';
   import { animStore }      from '$lib/stores/animations.svelte';
   import { fsWriteTextFile } from '$lib/ipc/fs';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import FileExplorerModal     from './FileExplorerModal.svelte';
   import Modal               from './Modal.svelte';
   import ModalHeader         from './ModalHeader.svelte';

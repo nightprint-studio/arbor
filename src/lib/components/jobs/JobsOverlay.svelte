@@ -5,10 +5,10 @@
     Trash2, ChevronDown, ChevronRight, Server, Hammer, Tag,
   } from 'lucide-svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
-  import { jobsStore } from '$lib/stores/jobs.svelte';
+  import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { uiStore }   from '$lib/stores/ui.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
-  import type { JobInfo } from '$lib/types/jobs';
+  import type { JobInfo } from '$lib/feedback/types/jobs';
   import { tooltip } from '$lib/actions/tooltip';
 
   // ── Show / hide hidden jobs ────────────────────────────────────────────────

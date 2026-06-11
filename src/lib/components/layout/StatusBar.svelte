@@ -3,8 +3,8 @@
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { jobsStore } from '$lib/stores/jobs.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { securityStore } from '$lib/stores/security.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { parkedModalsStore } from '$lib/stores/parked-modals.svelte';

@@ -1,5 +1,6 @@
-import type { JobInfo } from '$lib/types/jobs';
-import { listJobs, getJobOutput, cancelJob, dismissJob, clearFinishedJobs } from '$lib/ipc/job';
+import type { JobInfo } from '$lib/feedback/types/jobs';
+import { listJobs, getJobOutput, cancelJob, dismissJob, clearFinishedJobs } from '$lib/feedback/ipc/job';
+import { acceptAll, type TargetAccepts } from '$lib/feedback/routing';
 import { setupTauriListeners } from '$lib/utils/tauri-listeners';
 import { coalesceBatch } from '$lib/utils/coalesce';
 
@@ -63,20 +64,23 @@ function createJobsStore() {
 
   // ── Initial load ──────────────────────────────────────────────────────────
 
-  async function load() {
+  async function load(accepts: TargetAccepts = acceptAll) {
     try {
-      jobs = await listJobs();
+      jobs = (await listJobs()).filter(j => accepts(j.target));
     } catch { /* ignore — backend may not be ready */ }
   }
 
   // ── Tauri event listeners (called from AppShell) ───────────────────────────
 
-  function setupListeners(): () => void {
+  function setupListeners(accepts: TargetAccepts = acceptAll): () => void {
     return setupTauriListeners([
       {
         event: 'arbor://job-started',
-        handler: (e: { payload: { job_id: string; name: string; plugin_name: string; command: string; category?: string; hidden?: boolean } }) => {
+        handler: (e: { payload: { job_id: string; name: string; plugin_name: string; command: string; category?: string; hidden?: boolean; target?: string | null } }) => {
           const p = e.payload;
+          // Route: only adopt jobs addressed to this window (the main host
+          // also accepts untagged jobs).
+          if (!accepts(p.target)) return;
           upsertJob({
             id:          p.job_id,
             name:        p.name,
@@ -86,6 +90,7 @@ function createJobsStore() {
             status:      { type: 'running' },
             category:    p.category,
             hidden:      p.hidden,
+            target:      p.target,
           });
           if (!outputs[p.job_id]) outputs = { ...outputs, [p.job_id]: [] };
         },

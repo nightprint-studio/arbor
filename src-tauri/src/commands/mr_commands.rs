@@ -619,6 +619,7 @@ pub fn mr_start_conflict_resolution(
             is_system:       false,
             finished_at:     None,
             hidden:          false,
+            target:          None,
         });
         id
     };

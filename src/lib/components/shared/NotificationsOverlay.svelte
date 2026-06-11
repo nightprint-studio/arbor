@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Trash2, Info } from 'lucide-svelte';
   import { flip } from 'svelte/animate';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import NotificationItem from './NotificationItem.svelte';

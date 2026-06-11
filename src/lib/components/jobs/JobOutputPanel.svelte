@@ -2,9 +2,9 @@
   import { StopCircle, ChevronLeft, Copy, Check, ArrowDownToLine } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import LogStream from '$lib/components/shared/ui/LogStream.svelte';
-  import { jobsStore } from '$lib/stores/jobs.svelte';
+  import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import type { JobInfo } from '$lib/types/jobs';
+  import type { JobInfo } from '$lib/feedback/types/jobs';
   import { stripAnsi } from '$lib/utils/ansi-to-html';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';

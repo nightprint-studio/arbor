@@ -39,7 +39,7 @@
   import { localTagTracker } from '$lib/stores/local-tags.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { ticketLinksStore } from '$lib/stores/ticket_links.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';

@@ -1371,6 +1371,7 @@ pub fn workspace_fetch_all(
             is_system:       true,
             finished_at:     None,
             hidden:          false,
+            target:          None,
         });
         id
     };
@@ -1535,6 +1536,7 @@ pub fn workspace_pull_all(
             is_system:       true,
             finished_at:     None,
             hidden:          false,
+            target:          None,
         });
         id
     };
@@ -1756,6 +1758,7 @@ pub fn workspace_tag_all(
             is_system:       true,
             finished_at:     None,
             hidden:          false,
+            target:          None,
         });
         id
     };

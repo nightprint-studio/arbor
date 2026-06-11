@@ -72,6 +72,9 @@ pub fn spawn_render(
             hidden: false,
             is_system: false,
             finished_at: None,
+            // Renders show in the main Jobs overlay today; route to "grove"
+            // once GroveShell mounts its own feedback host.
+            target: None,
         });
         id
     };

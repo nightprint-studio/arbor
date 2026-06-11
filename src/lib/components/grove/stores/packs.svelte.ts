@@ -12,7 +12,7 @@ import {
   grovePacks, grovePackDownload, onGrovePackProgress,
   type GrovePack, type GrovePackProgress,
 } from '$lib/ipc/grove';
-import { cancelJob } from '$lib/ipc/job';
+import { cancelJob } from '$lib/feedback/ipc/job';
 
 function createPacksStore() {
   let packs    = $state<GrovePack[]>([]);

@@ -10,6 +10,7 @@ members = [
     "crates/arbor-auth",
     "crates/arbor-cloud",
     "crates/arbor-process-ext",
+    "crates/arbor-feedback",
     "crates/core",
     "crates/plugin/api",
     "crates/plugin/core",

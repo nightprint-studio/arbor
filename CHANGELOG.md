@@ -20,6 +20,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ### Changed
 
 - Keybindings are no longer a Settings section — viewing and customising shortcuts now live together in the dedicated Keyboard Shortcuts panel (**Shift+F1**).
+- Plugins can now route a notification, background job, or progress operation to a specific window via an optional `target` (`arbor.notify`, `arbor.job.spawn`, `arbor.ui.operation.start`); without it they go to the main window as before.
 
 ### Fixed
 

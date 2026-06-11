@@ -18,6 +18,10 @@ export interface JobInfo {
    *  and the status-bar running-count badge. Revealed by the
    *  "Show hidden" toggle on the Jobs panels. */
   hidden?: boolean;
+  /** Window-routing target. `null`/absent → main window (the only host that
+   *  also renders untagged jobs); a value routes the job to the matching
+   *  feedback host. */
+  target?: string | null;
 }
 
 export function isRunning(j: JobInfo): boolean {

@@ -14,7 +14,7 @@
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { firePluginAction, execHook } from '$lib/ipc/plugin';
   import { handlePullResult, handlePullThrown } from '$lib/utils/pullResultHandler';
-  import { startPullOperation } from '$lib/utils/operations-bridge';
+  import { startPullOperation } from '$lib/feedback/bridge/operations-bridge';
   import type { ActivityBarEntry, ComboOption } from '$lib/types/plugin';
   import { ACTIVITY_BAR_POINT, parseActivityBarEntry } from '$lib/contributions/activity-bar';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';

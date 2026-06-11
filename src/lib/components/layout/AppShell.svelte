@@ -40,7 +40,6 @@
   import MarkdownEditorModal from '../shared/MarkdownEditorModal.svelte';
   import { markdownStore } from '$lib/stores/markdown.svelte';
   import { hasOpenModal } from '../shared/Modal.svelte';
-  import ToastItem from '../shared/Toast.svelte';
   import TerminalPanel from '../terminal/TerminalPanel.svelte';
   import JobsOverlay from '../jobs/JobsOverlay.svelte';
   import JobOutputPanel from '../jobs/JobOutputPanel.svelte';
@@ -48,12 +47,9 @@
   import { pluginLogsStore } from '$lib/stores/pluginLogs.svelte';
   import PipelinesPanel from '../pipeline/PipelinesPanel.svelte';
   import PipelineRunDetailModal from '../pipeline/PipelineRunDetailModal.svelte';
-  import NotificationsOverlay from '../shared/NotificationsOverlay.svelte';
   import KeystrokesOverlay   from '../shared/KeystrokesOverlay.svelte';
   import { keystrokesStore }  from '$lib/stores/keystrokes.svelte';
-  import NotificationItem    from '../shared/NotificationItem.svelte';
-  import OperationsOverlay   from '../shared/OperationsOverlay.svelte';
-  import { setupOperationBridge } from '$lib/utils/operations-bridge';
+  import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
   import RecentReposModal from '../shared/RecentReposModal.svelte';
   import DepsExplorerModal from '../shared/DepsExplorerModal.svelte';
   import { depsExplorerStore } from '$lib/stores/depsExplorer.svelte';
@@ -161,7 +157,7 @@
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
-  import { jobsStore } from '$lib/stores/jobs.svelte';
+  import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { explorerStore } from '$lib/stores/explorer.svelte';
@@ -180,7 +176,7 @@
   import type { InitRepoOptions } from '$lib/types/git';
   import { terminalCreate } from '$lib/ipc/terminal';
   import { keybindingsStore } from '$lib/stores/keybindings.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { mrStore } from '$lib/stores/mr.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { worktreeStore } from '$lib/stores/worktree.svelte';
@@ -776,10 +772,6 @@
       });
 
       workspacesStore.setupListeners();
-      // Bridges Tauri progress events (pull/workspace bulk/linked-WT sync) into
-      // the OperationsOverlay store.  Returns a teardown closure — we don't
-      // call it here because AppShell is mounted for the app's lifetime.
-      setupOperationBridge();
     } finally {
       tabsStore.endInit();
     }
@@ -1481,42 +1473,9 @@
     // callback immediately unlistens the ghost listener.
     const unlistenPlugin = setupTauriListeners([
       {
-        event: 'plugin:toast',
-        handler: (e: { payload: { plugin: string; message: string; level: string } }) => {
-          const { plugin, message, level } = e.payload;
-          uiStore.showToast(`[${plugin}] ${message}`, (level as any) ?? 'info');
-        },
-      },
-      {
         event: 'plugin:form',
         handler: (e: { payload: PluginFormConfig }) => {
           pluginStore.setPendingForm(e.payload);
-        },
-      },
-      {
-        // In-app notification center (from arbor.notify). The plugin can mute
-        // either channel via `toast = false` (no transient pop) or
-        // `persist = false` (skip the bell — useful for "kicked off"
-        // chatter that the user doesn't need to read again later).
-        // Both default to true → existing call sites keep their behavior.
-        //
-        // A persisted notification ALREADY surfaces in the bottom-right
-        // transient stack via `notificationsStore.transient` (NotificationItem
-        // is interleaved with toasts in `feedItems`), so calling `showToast`
-        // on top would render two cards for one event. Only fall back to the
-        // toast path when the caller opted OUT of persistence — that's the
-        // one mode where a transient pop is the only channel.
-        event: 'plugin:notification',
-        handler: (e: { payload: { plugin: string; title: string; message: string; level: string; toast?: boolean; persist?: boolean; action?: import('$lib/stores/notifications.svelte').NotificationAction } }) => {
-          const { plugin, title, message, level, toast, persist, action } = e.payload;
-          const showToast   = toast   !== false;
-          const persistBell = persist !== false;
-          if (persistBell) {
-            notificationsStore.add(title, message, (level as any) ?? 'info', plugin, action);
-          } else if (showToast) {
-            const toastMsg = message ? `${title} — ${message}` : title;
-            uiStore.showToast(toastMsg, (level as any) ?? 'info', 5000);
-          }
         },
       },
       {
@@ -1621,10 +1580,6 @@
     // deps-explorer plugin and pops the IntelliJ-style modal.
     const unlistenDepsExplorer = depsExplorerStore.setupListeners();
 
-    // Job events
-    const unlistenJobs = jobsStore.setupListeners();
-    jobsStore.load();
-
     // Plugin log stream
     const unlistenPluginLogs = pluginLogsStore.setupListeners();
     pluginLogsStore.load();
@@ -1652,7 +1607,6 @@
       unlistenContributions();
       unlistenContainers();
       unlistenDepsExplorer();
-      unlistenJobs();
       unlistenPluginLogs();
       unlistenPipelines();
       unlistenLinks();
@@ -1675,23 +1629,6 @@
   const hasRepo           = $derived(tabsStore.activeTab !== null);
   const activePanel       = $derived(uiStore.activePanel);
 
-  // Merged feed for the bottom-right stack: toasts + transient notifications
-  // sorted by insertion time (ascending — oldest at top, newest just above
-  // the operations zone). Only freshly-added notifications appear here; the
-  // full archive lives in the bell overlay. Operation cards render after
-  // this loop and stay anchored at the bottom of the column.
-  type FeedItem =
-    | { kind: 'toast';        key: string; ts: number; value: typeof uiStore.toasts[number] }
-    | { kind: 'notification'; key: string; ts: number; value: typeof notificationsStore.notifications[number] };
-  const feedItems = $derived.by<FeedItem[]>(() => {
-    const out: FeedItem[] = [];
-    for (const t of uiStore.toasts)
-      out.push({ kind: 'toast',        key: `t:${t.id}`, ts: t.addedAt,  value: t });
-    for (const n of notificationsStore.transient)
-      out.push({ kind: 'notification', key: `n:${n.id}`, ts: n.timestamp, value: n });
-    out.sort((a, b) => a.ts - b.ts);
-    return out;
-  });
   const showSettings      = $derived(activePanel === 'settings');
   const showPlugins       = $derived(activePanel === 'plugins');
   const showAbout         = $derived(activePanel === 'about');
@@ -2321,13 +2258,6 @@
     </div>
   {/if}
 
-  <!-- Notifications archive overlay (toggleable bell panel — full history;
-       new notifications also live transiently in the bottom-right stack). -->
-  {#if uiStore.notificationsOverlayOpen}
-    <div transition:fly={{ y: 10, duration: animStore.dBase, easing: cubicOut }}>
-      <NotificationsOverlay />
-    </div>
-  {/if}
 
   <!-- Security quick-overlay (floating above statusbar, click-outside) -->
   {#if uiStore.securityOverlayOpen}
@@ -2343,9 +2273,8 @@
     </div>
   {/if}
 
-  <!-- OperationsOverlay is rendered INSIDE the bottom-right unified stack
-       above (so it's always anchored at the bottom of the column). -->
-
+  <!-- The bottom-right feedback column (toasts, notifications, operations) is
+       rendered by <FeedbackHost id="main"> above. -->
 
   <!-- MR detail modal -->
   {#if mrModalOpen && mrModalMr}
@@ -2595,17 +2524,11 @@
           and notifications scroll up over time.
        Single fixed-positioned column avoids the cross-overlay overlap we
        used to fight by chasing z-index values. -->
-  <div class="bottom-right-stack" aria-live="polite" aria-atomic="false">
-    <WorktreeLinkSyncSummary />
-    {#each feedItems as item (item.key)}
-      {#if item.kind === 'toast'}
-        <ToastItem toast={item.value} />
-      {:else}
-        <NotificationItem notif={item.value} alwaysShowDismiss />
-      {/if}
-    {/each}
-    <OperationsOverlay />
-  </div>
+  <FeedbackHost id="main" main>
+    {#snippet children()}
+      <WorktreeLinkSyncSummary />
+    {/snippet}
+  </FeedbackHost>
 
   <!-- Lazy-loaded — SettingsPanel and DocsPanel modules stay out of the
        initial JS heap until the user opens them. The dev warmup in onMount
@@ -2757,8 +2680,8 @@
   <!-- Modal: Linked Worktrees (cross-project sync) -->
   <WorktreeLinkManagerModal />
   <AddToWorktreeLinkModal />
-  <!-- WorktreeLinkSyncSummary is rendered inside .bottom-right-stack above so
-       it stacks with toasts instead of overlapping them. -->
+  <!-- WorktreeLinkSyncSummary is rendered inside <FeedbackHost> above (passed
+       as its header snippet) so it stacks with toasts instead of overlapping. -->
 
   <!-- Modal: About — self-contained (uses shared Modal shell). Lazy-loaded. -->
   <Lazy
@@ -2904,19 +2827,5 @@
     background: var(--bg-base);
     border-radius: var(--radius-lg);
   }
-
-  .bottom-right-stack {
-    position: fixed;
-    bottom: 36px;
-    right: 16px;
-    z-index: 800;
-    display: flex;
-    flex-direction: column; /* sync summary on top, toasts below; new toasts append at the bottom */
-    align-items: flex-end;
-    gap: 8px;
-    pointer-events: none;
-    max-width: calc(100vw - 32px);
-  }
-  .bottom-right-stack > :global(*) { pointer-events: auto; }
 
 </style>

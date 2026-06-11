@@ -16,7 +16,7 @@
   import { animStore } from '$lib/stores/animations.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { SCRATCH_ID, workspaceColorVar, WS_COLOR_COUNT } from '$lib/types/workspace';
   import type {
     WorkspaceDef, RepoHealth, RepoRegistryEntry, WorkspaceGroup,
@@ -29,7 +29,7 @@
   } from '$lib/ipc/workspace';
   import {
     startWorkspaceFetchOperation, startWorkspacePullOperation,
-  } from '$lib/utils/operations-bridge';
+  } from '$lib/feedback/bridge/operations-bridge';
   import { validateRepoPaths, validateRepoPath, type RepoPathStatus } from '$lib/ipc/missing';
   import RepoRelinkActions from './RepoRelinkActions.svelte';
   import Monogram from '$lib/components/shared/ui/Monogram.svelte';

@@ -28,7 +28,7 @@
 
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { securityStore } from '$lib/stores/security.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { exportSecurityReport, captureSecurityExportTheme } from '$lib/ipc/security';
   import { totalCount, type Severity } from '$lib/types/security';
 

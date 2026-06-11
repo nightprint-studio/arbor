@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { JobInfo } from '$lib/types/jobs';
+import type { JobInfo } from '$lib/feedback/types/jobs';
 
 export const listJobs = () =>
   invoke<JobInfo[]>('list_jobs');

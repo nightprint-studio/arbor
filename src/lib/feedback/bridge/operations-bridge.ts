@@ -7,7 +7,8 @@
 // ---------------------------------------------------------------------------
 
 import { setupTauriListeners } from '$lib/utils/tauri-listeners';
-import { operationsStore, type OperationStep } from '$lib/stores/operations.svelte';
+import { operationsStore, type OperationStep } from '$lib/feedback/stores/operations.svelte';
+import { acceptAll, type TargetAccepts } from '$lib/feedback/routing';
 import { workspacesStore } from '$lib/stores/workspaces.svelte';
 import type { StepStatus } from '$lib/components/shared/ui/ProgressStepper.svelte';
 import type {
@@ -179,7 +180,7 @@ export function startWorkspacePullOperation(jobId: string, wsId: string): void {
 // Listener bootstrap — call once on app start, returns cleanup.
 // ---------------------------------------------------------------------------
 
-export function setupOperationBridge(): () => void {
+export function setupOperationBridge(accepts: TargetAccepts = acceptAll): () => void {
   return setupTauriListeners([
     // ── Pull (single repo) ───────────────────────────────────────────────
     {
@@ -299,14 +300,20 @@ export function setupOperationBridge(): () => void {
         subtitle?: string | null;
         steps:     OperationStep[];
         current?:  string | null;
+        target?:   string | null;
       } }) => {
         const p = e.payload;
+        // Route: only adopt operations addressed to this window (the main host
+        // also accepts untagged ones). Later update/finish events carry only
+        // the id, so a non-adopted op is naturally ignored downstream.
+        if (!accepts(p.target)) return;
         operationsStore.start({
           id:       p.id,
           title:    p.title,
           subtitle: p.subtitle ?? p.plugin,
           steps:    p.steps ?? [],
           current:  p.current ?? p.steps?.[0]?.key ?? null,
+          target:   p.target,
         });
       },
     },

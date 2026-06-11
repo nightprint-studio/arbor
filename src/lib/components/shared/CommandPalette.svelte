@@ -43,7 +43,7 @@
   import { handlePullResult, handlePullThrown } from '$lib/utils/pullResultHandler';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
   import { applyPostCheckout } from '$lib/utils/applyPostCheckout';
-  import { startPullOperation } from '$lib/utils/operations-bridge';
+  import { startPullOperation } from '$lib/feedback/bridge/operations-bridge';
   import { cherryPick, revertCommit, stageAll, unstageAll, discardAll } from '$lib/ipc/stage';
   import { updateAllSubmodules } from '$lib/ipc/submodule';
   import { getCommitDetail, openRepo as ipcOpenRepo, getGraph, getRepoFiles } from '$lib/ipc/graph';

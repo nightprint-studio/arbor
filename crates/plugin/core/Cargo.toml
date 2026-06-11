@@ -9,6 +9,7 @@ description  = "Plugin runtime host: mlua VM management, lifecycle (load/unload/
 
 [dependencies]
 arbor-core         = { path = "../../core" }
+arbor-feedback     = { path = "../../arbor-feedback" }
 arbor-scheduler    = { path = "../../scheduler" }
 arbor-plugin-types = { path = "../types" }
 arbor-plugin-api   = { path = "../api" }

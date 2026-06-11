@@ -384,6 +384,7 @@ pub async fn export_graph_svg(
             is_system:       true,
             finished_at:     None,
             hidden:          false,
+            target:          None,
         });
         id
     };

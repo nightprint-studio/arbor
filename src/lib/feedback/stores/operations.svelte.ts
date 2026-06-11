@@ -34,6 +34,10 @@ export interface Operation {
   summary?:  string | null;
   startedAt: number;
   finishedAt?: number;
+  /** Window-routing target. `null`/absent → main window; a value routes the
+   *  card to the matching feedback host. Built-in flows (pull/fetch/sync) are
+   *  pre-created in the window that triggered them, so they leave this unset. */
+  target?:   string | null;
 }
 
 // Auto-dismiss windows.  Errors stick around longer so the user has time
@@ -54,6 +58,7 @@ function createOperationsStore() {
     subtitle?: string | null;
     steps:     OperationStep[];
     current?:  string | null;
+    target?:   string | null;
   }): void {
     // Replace any previous op with the same id (e.g. retry of the same
     // pull) — keeps the overlay deterministic instead of stacking ghosts.
@@ -68,6 +73,7 @@ function createOperationsStore() {
         done:      false,
         error:     null,
         startedAt: Date.now(),
+        target:    op.target ?? null,
       },
     ];
     dismissedIds.delete(op.id);

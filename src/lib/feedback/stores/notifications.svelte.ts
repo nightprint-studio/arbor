@@ -139,7 +139,7 @@ export const notificationsStore = createNotificationsStore();
 export async function dispatchNotificationAction(action: NotificationAction): Promise<void> {
   switch (action.kind) {
     case 'open-link-manager': {
-      const { uiStore } = await import('./ui.svelte');
+      const { uiStore } = await import('$lib/stores/ui.svelte');
       uiStore.openLinkManager(action.link_id);
       return;
     }
@@ -147,8 +147,8 @@ export async function dispatchNotificationAction(action: NotificationAction): Pr
       // Best-effort: find an open tab for this repo and activate it.  If no
       // tab is currently open we don't auto-spawn one (paths can move and
       // this is a passive action).
-      const { tabsStore }       = await import('./tabs.svelte');
-      const { workspacesStore } = await import('./workspaces.svelte');
+      const { tabsStore }       = await import('$lib/stores/tabs.svelte');
+      const { workspacesStore } = await import('$lib/stores/workspaces.svelte');
       const entry = workspacesStore.registry.find(r => r.id === action.repo_id);
       if (!entry) return;
       const tab = tabsStore.tabs.find(t => t.path === entry.path);
@@ -183,7 +183,7 @@ export async function dispatchNotificationAction(action: NotificationAction): Pr
       return;
     }
     case 'open-pipeline-run': {
-      const { pipelinesStore } = await import('./pipelines.svelte');
+      const { pipelinesStore } = await import('$lib/stores/pipelines.svelte');
       pipelinesStore.setActiveRun(action.run_id);
       return;
     }

@@ -120,6 +120,9 @@ pub fn start(app: &AppHandle, cfg: &GroveConfig, pack: &'static Pack) -> String 
             hidden: false,
             is_system: false,
             finished_at: None,
+            // Downloads show in the main Jobs overlay today; route to "grove"
+            // once GroveShell mounts its own feedback host.
+            target: None,
         });
         id
     };

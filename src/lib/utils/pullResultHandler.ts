@@ -12,7 +12,7 @@
 // needed, and returns `true` only on a fully clean pull.
 
 import type { PullResult, RepoStatus, StashEntry } from '$lib/types/git';
-import { notificationsStore } from '$lib/stores/notifications.svelte';
+import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
 import { uiStore } from '$lib/stores/ui.svelte';
 
 export interface PullResultContext {

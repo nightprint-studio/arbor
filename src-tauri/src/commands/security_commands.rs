@@ -205,6 +205,7 @@ pub async fn export_security_report(
             is_system:       true,
             finished_at:     None,
             hidden:          false,
+            target:          None,
         });
         id
     };

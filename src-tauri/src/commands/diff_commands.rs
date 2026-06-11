@@ -175,6 +175,7 @@ pub fn get_workdir_diff_stream(
             is_system: true,
             finished_at: None,
             hidden: false,
+            target: None,
         });
         id
     };
