@@ -30,13 +30,14 @@
 //! `(track, path)` and filters them out. The set is cleared on a track swap and on
 //! [`seek`](Transport::seek) — both are points where a stem legitimately restarts.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 
-use arbor_grove_audio::prelude::{AudioCommand, AudioSink, TrackConfig, VoiceSource};
+use arbor_grove_audio::prelude::{AudioCommand, AudioSink, DelayConfig, TrackConfig, VoiceSource};
 use arbor_grove_pattern::prelude::{ControlMap, SourceKind, Time, Tracks};
 
 use crate::clock::Epoch;
-use crate::schedule::schedule_span;
+use crate::schedule::{delay_config_for, schedule_span};
 
 /// Look-ahead window in milliseconds (how far ahead of "now" we schedule).
 pub const LOOKAHEAD_MS: u64 = 100;
@@ -59,6 +60,9 @@ pub struct Transport<S: AudioSink> {
     /// already started in an earlier window is not retriggered. Cleared on swap /
     /// seek (the only points where a stem legitimately restarts).
     sustained_started: HashSet<(u32, String)>,
+    /// Last delay-bus config sent per track, so `SetTrackDelay` is re-emitted only
+    /// when a track's delay line actually changes. Cleared on swap / seek.
+    delay_state: HashMap<u32, DelayConfig>,
 }
 
 impl<S: AudioSink> Transport<S> {
@@ -74,6 +78,7 @@ impl<S: AudioSink> Transport<S> {
             pending_cps: None,
             pending_tracks: None,
             sustained_started: HashSet::new(),
+            delay_state: HashMap::new(),
         }
     }
 
@@ -93,6 +98,7 @@ impl<S: AudioSink> Transport<S> {
         self.playing = true;
         self.scheduled_through = self.sink.now_frame();
         self.sustained_started.clear();
+        self.delay_state.clear();
         let _ = self.send_track_config();
     }
 
@@ -112,8 +118,9 @@ impl<S: AudioSink> Transport<S> {
         };
         self.scheduled_through = now;
         // A seek discontinues the timeline: any sustained stem must be free to
-        // restart at its new position.
+        // restart at its new position, and the delay buses re-arm from scratch.
         self.sustained_started.clear();
+        self.delay_state.clear();
     }
 
     /// Refill the look-ahead window: schedule newly-due cycles and push their
@@ -226,6 +233,7 @@ impl<S: AudioSink> Transport<S> {
             self.tracks = tracks;
             // A new track set means new strips and a fresh dedup baseline.
             self.sustained_started.clear();
+            self.delay_state.clear();
             let _ = self.send_track_config();
         }
     }
@@ -246,6 +254,7 @@ impl<S: AudioSink> Transport<S> {
             range,
             &mut self.next_id,
         );
+        let sr = self.sink.sample_rate();
         for ev in events {
             // Cross-window sustained dedup: skip a stem already started, but only
             // *mark* it started after a successful send so back-pressure can't drop
@@ -263,6 +272,17 @@ impl<S: AudioSink> Transport<S> {
                 }
                 _ => None,
             };
+            // Reconfigure the track's delay bus only when its config changes; send
+            // it ahead of the voice. On back-pressure leave `delay_state` unmarked
+            // so the reconfigure is retried with the voice next tick.
+            if let Some(AudioCommand::SetTrackDelay(track, cfg)) = delay_config_for(&ev, &self.epoch, sr) {
+                if self.delay_state.get(&track) != Some(&cfg) {
+                    if self.sink.send(AudioCommand::SetTrackDelay(track, cfg)).is_err() {
+                        return false;
+                    }
+                    self.delay_state.insert(track, cfg);
+                }
+            }
             if self.sink.send(AudioCommand::Voice(ev)).is_err() {
                 return false;
             }

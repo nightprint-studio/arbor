@@ -26,6 +26,14 @@ pub struct Region {
     /// `lovel` / `hivel` — inclusive velocity range (`0..127`).
     pub lovel: u8,
     pub hivel: u8,
+    /// `seq_length` — round-robin group size (how many variants cycle). `1` = no RR.
+    pub seq_length: u32,
+    /// `seq_position` — this region's 1-based slot in the round-robin group.
+    pub seq_position: u32,
+    /// `sw_last` — keyswitch MIDI key that activates this region (articulation
+    /// switch); `None` = always active. Used by registry articulations declaring
+    /// `keyswitch = <midi>`.
+    pub sw_last: Option<u8>,
     /// `loop_mode` — `no_loop` / `one_shot` / `loop_continuous` / `loop_sustain`.
     pub loop_mode: LoopMode,
     /// `loop_start` / `loop_end` — sample-frame loop points (when looping).
@@ -57,6 +65,9 @@ impl Default for Region {
             pitch_keycenter: 60,
             lovel: 0,
             hivel: 127,
+            seq_length: 1,
+            seq_position: 1,
+            sw_last: None,
             loop_mode: LoopMode::NoLoop,
             loop_start: None,
             loop_end: None,
@@ -77,6 +88,20 @@ impl Region {
     /// Whether this region answers to `(key, vel)` (both inclusive ranges).
     pub fn matches(&self, key: u8, vel: u8) -> bool {
         key >= self.lokey && key <= self.hikey && vel >= self.lovel && vel <= self.hivel
+    }
+
+    /// Whether this region answers to `(key, vel)` under the active keyswitch
+    /// `sw`. A region with no `sw_last` is always eligible; a region keyed to a
+    /// switch only answers when `sw` matches it.
+    pub fn matches_sw(&self, key: u8, vel: u8, sw: Option<u8>) -> bool {
+        if !self.matches(key, vel) {
+            return false;
+        }
+        match (self.sw_last, sw) {
+            (None, _) => true,
+            (Some(rsw), Some(active)) => rsw == active,
+            (Some(_), None) => false,
+        }
     }
 }
 
@@ -118,6 +143,37 @@ impl SfzInstrument {
     /// nothing matches (caller falls back to the synth).
     pub fn select(&self, key: u8, vel: u8) -> Option<&Region> {
         self.regions.iter().find(|r| r.matches(key, vel))
+    }
+
+    /// Round-robin- and keyswitch-aware selection for `(key, vel)`: among the
+    /// regions matching the request under the active keyswitch `sw`, pick the one
+    /// whose `seq_position` lands on `rr` (1-based, modulo the group's
+    /// `seq_length`). Falls back to the first match when the set declares no
+    /// round-robin (`seq_length <= 1`).
+    ///
+    /// `rr` is the caller's deterministic onset-seeded counter, so a given onset
+    /// always picks the same variant — reproducible loop-to-loop. `sw` is the
+    /// articulation keyswitch (`None` = no articulation requested).
+    pub fn select_rr(&self, key: u8, vel: u8, rr: u64, sw: Option<u8>) -> Option<&Region> {
+        // The round-robin group size is the max `seq_length` among matches.
+        let group_len = self
+            .regions
+            .iter()
+            .filter(|r| r.matches_sw(key, vel, sw))
+            .map(|r| r.seq_length.max(1))
+            .max()
+            .unwrap_or(1);
+        let first = || self.regions.iter().find(|r| r.matches_sw(key, vel, sw));
+        if group_len <= 1 {
+            return first();
+        }
+        // Target slot in `1..=group_len`.
+        let target = (rr % group_len as u64) as u32 + 1;
+        self.regions
+            .iter()
+            .find(|r| r.matches_sw(key, vel, sw) && r.seq_position == target)
+            // If the pack is sparse (no region at that exact slot), fall back.
+            .or_else(first)
     }
 }
 
@@ -348,6 +404,17 @@ fn set_field(r: &mut Region, key: &str, value: &str) {
                 r.hivel = v;
             }
         }
+        "seq_length" => {
+            if let Ok(v) = value.parse() {
+                r.seq_length = v;
+            }
+        }
+        "seq_position" => {
+            if let Ok(v) = value.parse() {
+                r.seq_position = v;
+            }
+        }
+        "sw_last" => r.sw_last = parse_key(value),
         "loop_mode" => r.loop_mode = LoopMode::parse(value),
         "loop_start" => {
             if let Ok(v) = value.parse() {
@@ -525,5 +592,40 @@ mod tests {
     #[test]
     fn error_when_no_regions() {
         assert!(parse("empty.sfz", "// nothing here").is_err());
+    }
+
+    #[test]
+    fn round_robin_cycles_variants_deterministically() {
+        // Three RR variants on the same key/vel: seq_length=3, positions 1..3.
+        let src = "\
+<group> key=60 seq_length=3
+<region> sample=rr1.wav seq_position=1
+<region> sample=rr2.wav seq_position=2
+<region> sample=rr3.wav seq_position=3";
+        let inst = parse("rr.sfz", src).unwrap();
+        // rr counter 0→pos1, 1→pos2, 2→pos3, 3→pos1 … (modulo 3, +1).
+        assert_eq!(inst.select_rr(60, 100, 0, None).unwrap().sample, "rr1.wav");
+        assert_eq!(inst.select_rr(60, 100, 1, None).unwrap().sample, "rr2.wav");
+        assert_eq!(inst.select_rr(60, 100, 2, None).unwrap().sample, "rr3.wav");
+        assert_eq!(inst.select_rr(60, 100, 3, None).unwrap().sample, "rr1.wav");
+        // Same seed → same pick (reproducible).
+        assert_eq!(
+            inst.select_rr(60, 100, 7, None).unwrap().sample,
+            inst.select_rr(60, 100, 7, None).unwrap().sample
+        );
+    }
+
+    #[test]
+    fn keyswitch_filters_articulation_regions() {
+        // Two articulations on the same key, distinguished by sw_last.
+        let src = "\
+<region> sample=sustain.wav key=60 sw_last=24
+<region> sample=pizz.wav key=60 sw_last=26";
+        let inst = parse("art.sfz", src).unwrap();
+        // No keyswitch requested → no sw region answers.
+        assert!(inst.select_rr(60, 100, 0, None).is_none());
+        // The matching keyswitch selects its articulation.
+        assert_eq!(inst.select_rr(60, 100, 0, Some(24)).unwrap().sample, "sustain.wav");
+        assert_eq!(inst.select_rr(60, 100, 0, Some(26)).unwrap().sample, "pizz.wav");
     }
 }

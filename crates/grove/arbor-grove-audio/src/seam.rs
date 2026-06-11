@@ -106,6 +106,17 @@ pub struct VoiceParams {
     pub shape: f32,
     /// Velocity `0..1`: selects the sampled velocity-layer + dynamics. Default `0.8`.
     pub vel: f32,
+    /// Delay line time in **fractions of a cycle** (e.g. `0.25` = a quarter-cycle);
+    /// `None` leaves the destination track's delay bus at its current setting.
+    /// Configures the per-track delay bus (additive seam extension, Onda 2).
+    pub delay: Option<f32>,
+    /// Delay feedback `0..1` — how much of the echo feeds back into the line.
+    /// `None` leaves the bus's feedback unchanged.
+    pub feedback: Option<f32>,
+    /// Per-event delay **send** `0..1` — how much of this voice feeds the track's
+    /// delay bus. `0`/`None` → no send (the echo bus rings independently of the
+    /// voice's lifetime, distinct from `off`).
+    pub delay_mix: Option<f32>,
 }
 
 impl Default for VoiceParams {
@@ -121,6 +132,101 @@ impl Default for VoiceParams {
             crush: None,
             shape: 0.0,
             vel: 0.8,
+            delay: None,
+            feedback: None,
+            delay_mix: None,
+        }
+    }
+}
+
+/// One parametric-EQ band: a single biquad section. Strip processors are driven
+/// by mixer [`AudioCommand`]s, never by the language — these are not `ControlMap`
+/// fields. Additive seam extension (Onda 2).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EqBand {
+    /// Filter shape this band realises.
+    pub kind: EqBandKind,
+    /// Centre / corner frequency in Hz.
+    pub freq: f32,
+    /// Gain in dB (peak / shelf bands only; ignored for hpf/lpf).
+    pub gain_db: f32,
+    /// Quality factor (bandwidth for peak, slope for shelf, resonance for hpf/lpf).
+    pub q: f32,
+}
+
+impl Default for EqBand {
+    fn default() -> Self {
+        EqBand {
+            kind: EqBandKind::Peak,
+            freq: 1_000.0,
+            gain_db: 0.0,
+            q: 0.707,
+        }
+    }
+}
+
+/// The shape of a parametric-EQ [`EqBand`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EqBandKind {
+    /// Bell / peaking boost-cut around `freq`.
+    Peak,
+    /// Low shelf below `freq`.
+    LowShelf,
+    /// High shelf above `freq`.
+    HighShelf,
+    /// High-pass (rumble removal).
+    Hpf,
+    /// Low-pass (top-end taming).
+    Lpf,
+}
+
+/// Standard feed-forward compressor settings for a strip / master processor.
+/// Additive seam extension (Onda 2); driven by mixer [`AudioCommand`]s.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CompSettings {
+    /// Threshold in dBFS below which no reduction is applied.
+    pub threshold_db: f32,
+    /// Compression ratio (e.g. `4.0` = 4:1). `1.0` is a no-op.
+    pub ratio: f32,
+    /// Attack time in seconds.
+    pub attack: f32,
+    /// Release time in seconds.
+    pub release: f32,
+    /// Make-up gain in dB applied after compression.
+    pub makeup_db: f32,
+    /// Soft-knee width in dB (0 = hard knee).
+    pub knee_db: f32,
+}
+
+impl Default for CompSettings {
+    fn default() -> Self {
+        CompSettings {
+            threshold_db: -18.0,
+            ratio: 4.0,
+            attack: 0.005,
+            release: 0.10,
+            makeup_db: 0.0,
+            knee_db: 6.0,
+        }
+    }
+}
+
+/// Configuration of a per-track delay bus. The line time is given in **frames**
+/// (the engine converts `VoiceParams::delay` cycle-fractions → frames via the
+/// epoch). Additive seam extension (Onda 2).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DelayConfig {
+    /// Delay time in output frames.
+    pub time_frames: u32,
+    /// Feedback `0..1`.
+    pub feedback: f32,
+}
+
+impl Default for DelayConfig {
+    fn default() -> Self {
+        DelayConfig {
+            time_frames: 0,
+            feedback: 0.0,
         }
     }
 }
@@ -145,10 +251,43 @@ pub enum AudioCommand {
     ConfigureTracks(Vec<TrackConfig>),
     /// Set a strip's gain (linear).
     SetTrackGain(u32, f32),
+    /// Set a strip's stereo pan `0` left … `1` right. (Additive, Onda 2.)
+    SetTrackPan(u32, f32),
     /// Mute / unmute a strip.
     SetTrackMute(u32, bool),
+    /// Solo / un-solo a strip. Any soloed strip mutes every non-soloed one.
+    /// (Additive, Onda 2.)
+    SetTrackSolo(u32, bool),
+    /// Set the master-strip gain (linear), applied after the strip sum.
+    /// (Additive, Onda 2.)
+    SetMasterGain(f32),
+    /// Replace a strip's parametric-EQ band list (empty = bypass). (Additive, Onda 2.)
+    SetTrackEq(u32, Vec<EqBand>),
+    /// Replace the master parametric-EQ band list. (Additive, Onda 2.)
+    SetMasterEq(Vec<EqBand>),
+    /// Set / clear a strip's compressor (`None` = bypass). (Additive, Onda 2.)
+    SetTrackComp(u32, Option<CompSettings>),
+    /// Set / clear the master compressor (`None` = bypass). (Additive, Onda 2.)
+    SetMasterComp(Option<CompSettings>),
+    /// Configure a strip's delay bus (time + feedback). The per-event send amount
+    /// rides on [`VoiceParams::delay_mix`]. (Additive, Onda 2.)
+    SetTrackDelay(u32, DelayConfig),
+    /// Install / replace the convolution-reverb impulse response. An empty buffer
+    /// regenerates the default procedural IR. (Additive, Onda 2.)
+    SetReverbIr(ReverbIr),
     /// Release every sounding voice (transport stop / panic).
     StopAll,
+}
+
+/// An impulse response for the convolution reverb send bus, carried on
+/// [`AudioCommand::SetReverbIr`]. Either an explicit stereo buffer or a request
+/// to (re)synthesise the default procedural IR. Additive seam extension (Onda 2).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReverbIr {
+    /// Synthesise a procedural IR of `seconds` decay at the renderer's rate.
+    Procedural { seconds: f32 },
+    /// An explicit stereo IR: interleaved-free, one `Frame` (L/R) per tap.
+    Buffer(Vec<Frame>),
 }
 
 /// The engine's view of the audio backend: a place to push timed commands and a

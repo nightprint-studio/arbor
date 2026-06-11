@@ -213,8 +213,8 @@ fn euclid_postfix_distributes_onsets() {
     let p = run_expr(s_island(term(
         m(MiniKind::Leaf(Leaf::Sound("bd".into()))),
         vec![Postfix::Euclid {
-            pulses: 3,
-            steps: 8,
+            pulses: MiniArg::Const(3.0),
+            steps: MiniArg::Const(8.0),
             rotation: None,
         }],
     )));
@@ -227,7 +227,7 @@ fn fast_postfix_repeats_inside_the_slot() {
     // s(bd*2) → two bd in the cycle
     let p = run_expr(s_island(term(
         m(MiniKind::Leaf(Leaf::Sound("bd".into()))),
-        vec![Postfix::Fast(2.0)],
+        vec![Postfix::Fast(MiniArg::Const(2.0))],
     )));
     assert_eq!(onsets(&p, 0).len(), 2);
 }
@@ -392,4 +392,82 @@ fn variant_in_note_island_is_a_context_error() {
 #[test]
 fn unknown_name_is_an_error() {
     assert!(run(vec![Item::Expr(var("nope"))]).is_err());
+}
+
+// ── §F transforms & signals (hand-built ASTs) ───────────────────────────────────
+
+#[test]
+fn add_method_transposes_semitones() {
+    // n(c4).add(7) → g4 = 67.
+    let p = run_expr(method(n_island(note("c4")), "add", vec![num(7.0)]));
+    assert_eq!(onsets(&p, 0)[0].value.note, Some(67.0));
+}
+
+#[test]
+fn add_deg_method_shifts_degree_before_scale() {
+    // n(0).addDeg(2).scale("c:minor") → degree 2 → Eb4 = 63.
+    let p = run_expr(method(
+        method(n_island(degree(0)), "addDeg", vec![num(2.0)]),
+        "scale",
+        vec![string("c:minor")],
+    ));
+    assert_eq!(onsets(&p, 0)[0].value.note, Some(63.0));
+}
+
+#[test]
+fn degrade_by_extremes() {
+    // degradeBy(1) drops everything; degradeBy(0) keeps everything.
+    let dense = || s_island(term(m(MiniKind::Leaf(Leaf::Sound("hh".into()))), vec![Postfix::Fast(MiniArg::Const(8.0))]));
+    let none = run_expr(method(dense(), "degradeBy", vec![num(1.0)]));
+    assert_eq!(onsets(&none, 0).len(), 0);
+    let all = run_expr(method(dense(), "degradeBy", vec![num(0.0)]));
+    assert_eq!(onsets(&all, 0).len(), 8);
+}
+
+#[test]
+fn iter_method_rotates() {
+    let p = run_expr(method(
+        s_island(m(MiniKind::Sequence(vec![sound("a"), sound("b")]))),
+        "iter",
+        vec![num(2.0)],
+    ));
+    let n0: Vec<_> = onsets(&p, 0).iter().map(|h| h.value.sound.clone().unwrap()).collect();
+    let n1: Vec<_> = onsets(&p, 1).iter().map(|h| h.value.sound.clone().unwrap()).collect();
+    assert_eq!(n0, vec!["a", "b"]);
+    assert_eq!(n1, vec!["b", "a"]);
+}
+
+#[test]
+fn palindrome_method_alternates() {
+    let p = run_expr(method(
+        s_island(m(MiniKind::Sequence(vec![sound("a"), sound("b")]))),
+        "palindrome",
+        vec![],
+    ));
+    let n1: Vec<_> = onsets(&p, 1).iter().map(|h| h.value.sound.clone().unwrap()).collect();
+    assert_eq!(n1, vec!["b", "a"]);
+}
+
+#[test]
+fn delay_method_sets_fields_with_defaults() {
+    let p = run_expr(method(s_island(sound("bd")), "delay", vec![num(0.25)]));
+    let h = &onsets(&p, 0)[0];
+    assert_eq!(h.value.delay, Some(0.25));
+    assert_eq!(h.value.feedback, Some(0.3));
+    assert_eq!(h.value.delay_mix, Some(0.5));
+}
+
+#[test]
+fn signal_source_resolves_and_ranges() {
+    // saw.range(0, 100) as a lpf param: a bare `saw` identifier is a NumSignal.
+    let lpf = method(
+        method(var("saw"), "range", vec![num(0.0), num(100.0)]),
+        // wrap into a pattern control via .lpf on an island
+        "fast", // no-op-ish; just confirm chaining stays a NumSignal then used below
+        vec![num(1.0)],
+    );
+    // Use it as a control on an island.
+    let p = run_expr(method(s_island(sound("hh")), "lpf", vec![lpf]));
+    let v = onsets(&p, 0)[0].value.lpf.unwrap();
+    assert!((0.0..=100.0).contains(&v));
 }

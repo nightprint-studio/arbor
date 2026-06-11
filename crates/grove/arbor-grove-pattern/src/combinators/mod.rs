@@ -5,16 +5,22 @@
 //!
 //! | Group | Module | Items |
 //! |---|---|---|
-//! | Composition | [`compose`] | `pure` `silence` `stack`/`par` `fastcat`/`seq` `slowcat`/`cat` `arrange` `cycles` `tracks` `track` |
+//! | Composition | [`compose`] | `pure` `silence` `stack`/`par` `fastcat`/`seq` `slowcat`/`cat` `timecat` `polymeter` `arrange` `cycles` `tracks` `track` |
 //! | Time/structure | [`time`] | `fast` `slow` `rev` `every` `off` `late` `early` |
-//! | Rhythm/probability | [`rhythm`] | `degrade` `degrade_by` `sometimes` `sometimes_by` |
+//! | Structural | [`structural`] | `within` `inside` `iter` `palindrome` `chunk` `swing_by` |
+//! | Patternised args | [`patterned`] | `inner_join_with` `fast_with` `slow_with` `euclid_with` |
+//! | Rhythm/probability | [`rhythm`] | `degrade` `degrade_by` `sometimes` `sometimes_by` `euclid` |
 //! | Voice/mix | [`voice`] | `gain` `pan` `room` `lpf` `hpf` `shift` `speed` `crush` `shape` `vel` `inst` `art` `scale` `jux` + [`voice::Param`] |
 //! | Generative | [`generative`] | `rand` `choose` |
+//! | Signals | [`signal`] | `sine` `saw` `isaw` `tri` `square` + `Pattern::<f64>::range` |
 //! | File sources | [`source`] | `sample` `audio` (markers) |
 
 pub mod compose;
 pub mod generative;
+pub mod patterned;
 pub mod rhythm;
+pub mod signal;
 pub mod source;
+pub mod structural;
 pub mod time;
 pub mod voice;

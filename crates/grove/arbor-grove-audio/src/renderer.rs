@@ -27,10 +27,10 @@
 use std::collections::BinaryHeap;
 use std::path::Path;
 
-use crate::effects::{Limiter, Reverb};
+use crate::effects::{equal_power_pan, Compressor, ConvReverb, DelayLine, EqChain, Limiter};
 use crate::registry::{Registry, ResolvedVoice, SampleParams};
 use crate::sampler::{Sample, SampleBank};
-use crate::seam::{AudioCommand, Frame, TrackConfig, VoiceEvent, VoiceSource};
+use crate::seam::{AudioCommand, Frame, ReverbIr, TrackConfig, VoiceEvent, VoiceSource};
 use crate::voice::{Voice, VoicePool};
 use arbor_grove_pattern::prelude::SourceKind;
 
@@ -38,18 +38,43 @@ use arbor_grove_pattern::prelude::SourceKind;
 /// later through the renderer constructor.
 pub const DEFAULT_VOICE_CAPACITY: usize = 128;
 
-/// One mixer strip: a linear gain and a mute flag.
-#[derive(Clone, Copy, Debug)]
+/// Default procedural reverb tail length (seconds) until an IR is installed.
+/// Kept short on purpose: the convolution is naive time-domain (O(IR) per sample),
+/// so a multi-second tail is a partitioned-FFT concern (Onda 3). A ~0.12 s dense
+/// IR gives a convincing room while staying real-time-tractable.
+const DEFAULT_REVERB_SECS: f32 = 0.12;
+
+/// Max delay-line length per track (seconds): caps `delay` so an absurd cycle
+/// fraction can't allocate without bound.
+const MAX_DELAY_SECS: f32 = 4.0;
+
+/// One mixer strip: gain, pan, mute/solo, and optional EQ + compressor inserts.
+#[derive(Debug)]
 struct Strip {
     gain: f32,
+    /// Stereo pan `0` left … `1` right (post-mix on the strip sum).
+    pan: f32,
     muted: bool,
+    soloed: bool,
+    /// Parametric EQ insert (empty = bypass).
+    eq: EqChain,
+    /// Compressor insert (`None` = bypass).
+    comp: Option<Compressor>,
+    /// Per-track delay bus.
+    delay: DelayLine,
 }
 
-impl Default for Strip {
-    fn default() -> Self {
+impl Strip {
+    fn new(sample_rate: u32) -> Self {
+        let max_delay = (MAX_DELAY_SECS * sample_rate as f32) as usize;
         Strip {
             gain: 1.0,
+            pan: 0.5,
             muted: false,
+            soloed: false,
+            eq: EqChain::default(),
+            comp: None,
+            delay: DelayLine::new(max_delay),
         }
     }
 }
@@ -80,6 +105,24 @@ impl Ord for Pending {
     }
 }
 
+/// The master strip: gain + optional EQ/compressor inserts, before the limiter.
+#[derive(Debug)]
+struct Master {
+    gain: f32,
+    eq: EqChain,
+    comp: Option<Compressor>,
+}
+
+impl Default for Master {
+    fn default() -> Self {
+        Master {
+            gain: 1.0,
+            eq: EqChain::default(),
+            comp: None,
+        }
+    }
+}
+
 /// Owns all sounding state and turns commands + time into samples.
 pub struct Renderer {
     sample_rate: u32,
@@ -87,9 +130,14 @@ pub struct Renderer {
     clock: u64,
     pool: VoicePool,
     strips: Vec<Strip>,
+    /// Whether any strip is currently soloed (drives solo-mutes-the-rest).
+    any_soloed: bool,
     /// Reused per-track dry accumulator (one L/R per strip), cleared each frame.
     track_dry: Vec<Frame>,
-    reverb: Reverb,
+    /// Reused per-track delay-bus send accumulator, cleared each frame.
+    track_delay_send: Vec<Frame>,
+    master: Master,
+    reverb: ConvReverb,
     limiter: Limiter,
     registry: Registry,
     /// Resident audio for `File` (`sample`/`audio`) voices, keyed by path.
@@ -122,9 +170,12 @@ impl Renderer {
             sample_rate,
             clock: 0,
             pool: VoicePool::new(capacity),
-            strips: vec![Strip::default(); strip_count],
+            strips: (0..strip_count).map(|_| Strip::new(sample_rate)).collect(),
+            any_soloed: false,
             track_dry: vec![[0.0; 2]; strip_count],
-            reverb: Reverb::new(sample_rate as f32),
+            track_delay_send: vec![[0.0; 2]; strip_count],
+            master: Master::default(),
+            reverb: ConvReverb::procedural(DEFAULT_REVERB_SECS, sample_rate as f32),
             limiter: Limiter::new(0.95, 0.05, sample_rate as f32),
             registry: Registry::new(),
             files: SampleBank::new(),
@@ -213,10 +264,54 @@ impl Renderer {
                     s.gain = g;
                 }
             }
+            AudioCommand::SetTrackPan(i, p) => {
+                if let Some(s) = self.strips.get_mut(i as usize) {
+                    s.pan = p.clamp(0.0, 1.0);
+                }
+            }
             AudioCommand::SetTrackMute(i, m) => {
                 if let Some(s) = self.strips.get_mut(i as usize) {
                     s.muted = m;
                 }
+            }
+            AudioCommand::SetTrackSolo(i, solo) => {
+                if let Some(s) = self.strips.get_mut(i as usize) {
+                    s.soloed = solo;
+                }
+                self.any_soloed = self.strips.iter().any(|s| s.soloed);
+            }
+            AudioCommand::SetMasterGain(g) => self.master.gain = g,
+            AudioCommand::SetTrackEq(i, bands) => {
+                let sr = self.sample_rate as f32;
+                if let Some(s) = self.strips.get_mut(i as usize) {
+                    s.eq = EqChain::new(&bands, sr);
+                }
+            }
+            AudioCommand::SetMasterEq(bands) => {
+                self.master.eq = EqChain::new(&bands, self.sample_rate as f32);
+            }
+            AudioCommand::SetTrackComp(i, settings) => {
+                let sr = self.sample_rate as f32;
+                if let Some(s) = self.strips.get_mut(i as usize) {
+                    s.comp = settings.map(|c| Compressor::new(&c, sr));
+                }
+            }
+            AudioCommand::SetMasterComp(settings) => {
+                let sr = self.sample_rate as f32;
+                self.master.comp = settings.map(|c| Compressor::new(&c, sr));
+            }
+            AudioCommand::SetTrackDelay(i, cfg) => {
+                if let Some(s) = self.strips.get_mut(i as usize) {
+                    s.delay.configure(cfg.time_frames, cfg.feedback);
+                }
+            }
+            AudioCommand::SetReverbIr(ir) => {
+                self.reverb = match ir {
+                    ReverbIr::Procedural { seconds } => {
+                        ConvReverb::procedural(seconds, self.sample_rate as f32)
+                    }
+                    ReverbIr::Buffer(buf) => ConvReverb::from_buffer(buf),
+                };
             }
             AudioCommand::StopAll => {
                 self.pool.release_all();
@@ -225,18 +320,25 @@ impl Renderer {
         }
     }
 
-    /// (Re)lay the mixer strips, preserving existing gain/mute where indices line
-    /// up. Resizes the per-track scratch buffer to match.
+    /// (Re)lay the mixer strips, preserving existing gain/pan/mute/solo/inserts
+    /// where indices line up. Resizes the per-track scratch buffers to match.
     fn configure_tracks(&mut self, tracks: &[TrackConfig]) {
         let count = tracks.len().max(1);
-        let mut next = vec![Strip::default(); count];
-        for (i, slot) in next.iter_mut().enumerate() {
-            if let Some(old) = self.strips.get(i) {
-                *slot = *old;
+        let sr = self.sample_rate;
+        // Drain existing strips so their non-`Copy` inserts (EQ/comp/delay state)
+        // are moved across rather than dropped where indices line up.
+        let mut old: Vec<Option<Strip>> = self.strips.drain(..).map(Some).collect();
+        let mut next = Vec::with_capacity(count);
+        for i in 0..count {
+            match old.get_mut(i).and_then(Option::take) {
+                Some(s) => next.push(s),
+                None => next.push(Strip::new(sr)),
             }
         }
         self.strips = next;
+        self.any_soloed = self.strips.iter().any(|s| s.soloed);
         self.track_dry = vec![[0.0; 2]; count];
+        self.track_delay_send = vec![[0.0; 2]; count];
     }
 
     /// Start every pending voice whose `start_frame` equals `frame`.
@@ -272,9 +374,21 @@ impl Renderer {
     /// state only).
     fn resolve_source(&self, ev: &VoiceEvent) -> ResolvedVoice {
         match &ev.source {
-            VoiceSource::Named { sound, inst, .. } => {
-                self.registry
-                    .resolve(sound.as_deref(), inst.as_deref(), ev.note, ev.params.vel)
+            VoiceSource::Named {
+                sound, inst, art, ..
+            } => {
+                // Deterministic per-onset seed for round-robin: derived from the
+                // voice id (the engine assigns ids stably per onset, so a given
+                // onset picks the same variant every loop).
+                let seed = onset_seed(ev.id.0);
+                self.registry.resolve(
+                    sound.as_deref(),
+                    inst.as_deref(),
+                    ev.note,
+                    ev.params.vel,
+                    art.as_deref(),
+                    seed,
+                )
             }
             VoiceSource::File { path, kind } => self.resolve_file(path, *kind),
         }
@@ -308,34 +422,99 @@ impl Renderer {
     }
 
     /// Render and mix one frame at absolute `frame`.
+    ///
+    /// Per strip: voices sum into `track_dry` (+ reverb send + per-track delay
+    /// send); the strip applies EQ → compressor → delay-bus mix-back → pan → gain
+    /// → mute/solo, then sums into the master. The master applies EQ → compressor
+    /// → gain, the convolution reverb folds in, then the limiter caps the output.
     fn render_frame(&mut self, frame: u64) -> Frame {
         // Clear per-track + send accumulators.
         for d in &mut self.track_dry {
             *d = [0.0; 2];
         }
-        let mut send = [0.0f32; 2];
+        for d in &mut self.track_delay_send {
+            *d = [0.0; 2];
+        }
+        let mut reverb_send = [0.0f32; 2];
 
-        // Sum all voices into their track strips + the reverb send.
-        self.pool.process_sample(frame, &mut self.track_dry, &mut send);
+        // Sum all voices into their track strips + the reverb / delay sends.
+        self.pool.process_sample(
+            frame,
+            &mut self.track_dry,
+            &mut reverb_send,
+            &mut self.track_delay_send,
+        );
 
-        // Apply per-strip gain/mute and sum to the master.
+        let any_soloed = self.any_soloed;
         let mut master = [0.0f32; 2];
-        for (strip, dry) in self.strips.iter().zip(self.track_dry.iter()) {
-            if strip.muted {
+        // Split the borrows: `strips` is mutated, the per-track accumulators are
+        // read by index — distinct fields, so borrow them separately up front.
+        let strips = &mut self.strips;
+        let track_dry = &self.track_dry;
+        let track_delay_send = &self.track_delay_send;
+        for (i, strip) in strips.iter_mut().enumerate() {
+            // Solo wins over an un-soloed strip; an explicit mute always silences.
+            let audible = !strip.muted && (!any_soloed || strip.soloed);
+
+            // Feed the per-track delay bus (always advances so a held tail keeps
+            // ringing even when the source has stopped) and read its echo.
+            strip.delay.send(track_delay_send[i]);
+            let echo = strip.delay.process();
+
+            if !audible {
                 continue;
             }
-            master[0] += dry[0] * strip.gain;
-            master[1] += dry[1] * strip.gain;
+
+            // Dry track signal + the delay echo, through the strip inserts.
+            let mut s = [
+                track_dry[i][0] + echo[0],
+                track_dry[i][1] + echo[1],
+            ];
+            if strip.eq.is_active() {
+                s = strip.eq.process(s);
+            }
+            if let Some(comp) = strip.comp.as_mut() {
+                s = comp.process(s);
+            }
+            // Strip pan is a stereo **balance** (attenuates the opposite side),
+            // preserving the per-voice stereo image rather than collapsing it.
+            let (bl, br) = equal_power_pan(strip.pan);
+            // Equal-power balance: at centre both gains are ~0.707, so scale by
+            // √2 to keep a centred strip unity.
+            const CENTER_COMP: f32 = std::f32::consts::SQRT_2;
+            master[0] += s[0] * bl * CENTER_COMP * strip.gain;
+            master[1] += s[1] * br * CENTER_COMP * strip.gain;
         }
 
-        // Reverb send → wet → fold back into master.
-        let wet = self.reverb.process(send);
+        // Master EQ → compressor → gain.
+        if self.master.eq.is_active() {
+            master = self.master.eq.process(master);
+        }
+        if let Some(comp) = self.master.comp.as_mut() {
+            master = comp.process(master);
+        }
+        master[0] *= self.master.gain;
+        master[1] *= self.master.gain;
+
+        // Convolution reverb send → wet → fold back into master.
+        let wet = self.reverb.process(reverb_send);
         master[0] += wet[0];
         master[1] += wet[1];
 
         // Master limiter.
         self.limiter.process(master)
     }
+}
+
+/// Hash a voice id into a deterministic round-robin seed. A cheap integer mix so
+/// consecutive ids don't trivially map to consecutive variants (which would defeat
+/// the point of randomised round-robin) while staying reproducible loop-to-loop.
+fn onset_seed(id: u64) -> u64 {
+    // SplitMix64 finaliser.
+    let mut z = id.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 /// SFZ-style playback params for a plain `File` source: full-range, native pitch.

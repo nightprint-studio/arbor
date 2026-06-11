@@ -189,6 +189,9 @@ fn eval_var(ctx: &Rc<Ctx>, env: &Env, name: &str, span: arbor_grove_pattern::pre
     if let Some(level) = LogLevel::parse(name) {
         return Ok(Value::Level(level));
     }
+    if let Some(sig) = combinators::signal_source(name) {
+        return Ok(Value::NumSignal(sig));
+    }
     if let Some(tf) = transforms::nullary_transform(name) {
         return Ok(Value::Transform(tf));
     }
@@ -237,6 +240,7 @@ fn eval_method(
             let tf = transforms::make_transform(ctx, name, &args, span)?;
             Ok(Value::Pattern(tf.apply(p)?))
         }
+        Value::NumSignal(sig) => signal_method(sig, name, args, span),
         seq_recv @ (Value::Range { .. } | Value::List(_)) => {
             seq_method(ctx, seq_recv, name, args, span)
         }
@@ -246,6 +250,48 @@ fn eval_method(
                 expected: "pattern, list or range".to_string(),
                 got: other.type_name().to_string(),
             },
+        )),
+    }
+}
+
+/// Methods on a continuous numeric signal (`sine`, `saw`, …): `.range(lo, hi)`
+/// to rescale the unipolar `0..1` source, and `.fast`/`.slow` to change its rate.
+/// The result is still a `NumSignal`, chainable into a patternised control
+/// (`.lpf(sine.range(200, 2000))`).
+fn signal_method(
+    sig: Pattern<f64>,
+    name: &str,
+    args: Vec<Value>,
+    span: arbor_grove_pattern::prelude::SourceSpan,
+) -> Result<Value> {
+    use crate::convert::{as_number, f64_to_time};
+    match name {
+        "range" => {
+            if args.len() != 2 {
+                return Err(LangError::at(
+                    span,
+                    LangErrorKind::Arity {
+                        name: "range".to_string(),
+                        expected: 2,
+                        got: args.len(),
+                    },
+                ));
+            }
+            let lo = as_number(&args[0], span)?;
+            let hi = as_number(&args[1], span)?;
+            Ok(Value::NumSignal(sig.range(lo, hi)))
+        }
+        "fast" => {
+            let n = f64_to_time(as_number(&args[0], span)?);
+            Ok(Value::NumSignal(sig.fast(n)))
+        }
+        "slow" => {
+            let n = f64_to_time(as_number(&args[0], span)?);
+            Ok(Value::NumSignal(sig.slow(n)))
+        }
+        other => Err(LangError::at(
+            span,
+            LangErrorKind::NotCallable(format!("numeric-signal method `{other}`")),
         )),
     }
 }

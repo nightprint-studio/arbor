@@ -6,9 +6,10 @@
 // ── Error ────────────────────────────────────────────────────────────────────
 pub use crate::error::{AudioError, Result};
 
-// ── The frozen engine↔audio contract ─────────────────────────────────────────
+// ── The engine↔audio contract (frozen core + Onda 2 additive mixer surface) ───
 pub use crate::seam::{
-    AudioCommand, AudioSink, Frame, TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource,
+    AudioCommand, AudioSink, CompSettings, DelayConfig, EqBand, EqBandKind, Frame, ReverbIr,
+    TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource,
 };
 
 // ── DSP core + real-time output ──────────────────────────────────────────────

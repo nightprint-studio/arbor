@@ -2,8 +2,9 @@
 //! whose `name(args)` form produces a value rather than a transform.
 
 use arbor_grove_pattern::prelude::{
-    arrange, audio, cat, choose, cycles, rand, sample, seq, stack, time_to_index, track, tracks,
-    ControlMap, Hap, Pattern, Section, SourceSpan, TimeSpan, Track,
+    arrange, audio, cat, choose, cycles, isaw, rand, sample, saw, seq, sine, square, stack,
+    time_to_index, track, tracks, tri, ControlMap, Hap, Pattern, Section, SourceSpan, TimeSpan,
+    Track,
 };
 
 use crate::convert::{as_int, as_number, as_pattern, as_str};
@@ -27,6 +28,20 @@ pub fn is_combinator(name: &str) -> bool {
             | "cps"
             | "trace" | "debug" | "info" | "warn" | "error"
     )
+}
+
+/// A bare continuous signal source (`sine`, `saw`, …) — a unipolar `0..1`
+/// `Pattern<f64>` used as a patternised parameter (`.lpf(sine.range(...))`).
+/// `None` if `name` is not a signal source.
+pub fn signal_source(name: &str) -> Option<Pattern<f64>> {
+    Some(match name {
+        "sine" => sine(),
+        "saw" => saw(),
+        "isaw" => isaw(),
+        "tri" => tri(),
+        "square" => square(),
+        _ => return None,
+    })
 }
 
 /// Evaluate a builtin call.

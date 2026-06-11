@@ -24,8 +24,8 @@
 //!   no trailing zeros, never exponent notation).
 
 use crate::ast::{
-    BinOp, Expr, ExprKind, Ident, Import, Island, IslandKind, Item, Leaf, Mini, MiniKind, Postfix,
-    Program, UnOp,
+    BinOp, Expr, ExprKind, Ident, Import, Island, IslandKind, Item, Leaf, Mini, MiniArg, MiniKind,
+    Postfix, Program, UnOp,
 };
 
 /// Calls printed one-argument-per-line. A deliberate formatting choice: these
@@ -309,6 +309,15 @@ fn write_atom(out: &mut String, m: &Mini) {
             write_parallel(out, inner);
             out.push('>');
         }
+        MiniKind::Poly { body, steps } => {
+            out.push('{');
+            write_parallel(out, body);
+            out.push('}');
+            if let Some(n) = steps {
+                out.push('%');
+                out.push_str(&n.to_string());
+            }
+        }
         // Defensive: a composite where the grammar expects an atom (a hand-built
         // or materialised tree that skipped a Group node). Bracket it so the
         // text still re-parses to the same structure.
@@ -337,11 +346,11 @@ fn write_postfix(out: &mut String, pf: &Postfix) {
     match pf {
         Postfix::Fast(n) => {
             out.push('*');
-            out.push_str(&fmt_number(*n));
+            write_mini_arg(out, n);
         }
         Postfix::Slow(n) => {
             out.push('/');
-            out.push_str(&fmt_number(*n));
+            write_mini_arg(out, n);
         }
         Postfix::Replicate(n) => {
             out.push('!');
@@ -357,12 +366,12 @@ fn write_postfix(out: &mut String, pf: &Postfix) {
             rotation,
         } => {
             out.push('(');
-            out.push_str(&pulses.to_string());
+            write_mini_arg(out, pulses);
             out.push(',');
-            out.push_str(&steps.to_string());
+            write_mini_arg(out, steps);
             if let Some(r) = rotation {
                 out.push(',');
-                out.push_str(&r.to_string());
+                write_mini_arg(out, r);
             }
             out.push(')');
         }
@@ -374,6 +383,15 @@ fn write_postfix(out: &mut String, pf: &Postfix) {
             out.push('\'');
             out.push_str(name);
         }
+    }
+}
+
+/// A postfix factor: a literal number, or a patternised sub-pattern printed as
+/// its own mini-notation atom (`<2 3>`, `[2 3]`, `{2 3}`).
+fn write_mini_arg(out: &mut String, arg: &MiniArg) {
+    match arg {
+        MiniArg::Const(n) => out.push_str(&fmt_number(*n)),
+        MiniArg::Pat(m) => write_atom(out, m),
     }
 }
 

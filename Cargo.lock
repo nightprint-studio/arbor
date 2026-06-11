@@ -236,6 +236,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-grove"
+version = "0.3.0"
+dependencies = [
+ "arbor-grove-audio",
+ "arbor-grove-engine",
+ "arbor-grove-lang",
+ "arbor-grove-pattern",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "arbor-grove-audio"
 version = "0.3.0"
 dependencies = [

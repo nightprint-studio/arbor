@@ -20,9 +20,15 @@ pub use crate::time::Time;
 
 // ── Combinators: composition ─────────────────────────────────────────────────
 pub use crate::combinators::compose::{
-    arrange, cat, cycles, fastcat, par, pure, seq, silence, slowcat, stack, timecat, track, tracks,
-    Section, Track, Tracks,
+    arrange, cat, cycles, fastcat, par, polymeter, pure, seq, silence, slowcat, stack, timecat,
+    track, tracks, Section, Track, Tracks,
 };
+
+// ── Combinators: patternised postfix args (mini-notation `bd*<2 3>`) ──────────
+pub use crate::combinators::patterned::{euclid_with, fast_with, slow_with};
+
+// ── Combinators: continuous signal sources + `.range` ────────────────────────
+pub use crate::combinators::signal::{isaw, saw, sine, square, tri};
 
 // ── Combinators: generative & voice param ────────────────────────────────────
 pub use crate::combinators::generative::{choose, rand};

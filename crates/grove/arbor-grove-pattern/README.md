@@ -48,11 +48,14 @@ A hap **has an onset** in a query when `part.begin == whole.begin`.
 
 | Group | Items |
 |---|---|
-| Composition | `pure` · `silence` · `stack`/`par` · `fastcat`/`seq` · `timecat` · `slowcat`/`cat` · `arrange` · `cycles` · `tracks` · `track` |
+| Composition | `pure` · `silence` · `stack`/`par` · `fastcat`/`seq` · `timecat` · `polymeter` · `slowcat`/`cat` · `arrange` · `cycles` · `tracks` · `track` |
 | Time/structure | `fast` · `slow` · `rev` · `every` · `off` · `late` · `early` |
+| Structural | `within` · `inside` · `iter` · `palindrome` · `chunk` · `swing_by` |
+| Patternised args | `inner_join_with` · `fast_with` · `slow_with` · `euclid_with` (mini-notation `bd*<2 3>`) |
 | Rhythm/probability | `degrade` · `degrade_by` · `sometimes` · `sometimes_by` · `euclid` |
 | Voice/mix | `gain` · `pan` · `room` · `lpf` · `hpf` · `shift` · `speed` · `crush` · `shape` · `vel` · `inst` · `art` · `scale` · `jux` |
 | Generative | `rand` · `choose` |
+| Signals | `sine` · `saw` · `isaw` · `tri` · `square` (continuous unipolar `0..1`, one period/cycle) + `Pattern::<f64>::range(lo, hi)` |
 | File sources | `sample` · `audio` (markers only — decode/playback is the audio crate; they stamp a `SourceKind` one-shot/sustained) |
 
 Constructors and generators are free functions; transforms are methods on `Pattern`. The
@@ -99,7 +102,7 @@ src/
   rng.rs         deterministic time-seeded RNG
   control.rs     ControlMap (the concrete value)
   pitch.rs       note names, scales, degree resolution
-  combinators/   the stdlib, grouped (compose / time / rhythm / voice / generative / source)
+  combinators/   the stdlib, grouped (compose / time / structural / patterned / rhythm / voice / generative / signal / source)
   error.rs       PatternError
   prelude.rs     canonical public surface
 ```

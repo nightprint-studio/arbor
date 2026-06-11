@@ -18,10 +18,10 @@ pub use crate::error::{GroveError, Result};
 // Core types, the four distinct combinator families, and the deterministic RNG.
 // `Result` intentionally omitted (see above); `PatternError` kept by name.
 pub use arbor_grove_pattern::prelude::{
-    arrange, audio, cat, choose, cycles, fastcat, par, parse_note, pure, rand, sample, seq, silence,
-    slowcat, stack, time_to_index, time_to_rand, timecat, track, tracks, ControlMap, Hap, Param,
-    Pattern, PatternError, Scale, Section, SourceKind, SourceSpan, Time, TimeSpan, Track, Tracks,
-    MIDDLE_C,
+    arrange, audio, cat, choose, cycles, euclid_with, fast_with, fastcat, isaw, par, parse_note,
+    polymeter, pure, rand, sample, saw, seq, silence, sine, slow_with, slowcat, square, stack,
+    time_to_index, time_to_rand, timecat, track, tracks, tri, ControlMap, Hap, Param, Pattern,
+    PatternError, Scale, Section, SourceKind, SourceSpan, Time, TimeSpan, Track, Tracks, MIDDLE_C,
 };
 
 // ── arbor-grove-lang — text ↔ Pattern ────────────────────────────────────────
@@ -31,24 +31,26 @@ pub use arbor_grove_pattern::prelude::{
 pub use arbor_grove_lang::prelude::{
     emit, emit_expr, evaluate, materialize_island, materialize_source, parse, BinOp, Ctx, Env,
     EvalConfig, EvalOutput, Expr, ExprKind, FnDef, Func, Ident, Import, Island, IslandKind, Item,
-    LangError, LangErrorKind, Leaf, LetBind, LogLevel, LogSink, Mini, MiniKind, NoImports, Postfix,
-    Program, SilentLog, SourceLoader, Transform, UnOp, Value,
+    LangError, LangErrorKind, Leaf, LetBind, LogLevel, LogSink, Mini, MiniArg, MiniKind, NoImports,
+    Postfix, Program, SilentLog, SourceLoader, Transform, UnOp, Value,
 };
 
 // ── arbor-grove-audio — the DSP / real-time backend ──────────────────────────
-// The frozen engine↔audio seam, the renderer + real-time stream, the sound
-// registry, and the offline/test recorder. `SourceKind` listed above (identical);
-// `Result` omitted; `AudioError` kept by name.
+// The engine↔audio seam (frozen core + Onda 2 additive mixer/EQ/comp/delay/
+// reverb surface), the renderer + real-time stream, the sound registry, and the
+// offline/test recorder. `SourceKind` listed above (identical); `Result` omitted;
+// `AudioError` kept by name.
 pub use arbor_grove_audio::prelude::{
-    open_output_stream, AudioCommand, AudioError, AudioSink, Frame, OutputStream, Registry,
-    Renderer, StreamSink, SynthPreset, TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource,
-    Waveform, RecordingSink, DEFAULT_VOICE_CAPACITY,
+    open_output_stream, AudioCommand, AudioError, AudioSink, CompSettings, DelayConfig, EqBand,
+    EqBandKind, Frame, OutputStream, Registry, Renderer, ReverbIr, StreamSink, SynthPreset,
+    TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource, Waveform, RecordingSink,
+    DEFAULT_VOICE_CAPACITY,
 };
 
 // ── arbor-grove-engine — the timing runtime ──────────────────────────────────
 // Clock, the pure scheduling core, the real-time transport, and the offline
 // render driver. `Result` omitted; `EngineError` kept by name.
 pub use arbor_grove_engine::prelude::{
-    render_offline, schedule_span, voice_event_from_hap, BitDepth, Epoch, EngineError, RenderConfig,
-    Transport, LOOKAHEAD_MS,
+    delay_config_for, render_offline, schedule_span, voice_event_from_hap, BitDepth, Epoch,
+    EngineError, RenderConfig, Transport, LOOKAHEAD_MS,
 };

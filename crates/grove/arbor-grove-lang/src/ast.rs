@@ -178,6 +178,13 @@ pub enum MiniKind {
     Group(Box<Mini>),
     /// `< ... >` — alternation, one element per cycle (slowcat).
     Alt(Box<Mini>),
+    /// `{ ... }%n` — polymeter: lanes step at `steps` slots per cycle, each
+    /// looping through its own length. `steps == None` defaults (at eval) to the
+    /// length of the first lane (Strudel semantics).
+    Poly {
+        body: Box<Mini>,
+        steps: Option<u32>,
+    },
     /// `~` — a silent slot.
     Rest,
     /// `_` — extend the previous term by one more slot.
@@ -199,22 +206,50 @@ pub enum Leaf {
     Degree(i32),
 }
 
+/// A postfix numeric argument: either a literal or a **patternised** sub-pattern
+/// (`bd*<2 3>`, `bd(<3 5>,8)`). A patternised arg varies the factor per
+/// slot/cycle, evaluated by inner-join (`design/grove/mini-notation.md`, level
+/// Full). The leaves of the sub-pattern are read as numbers at eval time.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MiniArg {
+    /// A literal number (`bd*2`, `bd(3,8)`).
+    Const(f64),
+    /// A sub-pattern whose per-slot values drive the postfix (`bd*<2 3>`).
+    Pat(Box<Mini>),
+}
+
+impl MiniArg {
+    /// Is this a literal (vs. a patternised sub-pattern)?
+    pub fn is_const(&self) -> bool {
+        matches!(self, MiniArg::Const(_))
+    }
+
+    /// The literal value, or `None` for a patternised arg.
+    pub fn const_value(&self) -> Option<f64> {
+        match self {
+            MiniArg::Const(n) => Some(*n),
+            MiniArg::Pat(_) => None,
+        }
+    }
+}
+
 /// A postfix operator attached to a term, applied left to right.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Postfix {
-    /// `*n` — fast (repeat n times inside the slot).
-    Fast(f64),
-    /// `/n` — slow (play once every n cycles).
-    Slow(f64),
+    /// `*n` — fast (repeat n times inside the slot); `n` may be patternised.
+    Fast(MiniArg),
+    /// `/n` — slow (play once every n cycles); `n` may be patternised.
+    Slow(MiniArg),
     /// `!n` — replicate as n separate slots.
     Replicate(u32),
     /// `@n` — weight (give the term more duration than its siblings).
     Weight(u32),
-    /// `(n,k)` / `(n,k,rot)` — Euclidean distribution.
+    /// `(n,k)` / `(n,k,rot)` — Euclidean distribution; each count may be
+    /// patternised (`bd(<3 5>,8)`).
     Euclid {
-        pulses: u32,
-        steps: u32,
-        rotation: Option<i32>,
+        pulses: MiniArg,
+        steps: MiniArg,
+        rotation: Option<MiniArg>,
     },
     /// `:n` — sample variant index (only in `s`/`sound`).
     Variant(u32),

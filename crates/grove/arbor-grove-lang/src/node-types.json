@@ -32,6 +32,10 @@
           "named": true
         },
         {
+          "type": "polymeter",
+          "named": true
+        },
+        {
           "type": "rest",
           "named": true
         },
@@ -300,7 +304,19 @@
         "required": true,
         "types": [
           {
+            "type": "alternation",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
             "type": "integer",
+            "named": true
+          },
+          {
+            "type": "polymeter",
             "named": true
           }
         ]
@@ -310,7 +326,19 @@
         "required": false,
         "types": [
           {
+            "type": "alternation",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
             "type": "integer",
+            "named": true
+          },
+          {
+            "type": "polymeter",
             "named": true
           }
         ]
@@ -320,7 +348,19 @@
         "required": true,
         "types": [
           {
+            "type": "alternation",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
             "type": "integer",
+            "named": true
+          },
+          {
+            "type": "polymeter",
             "named": true
           }
         ]
@@ -336,7 +376,19 @@
         "required": true,
         "types": [
           {
+            "type": "alternation",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
             "type": "number",
+            "named": true
+          },
+          {
+            "type": "polymeter",
             "named": true
           }
         ]
@@ -456,6 +508,10 @@
           "named": true
         },
         {
+          "type": "polymeter",
+          "named": true
+        },
+        {
           "type": "rest",
           "named": true
         },
@@ -534,6 +590,10 @@
           },
           {
             "type": "parallel",
+            "named": true
+          },
+          {
+            "type": "polymeter",
             "named": true
           },
           {
@@ -870,6 +930,10 @@
           "named": true
         },
         {
+          "type": "polymeter",
+          "named": true
+        },
+        {
           "type": "rest",
           "named": true
         },
@@ -964,6 +1028,76 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "polymeter",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "alternation",
+            "named": true
+          },
+          {
+            "type": "extend",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "note_name",
+            "named": true
+          },
+          {
+            "type": "parallel",
+            "named": true
+          },
+          {
+            "type": "polymeter",
+            "named": true
+          },
+          {
+            "type": "rest",
+            "named": true
+          },
+          {
+            "type": "sequence",
+            "named": true
+          },
+          {
+            "type": "sound_name",
+            "named": true
+          },
+          {
+            "type": "splice",
+            "named": true
+          },
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      },
+      "steps": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1139,6 +1273,10 @@
           "named": true
         },
         {
+          "type": "polymeter",
+          "named": true
+        },
+        {
           "type": "rest",
           "named": true
         },
@@ -1166,7 +1304,19 @@
         "required": true,
         "types": [
           {
+            "type": "alternation",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
             "type": "number",
+            "named": true
+          },
+          {
+            "type": "polymeter",
             "named": true
           }
         ]
@@ -1287,6 +1437,10 @@
           },
           {
             "type": "note_name",
+            "named": true
+          },
+          {
+            "type": "polymeter",
             "named": true
           },
           {
@@ -1447,6 +1601,10 @@
   },
   {
     "type": "$",
+    "named": false
+  },
+  {
+    "type": "%",
     "named": false
   },
   {

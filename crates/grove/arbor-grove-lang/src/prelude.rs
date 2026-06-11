@@ -9,7 +9,7 @@
 // ── AST ──────────────────────────────────────────────────────────────────────
 pub use crate::ast::{
     BinOp, Expr, ExprKind, FnDef, Ident, Import, Island, IslandKind, Item, Leaf, LetBind, Mini,
-    MiniKind, Postfix, Program, UnOp,
+    MiniArg, MiniKind, Postfix, Program, UnOp,
 };
 
 // ── Errors ───────────────────────────────────────────────────────────────────

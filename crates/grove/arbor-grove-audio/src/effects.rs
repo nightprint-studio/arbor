@@ -1,13 +1,17 @@
-//! Hand-rolled DSP building blocks: per-voice [`Biquad`] filters (`lpf`/`hpf`),
-//! the [`shape`] waveshaper and [`crush`] bitcrusher, a stereo [`Reverb`] send
-//! bus, and the master [`Limiter`].
+//! Hand-rolled DSP building blocks: per-voice [`Biquad`] filters (`lpf`/`hpf`
+//! plus parametric-EQ bands), the [`shape`] waveshaper and [`crush`] bitcrusher,
+//! a parametric [`EqChain`], a feed-forward [`Compressor`], a [`ConvReverb`]
+//! convolution send bus, a per-track [`DelayLine`], and the master [`Limiter`].
 //!
 //! These are deliberately self-contained (no `fundsp` API coupling) so the DSP
 //! is allocation-free, stable, and reviewable in isolation. The voice chain
 //! (`crate::voice`) owns the per-voice filters; the renderer (`crate::renderer`)
-//! owns the shared reverb bus and the master limiter.
+//! owns the strip EQ/comp/delay inserts, the shared convolution reverb bus, and
+//! the master strip + limiter.
 
 use std::f32::consts::PI;
+
+use crate::seam::{CompSettings, EqBand, EqBandKind, Frame};
 
 /// A transposed-direct-form-II biquad — the workhorse for `lpf` / `hpf`.
 ///
@@ -61,6 +65,73 @@ impl Biquad {
         let b0 = (1.0 + cos) / 2.0;
         let b1 = -(1.0 + cos);
         self.set_coeffs(b0, b1, b0, 1.0 + alpha, -2.0 * cos, 1.0 - alpha);
+    }
+
+    /// Build a parametric-EQ section from one [`EqBand`] (RBJ cookbook). Peak /
+    /// shelf bands honour `gain_db`; hpf/lpf bands ignore it. `q` sets the
+    /// bandwidth (peak) / slope (shelf) / resonance (hpf/lpf).
+    pub fn eq_band(band: &EqBand, sample_rate: f32) -> Self {
+        let mut q = Self::default();
+        q.set_eq_band(band, sample_rate);
+        q
+    }
+
+    /// Recompute this biquad as the given EQ band, preserving filter state.
+    pub fn set_eq_band(&mut self, band: &EqBand, sample_rate: f32) {
+        let nyq = sample_rate * 0.5;
+        let fc = band.freq.clamp(10.0, nyq * 0.99);
+        let qf = band.q.max(0.05);
+        let w0 = 2.0 * PI * fc / sample_rate;
+        let cos = w0.cos();
+        let sin = w0.sin();
+        let alpha = sin / (2.0 * qf);
+        match band.kind {
+            EqBandKind::Hpf => {
+                let b0 = (1.0 + cos) / 2.0;
+                let b1 = -(1.0 + cos);
+                self.set_coeffs(b0, b1, b0, 1.0 + alpha, -2.0 * cos, 1.0 - alpha);
+            }
+            EqBandKind::Lpf => {
+                let b1 = 1.0 - cos;
+                let b0 = b1 / 2.0;
+                self.set_coeffs(b0, b1, b0, 1.0 + alpha, -2.0 * cos, 1.0 - alpha);
+            }
+            EqBandKind::Peak => {
+                let a = 10.0_f32.powf(band.gain_db / 40.0);
+                self.set_coeffs(
+                    1.0 + alpha * a,
+                    -2.0 * cos,
+                    1.0 - alpha * a,
+                    1.0 + alpha / a,
+                    -2.0 * cos,
+                    1.0 - alpha / a,
+                );
+            }
+            EqBandKind::LowShelf => {
+                let a = 10.0_f32.powf(band.gain_db / 40.0);
+                let beta = 2.0 * a.sqrt() * alpha;
+                self.set_coeffs(
+                    a * ((a + 1.0) - (a - 1.0) * cos + beta),
+                    2.0 * a * ((a - 1.0) - (a + 1.0) * cos),
+                    a * ((a + 1.0) - (a - 1.0) * cos - beta),
+                    (a + 1.0) + (a - 1.0) * cos + beta,
+                    -2.0 * ((a - 1.0) + (a + 1.0) * cos),
+                    (a + 1.0) + (a - 1.0) * cos - beta,
+                );
+            }
+            EqBandKind::HighShelf => {
+                let a = 10.0_f32.powf(band.gain_db / 40.0);
+                let beta = 2.0 * a.sqrt() * alpha;
+                self.set_coeffs(
+                    a * ((a + 1.0) + (a - 1.0) * cos + beta),
+                    -2.0 * a * ((a - 1.0) + (a + 1.0) * cos),
+                    a * ((a + 1.0) + (a - 1.0) * cos - beta),
+                    (a + 1.0) - (a - 1.0) * cos + beta,
+                    2.0 * ((a - 1.0) - (a + 1.0) * cos),
+                    (a + 1.0) - (a - 1.0) * cos - beta,
+                );
+            }
+        }
     }
 
     fn set_coeffs(&mut self, b0: f32, b1: f32, b2: f32, a0: f32, a1: f32, a2: f32) {
@@ -117,121 +188,14 @@ pub fn crush(x: f32, bits: f32) -> f32 {
     (x * half).round() / half
 }
 
-/// A stereo Schroeder-style reverb (4 combs + 2 all-passes per channel), used as
-/// the shared `room` send bus. Pre-sized at construction; `process` is
-/// allocation-free. A fixed, pleasant medium room — `room` is a *send amount*,
-/// so per-voice variation is handled by how much dry signal is fed in.
-pub struct Reverb {
-    combs_l: [Comb; 4],
-    combs_r: [Comb; 4],
-    allpass_l: [Allpass; 2],
-    allpass_r: [Allpass; 2],
-}
-
-impl std::fmt::Debug for Reverb {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Reverb").finish_non_exhaustive()
-    }
-}
-
-impl Reverb {
-    /// Build the reverb network for `sample_rate`. Delay lengths are the classic
-    /// Freeverb tunings, scaled from their 44.1 kHz reference.
-    pub fn new(sample_rate: f32) -> Self {
-        let scale = sample_rate / 44_100.0;
-        let comb_tunings = [1116, 1188, 1277, 1356];
-        let stereo_spread = 23;
-        let allpass_tunings = [556, 441];
-        let feedback = 0.84;
-        let damp = 0.2;
-
-        let mk_comb = |len: usize| Comb::new((len as f32 * scale) as usize, feedback, damp);
-        let mk_ap = |len: usize| Allpass::new((len as f32 * scale) as usize, 0.5);
-
-        Reverb {
-            combs_l: comb_tunings.map(mk_comb),
-            combs_r: comb_tunings.map(|t| mk_comb(t + stereo_spread)),
-            allpass_l: allpass_tunings.map(mk_ap),
-            allpass_r: allpass_tunings.map(|t| mk_ap(t + stereo_spread)),
-        }
-    }
-
-    /// Process one stereo frame of the wet bus. Input is the summed send signal.
-    pub fn process(&mut self, input: [f32; 2]) -> [f32; 2] {
-        let mut l = 0.0;
-        let mut r = 0.0;
-        for c in &mut self.combs_l {
-            l += c.process(input[0]);
-        }
-        for c in &mut self.combs_r {
-            r += c.process(input[1]);
-        }
-        for ap in &mut self.allpass_l {
-            l = ap.process(l);
-        }
-        for ap in &mut self.allpass_r {
-            r = ap.process(r);
-        }
-        // Comb sum scaling (4 combs → ~0.25) plus a little headroom.
-        [l * 0.22, r * 0.22]
-    }
-}
-
-/// A lowpass-damped feedback comb filter (one Freeverb comb).
-#[derive(Clone, Debug)]
-struct Comb {
-    buf: Vec<f32>,
-    idx: usize,
-    feedback: f32,
-    damp: f32,
-    filter_store: f32,
-}
-
-impl Comb {
-    fn new(len: usize, feedback: f32, damp: f32) -> Self {
-        Comb {
-            buf: vec![0.0; len.max(1)],
-            idx: 0,
-            feedback,
-            damp,
-            filter_store: 0.0,
-        }
-    }
-
-    fn process(&mut self, input: f32) -> f32 {
-        let out = self.buf[self.idx];
-        // One-pole lowpass in the feedback path (damping).
-        self.filter_store = out * (1.0 - self.damp) + self.filter_store * self.damp;
-        self.buf[self.idx] = input + self.filter_store * self.feedback;
-        self.idx = (self.idx + 1) % self.buf.len();
-        out
-    }
-}
-
-/// A Schroeder all-pass filter (diffusion).
-#[derive(Clone, Debug)]
-struct Allpass {
-    buf: Vec<f32>,
-    idx: usize,
-    gain: f32,
-}
-
-impl Allpass {
-    fn new(len: usize, gain: f32) -> Self {
-        Allpass {
-            buf: vec![0.0; len.max(1)],
-            idx: 0,
-            gain,
-        }
-    }
-
-    fn process(&mut self, input: f32) -> f32 {
-        let buffered = self.buf[self.idx];
-        let out = -input + buffered;
-        self.buf[self.idx] = input + buffered * self.gain;
-        self.idx = (self.idx + 1) % self.buf.len();
-        out
-    }
+/// Equal-power pan law: `pan ∈ [0,1]` → (left, right) gains. At centre both
+/// gains are `√½ ≈ 0.707`, so the summed power is constant across the sweep.
+/// Used both for per-voice pan (`crate::voice`) and per-strip balance
+/// (`crate::renderer`).
+pub(crate) fn equal_power_pan(pan: f32) -> (f32, f32) {
+    let p = pan.clamp(0.0, 1.0);
+    let angle = p * std::f32::consts::FRAC_PI_2;
+    (angle.cos(), angle.sin())
 }
 
 /// A simple look-back-free peak limiter with smooth gain release. Keeps the
@@ -275,5 +239,344 @@ impl Limiter {
             self.gain = target + (self.gain - target) * self.release_coeff;
         }
         [frame[0] * self.gain, frame[1] * self.gain]
+    }
+}
+
+/// A stereo parametric-EQ chain: one biquad section per [`EqBand`], per channel.
+/// Empty band list = bypass (pass-through). Re-built wholesale when the strip's
+/// band list changes ([`AudioCommand::SetTrackEq`](crate::seam::AudioCommand)), so
+/// per-sample [`process`](EqChain::process) is allocation-free.
+#[derive(Clone, Debug, Default)]
+pub struct EqChain {
+    /// One biquad per band, per channel: `[left, right]`.
+    sections: Vec<[Biquad; 2]>,
+}
+
+impl EqChain {
+    /// Build the section chain for `bands` at `sample_rate`. An empty list is a
+    /// pass-through EQ.
+    pub fn new(bands: &[EqBand], sample_rate: f32) -> Self {
+        let sections = bands
+            .iter()
+            .map(|b| {
+                let s = Biquad::eq_band(b, sample_rate);
+                [s, s]
+            })
+            .collect();
+        EqChain { sections }
+    }
+
+    /// Whether the chain has any active band.
+    pub fn is_active(&self) -> bool {
+        !self.sections.is_empty()
+    }
+
+    /// Process one stereo frame through every section in series.
+    pub fn process(&mut self, frame: Frame) -> Frame {
+        let mut l = frame[0];
+        let mut r = frame[1];
+        for sec in &mut self.sections {
+            l = sec[0].process(l);
+            r = sec[1].process(r);
+        }
+        [l, r]
+    }
+}
+
+/// A standard feed-forward peak compressor with soft knee, attack/release
+/// smoothing and make-up gain. Operates on the stereo peak (linked channels) so
+/// the stereo image is preserved. Allocation-free; coefficients recomputed only
+/// when [`set`](Compressor::set) is called.
+#[derive(Clone, Copy, Debug)]
+pub struct Compressor {
+    threshold_db: f32,
+    ratio: f32,
+    knee_db: f32,
+    makeup: f32,
+    attack_coeff: f32,
+    release_coeff: f32,
+    /// Smoothed gain-reduction envelope in dB (≤ 0).
+    envelope_db: f32,
+}
+
+impl Compressor {
+    /// Build a compressor from settings at `sample_rate`.
+    pub fn new(settings: &CompSettings, sample_rate: f32) -> Self {
+        let mut c = Compressor {
+            threshold_db: 0.0,
+            ratio: 1.0,
+            knee_db: 0.0,
+            makeup: 1.0,
+            attack_coeff: 0.0,
+            release_coeff: 0.0,
+            envelope_db: 0.0,
+        };
+        c.set(settings, sample_rate);
+        c
+    }
+
+    /// Recompute coefficients from new settings, keeping the running envelope.
+    pub fn set(&mut self, s: &CompSettings, sample_rate: f32) {
+        self.threshold_db = s.threshold_db;
+        self.ratio = s.ratio.max(1.0);
+        self.knee_db = s.knee_db.max(0.0);
+        self.makeup = 10.0_f32.powf(s.makeup_db / 20.0);
+        self.attack_coeff = time_to_coeff(s.attack, sample_rate);
+        self.release_coeff = time_to_coeff(s.release, sample_rate);
+    }
+
+    /// Process one stereo frame, applying smoothed gain reduction + make-up.
+    pub fn process(&mut self, frame: Frame) -> Frame {
+        let peak = frame[0].abs().max(frame[1].abs());
+        // Level in dBFS; a tiny floor avoids log(0).
+        let level_db = 20.0 * peak.max(1.0e-9).log10();
+        let target_reduction = self.target_reduction_db(level_db);
+
+        // Smooth toward the target: faster coefficient when gain reduction is
+        // *increasing* (attack), slower when recovering (release).
+        let coeff = if target_reduction < self.envelope_db {
+            self.attack_coeff
+        } else {
+            self.release_coeff
+        };
+        self.envelope_db = target_reduction + (self.envelope_db - target_reduction) * coeff;
+
+        let gain = 10.0_f32.powf(self.envelope_db / 20.0) * self.makeup;
+        [frame[0] * gain, frame[1] * gain]
+    }
+
+    /// Static gain reduction (dB, ≤ 0) for an input `level_db`, with a soft knee.
+    ///
+    /// Canonical soft-knee compressor curve (Reiss/RBJ): output level `y` for
+    /// input `x`, then reduction = `y - x`.
+    fn target_reduction_db(&self, level_db: f32) -> f32 {
+        let x = level_db;
+        let t = self.threshold_db;
+        let w = self.knee_db;
+        let slope = 1.0 / self.ratio;
+        let y = if w > 0.0 && (2.0 * (x - t)) > -w && (2.0 * (x - t)) <= w {
+            // Knee region: quadratic blend from 1:1 to the ratio slope.
+            x + (slope - 1.0) * (x - t + w * 0.5).powi(2) / (2.0 * w)
+        } else if 2.0 * (x - t) > w {
+            // Above the knee: full ratio.
+            t + (x - t) * slope
+        } else {
+            // Below the knee: no compression.
+            x
+        };
+        y - x
+    }
+}
+
+/// One-pole smoothing coefficient for a `time`-second attack/release at
+/// `sample_rate` (`coeff^n ≈ 1/e` after `time`). `0` time → instantaneous.
+fn time_to_coeff(time: f32, sample_rate: f32) -> f32 {
+    if time <= 0.0 {
+        return 0.0;
+    }
+    (-1.0 / (time * sample_rate)).exp()
+}
+
+/// Hard cap on convolution IR length (frames). Naive time-domain convolution is
+/// O(IR) per sample; a longer tail needs partitioned-FFT convolution (Onda 3).
+/// An installed IR longer than this is truncated. ~8192 frames ≈ 170 ms @ 48 kHz.
+const MAX_IR_FRAMES: usize = 8192;
+
+/// A stereo convolution reverb over a (typically procedural) impulse response.
+///
+/// Time-domain FIR convolution per channel via a ring-buffered history. This is
+/// O(IR length) per sample — fine for the short, decimated procedural IRs grove
+/// uses as the `room` send target (capped at [`MAX_IR_FRAMES`]). The IR is
+/// generated/installed off the RT path ([`ConvReverb::procedural`] /
+/// [`ConvReverb::from_buffer`]); `process` only reads it.
+pub struct ConvReverb {
+    /// Impulse response, one `[l, r]` tap per frame.
+    ir: Vec<Frame>,
+    /// Ring of recent input frames, length = IR length.
+    history: Vec<Frame>,
+    /// Write cursor into `history`.
+    pos: usize,
+}
+
+impl std::fmt::Debug for ConvReverb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConvReverb")
+            .field("ir_len", &self.ir.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ConvReverb {
+    /// Build from an explicit stereo IR. An empty IR falls back to a single unit
+    /// tap (dry-through) so the bus never divides by zero; an over-long IR is
+    /// truncated to [`MAX_IR_FRAMES`] (a full reverb tail is an Onda 3 FFT path).
+    pub fn from_buffer(mut ir: Vec<Frame>) -> Self {
+        if ir.is_empty() {
+            ir = vec![[1.0, 1.0]];
+        }
+        ir.truncate(MAX_IR_FRAMES);
+        let len = ir.len();
+        ConvReverb {
+            ir,
+            history: vec![[0.0; 2]; len],
+            pos: 0,
+        }
+    }
+
+    /// Synthesise a default procedural IR: an exponentially-decaying, slightly
+    /// decorrelated stereo noise tail of `seconds` length, with a few early
+    /// reflections. Deterministic (a fixed LCG seed) so renders are reproducible.
+    pub fn procedural(seconds: f32, sample_rate: f32) -> Self {
+        ConvReverb::from_buffer(procedural_ir(seconds, sample_rate))
+    }
+
+    /// Number of IR taps.
+    pub fn len(&self) -> usize {
+        self.ir.len()
+    }
+
+    /// Whether the IR is empty (never, after construction).
+    pub fn is_empty(&self) -> bool {
+        self.ir.is_empty()
+    }
+
+    /// Convolve one stereo input frame against the IR, returning the wet output.
+    pub fn process(&mut self, input: Frame) -> Frame {
+        let len = self.ir.len();
+        // Store the newest input at the cursor.
+        self.history[self.pos] = input;
+
+        let mut acc = [0.0f32; 2];
+        // Walk the IR; tap `k` multiplies the input from `k` frames ago.
+        let mut h = self.pos;
+        for tap in &self.ir {
+            let x = self.history[h];
+            acc[0] += x[0] * tap[0];
+            acc[1] += x[1] * tap[1];
+            // Step backwards through the ring.
+            h = if h == 0 { len - 1 } else { h - 1 };
+        }
+
+        self.pos = (self.pos + 1) % len;
+        acc
+    }
+}
+
+/// Build a procedural reverb IR: a handful of early reflections plus an
+/// exponentially-decaying, channel-decorrelated noise tail. `seconds` caps the
+/// tail; the result is normalised to a gentle send level.
+fn procedural_ir(seconds: f32, sample_rate: f32) -> Vec<Frame> {
+    let len = ((seconds.max(0.05) * sample_rate) as usize)
+        .max(1)
+        .min(MAX_IR_FRAMES);
+    let mut ir = vec![[0.0f32; 2]; len];
+
+    // Deterministic LCG for the diffuse tail (reproducible renders).
+    let mut state_l: u32 = 0x1234_5678;
+    let mut state_r: u32 = 0x9E37_79B9;
+    let mut next = |s: &mut u32| -> f32 {
+        *s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (*s >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+    };
+
+    // Exponential decay so the tail reaches ~-60 dB at `len`.
+    let decay = (1.0e-3_f32).powf(1.0 / len as f32);
+    let mut env = 1.0f32;
+    for tap in ir.iter_mut() {
+        tap[0] = next(&mut state_l) * env;
+        tap[1] = next(&mut state_r) * env;
+        env *= decay;
+    }
+
+    // A few early reflections for a sense of space (delays in ms → frames).
+    for &(ms, g) in &[(7.0, 0.6), (11.0, 0.5), (17.0, 0.42), (23.0, 0.35)] {
+        let i = ((ms / 1000.0) * sample_rate) as usize;
+        if i < len {
+            ir[i][0] += g;
+            ir[i][1] += g * 0.9;
+        }
+    }
+    // Direct early tap so the wet onset isn't pure noise.
+    ir[0][0] += 0.5;
+    ir[0][1] += 0.5;
+
+    // Normalise to keep the send level sane regardless of length.
+    let norm = 0.06 / (len as f32).sqrt().max(1.0);
+    for tap in ir.iter_mut() {
+        tap[0] *= norm * (len as f32).sqrt();
+        tap[1] *= norm * (len as f32).sqrt();
+    }
+    ir
+}
+
+/// A stereo feedback delay line (per-track delay bus). The send into the line is
+/// summed each frame; the tap is read `time_frames` back and fed back at
+/// `feedback`. Reconfiguring time/feedback is cheap and keeps the buffered tail.
+#[derive(Clone, Debug)]
+pub struct DelayLine {
+    buf: Vec<Frame>,
+    pos: usize,
+    /// Read-back distance in frames (clamped to the buffer length).
+    time_frames: usize,
+    feedback: f32,
+    /// Pending send accumulated this frame, added into the line on `process`.
+    input: Frame,
+}
+
+impl DelayLine {
+    /// Build a delay line sized for up to `max_frames` of delay.
+    pub fn new(max_frames: usize) -> Self {
+        let cap = max_frames.max(1);
+        DelayLine {
+            buf: vec![[0.0; 2]; cap],
+            pos: 0,
+            time_frames: 0,
+            feedback: 0.0,
+            input: [0.0; 2],
+        }
+    }
+
+    /// Set the delay time (frames) and feedback `0..1`. Grows the buffer if the
+    /// requested time exceeds the current capacity (non-RT; the engine sets this
+    /// from a mixer command, not per sample).
+    pub fn configure(&mut self, time_frames: u32, feedback: f32) {
+        let t = time_frames as usize;
+        if t >= self.buf.len() {
+            self.buf.resize(t + 1, [0.0; 2]);
+        }
+        self.time_frames = t;
+        self.feedback = feedback.clamp(0.0, 0.999);
+    }
+
+    /// Whether this line currently produces echoes.
+    pub fn is_active(&self) -> bool {
+        self.time_frames > 0
+    }
+
+    /// Accumulate a send into the line for the current frame.
+    pub fn send(&mut self, amount: Frame) {
+        self.input[0] += amount[0];
+        self.input[1] += amount[1];
+    }
+
+    /// Advance one frame: read the delayed tap, write input + feedback, return the
+    /// wet echo. Call once per output frame after all sends for that frame.
+    pub fn process(&mut self) -> Frame {
+        if self.time_frames == 0 {
+            self.input = [0.0; 2];
+            return [0.0; 2];
+        }
+        let len = self.buf.len();
+        let read = (self.pos + len - self.time_frames % len) % len;
+        let echo = self.buf[read];
+
+        // Write the freshly-sent signal plus the fed-back echo at the head.
+        self.buf[self.pos] = [
+            self.input[0] + echo[0] * self.feedback,
+            self.input[1] + echo[1] * self.feedback,
+        ];
+        self.input = [0.0; 2];
+        self.pos = (self.pos + 1) % len;
+        echo
     }
 }

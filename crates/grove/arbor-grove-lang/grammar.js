@@ -207,6 +207,7 @@ module.exports = grammar({
       $.integer,        // a bare degree leaf (note island; eval validates context)
       $.group,
       $.alternation,
+      $.polymeter,
       $.rest,
       $.extend,
       $.splice,
@@ -214,6 +215,12 @@ module.exports = grammar({
 
     group: $ => seq('[', $._mini, ']'),
     alternation: $ => seq('<', $._mini, '>'),
+    // `{a b c}%n` — polymeter. `%n` sets steps-per-cycle; omitted, the steps
+    // default (eval) to the length of the first lane (Strudel semantics).
+    polymeter: $ => seq(
+      '{', field('body', $._mini), '}',
+      optional(seq('%', field('steps', $.integer))),
+    ),
     rest: _ => '~',
     extend: _ => '_',
     splice: $ => seq('$', field('name', $.identifier)),
@@ -222,19 +229,27 @@ module.exports = grammar({
       $.fast, $.slow, $.replicate, $.weight, $.euclid, $.variant, $.chord,
     ),
 
-    fast: $ => seq('*', field('n', $.number)),
-    slow: $ => seq('/', field('n', $.number)),
+    // `*`/`/` factors may be a literal **or** a sub-pattern (`bd*<2 3>`,
+    // `bd*[2 3]`, `bd*{2 3}`): a patternised factor that varies per slot/cycle.
+    fast: $ => seq('*', field('n', $._factor)),
+    slow: $ => seq('/', field('n', $._factor)),
     replicate: $ => seq('!', field('n', $.integer)),
     weight: $ => seq('@', field('n', $.integer)),
+    // Each euclid argument may itself be patternised (`bd(<3 5>,8)`).
     euclid: $ => seq(
       '(',
-      field('pulses', $.integer), ',',
-      field('steps', $.integer),
-      optional(seq(',', field('rotation', $.integer))),
+      field('pulses', $._count), ',',
+      field('steps', $._count),
+      optional(seq(',', field('rotation', $._count))),
       ')',
     ),
     variant: $ => seq(':', field('n', $.integer)),
     chord: $ => seq('\'', field('name', $.chord_name)),
+
+    // A postfix-argument factor: a literal number or a sub-pattern atom.
+    _factor: $ => choice($.number, $.alternation, $.group, $.polymeter),
+    // A euclid count: a literal integer or a sub-pattern atom.
+    _count: $ => choice($.integer, $.alternation, $.group, $.polymeter),
 
     // ── Leaf tokens ──────────────────────────────────────────────────────────
     identifier: _ => /[a-zA-Z_][a-zA-Z0-9_]*/,

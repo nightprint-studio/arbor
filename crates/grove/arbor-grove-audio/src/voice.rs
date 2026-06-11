@@ -114,6 +114,8 @@ pub struct Voice {
     pan_r: f32,
     /// Reverb send amount `0..1`.
     room: f32,
+    /// Per-track delay-bus send amount `0..1` (post-pan dry × this → the line).
+    delay_mix: f32,
     /// Absolute frame at which this voice should release; `None` = ring out.
     release_at: Option<u64>,
     /// Set once released so we don't re-trigger release every sample.
@@ -152,7 +154,7 @@ impl Voice {
 
         let region_pan = source.region_pan();
         let pan = (params.pan + region_pan * 0.5).clamp(0.0, 1.0);
-        let (pan_l, pan_r) = equal_power_pan(pan);
+        let (pan_l, pan_r) = effects::equal_power_pan(pan);
 
         Voice {
             id,
@@ -166,6 +168,7 @@ impl Voice {
             pan_l,
             pan_r,
             room: params.room.clamp(0.0, 1.0),
+            delay_mix: params.delay_mix.unwrap_or(0.0).clamp(0.0, 1.0),
             release_at,
             released: false,
         }
@@ -185,8 +188,15 @@ impl Voice {
     }
 
     /// Process one sample at absolute frame `frame`, accumulating its dry signal
-    /// into `dry` (the track strip's L/R) and its reverb send into `send`.
-    pub fn process_into(&mut self, frame: u64, dry: &mut [f32; 2], send: &mut [f32; 2]) {
+    /// into `dry` (the track strip's L/R), its reverb send into `send`, and its
+    /// per-track delay-bus send into `delay_send`.
+    pub fn process_into(
+        &mut self,
+        frame: u64,
+        dry: &mut [f32; 2],
+        send: &mut [f32; 2],
+        delay_send: &mut [f32; 2],
+    ) {
         // Self-release at the deadline.
         if let Some(at) = self.release_at {
             if !self.released && frame >= at {
@@ -215,6 +225,10 @@ impl Voice {
         if self.room > 0.0 {
             send[0] += l * self.room;
             send[1] += r * self.room;
+        }
+        if self.delay_mix > 0.0 {
+            delay_send[0] += l * self.delay_mix;
+            delay_send[1] += r * self.delay_mix;
         }
     }
 
@@ -304,13 +318,6 @@ fn build_sample_source(
     }
 }
 
-/// Equal-power pan law: `pan ∈ [0,1]` → (left, right) gains summing in power.
-fn equal_power_pan(pan: f32) -> (f32, f32) {
-    let p = pan.clamp(0.0, 1.0);
-    let angle = p * std::f32::consts::FRAC_PI_2;
-    (angle.cos(), angle.sin())
-}
-
 /// Fixed-capacity voice pool with the design's voice-stealing policy.
 ///
 /// Slots are `Option<Voice>`; an empty slot is taken first, otherwise the
@@ -380,20 +387,27 @@ impl VoicePool {
         }
     }
 
-    /// Render one sample of every voice into the per-track dry accumulators and
-    /// the shared reverb send, reclaiming finished voices.
+    /// Render one sample of every voice into the per-track dry accumulators, the
+    /// shared reverb send, and the per-track delay-bus sends, reclaiming finished
+    /// voices.
     ///
-    /// `track_dry[i]` is the L/R accumulator for strip `i`; a voice whose `track`
-    /// is out of range routes to strip `0` (defensive — the engine sends valid
-    /// indices). `send` is the shared reverb send accumulator.
-    pub fn process_sample(&mut self, frame: u64, track_dry: &mut [[f32; 2]], send: &mut [f32; 2]) {
+    /// `track_dry[i]` / `track_delay[i]` are the L/R accumulators for strip `i`; a
+    /// voice whose `track` is out of range routes to strip `0` (defensive — the
+    /// engine sends valid indices). `send` is the shared reverb send accumulator.
+    pub fn process_sample(
+        &mut self,
+        frame: u64,
+        track_dry: &mut [[f32; 2]],
+        send: &mut [f32; 2],
+        track_delay: &mut [[f32; 2]],
+    ) {
         if track_dry.is_empty() {
             return;
         }
         for slot in self.slots.iter_mut() {
             if let Some(voice) = slot {
                 let idx = (voice.track as usize).min(track_dry.len() - 1);
-                voice.process_into(frame, &mut track_dry[idx], send);
+                voice.process_into(frame, &mut track_dry[idx], send, &mut track_delay[idx]);
                 if voice.is_done() {
                     *slot = None;
                 }

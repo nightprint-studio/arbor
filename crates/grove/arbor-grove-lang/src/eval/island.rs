@@ -9,11 +9,11 @@
 use std::rc::Rc;
 
 use arbor_grove_pattern::prelude::{
-    parse_note, pure, silence, slowcat, stack, timecat, ControlMap, Hap, Pattern, SourceSpan,
-    TimeSpan,
+    euclid_with, fast_with, parse_note, polymeter, pure, silence, slow_with, slowcat, stack,
+    timecat, ControlMap, Hap, Pattern, SourceSpan, TimeSpan,
 };
 
-use crate::ast::{Island, IslandKind, Leaf, Mini, MiniKind, Postfix};
+use crate::ast::{Island, IslandKind, Leaf, Mini, MiniArg, MiniKind, Postfix};
 use crate::convert::f64_to_time;
 use crate::env::Env;
 use crate::error::{LangError, LangErrorKind, Result};
@@ -60,6 +60,7 @@ fn eval_mini(
         }
         MiniKind::Group(inner) => eval_mini(ctx, env, kind, inner),
         MiniKind::Alt(inner) => eval_alt(ctx, env, kind, inner),
+        MiniKind::Poly { body, steps } => eval_poly(ctx, env, kind, body, *steps),
         MiniKind::Rest => Ok(silence()),
         MiniKind::Extend => Ok(silence()), // a lone `_`; in a sequence it merges left
         MiniKind::Splice(ident) => eval_splice(ctx, env, kind, &ident.name, mini.span),
@@ -79,6 +80,60 @@ fn eval_alt(ctx: &Rc<Ctx>, env: &Env, kind: IslandKind, inner: &Mini) -> Result<
         .map(|m| eval_mini(ctx, env, kind, m))
         .collect::<Result<Vec<_>>>()?;
     Ok(slowcat(pats))
+}
+
+/// `{ ... }%n` — polymeter. Each lane steps at `steps` slots per cycle (default:
+/// the first lane's length), looping through its own length.
+fn eval_poly(
+    ctx: &Rc<Ctx>,
+    env: &Env,
+    kind: IslandKind,
+    body: &Mini,
+    steps: Option<u32>,
+) -> Result<Pattern<ControlMap>> {
+    let lanes: Vec<&Mini> = match &body.kind {
+        MiniKind::Parallel(ls) => ls.iter().collect(),
+        _ => vec![body],
+    };
+    let mut built: Vec<(u32, Pattern<ControlMap>)> = Vec::with_capacity(lanes.len());
+    for lane in &lanes {
+        let len = lane_step_count(lane).max(1);
+        built.push((len, eval_mini(ctx, env, kind, lane)?));
+    }
+    // Default steps-per-cycle = the first lane's length (Strudel semantics).
+    let steps = steps.unwrap_or_else(|| built.first().map(|(n, _)| *n).unwrap_or(1));
+    Ok(polymeter(steps, built))
+}
+
+/// Count the slots a lane occupies — the step count polymeter retimes against.
+/// Mirrors `build_sequence`: each term contributes `replicate` slots, a `_`
+/// extends the previous slot (no new step), a bare atom is one step.
+fn lane_step_count(lane: &Mini) -> u32 {
+    match &lane.kind {
+        MiniKind::Sequence(items) => items
+            .iter()
+            .map(|it| {
+                if is_extend(it) {
+                    0
+                } else {
+                    term_replicate(it)
+                }
+            })
+            .sum(),
+        _ => 1,
+    }
+}
+
+/// The replication count of a sequence item (`!n` → n, otherwise 1).
+fn term_replicate(item: &Mini) -> u32 {
+    if let MiniKind::Term { postfixes, .. } = &item.kind {
+        for pf in postfixes {
+            if let Postfix::Replicate(r) = pf {
+                return *r;
+            }
+        }
+    }
+    1
 }
 
 /// Build a space-separated sequence into a weighted `timecat`, handling `_`
@@ -147,13 +202,46 @@ fn eval_term(
     let mut replicate = 1u32;
     for pf in postfixes {
         match pf {
-            Postfix::Fast(n) => pattern = pattern.fast(f64_to_time(*n)),
-            Postfix::Slow(n) => pattern = pattern.slow(f64_to_time(*n)),
+            Postfix::Fast(arg) => {
+                pattern = match arg {
+                    MiniArg::Const(n) => pattern.fast(f64_to_time(*n)),
+                    MiniArg::Pat(m) => fast_with(pattern, num_pattern(m, span)?),
+                }
+            }
+            Postfix::Slow(arg) => {
+                pattern = match arg {
+                    MiniArg::Const(n) => pattern.slow(f64_to_time(*n)),
+                    MiniArg::Pat(m) => slow_with(pattern, num_pattern(m, span)?),
+                }
+            }
             Postfix::Euclid {
                 pulses,
                 steps,
                 rotation,
-            } => pattern = pattern.euclid(*pulses, *steps, (*rotation).unwrap_or(0)),
+            } => {
+                pattern = if pulses.is_const()
+                    && steps.is_const()
+                    && rotation.as_ref().map_or(true, |r| r.is_const())
+                {
+                    // All-constant euclid → the direct, exact path.
+                    let p = pulses.const_value().unwrap() as u32;
+                    let s = steps.const_value().unwrap() as u32;
+                    let r = rotation.as_ref().and_then(|r| r.const_value()).unwrap_or(0.0) as i32;
+                    pattern.euclid(p, s, r)
+                } else {
+                    // Any count patternised → inner-join over the three controls.
+                    let rot = match rotation {
+                        Some(r) => arg_num_pattern(r, span)?,
+                        None => num_const_pattern(0.0),
+                    };
+                    euclid_with(
+                        pattern,
+                        arg_num_pattern(pulses, span)?,
+                        arg_num_pattern(steps, span)?,
+                        rot,
+                    )
+                };
+            }
             Postfix::Variant(v) => {
                 if kind != IslandKind::Sound {
                     return Err(context(span, "`:n` (sample variant) is only valid in s()/sound()"));
@@ -265,6 +353,84 @@ fn chord_expand(
         }
         out
     }))
+}
+
+// ── Patternised postfix arguments ─────────────────────────────────────────────
+
+/// A `MiniArg` as a `Pattern<f64>` (a constant becomes a one-per-cycle signal).
+fn arg_num_pattern(arg: &MiniArg, span: SourceSpan) -> Result<Pattern<f64>> {
+    match arg {
+        MiniArg::Const(n) => Ok(num_const_pattern(*n)),
+        MiniArg::Pat(m) => num_pattern(m, span),
+    }
+}
+
+/// A constant numeric pattern (one value per cycle).
+fn num_const_pattern(n: f64) -> Pattern<f64> {
+    pure(n)
+}
+
+/// Build a numeric `Pattern<f64>` from a postfix sub-pattern (`<2 3>`, `[2 3]`,
+/// `{2 3}`). It reuses the mini structural operators; leaves must be numeric.
+fn num_pattern(mini: &Mini, span: SourceSpan) -> Result<Pattern<f64>> {
+    eval_mini_num(mini, span)
+}
+
+/// Evaluate a numeric sub-pattern: same structure as a value island, but the
+/// leaves are read as numbers (integer degree leaves, in practice).
+fn eval_mini_num(mini: &Mini, span: SourceSpan) -> Result<Pattern<f64>> {
+    use arbor_grove_pattern::prelude::fastcat;
+    match &mini.kind {
+        MiniKind::Sequence(items) => {
+            let pats = items
+                .iter()
+                .map(|m| eval_mini_num(m, span))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(fastcat(pats))
+        }
+        MiniKind::Parallel(lanes) => {
+            // A parallel of numeric lanes is unusual as a factor; take the first
+            // lane so the factor stays a single per-slot value.
+            let first = lanes
+                .first()
+                .ok_or_else(|| context(span, "empty numeric sub-pattern"))?;
+            eval_mini_num(first, span)
+        }
+        MiniKind::Term { atom, postfixes } => {
+            // A numeric factor sub-pattern can't take its own postfixes.
+            if !postfixes.is_empty() {
+                return Err(context(span, "a patternised factor cannot take postfixes"));
+            }
+            eval_mini_num(atom, span)
+        }
+        MiniKind::Group(inner) => eval_mini_num(inner, span),
+        MiniKind::Alt(inner) => {
+            let alts: Vec<&Mini> = match &inner.kind {
+                MiniKind::Sequence(items) => items.iter().collect(),
+                _ => vec![inner.as_ref()],
+            };
+            let pats = alts
+                .into_iter()
+                .map(|m| eval_mini_num(m, span))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(slowcat(pats))
+        }
+        MiniKind::Poly { body, steps } => {
+            let lanes: Vec<&Mini> = match &body.kind {
+                MiniKind::Parallel(ls) => ls.iter().collect(),
+                _ => vec![body.as_ref()],
+            };
+            let mut built = Vec::with_capacity(lanes.len());
+            for lane in &lanes {
+                let len = lane_step_count(lane).max(1);
+                built.push((len, eval_mini_num(lane, span)?));
+            }
+            let n = steps.unwrap_or_else(|| built.first().map(|(k, _)| *k).unwrap_or(1));
+            Ok(polymeter(n, built))
+        }
+        MiniKind::Leaf(Leaf::Degree(d)) => Ok(pure(*d as f64)),
+        _ => Err(context(span, "a patternised factor must contain only numbers")),
+    }
 }
 
 fn context(span: SourceSpan, msg: &str) -> LangError {

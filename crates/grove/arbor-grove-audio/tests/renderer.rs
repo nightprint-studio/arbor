@@ -192,3 +192,194 @@ fn clock_advances_by_block_length() {
     let _ = render_block(&mut r, vec![], 300);
     assert_eq!(r.now_frame(), 812);
 }
+
+/// Two strips so solo / per-track routing can be exercised.
+fn two_tracks() -> Vec<TrackConfig> {
+    vec![
+        TrackConfig { name: "a".to_string() },
+        TrackConfig { name: "b".to_string() },
+    ]
+}
+
+#[test]
+fn master_gain_scales_output() {
+    let full = {
+        let mut r = Renderer::new(SR, &tracks());
+        let out = render_block(&mut r, vec![AudioCommand::Voice(synth_event(1, 0, VoiceParams::default()))], 2048);
+        peaks(&out).0
+    };
+    let half = {
+        let mut r = Renderer::new(SR, &tracks());
+        let out = render_block(
+            &mut r,
+            vec![
+                AudioCommand::SetMasterGain(0.25),
+                AudioCommand::Voice(synth_event(1, 0, VoiceParams::default())),
+            ],
+            2048,
+        );
+        peaks(&out).0
+    };
+    assert!(half < full * 0.5, "master gain 0.25 should drop the level: {half} vs {full}");
+}
+
+#[test]
+fn solo_mutes_other_strips() {
+    let mut r = Renderer::new(SR, &two_tracks());
+    // A voice on each track; solo track 0 → track 1 must be silenced.
+    let mut on_b = synth_event(2, 0, VoiceParams::default());
+    on_b.track = 1;
+    let out = render_block(
+        &mut r,
+        vec![
+            AudioCommand::SetTrackSolo(0, true),
+            AudioCommand::Voice(synth_event(1, 0, VoiceParams::default())),
+            AudioCommand::Voice(on_b),
+        ],
+        1024,
+    );
+    let soloed_peak = peaks(&out).0;
+    assert!(soloed_peak > 0.01, "soloed track should sound");
+
+    // Now solo only track 1 and play just track 0 → silence.
+    let mut r2 = Renderer::new(SR, &two_tracks());
+    let out2 = render_block(
+        &mut r2,
+        vec![
+            AudioCommand::SetTrackSolo(1, true),
+            AudioCommand::Voice(synth_event(1, 0, VoiceParams::default())), // track 0
+        ],
+        1024,
+    );
+    let (l, rr) = peaks(&out2);
+    assert!(l < 1e-6 && rr < 1e-6, "non-soloed track must be silent: {l},{rr}");
+}
+
+#[test]
+fn track_pan_balances_toward_a_side() {
+    // Strip pan to hard-right with a centred voice → right dominates.
+    let mut r = Renderer::new(SR, &tracks());
+    let out = render_block(
+        &mut r,
+        vec![
+            AudioCommand::SetTrackPan(0, 1.0),
+            AudioCommand::Voice(synth_event(1, 0, VoiceParams::default())),
+        ],
+        1024,
+    );
+    let (l, rr) = peaks(&out);
+    assert!(rr > l * 2.0, "strip pan=1 should bias right: L={l} R={rr}");
+}
+
+#[test]
+fn lowpass_eq_attenuates_a_bright_synth() {
+    use arbor_grove_audio::prelude::{EqBand, EqBandKind};
+    // A bright saw through a steep low-pass EQ should peak lower than dry.
+    let dry = {
+        let mut r = Renderer::new(SR, &tracks());
+        let out = render_block(&mut r, vec![AudioCommand::Voice(synth_event(1, 0, VoiceParams::default()))], 2048);
+        peaks(&out).0
+    };
+    let filtered = {
+        let mut r = Renderer::new(SR, &tracks());
+        let band = EqBand { kind: EqBandKind::Lpf, freq: 200.0, gain_db: 0.0, q: 0.707 };
+        let out = render_block(
+            &mut r,
+            vec![
+                AudioCommand::SetTrackEq(0, vec![band]),
+                AudioCommand::Voice(synth_event(1, 0, VoiceParams::default())),
+            ],
+            2048,
+        );
+        peaks(&out).0
+    };
+    assert!(filtered < dry, "low-pass EQ should reduce a bright synth's peak: {filtered} vs {dry}");
+}
+
+#[test]
+fn compressor_reduces_a_loud_strip() {
+    use arbor_grove_audio::prelude::CompSettings;
+    let uncomp = {
+        let mut r = Renderer::new(SR, &tracks());
+        let out = render_block(&mut r, vec![AudioCommand::Voice(synth_event(1, 0, VoiceParams::default()))], 4096);
+        peaks(&out).0
+    };
+    let comp = {
+        let mut r = Renderer::new(SR, &tracks());
+        let settings = CompSettings { threshold_db: -30.0, ratio: 8.0, attack: 0.001, release: 0.05, makeup_db: 0.0, knee_db: 2.0 };
+        let out = render_block(
+            &mut r,
+            vec![
+                AudioCommand::SetTrackComp(0, Some(settings)),
+                AudioCommand::Voice(synth_event(1, 0, VoiceParams::default())),
+            ],
+            4096,
+        );
+        peaks(&out).0
+    };
+    assert!(comp < uncomp, "heavy compression should lower the peak: {comp} vs {uncomp}");
+}
+
+#[test]
+fn delay_bus_produces_an_echo_after_the_voice() {
+    // A short voice with a delay send: after the source decays, the echo must
+    // still ring in a later block.
+    let mut r = Renderer::new(SR, &tracks());
+    // ~10ms line, plenty of feedback, full send.
+    let cfg = arbor_grove_audio::prelude::DelayConfig { time_frames: 480, feedback: 0.7 };
+    let mut p = VoiceParams::default();
+    p.delay_mix = Some(1.0);
+    let mut ev = synth_event(1, 0, p);
+    ev.dur_frames = Some(256); // short source
+
+    let _ = render_block(
+        &mut r,
+        vec![AudioCommand::SetTrackDelay(0, cfg), AudioCommand::Voice(ev)],
+        1024,
+    );
+    // Render further; the echo should keep producing output for a while.
+    let mut echo_peak = 0.0f32;
+    for _ in 0..8 {
+        let out = render_block(&mut r, vec![], 1024);
+        echo_peak = echo_peak.max(peaks(&out).0);
+    }
+    assert!(echo_peak > 1e-4, "delay bus should ring after the source stops, got {echo_peak}");
+}
+
+#[test]
+fn reverb_send_makes_a_wet_tail() {
+    // A voice with room send into the convolution reverb should leave a wet tail
+    // after the dry source has gone.
+    let mut r = Renderer::new(SR, &tracks());
+    let mut p = VoiceParams::default();
+    p.room = 1.0;
+    let mut ev = synth_event(1, 0, p);
+    ev.dur_frames = Some(128);
+    let _ = render_block(&mut r, vec![AudioCommand::Voice(ev)], 512);
+    // Let the dry source release, then look for residual wet energy.
+    let mut tail = 0.0f32;
+    for _ in 0..6 {
+        let out = render_block(&mut r, vec![], 2048);
+        tail = tail.max(peaks(&out).0);
+    }
+    assert!(tail > 1e-5, "reverb send should leave a wet tail, got {tail}");
+}
+
+#[test]
+fn set_reverb_ir_buffer_is_accepted() {
+    use arbor_grove_audio::prelude::ReverbIr;
+    // Installing an explicit IR must not panic and must still render.
+    let mut r = Renderer::new(SR, &tracks());
+    let ir: Vec<Frame> = (0..64).map(|i| { let g = 0.5f32.powi(i / 8); [g, g] }).collect();
+    let mut p = VoiceParams::default();
+    p.room = 0.8;
+    let out = render_block(
+        &mut r,
+        vec![
+            AudioCommand::SetReverbIr(ReverbIr::Buffer(ir)),
+            AudioCommand::Voice(synth_event(1, 0, p)),
+        ],
+        2048,
+    );
+    assert!(peaks(&out).0 > 0.0, "render with a custom IR should produce output");
+}

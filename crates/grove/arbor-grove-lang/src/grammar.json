@@ -831,6 +831,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "polymeter"
+        },
+        {
+          "type": "SYMBOL",
           "name": "rest"
         },
         {
@@ -874,6 +878,52 @@
         {
           "type": "STRING",
           "value": ">"
+        }
+      ]
+    },
+    "polymeter": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "FIELD",
+          "name": "body",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_mini"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "%"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "steps",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "integer"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         }
       ]
     },
@@ -947,7 +997,7 @@
           "name": "n",
           "content": {
             "type": "SYMBOL",
-            "name": "number"
+            "name": "_factor"
           }
         }
       ]
@@ -964,7 +1014,7 @@
           "name": "n",
           "content": {
             "type": "SYMBOL",
-            "name": "number"
+            "name": "_factor"
           }
         }
       ]
@@ -1015,7 +1065,7 @@
           "name": "pulses",
           "content": {
             "type": "SYMBOL",
-            "name": "integer"
+            "name": "_count"
           }
         },
         {
@@ -1027,7 +1077,7 @@
           "name": "steps",
           "content": {
             "type": "SYMBOL",
-            "name": "integer"
+            "name": "_count"
           }
         },
         {
@@ -1045,7 +1095,7 @@
                   "name": "rotation",
                   "content": {
                     "type": "SYMBOL",
-                    "name": "integer"
+                    "name": "_count"
                   }
                 }
               ]
@@ -1092,6 +1142,48 @@
             "type": "SYMBOL",
             "name": "chord_name"
           }
+        }
+      ]
+    },
+    "_factor": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "number"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "alternation"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "group"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "polymeter"
+        }
+      ]
+    },
+    "_count": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "integer"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "alternation"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "group"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "polymeter"
         }
       ]
     },

@@ -10,7 +10,7 @@ pub use crate::error::{EngineError, Result};
 pub use crate::clock::Epoch;
 
 // ── Scheduling core (pure) ───────────────────────────────────────────────────
-pub use crate::schedule::{schedule_span, voice_event_from_hap};
+pub use crate::schedule::{delay_config_for, schedule_span, voice_event_from_hap};
 
 // ── Transport (real-time) ────────────────────────────────────────────────────
 pub use crate::transport::{Transport, LOOKAHEAD_MS};

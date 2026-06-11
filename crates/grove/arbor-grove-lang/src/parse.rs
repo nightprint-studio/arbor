@@ -12,7 +12,7 @@ use tree_sitter::{Node, Parser};
 
 use crate::ast::{
     BinOp, Expr, ExprKind, FnDef, Ident, Import, Island, IslandKind, Item, Leaf, LetBind, Mini,
-    MiniKind, Postfix, Program, UnOp,
+    MiniArg, MiniKind, Postfix, Program, UnOp,
 };
 use crate::error::{LangError, LangErrorKind, Result};
 
@@ -252,6 +252,13 @@ fn walk_mini(node: Node, src: &str) -> Result<Mini> {
         }
         "group" => MiniKind::Group(Box::new(walk_mini(first_named(node)?, src)?)),
         "alternation" => MiniKind::Alt(Box::new(walk_mini(first_named(node)?, src)?)),
+        "polymeter" => MiniKind::Poly {
+            body: Box::new(walk_mini(field(node, "body")?, src)?),
+            steps: match node.child_by_field_name("steps") {
+                Some(s) => Some(int_u32(s, src)?),
+                None => None,
+            },
+        },
         "rest" => MiniKind::Rest,
         "extend" => MiniKind::Extend,
         "splice" => MiniKind::Splice(ident(field(node, "name")?, src)),
@@ -277,22 +284,31 @@ fn walk_mini_children(node: Node, src: &str) -> Result<Vec<Mini>> {
 
 fn walk_postfix(node: Node, src: &str) -> Result<Postfix> {
     Ok(match node.kind() {
-        "fast" => Postfix::Fast(num_f64(field(node, "n")?, src)?),
-        "slow" => Postfix::Slow(num_f64(field(node, "n")?, src)?),
+        "fast" => Postfix::Fast(mini_arg(field(node, "n")?, src)?),
+        "slow" => Postfix::Slow(mini_arg(field(node, "n")?, src)?),
         "replicate" => Postfix::Replicate(int_u32(field(node, "n")?, src)?),
         "weight" => Postfix::Weight(int_u32(field(node, "n")?, src)?),
         "variant" => Postfix::Variant(int_u32(field(node, "n")?, src)?),
         "euclid" => Postfix::Euclid {
-            pulses: int_u32(field(node, "pulses")?, src)?,
-            steps: int_u32(field(node, "steps")?, src)?,
+            pulses: mini_arg(field(node, "pulses")?, src)?,
+            steps: mini_arg(field(node, "steps")?, src)?,
             rotation: match node.child_by_field_name("rotation") {
-                Some(r) => Some(int_i32(r, src)?),
+                Some(r) => Some(mini_arg(r, src)?),
                 None => None,
             },
         },
         "chord" => Postfix::Chord(node_text(field(node, "name")?, src).to_string()),
         other => return Err(parse_err(node, &format!("unexpected postfix `{other}`"))),
     })
+}
+
+/// A postfix factor: a literal number/integer, or a patternised sub-pattern
+/// (`<2 3>`, `[2 3]`, `{2 3}`).
+fn mini_arg(node: Node, src: &str) -> Result<MiniArg> {
+    match node.kind() {
+        "number" | "integer" | "float" => Ok(MiniArg::Const(num_f64(node, src)?)),
+        _ => Ok(MiniArg::Pat(Box::new(walk_mini(node, src)?))),
+    }
 }
 
 // ── Node helpers ────────────────────────────────────────────────────────────────

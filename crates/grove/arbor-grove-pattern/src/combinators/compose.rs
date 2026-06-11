@@ -131,6 +131,35 @@ pub fn timecat<T: Clone + Send + Sync + 'static>(weighted: Vec<(u32, Pattern<T>)
     .split_queries()
 }
 
+/// Polymeter (`{a b c}%n`): overlay lanes that all advance at `steps` slots per
+/// cycle but each loop through its **own** length, so lanes of different lengths
+/// drift against each other (Tidal's `polymeter`).
+///
+/// Each lane is given as `(len, pattern)` where `pattern` is the lane's
+/// `len`-item sequence (a [`fastcat`], so it already plays `len` items/cycle).
+/// Re-timing it to `steps` items/cycle is `fast(steps / len)`; the lane's own
+/// `slowcat`/`fast` construction makes it keep cycling through its `len` items.
+/// `steps == 0` or a zero-length lane → that lane is silent.
+pub fn polymeter<T: Clone + Send + Sync + 'static>(
+    steps: u32,
+    lanes: Vec<(u32, Pattern<T>)>,
+) -> Pattern<T> {
+    if steps == 0 {
+        return silence();
+    }
+    let retimed = lanes
+        .into_iter()
+        .map(|(len, lane)| {
+            if len == 0 {
+                silence()
+            } else {
+                lane.fast(Time::new(steps as i64, len as i64))
+            }
+        })
+        .collect();
+    stack(retimed)
+}
+
 /// A timeline section: `pattern` occupies `cycles` whole cycles. Produced by
 /// [`cycles`], consumed by [`arrange`].
 #[derive(Clone, Debug)]
@@ -285,6 +314,31 @@ mod tests {
         let p = stack(vec![pure("a"), pure("b")]);
         let haps = first_cycle(&p);
         assert_eq!(haps.len(), 2);
+    }
+
+    #[test]
+    fn polymeter_steps_each_lane_at_the_global_rate() {
+        // {a b c, d e}%2 → both lanes play 2 items/cycle, drifting against each
+        // other. Lane 1 (len 3) at 2 steps: cycle 0 → a,b; lane 2 (len 2) → d,e.
+        let lane1 = fastcat(vec![pure("a"), pure("b"), pure("c")]);
+        let lane2 = fastcat(vec![pure("d"), pure("e")]);
+        let p = polymeter(2, vec![(3, lane1), (2, lane2)]);
+        let mut c0: Vec<_> = sorted_by_onset(&p)
+            .into_iter()
+            .map(|h| (h.part.begin, h.value))
+            .collect();
+        c0.sort_by_key(|(t, _)| *t);
+        // 2 slots × 2 lanes = 4 onsets in cycle 0.
+        assert_eq!(c0.len(), 4);
+        // First slot of each lane is its first item.
+        assert!(c0.iter().any(|(t, v)| *t == Time::ZERO && *v == "a"));
+        assert!(c0.iter().any(|(t, v)| *t == Time::ZERO && *v == "d"));
+    }
+
+    #[test]
+    fn polymeter_default_steps_zero_is_silent() {
+        let p = polymeter(0, vec![(2, fastcat(vec![pure("a"), pure("b")]))]);
+        assert!(p.query(TimeSpan::cycle(0)).is_empty());
     }
 
     #[test]

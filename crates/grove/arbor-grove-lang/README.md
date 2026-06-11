@@ -97,10 +97,42 @@ primitives added there for this layer:
 
 - `@n` / `_` (weight / elongate) → `timecat` (weighted slots).
 - `(n,k[,rot])` (Euclidean) → `Pattern::euclid` (Bjorklund).
+- patternised postfix factors (`bd*<2 3>`, `bd(<3 5>,8)`) → `fast_with` / `slow_with` /
+  `euclid_with` (inner-join over a `Pattern<f64>` control).
+- polymeter `{a b c}%n` → `polymeter` (lanes retimed to `n` steps/cycle; default `n` = first lane
+  length).
 - leaf source spans → `Pattern::tag_span`.
 
 `!n` (replicate) and `'chord` (chord expansion) stay AST-level expansions; the chord interval table
 lives here (the pattern crate owns only scales).
+
+## Mini-notation (level Full) and §F transforms
+
+The islands accept the full Strudel-style mini-notation:
+
+- **Patternised factors** — `bd*<2 3>` (alternation), `bd*[2 3]` (sequence), `bd*{2 3}`
+  (polymeter), and the same after `/`; **patternised euclid** counts (`bd(<3 5>,8)`,
+  `bd(3,<8 16>)`, patternised rotation). The factor varies per slot/cycle by inner-join.
+- **Polymeter** — `{a b c}%n` plays each `&`-separated lane at `n` slots per cycle, each looping
+  through its own length; omitting `%n` defaults the step count to the **first lane's length**.
+
+The closed transform stdlib gains the §F set:
+
+| Transform | Form | Effect |
+|---|---|---|
+| `add(n)` | method / partial / HOF | +`n` **semitones** on `note` |
+| `addDeg(n)` | method / partial / HOF | +`n` on scale `degree` (before `scale`) |
+| `degradeBy(p)` / `sometimesBy(p, tf)` | method / partial | parametric `degrade` / `sometimes` |
+| `chunk(n, tf)` | method / partial | apply `tf` to a rotating `1/n` slice each cycle |
+| `iter(n)` | method / partial | rotate the cycle left `1/n` more each cycle |
+| `palindrome` | nullary | alternate forward / reversed per cycle |
+| `swingBy(amt, n)` | method / partial | delay every other `1/n` subdivision by `amt` |
+| `delay(t, fb?, mix?)` | method / partial | stamp the `ControlMap` delay fields (`fb`=0.3, `mix`=0.5 defaults) |
+
+Continuous **signal sources** — `sine` `saw` `isaw` `tri` `square` — are bare-identifier
+`Pattern<f64>` values (unipolar `0..1`, one period per cycle, responding to `.fast`/`.slow`);
+`.range(lo, hi)` rescales one into `[lo, hi]`, so it drives a patternised control
+(`.lpf(sine.range(200, 2000))`).
 
 ## Status
 

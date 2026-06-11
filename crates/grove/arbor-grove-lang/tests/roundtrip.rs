@@ -60,6 +60,55 @@ fn island_sources_round_trip() {
 }
 
 #[test]
+fn patterned_args_and_polymeter_round_trip() {
+    // Patterned `*`/`/` factors (alternation, sequence-group, polymeter).
+    emits_back("s(bd*<2 3>)");
+    emits_back("s(bd*[2 3])");
+    emits_back("s(bd*{2 3})");
+    emits_back("s(bd/<2 3>)");
+    // Patterned euclid counts.
+    emits_back("s(bd(<3 5>,8))");
+    emits_back("s(bd(3,<8 16>))");
+    emits_back("s(bd(3,8,<0 2>))");
+    // Polymeter atoms.
+    emits_back("n({c4 e4 g4}%2)");
+    emits_back("n({c4 e4 g4})");
+    emits_back("n({c4 e4 g4 & d4 f4}%3)");
+}
+
+#[test]
+fn parse_then_eval_patterned_fast() {
+    // s(bd*<2 3>) → two onsets on even cycles, three on odd.
+    let p = eval_first_track("s(bd*<2 3>)");
+    assert_eq!(onsets(&p, 0).len(), 2);
+    assert_eq!(onsets(&p, 1).len(), 3);
+}
+
+#[test]
+fn parse_then_eval_patterned_euclid() {
+    // s(bd(<3 5>,8)) → tresillo then quintillo across cycles.
+    let p = eval_first_track("s(bd(<3 5>,8))");
+    assert_eq!(onsets(&p, 0).len(), 3);
+    assert_eq!(onsets(&p, 1).len(), 5);
+}
+
+#[test]
+fn parse_then_eval_polymeter_default_steps() {
+    // n({c4 e4 g4}) — default steps = first lane length (3) → 3 onsets/cycle.
+    let p = eval_first_track("n({c4 e4 g4})");
+    assert_eq!(onsets(&p, 0).len(), 3);
+}
+
+#[test]
+fn parse_then_eval_polymeter_steps() {
+    // n({c4 e4 g4}%2) — 2 steps/cycle, looping the 3-item lane: cycle 0 → c4,e4.
+    let p = eval_first_track("n({c4 e4 g4}%2)");
+    let notes: Vec<f64> = onsets(&p, 0).iter().filter_map(|h| h.value.note).collect();
+    assert_eq!(notes.len(), 2);
+    assert!(notes.contains(&60.0) && notes.contains(&64.0)); // c4, e4
+}
+
+#[test]
 fn arrange_multiline_round_trips() {
     let src = "\
 arrange(
@@ -204,4 +253,115 @@ fn parse_then_eval_fast() {
 fn parse_reports_syntax_error_with_span() {
     let err = parse("n(c4").unwrap_err();
     assert!(err.span.is_some(), "syntax error should carry a span");
+}
+
+// ── §F transforms (parse → eval) ────────────────────────────────────────────────
+
+#[test]
+fn add_transposes_notes_in_semitones() {
+    // n(c4 e4).add(7) → +7 semitones → g4, b4.
+    let p = eval_first_track("n(c4 e4).add(7)");
+    let mut notes: Vec<f64> = onsets(&p, 0).iter().filter_map(|h| h.value.note).collect();
+    notes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(notes, vec![67.0, 71.0]);
+}
+
+#[test]
+fn add_deg_transposes_before_scale() {
+    // n(0 2).addDeg(2).scale("c:minor") → degrees 2,4 → Eb4, G4 = 63, 67.
+    let p = eval_first_track(r#"n(0 2).addDeg(2).scale("c:minor")"#);
+    let mut notes: Vec<f64> = onsets(&p, 0).iter().filter_map(|h| h.value.note).collect();
+    notes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(notes, vec![63.0, 67.0]);
+}
+
+#[test]
+fn degrade_by_drops_a_fraction() {
+    // s(hh*16).degradeBy(0) keeps all; degradeBy(1) drops all.
+    let kept_none = eval_first_track("s(hh*16).degradeBy(1)");
+    assert_eq!(onsets(&kept_none, 0).len(), 0);
+    let kept_all = eval_first_track("s(hh*16).degradeBy(0)");
+    assert_eq!(onsets(&kept_all, 0).len(), 16);
+}
+
+#[test]
+fn iter_rotates_across_cycles() {
+    // s(a b c d).iter(4) rotates one slot left each cycle.
+    let p = eval_first_track("s(a b c d).iter(4)");
+    let names = |c| {
+        onsets(&p, c)
+            .iter()
+            .map(|h| h.value.sound.clone().unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(0), vec!["a", "b", "c", "d"]);
+    assert_eq!(names(1), vec!["b", "c", "d", "a"]);
+}
+
+#[test]
+fn palindrome_alternates_direction() {
+    let p = eval_first_track("s(a b c).palindrome()");
+    let names = |c| {
+        onsets(&p, c)
+            .iter()
+            .map(|h| h.value.sound.clone().unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(0), vec!["a", "b", "c"]);
+    assert_eq!(names(1), vec!["c", "b", "a"]);
+}
+
+#[test]
+fn chunk_keeps_event_count() {
+    // chunk applies a transform to a rotating slice; the grid stays 4 onsets.
+    let p = eval_first_track("s(a b c d).chunk(4, rev)");
+    for c in 0..4 {
+        assert_eq!(onsets(&p, c).len(), 4);
+    }
+}
+
+#[test]
+fn swing_by_preserves_events() {
+    let p = eval_first_track("s(a b c d).swingBy(0.05, 2)");
+    assert_eq!(onsets(&p, 0).len(), 4);
+}
+
+#[test]
+fn delay_sets_the_control_map_fields() {
+    // s(bd).delay(0.25) → delay time set, default fb/mix applied.
+    let p = eval_first_track("s(bd).delay(0.25)");
+    let h = &onsets(&p, 0)[0];
+    assert_eq!(h.value.delay, Some(0.25));
+    assert_eq!(h.value.feedback, Some(0.3)); // default
+    assert_eq!(h.value.delay_mix, Some(0.5)); // default
+    // explicit fb/mix override the defaults.
+    let p2 = eval_first_track("s(bd).delay(0.125, 0.6, 0.4)");
+    let h2 = &onsets(&p2, 0)[0];
+    assert_eq!(h2.value.feedback, Some(0.6));
+    assert_eq!(h2.value.delay_mix, Some(0.4));
+}
+
+#[test]
+fn signal_range_patternises_a_control() {
+    // s(hh*2).lpf(saw.range(200, 2000)) → per-event cutoff from the saw ramp.
+    let p = eval_first_track("s(hh*2).lpf(saw.range(200, 2000))");
+    let h = onsets(&p, 0);
+    assert_eq!(h.len(), 2);
+    // both cutoffs lie in the rescaled range; the two slots differ (ramp rises).
+    let c0 = h[0].value.lpf.unwrap();
+    let c1 = h[1].value.lpf.unwrap();
+    assert!((200.0..=2000.0).contains(&c0) && (200.0..=2000.0).contains(&c1));
+    assert_ne!(c0, c1);
+}
+
+#[test]
+fn every_with_palindrome_nullary() {
+    // s(a b).every(2, palindrome) — palindrome passed nullary into a HOF.
+    let p = eval_first_track("s(a b).every(2, palindrome)");
+    // cycle 0: palindrome's cycle 0 (forward) → a, b
+    let names: Vec<String> = onsets(&p, 0)
+        .iter()
+        .map(|h| h.value.sound.clone().unwrap())
+        .collect();
+    assert_eq!(names, vec!["a", "b"]);
 }

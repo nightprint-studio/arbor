@@ -136,6 +136,29 @@ impl Pattern<ControlMap> {
         })
     }
 
+    /// Transpose by adding `semitones` to every event's `note` (`add`). Events
+    /// without a concrete `note` are left untouched — transposition acts on
+    /// resolved pitches, not unresolved degrees.
+    pub fn add_note(self, semitones: f64) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            if let Some(n) = c.note {
+                c.note = Some(n + semitones);
+            }
+            c
+        })
+    }
+
+    /// Transpose by adding `steps` to every event's scale `degree` (`addDeg`),
+    /// before `scale` resolves it. Events without a `degree` are left untouched.
+    pub fn add_degree(self, steps: i32) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            if let Some(d) = c.degree {
+                c.degree = Some(d + steps);
+            }
+            c
+        })
+    }
+
     /// Resolve numeric scale **degrees** to concrete pitches against `scale`,
     /// placing degree 0 at the root in `default_octave`. Haps that already carry
     /// a `note` are untouched.
@@ -192,6 +215,26 @@ mod tests {
         let h = &p.query(TimeSpan::cycle(0))[0];
         assert_eq!(h.value.note, Some(63.0)); // Eb4
         assert_eq!(h.value.degree, None); // consumed
+    }
+
+    #[test]
+    fn add_note_transposes_resolved_pitches() {
+        let p = note(60.0).add_note(7.0);
+        assert_eq!(p.query(TimeSpan::cycle(0))[0].value.note, Some(67.0));
+        // a degree-only event is untouched (no resolved note yet).
+        let d = pure(ControlMap::degree(2)).add_note(7.0);
+        let v = &d.query(TimeSpan::cycle(0))[0].value;
+        assert_eq!(v.note, None);
+        assert_eq!(v.degree, Some(2));
+    }
+
+    #[test]
+    fn add_degree_shifts_then_scale_resolves() {
+        let p = pure(ControlMap::degree(0))
+            .add_degree(2)
+            .scale(Scale::parse("c:minor").unwrap(), 4);
+        // degree 0 + 2 → Eb4 = 63.
+        assert_eq!(p.query(TimeSpan::cycle(0))[0].value.note, Some(63.0));
     }
 
     #[test]

@@ -33,7 +33,9 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use arbor_grove_audio::prelude::{VoiceEvent, VoiceParams, VoiceSource};
+use arbor_grove_audio::prelude::{
+    AudioCommand, DelayConfig, VoiceEvent, VoiceParams, VoiceSource,
+};
 use arbor_grove_pattern::prelude::{ControlMap, Hap, SourceKind, Tracks};
 
 use crate::clock::Epoch;
@@ -185,6 +187,34 @@ pub fn voice_event_from_hap(
     })
 }
 
+/// Derive the per-track delay-bus configuration a voice event implies, if any.
+///
+/// The language carries `delay` (line time, **cycle fractions**) and `feedback`
+/// on the per-event [`VoiceParams`]; the renderer realises them as a per-track
+/// delay bus. This converts the cycle-fraction time to **frames** via `epoch` and
+/// returns the [`AudioCommand::SetTrackDelay`] to apply before the voice. Returns
+/// `None` when the event configures no delay line (no `delay` set, or zero time).
+///
+/// `delay_mix` (the per-event send) is *not* here — it rides on the voice itself.
+pub fn delay_config_for(ev: &VoiceEvent, epoch: &Epoch, sample_rate: u32) -> Option<AudioCommand> {
+    let time_cycles = ev.params.delay?;
+    if time_cycles <= 0.0 {
+        return None;
+    }
+    let time_frames = (time_cycles as f64 * epoch.frames_per_cycle(sample_rate)).round();
+    if time_frames < 1.0 {
+        return None;
+    }
+    let feedback = ev.params.feedback.unwrap_or(0.0).clamp(0.0, 0.999);
+    Some(AudioCommand::SetTrackDelay(
+        ev.track,
+        DelayConfig {
+            time_frames: time_frames.min(u32::MAX as f64) as u32,
+            feedback,
+        },
+    ))
+}
+
 /// Resolve the symbolic source: a user file marker wins over a named sound/inst.
 fn resolve_source(v: &ControlMap) -> VoiceSource {
     if let Some(path) = &v.source_file {
@@ -247,6 +277,18 @@ fn resolve_params(v: &ControlMap) -> VoiceParams {
     }
     if let Some(x) = v.vel {
         p.vel = x as f32;
+    }
+    // Delay-bus controls (Onda 2): carried per-event; the renderer realises them
+    // as a per-track delay bus (`delay`/`feedback` configure the line via the
+    // engine's `SetTrackDelay`, `delay_mix` is the per-voice send).
+    if let Some(x) = v.delay {
+        p.delay = Some(x as f32);
+    }
+    if let Some(x) = v.feedback {
+        p.feedback = Some(x as f32);
+    }
+    if let Some(x) = v.delay_mix {
+        p.delay_mix = Some(x as f32);
     }
     p
 }
@@ -320,6 +362,42 @@ mod tests {
         assert_eq!(voice_event_from_hap(&n, 0, &e, sr, 0).unwrap().note, Some(64.0));
         let d = hap(ControlMap::degree(3), Time::ZERO, Time::ONE);
         assert_eq!(voice_event_from_hap(&d, 0, &e, sr, 0).unwrap().note, Some(63.0));
+    }
+
+    #[test]
+    fn delay_params_carry_through_to_voice() {
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut cm = ControlMap::sound("bd");
+        cm.delay = Some(0.25);
+        cm.feedback = Some(0.5);
+        cm.delay_mix = Some(0.6);
+        let ev = voice_event_from_hap(&hap(cm, Time::ZERO, Time::ONE), 0, &e, sr, 0).unwrap();
+        assert_eq!(ev.params.delay, Some(0.25));
+        assert_eq!(ev.params.feedback, Some(0.5));
+        assert_eq!(ev.params.delay_mix, Some(0.6));
+    }
+
+    #[test]
+    fn delay_config_converts_cycle_fraction_to_frames() {
+        use arbor_grove_audio::prelude::{AudioCommand, DelayConfig};
+        let e = Epoch::start(1.0); // 48_000 frames/cycle
+        let sr = 48_000;
+        let mut cm = ControlMap::sound("bd");
+        cm.delay = Some(0.25); // a quarter cycle → 12_000 frames
+        cm.feedback = Some(0.4);
+        let ev = voice_event_from_hap(&hap(cm, Time::ZERO, Time::ONE), 3, &e, sr, 0).unwrap();
+        match delay_config_for(&ev, &e, sr) {
+            Some(AudioCommand::SetTrackDelay(track, DelayConfig { time_frames, feedback })) => {
+                assert_eq!(track, 3);
+                assert_eq!(time_frames, 12_000);
+                assert!((feedback - 0.4).abs() < 1e-6);
+            }
+            other => panic!("expected SetTrackDelay, got {other:?}"),
+        }
+        // No delay field → no config.
+        let plain = voice_event_from_hap(&hap(ControlMap::sound("bd"), Time::ZERO, Time::ONE), 0, &e, sr, 0).unwrap();
+        assert!(delay_config_for(&plain, &e, sr).is_none());
     }
 
     #[test]

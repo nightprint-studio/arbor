@@ -12,14 +12,15 @@
 use std::path::Path;
 
 use arbor_grove_audio::prelude::{
-    AudioCommand, Frame, Renderer, SourceKind, TrackConfig, VoiceSource,
+    AudioCommand, DelayConfig, Frame, Renderer, SourceKind, TrackConfig, VoiceSource,
 };
 use arbor_grove_pattern::prelude::{ControlMap, Time, TimeSpan, Tracks};
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::clock::Epoch;
 use crate::error::{EngineError, Result};
-use crate::schedule::schedule_span;
+use crate::schedule::{delay_config_for, schedule_span};
 
 /// Frames per render block. Small enough that `start_frame`s land in the right
 /// block, large enough to keep the per-block overhead negligible offline.
@@ -106,6 +107,10 @@ pub fn render_offline(
     // (the schedule core is pure, so this state lives here — like the transport).
     let mut next_id: u64 = 0;
     let mut sustained_started: HashSet<(u32, String)> = HashSet::new();
+    // Last delay-bus config applied per track, so we only re-emit `SetTrackDelay`
+    // when a track's delay line actually changes (avoids spamming the command
+    // stream and reconfiguring the line — which would reset its tail — each onset).
+    let mut delay_state: HashMap<u32, DelayConfig> = HashMap::new();
 
     let mut block: Vec<Frame> = vec![[0.0, 0.0]; BLOCK_FRAMES];
     let mut frame_cursor: u64 = 0;
@@ -132,6 +137,15 @@ pub fn render_offline(
                 {
                     if !sustained_started.insert((ev.track, path.clone())) {
                         continue;
+                    }
+                }
+                // Reconfigure the track's delay bus only when its config changes.
+                if let Some(AudioCommand::SetTrackDelay(track, cfg)) =
+                    delay_config_for(&ev, &epoch, sr)
+                {
+                    if delay_state.get(&track) != Some(&cfg) {
+                        delay_state.insert(track, cfg);
+                        voice_cmds.push(AudioCommand::SetTrackDelay(track, cfg));
                     }
                 }
                 voice_cmds.push(AudioCommand::Voice(ev));

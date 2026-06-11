@@ -217,8 +217,8 @@ fn island_postfixes() {
         vec![
             Postfix::Variant(2),
             Postfix::Euclid {
-                pulses: 3,
-                steps: 8,
+                pulses: MiniArg::Const(3.0),
+                steps: MiniArg::Const(8.0),
                 rotation: None,
             },
         ],
@@ -227,7 +227,7 @@ fn island_postfixes() {
 
     // s(bd*2 sd!3)
     let seq = m(MiniKind::Sequence(vec![
-        term(sound("bd"), vec![Postfix::Fast(2.0)]),
+        term(sound("bd"), vec![Postfix::Fast(MiniArg::Const(2.0))]),
         term(sound("sd"), vec![Postfix::Replicate(3)]),
     ]));
     assert_eq!(emit_expr(&s_island(seq)), "s(bd*2 sd!3)");
@@ -256,7 +256,7 @@ fn island_parallel_and_group() {
         sound("sd"),
         m(MiniKind::Rest),
     ]));
-    let lane2 = term(sound("hh"), vec![Postfix::Fast(8.0)]);
+    let lane2 = term(sound("hh"), vec![Postfix::Fast(MiniArg::Const(8.0))]);
     let par = m(MiniKind::Parallel(vec![lane1, lane2]));
     assert_eq!(emit_expr(&s_island(par)), "s(bd ~ sd ~ & hh*8)");
 

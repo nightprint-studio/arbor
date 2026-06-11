@@ -22,20 +22,25 @@ use crate::value::{Transform, Value};
 pub fn is_transform(name: &str) -> bool {
     matches!(
         name,
-        "rev" | "degrade"
+        "rev" | "degrade" | "palindrome"
             | "fast" | "slow"
             | "gain" | "pan" | "room" | "lpf" | "hpf" | "shift" | "speed" | "crush" | "shape"
             | "vel" | "inst" | "art" | "scale"
+            | "add" | "addDeg"
+            | "degradeBy" | "sometimesBy"
+            | "chunk" | "iter" | "swingBy" | "delay"
             | "every" | "off" | "sometimes" | "jux"
             | "log"
     )
 }
 
-/// The transform value of a bare nullary transform (`rev`, `degrade`).
+/// The transform value of a bare nullary transform (`rev`, `degrade`,
+/// `palindrome`).
 pub fn nullary_transform(name: &str) -> Option<Transform> {
     match name {
         "rev" => Some(Transform::new(|p| Ok(p.rev()))),
         "degrade" => Some(Transform::new(|p| Ok(p.degrade()))),
+        "palindrome" => Some(Transform::new(|p| Ok(p.palindrome()))),
         _ => None,
     }
 }
@@ -86,7 +91,7 @@ pub fn make_transform(
     span: SourceSpan,
 ) -> Result<Transform> {
     match name {
-        "rev" | "degrade" => {
+        "rev" | "degrade" | "palindrome" => {
             arity(name, args, 0, span)?;
             Ok(nullary_transform(name).expect("nullary"))
         }
@@ -132,6 +137,61 @@ pub fn make_transform(
             let oct = ctx.config.default_octave;
             Ok(Transform::new(move |p| Ok(p.scale(scale.clone(), oct))))
         }
+
+        // ── §F transposition (two separate transforms) ──────────────────────
+        "add" => {
+            arity(name, args, 1, span)?;
+            let n = as_number(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.add_note(n))))
+        }
+        "addDeg" => {
+            arity(name, args, 1, span)?;
+            let n = as_int(&args[0], span)? as i32;
+            Ok(Transform::new(move |p| Ok(p.add_degree(n))))
+        }
+
+        // ── §F parametric probability ───────────────────────────────────────
+        "degradeBy" => {
+            arity(name, args, 1, span)?;
+            let prob = as_number(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.degrade_by(prob))))
+        }
+        "sometimesBy" => {
+            arity(name, args, 2, span)?;
+            let prob = as_number(&args[0], span)?;
+            let tf = as_transform(ctx, &args[1], span)?;
+            Ok(Transform::new(move |p| {
+                tf.apply(p.clone())?; // surface inner errors up front (see `sometimes`)
+                let tf2 = tf.clone();
+                Ok(p.sometimes_by(prob, move |q| tf2.apply(q).unwrap_or_else(|_| silence())))
+            }))
+        }
+
+        // ── §F structural ───────────────────────────────────────────────────
+        "chunk" => {
+            arity(name, args, 2, span)?;
+            let n = as_int(&args[0], span)?;
+            let tf = as_transform(ctx, &args[1], span)?;
+            Ok(Transform::new(move |p| {
+                tf.apply(p.clone())?; // surface inner errors up front
+                let tf2 = tf.clone();
+                Ok(p.chunk(n, move |q| tf2.apply(q).unwrap_or_else(|_| silence())))
+            }))
+        }
+        "iter" => {
+            arity(name, args, 1, span)?;
+            let n = as_int(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.iter(n))))
+        }
+        "swingBy" => {
+            arity(name, args, 2, span)?;
+            let amount = f64_to_time(as_number(&args[0], span)?);
+            let n = as_int(&args[1], span)?;
+            Ok(Transform::new(move |p| Ok(p.swing_by(amount, n))))
+        }
+
+        // ── §F delay (writes the ControlMap delay fields) ───────────────────
+        "delay" => make_delay(args, span),
 
         "every" => {
             arity(name, args, 2, span)?;
@@ -198,6 +258,45 @@ pub fn make_transform(
             LangErrorKind::NotCallable(format!("transform `{name}`")),
         )),
     }
+}
+
+/// Default delay feedback when `fb` is omitted.
+const DELAY_DEFAULT_FEEDBACK: f64 = 0.3;
+/// Default delay wet mix when `mix` is omitted.
+const DELAY_DEFAULT_MIX: f64 = 0.5;
+
+/// `delay(t, fb?, mix?)` — stamp the three `ControlMap` delay fields (`delay`
+/// time in fractions of a cycle, `feedback`, `delay_mix` send). The audio engine
+/// realises the audible feedback echo; here it is pure data on each hap. `fb`
+/// defaults to `0.3`, `mix` to `0.5`.
+fn make_delay(args: &[Value], span: SourceSpan) -> Result<Transform> {
+    if args.is_empty() || args.len() > 3 {
+        return Err(LangError::at(
+            span,
+            LangErrorKind::Arity {
+                name: "delay".to_string(),
+                expected: 1, // 1..3; report the minimum
+                got: args.len(),
+            },
+        ));
+    }
+    let t = as_number(&args[0], span)?;
+    let fb = match args.get(1) {
+        Some(v) => as_number(v, span)?,
+        None => DELAY_DEFAULT_FEEDBACK,
+    };
+    let mix = match args.get(2) {
+        Some(v) => as_number(v, span)?,
+        None => DELAY_DEFAULT_MIX,
+    };
+    Ok(Transform::new(move |p| {
+        Ok(p.fmap(move |mut c| {
+            c.delay = Some(t);
+            c.feedback = Some(fb);
+            c.delay_mix = Some(mix);
+            c
+        }))
+    }))
 }
 
 /// Build a voice/mix transform from a single patternisable parameter.

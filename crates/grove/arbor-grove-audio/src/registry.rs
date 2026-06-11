@@ -72,6 +72,20 @@ impl Default for SynthPreset {
     }
 }
 
+/// How a named articulation re-targets sample selection on an SFZ instrument.
+///
+/// * `Keyswitch` — the articulation activates a keyswitch (an SFZ `sw_last` key),
+///   filtering the same instrument's regions to that articulation's set.
+/// * `Region` — the articulation is a *separate* SFZ instrument (an alternate
+///   sample set in its own subdir), selected wholesale.
+#[derive(Clone, Debug)]
+enum Articulation {
+    /// Filter regions by this keyswitch key (MIDI).
+    Keyswitch(u8),
+    /// Use an alternate SFZ instrument (index into `instruments`).
+    Region(usize),
+}
+
 /// One manifest entry, post-load: a concrete thing a name resolves to.
 #[derive(Clone, Debug)]
 enum Entry {
@@ -79,8 +93,12 @@ enum Entry {
     Synth(SynthPreset),
     /// A one-shot sample, resident under `bank_key`.
     Sample { bank_key: String },
-    /// An SFZ instrument (index into `instruments`).
-    Sfz { instrument: usize },
+    /// An SFZ instrument (index into `instruments`) plus its named articulations.
+    Sfz {
+        instrument: usize,
+        /// Articulation name → how it re-targets selection. Empty = no articulations.
+        articulations: HashMap<String, Articulation>,
+    },
 }
 
 /// What [`Registry::resolve`] produces: a concrete voice description the renderer
@@ -229,8 +247,14 @@ impl Registry {
                 )))?;
                 let full = resolve_path(base, file);
                 let idx = self.load_sfz(&full)?;
-                self.entries
-                    .insert(name.to_string(), Entry::Sfz { instrument: idx });
+                let articulations = self.parse_articulations(kv, base)?;
+                self.entries.insert(
+                    name.to_string(),
+                    Entry::Sfz {
+                        instrument: idx,
+                        articulations,
+                    },
+                );
             }
             other => {
                 return Err(AudioError::Io(format!(
@@ -260,12 +284,49 @@ impl Registry {
         Ok(self.instruments.len() - 1)
     }
 
+    /// Parse the per-instrument articulation declarations out of an sfz entry's
+    /// key/value map. Each articulation is keyed `art.<name>.keyswitch = <midi>`
+    /// **or** `art.<name>.region = "<file.sfz>"` (an alternate sample set loaded as
+    /// its own SFZ instrument). A name may declare only one of the two.
+    fn parse_articulations(
+        &mut self,
+        kv: &HashMap<String, String>,
+        base: &Path,
+    ) -> Result<HashMap<String, Articulation>> {
+        let mut arts: HashMap<String, Articulation> = HashMap::new();
+        for (key, value) in kv {
+            let Some(rest) = key.strip_prefix("art.") else {
+                continue;
+            };
+            // `rest` is `<name>.<field>`.
+            let Some((art_name, field)) = rest.rsplit_once('.') else {
+                continue;
+            };
+            match field {
+                "keyswitch" => {
+                    if let Ok(midi) = value.parse::<u8>() {
+                        arts.insert(art_name.to_string(), Articulation::Keyswitch(midi));
+                    }
+                }
+                "region" => {
+                    let full = resolve_path(base, value);
+                    let idx = self.load_sfz(&full)?;
+                    arts.insert(art_name.to_string(), Articulation::Region(idx));
+                }
+                _ => {}
+            }
+        }
+        Ok(arts)
+    }
+
     /// Resolve a named source to a concrete voice.
     ///
     /// `inst` takes priority over `sound` (a melodic instrument over a drum
     /// leaf); `variant` selects a sample bank variant (currently unused beyond
-    /// the lookup key); `note`/`vel` choose the SFZ region. Anything unresolved
-    /// → the fallback synth. **RT-safe**: reads resident state only.
+    /// the lookup key); `note`/`vel` choose the SFZ region; `art` selects an
+    /// articulation (keyswitch or alternate region set); `seed` is the
+    /// deterministic onset seed driving round-robin variant choice. Anything
+    /// unresolved → the fallback synth. **RT-safe**: reads resident state only.
     ///
     /// Crate-internal: called by the renderer per voice trigger.
     pub(crate) fn resolve(
@@ -274,6 +335,8 @@ impl Registry {
         inst: Option<&str>,
         note: Option<f32>,
         vel: f32,
+        art: Option<&str>,
+        seed: u64,
     ) -> ResolvedVoice {
         // Prefer an explicit instrument, then a sound leaf.
         let name = inst.or(sound);
@@ -288,19 +351,38 @@ impl Registry {
                 },
                 None => ResolvedVoice::Synth(self.fallback),
             },
-            Some(Entry::Sfz { instrument }) => {
-                self.resolve_sfz(*instrument, note, vel).unwrap_or(ResolvedVoice::Synth(self.fallback))
-            }
+            Some(Entry::Sfz {
+                instrument,
+                articulations,
+            }) => self
+                .resolve_sfz(*instrument, articulations, note, vel, art, seed)
+                .unwrap_or(ResolvedVoice::Synth(self.fallback)),
             None => ResolvedVoice::Synth(self.fallback),
         }
     }
 
-    /// Pick the SFZ region for `(note, vel)` and bind its resident sample.
-    fn resolve_sfz(&self, idx: usize, note: Option<f32>, vel: f32) -> Option<ResolvedVoice> {
-        let instrument = self.instruments.get(idx)?;
+    /// Pick the SFZ region for `(note, vel)`, honouring the requested articulation
+    /// + round-robin, and bind its resident sample.
+    fn resolve_sfz(
+        &self,
+        idx: usize,
+        articulations: &HashMap<String, Articulation>,
+        note: Option<f32>,
+        vel: f32,
+        art: Option<&str>,
+        seed: u64,
+    ) -> Option<ResolvedVoice> {
+        // An articulation may redirect to a separate SFZ instrument (a `region`
+        // alternate sample set) or activate a keyswitch on this instrument.
+        let (inst_idx, keyswitch) = match art.and_then(|a| articulations.get(a)) {
+            Some(Articulation::Region(other)) => (*other, None),
+            Some(Articulation::Keyswitch(sw)) => (idx, Some(*sw)),
+            None => (idx, None),
+        };
+        let instrument = self.instruments.get(inst_idx)?;
         let key = note.unwrap_or(60.0).round().clamp(0.0, 127.0) as u8;
         let velo = (vel.clamp(0.0, 1.0) * 127.0).round() as u8;
-        let region = instrument.select(key, velo)?;
+        let region = instrument.select_rr(key, velo, seed, keyswitch)?;
 
         // Resolve the region's resident sample (re-derive its key the same way
         // `load_sfz` stored it: absolute path string). We can't know the sfz dir
@@ -490,7 +572,7 @@ file = \"drums/bd.wav\"
     #[test]
     fn unresolved_name_falls_back_to_synth() {
         let reg = Registry::new();
-        match reg.resolve(Some("nope"), None, Some(60.0), 0.8) {
+        match reg.resolve(Some("nope"), None, Some(60.0), 0.8, None, 0) {
             ResolvedVoice::Synth(_) => {}
             _ => panic!("expected synth fallback"),
         }
@@ -506,9 +588,29 @@ file = \"drums/bd.wav\"
                 ..SynthPreset::default()
             },
         );
-        match reg.resolve(None, Some("synth.pad"), Some(60.0), 0.8) {
+        match reg.resolve(None, Some("synth.pad"), Some(60.0), 0.8, None, 0) {
             ResolvedVoice::Synth(p) => assert_eq!(p.waveform, Waveform::Triangle),
             _ => panic!("expected synth"),
+        }
+    }
+
+    #[test]
+    fn parses_articulation_keyswitch_declarations() {
+        // The flat manifest parser flattens `art.<name>.keyswitch` keys; parsing
+        // them into `Articulation::Keyswitch` is what we check here (no files).
+        let mut kv = HashMap::new();
+        kv.insert("art.legato.keyswitch".to_string(), "24".to_string());
+        kv.insert("art.pizzicato.keyswitch".to_string(), "26".to_string());
+        let mut reg = Registry::new();
+        let arts = reg.parse_articulations(&kv, Path::new(".")).unwrap();
+        assert_eq!(arts.len(), 2);
+        match arts.get("legato") {
+            Some(Articulation::Keyswitch(24)) => {}
+            other => panic!("expected legato keyswitch 24, got {other:?}"),
+        }
+        match arts.get("pizzicato") {
+            Some(Articulation::Keyswitch(26)) => {}
+            other => panic!("expected pizzicato keyswitch 26, got {other:?}"),
         }
     }
 }
