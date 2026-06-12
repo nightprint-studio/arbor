@@ -36,6 +36,7 @@ import {
   type NemusTokenClass, type Tree, type Node, type Parser,
 } from './nemus-lang';
 import { nemusLanguageIntel, type NemusIntelSource } from './nemus-intel';
+import { nemusEditingExtensions } from './nemus-ergonomics';
 
 // ── Syntax-highlight ViewPlugin ────────────────────────────────────────────────
 
@@ -237,6 +238,14 @@ export const nemusTheme = EditorView.theme(
     },
     '.cm-lineNumbers .cm-gutterElement': { padding: '0 8px 0 14px', minWidth: '34px' },
     '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--text-secondary)' },
+    // Fold gutter (collapse arrows) + the inline placeholder for a folded block.
+    '.cm-foldGutter .cm-gutterElement': { padding: '0 2px', color: 'var(--text-disabled)', cursor: 'pointer' },
+    '.cm-foldGutter .cm-gutterElement:hover': { color: 'var(--text-primary)' },
+    '.cm-foldPlaceholder': {
+      backgroundColor: 'var(--bg-hover)', color: 'var(--text-muted)',
+      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
+      margin: '0 2px', padding: '0 4px',
+    },
     '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--bg-hover) 45%, transparent)' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text-primary)' },
     '.cm-selectionBackground, .cm-content ::selection': {
@@ -407,6 +416,10 @@ export function createNemusExtensions(opts: NemusExtensionsOptions = {}): Extens
     nemusHighlight,
     activeHapsField,
     lintGutter(),
+    // Editing ergonomics (comments, autoclose, delete-line, soft wrap, folding).
+    // Placed before the base keymap so its `Mod-/` / `Mod-y` win over the
+    // history defaults (`Mod-y` would otherwise redo).
+    nemusEditingExtensions(),
   ];
   // Language intelligence (autocomplete + hover) — only when a catalogue source
   // is provided and the pane is editable (no completions in a read-only viewer).

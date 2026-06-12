@@ -81,6 +81,30 @@ function entryCompletion(e: NemusDslEntry): Completion {
   };
 }
 
+/** Articulations the renderer always honours regardless of the instrument.
+ *  `legato` is the monophonic re-glide machinery in the voice pool (it smooths
+ *  phrasing even on a plain sustain patch with no dedicated legato samples), so
+ *  it is offered for every voice — see arbor-nemus-audio's voice pool docs. */
+const UNIVERSAL_ARTICULATIONS = ['legato'];
+
+/** Build the completion list for `.art("…")` — the union of every instrument's
+ *  declared articulations plus the universal ones, deduped + sorted. (We offer
+ *  the full set rather than resolving the track's specific instrument: the call
+ *  chain may not name one, and an over-broad list still beats no completion.) */
+function articulationCompletions(instruments: NemusInstrument[]): Completion[] {
+  const seen = new Set<string>();
+  const out: Completion[] = [];
+  const add = (name: string, universal: boolean) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    out.push({ label: name, type: 'enum', detail: universal ? 'articulation' : undefined });
+  };
+  for (const a of UNIVERSAL_ARTICULATIONS) add(a, true);
+  for (const i of instruments) for (const a of i.articulations) add(a, false);
+  out.sort((a, b) => a.label.localeCompare(b.label));
+  return out;
+}
+
 /** Build a completion item for a resolvable instrument (offered inside `inst`).
  *  Synths sort first (always available); the side `info` lists articulations. */
 function instrumentCompletion(i: NemusInstrument): Completion {
@@ -137,11 +161,20 @@ export function nemusCompletion(src: NemusIntelSource): CompletionSource {
     if (tree) {
       const call = stringArgCallAt(tree, context.pos);
       if (call) {
-        if (call.fn !== 'inst') return null;
-        const opts = src.instruments().map(instrumentCompletion);
-        if (opts.length === 0) return null;
-        // Dotted names (`synth.lead`, `strings.violin`) stay valid as you type.
-        return { from: call.from, options: opts, validFor: /^[A-Za-z0-9_.\/-]*$/ };
+        if (call.fn === 'inst') {
+          const opts = src.instruments().map(instrumentCompletion);
+          if (opts.length === 0) return null;
+          // Dotted names (`synth.lead`, `strings.violin`) stay valid as you type.
+          return { from: call.from, options: opts, validFor: /^[A-Za-z0-9_.\/-]*$/ };
+        }
+        if (call.fn === 'art') {
+          const opts = articulationCompletions(src.instruments());
+          if (opts.length === 0) return null;
+          return { from: call.from, options: opts, validFor: /^[A-Za-z0-9_.-]*$/ };
+        }
+        // Any other string argument: suppress the language completions (a builtin
+        // name inside a quoted path/pattern is never what the user wants).
+        return null;
       }
     }
 

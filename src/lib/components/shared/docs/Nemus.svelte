@@ -20,7 +20,7 @@
 <div class="feature-grid">
   <div class="feature-card">
     <div class="fc-title">Editor</div>
-    <div class="fc-desc">CodeMirror with nemus syntax highlighting, inline error underlines, and a live highlight of whatever is sounding right now. Edits re-evaluate automatically. Autocomplete (<kbd>Ctrl</kbd>+<kbd>Space</kbd>) suggests the language's combinators, transforms and your own declarations — and, inside <code>inst("…")</code>, every instrument the engine can resolve; hover a name for its signature and docs.</div>
+    <div class="fc-desc">CodeMirror with nemus syntax highlighting, inline error underlines, and a live highlight of whatever is sounding right now. Edits re-evaluate automatically. Autocomplete (<kbd>Ctrl</kbd>+<kbd>Space</kbd>) suggests the language's combinators, transforms and your own declarations — and, inside <code>inst("…")</code>, every instrument the engine can resolve, and inside <code>art("…")</code>, the available articulations; hover a name for its signature and docs. The usual editing comforts are there too: comment toggling, bracket / quote autoclosing, soft wrapping, and folding of multi-line blocks.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Arrangement</div>
@@ -170,7 +170,8 @@ arrange(
     <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New <code>.nemus</code> file (editor)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active file</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>G</kbd></td><td>Go to line (editor)</td></tr>
-    <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration (incl. cross-file)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Toggle comment / delete line (editor)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration (editor) · reveal hap source (arrangement)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (editor focused) · else search the Console / Problems</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Import audio / MIDI as <code>.nemus</code></td></tr>

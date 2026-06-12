@@ -35,6 +35,7 @@
   import { mixerStore } from '../stores/mixer.svelte';
   import { inspectStore } from '../stores/inspect.svelte';
   import { laneColor, sectionColor } from '../palette';
+  import { makeByteToU16 } from '../editor/nemus-lang';
   import type { NemusQueryHap } from '$lib/ipc/nemus';
 
   const PX = 26;
@@ -124,13 +125,17 @@
   }
 
   // ── Auto-follow: keep the playhead in view while playing (re-armed on each
-  // play start; a manual wheel pins it until the next start). ───────────────────
+  // play start; ANY manual horizontal scroll pins it until the next start). ──────
   let scrollEl = $state<HTMLElement | null>(null);
   let userPinned = $state(false);
   let prevPlaying = false;
+  // The scrollLeft we last set programmatically. A `scroll` event whose position
+  // differs from this is a user scroll (scrollbar, trackpad pan, keyboard) — that
+  // pins the follow so the playhead stops yanking the view back (the glitch).
+  let lastAutoScrollLeft = 0;
   $effect(() => {
     const p = transportStore.playing;
-    if (p && !prevPlaying) userPinned = false;
+    if (p && !prevPlaying) { userPinned = false; if (scrollEl) lastAutoScrollLeft = scrollEl.scrollLeft; }
     prevPlaying = p;
   });
   $effect(() => {
@@ -140,9 +145,17 @@
     const sl = scrollEl.scrollLeft;
     if (x < sl + headW + 24 || x > sl + vw - 48) {
       scrollEl.scrollLeft = Math.max(0, x - headW - vw / 3);
+      lastAutoScrollLeft = scrollEl.scrollLeft; // remember the clamped value we set
     }
   });
-  function onWheel() { if (playing) userPinned = true; }
+  /** Pin the follow when the user scrolls horizontally themselves — covers the
+   *  scrollbar / trackpad-pan / keyboard cases that `wheel` alone misses. Our own
+   *  programmatic scrolls match `lastAutoScrollLeft`, so they don't pin. */
+  function onScroll() {
+    if (playing && !userPinned && scrollEl && Math.abs(scrollEl.scrollLeft - lastAutoScrollLeft) > 2) {
+      userPinned = true;
+    }
+  }
 
   // ── Selection: shared with the mixer + inspector via the nemus store (keyed by
   // strip index), so clicking/▲▼ here drives the Inspector too. ↑/↓ move the
@@ -165,6 +178,14 @@
     mixerStore.select(lane.track);
     inspectStore.select(lane.track, hap);
     nemusStore.showRight('inspector');
+  }
+  /** Ctrl/Cmd+click a hap → reveal the source span that produced it. The hap span
+   *  is a UTF-8 byte range (backend coordinate); convert to the editor's UTF-16
+   *  offset before relaying the jump (no-op on pure-ASCII source). */
+  function gotoHapSource(hap: NemusQueryHap) {
+    if (hap.span_start == null) return;
+    const offset = makeByteToU16(projectStore.activeSource)(hap.span_start);
+    nemusStore.requestGoto(offset, 0);
   }
   /** Key of the selected event within a given lane, for the block highlight. */
   function selectedKeyFor(lane: VizLane): string | null {
@@ -217,7 +238,7 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div class="arr" tabindex="0" role="group" aria-label="Arrangement" onkeydown={onKeydown}>
-  <div class="arr-scroll" bind:this={scrollEl} onwheel={onWheel}>
+  <div class="arr-scroll" bind:this={scrollEl} onscroll={onScroll}>
     <div class="arr-inner" style="--head-w: {headW}px; --tl-w: {timelineW}px;">
       <!-- View toolbar (sticky-left, stays put as the timeline scrolls) -->
       <div class="arr-toolbar-row">
@@ -291,7 +312,8 @@
                 {/each}
               {/if}
               <HapLane {lane} {color} view={VIEW} px={PX} {dimmed} {playCycle} {playing}
-                       selectedKey={selectedKeyFor(lane)} onpick={(h) => pickHap(lane, h)} />
+                       selectedKey={selectedKeyFor(lane)} onpick={(h) => pickHap(lane, h)}
+                       ongoto={gotoHapSource} />
             </div>
           </div>
         {/each}

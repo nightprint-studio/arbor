@@ -37,6 +37,7 @@
     playing,
     selectedKey = null,
     onpick,
+    ongoto,
   }: {
     lane: VizLane;
     color: string;
@@ -52,6 +53,8 @@
     selectedKey?: string | null;
     /** Picked an event — opens it in the Inspector. */
     onpick?: (hap: NemusQueryHap) => void;
+    /** Ctrl/Cmd+clicked an event — reveal the source span that produced it. */
+    ongoto?: (hap: NemusQueryHap) => void;
   } = $props();
 
   const VPAD = 12;     // % vertical padding inside the lane
@@ -222,7 +225,10 @@
 
   function pick(h: NemusQueryHap, e: MouseEvent) {
     e.stopPropagation(); // don't let the lane-level click steal the event pick
-    onpick?.(h);
+    // Ctrl/Cmd+click jumps to the source span that produced this hap (IDE-style);
+    // a plain click opens it in the Inspector.
+    if (e.ctrlKey || e.metaKey) ongoto?.(h);
+    else onpick?.(h);
   }
 </script>
 

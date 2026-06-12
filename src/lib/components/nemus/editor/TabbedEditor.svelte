@@ -188,8 +188,10 @@
         size="sm"
         closable
         overflow
+        draggable
         onSelect={(id) => projectStore.openFile(id)}
         onClose={(id) => projectStore.closeFile(id)}
+        onReorder={(from, to) => projectStore.reorderTab(from, to)}
         onAdd={newFile}
         addLabel="New .nemus (Ctrl+N)"
       />

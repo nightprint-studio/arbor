@@ -29,13 +29,24 @@
     return parts;
   }
 
+  // Editor keys provided by CodeMirror (not keydown bindings in NEMUS_BINDINGS) —
+  // surfaced here so the cheat-sheet is complete.
+  const editorKeys = [
+    { keys: ['Ctrl', '/'],          description: 'Toggle line comment (or the selected lines)' },
+    { keys: ['Ctrl', 'Y'],          description: 'Delete the current line' },
+    { keys: ['Ctrl', 'Space'],      description: 'Trigger autocomplete' },
+    { keys: ['Ctrl', 'Shift', 'Z'], description: 'Redo' },
+  ];
+
   // Ctrl+Click is handled in the editor mousedown (not a keydown binding), so it
   // isn't in NEMUS_BINDINGS — surface it here as a documented contextual key.
   const contextual = [
-    { keys: ['Ctrl', 'Click'], description: 'Go to declaration (fn / let / import, incl. cross-file)' },
-    { keys: ['↑', '↓'],        description: 'Arrangement: move between track lanes' },
-    { keys: ['←', '→'],        description: 'Arrangement: nudge + seek the cursor' },
-    { keys: ['Home'],          description: 'Arrangement: seek to the start' },
+    { keys: ['Ctrl', 'Click'],  description: 'Editor: go to declaration (fn / let / import, incl. cross-file)' },
+    { keys: ['Ctrl', 'Click'],  description: 'Arrangement: reveal the source that produced a hap' },
+    { keys: ['Drag'],           description: 'Reorder editor tabs · fold blocks via the gutter arrows' },
+    { keys: ['↑', '↓'],         description: 'Arrangement: move between track lanes' },
+    { keys: ['←', '→'],         description: 'Arrangement: nudge + seek the cursor' },
+    { keys: ['Home'],           description: 'Arrangement: seek to the start' },
   ];
 </script>
 
@@ -63,6 +74,19 @@
             {b.description}
             {#if b.scope === 'editor'}<span class="sc-scope">editor</span>{/if}
           </td>
+        </tr>
+      {/each}
+
+      <tr><td colspan="2" class="sc-section">Editor</td></tr>
+      {#each editorKeys as c (c.description)}
+        <tr>
+          <td class="sc-keys">
+            {#each c.keys as part, i (i)}
+              {#if i > 0}<span class="sc-plus">+</span>{/if}
+              <kbd>{part}</kbd>
+            {/each}
+          </td>
+          <td class="sc-desc">{c.description}<span class="sc-scope">editor</span></td>
         </tr>
       {/each}
 

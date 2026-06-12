@@ -83,6 +83,17 @@ function createProjectStore() {
       }
     },
 
+    /** Reorder the open tabs (drag-to-reorder in the tab strip). Indices are into
+     *  `openFilePaths`; out-of-range requests are ignored. */
+    reorderTab(fromIndex: number, toIndex: number) {
+      if (fromIndex === toIndex) return;
+      const arr = [...openFilePaths];
+      if (fromIndex < 0 || fromIndex >= arr.length || toIndex < 0 || toIndex >= arr.length) return;
+      const [moved] = arr.splice(fromIndex, 1);
+      arr.splice(toIndex, 0, moved);
+      openFilePaths = arr;
+    },
+
     /** Update the cached source (editor edits route here). */
     setSource(path: string, text: string) { sources.set(path, text); },
 
