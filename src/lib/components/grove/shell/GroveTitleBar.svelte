@@ -150,7 +150,7 @@
         class="gtb-run"
         class:running={groveEngine.running}
         onclick={() => void groveEngine.toggleRun(projectStore.activeSource, projectStore.project?.path)}
-        use:tooltip={groveEngine.running ? 'Stop (Ctrl+Space)' : 'Run (Ctrl+Space)'}
+        use:tooltip={groveEngine.running ? 'Stop (Shift+F9)' : 'Run (Shift+F9)'}
         aria-label={groveEngine.running ? 'Stop' : 'Run'}
       >
         {#if groveEngine.running}<Square size={14} fill="currentColor" />{:else}<Play size={14} fill="currentColor" />{/if}

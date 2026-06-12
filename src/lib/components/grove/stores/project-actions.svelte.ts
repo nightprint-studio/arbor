@@ -10,7 +10,8 @@
  */
 
 import { projectStore } from './project.svelte';
-import { renderStore } from './render.svelte';
+import { renderStore, DEFAULT_RENDER_LOOPS } from './render.svelte';
+import { arrangementStore } from '../viz/arrangement.svelte';
 import { groveRender } from '$lib/ipc/grove';
 import { fsWriteTextFile } from '$lib/ipc/fs';
 
@@ -34,6 +35,13 @@ function createProjectActions() {
   // One picker at a time; the mode decides what a confirmed path means.
   let picker = $state<GrovePicker>(null);
 
+  // Export is a two-step flow: the options dialog (loops + live estimate) runs
+  // first, THEN the save picker — so the user sees the duration/size before
+  // committing to a path. `exportOptionsOpen` gates the dialog; `exportLoops`
+  // is the chosen multiplier, carried into the picker's confirm.
+  let exportOptionsOpen = $state(false);
+  let exportLoops       = $state(DEFAULT_RENDER_LOOPS);
+
   function onConfirm(path: string) {
     const mode = picker;
     picker = null;
@@ -54,17 +62,35 @@ function createProjectActions() {
     } else if (mode === 'open-file') {
       void projectStore.openFile(path).catch(() => {});
     } else if (mode === 'export') {
+      // Render length = the arrangement's natural loop period × the user's loop
+      // count from the options dialog. Falls back to one cycle when the
+      // arrangement hasn't been evaluated (loopCycles == 0) so a stray export
+      // still produces a (tiny but valid) WAV instead of an empty one.
+      const cycles = (arrangementStore.loopCycles || 1) * exportLoops;
       // The render runs as a background job; the store reports start/done/fail
       // via the title-bar badge (the job resolves with an id, not the WAV).
       void renderStore.track(
-        groveRender(projectStore.activeSource, path, { cycles: 32 }, projectStore.project?.path),
+        groveRender(projectStore.activeSource, path, { cycles }, projectStore.project?.path),
         path,
       );
     }
   }
 
+  /** Cycles that the current options would render — `loopCycles × loops`. 0
+   *  when the arrangement hasn't been evaluated yet (the dialog disables Export
+   *  and prompts the user to evaluate first). */
+  function exportCycles(): number {
+    return arrangementStore.loopCycles * exportLoops;
+  }
+
   return {
     get picker() { return picker; },
+    get exportOptionsOpen() { return exportOptionsOpen; },
+    get exportLoops()       { return exportLoops; },
+    /** Resulting render length for the chosen loop count (read-only echo). */
+    get exportCycles()      { return exportCycles(); },
+
+    setExportLoops(n: number) { exportLoops = Math.max(1, Math.round(n) || 1); },
 
     /** Open the "new grove project" folder picker. */
     newProject()  { picker = 'new'; },
@@ -75,8 +101,14 @@ function createProjectActions() {
     openProject() { picker = 'open-project'; },
     /** Open the "open .grove file" picker. */
     openFile()    { picker = 'open-file'; },
-    /** Open the "export/render to WAV" save picker. */
-    exportWav()   { picker = 'export'; },
+    /** Open the export options dialog (step 1 of the two-step export flow);
+     *  resets the loop count to the default each time so the dialog is
+     *  predictable. */
+    exportWav()   { exportLoops = DEFAULT_RENDER_LOOPS; exportOptionsOpen = true; },
+    /** Confirm export options → advance to the save picker (step 2). */
+    confirmExportOptions() { exportOptionsOpen = false; picker = 'export'; },
+    /** Dismiss the export options dialog without exporting. */
+    cancelExportOptions()  { exportOptionsOpen = false; },
     /** Flush the active buffer to disk (no-op when there's no active file). */
     save()        { void projectStore.save().catch(() => {}); },
 

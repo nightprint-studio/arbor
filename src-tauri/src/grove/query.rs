@@ -58,6 +58,106 @@ pub struct QueryHaps {
     pub haps: Vec<QueryHap>,
     /// Named section bands (empty unless a track uses `arrange(section(...))`).
     pub sections: Vec<QuerySection>,
+    /// Period (in cycles) after which the whole arrangement repeats — the natural
+    /// render length. A `Pattern` has no length, but a song does: `melody(<8…>)` +
+    /// `bass(<8…>)` loops every 8 cycles. `0` only when there are no haps at all.
+    pub loop_cycles: u32,
+}
+
+/// Detect the arrangement's loop period (in cycles) over a query window.
+///
+/// Strategy, most-authoritative first:
+/// 1. **Explicit `arrange(...)`** — if any track carries a named-section layout
+///    its `period` is the loop length by construction; the longest wins.
+/// 2. **Periodicity of the haps** — find the smallest `P` in `1..=window` for
+///    which the hap set is invariant under a shift of `P` (the haps in
+///    `[0, window-P)` match, modulo the time shift, those in `[P, window)`).
+/// 3. **Fallback** — no repetition detected (one-shot / non-periodic content):
+///    use the content end (max hap end, rounded up). Never `0` when haps exist.
+fn detect_loop_cycles(haps: &[QueryHap], sections: &[QuerySection], window: u32) -> u32 {
+    // (1) Explicit arrangement: a named layout's period is the loop, exactly.
+    if !sections.is_empty() {
+        let period = sections
+            .iter()
+            .map(|s| s.end.ceil() as u32)
+            .max()
+            .unwrap_or(0);
+        if period > 0 {
+            return period.min(window);
+        }
+    }
+
+    if haps.is_empty() {
+        return 0;
+    }
+
+    // (2) Periodicity: the smallest shift P that leaves the hap set invariant.
+    // A hap's identity for matching is everything but its absolute time; two haps
+    // are "the same event one period apart" when they agree on track/duration/
+    // payload and their starts differ by exactly P.
+    let window_i = window as f64;
+    for p in 1..=window {
+        let shift = p as f64;
+        // Every hap with start < window - P must reappear shifted by +P, and every
+        // hap with start >= P must be the image of one shifted from below. We check
+        // the forward direction over the interior and rely on the set equality of
+        // counts: build the shifted key-set of the lower band and compare to the
+        // upper band.
+        let mut lower: Vec<HapKey> = haps
+            .iter()
+            .filter(|h| h.start + EPS < window_i - shift)
+            .map(|h| HapKey::shifted(h, shift))
+            .collect();
+        let mut upper: Vec<HapKey> = haps
+            .iter()
+            .filter(|h| h.start + EPS >= shift)
+            .map(|h| HapKey::shifted(h, 0.0))
+            .collect();
+        if lower.len() != upper.len() {
+            continue;
+        }
+        lower.sort();
+        upper.sort();
+        if lower == upper && !lower.is_empty() {
+            return p;
+        }
+    }
+
+    // (3) Fallback: round the content end up to whole cycles.
+    let content_end = haps.iter().fold(0.0_f64, |m, h| m.max(h.end));
+    (content_end.ceil() as u32).clamp(1, window)
+}
+
+/// Tolerance for matching cycle positions across a period shift (haps carry
+/// rational times rendered to `f64`, so exact equality is unsafe).
+const EPS: f64 = 1e-6;
+
+/// A hap's identity for periodicity matching: track + duration + payload + onset,
+/// with the *start* quantised after the candidate shift so two events a period
+/// apart compare equal. Times are quantised to a fine grid to dodge `f64` noise.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct HapKey {
+    track: u32,
+    start_q: i64,
+    dur_q: i64,
+    has_onset: bool,
+    sound: Option<String>,
+    note_q: Option<i64>,
+}
+
+impl HapKey {
+    fn shifted(h: &QueryHap, shift: f64) -> Self {
+        const GRID: f64 = 1_000_000.0;
+        let q = |x: f64| (x * GRID).round() as i64;
+        HapKey {
+            track: h.track,
+            start_q: q(h.start - shift),
+            dur_q: q(h.end - h.start),
+            has_onset: h.has_onset,
+            sound: h.sound.clone(),
+            note_q: h.note.map(q),
+        }
+    }
 }
 
 /// Query the last-evaluated arrangement over `[0, cycles)` and return every hap.
@@ -75,7 +175,7 @@ pub async fn grove_query(
     };
 
     let Some(tracks) = tracks else {
-        return Ok(QueryHaps { haps: Vec::new(), sections: Vec::new() });
+        return Ok(QueryHaps { haps: Vec::new(), sections: Vec::new(), loop_cycles: 0 });
     };
 
     let window = cycles.max(1);
@@ -123,5 +223,62 @@ pub async fn grove_query(
             });
         }
     }
-    Ok(QueryHaps { haps, sections })
+    let loop_cycles = detect_loop_cycles(&haps, &sections, window);
+    Ok(QueryHaps { haps, sections, loop_cycles })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hap(track: u32, start: f64, end: f64, sound: &str) -> QueryHap {
+        QueryHap {
+            track,
+            start,
+            end,
+            has_onset: true,
+            span_start: None,
+            span_end: None,
+            sound: Some(sound.to_string()),
+            note: None,
+            gain: None,
+        }
+    }
+
+    /// A song that loops every 8 cycles, queried over a 96-cycle window: track 0
+    /// fires `bd` on every cycle, track 1 fires `bass` once at the head of each
+    /// 8-cycle block. The detector must find period 8, not the window 96.
+    #[test]
+    fn detects_period_8_over_window_96() {
+        let window = 96;
+        let mut haps = Vec::new();
+        for c in 0..window {
+            haps.push(hap(0, f64::from(c), f64::from(c) + 1.0, "bd"));
+            if c % 8 == 0 {
+                haps.push(hap(1, f64::from(c), f64::from(c) + 1.0, "bass"));
+            }
+        }
+        assert_eq!(detect_loop_cycles(&haps, &[], window), 8);
+    }
+
+    /// An explicit `arrange(...)` reports its total via the named-section layout;
+    /// the period comes straight from the sections (max `end`), not the haps.
+    #[test]
+    fn explicit_arrange_uses_section_total() {
+        let sections = vec![
+            QuerySection { track: 0, name: "INTRO".into(), start: 0.0, end: 4.0 },
+            QuerySection { track: 0, name: "VERSE".into(), start: 4.0, end: 12.0 },
+        ];
+        // Haps are incidental here; the section total (12) is authoritative.
+        let haps = vec![hap(0, 0.0, 1.0, "bd"), hap(0, 4.0, 1.0, "sn")];
+        assert_eq!(detect_loop_cycles(&haps, &sections, 96), 12);
+    }
+
+    /// Non-periodic one-shot content falls back to the rounded-up content end,
+    /// and never returns 0 while haps exist.
+    #[test]
+    fn fallback_to_content_end_when_not_periodic() {
+        let haps = vec![hap(0, 0.0, 2.5, "bd"), hap(0, 5.0, 6.0, "sn")];
+        assert_eq!(detect_loop_cycles(&haps, &[], 96), 6);
+    }
 }

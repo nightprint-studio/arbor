@@ -374,43 +374,61 @@ impl CallbackState {
         self.renderer.process(&mut drained, out);
         let elapsed = t0.elapsed();
 
-        // Telemetry tap (out-of-band; never feeds back into rendering). Master +
-        // per-track peaks are this block's max |sample|, floored by the decayed
-        // previous value so the meters fall smoothly; voices/DSP-load reflect the
-        // block just rendered.
-        let mut master_peak = [0.0f32; 2];
-        for frame in out.iter() {
-            master_peak[0] = master_peak[0].max(frame[0].abs());
-            master_peak[1] = master_peak[1].max(frame[1].abs());
+        // Telemetry tap (out-of-band; never feeds back into rendering).
+        if self.renderer.is_idle() {
+            // Idle fast-path (transport stopped, nothing sounding): the renderer
+            // wrote silence and skipped the DSP graph. Snap the telemetry to a
+            // clean idle frame — zero peaks/voices and DSP load — rather than
+            // running the decay ballistics (whose EMA would only crawl toward zero
+            // and leave the footer showing a ghost ~7% load at rest).
+            self.tap.store_master([0.0, 0.0]);
+            let n = self.renderer.track_peaks().len();
+            for i in 0..n {
+                self.tap.store_track(i, [0.0, 0.0]);
+            }
+            self.tap.store_track_count(n);
+            self.tap.store_voices(0);
+            self.tap.store_dsp_load(0.0);
+        } else {
+            // Master + per-track peaks are this block's max |sample|, floored by the
+            // decayed previous value so the meters fall smoothly; voices/DSP-load
+            // reflect the block just rendered.
+            let mut master_peak = [0.0f32; 2];
+            for frame in out.iter() {
+                master_peak[0] = master_peak[0].max(frame[0].abs());
+                master_peak[1] = master_peak[1].max(frame[1].abs());
+            }
+            let prev_master = self.tap.load_master();
+            self.tap.store_master([
+                master_peak[0].max(prev_master[0] * METER_DECAY),
+                master_peak[1].max(prev_master[1] * METER_DECAY),
+            ]);
+
+            let track_peaks = self.renderer.track_peaks();
+            for (i, block) in track_peaks.iter().enumerate() {
+                let prev = self.tap.load_track(i);
+                self.tap.store_track(
+                    i,
+                    [
+                        block[0].max(prev[0] * METER_DECAY),
+                        block[1].max(prev[1] * METER_DECAY),
+                    ],
+                );
+            }
+            self.tap.store_track_count(track_peaks.len());
+            self.tap.store_voices(self.renderer.active_voices() as u32);
+
+            // DSP load = compute time / buffer wall-time, EMA-smoothed (a
+            // utilisation, not a peak, so a gentle filter rather than
+            // peak-hold-with-decay).
+            let budget = frames.max(1) as f32 / self.sample_rate.max(1) as f32;
+            let instant_load = if budget > 0.0 { elapsed.as_secs_f32() / budget } else { 0.0 };
+            let prev_load = self.tap.load_dsp_load();
+            self.tap.store_dsp_load(prev_load * 0.9 + instant_load * 0.1);
         }
-        let prev_master = self.tap.load_master();
-        self.tap.store_master([
-            master_peak[0].max(prev_master[0] * METER_DECAY),
-            master_peak[1].max(prev_master[1] * METER_DECAY),
-        ]);
 
-        let track_peaks = self.renderer.track_peaks();
-        for (i, block) in track_peaks.iter().enumerate() {
-            let prev = self.tap.load_track(i);
-            self.tap.store_track(
-                i,
-                [
-                    block[0].max(prev[0] * METER_DECAY),
-                    block[1].max(prev[1] * METER_DECAY),
-                ],
-            );
-        }
-        self.tap.store_track_count(track_peaks.len());
-        self.tap.store_voices(self.renderer.active_voices() as u32);
-
-        // DSP load = compute time / buffer wall-time, EMA-smoothed (a utilisation,
-        // not a peak, so a gentle filter rather than peak-hold-with-decay).
-        let budget = frames.max(1) as f32 / self.sample_rate.max(1) as f32;
-        let instant_load = if budget > 0.0 { elapsed.as_secs_f32() / budget } else { 0.0 };
-        let prev_load = self.tap.load_dsp_load();
-        self.tap.store_dsp_load(prev_load * 0.9 + instant_load * 0.1);
-
-        // Interleave the stereo frames into the device buffer.
+        // Interleave the stereo frames into the device buffer. On the idle path the
+        // renderer already filled `out` with zeros, so this writes true silence.
         for (i, frame) in out.iter().enumerate() {
             let base = i * self.channels;
             for ch in 0..self.channels {

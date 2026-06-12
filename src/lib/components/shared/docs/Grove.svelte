@@ -20,11 +20,11 @@
 <div class="feature-grid">
   <div class="feature-card">
     <div class="fc-title">Editor</div>
-    <div class="fc-desc">CodeMirror with grove syntax highlighting, inline error underlines, and a live highlight of whatever is sounding right now. Edits re-evaluate automatically.</div>
+    <div class="fc-desc">CodeMirror with grove syntax highlighting, inline error underlines, and a live highlight of whatever is sounding right now. Edits re-evaluate automatically. Autocomplete (<kbd>Ctrl</kbd>+<kbd>Space</kbd>) suggests the language's combinators, transforms and your own declarations — and, inside <code>inst("…")</code>, every instrument the engine can resolve; hover a name for its signature and docs.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Arrangement</div>
-    <div class="fc-desc">A read-only, Logic-style timeline of the evaluated tracks, with a playhead that follows the transport. Named <code>section(…)</code> blocks show as coloured ruler chips and tinted lane bands. Click the ruler to seek; right-click a lane to mute / solo.</div>
+    <div class="fc-desc">A read-only, Logic-style timeline of the evaluated tracks, with a playhead that follows the transport. Note events show as clean piano-roll blocks; the toolbar toggles let you turn on a waveform overlay (drawn only on audio / sample lanes), the grid, note labels, and playhead-follow. Named <code>section(…)</code> blocks show as coloured ruler chips and tinted lane bands. Hover an event for its note / position / length; click it to load it into the Inspector. Click the ruler to seek; right-click a lane to mute / solo.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Mixer</div>
@@ -48,7 +48,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Inspector</div>
-    <div class="fc-desc">Detail for the selected track: voice, meters, the live mix values, pattern statistics (hap count, pitch range), and the code-first <strong>delay</strong> knobs (time / feedback / mix) that write a <code>.delay(…)</code> into the source.</div>
+    <div class="fc-desc">Detail for the selected track: voice, meters, the live mix values, pattern statistics (hap count, pitch range), and the code-first <strong>delay</strong> knobs (time / feedback / mix) that write a <code>.delay(…)</code> into the source. Clicking an event in the arrangement also shows that event's detail (note, position, length) here.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Zen &amp; collapse</div>
@@ -139,10 +139,10 @@ arrange(
 
 <h2>Playing &amp; rendering</h2>
 <ol class="step-list">
-  <li>Press <kbd>Ctrl</kbd>+<kbd>Space</kbd> to Run — the engine opens the audio device and starts the transport (the button turns red / shows Stop).</li>
+  <li>Press <kbd>Shift</kbd>+<kbd>F9</kbd> to Run — the engine opens the audio device and starts the transport (the button turns red / shows Stop).</li>
   <li>Edit while it plays: changes re-evaluate and swap in at the next cycle boundary, with the arrangement and meters updating live.</li>
   <li>Seek by clicking the arrangement ruler, or with <kbd>←</kbd> / <kbd>→</kbd> / <kbd>Home</kbd> while it has focus.</li>
-  <li>Export to WAV with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> — an offline render that runs as a background job.</li>
+  <li>Export to WAV with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> — an offline render that runs as a background job. The export dialog renders the arrangement's natural loop period once by default; set <em>Loops</em> to repeat it, and the dialog shows the resulting cycles and a live duration · size estimate before you pick a file (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> to continue).</li>
 </ol>
 
 <h2>Command Palette</h2>
@@ -153,7 +153,7 @@ arrange(
 <table class="shortcuts-table">
   <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
   <tbody>
-    <tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>Run / Stop the transport</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>F9</kbd></td><td>Run / Stop the transport</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Command Palette</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>Open / new project</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open a <code>.grove</code> file</td></tr>

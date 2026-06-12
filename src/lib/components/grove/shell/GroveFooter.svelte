@@ -11,6 +11,12 @@
   import { transportStore, metersStore, audioErrorStore } from '../stores/engine.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
   import { configStore } from '../stores/config.svelte';
+  import {
+    DEFAULT_RENDER_LOOPS,
+    estimateRender,
+    fmtRenderDuration,
+    fmtRenderSize,
+  } from '../stores/render.svelte';
   import type { Snippet } from 'svelte';
 
   // Right-cluster feedback badges (jobs · notifications) injected by the bridge
@@ -23,42 +29,29 @@
   const srLabel  = $derived(`${transportStore.sampleRate / 1000} kHz`);
 
   // ── Render estimate (duration · WAV size) ───────────────────────────────────
-  // Mirrors the offline bounce: the arrangement's content-end cycles play at the
-  // live cps, plus the render tail; size is stereo PCM at the live sample rate.
-  const totalCycles = $derived(arrangementStore.contentEnd);
+  // Mirrors the offline bounce *exactly*: the export renders the arrangement's
+  // natural loop period (`loopCycles`) repeated the default number of times, at
+  // the live cps, plus the render tail; size is stereo PCM at the live sample
+  // rate. Shown only once an evaluated arrangement reports a loop period. The
+  // math lives in `estimateRender` so this strip and the Export dialog agree.
+  const totalCycles = $derived(arrangementStore.loopCycles * DEFAULT_RENDER_LOOPS);
   const tailSecs    = $derived(configStore.render.tail_max_secs || 4.0);
-  // int24 → 3 bytes/sample, float32 → 4; default to int24.
-  const bytesPerSample = $derived(configStore.render.bit_depth === 'float32' ? 4 : 3);
 
-  const durationSecs = $derived(
-    totalCycles > 0 && transportStore.cps > 0
-      ? totalCycles / transportStore.cps + tailSecs
-      : 0,
-  );
-  const sizeBytes = $derived(
-    durationSecs * (transportStore.sampleRate || 48_000) * bytesPerSample * 2,
-  );
-
-  /** `m:ss` (seconds zero-padded). */
-  function fmtDuration(secs: number): string {
-    const total = Math.round(secs);
-    const m = Math.floor(total / 60);
-    const s = total % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  }
-
-  /** Bytes → human KB / MB (1 decimal for MB, integer for KB). */
-  function fmtSize(bytes: number): string {
-    const mb = bytes / (1024 * 1024);
-    if (mb >= 1) return `${mb.toFixed(1)} MB`;
-    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  }
+  const estimate = $derived(estimateRender({
+    cycles:     totalCycles,
+    cps:        transportStore.cps,
+    tailSecs,
+    sampleRate: transportStore.sampleRate,
+    bitDepth:   configStore.render.bit_depth,
+  }));
 
   const estimateLabel = $derived(
-    durationSecs > 0 ? `~${fmtDuration(durationSecs)} · ~${fmtSize(sizeBytes)}` : '—',
+    estimate.durationSecs > 0
+      ? `~${fmtRenderDuration(estimate.durationSecs)} · ~${fmtRenderSize(estimate.sizeBytes)}`
+      : '—',
   );
   const estimateTip = $derived(
-    durationSecs > 0
+    estimate.durationSecs > 0
       ? `Render estimate: ${totalCycles.toFixed(1)} cycles @ ${cpsLabel} cps + ${tailSecs}s tail · stereo ${configStore.render.bit_depth ?? 'int24'} @ ${srLabel}`
       : 'Render estimate (evaluate an arrangement to see it)',
   );

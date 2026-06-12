@@ -149,6 +149,13 @@ pub struct Renderer {
     files: SampleBank,
     /// Voices scheduled to start later within the current/next block.
     pending: BinaryHeap<Pending>,
+    /// Idle gate: set on [`AudioCommand::StopAll`] (transport stop), cleared on the
+    /// next real activity (a queued voice). While idle *and* nothing is sounding,
+    /// [`process`](Self::process) takes a silence fast-path that skips the entire
+    /// per-frame DSP graph (strips, delay buses, reverb convolution, limiter) — so
+    /// a stopped session is genuinely idle (DSP load → ~0) instead of grinding the
+    /// effect graph on silence for every device buffer until window close.
+    idle: bool,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -188,6 +195,9 @@ impl Renderer {
             // Pre-reserve so per-block `push`es don't grow the heap in the RT
             // callback (one look-ahead window is a few hundred events at most).
             pending: BinaryHeap::with_capacity(capacity * 4),
+            // A fresh renderer has never played: start idle so an open-but-unplayed
+            // stream costs ~nothing until the first voice arrives.
+            idle: true,
         }
     }
 
@@ -235,9 +245,24 @@ impl Renderer {
         }
 
         // 1. Apply commands. Voice triggers are queued (sample-accurate); mixer
-        //    / transport commands take effect immediately.
+        //    / transport commands take effect immediately. A queued voice clears
+        //    the idle gate (see `apply_command`), so a Play after Stop wakes the
+        //    DSP path here, the same buffer the first voice arrives.
         for cmd in commands {
             self.apply_command(cmd);
+        }
+
+        // Idle fast-path: stopped (StopAll seen) and nothing left sounding or
+        // pending. Tails are already flushed by StopAll, so the graph would only
+        // grind out silence — skip it. Write zeros, hold the meters at zero, and
+        // still advance the clock so the transport's free-running "now" stays
+        // truthful (seek/play re-anchor against it).
+        if self.idle && self.pool.active() == 0 && self.pending.is_empty() {
+            for frame_out in out.iter_mut() {
+                *frame_out = [0.0; 2];
+            }
+            self.clock = block_end;
+            return;
         }
 
         // 2. Render frame by frame, starting any pending voices at their frame.
@@ -258,6 +283,14 @@ impl Renderer {
         self.pool.active()
     }
 
+    /// Whether the renderer is on the idle silence fast-path: stopped, with nothing
+    /// sounding or pending. The real-time callback reads this to zero the DSP-load
+    /// meter directly (the fast-path does no measurable work, so an EMA would only
+    /// crawl toward zero — this snaps it).
+    pub fn is_idle(&self) -> bool {
+        self.idle && self.pool.active() == 0 && self.pending.is_empty()
+    }
+
     /// Per-track post-fader peak `[L, R]` over the most recent `process` block,
     /// for the out-of-band meter tap. Indexed by mixer strip; not decayed (the
     /// caller applies meter ballistics, as with the master peak).
@@ -270,6 +303,9 @@ impl Renderer {
     fn apply_command(&mut self, cmd: AudioCommand) {
         match cmd {
             AudioCommand::Voice(ev) => {
+                // A real trigger means playback resumed: leave the idle fast-path
+                // so the DSP graph runs again from this buffer.
+                self.idle = false;
                 // A voice already overdue (start ≤ clock) starts at the block top.
                 let start = ev.start_frame.max(self.clock);
                 self.pending.push(Pending {
@@ -342,6 +378,11 @@ impl Renderer {
                 self.pool.clear();
                 self.pending.clear();
                 self.reset_dsp_tails();
+                // Arm the idle fast-path: from the next buffer (with nothing left
+                // sounding) `process` skips the whole DSP graph until a voice wakes
+                // it, so a stopped session reports ~0 DSP load instead of grinding
+                // the effect chain on silence.
+                self.idle = true;
             }
         }
     }

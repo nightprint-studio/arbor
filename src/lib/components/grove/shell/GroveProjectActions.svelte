@@ -6,9 +6,14 @@
    * of them duplicating `FileExplorerModal` markup.
    */
   import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
+  import ExportOptionsModal from './ExportOptionsModal.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { projectStore } from '../stores/project.svelte';
 </script>
+
+{#if projectActions.exportOptionsOpen}
+  <ExportOptionsModal />
+{/if}
 
 {#if projectActions.picker === 'new' || projectActions.picker === 'open-project'}
   <FileExplorerModal

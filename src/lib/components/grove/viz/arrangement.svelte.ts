@@ -91,6 +91,7 @@ function buildLanes(haps: GroveQueryHap[], allSections: GroveQuerySection[]): Vi
 function createArrangementStore() {
   let haps     = $state<GroveQueryHap[]>([]);
   let sections = $state<GroveQuerySection[]>([]);
+  let loopCycles = $state(0);
   let loading  = $state(false);
   let loaded   = $state(false);
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -107,10 +108,12 @@ function createArrangementStore() {
       const res = await groveQuery(cycles);
       haps = res.haps;
       sections = res.sections;
+      loopCycles = res.loop_cycles;
       loaded = true;
     } catch {
       haps = [];
       sections = [];
+      loopCycles = 0;
     } finally {
       loading = false;
     }
@@ -126,6 +129,9 @@ function createArrangementStore() {
     get empty()      { return haps.length === 0; },
     /** Onset of the last hap in cycles (0 when empty) — the "song end" marker. */
     get contentEnd() { return contentEnd; },
+    /** Loop period of the arrangement in cycles (0 when empty/not loaded) — the
+     *  natural render-length default and duration/size estimate base. */
+    get loopCycles() { return loopCycles; },
 
     /** Re-query the arrangement now. */
     refresh(cycles = VIEW_CYCLES) { return run(cycles); },

@@ -46,8 +46,10 @@
   import { projectActions } from './stores/project-actions.svelte';
   import { mixerStore } from './stores/mixer.svelte';
   import { referenceStore } from './stores/reference.svelte';
+  import { soundsStore } from './stores/sounds.svelte';
   import { arrangementStore } from './viz/arrangement.svelte';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
+  import { uiStore } from '$lib/stores/ui.svelte';
   import GroveProjectActions from './shell/GroveProjectActions.svelte';
   import GroveSettingsModal from './shell/GroveSettingsModal.svelte';
   import GroveShortcutsModal from './shell/GroveShortcutsModal.svelte';
@@ -71,6 +73,9 @@
     // The DSL reference catalogue (autocomplete + hover + Docs panel). Static —
     // loaded once; failure leaves the editor working, just without language hints.
     void referenceStore.load();
+    // The resolvable instrument registry powers `inst("…")` autocomplete — load
+    // it up front so completions work without opening the Sound bank panel.
+    void soundsStore.refresh();
     // Restore the persisted layout, then best-effort reopen the last project.
     await workspaceStore.load();
     groveStore.applyLayout(workspaceStore.layout);
@@ -89,6 +94,19 @@
   $effect(() => {
     const snap = groveStore.layoutSnapshot();
     workspaceStore.persistLayout(snap);
+  });
+
+  // Bridge the shared Jobs overlay's "View output" button into grove. That button
+  // (in the shared JobsOverlay, mounted here via the footer badge) targets the
+  // main-app bottom-panel system (`uiStore.activeBottomSection`), which the grove
+  // window doesn't use — so it appeared to do nothing. Watch that one-shot signal
+  // and open grove's own Jobs panel instead; the overlay already set the active
+  // job on the shared `jobsStore`, so the panel drills straight into its output.
+  $effect(() => {
+    if (uiStore.activeBottomSection === 'jobs') {
+      uiStore.setActiveBottomSection(null); // consume the signal (grove ignores it otherwise)
+      groveStore.showBottom('jobs');
+    }
   });
 
   let editor = $state<{ openGoto: () => void; newFile: () => void } | null>(null);

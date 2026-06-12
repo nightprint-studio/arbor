@@ -25,12 +25,16 @@
   import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import HapLane from './HapLane.svelte';
+  import ArrangementToolbar from './ArrangementToolbar.svelte';
   import { arrangementStore, noteName, VIEW_CYCLES, type VizLane } from './arrangement.svelte';
+  import { arrViewOptions } from './arr-view-options.svelte';
   import { transportStore, groveEngine, diagnosticsStore } from '../stores/engine.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { groveStore } from '../grove-store.svelte';
   import { mixerStore } from '../stores/mixer.svelte';
+  import { inspectStore } from '../stores/inspect.svelte';
   import { laneColor, sectionColor } from '../palette';
+  import type { GroveQueryHap } from '$lib/ipc/grove';
 
   const PX = 26;
   const VIEW = VIEW_CYCLES;
@@ -119,7 +123,7 @@
   });
   $effect(() => {
     const x = playX; // dep — ~30 fps
-    if (!playing || userPinned || !scrollEl) return;
+    if (!playing || userPinned || !arrViewOptions.follow || !scrollEl) return;
     const vw = scrollEl.clientWidth;
     const sl = scrollEl.scrollLeft;
     if (x < sl + headW + 24 || x > sl + vw - 48) {
@@ -134,7 +138,31 @@
   const selectedTrack = $derived(mixerStore.selectedIndex);
   function selectLaneAt(pos: number) {
     const lane = lanes[pos];
-    if (lane) mixerStore.select(lane.track);
+    if (lane) selectTrack(lane.track);
+  }
+  /** Select a whole track (header / lane bg click). Clears any finer event pick
+   *  that belonged to a different track so the Inspector doesn't show a stale one. */
+  function selectTrack(track: number) {
+    mixerStore.select(track);
+    inspectStore.clearIfNotTrack(track);
+  }
+
+  // ── Event pick: clicking a hap selects its track AND the single event, then
+  // surfaces it in the Inspector (opening that rail if it's hidden). ─────────────
+  function pickHap(lane: VizLane, hap: GroveQueryHap) {
+    mixerStore.select(lane.track);
+    inspectStore.select(lane.track, hap);
+    groveStore.showRight('inspector');
+  }
+  /** Key of the selected event within a given lane, for the block highlight. */
+  function selectedKeyFor(lane: VizLane): string | null {
+    const sel = inspectStore.selected;
+    if (!sel || sel.track !== lane.track) return null;
+    if (!sel.has_onset) return `${lane.track}:cont`;
+    const i = lane.haps.findIndex(
+      (h) => h.start === sel.start && h.end === sel.end && h.note === sel.note && h.sound === sel.sound,
+    );
+    return i >= 0 ? `${lane.track}:${i}` : null;
   }
   function onKeydown(e: KeyboardEvent) {
     if (!lanes.length) return;
@@ -179,6 +207,11 @@
 <div class="arr" tabindex="0" role="group" aria-label="Arrangement" onkeydown={onKeydown}>
   <div class="arr-scroll" bind:this={scrollEl} onwheel={onWheel}>
     <div class="arr-inner" style="--head-w: {headW}px; --tl-w: {timelineW}px;">
+      <!-- View toolbar (sticky-left, stays put as the timeline scrolls) -->
+      <div class="arr-toolbar-row">
+        <div class="arr-toolbar-anchor"><ArrangementToolbar /></div>
+      </div>
+
       <!-- Ruler -->
       <div class="arr-top">
         <div class="arr-corner">
@@ -200,7 +233,7 @@
             </div>
           {/each}
           {#each bars as b (b)}
-            <div class="ruler-tick" style="left: {b * PX}px;" class:strong={b % 8 === 0}><span>{b}</span></div>
+            <div class="ruler-tick" style="left: {b * PX}px;" class:strong={b % 8 === 0} class:hide-line={!arrViewOptions.grid}><span>{b}</span></div>
           {/each}
         </div>
       </div>
@@ -214,7 +247,7 @@
           {@const dimmed = muted || (soloActive && !soloed)}
           <div class="arr-row" class:selected={selectedTrack === lane.track} style="--c: {color}">
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="arr-head" class:collapsed onclick={() => mixerStore.select(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)} use:tooltip={laneInfo(lane)}>
+            <div class="arr-head" class:collapsed onclick={() => selectTrack(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)} use:tooltip={laneInfo(lane)}>
               <span class="arr-colorbar"></span>
               {#if !collapsed}
                 <div class="arr-head-info">
@@ -228,14 +261,17 @@
               </div>
             </div>
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="arr-lane" onclick={() => mixerStore.select(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)}>
+            <div class="arr-lane" onclick={() => selectTrack(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)}>
               {#each lane.sections as s (s.name + '@' + s.start)}
                 <div class="lane-band" style="left: {s.start * PX}px; width: {(s.end - s.start) * PX}px; --sc: {sectionColor(s.name)}"></div>
               {/each}
-              {#each bars as b (b)}
-                <div class="lane-grid" style="left: {b * PX}px;" class:strong={b % 8 === 0}></div>
-              {/each}
-              <HapLane {lane} {color} view={VIEW} px={PX} {dimmed} {playCycle} {playing} />
+              {#if arrViewOptions.grid}
+                {#each bars as b (b)}
+                  <div class="lane-grid" style="left: {b * PX}px;" class:strong={b % 8 === 0}></div>
+                {/each}
+              {/if}
+              <HapLane {lane} {color} view={VIEW} px={PX} {dimmed} {playCycle} {playing}
+                       selectedKey={selectedKeyFor(lane)} onpick={(h) => pickHap(lane, h)} />
             </div>
           </div>
         {/each}
@@ -275,6 +311,8 @@
     /* Header strip matches the editor tab bar height (32px) so the two panes'
        tops line up. */
     --ruler-h: 32px;
+    /* View-toolbar row above the ruler (offsets the absolute overlays below). */
+    --tb-h: 30px;
     display: flex;
     flex: 1; min-width: 0; min-height: 0;
     background: var(--bg-base);
@@ -283,6 +321,19 @@
   .arr:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
   .arr-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
   .arr-inner { position: relative; width: calc(var(--head-w) + var(--tl-w)); }
+
+  /* ── View toolbar row (sticky-left strip above the ruler) ── */
+  .arr-toolbar-row {
+    position: relative; z-index: 7;
+    height: 30px;
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .arr-toolbar-anchor {
+    position: sticky; left: 0;
+    display: inline-flex; align-items: center; height: 100%;
+    width: max-content;
+  }
 
   /* ── Ruler (bg-base) ── */
   .arr-top { display: flex; height: var(--ruler-h); }
@@ -315,6 +366,7 @@
   }
   .ruler-tick { position: absolute; top: 21px; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent); }
   .ruler-tick.strong { border-left-color: var(--border-subtle); }
+  .ruler-tick.hide-line { border-left-color: transparent; }
   .ruler-tick span { position: absolute; bottom: 1px; left: 3px; font-size: 8.5px; color: var(--text-disabled); font-variant-numeric: tabular-nums; }
 
   /* Named-section chips: a coloured label strip along the top of the ruler. */
@@ -380,11 +432,13 @@
   .arr-empty code { font-family: var(--font-code); font-size: 11px; color: var(--text-secondary); }
 
   /* ── Overlays ── */
-  .arr-end { position: absolute; top: var(--ruler-h); bottom: 0; width: 1px; background: color-mix(in srgb, var(--border-strong, var(--text-disabled)) 60%, transparent); border-left: 1px dashed color-mix(in srgb, var(--text-disabled) 60%, transparent); pointer-events: none; z-index: 2; }
-  .arr-progress { position: absolute; top: var(--ruler-h); bottom: 0; background: color-mix(in srgb, var(--accent) 7%, transparent); pointer-events: none; z-index: 3; }
-  .arr-cursor { position: absolute; top: var(--ruler-h); bottom: 0; width: 1px; background: color-mix(in srgb, var(--accent) 70%, transparent); pointer-events: none; z-index: 4; }
+  /* Start below the toolbar row + ruler so the playhead / cursor span only the
+     lane area (the absolute origin is the whole `.arr-inner`). */
+  .arr-end { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1px; background: color-mix(in srgb, var(--border-strong, var(--text-disabled)) 60%, transparent); border-left: 1px dashed color-mix(in srgb, var(--text-disabled) 60%, transparent); pointer-events: none; z-index: 2; }
+  .arr-progress { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; background: color-mix(in srgb, var(--accent) 7%, transparent); pointer-events: none; z-index: 3; }
+  .arr-cursor { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1px; background: color-mix(in srgb, var(--accent) 70%, transparent); pointer-events: none; z-index: 4; }
   .cursor-flag { position: absolute; top: 0; left: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid var(--accent); }
-  .arr-playhead { position: absolute; top: var(--ruler-h); bottom: 0; width: 1.5px; background: var(--text-primary); opacity: 0.7; pointer-events: none; z-index: 4; transition: opacity var(--transition-fast); }
+  .arr-playhead { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1.5px; background: var(--text-primary); opacity: 0.7; pointer-events: none; z-index: 4; transition: opacity var(--transition-fast); }
   .arr-playhead.idle { opacity: 0.32; }
   .playhead-flag { position: absolute; top: 0; left: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid var(--text-primary); }
 </style>

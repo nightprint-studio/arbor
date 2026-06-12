@@ -326,6 +326,9 @@ export interface GroveQueryHaps {
   haps: GroveQueryHap[];
   /** Named section bands (empty unless a track uses `arrange(section(...))`). */
   sections: GroveQuerySection[];
+  /** Period (in cycles) after which the whole arrangement repeats — the natural
+   *  render length. `0` only when there are no haps at all. */
+  loop_cycles: number;
 }
 
 /** Query the last-evaluated arrangement over `[0, cycles)`. Empty until an eval

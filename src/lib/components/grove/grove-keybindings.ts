@@ -24,8 +24,9 @@ export const GROVE_BINDINGS: GroveBinding[] = [
   // Editor-scoped (only when the tab pane has focus).
   { id: 'goto_line',    key: 'g', ctrl: true,  scope: 'editor', description: 'Go to line' },
   { id: 'new_file',     key: 'n', ctrl: true,  scope: 'editor', description: 'New .grove in the tab pane' },
-  // Transport.
-  { id: 'run_stop',       key: ' ', ctrl: true,  scope: 'global', description: 'Toggle Run / Stop' },
+  // Transport. `Shift+F9` (IntelliJ-style) leaves `Ctrl+Space` free for the
+  // editor's autocomplete (the universal completion trigger).
+  { id: 'run_stop',       key: 'F9', shift: true, scope: 'global', description: 'Toggle Run / Stop' },
   { id: 'seek_to_start',  key: '[', ctrl: true, shift: true, scope: 'global', description: 'Skip to start (cycle 0)' },
   { id: 'seek_to_end',    key: ']', ctrl: true, shift: true, scope: 'global', description: 'Skip to end of arrangement' },
   // Window — discovery + layout.

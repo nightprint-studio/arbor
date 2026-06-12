@@ -272,9 +272,14 @@ function createMixerStore() {
 
     /** Drop all overrides + code-first buffers — call on each eval (the source
      *  is authoritative again: gain/pan re-baseline to neutral, room/delay reflect
-     *  the freshly-parsed literals via controlsStore). */
+     *  the freshly-parsed literals via controlsStore).
+     *
+     *  The **master gain is NOT reset**: it is mixer-only (no `.grove`
+     *  representation), so the source can't re-supply it. Clearing it would snap
+     *  the knob back to unity on every eval/play while the engine keeps the real
+     *  value — the value persists across evals and lives only here. */
     rebaseline() {
-      gains = {}; pans = {}; master = GAIN_UNITY;
+      gains = {}; pans = {};
       roomBuf = {}; delayBuf = {};
     },
   };

@@ -11,6 +11,65 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
+/**
+ * Default number of times the offline bounce repeats the arrangement's natural
+ * loop period (`arrangementStore.loopCycles`). A `Pattern` has no intrinsic
+ * length, so the render window is `loopCycles × loops`; one loop is the sane
+ * default and the Export dialog lets the user override it. Single source of
+ * truth shared by the footer estimate and the dialog's default.
+ */
+export const DEFAULT_RENDER_LOOPS = 1;
+
+/** Render-size estimate inputs — mirrors the offline bounce parameters. */
+export interface RenderEstimateInput {
+  /** Total cycles rendered (`loopCycles × loops`). */
+  cycles:     number;
+  /** Live cycles-per-second from the transport. */
+  cps:        number;
+  /** Render tail (reverb/release flush) in seconds. */
+  tailSecs:   number;
+  /** Sample rate in Hz. */
+  sampleRate: number;
+  /** PCM sample format — drives bytes/sample (int24 → 3, float32 → 4). */
+  bitDepth?:  string;
+}
+
+export interface RenderEstimate {
+  /** Wall-clock duration of the WAV in seconds (0 when not estimable). */
+  durationSecs: number;
+  /** Stereo file size in bytes. */
+  sizeBytes:    number;
+}
+
+/**
+ * The single source of truth for "how long / how big is this export" — used by
+ * both the footer status strip and the Export options dialog so their figures
+ * never drift from each other (or from the actual WAV the backend writes).
+ */
+export function estimateRender(input: RenderEstimateInput): RenderEstimate {
+  const { cycles, cps, tailSecs, sampleRate, bitDepth } = input;
+  const bytesPerSample = bitDepth === 'float32' ? 4 : 3;
+  const durationSecs =
+    cycles > 0 && cps > 0 ? cycles / cps + tailSecs : 0;
+  const sizeBytes = durationSecs * (sampleRate || 48_000) * bytesPerSample * 2;
+  return { durationSecs, sizeBytes };
+}
+
+/** `m:ss` (seconds zero-padded). */
+export function fmtRenderDuration(secs: number): string {
+  const total = Math.round(secs);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** Bytes → human KB / MB (1 decimal for MB, integer for KB). */
+export function fmtRenderSize(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) return `${mb.toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 export type RenderStatus = 'idle' | 'rendering' | 'done' | 'failed';
 
 interface JobDone {

@@ -1,16 +1,31 @@
 <script lang="ts">
   /**
    * One arrangement lane drawn from **real haps** (the `grove_query` result),
-   * not a fake waveform. Each hap is a small block positioned by its `[start,end)`
-   * in cycles; pitched haps stack as a mini piano-roll (high notes on top),
-   * unpitched (drum/sample) haps stack one row per distinct sound, and continuous
-   * signals (no onset) render as a faint full-height band. A block lights up while
-   * the transport playhead is inside it.
+   * Logic-Pro style. Two event families, drawn the way a DAW actually renders
+   * them — never with a decorative wave that doesn't match the data:
    *
-   * Geometry is `$derived` once per arrangement; only the per-block "active" class
-   * reacts to the playhead, so following playback stays cheap.
+   *  1. **MIDI notes** (`note != null`) → clean **piano-roll blocks**, positioned
+   *     by pitch (high notes near the top), sized by duration. No waveform: a note
+   *     is a discrete pitched event, so it reads as a solid block. With the
+   *     `labels` option on, the note name is printed inside blocks wide enough.
+   *
+   *  2. **Audio regions** — sample / drum hits (`note == null`, a `sound`) and
+   *     continuous signals (`has_onset == false`). These are real *audio*, so a
+   *     waveform is meaningful here — but only when the `waveform` option is on.
+   *     Off (the default) they render as clean region blocks too; on, a single
+   *     synthesized region shape (no PCM exists) spans each region's range, drawn
+   *     cleanly inside the clip box rather than as lane-wide noise.
+   *
+   * Every event is a real click target (picks the hap → Inspector) and carries a
+   * hover tooltip. Geometry is `$derived` once per arrangement; only the per-event
+   * "active" class reacts to the playhead, so following playback stays cheap. No
+   * RAF — the "alive" feel comes from the active highlight + the transport overlay.
    */
+  import { tooltip } from '$lib/actions/tooltip';
   import type { VizLane } from './arrangement.svelte';
+  import { noteName } from './arrangement.svelte';
+  import type { GroveQueryHap } from '$lib/ipc/grove';
+  import { arrViewOptions } from './arr-view-options.svelte';
 
   let {
     lane,
@@ -20,6 +35,8 @@
     dimmed = false,
     playCycle,
     playing,
+    selectedKey = null,
+    onpick,
   }: {
     lane: VizLane;
     color: string;
@@ -31,200 +48,333 @@
     /** Live playhead position in cycles (from the transport store). */
     playCycle: number;
     playing: boolean;
+    /** Key of the currently selected event (`<track>:<idx>`), highlighted here. */
+    selectedKey?: string | null;
+    /** Picked an event — opens it in the Inspector. */
+    onpick?: (hap: GroveQueryHap) => void;
   } = $props();
 
-  const VPAD = 10;    // % vertical padding inside the lane
-  const PITCH_H = 9;  // % block height for a pitched note
-  const DRUM_H = 12;  // % block height for a drum / sample hit
+  const VPAD = 12;     // % vertical padding inside the lane
+  const PITCH_H = 12;  // % block height for a pitched note
+  const DRUM_H = 15;   // % block height for a drum / sample hit
 
-  // Waveform sampling: small N keeps the path cheap (the timeline redraws often).
-  const WAVE_N = 24;            // sample points across the block width
-  const WAVE_MIN_W = 14;        // px below which a wave would be noise → skip it
-  // SVG drawing space is a normalized 0..100 box, mapped to the block by viewBox.
-  const SVG_W = 100;
+  // Waveform tuning (only consulted when the option is on for an audio region).
+  const WAVE_HALF = 36;     // % half-height the wave fills inside its clip box
   const SVG_H = 100;
   const SVG_MID = SVG_H / 2;
 
-  type Kind = 'pitched' | 'unpitched' | 'cont';
+  type Kind = 'note' | 'audio';
 
   interface Block {
+    /** Stable key into the selection highlight (`<track>:<hapIndex>`). */
+    key: string;
+    /** The real hap (for the pick callback + tooltip). */
+    hap: GroveQueryHap;
     x: number; w: number; top: number; h: number;
     start: number; end: number; kind: Kind;
-    /** SVG path `d` for the synthesized waveform, or '' when too narrow to draw. */
-    wave: string;
-    /** Pitch-driven oscillation count, only meaningful for pitched blocks. */
-    cycles: number;
+    /** Note-name label (pitched events only), shown when the block is wide. */
+    label: string | null;
   }
 
-  function clamp(v: number) { return Math.max(0, Math.min(100 - 4, v)); }
+  function clamp(v: number) { return Math.max(0, Math.min(100 - PITCH_H, v)); }
 
-  /**
-   * Synthesize a stylized waveform path inside the normalized 0..100 SVG box.
-   * No real PCM exists — the shape is generated from the hap's character:
-   *  - pitched   → damped sine oscillation filling the held note
-   *  - unpitched → sharp transient burst (fast attack, exponential decay) at onset
-   *  - cont      → slow gentle full-width swell
-   * `widthPx` gates detail so very short blocks degrade instead of aliasing.
-   */
-  function wavePath(kind: Kind, widthPx: number, cycles: number): string {
-    if (widthPx < WAVE_MIN_W) return '';
-    const n = Math.max(6, Math.min(WAVE_N, Math.round(widthPx / 5)));
-    let d = '';
-    for (let i = 0; i <= n; i++) {
-      const t = i / n;                 // 0..1 along the width
-      const x = t * SVG_W;
-      let amp: number;                 // -1..1 displacement from the mid line
-      if (kind === 'pitched') {
-        // Damped sine: oscillation density rises a touch with pitch.
-        const decay = Math.exp(-1.6 * t);
-        amp = Math.sin(t * Math.PI * 2 * cycles) * decay;
-      } else if (kind === 'unpitched') {
-        // Transient burst: loud fast wobble at the onset, quick exponential decay.
-        const env = Math.exp(-5 * t);
-        amp = Math.sin(t * Math.PI * 2 * 5) * env;
-      } else {
-        // Continuous: one slow swell across the whole band.
-        amp = Math.sin(t * Math.PI) * 0.6;
-      }
-      const y = SVG_MID - amp * (SVG_MID - 4);
-      d += `${i === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
-    }
-    return d;
+  // bar:beat + duration for the hover tooltip (1 cycle = 1 bar, 4 beats / bar).
+  function barBeat(cyc: number): string {
+    const bar = Math.floor(cyc) + 1;
+    const beat = (cyc - Math.floor(cyc)) * 4 + 1;
+    return `${bar}:${beat.toFixed(2).replace(/\.?0+$/, '')}`;
+  }
+  function hapTip(h: GroveQueryHap) {
+    const name = h.note != null ? noteName(h.note) : (h.sound ?? (h.has_onset ? 'event' : 'signal'));
+    const durBeats = (h.end - h.start) * 4;
+    const parts = [
+      `bar ${barBeat(h.start)}`,
+      h.has_onset ? `${durBeats.toFixed(2).replace(/\.?0+$/, '')} beat${durBeats === 1 ? '' : 's'}` : 'continuous',
+    ];
+    if (h.note != null) parts.push(`MIDI ${Math.round(h.note)}`);
+    if (h.gain != null) parts.push(`gain ${h.gain.toFixed(2)}`);
+    return { content: name, description: parts.join(' · ') };
   }
 
+  // ── Piano-roll blocks: every discrete hap, positioned + click-targeted ────────
   const blocks = $derived.by<Block[]>(() => {
     const out: Block[] = [];
     const lo = lane.noteLo;
     const hi = lane.noteHi;
     const pitchSpan = lo != null && hi != null ? Math.max(1, hi - lo) : 1;
-    // Each distinct unpitched sound gets its own row (kick / snare / hat separate).
     const drumRow = new Map<string, number>();
     lane.sounds.forEach((s, i) => drumRow.set(s, i));
     const drumRows = Math.max(1, lane.sounds.length);
 
-    for (const h of lane.haps) {
+    lane.haps.forEach((h, i) => {
+      if (!h.has_onset) return; // continuous → drawn as a region band below
       const x = h.start * px;
       const w = Math.max(2, (h.end - h.start) * px);
-      if (!h.has_onset) {
-        out.push({
-          x, w, top: VPAD, h: 100 - 2 * VPAD, start: h.start, end: h.end,
-          kind: 'cont', cycles: 0, wave: wavePath('cont', w, 0),
-        });
-        continue;
-      }
-      let center: number;
+      const key = `${lane.track}:${i}`;
       if (h.note != null && lo != null) {
-        const frac = (h.note - lo) / pitchSpan;             // 0 = lowest, 1 = highest
-        center = VPAD + (1 - frac) * (100 - 2 * VPAD);       // high notes near the top
-        // Higher pitch → a little denser oscillation, kept in a readable range.
-        const cycles = 3 + Math.round(frac * 4);
-        out.push({
-          x, w, top: clamp(center - PITCH_H / 2), h: PITCH_H, start: h.start, end: h.end,
-          kind: 'pitched', cycles, wave: wavePath('pitched', w, cycles),
-        });
+        const frac = (h.note - lo) / pitchSpan;            // 0 = lowest, 1 = highest
+        const center = VPAD + (1 - frac) * (100 - 2 * VPAD); // high notes near the top
+        out.push({ key, hap: h, x, w, top: clamp(center - PITCH_H / 2), h: PITCH_H,
+          start: h.start, end: h.end, kind: 'note', label: noteName(h.note) });
       } else {
         const row = h.sound ? (drumRow.get(h.sound) ?? 0) : 0;
         const frac = drumRows === 1 ? 0.5 : row / (drumRows - 1);
-        center = VPAD + frac * (100 - 2 * VPAD);
-        out.push({
-          x, w, top: clamp(center - DRUM_H / 2), h: DRUM_H, start: h.start, end: h.end,
-          kind: 'unpitched', cycles: 0, wave: wavePath('unpitched', w, 0),
-        });
+        const center = VPAD + frac * (100 - 2 * VPAD);
+        out.push({ key, hap: h, x, w, top: clamp(center - DRUM_H / 2), h: DRUM_H,
+          start: h.start, end: h.end, kind: 'audio', label: h.sound ?? null });
       }
-    }
+    });
     return out;
   });
+
+  // An *audio* lane (no pitched notes; carries sounds and/or a continuous signal)
+  // is the only place a waveform is meaningful — gate the wave on this + the option.
+  const isAudioLane = $derived(lane.noteCount === 0 && (lane.sounds.length > 0 || lane.hasContinuous));
+  const showWave = $derived(arrViewOptions.waveform && isAudioLane);
+
+  // Continuous (no-onset) signal → one full-width region band (always, even
+  // without the waveform option, since there are no discrete blocks for it).
+  const isContinuous = $derived(lane.haps.length > 0 && lane.haps.every((h) => !h.has_onset));
+
+  // ── Audio region waveform: one synthesized shape per region, drawn ONLY for
+  // audio lanes when the option is on. A carrier scaled by an onset-driven
+  // envelope, kept inside the clip box (no lane-wide noise). ─────────────────────
+  interface Wave { start: number; end: number; x: number; w: number; fill: string; line: string; }
+
+  const wave = $derived.by<Wave | null>(() => {
+    if (!showWave) return null;
+    const haps = lane.haps;
+    if (!haps.length) return null;
+
+    let regStart = Infinity, regEnd = -Infinity;
+    for (const h of haps) {
+      if (h.start < regStart) regStart = h.start;
+      if (h.end > regEnd) regEnd = h.end;
+    }
+    if (!Number.isFinite(regStart) || regEnd <= regStart) return null;
+
+    const x = regStart * px;
+    const wPx = Math.max(6, (regEnd - regStart) * px);
+    const spanCyc = regEnd - regStart;
+    const n = Math.max(8, Math.min(900, Math.round(wPx / 4)));
+
+    const onsets: { t: number; amp: number }[] = [];
+    if (!isContinuous) {
+      for (const h of haps) {
+        if (!h.has_onset) continue;
+        onsets.push({ t: h.start - regStart, amp: Math.max(0.4, Math.min(1, h.gain ?? 1)) });
+      }
+      onsets.sort((a, b) => a.t - b.t);
+    }
+
+    const ATTACK = 0.04, RELEASE = 0.55, BASE = 0.16;
+    function envAt(cyc: number): number {
+      if (isContinuous) {
+        const u = spanCyc > 0 ? cyc / spanCyc : 0;
+        return 0.55 + 0.35 * Math.sin(u * Math.PI);
+      }
+      let e = BASE;
+      for (const o of onsets) {
+        const d = cyc - o.t;
+        if (d < -ATTACK) continue;
+        const shape = d < 0 ? (d + ATTACK) / ATTACK : Math.exp(-d / RELEASE);
+        const v = o.amp * shape;
+        if (v > e) e = v;
+      }
+      return Math.min(1, e);
+    }
+
+    const carrierFreq = Math.max(6, Math.min(64, spanCyc * 2.2));
+    const top: string[] = [];
+    const bot: number[] = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const cyc = t * spanCyc;
+      const env = envAt(cyc);
+      const carrier = Math.sin(t * Math.PI * 2 * carrierFreq * (isContinuous ? 0.5 : 1));
+      const half = (0.22 + 0.78 * Math.abs(carrier)) * env * (WAVE_HALF / 100) * SVG_H;
+      const x100 = t * 100;
+      top.push(`${i === 0 ? 'M' : 'L'}${x100.toFixed(2)} ${(SVG_MID - half).toFixed(1)}`);
+      bot.push(SVG_MID + half);
+    }
+    let fill = top.join('');
+    for (let i = n; i >= 0; i--) fill += `L${((i / n) * 100).toFixed(2)} ${bot[i].toFixed(1)}`;
+    fill += 'Z';
+
+    return { start: regStart, end: regEnd, x, w: wPx, fill, line: top.join('') };
+  });
+
+  const waveActive = $derived(!!wave && playing && playCycle >= wave.start && playCycle < wave.end);
+
+  // Continuous region box (drawn whenever a no-onset signal exists, with or
+  // without the carved waveform on top).
+  const contBox = $derived.by(() => {
+    if (!isContinuous) return null;
+    let regStart = Infinity, regEnd = -Infinity;
+    for (const h of lane.haps) {
+      if (h.start < regStart) regStart = h.start;
+      if (h.end > regEnd) regEnd = h.end;
+    }
+    if (!Number.isFinite(regStart) || regEnd <= regStart) return null;
+    return { x: regStart * px, w: Math.max(6, (regEnd - regStart) * px), start: regStart, end: regEnd };
+  });
+  const contActive = $derived(!!contBox && playing && playCycle >= contBox.start && playCycle < contBox.end);
+
+  function pick(h: GroveQueryHap, e: MouseEvent) {
+    e.stopPropagation(); // don't let the lane-level click steal the event pick
+    onpick?.(h);
+  }
 </script>
 
 <div class="haplane" class:dimmed style="--c: {color}; width: {view * px}px;">
-  {#each blocks as b, i (i)}
+  <!-- Continuous-signal region: one band spanning the sounded range. The lane
+       carries no discrete blocks, so this is its only representation. -->
+  {#if contBox}
+    {@const h = lane.haps[0]}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div
+      class="region cont"
+      class:active={contActive}
+      class:selected={selectedKey === `${lane.track}:cont`}
+      style="left: {contBox.x}px; width: {contBox.w}px;"
+      use:tooltip={hapTip(h)}
+      onclick={(e) => pick(h, e)}
+    >
+      {#if wave}
+        <svg class="wave" viewBox="0 0 100 {SVG_H}" preserveAspectRatio="none" aria-hidden="true">
+          <path class="wave-fill" d={wave.fill} />
+          <path class="wave-line" d={wave.line} />
+        </svg>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- Audio-region waveform overlay (sample/drum lanes), only when the option is
+       on. The blocks below stay the click targets; this is a visual skin. -->
+  {#if wave && !isContinuous}
+    <div class="region wave-skin" class:active={waveActive} style="left: {wave.x}px; width: {wave.w}px;">
+      <svg class="wave" viewBox="0 0 100 {SVG_H}" preserveAspectRatio="none" aria-hidden="true">
+        <path class="wave-fill" d={wave.fill} />
+        <path class="wave-line" d={wave.line} />
+      </svg>
+    </div>
+  {/if}
+
+  <!-- Discrete events: piano-roll notes + sample/drum hits. Clean blocks. -->
+  {#each blocks as b (b.key)}
     {@const active = playing && playCycle >= b.start && playCycle < b.end}
+    {@const wide = b.w >= 26}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
       class="hap"
-      class:cont={b.kind === 'cont'}
+      class:drum={b.kind === 'audio'}
       class:active
+      class:selected={selectedKey === b.key}
+      class:muffled={showWave && b.kind === 'audio'}
       style="left: {b.x}px; width: {b.w}px; top: {b.top}%; height: {b.h}%;"
+      use:tooltip={hapTip(b.hap)}
+      onclick={(e) => pick(b.hap, e)}
     >
-      {#if b.wave}
-        <svg
-          class="wave"
-          class:active
-          viewBox="0 0 {SVG_W} {SVG_H}"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <path d={b.wave} />
-        </svg>
+      {#if arrViewOptions.labels && wide && b.label}
+        <span class="hap-label">{b.label}</span>
       {/if}
     </div>
   {/each}
 </div>
 
 <style>
-  .haplane { position: absolute; inset: 0; pointer-events: none; }
+  .haplane { position: absolute; inset: 0; }
   .haplane.dimmed { opacity: 0.4; }
 
+  /* ── Audio region (continuous band + waveform skin) ─────────────────────────── */
+  .region {
+    position: absolute;
+    top: 10%;
+    height: 80%;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .region.cont {
+    cursor: pointer;
+    background: color-mix(in srgb, var(--c) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 26%, transparent);
+    transition: background var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .region.cont:hover { background: color-mix(in srgb, var(--c) 20%, transparent); }
+  /* The waveform skin sits behind the (interactive) blocks — purely visual. */
+  .region.wave-skin {
+    pointer-events: none;
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--c) 20%, transparent),
+      color-mix(in srgb, var(--c) 9%, transparent));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 26%, transparent);
+  }
+  .wave { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .wave-fill { fill: color-mix(in srgb, var(--c) 55%, transparent); stroke: none; transition: fill var(--transition-fast); }
+  .wave-line {
+    fill: none;
+    stroke: color-mix(in srgb, #fff 55%, var(--c));
+    stroke-width: 1.2;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+    opacity: 0.8;
+    transition: stroke var(--transition-fast), opacity var(--transition-fast);
+  }
+  .region.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 26%, transparent), 0 0 9px color-mix(in srgb, var(--c) 50%, transparent); }
+  .region.active .wave-fill { fill: color-mix(in srgb, var(--c) 78%, #fff); }
+  .region.active .wave-line { stroke: color-mix(in srgb, #fff 85%, var(--c)); opacity: 1; }
+  .region.cont.selected { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, #fff 70%, var(--c)), 0 0 8px color-mix(in srgb, var(--c) 45%, transparent); }
+
+  /* ── Piano-roll / sample blocks (clean, interactive) ────────────────────────── */
   .hap {
     position: absolute;
     min-width: 2px;
-    border-radius: 3px;
+    border-radius: 2px;
+    cursor: pointer;
     overflow: hidden;
-    background: linear-gradient(180deg,
-      color-mix(in srgb, var(--c) 78%, transparent),
-      color-mix(in srgb, var(--c) 52%, transparent));
-    border: 1px solid color-mix(in srgb, var(--c) 70%, transparent);
-    box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent);
-    transition: background var(--transition-fast), box-shadow var(--transition-fast);
+    background: color-mix(in srgb, var(--c) 92%, #fff 6%);
+    box-shadow: 0 0 0 1px color-mix(in srgb, #000 18%, transparent),
+                inset 0 1px 0 color-mix(in srgb, #fff 25%, transparent);
+    transition: background var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
   }
-  /* Continuous signal (no onset): a soft band rather than a discrete block. */
-  .hap.cont {
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--c) 18%, transparent);
-    border-color: color-mix(in srgb, var(--c) 34%, transparent);
-    box-shadow: none;
+  .hap.drum { border-radius: 3px; }
+  .hap:hover { background: color-mix(in srgb, var(--c) 80%, #fff); box-shadow: 0 0 0 1px color-mix(in srgb, #fff 35%, transparent); }
+
+  /* When the waveform skin is shown, dim the underlying audio blocks so the wave
+     reads as the primary visual but the blocks stay there as click targets. */
+  .hap.muffled { opacity: 0.45; }
+  .hap.muffled:hover { opacity: 0.85; }
+
+  .hap-label {
+    display: block;
+    padding: 0 3px;
+    font-size: 8.5px;
+    line-height: 1;
+    font-family: var(--font-code);
+    color: color-mix(in srgb, #000 72%, var(--c));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    pointer-events: none;
   }
 
-  /* Synthesized waveform painted over the block — purely decorative, never
-     captures pointer events so the block underneath stays clickable. */
-  .wave {
-    position: absolute;
-    inset: 1px;
-    width: calc(100% - 2px);
-    height: calc(100% - 2px);
-    pointer-events: none;
-    overflow: visible;
-  }
-  .wave path {
-    fill: none;
-    stroke: color-mix(in srgb, #fff 70%, var(--c));
-    stroke-width: 1.4;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    vector-effect: non-scaling-stroke;
-    opacity: 0.7;
-    transition: stroke var(--transition-fast), opacity var(--transition-fast);
-  }
-  .hap.cont .wave path {
-    stroke: color-mix(in srgb, var(--c) 60%, #fff);
-    opacity: 0.5;
-  }
-  /* Sounding now → the wave flares to a near-white, fully opaque trace. */
-  .wave.active path {
-    stroke: color-mix(in srgb, #fff 88%, var(--c));
-    opacity: 1;
-    stroke-width: 1.7;
-  }
   /* Sounding right now — brighten + halo. */
   .hap.active {
-    background: linear-gradient(180deg,
-      color-mix(in srgb, var(--c) 96%, #fff),
-      color-mix(in srgb, var(--c) 78%, #fff));
-    border-color: color-mix(in srgb, #fff 55%, var(--c));
-    box-shadow: 0 0 0 1px color-mix(in srgb, #fff 35%, transparent),
+    background: color-mix(in srgb, var(--c) 70%, #fff);
+    box-shadow: 0 0 0 1px color-mix(in srgb, #fff 45%, transparent),
                 0 0 8px color-mix(in srgb, var(--c) 70%, transparent);
   }
-  .hap.cont.active {
-    background: color-mix(in srgb, var(--c) 40%, transparent);
-    box-shadow: 0 0 8px color-mix(in srgb, var(--c) 50%, transparent);
+  /* Selected event — crisp ring so it's findable from the Inspector. */
+  .hap.selected {
+    background: color-mix(in srgb, var(--c) 60%, #fff);
+    box-shadow: 0 0 0 1.5px color-mix(in srgb, #fff 75%, var(--c)),
+                0 0 9px color-mix(in srgb, var(--c) 55%, transparent);
+    opacity: 1;
+    z-index: 2;
   }
 </style>

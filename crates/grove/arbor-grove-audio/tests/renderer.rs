@@ -188,6 +188,36 @@ fn stop_all_flushes_effect_tails_to_silence() {
     assert_eq!(r.active_voices(), 0);
 }
 
+/// Regression for "the engine stays running after Stop": after `StopAll` (and the
+/// voices gone) the renderer must report `is_idle()`, so the real-time callback can
+/// skip the whole DSP graph and the footer's DSP load falls to ~0 instead of idling
+/// at a ghost ~7%. A fresh renderer is idle too (open-but-unplayed stream), and the
+/// next voice must wake it so a Play after Stop renders again.
+#[test]
+fn stop_all_parks_renderer_idle_and_a_voice_wakes_it() {
+    let mut r = Renderer::new(SR, &tracks());
+    // Fresh: never played → idle (no DSP work on an open-but-unplayed stream).
+    assert!(r.is_idle(), "a fresh renderer must start idle");
+
+    // Play: a voice wakes the DSP path.
+    let _ = render_block(&mut r, vec![AudioCommand::Voice(synth_event(1, 0, VoiceParams::default()))], 512);
+    assert!(!r.is_idle(), "a sounding voice must leave the idle fast-path");
+
+    // Stop: with the pool emptied in the same block, the renderer parks idle.
+    let _ = render_block(&mut r, vec![AudioCommand::StopAll], 1);
+    assert!(r.is_idle(), "after StopAll (voices gone) the renderer must be idle");
+
+    // A further empty block stays idle and writes exact silence (fast-path).
+    let tail = render_block(&mut r, vec![], 1024);
+    assert_eq!(peaks(&tail), (0.0, 0.0), "an idle block must be exact silence");
+    assert!(r.is_idle(), "still idle with no new voices");
+
+    // Play again (Play after Stop): the next voice must wake the renderer and sound.
+    let out = render_block(&mut r, vec![AudioCommand::Voice(synth_event(2, 0, VoiceParams::default()))], 1024);
+    assert!(!r.is_idle(), "a Play after Stop must wake the renderer");
+    assert!(peaks(&out).0 > 0.01, "the restarted voice must be audible");
+}
+
 #[test]
 fn track_mute_silences_strip() {
     let mut r = Renderer::new(SR, &tracks());

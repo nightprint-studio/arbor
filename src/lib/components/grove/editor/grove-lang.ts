@@ -314,4 +314,31 @@ export function identifierAt(tree: Tree, offset: number): string | null {
   return null;
 }
 
+// ── String-argument call context (scoped value completion) ─────────────────────
+
+/** When `offset` sits inside a string-literal argument, the callee name of the
+ *  innermost call/method wrapping that string plus `from` — the offset just past
+ *  the opening quote, where a replacement completion should start. Lets the
+ *  editor offer value completions scoped to a builtin (e.g. instrument names in
+ *  `inst("…")`, and to *suppress* language completions inside any other string).
+ *  Null when the cursor isn't inside a call's string argument. */
+export function stringArgCallAt(tree: Tree, offset: number): { from: number; fn: string } | null {
+  const at = tree.rootNode.descendantForIndex(offset);
+  if (!at) return null;
+  // Nearest enclosing string literal (the argument being typed).
+  let str: Node | null = at;
+  while (str && str.type !== 'string') str = str.parent;
+  if (!str || offset <= str.startIndex) return null; // not past the opening quote
+  // The innermost call whose argument list contains this string decides the scope.
+  for (let cur: Node | null = str.parent; cur; cur = cur.parent) {
+    const args = cur.childForFieldName('arguments');
+    if (!args) continue;
+    if (str.startIndex < args.startIndex || str.endIndex > args.endIndex) continue;
+    const callee = cur.childForFieldName('function') ?? cur.childForFieldName('method');
+    if (callee?.type !== 'identifier') return null;
+    return { from: str.startIndex + 1, fn: callee.text };
+  }
+  return null;
+}
+
 export type { Parser, Tree, Node, TreeCursor };

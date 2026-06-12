@@ -6,9 +6,10 @@
    * controls.
    *
    * The hamburger and settings menus are driven declaratively through the shared
-   * widget's `DropdownItem[]` API (the old hover-only Recent / Theme fly-outs are
-   * now keyboard-navigable inline groups). Only the workspace dropdown and the
-   * plugin-contributed pills are authored here as snippets.
+   * widget's `DropdownItem[]` API. Theme is a `submenu` flyout (hover-intent +
+   * keyboard, opens to the side); Recent stays an inline collapsible group. Only
+   * the workspace dropdown and the plugin-contributed pills are authored here as
+   * snippets.
    */
   import {
     Settings, Keyboard, LayoutDashboard, Palette,
@@ -140,7 +141,7 @@
     { kind: 'item', id: 'customize-ab', label: 'Customize Activity Bar…', icon: LayoutDashboard,
       onclick: () => { customizeActivityBarOpen = true; } },
     { kind: 'separator' },
-    { kind: 'group', id: 'theme', label: 'Theme', collapsible: true, defaultCollapsed: true, items: themeItems },
+    { kind: 'submenu', id: 'theme', label: 'Theme', icon: Palette, items: themeItems },
   ]);
 </script>
 

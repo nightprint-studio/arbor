@@ -22,13 +22,16 @@
   import { buildControlEdits, type ControlEdit } from './grove-edit';
   import { diagnosticsStore, activeHapsStore } from '../stores/engine.svelte';
   import { referenceStore } from '../stores/reference.svelte';
+  import { soundsStore } from '../stores/sounds.svelte';
 
   // Autocomplete + hover read the DSL catalogue live from the store (snapshotted
   // at call time — the store loads asynchronously, so completions light up once
-  // it lands without re-mounting the editor).
+  // it lands without re-mounting the editor). Instruments come from the live
+  // sound registry (for `inst("…")` value completion).
   const intel: GroveIntelSource = {
     entries: () => referenceStore.entries,
     byName: (name) => referenceStore.byName(name),
+    instruments: () => soundsStore.instruments,
   };
 
   let {

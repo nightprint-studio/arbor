@@ -22,9 +22,23 @@
   import { metersStore, diagnosticsStore } from '../stores/engine.svelte';
   import { arrangementStore, noteName } from '../viz/arrangement.svelte';
   import { controlsStore } from '../stores/controls.svelte';
+  import { inspectStore } from '../stores/inspect.svelte';
 
   const index = $derived(mixerStore.selectedIndex);
   const track = $derived(index == null ? null : mixerStore.byIndex(index));
+
+  // The event picked in the arrangement, shown only when it belongs to the track
+  // currently in the Inspector (selection follows the track).
+  const event = $derived.by(() => {
+    const sel = inspectStore.selected;
+    if (!sel || index == null || sel.track !== index) return null;
+    return sel;
+  });
+  const fmt = (n: number) => n.toFixed(2).replace(/\.?0+$/, '');
+  /** 1 cycle = 1 bar, 4 beats / bar → "bar:beat". */
+  function barBeat(cyc: number): string {
+    return `${Math.floor(cyc) + 1}:${fmt((cyc - Math.floor(cyc)) * 4 + 1)}`;
+  }
 
   // Self-sufficient on the right rail: re-query the track model + re-parse the
   // source controls on every eval, so the delay/room readouts are correct even
@@ -128,6 +142,23 @@
       <div class="insp-row"><span>sounds</span><code>{track.sounds.length ? track.sounds.slice(0, 4).join(' ') : '—'}</code></div>
       <div class="insp-row"><span>pitch range</span><code>{pitchRange(track.noteLo, track.noteHi)}</code></div>
       {#if track.hasContinuous}<div class="insp-row"><span>signal</span><code>continuous</code></div>{/if}
+
+      <!-- Selected event — the single hap picked in the arrangement timeline. -->
+      {#if event}
+        {@const durBeats = (event.end - event.start) * 4}
+        <div class="insp-section">Selected event</div>
+        <div class="insp-row">
+          <span>{event.note != null ? 'note' : event.has_onset ? 'sound' : 'signal'}</span>
+          <code>{event.note != null ? noteName(event.note) : (event.sound ?? (event.has_onset ? 'event' : 'continuous'))}</code>
+        </div>
+        <div class="insp-row"><span>position</span><code>bar {barBeat(event.start)}</code></div>
+        <div class="insp-row">
+          <span>length</span>
+          <code>{event.has_onset ? `${fmt(durBeats)} beat${durBeats === 1 ? '' : 's'}` : 'continuous'}</code>
+        </div>
+        {#if event.note != null}<div class="insp-row"><span>MIDI</span><code>{Math.round(event.note)}</code></div>{/if}
+        {#if event.gain != null}<div class="insp-row"><span>gain</span><code>{event.gain.toFixed(2)}</code></div>{/if}
+      {/if}
 
       <p class="insp-hint">
         Gain &amp; pan are <strong>live session overrides</strong> — commit them to

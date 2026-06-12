@@ -51,7 +51,7 @@
 
   const commands = $derived<Cmd[]>([
     // Transport
-    { id: 'run',  label: playing ? 'Stop' : 'Run', group: 'Transport', icon: playing ? 'Square' : 'Play', keys: 'Ctrl+Space',
+    { id: 'run',  label: playing ? 'Stop' : 'Run', group: 'Transport', icon: playing ? 'Square' : 'Play', keys: 'Shift+F9',
       run: () => void groveEngine.toggleRun(projectStore.activeSource, projectStore.project?.path) },
     { id: 'seek_start', label: 'Skip to start', group: 'Transport', icon: 'SkipBack', keys: 'Ctrl+Shift+[',
       run: () => void groveEngine.seekToStart() },

@@ -24,9 +24,12 @@ import { hoverTooltip, keymap, type Tooltip } from '@codemirror/view';
 import type { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 
-import type { GroveDslEntry, GroveDslKind } from '$lib/ipc/grove';
+import type { GroveDslEntry, GroveDslKind, GroveInstrument } from '$lib/ipc/grove';
 import { getGroveTree } from './grove-cm';
-import { extractSymbols, identifierAt, type GroveSymbol, type GroveSymbolKind } from './grove-lang';
+import {
+  extractSymbols, identifierAt, stringArgCallAt,
+  type GroveSymbol, type GroveSymbolKind,
+} from './grove-lang';
 
 /** A read of the live catalogue (the store, snapshotted at call time). */
 export interface GroveIntelSource {
@@ -34,6 +37,9 @@ export interface GroveIntelSource {
   entries(): GroveDslEntry[];
   /** Resolve a name to its (first) entry, or undefined. */
   byName(name: string): GroveDslEntry | undefined;
+  /** The resolvable instruments (registry introspection) — offered as value
+   *  completions inside `inst("…")`. May be empty before the registry loads. */
+  instruments(): GroveInstrument[];
 }
 
 // ── Completion ─────────────────────────────────────────────────────────────────
@@ -75,6 +81,18 @@ function entryCompletion(e: GroveDslEntry): Completion {
   };
 }
 
+/** Build a completion item for a resolvable instrument (offered inside `inst`).
+ *  Synths sort first (always available); the side `info` lists articulations. */
+function instrumentCompletion(i: GroveInstrument): Completion {
+  return {
+    label: i.name,
+    type: i.kind === 'synth' ? 'variable' : 'class',
+    detail: i.kind, // synth · sample · sfz
+    info: i.articulations.length ? `Articulations: ${i.articulations.join(', ')}` : undefined,
+    boost: i.kind === 'synth' ? 1 : 0,
+  };
+}
+
 /** Build a completion item from a local declaration. */
 function symbolCompletion(s: GroveSymbol): Completion {
   return {
@@ -112,6 +130,21 @@ function localSymbols(view: EditorView | undefined): GroveSymbol[] {
  */
 export function groveCompletion(src: GroveIntelSource): CompletionSource {
   return (context: CompletionContext): CompletionResult | null => {
+    // Inside a string argument: offer scoped value completions. `inst("…")` gets
+    // the live instrument registry; any other string suppresses the language
+    // completions (a transform name inside a quoted path is never wanted).
+    const tree = context.view ? getGroveTree(context.view) : null;
+    if (tree) {
+      const call = stringArgCallAt(tree, context.pos);
+      if (call) {
+        if (call.fn !== 'inst') return null;
+        const opts = src.instruments().map(instrumentCompletion);
+        if (opts.length === 0) return null;
+        // Dotted names (`synth.lead`, `strings.violin`) stay valid as you type.
+        return { from: call.from, options: opts, validFor: /^[A-Za-z0-9_.\/-]*$/ };
+      }
+    }
+
     const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_]*/);
     // Only auto-open once there's a word; explicit (Ctrl+Space) always opens.
     if (!context.explicit && (!word || word.from === word.to)) return null;
