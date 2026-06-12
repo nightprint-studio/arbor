@@ -3,7 +3,7 @@
 //! The four systems that surface progress / status to the user — the job
 //! registry, in-app notifications, the operations overlay, and (frontend-only)
 //! toasts — used to live inside the main-window shell. This crate holds the
-//! Tauri-agnostic pieces so any window (main, grove, …) can host them:
+//! Tauri-agnostic pieces so any window (main, nemus, …) can host them:
 //!
 //! - [`jobs`]       — [`jobs::JobRegistry`] + [`jobs::JobInfo`] / [`jobs::JobStatus`],
 //!                    the pure in-memory job model. The process-spawning glue

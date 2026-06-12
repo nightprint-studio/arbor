@@ -31,9 +31,9 @@ enough.
   and `try_arbor_config_path(sub)` (the `try_` variant propagates `None`
   when `dirs` is unavailable instead of falling back to `.`; use it when
   silently skipping persistence is preferable to writing under the cwd).
-  grove gets its own sibling namespace: `grove_config_dir()`,
-  `grove_data_dir()`, and `grove_config_path(sub)` resolve under
-  `…/grove` (not `…/arbor/grove`), so its config + sample banks live apart.
+  nemus gets its own sibling namespace: `nemus_config_dir()`,
+  `nemus_data_dir()`, and `nemus_config_path(sub)` resolve under
+  `…/nemus` (not `…/arbor/nemus`), so its config + sample banks live apart.
 
 - **`http`** — `client()` returns a pre-built `reqwest::Client` with the
   Arbor user-agent (`USER_AGENT = "Arbor-Git-GUI/<crate-version>"`) and

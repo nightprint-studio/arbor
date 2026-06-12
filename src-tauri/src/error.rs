@@ -38,8 +38,8 @@ pub enum AppError {
     #[error("Plugin error: {0}")]
     Plugin(String),
 
-    #[error("grove error: {0}")]
-    Grove(String),
+    #[error("nemus error: {0}")]
+    Nemus(String),
 
     #[error("Operation cancelled")]
     Cancelled,
@@ -123,14 +123,14 @@ impl From<arbor_plugin_core::prelude::PluginCoreError> for AppError {
     }
 }
 
-/// Bridge the grove facade's unified error into the host enum. grove's own
+/// Bridge the nemus facade's unified error into the host enum. nemus's own
 /// crates already preserve detail (and language errors carry a span surfaced
-/// separately as `grove:diagnostics`); at the IPC boundary a flattened string is
+/// separately as `nemus:diagnostics`); at the IPC boundary a flattened string is
 /// enough — infra failures (no audio device, render IO) ride this, not user
 /// language errors.
-impl From<arbor_grove::prelude::GroveError> for AppError {
-    fn from(e: arbor_grove::prelude::GroveError) -> Self {
-        AppError::Grove(e.to_string())
+impl From<arbor_nemus::prelude::NemusError> for AppError {
+    fn from(e: arbor_nemus::prelude::NemusError) -> Self {
+        AppError::Nemus(e.to_string())
     }
 }
 

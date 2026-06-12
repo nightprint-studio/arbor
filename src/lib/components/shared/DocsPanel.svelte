@@ -82,7 +82,7 @@
   import Security       from './docs/Security.svelte';
   import DeepLinks      from './docs/DeepLinks.svelte';
   import Marketplace    from './docs/Marketplace.svelte';
-  import Grove          from './docs/Grove.svelte';
+  import Nemus          from './docs/Nemus.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -129,7 +129,7 @@
         { id: 'terminal',        label: 'Terminal',           icon: TerminalSquare },
         { id: 'command-palette', label: 'Command Palette',    icon: Search         },
         { id: 'shortcuts',       label: 'Keyboard Shortcuts', icon: Keyboard       },
-        { id: 'grove',           label: 'grove (Music)',      icon: Music4         },
+        { id: 'nemus',           label: 'nemus (Music)',      icon: Music4         },
         { id: 'statistics',      label: 'Statistics',         icon: BarChart2      },
       ],
     },
@@ -194,7 +194,7 @@
     'terminal':        Terminal,
     'command-palette': CommandPalette,
     'shortcuts':       Shortcuts,
-    'grove':           Grove,
+    'nemus':           Nemus,
     'jobs':            BackgroundJobs,
     'notifications':   Notifications,
     'pipelines':       Pipelines,

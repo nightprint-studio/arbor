@@ -8,8 +8,8 @@ use tauri_plugin_deep_link::DeepLinkExt;
 mod app_ctx;
 mod error;
 mod explorer_window;
-mod grove;
-mod grove_window;
+mod nemus;
+mod nemus_window;
 mod process_ext;
 mod platform;
 mod efficiency;
@@ -486,13 +486,13 @@ pub fn run() {
         .manage(explorer_window::PendingReveals::default())
         .manage(explorer_window::ExplorerClipboard::default())
         .manage(explorer_window::DragOverlayText::default())
-        .manage(grove::GroveState::default())
+        .manage(nemus::NemusState::default())
         .setup(|app| {
-            // One-time storage split: move grove's data out of the old
-            // `<arbor-data>/grove` tree into its own `<grove-data>` root and seed
-            // grove's standalone config from Arbor's legacy `[grove]` section.
-            // Cheap no-op once migrated; runs before the grove window can open.
-            crate::grove::migrate_storage();
+            // One-time storage split: move nemus's data out of the old
+            // `<arbor-data>/nemus` tree into its own `<nemus-data>` root and seed
+            // nemus's standalone config from Arbor's legacy `[nemus]` section.
+            // Cheap no-op once migrated; runs before the nemus window can open.
+            crate::nemus::migrate_storage();
 
             // Wire the `arbor-cloud` crate against AppState: registers the
             // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
@@ -837,11 +837,11 @@ pub fn run() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // The grove window closing for real tears down its audio
+                    // The nemus window closing for real tears down its audio
                     // session (drops the cpal stream on the audio thread, stops
                     // sound). Lazy ownership: nothing happens if it never played.
-                    if window.label() == crate::grove_window::GROVE_WINDOW_LABEL {
-                        crate::grove::shutdown(window.app_handle());
+                    if window.label() == crate::nemus_window::NEMUS_WINDOW_LABEL {
+                        crate::nemus::shutdown(window.app_handle());
                     }
                     #[cfg(not(debug_assertions))]
                     {
@@ -1531,27 +1531,27 @@ pub fn run() {
             explorer_window::drag_overlay_move,
             explorer_window::drag_overlay_hide,
             explorer_window::explorer_drop_dispatch,
-            // Dedicated grove (music live-coding) window
-            grove_window::open_grove_window,
-            // grove engine: eval / transport / render / sample packs / config
-            grove::grove_eval,
-            grove::grove_transport,
-            grove::grove_render,
-            grove::grove_packs,
-            grove::grove_pack_download,
-            grove::grove_pack_delete,
-            grove::get_grove_config,
-            grove::set_grove_config,
-            // grove Fase 4: arrangement query / sound bank / live mixer /
+            // Dedicated nemus (music live-coding) window
+            nemus_window::open_nemus_window,
+            // nemus engine: eval / transport / render / sample packs / config
+            nemus::nemus_eval,
+            nemus::nemus_transport,
+            nemus::nemus_render,
+            nemus::nemus_packs,
+            nemus::nemus_pack_download,
+            nemus::nemus_pack_delete,
+            nemus::get_nemus_config,
+            nemus::set_nemus_config,
+            // nemus Fase 4: arrangement query / sound bank / live mixer /
             // window state / project model (all additive)
-            grove::query::grove_query,
-            grove::sounds::grove_sounds,
-            grove::grove_set_track,
-            grove::state::get_grove_state,
-            grove::state::set_grove_state,
-            grove::project::grove_open_project,
-            grove::project::grove_create_project,
-            grove::reference::grove_lang_reference,
+            nemus::query::nemus_query,
+            nemus::sounds::nemus_sounds,
+            nemus::nemus_set_track,
+            nemus::state::get_nemus_state,
+            nemus::state::set_nemus_state,
+            nemus::project::nemus_open_project,
+            nemus::project::nemus_create_project,
+            nemus::reference::nemus_lang_reference,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");

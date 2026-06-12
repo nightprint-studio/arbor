@@ -55,7 +55,7 @@ pub struct JobInfo {
     pub finished_at: Option<u64>,
     /// Optional window-routing target. `None` → the job belongs to the main
     /// window (the only host that accepts untagged items). A value (e.g.
-    /// `"grove"`) routes the job's overlay/badge to the matching feedback host.
+    /// `"nemus"`) routes the job's overlay/badge to the matching feedback host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
 }

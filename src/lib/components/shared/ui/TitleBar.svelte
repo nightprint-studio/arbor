@@ -35,7 +35,7 @@
    *
    * Renders the standard top bar skeleton (drag region · brand · hamburger ·
    * leading content · spacer · right cluster · window controls) and leaves
-   * every Arbor/grove-specific piece to the consumer:
+   * every Arbor/nemus-specific piece to the consumer:
    *
    *  • `logo`            — app mark snippet (omit → no brand slot)
    *  • `menu`/`hamburger`— structured `DropdownItem[]` OR a custom control

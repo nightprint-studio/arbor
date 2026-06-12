@@ -20,8 +20,8 @@ export function openExplorerWindow(): Promise<void> {
   return invoke('open_explorer_window');
 }
 
-/** Open (or focus, if already open) the dedicated grove window — the standalone
+/** Open (or focus, if already open) the dedicated nemus window — the standalone
  *  music live-coding DAW shell. */
-export function openGroveWindow(): Promise<void> {
-  return invoke('open_grove_window');
+export function openNemusWindow(): Promise<void> {
+  return invoke('open_nemus_window');
 }

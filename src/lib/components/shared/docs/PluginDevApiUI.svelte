@@ -284,7 +284,7 @@ end)
 arbor.ui.clear_theme_tokens()`, '.lua')}</pre>
 
 <h2>arbor.notify — persistent notifications</h2>
-<p>Adds a notification to the in-app notification center (bell icon in the status bar). Notifications persist until the user explicitly dismisses them. An optional <code>action</code> table renders a click button on the notification that triggers a built-in side-effect. An optional <code>target</code> routes the notification to a specific window's feedback host (e.g. <code>"grove"</code>); when absent it goes to the main window, which also receives every untagged notification. Boundary validation: <code>message</code> must be a non-empty string and <code>level</code> (when supplied) must be one of <code>"info"|"success"|"warning"|"error"</code> — invalid input raises a Lua error.</p>
+<p>Adds a notification to the in-app notification center (bell icon in the status bar). Notifications persist until the user explicitly dismisses them. An optional <code>action</code> table renders a click button on the notification that triggers a built-in side-effect. An optional <code>target</code> routes the notification to a specific window's feedback host (e.g. <code>"nemus"</code>); when absent it goes to the main window, which also receives every untagged notification. Boundary validation: <code>message</code> must be a non-empty string and <code>level</code> (when supplied) must be one of <code>"info"|"success"|"warning"|"error"</code> — invalid input raises a Lua error.</p>
 <pre class="language-lua">{@html highlight(`-- arbor.notify{ message, title?, level?, action?, target? }
 -- level: "info" | "success" | "warning" | "error"  (default "info")
 
@@ -293,7 +293,7 @@ arbor.notify{ title = "Build failed",    message = "Exited with code 2 — see J
 arbor.notify{ message = "Config reloaded" }    -- title-less, defaults to "info"
 
 -- Routed to a specific window's feedback host (absent → main window):
-arbor.notify{ message = "Render finished", level = "success", target = "grove" }
+arbor.notify{ message = "Render finished", level = "success", target = "nemus" }
 
 -- With a click action: button shown in the overlay; clicking runs the
 -- associated side-effect and dismisses the notification.

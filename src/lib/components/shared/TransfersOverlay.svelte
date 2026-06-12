@@ -4,7 +4,7 @@
    * downloads & exports with a real progress bar each, distinct from the generic
    * Jobs overlay (which has no percent). Driven entirely by the shared
    * `transfersStore`; any window that mounts it via <FeedbackHost> gets the same
-   * surface. Grove is the first consumer (sample-pack downloads + WAV exports).
+   * surface. Nemus is the first consumer (sample-pack downloads + WAV exports).
    *
    * Shared/top-level: an Arbor-specific overlay opened from a footer/status badge
    * (`uiStore.transfersOverlayOpen`), like JobsOverlay / NotificationsOverlay.

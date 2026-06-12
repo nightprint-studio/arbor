@@ -129,7 +129,7 @@ dependencies = [
  "arbor-cloud",
  "arbor-core",
  "arbor-feedback",
- "arbor-grove",
+ "arbor-nemus",
  "arbor-plugin-api",
  "arbor-plugin-core",
  "arbor-plugin-marketplace",
@@ -250,21 +250,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbor-grove"
+name = "arbor-nemus"
 version = "0.3.0"
 dependencies = [
- "arbor-grove-audio",
- "arbor-grove-engine",
- "arbor-grove-lang",
- "arbor-grove-pattern",
+ "arbor-nemus-audio",
+ "arbor-nemus-engine",
+ "arbor-nemus-lang",
+ "arbor-nemus-pattern",
  "thiserror 2.0.18",
 ]
 
 [[package]]
-name = "arbor-grove-audio"
+name = "arbor-nemus-audio"
 version = "0.3.0"
 dependencies = [
- "arbor-grove-pattern",
+ "arbor-nemus-pattern",
  "cpal",
  "fundsp",
  "hound",
@@ -275,26 +275,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbor-grove-engine"
+name = "arbor-nemus-engine"
 version = "0.3.0"
 dependencies = [
- "arbor-grove-audio",
- "arbor-grove-pattern",
+ "arbor-nemus-audio",
+ "arbor-nemus-pattern",
  "hound",
  "thiserror 2.0.18",
 ]
 
 [[package]]
-name = "arbor-grove-lang"
+name = "arbor-nemus-lang"
 version = "0.3.0"
 dependencies = [
- "arbor-grove-pattern",
+ "arbor-nemus-pattern",
  "cc",
  "tree-sitter",
 ]
 
 [[package]]
-name = "arbor-grove-pattern"
+name = "arbor-nemus-pattern"
 version = "0.3.0"
 
 [[package]]

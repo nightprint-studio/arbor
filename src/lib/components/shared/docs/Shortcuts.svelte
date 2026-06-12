@@ -162,21 +162,21 @@
   </tbody>
 </table>
 
-<h2>grove (Music live-coding)</h2>
+<h2>nemus (Music live-coding)</h2>
 <p class="hint">
-  The grove window keeps its own binding set (it's a self-contained studio, not the
+  The nemus window keeps its own binding set (it's a self-contained studio, not the
   main Git UI), so these are fixed rather than rebindable. Editor-scoped keys fire
-  only when the code tab pane has focus. See the <strong>grove (Music)</strong> page
+  only when the code tab pane has focus. See the <strong>nemus (Music)</strong> page
   for the full window tour.
 </p>
 <table class="shortcuts-table">
   <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
   <tbody>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>Run / Stop the transport</td></tr>
-    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Command Palette (grove)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Command Palette (nemus)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>Open / new project</td></tr>
-    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open a <code>.grove</code> file</td></tr>
-    <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New <code>.grove</code> file (editor pane)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open a <code>.nemus</code> file</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New <code>.nemus</code> file (editor pane)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active file</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>G</kbd></td><td>Go to line (editor pane)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration — fn / let / import, incl. cross-file</td></tr>
@@ -184,8 +184,8 @@
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></td><td>Commit mixer gain / pan overrides to source</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Toggle Zen mode</td></tr>
-    <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Open grove Settings</td></tr>
-    <tr><td><kbd>F1</kbd></td><td>Show grove keyboard shortcuts</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Open nemus Settings</td></tr>
+    <tr><td><kbd>F1</kbd></td><td>Show nemus keyboard shortcuts</td></tr>
   </tbody>
 </table>
 

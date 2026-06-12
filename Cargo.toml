@@ -17,11 +17,11 @@ members = [
     "crates/plugin/marketplace",
     "crates/plugin/types",
     "crates/scheduler",
-    "crates/grove/arbor-grove-pattern",
-    "crates/grove/arbor-grove-lang",
-    "crates/grove/arbor-grove-audio",
-    "crates/grove/arbor-grove-engine",
-    "crates/grove/arbor-grove",
+    "crates/nemus/arbor-nemus-pattern",
+    "crates/nemus/arbor-nemus-lang",
+    "crates/nemus/arbor-nemus-audio",
+    "crates/nemus/arbor-nemus-engine",
+    "crates/nemus/arbor-nemus",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────

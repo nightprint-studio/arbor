@@ -26,7 +26,7 @@
   import type { WorkspaceDef, RepoRegistryEntry } from '$lib/types/workspace';
   import { activityBarConfigStore } from '$lib/stores/activityBarConfig.svelte';
   import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
-  import { openExplorerWindow, openGroveWindow } from '$lib/ipc/app';
+  import { openExplorerWindow, openNemusWindow } from '$lib/ipc/app';
   import { openFolder } from '$lib/utils/reveal';
   import {
     checkoutBranch, checkoutBranchSafe, mergeBranch, deleteBranch, createBranch,
@@ -620,10 +620,10 @@
         title: 'Open File Explorer',
         subtitle: 'Standalone explorer window — browse, copy/move, delete, preview · also Ctrl+Shift+E (global)',
         action: () => { void openExplorerWindow(); onClose(); } },
-      { id: 'action:grove',        kind: 'action', icon: 'Activity',   group: 'System',
-        title: 'Open grove (Music)',
+      { id: 'action:nemus',        kind: 'action', icon: 'Activity',   group: 'System',
+        title: 'Open nemus (Music)',
         subtitle: 'Standalone music live-coding window — write patterns, hear soundtracks',
-        action: () => { void openGroveWindow(); onClose(); } },
+        action: () => { void openNemusWindow(); onClose(); } },
       { id: 'action:docs',         kind: 'action', icon: 'FileText',  group: 'System',
         title: 'Documentation',
         action: () => { uiStore.setPanel('docs'); onClose(); } },

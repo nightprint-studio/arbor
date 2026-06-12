@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * WorkspaceShell — the IntelliJ-style workspace frame shared by the main
-   * window and the grove window.
+   * window and the nemus window.
    *
    * Renders the `bg-elevated` `.workspace` strip with an (optional) activity
    * rail flush on each edge and the inset `.panels` container in between (the

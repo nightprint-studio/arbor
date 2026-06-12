@@ -1,13 +1,13 @@
 <script lang="ts">
   /**
    * FeedbackStatusButtons — the right-cluster status badges shared by Arbor's
-   * StatusBar and the Grove footer: a jobs badge (running / finished count), an
+   * StatusBar and the Nemus footer: a jobs badge (running / finished count), an
    * optional minimized-dialogs (parked modals) badge, and a notifications bell.
    * Each click toggles the matching overlay rendered by <FeedbackHost>.
    *
    * Reads the per-window feedback stores, so it reflects whichever window it is
-   * mounted in (main shows untagged + main-targeted items; grove shows
-   * grove-targeted ones). Renders three bare buttons so it drops directly into
+   * mounted in (main shows untagged + main-targeted items; nemus shows
+   * nemus-targeted ones). Renders three bare buttons so it drops directly into
    * a flex status row; the `spin` keyframe comes from app.css (global).
    */
   import { Loader, Bell, Minimize2, ArrowDownToLine } from 'lucide-svelte';
@@ -19,10 +19,10 @@
   import { parkedModalsStore } from '$lib/stores/parked-modals.svelte';
 
   let {
-    /** Show the minimized-dialogs badge (main window only — grove has no parked
+    /** Show the minimized-dialogs badge (main window only — nemus has no parked
      *  modals). */
     parked = false,
-    /** Always show the transfers (downloads/exports) badge, even when idle. Grove
+    /** Always show the transfers (downloads/exports) badge, even when idle. Nemus
      *  pins it on; elsewhere the badge only appears while a transfer is live. */
     transfers = false,
   }: { parked?: boolean; transfers?: boolean } = $props();

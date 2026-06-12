@@ -6,9 +6,9 @@
  *
  * It's the model behind the shared `TransfersOverlay`: any feature pushes a
  * transfer with `start()`, streams progress via `update()`, and resolves it
- * with `finish()` / `fail()` / `cancelled()`. Grove is the first consumer
+ * with `finish()` / `fail()` / `cancelled()`. Nemus is the first consumer
  * (sample-pack downloads + offline WAV exports), but nothing here is
- * grove-specific — the store lives in the shared feedback module so any window
+ * nemus-specific — the store lives in the shared feedback module so any window
  * can adopt it.
  *
  * Unlike `jobs`, transfers are registered client-side (the caller already knows
