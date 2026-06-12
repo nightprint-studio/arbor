@@ -333,10 +333,37 @@ impl Renderer {
                 };
             }
             AudioCommand::StopAll => {
-                self.pool.release_all();
+                // Transport stop / panic: drop every voice and pending trigger,
+                // then flush the effect tails. A feedback delay line and the
+                // convolution reverb don't decay to *exact* zero on their own, and
+                // the renderer advances them every frame regardless of play state —
+                // so without this flush a `room`/delay tail rings on (audibly, and
+                // as perpetual DSP load) long after playback has stopped.
+                self.pool.clear();
                 self.pending.clear();
+                self.reset_dsp_tails();
             }
         }
+    }
+
+    /// Clear the buffered tails / running state of every strip + master effect and
+    /// the reverb bus, so the renderer returns to exact silence and idle DSP. Keeps
+    /// all *configuration* (gains, EQ bands, delay times, IR) intact — only the
+    /// time-varying state is flushed.
+    fn reset_dsp_tails(&mut self) {
+        for strip in &mut self.strips {
+            strip.eq.reset();
+            if let Some(comp) = strip.comp.as_mut() {
+                comp.reset();
+            }
+            strip.delay.reset();
+        }
+        self.master.eq.reset();
+        if let Some(comp) = self.master.comp.as_mut() {
+            comp.reset();
+        }
+        self.reverb.reset();
+        self.limiter.reset();
     }
 
     /// (Re)lay the mixer strips, preserving existing gain/pan/mute/solo/inserts

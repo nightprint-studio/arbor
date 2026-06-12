@@ -12,7 +12,7 @@
    */
   import {
     Files, ListTree, Music4, Terminal, AlertTriangle,
-    SlidersHorizontal, Crosshair, BookOpen,
+    SlidersHorizontal, Crosshair, BookOpen, Boxes,
   } from 'lucide-svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
   import ResizablePanel from '$lib/components/layout/ResizablePanel.svelte';
@@ -27,6 +27,7 @@
   import SoundBankPanel from './panels/SoundBankPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import ProblemsPanel from './panels/ProblemsPanel.svelte';
+  import JobsPanel from './panels/JobsPanel.svelte';
   import MixerPanel from './panels/MixerPanel.svelte';
   import InspectorPanel from './panels/InspectorPanel.svelte';
   import DocsPanel from './panels/DocsPanel.svelte';
@@ -44,6 +45,9 @@
   import { projectStore } from './stores/project.svelte';
   import { projectActions } from './stores/project-actions.svelte';
   import { mixerStore } from './stores/mixer.svelte';
+  import { referenceStore } from './stores/reference.svelte';
+  import { arrangementStore } from './viz/arrangement.svelte';
+  import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import GroveProjectActions from './shell/GroveProjectActions.svelte';
   import GroveSettingsModal from './shell/GroveSettingsModal.svelte';
   import GroveShortcutsModal from './shell/GroveShortcutsModal.svelte';
@@ -64,6 +68,9 @@
     unPacks  = await packsStore.subscribe();
     void configStore.loadConfig();
     void packsStore.refresh();
+    // The DSL reference catalogue (autocomplete + hover + Docs panel). Static —
+    // loaded once; failure leaves the editor working, just without language hints.
+    void referenceStore.load();
     // Restore the persisted layout, then best-effort reopen the last project.
     await workspaceStore.load();
     groveStore.applyLayout(workspaceStore.layout);
@@ -107,6 +114,8 @@
       if (b.id === 'goto_line') editor?.openGoto();
       else if (b.id === 'new_file') editor?.newFile();
       else if (b.id === 'run_stop') void groveEngine.toggleRun(projectStore.activeSource, projectStore.project?.path);
+      else if (b.id === 'seek_to_start') void groveEngine.seekToStart();
+      else if (b.id === 'seek_to_end') void groveEngine.seekToEnd(arrangementStore.contentEnd);
       else if (b.id === 'command_palette') groveStore.togglePalette();
       else if (b.id === 'shortcuts') groveStore.openShortcuts();
       else if (b.id === 'settings') groveStore.openSettings();
@@ -133,10 +142,16 @@
     { id: 'outline',   tooltip: 'Outline',    icon: ListTree, active: groveStore.leftPanel === 'outline',   onclick: () => groveStore.toggleLeft('outline') },
     { id: 'soundbank', tooltip: 'Sound bank', icon: Music4,   active: groveStore.leftPanel === 'soundbank', onclick: () => groveStore.toggleLeft('soundbank') },
   ]);
+  const jobsTip = $derived(
+    jobsStore.runningCount > 0
+      ? `Jobs (${jobsStore.runningCount} running)`
+      : 'Jobs',
+  );
   const leftBottom = $derived<ActivityRailItem[]>([
     { id: 'mixer',    tooltip: 'Mixer',    icon: SlidersHorizontal, active: groveStore.bottomPanel === 'mixer',    onclick: () => groveStore.toggleBottom('mixer') },
     { id: 'console',  tooltip: 'Console',  icon: Terminal,      active: groveStore.bottomPanel === 'console',  onclick: () => groveStore.toggleBottom('console') },
     { id: 'problems', tooltip: 'Problems', icon: AlertTriangle, active: groveStore.bottomPanel === 'problems', onclick: () => groveStore.toggleBottom('problems') },
+    { id: 'jobs',     tooltip: jobsTip,    icon: Boxes,         active: groveStore.bottomPanel === 'jobs',     onclick: () => groveStore.toggleBottom('jobs') },
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
     { id: 'inspector', tooltip: 'Inspector', icon: Crosshair, active: groveStore.rightPanel === 'inspector', onclick: () => groveStore.toggleRight('inspector') },
@@ -158,7 +173,8 @@
 {#snippet bottomContent()}
   {#if groveStore.bottomPanel === 'mixer'}<MixerPanel />
   {:else if groveStore.bottomPanel === 'console'}<ConsolePanel />
-  {:else if groveStore.bottomPanel === 'problems'}<ProblemsPanel />{/if}
+  {:else if groveStore.bottomPanel === 'problems'}<ProblemsPanel />
+  {:else if groveStore.bottomPanel === 'jobs'}<JobsPanel />{/if}
 {/snippet}
 
 {#snippet vizContent()}

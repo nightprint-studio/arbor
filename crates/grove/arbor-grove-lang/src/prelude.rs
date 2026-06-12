@@ -27,5 +27,11 @@ pub use crate::value::{EvalOutput, Func, Transform, Value};
 pub use crate::emit::{emit, emit_expr};
 pub use crate::materialize::{materialize_island, materialize_source};
 
+// ── DSL reference catalogue (canonical name/doc surface for tooling) ──────────
+pub use crate::reference::{
+    combinator_names, generator_names, log_names, reference, signal_names,
+    transform_names, DslEntry, DslKind, DslParam,
+};
+
 // ── Re-exported pattern surface (so consumers need one `use`) ─────────────────
 pub use arbor_grove_pattern::prelude::{ControlMap, Pattern, SourceSpan, TempoMap, TimeSpan};

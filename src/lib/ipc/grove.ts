@@ -450,3 +450,50 @@ export function getGroveState(): Promise<GroveWorkspaceState> {
 export function setGroveState(state: GroveWorkspaceState): Promise<void> {
   return invoke('set_grove_state', { state });
 }
+
+// ── grove_lang_reference: the canonical DSL catalogue (autocomplete + hover) ───
+//
+// The `.grove` language reference is authored once in Rust (`arbor-grove-lang`'s
+// `reference()`); the FE loads it once and drives autocomplete, hover docs, and
+// the Docs panel off it — so the editor's language intelligence and the
+// evaluator can never drift. Mirrors the serde structs in
+// `crates/grove/arbor-grove-lang/src/reference.rs` field-for-field.
+
+/** Category of a {@link GroveDslEntry} (matches the serde `snake_case` tag). */
+export type GroveDslKind =
+  | 'combinator' | 'generator' | 'signal' | 'signal_method' | 'transform'
+  | 'seq_method' | 'island' | 'keyword' | 'log' | 'mini' | 'note';
+
+/** One parameter of a DSL entry. */
+export interface GroveDslParam {
+  /** Parameter name as written in the signature. */
+  name: string;
+  /** Whether the parameter may be omitted. */
+  optional: boolean;
+  /** Type + range + meaning. */
+  summary: string;
+  /** Default value when omitted (only present if `optional`). */
+  default?: string;
+}
+
+/** One catalogue entry: a named piece of the language with its docs. */
+export interface GroveDslEntry {
+  /** The bare name as typed (`gain`, `par`, `sine`, `~`). */
+  name: string;
+  kind: GroveDslKind;
+  /** One-line signature, e.g. `gain(x, pat) -> pat`. */
+  signature: string;
+  /** 1–2 sentence description. */
+  summary: string;
+  /** Its parameters in order (empty for nullary forms / operators). */
+  params: GroveDslParam[];
+  /** A short, realistic usage snippet. */
+  example: string;
+  /** What the call returns, when not obvious from the signature. */
+  returns?: string;
+}
+
+/** Read the full `.grove` DSL reference catalogue (static; load once). */
+export function groveLangReference(): Promise<GroveDslEntry[]> {
+  return invoke('grove_lang_reference');
+}

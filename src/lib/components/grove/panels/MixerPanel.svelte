@@ -13,12 +13,16 @@
    *
    * `room` is a code-first knob (seeded from the source literal, commits back to
    * it); `delay`'s three params live in the Inspector. gain/pan keep their live
-   * override plus an explicit commit-to-source affordance (the ↧ button, shown
-   * when a strip has a pending override).
+   * override AND write through to the source on a debounce — there's no explicit
+   * commit button, the value lands in the `.grove` on its own once the drag rests.
+   *
+   * Mute writes `.gain(0)` into the source (unmute restores the pre-mute gain);
+   * when a track's gain is a calculated argument it can't be rewritten, so mute is
+   * live-only there and the strip flags it.
    *
    * Imports only shared/ui (+ the tooltip action) + grove-local.
    */
-  import { SlidersHorizontal, VolumeX, Headphones, ArrowDownToLine } from 'lucide-svelte';
+  import { SlidersHorizontal, VolumeX, Headphones } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Knob from '$lib/components/shared/ui/Knob.svelte';
@@ -44,6 +48,7 @@
   });
 
   const ROOM_CALC = 'Room is a calculated value here — edit it in the source.';
+  const MUTE_CALC = 'Muted live only — gain is a calculated value, so .gain(0) can’t be written to the source.';
 
   function panLabel(p: number): string {
     if (Math.abs(p - PAN_CENTER) < 0.02) return 'C';
@@ -65,6 +70,7 @@
         {@const dimmed = mixerStore.isDimmed(t.index)}
         {@const muted = mixerStore.isMuted(t.index)}
         {@const soloed = mixerStore.isSoloed(t.index)}
+        {@const muteCalc = muted && mixerStore.gainCalculated(t.index)}
         <div class="strip" class:selected={mixerStore.selectedIndex === t.index} style="--c: {t.color}">
           <button class="strip-name" use:tooltip={t.voice} onclick={() => mixerStore.select(t.index)}>
             <span class="dot"></span><span class="nm">{t.name}</span>
@@ -97,14 +103,11 @@
           </div>
 
           <div class="ms-row">
-            <button class="ms" class:on={muted} use:tooltip={'Mute'} aria-label="{t.name} mute" aria-pressed={muted}
+            <button class="ms" class:on={muted} class:calc={muteCalc}
+                    use:tooltip={muteCalc ? MUTE_CALC : 'Mute'} aria-label="{t.name} mute" aria-pressed={muted}
                     onclick={() => mixerStore.toggleMute(t.index)}><VolumeX size={11} /></button>
             <button class="ms solo" class:on={soloed} use:tooltip={'Solo'} aria-label="{t.name} solo" aria-pressed={soloed}
                     onclick={() => mixerStore.toggleSolo(t.index)}><Headphones size={11} /></button>
-            {#if mixerStore.hasOverride(t.index)}
-              <button class="ms commit" use:tooltip={'Commit gain/pan to source'} aria-label="{t.name} commit to source"
-                      onclick={() => mixerStore.commit(t.index)}><ArrowDownToLine size={11} /></button>
-            {/if}
           </div>
         </div>
       {/each}
@@ -179,8 +182,8 @@
   .ms:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
   .ms.on { background: var(--warning); color: #1a1b1e; border-color: transparent; }
   .ms.solo.on { background: var(--info); color: #fff; }
-  .ms.commit { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border-subtle)); }
-  .ms.commit:hover { background: var(--accent); color: #fff; border-color: transparent; }
+  /* Muted but not persistible (calculated gain) — dashed outline = "live only". */
+  .ms.on.calc { background: color-mix(in srgb, var(--warning) 55%, var(--bg-input)); border: 1px dashed var(--warning); color: var(--text-primary); }
 
   .dsp { font-size: 9.5px; font-family: var(--font-code); color: var(--text-muted); }
 </style>

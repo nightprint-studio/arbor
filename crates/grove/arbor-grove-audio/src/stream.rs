@@ -24,12 +24,13 @@ use crate::seam::{AudioCommand, AudioSink, Frame, TrackConfig};
 const METER_DECAY: f32 = 0.85;
 
 /// Target output sample rate (design: 48 kHz); falls back to the device default
-/// if 48 kHz isn't offered.
-const TARGET_SAMPLE_RATE: u32 = 48_000;
+/// if 48 kHz isn't offered. The canonical value lives in [`crate::defaults`].
+const TARGET_SAMPLE_RATE: u32 = crate::defaults::DEFAULT_SAMPLE_RATE;
 
 /// Target device buffer size in frames (design: ~512). Advisory — the host may
-/// pick its own; the renderer copes with any block length.
-const TARGET_BUFFER_FRAMES: u32 = 512;
+/// pick its own; the renderer copes with any block length. Canonical value in
+/// [`crate::defaults`].
+const TARGET_BUFFER_FRAMES: u32 = crate::defaults::DEFAULT_BLOCK_FRAMES as u32;
 
 /// Command ring capacity. Generous: one block of look-ahead is a few hundred
 /// events at most, and a full ring just makes `send` return the command back.

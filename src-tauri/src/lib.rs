@@ -1544,6 +1544,7 @@ pub fn run() {
             grove::state::set_grove_state,
             grove::project::grove_open_project,
             grove::project::grove_create_project,
+            grove::reference::grove_lang_reference,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");

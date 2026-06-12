@@ -25,6 +25,7 @@ mod events;
 mod packs;
 pub mod project;
 pub mod query;
+pub mod reference;
 mod render;
 pub mod sounds;
 pub mod state;

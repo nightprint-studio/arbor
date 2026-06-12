@@ -13,6 +13,7 @@ use std::path::Path;
 
 use arbor_grove_audio::prelude::{
     AudioCommand, DelayConfig, Frame, Renderer, SourceKind, TrackConfig, VoiceSource,
+    DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE,
 };
 use arbor_grove_pattern::prelude::{ControlMap, Time, TimeSpan, Tracks};
 use std::collections::HashMap;
@@ -23,8 +24,17 @@ use crate::error::{EngineError, Result};
 use crate::schedule::{delay_config_for, schedule_span};
 
 /// Frames per render block. Small enough that `start_frame`s land in the right
-/// block, large enough to keep the per-block overhead negligible offline.
-const BLOCK_FRAMES: usize = 512;
+/// block, large enough to keep the per-block overhead negligible offline. Shares
+/// the audio backend's processing block size ([`DEFAULT_BLOCK_FRAMES`]).
+const BLOCK_FRAMES: usize = DEFAULT_BLOCK_FRAMES;
+
+/// Default offline-render bit depth ([`BitDepth::Int24`]) — the canonical value
+/// the shell config mirrors.
+pub const DEFAULT_BIT_DEPTH: BitDepth = BitDepth::Int24;
+
+/// Default trailing tail (release/reverb) captured after the arrangement, in
+/// seconds. The canonical value the shell config mirrors.
+pub const DEFAULT_TAIL_MAX_SECS: f32 = 4.0;
 
 /// Sample format of the rendered WAV.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,21 +48,21 @@ pub enum BitDepth {
 /// Options for an offline render.
 #[derive(Clone, Copy, Debug)]
 pub struct RenderConfig {
-    /// Output sample rate (frames/s). Default `48_000`.
+    /// Output sample rate (frames/s). Default [`DEFAULT_SAMPLE_RATE`].
     pub sample_rate: u32,
-    /// Sample format. Default [`BitDepth::Int24`].
+    /// Sample format. Default [`DEFAULT_BIT_DEPTH`].
     pub bit_depth: BitDepth,
     /// Max trailing silence/tail to capture after the arrangement, in seconds
-    /// (release/reverb). Default `4.0`.
+    /// (release/reverb). Default [`DEFAULT_TAIL_MAX_SECS`].
     pub tail_max_secs: f32,
 }
 
 impl Default for RenderConfig {
     fn default() -> Self {
         RenderConfig {
-            sample_rate: 48_000,
-            bit_depth: BitDepth::Int24,
-            tail_max_secs: 4.0,
+            sample_rate: DEFAULT_SAMPLE_RATE,
+            bit_depth: DEFAULT_BIT_DEPTH,
+            tail_max_secs: DEFAULT_TAIL_MAX_SECS,
         }
     }
 }
@@ -272,9 +282,9 @@ mod tests {
     #[test]
     fn config_defaults_match_design() {
         let c = RenderConfig::default();
-        assert_eq!(c.sample_rate, 48_000);
-        assert_eq!(c.bit_depth, BitDepth::Int24);
-        assert_eq!(c.tail_max_secs, 4.0);
+        assert_eq!(c.sample_rate, DEFAULT_SAMPLE_RATE);
+        assert_eq!(c.bit_depth, DEFAULT_BIT_DEPTH);
+        assert_eq!(c.tail_max_secs, DEFAULT_TAIL_MAX_SECS);
     }
 
     #[test]

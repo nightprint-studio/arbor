@@ -34,6 +34,7 @@ import {
   classifyToken, makeByteToU16, identifierAt, createGroveParser,
   type GroveTokenClass, type Tree, type Node, type Parser,
 } from './grove-lang';
+import { groveLanguageIntel, type GroveIntelSource } from './grove-intel';
 
 // ── Syntax-highlight ViewPlugin ────────────────────────────────────────────────
 
@@ -250,21 +251,82 @@ export const groveTheme = EditorView.theme(
     },
     '.cm-tooltip.cm-tooltip-lint': { padding: '2px 6px' },
 
-    // ── Token palette (Arbor syntax vars + grove-specific accents) ──
+    // ── Token palette ──
+    //
+    // Deliberate, hierarchical colouring rather than one-accent-per-token:
+    //   • Music content (notes / chords / sounds) is the bright, eye-catching
+    //     layer — it's what you read while composing.
+    //   • Structure (island heads, combinators-via-fn, splice) uses the accent /
+    //     teal family so the "shape" of a phrase stands out from its content.
+    //   • Host scaffolding (keywords, defs, numbers, strings, comments) uses the
+    //     standard Arbor syntax vars, quieter than the music.
+    //   • Punctuation / mini-notation operators stay muted so the rhythm reads
+    //     without visual noise.
+
+    // Host scaffolding (quiet, conventional — same `--syntax-*` vars + fallbacks
+    // the rest of Arbor's highlighting uses, so a theme overlay re-skins it too).
     '.cm-grv-comment': { color: 'var(--syntax-comment, #7a7d85)', fontStyle: 'italic' },
     '.cm-grv-string': { color: 'var(--syntax-string, #6a9956)' },
     '.cm-grv-number': { color: 'var(--syntax-number, #9876aa)' },
     '.cm-grv-keyword': { color: 'var(--syntax-keyword, #cc7832)', fontWeight: '600' },
-    '.cm-grv-fn': { color: 'var(--syntax-function, #ffc66d)' },
     '.cm-grv-def': { color: 'var(--syntax-type, #4d78cc)' },
     '.cm-grv-ident': { color: 'var(--text-primary)' },
-    '.cm-grv-island': { color: 'var(--accent, #56b6c2)', fontWeight: '600' },
-    '.cm-grv-sound': { color: 'var(--syntax-type, #4d78cc)' },
-    '.cm-grv-note': { color: 'var(--syntax-function, #e5c07b)' },
-    '.cm-grv-chord': { color: 'var(--syntax-function, #e5c07b)', fontStyle: 'italic' },
-    '.cm-grv-splice': { color: 'var(--accent, #56b6c2)' },
+
+    // Structure: function/method calls (combinators, transforms) + island heads.
+    '.cm-grv-fn': { color: 'var(--syntax-function, #ffc66d)' },
+    '.cm-grv-island': { color: 'var(--accent, #56b6c2)', fontWeight: '700' },
+    '.cm-grv-splice': { color: 'var(--accent, #56b6c2)', fontWeight: '600' },
+
+    // Music content (the bright layer): notes warm, chords italic, sounds cool
+    // teal. Grove-local vars (default to the music palette) keep them distinct
+    // from host scaffolding while still theme-overridable.
+    '.cm-grv-note': { color: 'var(--grv-syntax-note, #e5c07b)' },
+    '.cm-grv-chord': { color: 'var(--grv-syntax-note, #e5c07b)', fontStyle: 'italic', fontWeight: '600' },
+    '.cm-grv-sound': { color: 'var(--grv-syntax-sound, #56b6c2)' },
+
+    // Mini-notation operators (~ _ * / ! @ …) — muted, so rhythm reads clean.
     '.cm-grv-mininote': { color: 'var(--text-muted)' },
     '.cm-grv-op': { color: 'var(--text-secondary)' },
+
+    // ── Autocomplete + hover docs ──
+    '.cm-tooltip-autocomplete': {
+      backgroundColor: 'var(--bg-elevated)',
+      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
+    },
+    '.cm-tooltip-autocomplete > ul > li': {
+      fontFamily: 'var(--font-code)', fontSize: '12px',
+      padding: '2px 6px', color: 'var(--text-primary)',
+    },
+    '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+      backgroundColor: 'var(--accent-subtle)', color: 'var(--text-primary)',
+    },
+    '.cm-completionLabel': { color: 'var(--text-primary)' },
+    '.cm-completionDetail': { color: 'var(--text-muted)', fontStyle: 'normal', marginLeft: '0.6em' },
+    '.cm-completionMatchedText': { color: 'var(--accent)', textDecoration: 'none', fontWeight: '700' },
+
+    // Shared docs block (autocomplete info side-panel + hover tooltip).
+    '.cm-grv-hover': { maxWidth: '420px' },
+    '.cm-grv-doc': { padding: '4px 2px', maxWidth: '420px' },
+    '.cm-grv-doc-sig': {
+      fontFamily: 'var(--font-code)', fontSize: '12px', fontWeight: '600',
+      color: 'var(--accent)', marginBottom: '4px', whiteSpace: 'pre-wrap',
+    },
+    '.cm-grv-doc-summary': {
+      fontSize: '11.5px', lineHeight: '1.5', color: 'var(--text-secondary)',
+    },
+    '.cm-grv-doc-params': { margin: '6px 0 0', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '1px 8px' },
+    '.cm-grv-doc-params dt': {
+      fontFamily: 'var(--font-code)', fontSize: '11px', fontWeight: '600',
+      color: 'var(--grv-syntax-note, #e5c07b)', margin: '0',
+    },
+    '.cm-grv-doc-params dd': { margin: '0', fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.45' },
+    '.cm-grv-doc-example': {
+      margin: '6px 0 0', padding: '5px 7px',
+      background: 'var(--bg-input)', border: '1px solid var(--border-subtle)',
+      borderRadius: 'var(--radius-sm, 4px)',
+      fontFamily: 'var(--font-code)', fontSize: '11px', color: 'var(--text-primary)',
+      whiteSpace: 'pre-wrap',
+    },
 
     // Active-hap underline — tinted with the per-track colour via --grv-hap.
     '.cm-grv-hap': {
@@ -282,6 +344,9 @@ export interface GroveExtensionsOptions {
   readOnly?: boolean;
   /** Ctrl/Cmd+Click on an identifier — host resolves + jumps (go-to-decl). */
   onGoto?: (word: string, view: EditorView) => void;
+  /** The DSL catalogue source for autocomplete + hover docs. When omitted, the
+   *  editor still works (highlight, lint, go-to-decl) without language hints. */
+  intel?: GroveIntelSource;
 }
 
 /**
@@ -303,9 +368,18 @@ export function createGroveExtensions(opts: GroveExtensionsOptions = {}): Extens
     groveHighlight,
     activeHapsField,
     lintGutter(),
+  ];
+  // Language intelligence (autocomplete + hover) — only when a catalogue source
+  // is provided and the pane is editable (no completions in a read-only viewer).
+  // Added BEFORE the base keymap so its completion keymap (Enter / ↑↓ / Esc while
+  // the popup is open) takes precedence over the editor defaults.
+  if (opts.intel && !opts.readOnly) {
+    exts.push(groveLanguageIntel(opts.intel));
+  }
+  exts.push(
     keymap.of([...defaultKeymap, ...historyKeymap, ...lintKeymap, indentWithTab]),
     EditorState.readOnly.of(!!opts.readOnly),
-  ];
+  );
   if (opts.onGoto) {
     const onGoto = opts.onGoto;
     exts.push(EditorView.domEventHandlers({

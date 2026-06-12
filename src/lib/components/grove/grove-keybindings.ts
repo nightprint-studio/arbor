@@ -25,7 +25,9 @@ export const GROVE_BINDINGS: GroveBinding[] = [
   { id: 'goto_line',    key: 'g', ctrl: true,  scope: 'editor', description: 'Go to line' },
   { id: 'new_file',     key: 'n', ctrl: true,  scope: 'editor', description: 'New .grove in the tab pane' },
   // Transport.
-  { id: 'run_stop',     key: ' ', ctrl: true,  scope: 'global', description: 'Toggle Run / Stop' },
+  { id: 'run_stop',       key: ' ', ctrl: true,  scope: 'global', description: 'Toggle Run / Stop' },
+  { id: 'seek_to_start',  key: '[', ctrl: true, shift: true, scope: 'global', description: 'Skip to start (cycle 0)' },
+  { id: 'seek_to_end',    key: ']', ctrl: true, shift: true, scope: 'global', description: 'Skip to end of arrangement' },
   // Window — discovery + layout.
   { id: 'command_palette', key: 'p', ctrl: true, shift: true, scope: 'global', description: 'Open the Command Palette' },
   { id: 'shortcuts',    key: 'F1', scope: 'global', description: 'Show the keyboard shortcuts' },
@@ -42,6 +44,14 @@ export const GROVE_BINDINGS: GroveBinding[] = [
   { id: 'commit_overrides', key: 'c', alt: true, shift: true, scope: 'global', description: 'Commit mixer gain/pan overrides to source' },
 ];
 
+/** Physical-key codes for punctuation bindings whose printed char shifts with
+ *  the modifier/layout (e.g. Shift+`[` → `{`). Matching on `e.code` keeps the
+ *  binding stable regardless of Shift state or keyboard layout. */
+const PUNCT_CODES: Record<string, string> = {
+  '[': 'BracketLeft',
+  ']': 'BracketRight',
+};
+
 /** True when the event matches the binding (layout-tolerant for letters). */
 export function matchesGrove(e: KeyboardEvent, b: GroveBinding): boolean {
   if (!!b.ctrl !== (e.ctrlKey || e.metaKey)) return false;
@@ -49,5 +59,6 @@ export function matchesGrove(e: KeyboardEvent, b: GroveBinding): boolean {
   if (!!b.alt !== e.altKey) return false;
   if (e.key.toLowerCase() === b.key.toLowerCase()) return true;
   if (b.key.length === 1 && /[a-z]/i.test(b.key) && e.code === `Key${b.key.toUpperCase()}`) return true;
+  if (PUNCT_CODES[b.key] && e.code === PUNCT_CODES[b.key]) return true;
   return false;
 }

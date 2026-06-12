@@ -21,8 +21,8 @@ import type { ControlEdit } from './editor/grove-edit';
 /** Left-rail panels (top group = side panels, bottom group = bottom panel). */
 export type LeftPanel = 'files' | 'outline' | 'soundbank';
 /** Bottom-docked panels. The Mixer lives here (Logic-style horizontal strips),
- *  alongside the Console + Problems. */
-export type BottomPanel = 'console' | 'problems' | 'mixer';
+ *  alongside the Console + Problems + the background Jobs output. */
+export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs';
 /** Right-rail panels. */
 export type RightPanel = 'inspector' | 'docs';
 
@@ -58,6 +58,11 @@ function createGroveStore() {
   // `String(stripIndex)`; starts empty (the live arrangement seeds nothing).
   let muted  = $state<Record<string, boolean>>({});
   let soloed = $state<Record<string, boolean>>({});
+  // Pre-mute gain snapshot (index key) — captured when a track is muted so unmute
+  // can rewrite the source `.gain(x)` back (mute writes `.gain(0)` into the
+  // `.grove`; see mixer store `muteToSource`). Survives eval re-baseline because
+  // the muted state itself does (the source carries the `.gain(0)` across evals).
+  let premuteGain = $state<Record<string, number>>({});
 
   // ── Rails / panels ─────────────────────────────────────────────────────────
   let leftPanel   = $state<LeftPanel | null>('files');
@@ -97,6 +102,16 @@ function createGroveStore() {
     toggleMute(id: string)  { muted  = { ...muted,  [id]: !muted[id] }; },
     toggleSolo(id: string)  { soloed = { ...soloed, [id]: !soloed[id] }; },
     get anySolo() { return Object.values(soloed).some(Boolean); },
+
+    // Pre-mute gain snapshot — set on mute, read + cleared on unmute so the source
+    // `.gain` can be restored (mute writes `.gain(0)`). Owned here next to `muted`
+    // so the mixer + arrangement context-menu share one mute/premute truth.
+    premuteGain(id: string): number | undefined { return premuteGain[id]; },
+    setPremuteGain(id: string, v: number) { premuteGain = { ...premuteGain, [id]: v }; },
+    clearPremuteGain(id: string) {
+      const { [id]: _drop, ...rest } = premuteGain;
+      premuteGain = rest;
+    },
 
     // Transport read-throughs (no local state — the engine stream owns these).
     get running() { return transportStore.playing; },

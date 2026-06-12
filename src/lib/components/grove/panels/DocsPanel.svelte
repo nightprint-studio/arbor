@@ -1,58 +1,70 @@
 <script lang="ts">
   /**
-   * Docs — a compact grove language reference (like Arbor's DocsPanel). Mocked
-   * content grouped into collapsible sections with a search, an example, and
-   * symbol/description rows. The real version mirrors design/grove/*.md.
+   * Docs — the navigable grove language reference, rendered from the canonical
+   * DSL catalogue (`referenceStore`, fed by `grove_lang_reference`). Entries are
+   * grouped by kind into collapsible sections with a search; each row shows the
+   * name, signature, summary, and (on expand) its parameters + example. The
+   * authored-once Rust catalogue is the single source — no hardcoded language
+   * data here, so it never drifts from the evaluator.
    */
-  import { BookOpen, Search, Hash, Braces, WandSparkles, Music } from 'lucide-svelte';
+  import { BookOpen, Search } from 'lucide-svelte';
+  import {
+    Braces, Hash, WandSparkles, Music, Waves, Dice5, Brackets, FileCode2, Terminal,
+  } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
+  import { referenceStore } from '../stores/reference.svelte';
+  import type { GroveDslEntry, GroveDslKind } from '$lib/ipc/grove';
+  import DocsEntryRow from './DocsEntryRow.svelte';
+
+  // Idempotent: GroveShell loads this on mount, but a standalone mount still works.
+  void referenceStore.load();
 
   let query = $state('');
 
-  const SECTIONS = [
-    { id: 'host', label: 'Host language', icon: Braces, color: 'var(--accent)', rows: [
-      ['cps(n)', 'cycles per second (tempo)'],
-      ['let / fn', 'bindings & expression functions'],
-      ['par · seq · cat', 'compose patterns (stack / sequence / alternate)'],
-      ['arrange · cycles', 'absolute-timeline sections'],
-      ['tracks · track', 'output: named channels'],
-      ['(0..8).par(i => …)', 'range map + combine'],
-    ] },
-    { id: 'mini', label: 'Mini-notation', icon: Hash, color: 'var(--info)', rows: [
-      ['~', 'a silent slot (rest)'],
-      ['_', 'extend the previous term by a slot'],
-      ['[ ]', 'group events into one slot'],
-      ['< >', 'alternate — one element per cycle'],
-      ['&', 'parallel (stack) — loosest precedence'],
-      ['*n  /n', 'fast / slow inside the slot'],
-      ['!n  @n', 'replicate / weight'],
-      ['(n,k)', 'euclidean — n hits over k steps'],
-      [":n  'chord", 'sample variant / chord (n only)'],
-      ['$ident', 'splice a variable as a leaf'],
-    ] },
-    { id: 'xform', label: 'Transforms', icon: WandSparkles, color: 'var(--color-tag, #c792ea)', rows: [
-      ['fast · slow · rev', 'time & structure'],
-      ['every · off', 'periodic / echo'],
-      ['degrade · sometimes · jux', 'probability & stereo'],
-      ['gain · pan · room · lpf', 'voice & mix'],
-      ['inst · scale', 'instrument / degree mapping'],
-      ['rand(lo,hi) · choose(…)', 'generative values'],
-    ] },
+  // Display order + label / icon / accent per kind. Drives the section grouping.
+  const GROUPS: { kind: GroveDslKind; label: string; icon: typeof Braces; color: string }[] = [
+    { kind: 'keyword',       label: 'Host language',     icon: Braces,        color: 'var(--accent)' },
+    { kind: 'island',        label: 'Islands (s / n)',   icon: Music,         color: 'var(--accent)' },
+    { kind: 'mini',          label: 'Mini-notation',     icon: Hash,          color: 'var(--info)' },
+    { kind: 'note',          label: 'Notes & chords',    icon: Music,         color: 'var(--grv-syntax-note, #e5c07b)' },
+    { kind: 'combinator',    label: 'Combinators',       icon: Brackets,      color: 'var(--syntax-function, #ffc66d)' },
+    { kind: 'transform',     label: 'Transforms',        icon: WandSparkles,  color: 'var(--color-tag, #c792ea)' },
+    { kind: 'generator',     label: 'Generators',        icon: Dice5,         color: 'var(--warning)' },
+    { kind: 'signal',        label: 'Signals',           icon: Waves,         color: 'var(--grv-syntax-sound, #56b6c2)' },
+    { kind: 'signal_method', label: 'Signal methods',    icon: Waves,         color: 'var(--grv-syntax-sound, #56b6c2)' },
+    { kind: 'seq_method',    label: 'Range / list',      icon: FileCode2,     color: 'var(--syntax-function, #ffc66d)' },
+    { kind: 'log',           label: 'Logging',           icon: Terminal,      color: 'var(--text-secondary)' },
   ];
 
-  const filtered = $derived.by(() => {
+  function matches(e: GroveDslEntry, q: string): boolean {
+    return e.name.toLowerCase().includes(q)
+      || e.signature.toLowerCase().includes(q)
+      || e.summary.toLowerCase().includes(q);
+  }
+
+  const sections = $derived.by(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return SECTIONS;
-    return SECTIONS
-      .map(s => ({ ...s, rows: s.rows.filter(r => r[0].toLowerCase().includes(q) || r[1].toLowerCase().includes(q)) }))
-      .filter(s => s.rows.length > 0);
+    const byKind = new Map<GroveDslKind, GroveDslEntry[]>();
+    for (const e of referenceStore.entries) {
+      if (q && !matches(e, q)) continue;
+      const arr = byKind.get(e.kind) ?? [];
+      arr.push(e);
+      byKind.set(e.kind, arr);
+    }
+    return GROUPS
+      .map((g) => ({ ...g, rows: byKind.get(g.kind) ?? [] }))
+      .filter((g) => g.rows.length > 0);
   });
 
-  // Section open state (default open).
+  // Section open state (default: open while searching, else collapsed sections
+  // the user hasn't touched stay open too — a reference is most useful expanded).
   let open = $state<Record<string, boolean>>({});
   const isOpen = (id: string) => open[id] ?? true;
+  // Track which rows are expanded (id = entry name + kind, unique).
+  let expanded = $state<Record<string, boolean>>({});
+  const rowId = (e: GroveDslEntry) => `${e.kind}:${e.name}`;
 </script>
 
 <PanelShell title="Docs">
@@ -66,33 +78,32 @@
   {/snippet}
 
   <div class="docs">
-    {#if !query}
-      <div class="docs-example">
-        <div class="docs-example-head"><Music size={11} /> Example</div>
-        <pre class="docs-code">n(c4 e4 g4)<span class="op">.</span><span class="fn">slow</span>(2)<span class="op">.</span><span class="fn">inst</span>(<span class="str">"synth.pad"</span>)</pre>
-      </div>
+    {#if !referenceStore.loaded && referenceStore.entries.length === 0}
+      <div class="docs-empty">Loading the language reference…</div>
     {/if}
 
-    {#each filtered as sec (sec.id)}
+    {#each sections as sec (sec.kind)}
       {@const Si = sec.icon}
       <SidebarSection
         label={sec.label}
-        expanded={isOpen(sec.id)}
-        onToggle={() => open = { ...open, [sec.id]: !isOpen(sec.id) }}
+        expanded={isOpen(sec.kind)}
+        onToggle={() => open = { ...open, [sec.kind]: !isOpen(sec.kind) }}
         badge={sec.rows.length}
         iconColor={sec.color}
       >
         {#snippet icon()}<Si size={13} />{/snippet}
-        {#each sec.rows as row}
-          <div class="docs-row">
-            <code class="docs-sym" style="color: {sec.color}">{row[0]}</code>
-            <span class="docs-desc">{row[1]}</span>
-          </div>
+        {#each sec.rows as e (rowId(e))}
+          <DocsEntryRow
+            entry={e}
+            color={sec.color}
+            expanded={!!expanded[rowId(e)]}
+            onToggle={() => expanded = { ...expanded, [rowId(e)]: !expanded[rowId(e)] }}
+          />
         {/each}
       </SidebarSection>
     {/each}
 
-    {#if filtered.length === 0}
+    {#if referenceStore.loaded && sections.length === 0}
       <div class="docs-empty">No matches for “{query}”.</div>
     {/if}
   </div>
@@ -101,27 +112,5 @@
 <style>
   .docs-search { padding: 6px 8px; }
   .docs { padding: 4px 0 12px; }
-
-  .docs-example { margin: 6px 10px 8px; }
-  .docs-example-head {
-    display: flex; align-items: center; gap: 5px;
-    font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.4px;
-    color: var(--text-muted); margin-bottom: 4px;
-  }
-  .docs-code {
-    margin: 0; padding: 8px 10px;
-    background: var(--bg-input); border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    font-family: var(--font-code); font-size: 11.5px; line-height: 1.5;
-    color: var(--color-stash, #82aaff); white-space: pre-wrap;
-  }
-  .docs-code .op { color: var(--text-secondary); }
-  .docs-code .fn { color: #61afef; }
-  .docs-code .str { color: #98c379; }
-
-  .docs-row { display: flex; gap: 10px; padding: 3px 4px; align-items: baseline; }
-  .docs-sym { flex-shrink: 0; min-width: 96px; font-family: var(--font-code); font-size: 11px; }
-  .docs-desc { font-size: 11.5px; color: var(--text-secondary); line-height: 1.45; }
-
   .docs-empty { padding: 14px 12px; font-size: 11.5px; color: var(--text-muted); font-style: italic; }
 </style>

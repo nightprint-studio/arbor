@@ -11,10 +11,10 @@
    */
   import type { Component } from 'svelte';
   import {
-    Play, Square, FolderPlus, FolderOpen, FilePlus2, Save, Download,
+    Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
-    Keyboard, Command, ArrowDownToLine,
+    Keyboard, Command, ArrowDownToLine, Boxes,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -24,16 +24,17 @@
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { mixerStore } from '../stores/mixer.svelte';
+  import { arrangementStore } from '../viz/arrangement.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
   // Icon keys resolved by the shell. Local map keeps grove self-contained — no
   // dependency on Arbor's PLUGIN_ICONS registry.
   const ICONS: Record<string, Component> = {
-    Play, Square, FolderPlus, FolderOpen, FilePlus2, Save, Download,
+    Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
-    Keyboard, Command, ArrowDownToLine,
+    Keyboard, Command, ArrowDownToLine, Boxes,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -52,6 +53,10 @@
     // Transport
     { id: 'run',  label: playing ? 'Stop' : 'Run', group: 'Transport', icon: playing ? 'Square' : 'Play', keys: 'Ctrl+Space',
       run: () => void groveEngine.toggleRun(projectStore.activeSource, projectStore.project?.path) },
+    { id: 'seek_start', label: 'Skip to start', group: 'Transport', icon: 'SkipBack', keys: 'Ctrl+Shift+[',
+      run: () => void groveEngine.seekToStart() },
+    { id: 'seek_end',   label: 'Skip to end',   group: 'Transport', icon: 'SkipForward', keys: 'Ctrl+Shift+]',
+      run: () => void groveEngine.seekToEnd(arrangementStore.contentEnd) },
     // Project / file
     { id: 'new_project',  label: 'New project…',     group: 'Project', icon: 'FolderPlus', keys: 'Ctrl+Shift+N', run: () => projectActions.newProject() },
     { id: 'open_project', label: 'Open project…',    group: 'Project', icon: 'FolderOpen', keys: 'Ctrl+O',       run: () => projectActions.openProject() },
@@ -67,6 +72,7 @@
     { id: 'commit_overrides', label: 'Commit mixer overrides to source', group: 'Mixer', icon: 'ArrowDownToLine', keys: 'Alt+Shift+C', run: () => mixerStore.commitAll() },
     { id: 'p_console',   label: 'Toggle Console',    group: 'View', icon: 'Terminal',         run: () => groveStore.toggleBottom('console') },
     { id: 'p_problems',  label: 'Toggle Problems',   group: 'View', icon: 'AlertTriangle',    run: () => groveStore.toggleBottom('problems') },
+    { id: 'p_jobs',      label: 'Toggle Jobs',       group: 'View', icon: 'Boxes',            run: () => groveStore.toggleBottom('jobs') },
     { id: 'p_inspector', label: 'Toggle Inspector',  group: 'View', icon: 'Crosshair',        run: () => groveStore.toggleRight('inspector') },
     { id: 'p_docs',      label: 'Toggle Docs',       group: 'View', icon: 'BookOpen',         run: () => groveStore.toggleRight('docs') },
     { id: 'c_viz',       label: 'Toggle Arrangement', group: 'View', icon: 'PanelLeft',       run: () => groveStore.toggleCollapseUi() },

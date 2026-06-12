@@ -16,4 +16,6 @@ pub use crate::schedule::{delay_config_for, schedule_span, voice_event_from_hap}
 pub use crate::transport::{Transport, LOOKAHEAD_MS};
 
 // ── Offline render ───────────────────────────────────────────────────────────
-pub use crate::render::{render_offline, BitDepth, RenderConfig};
+pub use crate::render::{
+    render_offline, BitDepth, RenderConfig, DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS,
+};

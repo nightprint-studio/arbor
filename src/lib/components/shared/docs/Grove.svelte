@@ -28,11 +28,15 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Mixer</div>
-    <div class="fc-desc">One strip per track with live meters and gain / pan knobs (live overrides on top of the source). The room knob and the Inspector's delay knobs are <strong>code-first</strong> — they write the value straight into the <code>.grove</code> source. Commit a gain / pan override to source with the ↧ button on the strip.</div>
+    <div class="fc-desc">One strip per track with live meters and gain / pan knobs. Dragging a knob is heard instantly (a live override) and is <strong>written back</strong> into the <code>.grove</code> source as a <code>.gain(…)</code> / <code>.pan(…)</code> literal shortly after the gesture rests — no commit step. The room knob and the Inspector's delay knobs are code-first the same way. Muting a track writes <code>.gain(0)</code> into the source; unmuting restores the previous gain.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Console &amp; Problems</div>
     <div class="fc-desc">The Console shows log lines gated to your threshold; Problems lists evaluation diagnostics. Click a problem to jump the editor to its source span.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-title">Jobs</div>
+    <div class="fc-desc">Background work — offline WAV renders and sample-bank downloads — listed with live status and elapsed time. Cancel a running job, dismiss a finished one, or open it to follow its streaming output. The footer badge mirrors the running count.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Sound bank</div>
@@ -52,12 +56,78 @@
   </div>
 </div>
 
+<h2>The language</h2>
+<p>A <code>.grove</code> file is <strong>code</strong>, not a piano roll. You build patterns with a small host language and a compact <em>mini-notation</em> for rhythms and melodies, then compose them into named tracks. The full reference — every combinator, transform, signal and operator with its signature and an example — lives in the window's <strong>Docs</strong> panel (and as live autocomplete + hover in the editor); this is the narrative tour.</p>
+
+<h3>Host language</h3>
+<p>The host language names and composes patterns. The essentials:</p>
+<ul class="prop-list">
+  <li><code>let name = expr</code> binds a value; <code>fn name(params) = expr</code> defines an expression-bodied function (no recursion — the language is total, so it always terminates).</li>
+  <li><code>import {'{'} kick, snare {'}'} from "lib/drums.grove"</code> pulls top-level declarations from another file (its own <code>tracks(…)</code> output is ignored).</li>
+  <li>Arithmetic (<code>+ - * /</code>, unary minus) and Rust-style ranges (<code>0..8</code> exclusive, <code>0..=7</code> inclusive) are available; call a method on a range with parentheses: <code>(0..8).map(…)</code>.</li>
+  <li>Every function is called with parentheses and comma-separated arguments — the one exception is the mini-notation islands.</li>
+</ul>
+<pre class="code-block">let bass = n(c2 g1).inst("synth.bass")
+fn bassline(root) = n($root ~ $root g1).lpf(800)</pre>
+
+<h3>Islands &amp; mini-notation</h3>
+<p>The two islands carry mini-notation — a space-separated mini-language for one cycle. <code>s(…)</code> (alias <code>sound</code>) holds <strong>sample names</strong> (<code>bd</code>, <code>sd</code>, <code>hh</code>); <code>n(…)</code> (alias <code>note</code>) holds <strong>pitches</strong> (<code>c4</code>), <strong>scale degrees</strong> (<code>0 2 4</code>) or <strong>chords</strong> (<code>c4'min7</code>), played by an instrument. The structural operators are identical between them:</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Operator</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>~</code></td><td>a silent slot (rest)</td></tr>
+    <tr><td><code>_</code></td><td>extend the previous term by a slot</td></tr>
+    <tr><td><code>[ ]</code></td><td>group events into one slot (nestable)</td></tr>
+    <tr><td><code>&lt; &gt;</code></td><td>alternation — one element per cycle</td></tr>
+    <tr><td><code>&amp;</code></td><td>parallel (stack), the loosest-precedence operator</td></tr>
+    <tr><td><code>*n</code> / <code>/n</code></td><td>fast / slow inside the slot</td></tr>
+    <tr><td><code>!n</code> / <code>@n</code></td><td>replicate as separate slots / weight (more duration)</td></tr>
+    <tr><td><code>(n,k)</code></td><td>euclidean — distribute n hits over k steps</td></tr>
+    <tr><td><code>:n</code> / <code>'chord</code></td><td>sample variant (s only) / chord (n only)</td></tr>
+    <tr><td><code>$ident</code></td><td>splice a named variable in as a leaf</td></tr>
+  </tbody>
+</table>
+<pre class="code-block">s(bd [hh hh] sd ~)        // a kick, two fast hats, a snare, a rest
+s(bd(3,8))                // the euclidean tresillo
+n(&lt;c4'min7 af3'maj7&gt;)     // one chord per cycle</pre>
+
+<h3>Transforms</h3>
+<p>A <strong>transform</strong> turns a pattern into another pattern. It has two forms: as a <em>method</em> it applies (<code>pat.gain(0.4)</code>); standalone it is a reusable <em>transform value</em> (<code>gain(0.4)</code>), which you pass to the higher-order transforms (<code>every</code>, <code>off</code>, <code>sometimes</code>, <code>jux</code>) without a lambda. A nullary transform like <code>rev</code> is a value as a bare name.</p>
+<pre class="code-block">arp.every(4, rev)              // reverse every 4th cycle
+lead.off(0.125, gain(0.4))     // an echo, an eighth later, quieter
+hats.degrade().gain(0.8)       // drop ~half the hits (seeded, stable per loop)</pre>
+<p>The vocabulary covers <strong>time &amp; structure</strong> (<code>fast</code>, <code>slow</code>, <code>rev</code>, <code>iter</code>, <code>chunk</code>, <code>palindrome</code>, <code>swingBy</code>), <strong>probability</strong> (<code>degrade</code>, <code>degradeBy</code>, <code>sometimes</code>, <code>sometimesBy</code>, <code>jux</code>), and <strong>voice &amp; mix</strong> (<code>gain</code>, <code>pan</code>, <code>room</code>, <code>lpf</code>, <code>hpf</code>, <code>delay</code>, <code>crush</code>, <code>shape</code>, <code>shift</code>, <code>speed</code>, <code>vel</code>, <code>inst</code>, <code>art</code>, <code>scale</code>, <code>add</code>, <code>addDeg</code>). Voice/mix parameters accept a constant <em>or</em> a pattern/signal, so they can vary per event: <code>.lpf(sine.range(400, 2000))</code> sweeps the cutoff with an LFO; <code>.pan(rand(0, 1))</code> randomises stereo.</p>
+
+<h3>Composing &amp; arranging</h3>
+<p>Combinators glue patterns together: <code>par</code> stacks them (play at once), <code>seq</code> lays them out in equal slots within a cycle, <code>cat</code> plays one per cycle. <code>arrange</code> places <code>cycles(n, x)</code> / <code>section("NAME", n, x)</code> blocks along the absolute timeline (and loops). Mapping a range with <code>.par</code>/<code>.seq</code>/<code>.cat</code> is the shortcut for "make N variations and combine them":</p>
+<pre class="code-block">(0..8).par(i =&gt; n($i).off(i*0.1, gain(0.5)))     // eight detuned, staggered voices
+
+arrange(
+  section("INTRO", 4, intro),
+  section("MAIN", 16, mainGroove),
+  section("OUTRO", 4, outro),
+)</pre>
+
+<h3>Output: tracks (the mixer is code)</h3>
+<p>A file's output is <code>tracks(track("name", pattern), …)</code> — a list of named channels, which <em>are</em> the mixer strips. The mixer is therefore code-first: there is no separate session file. <code>arrange</code> / <code>cat</code> / <code>par</code> are used <em>inside</em> a track for its own timeline.</p>
+<pre class="code-block">tracks(
+  track("bass",  bassline(c2)),
+  track("drums", arrange(cycles(4, ~), cycles(24, drumGroove), cycles(4, ~))),
+)</pre>
+
+<h3>Generators &amp; signals</h3>
+<p>Where a value is needed you can compute one. <strong>Generators</strong> produce values: <code>rand(lo, hi)</code> is a per-event random in a range, <code>choose(a, b, c)</code> picks one. <strong>Signals</strong> (<code>sine</code>, <code>saw</code>, <code>isaw</code>, <code>tri</code>, <code>square</code>) are continuous 0..1 LFOs you rescale with <code>.range(lo, hi)</code> and reshape with <code>.fast</code> / <code>.slow</code>. Both are <strong>seeded by cycle</strong>, so they're identical every loop — the same bar always sounds the same.</p>
+
+<h3>Files &amp; samples</h3>
+<p><code>sample("path")</code> loads an audio file as a one-shot (pitch with <code>.shift</code>), <code>audio("path")</code> loads a long stem that plays in full. Paths are project-relative.</p>
+
 <h2>Editing from the panels</h2>
 <p>The mixer and inspector knobs are a surgical bridge back to the source — the code stays the single source of truth:</p>
 <ul class="prop-list">
-  <li><code>gain</code> / <code>pan</code> are <strong>live overrides</strong>: drag to hear the change instantly; each re-evaluation re-baselines them to the source. Press the ↧ button on a strip (or <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> for all strips) to <strong>commit</strong> the current value into the source as a <code>.gain(…)</code> / <code>.pan(…)</code> literal.</li>
+  <li><code>gain</code> / <code>pan</code> are <strong>live + write-through</strong>: dragging a knob is heard instantly (a live override) and, once the gesture rests, the value is written into the source as a <code>.gain(…)</code> / <code>.pan(…)</code> literal on its own. <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> flushes any pending write early.</li>
+  <li><strong>Mute</strong> writes <code>.gain(0)</code> into the track's source (so the silence lives in the file); unmuting restores the gain it had before. <strong>Solo</strong> stays live-only — it has no source representation. The explicit mute flag is the source of truth across re-evaluations.</li>
   <li><code>room</code> (mixer) and <code>delay</code> (inspector: time / feedback / mix) are <strong>code-first</strong>: turning a knob writes the literal straight into the track's <code>.grove</code> source — adding the method to the chain if it isn't there yet — and re-evaluates.</li>
-  <li>A knob whose value is <em>calculated</em> in the source (e.g. <code>.gain(rand(0,1))</code>) is shown read-only: there is no single literal to rewrite.</li>
+  <li>A knob whose value is <em>calculated</em> in the source (e.g. <code>.gain(rand(0,1))</code>) is shown read-only: there is no single literal to rewrite. Muting such a track works live but can't be written to the source, and the strip flags that.</li>
 </ul>
 <div class="hint">Commits are ordinary editor edits — one <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes them.</div>
 

@@ -35,6 +35,10 @@ function createControlsStore() {
   }
 
   return {
+    /** Current gain literal for track `i`, or null when absent / calculated.
+     *  Used by the mixer to snapshot a track's pre-mute gain before writing
+     *  `.gain(0)` (mute), so unmute can restore it. */
+    gain(i: number): number | null { return byTrack.get(i)?.gain ?? null; },
     /** Current room send literal for track `i` (0 when absent). */
     room(i: number): number { return byTrack.get(i)?.room ?? 0; },
     /** Whether track `i` has a room literal in source (vs. absent / calculated). */

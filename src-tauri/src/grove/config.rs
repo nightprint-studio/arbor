@@ -8,7 +8,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use arbor_grove::prelude::{BitDepth, EvalConfig, LogLevel, RenderConfig};
+use arbor_grove::prelude::{
+    BitDepth, EvalConfig, LogLevel, RenderConfig, DEFAULT_BIT_DEPTH, DEFAULT_SAMPLE_RATE,
+    DEFAULT_TAIL_MAX_SECS,
+};
 
 /// Persisted grove settings (global, `~/.config/arbor/config.toml` → `[grove]`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,10 +61,19 @@ pub struct GroveRenderConfig {
 impl Default for GroveRenderConfig {
     fn default() -> Self {
         GroveRenderConfig {
-            sample_rate: 48_000,
-            bit_depth: "int24".to_string(),
-            tail_max_secs: 4.0,
+            sample_rate: DEFAULT_SAMPLE_RATE,
+            bit_depth: bit_depth_str(DEFAULT_BIT_DEPTH).to_string(),
+            tail_max_secs: DEFAULT_TAIL_MAX_SECS,
         }
+    }
+}
+
+/// The config-string spelling of a [`BitDepth`] (the inverse of the parse in
+/// [`GroveRenderConfig::render_config`]), so the default lives in one place.
+fn bit_depth_str(depth: BitDepth) -> &'static str {
+    match depth {
+        BitDepth::Int24 => "int24",
+        BitDepth::Float32 => "float32",
     }
 }
 

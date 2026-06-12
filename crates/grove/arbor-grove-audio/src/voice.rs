@@ -180,14 +180,6 @@ impl Voice {
         self.source.is_done()
     }
 
-    /// Force the voice into its release stage now (transport stop / steal).
-    pub fn force_release(&mut self) {
-        if !self.released {
-            self.source.release();
-            self.released = true;
-        }
-    }
-
     /// Process one sample at absolute frame `frame`, accumulating its dry signal
     /// into `dry` (the track strip's L/R), its reverb send into `send`, and its
     /// per-track delay-bus send into `delay_send`.
@@ -383,10 +375,13 @@ impl VoicePool {
         best
     }
 
-    /// Release every sounding voice (transport stop / `StopAll`).
-    pub fn release_all(&mut self) {
-        for slot in self.slots.iter_mut().flatten() {
-            slot.force_release();
+    /// Drop every sounding voice immediately (transport stop / `StopAll`): the pool
+    /// goes empty in one frame, so the voice count reads zero and no residual voice
+    /// keeps the renderer busy. Paired with an effects-tail flush on stop, this
+    /// leaves the DSP truly at rest.
+    pub fn clear(&mut self) {
+        for slot in self.slots.iter_mut() {
+            *slot = None;
         }
     }
 

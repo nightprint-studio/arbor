@@ -10,7 +10,7 @@
    * (project switcher, transport, log threshold) are authored here as snippets.
    */
   import {
-    Play, Square, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
+    Play, Square, SkipBack, SkipForward, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
     PanelLeft, PanelRight, Minimize2, Command, Check, AlertTriangle,
     FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut,
   } from 'lucide-svelte';
@@ -32,8 +32,14 @@
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { renderStore } from '../stores/render.svelte';
+  import { arrangementStore } from '../viz/arrangement.svelte';
 
   let recentOpen = $state(false);
+
+  // Skip-to-end targets the last cycle of the evaluated arrangement (its content
+  // end); disabled while the arrangement is empty (nothing to skip to).
+  const arrangementEnd = $derived(arrangementStore.contentEnd);
+  const arrangementEmpty = $derived(arrangementStore.empty);
 
   // Export button reflects the render job: spinner while bouncing, then a brief
   // ✓ / ⚠ so the user sees it finished (or why it didn't) instead of nothing.
@@ -117,9 +123,29 @@
     </Dropdown>
   {/snippet}
 
-  <!-- Run cluster (IntelliJ-style) + log level -->
+  <!-- Log level + transport cluster (IntelliJ-style) -->
   {#snippet trailing()}
     <div class="gtb-run-cluster">
+      <Dropdown items={logItems} position="fixed" direction="down" width="160px">
+        {#snippet trigger({ open, toggle })}
+          <button class="gtb-log" class:open onclick={toggle} use:tooltip={'Log threshold'} aria-haspopup="menu" aria-expanded={open}>
+            <ScrollText size={13} />
+            <span>{configStore.logThreshold}</span>
+            <ChevronDown size={11} />
+          </button>
+        {/snippet}
+      </Dropdown>
+
+      <div class="gtb-sep"></div>
+
+      <button
+        class="gtb-run-icon"
+        onclick={() => void groveEngine.seekToStart()}
+        use:tooltip={'Skip to start (Ctrl+Shift+[)'}
+        aria-label="Skip to start"
+      >
+        <SkipBack size={14} fill="currentColor" />
+      </button>
       <button
         class="gtb-run"
         class:running={groveEngine.running}
@@ -129,6 +155,16 @@
       >
         {#if groveEngine.running}<Square size={14} fill="currentColor" />{:else}<Play size={14} fill="currentColor" />{/if}
       </button>
+      <button
+        class="gtb-run-icon"
+        onclick={() => void groveEngine.seekToEnd(arrangementEnd)}
+        disabled={arrangementEmpty}
+        use:tooltip={'Skip to end (Ctrl+Shift+])'}
+        aria-label="Skip to end"
+      >
+        <SkipForward size={14} fill="currentColor" />
+      </button>
+
       <button
         class="gtb-run-icon"
         class:rendering={renderStore.active}
@@ -144,18 +180,6 @@
         {:else if renderStore.status === 'failed'}<AlertTriangle size={14} />
         {:else}<Download size={14} />{/if}
       </button>
-
-      <div class="gtb-sep"></div>
-
-      <Dropdown items={logItems} position="fixed" direction="down" width="160px">
-        {#snippet trigger({ open, toggle })}
-          <button class="gtb-log" class:open onclick={toggle} use:tooltip={'Log threshold'} aria-haspopup="menu" aria-expanded={open}>
-            <ScrollText size={13} />
-            <span>{configStore.logThreshold}</span>
-            <ChevronDown size={11} />
-          </button>
-        {/snippet}
-      </Dropdown>
     </div>
   {/snippet}
 
@@ -214,7 +238,9 @@
   .gtb-project :global(svg:first-child) { color: var(--accent); }
 
   /* ── Run cluster ── */
-  .gtb-run-cluster { display: flex; align-items: center; gap: 2px; height: 100%; padding-right: 4px; }
+  /* IntelliJ leaves a clear gap before the layout toggles / window controls —
+     don't let the transport sit flush against the right edge. */
+  .gtb-run-cluster { display: flex; align-items: center; gap: 2px; height: 100%; padding-right: 14px; }
   .gtb-run, .gtb-run-icon {
     display: flex; align-items: center; justify-content: center;
     width: 30px; height: 28px;

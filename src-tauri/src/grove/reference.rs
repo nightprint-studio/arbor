@@ -1,0 +1,68 @@
+//! The canonical DSL reference, exposed to the frontend.
+//!
+//! `grove_lang_reference` returns the whole `.grove` language catalogue (every
+//! combinator, generator, signal, transform, mini-notation operator, …) from the
+//! authoritative source in `arbor-grove-lang` ([`reference`]). The frontend loads
+//! it once into a store and drives autocomplete, hover docs, and the Docs panel
+//! off it — so the editor's language intelligence and the evaluator can never
+//! drift. Static + cheap (a `Vec` of borrowed-static data); no state, no I/O.
+//!
+//! `arbor-grove-lang` stays serde-free (its only deps are `tree-sitter` + `cc`),
+//! so the serde shape lives **here**, at the IPC boundary — the same pattern as
+//! the engine→`events.rs` DTOs. The JSON field names / the `kind` tag string are
+//! the contract the frontend `referenceStore` parses.
+
+use arbor_grove::prelude::{reference, DslEntry, DslParam};
+use serde::Serialize;
+
+use crate::error::AppError;
+
+/// IPC view of a [`DslParam`].
+#[derive(Serialize)]
+pub struct DslParamDto {
+    name: &'static str,
+    optional: bool,
+    summary: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default: Option<&'static str>,
+}
+
+impl From<&DslParam> for DslParamDto {
+    fn from(p: &DslParam) -> Self {
+        DslParamDto { name: p.name, optional: p.optional, summary: p.summary, default: p.default }
+    }
+}
+
+/// IPC view of a [`DslEntry`]. `kind` is the lowercase tag from
+/// [`DslKind::as_str`](arbor_grove::prelude::DslKind::as_str).
+#[derive(Serialize)]
+pub struct DslEntryDto {
+    name: &'static str,
+    kind: &'static str,
+    signature: &'static str,
+    summary: &'static str,
+    params: Vec<DslParamDto>,
+    example: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    returns: Option<&'static str>,
+}
+
+impl From<DslEntry> for DslEntryDto {
+    fn from(e: DslEntry) -> Self {
+        DslEntryDto {
+            name: e.name,
+            kind: e.kind.as_str(),
+            signature: e.signature,
+            summary: e.summary,
+            params: e.params.iter().map(DslParamDto::from).collect(),
+            example: e.example,
+            returns: e.returns,
+        }
+    }
+}
+
+/// Return the full `.grove` DSL reference catalogue.
+#[tauri::command]
+pub fn grove_lang_reference() -> Result<Vec<DslEntryDto>, AppError> {
+    Ok(reference().into_iter().map(DslEntryDto::from).collect())
+}

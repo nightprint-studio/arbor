@@ -80,7 +80,10 @@ SFZ region vs. fallback) is the registry's job — the engine only forwards symb
   `symphonia`).
 - `effects.rs` — hand-rolled `Biquad` (`lpf`/`hpf` + parametric-EQ bands), `shape` waveshaper,
   `crush` bitcrusher, the parametric `Eq` chain, a feed-forward `Compressor`, the `ConvReverb`
-  convolution send bus, the per-track `DelayLine`, and a smoothed master `Limiter`.
+  convolution send bus, the per-track `DelayLine`, and a smoothed master `Limiter`. Each stateful
+  block exposes `reset()` so a transport stop (`StopAll`) can flush its tail to exact silence.
+- `defaults.rs` — shared audio defaults (`DEFAULT_SAMPLE_RATE`, `DEFAULT_BLOCK_FRAMES`), the single
+  source of truth the cpal stream, the offline render driver, and the shell config all reference.
 
 ### Registry articulations + round-robin
 

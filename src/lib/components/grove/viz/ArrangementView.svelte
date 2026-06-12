@@ -30,7 +30,6 @@
   import { projectStore } from '../stores/project.svelte';
   import { groveStore } from '../grove-store.svelte';
   import { mixerStore } from '../stores/mixer.svelte';
-  import { groveSetTrack } from '$lib/ipc/grove';
   import { laneColor, sectionColor } from '../palette';
 
   const PX = 26;
@@ -168,14 +167,10 @@
   );
   function onCtxSelect(id: string) {
     if (!ctx) return;
-    const key = laneKey(ctx.track);
-    if (id === 'mute') {
-      groveStore.toggleMute(key);
-      void groveSetTrack('mute', ctx.track, groveStore.isMuted(key) ? 1 : 0);
-    } else if (id === 'solo') {
-      groveStore.toggleSolo(key);
-      void groveSetTrack('solo', ctx.track, groveStore.isSoloed(key) ? 1 : 0);
-    }
+    // Route through the mixer store so mute writes `.gain(0)` into the source (and
+    // unmute restores it) — the single mute/solo entry point shared with the strips.
+    if (id === 'mute') mixerStore.toggleMute(ctx.track);
+    else if (id === 'solo') mixerStore.toggleSolo(ctx.track);
     ctx = null;
   }
 </script>

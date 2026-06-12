@@ -18,8 +18,21 @@
  * are not live overrides — they reflect the literal in the source and commit
  * straight back to it (`grove_set_literal` via the editor's Tree-sitter tree).
  * `room` is a single value in the mixer; `delay`'s three params (time/fb/mix)
- * live in the Inspector. gain / pan keep their live ephemeral override and gain
- * an explicit **commit** that writes the current value into the source.
+ * live in the Inspector.
+ *
+ * gain / pan are **both**: the knob pushes a live ephemeral override for instant
+ * audio feedback AND schedules a debounced write-through into the source (same
+ * `scheduleCommit` path as room/delay) — so a drag is heard immediately and, once
+ * the gesture settles (~280ms), the literal `.gain(x)` / `.pan(x)` is written to
+ * the `.grove`. No explicit commit button is needed; `commit`/`commitAll` just
+ * flush the pending write early (Command Palette / the ↧ affordance).
+ *
+ * Mute writes `.gain(0)` into the source (immediate commit, not debounced — a
+ * mute is a discrete intent, not a drag) plus the live mute override; unmute
+ * restores the pre-mute gain. When a track's gain is a *calculated* argument it
+ * can't be rewritten surgically, so mute stays live-only there (the source is
+ * left untouched and the strip shows it isn't persistible). Solo has no DSL
+ * representation, so it stays live-only — never written to the source.
  */
 
 import { groveSetTrack } from '$lib/ipc/grove';
@@ -93,7 +106,8 @@ function createMixerStore() {
   let delayBuf = $state<Record<number, DelayValues>>({});
 
   // Debounced commit: a knob drag fires many onchange; commit (which re-evals)
-  // once the gesture settles. Holds the latest pending edit per (index,control).
+  // once the gesture settles. Holds the latest pending edit per (index,control)
+  // so gain/pan/room/delay drags all coalesce into one write per gesture.
   let commitTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingEdits = new Map<number, Map<string, ControlEdit>>();
   function scheduleCommit(index: number, edit: ControlEdit) {
@@ -107,6 +121,49 @@ function createMixerStore() {
     commitTimer = null;
     for (const [index, m] of pendingEdits) groveStore.requestCommit(index, [...m.values()]);
     pendingEdits.clear();
+  }
+  /** Flush only `index`'s pending edits now (the ↧ affordance / commit). */
+  function flushOne(index: number) {
+    const m = pendingEdits.get(index);
+    if (!m) return;
+    pendingEdits.delete(index);
+    groveStore.requestCommit(index, [...m.values()]);
+  }
+  /** Commit `edits` straight away, bypassing the debounce (mute → `.gain(0)`).
+   *  Any pending debounced edit for the same control is dropped so the two don't
+   *  race (the immediate write is the newer intent). */
+  function commitNow(index: number, edits: ControlEdit[]) {
+    const m = pendingEdits.get(index);
+    if (m) for (const e of edits) m.delete(e.kind);
+    groveStore.requestCommit(index, edits);
+  }
+
+  /** Mute/unmute strip `i`, writing the source gain (the decision the user made:
+   *  mute ⇒ `.gain(0)`, unmute ⇒ restore the pre-mute gain). The live override is
+   *  always pushed (instant silence/restore) regardless of whether the source can
+   *  be written — when gain is *calculated* the literal can't be rewritten, so we
+   *  flip mute live-only and skip the source write (the strip surfaces this). */
+  function muteToSource(i: number, mute: boolean) {
+    const k = String(i);
+    groveStore.toggleMute(k);
+    // Live audio override: silence on mute, restore the (pre-mute or unity) gain
+    // on unmute — independent of the source write so mute is instant either way.
+    if (mute) void groveSetTrack('gain', i, 0);
+
+    const calculated = controlsStore.isCalculated(i, 'gain');
+    if (mute) {
+      // Snapshot the gain to restore on unmute, then write `.gain(0)` — unless gain
+      // is calculated (can't be rewritten to a literal): leave the source alone,
+      // mute stays live-only. Prefer an un-flushed live override (the user's latest
+      // intent) over the source literal, falling back to unity.
+      groveStore.setPremuteGain(k, gains[i] ?? controlsStore.gain(i) ?? GAIN_UNITY);
+      if (!calculated) commitNow(i, [{ kind: 'gain', value: 0 }]);
+    } else {
+      const prev = groveStore.premuteGain(k) ?? GAIN_UNITY;
+      groveStore.clearPremuteGain(k);
+      void groveSetTrack('gain', i, gains[i] ?? prev); // live: back to pre-mute gain
+      if (!calculated) commitNow(i, [{ kind: 'gain', value: prev }]);
+    }
   }
 
   const tracks = $derived.by<MixerTrack[]>(() => {
@@ -129,31 +186,32 @@ function createMixerStore() {
     get tracks() { return tracks; },
     byIndex(i: number): MixerTrack | null { return tracks.find((t) => t.index === i) ?? null; },
 
-    // ── gain / pan: live ephemeral overrides + explicit commit ──
+    // ── gain / pan: live ephemeral override + debounced write-through ──
+    // The knob pushes the live audio override now (instant feedback) and schedules
+    // a debounced source write — so the value ends up in the `.grove` on its own.
     gain(i: number) { return gains[i] ?? GAIN_UNITY; },
     pan(i: number)  { return pans[i]  ?? PAN_CENTER; },
-    setGain(i: number, v: number) { gains = { ...gains, [i]: v }; void groveSetTrack('gain', i, v); },
-    setPan(i: number, v: number)  { pans  = { ...pans,  [i]: v }; void groveSetTrack('pan', i, v); },
-    /** Whether strip `i` has an uncommitted gain/pan override (commit affordance). */
-    hasOverride(i: number) { return gains[i] != null || pans[i] != null; },
-    /** Commit strip `i`'s current gain/pan override into the source as literals.
-     *  The eval that follows re-baselines, so the override resets and the value
-     *  now lives in the `.grove`. */
-    commit(i: number) {
-      const edits: ControlEdit[] = [];
-      if (gains[i] != null) edits.push({ kind: 'gain', value: gains[i] });
-      if (pans[i]  != null) edits.push({ kind: 'pan',  value: pans[i]  });
-      if (edits.length) groveStore.requestCommit(i, edits);
+    setGain(i: number, v: number) {
+      gains = { ...gains, [i]: v };
+      void groveSetTrack('gain', i, v);
+      scheduleCommit(i, { kind: 'gain', value: v });
     },
-    /** Commit every overridden strip (Command Palette / shortcut). */
-    commitAll() {
-      const indices = new Set<number>([...Object.keys(gains), ...Object.keys(pans)].map(Number));
-      for (const i of indices) this.commit(i);
+    setPan(i: number, v: number)  {
+      pans = { ...pans, [i]: v };
+      void groveSetTrack('pan', i, v);
+      scheduleCommit(i, { kind: 'pan', value: v });
     },
-    /** Number of strips with a pending gain/pan override. */
-    get overrideCount() {
-      return new Set<number>([...Object.keys(gains), ...Object.keys(pans)].map(Number)).size;
-    },
+    /** Whether strip `i` has a gain/pan write still pending the debounce — the ↧
+     *  affordance lets the user flush it early instead of waiting. */
+    hasOverride(i: number) { return pendingEdits.has(i); },
+    /** Flush strip `i`'s pending gain/pan/room/delay write now (skip the debounce).
+     *  The eval that follows re-baselines, so the live override resets and the
+     *  value now lives in the `.grove`. */
+    commit(i: number) { flushOne(i); },
+    /** Flush every pending write now (Command Palette / shortcut). */
+    commitAll() { flushCommits(); },
+    /** Number of strips with a pending (un-flushed) write. */
+    get overrideCount() { return pendingEdits.size; },
 
     // ── room / delay: code-first knobs (seed from source, commit to source) ──
     room(i: number) { return roomBuf[i] ?? controlsStore.room(i); },
@@ -179,10 +237,17 @@ function createMixerStore() {
     // ── mute / solo: shared store (index key) + live override ──
     isMuted(i: number)  { return groveStore.isMuted(String(i)); },
     isSoloed(i: number) { return groveStore.isSoloed(String(i)); },
+    /** Whether strip `i`'s gain is a calculated argument (`gain(sine.range(…))`) —
+     *  it can't be rewritten to a literal, so mute can't persist `.gain(0)` and is
+     *  kept live-only (the strip shows it isn't persistible). */
+    gainCalculated(i: number) { return controlsStore.isCalculated(i, 'gain'); },
+    /** Toggle mute. On mute: write `.gain(0)` into the source (immediate commit)
+     *  after snapshotting the current source gain so unmute can restore it; on
+     *  unmute: rewrite `.gain(premute)`. Always keeps the live audio override for
+     *  instant silence. When gain is calculated the source is left untouched and
+     *  only the live override applies. Solo never touches the source. */
     toggleMute(i: number) {
-      const k = String(i);
-      groveStore.toggleMute(k);
-      void groveSetTrack('mute', i, groveStore.isMuted(k) ? 1 : 0);
+      muteToSource(i, !groveStore.isMuted(String(i)));
     },
     toggleSolo(i: number) {
       const k = String(i);

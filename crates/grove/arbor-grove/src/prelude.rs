@@ -30,10 +30,11 @@ pub use arbor_grove_pattern::prelude::{
 // `SourceSpan`/`TimeSpan` are re-exported by lang too, but listed above (identical
 // items); `Result` omitted; `LangError`/`LangErrorKind` kept by name.
 pub use arbor_grove_lang::prelude::{
-    emit, emit_expr, evaluate, materialize_island, materialize_source, parse, BinOp, Ctx, Env,
-    EvalConfig, EvalOutput, Expr, ExprKind, FnDef, Func, Ident, Import, Island, IslandKind, Item,
-    LangError, LangErrorKind, Leaf, LetBind, LogLevel, LogSink, Mini, MiniArg, MiniKind, NoImports,
-    Postfix, Program, SilentLog, SourceLoader, Transform, UnOp, Value,
+    emit, emit_expr, evaluate, materialize_island, materialize_source, parse, reference, BinOp, Ctx,
+    DslEntry, DslKind, DslParam, Env, EvalConfig, EvalOutput, Expr, ExprKind, FnDef, Func, Ident,
+    Import, Island, IslandKind, Item, LangError, LangErrorKind, Leaf, LetBind, LogLevel, LogSink,
+    Mini, MiniArg, MiniKind, NoImports, Postfix, Program, SilentLog, SourceLoader, Transform, UnOp,
+    Value,
 };
 
 // ── arbor-grove-audio — the DSP / real-time backend ──────────────────────────
@@ -45,7 +46,8 @@ pub use arbor_grove_audio::prelude::{
     open_output_stream, AudioCommand, AudioError, AudioSink, CompSettings, DelayConfig, EqBand,
     EqBandKind, Frame, InstrumentInfo, InstrumentKind, MeterSnapshot, MeterTap, OutputStream,
     Registry, Renderer, ReverbIr, StreamSink, SynthPreset, TrackConfig, VoiceEvent, VoiceId,
-    VoiceParams, VoiceSource, Waveform, RecordingSink, DEFAULT_VOICE_CAPACITY, MAX_METER_TRACKS,
+    VoiceParams, VoiceSource, Waveform, RecordingSink, DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE,
+    DEFAULT_VOICE_CAPACITY, MAX_METER_TRACKS,
 };
 
 // ── arbor-grove-engine — the timing runtime ──────────────────────────────────
@@ -53,5 +55,5 @@ pub use arbor_grove_audio::prelude::{
 // render driver. `Result` omitted; `EngineError` kept by name.
 pub use arbor_grove_engine::prelude::{
     delay_config_for, render_offline, schedule_span, voice_event_from_hap, BitDepth, Epoch,
-    EngineError, RenderConfig, Transport, LOOKAHEAD_MS,
+    EngineError, RenderConfig, Transport, DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS, LOOKAHEAD_MS,
 };

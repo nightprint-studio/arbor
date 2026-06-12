@@ -19,19 +19,12 @@ use crate::inject::{LogLevel, LogSink};
 use crate::value::{Transform, Value};
 
 /// Is `name` a transform (vs. a combinator or user binding)?
+///
+/// Derived from the canonical DSL catalogue ([`crate::reference`]) so the
+/// membership list lives in exactly one place. `make_transform` below still maps
+/// each name to its closure, but no longer re-states the set of names.
 pub fn is_transform(name: &str) -> bool {
-    matches!(
-        name,
-        "rev" | "degrade" | "palindrome"
-            | "fast" | "slow"
-            | "gain" | "pan" | "room" | "lpf" | "hpf" | "shift" | "speed" | "crush" | "shape"
-            | "vel" | "inst" | "art" | "scale"
-            | "add" | "addDeg"
-            | "degradeBy" | "sometimesBy"
-            | "chunk" | "iter" | "swingBy" | "delay"
-            | "every" | "off" | "sometimes" | "jux"
-            | "log"
-    )
+    crate::reference::transform_names().iter().any(|n| *n == name)
 }
 
 /// The transform value of a bare nullary transform (`rev`, `degrade`,

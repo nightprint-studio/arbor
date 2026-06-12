@@ -135,21 +135,57 @@ fn one_shot_decays_to_silence() {
 }
 
 #[test]
-fn stop_all_releases_voices() {
+fn stop_all_clears_voices_immediately() {
     let mut r = Renderer::new(SR, &tracks());
     let ev = synth_event(1, 0, VoiceParams::default());
     let _ = render_block(&mut r, vec![AudioCommand::Voice(ev)], 512);
     assert_eq!(r.active_voices(), 1);
 
+    // StopAll is a hard stop: the pool empties in the same block (no ring-out),
+    // so the voice count reads zero at once and the renderer is idle.
     let _ = render_block(&mut r, vec![AudioCommand::StopAll], 1);
-    // Let the release ring out.
-    for _ in 0..200 {
-        let _ = render_block(&mut r, vec![], 1024);
-        if r.active_voices() == 0 {
-            break;
-        }
-    }
-    assert_eq!(r.active_voices(), 0, "StopAll should release every voice");
+    assert_eq!(r.active_voices(), 0, "StopAll must drop every voice at once");
+}
+
+/// Regression for the "playback keeps running silently in the background, DSP
+/// load keeps varying after stop" bug: a `room`/delay tail used to ring on after
+/// `StopAll` because the effect buffers were never flushed. `StopAll` must leave
+/// the renderer at *exact* silence within one block.
+#[test]
+fn stop_all_flushes_effect_tails_to_silence() {
+    let mut r = Renderer::new(SR, &tracks());
+
+    // A loud voice with a heavy reverb send + a long-feedback per-track delay bus,
+    // i.e. exactly the case whose tails outlive the voice.
+    let mut p = VoiceParams::default();
+    p.room = 1.0;
+    p.delay_mix = 1.0;
+    // Configure the track's delay line with strong feedback so, untreated, it would
+    // ring for a very long time.
+    let cmds = vec![
+        AudioCommand::SetTrackDelay(
+            0,
+            DelayConfig {
+                time_frames: 2_400, // 50 ms @ 48 kHz
+                feedback: 0.95,
+            },
+        ),
+        AudioCommand::Voice(synth_event(1, 0, p)),
+    ];
+    let out = render_block(&mut r, cmds, 4_096);
+    assert!(peaks(&out).0 > 0.01, "the voice + tails should be audible first");
+
+    // Stop, then render more: with the tails flushed, the output is exact zero —
+    // not a slowly-decaying (or, with feedback, non-decaying) ring.
+    let _ = render_block(&mut r, vec![AudioCommand::StopAll], 1);
+    let tail = render_block(&mut r, vec![], 4_096);
+    let (l, rr) = peaks(&tail);
+    assert_eq!(
+        (l, rr),
+        (0.0, 0.0),
+        "after StopAll the renderer must be exact silence, got {l},{rr}"
+    );
+    assert_eq!(r.active_voices(), 0);
 }
 
 #[test]

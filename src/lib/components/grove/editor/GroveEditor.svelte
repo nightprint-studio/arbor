@@ -17,9 +17,19 @@
 
   import { createGroveExtensions, setActiveHaps, toActiveHapMarks, toCmDiagnostics, getGroveTree }
     from './grove-cm';
+  import type { GroveIntelSource } from './grove-intel';
   import { extractSymbols } from './grove-lang';
   import { buildControlEdits, type ControlEdit } from './grove-edit';
   import { diagnosticsStore, activeHapsStore } from '../stores/engine.svelte';
+  import { referenceStore } from '../stores/reference.svelte';
+
+  // Autocomplete + hover read the DSL catalogue live from the store (snapshotted
+  // at call time — the store loads asynchronously, so completions light up once
+  // it lands without re-mounting the editor).
+  const intel: GroveIntelSource = {
+    entries: () => referenceStore.entries,
+    byName: (name) => referenceStore.byName(name),
+  };
 
   let {
     value,
@@ -73,7 +83,7 @@
     const state = EditorState.create({
       doc: value,
       extensions: [
-        createGroveExtensions({ readOnly, onGoto: handleGoto }),
+        createGroveExtensions({ readOnly, onGoto: handleGoto, intel }),
         updateListener,
       ],
     });

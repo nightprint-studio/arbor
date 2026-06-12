@@ -41,4 +41,5 @@ pub mod inject;
 pub mod materialize;
 pub mod parse;
 pub mod prelude;
+pub mod reference;
 pub mod value;

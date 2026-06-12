@@ -19,15 +19,20 @@ use std::rc::Rc;
 /// pattern crate's own seed).
 const SEED_CHOOSE_PATTERNS: u64 = 0xc4_05e_9a77e_5_u64;
 
-/// Is `name` a combinator / constructor / generator / log function?
+/// Is `name` a combinator / constructor / generator / log function (anything the
+/// evaluator dispatches through [`eval_builtin_call`])?
+///
+/// The set is **derived from the canonical DSL catalogue** ([`crate::reference`]):
+/// the combinators + generators + log functions + the two builtin keywords
+/// (`cps`/`tempo`). Keeping the membership test in one place (the catalogue) means
+/// a new builtin only has to be added there — the `match` in `eval_builtin_call`
+/// below maps the name to its closure, but no longer re-states the name list.
 pub fn is_combinator(name: &str) -> bool {
-    matches!(
-        name,
-        "par" | "stack" | "seq" | "cat" | "arrange" | "cycles" | "section" | "track" | "tracks"
-            | "rand" | "choose" | "sample" | "audio"
-            | "cps" | "tempo"
-            | "trace" | "debug" | "info" | "warn" | "error"
-    )
+    use crate::reference::{combinator_names, generator_names, log_names};
+    combinator_names().iter().any(|n| *n == name)
+        || generator_names().iter().any(|n| *n == name)
+        || log_names().iter().any(|n| *n == name)
+        || matches!(name, "cps" | "tempo")
 }
 
 /// A bare continuous signal source (`sine`, `saw`, …) — a unipolar `0..1`

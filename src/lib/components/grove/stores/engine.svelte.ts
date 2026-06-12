@@ -201,6 +201,12 @@ function createGroveEngine() {
 
     seek(cycle: number)  { return groveSeek(cycle); },
     setCps(cps: number)  { return groveSetCps(cps); },
+
+    /** Jump the playhead back to cycle 0 (music-player skip-to-start). */
+    seekToStart() { return groveSeek(0); },
+    /** Jump the playhead to the last cycle of the arrangement (skip-to-end).
+     *  `totalCycles` comes from the arrangement viz (its content end). */
+    seekToEnd(totalCycles: number) { return groveSeek(Math.max(0, totalCycles)); },
   };
 }
 

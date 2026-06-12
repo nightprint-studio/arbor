@@ -142,8 +142,10 @@ impl<S: AudioSink> Transport<S> {
         let _ = self.send_track_config();
     }
 
-    /// Stop and release all voices. Freezes the reported playhead where it is, so
-    /// the UI ruler holds still instead of tracking the free-running sink clock.
+    /// Stop playback: clear every voice and flush the effect tails (via
+    /// [`AudioCommand::StopAll`]) so the output returns to exact silence and the
+    /// DSP goes idle. Freezes the reported playhead where it is, so the UI ruler
+    /// holds still instead of tracking the free-running sink clock.
     pub fn stop(&mut self) {
         self.paused_cycle = self
             .epoch
@@ -499,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_releases_all() {
+    fn stop_sends_stop_all() {
         let mut tr = Transport::new(RecordingSink::new(SR), 1.0);
         tr.set_tracks(drum_tracks("d", "bd", 4));
         tr.play();

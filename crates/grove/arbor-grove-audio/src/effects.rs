@@ -142,6 +142,12 @@ impl Biquad {
         self.a2 = a2 / a0;
     }
 
+    /// Clear the filter delay line (z-state), keeping the coefficients.
+    pub fn reset(&mut self) {
+        self.z1 = 0.0;
+        self.z2 = 0.0;
+    }
+
     /// Process one sample.
     pub fn process(&mut self, x: f32) -> f32 {
         let y = self.b0 * x + self.z1;
@@ -223,6 +229,11 @@ impl Limiter {
         }
     }
 
+    /// Reset the gain-reduction state to unity (transport stop / panic).
+    pub fn reset(&mut self) {
+        self.gain = 1.0;
+    }
+
     /// Process one stereo frame, applying smoothed gain reduction.
     pub fn process(&mut self, frame: [f32; 2]) -> [f32; 2] {
         let peak = frame[0].abs().max(frame[1].abs());
@@ -269,6 +280,15 @@ impl EqChain {
     /// Whether the chain has any active band.
     pub fn is_active(&self) -> bool {
         !self.sections.is_empty()
+    }
+
+    /// Clear every section's filter state (transport stop / panic), keeping the
+    /// band coefficients so the EQ stays configured.
+    pub fn reset(&mut self) {
+        for sec in &mut self.sections {
+            sec[0].reset();
+            sec[1].reset();
+        }
     }
 
     /// Process one stereo frame through every section in series.
@@ -323,6 +343,11 @@ impl Compressor {
         self.makeup = 10.0_f32.powf(s.makeup_db / 20.0);
         self.attack_coeff = time_to_coeff(s.attack, sample_rate);
         self.release_coeff = time_to_coeff(s.release, sample_rate);
+    }
+
+    /// Reset the gain-reduction envelope to unity (transport stop / panic).
+    pub fn reset(&mut self) {
+        self.envelope_db = 0.0;
     }
 
     /// Process one stereo frame, applying smoothed gain reduction + make-up.
@@ -442,6 +467,18 @@ impl ConvReverb {
     /// Number of IR taps.
     pub fn len(&self) -> usize {
         self.ir.len()
+    }
+
+    /// Flush the convolution tail: clear the input history and re-arm the silence
+    /// gate so the wet output is immediately, exactly zero. Used on a transport
+    /// stop / panic so a `room` tail can't ring on (and keep the bus busy) after
+    /// playback has stopped.
+    pub fn reset(&mut self) {
+        for h in &mut self.history {
+            *h = [0.0; 2];
+        }
+        self.pos = 0;
+        self.silent_for = self.ir.len();
     }
 
     /// Whether the IR is empty (never, after construction).
@@ -575,6 +612,18 @@ impl DelayLine {
         self.time_frames > 0
     }
 
+    /// Flush the buffered tail and any pending send to silence, keeping the
+    /// configured `time_frames`/`feedback`. A feedback line never decays to exact
+    /// zero on its own, so a transport stop must clear it explicitly — otherwise
+    /// the echo rings on (audibly, and as perpetual DSP load) after playback ends.
+    pub fn reset(&mut self) {
+        for f in &mut self.buf {
+            *f = [0.0; 2];
+        }
+        self.pos = 0;
+        self.input = [0.0; 2];
+    }
+
     /// Accumulate a send into the line for the current frame.
     pub fn send(&mut self, amount: Frame) {
         self.input[0] += amount[0];
@@ -633,5 +682,31 @@ mod tests {
             (y[0] - 0.5).abs() < 1e-6 && (y[1] - 0.4).abs() < 1e-6,
             "re-excitation after a gated flush must match a fresh impulse",
         );
+    }
+
+    /// A feedback delay line rings indefinitely; `reset` must silence it at once.
+    /// This is the tail that, before the stop-flush fix, kept the renderer busy
+    /// (and audible) after the transport stopped.
+    #[test]
+    fn delay_reset_silences_feedback_tail() {
+        let mut dl = DelayLine::new(64);
+        dl.configure(8, 0.9); // long feedback: this never decays to zero on its own
+
+        // Excite the line and let the echo build up.
+        dl.send([1.0, 1.0]);
+        for _ in 0..40 {
+            dl.process();
+        }
+        // Still ringing well after the input stopped.
+        let ringing = dl.process();
+        assert!(ringing[0].abs() > 0.0, "feedback line should still be ringing");
+
+        // Reset: the buffered tail and the pending send vanish, so every following
+        // frame is exact silence even though the line stays configured.
+        dl.reset();
+        assert!(dl.is_active(), "reset keeps the delay configured");
+        for _ in 0..32 {
+            assert_eq!(dl.process(), [0.0, 0.0], "a reset line must stay silent");
+        }
     }
 }
