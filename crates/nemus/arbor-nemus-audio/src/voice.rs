@@ -93,6 +93,68 @@ impl Source {
             Source::Synth(_) => 0.0,
         }
     }
+
+    /// Re-pitch the source to `note` for a **monophonic-legato glide**, carrying
+    /// the existing amplitude envelope forward (no re-attack). A synth retunes its
+    /// oscillator in place; a sampler rebuilds its player at the new pitch but
+    /// keeps its current envelope so there's no amplitude dip between notes. If the
+    /// new resolution is a *different* source kind (synth↔sampler — only on an
+    /// instrument swap), we rebuild from scratch, which re-attacks.
+    fn reglide(
+        &mut self,
+        resolved: ResolvedVoice,
+        note: Option<f32>,
+        shift: f32,
+        speed: f32,
+        sample_rate: f32,
+        seed: u64,
+    ) {
+        match resolved {
+            ResolvedVoice::Synth(preset) => {
+                if let Source::Synth(s) = self {
+                    let midi = note.unwrap_or(60.0) + shift;
+                    let freq = midi_to_freq(midi) * speed.max(0.001);
+                    s.set_pitch(freq, sample_rate);
+                    return;
+                }
+                *self = build_source(
+                    ResolvedVoice::Synth(preset),
+                    note,
+                    shift,
+                    speed,
+                    sample_rate,
+                    seed,
+                );
+            }
+            ResolvedVoice::Sample { sample, region } => {
+                if let Source::Sample {
+                    player,
+                    region_gain,
+                    region_pan,
+                    ..
+                } = self
+                {
+                    let note_offset = match note {
+                        Some(n) => n - region.pitch_keycenter as f32,
+                        None => 0.0,
+                    };
+                    let semitones = note_offset + shift + region.tune_semitones;
+                    *player = SamplePlayer::new(
+                        &sample,
+                        sample_rate,
+                        semitones,
+                        speed,
+                        region.offset,
+                        region.loop_spec,
+                    );
+                    *region_gain = region.gain;
+                    *region_pan = region.pan;
+                    return;
+                }
+                *self = build_sample_source(&sample, region, note, shift, speed, sample_rate);
+            }
+        }
+    }
 }
 
 /// One active voice: a source + post-source DSP + routing.
@@ -120,6 +182,18 @@ pub struct Voice {
     release_at: Option<u64>,
     /// Set once released so we don't re-trigger release every sample.
     released: bool,
+    /// Short linear **crossfade** gain `0..1` multiplied over the output, used by
+    /// sampler legato: the outgoing note fades to `0`, the incoming note fades from
+    /// `0`, so the recorded sample onset is masked and there's no boundary gap.
+    /// `1.0` with a zero increment = no fade (the common case).
+    fade: f32,
+    /// Per-sample change applied to `fade` (`0.0` = steady).
+    fade_inc: f32,
+    /// When a fade-out reaches `0`, free the voice (the outgoing half of a
+    /// crossfade is done once silent, regardless of its envelope).
+    fade_kill: bool,
+    /// Latched once a `fade_kill` fade has hit zero, so the pool reclaims the voice.
+    faded_out: bool,
 }
 
 impl Voice {
@@ -172,12 +246,76 @@ impl Voice {
             delay_mix: params.delay_mix.unwrap_or(0.0).clamp(0.0, 1.0),
             release_at,
             released: false,
+            fade: 1.0,
+            fade_inc: 0.0,
+            fade_kill: false,
+            faded_out: false,
         }
     }
 
     /// Whether the voice has finished and can be reclaimed.
     pub fn is_done(&self) -> bool {
-        self.source.is_done()
+        self.source.is_done() || self.faded_out
+    }
+
+    /// Whether this voice is a synth source. The renderer uses it to choose the
+    /// legato strategy: synths re-pitch in place (truly continuous), samplers
+    /// crossfade (re-pitching from the sample start would replay the bow onset).
+    pub fn is_synth(&self) -> bool {
+        matches!(self.source, Source::Synth(_))
+    }
+
+    /// Begin a linear **fade-in** over `frames` (the incoming half of a legato
+    /// crossfade): start silent and ramp to unity.
+    pub fn fade_in(&mut self, frames: u64) {
+        self.fade = 0.0;
+        self.fade_inc = 1.0 / frames.max(1) as f32;
+        self.fade_kill = false;
+    }
+
+    /// Begin a linear **fade-out** over `frames` from the current level, freeing
+    /// the voice once silent (the outgoing half of a legato crossfade).
+    pub fn fade_out(&mut self, frames: u64) {
+        self.fade_inc = -self.fade / frames.max(1) as f32;
+        self.fade_kill = true;
+    }
+
+    /// Glide this sounding voice to a new note + params for **monophonic legato**:
+    /// re-pitch the source without re-attacking the envelope, refresh the
+    /// post-source mix params, and re-arm the release deadline so the (re-used)
+    /// voice now lives until the new note's boundary. The caller guarantees the
+    /// voice is still sounding (so the envelope is mid-sustain and the glide is
+    /// seamless).
+    ///
+    /// This is the renderer's **synth** legato path — a synth tone re-pitches
+    /// continuously. Samplers can't reuse a voice this way (restarting the sample
+    /// replays its recorded onset), so the renderer crossfades them instead
+    /// ([`fade_in`](Self::fade_in) / [`fade_out`](Self::fade_out)).
+    pub fn reglide(
+        &mut self,
+        resolved: ResolvedVoice,
+        note: Option<f32>,
+        params: &VoiceParams,
+        release_at: Option<u64>,
+        sample_rate: f32,
+    ) {
+        self.source
+            .reglide(resolved, note, params.shift, params.speed, sample_rate, self.id.0);
+
+        self.amp = params.gain * params.vel;
+        let region_pan = self.source.region_pan();
+        let pan = (params.pan + region_pan * 0.5).clamp(0.0, 1.0);
+        let (pan_l, pan_r) = effects::equal_power_pan(pan);
+        self.pan_l = pan_l;
+        self.pan_r = pan_r;
+        self.hpf = params.hpf.map(|hz| Biquad::highpass(hz, sample_rate));
+        self.lpf = params.lpf.map(|hz| Biquad::lowpass(hz, sample_rate));
+        self.shape = params.shape;
+        self.crush = params.crush;
+        self.room = params.room.clamp(0.0, 1.0);
+        self.delay_mix = params.delay_mix.unwrap_or(0.0).clamp(0.0, 1.0);
+        self.release_at = release_at;
+        self.released = false;
     }
 
     /// Process one sample at absolute frame `frame`, accumulating its dry signal
@@ -209,7 +347,22 @@ impl Voice {
         if let Some(bits) = self.crush {
             s = effects::crush(s, bits);
         }
-        s *= self.amp;
+        s *= self.amp * self.fade;
+
+        // Advance the crossfade ramp (steady once it reaches its endpoint).
+        if self.fade_inc != 0.0 {
+            self.fade += self.fade_inc;
+            if self.fade <= 0.0 {
+                self.fade = 0.0;
+                self.fade_inc = 0.0;
+                if self.fade_kill {
+                    self.faded_out = true;
+                }
+            } else if self.fade >= 1.0 {
+                self.fade = 1.0;
+                self.fade_inc = 0.0;
+            }
+        }
 
         let l = s * self.pan_l;
         let r = s * self.pan_r;
@@ -341,6 +494,13 @@ impl VoicePool {
         self.slots.iter().filter(|s| s.is_some()).count()
     }
 
+    /// The sounding voice with this id, if still resident (for monophonic-legato
+    /// re-use). Ids are unique per onset, so at most one slot matches; a stolen /
+    /// freed voice simply no longer matches and the caller spawns a fresh one.
+    pub fn get_mut_by_id(&mut self, id: VoiceId) -> Option<&mut Voice> {
+        self.slots.iter_mut().flatten().find(|v| v.id == id)
+    }
+
     /// Insert a voice, stealing per policy if the pool is full.
     pub fn insert(&mut self, voice: Voice) {
         let slot = self.pick_slot();
@@ -411,5 +571,66 @@ impl VoicePool {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::{ResolvedVoice, SynthPreset};
+    use crate::seam::VoiceParams;
+
+    const SR: f32 = 48_000.0;
+
+    /// A held synth voice (no release deadline → rings until told otherwise).
+    fn synth_voice() -> Voice {
+        Voice::build(
+            VoiceId(1),
+            0,
+            ResolvedVoice::Synth(SynthPreset::default()),
+            Some(69.0),
+            &VoiceParams::default(),
+            None,
+            SR,
+        )
+    }
+
+    /// Advance one sample, returning the (left) dry output.
+    fn tick(v: &mut Voice) -> f32 {
+        let (mut dry, mut send, mut delay) = ([0.0; 2], [0.0; 2], [0.0; 2]);
+        v.process_into(0, &mut dry, &mut send, &mut delay);
+        dry[0]
+    }
+
+    #[test]
+    fn fade_out_frees_the_voice_once_silent() {
+        let mut v = synth_voice();
+        for _ in 0..32 {
+            tick(&mut v);
+        }
+        assert!(!v.is_done(), "a held voice keeps sounding");
+        v.fade_out(64);
+        for _ in 0..128 {
+            tick(&mut v);
+        }
+        assert!(v.is_done(), "the outgoing crossfade half is reclaimed once it hits zero");
+    }
+
+    #[test]
+    fn fade_in_opens_from_near_silence() {
+        let mut v = synth_voice();
+        v.fade_in(256);
+        let mut early = 0.0f32;
+        for _ in 0..40 {
+            early = early.max(tick(&mut v).abs());
+        }
+        for _ in 0..180 {
+            tick(&mut v);
+        }
+        let mut later = 0.0f32;
+        for _ in 0..40 {
+            later = later.max(tick(&mut v).abs());
+        }
+        assert!(later > early, "the incoming crossfade half ramps up (early {early}, later {later})");
     }
 }

@@ -71,7 +71,11 @@ SFZ region vs. fallback) is the registry's job — the engine only forwards symb
   samples**, so listing a multi-GB pack (VSCO/Dirt) doesn't read its audio into RAM.
 - `voice.rs` — the per-voice DSP chain (source → hpf → lpf → shape → crush → gain×vel → pan → dry +
   room send + per-track delay send) and the fixed-capacity **voice pool** with the design's
-  voice-stealing policy (quietest-releasing first, else oldest).
+  voice-stealing policy (quietest-releasing first, else oldest). It also carries the **monophonic legato**
+  (`art("legato")`) machinery: a synth `Voice` can `reglide` (re-pitch in place without re-attacking the
+  envelope — truly continuous), and any `Voice` has a short linear `fade_in`/`fade_out` so the renderer
+  can **crossfade** sampler notes (an in-place restart would replay the recorded sample onset). Either
+  way a melodic line connects instead of detaching at each note.
 - `synth.rs` — the **default synth** (saw/square/sine/triangle oscillator + ADSR), nemus's fallback
   and "electronic default" sound.
 - `sampler.rs` + `sfz.rs` + `decode.rs` — the hand-written **SFZ subset parser** (VSCO 2 CE opcodes,
@@ -103,7 +107,12 @@ art.pizzicato.region    = "vsco2/strings/violin_pizz.sfz"
 ```
 
 `.art("legato")` on a note resolves through the registry to the keyswitch (filtering the instrument's
-regions) or the alternate region SFZ. **Round-robin**: an SFZ region group with `seq_length = N` and
+regions) or the alternate region SFZ — **and**, independently of the sample set, makes the renderer play
+that track's part **monophonically and connected**: a synth re-pitches one sustained voice with no
+re-attack, while a sampler **crossfades** (~40 ms) from the old note into a fresh, correctly-pitched one
+so the recorded bow onset is masked and there's no gap. A rest or a chord breaks the line. So `legato`
+smooths phrasing even on a plain sustain patch that ships no dedicated legato samples. **Round-robin**:
+an SFZ region group with `seq_length = N` and
 `seq_position = 1..N` cycles its N variants per onset; the variant is chosen by a **deterministic
 onset seed** (hashed from the engine's stable per-onset voice id), so playback is reproducible
 loop-to-loop. A sparse group falls back to the first matching region.

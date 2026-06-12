@@ -20,7 +20,7 @@ use super::config::NemusConfig;
 mod download;
 mod gm;
 mod layout;
-mod vsco;
+mod versilian;
 
 pub use layout::Layout;
 
@@ -53,9 +53,23 @@ pub const PACKS: &[Pack] = &[
             playable SFZ instruments from its raw wavs at install time.",
         approx_bytes: 2_900_000_000,
         archive_url: "https://github.com/sgossner/VSCO-2-CE/archive/refs/heads/master.zip",
-        // The CE archive ships raw wavs (no `.sfz`); nemus builds the SFZ layer
-        // from the filenames — see `vsco`.
-        layout: Layout::VscoWavTree,
+        // The CE archive ships raw wavs (no `.sfz`); nemus builds the layer from
+        // the filenames — see `versilian`.
+        layout: Layout::VersilianWavTree,
+    },
+    Pack {
+        id: "vcsl",
+        name: "VCSL — community orchestra",
+        description: "The Versilian Community Sample Library (sibling of VSCO 2, same \
+            authors) — a huge CC0 set of orchestral, world and folk instruments \
+            plus a deep percussion/idiophone collection (anvil, claps, woodblocks, \
+            mallets, hand percussion). Indexed into playable instruments + one-shots \
+            from its raw wavs at install time.",
+        approx_bytes: 4_000_000_000,
+        archive_url: "https://github.com/sgossner/VCSL/archive/refs/heads/master.zip",
+        // Same raw-wav format as VSCO (no `.sfz`), deeper Hornbostel-Sachs nesting
+        // and a mix of pitched + unpitched instruments — both handled by `versilian`.
+        layout: Layout::VersilianWavTree,
     },
     Pack {
         id: "dirt-samples",

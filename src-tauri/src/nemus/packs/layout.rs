@@ -35,11 +35,12 @@ pub enum Layout {
     /// is one `.sf2`, converted to wav+SFZ by [`super::gm`] (which writes its own
     /// `registry.toml`), so [`generate`] is never called for this layout.
     Sf2,
-    /// A VSCO 2 CE wav tree (`<Family>/<Instrument>/<Articulation>/*.wav`), with
-    /// no shipped `.sfz`. [`super::vsco`] parses the pitch/velocity/round-robin
-    /// from the filenames, writes a `_nemus.sfz` per articulation, and emits one
-    /// registry entry per instrument (articulations as `.art(…)` alternates).
-    VscoWavTree,
+    /// A Versilian wav tree (VSCO 2 CE **or** VCSL — same on-disk format, differing
+    /// depth/taxonomy), with no shipped `.sfz`. [`super::versilian`] walks the tree,
+    /// groups wavs by instrument, and writes a `_nemus.sfz` for pitched instruments
+    /// (registered `kind=sfz`, articulations as lazy `.<art>` voices) while
+    /// registering unpitched one-shot folders as `kind=sample` (`s("anvil")`).
+    VersilianWavTree,
 }
 
 /// Generate the `registry.toml` body for `root`, returning `(toml, entry_count)`.
@@ -52,8 +53,8 @@ pub fn generate(root: &Path, layout: Layout) -> (String, usize) {
         // The GM pack converts a .sf2 directly (see `super::download` + `super::gm`);
         // it never reaches the tree-walking generators.
         Layout::Sf2 => (String::new(), 0),
-        // VSCO ships raw wavs — build the missing SFZ layer from the filenames.
-        Layout::VscoWavTree => super::vsco::generate(root),
+        // VSCO 2 / VCSL ship raw wavs — build the missing layer from the filenames.
+        Layout::VersilianWavTree => super::versilian::generate(root),
     }
 }
 

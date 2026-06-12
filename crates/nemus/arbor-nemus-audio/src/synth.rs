@@ -152,6 +152,13 @@ impl Oscillator {
         }
         s
     }
+
+    /// Retune to `freq` Hz **keeping the current phase** — a glide for monophonic
+    /// legato, where re-pitching mid-note must not reset the phase (that would
+    /// click).
+    pub fn set_freq(&mut self, freq: f32, sample_rate: f32) {
+        self.step = freq / sample_rate;
+    }
 }
 
 /// The four stages an [`Adsr`] envelope moves through.
@@ -338,6 +345,15 @@ impl SuperSaw {
         }
         sum * self.norm
     }
+
+    /// Re-centre the detuned stack on `freq` Hz, each voice keeping its phase (a
+    /// legato glide). Mirrors [`new`](SuperSaw::new)'s detune layout.
+    pub fn set_freq(&mut self, freq: f32, sample_rate: f32) {
+        for (i, osc) in self.oscs.iter_mut().enumerate() {
+            let detuned = freq * 2.0_f32.powf(SUPERSAW_DETUNE_CENTS[i] / 1200.0);
+            osc.set_freq(detuned, sample_rate);
+        }
+    }
 }
 
 /// A noise generator: a fast deterministic PRNG shaped to the requested
@@ -441,6 +457,16 @@ impl Tone {
             Tone::Noise(n) => n.next_sample(),
         }
     }
+
+    /// Retune a pitched tone in place (keeping phase) for a legato glide. Noise
+    /// has no pitch, so it's a no-op there.
+    fn set_freq(&mut self, freq: f32, sample_rate: f32) {
+        match self {
+            Tone::Osc(o) => o.set_freq(freq, sample_rate),
+            Tone::Super(s) => s.set_freq(freq, sample_rate),
+            Tone::Noise(_) => {}
+        }
+    }
 }
 
 /// A complete default-synth voice generator: a tone source + its own envelope.
@@ -469,6 +495,13 @@ impl SynthVoice {
     /// Begin the release phase of the amplitude envelope.
     pub fn release(&mut self) {
         self.env.release();
+    }
+
+    /// Retune the tone to `freq` Hz **without re-triggering the envelope** — the
+    /// monophonic-legato glide. The oscillator keeps its phase and the [`Adsr`]
+    /// keeps sustaining, so the pitch changes with no amplitude dip or click.
+    pub fn set_pitch(&mut self, freq: f32, sample_rate: f32) {
+        self.tone.set_freq(freq, sample_rate);
     }
 
     /// Whether the envelope has rung out (the voice can be reclaimed).

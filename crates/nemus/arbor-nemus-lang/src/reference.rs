@@ -691,7 +691,7 @@ fn transforms() -> Vec<DslEntry> {
         ),
         entry(
             "art", DslKind::Transform, "art(name, pat) -> pat  ·  pat.art(name)",
-            "Articulation: a constant string (`\"legato\"`, `\"staccato\"`, `\"pizzicato\"`, …) mapping `inst + art` to a sample region / keyswitch.",
+            "Articulation: a constant string (`\"legato\"`, `\"staccato\"`, `\"pizzicato\"`, …) mapping `inst + art` to a sample region / keyswitch. `\"legato\"` additionally plays the part monophonically and connected — a synth glides one voice from note to note, a sampler crossfades briefly — so a melodic line flows instead of detaching at each note (a rest or chord breaks the line).",
             vec![DslParam::req("name", "articulation name (string)"), pat()],
             "strings.art(\"pizzicato\")",
         ),

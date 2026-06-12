@@ -30,7 +30,7 @@ use std::path::Path;
 use crate::effects::{equal_power_pan, Compressor, DelayLine, EqChain, Limiter, Reverb};
 use crate::registry::{Registry, ResolvedVoice, SampleParams};
 use crate::sampler::{Sample, SampleBank};
-use crate::seam::{AudioCommand, Frame, ReverbIr, TrackConfig, VoiceEvent, VoiceSource};
+use crate::seam::{AudioCommand, Frame, ReverbIr, TrackConfig, VoiceEvent, VoiceId, VoiceSource};
 use crate::voice::{Voice, VoicePool};
 use arbor_nemus_pattern::prelude::SourceKind;
 
@@ -151,6 +151,12 @@ pub struct Renderer {
     files: SampleBank,
     /// Voices scheduled to start later within the current/next block.
     pending: BinaryHeap<Pending>,
+    /// Per-track currently-sounding legato voice (the `art("legato")` mono line).
+    /// When the next legato onset on a track arrives and this voice is still
+    /// resident, it is re-pitched instead of spawning a fresh voice — connecting
+    /// the notes with no envelope re-attack. Indexed by mixer strip; `None` =
+    /// nothing to glide from (start of line, after a rest, or after a steal).
+    legato: Vec<Option<VoiceId>>,
     /// Idle gate: set on [`AudioCommand::StopAll`] (transport stop), cleared on the
     /// next real activity (a queued voice). While idle *and* nothing is sounding,
     /// [`process`](Self::process) takes a silence fast-path that skips the entire
@@ -197,6 +203,7 @@ impl Renderer {
             // Pre-reserve so per-block `push`es don't grow the heap in the RT
             // callback (one look-ahead window is a few hundred events at most).
             pending: BinaryHeap::with_capacity(capacity * 4),
+            legato: vec![None; strip_count],
             // A fresh renderer has never played: start idle so an open-but-unplayed
             // stream costs ~nothing until the first voice arrives.
             idle: true,
@@ -379,6 +386,9 @@ impl Renderer {
                 // as perpetual DSP load) long after playback has stopped.
                 self.pool.clear();
                 self.pending.clear();
+                for l in &mut self.legato {
+                    *l = None;
+                }
                 self.reset_dsp_tails();
                 // Arm the idle fast-path: from the next buffer (with nothing left
                 // sounding) `process` skips the whole DSP graph until a voice wakes
@@ -429,6 +439,8 @@ impl Renderer {
         self.track_dry = vec![[0.0; 2]; count];
         self.track_delay_send = vec![[0.0; 2]; count];
         self.track_peak = vec![[0.0; 2]; count];
+        // A track-set swap invalidates any in-flight legato line.
+        self.legato = vec![None; count];
     }
 
     /// Start every pending voice whose `start_frame` equals `frame`.
@@ -444,19 +456,55 @@ impl Renderer {
     }
 
     /// Resolve an event's source + build a [`Voice`] and add it to the pool.
+    ///
+    /// A `legato` event (`art("legato")`) on a track whose previous voice is still
+    /// sounding connects to it instead of starting detached — by strategy:
+    /// - **synth** sources re-pitch the existing voice in place (truly continuous,
+    ///   no re-attack);
+    /// - **sampler** sources **crossfade**: the old note fades out while a fresh,
+    ///   correctly-pitched voice fades in, so the recorded sample onset is masked
+    ///   and there's no gap (an in-place restart would replay the bow attack and
+    ///   still sound detached).
+    ///
+    /// Otherwise a fresh voice is built. The per-track legato slot is updated to
+    /// the voice now carrying the line (legato events) or cleared (non-legato).
     fn spawn_voice(&mut self, ev: VoiceEvent, frame: u64) {
         let resolved = self.resolve_source(&ev);
         let release_at = ev.dur_frames.map(|d| frame.saturating_add(d));
-        let voice = Voice::build(
-            ev.id,
-            ev.track,
-            resolved,
-            ev.note,
-            &ev.params,
-            release_at,
-            self.sample_rate as f32,
-        );
+        let track = ev.track as usize;
+        let legato = is_legato(&ev);
+        let sr = self.sample_rate as f32;
+        let xfade = legato_xfade_frames(self.sample_rate);
+
+        // Whether to fade the new voice in (set when we just faded out a sampler
+        // voice it's crossfading from).
+        let mut crossfade_in = false;
+        if legato {
+            if let Some(prev) = self.legato.get(track).copied().flatten() {
+                if let Some(voice) = self.pool.get_mut_by_id(prev) {
+                    if !voice.is_done() {
+                        if voice.is_synth() {
+                            voice.reglide(resolved, ev.note, &ev.params, release_at, sr);
+                            return;
+                        }
+                        // Sampler: keep the old note ringing and crossfade into the
+                        // new one (built below).
+                        voice.fade_out(xfade);
+                        crossfade_in = true;
+                    }
+                }
+            }
+        }
+
+        let mut voice = Voice::build(ev.id, ev.track, resolved, ev.note, &ev.params, release_at, sr);
+        if crossfade_in {
+            voice.fade_in(xfade);
+        }
+        let id = voice.id;
         self.pool.insert(voice);
+        if let Some(cell) = self.legato.get_mut(track) {
+            *cell = if legato { Some(id) } else { None };
+        }
     }
 
     /// Turn a [`VoiceSource`] into a concrete [`ResolvedVoice`]; falls back to the
@@ -611,6 +659,26 @@ impl Renderer {
     }
 }
 
+/// Crossfade length for sampler legato, in seconds. Long enough to mask a bowed
+/// sample's recorded onset and bridge the note boundary, short enough not to
+/// audibly double fast notes.
+const LEGATO_XFADE_SECS: f32 = 0.04;
+
+/// [`LEGATO_XFADE_SECS`] in frames at `sample_rate` (at least one frame).
+fn legato_xfade_frames(sample_rate: u32) -> u64 {
+    ((LEGATO_XFADE_SECS * sample_rate as f32).round() as u64).max(1)
+}
+
+/// Whether an event requests monophonic legato voicing (`art("legato")`). Other
+/// articulations (`staccato`, `pizzicato`, …) are detached and never reuse a
+/// voice. `File` sources carry no articulation and are always fresh.
+fn is_legato(ev: &VoiceEvent) -> bool {
+    matches!(
+        &ev.source,
+        VoiceSource::Named { art: Some(a), .. } if a.eq_ignore_ascii_case("legato")
+    )
+}
+
 /// Hash a voice id into a deterministic round-robin seed. A cheap integer mix so
 /// consecutive ids don't trivially map to consecutive variants (which would defeat
 /// the point of randomised round-robin) while staying reproducible loop-to-loop.
@@ -631,5 +699,71 @@ fn file_region(_kind: SourceKind) -> SampleParams {
         // unpitched File plays at native pitch (note=None → no offset).
         release: 0.01,
         ..SampleParams::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::seam::VoiceParams;
+
+    const SR: u32 = 48_000;
+
+    /// A pitched named-instrument onset; unknown `inst` resolves to the fallback
+    /// synth, which is all these voice-management tests need.
+    fn note_event(id: u64, start: u64, dur: u64, art: Option<&str>) -> VoiceEvent {
+        VoiceEvent {
+            id: VoiceId(id),
+            start_frame: start,
+            dur_frames: Some(dur),
+            source: VoiceSource::Named {
+                sound: None,
+                variant: None,
+                inst: Some("test.tone".into()),
+                art: art.map(str::to_string),
+            },
+            note: Some(60.0 + id as f32), // distinct pitch per onset
+            params: VoiceParams::default(),
+            track: 0,
+            span: None,
+        }
+    }
+
+    fn render(r: &mut Renderer, cmds: Vec<AudioCommand>, frames: usize) {
+        let mut out = vec![[0.0f32; 2]; frames];
+        r.process(&mut cmds.into_iter(), &mut out);
+    }
+
+    #[test]
+    fn legato_onset_reuses_the_sounding_voice() {
+        let mut r = Renderer::new(SR, &[TrackConfig { name: "lead".into() }]);
+        // First legato note starts at 0, lasting 4000 frames.
+        render(&mut r, vec![AudioCommand::Voice(note_event(1, 0, 4000, Some("legato")))], 1000);
+        assert_eq!(r.active_voices(), 1, "first note sounds");
+        // A second legato note arrives mid-way through the first: it must glide the
+        // existing voice, not stack a new one.
+        render(&mut r, vec![AudioCommand::Voice(note_event(2, 1000, 4000, Some("legato")))], 1000);
+        assert_eq!(r.active_voices(), 1, "legato glides one voice, no stacking");
+    }
+
+    #[test]
+    fn non_legato_onset_stacks_a_new_voice() {
+        let mut r = Renderer::new(SR, &[TrackConfig { name: "lead".into() }]);
+        render(&mut r, vec![AudioCommand::Voice(note_event(1, 0, 4000, None))], 1000);
+        render(&mut r, vec![AudioCommand::Voice(note_event(2, 1000, 4000, None))], 1000);
+        assert_eq!(r.active_voices(), 2, "detached notes overlap as two voices");
+    }
+
+    #[test]
+    fn legato_reattacks_after_the_line_goes_silent() {
+        let mut r = Renderer::new(SR, &[TrackConfig { name: "lead".into() }]);
+        // Short note that fully rings out (release) before the next onset. The
+        // fallback preset's release is ~0.2 s, so a generous window guarantees the
+        // exponential tail has dropped below the silence floor and freed the voice.
+        render(&mut r, vec![AudioCommand::Voice(note_event(1, 0, 100, Some("legato")))], 20_000);
+        assert_eq!(r.active_voices(), 0, "first note released into silence");
+        // With nothing to glide from, the next legato onset spawns a fresh voice.
+        render(&mut r, vec![AudioCommand::Voice(note_event(2, 20_000, 4000, Some("legato")))], 1000);
+        assert_eq!(r.active_voices(), 1, "fresh attack after the rest");
     }
 }
