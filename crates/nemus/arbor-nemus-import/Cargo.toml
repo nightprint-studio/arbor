@@ -1,0 +1,23 @@
+[package]
+name         = "arbor-nemus-import"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "nemus — deterministic MIDI → .nemus conversion (the \"faithful\" path). No AI: L1 transcodes MIDI events to explicit notes, L2 applies heuristics (quantize, key/scale detection, chord grouping, loop detection) and emits idiomatic .nemus source. Depends on pattern + lang, NOT on audio."
+
+# The deterministic import pipeline. Reads MIDI (`midly`), produces a neutral
+# note model in cycle-time (L1), refines it with musical heuristics (L2), and
+# prints idiomatic `.nemus` by building `arbor-nemus-lang` AST nodes and reusing
+# its canonical emitter — so formatting lives in exactly one place. It does NOT
+# touch audio: WAV→MIDI is `arbor-nemus-transcribe`'s job; this crate starts at
+# MIDI. L1 and L2 modules are independently unit-tested.
+[dependencies]
+arbor-nemus-pattern = { path = "../arbor-nemus-pattern" }
+arbor-nemus-lang    = { path = "../arbor-nemus-lang" }
+midly.workspace     = true
+thiserror.workspace = true
+
+[lints.rust]
+missing_debug_implementations = "warn"

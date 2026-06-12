@@ -20,8 +20,9 @@
    *
    * Imports only shared/ui (+ the shared ContextMenu overlay) + nemus-local.
    */
-  import { PanelLeftClose, PanelRightClose, VolumeX, Headphones } from 'lucide-svelte';
+  import { PanelLeftClose, PanelRightClose, VolumeX, Headphones, FileInput } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { importActions } from '../stores/import-actions.svelte';
   import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import HapLane from './HapLane.svelte';
@@ -99,6 +100,17 @@
   const endX    = $derived(headW + arrangementStore.contentEnd * PX);
 
   const bars = Array.from({ length: VIEW / 4 + 1 }, (_, i) => i * 4);
+
+  // ── Time ruler (footer): cycles → wall-clock. One cycle = 1/cps seconds; the
+  // live transport cps drives it, falling back to a sane default before the first
+  // eval/play so the strip still reads sensibly. ──────────────────────────────
+  const cps = $derived(transportStore.cps > 0 ? transportStore.cps : 0.5);
+  function fmtClock(cycle: number): string {
+    const sec = cycle / cps;
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
 
   let rulerEl = $state<HTMLElement | null>(null);
   function seekTo(cyc: number) {
@@ -209,7 +221,15 @@
     <div class="arr-inner" style="--head-w: {headW}px; --tl-w: {timelineW}px;">
       <!-- View toolbar (sticky-left, stays put as the timeline scrolls) -->
       <div class="arr-toolbar-row">
-        <div class="arr-toolbar-anchor"><ArrangementToolbar /></div>
+        <div class="arr-toolbar-anchor">
+          <button class="tb-import" onclick={() => importActions.start()}
+                  use:tooltip={{ content: 'Import audio / MIDI', description: 'Transcribe a WAV or bring a .mid in as an editable .nemus file' }}>
+            <FileInput size={13} />
+            <span>Import</span>
+          </button>
+          <span class="tb-sep"></span>
+          <ArrangementToolbar />
+        </div>
       </div>
 
       <!-- Ruler -->
@@ -298,6 +318,17 @@
         <div class="arr-cursor" style="left: {cursorX}px;"><span class="cursor-flag"></span></div>
         <div class="arr-playhead" class:idle={!playing} style="left: {playX}px;"><span class="playhead-flag"></span></div>
       {/if}
+
+      <!-- Time ruler (footer): MM:SS in parallel to the bars/beats above; sticks
+           to the bottom and scrolls horizontally with the timeline. -->
+      <div class="arr-time">
+        <div class="arr-time-corner">time</div>
+        <div class="arr-time-track">
+          {#each bars as b (b)}
+            <div class="time-tick" style="left: {b * PX}px;" class:strong={b % 8 === 0}><span>{fmtClock(b)}</span></div>
+          {/each}
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -333,7 +364,24 @@
     position: sticky; left: 0;
     display: inline-flex; align-items: center; height: 100%;
     width: max-content;
+    padding: 0 8px;
   }
+
+  /* Import action — sits left of the view toggles. */
+  .tb-import {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 22px; padding: 0 9px;
+    background: var(--bg-hover); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); color: var(--text-secondary);
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  }
+  .tb-import:hover {
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg-hover));
+    color: var(--text-primary);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border-subtle));
+  }
+  .tb-sep { width: 1px; height: 16px; background: var(--border-subtle); margin: 0 8px; }
 
   /* ── Ruler (bg-base) ── */
   .arr-top { display: flex; height: var(--ruler-h); }
@@ -441,4 +489,27 @@
   .arr-playhead { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1.5px; background: var(--text-primary); opacity: 0.7; pointer-events: none; z-index: 4; transition: opacity var(--transition-fast); }
   .arr-playhead.idle { opacity: 0.32; }
   .playhead-flag { position: absolute; top: 0; left: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid var(--text-primary); }
+
+  /* ── Time ruler (footer) ── */
+  /* Sticky to the bottom of the scroll viewport; scrolls horizontally with the
+     timeline. Shows MM:SS in parallel to the bars/beats ruler at the top. */
+  .arr-time {
+    position: sticky; bottom: 0; z-index: 7;
+    display: flex; height: 20px;
+    background: var(--bg-base);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .arr-time-corner {
+    width: var(--head-w); flex-shrink: 0;
+    position: sticky; left: 0; z-index: 1;
+    display: flex; align-items: center; padding: 0 12px;
+    background: var(--bg-base);
+    border-right: 1px solid var(--border-subtle);
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--text-disabled);
+  }
+  .arr-time-track { position: relative; width: var(--tl-w); flex-shrink: 0; }
+  .time-tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent); }
+  .time-tick.strong { border-left-color: var(--border-subtle); }
+  .time-tick span { position: absolute; bottom: 3px; left: 3px; font-size: 8.5px; color: var(--text-disabled); font-variant-numeric: tabular-nums; }
 </style>

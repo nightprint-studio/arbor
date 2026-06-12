@@ -24,7 +24,7 @@
 
 import { notificationsStore } from './notifications.svelte';
 
-export type TransferKind = 'download' | 'export';
+export type TransferKind = 'download' | 'export' | 'import';
 export type TransferState = 'active' | 'done' | 'failed' | 'cancelled';
 
 export interface Transfer {
@@ -38,6 +38,11 @@ export interface Transfer {
   /** 0..100, or `null` for an indeterminate bar. */
   progress: number | null;
   state: TransferState;
+  /** Wall-clock ms when the transfer started (set by the store) — for elapsed
+   *  time + a rate-based ETA in the overlay. */
+  startedAt: number;
+  /** Wall-clock ms when it reached a terminal state — freezes the elapsed time. */
+  endedAt?: number;
   /** Failure reason (when `state === 'failed'`). */
   error?: string;
   /** Filesystem target (the installed folder / the exported file). When present
@@ -72,9 +77,9 @@ function createTransfersStore() {
   /** One-shot terminal notification for a transfer reaching done/failed — so the
    *  user learns the outcome even with the overlay closed. */
   function notifyTerminal(t: Transfer, state: 'done' | 'failed') {
-    const noun = t.kind === 'download' ? 'Download' : 'Export';
+    const noun = t.kind === 'download' ? 'Download' : t.kind === 'import' ? 'Import' : 'Export';
     if (state === 'done') {
-      const verb = t.kind === 'download' ? 'installed' : 'exported';
+      const verb = t.kind === 'download' ? 'installed' : t.kind === 'import' ? 'imported' : 'exported';
       notificationsStore.add(`${noun} complete`, `${t.label} ${verb}.`, 'success');
     } else {
       notificationsStore.add(`${noun} failed`, t.error ? `${t.label} — ${t.error}` : t.label, 'error');
@@ -88,9 +93,14 @@ function createTransfersStore() {
     get hasAny() { return transfers.length > 0; },
 
     /** Register (or restart) a transfer. A same-id entry is replaced. */
-    start(t: Omit<Transfer, 'state'> & { state?: TransferState }) {
+    start(t: Omit<Transfer, 'state' | 'startedAt' | 'endedAt'> & { state?: TransferState }) {
       clearTimer(t.id);
-      const entry: Transfer = { progress: null, ...t, state: t.state ?? 'active' };
+      const entry: Transfer = {
+        progress: null,
+        ...t,
+        state: t.state ?? 'active',
+        startedAt: Date.now(),
+      };
       transfers = [...transfers.filter((x) => x.id !== t.id), entry];
     },
 
@@ -108,7 +118,7 @@ function createTransfersStore() {
       // finds the transfer already `done` and stays a no-op.
       const prev = transfers.find((t) => t.id === id);
       if (!prev) return;
-      patch(id, (t) => ({ ...t, state: 'done', progress: 100, sublabel: sublabel ?? t.sublabel }));
+      patch(id, (t) => ({ ...t, state: 'done', progress: 100, sublabel: sublabel ?? t.sublabel, endedAt: Date.now() }));
       if (!prev.path) scheduleDismiss(id);
       if (prev.state === 'active') notifyTerminal({ ...prev, state: 'done' }, 'done');
     },
@@ -116,12 +126,12 @@ function createTransfersStore() {
     fail(id: string, error?: string) {
       const prev = transfers.find((t) => t.id === id);
       if (!prev) return;
-      patch(id, (t) => ({ ...t, state: 'failed', error }));
+      patch(id, (t) => ({ ...t, state: 'failed', error, endedAt: Date.now() }));
       if (prev.state === 'active') notifyTerminal({ ...prev, state: 'failed', error }, 'failed');
     },
     /** Mark a transfer cancelled (then auto-dismiss). */
     cancelled(id: string) {
-      patch(id, (t) => ({ ...t, state: 'cancelled' }));
+      patch(id, (t) => ({ ...t, state: 'cancelled', endedAt: Date.now() }));
       scheduleDismiss(id);
     },
 

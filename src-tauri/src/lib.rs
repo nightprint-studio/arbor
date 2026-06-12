@@ -1552,6 +1552,14 @@ pub fn run() {
             nemus::project::nemus_open_project,
             nemus::project::nemus_create_project,
             nemus::reference::nemus_lang_reference,
+            // nemus import: WAV → MIDI (transcription) / MIDI → .nemus (deterministic)
+            nemus::import::nemus_convert_wav_to_midi,
+            nemus::import::nemus_import_audio_as_nemus,
+            nemus::import::nemus_import_midi_as_nemus,
+            // nemus ONNX transcription models (download on-demand)
+            nemus::models::nemus_models,
+            nemus::models::nemus_download_model,
+            nemus::models::nemus_delete_model,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");

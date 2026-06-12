@@ -288,6 +288,52 @@ fn island_alt_and_splice() {
     assert_eq!(emit_expr(&n_island(seq)), "n(c5 $motif g4)");
 }
 
+#[test]
+fn wide_island_wraps_alt_one_bar_per_line() {
+    // A four-bar alternation whose inline form blows past the margin must break:
+    // each `[...]` bar on its own indented line, `<`/`>` framing it.
+    let bar = |n: &str| {
+        m(MiniKind::Group(Box::new(m(MiniKind::Sequence(
+            (0..8).map(|_| sound(n)).collect(),
+        )))))
+    };
+    let alt = m(MiniKind::Alt(Box::new(m(MiniKind::Sequence(vec![
+        bar("bd"),
+        bar("sd"),
+        bar("hh"),
+        bar("cp"),
+    ])))));
+    let src = emit_expr(&s_island(alt));
+    assert!(src.contains('\n'), "wide island should wrap:\n{src}");
+    assert!(src.contains("\n  [bd"), "first bar on its own indented line:\n{src}");
+    assert!(src.contains("\n  [sd"), "later bars each on a line:\n{src}");
+    assert!(src.contains("\n>"), "closing angle on its own line:\n{src}");
+    // The bars themselves are short enough to stay inline.
+    assert!(src.contains("[bd bd bd bd bd bd bd bd]"), "bar stays inline:\n{src}");
+}
+
+#[test]
+fn wide_parallel_wraps_one_lane_per_line() {
+    // Many `&` lanes that overflow the margin break one lane per line.
+    let lane = |n: &str| m(MiniKind::Sequence((0..6).map(|_| sound(n)).collect()));
+    let par = m(MiniKind::Parallel(vec![
+        lane("bd"),
+        lane("sd"),
+        lane("hh"),
+        lane("cp"),
+    ]));
+    let src = emit_expr(&s_island(par));
+    assert!(src.contains("\n& "), "lanes should break onto their own lines:\n{src}");
+}
+
+#[test]
+fn narrow_island_stays_inline() {
+    // Below the margin nothing wraps — the canonical short form is preserved.
+    let seq = m(MiniKind::Sequence(vec![sound("bd"), sound("sd"), sound("hh")]));
+    let src = emit_expr(&s_island(seq));
+    assert_eq!(src, "s(bd sd hh)");
+}
+
 // ── Items & multi-line output ─────────────────────────────────────────────────
 
 #[test]

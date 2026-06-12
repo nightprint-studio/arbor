@@ -12,12 +12,20 @@ description  = "nemus — facade crate: re-exports the public surface of the fou
 # name collision across the four preludes is the per-crate `Result` alias, which
 # the facade resolves by exposing a single `NemusError`/`Result` (see error.rs);
 # every other symbol is either single-homed or an identical re-export.
+[features]
+default = []
+# Forward the ONNX transcription backends (basic-pitch / Demucs) — links
+# onnxruntime into the binary. The shell turns this on.
+onnx = ["arbor-nemus-transcribe/onnx"]
+
 [dependencies]
-arbor-nemus-pattern = { path = "../arbor-nemus-pattern" }
-arbor-nemus-lang    = { path = "../arbor-nemus-lang" }
-arbor-nemus-audio   = { path = "../arbor-nemus-audio" }
-arbor-nemus-engine  = { path = "../arbor-nemus-engine" }
-thiserror.workspace = true
+arbor-nemus-pattern    = { path = "../arbor-nemus-pattern" }
+arbor-nemus-lang       = { path = "../arbor-nemus-lang" }
+arbor-nemus-audio      = { path = "../arbor-nemus-audio" }
+arbor-nemus-engine     = { path = "../arbor-nemus-engine" }
+arbor-nemus-import     = { path = "../arbor-nemus-import" }
+arbor-nemus-transcribe = { path = "../arbor-nemus-transcribe" }
+thiserror.workspace    = true
 
 [lints.rust]
 missing_debug_implementations = "warn"

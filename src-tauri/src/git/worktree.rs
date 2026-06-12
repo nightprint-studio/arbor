@@ -206,7 +206,7 @@ pub fn list_worktrees(repo_path: &Path, current_path: &Path) -> Result<Vec<Workt
 /// Parse the `--porcelain` output of `git worktree list`.
 ///
 /// Format (blocks separated by blank lines):
-/// ```
+/// ```text
 /// worktree /path/to/main
 /// HEAD abc123def456...
 /// branch refs/heads/main

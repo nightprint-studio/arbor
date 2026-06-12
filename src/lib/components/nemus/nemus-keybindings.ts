@@ -41,6 +41,9 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   { id: 'open_file',    key: 'o', ctrl: true, shift: true, scope: 'global', description: 'Open file' },
   { id: 'save',         key: 's', ctrl: true,  scope: 'global', description: 'Save the active file' },
   { id: 'render_wav',   key: 'r', ctrl: true, shift: true, scope: 'global', description: 'Export / render to WAV' },
+  // `Alt+Shift+I` (AltGr-safe): `Ctrl+Shift+I` would collide with the webview's
+  // devtools toggle.
+  { id: 'import_audio', key: 'i', alt: true, shift: true, scope: 'global', description: 'Import audio / MIDI as .nemus' },
   // Mixer.
   { id: 'commit_overrides', key: 'c', alt: true, shift: true, scope: 'global', description: 'Commit mixer gain/pan overrides to source' },
 ];

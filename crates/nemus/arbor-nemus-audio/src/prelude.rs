@@ -15,6 +15,9 @@ pub use crate::seam::{
     TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource,
 };
 
+// ── Non-real-time file decode (mono f32 + source rate) ───────────────────────
+pub use crate::decode::DecodedAudio;
+
 // ── DSP core + real-time output ──────────────────────────────────────────────
 pub use crate::renderer::{Renderer, DEFAULT_VOICE_CAPACITY};
 pub use crate::stream::{open_output_stream, OutputStream, StreamSink};

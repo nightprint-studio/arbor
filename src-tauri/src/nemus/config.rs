@@ -36,6 +36,14 @@ pub struct NemusConfig {
     /// Override for the directory holding downloadable sample packs (Dirt-Samples,
     /// drum machines, GM). `None` → the default (`<nemus-data>/packs`).
     pub packs_dir: Option<String>,
+    /// Override for the directory holding downloadable ONNX transcription models.
+    /// `None` → the default (`<nemus-data>/models`).
+    pub models_dir: Option<String>,
+    /// Override for the basic-pitch ONNX download URL. `None` → the built-in
+    /// default (see `nemus::models`). Set this if the default artifact moves.
+    pub basic_pitch_url: Option<String>,
+    /// Override for the Demucs ONNX download URL. `None` → the built-in default.
+    pub demucs_url: Option<String>,
     /// Offline-render defaults. Declared last: as a nested TOML table it must
     /// follow every scalar field, or `toml` serialization fails once an override
     /// above is set ("values must be emitted before tables").
@@ -50,6 +58,9 @@ impl Default for NemusConfig {
             log_threshold: "info".to_string(),
             vsco_dir: None,
             packs_dir: None,
+            models_dir: None,
+            basic_pitch_url: None,
+            demucs_url: None,
             render: NemusRenderConfig::default(),
         }
     }

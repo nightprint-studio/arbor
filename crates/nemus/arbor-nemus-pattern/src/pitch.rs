@@ -82,6 +82,11 @@ impl Scale {
             "melodicminor" | "melodic_minor" => vec![0, 2, 3, 5, 7, 9, 11],
             "majpent" | "majorpentatonic" => vec![0, 2, 4, 7, 9],
             "minpent" | "minorpentatonic" => vec![0, 3, 5, 7, 10],
+            // Japanese pentatonic / hexatonic modes (used in the author's pieces).
+            "hirajoshi" => vec![0, 2, 3, 7, 8],
+            "insen" | "in_sen" | "in-sen" => vec![0, 1, 5, 7, 10],
+            "iwato" => vec![0, 1, 5, 6, 10],
+            "kumoi" => vec![0, 2, 3, 7, 9],
             "chromatic" => (0..12).collect(),
             other => return Err(PatternError::UnknownScale(other.to_string())),
         };
@@ -145,5 +150,25 @@ mod tests {
     fn scale_spec_errors() {
         assert!(Scale::parse("c-minor").is_err());
         assert!(Scale::parse("c:bogus").is_err());
+    }
+
+    #[test]
+    fn resolves_japanese_scales() {
+        // Hirajoshi on D: D E F A Bb (semitones 0 2 3 7 8 from root).
+        let hira = Scale::parse("d:hirajoshi").unwrap();
+        assert_eq!(hira.degree_to_midi(0, 4), 62.0); // D4
+        assert_eq!(hira.degree_to_midi(1, 4), 64.0); // E4
+        assert_eq!(hira.degree_to_midi(2, 4), 65.0); // F4
+        assert_eq!(hira.degree_to_midi(5, 4), 74.0); // D5 (wraps an octave)
+
+        // In-sen aliases all resolve to the same intervals.
+        assert_eq!(
+            Scale::parse("c:insen").unwrap(),
+            Scale::parse("c:in-sen").unwrap()
+        );
+        assert_eq!(
+            Scale::parse("c:insen").unwrap(),
+            Scale::parse("c:in_sen").unwrap()
+        );
     }
 }

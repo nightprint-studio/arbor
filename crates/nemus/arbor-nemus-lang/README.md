@@ -23,8 +23,10 @@ The layers never reach across each other (`design/nemus/editing-model.md`):
 - **Evaluator** — `AST → Pattern<ControlMap>`. Resolves the host language (let/fn/lambda/range/map,
   arithmetic, the closed stdlib of combinators + transforms) and the mini-notation islands.
 - **Emitter** (`emit.rs`) — `AST → source` (pretty-printer). Deterministic, minimal-paren, semantic
-  round-trip (comments/whitespace are not in the AST, so they are not recovered). The enabler for the
-  future editor's surgical edits and for *materialisation*.
+  round-trip (comments/whitespace are not in the AST, so they are not recovered). Width-aware: a
+  mini-notation island past the margin wraps to one `<...>`/`[...]` element (or one `&` lane) per
+  indented line, so large imported patterns stay readable; short islands stay inline. The enabler for
+  the future editor's surgical edits and for *materialisation*.
 - **Materialiser** (`materialize.rs`) — evaluated haps → mini-notation AST: the value→AST half of
   *materialisation* (evaluate a generative sub-tree, re-emit it as a literal). Base scope: one cycle,
   discrete events, overlap split into `&` lanes, uniform grid with `~`/`@`.

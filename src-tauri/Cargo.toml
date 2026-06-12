@@ -22,8 +22,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # Release builds always activate the deep-link plugin (see the
 # `cfg(any(not(debug_assertions), feature = ...))` guards in lib.rs).
 [features]
-default = []
+default = ["onnx"]
 deep-link-dev = []
+# ONNX transcription backends (basic-pitch / Demucs). On by default: links
+# onnxruntime into the binary; models download on demand. Turn off for a lighter
+# build without ML transcription (the DSP backend still works).
+onnx = ["arbor-nemus/onnx"]
 # Bundle OpenSSL from source instead of linking against the system libssl.
 # Activated by the release workflow on Linux + macOS so produced binaries
 # don't depend on the runner's libssl version (and so the macOS x86_64 cross
@@ -57,6 +61,8 @@ arbor-plugin-marketplace = { path = "../crates/plugin/marketplace" }
 arbor-plugin-types = { path = "../crates/plugin/types" }
 arbor-scheduler   = { path = "../crates/scheduler" }
 # nemus — music live-coding engine (pattern/lang/audio/engine behind one facade).
+# The ONNX backends are gated by this crate's `onnx` feature (default on), which
+# forwards to `arbor-nemus/onnx` (links onnxruntime; models download on demand).
 arbor-nemus       = { path = "../crates/nemus/arbor-nemus" }
 
 # --- Tauri ---

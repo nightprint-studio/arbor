@@ -13,6 +13,7 @@
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import TranscriptionModels from './TranscriptionModels.svelte';
   import { configStore, LOG_LEVELS, type NemusLogThreshold } from '../stores/config.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -29,7 +30,7 @@
   function setTail(v: number)  { configStore.setRender({ ...configStore.render, tail_max_secs: v }); }
 </script>
 
-<Modal {onClose} width="560px" height="540px" ariaLabel="Nemus Settings">
+<Modal {onClose} width="560px" height="640px" ariaLabel="Nemus Settings">
   {#snippet header()}
     <ModalHeader {onClose}>
       <Settings size={14} />
@@ -73,6 +74,10 @@
   <FormField label="Reverb tail" hint="Extra seconds rendered after the last event so reverb / delay tails aren't cut.">
     <NumberStepper value={configStore.render.tail_max_secs} min={0} step={0.5} narrow suffix="s" onchange={setTail} ariaLabel="Reverb tail seconds" />
   </FormField>
+
+  <div class="grp-label">Transcription models</div>
+  <p class="grp-hint">Optional ONNX models for audio import, downloaded on demand. basic-pitch gives polyphonic, chord-aware pitch; Demucs splits the mix into stems for cleaner notes. Once installed they're used automatically.</p>
+  <TranscriptionModels />
   </div>
 
   {#snippet footer()}
@@ -87,6 +92,9 @@
     color: var(--text-muted); margin: 4px 0 10px;
   }
   .grp-label:not(:first-child) { margin-top: 22px; }
+  .grp-hint {
+    margin: -4px 0 12px; font-size: 11px; line-height: 1.45; color: var(--text-muted);
+  }
   .row { display: flex; gap: 16px; margin-bottom: 14px; }
   .row > :global(.form-field) { flex: 1; }
   /* Standalone fields (Log threshold, Reverb tail) keep their own rhythm. */

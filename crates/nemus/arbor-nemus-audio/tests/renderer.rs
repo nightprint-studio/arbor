@@ -159,7 +159,7 @@ fn stop_all_flushes_effect_tails_to_silence() {
     // i.e. exactly the case whose tails outlive the voice.
     let mut p = VoiceParams::default();
     p.room = 1.0;
-    p.delay_mix = 1.0;
+    p.delay_mix = Some(1.0);
     // Configure the track's delay line with strong feedback so, untreated, it would
     // ring for a very long time.
     let cmds = vec![

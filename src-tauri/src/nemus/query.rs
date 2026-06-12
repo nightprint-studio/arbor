@@ -98,20 +98,19 @@ fn detect_loop_cycles(haps: &[QueryHap], sections: &[QuerySection], window: u32)
     let window_i = window as f64;
     for p in 1..=window {
         let shift = p as f64;
-        // Every hap with start < window - P must reappear shifted by +P, and every
-        // hap with start >= P must be the image of one shifted from below. We check
-        // the forward direction over the interior and rely on the set equality of
-        // counts: build the shifted key-set of the lower band and compare to the
-        // upper band.
+        // Every hap with start < window - P must reappear shifted by +P. Align the
+        // two bands onto the same `[0, window - P)` frame: keep the lower band as
+        // is, and shift the upper band (`start >= P`) *down* by P. A periodic signal
+        // makes the two key-sets identical.
         let mut lower: Vec<HapKey> = haps
             .iter()
             .filter(|h| h.start + EPS < window_i - shift)
-            .map(|h| HapKey::shifted(h, shift))
+            .map(|h| HapKey::shifted(h, 0.0))
             .collect();
         let mut upper: Vec<HapKey> = haps
             .iter()
             .filter(|h| h.start + EPS >= shift)
-            .map(|h| HapKey::shifted(h, 0.0))
+            .map(|h| HapKey::shifted(h, shift))
             .collect();
         if lower.len() != upper.len() {
             continue;

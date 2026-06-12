@@ -14,7 +14,7 @@
     Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
-    Keyboard, Command, ArrowDownToLine, Boxes,
+    Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -23,6 +23,8 @@
   import { nemusEngine } from '../stores/engine.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
+  import { importActions } from '../stores/import-actions.svelte';
+  import { modelsStore } from '../stores/models.svelte';
   import { mixerStore } from '../stores/mixer.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
 
@@ -34,7 +36,7 @@
     Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
-    Keyboard, Command, ArrowDownToLine, Boxes,
+    Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -64,6 +66,11 @@
     { id: 'new_file',     label: 'New .nemus file…', group: 'Project', icon: 'FilePlus2',  keys: 'Ctrl+N',       run: () => projectActions.newFile() },
     { id: 'save',         label: 'Save file',        group: 'Project', icon: 'Save',       keys: 'Ctrl+S',       run: () => projectActions.save() },
     { id: 'export',       label: 'Export to WAV…',   group: 'Project', icon: 'Download',   keys: 'Ctrl+Shift+R', run: () => projectActions.exportWav() },
+    { id: 'import',       label: 'Import audio / MIDI…', group: 'Project', icon: 'FileInput', keys: 'Alt+Shift+I', run: () => importActions.start() },
+    { id: 'convert_midi', label: 'Convert WAV to MIDI…', group: 'Project', icon: 'FileAudio', run: () => importActions.startConvert() },
+    { id: 'dl_basic_pitch', label: 'Download polyphonic model (basic-pitch)', group: 'Project', icon: 'Download', run: () => void modelsStore.download('basic-pitch') },
+    { id: 'dl_demucs', label: 'Download stem-split model (Demucs)', group: 'Project', icon: 'Download', run: () => void modelsStore.download('demucs') },
+    { id: 'models', label: 'Manage transcription models…', group: 'Project', icon: 'Boxes', run: () => nemusStore.openSettings() },
     // Panels
     { id: 'p_files',     label: 'Toggle Files',      group: 'View', icon: 'Files',            run: () => nemusStore.toggleLeft('files') },
     { id: 'p_outline',   label: 'Toggle Outline',    group: 'View', icon: 'ListTree',         run: () => nemusStore.toggleLeft('outline') },

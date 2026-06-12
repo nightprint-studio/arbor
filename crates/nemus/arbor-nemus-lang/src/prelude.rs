@@ -27,6 +27,9 @@ pub use crate::value::{EvalOutput, Func, Transform, Value};
 pub use crate::emit::{emit, emit_expr};
 pub use crate::materialize::{materialize_island, materialize_source};
 
+// ── Chord vocabulary (the `'name` postfix table — single source of truth) ─────
+pub use crate::eval::chords::chord_intervals;
+
 // ── DSL reference catalogue (canonical name/doc surface for tooling) ──────────
 pub use crate::reference::{
     combinator_names, generator_names, log_names, reference, signal_names,

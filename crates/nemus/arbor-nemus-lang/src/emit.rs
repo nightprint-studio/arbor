@@ -17,6 +17,10 @@
 //! - `tracks(...)` / `arrange(...)` — the output / arrangement combinators —
 //!   print one argument per line, indented two spaces, with a trailing comma.
 //!   Every other call is inline; method chains stay on one line.
+//! - A mini-notation island that would overrun [`MAX_WIDTH`] wraps: `<...>` /
+//!   `[...]` break to one element per line, `a & b` to one lane per line. Short
+//!   islands stay inline. Whitespace is `extras` in the grammar, so the wrapped
+//!   form re-parses to the same tree.
 //! - Host arithmetic is **tight** (`i*0.1`, `a-1`); structural tokens are
 //!   **spaced** (`a & b`, `let x = …`, `i => …`); `,` takes a trailing space.
 //! - **Minimal-but-correct** parentheses, driven by operator precedence.
@@ -35,6 +39,12 @@ const MULTILINE_CALLS: &[&str] = &["tracks", "arrange"];
 
 /// One indentation step.
 const INDENT: &str = "  ";
+
+/// Soft right margin. A mini-notation node whose inline form would push the
+/// current line past this is broken across indented lines instead (one `<...>`
+/// element / one `&` lane per line) — so a long imported take reads as a column
+/// of bars rather than one unscannable line. Leaves are never split.
+const MAX_WIDTH: usize = 88;
 
 // Precedence ladder, loosest → tightest (mirrors `design/nemus/grammar.md §4`).
 const P_LAMBDA: u8 = 0;
@@ -188,7 +198,7 @@ fn write_expr_inner(out: &mut String, e: &Expr, indent: usize) {
             out.push_str(" => ");
             write_expr(out, body, P_LAMBDA, false, indent);
         }
-        ExprKind::Island(isl) => write_island(out, isl),
+        ExprKind::Island(isl) => write_island(out, isl, indent),
     }
 }
 
@@ -235,14 +245,142 @@ fn write_args_inline(out: &mut String, args: &[Expr], indent: usize) {
 
 // ── Islands (mini-notation) ───────────────────────────────────────────────────
 
-fn write_island(out: &mut String, isl: &Island) {
+fn write_island(out: &mut String, isl: &Island, indent: usize) {
     out.push_str(match isl.kind {
         IslandKind::Sound => "s",
         IslandKind::Note => "n",
     });
     out.push('(');
-    write_parallel(out, &isl.root);
+    write_parallel_w(out, &isl.root, indent);
     out.push(')');
+}
+
+// ── Width-aware wrapping ────────────────────────────────────────────────────────
+//
+// Each `_w` writer first renders its node *inline* (reusing the plain writers
+// below) and, if it still fits before the [`MAX_WIDTH`] margin at the current
+// column, emits that verbatim. Only when it would overflow does it break — at the
+// one structural seam that reads well: `<...>`/`[...]` put one element per line,
+// `a & b` put one lane per line. The plain writers stay the single source of
+// truth for the inline form (so wrapped and inline output can't drift apart).
+
+/// Current column: bytes since the last newline (island tokens are ASCII, so
+/// byte length tracks visible width).
+fn cur_col(out: &str) -> usize {
+    match out.rfind('\n') {
+        Some(i) => out.len() - i - 1,
+        None => out.len(),
+    }
+}
+
+/// True if `m`'s inline form fits before the margin at the current column.
+fn fits_inline(out: &str, m: &Mini, render: fn(&mut String, &Mini)) -> Option<String> {
+    let mut inline = String::new();
+    render(&mut inline, m);
+    if !inline.contains('\n') && cur_col(out) + inline.len() <= MAX_WIDTH {
+        Some(inline)
+    } else {
+        None
+    }
+}
+
+fn write_parallel_w(out: &mut String, m: &Mini, indent: usize) {
+    if let Some(inline) = fits_inline(out, m, write_parallel) {
+        out.push_str(&inline);
+        return;
+    }
+    match &m.kind {
+        MiniKind::Parallel(lanes) => {
+            for (i, lane) in lanes.iter().enumerate() {
+                if i > 0 {
+                    out.push('\n');
+                    push_indent(out, indent);
+                    out.push_str("& ");
+                }
+                write_sequence_w(out, lane, indent + 1);
+            }
+        }
+        _ => write_sequence_w(out, m, indent),
+    }
+}
+
+fn write_sequence_w(out: &mut String, m: &Mini, indent: usize) {
+    if let Some(inline) = fits_inline(out, m, write_sequence) {
+        out.push_str(&inline);
+        return;
+    }
+    match &m.kind {
+        MiniKind::Sequence(items) => {
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push('\n');
+                    push_indent(out, indent);
+                }
+                write_term_w(out, item, indent);
+            }
+        }
+        _ => write_term_w(out, m, indent),
+    }
+}
+
+fn write_term_w(out: &mut String, m: &Mini, indent: usize) {
+    if let Some(inline) = fits_inline(out, m, write_term) {
+        out.push_str(&inline);
+        return;
+    }
+    match &m.kind {
+        MiniKind::Term { atom, postfixes } => {
+            write_atom_w(out, atom, indent);
+            for pf in postfixes {
+                write_postfix(out, pf);
+            }
+        }
+        _ => write_atom_w(out, m, indent),
+    }
+}
+
+fn write_atom_w(out: &mut String, m: &Mini, indent: usize) {
+    if let Some(inline) = fits_inline(out, m, write_atom) {
+        out.push_str(&inline);
+        return;
+    }
+    match &m.kind {
+        MiniKind::Group(inner) => {
+            out.push('[');
+            write_parallel_w(out, inner, indent + 1);
+            out.push(']');
+        }
+        MiniKind::Alt(inner) => {
+            out.push_str("<\n");
+            push_indent(out, indent + 1);
+            write_parallel_w(out, inner, indent + 1);
+            out.push('\n');
+            push_indent(out, indent);
+            out.push('>');
+        }
+        MiniKind::Poly { body, steps } => {
+            out.push('{');
+            write_parallel_w(out, body, indent + 1);
+            out.push('}');
+            if let Some(n) = steps {
+                out.push('%');
+                out.push_str(&n.to_string());
+            }
+        }
+        // Defensive (a composite where an atom was expected): bracket then wrap.
+        MiniKind::Parallel(_) => {
+            out.push('[');
+            write_parallel_w(out, m, indent + 1);
+            out.push(']');
+        }
+        MiniKind::Sequence(_) => {
+            out.push('[');
+            write_sequence_w(out, m, indent + 1);
+            out.push(']');
+        }
+        // Leaves and the like never overflow on their own.
+        _ => write_atom(out, m),
+    }
 }
 
 /// `a & b & c` — the loosest island layer. Brackets/angles are *not* added here:

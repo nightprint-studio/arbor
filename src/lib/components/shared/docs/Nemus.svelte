@@ -145,6 +145,15 @@ arrange(
   <li>Export to WAV with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> — an offline render that runs as a background job. The export dialog renders the arrangement's natural loop period once by default; set <em>Loops</em> to repeat it, and the dialog shows the resulting cycles and a live duration · size estimate before you pick a file (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> to continue).</li>
 </ol>
 
+<h2>Importing audio &amp; MIDI</h2>
+<p>The <strong>Import</strong> button on the arrangement toolbar (also <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd>, or the Command Palette) brings outside material in:</p>
+<ul class="prop-list">
+  <li><strong>A MIDI file</strong> (<code>.mid</code>) opens directly as an editable <code>.nemus</code> file — a deterministic, faithful conversion: notes are quantised to a grid, a key/scale is detected (so the result uses scale degrees and <code>.scale(...)</code> where it fits, including non-Western modes like <em>hirajoshi</em> and <em>in-sen</em>), chords are recognised into symbols, and repeating bars collapse into a loop. A long take isn't dumped as one giant pattern: the timeline is split into short phrases, repeated sections (a chorus, a refrain) are factored into reusable <code>let</code> variables, and the file plays them back through an <code>arrange(section(…))</code> structure — so the chorus is written once and every section is easy to find and edit.</li>
+  <li><strong>Audio</strong> (WAV and common formats) is first <em>transcribed</em> to MIDI, then offered two ways: <em>Import as .nemus</em> (the transient MIDI never touches disk — you get an editable file straight away) or <em>Convert to MIDI file</em> (saves a <code>.mid</code> you can use elsewhere). Transcription is a background job with a progress bar in <strong>Downloads &amp; Exports</strong>.</li>
+</ul>
+<p>The built-in transcriber is fast and approximate (a monophonic melody plus a drum part) — a starting point you refine in the editor. The result opens in its own tab, ready to play.</p>
+<p>For much better results on real, polyphonic audio, download the <strong>basic-pitch</strong> model from <strong>Settings → Transcription models</strong> (or the Command Palette: <em>Download polyphonic model</em>) — once present, audio import automatically uses it (polyphonic, chord-aware) instead of the DSP fallback. An optional <strong>Demucs</strong> model adds stem separation — once installed it engages automatically: the mix is split so drums are read from the isolated kit and pitch from a drum-free blend, giving noticeably cleaner notes. Models download on demand (the runtime is built in) and progress shows in <strong>Downloads &amp; Exports</strong>. Inference runs on the GPU (via DirectML) when one is available, falling back to the CPU otherwise.</p>
+
 <h2>Command Palette</h2>
 <p>The nemus window has its own Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>) listing every window action — transport, project operations, panel toggles, settings. Type to filter, <kbd>↑</kbd> / <kbd>↓</kbd> to move, <kbd>Enter</kbd> to run.</p>
 
@@ -163,6 +172,7 @@ arrange(
     <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration (incl. cross-file)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (editor focused) · else search the Console / Problems</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Import audio / MIDI as <code>.nemus</code></td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></td><td>Commit mixer overrides to source</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Toggle Zen mode</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd> / <kbd>F1</kbd></td><td>Settings / keyboard shortcuts</td></tr>

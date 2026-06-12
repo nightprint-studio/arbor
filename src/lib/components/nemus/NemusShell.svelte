@@ -41,9 +41,11 @@
   import { nemusEngine } from './stores/engine.svelte';
   import { configStore } from './stores/config.svelte';
   import { packsStore } from './stores/packs.svelte';
+  import { modelsStore } from './stores/models.svelte';
   import { workspaceStore } from './stores/workspace.svelte';
   import { projectStore } from './stores/project.svelte';
   import { projectActions } from './stores/project-actions.svelte';
+  import { importActions } from './stores/import-actions.svelte';
   import { mixerStore } from './stores/mixer.svelte';
   import { referenceStore } from './stores/reference.svelte';
   import { soundsStore } from './stores/sounds.svelte';
@@ -51,6 +53,7 @@
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import NemusProjectActions from './shell/NemusProjectActions.svelte';
+  import NemusImportActions from './shell/NemusImportActions.svelte';
   import NemusSettingsModal from './shell/NemusSettingsModal.svelte';
   import NemusShortcutsModal from './shell/NemusShortcutsModal.svelte';
   import NemusCommandPalette from './shell/NemusCommandPalette.svelte';
@@ -63,13 +66,17 @@
 
   let unEngine: UnlistenFn | null = null;
   let unPacks:  UnlistenFn | null = null;
+  let unModels: UnlistenFn | null = null;
 
   onMount(async () => {
-    // Live engine + sample-pack streams (each nemus window owns its listeners).
+    // Live engine + sample-pack + transcription-model streams (each nemus window
+    // owns its listeners).
     unEngine = await nemusEngine.subscribe();
     unPacks  = await packsStore.subscribe();
+    unModels = await modelsStore.subscribe();
     void configStore.loadConfig();
     void packsStore.refresh();
+    void modelsStore.refresh();
     // The DSL reference catalogue (autocomplete + hover + Docs panel). Static —
     // loaded once; failure leaves the editor working, just without language hints.
     void referenceStore.load();
@@ -87,6 +94,7 @@
   onDestroy(() => {
     unEngine?.();
     unPacks?.();
+    unModels?.();
   });
 
   // Mirror layout changes to the persisted window state (debounced in the
@@ -144,6 +152,7 @@
       else if (b.id === 'open_file') projectActions.openFile();
       else if (b.id === 'save') projectActions.save();
       else if (b.id === 'render_wav') projectActions.exportWav();
+      else if (b.id === 'import_audio') importActions.start();
       else if (b.id === 'commit_overrides') mixerStore.commitAll();
       return;
     }
@@ -265,6 +274,10 @@
 <!-- Project/file pickers (New / Open / Export) — one mount for the whole window;
      menu, titlebar, and keyboard shortcuts all drive these via projectActions. -->
 <NemusProjectActions />
+
+<!-- Audio/MIDI import dialogs — one mount; driven by importActions from the
+     waveform toolbar and the command palette. -->
+<NemusImportActions />
 
 <!-- Window overlays — one mount each; opened from the gear menu, the command
      palette, and the keyboard shortcuts (all via nemusStore). -->

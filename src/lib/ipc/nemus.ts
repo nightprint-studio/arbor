@@ -520,3 +520,81 @@ export interface NemusDslEntry {
 export function nemusLangReference(): Promise<NemusDslEntry[]> {
   return invoke('nemus_lang_reference');
 }
+
+// ── Audio / MIDI import (WAV → MIDI, MIDI → .nemus) ───────────────────────────
+
+/** Options for the import commands (all optional; the backend fills defaults). */
+export interface NemusImportOpts {
+  /** Separate stems before pitch detection (ML backends only). */
+  splitStems?: boolean;
+  /** Tempo (BPM) stamped into the generated MIDI. */
+  tempoBpm?: number;
+  /** Detect a pitched part. */
+  detectPitch?: boolean;
+  /** Detect a drum part. */
+  detectDrums?: boolean;
+  /** Quantisation grid (subdivisions per cycle); `0` keeps raw timing. */
+  grid?: number;
+  /** Beats per cycle (bar length). */
+  beatsPerCycle?: number;
+}
+
+/**
+ * D4 — transcribe a WAV and write a `.mid` to `output`. Returns the job id;
+ * progress/completion arrive on `arbor://job-progress` / `job-done`.
+ */
+export function nemusConvertWavToMidi(
+  input: string,
+  output: string,
+  opId?: string,
+  opts?: NemusImportOpts,
+): Promise<string> {
+  return invoke('nemus_convert_wav_to_midi', { input, output, opId: opId ?? null, opts: opts ?? null });
+}
+
+/**
+ * D3 — transcribe a WAV and return idiomatic `.nemus` text (the MIDI never
+ * touches disk). `opId` correlates the backend progress/done events with a
+ * client-side transfer so the UI can show a live bar; open the result in a tab.
+ */
+export function nemusImportAudioAsNemus(
+  input: string,
+  opId?: string,
+  opts?: NemusImportOpts,
+): Promise<string> {
+  return invoke('nemus_import_audio_as_nemus', { input, opId: opId ?? null, opts: opts ?? null });
+}
+
+/** D5 — convert an existing `.mid` to idiomatic `.nemus` text (no transcription). */
+export function nemusImportMidiAsNemus(input: string, opts?: NemusImportOpts): Promise<string> {
+  return invoke('nemus_import_midi_as_nemus', { input, opts: opts ?? null });
+}
+
+// ── ONNX transcription models (downloaded on-demand) ──────────────────────────
+
+/** State of one downloadable transcription model (mirrors `nemus::models`). */
+export interface NemusModelStatus {
+  id: string;
+  name: string;
+  description: string;
+  approx_bytes: number;
+  installed: boolean;
+  path: string;
+  size_bytes: number;
+}
+
+/** List every transcription model with its install state. */
+export function nemusModels(): Promise<NemusModelStatus[]> {
+  return invoke('nemus_models');
+}
+
+/** Start a background download of model `id` (returns the job id; progress on
+ *  `arbor://job-progress` / `job-done`). */
+export function nemusDownloadModel(id: string): Promise<string> {
+  return invoke('nemus_download_model', { id });
+}
+
+/** Delete a downloaded model. */
+export function nemusDeleteModel(id: string): Promise<void> {
+  return invoke('nemus_delete_model', { id });
+}

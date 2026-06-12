@@ -6,7 +6,7 @@
 //! mini-notation islands in [`island`]. Totality (no recursion) is enforced both
 //! statically ([`totality`]) and by a runtime depth guard.
 
-pub(crate) mod chords;
+pub mod chords;
 pub(crate) mod combinators;
 pub(crate) mod island;
 pub(crate) mod totality;

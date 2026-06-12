@@ -324,8 +324,9 @@ impl SuperSaw {
         SuperSaw {
             oscs,
             // Saws are uncorrelated once detuned, so energy grows ~√N; normalise
-            // by that (a touch of extra headroom) to keep the sum bounded.
-            norm: 0.8 / (SUPERSAW_VOICES as f32).sqrt(),
+            // by that, with generous headroom so transient phase alignments stay
+            // bounded (the raw √N-normalised sum can still spike well above 1).
+            norm: 0.45 / (SUPERSAW_VOICES as f32).sqrt(),
         }
     }
 
@@ -405,7 +406,7 @@ impl NoiseGen {
                 // a DC rail; the gain brings the quiet result back to unit range.
                 let w = self.white();
                 self.brown = (self.brown + 0.02 * w).clamp(-1.0, 1.0);
-                self.brown * 3.5
+                self.brown * 1.8
             }
             NoiseColor::Crackle => {
                 // Sparse impulses: most samples are silent, an occasional spike is

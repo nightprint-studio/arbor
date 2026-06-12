@@ -11,8 +11,10 @@ use thiserror::Error;
 
 use arbor_nemus_audio::prelude::AudioError;
 use arbor_nemus_engine::prelude::EngineError;
+use arbor_nemus_import::prelude::ImportError;
 use arbor_nemus_lang::prelude::LangError;
 use arbor_nemus_pattern::prelude::PatternError;
+use arbor_nemus_transcribe::prelude::TranscribeError;
 
 /// Any failure surfaced through the nemus facade.
 ///
@@ -34,6 +36,12 @@ pub enum NemusError {
     /// `AudioError`; a bare `AudioError` maps to [`NemusError::Audio`] instead.
     #[error("engine error: {0}")]
     Engine(#[from] EngineError),
+    /// A deterministic MIDI → `.nemus` import failure (bad MIDI, no notes).
+    #[error("import error: {0}")]
+    Import(#[from] ImportError),
+    /// A WAV → MIDI transcription failure (decode, no content, backend).
+    #[error("transcribe error: {0}")]
+    Transcribe(#[from] TranscribeError),
 }
 
 /// The facade's result alias — the single `Result` the prelude exposes in place

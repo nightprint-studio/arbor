@@ -446,8 +446,12 @@ mod tests {
     fn tempo_map_reanchors_at_segment_boundaries() {
         let mut tr = Transport::new(RecordingSink::new(SR), 1.0);
         tr.set_tracks(drum_tracks("d", "bd", 1));
-        // 1 cps for cycles 0–1, then 2 cps for cycles 2–3, looping every 4 cycles.
-        tr.set_tempo_map(TempoMap::from_segments(&[(2, 1.0), (2, 2.0)]));
+        // 1 cps for cycles 0–1, then 2 cps for cycles 2–7 (period 8). The high-tempo
+        // segment is long enough that the swept look-ahead window stays inside it —
+        // otherwise the map's loop wrap at the period boundary would (correctly)
+        // re-anchor back to 1 cps, which is a separate behaviour from the
+        // segment-boundary doubling this test pins down.
+        tr.set_tempo_map(TempoMap::from_segments(&[(2, 1.0), (6, 2.0)]));
         tr.play();
         // Sweep the clock across the cycle-2 boundary (frame 96_000 at cps=1).
         for now in [0u64, 48_000, 96_000, 140_000] {
