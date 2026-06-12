@@ -27,6 +27,7 @@ import {
 import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { lintGutter, lintKeymap, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
+import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 
 import { laneColor } from '../palette';
 import type { GroveDiagnostic } from '$lib/ipc/grove';
@@ -251,6 +252,35 @@ export const groveTheme = EditorView.theme(
     },
     '.cm-tooltip.cm-tooltip-lint': { padding: '2px 6px' },
 
+    // ── Search panel (Ctrl+F) — themed to match Arbor's inputs/buttons ──
+    '.cm-panels': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' },
+    '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--border-subtle)' },
+    '.cm-panel.cm-search': {
+      padding: '6px 8px', fontFamily: 'var(--font-ui-sans)', fontSize: '12px',
+      display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px',
+    },
+    '.cm-panel.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: 'var(--text-muted)' },
+    '.cm-panel.cm-search input, .cm-panel.cm-search input[type=text]': {
+      backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)',
+      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
+      padding: '3px 6px', fontFamily: 'var(--font-code)', fontSize: '12px', outline: 'none',
+    },
+    '.cm-panel.cm-search input:focus': { borderColor: 'var(--border-focus, var(--accent))' },
+    '.cm-panel.cm-search button, .cm-panel.cm-search .cm-button': {
+      backgroundColor: 'var(--bg-input)', color: 'var(--text-secondary)',
+      border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
+      backgroundImage: 'none', padding: '3px 8px', cursor: 'pointer', fontSize: '11px',
+    },
+    '.cm-panel.cm-search button:hover, .cm-panel.cm-search .cm-button:hover': {
+      backgroundColor: 'var(--bg-hover)', color: 'var(--text-primary)',
+    },
+    '.cm-panel.cm-search .cm-button:active': { backgroundImage: 'none' },
+    '.cm-panel.cm-search [name=close]': { color: 'var(--text-muted)', fontSize: '16px' },
+    '.cm-panel.cm-search [name=close]:hover': { color: 'var(--text-primary)' },
+    '.cm-searchMatch': { backgroundColor: 'color-mix(in srgb, var(--warning) 28%, transparent)', borderRadius: '2px' },
+    '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--accent) 45%, transparent)' },
+    '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--accent) 18%, transparent)' },
+
     // ── Token palette ──
     //
     // Deliberate, hierarchical colouring rather than one-accent-per-token:
@@ -349,11 +379,18 @@ export interface GroveExtensionsOptions {
   intel?: GroveIntelSource;
 }
 
+/** The search keymap minus its open binding: the GroveShell owns `Ctrl+F` so it
+ *  can route it to the editor (when the pane is focused) or the Console search
+ *  (otherwise). The in-panel navigation (next / previous / replace / close) stays
+ *  so the search panel is fully keyboard-driven once opened. */
+const groveSearchKeymap = searchKeymap.filter((b) => b.key !== 'Mod-f');
+
 /**
- * The full grove editor extension set. Search/find keymaps are intentionally
- * omitted so `Ctrl+F` / `Ctrl+G` bubble up to the GroveShell (Console search /
- * go-to-line) instead of CodeMirror's own find — keeping the pane-scoped
- * shortcuts authoritative.
+ * The full grove editor extension set. CodeMirror's search panel IS wired (so
+ * `Ctrl+F` searches the buffer when the editor is focused), but its *open*
+ * binding is removed from the keymap — the GroveShell decides whether `Ctrl+F`
+ * opens the editor search (pane focused) or the Console search (otherwise) and
+ * calls `openSearch()` imperatively, keeping one authoritative router.
  */
 export function createGroveExtensions(opts: GroveExtensionsOptions = {}): Extension {
   const exts: Extension[] = [
@@ -365,6 +402,8 @@ export function createGroveExtensions(opts: GroveExtensionsOptions = {}): Extens
     bracketMatching(),
     highlightActiveLine(),
     highlightActiveLineGutter(),
+    highlightSelectionMatches(),
+    search({ top: true }),
     groveHighlight,
     activeHapsField,
     lintGutter(),
@@ -377,7 +416,7 @@ export function createGroveExtensions(opts: GroveExtensionsOptions = {}): Extens
     exts.push(groveLanguageIntel(opts.intel));
   }
   exts.push(
-    keymap.of([...defaultKeymap, ...historyKeymap, ...lintKeymap, indentWithTab]),
+    keymap.of([...defaultKeymap, ...historyKeymap, ...lintKeymap, ...groveSearchKeymap, indentWithTab]),
     EditorState.readOnly.of(!!opts.readOnly),
   );
   if (opts.onGoto) {

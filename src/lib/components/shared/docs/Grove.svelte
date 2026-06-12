@@ -40,7 +40,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Sound bank</div>
-    <div class="fc-desc">The instruments the engine can resolve — the bare oscillators (<code>sine</code>, <code>sawtooth</code>, <code>square</code>, <code>triangle</code>, <code>pulse</code> + <code>saw</code> / <code>tri</code> / <code>sqr</code> / <code>sin</code> aliases), the detuned <code>supersaw</code>, the noise colours (<code>white</code>, <code>pink</code>, <code>brown</code>, <code>crackle</code>), the <code>synth.*</code> presets, and the samplers from any installed <strong>sample bank</strong>. Download / manage the banks (VSCO 2, Dirt-Samples, drum machines, General MIDI) from here.</div>
+    <div class="fc-desc">The instruments the engine can resolve — the bare oscillators (<code>sine</code>, <code>sawtooth</code>, <code>square</code>, <code>triangle</code>, <code>pulse</code> + <code>saw</code> / <code>tri</code> / <code>sqr</code> / <code>sin</code> aliases), the detuned <code>supersaw</code>, the noise colours (<code>white</code>, <code>pink</code>, <code>brown</code>, <code>crackle</code>), the <code>synth.*</code> presets, and the samplers from any installed <strong>sample bank</strong>. Click a voice to copy its name; open its info for a description and articulations, and filter the list by name. Download / manage the banks (VSCO 2, Dirt-Samples, drum machines, General MIDI) — each card shows a description and download-size estimate — from here.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Outline</div>
@@ -161,7 +161,7 @@ arrange(
     <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active file</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>G</kbd></td><td>Go to line (editor)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration (incl. cross-file)</td></tr>
-    <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Search the Console / Problems</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (editor focused) · else search the Console / Problems</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></td><td>Commit mixer overrides to source</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Toggle Zen mode</td></tr>
@@ -180,7 +180,7 @@ arrange(
 </ul>
 
 <h2>Sample banks</h2>
-<p>The synth voices are always available. <strong>Sample banks</strong> add sampled instruments, downloaded on demand from the <strong>Sound bank</strong> panel — each installs on a background job with a progress bar you can cancel, and its instruments appear once extraction finishes:</p>
+<p>The synth voices are always available. <strong>Sample banks</strong> add sampled instruments, downloaded on demand from the <strong>Sound bank</strong> panel — each card shows what the bank contains and an estimated download size, installs on a background job with a progress bar you can cancel, and its instruments appear once extraction finishes:</p>
 <ul class="prop-list">
   <li><strong>VSCO 2</strong> — orchestral samplers (strings, brass, winds, percussion), each exposing articulations for <code>.art("…")</code>.</li>
   <li><strong>Dirt-Samples</strong> — the Tidal/Strudel sample set (<code>bd</code>, <code>sd</code>, <code>hh</code>, <code>casio</code>, <code>jazz</code>, …).</li>
@@ -188,4 +188,5 @@ arrange(
   <li><strong>General MIDI</strong> — the 128 GM instruments from a soundfont, converted to samplers on install (<code>gm_acoustic_grand_piano</code>, <code>gm_violin</code>, … and <code>gm_drums</code>).</li>
 </ul>
 <p>A sound that ships several samples exposes <strong>variants</strong>: <code>s("bd:3")</code> plays the fourth; with no index they round-robin per onset so repeats vary.</p>
+<p>Bank downloads and WAV exports also collect in the <strong>Downloads &amp; Exports</strong> overlay — a badge always present in the footer that opens a list of every in-flight (and just-finished) transfer, each with its own live progress bar. A finished transfer offers <strong>Reveal in file explorer</strong> (the built-in explorer or your OS file manager, per <em>Settings → File Explorer</em>).</p>
 <p>A <code>.inst("…")</code> or <code>s("…")</code> name the engine can't resolve to a built-in synth or an installed instrument is underlined as an <strong>error</strong> in the editor, so a typo surfaces immediately instead of silently playing a fallback voice.</p>

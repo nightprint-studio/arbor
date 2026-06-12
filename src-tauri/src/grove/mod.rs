@@ -27,6 +27,7 @@ pub mod project;
 pub mod query;
 pub mod reference;
 mod render;
+mod sound_catalog;
 pub mod sounds;
 pub mod state;
 mod validate;

@@ -240,7 +240,7 @@
   /* ── Run cluster ── */
   /* IntelliJ leaves a clear gap before the layout toggles / window controls —
      don't let the transport sit flush against the right edge. */
-  .gtb-run-cluster { display: flex; align-items: center; gap: 2px; height: 100%; padding-right: 14px; }
+  .gtb-run-cluster { display: flex; align-items: center; gap: 2px; height: 100%; padding-right: 80px; }
   .gtb-run, .gtb-run-icon {
     display: flex; align-items: center; justify-content: center;
     width: 30px; height: 28px;

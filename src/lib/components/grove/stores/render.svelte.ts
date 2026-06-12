@@ -10,6 +10,7 @@
  */
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
 
 /**
  * Default number of times the offline bounce repeats the arrangement's natural
@@ -78,6 +79,12 @@ interface JobDone {
   error: string | null;
 }
 
+interface JobProgress {
+  job_id: string;
+  /** Whole-percent completion, 0..100. */
+  pct: number;
+}
+
 /** Last path segment (forward- or back-slash). */
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -90,15 +97,26 @@ function createRenderStore() {
   let error  = $state<string | null>(null);
 
   let unlisten: UnlistenFn | null = null;
+  let unlistenProgress: UnlistenFn | null = null;
   let clearTimer: ReturnType<typeof setTimeout> | null = null;
+  // The shared transfers-overlay entry id for the in-flight export (the output
+  // path, unique per render); null when idle.
+  let transferId: string | null = null;
 
   function disarm() {
     if (unlisten) { unlisten(); unlisten = null; }
+    if (unlistenProgress) { unlistenProgress(); unlistenProgress = null; }
   }
   function settle(s: RenderStatus, err?: string) {
     disarm();
     status = s;
     error = err ?? null;
+    // Mirror the terminal state into the shared transfers overlay.
+    if (transferId) {
+      if (s === 'done') transfersStore.finish(transferId);
+      else if (s === 'failed') transfersStore.fail(transferId, err);
+      transferId = null;
+    }
     // Auto-clear the terminal badge so the button returns to its idle icon.
     if (clearTimer) clearTimeout(clearTimer);
     clearTimer = setTimeout(() => {
@@ -122,13 +140,27 @@ function createRenderStore() {
       status = 'rendering';
       file = basename(outPath);
       error = null;
+      // Surface the export in the shared transfers overlay, with a live percent
+      // streamed from the backend render job (`arbor://job-progress`). Carries the
+      // output path so the overlay can reveal the finished WAV in the explorer.
+      transferId = outPath;
+      transfersStore.start({
+        id: outPath, kind: 'export', label: file, sublabel: 'Rendering…', progress: 0, path: outPath,
+      });
 
       let jobId: string | null = null;
       const buffered: JobDone[] = [];
+      let bufferedPct: number | null = null;
       unlisten = await listen<JobDone>('arbor://job-done', (e) => {
         if (jobId == null) { buffered.push(e.payload); return; }
         if (e.payload.job_id === jobId) {
           settle(e.payload.success ? 'done' : 'failed', e.payload.error ?? undefined);
+        }
+      });
+      unlistenProgress = await listen<JobProgress>('arbor://job-progress', (e) => {
+        if (jobId == null) { bufferedPct = e.payload.pct; return; }
+        if (e.payload.job_id === jobId && transferId) {
+          transfersStore.update(transferId, { progress: e.payload.pct });
         }
       });
 
@@ -139,6 +171,7 @@ function createRenderStore() {
         return;
       }
       // Drain anything that landed before the id was known.
+      if (bufferedPct != null && transferId) transfersStore.update(transferId, { progress: bufferedPct });
       const hit = buffered.find((p) => p.job_id === jobId);
       if (hit) settle(hit.success ? 'done' : 'failed', hit.error ?? undefined);
     },

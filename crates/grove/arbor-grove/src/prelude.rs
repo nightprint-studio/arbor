@@ -54,6 +54,7 @@ pub use arbor_grove_audio::prelude::{
 // Clock, the pure scheduling core, the real-time transport, and the offline
 // render driver. `Result` omitted; `EngineError` kept by name.
 pub use arbor_grove_engine::prelude::{
-    delay_config_for, render_offline, schedule_span, voice_event_from_hap, BitDepth, Epoch,
-    EngineError, RenderConfig, Transport, DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS, LOOKAHEAD_MS,
+    delay_config_for, render_offline, render_offline_with_progress, schedule_span,
+    voice_event_from_hap, BitDepth, Epoch, EngineError, RenderConfig, RenderProgress, Transport,
+    DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS, LOOKAHEAD_MS,
 };

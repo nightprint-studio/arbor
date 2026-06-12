@@ -14,6 +14,7 @@
   import { EditorState } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
   import { setDiagnostics } from '@codemirror/lint';
+  import { openSearchPanel } from '@codemirror/search';
 
   import { createGroveExtensions, setActiveHaps, toActiveHapMarks, toCmDiagnostics, getGroveTree }
     from './grove-cm';
@@ -129,6 +130,13 @@
 
   // ── Imperative API ──────────────────────────────────────────────────────────
   export function focus() { view?.focus(); }
+
+  /** Open CodeMirror's search panel and focus its query field (routed here from
+   *  the GroveShell's Ctrl+F when the editor pane has focus). */
+  export function openSearch() {
+    if (!view) return;
+    openSearchPanel(view);
+  }
 
   export function scrollToOffset(offset: number, select = false) {
     if (!view) return;

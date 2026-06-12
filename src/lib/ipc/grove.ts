@@ -7,8 +7,11 @@
  * (the Rust wire shape is authoritative; do not camelCase the payloads).
  *
  * - Commands: `grove_eval` / `grove_transport` / `grove_render` / sample-pack
- *   list + download / get + set config. Command argument keys are snake_case to
- *   match the Rust parameter names exactly.
+ *   list + download / get + set config. Command argument keys are **camelCase**:
+ *   Tauri maps a camelCase invoke key to the snake_case Rust parameter (e.g.
+ *   `packId` → `pack_id`), like the rest of the app's IPC. (Distinct from the
+ *   *event payloads* above, which stay snake_case — those are serde structs read
+ *   field-for-field, not invoke arguments.)
  * - Events (grove-window scoped): `grove:diagnostics` / `active_haps` / `meters`
  *   / `transport` / `log` / `pack_progress` / `audio_error`. The audio thread
  *   throttles `transport`/`meters` to ~30 fps and emits `active_haps` only when
@@ -124,6 +127,10 @@ export interface GrovePack {
   id: string;
   /** Human label for the UI. */
   name: string;
+  /** One-line description of the pack's contents. */
+  description: string;
+  /** Rough download size in bytes, for a pre-install estimate (`~N MB`). */
+  approx_bytes: number;
   installed: boolean;
   path: string;
   size_bytes: number;
@@ -171,7 +178,7 @@ export type GroveTransportAction = 'play' | 'stop' | 'seek' | 'set_cps';
  * Does **not** open the audio device — that happens on the first `play`.
  */
 export function groveEval(source: string, projectDir?: string): Promise<GroveDiagnostics> {
-  return invoke('grove_eval', { source, project_dir: projectDir ?? null });
+  return invoke('grove_eval', { source, projectDir: projectDir ?? null });
 }
 
 /** Low-level transport command. Prefer the named helpers below. */
@@ -209,7 +216,7 @@ export function groveRender(
   opts: GroveRenderOpts,
   projectDir?: string,
 ): Promise<string> {
-  return invoke('grove_render', { source, project_dir: projectDir ?? null, path, opts });
+  return invoke('grove_render', { source, projectDir: projectDir ?? null, path, opts });
 }
 
 /** List every downloadable sample pack with its install status. */
@@ -219,7 +226,7 @@ export function grovePacks(): Promise<GrovePack[]> {
 
 /** Start downloading + installing a sample pack by id (job-tracked). Returns job id. */
 export function grovePackDownload(packId: string): Promise<string> {
-  return invoke('grove_pack_download', { pack_id: packId });
+  return invoke('grove_pack_download', { packId });
 }
 
 /** Read the grove config (`[grove]` in the global config.toml). */
@@ -349,6 +356,9 @@ export interface GroveInstrument {
   /** Named articulations the instrument exposes (`.art("…")`), sorted; empty for
    *  synth / sample voices. */
   articulations: string[];
+  /** A short one-line description for the sound bank, or null when the catalogue
+   *  has no entry for this voice. */
+  description: string | null;
 }
 
 /** `grove_sounds` result. Always includes the built-in default synth. */

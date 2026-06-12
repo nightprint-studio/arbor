@@ -17,6 +17,7 @@
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { explorerStore } from '$lib/stores/explorer.svelte';
   import GroveShell from '$lib/components/grove/GroveShell.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
@@ -27,6 +28,9 @@
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
+    // So "Reveal in file explorer" on a finished transfer honours the user's
+    // built-in-vs-OS choice (Settings → File Explorer) in this window too.
+    void explorerStore.loadConfig();
   });
 </script>
 
@@ -36,7 +40,7 @@
      <FeedbackHost> below. -->
 <GroveShell>
   {#snippet footerExtra()}
-    <FeedbackStatusButtons />
+    <FeedbackStatusButtons transfers />
   {/snippet}
 </GroveShell>
 

@@ -24,6 +24,9 @@ pub struct Instrument {
     /// Named articulations the instrument exposes (`.art("…")`), sorted; empty
     /// for synth / sample voices.
     pub articulations: Vec<String>,
+    /// A short one-line description for the sound bank (authored in
+    /// [`super::sound_catalog`]); `None` when the catalogue has no match.
+    pub description: Option<&'static str>,
 }
 
 /// The `grove_sounds` result. Always includes the built-in default synth.
@@ -46,6 +49,7 @@ pub async fn grove_sounds(state: State<'_, AppState>) -> Result<SoundList, AppEr
         .instruments_list()
         .into_iter()
         .map(|i| Instrument {
+            description: super::sound_catalog::describe(&i.name, i.kind),
             name: i.name,
             kind: kind_str(i.kind),
             articulations: i.articulations,
@@ -62,6 +66,7 @@ pub async fn grove_sounds(state: State<'_, AppState>) -> Result<SoundList, AppEr
                 name: "synth".to_string(),
                 kind: "synth",
                 articulations: Vec::new(),
+                description: super::sound_catalog::describe("synth", InstrumentKind::Synth),
             },
         );
     }

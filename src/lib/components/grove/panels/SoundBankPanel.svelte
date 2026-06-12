@@ -6,32 +6,46 @@
    *
    * Three sections: the built-in synth presets (always present), the resolved
    * sampler voices (filled once any pack is installed), and the **Sample banks**
-   * — one download card per pack (VSCO 2, Dirt-Samples, drum machines, …) with a
-   * job-tracked install + live progress bar (+ Cancel). Downloads are async — the
-   * UI never blocks.
+   * — one card per pack (VSCO 2, Dirt-Samples, drum machines, …) with a
+   * description, a download-size estimate, and a job-tracked install + live
+   * progress bar (+ Cancel). Downloads are async — the UI never blocks.
    *
-   * Imports only shared/ui (+ the tooltip action) + grove-local stores.
+   * Each voice row (`SoundBankItem`) copies its name on click and reveals an info
+   * panel with the catalogue description + articulations. A filter narrows the
+   * (potentially hundreds of) sampler voices by name.
+   *
+   * Imports only shared/ui (+ the tooltip action) + grove-local.
    */
-  import { Music4, Waves, Piano, Download, Check, RefreshCw, Boxes } from 'lucide-svelte';
+  import { Music4, Waves, Piano, Download, Check, RefreshCw, Boxes, HardDrive } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
-  import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
+  import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import ProgressBar from '$lib/components/shared/ui/ProgressBar.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import SoundBankItem from './SoundBankItem.svelte';
   import { soundsStore } from '../stores/sounds.svelte';
   import { packsStore } from '../stores/packs.svelte';
   import type { GroveInstrument, GrovePack } from '$lib/ipc/grove';
 
-  const synths   = $derived(soundsStore.synths);
-  const samplers = $derived(soundsStore.samplers);
+  let query = $state('');
+  const q = $derived(query.trim().toLowerCase());
+  function match(list: GroveInstrument[]): GroveInstrument[] {
+    return q ? list.filter((i) => i.name.toLowerCase().includes(q)) : list;
+  }
+  const synths   = $derived(match(soundsStore.synths));
+  const samplers = $derived(match(soundsStore.samplers));
+
   let openSynth   = $state(true);
-  // Samplers can run to the hundreds (Dirt-Samples), so start collapsed.
+  // Samplers can run to the hundreds (Dirt-Samples), so start collapsed — but a
+  // live filter implies the user is hunting a sampler, so auto-open while filtering.
   let openSampler = $state(false);
   let openBanks   = $state(true);
+  const showSynth   = $derived(openSynth || (!!q && synths.length > 0));
+  const showSampler = $derived(openSampler || (!!q && samplers.length > 0));
 
   // The pack subscription is owned by the GroveShell; here we just (re)read the
   // registry on mount and again whenever the pack set changes (an install adds
@@ -61,31 +75,24 @@
   }
 </script>
 
-{#snippet voiceRow(inst: GroveInstrument)}
-  <SidebarItem>
-    {#snippet icon()}
-      {#if inst.kind === 'synth'}<Waves size={13} />{:else}<Piano size={13} />{/if}
-    {/snippet}
-    <span class="bank-name">{inst.name}</span>
-  </SidebarItem>
-  {#if inst.articulations.length}
-    <div class="arts" use:tooltip={'Articulations — use .art("…") on this instrument'}>
-      {#each inst.articulations as a (a)}<span class="art-chip">{a}</span>{/each}
-    </div>
-  {/if}
-{/snippet}
-
 {#snippet packCard(pack: GrovePack)}
   {@const prog = packsStore.progressOf(pack.id)}
-  <div class="pack">
+  <div class="pack" class:installed={pack.installed}>
     <div class="pack-head">
       <span class="pack-name">{pack.name}</span>
       {#if pack.installed}
         <Badge variant="tone" tone="success" size="sm"><Check size={9} /> installed</Badge>
       {/if}
     </div>
+    {#if pack.description}
+      <p class="pack-desc">{pack.description}</p>
+    {/if}
     {#if pack.installed}
-      <span class="pack-meta">{pack.instrument_count} instruments · {formatBytes(pack.size_bytes)}</span>
+      <span class="pack-meta">
+        <Piano size={11} /> {pack.instrument_count} instruments
+        <span class="pack-dot">·</span>
+        <HardDrive size={11} /> {formatBytes(pack.size_bytes)} on disk
+      </span>
     {:else if packsStore.downloadingOf(pack.id)}
       <div class="pack-dl">
         <div class="pack-dl-head">
@@ -98,10 +105,15 @@
         <Button size="xs" variant="ghost" block onclick={() => packsStore.cancel(pack.id)}>Cancel</Button>
       </div>
     {:else}
-      <Button size="sm" variant="secondary" block onclick={() => packsStore.download(pack.id)}>
-        {#snippet iconStart()}<Download size={13} />{/snippet}
-        Download
-      </Button>
+      <div class="pack-foot">
+        <span class="pack-meta" use:tooltip={'Approximate download size'}>
+          <Download size={11} /> ~{formatBytes(pack.approx_bytes)}
+        </span>
+        <Button size="sm" variant="secondary" onclick={() => packsStore.download(pack.id)}>
+          {#snippet iconStart()}<Download size={13} />{/snippet}
+          Download
+        </Button>
+      </div>
     {/if}
   </div>
 {/snippet}
@@ -117,21 +129,26 @@
     <div class="loading"><Spinner block label="Loading sounds…" /></div>
   {:else}
     <div class="bank">
-      <SidebarSection label="Synth presets" bind:expanded={openSynth} badge={synths.length}>
+      <div class="bank-filter">
+        <SearchBar bind:query showRegex={false} showCounter={false}
+                   placeholder="Filter voices…" ariaLabel="Filter instruments" />
+      </div>
+
+      <SidebarSection label="Synth presets" expanded={showSynth} onToggle={() => openSynth = !openSynth} badge={synths.length}>
         {#snippet icon()}<Waves size={13} />{/snippet}
         {#if synths.length}
-          {#each synths as inst (inst.name)}{@render voiceRow(inst)}{/each}
+          {#each synths as inst (inst.name)}<SoundBankItem {inst} />{/each}
         {:else}
-          <EmptyState compact message="No synth presets resolved." />
+          <EmptyState compact message={q ? 'No synth presets match.' : 'No synth presets resolved.'} />
         {/if}
       </SidebarSection>
 
-      <SidebarSection label="Samplers" bind:expanded={openSampler} badge={samplers.length}>
+      <SidebarSection label="Samplers" expanded={showSampler} onToggle={() => openSampler = !openSampler} badge={samplers.length}>
         {#snippet icon()}<Piano size={13} />{/snippet}
         {#if samplers.length}
-          {#each samplers as inst (inst.name)}{@render voiceRow(inst)}{/each}
+          {#each samplers as inst (inst.name)}<SoundBankItem {inst} />{/each}
         {:else}
-          <EmptyState compact message="No sampler voices yet — install a sample bank below." />
+          <EmptyState compact message={q ? 'No sampler voices match.' : 'No sampler voices yet — install a sample bank below.'} />
         {/if}
       </SidebarSection>
 
@@ -147,25 +164,30 @@
 
 <style>
   .bank { padding: 4px 0; }
-  .bank-name { font-family: var(--font-code); font-size: 11.5px; }
-
-  /* Articulation chips under an SFZ voice (legato / staccato / …). */
-  .arts { display: flex; flex-wrap: wrap; gap: 3px; padding: 0 10px 5px 30px; }
-  .art-chip {
-    font-family: var(--font-code); font-size: 9px; line-height: 1.5;
-    padding: 0 5px; border-radius: var(--radius-sm);
-    color: var(--text-muted); background: var(--bg-overlay);
-    border: 1px solid var(--border-subtle);
-  }
+  .bank-filter { padding: 2px 10px 6px; }
 
   .loading { padding: 24px 12px; }
 
   /* Sample-bank download cards. */
   .banks { display: flex; flex-direction: column; gap: 8px; padding: 6px 10px 8px; }
-  .pack { display: flex; flex-direction: column; gap: 6px; }
+  .pack {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 9px 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+  }
+  .pack.installed { border-color: color-mix(in srgb, var(--success) 35%, var(--border-subtle)); }
   .pack-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .pack-name { font-size: var(--font-size-xs); font-weight: 600; color: var(--text-primary); }
-  .pack-meta { font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code); }
+  .pack-name { font-size: var(--font-size-sm); font-weight: 600; color: var(--text-primary); }
+  .pack-desc { margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
+  .pack-meta {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: var(--font-size-xs); color: var(--text-muted); font-family: var(--font-code);
+  }
+  .pack-meta :global(svg) { color: var(--text-disabled); }
+  .pack-dot { margin: 0 2px; }
+  .pack-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
   .pack-dl { display: flex; flex-direction: column; gap: 5px; }
   .pack-dl-head { display: flex; align-items: baseline; justify-content: space-between; }

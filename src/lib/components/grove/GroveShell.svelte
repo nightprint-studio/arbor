@@ -109,7 +109,7 @@
     }
   });
 
-  let editor = $state<{ openGoto: () => void; newFile: () => void } | null>(null);
+  let editor = $state<{ openGoto: () => void; newFile: () => void; openSearch: () => void } | null>(null);
   let editorEl = $state<HTMLElement | null>(null);
   let editorScoped = $state(true);
 
@@ -138,7 +138,7 @@
       else if (b.id === 'shortcuts') groveStore.openShortcuts();
       else if (b.id === 'settings') groveStore.openSettings();
       else if (b.id === 'zen') groveStore.toggleZen();
-      else if (b.id === 'find') groveStore.requestFind();
+      else if (b.id === 'find') { if (editorScoped) editor?.openSearch(); else groveStore.requestFind(); }
       else if (b.id === 'new_project') projectActions.newProject();
       else if (b.id === 'open_project') projectActions.openProject();
       else if (b.id === 'open_file') projectActions.openFile();

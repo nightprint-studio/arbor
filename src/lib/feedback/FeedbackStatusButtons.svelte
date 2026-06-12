@@ -10,21 +10,54 @@
    * grove-targeted ones). Renders three bare buttons so it drops directly into
    * a flex status row; the `spin` keyframe comes from app.css (global).
    */
-  import { Loader, Bell, Minimize2 } from 'lucide-svelte';
+  import { Loader, Bell, Minimize2, ArrowDownToLine } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
+  import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
   import { parkedModalsStore } from '$lib/stores/parked-modals.svelte';
 
-  /** Show the minimized-dialogs badge (main window only — grove has no parked
-   *  modals). */
-  let { parked = false }: { parked?: boolean } = $props();
+  let {
+    /** Show the minimized-dialogs badge (main window only — grove has no parked
+     *  modals). */
+    parked = false,
+    /** Always show the transfers (downloads/exports) badge, even when idle. Grove
+     *  pins it on; elsewhere the badge only appears while a transfer is live. */
+    transfers = false,
+  }: { parked?: boolean; transfers?: boolean } = $props();
 
   const runningJobs = $derived(jobsStore.runningCount);
   const totalJobs   = $derived(jobsStore.runningCount + jobsStore.finishedCount);
   const parkedCount = $derived(parkedModalsStore.count);
+
+  // Transfers (downloads / exports) — only surfaces when something is registered,
+  // so the badge stays invisible in windows that don't use it.
+  const activeTransfers = $derived(transfersStore.activeCount);
+  const showTransfers   = $derived(transfers || transfersStore.hasAny);
 </script>
+
+{#if showTransfers}
+  <!-- Transfers badge (downloads / exports with progress) -->
+  <button
+    class="transfer-badge"
+    class:transfer-badge-active={activeTransfers > 0}
+    use:tooltip={{
+      content: activeTransfers > 0
+        ? `${activeTransfers} transfer${activeTransfers > 1 ? 's' : ''} in progress`
+        : 'Downloads & exports',
+      description: 'Click to view',
+    }}
+    onclick={() => uiStore.toggleTransfersOverlay()}
+  >
+    {#if activeTransfers > 0}
+      <span class="transfer-spinner"><ArrowDownToLine size={12} /></span>
+      <span>{activeTransfers}</span>
+    {:else}
+      <ArrowDownToLine size={12} />
+    {/if}
+  </button>
+{/if}
 
 <!-- Jobs badge (IntelliJ-style) -->
 <button
@@ -110,6 +143,33 @@
   .job-badge:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
   .job-badge-running { color: var(--accent); }
   .job-badge-idle    { color: var(--text-muted); }
+
+  /* ── Transfers badge ──────────────────────────────────────────────────────
+     Same shape as the jobs badge; the down-arrow gently bobs while active. */
+  .transfer-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 100%;
+    padding: 0 10px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: var(--font-ui-sans);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .transfer-badge:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+  .transfer-badge-active { color: var(--accent); }
+  .transfer-spinner { display: flex; align-items: center; animation: transfer-bob 1.1s ease-in-out infinite; }
+  @keyframes transfer-bob {
+    0%, 100% { transform: translateY(-1px); }
+    50%      { transform: translateY(1px); }
+  }
 
   .job-spinner {
     display: flex;

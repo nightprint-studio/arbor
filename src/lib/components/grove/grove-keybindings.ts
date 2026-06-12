@@ -34,7 +34,7 @@ export const GROVE_BINDINGS: GroveBinding[] = [
   { id: 'shortcuts',    key: 'F1', scope: 'global', description: 'Show the keyboard shortcuts' },
   { id: 'settings',     key: ',', ctrl: true,  scope: 'global', description: 'Open Settings' },
   { id: 'zen',          key: 'z', ctrl: true, shift: true, scope: 'global', description: 'Toggle Zen mode' },
-  { id: 'find',         key: 'f', ctrl: true,  scope: 'global', description: 'Search in the Console / Problems' },
+  { id: 'find',         key: 'f', ctrl: true,  scope: 'global', description: 'Find in file (editor) · search the Console / Problems' },
   // Project / file.
   { id: 'new_project',  key: 'n', ctrl: true, shift: true, scope: 'global', description: 'New project' },
   { id: 'open_project', key: 'o', ctrl: true,  scope: 'global', description: 'Open project' },

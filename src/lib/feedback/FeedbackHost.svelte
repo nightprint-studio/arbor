@@ -31,6 +31,7 @@
   import NotificationsOverlay from '$lib/components/shared/NotificationsOverlay.svelte';
   import OperationsOverlay from '$lib/components/shared/OperationsOverlay.svelte';
   import JobsOverlay from '$lib/components/jobs/JobsOverlay.svelte';
+  import TransfersOverlay from '$lib/components/shared/TransfersOverlay.svelte';
 
   let { id, main = false, children }: { id: string; main?: boolean; children?: Snippet } = $props();
 
@@ -128,6 +129,13 @@
 {#if uiStore.jobsOverlayOpen}
   <div transition:fly={{ y: 10, duration: animStore.dBase, easing: cubicOut }}>
     <JobsOverlay />
+  </div>
+{/if}
+
+<!-- Transfers overlay (downloads + exports, with progress bars). -->
+{#if uiStore.transfersOverlayOpen}
+  <div transition:fly={{ y: 10, duration: animStore.dBase, easing: cubicOut }}>
+    <TransfersOverlay />
   </div>
 {/if}
 

@@ -120,6 +120,7 @@ function createUiStore() {
    *  that pre-fill the palette with a workspace-aware verb. */
   let pendingPaletteVerb       = $state<string | null>(null);
   let jobsOverlayOpen          = $state(false);
+  let transfersOverlayOpen     = $state(false);
   let notificationsOverlayOpen = $state(false);
   let securityOverlayOpen      = $state(false);
   let parkedModalsOverlayOpen  = $state(false);
@@ -422,6 +423,8 @@ function createUiStore() {
   function toggleRecentQuickSwitch()              { recentQuickSwitchOpen = !recentQuickSwitchOpen; }
   function setRecentQuickSwitchOpen(v: boolean)   { recentQuickSwitchOpen = v; }
   function setJobsOverlayOpen(v: boolean)         { jobsOverlayOpen = v; }
+  function toggleTransfersOverlay()               { transfersOverlayOpen = !transfersOverlayOpen; }
+  function setTransfersOverlayOpen(v: boolean)    { transfersOverlayOpen = v; }
   function toggleNotificationsOverlay()           { notificationsOverlayOpen = !notificationsOverlayOpen; }
   function setNotificationsOverlayOpen(v: boolean){ notificationsOverlayOpen = v; }
   function toggleSecurityOverlay()                { securityOverlayOpen = !securityOverlayOpen; }
@@ -502,6 +505,7 @@ function createUiStore() {
     get commandPaletteOpen()             { return commandPaletteOpen; },
     get pendingPaletteVerb()             { return pendingPaletteVerb; },
     get jobsOverlayOpen()                { return jobsOverlayOpen; },
+    get transfersOverlayOpen()           { return transfersOverlayOpen; },
     get notificationsOverlayOpen()       { return notificationsOverlayOpen; },
     get securityOverlayOpen()            { return securityOverlayOpen; },
     get parkedModalsOverlayOpen()        { return parkedModalsOverlayOpen; },
@@ -547,6 +551,7 @@ function createUiStore() {
     setSearchVisible, setCommandPaletteOpen, toggleCommandPalette,
     openCommandPaletteWithVerb, takePendingPaletteVerb,
     toggleJobsOverlay, setJobsOverlayOpen,
+    toggleTransfersOverlay, setTransfersOverlayOpen,
     openMergeModal, closeMergeModal,
     openStashConflictModal, closeStashConflictModal,
     openCheckoutConflictModal, closeCheckoutConflictModal,

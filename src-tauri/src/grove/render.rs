@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use arbor_grove::prelude::{render_offline, ControlMap, RenderConfig, Tracks};
+use arbor_grove::prelude::{render_offline_with_progress, ControlMap, RenderConfig, Tracks};
 
 use crate::jobs::{JobInfo, JobRegistry, JobStatus};
 
@@ -71,7 +71,13 @@ pub fn spawn_render(
             status: JobStatus::Running,
             category: Some("Renders".to_string()),
             non_cancellable: false,
-            hidden: false,
+            // Hidden from the Jobs panel / overlay / badge: the render is the
+            // user-facing surface of the grove **Downloads & Exports** overlay
+            // (it streams `job-progress` + a revealable output path there), so
+            // showing it in Jobs too would be a duplicate. Still registered
+            // (tracked, revealable via "Show hidden") to keep the job-event
+            // invariants intact.
+            hidden: true,
             is_system: false,
             finished_at: None,
             // Route to the grove window's feedback host (it mounts
@@ -80,14 +86,15 @@ pub fn spawn_render(
         });
         id
     };
-    // Live-surface the render in the grove window's Jobs overlay / badge.
+    // Register the job (hidden) so its terminal event has a registry entry; the
+    // visible surface is the Transfers overlay, fed by job-progress / job-done.
     let _ = app.emit("arbor://job-started", serde_json::json!({
         "job_id":      &job_id,
         "name":        &name,
         "plugin_name": "grove",
         "command":     &command,
         "category":    "Renders",
-        "hidden":      false,
+        "hidden":      true,
         "target":      "grove",
     }));
 
@@ -97,12 +104,27 @@ pub fn spawn_render(
     if let Err(e) = std::thread::Builder::new()
         .name(format!("grove-render-{job_id}"))
         .spawn(move || {
+            // Forward render progress to the FE (throttled to whole-percent steps
+            // so a long bounce emits ~100 events, not one per block).
+            let progress_app = app.clone();
+            let progress_job = job_id_thread.clone();
+            let mut last_pct: i32 = -1;
+            let on_progress = move |p: arbor_grove::prelude::RenderProgress| {
+                let pct = (p.fraction() * 100.0).round() as i32;
+                if pct != last_pct {
+                    last_pct = pct;
+                    let _ = progress_app.emit(
+                        "arbor://job-progress",
+                        serde_json::json!({ "job_id": progress_job, "pct": pct }),
+                    );
+                }
+            };
             // Catch a panic in the render core so the job reports Failed (with a
             // surfaced message) instead of hanging on Running and leaving an
             // unfinalized, unplayable WAV with no explanation.
             let outcome: Result<(), String> = match std::panic::catch_unwind(
                 std::panic::AssertUnwindSafe(|| {
-                    render_offline(&tracks, cps, cycles, &cfg, &out_path)
+                    render_offline_with_progress(&tracks, cps, cycles, &cfg, &out_path, on_progress)
                 }),
             ) {
                 Ok(Ok(())) => Ok(()),

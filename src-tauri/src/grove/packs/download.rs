@@ -40,6 +40,8 @@ pub fn status(cfg: &GroveConfig, pack: &Pack) -> PackStatus {
         Some(m) => PackStatus {
             id: pack.id.to_string(),
             name: pack.name.to_string(),
+            description: pack.description.to_string(),
+            approx_bytes: pack.approx_bytes,
             installed: true,
             path,
             size_bytes: m.size_bytes,
@@ -49,6 +51,8 @@ pub fn status(cfg: &GroveConfig, pack: &Pack) -> PackStatus {
         None => PackStatus {
             id: pack.id.to_string(),
             name: pack.name.to_string(),
+            description: pack.description.to_string(),
+            approx_bytes: pack.approx_bytes,
             installed: false,
             path,
             size_bytes: 0,
@@ -119,7 +123,12 @@ pub fn start(app: &AppHandle, cfg: &GroveConfig, pack: &'static Pack) -> String 
             status: JobStatus::Running,
             category: Some("Downloads".to_string()),
             non_cancellable: false,
-            hidden: false,
+            // Hidden from the Jobs panel / overlay / badge: the user-facing
+            // surface is the grove **Downloads & Exports** overlay (live %, phase,
+            // cancel, reveal) plus the inline Sound-bank progress, so a Jobs entry
+            // would duplicate it. Still registered so cancel + the terminal event
+            // have a registry entry (revealable via "Show hidden").
+            hidden: true,
             is_system: false,
             finished_at: None,
             // Route to the grove window's feedback host so downloads surface
@@ -128,14 +137,15 @@ pub fn start(app: &AppHandle, cfg: &GroveConfig, pack: &'static Pack) -> String 
         });
         id
     };
-    // Live-surface the download in the grove window's Jobs overlay / badge.
+    // Register the job (hidden) so cancel + the terminal event have a registry
+    // entry; the visible surface is the Transfers overlay + inline Sound-bank.
     let _ = app.emit("arbor://job-started", serde_json::json!({
         "job_id":      &job_id,
         "name":        &name,
         "plugin_name": "grove",
         "command":     &command,
         "category":    "Downloads",
-        "hidden":      false,
+        "hidden":      true,
         "target":      "grove",
     }));
 
@@ -395,7 +405,10 @@ fn finish_job(app: &AppHandle, job_id: &str, result: Result<JobOutcome, String>)
     let (status, success, error) = match result {
         Ok(JobOutcome::Completed) => (JobStatus::Completed { exit_code: 0 }, true, None),
         Ok(JobOutcome::Cancelled) => (JobStatus::Cancelled, false, None),
-        Err(e) => (JobStatus::Failed { error: e.clone() }, false, Some(e)),
+        Err(e) => {
+            tracing::warn!("grove: pack download/install failed ({job_id}): {e}");
+            (JobStatus::Failed { error: e.clone() }, false, Some(e))
+        }
     };
     let state = app.state::<crate::AppState>();
     if let Ok(mut jobs) = state.jobs.lock() {

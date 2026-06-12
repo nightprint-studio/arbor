@@ -5,14 +5,27 @@
  * Each download is a background job (the Jobs overlay tracks it); progress also
  * streams here, keyed by `pack_id`, for the inline indicators in the sound bank.
  * Subscribe once on mount, unlisten on teardown.
+ *
+ * Two backend streams drive the store: `grove:pack_progress` (live %/phase) and
+ * the global `arbor://job-done` (terminal success/failure). The latter is the
+ * authority on failure — a download that errors emits no final extract-progress
+ * event, so without it a failed transfer would stay "active" forever.
  */
 
-import type { UnlistenFn } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   grovePacks, grovePackDownload, onGrovePackProgress,
   type GrovePack, type GrovePackProgress,
 } from '$lib/ipc/grove';
 import { cancelJob } from '$lib/feedback/ipc/job';
+import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
+
+/** Terminal job result (mirrors the `arbor://job-done` payload). */
+interface JobDone {
+  job_id: string;
+  success: boolean;
+  error: string | null;
+}
 
 function createPacksStore() {
   let packs    = $state<GrovePack[]>([]);
@@ -27,6 +40,31 @@ function createPacksStore() {
     jobIds = next;
   }
 
+  /** The pack id that owns `jobId`, if any is still in flight. */
+  function packForJob(jobId: string): string | undefined {
+    return Object.keys(jobIds).find((pid) => jobIds[pid] === jobId);
+  }
+
+  async function refreshPacks() {
+    try { packs = await grovePacks(); } catch { /* keep last */ }
+  }
+
+  /** Apply a terminal job result to its pack: clear the in-flight state and
+   *  resolve the transfer (success → finish + refresh; failure → fail, leaving
+   *  the card back on its Download button so the user can retry). Idempotent —
+   *  a success that also gets the final extract-progress event is a no-op the
+   *  second time (the job id is already cleared). */
+  function settleJob(packId: string, done: JobDone) {
+    clearJob(packId);
+    progress = { ...progress, [packId]: null };
+    if (done.success) {
+      transfersStore.finish(packId);
+      void refreshPacks();
+    } else {
+      transfersStore.fail(packId, done.error ?? 'Download failed');
+    }
+  }
+
   return {
     /** All known packs with their install status (display order). */
     get packs() { return packs; },
@@ -36,17 +74,29 @@ function createPacksStore() {
     downloadingOf(id: string) { return jobIds[id] != null; },
 
     /** Re-read every pack's install status from disk. */
-    async refresh() {
-      try { packs = await grovePacks(); } catch { /* keep last */ }
-    },
+    refresh() { return refreshPacks(); },
 
-    /** Start the download+install job for `id`. Progress flows via the subscription. */
+    /** Start the download+install job for `id`. Progress flows via the
+     *  subscription, mirrored into the shared transfers overlay. */
     async download(id: string) {
       progress = { ...progress, [id]: null };
+      const pack = packs.find((p) => p.id === id);
+      transfersStore.start({
+        id, kind: 'download', label: pack?.name ?? id, sublabel: 'Starting…', progress: null,
+        // The install folder, so the finished transfer can be revealed.
+        path: pack?.path,
+        cancel: () => { void this.cancel(id); },
+      });
       try {
         const job = await grovePackDownload(id);
         jobIds = { ...jobIds, [id]: job };
-      } catch { /* leave idle */ }
+      } catch (e) {
+        // A Tauri command rejection is the serialized `AppError` *string* (see
+        // `serialize_str` in error.rs), never an `Error` instance — so surface
+        // it verbatim instead of a useless generic, otherwise the real cause
+        // (bad path, disk, server error…) is silently discarded.
+        transfersStore.fail(id, e instanceof Error ? e.message : String(e));
+      }
     },
 
     /** Cancel a pack's in-flight job (standard job cancellation). */
@@ -56,18 +106,37 @@ function createPacksStore() {
       try { await cancelJob(job); } catch { /* already gone */ }
       clearJob(id);
       progress = { ...progress, [id]: null };
+      transfersStore.cancelled(id);
     },
 
-    subscribe(): Promise<UnlistenFn> {
-      return onGrovePackProgress((p) => {
+    async subscribe(): Promise<UnlistenFn> {
+      const unProgress = await onGrovePackProgress((p) => {
+        // A terminal job-done may already have cleared this pack (failure /
+        // backstop); ignore late progress for a pack no longer in flight.
+        if (jobIds[p.pack_id] == null) return;
         progress = { ...progress, [p.pack_id]: p };
+        transfersStore.update(p.pack_id, {
+          progress: p.pct >= 0 ? p.pct : null,
+          sublabel: p.phase === 'extracting' ? 'Extracting…' : 'Downloading…',
+        });
         // A 100% extract is the last event of an install — refresh + clear.
         if (p.phase === 'extracting' && p.total > 0 && p.done >= p.total) {
           clearJob(p.pack_id);
           progress = { ...progress, [p.pack_id]: null };
-          void this.refresh();
+          transfersStore.finish(p.pack_id);
+          void refreshPacks();
         }
       });
+
+      // Terminal job results — the authority on download failure (and a backstop
+      // for success when no final extract-progress event lands). Jobs that don't
+      // map to an in-flight pack download (renders, other features) are ignored.
+      const unDone = await listen<JobDone>('arbor://job-done', (e) => {
+        const packId = packForJob(e.payload.job_id);
+        if (packId) settleJob(packId, e.payload);
+      });
+
+      return () => { unProgress(); unDone(); };
     },
   };
 }

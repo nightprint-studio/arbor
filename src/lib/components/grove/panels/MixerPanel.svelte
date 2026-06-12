@@ -76,10 +76,10 @@
             <span class="dot"></span><span class="nm">{t.name}</span>
           </button>
 
-          <div class="strip-body">
+          <div class="fader">
             <div class="meter"><PeakMeter peak={metersStore.peak(t.index)} {dimmed} /></div>
-            <div class="kcol">
-              <Knob value={mixerStore.gain(t.index)} default={GAIN_UNITY} size={32} color={t.color}
+            <div class="kcol gain-col">
+              <Knob value={mixerStore.gain(t.index)} default={GAIN_UNITY} size={36} color={t.color}
                     label="gain" ariaLabel="{t.name} gain" onchange={(v) => mixerStore.setGain(t.index, v)} />
               <span class="kval">{mixerStore.gain(t.index).toFixed(2)}</span>
             </div>
@@ -115,10 +115,10 @@
       <!-- Master strip -->
       <div class="strip master">
         <div class="strip-name master-name"><span class="nm">MASTER</span></div>
-        <div class="strip-body">
+        <div class="fader">
           <div class="meter"><PeakMeter peak={metersStore.master} /></div>
-          <div class="kcol">
-            <Knob value={mixerStore.masterGain} default={GAIN_UNITY} size={32} color="var(--accent)"
+          <div class="kcol gain-col">
+            <Knob value={mixerStore.masterGain} default={GAIN_UNITY} size={36} color="var(--accent)"
                   label="gain" ariaLabel="Master gain" onchange={(v) => mixerStore.setMasterGain(v)} />
             <span class="kval">{mixerStore.masterGain.toFixed(2)}</span>
           </div>
@@ -133,12 +133,12 @@
 <style>
   .mixer-root { display: flex; flex-direction: column; height: 100%; background: var(--bg-base); }
   .mixer-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .mix { display: flex; gap: 4px; padding: 6px 8px; height: 100%; overflow-x: auto; align-items: stretch; }
+  .mix { display: flex; gap: 4px; padding: 6px 8px; height: 100%; min-height: 0; overflow-x: auto; align-items: stretch; }
 
   .strip {
-    display: flex; flex-direction: column; align-items: center; gap: 4px;
-    width: 96px; flex-shrink: 0;
-    padding: 5px 4px 6px;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    width: 84px; flex-shrink: 0; height: 100%; min-height: 0;
+    padding: 6px 5px 7px;
     border-radius: var(--radius-md);
     background: var(--bg-elevated);
     box-shadow: inset 0 0 0 1px transparent;
@@ -163,10 +163,17 @@
   }
   .master-name .nm { font-size: 9.5px; letter-spacing: 0.6px; color: var(--text-muted); }
 
-  .strip-body { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 52px; }
-  .meter { height: 46px; flex-shrink: 0; }
+  /* Fader zone — the only flexible region: it soaks up the panel height so the
+     meter grows tall on a big panel and shrinks (never the knobs) on a small one. */
+  .fader {
+    flex: 1; min-height: 56px;
+    display: flex; align-items: stretch; justify-content: center; gap: 9px;
+    width: 100%;
+  }
+  .meter { flex-shrink: 0; min-height: 0; }
+  .gain-col { justify-content: flex-end; }
 
-  .knobs-row { display: flex; align-items: flex-start; justify-content: center; gap: 5px; }
+  .knobs-row { display: flex; align-items: flex-start; justify-content: center; gap: 5px; flex-shrink: 0; }
   .kcol { display: flex; flex-direction: column; align-items: center; gap: 1px; }
   .kval { font-size: 9px; color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
 

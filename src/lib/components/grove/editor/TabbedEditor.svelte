@@ -27,6 +27,7 @@
 
   type EditorController = {
     focus: () => void;
+    openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
     scrollToOffset: (offset: number, select?: boolean) => void;
     gotoSymbol: (name: string) => boolean;
@@ -150,6 +151,9 @@
    *  starter file into the project, opens it). Falls back to New Project when no
    *  project is open. */
   export function newFile() { projectActions.newFile(); }
+
+  /** Open the editor's in-buffer search panel (Ctrl+F when the pane is focused). */
+  export function openSearch() { editorComp?.openSearch(); }
 
   function commitGoto() {
     const m = gotoValue.match(/(\d+)(?:\s*[:,]\s*(\d+))?/);

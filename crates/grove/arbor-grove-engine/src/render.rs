@@ -67,6 +67,27 @@ impl Default for RenderConfig {
     }
 }
 
+/// How far an offline render has progressed, reported to the optional progress
+/// callback of [`render_offline_with_progress`]. `total_frames` is the whole
+/// bounce (arrangement + tail); `done_frames` rises to it as blocks are written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RenderProgress {
+    /// Frames written so far.
+    pub done_frames: u64,
+    /// Total frames the render will write (`0` only for an empty bounce).
+    pub total_frames: u64,
+}
+
+impl RenderProgress {
+    /// Completion as a `0.0..=1.0` fraction (`1.0` for an empty render).
+    pub fn fraction(self) -> f32 {
+        if self.total_frames == 0 {
+            return 1.0;
+        }
+        (self.done_frames as f64 / self.total_frames as f64).clamp(0.0, 1.0) as f32
+    }
+}
+
 /// Render `cycles` cycles of `tracks` (at `cps`) to a stereo WAV at `out_path`,
 /// plus a trailing tail up to [`RenderConfig::tail_max_secs`].
 ///
@@ -84,6 +105,21 @@ pub fn render_offline(
     cycles: u32,
     cfg: &RenderConfig,
     out_path: &Path,
+) -> Result<()> {
+    render_offline_with_progress(tracks, cps, cycles, cfg, out_path, |_| {})
+}
+
+/// Like [`render_offline`], but reports progress: `on_progress` is invoked after
+/// each block is written (and once at the start) with the running
+/// [`RenderProgress`]. The callback runs on the render thread — keep it cheap
+/// (the shell throttles + forwards it as an event). Anything else is identical.
+pub fn render_offline_with_progress(
+    tracks: &Tracks<ControlMap>,
+    cps: f64,
+    cycles: u32,
+    cfg: &RenderConfig,
+    out_path: &Path,
+    mut on_progress: impl FnMut(RenderProgress),
 ) -> Result<()> {
     let sr = cfg.sample_rate;
     let epoch = Epoch::start(cps);
@@ -136,6 +172,7 @@ pub fn render_offline(
     // even though megabytes of samples reached disk. A short, *valid* file (and a
     // surfaced error) beats a large corrupt one.
     let mut write_err: Option<EngineError> = None;
+    on_progress(RenderProgress { done_frames: 0, total_frames });
     while frame_cursor < total_frames {
         let block_len = ((total_frames - frame_cursor) as usize).min(BLOCK_FRAMES);
         let block_end = frame_cursor + block_len as u64;
@@ -181,6 +218,7 @@ pub fn render_offline(
         }
 
         frame_cursor = block_end;
+        on_progress(RenderProgress { done_frames: frame_cursor, total_frames });
     }
 
     // Always finalize, even after a write error, so the file is a valid WAV.

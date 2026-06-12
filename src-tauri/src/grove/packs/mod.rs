@@ -29,6 +29,11 @@ pub struct Pack {
     pub id: &'static str,
     /// Human label for the sound-bank UI.
     pub name: &'static str,
+    /// One-line description shown in the sound bank (what the pack contains).
+    pub description: &'static str,
+    /// Rough **download** size, for a pre-install "how big is this" estimate.
+    /// Approximate (the GitHub archive size varies); shown as `~N MB`.
+    pub approx_bytes: u64,
     /// GitHub archive (`.zip`) of the pack's source repo. `HEAD.zip` resolves the
     /// default branch regardless of its name.
     pub archive_url: &'static str,
@@ -41,12 +46,20 @@ pub const PACKS: &[Pack] = &[
     Pack {
         id: "vsco",
         name: "VSCO 2 — orchestral",
+        description: "The Versilian Studios Chamber Orchestra 2 — a full set of \
+            multisampled orchestral instruments (strings, brass, woodwinds, \
+            percussion) as SFZ. Large; the richest sound source grove ships.",
+        approx_bytes: 2_900_000_000,
         archive_url: "https://github.com/sgossner/VSCO-2-CE/archive/refs/heads/master.zip",
         layout: Layout::SfzTree,
     },
     Pack {
         id: "dirt-samples",
         name: "Dirt-Samples",
+        description: "The TidalCycles / SuperDirt sample library — hundreds of \
+            short one-shots and loops (drums, blips, vocals, textures) addressed \
+            by name with `:n` variants. The classic live-coding sound set.",
+        approx_bytes: 230_000_000,
         archive_url: "https://github.com/tidalcycles/Dirt-Samples/archive/HEAD.zip",
         // Flat folders of variant wavs (`bd`, `casio`, …).
         layout: Layout::FolderOfWavs { strip_segments: 0, joiner: "_" },
@@ -54,6 +67,10 @@ pub const PACKS: &[Pack] = &[
     Pack {
         id: "drum-machines",
         name: "Drum machines",
+        description: "Sampled classic drum machines (Roland TR-808/909, LinnDrum, \
+            and many more), one voice per drum as `<Machine>_<drum>`. Punchy, \
+            ready-made kits for beats.",
+        approx_bytes: 55_000_000,
         archive_url: "https://github.com/ritchse/tidal-drum-machines/archive/HEAD.zip",
         // `machines/<Machine>/<drum>/*.wav` → `<Machine>_<drum>` (drop `machines`).
         layout: Layout::FolderOfWavs { strip_segments: 1, joiner: "_" },
@@ -61,6 +78,10 @@ pub const PACKS: &[Pack] = &[
     Pack {
         id: "gm",
         name: "General MIDI (soundfont)",
+        description: "The FluidR3 General MIDI soundfont — the 128 standard GM \
+            instruments (pianos, organs, guitars, synths, ethnic and more), \
+            converted to playable multisamples at install time.",
+        approx_bytes: 148_000_000,
         // A single `.sf2`, converted to wav+SFZ at install time (see `gm`).
         archive_url: gm::SF2_URL,
         layout: Layout::Sf2,
@@ -72,6 +93,10 @@ pub const PACKS: &[Pack] = &[
 pub struct PackStatus {
     pub id: String,
     pub name: String,
+    /// One-line description of the pack's contents (from the [`Pack`] descriptor).
+    pub description: String,
+    /// Rough download size for the pre-install estimate (from the descriptor).
+    pub approx_bytes: u64,
     pub installed: bool,
     pub path: String,
     pub size_bytes: u64,
