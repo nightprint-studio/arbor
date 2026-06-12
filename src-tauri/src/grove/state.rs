@@ -1,6 +1,6 @@
 //! Persisted grove **window** state — recents, last project, panel layout.
 //!
-//! A dedicated file (`<data>/arbor/grove/state.json`), deliberately **not** the
+//! A dedicated file (`<grove-data>/state.json`), deliberately **not** the
 //! typed `[grove]` config (those are engine settings), **not** the per-project
 //! `grove.toml` (that's the project model), and **not** `localStorage` (hard rule
 //! #11). This is global, app-level window state. Missing / unparseable → defaults,
@@ -40,11 +40,9 @@ pub struct GroveWorkspaceState {
     pub layout: GroveLayoutState,
 }
 
-/// `<data>/arbor/grove/state.json`.
+/// `<grove-data>/state.json`.
 fn state_path() -> PathBuf {
-    arbor_core::prelude::arbor_data_dir()
-        .join("grove")
-        .join("state.json")
+    arbor_core::prelude::grove_data_dir().join("state.json")
 }
 
 /// Read the persisted grove window state. A missing or unreadable/unparseable

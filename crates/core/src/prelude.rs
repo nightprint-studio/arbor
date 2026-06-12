@@ -12,5 +12,5 @@ pub use crate::error::{CoreError, Result};
 pub use crate::http::{client, client_builder, DEFAULT_TIMEOUT, USER_AGENT};
 pub use crate::paths::{
     arbor_cache_dir, arbor_config_dir, arbor_config_path, arbor_data_dir,
-    try_arbor_config_path,
+    grove_config_dir, grove_config_path, grove_data_dir, try_arbor_config_path,
 };

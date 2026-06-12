@@ -14,7 +14,7 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
-  grovePacks, grovePackDownload, onGrovePackProgress,
+  grovePacks, grovePackDownload, grovePackDelete, onGrovePackProgress,
   type GrovePack, type GrovePackProgress,
 } from '$lib/ipc/grove';
 import { cancelJob } from '$lib/feedback/ipc/job';
@@ -109,6 +109,14 @@ function createPacksStore() {
       transfersStore.cancelled(id);
     },
 
+    /** Delete an installed pack from disk, then re-read the pack list (which
+     *  drives the sound bank to drop the pack's voices). Throws on failure so
+     *  the caller can surface it. */
+    async remove(id: string) {
+      await grovePackDelete(id);
+      await refreshPacks();
+    },
+
     async subscribe(): Promise<UnlistenFn> {
       const unProgress = await onGrovePackProgress((p) => {
         // A terminal job-done may already have cleared this pack (failure /
@@ -119,13 +127,12 @@ function createPacksStore() {
           progress: p.pct >= 0 ? p.pct : null,
           sublabel: p.phase === 'extracting' ? 'Extracting…' : 'Downloading…',
         });
-        // A 100% extract is the last event of an install — refresh + clear.
-        if (p.phase === 'extracting' && p.total > 0 && p.done >= p.total) {
-          clearJob(p.pack_id);
-          progress = { ...progress, [p.pack_id]: null };
-          transfersStore.finish(p.pack_id);
-          void refreshPacks();
-        }
+        // NB: do NOT settle on a 100% extract event — the pack's `registry.toml`
+        // and `install.json` are written *after* the last extract-progress event,
+        // so a refresh here would read a still-empty/not-yet-installed pack (the
+        // sound bank would stay stale until a manual refresh). The terminal
+        // `arbor://job-done` (below) is the single authority: it fires only once
+        // those files are on disk, so refreshing there is the reliable signal.
       });
 
       // Terminal job results — the authority on download failure (and a backstop

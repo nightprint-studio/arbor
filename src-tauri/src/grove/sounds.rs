@@ -7,12 +7,10 @@
 //! universal fallback for any unresolved name — is always present.
 
 use serde::Serialize;
-use tauri::State;
 
 use arbor_grove::prelude::{InstrumentKind, Registry};
 
 use crate::error::AppError;
-use crate::AppState;
 
 /// One resolvable voice in the sound registry.
 #[derive(Debug, Clone, Serialize)]
@@ -27,6 +25,11 @@ pub struct Instrument {
     /// A short one-line description for the sound bank (authored in
     /// [`super::sound_catalog`]); `None` when the catalogue has no match.
     pub description: Option<&'static str>,
+    /// Stable id of the sample pack this voice comes from (`dirt-samples`, …),
+    /// for the sound bank's per-pack grouping. `None` for built-in synths.
+    pub pack: Option<String>,
+    /// Human label of that pack (`Dirt-Samples`, …); `None` for built-in synths.
+    pub pack_name: Option<String>,
 }
 
 /// The `grove_sounds` result. Always includes the built-in default synth.
@@ -38,24 +41,41 @@ pub struct SoundList {
 /// List the instruments the engine can currently resolve (default synth + any
 /// installed VSCO/manifest entries).
 #[tauri::command]
-pub async fn grove_sounds(state: State<'_, AppState>) -> Result<SoundList, AppError> {
-    let cfg = super::grove_config(&state)?;
-    // Match the audio thread exactly: built-in synths, then every installed pack.
-    let mut registry = Registry::new();
-    registry.install_builtin_synths();
-    super::packs::load_into(&cfg, &mut registry);
+pub async fn grove_sounds() -> Result<SoundList, AppError> {
+    let cfg = super::grove_config();
+    // The sound bank only needs the *names* the engine can resolve, never the
+    // audio. Built-in synths are cheap in-memory presets; sample packs are
+    // enumerated WITHOUT decoding (listing VSCO/Dirt by building a real registry
+    // would eagerly read gigabytes of WAV into RAM — see `list_manifest_instruments`).
+    let mut synths = Registry::new();
+    synths.install_builtin_synths();
+    let mut infos = synths.instruments_list();
+    super::packs::list_instruments_into(&cfg, &mut infos);
+    // name → (pack_id, pack_name), so each sampler voice carries its origin for
+    // the sound bank's per-pack grouping (built-in synths stay unmapped).
+    let pack_map = super::packs::instrument_pack_map(&cfg);
 
-    let mut instruments: Vec<Instrument> = registry
-        .instruments_list()
+    let mut instruments: Vec<Instrument> = infos
         .into_iter()
-        .map(|i| Instrument {
-            description: super::sound_catalog::describe(&i.name, i.kind),
-            name: i.name,
-            kind: kind_str(i.kind),
-            articulations: i.articulations,
+        .map(|i| {
+            let (pack, pack_name) = match pack_map.get(&i.name) {
+                Some((id, name)) => (Some(id.clone()), Some(name.clone())),
+                None => (None, None),
+            };
+            Instrument {
+                description: super::sound_catalog::describe(&i.name, i.kind),
+                name: i.name,
+                kind: kind_str(i.kind),
+                articulations: i.articulations,
+                pack,
+                pack_name,
+            }
         })
         .collect();
+    // One row per name (a real registry dedups by name; the listing path is a
+    // flat Vec, so collapse any same-named entry — overrides, cross-pack clashes).
     instruments.sort_by(|a, b| a.name.cmp(&b.name));
+    instruments.dedup_by(|a, b| a.name == b.name);
 
     // The universal fallback is always resolvable, even with no manifest; surface
     // it first so the UI can always offer it.
@@ -67,6 +87,8 @@ pub async fn grove_sounds(state: State<'_, AppState>) -> Result<SoundList, AppEr
                 kind: "synth",
                 articulations: Vec::new(),
                 description: super::sound_catalog::describe("synth", InstrumentKind::Synth),
+                pack: None,
+                pack_name: None,
             },
         );
     }

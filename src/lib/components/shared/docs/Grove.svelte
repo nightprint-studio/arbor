@@ -180,7 +180,7 @@ arrange(
 </ul>
 
 <h2>Sample banks</h2>
-<p>The synth voices are always available. <strong>Sample banks</strong> add sampled instruments, downloaded on demand from the <strong>Sound bank</strong> panel — each card shows what the bank contains and an estimated download size, installs on a background job with a progress bar you can cancel, and its instruments appear once extraction finishes:</p>
+<p>The synth voices are always available. <strong>Sample banks</strong> add sampled instruments, downloaded on demand from the <strong>Sound bank</strong> panel — each card shows what the bank contains and an estimated download size, installs on a background job with a progress bar you can cancel, and its instruments appear once the install finishes (grouped under their bank in the <strong>Samplers</strong> list). An installed bank's card offers a <strong>Delete</strong> action that removes its samples from disk; you can re-download it any time:</p>
 <ul class="prop-list">
   <li><strong>VSCO 2</strong> — orchestral samplers (strings, brass, winds, percussion), each exposing articulations for <code>.art("…")</code>.</li>
   <li><strong>Dirt-Samples</strong> — the Tidal/Strudel sample set (<code>bd</code>, <code>sd</code>, <code>hh</code>, <code>casio</code>, <code>jazz</code>, …).</li>

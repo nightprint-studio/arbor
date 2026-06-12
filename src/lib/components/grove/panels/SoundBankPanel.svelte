@@ -16,7 +16,7 @@
    *
    * Imports only shared/ui (+ the tooltip action) + grove-local.
    */
-  import { Music4, Waves, Piano, Download, Check, RefreshCw, Boxes, HardDrive } from 'lucide-svelte';
+  import { Music4, Waves, Piano, Download, Check, RefreshCw, Boxes, HardDrive, Trash2 } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
@@ -25,6 +25,7 @@
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import ProgressBar from '$lib/components/shared/ui/ProgressBar.svelte';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import SoundBankItem from './SoundBankItem.svelte';
   import { soundsStore } from '../stores/sounds.svelte';
@@ -39,13 +40,51 @@
   const synths   = $derived(match(soundsStore.synths));
   const samplers = $derived(match(soundsStore.samplers));
 
+  // Samplers grouped by their origin pack (Dirt-Samples, drum machines, …) so the
+  // bank isn't one flat list of hundreds of voices. Ordered to match the pack
+  // display order; an "Other" bucket catches any voice without a known pack.
+  interface SamplerGroup { id: string; name: string; items: GroveInstrument[]; }
+  const samplerGroups = $derived.by<SamplerGroup[]>(() => {
+    const groups = new Map<string, SamplerGroup>();
+    for (const inst of samplers) {
+      const id = inst.pack ?? 'other';
+      let g = groups.get(id);
+      if (!g) { g = { id, name: inst.pack_name ?? 'Other', items: [] }; groups.set(id, g); }
+      g.items.push(inst);
+    }
+    const order = packsStore.packs.map((p) => p.id);
+    const rank = (id: string) => { const i = order.indexOf(id); return i < 0 ? order.length : i; };
+    return [...groups.values()].sort((a, b) => rank(a.id) - rank(b.id));
+  });
+
   let openSynth   = $state(true);
-  // Samplers can run to the hundreds (Dirt-Samples), so start collapsed — but a
-  // live filter implies the user is hunting a sampler, so auto-open while filtering.
-  let openSampler = $state(false);
   let openBanks   = $state(true);
-  const showSynth   = $derived(openSynth || (!!q && synths.length > 0));
-  const showSampler = $derived(openSampler || (!!q && samplers.length > 0));
+  const showSynth = $derived(openSynth || (!!q && synths.length > 0));
+  // Per-pack expand state. Sampler banks can run to the hundreds (Dirt-Samples),
+  // so start collapsed — but a live filter implies the user is hunting a voice,
+  // so auto-open any group that still has matches while filtering.
+  let openPacks = $state<Record<string, boolean>>({});
+  function togglePack(id: string) { openPacks = { ...openPacks, [id]: !(openPacks[id] ?? false) }; }
+  function packShown(id: string): boolean { return (openPacks[id] ?? false) || !!q; }
+
+  // Delete-pack confirmation (an installed pack's files are removed from disk).
+  let confirmDelete = $state<GrovePack | null>(null);
+  let deleting      = $state(false);
+  let deleteError   = $state<string | null>(null);
+  function askDelete(pack: GrovePack) { deleteError = null; confirmDelete = pack; }
+  async function doDelete() {
+    if (!confirmDelete) return;
+    deleting = true;
+    deleteError = null;
+    try {
+      await packsStore.remove(confirmDelete.id);
+      confirmDelete = null;
+    } catch (e) {
+      deleteError = e instanceof Error ? e.message : String(e);
+    } finally {
+      deleting = false;
+    }
+  }
 
   // The pack subscription is owned by the GroveShell; here we just (re)read the
   // registry on mount and again whenever the pack set changes (an install adds
@@ -88,11 +127,17 @@
       <p class="pack-desc">{pack.description}</p>
     {/if}
     {#if pack.installed}
-      <span class="pack-meta">
-        <Piano size={11} /> {pack.instrument_count} instruments
-        <span class="pack-dot">·</span>
-        <HardDrive size={11} /> {formatBytes(pack.size_bytes)} on disk
-      </span>
+      <div class="pack-foot">
+        <span class="pack-meta">
+          <Piano size={11} /> {pack.instrument_count} instruments
+          <span class="pack-dot">·</span>
+          <HardDrive size={11} /> {formatBytes(pack.size_bytes)} on disk
+        </span>
+        <button class="pack-del" use:tooltip={'Delete pack'}
+                aria-label={`Delete ${pack.name}`} onclick={() => askDelete(pack)}>
+          <Trash2 size={13} />
+        </button>
+      </div>
     {:else if packsStore.downloadingOf(pack.id)}
       <div class="pack-dl">
         <div class="pack-dl-head">
@@ -143,14 +188,20 @@
         {/if}
       </SidebarSection>
 
-      <SidebarSection label="Samplers" expanded={showSampler} onToggle={() => openSampler = !openSampler} badge={samplers.length}>
-        {#snippet icon()}<Piano size={13} />{/snippet}
-        {#if samplers.length}
-          {#each samplers as inst (inst.name)}<SoundBankItem {inst} />{/each}
-        {:else}
+      {#if samplerGroups.length}
+        {#each samplerGroups as group (group.id)}
+          <SidebarSection label={group.name} expanded={packShown(group.id)}
+                          onToggle={() => togglePack(group.id)} badge={group.items.length}>
+            {#snippet icon()}<Piano size={13} />{/snippet}
+            {#each group.items as inst (inst.name)}<SoundBankItem {inst} />{/each}
+          </SidebarSection>
+        {/each}
+      {:else}
+        <SidebarSection label="Samplers" expanded={true} onToggle={() => {}} badge={0}>
+          {#snippet icon()}<Piano size={13} />{/snippet}
           <EmptyState compact message={q ? 'No sampler voices match.' : 'No sampler voices yet — install a sample bank below.'} />
-        {/if}
-      </SidebarSection>
+        </SidebarSection>
+      {/if}
 
       <SidebarSection label="Sample banks" bind:expanded={openBanks} badge={packsStore.packs.length}>
         {#snippet icon()}<Boxes size={13} />{/snippet}
@@ -161,6 +212,19 @@
     </div>
   {/if}
 </PanelShell>
+
+{#if confirmDelete}
+  <ConfirmModal
+    variant="danger"
+    title="Delete sample pack"
+    message={`Delete “${confirmDelete.name}” and all its samples from disk?`}
+    detail={deleteError ?? 'You can re-download it any time from the sound bank.'}
+    confirmLabel="Delete"
+    busy={deleting}
+    onConfirm={doDelete}
+    onCancel={() => { if (!deleting) confirmDelete = null; }}
+  />
+{/if}
 
 <style>
   .bank { padding: 4px 0; }
@@ -188,6 +252,16 @@
   .pack-meta :global(svg) { color: var(--text-disabled); }
   .pack-dot { margin: 0 2px; }
   .pack-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+  .pack-del {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0; padding: 3px; border-radius: var(--radius-sm);
+    background: transparent; border: none; cursor: pointer;
+    color: var(--text-disabled);
+    transition: color var(--transition-fast), background var(--transition-fast);
+  }
+  .pack-del:hover { color: var(--error); background: var(--error-subtle); }
+  .pack-del:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--error); }
 
   .pack-dl { display: flex; flex-direction: column; gap: 5px; }
   .pack-dl-head { display: flex; align-items: baseline; justify-content: space-between; }

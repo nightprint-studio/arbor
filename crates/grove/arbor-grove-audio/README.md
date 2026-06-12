@@ -66,8 +66,9 @@ SFZ region vs. fallback) is the registry's job — the engine only forwards symb
   (`strings.violin`, `synth.pad`) → a synth preset / one-shot sample / SFZ instrument; unresolved →
   the default synth. Resolves `art` (articulations) + round-robin per onset. Manifest + articulation
   schema in the module docs (see "Registry articulations + round-robin" below). `instruments_list()`
-  enumerates every resolvable instrument (name + kind + the articulation names it exposes) for the
-  sound-bank UI.
+  enumerates a built registry's instruments (name + kind + articulation names) for the sound-bank UI;
+  `list_manifest_instruments(path)` does the same straight from a manifest file **without decoding any
+  samples**, so listing a multi-GB pack (VSCO/Dirt) doesn't read its audio into RAM.
 - `voice.rs` — the per-voice DSP chain (source → hpf → lpf → shape → crush → gain×vel → pan → dry +
   room send + per-track delay send) and the fixed-capacity **voice pool** with the design's
   voice-stealing policy (quietest-releasing first, else oldest).
@@ -115,7 +116,10 @@ manual clock — the seam that lets the engine's scheduler be tested headless.
 Decoding and SFZ/sample loading happen on a **non-RT** path (`Renderer::registry_mut` /
 `Renderer::preload_file`) and the audio is kept resident as `Arc<[f32]>`. The cpal callback only ever
 *reads* resident data; a `Named` name or a `File` path that isn't resident falls back to the synth
-rather than blocking. `rubato` is reserved for the offline fixed-ratio sample-rate conversion path;
+rather than blocking. The registry is fixed once it's inside the callback, so the shell loads it
+**lazily**: `Registry::load_manifest_subset_into(path, needed)` decodes only the named entries (the
+instruments an arrangement actually references), and growing the set means reopening the stream — a
+whole pack (VSCO/Dirt is gigabytes) is never decoded just to play one drum. `rubato` is reserved for the offline fixed-ratio sample-rate conversion path;
 per-voice pitch in the RT path is linear-interpolation resampling through the resident buffer.
 
 ## Dependencies

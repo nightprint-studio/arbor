@@ -229,7 +229,12 @@ export function grovePackDownload(packId: string): Promise<string> {
   return invoke('grove_pack_download', { packId });
 }
 
-/** Read the grove config (`[grove]` in the global config.toml). */
+/** Delete an installed sample pack from disk. Re-read packs + sounds afterwards. */
+export function grovePackDelete(packId: string): Promise<void> {
+  return invoke('grove_pack_delete', { packId });
+}
+
+/** Read the grove config (grove's own `config.toml`). */
 export function getGroveConfig(): Promise<GroveConfig> {
   return invoke('get_grove_config');
 }
@@ -359,6 +364,11 @@ export interface GroveInstrument {
   /** A short one-line description for the sound bank, or null when the catalogue
    *  has no entry for this voice. */
   description: string | null;
+  /** Stable id of the sample pack this voice comes from (`dirt-samples`, …), for
+   *  per-pack grouping; null for built-in synths. */
+  pack: string | null;
+  /** Human label of that pack (`Dirt-Samples`, …); null for built-in synths. */
+  pack_name: string | null;
 }
 
 /** `grove_sounds` result. Always includes the built-in default synth. */

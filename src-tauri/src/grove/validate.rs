@@ -34,6 +34,25 @@ pub fn known_instruments(cfg: &GroveConfig) -> HashSet<String> {
     known
 }
 
+/// Every distinct `sound`/`inst` name the arrangement references over the probe
+/// window — the renderer's precedence (`inst` over `sound`). Drives lazy sample
+/// loading: the live session decodes only these instead of every installed pack
+/// (VSCO/Dirt are gigabytes). Same probe window as validation, so the same blind
+/// spot for a name that first appears only after `PROBE_CYCLES` (it falls back to
+/// the synth until referenced within the window).
+pub fn referenced_instruments(tracks: &Tracks<ControlMap>) -> HashSet<String> {
+    let span = TimeSpan::new(Time::int(0), Time::int(PROBE_CYCLES));
+    let mut names: HashSet<String> = HashSet::new();
+    for track in &tracks.tracks {
+        for hap in track.pattern.query(span) {
+            if let Some(name) = hap.value.inst.as_deref().or(hap.value.sound.as_deref()) {
+                names.insert(name.to_string());
+            }
+        }
+    }
+    names
+}
+
 /// Diagnose every `sound`/`inst` reference `known` can't resolve, located at the
 /// source span of the offending leaf. Mirrors the renderer's precedence (`inst`
 /// over `sound`) so the diagnosed name is the one that would actually be looked

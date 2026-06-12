@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::AppHandle;
 
-use arbor_grove::prelude::Registry;
+use arbor_grove::prelude::{InstrumentInfo, Registry};
 
 use super::config::GroveConfig;
 
@@ -109,21 +109,35 @@ pub fn pack(id: &str) -> Option<&'static Pack> {
     PACKS.iter().find(|p| p.id == id)
 }
 
-/// Install directory for a pack. VSCO keeps its legacy location (and the
-/// `[grove].vsco_dir` override) for back-compat with existing installs; every
-/// other pack lives under `<data>/grove/packs/<id>` (or the `packs_dir` override).
+/// Install directory for a pack. VSCO lives at `<grove-data>/vsco` (or the
+/// `vsco_dir` override); every other pack lives under `<grove-data>/packs/<id>`
+/// (or the `packs_dir` override).
 pub fn pack_dir(cfg: &GroveConfig, id: &str) -> PathBuf {
     if id == "vsco" {
         if let Some(dir) = &cfg.vsco_dir {
             return PathBuf::from(dir);
         }
-        return arbor_core::prelude::arbor_data_dir().join("grove").join("vsco");
+        return arbor_core::prelude::grove_data_dir().join("vsco");
     }
     let base = match &cfg.packs_dir {
         Some(d) => PathBuf::from(d),
-        None => arbor_core::prelude::arbor_data_dir().join("grove").join("packs"),
+        None => arbor_core::prelude::grove_data_dir().join("packs"),
     };
     base.join(id)
+}
+
+/// Delete an installed pack's files (its whole install dir; for VSCO with a
+/// custom `vsco_dir`, that directory). `Ok` when already absent; `Err` only on
+/// a filesystem failure or an unknown id.
+pub fn delete(cfg: &GroveConfig, id: &str) -> Result<(), String> {
+    if pack(id).is_none() {
+        return Err(format!("unknown sample pack `{id}`"));
+    }
+    let dir = pack_dir(cfg, id);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).map_err(|e| format!("remove {}: {e}", dir.display()))?;
+    }
+    Ok(())
 }
 
 /// The install status of every known pack (display order).
@@ -146,12 +160,40 @@ pub fn installed_instrument_names(cfg: &GroveConfig) -> Vec<String> {
     names
 }
 
-/// Merge every installed pack's registry into `reg` (additive). The engine calls
-/// this after [`Registry::install_builtin_synths`] so built-ins + all packs
-/// resolve from one registry.
-pub fn load_into(cfg: &GroveConfig, reg: &mut Registry) {
+/// Map each installed pack's instrument names to its `(pack_id, pack_name)`, for
+/// the sound-bank's per-pack grouping. Cheap header scan (no sample decode). On
+/// a name claimed by two packs, the first in [`PACKS`] order wins.
+pub fn instrument_pack_map(cfg: &GroveConfig) -> std::collections::HashMap<String, (String, String)> {
+    let mut map = std::collections::HashMap::new();
     for p in PACKS {
-        download::load_into(cfg, p, reg);
+        for name in download::installed_names(cfg, p) {
+            map.entry(name)
+                .or_insert_with(|| (p.id.to_string(), p.name.to_string()));
+        }
+    }
+    map
+}
+
+/// Append every installed pack's instruments (name / kind / articulations) to
+/// `out` **without decoding samples** — the sound-bank listing path. Pairs with
+/// [`load_subset_into`], which decodes (for playback) only the referenced
+/// instruments (a pack like VSCO/Dirt is gigabytes, never loaded wholesale).
+pub fn list_instruments_into(cfg: &GroveConfig, out: &mut Vec<InstrumentInfo>) {
+    for p in PACKS {
+        download::list_into(cfg, p, out);
+    }
+}
+
+/// Merge **only** the entries named in `needed` from every installed pack into
+/// `reg`. The lazy playback path: the live session decodes just the instruments
+/// the arrangement references, not every sample of every installed pack.
+pub fn load_subset_into(
+    cfg: &GroveConfig,
+    reg: &mut Registry,
+    needed: &std::collections::HashSet<String>,
+) {
+    for p in PACKS {
+        download::load_subset_into(cfg, p, reg, needed);
     }
 }
 

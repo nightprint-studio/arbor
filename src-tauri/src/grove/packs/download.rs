@@ -9,12 +9,13 @@
 //! - `<repo>-<ref>/` — extracted tree, with a generated `registry.toml`
 //! - `install.json`  — install marker (sha256, size, instrument count)
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use arbor_grove::prelude::Registry;
+use arbor_grove::prelude::{list_manifest_instruments, InstrumentInfo, Registry};
 
 use super::{pack_dir, Pack, PackStatus};
 use crate::grove::config::GroveConfig;
@@ -87,16 +88,36 @@ pub fn installed_names(cfg: &GroveConfig, pack: &Pack) -> Vec<String> {
     names
 }
 
-/// Merge an installed pack's registry into `reg` (no-op if not installed). A load
-/// failure is logged and skipped so the other packs still resolve.
-pub fn load_into(cfg: &GroveConfig, pack: &Pack, reg: &mut Registry) {
+/// Append an installed pack's instruments — name / kind / articulations — to
+/// `out` **without decoding samples** (no-op if not installed). The cheap
+/// listing path for the sound bank; pairs with [`load_subset_into`], which
+/// decodes (for playback) only the referenced instruments.
+pub fn list_into(cfg: &GroveConfig, pack: &Pack, out: &mut Vec<InstrumentInfo>) {
     let dir = pack_dir(cfg, pack.id);
     let Some(manifest) = read_manifest(&dir) else {
         return;
     };
     let registry_path = dir.join(&manifest.registry_rel);
-    if let Err(e) = reg.load_manifest_into(&registry_path) {
-        tracing::warn!("grove: pack `{}` registry load failed ({e}); skipping", pack.id);
+    out.extend(list_manifest_instruments(&registry_path));
+}
+
+/// Merge **only** the entries named in `needed` from an installed pack's registry
+/// into `reg` (no-op if not installed). The lazy-loading playback path: decode
+/// just the instruments the arrangement references, not the whole pack. A load
+/// failure is logged and skipped so the other packs still resolve.
+pub fn load_subset_into(
+    cfg: &GroveConfig,
+    pack: &Pack,
+    reg: &mut Registry,
+    needed: &HashSet<String>,
+) {
+    let dir = pack_dir(cfg, pack.id);
+    let Some(manifest) = read_manifest(&dir) else {
+        return;
+    };
+    let registry_path = dir.join(&manifest.registry_rel);
+    if let Err(e) = reg.load_manifest_subset_into(&registry_path, needed) {
+        tracing::warn!("grove: pack `{}` subset load failed ({e}); skipping", pack.id);
     }
 }
 

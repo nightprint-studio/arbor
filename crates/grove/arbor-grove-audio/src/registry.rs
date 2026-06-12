@@ -45,7 +45,7 @@
 //! manifest's base directory by the loader (the shell hands the audio crate
 //! absolute paths). Anything not in the manifest → the default synth.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::error::{AudioError, Result};
@@ -285,6 +285,28 @@ impl Registry {
         let text = std::fs::read_to_string(path).map_err(|e| AudioError::Io(e.to_string()))?;
         let base = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
         self.add_manifest_text(&text, &base)
+    }
+
+    /// Like [`load_manifest_into`], but decode **only** the entries whose name is
+    /// in `needed`; every other table is parsed then skipped (no sample decode).
+    ///
+    /// This is the lazy-loading path: an arrangement references a handful of
+    /// instruments, so the live session loads just those instead of a whole pack
+    /// — decoding all of VSCO/Dirt to play one drum would read gigabytes into RAM.
+    /// Decodes eagerly (non-RT) for the selected entries only.
+    pub fn load_manifest_subset_into(
+        &mut self,
+        path: &Path,
+        needed: &HashSet<String>,
+    ) -> Result<()> {
+        let text = std::fs::read_to_string(path).map_err(|e| AudioError::Io(e.to_string()))?;
+        let base = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+        for (name, kv) in parse_toml_tables(&text)? {
+            if needed.contains(&name) {
+                self.add_entry(&name, &kv, &base)?;
+            }
+        }
+        Ok(())
     }
 
     /// Register a synth preset under `name` (non-RT). Lets the engine/shell wire
@@ -639,6 +661,45 @@ impl Registry {
     }
 }
 
+/// Enumerate the instruments a manifest declares — name, kind, and (for SFZ)
+/// articulation names — **without decoding any samples**.
+///
+/// The sound-bank UI only needs the listing, not the audio. Building a real
+/// [`Registry`] via [`Registry::load_manifest_into`] decodes every referenced
+/// sample eagerly, so listing a pack like VSCO or Dirt-Samples that way reads
+/// gigabytes of WAV into RAM just to show some names. This parses the manifest's
+/// `[name]` tables only (the same flat schema the loader reads) — pure text, no
+/// filesystem walk into the samples. A missing / unparseable file yields an
+/// empty list.
+pub fn list_manifest_instruments(path: &Path) -> Vec<InstrumentInfo> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(tables) = parse_toml_tables(&text) else {
+        return Vec::new();
+    };
+    tables
+        .into_iter()
+        .map(|(name, kv)| {
+            let kind = match kv.get("kind").map(String::as_str).unwrap_or("synth") {
+                "sample" => InstrumentKind::Sample,
+                "sfz" => InstrumentKind::Sfz,
+                _ => InstrumentKind::Synth,
+            };
+            // Articulation declarations are keyed `art.<name>.<field>`; collect the
+            // distinct `<name>`s (the same set `parse_articulations` would build).
+            let mut articulations: Vec<String> = kv
+                .keys()
+                .filter_map(|k| k.strip_prefix("art."))
+                .filter_map(|rest| rest.rsplit_once('.').map(|(art, _)| art.to_string()))
+                .collect();
+            articulations.sort();
+            articulations.dedup();
+            InstrumentInfo { name, kind, articulations }
+        })
+        .collect()
+}
+
 /// Convert dB to a linear gain multiplier.
 fn db_to_linear(db: f32) -> f32 {
     10.0_f32.powf(db / 20.0)
@@ -716,7 +777,11 @@ fn parse_toml_tables(text: &str) -> Result<Vec<(String, HashMap<String, String>)
             if let Some(t) = current.take() {
                 tables.push(t);
             }
-            current = Some((name.trim().to_string(), HashMap::new()));
+            // Headers may be quoted (`["808"]`, `["strings.violin"]`) or bare
+            // (`[bd]`, `[synth.bass]`). Unquote so the entry's resolvable name is
+            // `808`, not `"808"` — otherwise `s("808")` never matches it (and the
+            // sound bank shows the literal quotes).
+            current = Some((unquote(name.trim()), HashMap::new()));
             continue;
         }
         let eq = line.find('=').ok_or_else(|| {
@@ -784,6 +849,25 @@ file = \"drums/bd.wav\"
         assert_eq!(tables[0].1.get("waveform").unwrap(), "square");
         assert_eq!(tables[1].0, "bd");
         assert_eq!(tables[1].1.get("file").unwrap(), "drums/bd.wav");
+    }
+
+    #[test]
+    fn quoted_table_headers_are_unquoted() {
+        // Dirt-Samples / VSCO write quoted headers (`["808"]`); the resolvable
+        // name must be the bare `808`, not `"808"` (else `s("808")` misses it
+        // and the sound bank shows the literal quotes).
+        let src = "\
+[\"808\"]
+kind = \"sample\"
+dir = \"808\"
+
+[\"strings.violin\"]
+kind = \"sfz\"
+file = \"strings/violin.sfz\"
+";
+        let tables = parse_toml_tables(src).unwrap();
+        assert_eq!(tables[0].0, "808");
+        assert_eq!(tables[1].0, "strings.violin");
     }
 
     #[test]

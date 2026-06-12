@@ -40,9 +40,7 @@ use tauri::{AppHandle, Manager, State};
 
 use arbor_grove::prelude::{ControlMap, TempoMap, Tracks};
 
-use crate::config::app_config;
 use crate::error::AppError;
-use crate::AppState;
 
 pub use config::GroveConfig;
 use control::GroveControl;
@@ -125,9 +123,32 @@ impl GroveState {
     }
 }
 
-/// Read the grove config from app state.
-fn grove_config(state: &State<'_, AppState>) -> Result<GroveConfig, AppError> {
-    Ok(state.lock_config()?.grove.clone())
+/// Read grove's config from its own `%APPDATA%\grove\config.toml` (defaults on a
+/// missing / corrupt file; never errors).
+fn grove_config() -> GroveConfig {
+    config::load()
+}
+
+/// One-time storage migration, run once at app startup. Moves grove's data out
+/// of the old `<arbor-data>/grove` location into its own `<grove-data>` root and
+/// seeds grove's config file from Arbor's legacy `[grove]` section. Cheap no-op
+/// once migrated.
+pub fn migrate_storage() {
+    // Data: move `%APPDATA%\arbor\grove` → `%APPDATA%\grove` (a same-volume
+    // rename, so the multi-GB sample banks aren't re-downloaded). Only when the
+    // old tree exists and the new one doesn't, so it runs exactly once.
+    let old = arbor_core::prelude::arbor_data_dir().join("grove");
+    let new = arbor_core::prelude::grove_data_dir();
+    if old.exists() && !new.exists() {
+        if let Some(parent) = new.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::rename(&old, &new) {
+            tracing::warn!("grove: storage migration {old:?} → {new:?} failed: {e}");
+        }
+    }
+    // Config: seed grove's own file from Arbor's legacy `[grove]` section.
+    config::migrate_if_needed();
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -139,12 +160,11 @@ fn grove_config(state: &State<'_, AppState>) -> Result<GroveConfig, AppError> {
 #[tauri::command]
 pub async fn grove_eval(
     app: AppHandle,
-    state: State<'_, AppState>,
     grove: State<'_, GroveState>,
     source: String,
     project_dir: Option<String>,
 ) -> Result<GroveDiagnostics, AppError> {
-    let cfg = grove_config(&state)?;
+    let cfg = grove_config();
     let base = project_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -184,14 +204,13 @@ pub async fn grove_eval(
 #[tauri::command]
 pub async fn grove_transport(
     app: AppHandle,
-    state: State<'_, AppState>,
     grove: State<'_, GroveState>,
     action: String,
     value: Option<f64>,
 ) -> Result<(), AppError> {
     match action.as_str() {
         "play" => {
-            let cfg = grove_config(&state)?;
+            let cfg = grove_config();
             let tx = grove.ensure_session(&app, &cfg);
             // Feed the freshly-started transport the latest arrangement before
             // starting it (harmless if a live eval already pushed the same).
@@ -265,13 +284,12 @@ pub async fn grove_set_track(
 #[tauri::command]
 pub async fn grove_render(
     app: AppHandle,
-    state: State<'_, AppState>,
     source: String,
     project_dir: Option<String>,
     path: String,
     opts: RenderOpts,
 ) -> Result<String, AppError> {
-    let cfg = grove_config(&state)?;
+    let cfg = grove_config();
     let base = project_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -314,11 +332,8 @@ pub async fn grove_render(
 /// List every downloadable sample pack (VSCO, Dirt-Samples, drum machines, …)
 /// with its current install status.
 #[tauri::command]
-pub async fn grove_packs(
-    state: State<'_, AppState>,
-) -> Result<Vec<packs::PackStatus>, AppError> {
-    let cfg = grove_config(&state)?;
-    Ok(packs::list(&cfg))
+pub async fn grove_packs() -> Result<Vec<packs::PackStatus>, AppError> {
+    Ok(packs::list(&grove_config()))
 }
 
 /// Start downloading + installing a sample pack by id (job-tracked). Returns the
@@ -326,28 +341,35 @@ pub async fn grove_packs(
 #[tauri::command]
 pub async fn grove_pack_download(
     app: AppHandle,
-    state: State<'_, AppState>,
     pack_id: String,
 ) -> Result<String, AppError> {
-    let cfg = grove_config(&state)?;
-    packs::start_download(&app, &cfg, &pack_id).map_err(AppError::Grove)
+    packs::start_download(&app, &grove_config(), &pack_id).map_err(AppError::Grove)
 }
 
-/// Read the grove config (`[grove]` in the global config.toml).
+/// Delete an installed sample pack from disk (its whole install dir). No-op for
+/// an unknown id; an already-absent pack succeeds. The caller re-reads the pack
+/// list + sound registry afterwards.
 #[tauri::command]
-pub fn get_grove_config(state: State<'_, AppState>) -> Result<GroveConfig, AppError> {
-    grove_config(&state)
+pub async fn grove_pack_delete(pack_id: String) -> Result<(), AppError> {
+    let cfg = grove_config();
+    // `remove_dir_all` on a multi-GB pack (VSCO) can run long past the UI's 50ms
+    // budget — off the async worker via spawn_blocking.
+    tauri::async_runtime::spawn_blocking(move || packs::delete(&cfg, &pack_id))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .map_err(AppError::Grove)
+}
+
+/// Read the grove config (`%APPDATA%\grove\config.toml`).
+#[tauri::command]
+pub fn get_grove_config() -> Result<GroveConfig, AppError> {
+    Ok(grove_config())
 }
 
 /// Persist a new grove config. Takes effect for the next session / render.
 #[tauri::command]
-pub fn set_grove_config(
-    state: State<'_, AppState>,
-    grove: GroveConfig,
-) -> Result<(), AppError> {
-    let mut config = state.lock_config()?;
-    config.grove = grove;
-    app_config::save(&config).map_err(|e| AppError::Other(e.to_string()))
+pub fn set_grove_config(grove: GroveConfig) -> Result<(), AppError> {
+    config::save(&grove).map_err(AppError::Other)
 }
 
 /// Tear down the grove audio session for the app (window close). Safe to call

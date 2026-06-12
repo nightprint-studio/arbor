@@ -488,6 +488,12 @@ pub fn run() {
         .manage(explorer_window::DragOverlayText::default())
         .manage(grove::GroveState::default())
         .setup(|app| {
+            // One-time storage split: move grove's data out of the old
+            // `<arbor-data>/grove` tree into its own `<grove-data>` root and seed
+            // grove's standalone config from Arbor's legacy `[grove]` section.
+            // Cheap no-op once migrated; runs before the grove window can open.
+            crate::grove::migrate_storage();
+
             // Wire the `arbor-cloud` crate against AppState: registers the
             // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
             // into Tauri state so command + plugin-namespace layers can pull
@@ -1533,6 +1539,7 @@ pub fn run() {
             grove::grove_render,
             grove::grove_packs,
             grove::grove_pack_download,
+            grove::grove_pack_delete,
             grove::get_grove_config,
             grove::set_grove_config,
             // grove Fase 4: arrangement query / sound bank / live mixer /

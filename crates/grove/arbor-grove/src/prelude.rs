@@ -43,11 +43,11 @@ pub use arbor_grove_lang::prelude::{
 // offline/test recorder. `SourceKind` listed above (identical); `Result` omitted;
 // `AudioError` kept by name.
 pub use arbor_grove_audio::prelude::{
-    open_output_stream, AudioCommand, AudioError, AudioSink, CompSettings, DelayConfig, EqBand,
-    EqBandKind, Frame, InstrumentInfo, InstrumentKind, MeterSnapshot, MeterTap, OutputStream,
-    Registry, Renderer, ReverbIr, StreamSink, SynthPreset, TrackConfig, VoiceEvent, VoiceId,
-    VoiceParams, VoiceSource, Waveform, RecordingSink, DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE,
-    DEFAULT_VOICE_CAPACITY, MAX_METER_TRACKS,
+    list_manifest_instruments, open_output_stream, AudioCommand, AudioError, AudioSink,
+    CompSettings, DelayConfig, EqBand, EqBandKind, Frame, InstrumentInfo, InstrumentKind,
+    MeterSnapshot, MeterTap, OutputStream, Registry, Renderer, ReverbIr, StreamSink, SynthPreset,
+    TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource, Waveform, RecordingSink,
+    DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE, DEFAULT_VOICE_CAPACITY, MAX_METER_TRACKS,
 };
 
 // ── arbor-grove-engine — the timing runtime ──────────────────────────────────
