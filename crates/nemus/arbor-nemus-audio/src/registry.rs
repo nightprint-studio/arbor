@@ -449,16 +449,25 @@ impl Registry {
     /// the instrument index.
     fn load_sfz(&mut self, path: &Path) -> Result<usize> {
         let text = std::fs::read_to_string(path).map_err(|e| AudioError::Io(e.to_string()))?;
-        let instrument = sfz::parse(&path.to_string_lossy(), &text)?;
+        let mut instrument = sfz::parse(&path.to_string_lossy(), &text)?;
         let sfz_dir = path.parent().unwrap_or_else(|| Path::new("."));
-        for region in &instrument.regions {
+        for region in &mut instrument.regions {
             let sample_path = resolve_path(sfz_dir, &region.sample);
-            // Resident under its absolute path key; a missing sample is left
-            // unresident so the renderer falls back to the synth for it.
+            // Key the bank by the **normalised** (forward-slash) absolute path and
+            // rewrite the region to that exact key. At voice spawn `resolve_sfz`
+            // then resolves the region's sample with an O(1) map hit instead of an
+            // O(bank) suffix scan that also allocates a String per key — that scan
+            // runs on the RT thread per onset, so on a large bank (VSCO) a dense
+            // passage starves the audio callback into underruns (distortion).
+            // Normalising both sides is also what makes the exact hit work on
+            // Windows at all (bank keys had `\`, the lookup needle `/`).
+            let key = sample_path.to_string_lossy().replace('\\', "/");
+            // A missing sample is left unresident so the renderer falls back to the
+            // synth for it; the region still carries the (would-be) key.
             if let Ok(sample) = self.bank.load(&sample_path) {
-                let key = sample_path.to_string_lossy().into_owned();
-                self.bank.insert(key, sample);
+                self.bank.insert(key.clone(), sample);
             }
+            region.sample = key;
         }
         self.instruments.push(instrument);
         Ok(self.instruments.len() - 1)

@@ -20,6 +20,7 @@ use super::config::NemusConfig;
 mod download;
 mod gm;
 mod layout;
+mod vsco;
 
 pub use layout::Layout;
 
@@ -48,10 +49,13 @@ pub const PACKS: &[Pack] = &[
         name: "VSCO 2 — orchestral",
         description: "The Versilian Studios Chamber Orchestra 2 — a full set of \
             multisampled orchestral instruments (strings, brass, woodwinds, \
-            percussion) as SFZ. Large; the richest sound source nemus ships.",
+            percussion). Large; the richest sound source nemus ships. Indexed into \
+            playable SFZ instruments from its raw wavs at install time.",
         approx_bytes: 2_900_000_000,
         archive_url: "https://github.com/sgossner/VSCO-2-CE/archive/refs/heads/master.zip",
-        layout: Layout::SfzTree,
+        // The CE archive ships raw wavs (no `.sfz`); nemus builds the SFZ layer
+        // from the filenames — see `vsco`.
+        layout: Layout::VscoWavTree,
     },
     Pack {
         id: "dirt-samples",
@@ -148,6 +152,17 @@ pub fn list(cfg: &NemusConfig) -> Vec<PackStatus> {
 /// The install status of one pack by id (`None` for an unknown id).
 pub fn status(cfg: &NemusConfig, id: &str) -> Option<PackStatus> {
     pack(id).map(|p| download::status(cfg, p))
+}
+
+/// Re-index an already-installed pack: regenerate its `registry.toml` from the
+/// **extracted tree on disk** (no re-download) and refresh the install marker's
+/// instrument count. The fix for a pack whose index is stale or empty — e.g. an
+/// older VSCO install that produced zero instruments. `Err` for an unknown /
+/// not-installed id, a missing extracted tree, or a layout that can't re-index
+/// from the tree (General MIDI, whose source `.sf2` is deleted after install).
+pub fn reindex(cfg: &NemusConfig, id: &str) -> Result<PackStatus, String> {
+    let pack = pack(id).ok_or_else(|| format!("unknown sample pack `{id}`"))?;
+    download::reindex(cfg, pack)
 }
 
 /// The instrument names declared by every installed pack (union), for the eval

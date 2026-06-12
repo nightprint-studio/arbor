@@ -204,52 +204,91 @@ pub(crate) fn equal_power_pan(pan: f32) -> (f32, f32) {
     (angle.cos(), angle.sin())
 }
 
-/// A simple look-back-free peak limiter with smooth gain release. Keeps the
-/// master bus under `ceiling` without the hard-clip "crunch": when a peak
-/// exceeds the ceiling the gain drops instantly, then recovers exponentially.
-#[derive(Clone, Copy, Debug)]
+/// A **look-ahead** peak limiter keeping the master under `ceiling`.
+///
+/// The naive version reduced gain *instantaneously* at each over-ceiling sample.
+/// Under a hot, dense mix (many summed voices + a reverb send) the peak envelope
+/// is jagged, so that per-sample gain stepping modulates the signal at audio rate
+/// — audible as distortion, worst exactly where a `room` send adds decorrelated
+/// energy. Instead we delay the signal by a short look-ahead and **ramp** the gain
+/// smoothly toward the reduction the incoming peak needs, reaching it by the time
+/// that peak emerges. Smooth gain → no audio-rate modulation → clean limiting even
+/// when slammed. A peak-hold over the look-ahead keeps a lone spike ducked until
+/// it passes through.
+#[derive(Clone, Debug)]
 pub struct Limiter {
     ceiling: f32,
-    /// Current gain reduction multiplier `0..1` (1 = no reduction).
+    /// Current gain-reduction multiplier `0..1` (1 = no reduction).
     gain: f32,
-    /// Per-sample recovery coefficient toward unity.
+    /// Per-sample smoothing toward a deeper reduction (attack, over the look-ahead).
+    attack_coeff: f32,
+    /// Per-sample recovery toward unity (release).
     release_coeff: f32,
+    /// Look-ahead delay ring (the output is this many samples behind the detector).
+    delay: Vec<[f32; 2]>,
+    pos: usize,
+    /// Peak held across the look-ahead window so a spike stays ducked until output.
+    held_peak: f32,
+    hold: usize,
 }
 
 impl Limiter {
     /// Build a limiter at `ceiling` (linear, e.g. `0.95`) with a release time in
     /// seconds for `sample_rate`.
     pub fn new(ceiling: f32, release_secs: f32, sample_rate: f32) -> Self {
-        let n = (release_secs * sample_rate).max(1.0);
+        // ~1.5 ms look-ahead — enough to ramp gain down before a peak reaches the
+        // output, imperceptible as latency.
+        let look = ((sample_rate * 0.0015) as usize).clamp(16, 1024);
+        let rel = (release_secs * sample_rate).max(1.0);
         Limiter {
             ceiling,
             gain: 1.0,
-            // Exponential approach: reach ~63% of the way to unity in `n` samples.
-            release_coeff: (-1.0 / n).exp(),
+            // Reach ~98% of the reduction across the look-ahead window (smooth, but
+            // settled before the peak emerges, so overshoot stays well under 1.0).
+            attack_coeff: (-4.0 / look as f32).exp(),
+            release_coeff: (-1.0 / rel).exp(),
+            delay: vec![[0.0; 2]; look],
+            pos: 0,
+            held_peak: 0.0,
+            hold: 0,
         }
     }
 
-    /// Reset the gain-reduction state to unity (transport stop / panic).
+    /// Reset the gain-reduction state + look-ahead buffer (transport stop / panic).
     pub fn reset(&mut self) {
         self.gain = 1.0;
+        self.delay.iter_mut().for_each(|s| *s = [0.0; 2]);
+        self.pos = 0;
+        self.held_peak = 0.0;
+        self.hold = 0;
     }
 
-    /// Process one stereo frame, applying smoothed gain reduction.
+    /// Process one stereo frame. `frame` is the (future) detector input; the
+    /// returned frame is the look-ahead-delayed signal with the smoothed gain.
     pub fn process(&mut self, frame: [f32; 2]) -> [f32; 2] {
+        // Peak-hold the detector over the look-ahead so a spike stays ducked until
+        // it reaches the output.
         let peak = frame[0].abs().max(frame[1].abs());
-        let target = if peak * self.gain > self.ceiling {
-            self.ceiling / peak
+        if peak >= self.held_peak {
+            self.held_peak = peak;
+            self.hold = self.delay.len();
+        } else if self.hold > 0 {
+            self.hold -= 1;
         } else {
-            1.0
-        };
-        if target < self.gain {
-            // Attack is instantaneous (clamp this sample's peak immediately).
-            self.gain = target;
-        } else {
-            // Release: ease back toward unity.
-            self.gain = target + (self.gain - target) * self.release_coeff;
+            self.held_peak = peak;
         }
-        [frame[0] * self.gain, frame[1] * self.gain]
+        let target = if self.held_peak > self.ceiling { self.ceiling / self.held_peak } else { 1.0 };
+        // Smooth toward the target: attack when ducking deeper, release when easing.
+        let coeff = if target < self.gain { self.attack_coeff } else { self.release_coeff };
+        self.gain = target + (self.gain - target) * coeff;
+
+        let out = self.delay[self.pos];
+        self.delay[self.pos] = frame;
+        self.pos += 1;
+        if self.pos >= self.delay.len() {
+            self.pos = 0;
+        }
+        [out[0] * self.gain, out[1] * self.gain]
     }
 }
 
@@ -407,6 +446,11 @@ fn time_to_coeff(time: f32, sample_rate: f32) -> f32 {
 /// An installed IR longer than this is truncated. ~8192 frames ≈ 170 ms @ 48 kHz.
 const MAX_IR_FRAMES: usize = 8192;
 
+/// Target L2 energy the procedural reverb IR is normalised to, so the `room` wet
+/// send is a controlled, gentle level **independent of the tail length**. Picked
+/// for a subtle-but-present room; raise for a wetter default.
+const TARGET_IR_ENERGY: f32 = 0.3;
+
 /// A stereo convolution reverb over a (typically procedural) impulse response.
 ///
 /// Time-domain FIR convolution per channel via a ring-buffered history. This is
@@ -559,13 +603,203 @@ fn procedural_ir(seconds: f32, sample_rate: f32) -> Vec<Frame> {
     ir[0][0] += 0.5;
     ir[0][1] += 0.5;
 
-    // Normalise to keep the send level sane regardless of length.
-    let norm = 0.06 / (len as f32).sqrt().max(1.0);
-    for tap in ir.iter_mut() {
-        tap[0] *= norm * (len as f32).sqrt();
-        tap[1] *= norm * (len as f32).sqrt();
+    // Normalise the IR to a fixed total energy so the wet send level is sane and
+    // genuinely independent of the tail length. The previous form multiplied the
+    // `0.06 / sqrt(len)` factor straight back by `sqrt(len)`, cancelling the length
+    // normalisation and leaving the raw energy — which grows with the tail, so a
+    // `room`-heavy passage overdrove the master into distortion.
+    let energy = ir
+        .iter()
+        .map(|t| t[0] * t[0] + t[1] * t[1])
+        .sum::<f32>()
+        .sqrt();
+    if energy > 0.0 {
+        let g = TARGET_IR_ENERGY / energy;
+        for tap in ir.iter_mut() {
+            tap[0] *= g;
+            tap[1] *= g;
+        }
     }
     ir
+}
+
+// ── Algorithmic reverb (Freeverb topology) ─────────────────────────────────────
+//
+// The DEFAULT `room` reverb. Unlike [`ConvReverb`] (kept for an explicitly
+// installed impulse response) this is **O(1) per output sample** — a fixed bank
+// of comb + allpass delay lines — so the per-frame cost is constant regardless of
+// the tail length. The convolution's cost is O(IR taps) per sample, which (gated
+// on by any `.room()` send) overran the audio callback on `room`-heavy material
+// and was heard as distortion. Feedback stays < 1, so the tail is always bounded.
+
+/// Comb-filter delays (samples @ 44.1 kHz), scaled to the actual rate at build.
+const COMB_TUNINGS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+/// Allpass diffuser delays (samples @ 44.1 kHz).
+const ALLPASS_TUNINGS: [usize; 4] = [556, 441, 341, 225];
+/// Right-channel delay offset for a stereo image.
+const STEREO_SPREAD: usize = 23;
+/// Input attenuation feeding the comb bank (Freeverb's fixed gain).
+const REVERB_FIXED_GAIN: f32 = 0.015;
+
+/// A damped feedback comb filter — one decaying reverb "mode".
+struct Comb {
+    buf: Vec<f32>,
+    pos: usize,
+    /// One-pole lowpass state for high-frequency damping in the feedback path.
+    store: f32,
+    feedback: f32,
+    damp1: f32,
+    damp2: f32,
+}
+
+impl Comb {
+    fn new(len: usize, feedback: f32, damp: f32) -> Self {
+        Comb { buf: vec![0.0; len.max(1)], pos: 0, store: 0.0, feedback, damp1: damp, damp2: 1.0 - damp }
+    }
+    #[inline]
+    fn process(&mut self, input: f32) -> f32 {
+        let out = self.buf[self.pos];
+        self.store = out * self.damp2 + self.store * self.damp1;
+        self.buf[self.pos] = input + self.store * self.feedback;
+        self.pos += 1;
+        if self.pos >= self.buf.len() {
+            self.pos = 0;
+        }
+        out
+    }
+    fn reset(&mut self) {
+        self.buf.iter_mut().for_each(|s| *s = 0.0);
+        self.store = 0.0;
+        self.pos = 0;
+    }
+}
+
+/// A Schroeder allpass filter — a diffuser that thickens the comb output.
+struct Allpass {
+    buf: Vec<f32>,
+    pos: usize,
+    feedback: f32,
+}
+
+impl Allpass {
+    fn new(len: usize, feedback: f32) -> Self {
+        Allpass { buf: vec![0.0; len.max(1)], pos: 0, feedback }
+    }
+    #[inline]
+    fn process(&mut self, input: f32) -> f32 {
+        let buffered = self.buf[self.pos];
+        let out = -input + buffered;
+        self.buf[self.pos] = input + buffered * self.feedback;
+        self.pos += 1;
+        if self.pos >= self.buf.len() {
+            self.pos = 0;
+        }
+        out
+    }
+    fn reset(&mut self) {
+        self.buf.iter_mut().for_each(|s| *s = 0.0);
+        self.pos = 0;
+    }
+}
+
+/// A compact stereo algorithmic reverb (Freeverb topology): eight damped feedback
+/// combs in parallel into four series allpasses, per channel. O(1) per sample.
+pub struct Freeverb {
+    combs_l: Vec<Comb>,
+    combs_r: Vec<Comb>,
+    allp_l: Vec<Allpass>,
+    allp_r: Vec<Allpass>,
+    /// Output (wet) scaling — the bus is a pure send, so this sets the overall
+    /// `room` level a `.room(x)` send then scales further.
+    wet: f32,
+}
+
+impl Freeverb {
+    /// Build for `sample_rate`. `room_hint` (0..1, the repurposed reverb "length")
+    /// maps to the comb feedback — larger = a longer, more diffuse tail.
+    pub fn new(room_hint: f32, sample_rate: f32) -> Self {
+        let feedback = room_hint.clamp(0.0, 1.0) * 0.28 + 0.7; // ~0.7..0.98, always < 1
+        // Fairly strong HF damping: a darker tail (like Strudel's low-passed reverb)
+        // sits behind the mix instead of adding bright, harsh, peak-jagged energy.
+        let damp = 0.35;
+        let scale = (sample_rate / 44_100.0).max(0.1);
+        let s = |n: usize| (((n as f32) * scale) as usize).max(1);
+        Freeverb {
+            combs_l: COMB_TUNINGS.iter().map(|&t| Comb::new(s(t), feedback, damp)).collect(),
+            combs_r: COMB_TUNINGS.iter().map(|&t| Comb::new(s(t + STEREO_SPREAD), feedback, damp)).collect(),
+            allp_l: ALLPASS_TUNINGS.iter().map(|&t| Allpass::new(s(t), 0.5)).collect(),
+            allp_r: ALLPASS_TUNINGS.iter().map(|&t| Allpass::new(s(t + STEREO_SPREAD), 0.5)).collect(),
+            wet: 0.22,
+        }
+    }
+    /// Process one stereo send frame, returning the wet reverb output.
+    pub fn process(&mut self, input: Frame) -> Frame {
+        let x = (input[0] + input[1]) * REVERB_FIXED_GAIN;
+        let mut l = 0.0;
+        for c in &mut self.combs_l {
+            l += c.process(x);
+        }
+        for a in &mut self.allp_l {
+            l = a.process(l);
+        }
+        let mut r = 0.0;
+        for c in &mut self.combs_r {
+            r += c.process(x);
+        }
+        for a in &mut self.allp_r {
+            r = a.process(r);
+        }
+        [l * self.wet, r * self.wet]
+    }
+    /// Clear every delay line so the wet output is immediately silent.
+    pub fn reset(&mut self) {
+        self.combs_l.iter_mut().for_each(Comb::reset);
+        self.combs_r.iter_mut().for_each(Comb::reset);
+        self.allp_l.iter_mut().for_each(Allpass::reset);
+        self.allp_r.iter_mut().for_each(Allpass::reset);
+    }
+}
+
+/// The `room` reverb: the cheap O(1) algorithmic [`Freeverb`] by default, or a
+/// [`ConvReverb`] when an explicit impulse response is installed. The renderer
+/// holds one of these on the `room` bus and dispatches `process` / `reset`.
+#[derive(Debug)]
+pub enum Reverb {
+    /// Default: the algorithmic reverb (constant per-sample cost).
+    Algo(Freeverb),
+    /// An installed impulse response, via time-domain convolution.
+    Conv(ConvReverb),
+}
+
+impl Reverb {
+    /// The default procedural reverb — now the O(1) algorithmic [`Freeverb`].
+    pub fn procedural(room_hint: f32, sample_rate: f32) -> Self {
+        Reverb::Algo(Freeverb::new(room_hint, sample_rate))
+    }
+    /// An installed impulse-response reverb (convolution).
+    pub fn from_buffer(ir: Vec<Frame>) -> Self {
+        Reverb::Conv(ConvReverb::from_buffer(ir))
+    }
+    /// Process one stereo send frame.
+    pub fn process(&mut self, input: Frame) -> Frame {
+        match self {
+            Reverb::Algo(f) => f.process(input),
+            Reverb::Conv(c) => c.process(input),
+        }
+    }
+    /// Flush the reverb tail to immediate silence.
+    pub fn reset(&mut self) {
+        match self {
+            Reverb::Algo(f) => f.reset(),
+            Reverb::Conv(c) => c.reset(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Freeverb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Freeverb").field("combs", &self.combs_l.len()).finish_non_exhaustive()
+    }
 }
 
 /// A stereo feedback delay line (per-track delay bus). The send into the line is
@@ -682,6 +916,64 @@ mod tests {
             (y[0] - 0.5).abs() < 1e-6 && (y[1] - 0.4).abs() < 1e-6,
             "re-excitation after a gated flush must match a fresh impulse",
         );
+    }
+
+    /// The procedural IR must be energy-normalised to `TARGET_IR_ENERGY` regardless
+    /// of the requested tail length — the regression guard for the `room` bug where
+    /// the length normalisation cancelled out and the reverb gain grew with the
+    /// tail (overdriving the master into distortion).
+    #[test]
+    fn procedural_ir_energy_is_normalised_and_length_independent() {
+        let energy = |secs: f32| {
+            procedural_ir(secs, 48_000.0)
+                .iter()
+                .map(|t| t[0] * t[0] + t[1] * t[1])
+                .sum::<f32>()
+                .sqrt()
+        };
+        for secs in [0.05, 0.1, 0.5, 2.0] {
+            let e = energy(secs);
+            assert!(
+                (e - TARGET_IR_ENERGY).abs() < 1e-3,
+                "IR energy {e} for {secs}s should be ~{TARGET_IR_ENERGY}",
+            );
+        }
+    }
+
+    /// The look-ahead limiter must tame a hard overdrive down to (about) the
+    /// ceiling, staying finite and not clipping past 1.0 — the property that makes
+    /// a slammed master (dense mix + reverb send) clean instead of distorted.
+    #[test]
+    fn limiter_tames_overdrive_without_clipping() {
+        let mut lim = Limiter::new(0.95, 0.05, 48_000.0);
+        let mut peak = 0.0f32;
+        for i in 0..48_000 {
+            let y = lim.process([5.0, -5.0]);
+            assert!(y[0].is_finite() && y[1].is_finite(), "limited output must be finite");
+            // Skip the initial gain ramp; measure the settled region.
+            if i > 4_000 {
+                peak = peak.max(y[0].abs()).max(y[1].abs());
+            }
+        }
+        assert!(peak <= 1.0, "limited output should stay <= 1.0 (peak {peak})");
+        assert!(peak > 0.9, "and should reach the ceiling, not over-duck (peak {peak})");
+    }
+
+    /// The algorithmic reverb must stay bounded under a sustained input (feedback
+    /// < 1, no blow-up) and go exactly silent after a reset — the property that
+    /// makes it a safe, O(1) replacement for the convolution on the `room` bus.
+    #[test]
+    fn freeverb_is_bounded_and_reset_silences() {
+        let mut rv = Freeverb::new(0.5, 48_000.0);
+        let mut peak = 0.0f32;
+        for _ in 0..48_000 {
+            let y = rv.process([1.0, 1.0]);
+            assert!(y[0].is_finite() && y[1].is_finite(), "wet must stay finite");
+            peak = peak.max(y[0].abs()).max(y[1].abs());
+        }
+        assert!(peak < 4.0, "wet should stay bounded (peak {peak})");
+        rv.reset();
+        assert_eq!(rv.process([0.0, 0.0]), [0.0, 0.0], "a reset reverb is exactly silent");
     }
 
     /// A feedback delay line rings indefinitely; `reset` must silence it at once.

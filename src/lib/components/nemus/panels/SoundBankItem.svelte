@@ -75,7 +75,17 @@
 </div>
 
 <style>
-  .sbi { display: flex; flex-direction: column; }
+  /* A sampler bank (drum machines, Dirt-Samples) can run to hundreds of rows;
+     expanding the section would otherwise lay out + paint them all in one frame.
+     `content-visibility: auto` lets WebView2 skip layout/paint for rows scrolled
+     out of view, and `contain-intrinsic-size: auto …` remembers each row's real
+     size after its first render — so the inline info-expand (variable height)
+     stays accurate without a fixed-height windowing scheme. */
+  .sbi {
+    display: flex; flex-direction: column;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 26px;
+  }
 
   .sbi-row {
     display: flex; align-items: stretch; gap: 2px;

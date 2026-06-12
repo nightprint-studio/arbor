@@ -35,6 +35,11 @@ pub enum Layout {
     /// is one `.sf2`, converted to wav+SFZ by [`super::gm`] (which writes its own
     /// `registry.toml`), so [`generate`] is never called for this layout.
     Sf2,
+    /// A VSCO 2 CE wav tree (`<Family>/<Instrument>/<Articulation>/*.wav`), with
+    /// no shipped `.sfz`. [`super::vsco`] parses the pitch/velocity/round-robin
+    /// from the filenames, writes a `_nemus.sfz` per articulation, and emits one
+    /// registry entry per instrument (articulations as `.art(…)` alternates).
+    VscoWavTree,
 }
 
 /// Generate the `registry.toml` body for `root`, returning `(toml, entry_count)`.
@@ -47,6 +52,8 @@ pub fn generate(root: &Path, layout: Layout) -> (String, usize) {
         // The GM pack converts a .sf2 directly (see `super::download` + `super::gm`);
         // it never reaches the tree-walking generators.
         Layout::Sf2 => (String::new(), 0),
+        // VSCO ships raw wavs — build the missing SFZ layer from the filenames.
+        Layout::VscoWavTree => super::vsco::generate(root),
     }
 }
 

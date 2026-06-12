@@ -181,6 +181,35 @@ pub fn start(app: &AppHandle, cfg: &NemusConfig, pack: &'static Pack) -> String 
     job_id
 }
 
+/// Re-index an installed pack from its extracted tree (no network). Regenerates
+/// `registry.toml` via the pack's [`Layout`](super::Layout) and rewrites the
+/// install marker's instrument count, leaving the downloaded samples untouched.
+///
+/// `Err` when the pack isn't installed, its extracted tree is gone, or its layout
+/// can't rebuild from the tree (the GM `.sf2` is deleted post-install, so GM can
+/// only be rebuilt by re-downloading).
+pub fn reindex(cfg: &NemusConfig, pack: &Pack) -> Result<PackStatus, String> {
+    let dir = pack_dir(cfg, pack.id);
+    let manifest = read_manifest(&dir).ok_or_else(|| format!("pack `{}` is not installed", pack.id))?;
+    if matches!(pack.layout, super::Layout::Sf2) {
+        return Err("re-indexing isn't supported for General MIDI — re-download it to rebuild".to_string());
+    }
+    // The extracted tree's root is the parent of the registry path (`<repo>-<ref>/`).
+    let registry_path = dir.join(&manifest.registry_rel);
+    let root = registry_path
+        .parent()
+        .ok_or_else(|| "malformed install marker (no registry parent)".to_string())?
+        .to_path_buf();
+    if !root.exists() {
+        return Err("the pack's extracted files are missing — re-download it".to_string());
+    }
+
+    let (toml, instrument_count) = super::layout::generate(&root, pack.layout);
+    std::fs::write(&registry_path, toml).map_err(|e| format!("write registry: {e}"))?;
+    write_manifest(&dir, &InstallManifest { instrument_count, ..manifest })?;
+    Ok(status(cfg, pack))
+}
+
 // ── Internals ────────────────────────────────────────────────────────────────
 
 /// Stream the archive to disk (hashing as we go), then extract + index it.

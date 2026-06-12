@@ -229,6 +229,15 @@ export function nemusPackDownload(packId: string): Promise<string> {
   return invoke('nemus_pack_download', { packId });
 }
 
+/**
+ * Re-index an installed pack: rebuild its registry from the extracted files on
+ * disk (no re-download), refreshing the instruments it exposes. Returns the
+ * updated pack status. Re-read packs + sounds afterwards.
+ */
+export function nemusPackReindex(packId: string): Promise<NemusPack> {
+  return invoke('nemus_pack_reindex', { packId });
+}
+
 /** Delete an installed sample pack from disk. Re-read packs + sounds afterwards. */
 export function nemusPackDelete(packId: string): Promise<void> {
   return invoke('nemus_pack_delete', { packId });

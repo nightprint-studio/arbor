@@ -27,7 +27,7 @@
 use std::collections::BinaryHeap;
 use std::path::Path;
 
-use crate::effects::{equal_power_pan, Compressor, ConvReverb, DelayLine, EqChain, Limiter};
+use crate::effects::{equal_power_pan, Compressor, DelayLine, EqChain, Limiter, Reverb};
 use crate::registry::{Registry, ResolvedVoice, SampleParams};
 use crate::sampler::{Sample, SampleBank};
 use crate::seam::{AudioCommand, Frame, ReverbIr, TrackConfig, VoiceEvent, VoiceSource};
@@ -38,11 +38,13 @@ use arbor_nemus_pattern::prelude::SourceKind;
 /// later through the renderer constructor.
 pub const DEFAULT_VOICE_CAPACITY: usize = 128;
 
-/// Default procedural reverb tail length (seconds) until an IR is installed.
-/// Kept short on purpose: the convolution is naive time-domain (O(IR) per sample),
-/// so a multi-second tail is a partitioned-FFT concern (Onda 3). A ~0.12 s dense
-/// IR gives a convincing room while staying real-time-tractable.
-const DEFAULT_REVERB_SECS: f32 = 0.12;
+/// Default `room` reverb size (`0..1`) until an IR is installed. The default
+/// reverb is the **O(1) algorithmic [`Reverb::Algo`]** (Freeverb), whose cost is
+/// constant per sample regardless of tail length — so unlike the old naive
+/// convolution (O(IR taps) per sample, which overran the callback on `room`-heavy
+/// material and was heard as distortion) the size is purely a tonal choice. `0.5`
+/// is a medium room; higher = longer/more diffuse.
+const DEFAULT_REVERB_SECS: f32 = 0.5;
 
 /// Max delay-line length per track (seconds): caps `delay` so an absurd cycle
 /// fraction can't allocate without bound.
@@ -142,7 +144,7 @@ pub struct Renderer {
     /// atomic (so ballistics live in one place, next to the master peak).
     track_peak: Vec<Frame>,
     master: Master,
-    reverb: ConvReverb,
+    reverb: Reverb,
     limiter: Limiter,
     registry: Registry,
     /// Resident audio for `File` (`sample`/`audio`) voices, keyed by path.
@@ -152,7 +154,7 @@ pub struct Renderer {
     /// Idle gate: set on [`AudioCommand::StopAll`] (transport stop), cleared on the
     /// next real activity (a queued voice). While idle *and* nothing is sounding,
     /// [`process`](Self::process) takes a silence fast-path that skips the entire
-    /// per-frame DSP graph (strips, delay buses, reverb convolution, limiter) — so
+    /// per-frame DSP graph (strips, delay buses, reverb, limiter) — so
     /// a stopped session is genuinely idle (DSP load → ~0) instead of grinding the
     /// effect graph on silence for every device buffer until window close.
     idle: bool,
@@ -188,7 +190,7 @@ impl Renderer {
             track_delay_send: vec![[0.0; 2]; strip_count],
             track_peak: vec![[0.0; 2]; strip_count],
             master: Master::default(),
-            reverb: ConvReverb::procedural(DEFAULT_REVERB_SECS, sample_rate as f32),
+            reverb: Reverb::procedural(DEFAULT_REVERB_SECS, sample_rate as f32),
             limiter: Limiter::new(0.95, 0.05, sample_rate as f32),
             registry: Registry::new(),
             files: SampleBank::new(),
@@ -363,9 +365,9 @@ impl Renderer {
             AudioCommand::SetReverbIr(ir) => {
                 self.reverb = match ir {
                     ReverbIr::Procedural { seconds } => {
-                        ConvReverb::procedural(seconds, self.sample_rate as f32)
+                        Reverb::procedural(seconds, self.sample_rate as f32)
                     }
-                    ReverbIr::Buffer(buf) => ConvReverb::from_buffer(buf),
+                    ReverbIr::Buffer(buf) => Reverb::from_buffer(buf),
                 };
             }
             AudioCommand::StopAll => {
@@ -518,7 +520,7 @@ impl Renderer {
     /// Per strip: voices sum into `track_dry` (+ reverb send + per-track delay
     /// send); the strip applies EQ → compressor → delay-bus mix-back → pan → gain
     /// → mute/solo, then sums into the master. The master applies EQ → compressor
-    /// → gain, the convolution reverb folds in, then the limiter caps the output.
+    /// → gain, the reverb send folds in, then the limiter caps the output.
     fn render_frame(&mut self, frame: u64) -> Frame {
         // Clear per-track + send accumulators.
         for d in &mut self.track_dry {

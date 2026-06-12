@@ -67,6 +67,18 @@
   function togglePack(id: string) { openPacks = { ...openPacks, [id]: !(openPacks[id] ?? false) }; }
   function packShown(id: string): boolean { return (openPacks[id] ?? false) || !!q; }
 
+  // Re-index: rebuild an installed pack's registry from the files on disk (fixes
+  // a pack that indexed to zero instruments, e.g. an older VSCO install).
+  let reindexError = $state<Record<string, string>>({});
+  async function doReindex(pack: NemusPack) {
+    reindexError = { ...reindexError, [pack.id]: '' };
+    try {
+      await packsStore.reindex(pack.id);
+    } catch (e) {
+      reindexError = { ...reindexError, [pack.id]: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   // Delete-pack confirmation (an installed pack's files are removed from disk).
   let confirmDelete = $state<NemusPack | null>(null);
   let deleting      = $state(false);
@@ -133,11 +145,24 @@
           <span class="pack-dot">·</span>
           <HardDrive size={11} /> {formatBytes(pack.size_bytes)} on disk
         </span>
-        <button class="pack-del" use:tooltip={'Delete pack'}
-                aria-label={`Delete ${pack.name}`} onclick={() => askDelete(pack)}>
-          <Trash2 size={13} />
-        </button>
+        <div class="pack-actions">
+          <button class="pack-del" use:tooltip={'Rebuild this pack’s instruments from the files on disk'}
+                  aria-label={`Re-index ${pack.name}`} disabled={packsStore.reindexingOf(pack.id)}
+                  onclick={() => doReindex(pack)}>
+            {#if packsStore.reindexingOf(pack.id)}<Spinner size={13} />{:else}<RefreshCw size={13} />{/if}
+          </button>
+          <button class="pack-del" use:tooltip={'Delete pack'}
+                  aria-label={`Delete ${pack.name}`} onclick={() => askDelete(pack)}>
+            <Trash2 size={13} />
+          </button>
+        </div>
       </div>
+      {#if pack.instrument_count === 0}
+        <p class="pack-hint">No instruments indexed — try <strong>Re-index</strong> to rebuild from the downloaded files.</p>
+      {/if}
+      {#if reindexError[pack.id]}
+        <p class="pack-err">{reindexError[pack.id]}</p>
+      {/if}
     {:else if packsStore.downloadingOf(pack.id)}
       <div class="pack-dl">
         <div class="pack-dl-head">
@@ -260,8 +285,19 @@
     color: var(--text-disabled);
     transition: color var(--transition-fast), background var(--transition-fast);
   }
-  .pack-del:hover { color: var(--error); background: var(--error-subtle); }
+  .pack-del:hover:not(:disabled) { color: var(--error); background: var(--error-subtle); }
   .pack-del:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--error); }
+  .pack-del:disabled { opacity: 0.5; cursor: default; }
+
+  .pack-actions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+  /* The re-index button is the first `.pack-del` in `.pack-actions`; tint it
+     accent on hover (it rebuilds, it doesn't destroy) rather than the delete red. */
+  .pack-actions .pack-del:first-child:hover:not(:disabled) { color: var(--accent); background: var(--accent-subtle); }
+  .pack-actions .pack-del:first-child:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+
+  .pack-hint { margin: 2px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+  .pack-hint strong { color: var(--text-secondary); font-weight: 600; }
+  .pack-err { margin: 2px 0 0; font-size: 11px; line-height: 1.5; color: var(--error); }
 
   .pack-dl { display: flex; flex-direction: column; gap: 5px; }
   .pack-dl-head { display: flex; align-items: baseline; justify-content: space-between; }

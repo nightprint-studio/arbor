@@ -1539,6 +1539,7 @@ pub fn run() {
             nemus::nemus_render,
             nemus::nemus_packs,
             nemus::nemus_pack_download,
+            nemus::nemus_pack_reindex,
             nemus::nemus_pack_delete,
             nemus::get_nemus_config,
             nemus::set_nemus_config,

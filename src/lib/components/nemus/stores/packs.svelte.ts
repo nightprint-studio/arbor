@@ -14,7 +14,7 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
-  nemusPacks, nemusPackDownload, nemusPackDelete, onNemusPackProgress,
+  nemusPacks, nemusPackDownload, nemusPackDelete, nemusPackReindex, onNemusPackProgress,
   type NemusPack, type NemusPackProgress,
 } from '$lib/ipc/nemus';
 import { cancelJob } from '$lib/feedback/ipc/job';
@@ -32,6 +32,9 @@ function createPacksStore() {
   // Keyed by pack id; a pack is "downloading" while it has a live job id.
   let progress = $state<Record<string, NemusPackProgress | null>>({});
   let jobIds   = $state<Record<string, string>>({});
+  // Packs with a re-index in flight (the registry rebuild is synchronous backend
+  // work, not a job, so it gets its own transient flag).
+  let reindexing = $state<Record<string, boolean>>({});
 
   /** Drop a pack's job id (no longer in flight). */
   function clearJob(id: string) {
@@ -72,6 +75,8 @@ function createPacksStore() {
     progressOf(id: string) { return progress[id] ?? null; },
     /** Whether a pack has a download/extract job in flight. */
     downloadingOf(id: string) { return jobIds[id] != null; },
+    /** Whether a pack is being re-indexed right now. */
+    reindexingOf(id: string) { return reindexing[id] === true; },
 
     /** Re-read every pack's install status from disk. */
     refresh() { return refreshPacks(); },
@@ -115,6 +120,23 @@ function createPacksStore() {
     async remove(id: string) {
       await nemusPackDelete(id);
       await refreshPacks();
+    },
+
+    /** Rebuild an installed pack's registry from the files already on disk (no
+     *  re-download), then re-read the pack list so the sound bank picks up the
+     *  refreshed instrument set. Throws on failure so the caller can surface it.
+     *  Sets a transient `reindexingOf` flag for the duration. */
+    async reindex(id: string) {
+      if (reindexing[id]) return;
+      reindexing = { ...reindexing, [id]: true };
+      try {
+        await nemusPackReindex(id);
+        await refreshPacks();
+      } finally {
+        const next = { ...reindexing };
+        delete next[id];
+        reindexing = next;
+      }
     },
 
     async subscribe(): Promise<UnlistenFn> {

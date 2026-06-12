@@ -348,6 +348,21 @@ pub async fn nemus_pack_download(
     packs::start_download(&app, &nemus_config(), &pack_id).map_err(AppError::Nemus)
 }
 
+/// Re-index an already-installed pack: rebuild its `registry.toml` from the
+/// extracted files on disk (no re-download), refreshing the instruments it
+/// exposes. Use after a pack indexed to zero instruments (e.g. an older VSCO
+/// install). Returns the updated status; the caller re-reads packs + sounds.
+#[tauri::command]
+pub async fn nemus_pack_reindex(pack_id: String) -> Result<packs::PackStatus, AppError> {
+    let cfg = nemus_config();
+    // Walking the VSCO tree + writing every `_nemus.sfz` runs far past the UI's
+    // 50ms budget — off the async worker via spawn_blocking.
+    tauri::async_runtime::spawn_blocking(move || packs::reindex(&cfg, &pack_id))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?
+        .map_err(AppError::Nemus)
+}
+
 /// Delete an installed sample pack from disk (its whole install dir). No-op for
 /// an unknown id; an already-absent pack succeeds. The caller re-reads the pack
 /// list + sound registry afterwards.
