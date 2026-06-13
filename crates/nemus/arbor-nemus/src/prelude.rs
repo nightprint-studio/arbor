@@ -21,8 +21,8 @@ pub use arbor_nemus_pattern::prelude::{
     arrange, audio, cat, choose, cycles, euclid_with, fast_with, fastcat, isaw, par, parse_note,
     polymeter, pure, rand, sample, saw, section, section_layout, seq, silence, sine, slow_with,
     slowcat, square, stack, time_to_index, time_to_rand, timecat, track, track_with_sections,
-    tracks, tri, ControlMap, Hap, Param, Pattern, PatternError, Scale, Section, SectionSpan,
-    SourceKind, SourceSpan, TempoMap, Time, TimeSpan, Track, Tracks, MIDDLE_C,
+    tracks, tri, ControlMap, Hap, HoldSpec, Param, Pattern, PatternError, Scale, Section,
+    SectionSpan, SourceKind, SourceSpan, TempoMap, Time, TimeSpan, Track, Tracks, MIDDLE_C,
 };
 
 // ── arbor-nemus-lang — text ↔ Pattern ────────────────────────────────────────

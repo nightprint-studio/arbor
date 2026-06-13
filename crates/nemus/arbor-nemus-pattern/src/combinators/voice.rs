@@ -9,7 +9,7 @@
 //! they are pure data on the hap.
 
 use crate::combinators::compose::stack;
-use crate::control::ControlMap;
+use crate::control::{ControlMap, HoldSpec};
 use crate::pattern::Pattern;
 use crate::pitch::Scale;
 use crate::time::Time;
@@ -132,6 +132,17 @@ impl Pattern<ControlMap> {
         let name = name.into();
         self.fmap(move |mut c| {
             c.art = Some(name.clone());
+            c
+        })
+    }
+
+    /// Hold / sustain voicing: play the pattern as a monophonic **held** line
+    /// (drone / pad) — one voice per track, re-pitched by the next note with no
+    /// re-attack (like `legato`), with the per-slot release replaced by `spec`.
+    /// Constant like `art` (not patternised).
+    pub fn hold(self, spec: HoldSpec) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            c.hold = Some(spec);
             c
         })
     }

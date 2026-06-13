@@ -39,8 +39,14 @@ pub struct VoiceEvent {
     /// When the voice starts, in absolute frames.
     pub start_frame: u64,
     /// Voice lifetime in frames (from the hap's `whole` × frames-per-cycle).
-    /// `None` lets the source ring to its natural end (one-shots / decays).
+    /// `None` lets the source ring to its natural end (one-shots / decays / a
+    /// `.hold()` drone).
     pub dur_frames: Option<u64>,
+    /// Monophonic **connected** voicing: re-pitch the track's current voice rather
+    /// than stack a fresh one (no envelope re-attack). Set by `art("legato")` and
+    /// by any `.hold(...)` (drone / pad). The held lifetime itself rides on
+    /// `dur_frames` (`None` = ring until the next note). Additive seam extension.
+    pub legato: bool,
     /// What produces the sound.
     pub source: VoiceSource,
     /// Pitch as a MIDI-style semitone (`C4 = 60`). `None` plays at native pitch

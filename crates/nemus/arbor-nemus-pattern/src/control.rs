@@ -26,6 +26,25 @@ pub enum SourceKind {
     Sustained,
 }
 
+/// How long a `.hold(...)` note sustains before releasing — the monophonic,
+/// connected "drone / pad" voicing.
+///
+/// A held note reuses the legato machinery (one voice per track, re-pitched by
+/// the next note with no envelope re-attack) **and** suppresses the per-slot
+/// note-off: a plain note releases when its slot ends, a held note's release is
+/// driven by this policy instead. The pattern layer can't act on it — it travels
+/// on the [`ControlMap`] for the audio engine to realise.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HoldSpec {
+    /// Ring until the next note on the track re-pitches it (or transport stop) —
+    /// the continuous pad / drone. No self-release; a rest does not break it.
+    Drone,
+    /// Release after this many **cycles** (beats), regardless of the slot length.
+    Cycles(f64),
+    /// Release after this many absolute **seconds** (converted via the clock).
+    Seconds(f64),
+}
+
 /// A typed bag of controls describing a single event.
 ///
 /// Every field is `Option` — unset means "inherit / engine default". Build with
@@ -88,6 +107,10 @@ pub struct ControlMap {
     pub inst: Option<String>,
     /// Articulation name (`legato`/`staccato`/…), resolved by the instrument.
     pub art: Option<String>,
+    /// Sustain / "hold" voicing — a monophonic held note (drone / pad). `Some`
+    /// connects the note mono per track (like `legato`) and replaces the per-slot
+    /// release with the [`HoldSpec`] policy. Realised by the audio engine.
+    pub hold: Option<HoldSpec>,
 }
 
 impl ControlMap {
@@ -151,6 +174,7 @@ impl ControlMap {
             vel: other.vel.or(self.vel),
             inst: other.inst.or(self.inst),
             art: other.art.or(self.art),
+            hold: other.hold.or(self.hold),
         }
     }
 }

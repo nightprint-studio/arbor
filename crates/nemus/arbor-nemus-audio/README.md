@@ -14,7 +14,7 @@ VoiceEvent (from the engine) ──▶ Renderer (voices → mixer → effects �
 
 | Type | Role |
 |---|---|
-| `VoiceEvent { id, start_frame, dur_frames, source, note, params, track, span }` | one sample-accurate trigger; times are **absolute output frames** |
+| `VoiceEvent { id, start_frame, dur_frames, legato, source, note, params, track, span }` | one sample-accurate trigger; times are **absolute output frames**. `legato` = monophonic connected voicing (`art("legato")` / `.hold(...)`) |
 | `VoiceSource` | `Named { sound, variant, inst, art }` (resolved by the registry) or `File { path, kind }` (one-shot / sustained) |
 | `VoiceParams` | per-voice DSP/mix, already sampled from the `ControlMap`: gain/pan/room/lpf/hpf/shift/speed/crush/shape/vel + the delay send (`delay`/`feedback`/`delay_mix`) |
 | `AudioCommand` | `Voice` + `Audition` (a preview voice on a dedicated bus that bypasses the song mixer) + transport/mixer controls: `ConfigureTracks`, `SetTrackGain`, `SetTrackPan`, `SetTrackMute`, `SetTrackSolo`, `SetMasterGain`, `SetTrackEq`, `SetMasterEq`, `SetTrackComp`, `SetMasterComp`, `SetTrackDelay`, `SetReverbIr`, `StopAll` |

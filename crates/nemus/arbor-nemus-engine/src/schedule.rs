@@ -36,7 +36,7 @@ use std::ops::Range;
 use arbor_nemus_audio::prelude::{
     AudioCommand, DelayConfig, VoiceEvent, VoiceParams, VoiceSource,
 };
-use arbor_nemus_pattern::prelude::{ControlMap, Hap, SourceKind, Tracks};
+use arbor_nemus_pattern::prelude::{ControlMap, Hap, HoldSpec, SourceKind, Tracks};
 
 use crate::clock::Epoch;
 
@@ -160,18 +160,37 @@ pub fn voice_event_from_hap(
 
     let start_frame = epoch.frame_of(hap.onset(), sample_rate);
 
-    // Lifetime from the hap's `whole` × frames-per-cycle. A sustained file source
-    // rings to its natural end → `None` (it is one continuous take, not a slot).
-    let dur_frames = match &source {
-        VoiceSource::File {
-            kind: SourceKind::Sustained,
-            ..
-        } => None,
-        _ => {
-            let dur = (whole.end - whole.begin).to_f64() * epoch.frames_per_cycle(sample_rate);
-            Some(dur.round().max(0.0) as u64)
+    // Lifetime. A `.hold(...)` note overrides the slot: it suppresses the per-slot
+    // note-off and the engine realises the chosen policy (drone = ring forever,
+    // else release after N cycles / seconds). Otherwise the lifetime is the hap's
+    // `whole` × frames-per-cycle, and a sustained file source rings to its natural
+    // end (`None`).
+    let dur_frames = match v.hold {
+        Some(HoldSpec::Drone) => None,
+        Some(HoldSpec::Cycles(n)) => {
+            Some((n * epoch.frames_per_cycle(sample_rate)).round().max(0.0) as u64)
         }
+        Some(HoldSpec::Seconds(s)) => Some((s * sample_rate as f64).round().max(0.0) as u64),
+        None => match &source {
+            VoiceSource::File {
+                kind: SourceKind::Sustained,
+                ..
+            } => None,
+            _ => {
+                let dur = (whole.end - whole.begin).to_f64() * epoch.frames_per_cycle(sample_rate);
+                Some(dur.round().max(0.0) as u64)
+            }
+        },
     };
+
+    // Monophonic connected voicing: a held note, or an explicit `art("legato")`,
+    // makes the renderer re-pitch one voice per track rather than stack a fresh
+    // one. Computed here (where the full `ControlMap` is visible) so the renderer
+    // just reads the flag.
+    let legato = v.hold.is_some()
+        || v.art
+            .as_deref()
+            .map_or(false, |a| a.eq_ignore_ascii_case("legato"));
 
     let params = resolve_params(v);
 
@@ -179,6 +198,7 @@ pub fn voice_event_from_hap(
         id: arbor_nemus_audio::prelude::VoiceId(id),
         start_frame,
         dur_frames,
+        legato,
         source,
         note,
         params,

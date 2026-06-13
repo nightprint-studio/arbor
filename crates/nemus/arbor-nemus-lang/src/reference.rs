@@ -696,6 +696,17 @@ fn transforms() -> Vec<DslEntry> {
             "strings.art(\"pizzicato\")",
         ),
         entry(
+            "hold", DslKind::Transform,
+            "hold(pat) -> pat  ·  pat.hold()  ·  pat.hold(n)  ·  pat.hold(n, \"s\")",
+            "Hold / sustain: play as a monophonic **held** line (drone / pad) — one voice per track, re-pitched by the next note with no re-attack (like `legato`'s connection), but with the per-slot release replaced. `hold()` rings until the next note on the track (or transport stop) — the continuous pad. `hold(n)` releases after `n` cycles; `hold(n, \"s\")` after `n` seconds.",
+            vec![
+                DslParam::opt("n", "hold length — cycles, or seconds with unit \"s\"; omitted = ring until the next note", "drone"),
+                DslParam::opt("unit", "\"s\" to read `n` as seconds (omitted = cycles)", "cycles"),
+                pat(),
+            ],
+            "n(c4).inst(\"flute\").hold()",
+        ),
+        entry(
             "scale", DslKind::Transform, "scale(name, pat) -> pat  ·  pat.scale(name)",
             "Interpret numeric DEGREE leaves against a `\"root:mode\"` scale (e.g. \"c:minor\"). Required when the pattern uses degrees; no effect on note-name leaves.",
             vec![DslParam::req("name", "\"root:mode\" string, e.g. \"c:minor\""), pat()],
@@ -858,7 +869,7 @@ mod tests {
     const IMPLEMENTED_TRANSFORMS: &[&str] = &[
         "rev", "degrade", "palindrome", "fast", "slow", "gain", "pan", "room",
         "lpf", "hpf", "shift", "speed", "crush", "shape", "vel", "inst", "art",
-        "scale", "add", "addDeg", "degradeBy", "sometimesBy", "chunk", "iter",
+        "hold", "scale", "add", "addDeg", "degradeBy", "sometimesBy", "chunk", "iter",
         "swingBy", "delay", "every", "off", "sometimes", "jux", "log",
     ];
     const IMPLEMENTED_COMBINATORS: &[&str] = &[

@@ -20,6 +20,7 @@ fn synth_event(id: u64, start_frame: u64, params: VoiceParams) -> VoiceEvent {
         id: VoiceId(id),
         start_frame,
         dur_frames: None,
+        legato: false,
         source: VoiceSource::Named {
             sound: None,
             variant: None,

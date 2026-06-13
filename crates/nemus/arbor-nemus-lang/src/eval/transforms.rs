@@ -10,7 +10,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use arbor_nemus_pattern::prelude::{silence, stack, ControlMap, Pattern, Scale, SourceSpan};
+use arbor_nemus_pattern::prelude::{silence, stack, ControlMap, HoldSpec, Pattern, Scale, SourceSpan};
 
 use crate::convert::{as_int, as_number, as_param, as_pattern, as_str, f64_to_time};
 use crate::error::{LangError, LangErrorKind, Result};
@@ -122,6 +122,7 @@ pub fn make_transform(
             let s = as_str(&args[0], span)?;
             Ok(Transform::new(move |p| Ok(p.art(s.clone()))))
         }
+        "hold" => make_hold(args, span),
         "scale" => {
             arity(name, args, 1, span)?;
             let spec = as_str(&args[0], span)?;
@@ -290,6 +291,41 @@ fn make_delay(args: &[Value], span: SourceSpan) -> Result<Transform> {
             c
         }))
     }))
+}
+
+/// `hold()` / `hold(n)` / `hold(n, "s")` — the monophonic held-note (drone / pad)
+/// voicing. No args → ring until the next note (`HoldSpec::Drone`); one number →
+/// release after `n` cycles; a number plus the unit `"s"` → release after `n`
+/// seconds. Any other unit string is rejected.
+fn make_hold(args: &[Value], span: SourceSpan) -> Result<Transform> {
+    let spec = match args.len() {
+        0 => HoldSpec::Drone,
+        1 => HoldSpec::Cycles(as_number(&args[0], span)?),
+        2 => {
+            let n = as_number(&args[0], span)?;
+            let unit = as_str(&args[1], span)?;
+            if !unit.eq_ignore_ascii_case("s") {
+                return Err(LangError::at(
+                    span,
+                    LangErrorKind::Other(format!(
+                        "hold: unknown duration unit `{unit}` (expected \"s\" for seconds)"
+                    )),
+                ));
+            }
+            HoldSpec::Seconds(n)
+        }
+        _ => {
+            return Err(LangError::at(
+                span,
+                LangErrorKind::Arity {
+                    name: "hold".to_string(),
+                    expected: 2, // 0..2; report the maximum
+                    got: args.len(),
+                },
+            ))
+        }
+    };
+    Ok(Transform::new(move |p| Ok(p.hold(spec))))
 }
 
 /// Build a voice/mix transform from a single patternisable parameter.

@@ -719,14 +719,13 @@ fn legato_xfade_frames(sample_rate: u32) -> u64 {
     ((LEGATO_XFADE_SECS * sample_rate as f32).round() as u64).max(1)
 }
 
-/// Whether an event requests monophonic legato voicing (`art("legato")`). Other
-/// articulations (`staccato`, `pizzicato`, …) are detached and never reuse a
-/// voice. `File` sources carry no articulation and are always fresh.
+/// Whether an event requests monophonic **connected** voicing — `art("legato")`
+/// or any `.hold(...)` (drone / pad). The engine computes this from the full
+/// `ControlMap`; the renderer just reads the flag. Connected events re-pitch the
+/// track's voice (synth) or crossfade (sampler); detached articulations
+/// (`staccato`, …) and plain notes always spawn a fresh voice.
 fn is_legato(ev: &VoiceEvent) -> bool {
-    matches!(
-        &ev.source,
-        VoiceSource::Named { art: Some(a), .. } if a.eq_ignore_ascii_case("legato")
-    )
+    ev.legato
 }
 
 /// Hash a voice id into a deterministic round-robin seed. A cheap integer mix so
@@ -766,6 +765,7 @@ mod tests {
             id: VoiceId(id),
             start_frame: start,
             dur_frames: Some(dur),
+            legato: art.is_some_and(|a| a.eq_ignore_ascii_case("legato")),
             source: VoiceSource::Named {
                 sound: None,
                 variant: None,
