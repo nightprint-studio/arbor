@@ -41,7 +41,7 @@
   import { onMount, onDestroy, type Snippet } from 'svelte';
   import type { UnlistenFn } from '@tauri-apps/api/event';
   import { nemusStore } from './nemus-store.svelte';
-  import { nemusEngine } from './stores/engine.svelte';
+  import { nemusEngine, diagnosticsStore } from './stores/engine.svelte';
   import { configStore } from './stores/config.svelte';
   import { packsStore } from './stores/packs.svelte';
   import { modelsStore } from './stores/models.svelte';
@@ -135,6 +135,16 @@
   $effect(() => {
     void projectStore.activeFilePath;
     void fileWatchStore.watchActive();
+  });
+
+  // Keep the arrangement query (loop period + tempo) fresh after every eval —
+  // centralised here (always mounted) so the footer's render estimate updates on
+  // edit / file switch even when no viz panel is open to drive the query. The
+  // store coalesces calls (debounced single timer), so this is redundant-safe
+  // with the panels that also schedule it.
+  $effect(() => {
+    void diagnosticsStore.errors; // dep: a fresh array is set on each eval
+    arrangementStore.schedule();
   });
 
   // Mirror layout changes to the persisted window state (debounced in the

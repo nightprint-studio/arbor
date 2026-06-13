@@ -11,9 +11,11 @@
   import { transportStore, metersStore, audioErrorStore } from '../stores/engine.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
   import { configStore } from '../stores/config.svelte';
+  import { projectActions } from '../stores/project-actions.svelte';
   import {
     DEFAULT_RENDER_LOOPS,
     estimateRender,
+    estimateExportSize,
     fmtRenderDuration,
     fmtRenderSize,
   } from '../stores/render.svelte';
@@ -23,36 +25,52 @@
   // (NemusWindow) — see NemusShell. Optional so the footer renders standalone.
   let { footerExtra }: { footerExtra?: Snippet } = $props();
 
-  // cps: 2-3 significant digits, trimming trailing zeros (0.5, 0.35, 1.25…).
-  const cpsLabel = $derived(Number(transportStore.cps.toPrecision(3)).toString());
-  const dspPct   = $derived(Math.round(metersStore.dspLoad * 100));
-  const srLabel  = $derived(`${transportStore.sampleRate / 1000} kHz`);
+  const dspPct  = $derived(Math.round(metersStore.dspLoad * 100));
+  // Live audio-output sample rate (the badge) — distinct from the *render* sample
+  // rate used by the estimate below.
+  const srLabel = $derived(`${transportStore.sampleRate / 1000} kHz`);
 
-  // ── Render estimate (duration · WAV size) ───────────────────────────────────
-  // Mirrors the offline bounce *exactly*: the export renders the arrangement's
-  // natural loop period (`loopCycles`) repeated the default number of times, at
-  // the live cps, plus the render tail; size is stereo PCM at the live sample
-  // rate. Shown only once an evaluated arrangement reports a loop period. The
-  // math lives in `estimateRender` so this strip and the Export dialog agree.
+  // Effective tempo: live transport while playing, else the evaluated
+  // arrangement's cps (refreshed by every eval / file switch via the central
+  // query), falling back to the configured default. So cps + the estimate track
+  // the active file even when stopped — not just during playback.
+  const renderCps = $derived(arrangementStore.cps ?? configStore.defaultCps);
+  const liveCps   = $derived(transportStore.playing ? transportStore.cps : renderCps);
+  const cpsLabel  = $derived(Number(liveCps.toPrecision(3)).toString());
+
+  // ── Render estimate (duration · size) ───────────────────────────────────────
+  // Mirrors a default export: the arrangement's natural loop period (`loopCycles`)
+  // repeated the default number of times, at the evaluated tempo, with the
+  // configured render format (sample rate · bit depth · tail) and the *chosen*
+  // container — so the size reflects the picked WAV/OGG. The math is shared with
+  // the Export dialog (`estimateRender` / `estimateExportSize`) so they agree.
   const totalCycles = $derived(arrangementStore.loopCycles * DEFAULT_RENDER_LOOPS);
   const tailSecs    = $derived(configStore.render.tail_max_secs || 4.0);
+  const renderSr    = $derived(configStore.render.sample_rate);
+  const bitDepth    = $derived(configStore.render.bit_depth);
+  const format      = $derived(projectActions.exportFormat);
 
   const estimate = $derived(estimateRender({
     cycles:     totalCycles,
-    cps:        transportStore.cps,
+    cps:        renderCps,
     tailSecs,
-    sampleRate: transportStore.sampleRate,
-    bitDepth:   configStore.render.bit_depth,
+    sampleRate: renderSr,
+    bitDepth,
   }));
+  const sizeBytes = $derived(estimateExportSize(format, estimate.durationSecs, estimate.sizeBytes));
 
   const estimateLabel = $derived(
     estimate.durationSecs > 0
-      ? `~${fmtRenderDuration(estimate.durationSecs)} · ~${fmtRenderSize(estimate.sizeBytes)}`
+      ? `~${fmtRenderDuration(estimate.durationSecs)} · ~${fmtRenderSize(sizeBytes)}`
       : '—',
+  );
+  const renderSrLabel = $derived(`${renderSr / 1000} kHz`);
+  const formatDetail  = $derived(
+    format === 'ogg' ? `OGG Vorbis ~192 kbps @ ${renderSrLabel}` : `WAV ${bitDepth} @ ${renderSrLabel}`,
   );
   const estimateTip = $derived(
     estimate.durationSecs > 0
-      ? `Render estimate: ${totalCycles.toFixed(1)} cycles @ ${cpsLabel} cps + ${tailSecs}s tail · stereo ${configStore.render.bit_depth ?? 'int24'} @ ${srLabel}`
+      ? `Render estimate: ${totalCycles.toFixed(1)} cycles @ ${Number(renderCps.toPrecision(3))} cps + ${tailSecs}s tail · stereo ${formatDetail}`
       : 'Render estimate (evaluate an arrangement to see it)',
   );
 </script>

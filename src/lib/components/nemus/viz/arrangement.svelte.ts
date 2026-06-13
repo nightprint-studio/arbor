@@ -92,6 +92,10 @@ function createArrangementStore() {
   let haps     = $state<NemusQueryHap[]>([]);
   let sections = $state<NemusQuerySection[]>([]);
   let loopCycles = $state(0);
+  // The arrangement's effective render tempo (cps), captured from the query so a
+  // passive estimate stays correct without the transport running. null until an
+  // eval that set a tempo/cps; the consumer falls back to the configured default.
+  let cps      = $state<number | null>(null);
   let loading  = $state(false);
   let loaded   = $state(false);
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -109,11 +113,13 @@ function createArrangementStore() {
       haps = res.haps;
       sections = res.sections;
       loopCycles = res.loop_cycles;
+      cps = res.cps;
       loaded = true;
     } catch {
       haps = [];
       sections = [];
       loopCycles = 0;
+      cps = null;
     } finally {
       loading = false;
     }
@@ -132,6 +138,9 @@ function createArrangementStore() {
     /** Loop period of the arrangement in cycles (0 when empty/not loaded) — the
      *  natural render-length default and duration/size estimate base. */
     get loopCycles() { return loopCycles; },
+    /** Effective render tempo (cps) of the evaluated arrangement, or null when the
+     *  script set neither tempo nor cps (use the configured default). */
+    get cps() { return cps; },
 
     /** Re-query the arrangement now. */
     refresh(cycles = VIEW_CYCLES) { return run(cycles); },

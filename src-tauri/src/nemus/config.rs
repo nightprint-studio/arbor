@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use arbor_nemus::prelude::{
-    BitDepth, EvalConfig, LogLevel, RenderConfig, DEFAULT_BIT_DEPTH, DEFAULT_SAMPLE_RATE,
+    BitDepth, EvalConfig, Format, LogLevel, RenderConfig, DEFAULT_BIT_DEPTH, DEFAULT_SAMPLE_RATE,
     DEFAULT_TAIL_MAX_SECS,
 };
 
@@ -80,6 +80,10 @@ pub struct NemusRenderConfig {
     pub bit_depth: String,
     /// Trailing tail (release/reverb) captured after the arrangement, in seconds.
     pub tail_max_secs: f32,
+    /// Default output container/codec: `"wav"` (default) or `"ogg"`. Remembered
+    /// across sessions as the last format the user exported with; the export
+    /// dialog seeds its Format picker from it.
+    pub format: String,
 }
 
 impl Default for NemusRenderConfig {
@@ -88,6 +92,7 @@ impl Default for NemusRenderConfig {
             sample_rate: DEFAULT_SAMPLE_RATE,
             bit_depth: bit_depth_str(DEFAULT_BIT_DEPTH).to_string(),
             tail_max_secs: DEFAULT_TAIL_MAX_SECS,
+            format: "wav".to_string(),
         }
     }
 }
@@ -117,8 +122,9 @@ impl NemusConfig {
 }
 
 impl NemusRenderConfig {
-    /// The engine render config derived from these settings. `format` defaults to
-    /// WAV; the per-export OGG/WAV choice is overlaid in `render::resolve_config`.
+    /// The engine render config derived from these settings. `format` is the
+    /// saved default; a per-export OGG/WAV choice is overlaid in
+    /// `render::resolve_config`.
     pub fn render_config(&self) -> RenderConfig {
         RenderConfig {
             sample_rate: self.sample_rate,
@@ -128,7 +134,11 @@ impl NemusRenderConfig {
                 BitDepth::Int24
             },
             tail_max_secs: self.tail_max_secs,
-            format: arbor_nemus::prelude::Format::Wav,
+            format: if self.format.eq_ignore_ascii_case("ogg") {
+                Format::Ogg
+            } else {
+                Format::Wav
+            },
         }
     }
 }

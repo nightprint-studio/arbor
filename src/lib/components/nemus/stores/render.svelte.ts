@@ -72,6 +72,17 @@ export function fmtRenderSize(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
+/** Nominal OGG Vorbis VBR bitrate (~q6) used to size a compressed export — OGG is
+ *  lossy, so its size comes from a bitrate, not the PCM bit depth. */
+export const OGG_NOMINAL_BITRATE = 192_000;
+
+/** Format-aware export size in bytes: lossless (WAV) uses the PCM size from
+ *  {@link estimateRender}; OGG uses the nominal bitrate × duration. Single source
+ *  of truth so the footer strip and the Export dialog always agree. */
+export function estimateExportSize(format: string, durationSecs: number, pcmSizeBytes: number): number {
+  return format === 'ogg' ? Math.round((durationSecs * OGG_NOMINAL_BITRATE) / 8) : pcmSizeBytes;
+}
+
 export type RenderStatus = 'idle' | 'rendering' | 'done' | 'failed';
 
 interface JobDone {

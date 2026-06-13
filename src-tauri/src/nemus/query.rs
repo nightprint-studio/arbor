@@ -62,6 +62,12 @@ pub struct QueryHaps {
     /// render length. A `Pattern` has no length, but a song does: `melody(<8…>)` +
     /// `bass(<8…>)` loops every 8 cycles. `0` only when there are no haps at all.
     pub loop_cycles: u32,
+    /// The arrangement's effective render tempo (cycles/second): the starting
+    /// `tempo(...)` point, else the script's `cps(...)`, mirroring how
+    /// `nemus_render` picks the offline-bounce tempo. `None` when the script set
+    /// neither (the caller falls back to its configured default). Lets a passive
+    /// render estimate stay correct without the transport running.
+    pub cps: Option<f64>,
 }
 
 /// Detect the arrangement's loop period (in cycles) over a query window.
@@ -167,14 +173,19 @@ pub async fn nemus_query(
     nemus: State<'_, NemusState>,
     cycles: u32,
 ) -> Result<QueryHaps, AppError> {
-    // Clone the arrangement under the lock, then drop it before querying.
-    let tracks: Option<Tracks<ControlMap>> = {
+    // Clone the arrangement under the lock, then drop it before querying. Capture
+    // the render tempo too (starting `tempo(...)` point, else `cps(...)`) — the
+    // same choice `nemus_render` makes — so the estimate is right without playback.
+    let (tracks, cps): (Option<Tracks<ControlMap>>, Option<f64>) = {
         let latest = nemus.latest.lock().unwrap_or_else(|e| e.into_inner());
-        latest.as_ref().map(|l| l.tracks.clone())
+        match latest.as_ref() {
+            Some(l) => (Some(l.tracks.clone()), l.tempo.points.first().map(|p| p.1).or(l.cps)),
+            None => (None, None),
+        }
     };
 
     let Some(tracks) = tracks else {
-        return Ok(QueryHaps { haps: Vec::new(), sections: Vec::new(), loop_cycles: 0 });
+        return Ok(QueryHaps { haps: Vec::new(), sections: Vec::new(), loop_cycles: 0, cps: None });
     };
 
     let window = cycles.max(1);
@@ -223,7 +234,7 @@ pub async fn nemus_query(
         }
     }
     let loop_cycles = detect_loop_cycles(&haps, &sections, window);
-    Ok(QueryHaps { haps, sections, loop_cycles })
+    Ok(QueryHaps { haps, sections, loop_cycles, cps })
 }
 
 #[cfg(test)]

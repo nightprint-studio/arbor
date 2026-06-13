@@ -144,6 +144,8 @@ export interface NemusRenderConfig {
   /** `int24` | `float32`. */
   bit_depth: string;
   tail_max_secs: number;
+  /** `wav` | `ogg` — the remembered default export format. */
+  format: string;
 }
 
 /** Persisted nemus settings (`[nemus]` in the global config). */
@@ -371,6 +373,10 @@ export interface NemusQueryHaps {
   /** Period (in cycles) after which the whole arrangement repeats — the natural
    *  render length. `0` only when there are no haps at all. */
   loop_cycles: number;
+  /** Effective render tempo (cycles/s): the arrangement's starting `tempo(...)`
+   *  point, else its `cps(...)`. `null` when the script set neither (fall back to
+   *  the configured default). Mirrors how `nemus_render` picks the bounce tempo. */
+  cps: number | null;
 }
 
 /** Query the last-evaluated arrangement over `[0, cycles)`. Empty until an eval

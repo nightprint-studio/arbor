@@ -11,6 +11,7 @@
 
 import { projectStore } from './project.svelte';
 import { renderStore, DEFAULT_RENDER_LOOPS } from './render.svelte';
+import { configStore } from './config.svelte';
 import { arrangementStore } from '../viz/arrangement.svelte';
 import { nemusRender } from '$lib/ipc/nemus';
 import { fsWriteTextFile } from '$lib/ipc/fs';
@@ -41,7 +42,29 @@ function createProjectActions() {
   // is the chosen multiplier, carried into the picker's confirm.
   let exportOptionsOpen = $state(false);
   let exportLoops       = $state(DEFAULT_RENDER_LOOPS);
-  let exportFormat      = $state<'wav' | 'ogg'>('wav');
+  // The chosen output format is a *persistent* preference (saved to the nemus
+  // render config, never localStorage — Arbor hard rule #11), so it survives
+  // across sessions and is shared by the split button + the export dialog.
+  // Read/written straight through `configStore.render.format`.
+  function currentFormat(): 'wav' | 'ogg' {
+    return configStore.render.format === 'ogg' ? 'ogg' : 'wav';
+  }
+  // Per-export render-format overrides. Seeded from the global Settings → Render
+  // defaults each time an export starts (so a one-off tweak in the dialog never
+  // silently rewrites the global config), then sent as `nemus_render` opts.
+  let exportSampleRate  = $state(48_000);
+  let exportBitDepth    = $state('int24');
+  let exportTail        = $state(4.0);
+
+  /** Reset the render-format overrides to the current global defaults. Called at
+   *  each export entry point (quick export + the options dialog) so both start
+   *  from Settings → Render. */
+  function loadRenderDefaults() {
+    const r = configStore.render;
+    exportSampleRate = r.sample_rate;
+    exportBitDepth   = r.bit_depth;
+    exportTail       = r.tail_max_secs;
+  }
 
   function onConfirm(path: string) {
     const mode = picker;
@@ -70,8 +93,14 @@ function createProjectActions() {
       const cycles = (arrangementStore.loopCycles || 1) * exportLoops;
       // The render runs as a background job; the store reports start/done/fail
       // via the title-bar badge (the job resolves with an id, not the audio file).
+      // Format overrides come from the options dialog (seeded from Settings).
       void renderStore.track(
-        nemusRender(projectStore.activeSource, path, { cycles, format: exportFormat }, projectStore.project?.path),
+        nemusRender(
+          projectStore.activeSource,
+          path,
+          { cycles, format: currentFormat(), sample_rate: exportSampleRate, bit_depth: exportBitDepth, tail_max_secs: exportTail },
+          projectStore.project?.path,
+        ),
         path,
       );
     }
@@ -88,12 +117,23 @@ function createProjectActions() {
     get picker() { return picker; },
     get exportOptionsOpen() { return exportOptionsOpen; },
     get exportLoops()       { return exportLoops; },
-    get exportFormat()      { return exportFormat; },
+    get exportFormat()      { return currentFormat(); },
+    get exportSampleRate()  { return exportSampleRate; },
+    get exportBitDepth()    { return exportBitDepth; },
+    get exportTail()        { return exportTail; },
     /** Resulting render length for the chosen loop count (read-only echo). */
     get exportCycles()      { return exportCycles(); },
 
     setExportLoops(n: number) { exportLoops = Math.max(1, Math.round(n) || 1); },
-    setExportFormat(f: 'wav' | 'ogg') { exportFormat = f; },
+    /** Persist the chosen format to the nemus render config (sticky across
+     *  sessions). Drives both the split-button selection and the dialog picker. */
+    setExportFormat(f: 'wav' | 'ogg') {
+      if (currentFormat() === f) return;
+      configStore.setRender({ ...configStore.render, format: f });
+    },
+    setExportSampleRate(n: number) { exportSampleRate = n; },
+    setExportBitDepth(d: string)   { exportBitDepth = d; },
+    setExportTail(s: number)       { exportTail = Math.max(0, s); },
 
     /** Open the "new nemus project" folder picker. */
     newProject()  { picker = 'new'; },
@@ -107,12 +147,12 @@ function createProjectActions() {
     /** Open the export options dialog (step 1 of the two-step export flow);
      *  resets the loop count to the default each time so the dialog is
      *  predictable. */
-    exportWav()   { exportLoops = DEFAULT_RENDER_LOOPS; exportOptionsOpen = true; },
+    exportWav()   { exportLoops = DEFAULT_RENDER_LOOPS; loadRenderDefaults(); exportOptionsOpen = true; },
     /** Quick export (IntelliJ "run current configuration") — skip the options
-     *  dialog and go straight to the save picker, reusing the last-chosen
-     *  format + loop count. The split-button's main action; "Edit export…"
-     *  (→ `exportWav`) is the dialog path for tweaking the details first. */
-    quickExport() { picker = 'export'; },
+     *  dialog and go straight to the save picker, reusing the last-chosen format
+     *  and the global render defaults. The split-button's main action; "Edit
+     *  export…" (→ `exportWav`) is the dialog path for tweaking the details. */
+    quickExport() { loadRenderDefaults(); picker = 'export'; },
     /** Confirm export options → advance to the save picker (step 2). */
     confirmExportOptions() { exportOptionsOpen = false; picker = 'export'; },
     /** Dismiss the export options dialog without exporting. */

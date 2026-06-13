@@ -14,6 +14,7 @@
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
+  import RenderFormatFields from './RenderFormatFields.svelte';
   import TranscriptionModels from './TranscriptionModels.svelte';
   import { configStore, LOG_LEVELS, type NemusLogThreshold } from '../stores/config.svelte';
   import { nemusAudioDevices, type NemusAudioDevice } from '$lib/ipc/nemus';
@@ -41,13 +42,8 @@
   ]);
 
   const logOptions = LOG_LEVELS.map((l) => ({ value: l, label: l }));
-  const rateOptions = [44_100, 48_000, 88_200, 96_000].map((r) => ({ value: r, label: `${r / 1000} kHz` }));
-  const depthOptions = [
-    { value: 'int24',   label: '24-bit integer' },
-    { value: 'float32', label: '32-bit float' },
-  ];
 
-  function setRate(v: string)  { configStore.setRender({ ...configStore.render, sample_rate: Number(v) }); }
+  function setRate(v: number)  { configStore.setRender({ ...configStore.render, sample_rate: v }); }
   function setDepth(v: string) { configStore.setRender({ ...configStore.render, bit_depth: v }); }
   function setTail(v: number)  { configStore.setRender({ ...configStore.render, tail_max_secs: v }); }
 </script>
@@ -97,15 +93,14 @@
         </div>
         <div class="card">
           <div class="card-section-title"><FileAudio size={12} /> Format</div>
-          <FormRow label="Sample rate">
-            <Select value={configStore.render.sample_rate} options={rateOptions} onchange={setRate} />
-          </FormRow>
-          <FormRow label="Bit depth">
-            <Select value={configStore.render.bit_depth} options={depthOptions} onchange={setDepth} />
-          </FormRow>
-          <FormRow label="Reverb tail" description="Extra seconds rendered after the last event so reverb / delay tails aren't cut.">
-            <NumberStepper value={configStore.render.tail_max_secs} min={0} step={0.5} narrow suffix="s" onchange={setTail} ariaLabel="Reverb tail seconds" />
-          </FormRow>
+          <RenderFormatFields
+            sampleRate={configStore.render.sample_rate}
+            bitDepth={configStore.render.bit_depth}
+            tail={configStore.render.tail_max_secs}
+            onSampleRate={setRate}
+            onBitDepth={setDepth}
+            onTail={setTail}
+          />
         </div>
       {:else if active === 'models'}
         <div class="section-header">

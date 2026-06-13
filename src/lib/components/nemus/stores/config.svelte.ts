@@ -14,7 +14,7 @@ import {
 export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const;
 export type NemusLogThreshold = (typeof LOG_LEVELS)[number];
 
-const DEFAULT_RENDER: NemusRenderConfig = { sample_rate: 48_000, bit_depth: 'int24', tail_max_secs: 4.0 };
+const DEFAULT_RENDER: NemusRenderConfig = { sample_rate: 48_000, bit_depth: 'int24', tail_max_secs: 4.0, format: 'wav' };
 
 function createConfigStore() {
   let defaultOctave = $state(4);
