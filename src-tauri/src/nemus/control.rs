@@ -51,19 +51,26 @@ pub enum NemusControl {
     /// stream on this thread, preserving the playhead + play state.
     SetOutputDevice { device: Option<String> },
 
-    /// Play a one-off **instrument preview** on the dedicated audition bus (bypasses
-    /// the song mixer). `tracks` is a tiny arrangement the command already evaluated
-    /// from a generated `.nemus` snippet (a note + the panel's chain): the audio
-    /// thread schedules one cycle of it at `cps`, anchored at the current frame, and
-    /// routes the resulting voices to the preview bus — so the full language (notes,
-    /// chords, scales, any effect) drives the preview without per-param plumbing.
+    /// Play a one-off **preview / snippet** on the dedicated audition bus (bypasses
+    /// the song mixer). `tracks` is a small arrangement the command already evaluated
+    /// — either an instrument-preview snippet (a note + the panel's chain) or an
+    /// arbitrary user-selected `.nemus` chunk. The audio thread schedules `cycles`
+    /// cycles of it at `cps`, anchored at the current frame, and routes the resulting
+    /// voices to the preview bus — so the full language (notes, chords, scales, any
+    /// effect, multiple tracks) drives the preview without per-param plumbing. Each
+    /// voice self-releases via its own duration, so the one-shot stops on its own.
     /// `prepared` carries a registry decoded off-thread when a referenced instrument
     /// isn't resident yet (same path as [`NemusControl::SetTracks`]).
     Audition {
         tracks: Tracks<ControlMap>,
         cps: f64,
+        cycles: u32,
         prepared: Option<Prepared>,
     },
+    /// Clear the audition bus only (stop an in-flight snippet preview early) without
+    /// touching the song's voices — unlike [`NemusControl::Stop`], the main
+    /// transport keeps playing.
+    StopSnippet,
 
     // ── Live mixer overrides ───────────────────────────────────────────────
     // Ephemeral session tweaks on top of the source-derived baseline: applied

@@ -209,8 +209,12 @@ impl Session {
             }
             NemusControl::SetCps { cps } => self.transport.set_cps(cps),
             NemusControl::SetOutputDevice { device } => self.set_output_device(app, device),
-            NemusControl::Audition { tracks, cps, prepared } => {
-                self.audition(app, tracks, cps, prepared)
+            NemusControl::Audition { tracks, cps, cycles, prepared } => {
+                self.audition(app, tracks, cps, cycles, prepared)
+            }
+            NemusControl::StopSnippet => {
+                // Clear only the audition bus; the song's voices are untouched.
+                let _ = self.transport.sink_mut().send(AudioCommand::StopAudition);
             }
             // Live mixer overrides: forwarded straight to the sink (non-blocking;
             // dropping the command on a full queue is acceptable for a knob drag).
@@ -310,19 +314,22 @@ impl Session {
         }
     }
 
-    /// Play a one-off instrument preview on the dedicated audition bus. When a
+    /// Play a one-off preview / snippet on the dedicated audition bus. When a
     /// referenced instrument was decoded off-thread (`prepared`), swap it in first —
-    /// restoring the playing song across the stream swap — then schedule **one
-    /// cycle** of the evaluated `tracks` (a generated snippet) at `cps`, anchored at
-    /// the current frame, and push the resulting voices to the preview bus. The
-    /// renderer routes [`AudioCommand::Audition`] to its own bus, so the preview is
-    /// heard cleanly even while a song plays. Notes / chords / scales / any effect
-    /// all come straight from the evaluated pattern — no per-param plumbing.
+    /// restoring the playing song across the stream swap — then schedule `cycles`
+    /// cycles of the evaluated `tracks` (an instrument-preview snippet or an
+    /// arbitrary selected chunk) at `cps`, anchored at the current frame, and push
+    /// the resulting voices to the preview bus. The renderer routes
+    /// [`AudioCommand::Audition`] to its own bus, so the preview is heard cleanly
+    /// even while a song plays; each voice self-releases via its duration, so the
+    /// one-shot stops on its own. Notes / chords / scales / any effect all come
+    /// straight from the evaluated pattern — no per-param plumbing.
     fn audition(
         &mut self,
         app: &AppHandle,
         tracks: Tracks<ControlMap>,
         cps: f64,
+        cycles: u32,
         prepared: Option<Prepared>,
     ) {
         if let Some(prep) = prepared {
@@ -343,10 +350,11 @@ impl Session {
             let sink = self.transport.sink();
             (sink.now_frame(), sink.sample_rate())
         };
-        // Schedule cycle [0, 1) of the snippet, with cycle 0 anchored at `now`.
+        // Schedule cycles [0, cycles) of the snippet, with cycle 0 anchored at `now`.
         let epoch = Epoch { frame: now, cycle: Time::ZERO, cps };
         let fpc = (sr as f64 / cps).max(1.0) as u64;
-        let events = schedule_span(&tracks, &epoch, sr, now..now + fpc, &mut self.audition_id);
+        let total = fpc.saturating_mul(cycles.max(1) as u64);
+        let events = schedule_span(&tracks, &epoch, sr, now..now + total, &mut self.audition_id);
         let sink = self.transport.sink_mut();
         for ev in events {
             let _ = sink.send(AudioCommand::Audition(ev));

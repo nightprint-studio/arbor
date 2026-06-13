@@ -35,6 +35,7 @@
   import { mixerStore } from '../stores/mixer.svelte';
   import { inspectStore } from '../stores/inspect.svelte';
   import { symbolHighlightStore } from '../stores/symbol-highlight.svelte';
+  import { editorSelectionStore } from '../stores/editor-selection.svelte';
   import { laneColor, sectionColor } from '../palette';
   import { makeByteToU16 } from '../editor/nemus-lang';
   import type { NemusQueryHap } from '$lib/ipc/nemus';
@@ -236,6 +237,16 @@
     nemusStore.requestGoto(byteToU16(hap.span_start), 0);
   }
 
+  // ── Editor→DAW selection link ────────────────────────────────────────────────
+  // Box every hap whose source span overlaps any selected region (the selected
+  // text, plus a selected variable's `let` value range). Hap spans are UTF-8 bytes
+  // → map to UTF-16 (the selection's space) via `byteToU16`.
+  const selActive = $derived(editorSelectionStore.active);
+  function hapInSelection(hap: NemusQueryHap): boolean {
+    if (!selActive || hap.span_start == null || hap.span_end == null) return false;
+    return editorSelectionStore.overlaps(byteToU16(hap.span_start), byteToU16(hap.span_end));
+  }
+
   const NOTE_PC: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
   /** MIDI of a host note literal (`c4`=60; `s`=sharp, `f`=flat), or null. Mirrors
    *  the language's pitch convention so we can tell whether a transform moved it. */
@@ -386,7 +397,8 @@
                 {/each}
               {/if}
               <HapLane {lane} {color} view={VIEW} px={PX} {dimmed} {playCycle} {playing}
-                       selectedKey={selectedKeyFor(lane)} onpick={(h) => pickHap(lane, h)}
+                       selectedKey={selectedKeyFor(lane)} inSelection={hapInSelection}
+                       onpick={(h) => pickHap(lane, h)}
                        ongoto={gotoHapSource} {writtenNote} />
             </div>
           </div>

@@ -15,7 +15,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces,
+    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -25,6 +25,8 @@
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { importActions } from '../stores/import-actions.svelte';
+  import { editorSelectionStore } from '../stores/editor-selection.svelte';
+  import { withFileDeps } from '../editor/nemus-lang';
   import { modelsStore } from '../stores/models.svelte';
   import { mixerStore } from '../stores/mixer.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
@@ -39,7 +41,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces,
+    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -62,6 +64,15 @@
       run: () => void nemusEngine.seekToStart() },
     { id: 'seek_end',   label: 'Skip to end',   group: 'Transport', icon: 'SkipForward', keys: 'Ctrl+Shift+]',
       run: () => void nemusEngine.seekToEnd(arrangementStore.contentEnd) },
+    { id: 'play_selection', label: 'Play selection one-shot', group: 'Transport', icon: 'FlaskConical', keys: 'Ctrl+Shift+Enter',
+      run: async () => {
+        const file = projectStore.activeSource;
+        const r = editorSelectionStore.primary;
+        const src = r ? await withFileDeps(file, file.slice(r.from, r.to)) : file;
+        void nemusEngine.playSnippet(src, projectStore.project?.path);
+      } },
+    { id: 'stop_snippet', label: 'Stop snippet preview', group: 'Transport', icon: 'Square',
+      run: () => void nemusEngine.stopSnippet() },
     // Project / file
     { id: 'new_project',  label: 'New project…',     group: 'Project', icon: 'FolderPlus', keys: 'Ctrl+Shift+N', run: () => projectActions.newProject() },
     { id: 'open_project', label: 'Open project…',    group: 'Project', icon: 'FolderOpen', keys: 'Ctrl+O',       run: () => projectActions.openProject() },
@@ -85,6 +96,7 @@
     { id: 'p_console',   label: 'Toggle Console',    group: 'View', icon: 'Terminal',         run: () => nemusStore.toggleBottom('console') },
     { id: 'p_problems',  label: 'Toggle Problems',   group: 'View', icon: 'AlertTriangle',    run: () => nemusStore.toggleBottom('problems') },
     { id: 'p_jobs',      label: 'Toggle Jobs',       group: 'View', icon: 'Boxes',            run: () => nemusStore.toggleBottom('jobs') },
+    { id: 'p_scratch',   label: 'Toggle Scratch (expression evaluator)', group: 'View', icon: 'FlaskConical', keys: 'Alt+Shift+S', run: () => nemusStore.toggleBottom('scratch') },
     { id: 'p_inspector', label: 'Toggle Inspector',  group: 'View', icon: 'Crosshair',        run: () => nemusStore.toggleRight('inspector') },
     { id: 'p_docs',      label: 'Toggle Language reference', group: 'View', icon: 'Braces',    run: () => nemusStore.toggleRight('docs') },
     { id: 'c_viz',       label: 'Toggle Arrangement', group: 'View', icon: 'PanelLeft',       run: () => nemusStore.toggleCollapseUi() },

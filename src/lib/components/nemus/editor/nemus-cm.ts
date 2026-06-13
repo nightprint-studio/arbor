@@ -224,6 +224,10 @@ const OCCUR_MARK = Decoration.mark({ class: 'cm-grv-occur' });
 export interface OccurrenceOptions {
   /** Called when the symbol under the caret changes (null when off a name). */
   onSymbol?: (name: string | null, view: EditorView) => void;
+  /** Called when the editor's main selection range changes (UTF-16 doc offsets);
+   *  `null` when the selection is empty (a bare caret). Drives the editor→DAW
+   *  region highlight: the arrangement boxes the haps whose source span overlaps. */
+  onSelection?: (range: { from: number; to: number } | null) => void;
 }
 
 function occurrenceHighlight(opts: OccurrenceOptions): Extension {
@@ -231,6 +235,7 @@ function occurrenceHighlight(opts: OccurrenceOptions): Extension {
     class {
       decorations: DecorationSet = Decoration.none;
       lastName: string | null = null;
+      lastSel: string | null = null;
 
       constructor(view: EditorView) { this.recompute(view); }
 
@@ -243,6 +248,18 @@ function occurrenceHighlight(opts: OccurrenceOptions): Extension {
       private recompute(view: EditorView) {
         const tree = getNemusTree(view);
         const head = view.state.selection.main.head;
+
+        // Editor→DAW selection link: report the main selection range (null when
+        // it's an empty caret), de-duped so it only fires on a real change.
+        if (opts.onSelection) {
+          const sel = view.state.selection.main;
+          const range = sel.empty ? null : { from: sel.from, to: sel.to };
+          const key = range ? `${range.from}:${range.to}` : null;
+          if (key !== this.lastSel) {
+            this.lastSel = key;
+            opts.onSelection(range);
+          }
+        }
         // Boundary-tolerant (caret at a word's right edge resolves to the word).
         let name = tree
           ? (identifierAt(tree, head) ?? (head > 0 ? identifierAt(tree, head - 1) : null))
@@ -491,6 +508,9 @@ export interface NemusExtensionsOptions {
   /** Called when the identifier under the caret changes (null when off a name) —
    *  drives the editor↔arrangement symbol highlight. */
   onSymbol?: (name: string | null, view: EditorView) => void;
+  /** Called when the main selection range changes (UTF-16 doc offsets; null when
+   *  empty) — drives the editor→DAW region highlight (box overlapping haps). */
+  onSelection?: (range: { from: number; to: number } | null) => void;
 }
 
 /** The search keymap minus its open binding: the NemusShell owns `Ctrl+F` so it
@@ -521,7 +541,7 @@ export function createNemusExtensions(opts: NemusExtensionsOptions = {}): Extens
     nemusHighlight,
     // After nemusHighlight so it reads the freshly-updated tree (plugin update
     // order follows registration order).
-    occurrenceHighlight({ onSymbol: opts.onSymbol }),
+    occurrenceHighlight({ onSymbol: opts.onSymbol, onSelection: opts.onSelection }),
     activeHapsField,
     lintGutter(),
     // Editing ergonomics (comments, autoclose, delete-line, soft wrap, folding).

@@ -186,12 +186,12 @@ impl NemusState {
         let _ = tx.send(NemusControl::SetTracks { tracks, cps, tempo, prepared });
     }
 
-    /// Play a preview arrangement (evaluated from a generated snippet) on the
-    /// audition bus, decoding any referenced instrument **off the RT thread** first
-    /// if the live registry doesn't resolve it yet (same path as
-    /// [`Self::stage_tracks`]). No-op when no session is live (the caller opens one
-    /// via [`Self::ensure_session`] first).
-    async fn audition(&self, cfg: &NemusConfig, tracks: Tracks<ControlMap>, cps: f64) {
+    /// Play a preview arrangement (an instrument-preview snippet or an arbitrary
+    /// user-selected chunk) on the audition bus for `cycles` cycles, decoding any
+    /// referenced instrument **off the RT thread** first if the live registry
+    /// doesn't resolve it yet (same path as [`Self::stage_tracks`]). No-op when no
+    /// session is live (the caller opens one via [`Self::ensure_session`] first).
+    async fn audition(&self, cfg: &NemusConfig, tracks: Tracks<ControlMap>, cps: f64, cycles: u32) {
         let (tx, loaded) = {
             let guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
             match guard.as_ref() {
@@ -229,7 +229,7 @@ impl NemusState {
             None => None,
         };
 
-        let _ = tx.send(NemusControl::Audition { tracks, cps, prepared });
+        let _ = tx.send(NemusControl::Audition { tracks, cps, cycles: cycles.max(1), prepared });
     }
 
     /// Tear the session down (drop the cpal stream on its thread) and join.
@@ -438,7 +438,86 @@ pub async fn nemus_audition_expr(
     let cps = output.cps.unwrap_or(PREVIEW_CPS);
 
     nemus.ensure_session(&app, &cfg);
-    nemus.audition(&cfg, output.tracks, cps).await;
+    nemus.audition(&cfg, output.tracks, cps, 1).await;
+    Ok(())
+}
+
+/// Evaluate an arbitrary `.nemus` chunk **in isolation** and return the events it
+/// generates (plus its detected loop period + tempo), without touching the live
+/// arrangement or the audio device. Powers the Scratch / expression evaluator: the
+/// user pastes/selects a snippet and inspects what it produces. Errors come back
+/// inline in [`query::SnippetEval`] (never on the `nemus:diagnostics` channel — that
+/// belongs to the main editor). The snippet is passed verbatim (no `tracks(...)`
+/// wrapper), so the returned spans stay relative to the snippet text.
+#[tauri::command]
+pub async fn nemus_eval_snippet(
+    app: AppHandle,
+    source: String,
+    project_dir: Option<String>,
+) -> Result<query::SnippetEval, AppError> {
+    let cfg = nemus_config();
+    let base = project_dir
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
+        Ok(output) => {
+            let known = validate::known_instruments(&cfg);
+            let diagnostics = validate::validate_instruments(&output.tracks, &known);
+            let (haps, sections, loop_cycles) =
+                query::collect_haps(&output.tracks, query::SNIPPET_WINDOW);
+            let cps = output.tempo.points.first().map(|p| p.1).or(output.cps);
+            Ok(query::SnippetEval { diagnostics, haps, sections, loop_cycles, cps })
+        }
+        Err(diags) => Ok(query::SnippetEval {
+            diagnostics: diags.errors,
+            haps: Vec::new(),
+            sections: Vec::new(),
+            loop_cycles: 0,
+            cps: None,
+        }),
+    }
+}
+
+/// Play an arbitrary `.nemus` chunk **one-shot** on the audition bus: it sounds
+/// once over its detected loop period and stops on its own, without disturbing the
+/// song transport (the audition bus bypasses the song mixer and the voices
+/// self-release). Powers right-click→Play on a selection, the Outline Play button,
+/// and the Scratch panel. A malformed snippet simply doesn't sound. Opens the audio
+/// device on demand. The snippet is passed verbatim (no wrapper), so it must be a
+/// self-contained program (a `tracks(...)` / pattern expression).
+#[tauri::command]
+pub async fn nemus_play_snippet(
+    app: AppHandle,
+    nemus: State<'_, NemusState>,
+    source: String,
+    project_dir: Option<String>,
+) -> Result<(), AppError> {
+    let cfg = nemus_config();
+    let base = project_dir
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let output = match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
+        Ok(o) => o,
+        Err(_diags) => return Ok(()), // bad snippet → silent (Scratch panel surfaces errors)
+    };
+    // One-shot length = the snippet's detected loop period (clamp ≥ 1 cycle).
+    let (_haps, _sections, loop_cycles) =
+        query::collect_haps(&output.tracks, query::SNIPPET_WINDOW);
+    let cycles = loop_cycles.max(1);
+    let cps = output.tempo.points.first().map(|p| p.1).or(output.cps).unwrap_or(PREVIEW_CPS);
+
+    nemus.ensure_session(&app, &cfg);
+    nemus.audition(&cfg, output.tracks, cps, cycles).await;
+    Ok(())
+}
+
+/// Stop an in-flight snippet preview early (clears the audition bus only). The song
+/// transport, if playing, is untouched. No-op when nothing is running.
+#[tauri::command]
+pub async fn nemus_stop_snippet(nemus: State<'_, NemusState>) -> Result<(), AppError> {
+    nemus.send_if_live(NemusControl::StopSnippet);
     Ok(())
 }
 

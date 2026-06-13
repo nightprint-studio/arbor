@@ -281,6 +281,11 @@ export function extractOutline(tree: Tree): NemusSymbol[] {
  *  children. */
 export interface NemusOutlineNode extends NemusSymbol {
   children?: NemusSymbol[];
+  /** A self-contained snippet that plays just this declaration in isolation:
+   *  the file's `let`/`fn`/`import` preamble (so dependencies resolve) plus this
+   *  node as the sole top-level output. Set for playable nodes (`track` / `let`);
+   *  `undefined` for `fn` (needs args) / `import`. Drives the Outline Play button. */
+  playSource?: string;
 }
 
 /** Like {@link collectTracks} but keeps each track's tree node so we can scan
@@ -334,17 +339,47 @@ export function extractOutlineTree(tree: Tree): NemusOutlineNode[] {
   collectTrackNodes(tree.rootNode, trackNodes);
 
   const sectionsByOffset = new Map<number, NemusSymbol[]>();
+  const trackTextByOffset = new Map<number, string>();
   for (const { sym, node } of trackNodes) {
     const secs: NemusSymbol[] = [];
     collectSections(node, secs);
     if (secs.length) sectionsByOffset.set(sym.offset, secs);
+    trackTextByOffset.set(sym.offset, node.text);
   }
 
-  return flat.map((s) =>
-    s.kind === 'track' && sectionsByOffset.has(s.offset)
-      ? { ...s, children: sectionsByOffset.get(s.offset) }
-      : s,
-  );
+  // The file's `let`/`fn`/`import` preamble — prepended to a played declaration so
+  // its dependencies (other lets, imports) resolve when evaluated in isolation.
+  const preamble = topLevelPreamble(tree);
+
+  // The played top-level output: a track is a bare `track(...)` call (a Track
+  // value); a let plays its bound name (the value becomes the output track). Both
+  // are accepted as top-level outputs by the evaluator.
+  function playSourceFor(s: NemusSymbol): string | undefined {
+    let target: string | undefined;
+    if (s.kind === 'track') target = trackTextByOffset.get(s.offset);
+    else if (s.kind === 'let') target = s.name;
+    if (!target) return undefined;
+    return preamble ? `${preamble}\n${target}` : target;
+  }
+
+  return flat.map((s) => {
+    const node: NemusOutlineNode = { ...s };
+    const play = playSourceFor(s);
+    if (play) node.playSource = play;
+    if (s.kind === 'track' && sectionsByOffset.has(s.offset)) node.children = sectionsByOffset.get(s.offset);
+    return node;
+  });
+}
+
+/** The file's top-level `let` / `fn` / `import` declarations, concatenated in
+ *  source order — the preamble prepended to a played fragment so its dependencies
+ *  (other constants, functions, imports) resolve when it's evaluated in isolation. */
+export function topLevelPreamble(tree: Tree): string {
+  return tree.rootNode.namedChildren
+    .filter((c): c is Node => !!c &&
+      (c.type === 'let_binding' || c.type === 'fn_definition' || c.type === 'import_statement'))
+    .map((c) => c.text)
+    .join('\n');
 }
 
 // ── Standalone parse (for consumers without an editor, e.g. the Outline panel) ─
@@ -367,6 +402,27 @@ export async function outlineFromSource(src: string): Promise<NemusSymbol[]> {
     return tree ? extractOutline(tree) : [];
   } catch {
     return [];
+  }
+}
+
+/** Resolve a played `fragment` against the active file `src`: prepend the file's
+ *  `let`/`fn`/`import` preamble so a bare variable (or any expression referencing
+ *  file-level bindings) evaluates in isolation. A self-contained fragment is left
+ *  effectively unchanged (the unused preamble is harmless). Falls back to the raw
+ *  fragment if the grammar isn't available. */
+export async function withFileDeps(src: string, fragment: string): Promise<string> {
+  if (!fragment.trim()) return fragment;
+  try {
+    const tree = await parseNemus(src);
+    if (!tree) return fragment;
+    const pre = topLevelPreamble(tree);
+    // A bare nullary `fn` name isn't a pattern on its own — invoke it so it plays.
+    let frag = fragment;
+    const lone = fragment.trim();
+    if (/^[A-Za-z_]\w*$/.test(lone) && fnArity(tree, lone) === 0) frag = `${lone}()`;
+    return pre ? `${pre}\n${frag}` : frag;
+  } catch {
+    return fragment;
   }
 }
 
@@ -393,6 +449,62 @@ export function identifierAt(tree: Tree, offset: number): string | null {
   while (cur) {
     if (cur.type === 'identifier') return cur.text;
     cur = cur.parent;
+  }
+  return null;
+}
+
+/** The body expression node of a `fn_definition` — the last named child that isn't
+ *  the name or the parameter list (the grammar is `fn IDENT(params) = EXPR`). */
+function fnBodyNode(fn: Node): Node | null {
+  const name = fn.childForFieldName('name');
+  const params = fn.childForFieldName('params');
+  const named = fn.namedChildren.filter((c): c is Node => !!c);
+  for (let i = named.length - 1; i >= 0; i--) {
+    const c = named[i];
+    if (name && c.id === name.id) continue;
+    if (params && c.id === params.id) continue;
+    return c;
+  }
+  return null;
+}
+
+/** Parameter count of a top-level `fn` named `name`, or `null` when there's no
+ *  such function. Used to decide whether a bare fn name is directly playable. */
+export function fnArity(tree: Tree, name: string): number | null {
+  for (const item of tree.rootNode.namedChildren) {
+    if (item?.type === 'fn_definition' && item.childForFieldName('name')?.text === name) {
+      const params = item.childForFieldName('params');
+      return params ? params.namedChildren.filter((c) => c?.type === 'identifier').length : 0;
+    }
+  }
+  return null;
+}
+
+/** When the selection `[from, to)` is exactly a single `identifier` that names a
+ *  top-level `let` or `fn`, return that declaration's **body** range (UTF-16) —
+ *  where its note literals live. Used by the editor→DAW link: selecting a variable
+ *  or a function boxes every hap it produces (their source spans point into the
+ *  declaration's body, not the use site). Returns null when the selection isn't a
+ *  clean declaration reference. */
+export function declBodyRangeForSelection(
+  tree: Tree, from: number, to: number,
+): { from: number; to: number } | null {
+  if (to <= from) return null;
+  let id: Node | null = tree.rootNode.descendantForIndex(from);
+  while (id && id.type !== 'identifier') id = id.parent;
+  // Require the selection to cover exactly the identifier token (a deliberate
+  // "select the symbol", not an incidental overlap).
+  if (!id || id.startIndex !== from || id.endIndex !== to) return null;
+  const name = id.text;
+  for (const item of tree.rootNode.namedChildren) {
+    if (!item || item.childForFieldName('name')?.text !== name) continue;
+    if (item.type === 'let_binding') {
+      const v = item.childForFieldName('value');
+      if (v) return { from: v.startIndex, to: v.endIndex };
+    } else if (item.type === 'fn_definition') {
+      const body = item.childForFieldName('body') ?? fnBodyNode(item);
+      if (body) return { from: body.startIndex, to: body.endIndex };
+    }
   }
   return null;
 }

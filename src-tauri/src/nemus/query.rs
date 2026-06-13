@@ -11,6 +11,7 @@ use tauri::State;
 
 use arbor_nemus::prelude::{ControlMap, Time, TimeSpan, Tracks};
 
+use super::events::Diagnostic;
 use super::NemusState;
 use crate::error::AppError;
 
@@ -67,6 +68,26 @@ pub struct QueryHaps {
     /// `nemus_render` picks the offline-bounce tempo. `None` when the script set
     /// neither (the caller falls back to its configured default). Lets a passive
     /// render estimate stay correct without the transport running.
+    pub cps: Option<f64>,
+}
+
+/// The `nemus_eval_snippet` result: an arbitrary `.nemus` chunk evaluated in
+/// isolation. Mirrors [`QueryHaps`] (the events it generates + its detected loop
+/// period + render tempo) but adds inline `diagnostics` — a snippet is editable
+/// scratch, so parse/eval errors are surfaced to the panel rather than swallowed.
+/// Spans on `haps` are byte offsets relative to the **snippet** text (offset 0 =
+/// start of the snippet), so the front end maps them back by adding the snippet's
+/// origin offset in the document.
+#[derive(Debug, Clone, Serialize)]
+pub struct SnippetEval {
+    /// Parse/eval/validation errors (empty on success). Inline only — never
+    /// emitted on `nemus:diagnostics` (that channel belongs to the main editor).
+    pub diagnostics: Vec<Diagnostic>,
+    pub haps: Vec<QueryHap>,
+    pub sections: Vec<QuerySection>,
+    /// Detected loop period (cycles), the natural one-shot length. `0` when empty.
+    pub loop_cycles: u32,
+    /// Effective render tempo (starting `tempo(...)` point, else `cps(...)`).
     pub cps: Option<f64>,
 }
 
@@ -137,6 +158,68 @@ fn detect_loop_cycles(haps: &[QueryHap], sections: &[QuerySection], window: u32)
 /// rational times rendered to `f64`, so exact equality is unsafe).
 const EPS: f64 = 1e-6;
 
+/// Probe window (in cycles) for evaluating an ad-hoc snippet (no caller-supplied
+/// `cycles`): wide enough for [`detect_loop_cycles`] to find periodicity, while
+/// still bounding the query of a non-looping snippet to its content end.
+pub(super) const SNIPPET_WINDOW: u32 = 64;
+
+/// Query a `Tracks<ControlMap>` over `[0, window)` and collect every hap + every
+/// tiled named section, then detect the loop period. The shared core behind
+/// [`nemus_query`] (over the staged arrangement) and the snippet evaluator (over
+/// a freshly-evaluated `EvalOutput`). Pure — no lock, no `State`.
+pub(super) fn collect_haps(
+    tracks: &Tracks<ControlMap>,
+    window: u32,
+) -> (Vec<QueryHap>, Vec<QuerySection>, u32) {
+    let window = window.max(1);
+    let span = TimeSpan::new(Time::int(0), Time::int(window as i64));
+    let mut haps: Vec<QueryHap> = Vec::new();
+    let mut sections: Vec<QuerySection> = Vec::new();
+    for (track_idx, track) in tracks.tracks.iter().enumerate() {
+        let track_id = track_idx as u32;
+        // Tile the named-section layout across the window (the arrangement loops
+        // every `period` cycles, so each named span repeats).
+        if track.period > 0 && !track.sections.is_empty() {
+            let mut base = 0u32;
+            while base < window {
+                for s in &track.sections {
+                    let start = base + s.start;
+                    if start >= window {
+                        continue;
+                    }
+                    sections.push(QuerySection {
+                        track: track_id,
+                        name: s.name.clone(),
+                        start: f64::from(start),
+                        end: f64::from((base + s.end).min(window)),
+                    });
+                }
+                base += track.period;
+            }
+        }
+        for hap in track.pattern.query(span) {
+            // Discrete events carry a `whole`; continuous signals only a `part`.
+            let (start, end) = match hap.whole {
+                Some(w) => (w.begin.to_f64(), w.end.to_f64()),
+                None => (hap.part.begin.to_f64(), hap.part.end.to_f64()),
+            };
+            haps.push(QueryHap {
+                track: track_id,
+                start,
+                end,
+                has_onset: hap.whole.is_some(),
+                span_start: hap.span.map(|s| s.start),
+                span_end: hap.span.map(|s| s.end),
+                sound: hap.value.sound.clone(),
+                note: hap.value.note,
+                gain: hap.value.gain,
+            });
+        }
+    }
+    let loop_cycles = detect_loop_cycles(&haps, &sections, window);
+    (haps, sections, loop_cycles)
+}
+
 /// A hap's identity for periodicity matching: track + duration + payload + onset,
 /// with the *start* quantised after the candidate shift so two events a period
 /// apart compare equal. Times are quantised to a fine grid to dodge `f64` noise.
@@ -188,52 +271,7 @@ pub async fn nemus_query(
         return Ok(QueryHaps { haps: Vec::new(), sections: Vec::new(), loop_cycles: 0, cps: None });
     };
 
-    let window = cycles.max(1);
-    let span = TimeSpan::new(Time::int(0), Time::int(window as i64));
-    let mut haps: Vec<QueryHap> = Vec::new();
-    let mut sections: Vec<QuerySection> = Vec::new();
-    for (track_idx, track) in tracks.tracks.iter().enumerate() {
-        let track_id = track_idx as u32;
-        // Tile the named-section layout across the window (the arrangement loops
-        // every `period` cycles, so each named span repeats).
-        if track.period > 0 && !track.sections.is_empty() {
-            let mut base = 0u32;
-            while base < window {
-                for s in &track.sections {
-                    let start = base + s.start;
-                    if start >= window {
-                        continue;
-                    }
-                    sections.push(QuerySection {
-                        track: track_id,
-                        name: s.name.clone(),
-                        start: f64::from(start),
-                        end: f64::from((base + s.end).min(window)),
-                    });
-                }
-                base += track.period;
-            }
-        }
-        for hap in track.pattern.query(span) {
-            // Discrete events carry a `whole`; continuous signals only a `part`.
-            let (start, end) = match hap.whole {
-                Some(w) => (w.begin.to_f64(), w.end.to_f64()),
-                None => (hap.part.begin.to_f64(), hap.part.end.to_f64()),
-            };
-            haps.push(QueryHap {
-                track: track_id,
-                start,
-                end,
-                has_onset: hap.whole.is_some(),
-                span_start: hap.span.map(|s| s.start),
-                span_end: hap.span.map(|s| s.end),
-                sound: hap.value.sound.clone(),
-                note: hap.value.note,
-                gain: hap.value.gain,
-            });
-        }
-    }
-    let loop_cycles = detect_loop_cycles(&haps, &sections, window);
+    let (haps, sections, loop_cycles) = collect_haps(&tracks, cycles);
     Ok(QueryHaps { haps, sections, loop_cycles, cps })
 }
 

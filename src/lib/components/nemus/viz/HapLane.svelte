@@ -36,6 +36,7 @@
     playCycle,
     playing,
     selectedKey = null,
+    inSelection,
     onpick,
     ongoto,
     writtenNote,
@@ -52,6 +53,9 @@
     playing: boolean;
     /** Key of the currently selected event (`<track>:<idx>`), highlighted here. */
     selectedKey?: string | null;
+    /** True when a hap's source span overlaps the editor's text selection — the
+     *  editor→DAW link boxes these regions. */
+    inSelection?: (hap: NemusQueryHap) => boolean;
     /** Picked an event — opens it in the Inspector. */
     onpick?: (hap: NemusQueryHap) => void;
     /** Ctrl/Cmd+clicked an event — reveal the source span that produced it. */
@@ -250,6 +254,7 @@
       class="region cont"
       class:active={contActive}
       class:selected={selectedKey === `${lane.track}:cont`}
+      class:span-sel={inSelection?.(lane.haps[0])}
       style="left: {contBox.x}px; width: {contBox.w}px;"
       use:tooltip={hapTip(h)}
       onclick={(e) => pick(h, e)}
@@ -284,6 +289,7 @@
       class:drum={b.kind === 'audio'}
       class:active
       class:selected={selectedKey === b.key}
+      class:span-sel={inSelection?.(b.hap)}
       class:muffled={showWave && b.kind === 'audio'}
       style="left: {b.x}px; width: {b.w}px; top: {b.top}%; height: {b.h}%;"
       use:tooltip={hapTip(b.hap)}
@@ -390,5 +396,17 @@
                 0 0 9px color-mix(in srgb, var(--c) 55%, transparent);
     opacity: 1;
     z-index: 2;
+  }
+
+  /* Editor→DAW link: the hap's source span overlaps the editor's text selection.
+     A distinct accent box (vs the lane-tinted Inspector ring) so it reads as "this
+     is what the text you selected produces" without being confused for selection. */
+  .hap.span-sel,
+  .region.cont.span-sel {
+    outline: 1.5px solid var(--accent);
+    outline-offset: 1px;
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent);
+    opacity: 1;
+    z-index: 3;
   }
 </style>

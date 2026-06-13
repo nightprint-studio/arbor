@@ -7,7 +7,7 @@
    */
   import {
     BookOpen, Rocket, Braces, FileCode2, Hash, Music, WandSparkles,
-    Boxes, ListTree, SlidersHorizontal, FileInput, Keyboard,
+    Boxes, ListTree, SlidersHorizontal, FileInput, Keyboard, FlaskConical,
   } from 'lucide-svelte';
   import DocsShell, { type DocsNavItem, type DocsNavGroup } from '$lib/components/shared/DocsShell.svelte';
   import GettingStarted from '../docs/GettingStarted.svelte';
@@ -18,6 +18,7 @@
   import Arrangement from '../docs/Arrangement.svelte';
   import Mixer from '../docs/Mixer.svelte';
   import Import from '../docs/Import.svelte';
+  import Scratch from '../docs/Scratch.svelte';
   import Shortcuts from '../docs/Shortcuts.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -36,6 +37,7 @@
     { id: 'studio', label: 'Studio', icon: Boxes, items: [
       { id: 'arrangement', label: 'Arrangement', icon: ListTree },
       { id: 'mixer',       label: 'Mixer & render', icon: SlidersHorizontal },
+      { id: 'scratch',     label: 'Scratch & testing', icon: FlaskConical },
       { id: 'import',      label: 'Import',      icon: FileInput },
     ] },
     { id: 'reference', label: 'Reference', icon: Keyboard, items: [
@@ -51,6 +53,7 @@
     'transforms': Transforms,
     'arrangement': Arrangement,
     'mixer': Mixer,
+    'scratch': Scratch,
     'import': Import,
     'shortcuts': Shortcuts,
   };

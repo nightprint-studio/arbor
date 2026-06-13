@@ -291,6 +291,10 @@ pub enum AudioCommand {
     SetReverbIr(ReverbIr),
     /// Release every sounding voice (transport stop / panic).
     StopAll,
+    /// Clear the **audition / preview bus only** (stop an in-flight snippet preview
+    /// early), leaving the song's voices sounding. Unlike [`AudioCommand::StopAll`]
+    /// this never touches the main voice pool. Additive seam extension.
+    StopAudition,
 }
 
 /// An impulse response for the convolution reverb send bus, carried on

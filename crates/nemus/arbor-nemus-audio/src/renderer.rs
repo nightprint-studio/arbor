@@ -38,9 +38,11 @@ use arbor_nemus_pattern::prelude::SourceKind;
 /// later through the renderer constructor.
 pub const DEFAULT_VOICE_CAPACITY: usize = 128;
 
-/// Voice capacity of the dedicated **audition** bus (instrument preview). Small —
-/// a few overlapping preview notes is plenty; previews never need the full pool.
-const AUDITION_VOICE_CAPACITY: usize = 8;
+/// Voice capacity of the dedicated **audition** bus (instrument preview + one-shot
+/// snippet test). A single preview note needs only a few voices, but a multi-track
+/// snippet played over several cycles can stack dozens of overlapping voices — so
+/// the bus is sized to host a small arrangement without audible voice-stealing.
+const AUDITION_VOICE_CAPACITY: usize = 64;
 
 /// Default `room` reverb size (`0..1`) until an IR is installed. The default
 /// reverb is the **O(1) algorithmic [`Reverb::Algo`]** (Freeverb), whose cost is
@@ -430,6 +432,13 @@ impl Renderer {
                 // it, so a stopped session reports ~0 DSP load instead of grinding
                 // the effect chain on silence.
                 self.idle = true;
+            }
+            AudioCommand::StopAudition => {
+                // Stop an in-flight snippet preview early: drop only the audition
+                // voices. The song's pool / pending / effect tails are untouched, so
+                // a playing song keeps sounding. Don't arm `idle` — the main pool may
+                // still be live.
+                self.audition.clear();
             }
         }
     }

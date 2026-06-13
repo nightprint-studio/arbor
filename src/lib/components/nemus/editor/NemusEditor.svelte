@@ -20,17 +20,23 @@
     from './nemus-cm';
   import { nemusFormat } from '$lib/ipc/nemus';
   import type { NemusIntelSource } from './nemus-intel';
-  import { extractSymbols, identifierAt, identifierUsages, tracksReferencing, stringArgCallAt, type NemusSymbol } from './nemus-lang';
+  import { extractSymbols, identifierAt, identifierUsages, tracksReferencing, stringArgCallAt, declBodyRangeForSelection, withFileDeps, type NemusSymbol } from './nemus-lang';
   import { symbolHighlightStore } from '../stores/symbol-highlight.svelte';
+  import { editorSelectionStore } from '../stores/editor-selection.svelte';
   import { buildControlEdits, type ControlEdit, type EditChange } from './nemus-edit';
   import { renamePlan, extractTarget, extractLetPlan, inlinePlan, freshName } from './nemus-refactor';
   import { collectIntentions, changeScalePlan, type IntentionItem } from './nemus-intentions';
   import { scalesStore } from '../stores/scales.svelte';
   import type { UsageItem, UsageAnchor } from '../stores/usages.svelte';
-  import { diagnosticsStore, activeHapsStore } from '../stores/engine.svelte';
+  import { diagnosticsStore, activeHapsStore, nemusEngine } from '../stores/engine.svelte';
   import { referenceStore } from '../stores/reference.svelte';
   import { soundsStore } from '../stores/sounds.svelte';
   import { previewStore } from '../stores/preview.svelte';
+  import { scratchStore } from '../stores/scratch.svelte';
+  import { projectStore } from '../stores/project.svelte';
+  import { nemusStore } from '../nemus-store.svelte';
+  import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
+  import { Play, FlaskConical } from 'lucide-svelte';
 
   // Autocomplete + hover read the DSL catalogue live from the store (snapshotted
   // at call time — the store loads asynchronously, so completions light up once
@@ -74,6 +80,47 @@
     symbolHighlightStore.set(name, tree ? tracksReferencing(tree, name) : []);
   }
 
+  // ── Selection → arrangement region highlight ─────────────────────────────────
+  // Publish the source regions the selection maps to; the DAW boxes the haps whose
+  // span overlaps any of them. Selecting a variable / function name resolves to its
+  // declaration body range too, so every note it produces lights up (their spans
+  // point into the definition, not the use site). Cycles (`<…>`, cat, every, …) are
+  // inline, so their literals already fall inside the selection.
+  function handleSelection(range: { from: number; to: number } | null) {
+    if (!range) { editorSelectionStore.set([]); return; }
+    const ranges = [range];
+    const tree = view ? getNemusTree(view) : null;
+    if (tree) {
+      const declRange = declBodyRangeForSelection(tree, range.from, range.to);
+      if (declRange) ranges.push(declRange);
+    }
+    editorSelectionStore.set(ranges);
+  }
+
+  // ── Right-click → play / send the selection ──────────────────────────────────
+  let ctx = $state<{ x: number; y: number; text: string } | null>(null);
+  function onContextMenu(e: MouseEvent) {
+    if (!view) return;
+    const sel = view.state.selection.main;
+    if (sel.empty) return; // no selection → leave the native menu
+    e.preventDefault();
+    ctx = { x: e.clientX, y: e.clientY, text: view.state.doc.sliceString(sel.from, sel.to) };
+  }
+  const ctxItems: MenuItem[] = [
+    { id: 'play',    label: 'Play selection',     icon: Play },
+    { id: 'scratch', label: 'Send to Scratch',    icon: FlaskConical },
+  ];
+  async function onCtxSelect(id: string) {
+    const text = ctx?.text;
+    const src = view?.state.doc.toString() ?? '';
+    ctx = null;
+    if (!text) return;
+    // Resolve the selection against the file's preamble so a bare variable (or any
+    // expression using file-level bindings) actually plays, not silently nothing.
+    if (id === 'play') void nemusEngine.playSnippet(await withFileDeps(src, text), projectStore.project?.path);
+    else if (id === 'scratch') { scratchStore.load(text); nemusStore.showBottom('scratch'); }
+  }
+
   // ── Go-to-declaration (Ctrl/Cmd+Click) ──────────────────────────────────────
   function handleGoto(word: string, v: EditorView) {
     const tree = getNemusTree(v);
@@ -108,6 +155,7 @@
           onGoto: handleGoto,
           onPreview: (name) => previewStore.showByName(name),
           onSymbol: handleSymbol,
+          onSelection: handleSelection,
           intel,
         }),
         updateListener,
@@ -123,6 +171,7 @@
     view?.destroy();
     view = undefined;
     symbolHighlightStore.clear(); // drop the arrangement lane highlight with the editor
+    editorSelectionStore.clear(); // drop the selection→region boxes with the editor
   });
 
   // ── value (controlled) → editor ─────────────────────────────────────────────
@@ -421,7 +470,11 @@
   }
 </script>
 
-<div class="grv-editor" bind:this={hostEl}></div>
+<div class="grv-editor" bind:this={hostEl} oncontextmenu={onContextMenu}></div>
+
+{#if ctx}
+  <ContextMenu items={ctxItems} x={ctx.x} y={ctx.y} onSelect={onCtxSelect} onClose={() => (ctx = null)} />
+{/if}
 
 <style>
   .grv-editor {

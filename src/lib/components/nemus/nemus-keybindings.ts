@@ -44,6 +44,13 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   // Transport. `Shift+F9` (IntelliJ-style) leaves `Ctrl+Space` free for the
   // editor's autocomplete (the universal completion trigger).
   { id: 'run_stop',       key: 'F9', shift: true, scope: 'global', description: 'Toggle Run / Stop' },
+  // `Ctrl+Shift+Enter` — play the editor selection one-shot (or the whole file
+  // when nothing is selected), isolated from the song transport. Mirrors the
+  // right-click→Play / Outline Play / Scratch path.
+  { id: 'play_selection', key: 'Enter', ctrl: true, shift: true, scope: 'editor', description: 'Play selection one-shot (or the file)' },
+  // `Alt+Shift+S` (AltGr-safe; Ctrl+S is Save) — toggle the Scratch panel
+  // (expression evaluator / mini audio tester).
+  { id: 'toggle_scratch', key: 's', alt: true, shift: true, scope: 'global', description: 'Toggle the Scratch panel' },
   { id: 'seek_to_start',  key: '[', ctrl: true, shift: true, scope: 'global', description: 'Skip to start (cycle 0)' },
   { id: 'seek_to_end',    key: ']', ctrl: true, shift: true, scope: 'global', description: 'Skip to end of arrangement' },
   // Window — discovery + layout. `Ctrl+K` matches Arbor's command palette so the

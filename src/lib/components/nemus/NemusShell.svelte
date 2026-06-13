@@ -12,7 +12,7 @@
    */
   import {
     Files, ListTree, Music4, Terminal, AlertTriangle,
-    SlidersHorizontal, Crosshair, Braces, Boxes, Piano,
+    SlidersHorizontal, Crosshair, Braces, Boxes, Piano, FlaskConical,
   } from 'lucide-svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
   import ResizablePanel from '$lib/components/layout/ResizablePanel.svelte';
@@ -31,6 +31,7 @@
   import MixerPanel from './panels/MixerPanel.svelte';
   import InspectorPanel from './panels/InspectorPanel.svelte';
   import DocsPanel from './panels/DocsPanel.svelte';
+  import ScratchPanel from './panels/ScratchPanel.svelte';
 
   import ArrangementView from './viz/ArrangementView.svelte';
   import TabbedEditor from './editor/TabbedEditor.svelte';
@@ -47,6 +48,8 @@
   import { modelsStore } from './stores/models.svelte';
   import { workspaceStore } from './stores/workspace.svelte';
   import { projectStore } from './stores/project.svelte';
+  import { editorSelectionStore } from './stores/editor-selection.svelte';
+  import { withFileDeps } from './editor/nemus-lang';
   import { fileWatchStore } from './stores/file-watch.svelte';
   import { onFsChanged } from '$lib/ipc/fs';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
@@ -191,6 +194,16 @@
   // palette toggle is honoured through, so Ctrl+K also dismisses it.
   const overlayOpen = $derived(nemusStore.settingsOpen || nemusStore.shortcutsOpen || nemusStore.paletteOpen || nemusStore.renameProjectOpen || nemusStore.docsOpen);
 
+  // Play the editor selection one-shot, or the whole active file when nothing is
+  // selected — isolated from the song transport (audition bus). A selection is
+  // resolved against the file's preamble (withFileDeps) so a bare variable plays.
+  async function playSelectionOrFile() {
+    const file = projectStore.activeSource;
+    const r = editorSelectionStore.primary;
+    const src = r ? await withFileDeps(file, file.slice(r.from, r.to)) : file;
+    void nemusEngine.playSnippet(src, projectStore.project?.path);
+  }
+
   function onKeyDown(e: KeyboardEvent) {
     for (const b of NEMUS_BINDINGS) {
       if (b.scope === 'editor' && !editorScoped) continue;
@@ -200,6 +213,8 @@
       if (b.id === 'goto_line') editor?.openGoto();
       else if (b.id === 'new_file') editor?.newFile();
       else if (b.id === 'run_stop') void nemusEngine.toggleRun(projectStore.activeSource, projectStore.project?.path);
+      else if (b.id === 'play_selection') playSelectionOrFile();
+      else if (b.id === 'toggle_scratch') nemusStore.toggleBottom('scratch');
       else if (b.id === 'seek_to_start') void nemusEngine.seekToStart();
       else if (b.id === 'seek_to_end') void nemusEngine.seekToEnd(arrangementStore.contentEnd);
       else if (b.id === 'command_palette') nemusStore.togglePalette();
@@ -245,6 +260,7 @@
   const leftBottom = $derived<ActivityRailItem[]>([
     { id: 'mixer',    tooltip: 'Mixer',    icon: SlidersHorizontal, active: nemusStore.bottomPanel === 'mixer',    onclick: () => nemusStore.toggleBottom('mixer') },
     { id: 'preview',  tooltip: 'Preview',  icon: Piano,         active: nemusStore.bottomPanel === 'preview',  onclick: () => nemusStore.toggleBottom('preview') },
+    { id: 'scratch',  tooltip: 'Scratch · Alt+Shift+S', icon: FlaskConical, active: nemusStore.bottomPanel === 'scratch', onclick: () => nemusStore.toggleBottom('scratch') },
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
     { id: 'inspector', tooltip: 'Inspector', icon: Crosshair, active: nemusStore.rightPanel === 'inspector', onclick: () => nemusStore.toggleRight('inspector') },
@@ -275,6 +291,7 @@
   {:else if nemusStore.bottomPanel === 'preview'}<InstrumentPreviewPanel />
   {:else if nemusStore.bottomPanel === 'console'}<ConsolePanel />
   {:else if nemusStore.bottomPanel === 'problems'}<ProblemsPanel />
+  {:else if nemusStore.bottomPanel === 'scratch'}<ScratchPanel />
   {:else if nemusStore.bottomPanel === 'jobs'}<JobsPanel />{/if}
 {/snippet}
 

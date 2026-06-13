@@ -19,6 +19,7 @@
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import {
   nemusEval, nemusPlay, nemusStop, nemusSeek, nemusSetCps,
+  nemusPlaySnippet, nemusStopSnippet,
   onNemusTransport, onNemusMeters, onNemusDiagnostics, onNemusActiveHaps, onNemusLog,
   onNemusAudioError,
   type NemusDiagnostic, type NemusActiveHap, type NemusStereoPeak,
@@ -210,6 +211,17 @@ function createNemusEngine() {
 
     seek(cycle: number)  { return nemusSeek(cycle); },
     setCps(cps: number)  { return nemusSetCps(cps); },
+
+    /** Play an arbitrary `.nemus` chunk **one-shot** on the audition bus (right-
+     *  click→Play, Outline Play, Scratch panel). It sounds once over its detected
+     *  period and stops on its own; the song transport is untouched. A blank /
+     *  malformed snippet is a no-op. */
+    playSnippet(source: string, projectDir?: string): Promise<void> {
+      if (!source.trim()) return Promise.resolve();
+      return nemusPlaySnippet(source, projectDir);
+    },
+    /** Stop an in-flight snippet preview early (clears the audition bus only). */
+    stopSnippet(): Promise<void> { return nemusStopSnippet(); },
 
     /** Jump the playhead back to cycle 0 (music-player skip-to-start). */
     seekToStart() { return nemusSeek(0); },

@@ -21,6 +21,7 @@
   <li>Pitched notes draw as piano-roll blocks, high notes near the top; samples and signals draw as region blocks.</li>
   <li>Hover an event for its bar:beat, duration, MIDI and (when transposed) the written note.</li>
   <li><kbd>Ctrl</kbd> + click an event to jump to the source that produced it.</li>
+  <li>Select code in the editor to outline the regions it produces here.</li>
   <li>Click a track header or lane to select it — the Inspector and mixer follow.</li>
   <li>Right-click a header for mute / solo.</li>
 </ul>

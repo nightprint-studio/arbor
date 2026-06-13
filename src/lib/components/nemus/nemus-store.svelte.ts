@@ -21,10 +21,11 @@ import type { ControlEdit } from './editor/nemus-edit';
 /** Left-rail panels (top group = side panels, bottom group = bottom panel). */
 export type LeftPanel = 'files' | 'outline' | 'soundbank';
 /** Bottom-docked panels. The Mixer lives here (Logic-style horizontal strips),
- *  alongside the Console + Problems + the background Jobs output, plus the
- *  instrument **Preview** (audition keyboard + knobs). (Find-usages is a floating
- *  popover, not a docked panel — see `usagesStore`.) */
-export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs' | 'preview';
+ *  alongside the Console + Problems + the background Jobs output, the instrument
+ *  **Preview** (audition keyboard + knobs), and the **Scratch** expression
+ *  evaluator / mini audio tester. (Find-usages is a floating popover, not a docked
+ *  panel — see `usagesStore`.) */
+export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs' | 'preview' | 'scratch';
 /** Right-rail panels. */
 export type RightPanel = 'inspector' | 'docs';
 

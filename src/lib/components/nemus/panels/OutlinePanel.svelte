@@ -4,15 +4,23 @@
    *  editor uses (`outlineFromSource`, gate 3 — client-side, no backend). Click
    *  a symbol to jump the editor to its declaration (via the NemusShell relay).
    *  Cross-file go-to-declaration lives in the editor (Ctrl+Click on a name). */
-  import { ListTree, Disc3, SquareFunction, Variable, Import, ChevronRight, Layers } from 'lucide-svelte';
+  import { ListTree, Disc3, SquareFunction, Variable, Import, ChevronRight, Layers, Play } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
   import { sectionColor } from '../palette';
   import { projectStore } from '../stores/project.svelte';
   import { nemusStore } from '../nemus-store.svelte';
+  import { nemusEngine } from '../stores/engine.svelte';
   import { outlineTreeFromSource, type NemusOutlineNode } from '../editor/nemus-lang';
+
+  /** Play just this declaration one-shot (isolated, dependency-aware snippet). */
+  function playNode(e: NemusOutlineNode, ev: MouseEvent) {
+    ev.stopPropagation();
+    if (e.playSource) void nemusEngine.playSnippet(e.playSource, projectStore.project?.path);
+  }
 
   let entries = $state<NemusOutlineNode[]>([]);
 
@@ -84,7 +92,12 @@
                     </button>
                   {/snippet}
                   {e.label}
-                  {#snippet badges()}<span class="ol-secount">{secs.length}</span>{/snippet}
+                  {#snippet badges()}
+                    {#if e.playSource}
+                      <button class="ol-play" onclick={(ev) => playNode(e, ev)} use:tooltip={'Play this track (one-shot)'} aria-label="Play track"><Play size={11} fill="currentColor" /></button>
+                    {/if}
+                    <span class="ol-secount">{secs.length}</span>
+                  {/snippet}
                 </SidebarItem>
                 {#if isTrackOpen(e.id)}
                   {#each secs as s (s.id)}
@@ -99,7 +112,12 @@
                 <SidebarItem onclick={() => nemusStore.requestGoto(e.offset, e.line)}>
                   {#snippet icon()}<span style="color: {g.color}; display:flex"><Gi size={12} /></span>{/snippet}
                   {e.label}
-                  {#snippet badges()}<span class="ol-line">:{e.line}</span>{/snippet}
+                  {#snippet badges()}
+                    {#if e.playSource}
+                      <button class="ol-play" onclick={(ev) => playNode(e, ev)} use:tooltip={'Play this constant (one-shot)'} aria-label="Play"><Play size={11} fill="currentColor" /></button>
+                    {/if}
+                    <span class="ol-line">:{e.line}</span>
+                  {/snippet}
                 </SidebarItem>
               {/if}
             {/each}
@@ -131,4 +149,15 @@
   .ol-chevron:hover { color: var(--text-primary); }
   .ol-chevron.open { transform: rotate(90deg); }
   .ol-sec-dot { display: flex; color: var(--sc); }
+
+  /* Play button — appears on row hover so the Outline stays clean at rest. */
+  .ol-play {
+    display: flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; padding: 0;
+    background: transparent; border: none; cursor: pointer;
+    color: var(--text-muted); border-radius: var(--radius-sm);
+    opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  }
+  :global(.sidebar-item:hover) .ol-play { opacity: 1; }
+  .ol-play:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 </style>

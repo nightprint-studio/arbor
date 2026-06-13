@@ -448,6 +448,51 @@ export function nemusAuditionExpr(expr: string, projectDir?: string): Promise<vo
   return invoke('nemus_audition_expr', { expr, projectDir: projectDir ?? null });
 }
 
+// ── Snippet evaluator / mini audio tester ──────────────────────────────────────
+//
+// Evaluate or play an arbitrary `.nemus` chunk (a selection, an outline
+// declaration, or pasted scratch text) in isolation — without touching the live
+// arrangement. Powers the Scratch panel, right-click→Play, and Outline Play.
+
+/** `nemus_eval_snippet` result: an arbitrary chunk evaluated in isolation. Mirrors
+ *  {@link NemusQueryHaps} (events + detected loop period + tempo) plus inline
+ *  `diagnostics`. Hap spans are byte offsets relative to the **snippet** text
+ *  (offset 0 = start of the snippet), so the caller maps them back by adding the
+ *  snippet's origin offset in the document. */
+export interface NemusSnippetEval {
+  /** Parse / eval / validation errors (empty on success). Inline only — never
+   *  emitted on the `nemus:diagnostics` channel (that belongs to the main editor). */
+  diagnostics: NemusDiagnostic[];
+  haps: NemusQueryHap[];
+  sections: NemusQuerySection[];
+  /** Detected loop period (cycles), the natural one-shot length. `0` when empty. */
+  loop_cycles: number;
+  /** Effective render tempo (starting `tempo(...)` point, else `cps(...)`), or null. */
+  cps: number | null;
+}
+
+/** Evaluate an arbitrary `.nemus` chunk in isolation and return the events it
+ *  generates (plus its detected loop period + tempo). Does not touch the live
+ *  arrangement or the audio device; errors come back inline in the result. The
+ *  snippet must be a self-contained program (a `tracks(...)` / pattern expression). */
+export function nemusEvalSnippet(source: string, projectDir?: string): Promise<NemusSnippetEval> {
+  return invoke('nemus_eval_snippet', { source, projectDir: projectDir ?? null });
+}
+
+/** Play an arbitrary `.nemus` chunk **one-shot** on the audition bus: it sounds
+ *  once over its detected loop period and stops on its own, without disturbing the
+ *  song transport. Opens the audio device on demand; a malformed snippet simply
+ *  doesn't sound (use {@link nemusEvalSnippet} to surface errors). */
+export function nemusPlaySnippet(source: string, projectDir?: string): Promise<void> {
+  return invoke('nemus_play_snippet', { source, projectDir: projectDir ?? null });
+}
+
+/** Stop an in-flight snippet preview early (clears the audition bus only; a playing
+ *  song is untouched). No-op when nothing is running. */
+export function nemusStopSnippet(): Promise<void> {
+  return invoke('nemus_stop_snippet');
+}
+
 // ── Project model: open / create a nemus project (folder + nemus.toml) ─────────
 
 /** One `.nemus` file in a project (source read lazily on the FE via `fs_*`). */
