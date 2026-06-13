@@ -120,9 +120,15 @@ pub fn timecat<T: Clone + Send + Sync + 'static>(weighted: Vec<(Time, Pattern<T>
             let Some(qpart) = span.sect(slot) else {
                 continue;
             };
-            // Map slot-space ↔ the pattern's own cycle [0, 1).
-            let to_inner = move |t: Time| (t - slot_begin) / width;
-            let from_inner = move |t: Time| slot_begin + t * width;
+            // Map slot-space ↔ the pattern's own cycle. The inner pattern sees the
+            // **running cycle** `cyc` (compressed into the slot), not a frozen
+            // `[0, 1)` — otherwise a cycle-dependent child (an alternation `<…>`,
+            // `slow`, seeded `rand`/`degrade`) would replay its cycle 0 every cycle
+            // and never advance (Tidal's `timeCat` advances the child). Carrying
+            // `cyc` keeps cycle 0 identical to before while letting later cycles
+            // progress.
+            let to_inner = move |t: Time| cyc + (t - slot_begin) / width;
+            let from_inner = move |t: Time| slot_begin + (t - cyc) * width;
             for h in p.query(qpart.with_time(to_inner)) {
                 out.push(h.map_time(from_inner));
             }
@@ -375,6 +381,24 @@ mod tests {
             assert_eq!(x.value, y.value);
             assert_eq!(x.whole, y.whole);
         }
+    }
+
+    #[test]
+    fn timecat_advances_inner_alternation_across_cycles() {
+        // A sequence `x <a b>` (equal weights → timecat) must let an inner
+        // alternation advance per cycle, like Tidal's `timeCat`: the slot shows
+        // the child's *running* cycle, not a frozen cycle 0. Regression for the
+        // bug where `<…>` inside a sequence stuck on its first element forever.
+        let alt = slowcat(vec![pure("a"), pure("b")]);
+        let p = timecat(vec![(Time::ONE, pure("x")), (Time::ONE, alt)]);
+        let cycle = |n: i64| {
+            let mut hs = p.query(TimeSpan::cycle(n));
+            hs.sort_by_key(|h| h.part.begin);
+            hs.into_iter().map(|h| h.value).collect::<Vec<_>>()
+        };
+        assert_eq!(cycle(0), vec!["x", "a"]);
+        assert_eq!(cycle(1), vec!["x", "b"]); // the alternation advanced
+        assert_eq!(cycle(2), vec!["x", "a"]); // and wraps
     }
 
     #[test]
