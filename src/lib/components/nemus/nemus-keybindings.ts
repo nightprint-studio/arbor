@@ -61,6 +61,11 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   { id: 'toggle_loop', key: 'l', ctrl: true, shift: true, scope: 'global', description: 'Toggle the loop region' },
   // `Ctrl+Shift+M` (M = marker; AltGr-safe). Drop a named marker at the cursor.
   { id: 'add_marker', key: 'm', ctrl: true, shift: true, scope: 'global', description: 'Add a marker at the cursor' },
+  // `Ctrl+Shift+B` (B = beat; AltGr-safe). Toggle the audible metronome click track.
+  { id: 'toggle_metronome', key: 'b', ctrl: true, shift: true, scope: 'global', description: 'Toggle the metronome (click track)' },
+  // `Ctrl+Shift+U` (U = coUnt-in; AltGr-safe, clear of the webview devtools letters).
+  // Step the count-in pre-roll: off → 1 → 2 bars.
+  { id: 'cycle_count_in', key: 'u', ctrl: true, shift: true, scope: 'global', description: 'Cycle the count-in (pre-roll bars)' },
   // Window — discovery + layout. `Ctrl+K` matches Arbor's command palette so the
   // muscle memory carries across both windows.
   { id: 'command_palette', key: 'k', ctrl: true, scope: 'global', description: 'Open the Command Palette' },

@@ -239,6 +239,8 @@ impl Session {
                     .sink_mut()
                     .send(AudioCommand::SetReverbIr(ReverbIr::Procedural { seconds }));
             }
+            NemusControl::SetMetronome { on } => self.transport.set_metronome(on),
+            NemusControl::SetCountIn { bars } => self.transport.set_count_in_bars(bars),
             NemusControl::Shutdown => return false,
         }
         true

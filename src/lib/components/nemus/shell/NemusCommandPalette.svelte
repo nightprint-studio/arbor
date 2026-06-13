@@ -16,7 +16,7 @@
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin,
+    Repeat, PlayCircle, MapPin, Timer, Hourglass,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -44,7 +44,7 @@
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin,
+    Repeat, PlayCircle, MapPin, Timer, Hourglass,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -69,6 +69,10 @@
       run: () => void nemusEngine.seekToEnd(arrangementStore.contentEnd) },
     { id: 'play_from_cursor', label: 'Play from cursor (punch-in)', group: 'Transport', icon: 'PlayCircle', keys: 'F8',
       run: () => transportUiStore.playFromCursor() },
+    { id: 'toggle_metronome', label: transportUiStore.metronome ? 'Metronome: off' : 'Metronome: on', group: 'Transport', icon: 'Timer', keys: 'Ctrl+Shift+B',
+      run: () => transportUiStore.toggleMetronome() },
+    { id: 'cycle_count_in', label: transportUiStore.countIn > 0 ? `Count-in: ${transportUiStore.countIn} bar${transportUiStore.countIn > 1 ? 's' : ''} (step)` : 'Count-in: add pre-roll', group: 'Transport', icon: 'Hourglass', keys: 'Ctrl+Shift+U',
+      run: () => transportUiStore.cycleCountIn() },
     { id: 'toggle_loop', label: transportUiStore.loopActive ? 'Loop region: off' : 'Loop region: on', group: 'Transport', icon: 'Repeat', keys: 'Ctrl+Shift+L',
       run: () => transportUiStore.toggleLoop() },
     { id: 'clear_loop', label: 'Clear loop region', group: 'Transport', icon: 'Repeat',

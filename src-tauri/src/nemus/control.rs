@@ -90,6 +90,12 @@ pub enum NemusControl {
     /// Set the shared reverb-return decay (procedural IR length, in seconds). A
     /// global mix control like the master gain — session-only, not in the source.
     SetReverb { seconds: f32 },
+    /// Enable / disable the audible metronome click track (a monitoring aid; clicks
+    /// ride the audition bus, bypassing the song mixer).
+    SetMetronome { on: bool },
+    /// Set the count-in length in whole bars (`0` = off). On the next play the song is
+    /// delayed by this many bars while the metronome clicks the pre-roll.
+    SetCountIn { bars: u32 },
 
     /// Tear the session down (drop the cpal stream on this thread) and exit.
     Shutdown,

@@ -32,6 +32,8 @@
   <li><kbd>↑</kbd> / <kbd>↓</kbd> move between lanes, <kbd>←</kbd> / <kbd>→</kbd> nudge the cursor, <kbd>Home</kbd> seeks to the start.</li>
   <li><kbd>F8</kbd> plays from the cursor (punch-in) instead of from the top.</li>
   <li>The view toolbar toggles waveform, follow-playhead, grid and event labels.</li>
+  <li>The <strong>metronome</strong> toggle (or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>) adds an audible click on every beat, accented on the bar — a monitoring aid that bypasses the mix (mute / solo don't silence it).</li>
+  <li>The <strong>count-in</strong> toggle (or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd>) steps a 1- or 2-bar metronome pre-roll: playback waits that many bars, clicking you in, before the song starts. It applies to the next play (from the top or from the cursor).</li>
 </ul>
 
 <h2>Loop region</h2>

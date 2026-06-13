@@ -33,7 +33,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use arbor_nemus_audio::prelude::{AudioCommand, AudioSink, DelayConfig, TrackConfig, VoiceSource};
+use arbor_nemus_audio::prelude::{
+    AudioCommand, AudioSink, DelayConfig, TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource,
+};
 use arbor_nemus_pattern::prelude::{ControlMap, SourceKind, TempoMap, Time, Tracks};
 
 use crate::clock::Epoch;
@@ -76,6 +78,21 @@ pub struct Transport<S: AudioSink> {
     /// this frozen value when not playing. Updated on stop (freeze where we are)
     /// and seek (jump to the target), and used by [`play`](Self::play) to resume.
     paused_cycle: f64,
+    /// Audible click track: when on, [`tick`](Self::tick) emits a metronome click on
+    /// every beat (quarter-cycle), accented on the bar (whole cycle). Clicks ride the
+    /// **audition bus** so they bypass the song's strips (mute / solo never silence
+    /// them). Off by default; a pure monitoring aid, never part of the render.
+    metronome: bool,
+    /// Count-in length in whole bars (cycles). When `> 0`, [`play`](Self::play) delays
+    /// the song by this many cycles: the clock is anchored so the resume position lands
+    /// after the pre-roll, the metronome clicks through the pre-roll (forced on, beats
+    /// leading into bar 1), and the song's own voices are suppressed until then. `0`
+    /// (default) = no pre-roll. Session-only, like the metronome toggle.
+    count_in_bars: u32,
+    /// Frame at which the song begins after a count-in; `Some` only while a pre-roll is
+    /// in flight. Below this frame the scheduler emits clicks but no song voices; it is
+    /// cleared once the clock crosses it (and on stop / seek, which discontinue it).
+    preroll_end: Option<u64>,
 }
 
 impl<S: AudioSink> Transport<S> {
@@ -95,7 +112,21 @@ impl<S: AudioSink> Transport<S> {
             sustained_started: HashSet::new(),
             delay_state: HashMap::new(),
             paused_cycle: 0.0,
+            metronome: false,
+            count_in_bars: 0,
+            preroll_end: None,
         }
+    }
+
+    /// Enable / disable the audible click track (the metronome).
+    pub fn set_metronome(&mut self, on: bool) {
+        self.metronome = on;
+    }
+
+    /// Set the count-in length in whole bars (`0` = off). Takes effect on the next
+    /// [`play`](Self::play); a pre-roll already in flight is unaffected.
+    pub fn set_count_in_bars(&mut self, bars: u32) {
+        self.count_in_bars = bars;
     }
 
     /// Replace the output (a re-eval). Applied quantized at the next cycle boundary.
@@ -127,9 +158,15 @@ impl<S: AudioSink> Transport<S> {
         let sr = self.sink.sample_rate();
         let now = self.sink.now_frame();
         let fpc = self.epoch.frames_per_cycle(sr);
+        // Count-in: shift the resume position forward by N bars, so `paused_cycle`
+        // lands at the end of the pre-roll instead of at `now`. The bars in between
+        // (negative cycles relative to the song) are metronome-only; the song's own
+        // voices below `preroll_end` are suppressed by `schedule_segment`.
+        let preroll_frames = self.count_in_bars as f64 * fpc;
         let delta = self.paused_cycle - self.epoch.cycle.to_f64();
-        let anchor = (now as f64 - delta * fpc).round();
+        let anchor = (now as f64 + preroll_frames - delta * fpc).round();
         self.epoch.frame = if anchor <= 0.0 { 0 } else { anchor as u64 };
+        self.preroll_end = (self.count_in_bars > 0).then(|| now + preroll_frames.round() as u64);
         self.playing = true;
         self.scheduled_through = now;
         self.sustained_started.clear();
@@ -151,6 +188,7 @@ impl<S: AudioSink> Transport<S> {
             .epoch
             .cycle_of(self.sink.now_frame(), self.sink.sample_rate());
         self.playing = false;
+        self.preroll_end = None;
         let _ = self.sink.send(AudioCommand::StopAll);
     }
 
@@ -177,9 +215,11 @@ impl<S: AudioSink> Transport<S> {
         // Jump the frozen playhead too, so a seek while stopped moves the ruler.
         self.paused_cycle = cycle.to_f64();
         // A seek discontinues the timeline: any sustained stem must be free to
-        // restart at its new position, and the delay buses re-arm from scratch.
+        // restart at its new position, the delay buses re-arm from scratch, and any
+        // in-flight count-in pre-roll is abandoned (the new position plays at once).
         self.sustained_started.clear();
         self.delay_state.clear();
+        self.preroll_end = None;
     }
 
     /// Refill the look-ahead window: schedule newly-due cycles and push their
@@ -229,12 +269,81 @@ impl<S: AudioSink> Transport<S> {
             }
             let segment_end = next_frame.min(target);
 
-            if !self.schedule_segment(self.scheduled_through..segment_end) {
+            let seg_start = self.scheduled_through;
+            if !self.schedule_segment(seg_start..segment_end) {
                 // Back-pressure: queue full. Leave `scheduled_through` unmoved so the
                 // same window is retried next tick; the swap stays pending.
                 return;
             }
             self.scheduled_through = segment_end;
+            // Metronome clicks for the segment we just committed (best-effort, so a
+            // dropped click never blocks the song). The range only advances on a
+            // successful song segment, so clicks are never double-emitted. Clicks fire
+            // when the toggle is on *or* the segment sits in a count-in pre-roll.
+            if self.metronome || self.preroll_end.is_some() {
+                self.schedule_metronome(seg_start..segment_end);
+            }
+            // The pre-roll ends once the clock crosses its boundary; from here the
+            // song's voices flow and the click follows only the metronome toggle.
+            if let Some(end) = self.preroll_end {
+                if self.scheduled_through >= end {
+                    self.preroll_end = None;
+                }
+            }
+        }
+    }
+
+    /// Emit a metronome click on every beat (quarter-cycle) whose onset frame lands
+    /// in `range`, accented on the bar (whole cycle). Clicks go to the audition bus
+    /// (bypassing the song strips). Best-effort: a dropped click is acceptable.
+    fn schedule_metronome(&mut self, range: std::ops::Range<u64>) {
+        let sr = self.sink.sample_rate();
+        let fpc = self.epoch.frames_per_cycle(sr);
+        let dur = (0.04 * fpc).round().max(1.0) as u64;
+        // First beat index (quarter-cycle) at or after the range start.
+        let start_cycle = self.epoch.cycle_of(range.start, sr);
+        let mut k = (start_cycle * 4.0).ceil() as i64;
+        loop {
+            let frame = self.epoch.frame_of(Time::new(k, 4), sr);
+            if frame >= range.end {
+                break;
+            }
+            // A beat sounds when the metronome is on, or while it still falls inside a
+            // count-in pre-roll (so the click count leads cleanly into the first bar).
+            let in_preroll = self.preroll_end.is_some_and(|e| frame < e);
+            if frame >= range.start && (self.metronome || in_preroll) {
+                let accent = k.rem_euclid(4) == 0; // bar start (whole cycle)
+                let ev = self.click_event(frame, dur, accent);
+                let _ = self.sink.send(AudioCommand::Audition(ev));
+            }
+            k += 1;
+        }
+    }
+
+    /// Build one metronome click voice (a short `synth.hat` noise tick on the
+    /// audition bus; the accent is louder). `track` is ignored on the audition bus.
+    fn click_event(&mut self, start_frame: u64, dur: u64, accent: bool) -> VoiceEvent {
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut params = VoiceParams::default();
+        params.gain = if accent { 1.0 } else { 0.45 };
+        VoiceEvent {
+            id: VoiceId(id),
+            start_frame,
+            dur_frames: Some(dur),
+            legato: false,
+            source: VoiceSource::Named {
+                sound: None,
+                variant: None,
+                inst: Some("synth.hat".to_string()),
+                art: None,
+            },
+            // `synth.hat` is noise (pitch-agnostic), but give the voice a defined note
+            // so an oscillator-based source still triggers cleanly.
+            note: Some(72.0),
+            params,
+            track: 0,
+            span: None,
         }
     }
 
@@ -312,6 +421,12 @@ impl<S: AudioSink> Transport<S> {
         );
         let sr = self.sink.sample_rate();
         for ev in events {
+            // Count-in pre-roll: the bars before `preroll_end` are metronome-only, so
+            // drop the song's own voices there (without marking sustained / delay state,
+            // leaving the first real onset at the boundary free to fire).
+            if self.preroll_end.is_some_and(|end| ev.start_frame < end) {
+                continue;
+            }
             // Cross-window sustained dedup: skip a stem already started, but only
             // *mark* it started after a successful send so back-pressure can't drop
             // it (the segment is re-scheduled next tick if send fails).
@@ -510,6 +625,36 @@ mod tests {
             .filter(|c| matches!(c, AudioCommand::ConfigureTracks(_)))
             .count();
         assert!(configs >= 2);
+    }
+
+    #[test]
+    fn count_in_delays_song_and_clicks_through_preroll() {
+        let mut tr = Transport::new(RecordingSink::new(SR), 1.0);
+        tr.set_tracks(drum_tracks("d", "bd", 1)); // one bd per cycle (frame 0, 48_000, …)
+        tr.set_count_in_bars(2); // 2-bar pre-roll = 96_000 frames at cps=1
+        tr.play();
+        // Sweep across the pre-roll and into bar 1.
+        for now in (0u64..=100_000).step_by(4_000) {
+            tr.sink_mut().set_now(now);
+            tr.tick();
+        }
+        // The song's bd is suppressed for the whole pre-roll; the first real onset
+        // lands at the boundary (frame 96_000), never at frame 0.
+        let song_starts: Vec<u64> = tr.sink().voices().map(|v| v.start_frame).collect();
+        assert!(!song_starts.contains(&0), "song must stay silent during the count-in");
+        assert!(
+            song_starts.contains(&96_000),
+            "song must start at the pre-roll boundary"
+        );
+        // The 2 bars of count-in click every beat (8 audition clicks), even though the
+        // metronome toggle is off; clicks stop once the pre-roll ends.
+        let clicks = tr
+            .sink()
+            .commands()
+            .iter()
+            .filter(|c| matches!(c, AudioCommand::Audition(_)))
+            .count();
+        assert_eq!(clicks, 8, "a 2-bar count-in must click 8 beats then stop");
     }
 
     #[test]

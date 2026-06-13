@@ -428,8 +428,17 @@ export function nemusSounds(): Promise<NemusSoundList> {
 // real-time (smooth knob drag), released at the next eval. Surgical "commit
 // knob → source literal" is the future `nemus_set_literal`.
 
-/** A live mixer override target. `master_gain` / `reverb` ignore `track`. */
-export type NemusTrackAction = 'gain' | 'pan' | 'mute' | 'solo' | 'master_gain' | 'reverb';
+/** A live mixer override target. `master_gain` / `reverb` / `metronome` / `count_in`
+ *  ignore `track`. */
+export type NemusTrackAction =
+  | 'gain'
+  | 'pan'
+  | 'mute'
+  | 'solo'
+  | 'master_gain'
+  | 'reverb'
+  | 'metronome'
+  | 'count_in';
 
 /** Push a live mixer override to the running session (no-op when stopped). `value`
  *  is 0..1 for gain/pan/master_gain, 0|1 (off|on) for mute/solo, and decay seconds
@@ -442,6 +451,19 @@ export function nemusSetTrack(action: NemusTrackAction, track: number | null, va
  *  mix control like the master gain — session-only, persists across evals. */
 export function nemusSetReverb(seconds: number): Promise<void> {
   return nemusSetTrack('reverb', null, seconds);
+}
+
+/** Enable / disable the audible metronome click track (a monitoring aid; clicks
+ *  bypass the song mixer). Session-only, persists across evals. */
+export function nemusSetMetronome(on: boolean): Promise<void> {
+  return nemusSetTrack('metronome', null, on ? 1 : 0);
+}
+
+/** Set the count-in length in whole bars (`0` = off). On the next play the song is
+ *  delayed by this many bars while the metronome clicks the pre-roll. Session-only,
+ *  persists across evals. */
+export function nemusSetCountIn(bars: number): Promise<void> {
+  return nemusSetTrack('count_in', null, Math.max(0, Math.round(bars)));
 }
 
 // ── nemus_audition_expr: one-off instrument preview from a generated snippet ────

@@ -139,6 +139,16 @@
     else if (loopArmed) { loopArmed = false; void nemusEngine.seek(loop.start); }
   });
 
+  // Re-push the metronome + count-in state when playback starts: both are
+  // session-only on the BE, so a toggle made while stopped (or before the device
+  // opened) must be re-sent so the value survives a session re-open.
+  let wasPlaying = false;
+  $effect(() => {
+    const p = transportStore.playing;
+    if (p && !wasPlaying) { transportUiStore.syncMetronome(); transportUiStore.syncCountIn(); }
+    wasPlaying = p;
+  });
+
   // On project open/switch: load the declared libraries and auto-sync any that
   // aren't present yet (the user opted into fetch-if-missing on open).
   $effect(() => {
@@ -245,6 +255,8 @@
       else if (b.id === 'play_from_cursor') transportUiStore.playFromCursor();
       else if (b.id === 'toggle_loop') transportUiStore.toggleLoop();
       else if (b.id === 'add_marker') transportUiStore.addMarker(transportUiStore.cursor);
+      else if (b.id === 'toggle_metronome') transportUiStore.toggleMetronome();
+      else if (b.id === 'cycle_count_in') transportUiStore.cycleCountIn();
       else if (b.id === 'command_palette') nemusStore.togglePalette();
       else if (b.id === 'docs') nemusStore.toggleDocs();
       else if (b.id === 'shortcuts') nemusStore.openShortcuts();

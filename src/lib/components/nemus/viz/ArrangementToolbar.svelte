@@ -8,13 +8,15 @@
    * Sticky-left so it stays in view while the (much wider) timeline scrolls.
    * Imports only nemus-local + the shared tooltip action.
    */
-  import { AudioLines, Crosshair, Grid3x3, Tag, Repeat } from 'lucide-svelte';
+  import { AudioLines, Crosshair, Grid3x3, Tag, Repeat, Timer, Hourglass } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { arrViewOptions as o } from './arr-view-options.svelte';
   import { transportUiStore } from '../stores/transport-ui.svelte';
 
   const hasLoop = $derived(transportUiStore.loop != null);
   const loopOn = $derived(transportUiStore.loopActive);
+  const metroOn = $derived(transportUiStore.metronome);
+  const countIn = $derived(transportUiStore.countIn);
 
   const toggles = $derived([
     { key: 'waveform', icon: AudioLines, on: o.waveform, toggle: () => o.toggleWaveform(),
@@ -55,6 +57,29 @@
   >
     <Repeat size={14} />
   </button>
+  <button
+    class="tb-btn"
+    class:on={metroOn}
+    type="button"
+    aria-pressed={metroOn}
+    aria-label="Metronome"
+    use:tooltip={{ content: 'Metronome · Ctrl+Shift+B', description: 'Audible click track on every beat (accented on the bar)' }}
+    onclick={() => transportUiStore.toggleMetronome()}
+  >
+    <Timer size={14} />
+  </button>
+  <button
+    class="tb-btn count"
+    class:on={countIn > 0}
+    type="button"
+    aria-pressed={countIn > 0}
+    aria-label="Count-in"
+    use:tooltip={{ content: 'Count-in · Ctrl+Shift+U', description: countIn > 0 ? `${countIn} bar${countIn > 1 ? 's' : ''} of metronome pre-roll before playback starts (click to step)` : 'No count-in — click to add a metronome pre-roll before playback' }}
+    onclick={() => transportUiStore.cycleCountIn()}
+  >
+    <Hourglass size={14} />
+    {#if countIn > 0}<span class="cnt">{countIn}</span>{/if}
+  </button>
 </div>
 
 <style>
@@ -92,4 +117,18 @@
   .tb-btn:disabled { opacity: 0.4; cursor: default; }
   .tb-btn:disabled:hover { background: transparent; color: var(--text-muted); }
   .tb-div { width: 1px; height: 14px; background: var(--border-subtle); margin: 0 4px; flex-shrink: 0; }
+  /* Count-in: a small bar-count badge over the hourglass when a pre-roll is set. */
+  .tb-btn.count { position: relative; }
+  .cnt {
+    position: absolute;
+    right: 1px;
+    bottom: 0;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--accent);
+    background: var(--bg-base);
+    border-radius: 2px;
+    padding: 0 1px;
+  }
 </style>

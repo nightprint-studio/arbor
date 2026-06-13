@@ -14,6 +14,10 @@
  */
 
 import { nemusEngine } from './engine.svelte';
+import { nemusSetMetronome, nemusSetCountIn } from '$lib/ipc/nemus';
+
+/** Count-in cycles when stepping the toolbar control: off → 1 → 2 bars → off. */
+export const COUNT_IN_MAX = 2;
 
 /** An inclusive-start, exclusive-end loop span, in arrangement cycles. */
 export interface LoopRegion {
@@ -39,6 +43,12 @@ function createTransportUiStore() {
   // Markers, kept sorted by cycle; ids are monotonic (stable keys / nav).
   let markers = $state<Marker[]>([]);
   let nextMarkerId = 1;
+  // Metronome (audible click track). Session-only, like the BE side; pushed live.
+  let metronome = $state(false);
+  // Count-in length in whole bars before the song starts on play (0 = off).
+  // Session-only; pushed eagerly (must reach the BE before the next Play) and
+  // re-synced on play-start to survive a session re-open.
+  let countIn = $state(0);
 
   return {
     // ── Edit cursor ──────────────────────────────────────────────────────────
@@ -74,6 +84,28 @@ function createTransportUiStore() {
       void nemusEngine.seek(cursor);
       void nemusEngine.play();
     },
+
+    // ── Metronome (audible click track) ──────────────────────────────────────
+    get metronome() { return metronome; },
+    setMetronome(on: boolean) { metronome = on; void nemusSetMetronome(on); },
+    toggleMetronome() { this.setMetronome(!metronome); },
+    /** Re-push the current metronome state to the (possibly newly-opened) session.
+     *  Called when playback starts, so the BE matches even if it was toggled while
+     *  stopped / before the audio device opened. */
+    syncMetronome() { void nemusSetMetronome(metronome); },
+
+    // ── Count-in (pre-roll bars before the song starts on play) ──────────────
+    get countIn() { return countIn; },
+    setCountIn(bars: number) {
+      countIn = Math.max(0, Math.min(COUNT_IN_MAX, Math.round(bars)));
+      void nemusSetCountIn(countIn);
+    },
+    /** Step the count-in: off → 1 → 2 → off (toolbar button). */
+    cycleCountIn() { this.setCountIn(countIn >= COUNT_IN_MAX ? 0 : countIn + 1); },
+    /** Re-push the count-in to the (possibly re-opened) session — see
+     *  {@link syncMetronome}. Keeps the BE value correct across a device swap;
+     *  the live setter already pushed it for the common set-then-play path. */
+    syncCountIn() { void nemusSetCountIn(countIn); },
 
     // ── Markers ──────────────────────────────────────────────────────────────
     get markers() { return markers; },
