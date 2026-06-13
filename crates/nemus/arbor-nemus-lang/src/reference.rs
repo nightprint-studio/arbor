@@ -419,6 +419,12 @@ fn islands() -> Vec<DslEntry> {
 fn keywords() -> Vec<DslEntry> {
     vec![
         entry(
+            "meta", DslKind::Keyword, "meta { key = \"…\" | [\"…\"] }",
+            "Optional file front-matter: free-form metadata (e.g. `title`, `description`, `tags`) shown by the Files panel and the marketplace. Pure metadata — it does not sound and has no runtime effect.",
+            vec![],
+            "meta {\n  title = \"Inno alla Gioia\"\n  description = \"Beethoven — Ode to Joy theme\"\n  tags = [\"orchestral\", \"beethoven\"]\n}",
+        ),
+        entry(
             "let", DslKind::Keyword, "let IDENT = expr",
             "Bind a value to a name (it does not sound on its own).",
             vec![],

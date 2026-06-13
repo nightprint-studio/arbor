@@ -2,7 +2,7 @@
   /**
    * Nemus command palette — every discoverable window action in one searchable,
    * keyboard-driven list (panel toggles, transport, project ops, settings).
-   * Opened with Ctrl+Shift+P.
+   * Opened with Ctrl+K (same as Arbor).
    *
    * Thin data-provider over the shared `CommandPaletteShell`: nemus only has
    * phase-1 commands (no verbs / target picker), so it just maps its command
@@ -15,7 +15,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library,
+    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -39,7 +39,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library,
+    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -68,6 +68,7 @@
     { id: 'open_file',    label: 'Open file…',       group: 'Project', icon: 'FolderOpen', keys: 'Ctrl+Shift+O', run: () => projectActions.openFile() },
     { id: 'new_file',     label: 'New .nemus file…', group: 'Project', icon: 'FilePlus2',  keys: 'Ctrl+N',       run: () => projectActions.newFile() },
     { id: 'save',         label: 'Save file',        group: 'Project', icon: 'Save',       keys: 'Ctrl+S',       run: () => projectActions.save() },
+    { id: 'rename_project', label: 'Rename project…', group: 'Project', icon: 'FolderPen', run: () => { if (projectStore.project) nemusStore.openRenameProject(); } },
     { id: 'export',       label: 'Export to WAV…',   group: 'Project', icon: 'Download',   keys: 'Ctrl+Shift+R', run: () => projectActions.exportWav() },
     { id: 'import',       label: 'Import audio / MIDI…', group: 'Project', icon: 'FileInput', keys: 'Alt+Shift+I', run: () => importActions.start() },
     { id: 'convert_midi', label: 'Convert WAV to MIDI…', group: 'Project', icon: 'FileAudio', run: () => importActions.startConvert() },
@@ -155,7 +156,6 @@
   {sections}
   bind:query
   placeholder="Type a command…"
-  width="560px"
 >
   {#snippet emptyMessage()}
     No matching command

@@ -1,6 +1,7 @@
 import { getRecentRepos, addRecentRepo as addRecentRepoIpc } from '$lib/ipc/config';
 import type { StashEntry } from '$lib/types/git';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+import { loadPixels, saveRatio } from '$lib/utils/panel-ratio';
 
 export type Panel = 'graph' | 'settings' | 'plugins' | 'rebase' | 'about' | 'docs';
 /**
@@ -38,24 +39,6 @@ const BOTTOM_LAST_SECTION_KEY = 'arbor:bottom-last-section';
 // so the generic toggle shortcut can re-open the last view after a close.
 const MAIN_VIEW_KEY           = 'arbor:main-view';
 const MAIN_VIEW_LAST_KEY      = 'arbor:main-view-last';
-
-function loadPixels(key: string, defaultPx: number, min: number, max: number, useHeight = false): number {
-  try {
-    const ratio = parseFloat(localStorage.getItem(key) ?? '');
-    if (!isNaN(ratio) && ratio > 0) {
-      const ref = useHeight ? window.innerHeight : window.innerWidth;
-      return Math.max(min, Math.min(max, Math.round(ratio * ref)));
-    }
-  } catch { /* ignore */ }
-  return defaultPx;
-}
-
-function saveRatio(key: string, px: number, useHeight = false) {
-  try {
-    const ref = useHeight ? window.innerHeight : window.innerWidth;
-    localStorage.setItem(key, String(px / ref));
-  } catch { /* ignore */ }
-}
 
 function createUiStore() {
   let sidebarWidth      = $state(loadPixels(SIDEBAR_RATIO_KEY, 240, 160, 500));

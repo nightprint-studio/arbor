@@ -111,7 +111,63 @@ pub async fn nemus_create_project(
     nemus_open_project(dir).await
 }
 
+/// Rename a project: set the root `name` key in `<dir>/nemus.toml`, preserving
+/// everything else (audience, `[libraries]`, comments). Creates a minimal
+/// manifest if none exists. Returns the re-opened project.
+#[tauri::command]
+pub async fn nemus_set_project_name(
+    dir: String,
+    name: String,
+) -> Result<NemusProjectInfo, AppError> {
+    let manifest_path = PathBuf::from(&dir).join("nemus.toml");
+    let existing = std::fs::read_to_string(&manifest_path).unwrap_or_default();
+    let updated = set_root_name(&existing, &name);
+    std::fs::write(&manifest_path, updated).map_err(|e| AppError::Other(e.to_string()))?;
+    nemus_open_project(dir).await
+}
+
 // ── Internals ────────────────────────────────────────────────────────────────
+
+/// Replace (or insert) the root-level `name = "…"` assignment in a nemus.toml,
+/// touching nothing else. The root scope ends at the first `[table]` header, so
+/// a `name` key inside `[libraries]` (unlikely) is never disturbed.
+fn set_root_name(text: &str, name: &str) -> String {
+    let assignment = format!("name = {}", toml_str(name));
+    let mut out: Vec<String> = Vec::new();
+    let mut replaced = false;
+    let mut in_root = true;
+    for raw in text.lines() {
+        let trimmed = raw.trim_start();
+        if in_root && trimmed.starts_with('[') {
+            in_root = false;
+        }
+        if in_root && !replaced && is_root_name_assignment(trimmed) {
+            out.push(assignment.clone());
+            replaced = true;
+            continue;
+        }
+        out.push(raw.to_string());
+    }
+    if !replaced {
+        out.insert(0, assignment);
+    }
+    let mut s = out.join("\n");
+    if !s.ends_with('\n') {
+        s.push('\n');
+    }
+    s
+}
+
+/// A `name = …` assignment line (not a comment, not `names`/`name_x`).
+fn is_root_name_assignment(trimmed: &str) -> bool {
+    if trimmed.starts_with('#') {
+        return false;
+    }
+    match trimmed.strip_prefix("name") {
+        Some(rest) => rest.trim_start().starts_with('='),
+        None => false,
+    }
+}
 
 /// Read + parse `<dir>/nemus.toml`. A missing file is an empty manifest (not an
 /// error); a present-but-malformed file *is* an error so the user can fix it.

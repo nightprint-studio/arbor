@@ -29,6 +29,9 @@ pub struct Program {
 /// A top-level statement.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item {
+    /// `meta { … }` — file front-matter (title / description / tags). Pure
+    /// metadata for tooling (Files panel, marketplace); evaluates to nothing.
+    Meta(MetaBlock),
     /// `import { a, b } from "path"` — bring `fn`/`let` names into scope.
     Import(Import),
     /// `let name = expr` — bind a value (does not sound).
@@ -37,6 +40,29 @@ pub enum Item {
     Fn(FnDef),
     /// A bare top-level expression: the output (`tracks(...)` or a single pattern).
     Expr(Expr),
+}
+
+/// `meta { title = "…" description = "…" tags = ["…"] }` — a file's front-matter.
+/// Free-form key/value pairs; no fixed schema (tooling reads the keys it knows).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetaBlock {
+    pub fields: Vec<MetaField>,
+    pub span: SourceSpan,
+}
+
+/// One `key = value` pair inside a [`MetaBlock`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetaField {
+    pub key: Ident,
+    pub value: MetaValue,
+    pub span: SourceSpan,
+}
+
+/// A metadata value: a string or a list of strings (e.g. `tags`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum MetaValue {
+    Str(String),
+    List(Vec<String>),
 }
 
 /// `import { names } from "path"`.

@@ -11,7 +11,7 @@
 
 import { SvelteMap } from 'svelte/reactivity';
 import {
-  nemusOpenProject, nemusCreateProject,
+  nemusOpenProject, nemusCreateProject, nemusSetProjectName,
   type NemusProjectInfo, type NemusProjectFile,
 } from '$lib/ipc/nemus';
 import { fsReadTextFile, fsWriteTextFile } from '$lib/ipc/fs';
@@ -108,6 +108,15 @@ function createProjectStore() {
     async createProject(dir: string, name: string, audience: string) {
       await nemusCreateProject(dir, name, audience);
       await this.open(dir);
+    },
+
+    /** Rename the open project (writes `nemus.toml`). Updates the manifest in
+     *  place — open tabs / buffers / selection are untouched. */
+    async rename(name: string) {
+      if (!project) return;
+      const trimmed = name.trim();
+      if (!trimmed || trimmed === project.name) return;
+      project = await nemusSetProjectName(project.path, trimmed);
     },
   };
 }

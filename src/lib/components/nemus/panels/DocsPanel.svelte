@@ -7,7 +7,7 @@
    * authored-once Rust catalogue is the single source — no hardcoded language
    * data here, so it never drifts from the evaluator.
    */
-  import { BookOpen, Search } from 'lucide-svelte';
+  import { Search } from 'lucide-svelte';
   import {
     Braces, Hash, WandSparkles, Music, Waves, Dice5, Brackets, FileCode2, Terminal,
   } from 'lucide-svelte';
@@ -67,8 +67,8 @@
   const rowId = (e: NemusDslEntry) => `${e.kind}:${e.name}`;
 </script>
 
-<PanelShell title="Docs">
-  {#snippet icon()}<BookOpen size={13} />{/snippet}
+<PanelShell title="Language reference">
+  {#snippet icon()}<Braces size={13} />{/snippet}
   {#snippet toolbar()}
     <div class="docs-search">
       <Input bind:value={query} placeholder="Search the language…" size="sm">

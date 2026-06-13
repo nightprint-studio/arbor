@@ -83,6 +83,7 @@ pub fn evaluate(
     let mut outputs: Vec<Value> = Vec::new();
     for item in &program.items {
         match item {
+            Item::Meta(_) => {} // front-matter: metadata only, no runtime effect
             Item::Import(imp) => resolve_import(&ctx, imp)?,
             Item::Let(b) => {
                 let v = eval_expr(&ctx, &Env::empty(), &b.value)?;
@@ -503,6 +504,7 @@ fn load_module(ctx: &Rc<Ctx>, path: &str) -> Result<HashMap<String, Value>> {
     let mut result: Result<()> = Ok(());
     for item in &program.items {
         match item {
+            Item::Meta(_) => {} // front-matter: ignored
             Item::Import(inner) => {
                 if let Err(e) = resolve_import(&sub, inner) {
                     result = Err(e);

@@ -12,7 +12,7 @@
    */
   import {
     Files, ListTree, Music4, Terminal, AlertTriangle,
-    SlidersHorizontal, Crosshair, BookOpen, Boxes, Piano,
+    SlidersHorizontal, Crosshair, Braces, Boxes, Piano,
   } from 'lucide-svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
   import ResizablePanel from '$lib/components/layout/ResizablePanel.svelte';
@@ -58,6 +58,7 @@
   import { scalesStore } from './stores/scales.svelte';
   import { librariesStore } from './stores/libraries.svelte';
   import { arrangementStore } from './viz/arrangement.svelte';
+  import { panelSizes } from './stores/panel-sizes.svelte';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import NemusProjectActions from './shell/NemusProjectActions.svelte';
@@ -65,6 +66,7 @@
   import NemusSettingsModal from './shell/NemusSettingsModal.svelte';
   import NemusShortcutsModal from './shell/NemusShortcutsModal.svelte';
   import NemusCommandPalette from './shell/NemusCommandPalette.svelte';
+  import RenameProjectModal from './shell/RenameProjectModal.svelte';
   import InstrumentPreviewPanel from './preview/InstrumentPreviewPanel.svelte';
   import { NEMUS_BINDINGS, matchesNemus } from './nemus-keybindings';
 
@@ -175,8 +177,8 @@
 
   // While any overlay (Settings / Shortcuts / Command Palette) is open it owns
   // the keyboard — Esc (handled by the modal / palette) closes it. Only the
-  // palette toggle is honoured through, so Ctrl+Shift+P also dismisses it.
-  const overlayOpen = $derived(nemusStore.settingsOpen || nemusStore.shortcutsOpen || nemusStore.paletteOpen);
+  // palette toggle is honoured through, so Ctrl+K also dismisses it.
+  const overlayOpen = $derived(nemusStore.settingsOpen || nemusStore.shortcutsOpen || nemusStore.paletteOpen || nemusStore.renameProjectOpen);
 
   function onKeyDown(e: KeyboardEvent) {
     for (const b of NEMUS_BINDINGS) {
@@ -234,7 +236,7 @@
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
     { id: 'inspector', tooltip: 'Inspector', icon: Crosshair, active: nemusStore.rightPanel === 'inspector', onclick: () => nemusStore.toggleRight('inspector') },
-    { id: 'docs',      tooltip: 'Docs',      icon: BookOpen,  active: nemusStore.rightPanel === 'docs',      onclick: () => nemusStore.toggleRight('docs') },
+    { id: 'docs',      tooltip: 'Language reference', icon: Braces, active: nemusStore.rightPanel === 'docs', onclick: () => nemusStore.toggleRight('docs') },
   ]);
   // Diagnostics / system panels — toggles on the right rail (they still dock at the
   // bottom, where their wide log / list layout belongs).
@@ -289,7 +291,8 @@
 
       {#snippet panels()}
         {#if showLeft}
-          <PanelCard orientation="left" initialSize={240} minSize={170} maxSize={460}>
+          <PanelCard orientation="left" initialSize={panelSizes.left} minSize={170} maxSize={460}
+            onResize={(px) => panelSizes.setLeft(px)}>
             {@render leftContent()}
           </PanelCard>
         {/if}
@@ -298,7 +301,8 @@
           <div class="body-row">
             {#if showViz && showEditor}
               <div class="card">
-                <ResizablePanel direction="horizontal" initialSize={600} minSize={320} maxSize={1100}>
+                <ResizablePanel direction="horizontal" initialSize={panelSizes.viz} minSize={320} maxSize={1100}
+                  onResize={(px) => panelSizes.setViz(px)}>
                   {@render vizContent()}
                 </ResizablePanel>
               </div>
@@ -311,14 +315,16 @@
           </div>
 
           {#if showBottom}
-            <PanelCard orientation="bottom" initialSize={220} minSize={90} maxSize={560}>
+            <PanelCard orientation="bottom" initialSize={panelSizes.bottom} minSize={90} maxSize={560}
+              onResize={(px) => panelSizes.setBottom(px)}>
               {@render bottomContent()}
             </PanelCard>
           {/if}
         </div>
 
         {#if showRight}
-          <PanelCard orientation="right" initialSize={300} minSize={210} maxSize={520}>
+          <PanelCard orientation="right" initialSize={panelSizes.right} minSize={210} maxSize={520}
+            onResize={(px) => panelSizes.setRight(px)}>
             {@render rightContent()}
           </PanelCard>
         {/if}
@@ -367,6 +373,7 @@
 {#if nemusStore.settingsOpen}<NemusSettingsModal onClose={() => nemusStore.closeSettings()} />{/if}
 {#if nemusStore.shortcutsOpen}<NemusShortcutsModal onClose={() => nemusStore.closeShortcuts()} />{/if}
 {#if nemusStore.paletteOpen}<NemusCommandPalette onClose={() => nemusStore.closePalette()} />{/if}
+{#if nemusStore.renameProjectOpen}<RenameProjectModal onClose={() => nemusStore.closeRenameProject()} />{/if}
 
 <style>
   .shell {

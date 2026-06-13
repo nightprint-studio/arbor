@@ -26,6 +26,7 @@
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Knob from '$lib/components/shared/ui/Knob.svelte';
+  import Fader from '$lib/components/shared/ui/Fader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import PeakMeter from './PeakMeter.svelte';
   import { nemusStore } from '../nemus-store.svelte';
@@ -54,6 +55,14 @@
     if (Math.abs(p - PAN_CENTER) < 0.02) return 'C';
     return p < PAN_CENTER ? `L${Math.round((PAN_CENTER - p) * 200)}` : `R${Math.round((p - PAN_CENTER) * 200)}`;
   }
+  /** Linear gain → dB readout (how a pro console labels level). Unity reads
+   *  `0.0`, silence `-∞`; the knob position stays linear. */
+  function gainDb(g: number): string {
+    if (g <= 0.0001) return '-∞';
+    const db = 20 * Math.log10(g);
+    const r = Math.abs(db) < 0.05 ? 0 : db;
+    return `${r > 0 ? '+' : ''}${r.toFixed(1)}`;
+  }
 </script>
 
 <div class="mixer-root">
@@ -77,12 +86,12 @@
           </button>
 
           <div class="fader">
-            <div class="meter"><PeakMeter peak={metersStore.peak(t.index)} {dimmed} /></div>
-            <div class="kcol gain-col">
-              <Knob value={mixerStore.gain(t.index)} default={GAIN_UNITY} size={36} color={t.color}
-                    label="gain" ariaLabel="{t.name} gain" onchange={(v) => mixerStore.setGain(t.index, v)} />
-              <span class="kval">{mixerStore.gain(t.index).toFixed(2)}</span>
+            <div class="fader-controls">
+              <div class="meter"><PeakMeter peak={metersStore.peak(t.index)} {dimmed} /></div>
+              <Fader value={mixerStore.gain(t.index)} max={1} default={GAIN_UNITY} unity={GAIN_UNITY}
+                     color={t.color} ariaLabel="{t.name} gain" onchange={(v) => mixerStore.setGain(t.index, v)} />
             </div>
+            <span class="kval">{gainDb(mixerStore.gain(t.index))}<span class="kunit">dB</span></span>
           </div>
 
           <div class="knobs-row">
@@ -116,12 +125,12 @@
       <div class="strip master">
         <div class="strip-name master-name"><span class="nm">MASTER</span></div>
         <div class="fader">
-          <div class="meter"><PeakMeter peak={metersStore.master} /></div>
-          <div class="kcol gain-col">
-            <Knob value={mixerStore.masterGain} default={GAIN_UNITY} size={36} color="var(--accent)"
-                  label="gain" ariaLabel="Master gain" onchange={(v) => mixerStore.setMasterGain(v)} />
-            <span class="kval">{mixerStore.masterGain.toFixed(2)}</span>
+          <div class="fader-controls">
+            <div class="meter"><PeakMeter peak={metersStore.master} /></div>
+            <Fader value={mixerStore.masterGain} max={1} default={GAIN_UNITY} unity={GAIN_UNITY}
+                   color="var(--accent)" ariaLabel="Master gain" onchange={(v) => mixerStore.setMasterGain(v)} />
           </div>
+          <span class="kval">{gainDb(mixerStore.masterGain)}<span class="kunit">dB</span></span>
         </div>
         <div class="ms-row"><span class="dsp" use:tooltip={'DSP load'}>{Math.round(metersStore.dspLoad * 100)}%</span></div>
       </div>
@@ -165,17 +174,23 @@
 
   /* Fader zone — the only flexible region: it soaks up the panel height so the
      meter grows tall on a big panel and shrinks (never the knobs) on a small one. */
+  /* Fader zone — a tall controls row (meter + fader) that soaks up the strip
+     height, with the dB readout pinned BELOW it (never overlapping). */
   .fader {
     flex: 1; min-height: 56px;
-    display: flex; align-items: stretch; justify-content: center; gap: 9px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
     width: 100%;
   }
+  .fader-controls {
+    flex: 1; min-height: 0; width: 100%;
+    display: flex; align-items: stretch; justify-content: center; gap: 9px;
+  }
   .meter { flex-shrink: 0; min-height: 0; }
-  .gain-col { justify-content: flex-end; }
 
   .knobs-row { display: flex; align-items: flex-start; justify-content: center; gap: 5px; flex-shrink: 0; }
   .kcol { display: flex; flex-direction: column; align-items: center; gap: 1px; }
   .kval { font-size: 9px; color: var(--text-muted); font-family: var(--font-code); line-height: 1; }
+  .kunit { margin-left: 2px; opacity: 0.6; font-size: 8px; }
 
   .ms-row { display: flex; gap: 3px; align-items: center; min-height: 18px; }
   .ms {

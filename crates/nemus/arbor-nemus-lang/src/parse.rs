@@ -12,7 +12,7 @@ use tree_sitter::{Node, Parser};
 
 use crate::ast::{
     BinOp, Expr, ExprKind, FnDef, Ident, Import, Island, IslandKind, Item, Leaf, LetBind, Mini,
-    MiniArg, MiniKind, Postfix, Program, UnOp,
+    MetaBlock, MetaField, MetaValue, MiniArg, MiniKind, Postfix, Program, UnOp,
 };
 use crate::error::{LangError, LangErrorKind, Result};
 
@@ -77,11 +77,46 @@ fn walk_program(root: Node, src: &str) -> Result<Program> {
 
 fn walk_item(node: Node, src: &str) -> Result<Item> {
     match node.kind() {
+        "meta_block" => Ok(Item::Meta(walk_meta(node, src)?)),
         "import_statement" => Ok(Item::Import(walk_import(node, src)?)),
         "let_binding" => Ok(Item::Let(walk_let(node, src)?)),
         "fn_definition" => Ok(Item::Fn(walk_fn(node, src)?)),
         _ => Ok(Item::Expr(walk_expr(node, src)?)),
     }
+}
+
+fn walk_meta(node: Node, src: &str) -> Result<MetaBlock> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+    for f in node.named_children(&mut cursor) {
+        if f.kind() != "meta_field" {
+            continue; // skip comments
+        }
+        let key = ident(field(f, "key")?, src);
+        let value_node = field(f, "value")?;
+        let value = match value_node.kind() {
+            "meta_list" => {
+                let mut items = Vec::new();
+                let mut lc = value_node.walk();
+                for s in value_node.named_children(&mut lc) {
+                    if s.kind() == "string" {
+                        items.push(unquote(node_text(s, src)));
+                    }
+                }
+                MetaValue::List(items)
+            }
+            _ => MetaValue::Str(unquote(node_text(value_node, src))),
+        };
+        fields.push(MetaField {
+            key,
+            value,
+            span: span(f),
+        });
+    }
+    Ok(MetaBlock {
+        fields,
+        span: span(node),
+    })
 }
 
 fn walk_import(node: Node, src: &str) -> Result<Import> {

@@ -38,6 +38,7 @@
     selectedKey = null,
     onpick,
     ongoto,
+    writtenNote,
   }: {
     lane: VizLane;
     color: string;
@@ -55,6 +56,9 @@
     onpick?: (hap: NemusQueryHap) => void;
     /** Ctrl/Cmd+clicked an event — reveal the source span that produced it. */
     ongoto?: (hap: NemusQueryHap) => void;
+    /** Written note literal behind a hap when a transform shifted its pitch
+     *  (e.g. `.add(-24)`), for the "sounds X · written Y" tooltip hint. */
+    writtenNote?: (hap: NemusQueryHap) => string | null;
   } = $props();
 
   const VPAD = 12;     // % vertical padding inside the lane
@@ -94,7 +98,11 @@
       `bar ${barBeat(h.start)}`,
       h.has_onset ? `${durBeats.toFixed(2).replace(/\.?0+$/, '')} beat${durBeats === 1 ? '' : 's'}` : 'continuous',
     ];
-    if (h.note != null) parts.push(`MIDI ${Math.round(h.note)}`);
+    if (h.note != null) {
+      parts.push(`MIDI ${Math.round(h.note)}`);
+      const written = writtenNote?.(h);
+      if (written) parts.push(`written ${written}`);
+    }
     if (h.gain != null) parts.push(`gain ${h.gain.toFixed(2)}`);
     return { content: name, description: parts.join(' · ') };
   }

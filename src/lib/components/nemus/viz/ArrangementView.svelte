@@ -127,10 +127,48 @@
     cursorCycle = Math.max(0, Math.round(cyc * 4) / 4);
     void nemusEngine.seek(cursorCycle);
   }
-  function setStartFromEvent(e: MouseEvent) {
-    if (!rulerEl) return;
+  /** Pixel → cycle under the ruler, clamped to the visible timeline. */
+  function rulerCycleAt(clientX: number): number {
+    if (!rulerEl) return 0;
     const r = rulerEl.getBoundingClientRect();
-    seekTo(Math.max(0, Math.min(VIEW, (e.clientX - r.left) / PX)));
+    return Math.max(0, Math.min(VIEW, (clientX - r.left) / PX));
+  }
+  // Press-and-drag scrub: seek continuously while the mouse is down (DAW-style),
+  // not just on a single click. We snap to quarter-cycles and only re-seek when
+  // the snapped position actually changes, so a drag fires at most one IPC per
+  // crossed beat — never a flood of per-pixel seeks.
+  function startScrub(e: MouseEvent) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    let last = -1;
+    const apply = (clientX: number) => {
+      const snapped = Math.max(0, Math.round(rulerCycleAt(clientX) * 4) / 4);
+      if (snapped === last) return;
+      last = snapped;
+      cursorCycle = snapped;
+      void nemusEngine.seek(snapped);
+    };
+    apply(e.clientX);
+    const onMove = (ev: MouseEvent) => apply(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+  /** Wheel over the time axis = horizontal navigation (no reaching for the
+   *  scrollbar). The dominant axis wins, so a trackpad's horizontal swipe still
+   *  pans naturally. Shift+wheel anywhere in the timeline does the same. */
+  function wheelToHorizontal(e: WheelEvent) {
+    if (!scrollEl) return;
+    const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    if (d === 0) return;
+    e.preventDefault();
+    scrollEl.scrollLeft += d;
+  }
+  function onArrWheel(e: WheelEvent) {
+    if (e.shiftKey) wheelToHorizontal(e);
   }
 
   // ── Auto-follow: keep the playhead in view while playing (re-armed on each
@@ -188,13 +226,40 @@
     inspectStore.select(lane.track, hap);
     nemusStore.showRight('inspector');
   }
-  /** Ctrl/Cmd+click a hap → reveal the source span that produced it. The hap span
-   *  is a UTF-8 byte range (backend coordinate); convert to the editor's UTF-16
-   *  offset before relaying the jump (no-op on pure-ASCII source). */
+  // Byte→UTF-16 mapper for the active source (rebuilt when the source changes).
+  // Hap spans are UTF-8 byte ranges; the editor + JS string slicing need UTF-16.
+  const byteToU16 = $derived(makeByteToU16(projectStore.activeSource));
+
+  /** Ctrl/Cmd+click a hap → reveal the source span that produced it. */
   function gotoHapSource(hap: NemusQueryHap) {
     if (hap.span_start == null) return;
-    const offset = makeByteToU16(projectStore.activeSource)(hap.span_start);
-    nemusStore.requestGoto(offset, 0);
+    nemusStore.requestGoto(byteToU16(hap.span_start), 0);
+  }
+
+  const NOTE_PC: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+  /** MIDI of a host note literal (`c4`=60; `s`=sharp, `f`=flat), or null. Mirrors
+   *  the language's pitch convention so we can tell whether a transform moved it. */
+  function noteLiteralToMidi(tok: string): number | null {
+    const m = tok.toLowerCase().match(/^([a-g])([sf]*)(-?\d+)$/);
+    if (!m) return null;
+    let semis = NOTE_PC[m[1]];
+    for (const acc of m[2]) semis += acc === 's' ? 1 : -1;
+    return (parseInt(m[3], 10) + 1) * 12 + semis;
+  }
+  /** The written note literal behind a hap, but ONLY when a transform (e.g.
+   *  `.add(-24)`) shifted its sounding pitch — so the tooltip can clarify
+   *  "MIDI 33 · written a3". Returns null when the written token already matches
+   *  the sounding pitch, or the span isn't a plain note literal (degrees, chords,
+   *  generated notes). */
+  function writtenNote(hap: NemusQueryHap): string | null {
+    if (hap.note == null || hap.span_start == null || hap.span_end == null) return null;
+    const raw = projectStore.activeSource.slice(byteToU16(hap.span_start), byteToU16(hap.span_end));
+    const m = raw.match(/[a-gA-G][sSfF]*-?\d+/);
+    if (!m) return null;
+    const tok = m[0].toLowerCase();
+    const midi = noteLiteralToMidi(tok);
+    if (midi == null || midi === Math.round(hap.note)) return null;
+    return tok;
   }
   /** Key of the selected event within a given lane, for the block highlight. */
   function selectedKeyFor(lane: VizLane): string | null {
@@ -247,7 +312,7 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div class="arr" tabindex="0" role="group" aria-label="Arrangement" onkeydown={onKeydown}>
-  <div class="arr-scroll" bind:this={scrollEl} onscroll={onScroll}>
+  <div class="arr-scroll" bind:this={scrollEl} onscroll={onScroll} onwheel={onArrWheel}>
     <div class="arr-inner" style="--head-w: {headW}px; --tl-w: {timelineW}px;">
       <!-- View toolbar (sticky-left, stays put as the timeline scrolls) -->
       <div class="arr-toolbar-row">
@@ -276,7 +341,7 @@
           </button>
         </div>
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="arr-ruler" bind:this={rulerEl} onclick={setStartFromEvent} use:tooltip={'Click to seek'}>
+        <div class="arr-ruler" bind:this={rulerEl} onmousedown={startScrub} onwheel={wheelToHorizontal} use:tooltip={'Drag to scrub · wheel to scroll'}>
           {#each arrangementStore.rulerSections as s (s.name + '@' + s.start)}
             <div class="ruler-chip" style="left: {s.start * PX}px; width: {(s.end - s.start) * PX}px; --sc: {sectionColor(s.name)}">
               <span>{s.name}</span>
@@ -322,7 +387,7 @@
               {/if}
               <HapLane {lane} {color} view={VIEW} px={PX} {dimmed} {playCycle} {playing}
                        selectedKey={selectedKeyFor(lane)} onpick={(h) => pickHap(lane, h)}
-                       ongoto={gotoHapSource} />
+                       ongoto={gotoHapSource} {writtenNote} />
             </div>
           </div>
         {/each}
@@ -441,7 +506,8 @@
     position: relative; width: var(--tl-w); flex-shrink: 0;
     background: var(--bg-base);
     border-bottom: 1px solid var(--border-subtle);
-    cursor: text;
+    cursor: ew-resize;
+    user-select: none;
   }
   .ruler-tick { position: absolute; top: 21px; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent); }
   .ruler-tick.strong { border-left-color: var(--border-subtle); }

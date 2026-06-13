@@ -46,8 +46,9 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   { id: 'run_stop',       key: 'F9', shift: true, scope: 'global', description: 'Toggle Run / Stop' },
   { id: 'seek_to_start',  key: '[', ctrl: true, shift: true, scope: 'global', description: 'Skip to start (cycle 0)' },
   { id: 'seek_to_end',    key: ']', ctrl: true, shift: true, scope: 'global', description: 'Skip to end of arrangement' },
-  // Window — discovery + layout.
-  { id: 'command_palette', key: 'p', ctrl: true, shift: true, scope: 'global', description: 'Open the Command Palette' },
+  // Window — discovery + layout. `Ctrl+K` matches Arbor's command palette so the
+  // muscle memory carries across both windows.
+  { id: 'command_palette', key: 'k', ctrl: true, scope: 'global', description: 'Open the Command Palette' },
   { id: 'shortcuts',    key: 'F1', scope: 'global', description: 'Show the keyboard shortcuts' },
   { id: 'settings',     key: ',', ctrl: true,  scope: 'global', description: 'Open Settings' },
   { id: 'zen',          key: 'z', ctrl: true, shift: true, scope: 'global', description: 'Toggle Zen mode' },

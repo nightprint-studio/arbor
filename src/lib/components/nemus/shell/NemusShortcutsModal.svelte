@@ -44,6 +44,8 @@
     { keys: ['Ctrl', 'Click'],  description: 'Editor: go to declaration (fn / let / import, incl. cross-file)' },
     { keys: ['Ctrl', 'Click'],  description: 'Editor: preview an instrument name — inst("…") / s("…")' },
     { keys: ['Ctrl', 'Click'],  description: 'Arrangement: reveal the source that produced a hap' },
+    { keys: ['Drag'],           description: 'Arrangement ruler: scrub the seek cursor' },
+    { keys: ['Wheel'],          description: 'Arrangement ruler: scroll the timeline (Shift+wheel anywhere)' },
     { keys: ['Drag'],           description: 'Reorder editor tabs · fold blocks via the gutter arrows' },
     { keys: ['↑', '↓'],         description: 'Arrangement: move between track lanes' },
     { keys: ['←', '→'],         description: 'Arrangement: nudge + seek the cursor' },

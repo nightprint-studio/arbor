@@ -28,8 +28,8 @@
 //!   no trailing zeros, never exponent notation).
 
 use crate::ast::{
-    BinOp, Expr, ExprKind, Ident, Import, Island, IslandKind, Item, Leaf, Mini, MiniArg, MiniKind,
-    Postfix, Program, UnOp,
+    BinOp, Expr, ExprKind, Ident, Import, Island, IslandKind, Item, Leaf, MetaBlock, MetaValue,
+    Mini, MiniArg, MiniKind, Postfix, Program, UnOp,
 };
 
 /// Calls printed one-argument-per-line. A deliberate formatting choice: these
@@ -77,6 +77,7 @@ pub fn emit_expr(expr: &Expr) -> String {
 
 fn write_item(out: &mut String, item: &Item) {
     match item {
+        Item::Meta(m) => write_meta(out, m),
         Item::Import(im) => write_import(out, im),
         Item::Let(b) => {
             out.push_str("let ");
@@ -94,6 +95,32 @@ fn write_item(out: &mut String, item: &Item) {
         }
         Item::Expr(e) => write_expr(out, e, P_LAMBDA, false, 0),
     }
+}
+
+fn write_meta(out: &mut String, m: &MetaBlock) {
+    out.push_str("meta {");
+    for f in &m.fields {
+        out.push_str("\n  ");
+        out.push_str(&f.key.name);
+        out.push_str(" = ");
+        match &f.value {
+            MetaValue::Str(s) => write_quoted(out, s),
+            MetaValue::List(items) => {
+                out.push('[');
+                for (i, s) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    write_quoted(out, s);
+                }
+                out.push(']');
+            }
+        }
+    }
+    if !m.fields.is_empty() {
+        out.push('\n');
+    }
+    out.push('}');
 }
 
 fn write_import(out: &mut String, im: &Import) {

@@ -1555,6 +1555,7 @@ pub fn run() {
             nemus::state::set_nemus_state,
             nemus::project::nemus_open_project,
             nemus::project::nemus_create_project,
+            nemus::project::nemus_set_project_name,
             nemus::reference::nemus_lang_reference,
             nemus::format::nemus_format,
             nemus::scales::nemus_scales,

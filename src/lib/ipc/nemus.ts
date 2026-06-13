@@ -476,6 +476,12 @@ export function nemusCreateProject(dir: string, name: string, audience: string):
   return invoke('nemus_create_project', { dir, name, audience });
 }
 
+/** Rename a project — set the root `name` in `nemus.toml` (preserves the rest of
+ *  the manifest), returning the re-opened project. */
+export function nemusSetProjectName(dir: string, name: string): Promise<NemusProjectInfo> {
+  return invoke('nemus_set_project_name', { dir, name });
+}
+
 // ── Persisted nemus window state (recents + last project + layout) ─────────────
 //
 // A dedicated nemus state file (NOT localStorage, NOT the per-project nemus.toml,

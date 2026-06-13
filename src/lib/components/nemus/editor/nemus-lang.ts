@@ -154,8 +154,9 @@ export function makeByteToU16(src: string): (byte: number) => number {
 
 // ── Symbols + outline (one shared tree walk) ──────────────────────────────────
 
-/** Kind of an outline / declaration symbol. */
-export type NemusSymbolKind = 'track' | 'fn' | 'let' | 'import';
+/** Kind of an outline / declaration symbol. `section` only appears nested under
+ *  a track in the tree outline (never in the flat declaration list). */
+export type NemusSymbolKind = 'track' | 'fn' | 'let' | 'import' | 'section';
 
 /** A declared symbol the editor can jump to (go-to-decl) and the Outline panel
  *  lists. Carries a UTF-16 `offset` so the jump is exact, not line-rounded. */
@@ -275,6 +276,77 @@ export function extractOutline(tree: Tree): NemusSymbol[] {
   return extractSymbols(tree).outline;
 }
 
+/** A track outline node that may carry its named `section(…)` blocks as
+ *  children (the expandable Outline rows). Non-track symbols never have
+ *  children. */
+export interface NemusOutlineNode extends NemusSymbol {
+  children?: NemusSymbol[];
+}
+
+/** Like {@link collectTracks} but keeps each track's tree node so we can scan
+ *  its subtree for sections. */
+function collectTrackNodes(node: Node, out: { sym: NemusSymbol; node: Node }[]): void {
+  if (node.type === 'call_expression') {
+    const fn = node.childForFieldName('function');
+    if (fn?.type === 'identifier' && fn.text === 'track') {
+      const args = node.childForFieldName('arguments');
+      const firstStr = args?.namedChildren.find((c) => c?.type === 'string');
+      if (firstStr) {
+        const name = unquote(firstStr.text);
+        out.push({
+          sym: { id: `track:${name}:${node.startIndex}`, kind: 'track', label: name, name,
+            line: nodeLine(node), offset: node.startIndex },
+          node,
+        });
+      }
+    }
+  }
+  for (const child of node.namedChildren) if (child) collectTrackNodes(child, out);
+}
+
+/** Collect `section("name", …)` calls within a subtree — the arrangement's
+ *  named bands, in source order. The jump target is the name string token. */
+function collectSections(node: Node, out: NemusSymbol[]): void {
+  if (node.type === 'call_expression') {
+    const fn = node.childForFieldName('function');
+    if (fn?.type === 'identifier' && fn.text === 'section') {
+      const args = node.childForFieldName('arguments');
+      const firstStr = args?.namedChildren.find((c) => c?.type === 'string');
+      if (firstStr) {
+        const name = unquote(firstStr.text);
+        out.push({
+          id: `section:${name}:${node.startIndex}`,
+          kind: 'section', label: name, name,
+          line: nodeLine(node), offset: firstStr.startIndex,
+        });
+      }
+    }
+  }
+  for (const child of node.namedChildren) if (child) collectSections(child, out);
+}
+
+/** Outline with each track's `section(…)` blocks nested as children — drives the
+ *  expandable Outline panel. The flat declaration order is preserved; only
+ *  tracks gain a `children` array (when they declare sections). */
+export function extractOutlineTree(tree: Tree): NemusOutlineNode[] {
+  const flat = extractSymbols(tree).outline;
+  const trackNodes: { sym: NemusSymbol; node: Node }[] = [];
+  collectTrackNodes(tree.rootNode, trackNodes);
+
+  const sectionsByOffset = new Map<number, NemusSymbol[]>();
+  for (const { sym, node } of trackNodes) {
+    const secs: NemusSymbol[] = [];
+    collectSections(node, secs);
+    if (secs.length) sectionsByOffset.set(sym.offset, secs);
+  }
+
+  return flat.map((s) =>
+    s.kind === 'track' && sectionsByOffset.has(s.offset)
+      ? { ...s, children: sectionsByOffset.get(s.offset) }
+      : s,
+  );
+}
+
 // ── Standalone parse (for consumers without an editor, e.g. the Outline panel) ─
 
 let sharedParser: Parser | null = null;
@@ -293,6 +365,17 @@ export async function outlineFromSource(src: string): Promise<NemusSymbol[]> {
   try {
     const tree = await parseNemus(src);
     return tree ? extractOutline(tree) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Nested outline (tracks → sections) from source — the Outline panel's source.
+ *  Returns `[]` if the grammar wasm hasn't been built / fails to load. */
+export async function outlineTreeFromSource(src: string): Promise<NemusOutlineNode[]> {
+  try {
+    const tree = await parseNemus(src);
+    return tree ? extractOutlineTree(tree) : [];
   } catch {
     return [];
   }

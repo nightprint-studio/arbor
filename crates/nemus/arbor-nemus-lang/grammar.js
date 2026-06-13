@@ -67,10 +67,29 @@ module.exports = grammar({
     source_file: $ => repeat($._item),
 
     _item: $ => choice(
+      $.meta_block,
       $.import_statement,
       $.let_binding,
       $.fn_definition,
       $._expression, // a bare top-level expression: the output
+    ),
+
+    // `meta { title = "…" description = "…" tags = ["…"] }` — file front-matter.
+    // Pure metadata (no runtime effect); fields are free-form key = string|list.
+    meta_block: $ => seq(
+      'meta', '{',
+      repeat($.meta_field),
+      '}',
+    ),
+    meta_field: $ => seq(
+      field('key', $.identifier),
+      '=',
+      field('value', choice($.string, $.meta_list)),
+    ),
+    meta_list: $ => seq(
+      '[',
+      optional(seq(commaSep1($.string), optional(','))),
+      ']',
     ),
 
     comment: _ => token(choice(

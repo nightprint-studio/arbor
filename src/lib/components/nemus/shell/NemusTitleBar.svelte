@@ -11,8 +11,8 @@
    */
   import {
     Play, Square, SkipBack, SkipForward, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
-    PanelLeft, PanelRight, Minimize2, Command, Check, AlertTriangle,
-    FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut,
+    PanelLeft, PanelRight, Minimize2, Check, AlertTriangle,
+    FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut, FolderPen,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
@@ -71,8 +71,9 @@
   ]);
 
   // ── Settings (gear) ─────────────────────────────────────────────────────────
+  // The command palette has its own dedicated titlebar button (next to the gear,
+  // Arbor-style), so it's no longer duplicated here.
   const settingsMenu = $derived<DropdownItem[]>([
-    { kind: 'item', id: 'palette', label: 'Command Palette…', icon: Command, shortcut: 'Ctrl+Shift+P', onclick: () => nemusStore.openPalette() },
     { kind: 'item', id: 'zen', label: 'Zen mode', icon: Minimize2, shortcut: 'Ctrl+Shift+Z', onclick: () => nemusStore.toggleZen() },
     { kind: 'separator' },
     { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings,  shortcut: 'Ctrl+,', onclick: () => nemusStore.openSettings() },
@@ -88,6 +89,9 @@
       onclick: () => void projectStore.open(path).catch(() => {}),
     })),
     ...(workspaceStore.recentProjects.length ? [{ kind: 'separator' as const }] : []),
+    ...(projectStore.project
+      ? [{ kind: 'item' as const, id: '__rename', label: 'Rename project…', icon: FolderPen, onclick: () => nemusStore.openRenameProject() }]
+      : []),
     { kind: 'item' as const, id: '__open', label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => projectActions.openProject() },
   ]);
 
@@ -104,6 +108,7 @@
   logoTooltip="nemus — music live-coding"
   menu={hamburgerMenu}
   menuWidth="240px"
+  commandPalette={{ active: nemusStore.paletteOpen, tooltip: 'Command palette (Ctrl+K)', onclick: () => nemusStore.togglePalette() }}
   settings={{ menu: settingsMenu, menuWidth: '220px', tooltip: 'Settings' }}
 >
   {#snippet logo()}
@@ -164,6 +169,8 @@
       >
         <SkipForward size={14} fill="currentColor" />
       </button>
+
+      <div class="gtb-sep"></div>
 
       <button
         class="gtb-run-icon"
