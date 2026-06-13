@@ -12,8 +12,10 @@
    */
   import {
     Files, ListTree, Music4, Terminal, AlertTriangle,
-    SlidersHorizontal, Crosshair, Braces, Boxes, Piano, FlaskConical,
+    SlidersHorizontal, Crosshair, Braces, Boxes, Piano, Music2, FlaskConical, Minimize2,
   } from 'lucide-svelte';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { tooltip } from '$lib/actions/tooltip';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
   import ResizablePanel from '$lib/components/layout/ResizablePanel.svelte';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
@@ -32,6 +34,7 @@
   import InspectorPanel from './panels/InspectorPanel.svelte';
   import DocsPanel from './panels/DocsPanel.svelte';
   import ScratchPanel from './panels/ScratchPanel.svelte';
+  import KeyboardPanel from './panels/KeyboardPanel.svelte';
 
   import ArrangementView from './viz/ArrangementView.svelte';
   import TabbedEditor from './editor/TabbedEditor.svelte';
@@ -138,6 +141,29 @@
     const disp = period > 0 ? raw % period : raw;
     if (disp < loop.end - 0.05) loopArmed = true;
     else if (loopArmed) { loopArmed = false; void nemusEngine.seek(loop.start); }
+  });
+
+  // Performance mode maximises the window (chrome already hidden by `chromeHidden`)
+  // off the store flag. We use maximise — NOT OS `setFullscreen` — because the nemus
+  // window is decorationless (`decorations: false`), and toggling native fullscreen
+  // on a frameless WebView2 window leaves the webview mis-sized on exit (a black gap
+  // at the bottom). Maximise is the same path WindowControls uses and restores
+  // cleanly. We only un-maximise on exit if WE maximised a previously-windowed window.
+  let wasPerformance = false;
+  let weMaximised = false;
+  $effect(() => {
+    const on = nemusStore.performance;
+    if (on === wasPerformance) return;
+    wasPerformance = on;
+    const win = getCurrentWindow();
+    if (on) {
+      void win.isMaximized()
+        .then((m) => { weMaximised = !m; return m ? undefined : win.maximize(); })
+        .catch(() => {});
+    } else if (weMaximised) {
+      weMaximised = false;
+      void win.unmaximize().catch(() => {});
+    }
   });
 
   // Re-push the metronome + count-in state when playback starts: both are
@@ -266,6 +292,7 @@
       else if (b.id === 'shortcuts') nemusStore.openShortcuts();
       else if (b.id === 'settings') nemusStore.openSettings();
       else if (b.id === 'zen') nemusStore.toggleZen();
+      else if (b.id === 'performance') nemusStore.togglePerformance();
       else if (b.id === 'find') { if (editorScoped) editor?.openSearch(); else nemusStore.requestFind(); }
       else if (b.id === 'find_usages') nemusStore.requestFindUsages();
       else if (b.id === 'format_document') editor?.formatDocument();
@@ -285,9 +312,9 @@
     }
   }
 
-  const showLeft   = $derived(!nemusStore.zen && nemusStore.leftPanel !== null);
-  const showRight  = $derived(!nemusStore.zen && nemusStore.rightPanel !== null);
-  const showBottom = $derived(!nemusStore.zen && nemusStore.bottomPanel !== null);
+  const showLeft   = $derived(!nemusStore.chromeHidden && nemusStore.leftPanel !== null);
+  const showRight  = $derived(!nemusStore.chromeHidden && nemusStore.rightPanel !== null);
+  const showBottom = $derived(!nemusStore.chromeHidden && nemusStore.bottomPanel !== null);
   const showViz    = $derived(!nemusStore.collapseUi);
   const showEditor = $derived(!nemusStore.collapseTabpane);
 
@@ -303,7 +330,8 @@
   );
   const leftBottom = $derived<ActivityRailItem[]>([
     { id: 'mixer',    tooltip: 'Mixer',    icon: SlidersHorizontal, active: nemusStore.bottomPanel === 'mixer',    onclick: () => nemusStore.toggleBottom('mixer') },
-    { id: 'preview',  tooltip: 'Preview',  icon: Piano,         active: nemusStore.bottomPanel === 'preview',  onclick: () => nemusStore.toggleBottom('preview') },
+    { id: 'preview',  tooltip: 'Preview',  icon: Music2,        active: nemusStore.bottomPanel === 'preview',  onclick: () => nemusStore.toggleBottom('preview') },
+    { id: 'keyboard', tooltip: 'Keyboard (live notes)', icon: Piano, active: nemusStore.bottomPanel === 'keyboard', onclick: () => nemusStore.toggleBottom('keyboard') },
     { id: 'scratch',  tooltip: 'Scratch · Ctrl+Shift+S', icon: FlaskConical, active: nemusStore.bottomPanel === 'scratch', onclick: () => nemusStore.toggleBottom('scratch') },
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
@@ -333,6 +361,7 @@
 {#snippet bottomContent()}
   {#if nemusStore.bottomPanel === 'mixer'}<MixerPanel />
   {:else if nemusStore.bottomPanel === 'preview'}<InstrumentPreviewPanel />
+  {:else if nemusStore.bottomPanel === 'keyboard'}<KeyboardPanel />
   {:else if nemusStore.bottomPanel === 'console'}<ConsolePanel />
   {:else if nemusStore.bottomPanel === 'problems'}<ProblemsPanel />
   {:else if nemusStore.bottomPanel === 'scratch'}<ScratchPanel />
@@ -351,10 +380,10 @@
 {/snippet}
 
 <div class="shell">
-  <NemusTitleBar />
+  {#if !nemusStore.performance}<NemusTitleBar />{/if}
 
   <div class="content-area">
-    <WorkspaceShell showLeftRail={!nemusStore.zen} showRightRail={!nemusStore.zen}>
+    <WorkspaceShell showLeftRail={!nemusStore.chromeHidden} showRightRail={!nemusStore.chromeHidden}>
       {#snippet leftRail()}
         <ActivityBar side="left" ariaLabel="Navigation rail" topItems={leftTop} bottomItems={leftBottom} />
       {/snippet}
@@ -405,8 +434,23 @@
     </WorkspaceShell>
   </div>
 
-  {#if !nemusStore.zen}
+  {#if !nemusStore.chromeHidden}
     <NemusFooter {footerExtra} />
+  {/if}
+
+  <!-- Performance mode: a single floating affordance so the full-screen stage is
+       never a trap (F11 also exits). Shows the live play state at a glance. -->
+  {#if nemusStore.performance}
+    <button
+      class="perf-exit"
+      type="button"
+      aria-label="Exit performance mode"
+      use:tooltip={{ content: 'Exit performance mode · F11', description: 'Leave full-screen and bring the chrome back' }}
+      onclick={() => nemusStore.setPerformance(false)}
+    >
+      <Minimize2 size={14} />
+      <span>Exit</span>
+    </button>
   {/if}
 </div>
 
@@ -484,4 +528,28 @@
     min-width: 0; min-height: 0;
   }
   .viz-wrap > :global(*), .editor-host > :global(*) { flex: 1; min-width: 0; min-height: 0; }
+
+  /* Performance mode: chrome is gone; only this floating exit remains, tucked in
+     the top-right so it never competes with the stage. Fades to near-invisible
+     until hovered/focused so it doesn't draw the eye during play. */
+  .perf-exit {
+    position: fixed;
+    top: 8px; right: 8px;
+    z-index: 50;
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 26px; padding: 0 9px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 11px; font-weight: 600;
+    cursor: pointer;
+    opacity: 0.25;
+    transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  }
+  .perf-exit:hover { opacity: 1; background: var(--bg-hover); color: var(--text-primary); }
+  .perf-exit:focus-visible {
+    opacity: 1; outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
 </style>

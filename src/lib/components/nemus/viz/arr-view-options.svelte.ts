@@ -10,23 +10,41 @@
  *  - `follow`    — auto-scroll to keep the playhead in view while playing.
  *  - `grid`      — draw the bar grid lines / ruler ticks.
  *  - `labels`    — print note / sound names on blocks when they're wide enough.
+ *  - `minimap`   — show the overview strip + viewport box below the timeline.
+ *  - `zoom`      — horizontal scale multiplier on the base pixels-per-cycle.
  */
+
+/** Horizontal-zoom bounds + step (multiplicative, so each press scales evenly). */
+export const MIN_ZOOM = 0.25;
+export const MAX_ZOOM = 6;
+export const ZOOM_STEP = 1.25;
+const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
 
 function createArrViewOptions() {
   let waveform = $state(false);
   let follow   = $state(true);
   let grid     = $state(true);
   let labels   = $state(true);
+  let minimap  = $state(true);
+  let zoom     = $state(1);
 
   return {
     get waveform() { return waveform; },
     get follow()   { return follow; },
     get grid()     { return grid; },
     get labels()   { return labels; },
+    get minimap()  { return minimap; },
+    get zoom()     { return zoom; },
     toggleWaveform() { waveform = !waveform; },
     toggleFollow()   { follow   = !follow; },
     toggleGrid()     { grid     = !grid; },
     toggleLabels()   { labels   = !labels; },
+    toggleMinimap()  { minimap  = !minimap; },
+    setZoom(z: number)   { zoom = clampZoom(z); },
+    zoomBy(factor: number) { zoom = clampZoom(zoom * factor); },
+    zoomIn()    { zoom = clampZoom(zoom * ZOOM_STEP); },
+    zoomOut()   { zoom = clampZoom(zoom / ZOOM_STEP); },
+    zoomReset() { zoom = 1; },
   };
 }
 

@@ -74,6 +74,9 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   { id: 'shortcuts',    key: 'F1', shift: true, scope: 'global', description: 'Show the keyboard shortcuts' },
   { id: 'settings',     key: ',', ctrl: true,  scope: 'global', description: 'Open Settings' },
   { id: 'zen',          key: 'z', ctrl: true, shift: true, scope: 'global', description: 'Toggle Zen mode' },
+  // `F11` — the conventional full-screen key. Performance mode = zen + OS
+  // full-screen + no titlebar, for live play. The floating Exit (or F11) leaves it.
+  { id: 'performance',  key: 'F11', scope: 'global', description: 'Toggle performance mode (full-screen stage)' },
   { id: 'find',         key: 'f', ctrl: true,  scope: 'global', description: 'Find in file (editor) · search the Console / Problems' },
   // Project / file.
   { id: 'new_project',  key: 'n', ctrl: true, shift: true, scope: 'global', description: 'New project' },

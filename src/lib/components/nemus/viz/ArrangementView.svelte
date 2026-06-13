@@ -27,10 +27,12 @@
   import { importActions } from '../stores/import-actions.svelte';
   import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
+  import { tick } from 'svelte';
   import HapLane from './HapLane.svelte';
   import ArrangementToolbar from './ArrangementToolbar.svelte';
+  import Minimap from './Minimap.svelte';
   import { arrangementStore, noteName, VIEW_CYCLES, type VizLane } from './arrangement.svelte';
-  import { arrViewOptions } from './arr-view-options.svelte';
+  import { arrViewOptions, ZOOM_STEP } from './arr-view-options.svelte';
   import { transportStore, nemusEngine, diagnosticsStore } from '../stores/engine.svelte';
   import { transportUiStore } from '../stores/transport-ui.svelte';
   import { projectStore } from '../stores/project.svelte';
@@ -43,9 +45,12 @@
   import { makeByteToU16 } from '../editor/nemus-lang';
   import type { NemusQueryHap } from '$lib/ipc/nemus';
 
-  const PX = 26;
+  // Pixels-per-cycle = a fixed base scaled by the live horizontal zoom. Reactive,
+  // so every `* PX` position (ruler, lanes, overlays, HapLane) re-lays-out on zoom.
+  const BASE_PX = 26;
+  const PX = $derived(BASE_PX * arrViewOptions.zoom);
   const VIEW = VIEW_CYCLES;
-  const timelineW = VIEW * PX;
+  const timelineW = $derived(VIEW * PX);
 
   let collapsed = $state(false);
   const headW = $derived(collapsed ? 48 : 184);
@@ -124,6 +129,11 @@
   const cursorX = $derived(headW + cursorCycle * PX);
   const endX    = $derived(headW + arrangementStore.contentEnd * PX);
 
+  // ── Minimap geometry (cycle-space; the component maps cycle→percent itself) ──
+  const mapCycles = $derived(Math.max(arrangementStore.contentEnd, loopCycles, 4));
+  const viewStartCycle = $derived(PX > 0 ? scrollLeftPx / PX : 0);
+  const viewEndCycle   = $derived(PX > 0 ? (scrollLeftPx + viewportW - headW) / PX : 0);
+
   const bars = Array.from({ length: VIEW / 4 + 1 }, (_, i) => i * 4);
 
   // ── Time ruler (footer): cycles → wall-clock. One cycle = 1/cps seconds; the
@@ -193,23 +203,68 @@
   }
   /** Wheel over the time axis = horizontal navigation (no reaching for the
    *  scrollbar). The dominant axis wins, so a trackpad's horizontal swipe still
-   *  pans naturally. Shift+wheel anywhere in the timeline does the same. */
+   *  pans naturally. Shift+wheel anywhere in the timeline does the same.
+   *  **Ctrl/Cmd+wheel zooms** (centred on the pointer). */
   function wheelToHorizontal(e: WheelEvent) {
+    if (e.ctrlKey || e.metaKey) { void zoomAtPointer(e); return; }
     if (!scrollEl) return;
     const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
     if (d === 0) return;
     e.preventDefault();
     scrollEl.scrollLeft += d;
+    syncView();
   }
   function onArrWheel(e: WheelEvent) {
+    if (e.ctrlKey || e.metaKey) { void zoomAtPointer(e); return; }
     if (e.shiftKey) wheelToHorizontal(e);
+  }
+
+  /** Ctrl/Cmd+wheel zoom, keeping the cycle under the pointer pinned in place. */
+  async function zoomAtPointer(e: WheelEvent) {
+    if (!scrollEl) return;
+    e.preventDefault();
+    const r = scrollEl.getBoundingClientRect();
+    const localX = e.clientX - r.left;                          // px within the viewport
+    const c = (scrollEl.scrollLeft + localX - headW) / PX;      // cycle under the pointer
+    arrViewOptions.zoomBy(e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+    await tick();                                               // let the timeline width settle
+    const newPx = BASE_PX * arrViewOptions.zoom;
+    scrollEl.scrollLeft = Math.max(0, headW + c * newPx - localX);
+    syncView();
+  }
+
+  /** Mirror the scroll element's geometry into reactive state for the minimap. */
+  function syncView() {
+    if (!scrollEl) return;
+    scrollLeftPx = scrollEl.scrollLeft;
+    viewportW = scrollEl.clientWidth;
+  }
+  /** Pan so the main view is centred on `centerCycle` (from the minimap). */
+  function panTo(centerCycle: number) {
+    if (!scrollEl) return;
+    const viewWCycles = Math.max(0, viewportW - headW) / PX;
+    const targetStart = Math.max(0, centerCycle - viewWCycles / 2);
+    scrollEl.scrollLeft = targetStart * PX;
+    syncView();
   }
 
   // ── Auto-follow: keep the playhead in view while playing (re-armed on each
   // play start; ANY manual horizontal scroll pins it until the next start). ──────
   let scrollEl = $state<HTMLElement | null>(null);
+  // Reactive mirror of the scroll geometry (driven by `syncView`), for the minimap
+  // viewport box. `viewportW` also tracks panel resizes via a ResizeObserver.
+  let scrollLeftPx = $state(0);
+  let viewportW = $state(0);
   let userPinned = $state(false);
   let prevPlaying = false;
+  // Keep the geometry mirror fresh when the scroll element mounts / resizes.
+  $effect(() => {
+    if (!scrollEl) return;
+    syncView();
+    const ro = new ResizeObserver(() => syncView());
+    ro.observe(scrollEl);
+    return () => ro.disconnect();
+  });
   // The scrollLeft we last set programmatically. A `scroll` event whose position
   // differs from this is a user scroll (scrollbar, trackpad pan, keyboard) — that
   // pins the follow so the playhead stops yanking the view back (the glitch).
@@ -236,6 +291,7 @@
     if (playing && !userPinned && scrollEl && Math.abs(scrollEl.scrollLeft - lastAutoScrollLeft) > 2) {
       userPinned = true;
     }
+    syncView();
   }
 
   // ── Selection: shared with the mixer + inspector via the nemus store (keyed by
@@ -525,6 +581,14 @@
       </div>
     </div>
   </div>
+
+  <!-- Minimap: a fixed (non-scrolling) overview strip with a draggable viewport. -->
+  {#if lanes.length && arrViewOptions.minimap}
+    <div class="arr-minimap">
+      <Minimap {lanes} {mapCycles} viewStart={viewStartCycle} viewEnd={viewEndCycle}
+               playCycle={playing ? displayCycle : -1} {cursorCycle} {loop} onPan={panTo} />
+    </div>
+  {/if}
 </div>
 
 {#if ctx}
@@ -547,12 +611,21 @@
     /* View-toolbar row above the ruler (offsets the absolute overlays below). */
     --tb-h: 30px;
     display: flex;
+    flex-direction: column;
     flex: 1; min-width: 0; min-height: 0;
     background: var(--bg-base);
     outline: none;
   }
   .arr:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
   .arr-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+  /* Minimap: a fixed-height overview strip below the scrolling timeline. */
+  .arr-minimap {
+    flex-shrink: 0;
+    height: 40px;
+    padding: 4px 6px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-elevated);
+  }
   .arr-inner { position: relative; width: calc(var(--head-w) + var(--tl-w)); }
 
   /* ── View toolbar row (sticky-left strip above the ruler) ── */

@@ -13,10 +13,10 @@
   import {
     Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
-    Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
+    Crosshair, BookOpen, Minimize2, Maximize2, PanelLeft, PanelRight, Search, Settings, Piano,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw,
+    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -34,6 +34,7 @@
   import { librariesStore } from '../stores/libraries.svelte';
   import { transportUiStore } from '../stores/transport-ui.svelte';
   import { tempoStore } from '../stores/tempo.svelte';
+  import { arrViewOptions } from '../viz/arr-view-options.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -42,10 +43,10 @@
   const ICONS: Record<string, Component> = {
     Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
-    Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
+    Crosshair, BookOpen, Minimize2, Maximize2, PanelLeft, PanelRight, Search, Settings, Piano,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw,
+    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -127,11 +128,17 @@
     { id: 'p_problems',  label: 'Toggle Problems',   group: 'View', icon: 'AlertTriangle',    run: () => nemusStore.toggleBottom('problems') },
     { id: 'p_jobs',      label: 'Toggle Jobs',       group: 'View', icon: 'Boxes',            run: () => nemusStore.toggleBottom('jobs') },
     { id: 'p_scratch',   label: 'Toggle Scratch (expression evaluator)', group: 'View', icon: 'FlaskConical', keys: 'Ctrl+Shift+S', run: () => nemusStore.toggleBottom('scratch') },
+    { id: 'p_keyboard',  label: 'Toggle Keyboard (live notes)', group: 'View', icon: 'Piano',          run: () => nemusStore.toggleBottom('keyboard') },
+    { id: 'p_minimap',   label: arrViewOptions.minimap ? 'Hide minimap' : 'Show minimap', group: 'View', icon: 'Map', run: () => arrViewOptions.toggleMinimap() },
+    { id: 'zoom_in',     label: 'Zoom in timeline',  group: 'View', icon: 'ZoomIn',  run: () => arrViewOptions.zoomIn() },
+    { id: 'zoom_out',    label: 'Zoom out timeline', group: 'View', icon: 'ZoomOut', run: () => arrViewOptions.zoomOut() },
+    { id: 'zoom_reset',  label: 'Reset timeline zoom', group: 'View', icon: 'RotateCcw', run: () => arrViewOptions.zoomReset() },
     { id: 'p_inspector', label: 'Toggle Inspector',  group: 'View', icon: 'Crosshair',        run: () => nemusStore.toggleRight('inspector') },
     { id: 'p_docs',      label: 'Toggle Language reference', group: 'View', icon: 'Braces',    run: () => nemusStore.toggleRight('docs') },
     { id: 'c_viz',       label: 'Toggle Arrangement', group: 'View', icon: 'PanelLeft',       run: () => nemusStore.toggleCollapseUi() },
     { id: 'c_editor',    label: 'Toggle Editor',      group: 'View', icon: 'PanelRight',      run: () => nemusStore.toggleCollapseTabpane() },
     { id: 'zen',         label: 'Toggle Zen mode',   group: 'View', icon: 'Minimize2', keys: 'Ctrl+Shift+Z', run: () => nemusStore.toggleZen() },
+    { id: 'performance', label: nemusStore.performance ? 'Exit performance mode' : 'Performance mode (full-screen stage)', group: 'View', icon: 'Maximize2', keys: 'F11', run: () => nemusStore.togglePerformance() },
     { id: 'find',        label: 'Search Console / Problems', group: 'View', icon: 'Search', keys: 'Ctrl+F', run: () => nemusStore.requestFind() },
     { id: 'find_usages', label: 'Find usages of symbol at caret', group: 'View', icon: 'SearchCode', keys: 'Alt+F7', run: () => nemusStore.requestFindUsages() },
     { id: 'structure',   label: 'File structure (find method / variable)', group: 'View', icon: 'ListTree', keys: 'Ctrl+F12', run: () => nemusStore.requestStructure() },

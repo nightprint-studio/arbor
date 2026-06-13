@@ -41,4 +41,14 @@ tracks(
   <li><strong>Language reference</strong> — every island, combinator, transform and signal, searchable.</li>
   <li><strong>Mixer</strong> — a fader per track, driven by the live engine.</li>
   <li><strong>Inspector</strong> — the selected track's character and the picked event.</li>
+  <li><strong>Keyboard</strong> — a piano that lights the notes sounding at the playhead, coloured per track.</li>
 </ul>
+
+<h2>Going full-screen</h2>
+<p>
+  <strong>Performance mode</strong> (<kbd>F11</kbd>) turns the window into a distraction-free
+  full-screen stage for live play: the rails, footer and titlebar drop away and the editor +
+  arrangement fill the screen. A floating <strong>Exit</strong> stays in the top-right (or press
+  <kbd>F11</kbd> again). <strong>Zen mode</strong> (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
+  <kbd>Z</kbd>) hides the same chrome without going full-screen.
+</p>

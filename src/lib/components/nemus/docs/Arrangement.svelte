@@ -29,6 +29,8 @@
 <h2>Navigating</h2>
 <ul>
   <li><strong>Drag the ruler</strong> to scrub the play cursor; <strong>wheel</strong> over it (or <kbd>Shift</kbd> + wheel anywhere) scrolls the timeline.</li>
+  <li><strong><kbd>Ctrl</kbd> + wheel</strong> zooms the timeline horizontally (centred on the pointer); the toolbar's <strong>−</strong> / <strong>%</strong> / <strong>+</strong> do the same (click the readout to reset to 100%).</li>
+  <li>The <strong>minimap</strong> below the timeline shows the whole arrangement with a viewport box — drag it to pan. Toggle it from the view toolbar.</li>
   <li><kbd>↑</kbd> / <kbd>↓</kbd> move between lanes, <kbd>←</kbd> / <kbd>→</kbd> nudge the cursor, <kbd>Home</kbd> seeks to the start.</li>
   <li><kbd>F8</kbd> plays from the cursor (punch-in) instead of from the top.</li>
   <li>The view toolbar toggles waveform, follow-playhead, grid and event labels.</li>

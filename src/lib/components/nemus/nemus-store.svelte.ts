@@ -22,10 +22,11 @@ import type { ControlEdit } from './editor/nemus-edit';
 export type LeftPanel = 'files' | 'outline' | 'soundbank';
 /** Bottom-docked panels. The Mixer lives here (Logic-style horizontal strips),
  *  alongside the Console + Problems + the background Jobs output, the instrument
- *  **Preview** (audition keyboard + knobs), and the **Scratch** expression
- *  evaluator / mini audio tester. (Find-usages is a floating popover, not a docked
+ *  **Preview** (audition keyboard + knobs), the **Scratch** expression evaluator /
+ *  mini audio tester, and the live **Keyboard** (piano that lights the notes
+ *  sounding at the playhead). (Find-usages is a floating popover, not a docked
  *  panel — see `usagesStore`.) */
-export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs' | 'preview' | 'scratch';
+export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs' | 'preview' | 'scratch' | 'keyboard';
 /** Right-rail panels. */
 export type RightPanel = 'inspector' | 'docs';
 
@@ -76,6 +77,10 @@ function createNemusStore() {
   let collapseUi      = $state(false);  // hide the viz pane (editor full width)
   let collapseTabpane = $state(false);  // hide the editor (viz full width)
   let zen             = $state(false);  // hide chrome (rails / footer / bottom)
+  // Performance mode: zen + OS fullscreen + the titlebar hidden — a distraction-free
+  // full-screen stage for live play. NemusShell drives the actual window fullscreen
+  // off this flag and renders a floating exit affordance. Session-only (not persisted).
+  let performance     = $state(false);
 
   // ── Find (Ctrl+F) — set true to ask the active bottom panel to focus its
   // search input; the panel clears it once focused. */
@@ -170,6 +175,11 @@ function createNemusStore() {
     toggleCollapseTabpane() { collapseTabpane = !collapseTabpane; if (collapseTabpane) collapseUi = false; },
     get zen() { return zen; },
     toggleZen() { zen = !zen; },
+    get performance() { return performance; },
+    setPerformance(on: boolean) { performance = on; },
+    togglePerformance() { performance = !performance; },
+    /** Chrome (rails / footer / bottom panel) is hidden in zen OR performance. */
+    get chromeHidden() { return zen || performance; },
 
     /** The five persisted layout fields, for mirroring to the workspace state. */
     layoutSnapshot(): NemusLayoutState {

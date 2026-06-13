@@ -8,9 +8,9 @@
    * Sticky-left so it stays in view while the (much wider) timeline scrolls.
    * Imports only nemus-local + the shared tooltip action.
    */
-  import { AudioLines, Crosshair, Grid3x3, Tag, Repeat, Timer, Hourglass } from 'lucide-svelte';
+  import { AudioLines, Crosshair, Grid3x3, Tag, Repeat, Timer, Hourglass, Map, ZoomIn, ZoomOut } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import { arrViewOptions as o } from './arr-view-options.svelte';
+  import { arrViewOptions as o, MIN_ZOOM, MAX_ZOOM } from './arr-view-options.svelte';
   import { transportUiStore } from '../stores/transport-ui.svelte';
   import TempoControl from './TempoControl.svelte';
 
@@ -18,6 +18,7 @@
   const loopOn = $derived(transportUiStore.loopActive);
   const metroOn = $derived(transportUiStore.metronome);
   const countIn = $derived(transportUiStore.countIn);
+  const zoomPct = $derived(Math.round(o.zoom * 100));
 
   const toggles = $derived([
     { key: 'waveform', icon: AudioLines, on: o.waveform, toggle: () => o.toggleWaveform(),
@@ -28,6 +29,8 @@
       tip: { content: 'Grid', description: 'Show the bar grid lines' } },
     { key: 'labels', icon: Tag, on: o.labels, toggle: () => o.toggleLabels(),
       tip: { content: 'Labels', description: 'Show note / sound names on events when they fit' } },
+    { key: 'minimap', icon: Map, on: o.minimap, toggle: () => o.toggleMinimap(),
+      tip: { content: 'Minimap', description: 'Show the overview strip + viewport box below the timeline' } },
   ] as const);
 </script>
 
@@ -83,6 +86,36 @@
   </button>
   <span class="tb-div"></span>
   <TempoControl />
+  <span class="tb-div"></span>
+  <button
+    class="tb-btn"
+    type="button"
+    disabled={o.zoom <= MIN_ZOOM}
+    aria-label="Zoom out"
+    use:tooltip={{ content: 'Zoom out', description: 'Ctrl+wheel over the timeline zooms too' }}
+    onclick={() => o.zoomOut()}
+  >
+    <ZoomOut size={14} />
+  </button>
+  <button
+    class="tb-zoom"
+    type="button"
+    aria-label="Reset zoom"
+    use:tooltip={{ content: 'Reset zoom to 100%', description: 'Click to reset · Ctrl+wheel over the timeline to zoom' }}
+    onclick={() => o.zoomReset()}
+  >
+    {zoomPct}%
+  </button>
+  <button
+    class="tb-btn"
+    type="button"
+    disabled={o.zoom >= MAX_ZOOM}
+    aria-label="Zoom in"
+    use:tooltip={{ content: 'Zoom in', description: 'Ctrl+wheel over the timeline zooms too' }}
+    onclick={() => o.zoomIn()}
+  >
+    <ZoomIn size={14} />
+  </button>
 </div>
 
 <style>
@@ -120,6 +153,26 @@
   .tb-btn:disabled { opacity: 0.4; cursor: default; }
   .tb-btn:disabled:hover { background: transparent; color: var(--text-muted); }
   .tb-div { width: 1px; height: 14px; background: var(--border-subtle); margin: 0 4px; flex-shrink: 0; }
+  /* Zoom readout doubles as a reset button. */
+  .tb-zoom {
+    min-width: 38px;
+    height: 22px;
+    padding: 0 4px;
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .tb-zoom:hover { background: var(--bg-hover); color: var(--text-secondary); }
+  .tb-zoom:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
   /* Count-in: a small bar-count badge over the hourglass when a pre-roll is set. */
   .tb-btn.count { position: relative; }
   .cnt {
