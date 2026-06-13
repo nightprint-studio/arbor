@@ -81,9 +81,7 @@
 
   <span class="gf-spacer"></span>
 
-  <span class="gf-item gf-render">{transportStore.playing ? 'playing' : 'idle'}</span>
   {#if footerExtra}
-    <span class="gf-sep"></span>
     {@render footerExtra()}
   {/if}
 </div>
@@ -107,5 +105,4 @@
   .gf-error :global(svg) { color: var(--error); }
   .gf-spacer { flex: 1; }
   .gf-sep { width: 1px; height: 12px; background: var(--border-subtle); }
-  .gf-render { text-transform: uppercase; letter-spacing: 0.4px; font-size: 10px; }
 </style>

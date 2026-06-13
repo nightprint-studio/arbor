@@ -336,6 +336,39 @@ export function identifierUsages(tree: Tree, name: string): { from: number; to: 
   return out;
 }
 
+// ── Tracks referencing a symbol (editor ↔ arrangement link) ────────────────────
+
+/** Indices (declaration order) of the `track("name", …)` calls whose subtree
+ *  references the identifier `name` — i.e. the arrangement lanes a `let` / `fn`
+ *  phrase feeds. A track matches when an `identifier` equal to `name` (a plain
+ *  use or a `$splice` reference) appears anywhere inside its `track(...)` call.
+ *  The index is the same stable key the mixer / arrangement use. */
+export function tracksReferencing(tree: Tree, name: string): number[] {
+  const out: number[] = [];
+  let index = -1;
+  const subtreeUses = (node: Node): boolean => {
+    if (node.type === 'identifier' && node.text === name) return true;
+    for (let i = 0; i < node.childCount; i++) {
+      const c = node.child(i);
+      if (c && subtreeUses(c)) return true;
+    }
+    return false;
+  };
+  const visit = (node: Node) => {
+    if (node.type === 'call_expression') {
+      const fn = node.childForFieldName('function');
+      if (fn?.type === 'identifier' && fn.text === 'track') {
+        index++; // track calls don't nest — this matches `collectTracks` ordering
+        if (subtreeUses(node)) out.push(index);
+        return;
+      }
+    }
+    for (const child of node.namedChildren) if (child) visit(child);
+  };
+  visit(tree.rootNode);
+  return out;
+}
+
 // ── String-argument call context (scoped value completion) ─────────────────────
 
 /** When `offset` sits inside a string-literal argument, the callee name of the

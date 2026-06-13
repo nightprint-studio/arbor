@@ -22,6 +22,7 @@ pub mod config;
 mod control;
 mod eval;
 mod events;
+pub mod format;
 pub mod import;
 pub mod models;
 mod packs;

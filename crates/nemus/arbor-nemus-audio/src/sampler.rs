@@ -61,7 +61,7 @@ impl Sample {
 /// Owned off the RT thread. The renderer is handed cheap `Arc` clones of the
 /// resident [`Sample`]s (via [`get`](SampleBank::get)); it never touches this map
 /// from the callback.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SampleBank {
     resident: HashMap<String, Sample>,
 }

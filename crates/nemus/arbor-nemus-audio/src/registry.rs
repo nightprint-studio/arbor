@@ -242,7 +242,13 @@ pub struct InstrumentInfo {
 }
 
 /// The resolved sound registry: name → entry, plus resident SFZ + samples.
-#[derive(Debug)]
+///
+/// `Clone` is cheap: the heavy decoded audio lives behind `Arc<[f32]>` in the
+/// [`SampleBank`]'s [`Sample`](crate::sampler::Sample)s (cloning shares it), and
+/// the rest is small per-instrument metadata. A clone lets the audio session keep
+/// a decoded registry around and reopen the stream on a new output device without
+/// re-decoding every WAV.
+#[derive(Clone, Debug)]
 pub struct Registry {
     entries: HashMap<String, Entry>,
     instruments: Vec<SfzInstrument>,

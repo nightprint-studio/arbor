@@ -18,8 +18,10 @@
 
   import { createNemusExtensions, setActiveHaps, toActiveHapMarks, toCmDiagnostics, getNemusTree }
     from './nemus-cm';
+  import { nemusFormat } from '$lib/ipc/nemus';
   import type { NemusIntelSource } from './nemus-intel';
-  import { extractSymbols, identifierAt, identifierUsages } from './nemus-lang';
+  import { extractSymbols, identifierAt, identifierUsages, tracksReferencing, type NemusSymbol } from './nemus-lang';
+  import { symbolHighlightStore } from '../stores/symbol-highlight.svelte';
   import { buildControlEdits, type ControlEdit } from './nemus-edit';
   import type { UsageItem, UsageAnchor } from '../stores/usages.svelte';
   import { diagnosticsStore, activeHapsStore } from '../stores/engine.svelte';
@@ -60,6 +62,15 @@
   let suppressEmit = false;
   let lastEmitted: string | null = null;
 
+  // ── Symbol-under-caret → arrangement lane highlight ──────────────────────────
+  // The occurrence plugin reports the identifier at the caret; resolve which
+  // arrangement tracks reference it (from the live tree) and publish for the DAW.
+  function handleSymbol(name: string | null, v: EditorView) {
+    if (!name) { symbolHighlightStore.clear(); return; }
+    const tree = getNemusTree(v);
+    symbolHighlightStore.set(name, tree ? tracksReferencing(tree, name) : []);
+  }
+
   // ── Go-to-declaration (Ctrl/Cmd+Click) ──────────────────────────────────────
   function handleGoto(word: string, v: EditorView) {
     const tree = getNemusTree(v);
@@ -93,6 +104,7 @@
           readOnly,
           onGoto: handleGoto,
           onPreview: (name) => previewStore.showByName(name),
+          onSymbol: handleSymbol,
           intel,
         }),
         updateListener,
@@ -104,7 +116,11 @@
   }
 
   $effect(() => { if (hostEl && !view) mount(hostEl); });
-  onDestroy(() => { view?.destroy(); view = undefined; });
+  onDestroy(() => {
+    view?.destroy();
+    view = undefined;
+    symbolHighlightStore.clear(); // drop the arrangement lane highlight with the editor
+  });
 
   // ── value (controlled) → editor ─────────────────────────────────────────────
   $effect(() => {
@@ -185,6 +201,35 @@
     return view?.state.doc.toString() ?? value;
   }
 
+  /** Reformat the buffer through the canonical pretty-printer (backend `emit`).
+   *  The whole-document rewrite is one undoable transaction that flows out via
+   *  `oninput` (so the debounced re-eval runs); the caret is re-anchored to the
+   *  start of its former line (formatting reflows columns). Resolves `{ ok:false,
+   *  error }` when the source has a syntax error — the buffer is left untouched so
+   *  no content is lost (the lint markers already point at the offending span). */
+  export async function formatDocument(): Promise<{ ok: boolean; error?: string }> {
+    if (!view) return { ok: false };
+    const src = view.state.doc.toString();
+    let formatted: string;
+    try {
+      formatted = await nemusFormat(src);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    if (!view) return { ok: true };            // editor torn down mid-await
+    if (formatted === src) return { ok: true }; // already canonical
+    const lineNo = view.state.doc.lineAt(view.state.selection.main.head).number;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: formatted } });
+    const doc = view.state.doc;
+    const pos = doc.line(Math.min(lineNo, doc.lines)).from;
+    view.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    });
+    view.focus();
+    return { ok: true };
+  }
+
   /** Find every usage of the identifier under the caret (declaration + refs),
    *  resolved against the live tree. Always returns (when the editor exists) so
    *  the popover can give feedback: `name` is null when the caret isn't on a name
@@ -210,6 +255,16 @@
       return { offset: r.from, line: line.number, col: r.from - line.from + 1, preview: line.text.trim() };
     });
     return { name, items, anchor };
+  }
+
+  /** The active file's symbol table (tracks · fn · let · import) in source order,
+   *  for the file-structure picker (Ctrl+F12). Empty until the grammar/tree is
+   *  ready. Reuses the same `extractSymbols` walk the Outline panel feeds — no drift. */
+  export function getStructure(): NemusSymbol[] {
+    if (!view) return [];
+    const tree = getNemusTree(view);
+    if (!tree) return [];
+    return extractSymbols(tree).outline;
   }
 
   /** Commit mixer/inspector control values into the source as literals (one

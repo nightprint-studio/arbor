@@ -1556,6 +1556,7 @@ pub fn run() {
             nemus::project::nemus_open_project,
             nemus::project::nemus_create_project,
             nemus::reference::nemus_lang_reference,
+            nemus::format::nemus_format,
             // nemus import: WAV → MIDI (transcription) / MIDI → .nemus (deterministic)
             nemus::import::nemus_convert_wav_to_midi,
             nemus::import::nemus_import_audio_as_nemus,

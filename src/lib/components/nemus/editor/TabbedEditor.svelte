@@ -25,6 +25,9 @@
   import { nemusEngine } from '../stores/engine.svelte';
   import { nemusStore } from '../nemus-store.svelte';
   import { usagesStore, type UsageItem, type UsageAnchor } from '../stores/usages.svelte';
+  import { structureStore } from '../stores/structure.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import type { NemusSymbol } from './nemus-lang';
 
   type EditorController = {
     focus: () => void;
@@ -33,6 +36,8 @@
     scrollToOffset: (offset: number, select?: boolean) => void;
     gotoSymbol: (name: string) => boolean;
     findUsages: () => { name: string | null; items: UsageItem[]; anchor: UsageAnchor | null } | null;
+    getStructure: () => NemusSymbol[];
+    formatDocument: () => Promise<{ ok: boolean; error?: string }>;
     commitControls: (
       index: number,
       edits: import('./nemus-edit').ControlEdit[],
@@ -146,6 +151,25 @@
     if (seq > 0) findUsages();
   });
 
+  // ── Format relay (Command Palette → store seq; the Alt+Shift+L shortcut calls
+  // formatDocument() directly via the editor ref). ────────────────────────────
+  let lastFormatSeq = 0;
+  $effect(() => {
+    const seq = nemusStore.formatSeq;
+    if (seq === lastFormatSeq) return;
+    lastFormatSeq = seq;
+    if (seq > 0) void formatDocument();
+  });
+
+  // ── Structure popup relay (Ctrl+F12 / Command Palette) ───────────────────────
+  let lastStructureSeq = 0;
+  $effect(() => {
+    const seq = nemusStore.structureSeq;
+    if (seq === lastStructureSeq) return;
+    lastStructureSeq = seq;
+    if (seq > 0) openStructure();
+  });
+
   // ── Goto-line overlay (Ctrl+G) ───────────────────────────────────────────────
   let gotoOpen = $state(false);
   let gotoValue = $state('');
@@ -165,6 +189,22 @@
 
   /** Open the editor's in-buffer search panel (Ctrl+F when the pane is focused). */
   export function openSearch() { editorComp?.openSearch(); }
+
+  /** Reformat the active file to canonical style (Alt+Shift+L / Command Palette).
+   *  On a syntax error the buffer is left as-is and a toast points the user at the
+   *  lint markers, which already show where the problem is. */
+  export async function formatDocument() {
+    const r = await editorComp?.formatDocument();
+    if (r && !r.ok && r.error) {
+      toastStore.show('Format skipped — fix the syntax error first', 'warning');
+    }
+  }
+
+  /** Open the file-structure picker (Ctrl+F12 / Command Palette) — a filterable
+   *  list of every track / fn / let / import to jump to. */
+  export function openStructure() {
+    structureStore.openWith(editorComp?.getStructure() ?? []);
+  }
 
   /** Find usages of the identifier under the caret → open the floating popover
    *  anchored at the caret (Alt+F7 / Command Palette). No-op when the caret isn't

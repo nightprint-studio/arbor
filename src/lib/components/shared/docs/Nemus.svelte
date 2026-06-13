@@ -176,6 +176,8 @@ arrange(
     <tr><td><kbd>Ctrl</kbd>+<kbd>G</kbd></td><td>Go to line (editor)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Toggle comment / delete line (editor)</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>F7</kbd></td><td>Find usages of the symbol at the caret (editor)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>F12</kbd></td><td>File structure — jump to any track / fn / let / import (editor)</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></td><td>Format document — reformat to canonical style (editor)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration · preview an <code>inst("…")</code> / <code>s("…")</code> name (editor) · reveal hap source (arrangement)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (editor focused) · else search the Console / Problems</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>

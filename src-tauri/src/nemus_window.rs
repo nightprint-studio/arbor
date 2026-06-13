@@ -65,8 +65,12 @@ fn create_or_focus(app: &AppHandle) {
 fn build_nemus_window(app: &AppHandle) {
     let res = WebviewWindowBuilder::new(app, NEMUS_WINDOW_LABEL, WebviewUrl::default())
         .title("nemus — Arbor")
+        // `inner_size` is the *restore* size (what you get after un-maximising);
+        // the window opens maximised so a DAW lands full-screen, not at the small
+        // explorer footprint.
         .inner_size(1320.0, 860.0)
         .min_inner_size(900.0, 600.0)
+        .maximized(true)
         .decorations(false)
         .shadow(true)
         .center()

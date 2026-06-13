@@ -34,6 +34,7 @@
   import { nemusStore } from '../nemus-store.svelte';
   import { mixerStore } from '../stores/mixer.svelte';
   import { inspectStore } from '../stores/inspect.svelte';
+  import { symbolHighlightStore } from '../stores/symbol-highlight.svelte';
   import { laneColor, sectionColor } from '../palette';
   import { makeByteToU16 } from '../editor/nemus-lang';
   import type { NemusQueryHap } from '$lib/ipc/nemus';
@@ -294,7 +295,7 @@
           {@const muted = nemusStore.isMuted(laneKey(lane.track))}
           {@const soloed = nemusStore.isSoloed(laneKey(lane.track))}
           {@const dimmed = muted || (soloActive && !soloed)}
-          <div class="arr-row" class:selected={selectedTrack === lane.track} style="--c: {color}">
+          <div class="arr-row" class:selected={selectedTrack === lane.track} class:sym-hl={symbolHighlightStore.has(lane.track)} style="--c: {color}">
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <div class="arr-head" class:collapsed onclick={() => selectTrack(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)} use:tooltip={laneInfo(lane)}>
               <span class="arr-colorbar"></span>
@@ -465,6 +466,12 @@
   .arr-row { display: flex; height: 72px; border-bottom: 1px solid var(--border-subtle); }
   .arr-row.selected .arr-head { background: color-mix(in srgb, var(--c) 16%, var(--bg-base)); }
   .arr-row.selected .arr-lane { background: color-mix(in srgb, var(--c) 5%, transparent); }
+
+  /* Symbol highlight: tracks whose pattern references the identifier under the
+     editor caret. Accent-tinted (distinct from the per-track selection colour) so
+     it reads as "these lanes use this phrase". */
+  .arr-row.sym-hl .arr-head { box-shadow: inset 3px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 13%, var(--bg-base)); }
+  .arr-row.sym-hl .arr-lane { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 
   .arr-head {
     width: var(--head-w); flex-shrink: 0;

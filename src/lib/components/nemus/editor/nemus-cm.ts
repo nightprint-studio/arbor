@@ -32,7 +32,8 @@ import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/sea
 import { laneColor } from '../palette';
 import type { NemusDiagnostic } from '$lib/ipc/nemus';
 import {
-  classifyToken, makeByteToU16, identifierAt, instrumentNameAt, createNemusParser,
+  classifyToken, makeByteToU16, identifierAt, identifierUsages, instrumentNameAt,
+  extractSymbols, createNemusParser,
   type NemusTokenClass, type Tree, type Node, type Parser,
 } from './nemus-lang';
 import { nemusLanguageIntel, type NemusIntelSource } from './nemus-intel';
@@ -196,6 +197,73 @@ export function toActiveHapMarks(
   return out;
 }
 
+// ── Occurrence highlight (identifier under caret → all its uses) ───────────────
+//
+// IntelliJ-style "highlight usages of the symbol at the caret": resting the caret
+// on a `let`/`fn`/`import`/`$splice` name softly boxes every occurrence in the
+// buffer. Pure: a self-contained ViewPlugin that reads the live tree (so it never
+// dispatches mid-update) and *provides* its decorations. It also reports the
+// current symbol via `onSymbol` so the host can light up the arrangement lanes
+// that reference it — the editor↔DAW link. Only highlights when ≥2 occurrences
+// exist (a lone declaration needn't glow).
+
+const OCCUR_MARK = Decoration.mark({ class: 'cm-grv-occur' });
+
+export interface OccurrenceOptions {
+  /** Called when the symbol under the caret changes (null when off a name). */
+  onSymbol?: (name: string | null, view: EditorView) => void;
+}
+
+function occurrenceHighlight(opts: OccurrenceOptions): Extension {
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet = Decoration.none;
+      lastName: string | null = null;
+
+      constructor(view: EditorView) { this.recompute(view); }
+
+      update(u: ViewUpdate) {
+        const ready = u.transactions.some((tr) =>
+          tr.effects.some((e) => e.is(nemusParserReady)));
+        if (u.docChanged || u.selectionSet || ready) this.recompute(u.view);
+      }
+
+      private recompute(view: EditorView) {
+        const tree = getNemusTree(view);
+        const head = view.state.selection.main.head;
+        // Boundary-tolerant (caret at a word's right edge resolves to the word).
+        let name = tree
+          ? (identifierAt(tree, head) ?? (head > 0 ? identifierAt(tree, head - 1) : null))
+          : null;
+
+        // Only a user-declared symbol (let / fn / import) is worth highlighting —
+        // gating out builtins (`fast`, `par`, …) keeps the editor + the arrangement
+        // link from lighting up on every combinator.
+        if (tree && name) {
+          const syms = extractSymbols(tree);
+          if (!syms.defs.has(name) && !syms.imports.has(name)) name = null;
+        }
+
+        let deco: DecorationSet = Decoration.none;
+        if (tree && name) {
+          const uses = identifierUsages(tree, name);
+          if (uses.length >= 2) {
+            const builder = new RangeSetBuilder<Decoration>();
+            for (const r of uses) if (r.to > r.from) builder.add(r.from, r.to, OCCUR_MARK);
+            deco = builder.finish();
+          }
+        }
+        this.decorations = deco;
+        if (name !== this.lastName) {
+          this.lastName = name;
+          opts.onSymbol?.(name, view);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+}
+
 // ── Diagnostics (byte spans → CM lint) ─────────────────────────────────────────
 
 /** Map the diagnostics store (UTF-8 byte offsets) onto CodeMirror `Diagnostic`s
@@ -246,8 +314,19 @@ export const nemusTheme = EditorView.theme(
       border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
       margin: '0 2px', padding: '0 4px',
     },
-    '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--bg-hover) 45%, transparent)' },
-    '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text-primary)' },
+    // Current line: a touch warmer than plain hover and tinted with the accent so
+    // the caret's row is easy to re-find at a glance (the bare caret alone was too
+    // easy to lose). Kept subtle — it must not fight the syntax colours.
+    '.cm-activeLine': {
+      backgroundColor: 'color-mix(in srgb, var(--accent) 9%, var(--bg-hover) 55%)',
+    },
+    // Caret: a 2px bright accent bar (the default 1px text-primary sliver was hard
+    // to spot against the code). Both the steady and the drop cursor track it.
+    '.cm-cursor, .cm-dropCursor': {
+      borderLeftColor: 'var(--accent)',
+      borderLeftWidth: '2px',
+    },
+    '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--accent)' },
     '.cm-selectionBackground, .cm-content ::selection': {
       backgroundColor: 'var(--accent-subtle) !important',
     },
@@ -367,6 +446,14 @@ export const nemusTheme = EditorView.theme(
       whiteSpace: 'pre-wrap',
     },
 
+    // Occurrence highlight — the symbol under the caret + all its uses. A soft
+    // accent box, quieter than the selection-match colour so it reads as ambient.
+    '.cm-grv-occur': {
+      backgroundColor: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+      borderRadius: '2px',
+      boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent)',
+    },
+
     // Active-hap underline — tinted with the per-track colour via --grv-hap.
     '.cm-grv-hap': {
       backgroundColor: 'color-mix(in srgb, var(--grv-hap) 22%, transparent)',
@@ -389,6 +476,9 @@ export interface NemusExtensionsOptions {
   /** The DSL catalogue source for autocomplete + hover docs. When omitted, the
    *  editor still works (highlight, lint, go-to-decl) without language hints. */
   intel?: NemusIntelSource;
+  /** Called when the identifier under the caret changes (null when off a name) —
+   *  drives the editor↔arrangement symbol highlight. */
+  onSymbol?: (name: string | null, view: EditorView) => void;
 }
 
 /** The search keymap minus its open binding: the NemusShell owns `Ctrl+F` so it
@@ -417,6 +507,9 @@ export function createNemusExtensions(opts: NemusExtensionsOptions = {}): Extens
     highlightSelectionMatches(),
     search({ top: true }),
     nemusHighlight,
+    // After nemusHighlight so it reads the freshly-updated tree (plugin update
+    // order follows registration order).
+    occurrenceHighlight({ onSymbol: opts.onSymbol }),
     activeHapsField,
     lintGutter(),
     // Editing ergonomics (comments, autoclose, delete-line, soft wrap, folding).

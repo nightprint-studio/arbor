@@ -97,6 +97,14 @@ function createNemusStore() {
   // shortcut / palette ask it to collect usages via this bumped seq. ────────────
   let findUsagesSeq = $state(0);
 
+  // ── Format-document relay (one-shot) — the editor owns the live buffer, so the
+  // shortcut / palette ask it to reformat via this bumped seq. ──────────────────
+  let formatSeq = $state(0);
+
+  // ── Structure-popup relay (one-shot, Ctrl+F12) — the editor owns the tree, so
+  // the shortcut / palette ask it to open the file-structure picker. ────────────
+  let structureSeq = $state(0);
+
   // ── Live editor caret (footer Ln/Col) ────────────────────────────────────────
   let caretLine = $state(1);
   let caretCol  = $state(1);
@@ -214,6 +222,20 @@ function createNemusStore() {
     requestFindUsages() {
       if (collapseTabpane) collapseTabpane = false; // editor must be mounted to read the tree
       findUsagesSeq++;
+    },
+
+    // ── format document (one-shot; TabbedEditor consumes) ──
+    get formatSeq() { return formatSeq; },
+    requestFormat() {
+      if (collapseTabpane) collapseTabpane = false; // editor must be mounted to reformat
+      formatSeq++;
+    },
+
+    // ── structure popup / find method (one-shot; TabbedEditor consumes) ──
+    get structureSeq() { return structureSeq; },
+    requestStructure() {
+      if (collapseTabpane) collapseTabpane = false; // editor must be mounted to read the tree
+      structureSeq++;
     },
 
     // ── live caret (footer) ──

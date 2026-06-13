@@ -110,21 +110,6 @@ pub fn run(
     }
 }
 
-/// Build a cpal stream whose registry is the built-in synths plus exactly the
-/// `needed` sample instruments (decoded from their installed packs — synth names
-/// in the set are ignored by the pack loader and resolve from the built-ins).
-///
-/// Built here on the owning thread because the `Renderer` it backs then lives
-/// inside the RT callback, with no in-place mutation afterwards — so growing the
-/// registry means a fresh stream (see [`Session::set_tracks`]).
-fn open_stream(
-    cfg: &NemusConfig,
-    needed: &HashSet<String>,
-    device: Option<&str>,
-) -> Result<(StreamSink, OutputStream), AudioError> {
-    open_output_stream(device, Vec::new(), build_registry(cfg, needed))
-}
-
 /// Build a sound registry: the built-in synths plus exactly the `needed` sample
 /// instruments, **decoded** from their installed packs (the slow part — seconds
 /// for a big pack). Called off the RT thread (the command's blocking worker) so
@@ -165,6 +150,11 @@ struct Session {
     /// (`Arc<Mutex>`): the command reads it to decide whether an eval needs a new
     /// (off-thread) decode; the audio thread writes it on a successful swap.
     loaded: Arc<Mutex<HashSet<String>>>,
+    /// The live decoded registry (built-in synths + every sample voice decoded so
+    /// far) — shares the heavy `Arc<[f32]>` sample data with the stream's copy.
+    /// Kept resident so a **device switch** reopens the stream on the same voices
+    /// without re-decoding any WAV (the slow part). Replaced on each registry swap.
+    registry: Registry,
     /// The chosen cpal output device name (`None` = host default). Carried so a
     /// registry rebuild reopens on the SAME device, and a device switch can reopen
     /// with the current registry.
@@ -187,12 +177,17 @@ impl Session {
         loaded: Arc<Mutex<HashSet<String>>>,
     ) -> Result<Session, AudioError> {
         let device = cfg.output_device.clone();
-        let (sink, stream) = open_stream(cfg, &HashSet::new(), device.as_deref())?;
+        // Build the synths-only registry once and keep it; the stream takes a clone
+        // (sharing the Arc sample data), so a later device switch can reopen without
+        // a rebuild.
+        let registry = build_registry(cfg, &HashSet::new());
+        let (sink, stream) = open_output_stream(device.as_deref(), Vec::new(), registry.clone())?;
         Ok(Session {
             transport: Transport::new(sink, cfg.default_cps),
             _stream: stream,
             current: Tracks { tracks: Vec::new() },
             loaded,
+            registry,
             device,
             tempo: TempoMap::default(),
             audition_id: 0,
@@ -213,7 +208,7 @@ impl Session {
                 self.transport.seek(Time::int(cycle.round() as i64));
             }
             NemusControl::SetCps { cps } => self.transport.set_cps(cps),
-            NemusControl::SetOutputDevice { device } => self.set_output_device(app, cfg, device),
+            NemusControl::SetOutputDevice { device } => self.set_output_device(app, device),
             NemusControl::Audition { tracks, cps, prepared } => {
                 self.audition(app, tracks, cps, prepared)
             }
@@ -295,11 +290,14 @@ impl Session {
     fn swap_registry(&mut self, app: &AppHandle, prep: Prepared, cps: f64) -> Option<(bool, f64)> {
         let was_playing = self.transport.is_playing();
         let pos = self.transport.position_cycle();
-        match open_output_stream(self.device.as_deref(), Vec::new(), prep.registry) {
+        let registry = prep.registry;
+        match open_output_stream(self.device.as_deref(), Vec::new(), registry.clone()) {
             Ok((sink, stream)) => {
                 // Commit the wider set only on success; replace transport + stream
-                // (dropping the old stream stops its audio).
+                // (dropping the old stream stops its audio). Keep the decoded registry
+                // resident so a later device switch reuses it (no re-decode).
                 *self.loaded.lock().unwrap_or_else(|e| e.into_inner()) = prep.names;
+                self.registry = registry;
                 self.transport = Transport::new(sink, cps);
                 self._stream = stream;
                 Some((was_playing, pos))
@@ -355,24 +353,22 @@ impl Session {
         }
     }
 
-    /// Switch the output device live: reopen the stream on the new device with the
-    /// current registry (the `loaded` set), preserving the playhead + play state +
-    /// the staged arrangement. A no-op when the device is unchanged; on failure it
-    /// keeps the current stream and surfaces the error (the old device stays).
-    fn set_output_device(&mut self, app: &AppHandle, cfg: &NemusConfig, device: Option<String>) {
+    /// Switch the output device live: reopen the stream on the new device reusing
+    /// the **already-decoded** registry, preserving the playhead + play state + the
+    /// staged arrangement. A no-op when the device is unchanged; on failure it keeps
+    /// the current stream and surfaces the error (the old device stays).
+    fn set_output_device(&mut self, app: &AppHandle, device: Option<String>) {
         if device == self.device {
             return;
         }
         let was_playing = self.transport.is_playing();
         let pos = self.transport.position_cycle();
         let cps = self.transport.epoch().cps;
-        // A device switch must rebuild the registry for the new stream; the voices
-        // are the same, so we re-decode the current `loaded` set. This is the one
-        // place a decode still runs on this thread — but it's rare and explicitly
-        // user-initiated (the device is changing, audio necessarily blips), so the
-        // brief stall is acceptable.
-        let needed = self.loaded.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        match open_stream(cfg, &needed, device.as_deref()) {
+        // Reuse the resident registry (cloning shares the Arc sample data) — the
+        // voices are unchanged, only the device differs, so NO WAV is re-decoded.
+        // The stream still has to reopen on the new device (audio briefly blips),
+        // but the previously-slow re-decode of every loaded sample is gone.
+        match open_output_stream(device.as_deref(), Vec::new(), self.registry.clone()) {
             Ok((sink, stream)) => {
                 self.device = device;
                 self.transport = Transport::new(sink, cps);

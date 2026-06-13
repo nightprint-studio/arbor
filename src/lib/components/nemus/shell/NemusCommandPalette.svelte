@@ -15,6 +15,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
+    AlignLeft,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -37,6 +38,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
+    AlignLeft,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -87,6 +89,9 @@
     { id: 'zen',         label: 'Toggle Zen mode',   group: 'View', icon: 'Minimize2', keys: 'Ctrl+Shift+Z', run: () => nemusStore.toggleZen() },
     { id: 'find',        label: 'Search Console / Problems', group: 'View', icon: 'Search', keys: 'Ctrl+F', run: () => nemusStore.requestFind() },
     { id: 'find_usages', label: 'Find usages of symbol at caret', group: 'View', icon: 'SearchCode', keys: 'Alt+F7', run: () => nemusStore.requestFindUsages() },
+    { id: 'structure',   label: 'File structure (find method / variable)', group: 'View', icon: 'ListTree', keys: 'Ctrl+F12', run: () => nemusStore.requestStructure() },
+    // Edit
+    { id: 'format', label: 'Format document', group: 'Edit', icon: 'AlignLeft', keys: 'Alt+Shift+L', run: () => nemusStore.requestFormat() },
     // Window
     { id: 'settings',  label: 'Settings…',          group: 'Window', icon: 'Settings', keys: 'Ctrl+,', run: () => nemusStore.openSettings() },
     { id: 'shortcuts', label: 'Keyboard Shortcuts', group: 'Window', icon: 'Keyboard', keys: 'F1',     run: () => nemusStore.openShortcuts() },

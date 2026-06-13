@@ -562,6 +562,14 @@ export function nemusLangReference(): Promise<NemusDslEntry[]> {
   return invoke('nemus_lang_reference');
 }
 
+/** Reformat `.nemus` source to canonical style (the AST pretty-printer). Rejects
+ *  with the language error when the source has a syntax error — the caller then
+ *  leaves the buffer untouched. The round-trip is semantic, not byte-exact:
+ *  comments and incidental whitespace are not preserved. */
+export function nemusFormat(source: string): Promise<string> {
+  return invoke('nemus_format', { source });
+}
+
 // ── Audio / MIDI import (WAV → MIDI, MIDI → .nemus) ───────────────────────────
 
 /** Options for the import commands (all optional; the backend fills defaults). */

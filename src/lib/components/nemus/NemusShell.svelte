@@ -35,6 +35,7 @@
   import ArrangementView from './viz/ArrangementView.svelte';
   import TabbedEditor from './editor/TabbedEditor.svelte';
   import UsagesPopover from './editor/UsagesPopover.svelte';
+  import StructurePopover from './editor/StructurePopover.svelte';
 
   import { onMount, onDestroy, type Snippet } from 'svelte';
   import type { UnlistenFn } from '@tauri-apps/api/event';
@@ -134,7 +135,13 @@
     }
   });
 
-  let editor = $state<{ openGoto: () => void; newFile: () => void; openSearch: () => void } | null>(null);
+  let editor = $state<{
+    openGoto: () => void;
+    newFile: () => void;
+    openSearch: () => void;
+    formatDocument: () => void;
+    openStructure: () => void;
+  } | null>(null);
   let editorEl = $state<HTMLElement | null>(null);
   let editorScoped = $state(true);
 
@@ -165,6 +172,8 @@
       else if (b.id === 'zen') nemusStore.toggleZen();
       else if (b.id === 'find') { if (editorScoped) editor?.openSearch(); else nemusStore.requestFind(); }
       else if (b.id === 'find_usages') nemusStore.requestFindUsages();
+      else if (b.id === 'format_document') editor?.formatDocument();
+      else if (b.id === 'find_method') editor?.openStructure();
       else if (b.id === 'new_project') projectActions.newProject();
       else if (b.id === 'open_project') projectActions.openProject();
       else if (b.id === 'open_file') projectActions.openFile();
@@ -321,6 +330,9 @@
 
 <!-- Floating "find usages" popover (Alt+F7 / Command Palette) — one mount. -->
 <UsagesPopover />
+
+<!-- Floating "file structure" popover (Ctrl+F12 / Command Palette) — one mount. -->
+<StructurePopover />
 
 {#if nemusStore.settingsOpen}<NemusSettingsModal onClose={() => nemusStore.closeSettings()} />{/if}
 {#if nemusStore.shortcutsOpen}<NemusShortcutsModal onClose={() => nemusStore.closeShortcuts()} />{/if}
