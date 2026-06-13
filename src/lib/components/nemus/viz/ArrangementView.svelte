@@ -92,11 +92,19 @@
   const soloActive = $derived(lanes.some((l) => nemusStore.isSoloed(laneKey(l.track))));
 
   // ── Transport-driven playhead + seek cursor ──────────────────────────────────
+  // The backend transport clock free-runs (monotonic), so its raw cycle marches
+  // forever — past the song it would leave the drawn timeline into empty bars.
+  // The arrangement loops by periodicity (audio restarts every `loopCycles`), so
+  // we WRAP the displayed playhead at that period: it returns to the start when
+  // the song repeats, matching what's actually sounding. Falls back to the raw
+  // cycle when no loop is known (nothing evaluated yet).
   const playCycle = $derived(transportStore.cycle);
   const playing   = $derived(transportStore.playing);
+  const loopCycles = $derived(arrangementStore.loopCycles);
+  const displayCycle = $derived(loopCycles > 0 ? playCycle % loopCycles : playCycle);
   let   cursorCycle = $state(0); // seek anchor (last ruler click / arrow seek)
 
-  const playX   = $derived(headW + playCycle * PX);
+  const playX   = $derived(headW + displayCycle * PX);
   const cursorX = $derived(headW + cursorCycle * PX);
   const endX    = $derived(headW + arrangementStore.contentEnd * PX);
 

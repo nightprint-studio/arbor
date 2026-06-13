@@ -1543,11 +1543,14 @@ pub fn run() {
             nemus::nemus_pack_delete,
             nemus::get_nemus_config,
             nemus::set_nemus_config,
+            nemus::nemus_audio_devices,
+            nemus::nemus_set_output_device,
             // nemus Fase 4: arrangement query / sound bank / live mixer /
             // window state / project model (all additive)
             nemus::query::nemus_query,
             nemus::sounds::nemus_sounds,
             nemus::nemus_set_track,
+            nemus::nemus_audition_expr,
             nemus::state::get_nemus_state,
             nemus::state::set_nemus_state,
             nemus::project::nemus_open_project,

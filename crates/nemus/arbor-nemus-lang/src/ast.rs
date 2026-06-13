@@ -242,8 +242,9 @@ pub enum Postfix {
     Slow(MiniArg),
     /// `!n` — replicate as n separate slots.
     Replicate(u32),
-    /// `@n` — weight (give the term more duration than its siblings).
-    Weight(u32),
+    /// `@n` — weight (give the term more duration than its siblings). Fractional
+    /// allowed (`bd@1.5 sd`), so it carries an `f64`.
+    Weight(f64),
     /// `(n,k)` / `(n,k,rot)` — Euclidean distribution; each count may be
     /// patternised (`bd(<3 5>,8)`).
     Euclid {

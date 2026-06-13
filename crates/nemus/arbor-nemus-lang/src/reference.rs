@@ -762,7 +762,7 @@ fn mini_operators() -> Vec<DslEntry> {
         op("*n", "x*n", "Fast: repeat the token n times inside its slot.", "s(hh*4)"),
         op("/n", "x/n", "Slow: play the token once every n cycles.", "s(bd/2)"),
         op("!n", "x!n", "Replicate as n separate slots (≠ `*n`).", "s(bd!3)"),
-        op("@n", "x@n", "Weight: give the token n× the duration of its siblings.", "s(bd@3 sd)"),
+        op("@n", "x@n", "Weight: give the token n× the duration of its siblings (n may be fractional, e.g. bd@1.5).", "s(bd@3 sd)"),
         op("(n,k)", "x(n,k) / x(n,k,rot)", "Euclidean: distribute n hits over k steps (optional rotation).", "s(bd(3,8))"),
         op(":n", "x:n", "Sample variant: pick the nth sample (s islands only).", "s(bd:3)"),
         op("'chord", "note'chord", "Expand a note into a chord (n islands only).", "n(c4'min7)"),

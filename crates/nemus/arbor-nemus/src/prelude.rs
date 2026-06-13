@@ -43,11 +43,12 @@ pub use arbor_nemus_lang::prelude::{
 // offline/test recorder. `SourceKind` listed above (identical); `Result` omitted;
 // `AudioError` kept by name.
 pub use arbor_nemus_audio::prelude::{
-    list_manifest_instruments, open_output_stream, AudioCommand, AudioError, AudioSink,
-    CompSettings, DecodedAudio, DelayConfig, EqBand, EqBandKind, Frame, InstrumentInfo,
-    InstrumentKind, MeterSnapshot, MeterTap, OutputStream, Registry, Renderer, ReverbIr, StreamSink,
-    SynthPreset, TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource, Waveform, RecordingSink,
-    DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE, DEFAULT_VOICE_CAPACITY, MAX_METER_TRACKS,
+    list_manifest_instruments, list_output_devices, open_output_stream, AudioCommand, AudioDevice,
+    AudioError, AudioSink, CompSettings, DecodedAudio, DelayConfig, EqBand, EqBandKind, Frame,
+    InstrumentInfo, InstrumentKind, MeterSnapshot, MeterTap, OutputStream, Registry, Renderer,
+    ReverbIr, StreamSink, SynthPreset, TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource,
+    Waveform, RecordingSink, DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE, DEFAULT_VOICE_CAPACITY,
+    MAX_METER_TRACKS,
 };
 
 // ── arbor-nemus-engine — the timing runtime ──────────────────────────────────

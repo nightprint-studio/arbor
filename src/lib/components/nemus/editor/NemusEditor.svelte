@@ -19,11 +19,13 @@
   import { createNemusExtensions, setActiveHaps, toActiveHapMarks, toCmDiagnostics, getNemusTree }
     from './nemus-cm';
   import type { NemusIntelSource } from './nemus-intel';
-  import { extractSymbols } from './nemus-lang';
+  import { extractSymbols, identifierAt, identifierUsages } from './nemus-lang';
   import { buildControlEdits, type ControlEdit } from './nemus-edit';
+  import type { UsageItem, UsageAnchor } from '../stores/usages.svelte';
   import { diagnosticsStore, activeHapsStore } from '../stores/engine.svelte';
   import { referenceStore } from '../stores/reference.svelte';
   import { soundsStore } from '../stores/sounds.svelte';
+  import { previewStore } from '../stores/preview.svelte';
 
   // Autocomplete + hover read the DSL catalogue live from the store (snapshotted
   // at call time — the store loads asynchronously, so completions light up once
@@ -87,7 +89,12 @@
     const state = EditorState.create({
       doc: value,
       extensions: [
-        createNemusExtensions({ readOnly, onGoto: handleGoto, intel }),
+        createNemusExtensions({
+          readOnly,
+          onGoto: handleGoto,
+          onPreview: (name) => previewStore.showByName(name),
+          intel,
+        }),
         updateListener,
       ],
     });
@@ -176,6 +183,33 @@
 
   export function getValue(): string {
     return view?.state.doc.toString() ?? value;
+  }
+
+  /** Find every usage of the identifier under the caret (declaration + refs),
+   *  resolved against the live tree. Always returns (when the editor exists) so
+   *  the popover can give feedback: `name` is null when the caret isn't on a name
+   *  (the popover then shows a hint). Returns null only when there's no view at
+   *  all. `anchor` is the caret's viewport coords (to position the popover). */
+  export function findUsages(): { name: string | null; items: UsageItem[]; anchor: UsageAnchor | null } | null {
+    if (!view) return null;
+    const head = view.state.selection.main.head;
+    const c = view.coordsAtPos(head);
+    const anchor: UsageAnchor | null = c ? { x: c.left, y: c.bottom } : null;
+    const tree = getNemusTree(view);
+    // Boundary-tolerant: the caret often sits at the RIGHT edge of a word (after a
+    // double-click selection or typing the name), where `descendantForIndex(head)`
+    // returns the next token. Fall back to the char just before the caret so
+    // `bass|` resolves to `bass`.
+    const name = tree
+      ? (identifierAt(tree, head) ?? (head > 0 ? identifierAt(tree, head - 1) : null))
+      : null;
+    if (!tree || !name) return { name: null, items: [], anchor };
+    const doc = view.state.doc;
+    const items: UsageItem[] = identifierUsages(tree, name).map((r) => {
+      const line = doc.lineAt(r.from);
+      return { offset: r.from, line: line.number, col: r.from - line.from + 1, preview: line.text.trim() };
+    });
+    return { name, items, anchor };
   }
 
   /** Commit mixer/inspector control values into the source as literals (one

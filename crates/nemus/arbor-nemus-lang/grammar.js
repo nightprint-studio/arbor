@@ -234,7 +234,8 @@ module.exports = grammar({
     fast: $ => seq('*', field('n', $._factor)),
     slow: $ => seq('/', field('n', $._factor)),
     replicate: $ => seq('!', field('n', $.integer)),
-    weight: $ => seq('@', field('n', $.integer)),
+    // `@n` weight — fractional allowed (`bd@1.5 sd`), so it accepts a float too.
+    weight: $ => seq('@', field('n', $.number)),
     // Each euclid argument may itself be patternised (`bd(<3 5>,8)`).
     euclid: $ => seq(
       '(',

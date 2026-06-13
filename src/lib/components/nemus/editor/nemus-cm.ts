@@ -32,7 +32,7 @@ import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/sea
 import { laneColor } from '../palette';
 import type { NemusDiagnostic } from '$lib/ipc/nemus';
 import {
-  classifyToken, makeByteToU16, identifierAt, createNemusParser,
+  classifyToken, makeByteToU16, identifierAt, instrumentNameAt, createNemusParser,
   type NemusTokenClass, type Tree, type Node, type Parser,
 } from './nemus-lang';
 import { nemusLanguageIntel, type NemusIntelSource } from './nemus-intel';
@@ -383,6 +383,9 @@ export interface NemusExtensionsOptions {
   readOnly?: boolean;
   /** Ctrl/Cmd+Click on an identifier — host resolves + jumps (go-to-decl). */
   onGoto?: (word: string, view: EditorView) => void;
+  /** Ctrl/Cmd+Click on an instrument name (`inst("…")` / `s("…")`) — host opens
+   *  the preview/audition modal. Takes precedence over `onGoto` at that spot. */
+  onPreview?: (name: string) => void;
   /** The DSL catalogue source for autocomplete + hover docs. When omitted, the
    *  editor still works (highlight, lint, go-to-decl) without language hints. */
   intel?: NemusIntelSource;
@@ -432,8 +435,8 @@ export function createNemusExtensions(opts: NemusExtensionsOptions = {}): Extens
     keymap.of([...defaultKeymap, ...historyKeymap, ...lintKeymap, ...nemusSearchKeymap, indentWithTab]),
     EditorState.readOnly.of(!!opts.readOnly),
   );
-  if (opts.onGoto) {
-    const onGoto = opts.onGoto;
+  if (opts.onGoto || opts.onPreview) {
+    const { onGoto, onPreview } = opts;
     exts.push(EditorView.domEventHandlers({
       mousedown(event, view) {
         if (!(event.ctrlKey || event.metaKey)) return false;
@@ -441,11 +444,25 @@ export function createNemusExtensions(opts: NemusExtensionsOptions = {}): Extens
         if (pos == null) return false;
         const tree = getNemusTree(view);
         if (!tree) return false;
-        const word = identifierAt(tree, pos);
-        if (!word) return false;
-        event.preventDefault();
-        onGoto(word, view);
-        return true;
+        // An instrument name (`inst("…")` / `s("…")`) opens the preview; otherwise
+        // an identifier resolves to its declaration.
+        if (onPreview) {
+          const sound = instrumentNameAt(tree, pos);
+          if (sound) {
+            event.preventDefault();
+            onPreview(sound);
+            return true;
+          }
+        }
+        if (onGoto) {
+          const word = identifierAt(tree, pos);
+          if (word) {
+            event.preventDefault();
+            onGoto(word, view);
+            return true;
+          }
+        }
+        return false;
       },
     }));
   }

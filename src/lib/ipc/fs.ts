@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export interface FsEntry {
   name:     string;
@@ -110,6 +111,10 @@ export const fsIcon = (query: string, size: number) => invoke<string>('fs_icon',
 export const fsWatchStart  = (path: string) => invoke<void>('fs_watch_start', { path });
 /** Stop the active filesystem watch. */
 export const fsWatchStop   = () => invoke<void>('fs_watch_stop');
+/** Subscribe to this window's `arbor://fs-changed` signal (fired when the watched
+ *  directory changes; carries no payload — re-read what you care about). */
+export const onFsChanged   = (cb: () => void): Promise<UnlistenFn> =>
+  listen('arbor://fs-changed', () => cb());
 
 // ── File explorer: git awareness (TortoiseGit-style overlays + actions) ─────
 /** Overlay badge for one explorer entry (or a rolled-up folder). */

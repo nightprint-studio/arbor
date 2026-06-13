@@ -20,7 +20,9 @@ pub use crate::decode::DecodedAudio;
 
 // ── DSP core + real-time output ──────────────────────────────────────────────
 pub use crate::renderer::{Renderer, DEFAULT_VOICE_CAPACITY};
-pub use crate::stream::{open_output_stream, OutputStream, StreamSink};
+pub use crate::stream::{
+    list_output_devices, open_output_stream, AudioDevice, OutputStream, StreamSink,
+};
 
 // ── Out-of-band telemetry tap (level meters, voices, DSP load) ────────────────
 // Written by the real-time callback, read by the shell; additive, not part of

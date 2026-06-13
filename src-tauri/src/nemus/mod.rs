@@ -34,8 +34,9 @@ pub mod sounds;
 pub mod state;
 mod validate;
 
+use std::collections::HashSet;
 use std::sync::mpsc::{self, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use tauri::{AppHandle, Manager, State};
@@ -70,6 +71,12 @@ pub struct NemusState {
 struct Session {
     tx: Sender<NemusControl>,
     handle: JoinHandle<()>,
+    /// Instruments decoded into the live stream's registry (built-in synths +
+    /// sample voices). Shared with the audio thread: the command reads it to tell
+    /// whether an eval pulls in a *new* voice (which it then decodes off-thread,
+    /// handing the result over in `SetTracks`); the audio thread updates it after
+    /// a successful stream swap.
+    loaded: Arc<Mutex<HashSet<String>>>,
 }
 
 /// The last successfully evaluated arrangement.
@@ -92,13 +99,19 @@ impl NemusState {
         let (tx, rx) = mpsc::channel();
         let app2 = app.clone();
         let cfg2 = cfg.clone();
+        // Seed the shared `loaded` set with the always-present built-in synth names
+        // (so a synth-only patch never triggers a pointless decode); pack voices
+        // join it as they're first referenced.
+        let loaded = Arc::new(Mutex::new(audio_thread::builtin_synth_names()));
+        let loaded2 = Arc::clone(&loaded);
         let handle = std::thread::Builder::new()
             .name("nemus-audio".to_string())
-            .spawn(move || audio_thread::run(app2, rx, cfg2))
+            .spawn(move || audio_thread::run(app2, rx, cfg2, loaded2))
             .expect("spawn nemus-audio thread");
         *guard = Some(Session {
             tx: tx.clone(),
             handle,
+            loaded,
         });
         tx
     }
@@ -109,6 +122,111 @@ impl NemusState {
         if let Some(s) = guard.as_ref() {
             let _ = s.tx.send(msg);
         }
+    }
+
+    /// Stage an arrangement on the live session, decoding any newly-referenced
+    /// sample instruments **off the RT thread** first. Reads the session's shared
+    /// `loaded` set: if the arrangement only uses already-loaded voices it just
+    /// restages the tracks (no rebuild); otherwise it builds the wider registry on
+    /// a blocking worker and hands it to the audio thread ready to swap in — so the
+    /// seconds-long decode never freezes playback. No-op when no session is live.
+    async fn stage_tracks(
+        &self,
+        cfg: &NemusConfig,
+        tracks: Tracks<ControlMap>,
+        cps: Option<f64>,
+        tempo: TempoMap,
+    ) {
+        // Snapshot the sender + shared `loaded` under the lock, then release it
+        // before any `.await` (the `MutexGuard` is not `Send`).
+        let (tx, loaded) = {
+            let guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
+            match guard.as_ref() {
+                Some(s) if !s.handle.is_finished() => (s.tx.clone(), Arc::clone(&s.loaded)),
+                _ => return,
+            }
+        };
+
+        // Does this arrangement pull in a voice the live registry doesn't have yet?
+        let referenced = validate::referenced_instruments(&tracks);
+        let target: Option<HashSet<String>> = {
+            let have = loaded.lock().unwrap_or_else(|e| e.into_inner());
+            if referenced.is_subset(&have) {
+                None
+            } else {
+                Some(have.union(&referenced).cloned().collect())
+            }
+        };
+
+        // New voice → decode the wider set on a blocking worker (never the RT
+        // thread), hand the ready registry to the audio thread. Old voices only →
+        // restage with no rebuild.
+        let prepared = match target {
+            Some(names) => {
+                let cfg2 = cfg.clone();
+                let names2 = names.clone();
+                match tauri::async_runtime::spawn_blocking(move || {
+                    audio_thread::build_registry(&cfg2, &names2)
+                })
+                .await
+                {
+                    Ok(registry) => Some(control::Prepared { registry, names }),
+                    Err(e) => {
+                        tracing::warn!("nemus: registry decode task failed: {e}");
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+
+        let _ = tx.send(NemusControl::SetTracks { tracks, cps, tempo, prepared });
+    }
+
+    /// Play a preview arrangement (evaluated from a generated snippet) on the
+    /// audition bus, decoding any referenced instrument **off the RT thread** first
+    /// if the live registry doesn't resolve it yet (same path as
+    /// [`Self::stage_tracks`]). No-op when no session is live (the caller opens one
+    /// via [`Self::ensure_session`] first).
+    async fn audition(&self, cfg: &NemusConfig, tracks: Tracks<ControlMap>, cps: f64) {
+        let (tx, loaded) = {
+            let guard = self.session.lock().unwrap_or_else(|e| e.into_inner());
+            match guard.as_ref() {
+                Some(s) if !s.handle.is_finished() => (s.tx.clone(), Arc::clone(&s.loaded)),
+                _ => return,
+            }
+        };
+
+        // Decode any referenced instrument off-thread when the live registry lacks it.
+        let referenced = validate::referenced_instruments(&tracks);
+        let target: Option<HashSet<String>> = {
+            let have = loaded.lock().unwrap_or_else(|e| e.into_inner());
+            if referenced.is_subset(&have) {
+                None
+            } else {
+                Some(have.union(&referenced).cloned().collect())
+            }
+        };
+        let prepared = match target {
+            Some(names) => {
+                let cfg2 = cfg.clone();
+                let names2 = names.clone();
+                match tauri::async_runtime::spawn_blocking(move || {
+                    audio_thread::build_registry(&cfg2, &names2)
+                })
+                .await
+                {
+                    Ok(registry) => Some(control::Prepared { registry, names }),
+                    Err(e) => {
+                        tracing::warn!("nemus: audition decode task failed: {e}");
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+
+        let _ = tx.send(NemusControl::Audition { tracks, cps, prepared });
     }
 
     /// Tear the session down (drop the cpal stream on its thread) and join.
@@ -187,11 +305,9 @@ pub async fn nemus_eval(
                     tempo: output.tempo.clone(),
                 });
             }
-            nemus.send_if_live(NemusControl::SetTracks {
-                tracks: output.tracks,
-                cps: output.cps,
-                tempo: output.tempo,
-            });
+            // Push live if a session is running, decoding any new sample voices
+            // off the RT thread (so editing while playing never freezes audio).
+            nemus.stage_tracks(&cfg, output.tracks, output.cps, output.tempo).await;
             NemusDiagnostics { errors }
         }
         Err(diags) => diags,
@@ -213,20 +329,19 @@ pub async fn nemus_transport(
     match action.as_str() {
         "play" => {
             let cfg = nemus_config();
-            let tx = nemus.ensure_session(&app, &cfg);
+            nemus.ensure_session(&app, &cfg);
             // Feed the freshly-started transport the latest arrangement before
-            // starting it (harmless if a live eval already pushed the same).
-            {
-                let latest = nemus.latest.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(l) = latest.as_ref() {
-                    let _ = tx.send(NemusControl::SetTracks {
-                        tracks: l.tracks.clone(),
-                        cps: l.cps,
-                        tempo: l.tempo.clone(),
-                    });
-                }
+            // starting it (harmless if a live eval already pushed the same). Snapshot
+            // it out from under the lock, then stage it — `stage_tracks` decodes any
+            // sample voices off the RT thread, so the first play never stalls.
+            let latest = {
+                let guard = nemus.latest.lock().unwrap_or_else(|e| e.into_inner());
+                guard.as_ref().map(|l| (l.tracks.clone(), l.cps, l.tempo.clone()))
+            };
+            if let Some((tracks, cps, tempo)) = latest {
+                nemus.stage_tracks(&cfg, tracks, cps, tempo).await;
             }
-            let _ = tx.send(NemusControl::Play);
+            nemus.send_if_live(NemusControl::Play);
         }
         "stop" => nemus.send_if_live(NemusControl::Stop),
         "seek" => {
@@ -277,6 +392,43 @@ pub async fn nemus_set_track(
         other => return Err(AppError::Unsupported(format!("nemus set_track: {other}"))),
     };
     nemus.send_if_live(msg);
+    Ok(())
+}
+
+/// Default preview tempo (cycles per second): one cycle of the snippet ≈ this many
+/// seconds. A single `n(c4)` note then rings ~1s before its release.
+const PREVIEW_CPS: f64 = 1.0;
+
+/// Preview (audition) an instrument from a generated `.nemus` **snippet**. The
+/// front end composes a tiny expression — a note (or chord / scale degree) plus the
+/// panel's knob/chain values, e.g. `n(c4).inst("synth.bass").gain(0.8).room(0.2)` —
+/// and this evaluates it with the real language, then plays one cycle on a dedicated
+/// preview bus that bypasses the song mixer (heard cleanly whether or not a song is
+/// playing). Opens the audio device on demand. A malformed snippet simply doesn't
+/// sound (no editor diagnostics). This single command never grows: every preview
+/// capability rides on the language, not on new parameters.
+#[tauri::command]
+pub async fn nemus_audition_expr(
+    app: AppHandle,
+    nemus: State<'_, NemusState>,
+    expr: String,
+    project_dir: Option<String>,
+) -> Result<(), AppError> {
+    let cfg = nemus_config();
+    let base = project_dir
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    // Wrap the snippet as a one-track program and evaluate it with the real lang.
+    let source = format!("tracks(track(\"preview\", {expr}))");
+    let output = match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
+        Ok(o) => o,
+        Err(_diags) => return Ok(()), // bad snippet → silent (no diagnostics surfaced)
+    };
+    let cps = output.cps.unwrap_or(PREVIEW_CPS);
+
+    nemus.ensure_session(&app, &cfg);
+    nemus.audition(&cfg, output.tracks, cps).await;
     Ok(())
 }
 
@@ -387,6 +539,40 @@ pub fn get_nemus_config() -> Result<NemusConfig, AppError> {
 #[tauri::command]
 pub fn set_nemus_config(nemus: NemusConfig) -> Result<(), AppError> {
     config::save(&nemus).map_err(AppError::Other)
+}
+
+/// One selectable audio output device, for the Settings picker.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AudioDeviceInfo {
+    /// cpal device name — the stable id persisted + handed back when chosen.
+    pub name: String,
+    /// Whether this is the host's current default output device.
+    pub is_default: bool,
+}
+
+/// List the host's audio output devices (name + whether it's the system default).
+/// The default is always reachable by selecting "System default" (a `None` device).
+#[tauri::command]
+pub fn nemus_audio_devices() -> Result<Vec<AudioDeviceInfo>, AppError> {
+    Ok(arbor_nemus::prelude::list_output_devices()
+        .into_iter()
+        .map(|d| AudioDeviceInfo { name: d.name, is_default: d.is_default })
+        .collect())
+}
+
+/// Choose the audio output device (by name; `None` = host default). Persists the
+/// choice to the nemus config and, when a session is live, switches it
+/// immediately (reopening the stream, preserving the playhead + play state).
+#[tauri::command]
+pub fn nemus_set_output_device(
+    nemus: State<'_, NemusState>,
+    device: Option<String>,
+) -> Result<(), AppError> {
+    let mut cfg = nemus_config();
+    cfg.output_device = device.clone();
+    config::save(&cfg).map_err(AppError::Other)?;
+    nemus.send_if_live(NemusControl::SetOutputDevice { device });
+    Ok(())
 }
 
 /// Tear down the nemus audio session for the app (window close). Safe to call

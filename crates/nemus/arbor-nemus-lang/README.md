@@ -97,7 +97,7 @@ to the future CodeMirror editor (a separate `tree-sitter build --wasm` step), no
 The evaluator builds patterns out of the Fase 0 stdlib. A few mini-notation operators map onto
 primitives added there for this layer:
 
-- `@n` / `_` (weight / elongate) → `timecat` (weighted slots).
+- `@n` / `_` (weight / elongate) → `timecat` (weighted slots); `n` may be fractional (`bd@1.5`).
 - `(n,k[,rot])` (Euclidean) → `Pattern::euclid` (Bjorklund).
 - patternised postfix factors (`bd*<2 3>`, `bd(<3 5>,8)`) → `fast_with` / `slow_with` /
   `euclid_with` (inner-join over a `Pattern<f64>` control).

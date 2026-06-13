@@ -12,7 +12,7 @@
    */
   import {
     Files, ListTree, Music4, Terminal, AlertTriangle,
-    SlidersHorizontal, Crosshair, BookOpen, Boxes,
+    SlidersHorizontal, Crosshair, BookOpen, Boxes, Piano,
   } from 'lucide-svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
   import ResizablePanel from '$lib/components/layout/ResizablePanel.svelte';
@@ -34,6 +34,7 @@
 
   import ArrangementView from './viz/ArrangementView.svelte';
   import TabbedEditor from './editor/TabbedEditor.svelte';
+  import UsagesPopover from './editor/UsagesPopover.svelte';
 
   import { onMount, onDestroy, type Snippet } from 'svelte';
   import type { UnlistenFn } from '@tauri-apps/api/event';
@@ -44,6 +45,9 @@
   import { modelsStore } from './stores/models.svelte';
   import { workspaceStore } from './stores/workspace.svelte';
   import { projectStore } from './stores/project.svelte';
+  import { fileWatchStore } from './stores/file-watch.svelte';
+  import { onFsChanged } from '$lib/ipc/fs';
+  import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { projectActions } from './stores/project-actions.svelte';
   import { importActions } from './stores/import-actions.svelte';
   import { mixerStore } from './stores/mixer.svelte';
@@ -57,6 +61,7 @@
   import NemusSettingsModal from './shell/NemusSettingsModal.svelte';
   import NemusShortcutsModal from './shell/NemusShortcutsModal.svelte';
   import NemusCommandPalette from './shell/NemusCommandPalette.svelte';
+  import InstrumentPreviewPanel from './preview/InstrumentPreviewPanel.svelte';
   import { NEMUS_BINDINGS, matchesNemus } from './nemus-keybindings';
 
   // Arbor-specific feedback badges (jobs · notifications) injected by the bridge
@@ -67,6 +72,7 @@
   let unEngine: UnlistenFn | null = null;
   let unPacks:  UnlistenFn | null = null;
   let unModels: UnlistenFn | null = null;
+  let unFsWatch: UnlistenFn | null = null;
 
   onMount(async () => {
     // Live engine + sample-pack + transcription-model streams (each nemus window
@@ -74,6 +80,8 @@
     unEngine = await nemusEngine.subscribe();
     unPacks  = await packsStore.subscribe();
     unModels = await modelsStore.subscribe();
+    // External-change detection for the open .nemus file (IDE-style reload prompt).
+    unFsWatch = await onFsChanged(() => void fileWatchStore.onChanged());
     void configStore.loadConfig();
     void packsStore.refresh();
     void modelsStore.refresh();
@@ -95,6 +103,15 @@
     unEngine?.();
     unPacks?.();
     unModels?.();
+    unFsWatch?.();
+    fileWatchStore.stop();
+  });
+
+  // Watch the directory of the active file for external edits (re-armed on tab
+  // switch / cross-file open).
+  $effect(() => {
+    void projectStore.activeFilePath;
+    void fileWatchStore.watchActive();
   });
 
   // Mirror layout changes to the persisted window state (debounced in the
@@ -147,6 +164,7 @@
       else if (b.id === 'settings') nemusStore.openSettings();
       else if (b.id === 'zen') nemusStore.toggleZen();
       else if (b.id === 'find') { if (editorScoped) editor?.openSearch(); else nemusStore.requestFind(); }
+      else if (b.id === 'find_usages') nemusStore.requestFindUsages();
       else if (b.id === 'new_project') projectActions.newProject();
       else if (b.id === 'open_project') projectActions.openProject();
       else if (b.id === 'open_file') projectActions.openFile();
@@ -176,13 +194,18 @@
   );
   const leftBottom = $derived<ActivityRailItem[]>([
     { id: 'mixer',    tooltip: 'Mixer',    icon: SlidersHorizontal, active: nemusStore.bottomPanel === 'mixer',    onclick: () => nemusStore.toggleBottom('mixer') },
-    { id: 'console',  tooltip: 'Console',  icon: Terminal,      active: nemusStore.bottomPanel === 'console',  onclick: () => nemusStore.toggleBottom('console') },
-    { id: 'problems', tooltip: 'Problems', icon: AlertTriangle, active: nemusStore.bottomPanel === 'problems', onclick: () => nemusStore.toggleBottom('problems') },
-    { id: 'jobs',     tooltip: jobsTip,    icon: Boxes,         active: nemusStore.bottomPanel === 'jobs',     onclick: () => nemusStore.toggleBottom('jobs') },
+    { id: 'preview',  tooltip: 'Preview',  icon: Piano,         active: nemusStore.bottomPanel === 'preview',  onclick: () => nemusStore.toggleBottom('preview') },
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
     { id: 'inspector', tooltip: 'Inspector', icon: Crosshair, active: nemusStore.rightPanel === 'inspector', onclick: () => nemusStore.toggleRight('inspector') },
     { id: 'docs',      tooltip: 'Docs',      icon: BookOpen,  active: nemusStore.rightPanel === 'docs',      onclick: () => nemusStore.toggleRight('docs') },
+  ]);
+  // Diagnostics / system panels — toggles on the right rail (they still dock at the
+  // bottom, where their wide log / list layout belongs).
+  const rightBottom = $derived<ActivityRailItem[]>([
+    { id: 'console',  tooltip: 'Console',  icon: Terminal,      active: nemusStore.bottomPanel === 'console',  onclick: () => nemusStore.toggleBottom('console') },
+    { id: 'problems', tooltip: 'Problems', icon: AlertTriangle, active: nemusStore.bottomPanel === 'problems', onclick: () => nemusStore.toggleBottom('problems') },
+    { id: 'jobs',     tooltip: jobsTip,    icon: Boxes,         active: nemusStore.bottomPanel === 'jobs',     onclick: () => nemusStore.toggleBottom('jobs') },
   ]);
 </script>
 
@@ -199,6 +222,7 @@
 {/snippet}
 {#snippet bottomContent()}
   {#if nemusStore.bottomPanel === 'mixer'}<MixerPanel />
+  {:else if nemusStore.bottomPanel === 'preview'}<InstrumentPreviewPanel />
   {:else if nemusStore.bottomPanel === 'console'}<ConsolePanel />
   {:else if nemusStore.bottomPanel === 'problems'}<ProblemsPanel />
   {:else if nemusStore.bottomPanel === 'jobs'}<JobsPanel />{/if}
@@ -224,7 +248,7 @@
         <ActivityBar side="left" ariaLabel="Navigation rail" topItems={leftTop} bottomItems={leftBottom} />
       {/snippet}
       {#snippet rightRail()}
-        <ActivityBar side="right" ariaLabel="Inspection rail" topItems={rightTop} />
+        <ActivityBar side="right" ariaLabel="Inspection rail" topItems={rightTop} bottomItems={rightBottom} />
       {/snippet}
 
       {#snippet panels()}
@@ -281,6 +305,23 @@
 
 <!-- Window overlays — one mount each; opened from the gear menu, the command
      palette, and the keyboard shortcuts (all via nemusStore). -->
+<!-- External-change reload prompt (the open .nemus file changed on disk). -->
+{#if fileWatchStore.pending}
+  <ConfirmModal
+    title="File changed on disk"
+    message={`“${fileWatchStore.pending.name}” was modified outside nemus.`}
+    detail="Reload it from disk? Any unsaved changes in the editor will be lost."
+    variant="warning"
+    confirmLabel="Reload"
+    cancelLabel="Keep mine"
+    onConfirm={() => fileWatchStore.reload()}
+    onCancel={() => fileWatchStore.dismiss()}
+  />
+{/if}
+
+<!-- Floating "find usages" popover (Alt+F7 / Command Palette) — one mount. -->
+<UsagesPopover />
+
 {#if nemusStore.settingsOpen}<NemusSettingsModal onClose={() => nemusStore.closeSettings()} />{/if}
 {#if nemusStore.shortcutsOpen}<NemusShortcutsModal onClose={() => nemusStore.closeShortcuts()} />{/if}
 {#if nemusStore.paletteOpen}<NemusCommandPalette onClose={() => nemusStore.closePalette()} />{/if}

@@ -160,7 +160,7 @@ fn leaf_term(kind: IslandKind, value: &ControlMap, weight: u32) -> Mini {
     let mut postfixes = Vec::new();
     let atom = leaf_atom(kind, value, &mut postfixes);
     if weight > 1 {
-        postfixes.push(Postfix::Weight(weight));
+        postfixes.push(Postfix::Weight(weight as f64));
     }
     if postfixes.is_empty() {
         atom
@@ -201,7 +201,7 @@ fn rest_term(weight: u32) -> Mini {
     if weight > 1 {
         mini(MiniKind::Term {
             atom: Box::new(mini(MiniKind::Rest)),
-            postfixes: vec![Postfix::Weight(weight)],
+            postfixes: vec![Postfix::Weight(weight as f64)],
         })
     } else {
         mini(MiniKind::Rest)

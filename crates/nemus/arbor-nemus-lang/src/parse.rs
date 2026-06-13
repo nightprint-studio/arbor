@@ -287,7 +287,7 @@ fn walk_postfix(node: Node, src: &str) -> Result<Postfix> {
         "fast" => Postfix::Fast(mini_arg(field(node, "n")?, src)?),
         "slow" => Postfix::Slow(mini_arg(field(node, "n")?, src)?),
         "replicate" => Postfix::Replicate(int_u32(field(node, "n")?, src)?),
-        "weight" => Postfix::Weight(int_u32(field(node, "n")?, src)?),
+        "weight" => Postfix::Weight(num_f64(field(node, "n")?, src)?),
         "variant" => Postfix::Variant(int_u32(field(node, "n")?, src)?),
         "euclid" => Postfix::Euclid {
             pulses: mini_arg(field(node, "pulses")?, src)?,

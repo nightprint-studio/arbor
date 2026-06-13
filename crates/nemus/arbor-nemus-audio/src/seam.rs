@@ -247,6 +247,14 @@ pub struct TrackConfig {
 pub enum AudioCommand {
     /// Start a voice.
     Voice(VoiceEvent),
+    /// Trigger a **preview / audition** voice: a one-off note for the instrument
+    /// browser, rendered through a dedicated bus that **bypasses the song mixer
+    /// strips** (no per-strip gain / mute / solo / insert) and folds straight into
+    /// the master — so a preview sounds identical whether or not a song is loaded,
+    /// playing, or muted. Self-releases via [`VoiceEvent::dur_frames`]; the event's
+    /// `track` is ignored (the audition bus is separate). The engine never emits
+    /// this — only the shell's instrument-preview path does. Additive seam extension.
+    Audition(VoiceEvent),
     /// (Re)configure the mixer strips. Sent at startup and on a track-set swap.
     ConfigureTracks(Vec<TrackConfig>),
     /// Set a strip's gain (linear).

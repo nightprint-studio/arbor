@@ -314,6 +314,28 @@ export function identifierAt(tree: Tree, offset: number): string | null {
   return null;
 }
 
+// ── Find usages (every occurrence of an identifier) ────────────────────────────
+
+/** Every `identifier` node in the tree whose text equals `name`, as UTF-16 doc
+ *  ranges (declaration + references, incl. `$splice` and call/method positions),
+ *  in source order. Powers "find usages": a flat, file-scoped name match — the
+ *  DSL has no shadowing to disambiguate, so same-name == same symbol here. */
+export function identifierUsages(tree: Tree, name: string): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  const walk = (node: Node) => {
+    if (node.type === 'identifier' && node.text === name) {
+      out.push({ from: node.startIndex, to: node.endIndex });
+    }
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i);
+      if (child) walk(child);
+    }
+  };
+  walk(tree.rootNode);
+  out.sort((a, b) => a.from - b.from);
+  return out;
+}
+
 // ── String-argument call context (scoped value completion) ─────────────────────
 
 /** When `offset` sits inside a string-literal argument, the callee name of the
@@ -337,6 +359,28 @@ export function stringArgCallAt(tree: Tree, offset: number): { from: number; fn:
     const callee = cur.childForFieldName('function') ?? cur.childForFieldName('method');
     if (callee?.type !== 'identifier') return null;
     return { from: str.startIndex + 1, fn: callee.text };
+  }
+  return null;
+}
+
+/** The instrument / sound name when `offset` sits inside an `inst("…")` or
+ *  `s("…")` string argument, else null. Powers Ctrl/Cmd+click → instrument
+ *  preview: it recognises the two functions that name a registry voice and
+ *  returns the bare name (unquoted), so the editor can open the audition modal
+ *  instead of go-to-declaration. */
+export function instrumentNameAt(tree: Tree, offset: number): string | null {
+  const at = tree.rootNode.descendantForIndex(offset);
+  if (!at) return null;
+  let str: Node | null = at;
+  while (str && str.type !== 'string') str = str.parent;
+  if (!str) return null;
+  for (let cur: Node | null = str.parent; cur; cur = cur.parent) {
+    const args = cur.childForFieldName('arguments');
+    if (!args) continue;
+    if (str.startIndex < args.startIndex || str.endIndex > args.endIndex) continue;
+    const callee = cur.childForFieldName('function') ?? cur.childForFieldName('method');
+    if (callee?.type !== 'identifier') return null;
+    return callee.text === 'inst' || callee.text === 's' ? unquote(str.text) : null;
   }
   return null;
 }

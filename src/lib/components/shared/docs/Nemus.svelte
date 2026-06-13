@@ -20,7 +20,7 @@
 <div class="feature-grid">
   <div class="feature-card">
     <div class="fc-title">Editor</div>
-    <div class="fc-desc">CodeMirror with nemus syntax highlighting, inline error underlines, and a live highlight of whatever is sounding right now. Edits re-evaluate automatically. Autocomplete (<kbd>Ctrl</kbd>+<kbd>Space</kbd>) suggests the language's combinators, transforms and your own declarations — and, inside <code>inst("…")</code>, every instrument the engine can resolve, and inside <code>art("…")</code>, the available articulations; hover a name for its signature and docs. The usual editing comforts are there too: comment toggling, bracket / quote autoclosing, soft wrapping, and folding of multi-line blocks.</div>
+    <div class="fc-desc">CodeMirror with nemus syntax highlighting, inline error underlines, and a live highlight of whatever is sounding right now. Edits re-evaluate automatically. Autocomplete (<kbd>Ctrl</kbd>+<kbd>Space</kbd>) suggests the language's combinators, transforms and your own declarations — and, inside <code>inst("…")</code>, every instrument the engine can resolve, and inside <code>art("…")</code>, the available articulations; hover a name for its signature and docs. The usual editing comforts are there too: comment toggling, bracket / quote autoclosing, soft wrapping, and folding of multi-line blocks. If the open file changes on disk outside nemus, it offers to reload it.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Arrangement</div>
@@ -31,8 +31,12 @@
     <div class="fc-desc">One strip per track with live meters and gain / pan knobs. Dragging a knob is heard instantly (a live override) and is <strong>written back</strong> into the <code>.nemus</code> source as a <code>.gain(…)</code> / <code>.pan(…)</code> literal shortly after the gesture rests — no commit step. The room knob and the Inspector's delay knobs are code-first the same way. Muting a track writes <code>.gain(0)</code> into the source; unmuting restores the previous gain.</div>
   </div>
   <div class="feature-card">
+    <div class="fc-title">Preview</div>
+    <div class="fc-desc">A docked audition panel for hearing an instrument before you commit to it. A pitched voice plays from a full-width on-screen piano (click, drag to glide, or focus it and play two octaves from the computer keyboard — the <kbd>Z</kbd>… row is the low octave, the <kbd>Q</kbd>… row the one above; the octave buttons move the range); a one-shot plays from a single trigger. Gain / Velocity / Reverb / Speed / Pan knobs shape the note, a <strong>Scale</strong> + root turns the keyboard into scale degrees, and a free <strong>chain</strong> field appends any DSL you like (e.g. <code>.lpf(800).crush(4)</code>) — under the hood each press is a tiny <code>.nemus</code> snippet the engine evaluates, so the whole language is available. It routes through a dedicated bus that bypasses the song mixer, so it's heard cleanly even while a song plays. Open it from the Sound bank's preview button or by <kbd>Ctrl</kbd>+<kbd>Click</kbd> on an <code>inst("…")</code> / <code>s("…")</code> name in the editor.</div>
+  </div>
+  <div class="feature-card">
     <div class="fc-title">Console &amp; Problems</div>
-    <div class="fc-desc">The Console shows log lines gated to your threshold; Problems lists evaluation diagnostics. Click a problem to jump the editor to its source span.</div>
+    <div class="fc-desc">The Console shows log lines gated to your threshold; Problems lists evaluation diagnostics — click a row to jump the editor to its source span. Press <kbd>Alt</kbd>+<kbd>F7</kbd> on a name for a floating list of its usages (↑/↓ to move, Enter to jump).</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Jobs</div>
@@ -40,7 +44,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Sound bank</div>
-    <div class="fc-desc">The instruments the engine can resolve — the bare oscillators (<code>sine</code>, <code>sawtooth</code>, <code>square</code>, <code>triangle</code>, <code>pulse</code> + <code>saw</code> / <code>tri</code> / <code>sqr</code> / <code>sin</code> aliases), the detuned <code>supersaw</code>, the noise colours (<code>white</code>, <code>pink</code>, <code>brown</code>, <code>crackle</code>), the <code>synth.*</code> presets, and the samplers from any installed <strong>sample bank</strong>. Click a voice to copy its name; open its info for a description and articulations, and filter the list by name. Download / manage the banks (VSCO 2, Dirt-Samples, drum machines, General MIDI) — each card shows a description and download-size estimate — from here.</div>
+    <div class="fc-desc">The instruments the engine can resolve — the bare oscillators (<code>sine</code>, <code>sawtooth</code>, <code>square</code>, <code>triangle</code>, <code>pulse</code> + <code>saw</code> / <code>tri</code> / <code>sqr</code> / <code>sin</code> aliases), the detuned <code>supersaw</code>, the noise colours (<code>white</code>, <code>pink</code>, <code>brown</code>, <code>crackle</code>), the <code>synth.*</code> presets, and the samplers from any installed <strong>sample bank</strong>. Click a voice to copy its name; press its preview button to audition it in the <strong>Preview</strong> panel (an on-screen piano + knobs); open its info for a description and articulations, and filter the list by name. Download / manage the banks (VSCO 2, Dirt-Samples, drum machines, General MIDI) — each card shows a description and download-size estimate — from here.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Outline</div>
@@ -81,7 +85,7 @@ fn bassline(root) = n($root ~ $root g1).lpf(800)</pre>
     <tr><td><code>&lt; &gt;</code></td><td>alternation — one element per cycle</td></tr>
     <tr><td><code>&amp;</code></td><td>parallel (stack), the loosest-precedence operator</td></tr>
     <tr><td><code>*n</code> / <code>/n</code></td><td>fast / slow inside the slot</td></tr>
-    <tr><td><code>!n</code> / <code>@n</code></td><td>replicate as separate slots / weight (more duration)</td></tr>
+    <tr><td><code>!n</code> / <code>@n</code></td><td>replicate as separate slots / weight (more duration; <code>n</code> may be fractional, e.g. <code>bd@1.5</code>)</td></tr>
     <tr><td><code>(n,k)</code></td><td>euclidean — distribute n hits over k steps</td></tr>
     <tr><td><code>:n</code> / <code>'chord</code></td><td>sample variant (s only) / chord (n only)</td></tr>
     <tr><td><code>$ident</code></td><td>splice a named variable in as a leaf</td></tr>
@@ -171,7 +175,8 @@ arrange(
     <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active file</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>G</kbd></td><td>Go to line (editor)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Toggle comment / delete line (editor)</td></tr>
-    <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration (editor) · reveal hap source (arrangement)</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>F7</kbd></td><td>Find usages of the symbol at the caret (editor)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration · preview an <code>inst("…")</code> / <code>s("…")</code> name (editor) · reveal hap source (arrangement)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (editor focused) · else search the Console / Problems</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Import audio / MIDI as <code>.nemus</code></td></tr>
@@ -186,6 +191,7 @@ arrange(
 <ul class="prop-list">
   <li><code>Default octave</code> The octave assigned to a bare note name (e.g. <code>c</code> → <code>c4</code>).</li>
   <li><code>Default tempo</code> Cycles-per-second used when a file omits <code>cps()</code>.</li>
+  <li><code>Output device</code> Where playback is sent — pick any of the system's audio outputs, or leave it on the system default. Switching it moves a running session to the new device immediately.</li>
   <li><code>Log threshold</code> The minimum level emitted. Lines below it are never produced or transmitted — no IPC flood, even at <code>trace</code>.</li>
   <li><code>Sample rate</code> / <code>Bit depth</code> Format of the offline WAV render.</li>
   <li><code>Reverb tail</code> Extra seconds rendered after the last event so reverb / delay tails aren't cut off.</li>

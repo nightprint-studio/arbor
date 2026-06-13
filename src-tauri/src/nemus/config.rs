@@ -44,6 +44,9 @@ pub struct NemusConfig {
     pub basic_pitch_url: Option<String>,
     /// Override for the Demucs ONNX download URL. `None` → the built-in default.
     pub demucs_url: Option<String>,
+    /// Chosen audio output device, by cpal device name. `None` → the host default
+    /// (also the fallback if the named device is no longer present).
+    pub output_device: Option<String>,
     /// Offline-render defaults. Declared last: as a nested TOML table it must
     /// follow every scalar field, or `toml` serialization fails once an override
     /// above is set ("values must be emitted before tables").
@@ -61,6 +64,7 @@ impl Default for NemusConfig {
             models_dir: None,
             basic_pitch_url: None,
             demucs_url: None,
+            output_device: None,
             render: NemusRenderConfig::default(),
         }
     }

@@ -91,18 +91,19 @@ pub fn seq<T: Clone + Send + Sync + 'static>(pats: Vec<Pattern<T>>) -> Pattern<T
 ///
 /// Each slot plays **one cycle** of its pattern, compressed into the slot and
 /// silent outside it (Tidal's `timeCat`). Zero total weight → silence.
-pub fn timecat<T: Clone + Send + Sync + 'static>(weighted: Vec<(u32, Pattern<T>)>) -> Pattern<T> {
-    let total: i64 = weighted.iter().map(|(w, _)| *w as i64).sum();
-    if total == 0 {
+pub fn timecat<T: Clone + Send + Sync + 'static>(weighted: Vec<(Time, Pattern<T>)>) -> Pattern<T> {
+    // Weights are rational (`Time`) so fractional `@n` (e.g. `bd@1.5`) is exact.
+    let total: Time = weighted.iter().fold(Time::ZERO, |acc, (w, _)| acc + *w);
+    if total == Time::ZERO {
         return silence();
     }
     // Precompute each slot's sub-arc within the unit cycle [0, 1).
     let mut slots: Vec<(Time, Time, Pattern<T>)> = Vec::with_capacity(weighted.len());
-    let mut acc = 0i64;
+    let mut acc = Time::ZERO;
     for (w, p) in weighted {
-        let begin = Time::new(acc, total);
-        acc += w as i64;
-        let end = Time::new(acc, total);
+        let begin = acc / total;
+        acc = acc + w;
+        let end = acc / total;
         slots.push((begin, end, p));
     }
     Pattern::new(move |span: TimeSpan| {
@@ -354,7 +355,7 @@ mod tests {
     #[test]
     fn timecat_gives_each_slot_its_weighted_share() {
         // weights 3 and 1 → "a" fills the first 3/4, "b" the last 1/4.
-        let p = timecat(vec![(3, pure("a")), (1, pure("b"))]);
+        let p = timecat(vec![(Time::int(3), pure("a")), (Time::ONE, pure("b"))]);
         let haps = sorted_by_onset(&p);
         assert_eq!(haps.len(), 2);
         assert_eq!(haps[0].value, "a");
@@ -365,7 +366,7 @@ mod tests {
 
     #[test]
     fn timecat_with_equal_weights_matches_fastcat() {
-        let weighted = timecat(vec![(1, pure("a")), (1, pure("b")), (1, pure("c"))]);
+        let weighted = timecat(vec![(Time::ONE, pure("a")), (Time::ONE, pure("b")), (Time::ONE, pure("c"))]);
         let equal = fastcat(vec![pure("a"), pure("b"), pure("c")]);
         let a = sorted_by_onset(&weighted);
         let b = sorted_by_onset(&equal);

@@ -241,7 +241,7 @@ fn island_postfixes() {
 fn island_weight() {
     // s(a@2 b)
     let seq = m(MiniKind::Sequence(vec![
-        term(sound("a"), vec![Postfix::Weight(2)]),
+        term(sound("a"), vec![Postfix::Weight(2.0)]),
         sound("b"),
     ]));
     assert_eq!(emit_expr(&s_island(seq)), "s(a@2 b)");
@@ -314,8 +314,9 @@ fn wide_island_wraps_alt_one_bar_per_line() {
 
 #[test]
 fn wide_parallel_wraps_one_lane_per_line() {
-    // Many `&` lanes that overflow the margin break one lane per line.
-    let lane = |n: &str| m(MiniKind::Sequence((0..6).map(|_| sound(n)).collect()));
+    // Many `&` lanes that overflow the margin break one lane per line. Each lane
+    // is long enough that the inline parallel exceeds MAX_WIDTH (88) and wraps.
+    let lane = |n: &str| m(MiniKind::Sequence((0..8).map(|_| sound(n)).collect()));
     let par = m(MiniKind::Parallel(vec![
         lane("bd"),
         lane("sd"),

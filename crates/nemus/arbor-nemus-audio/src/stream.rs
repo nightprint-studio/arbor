@@ -131,12 +131,60 @@ impl fmt::Debug for OutputStream {
     }
 }
 
-/// Open the default output device and start streaming.
+/// One selectable output device, for the device picker.
+#[derive(Debug, Clone)]
+pub struct AudioDevice {
+    /// The cpal device name — the stable id passed back to [`open_output_stream`].
+    pub name: String,
+    /// Whether this is the host's current default output device.
+    pub is_default: bool,
+}
+
+/// Enumerate the host's output devices (name + whether it's the default). Empty
+/// when the host exposes none. Cheap, non-RT — call it to populate a picker; the
+/// chosen `name` is then handed to [`open_output_stream`]. The default device is
+/// always reachable by passing `None`, so it need not appear by exact name.
+pub fn list_output_devices() -> Vec<AudioDevice> {
+    let host = cpal::default_host();
+    let default_name = host.default_output_device().and_then(|d| d.name().ok());
+    let mut out = Vec::new();
+    if let Ok(devices) = host.output_devices() {
+        for d in devices {
+            if let Ok(name) = d.name() {
+                let is_default = default_name.as_deref() == Some(name.as_str());
+                out.push(AudioDevice { name, is_default });
+            }
+        }
+    }
+    out
+}
+
+/// Resolve a device by name, falling back to the host default when `name` is
+/// `None` or names a device that's no longer present (e.g. unplugged) — so a
+/// stale saved selection degrades to the default instead of failing to open.
+fn resolve_output_device(name: Option<&str>) -> Result<cpal::Device, AudioError> {
+    let host = cpal::default_host();
+    if let Some(want) = name {
+        if let Ok(devices) = host.output_devices() {
+            for d in devices {
+                if d.name().map(|n| n == want).unwrap_or(false) {
+                    return Ok(d);
+                }
+            }
+        }
+        // Named device not found — fall through to the default below.
+    }
+    host.default_output_device()
+        .ok_or_else(|| AudioError::Device("no default output device".to_string()))
+}
+
+/// Open an output device and start streaming.
 ///
-/// Picks the default output device and a stereo config at (or nearest to) 48 kHz,
-/// builds the `rtrb` command ring, constructs a [`Renderer`] backed by the given
-/// sound [`Registry`], and starts a cpal output stream whose callback drains the
-/// ring into the renderer, calls [`Renderer::process`], writes the device buffer,
+/// Picks the device named by `device_name` (or the host default when `None` / the
+/// named device is gone) and a stereo config at (or nearest to) 48 kHz, builds the
+/// `rtrb` command ring, constructs a [`Renderer`] backed by the given sound
+/// [`Registry`], and starts a cpal output stream whose callback drains the ring
+/// into the renderer, calls [`Renderer::process`], writes the device buffer,
 /// advances the shared playhead, and updates the output meter. The returned
 /// [`OutputStream`] keeps the cpal `Stream` alive; drop it to stop audio.
 ///
@@ -145,13 +193,11 @@ impl fmt::Debug for OutputStream {
 /// manifest. It must be set here because the [`Renderer`] then lives inside the
 /// real-time callback, unreachable for a later swap.
 pub fn open_output_stream(
+    device_name: Option<&str>,
     tracks: Vec<TrackConfig>,
     registry: Registry,
 ) -> Result<(StreamSink, OutputStream), AudioError> {
-    let host = cpal::default_host();
-    let device = host
-        .default_output_device()
-        .ok_or_else(|| AudioError::Device("no default output device".to_string()))?;
+    let device = resolve_output_device(device_name)?;
 
     let config = choose_output_config(&device)?;
     let sample_rate = config.sample_rate().0;

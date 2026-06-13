@@ -6,7 +6,8 @@
    * button — Esc / Done just closes. Keyboard-first: Tab cycles the fields,
    * the first field auto-focuses (Modal), Esc cancels.
    */
-  import { Settings, Music, Gauge, ScrollText, FileAudio } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  import { Settings, Music, Gauge, ScrollText, FileAudio, Volume2 } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import FormField from '$lib/components/shared/ui/FormField.svelte';
@@ -15,8 +16,18 @@
   import Button from '$lib/components/shared/ui/Button.svelte';
   import TranscriptionModels from './TranscriptionModels.svelte';
   import { configStore, LOG_LEVELS, type NemusLogThreshold } from '../stores/config.svelte';
+  import { nemusAudioDevices, type NemusAudioDevice } from '$lib/ipc/nemus';
 
   let { onClose }: { onClose: () => void } = $props();
+
+  // Audio output devices (queried once on open). The empty value means "system
+  // default" (a null device — always reachable even if the saved name is gone).
+  let devices = $state<NemusAudioDevice[]>([]);
+  onMount(async () => { try { devices = await nemusAudioDevices(); } catch { /* none */ } });
+  const deviceOptions = $derived([
+    { value: '', label: 'System default' },
+    ...devices.map((d) => ({ value: d.name, label: d.is_default ? `${d.name} (default)` : d.name })),
+  ]);
 
   const logOptions = LOG_LEVELS.map((l) => ({ value: l, label: l }));
   const rateOptions = [44_100, 48_000, 88_200, 96_000].map((r) => ({ value: r, label: `${r / 1000} kHz` }));
@@ -56,6 +67,17 @@
   <FormField label="Log threshold" hint="Lines below this level are never produced — no IPC flood.">
     {#snippet icon()}<ScrollText size={12} />{/snippet}
     <Select value={configStore.logThreshold} options={logOptions} onchange={(v) => configStore.setLogThreshold(v as NemusLogThreshold)} />
+  </FormField>
+
+  <div class="grp-label">Audio output</div>
+
+  <FormField label="Output device" hint="Where playback is sent. Changing it switches a running session immediately.">
+    {#snippet icon()}<Volume2 size={12} />{/snippet}
+    <Select
+      value={configStore.outputDevice ?? ''}
+      options={deviceOptions}
+      onchange={(v) => configStore.setOutputDevice(v === '' ? null : v)}
+    />
   </FormField>
 
   <div class="grp-label">Offline render</div>

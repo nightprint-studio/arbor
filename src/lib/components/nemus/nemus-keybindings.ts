@@ -24,6 +24,8 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   // Editor-scoped (only when the tab pane has focus).
   { id: 'goto_line',    key: 'g', ctrl: true,  scope: 'editor', description: 'Go to line' },
   { id: 'new_file',     key: 'n', ctrl: true,  scope: 'editor', description: 'New .nemus in the tab pane' },
+  // `Alt+F7` (IntelliJ-style) — find usages of the symbol under the caret.
+  { id: 'find_usages',  key: 'F7', alt: true,  scope: 'editor', description: 'Find usages of the symbol under the caret' },
   // Transport. `Shift+F9` (IntelliJ-style) leaves `Ctrl+Space` free for the
   // editor's autocomplete (the universal completion trigger).
   { id: 'run_stop',       key: 'F9', shift: true, scope: 'global', description: 'Toggle Run / Stop' },

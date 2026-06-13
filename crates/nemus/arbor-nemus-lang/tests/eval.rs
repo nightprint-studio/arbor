@@ -183,7 +183,7 @@ fn degrees_need_scale_then_resolve() {
 fn weight_postfix_lengthens_a_slot() {
     // s(bd@3 sd) → bd over [0,3/4), sd over [3/4,1)
     let p = run_expr(s_island(m(MiniKind::Sequence(vec![
-        term(m(MiniKind::Leaf(Leaf::Sound("bd".into()))), vec![Postfix::Weight(3)]),
+        term(m(MiniKind::Leaf(Leaf::Sound("bd".into()))), vec![Postfix::Weight(3.0)]),
         sound("sd"),
     ]))));
     let h = onsets(&p, 0);

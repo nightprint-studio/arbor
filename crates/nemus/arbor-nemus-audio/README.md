@@ -17,7 +17,7 @@ VoiceEvent (from the engine) ──▶ Renderer (voices → mixer → effects �
 | `VoiceEvent { id, start_frame, dur_frames, source, note, params, track, span }` | one sample-accurate trigger; times are **absolute output frames** |
 | `VoiceSource` | `Named { sound, variant, inst, art }` (resolved by the registry) or `File { path, kind }` (one-shot / sustained) |
 | `VoiceParams` | per-voice DSP/mix, already sampled from the `ControlMap`: gain/pan/room/lpf/hpf/shift/speed/crush/shape/vel + the delay send (`delay`/`feedback`/`delay_mix`) |
-| `AudioCommand` | `Voice` + transport/mixer controls: `ConfigureTracks`, `SetTrackGain`, `SetTrackPan`, `SetTrackMute`, `SetTrackSolo`, `SetMasterGain`, `SetTrackEq`, `SetMasterEq`, `SetTrackComp`, `SetMasterComp`, `SetTrackDelay`, `SetReverbIr`, `StopAll` |
+| `AudioCommand` | `Voice` + `Audition` (a preview voice on a dedicated bus that bypasses the song mixer) + transport/mixer controls: `ConfigureTracks`, `SetTrackGain`, `SetTrackPan`, `SetTrackMute`, `SetTrackSolo`, `SetMasterGain`, `SetTrackEq`, `SetMasterEq`, `SetTrackComp`, `SetMasterComp`, `SetTrackDelay`, `SetReverbIr`, `StopAll` |
 | `EqBand` / `CompSettings` / `DelayConfig` / `ReverbIr` | strip-processor payloads carried on the mixer commands (never `ControlMap` fields, never language-visible) |
 | `AudioSink` | the engine's view of the backend: `send(cmd)` (non-blocking) + `now_frame()` + `sample_rate()` |
 
@@ -53,9 +53,11 @@ SFZ region vs. fallback) is the registry's job — the engine only forwards symb
   pan/gain with mute/solo, sums to the master strip (EQ → comp → gain), folds in the convolution
   reverb send, and runs the master limiter.
 - `stream.rs` — `StreamSink` (the production `AudioSink`: an `rtrb` SPSC producer + a shared playhead
-  atomic + a shared telemetry tap) and `open_output_stream(tracks, registry)` (cpal device/stream + the
-  draining callback; the `registry` is baked into the `Renderer` here because it then lives inside the
-  real-time callback, unreachable for a later swap). The callback never allocates, locks, or does IO.
+  atomic + a shared telemetry tap) and `open_output_stream(device_name, tracks, registry)` (opens the
+  named cpal device — or the host default when `None` / it's gone — + the draining callback; the
+  `registry` is baked into the `Renderer` here because it then lives inside the real-time callback,
+  unreachable for a later swap). `list_output_devices()` enumerates the selectable devices (`AudioDevice`)
+  for a picker. The callback never allocates, locks, or does IO.
 - `meters.rs` — the **out-of-band telemetry tap** (`MeterTap` / `MeterSnapshot`), read via
   `StreamSink::peak()` (master only) or `StreamSink::meters()` (full). The callback writes, each device
   buffer, the master + **per-track** post-fader peak (decayed for smooth ballistics), the active

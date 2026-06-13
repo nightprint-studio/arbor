@@ -6,7 +6,10 @@
  * the nemus window boot), setters persist.
  */
 
-import { getNemusConfig, setNemusConfig, type NemusConfig, type NemusRenderConfig } from '$lib/ipc/nemus';
+import {
+  getNemusConfig, setNemusConfig, nemusSetOutputDevice,
+  type NemusConfig, type NemusRenderConfig,
+} from '$lib/ipc/nemus';
 
 export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const;
 export type NemusLogThreshold = (typeof LOG_LEVELS)[number];
@@ -20,6 +23,7 @@ function createConfigStore() {
   let render        = $state<NemusRenderConfig>({ ...DEFAULT_RENDER });
   let vscoDir       = $state<string | null>(null);
   let packsDir      = $state<string | null>(null);
+  let outputDevice  = $state<string | null>(null);
   let loaded        = $state(false);
 
   function snapshot(): NemusConfig {
@@ -30,6 +34,7 @@ function createConfigStore() {
       render:         { ...render },
       vsco_dir:       vscoDir,
       packs_dir:      packsDir,
+      output_device:  outputDevice,
     };
   }
 
@@ -42,6 +47,7 @@ function createConfigStore() {
     get render()        { return render; },
     get vscoDir()       { return vscoDir; },
     get packsDir()      { return packsDir; },
+    get outputDevice()  { return outputDevice; },
     get loaded()        { return loaded; },
 
     async loadConfig() {
@@ -53,6 +59,7 @@ function createConfigStore() {
         render        = { ...cfg.render };
         vscoDir       = cfg.vsco_dir;
         packsDir      = cfg.packs_dir;
+        outputDevice  = cfg.output_device ?? null;
         loaded = true;
       } catch {
         // First-run / backend not ready — keep defaults; next call retries.
@@ -78,6 +85,14 @@ function createConfigStore() {
       if (vscoDir === dir) return;
       vscoDir = dir;
       persist();
+    },
+    /** Choose the audio output device (cpal name, or null = host default). Uses
+     *  the dedicated command (persists + switches a live session immediately),
+     *  not the generic config save. */
+    setOutputDevice(name: string | null) {
+      if (outputDevice === name) return;
+      outputDevice = name;
+      void nemusSetOutputDevice(name).catch(() => {});
     },
     setRender(next: NemusRenderConfig) {
       render = { ...next };

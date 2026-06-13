@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use arbor_nemus_pattern::prelude::{
     euclid_with, fast_with, parse_note, polymeter, pure, silence, slow_with, slowcat, stack,
-    timecat, ControlMap, Hap, Pattern, SourceSpan, TimeSpan,
+    timecat, ControlMap, Hap, Pattern, SourceSpan, Time, TimeSpan,
 };
 
 use crate::ast::{Island, IslandKind, Leaf, Mini, MiniArg, MiniKind, Postfix};
@@ -23,7 +23,8 @@ use crate::eval::{resolve, Ctx};
 /// A sequence element after evaluation: its pattern plus how it occupies slots.
 struct TermEval {
     pattern: Pattern<ControlMap>,
-    weight: u32,
+    /// Slot weight (`@n`) — rational so fractional weights (`bd@1.5`) are exact.
+    weight: Time,
     replicate: u32,
 }
 
@@ -52,7 +53,7 @@ fn eval_mini(
         MiniKind::Term { atom, postfixes } => {
             let te = eval_term(ctx, env, kind, atom, postfixes, mini.span)?;
             if te.replicate > 1 {
-                let slots = (0..te.replicate).map(|_| (1, te.pattern.clone())).collect();
+                let slots = (0..te.replicate).map(|_| (Time::ONE, te.pattern.clone())).collect();
                 Ok(timecat(slots))
             } else {
                 Ok(te.pattern)
@@ -145,12 +146,12 @@ fn build_sequence(
     kind: IslandKind,
     items: &[Mini],
 ) -> Result<Pattern<ControlMap>> {
-    let mut slots: Vec<(u32, Pattern<ControlMap>)> = Vec::new();
+    let mut slots: Vec<(Time, Pattern<ControlMap>)> = Vec::new();
     for item in items {
         if is_extend(item) {
             match slots.last_mut() {
-                Some(last) => last.0 += 1,
-                None => slots.push((1, silence())),
+                Some(last) => last.0 = last.0 + Time::ONE,
+                None => slots.push((Time::ONE, silence())),
             }
             continue;
         }
@@ -161,7 +162,7 @@ fn build_sequence(
     }
     Ok(match slots.len() {
         0 => silence(),
-        1 if slots[0].0 == 1 => slots.pop().unwrap().1,
+        1 if slots[0].0 == Time::ONE => slots.pop().unwrap().1,
         _ => timecat(slots),
     })
 }
@@ -182,7 +183,7 @@ fn eval_seq_item(ctx: &Rc<Ctx>, env: &Env, kind: IslandKind, item: &Mini) -> Res
         }
         _ => Ok(TermEval {
             pattern: eval_mini(ctx, env, kind, item)?,
-            weight: 1,
+            weight: Time::ONE,
             replicate: 1,
         }),
     }
@@ -198,7 +199,7 @@ fn eval_term(
     span: SourceSpan,
 ) -> Result<TermEval> {
     let mut pattern = eval_mini(ctx, env, kind, atom)?;
-    let mut weight = 1u32;
+    let mut weight = Time::ONE;
     let mut replicate = 1u32;
     for pf in postfixes {
         match pf {
@@ -259,7 +260,7 @@ fn eval_term(
                 pattern = chord_expand(pattern, name, span)?;
             }
             Postfix::Replicate(r) => replicate = *r,
-            Postfix::Weight(w) => weight = *w,
+            Postfix::Weight(w) => weight = f64_to_time(*w),
         }
     }
     Ok(TermEval {

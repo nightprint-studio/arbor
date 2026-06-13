@@ -38,6 +38,10 @@ use arbor_nemus_pattern::prelude::SourceKind;
 /// later through the renderer constructor.
 pub const DEFAULT_VOICE_CAPACITY: usize = 128;
 
+/// Voice capacity of the dedicated **audition** bus (instrument preview). Small —
+/// a few overlapping preview notes is plenty; previews never need the full pool.
+const AUDITION_VOICE_CAPACITY: usize = 8;
+
 /// Default `room` reverb size (`0..1`) until an IR is installed. The default
 /// reverb is the **O(1) algorithmic [`Reverb::Algo`]** (Freeverb), whose cost is
 /// constant per sample regardless of tail length — so unlike the old naive
@@ -131,6 +135,10 @@ pub struct Renderer {
     /// Absolute output frame of the *next* frame to render.
     clock: u64,
     pool: VoicePool,
+    /// Dedicated **audition** voices (instrument preview). Separate from the song
+    /// `pool`: they bypass the mixer strips and fold straight into the master, so a
+    /// preview is unaffected by — and doesn't disturb — the song mix.
+    audition: VoicePool,
     strips: Vec<Strip>,
     /// Whether any strip is currently soloed (drives solo-mutes-the-rest).
     any_soloed: bool,
@@ -190,6 +198,7 @@ impl Renderer {
             sample_rate,
             clock: 0,
             pool: VoicePool::new(capacity),
+            audition: VoicePool::new(AUDITION_VOICE_CAPACITY),
             strips: (0..strip_count).map(|_| Strip::new(sample_rate)).collect(),
             any_soloed: false,
             track_dry: vec![[0.0; 2]; strip_count],
@@ -266,7 +275,9 @@ impl Renderer {
         // grind out silence — skip it. Write zeros, hold the meters at zero, and
         // still advance the clock so the transport's free-running "now" stays
         // truthful (seek/play re-anchor against it).
-        if self.idle && self.pool.active() == 0 && self.pending.is_empty() {
+        if self.idle && self.pool.active() == 0 && self.pending.is_empty()
+            && self.audition.active() == 0
+        {
             for frame_out in out.iter_mut() {
                 *frame_out = [0.0; 2];
             }
@@ -287,9 +298,10 @@ impl Renderer {
         self.clock = block_end;
     }
 
-    /// Number of currently sounding voices (for meters / tests).
+    /// Number of currently sounding voices (for meters / tests) — song voices plus
+    /// any live preview/audition voices.
     pub fn active_voices(&self) -> usize {
-        self.pool.active()
+        self.pool.active() + self.audition.active()
     }
 
     /// Whether the renderer is on the idle silence fast-path: stopped, with nothing
@@ -297,7 +309,10 @@ impl Renderer {
     /// meter directly (the fast-path does no measurable work, so an EMA would only
     /// crawl toward zero — this snaps it).
     pub fn is_idle(&self) -> bool {
-        self.idle && self.pool.active() == 0 && self.pending.is_empty()
+        self.idle
+            && self.pool.active() == 0
+            && self.pending.is_empty()
+            && self.audition.active() == 0
     }
 
     /// Per-track post-fader peak `[L, R]` over the most recent `process` block,
@@ -321,6 +336,25 @@ impl Renderer {
                     start_frame: start,
                     event: ev,
                 });
+            }
+            AudioCommand::Audition(ev) => {
+                // Preview note: spawn immediately into the dedicated audition pool
+                // — no sample-accurate scheduling, no legato, no strip routing. We
+                // deliberately don't touch `idle`: the idle gate already accounts
+                // for live audition voices, so a stopped session wakes the graph
+                // for the preview and re-idles once it finishes.
+                let resolved = self.resolve_source(&ev);
+                let release_at = ev.dur_frames.map(|d| self.clock.saturating_add(d));
+                let voice = Voice::build(
+                    ev.id,
+                    ev.track,
+                    resolved,
+                    ev.note,
+                    &ev.params,
+                    release_at,
+                    self.sample_rate as f32,
+                );
+                self.audition.insert(voice);
             }
             AudioCommand::ConfigureTracks(tracks) => self.configure_tracks(&tracks),
             AudioCommand::SetTrackGain(i, g) => {
@@ -385,6 +419,7 @@ impl Renderer {
                 // so without this flush a `room`/delay tail rings on (audibly, and
                 // as perpetual DSP load) long after playback has stopped.
                 self.pool.clear();
+                self.audition.clear();
                 self.pending.clear();
                 for l in &mut self.legato {
                     *l = None;
@@ -637,6 +672,21 @@ impl Renderer {
             let peak = &mut track_peak[i];
             peak[0] = peak[0].max(contrib[0].abs());
             peak[1] = peak[1].max(contrib[1].abs());
+        }
+
+        // Preview / audition voices: a dedicated bus that bypasses the song strips
+        // (no per-strip gain / mute / solo / insert) and folds straight into the
+        // master sum, so a preview is heard cleanly whatever the song mix is doing.
+        // The shared reverb send is passed through (audition voices default to no
+        // `room`, so they don't feed it unless asked); the per-track delay send is a
+        // throwaway (the audition bus has no delay line).
+        if self.audition.active() > 0 {
+            let mut aud = [[0.0f32; 2]];
+            let mut aud_delay = [[0.0f32; 2]];
+            self.audition
+                .process_sample(frame, &mut aud, &mut reverb_send, &mut aud_delay);
+            master[0] += aud[0][0];
+            master[1] += aud[0][1];
         }
 
         // Master EQ → compressor → gain.

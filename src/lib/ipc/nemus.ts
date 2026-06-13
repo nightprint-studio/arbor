@@ -155,6 +155,14 @@ export interface NemusConfig {
   render: NemusRenderConfig;
   vsco_dir: string | null;
   packs_dir: string | null;
+  /** Chosen audio output device (cpal name), or null for the host default. */
+  output_device: string | null;
+}
+
+/** One selectable audio output device (`nemus_audio_devices`). */
+export interface NemusAudioDevice {
+  name: string;
+  is_default: boolean;
 }
 
 /** Options for `nemus_render`. `cycles` is required (a Pattern has no length). */
@@ -251,6 +259,17 @@ export function getNemusConfig(): Promise<NemusConfig> {
 /** Persist a new nemus config. Takes effect for the next session / render. */
 export function setNemusConfig(nemus: NemusConfig): Promise<void> {
   return invoke('set_nemus_config', { nemus });
+}
+
+/** List the host's audio output devices (name + whether it's the system default). */
+export function nemusAudioDevices(): Promise<NemusAudioDevice[]> {
+  return invoke('nemus_audio_devices');
+}
+
+/** Choose the audio output device (cpal name, or null for the host default).
+ *  Persists the choice and switches a live session to it immediately. */
+export function nemusSetOutputDevice(device: string | null): Promise<void> {
+  return invoke('nemus_set_output_device', { device });
 }
 
 // ── Event subscriptions ───────────────────────────────────────────────────────
@@ -406,6 +425,19 @@ export type NemusTrackAction = 'gain' | 'pan' | 'mute' | 'solo' | 'master_gain';
  *  `value` is 0..1 for gain/pan/master_gain, and 0|1 (off|on) for mute/solo. */
 export function nemusSetTrack(action: NemusTrackAction, track: number | null, value: number): Promise<void> {
   return invoke('nemus_set_track', { action, track: track ?? null, value });
+}
+
+// ── nemus_audition_expr: one-off instrument preview from a generated snippet ────
+
+/** Play a one-off instrument preview from a `.nemus` snippet. The caller composes
+ *  a tiny expression — a note (or chord / scale degree) plus the panel's knob /
+ *  chain values, e.g. `n(c4).inst("synth.bass").gain(0.8).room(0.2)` — which the
+ *  backend evaluates with the real language and plays one cycle of on a dedicated
+ *  audition bus (bypasses the song mixer, so it's heard cleanly whether or not a
+ *  song is playing). Opens the audio device on demand; a malformed snippet simply
+ *  doesn't sound. The whole language drives the preview — no per-param plumbing. */
+export function nemusAuditionExpr(expr: string, projectDir?: string): Promise<void> {
+  return invoke('nemus_audition_expr', { expr, projectDir: projectDir ?? null });
 }
 
 // ── Project model: open / create a nemus project (folder + nemus.toml) ─────────

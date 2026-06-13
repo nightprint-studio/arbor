@@ -435,7 +435,7 @@ fn cell_term(c: &Cell, weight: u32) -> Mini {
         pf.push(Postfix::Chord(name.to_string()));
     }
     if weight > 1 {
-        pf.push(Postfix::Weight(weight));
+        pf.push(Postfix::Weight(weight as f64));
     }
     if pf.is_empty() {
         c.atom.clone()
@@ -451,7 +451,7 @@ fn rest_term(weight: u32) -> Mini {
     if weight > 1 {
         mini(MiniKind::Term {
             atom: Box::new(mini(MiniKind::Rest)),
-            postfixes: vec![Postfix::Weight(weight)],
+            postfixes: vec![Postfix::Weight(weight as f64)],
         })
     } else {
         mini(MiniKind::Rest)

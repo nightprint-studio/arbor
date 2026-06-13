@@ -12,17 +12,18 @@
 
 use std::collections::HashSet;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 
 use arbor_nemus::prelude::{
-    open_output_stream, AudioCommand, AudioError, AudioSink, ControlMap, Epoch, OutputStream,
-    Registry, StreamSink, TempoMap, Time, TimeSpan, Tracks, Transport,
+    open_output_stream, schedule_span, AudioCommand, AudioError, AudioSink, ControlMap, Epoch,
+    OutputStream, Registry, StreamSink, TempoMap, Time, TimeSpan, Tracks, Transport,
 };
 
 use super::config::NemusConfig;
-use super::control::NemusControl;
+use super::control::{NemusControl, Prepared};
 use super::events::{
     emit, ActiveHap, ActiveHaps, AudioErrorEvent, Meters, TransportState, EVT_ACTIVE_HAPS,
     EVT_AUDIO_ERROR, EVT_METERS, EVT_TRANSPORT,
@@ -37,19 +38,31 @@ const TICK_MS: u64 = 20;
 /// from the tick so a burst of control messages can't flood the front end.
 const EMIT_INTERVAL: Duration = Duration::from_millis(33);
 
+
 /// Run the audio session until a `Shutdown` (or the channel closing). Opens the
-/// stream with the built-in synths only, then **lazily** decodes each sample
-/// instrument the first time an arrangement references it (rebuilding the stream
-/// to merge the new voices in). Loops on the control channel; returns when the
-/// session ends and the caller's `JoinHandle` resolves.
+/// stream with the built-in synths only; sample voices are decoded **off this
+/// thread** by the command layer and arrive ready in `SetTracks` (the audio
+/// thread only reopens the stream to merge them in). Loops on the control
+/// channel; returns when the session ends and the caller's `JoinHandle` resolves.
 ///
 /// Why lazy: a pack like VSCO or Dirt-Samples is gigabytes of audio. Decoding
 /// every installed pack up front made the first play stall and held all of it in
 /// RAM even for a one-drum patch — now only the referenced instruments load.
-pub fn run(app: AppHandle, rx: Receiver<NemusControl>, cfg: NemusConfig) {
-    // Start with synths only (always available, no decode); sample voices load on
-    // first reference.
-    let mut session = match Session::open(&cfg, &HashSet::new()) {
+///
+/// Why off-thread: the decode (`packs::load_subset_into`) can run for seconds; on
+/// this driver loop it would starve [`Transport::tick`] and freeze playback while
+/// the user edits. So the command pre-decodes on a blocking worker and hands us a
+/// ready [`Registry`] via [`Prepared`]; `loaded` is the set those decodes have
+/// landed, shared with the command so it knows when a new voice needs building.
+pub fn run(
+    app: AppHandle,
+    rx: Receiver<NemusControl>,
+    cfg: NemusConfig,
+    loaded: Arc<Mutex<HashSet<String>>>,
+) {
+    // Start with synths only (always available, no decode); sample voices arrive
+    // pre-decoded from the command on first reference.
+    let mut session = match Session::open(&cfg, loaded) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("nemus: failed to open audio output: {e}");
@@ -107,17 +120,26 @@ pub fn run(app: AppHandle, rx: Receiver<NemusControl>, cfg: NemusConfig) {
 fn open_stream(
     cfg: &NemusConfig,
     needed: &HashSet<String>,
+    device: Option<&str>,
 ) -> Result<(StreamSink, OutputStream), AudioError> {
+    open_output_stream(device, Vec::new(), build_registry(cfg, needed))
+}
+
+/// Build a sound registry: the built-in synths plus exactly the `needed` sample
+/// instruments, **decoded** from their installed packs (the slow part — seconds
+/// for a big pack). Called off the RT thread (the command's blocking worker) so
+/// the decode never stalls playback; the audio thread only consumes the result.
+pub(super) fn build_registry(cfg: &NemusConfig, needed: &HashSet<String>) -> Registry {
     let mut registry = Registry::new();
     registry.install_builtin_synths();
     packs::load_subset_into(cfg, &mut registry, needed);
-    open_output_stream(Vec::new(), registry)
+    registry
 }
 
 /// The built-in synth instrument names (always resolvable, no pack). Used to seed
 /// a session's `loaded` set so synth-only patches don't trigger a registry
 /// rebuild. Cheap — in-memory presets, no decode.
-fn builtin_synth_names() -> HashSet<String> {
+pub(super) fn builtin_synth_names() -> HashSet<String> {
     let mut reg = Registry::new();
     reg.install_builtin_synths();
     reg.instruments_list().into_iter().map(|i| i.name).collect()
@@ -139,32 +161,49 @@ struct Session {
     current: Tracks<ControlMap>,
     /// Instrument names the live registry already resolves: the built-in synths
     /// (seeded at open) plus every sample voice decoded so far. A referenced name
-    /// outside this set is what triggers a rebuild.
-    loaded: HashSet<String>,
+    /// outside this set is what triggers a rebuild. **Shared** with the command
+    /// (`Arc<Mutex>`): the command reads it to decide whether an eval needs a new
+    /// (off-thread) decode; the audio thread writes it on a successful swap.
+    loaded: Arc<Mutex<HashSet<String>>>,
+    /// The chosen cpal output device name (`None` = host default). Carried so a
+    /// registry rebuild reopens on the SAME device, and a device switch can reopen
+    /// with the current registry.
+    device: Option<String>,
+    /// The live tempo map (empty = constant clock), kept so reopening the stream
+    /// (registry rebuild / device switch) re-applies the same tempo automation.
+    tempo: TempoMap,
+    /// Monotonic id source for preview voices, bumped by `schedule_span`. The
+    /// preview voices live in the renderer's separate audition pool, so these never
+    /// collide with the engine's song-voice ids.
+    audition_id: u64,
 }
 
 impl Session {
-    /// Open a session whose registry holds the built-in synths plus `needed`.
-    fn open(cfg: &NemusConfig, needed: &HashSet<String>) -> Result<Session, AudioError> {
-        let (sink, stream) = open_stream(cfg, needed)?;
-        // Seed `loaded` with the always-present built-in synth names so a
-        // synth-only patch never triggers a (pointless) rebuild; pack voices are
-        // added to the set as they're first referenced.
-        let mut loaded = builtin_synth_names();
-        loaded.extend(needed.iter().cloned());
+    /// Open a session with the built-in synths only (no decode). `loaded` is the
+    /// shared set the command already seeded with the built-in synth names; pack
+    /// voices are added to it as they're first referenced (decoded off-thread).
+    fn open(
+        cfg: &NemusConfig,
+        loaded: Arc<Mutex<HashSet<String>>>,
+    ) -> Result<Session, AudioError> {
+        let device = cfg.output_device.clone();
+        let (sink, stream) = open_stream(cfg, &HashSet::new(), device.as_deref())?;
         Ok(Session {
             transport: Transport::new(sink, cfg.default_cps),
             _stream: stream,
             current: Tracks { tracks: Vec::new() },
             loaded,
+            device,
+            tempo: TempoMap::default(),
+            audition_id: 0,
         })
     }
 
     /// Apply one control message. Returns `false` on `Shutdown` (caller exits).
     fn apply(&mut self, app: &AppHandle, cfg: &NemusConfig, msg: NemusControl) -> bool {
         match msg {
-            NemusControl::SetTracks { tracks, cps, tempo } => {
-                self.set_tracks(app, cfg, tracks, cps, tempo)
+            NemusControl::SetTracks { tracks, cps, tempo, prepared } => {
+                self.set_tracks(app, cfg, tracks, cps, tempo, prepared)
             }
             NemusControl::Play => self.transport.play(),
             NemusControl::Stop => self.transport.stop(),
@@ -174,6 +213,10 @@ impl Session {
                 self.transport.seek(Time::int(cycle.round() as i64));
             }
             NemusControl::SetCps { cps } => self.transport.set_cps(cps),
+            NemusControl::SetOutputDevice { device } => self.set_output_device(app, cfg, device),
+            NemusControl::Audition { tracks, cps, prepared } => {
+                self.audition(app, tracks, cps, prepared)
+            }
             // Live mixer overrides: forwarded straight to the sink (non-blocking;
             // dropping the command on a full queue is acceptable for a knob drag).
             NemusControl::SetTrackGain { track, gain } => {
@@ -196,10 +239,11 @@ impl Session {
         true
     }
 
-    /// Stage a new arrangement. If it references a sample instrument not yet
-    /// decoded, rebuild the stream first (merging the new voices into the
-    /// registry) while preserving the playhead + play state across the swap;
-    /// otherwise just push the tracks to the live transport.
+    /// Stage a new arrangement. When the command pre-decoded new voices (it hands
+    /// us a ready [`Prepared`] registry), reopen the stream to merge them in while
+    /// preserving the playhead + play state across the swap — **no decode runs on
+    /// this RT thread**. Otherwise (`prepared` is `None`: no new voices) just push
+    /// the tracks to the live transport.
     fn set_tracks(
         &mut self,
         app: &AppHandle,
@@ -207,44 +251,25 @@ impl Session {
         tracks: Tracks<ControlMap>,
         cps: Option<f64>,
         tempo: TempoMap,
+        prepared: Option<Prepared>,
     ) {
         self.current = tracks.clone();
 
-        // Lazily decode any newly-referenced instruments. The registry is inside
-        // the RT callback, so "load more" means reopening the stream with a wider
-        // registry — only when a genuinely new name shows up.
-        let referenced = super::validate::referenced_instruments(&tracks);
-        let resume = if referenced.is_subset(&self.loaded) {
-            None
-        } else {
-            let needed: HashSet<String> = self.loaded.union(&referenced).cloned().collect();
-            let was_playing = self.transport.is_playing();
-            let pos = self.transport.position_cycle();
-            match open_stream(cfg, &needed) {
-                Ok((sink, stream)) => {
-                    // Commit the wider set only on success; replace transport +
-                    // stream (dropping the old stream stops its audio). tracks /
-                    // tempo / cps are re-applied just below.
-                    self.loaded = needed;
-                    self.transport = Transport::new(sink, cps.unwrap_or(cfg.default_cps));
-                    self._stream = stream;
-                    Some((was_playing, pos))
-                }
-                Err(e) => {
-                    // Keep the current session (and `loaded`, so it retries next
-                    // eval); the new instrument falls back to the synth meanwhile.
-                    tracing::warn!("nemus: registry rebuild failed ({e}); keeping current voices");
-                    emit(app, EVT_AUDIO_ERROR, AudioErrorEvent { message: e.to_string() });
-                    None
-                }
-            }
+        // The registry lives inside the RT callback, so "load more" means reopening
+        // the stream with a wider registry. The decode already ran off-thread, so
+        // here we only swap in the ready registry — fast, no RT stall.
+        let resume = match prepared {
+            Some(prep) => self.swap_registry(app, prep, cps.unwrap_or(cfg.default_cps)),
+            None => None,
         };
 
         // (Re)apply the arrangement to the (possibly fresh) transport.
         self.transport.set_tracks(tracks);
         // A tempo-map drives the clock when present; otherwise the script's
         // constant `cps(...)` applies. Always push the map (empty clears any
-        // previous automation back to a constant clock).
+        // previous automation back to a constant clock). Keep a copy so reopening
+        // the stream (device switch) re-applies the same automation.
+        self.tempo = tempo.clone();
         let has_tempo = !tempo.is_empty();
         self.transport.set_tempo_map(tempo);
         if !has_tempo {
@@ -258,6 +283,112 @@ impl Session {
             self.transport.seek(Time::int(pos.round() as i64));
             if was_playing {
                 self.transport.play();
+            }
+        }
+    }
+
+    /// Reopen the cpal stream on a registry the command pre-decoded off-thread
+    /// ([`Prepared`]) — the only RT work a "load more" costs now. Commits the wider
+    /// `loaded` set on success and returns `(was_playing, position_cycle)` so the
+    /// caller can restore the playhead after re-applying its arrangement. Keeps the
+    /// current stream and returns `None` on failure.
+    fn swap_registry(&mut self, app: &AppHandle, prep: Prepared, cps: f64) -> Option<(bool, f64)> {
+        let was_playing = self.transport.is_playing();
+        let pos = self.transport.position_cycle();
+        match open_output_stream(self.device.as_deref(), Vec::new(), prep.registry) {
+            Ok((sink, stream)) => {
+                // Commit the wider set only on success; replace transport + stream
+                // (dropping the old stream stops its audio).
+                *self.loaded.lock().unwrap_or_else(|e| e.into_inner()) = prep.names;
+                self.transport = Transport::new(sink, cps);
+                self._stream = stream;
+                Some((was_playing, pos))
+            }
+            Err(e) => {
+                tracing::warn!("nemus: registry rebuild failed ({e}); keeping current voices");
+                emit(app, EVT_AUDIO_ERROR, AudioErrorEvent { message: e.to_string() });
+                None
+            }
+        }
+    }
+
+    /// Play a one-off instrument preview on the dedicated audition bus. When a
+    /// referenced instrument was decoded off-thread (`prepared`), swap it in first —
+    /// restoring the playing song across the stream swap — then schedule **one
+    /// cycle** of the evaluated `tracks` (a generated snippet) at `cps`, anchored at
+    /// the current frame, and push the resulting voices to the preview bus. The
+    /// renderer routes [`AudioCommand::Audition`] to its own bus, so the preview is
+    /// heard cleanly even while a song plays. Notes / chords / scales / any effect
+    /// all come straight from the evaluated pattern — no per-param plumbing.
+    fn audition(
+        &mut self,
+        app: &AppHandle,
+        tracks: Tracks<ControlMap>,
+        cps: f64,
+        prepared: Option<Prepared>,
+    ) {
+        if let Some(prep) = prepared {
+            let cur_cps = self.transport.epoch().cps;
+            if let Some((was_playing, pos)) = self.swap_registry(app, prep, cur_cps) {
+                // Re-apply the live song to the fresh transport so it keeps playing
+                // through the preview-driven stream swap.
+                self.transport.set_tracks(self.current.clone());
+                self.transport.set_tempo_map(self.tempo.clone());
+                self.transport.seek(Time::int(pos.round() as i64));
+                if was_playing {
+                    self.transport.play();
+                }
+            }
+        }
+
+        let (now, sr) = {
+            let sink = self.transport.sink();
+            (sink.now_frame(), sink.sample_rate())
+        };
+        // Schedule cycle [0, 1) of the snippet, with cycle 0 anchored at `now`.
+        let epoch = Epoch { frame: now, cycle: Time::ZERO, cps };
+        let fpc = (sr as f64 / cps).max(1.0) as u64;
+        let events = schedule_span(&tracks, &epoch, sr, now..now + fpc, &mut self.audition_id);
+        let sink = self.transport.sink_mut();
+        for ev in events {
+            let _ = sink.send(AudioCommand::Audition(ev));
+        }
+    }
+
+    /// Switch the output device live: reopen the stream on the new device with the
+    /// current registry (the `loaded` set), preserving the playhead + play state +
+    /// the staged arrangement. A no-op when the device is unchanged; on failure it
+    /// keeps the current stream and surfaces the error (the old device stays).
+    fn set_output_device(&mut self, app: &AppHandle, cfg: &NemusConfig, device: Option<String>) {
+        if device == self.device {
+            return;
+        }
+        let was_playing = self.transport.is_playing();
+        let pos = self.transport.position_cycle();
+        let cps = self.transport.epoch().cps;
+        // A device switch must rebuild the registry for the new stream; the voices
+        // are the same, so we re-decode the current `loaded` set. This is the one
+        // place a decode still runs on this thread — but it's rare and explicitly
+        // user-initiated (the device is changing, audio necessarily blips), so the
+        // brief stall is acceptable.
+        let needed = self.loaded.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        match open_stream(cfg, &needed, device.as_deref()) {
+            Ok((sink, stream)) => {
+                self.device = device;
+                self.transport = Transport::new(sink, cps);
+                self._stream = stream;
+                // Re-apply the live arrangement + tempo to the fresh transport,
+                // then restore the playhead + play state.
+                self.transport.set_tracks(self.current.clone());
+                self.transport.set_tempo_map(self.tempo.clone());
+                self.transport.seek(Time::int(pos.round() as i64));
+                if was_playing {
+                    self.transport.play();
+                }
+            }
+            Err(e) => {
+                tracing::warn!("nemus: output-device switch failed ({e}); keeping current device");
+                emit(app, EVT_AUDIO_ERROR, AudioErrorEvent { message: e.to_string() });
             }
         }
     }

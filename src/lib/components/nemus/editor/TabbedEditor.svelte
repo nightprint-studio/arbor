@@ -24,6 +24,7 @@
   import { projectActions } from '../stores/project-actions.svelte';
   import { nemusEngine } from '../stores/engine.svelte';
   import { nemusStore } from '../nemus-store.svelte';
+  import { usagesStore, type UsageItem, type UsageAnchor } from '../stores/usages.svelte';
 
   type EditorController = {
     focus: () => void;
@@ -31,6 +32,7 @@
     scrollToLineCol: (line: number, col?: number) => void;
     scrollToOffset: (offset: number, select?: boolean) => void;
     gotoSymbol: (name: string) => boolean;
+    findUsages: () => { name: string | null; items: UsageItem[]; anchor: UsageAnchor | null } | null;
     commitControls: (
       index: number,
       edits: import('./nemus-edit').ControlEdit[],
@@ -135,6 +137,15 @@
     apply();
   });
 
+  // ── Find-usages relay (Alt+F7 / Command Palette) ─────────────────────────────
+  let lastUsagesSeq = 0;
+  $effect(() => {
+    const seq = nemusStore.findUsagesSeq;
+    if (seq === lastUsagesSeq) return;
+    lastUsagesSeq = seq;
+    if (seq > 0) findUsages();
+  });
+
   // ── Goto-line overlay (Ctrl+G) ───────────────────────────────────────────────
   let gotoOpen = $state(false);
   let gotoValue = $state('');
@@ -154,6 +165,15 @@
 
   /** Open the editor's in-buffer search panel (Ctrl+F when the pane is focused). */
   export function openSearch() { editorComp?.openSearch(); }
+
+  /** Find usages of the identifier under the caret → open the floating popover
+   *  anchored at the caret (Alt+F7 / Command Palette). No-op when the caret isn't
+   *  on a name. */
+  export function findUsages() {
+    const res = editorComp?.findUsages();
+    if (!res) return;
+    usagesStore.openAt(res.name, res.items, res.anchor);
+  }
 
   function commitGoto() {
     const m = gotoValue.match(/(\d+)(?:\s*[:,]\s*(\d+))?/);

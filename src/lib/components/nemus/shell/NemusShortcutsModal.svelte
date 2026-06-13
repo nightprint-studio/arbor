@@ -42,6 +42,7 @@
   // isn't in NEMUS_BINDINGS — surface it here as a documented contextual key.
   const contextual = [
     { keys: ['Ctrl', 'Click'],  description: 'Editor: go to declaration (fn / let / import, incl. cross-file)' },
+    { keys: ['Ctrl', 'Click'],  description: 'Editor: preview an instrument name — inst("…") / s("…")' },
     { keys: ['Ctrl', 'Click'],  description: 'Arrangement: reveal the source that produced a hap' },
     { keys: ['Drag'],           description: 'Reorder editor tabs · fold blocks via the gutter arrows' },
     { keys: ['↑', '↓'],         description: 'Arrangement: move between track lanes' },

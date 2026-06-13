@@ -9,17 +9,25 @@
 //! **Decimation.** Pitch lives in `F_MIN..F_MAX` (70–1200 Hz), far below the
 //! source's Nyquist, so we box-average the signal down to ~[`TARGET_RATE`] before
 //! analysis. YIN's difference function is `O(tau_max · frame)` per frame and both
-//! scale with the rate, so decimating by `M` cuts the work by ~`M²` (≈80× at
-//! 44.1 kHz). Parabolic interpolation recovers the precision the lower rate would
-//! otherwise cost at higher notes, so the result is as accurate but far faster.
+//! scale with the rate, so decimating by `M` cuts the work by ~`M²` (≈25× at
+//! 44.1 kHz, where `M ≈ 5`). The target rate is chosen so YIN still *resolves* the
+//! period at `F_MAX` (see [`TARGET_RATE`]) — decimate harder and high notes fold
+//! an octave low — and parabolic interpolation then recovers sub-sample precision.
 
 use crate::note::DetNote;
 
 /// Pitch search range. Below/above this we don't trust a monophonic estimate.
 const F_MIN: f64 = 70.0;
 const F_MAX: f64 = 1200.0;
-/// Decimate to roughly this rate before YIN (well above `2·F_MAX`, with headroom).
-const TARGET_RATE: f64 = 4500.0;
+/// Decimate to roughly this rate before YIN. Must give YIN enough samples per
+/// period to *resolve* the fundamental at `F_MAX`, not merely to represent the
+/// signal: the difference function's minimum at the true period has to be deep
+/// and well-placed, or the first sub-threshold dip lands on 2× the period and the
+/// note reads an octave low. `2·F_MAX` (Nyquist) is far too coarse for that — a
+/// `F_MAX` tone then has < 4 samples/period; ~6–8 is what keeps high notes from
+/// octave-folding. `9000` gives ≈7.4 samples/period at 1200 Hz while still
+/// decimating 44.1/48 kHz ~5×.
+const TARGET_RATE: f64 = 9000.0;
 /// Analysis window / hop in **time**, so they map to the same musical resolution
 /// at any (decimated) rate. ~46 ms window, ~11.6 ms hop (≈86 frames/s).
 const WIN_SEC: f64 = 0.046;

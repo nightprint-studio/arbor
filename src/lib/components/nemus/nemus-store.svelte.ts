@@ -21,8 +21,10 @@ import type { ControlEdit } from './editor/nemus-edit';
 /** Left-rail panels (top group = side panels, bottom group = bottom panel). */
 export type LeftPanel = 'files' | 'outline' | 'soundbank';
 /** Bottom-docked panels. The Mixer lives here (Logic-style horizontal strips),
- *  alongside the Console + Problems + the background Jobs output. */
-export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs';
+ *  alongside the Console + Problems + the background Jobs output, plus the
+ *  instrument **Preview** (audition keyboard + knobs). (Find-usages is a floating
+ *  popover, not a docked panel — see `usagesStore`.) */
+export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs' | 'preview';
 /** Right-rail panels. */
 export type RightPanel = 'inspector' | 'docs';
 
@@ -90,6 +92,10 @@ function createNemusStore() {
   // ── Mixer/Inspector → editor commit relay (one-shot) ─────────────────────────
   let commitRequest = $state<CommitRequest | null>(null);
   let commitSeq = 0;
+
+  // ── Find-usages relay (one-shot) — the editor owns the tree + caret, so the
+  // shortcut / palette ask it to collect usages via this bumped seq. ────────────
+  let findUsagesSeq = $state(0);
 
   // ── Live editor caret (footer Ln/Col) ────────────────────────────────────────
   let caretLine = $state(1);
@@ -201,6 +207,13 @@ function createNemusStore() {
       if (!edits.length) return;
       if (collapseTabpane) collapseTabpane = false; // editor must be mounted to apply
       commitRequest = { index, edits, seq: ++commitSeq };
+    },
+
+    // ── find usages (one-shot; TabbedEditor consumes, populates usagesStore) ──
+    get findUsagesSeq() { return findUsagesSeq; },
+    requestFindUsages() {
+      if (collapseTabpane) collapseTabpane = false; // editor must be mounted to read the tree
+      findUsagesSeq++;
     },
 
     // ── live caret (footer) ──

@@ -9,10 +9,11 @@
    * (`NemusInstrument`) is nemus-specific, so this lives under nemus/panels.
    */
   import { slide } from 'svelte/transition';
-  import { Waves, Piano, Drum, Copy, Check, Info } from 'lucide-svelte';
+  import { Waves, Piano, Drum, Copy, Check, Info, Volume2 } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { animStore } from '$lib/stores/animations.svelte';
+  import { previewStore } from '../stores/preview.svelte';
   import type { NemusInstrument } from '$lib/ipc/nemus';
 
   let { inst }: { inst: NemusInstrument } = $props();
@@ -49,6 +50,12 @@
       <span class="sbi-copy" class:ok={copied}>
         {#if copied}<Check size={12} />{:else}<Copy size={12} />{/if}
       </span>
+    </button>
+
+    <button class="sbi-info-btn" aria-label={`Preview ${inst.name}`}
+            use:tooltip={'Preview instrument'}
+            onclick={() => previewStore.show(inst)}>
+      <Volume2 size={13} />
     </button>
 
     {#if hasInfo}
