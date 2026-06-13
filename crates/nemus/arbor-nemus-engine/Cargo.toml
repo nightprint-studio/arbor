@@ -17,6 +17,10 @@ arbor-nemus-pattern = { path = "../arbor-nemus-pattern" }
 arbor-nemus-audio   = { path = "../arbor-nemus-audio" }
 thiserror.workspace = true
 hound = "3"
+# Ogg Vorbis encoder for the offline render's OGG export (vendored libvorbis/aoTuV,
+# no system deps — same vendored-C posture as git2/mlua). Quarantined behind
+# `encode::OggSink` so it's swappable.
+vorbis_rs = "0.5"
 
 [lints.rust]
 missing_debug_implementations = "warn"

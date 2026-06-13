@@ -172,6 +172,8 @@ export interface NemusRenderOpts {
   bit_depth?: string;
   tail_max_secs?: number;
   sample_rate?: number;
+  /** `wav` | `ogg` — output container/codec. Defaults to WAV. */
+  format?: string;
 }
 
 /** A `nemus_transport` verb. */

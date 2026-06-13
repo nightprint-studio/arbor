@@ -41,6 +41,7 @@ function createProjectActions() {
   // is the chosen multiplier, carried into the picker's confirm.
   let exportOptionsOpen = $state(false);
   let exportLoops       = $state(DEFAULT_RENDER_LOOPS);
+  let exportFormat      = $state<'wav' | 'ogg'>('wav');
 
   function onConfirm(path: string) {
     const mode = picker;
@@ -68,9 +69,9 @@ function createProjectActions() {
       // still produces a (tiny but valid) WAV instead of an empty one.
       const cycles = (arrangementStore.loopCycles || 1) * exportLoops;
       // The render runs as a background job; the store reports start/done/fail
-      // via the title-bar badge (the job resolves with an id, not the WAV).
+      // via the title-bar badge (the job resolves with an id, not the audio file).
       void renderStore.track(
-        nemusRender(projectStore.activeSource, path, { cycles }, projectStore.project?.path),
+        nemusRender(projectStore.activeSource, path, { cycles, format: exportFormat }, projectStore.project?.path),
         path,
       );
     }
@@ -87,10 +88,12 @@ function createProjectActions() {
     get picker() { return picker; },
     get exportOptionsOpen() { return exportOptionsOpen; },
     get exportLoops()       { return exportLoops; },
+    get exportFormat()      { return exportFormat; },
     /** Resulting render length for the chosen loop count (read-only echo). */
     get exportCycles()      { return exportCycles(); },
 
     setExportLoops(n: number) { exportLoops = Math.max(1, Math.round(n) || 1); },
+    setExportFormat(f: 'wav' | 'ogg') { exportFormat = f; },
 
     /** Open the "new nemus project" folder picker. */
     newProject()  { picker = 'new'; },

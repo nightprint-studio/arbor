@@ -27,11 +27,13 @@ pub struct RenderOpts {
     pub tail_max_secs: Option<f32>,
     /// Output sample rate — overrides the config default when present.
     pub sample_rate: Option<u32>,
+    /// Output container/codec: `"wav"` | `"ogg"`. Defaults to WAV.
+    pub format: Option<String>,
 }
 
 /// Resolve the effective [`RenderConfig`] by overlaying `opts` onto `base`.
 pub fn resolve_config(base: RenderConfig, opts: &RenderOpts) -> RenderConfig {
-    use arbor_nemus::prelude::BitDepth;
+    use arbor_nemus::prelude::{BitDepth, Format};
     RenderConfig {
         sample_rate: opts.sample_rate.unwrap_or(base.sample_rate),
         bit_depth: match opts.bit_depth.as_deref() {
@@ -40,6 +42,11 @@ pub fn resolve_config(base: RenderConfig, opts: &RenderOpts) -> RenderConfig {
             None => base.bit_depth,
         },
         tail_max_secs: opts.tail_max_secs.unwrap_or(base.tail_max_secs),
+        format: match opts.format.as_deref() {
+            Some(s) if s.eq_ignore_ascii_case("ogg") => Format::Ogg,
+            Some(_) => Format::Wav,
+            None => base.format,
+        },
     }
 }
 

@@ -44,10 +44,10 @@
   // Export button reflects the render job: spinner while bouncing, then a brief
   // ✓ / ⚠ so the user sees it finished (or why it didn't) instead of nothing.
   const exportTip = $derived(
-    renderStore.status === 'rendering' ? `Rendering ${renderStore.file ?? 'WAV'}…`
-    : renderStore.status === 'done'    ? `Exported ${renderStore.file ?? 'WAV'}`
+    renderStore.status === 'rendering' ? `Rendering ${renderStore.file ?? 'audio'}…`
+    : renderStore.status === 'done'    ? `Exported ${renderStore.file ?? 'audio'}`
     : renderStore.status === 'failed'  ? `Render failed${renderStore.error ? `: ${renderStore.error}` : ''}`
-    : 'Render to WAV (Ctrl+Shift+R)',
+    : 'Export audio (Ctrl+Shift+R)',
   );
 
   /** Last path segment (forward- or back-slash) for a recents label. */
@@ -65,7 +65,7 @@
     { kind: 'item', id: 'recent',   label: 'Recent Projects…', icon: Clock,                                  onclick: () => { recentOpen = true; } },
     { kind: 'separator', label: 'Project' },
     { kind: 'item', id: 'save',   label: 'Save',           icon: Save,     shortcut: 'Ctrl+S',       onclick: () => projectActions.save() },
-    { kind: 'item', id: 'export', label: 'Export to WAV…', icon: Download, shortcut: 'Ctrl+Shift+R', onclick: () => projectActions.exportWav() },
+    { kind: 'item', id: 'export', label: 'Export audio…', icon: Download, shortcut: 'Ctrl+Shift+R', onclick: () => projectActions.exportWav() },
     { kind: 'separator' },
     { kind: 'item', id: 'close', label: 'Close Window', icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },
   ]);
@@ -77,7 +77,7 @@
     { kind: 'item', id: 'zen', label: 'Zen mode', icon: Minimize2, shortcut: 'Ctrl+Shift+Z', onclick: () => nemusStore.toggleZen() },
     { kind: 'separator' },
     { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings,  shortcut: 'Ctrl+,', onclick: () => nemusStore.openSettings() },
-    { kind: 'item', id: 'shortcuts', label: 'Keyboard Shortcuts…', icon: Keyboard,  shortcut: 'F1',     onclick: () => nemusStore.openShortcuts() },
+    { kind: 'item', id: 'shortcuts', label: 'Keyboard Shortcuts…', icon: Keyboard,  shortcut: 'Shift+F1', onclick: () => nemusStore.openShortcuts() },
   ]);
 
   // ── Project fast-swap (recents + open) ────────────────────────────────────────
@@ -108,6 +108,7 @@
   logoTooltip="nemus — music live-coding"
   menu={hamburgerMenu}
   menuWidth="240px"
+  docs={{ active: nemusStore.docsOpen, tooltip: 'Documentation (F1)', onclick: () => nemusStore.toggleDocs() }}
   commandPalette={{ active: nemusStore.paletteOpen, tooltip: 'Command palette (Ctrl+K)', onclick: () => nemusStore.togglePalette() }}
   settings={{ menu: settingsMenu, menuWidth: '220px', tooltip: 'Settings' }}
 >
@@ -180,7 +181,7 @@
         onclick={() => projectActions.exportWav()}
         disabled={renderStore.active}
         use:tooltip={exportTip}
-        aria-label="Render to WAV"
+        aria-label="Export audio"
       >
         {#if renderStore.status === 'rendering'}<Spinner size={13} />
         {:else if renderStore.status === 'done'}<Check size={14} />

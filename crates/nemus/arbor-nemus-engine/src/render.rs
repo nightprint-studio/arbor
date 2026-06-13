@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::clock::Epoch;
+use crate::encode::{Format, RenderSink};
 use crate::error::{EngineError, Result};
 use crate::schedule::{delay_config_for, schedule_span};
 
@@ -50,11 +51,14 @@ pub enum BitDepth {
 pub struct RenderConfig {
     /// Output sample rate (frames/s). Default [`DEFAULT_SAMPLE_RATE`].
     pub sample_rate: u32,
-    /// Sample format. Default [`DEFAULT_BIT_DEPTH`].
+    /// Sample format (WAV only). Default [`DEFAULT_BIT_DEPTH`].
     pub bit_depth: BitDepth,
     /// Max trailing silence/tail to capture after the arrangement, in seconds
     /// (release/reverb). Default [`DEFAULT_TAIL_MAX_SECS`].
     pub tail_max_secs: f32,
+    /// Output container/codec (WAV vs Ogg Vorbis). Default [`Format::Wav`].
+    /// This is a per-export choice, not a persisted preference.
+    pub format: Format,
 }
 
 impl Default for RenderConfig {
@@ -63,6 +67,7 @@ impl Default for RenderConfig {
             sample_rate: DEFAULT_SAMPLE_RATE,
             bit_depth: DEFAULT_BIT_DEPTH,
             tail_max_secs: DEFAULT_TAIL_MAX_SECS,
+            format: Format::Wav,
         }
     }
 }
@@ -150,7 +155,7 @@ pub fn render_offline_with_progress(
     let tail_frames = (cfg.tail_max_secs.max(0.0) as f64 * sr as f64).round() as u64;
     let total_frames = arrangement_frames + tail_frames;
 
-    let mut writer = wav_writer(cfg, out_path)?;
+    let mut sink = RenderSink::open(cfg.format, cfg, out_path)?;
 
     // Voice-id counter and cross-render sustained dedup, threaded across blocks
     // (the schedule core is pure, so this state lives here — like the transport).
@@ -212,7 +217,7 @@ pub fn render_offline_with_progress(
 
         let out = &mut block[..block_len];
         renderer.process(&mut cmds, out);
-        if let Err(e) = write_block(&mut writer, cfg, out) {
+        if let Err(e) = sink.write_block(out) {
             write_err = Some(e);
             break;
         }
@@ -221,10 +226,8 @@ pub fn render_offline_with_progress(
         on_progress(RenderProgress { done_frames: frame_cursor, total_frames });
     }
 
-    // Always finalize, even after a write error, so the file is a valid WAV.
-    let finalized = writer
-        .finalize()
-        .map_err(|e| EngineError::Render(format!("finalizing WAV: {e}")));
+    // Always finalize, even after a write error, so the file is valid/playable.
+    let finalized = sink.finalize();
     match write_err {
         Some(e) => Err(e),
         None => finalized,
@@ -257,62 +260,6 @@ fn preload_file_sources(renderer: &mut Renderer, tracks: &Tracks<ControlMap>, cy
     }
 }
 
-/// Open a `hound` WAV writer matching `cfg`'s format (stereo, `cfg.sample_rate`).
-fn wav_writer(cfg: &RenderConfig, out_path: &Path) -> Result<hound::WavWriter<std::io::BufWriter<std::fs::File>>> {
-    let spec = match cfg.bit_depth {
-        BitDepth::Int24 => hound::WavSpec {
-            channels: 2,
-            sample_rate: cfg.sample_rate,
-            bits_per_sample: 24,
-            sample_format: hound::SampleFormat::Int,
-        },
-        BitDepth::Float32 => hound::WavSpec {
-            channels: 2,
-            sample_rate: cfg.sample_rate,
-            bits_per_sample: 32,
-            sample_format: hound::SampleFormat::Float,
-        },
-    };
-    hound::WavWriter::create(out_path, spec)
-        .map_err(|e| EngineError::Io(format!("creating {}: {e}", out_path.display())))
-}
-
-/// Write one rendered block, interleaving L/R and converting to the WAV format.
-fn write_block(
-    writer: &mut hound::WavWriter<std::io::BufWriter<std::fs::File>>,
-    cfg: &RenderConfig,
-    block: &[Frame],
-) -> Result<()> {
-    match cfg.bit_depth {
-        BitDepth::Int24 => {
-            for &[l, r] in block {
-                writer
-                    .write_sample(to_i24(l))
-                    .and_then(|()| writer.write_sample(to_i24(r)))
-                    .map_err(|e| EngineError::Render(format!("writing sample: {e}")))?;
-            }
-        }
-        BitDepth::Float32 => {
-            for &[l, r] in block {
-                writer
-                    .write_sample(l)
-                    .and_then(|()| writer.write_sample(r))
-                    .map_err(|e| EngineError::Render(format!("writing sample: {e}")))?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Convert a `-1.0..=1.0` float sample to a 24-bit signed integer (carried in an
-/// `i32`, which is how `hound` writes 24-bit PCM). Out-of-range values are
-/// hard-clipped to the 24-bit full-scale.
-fn to_i24(sample: f32) -> i32 {
-    const MAX: f32 = 8_388_607.0; // 2^23 - 1
-    let scaled = (sample.clamp(-1.0, 1.0) * MAX).round();
-    scaled as i32
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,15 +270,7 @@ mod tests {
         assert_eq!(c.sample_rate, DEFAULT_SAMPLE_RATE);
         assert_eq!(c.bit_depth, DEFAULT_BIT_DEPTH);
         assert_eq!(c.tail_max_secs, DEFAULT_TAIL_MAX_SECS);
-    }
-
-    #[test]
-    fn i24_conversion_clamps_and_scales() {
-        assert_eq!(to_i24(0.0), 0);
-        assert_eq!(to_i24(1.0), 8_388_607);
-        assert_eq!(to_i24(-1.0), -8_388_607);
-        assert_eq!(to_i24(2.0), 8_388_607); // clipped
-        assert_eq!(to_i24(-2.0), -8_388_607);
+        assert_eq!(c.format, Format::Wav);
     }
 
     #[test]

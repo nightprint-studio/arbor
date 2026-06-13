@@ -18,6 +18,7 @@
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
+  import Select from '$lib/components/shared/ui/Select.svelte';
   import { Download } from 'lucide-svelte';
 
   import { projectActions } from '../stores/project-actions.svelte';
@@ -38,6 +39,14 @@
   const srLabel  = $derived(`${transportStore.sampleRate / 1000} kHz`);
   const tailSecs = $derived(configStore.render.tail_max_secs || 4.0);
 
+  const format = $derived(projectActions.exportFormat);
+  const formatOptions = [
+    { value: 'wav', label: 'WAV — lossless PCM' },
+    { value: 'ogg', label: 'OGG Vorbis — compressed' },
+  ];
+  /** Rough VBR bitrate (~q0.6) used for the OGG size estimate. */
+  const OGG_BITRATE = 192_000;
+
   const estimate = $derived(estimateRender({
     cycles:     totalCycles,
     cps:        transportStore.cps,
@@ -46,10 +55,20 @@
     bitDepth:   configStore.render.bit_depth,
   }));
 
+  // OGG is lossy: estimate size from a nominal bitrate, not the PCM bit depth.
+  const sizeBytes = $derived(
+    format === 'ogg' ? Math.round((estimate.durationSecs * OGG_BITRATE) / 8) : estimate.sizeBytes,
+  );
+
   const estimateLabel = $derived(
     estimate.durationSecs > 0
-      ? `~${fmtRenderDuration(estimate.durationSecs)} · ~${fmtRenderSize(estimate.sizeBytes)}`
+      ? `~${fmtRenderDuration(estimate.durationSecs)} · ~${fmtRenderSize(sizeBytes)}`
       : '—',
+  );
+  const formatDetail = $derived(
+    format === 'ogg'
+      ? `stereo Vorbis ~192 kbps @ ${srLabel}`
+      : `stereo ${configStore.render.bit_depth ?? 'int24'} @ ${srLabel}`,
   );
 
   function submit() {
@@ -70,16 +89,28 @@
 <Modal
   onClose={projectActions.cancelExportOptions}
   width="560px"
-  height="320px"
+  height="380px"
   ariaLabel="Export options"
 >
   {#snippet header()}
-    <ModalHeader title="Export to WAV" onClose={projectActions.cancelExportOptions} />
+    <ModalHeader title="Export audio" onClose={projectActions.cancelExportOptions} />
   {/snippet}
 
   {#snippet children()}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="body" onkeydown={onKeydown}>
+      <div class="row">
+        <label class="row-label" for="export-format">Format</label>
+        <div class="row-control">
+          <Select
+            id="export-format"
+            value={format}
+            options={formatOptions}
+            onchange={(v) => projectActions.setExportFormat(v as 'wav' | 'ogg')}
+          />
+        </div>
+      </div>
+
       <div class="row">
         <label class="row-label" for="export-loops">Loops</label>
         <div class="row-control">
@@ -118,7 +149,7 @@
             {estimateLabel}
             {#if canExport}
               <span class="summary-detail">
-                stereo {configStore.render.bit_depth ?? 'int24'} @ {srLabel} · {cpsLabel} cps + {tailSecs}s tail
+                {formatDetail} · {cpsLabel} cps + {tailSecs}s tail
               </span>
             {/if}
           </span>

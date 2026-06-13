@@ -15,7 +15,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen,
+    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -39,7 +39,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen,
+    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -69,7 +69,7 @@
     { id: 'new_file',     label: 'New .nemus file…', group: 'Project', icon: 'FilePlus2',  keys: 'Ctrl+N',       run: () => projectActions.newFile() },
     { id: 'save',         label: 'Save file',        group: 'Project', icon: 'Save',       keys: 'Ctrl+S',       run: () => projectActions.save() },
     { id: 'rename_project', label: 'Rename project…', group: 'Project', icon: 'FolderPen', run: () => { if (projectStore.project) nemusStore.openRenameProject(); } },
-    { id: 'export',       label: 'Export to WAV…',   group: 'Project', icon: 'Download',   keys: 'Ctrl+Shift+R', run: () => projectActions.exportWav() },
+    { id: 'export',       label: 'Export audio…',    group: 'Project', icon: 'Download',   keys: 'Ctrl+Shift+R', run: () => projectActions.exportWav() },
     { id: 'import',       label: 'Import audio / MIDI…', group: 'Project', icon: 'FileInput', keys: 'Alt+Shift+I', run: () => importActions.start() },
     { id: 'convert_midi', label: 'Convert WAV to MIDI…', group: 'Project', icon: 'FileAudio', run: () => importActions.startConvert() },
     { id: 'dl_basic_pitch', label: 'Download polyphonic model (basic-pitch)', group: 'Project', icon: 'Download', run: () => void modelsStore.download('basic-pitch') },
@@ -86,7 +86,7 @@
     { id: 'p_problems',  label: 'Toggle Problems',   group: 'View', icon: 'AlertTriangle',    run: () => nemusStore.toggleBottom('problems') },
     { id: 'p_jobs',      label: 'Toggle Jobs',       group: 'View', icon: 'Boxes',            run: () => nemusStore.toggleBottom('jobs') },
     { id: 'p_inspector', label: 'Toggle Inspector',  group: 'View', icon: 'Crosshair',        run: () => nemusStore.toggleRight('inspector') },
-    { id: 'p_docs',      label: 'Toggle Docs',       group: 'View', icon: 'BookOpen',         run: () => nemusStore.toggleRight('docs') },
+    { id: 'p_docs',      label: 'Toggle Language reference', group: 'View', icon: 'Braces',    run: () => nemusStore.toggleRight('docs') },
     { id: 'c_viz',       label: 'Toggle Arrangement', group: 'View', icon: 'PanelLeft',       run: () => nemusStore.toggleCollapseUi() },
     { id: 'c_editor',    label: 'Toggle Editor',      group: 'View', icon: 'PanelRight',      run: () => nemusStore.toggleCollapseTabpane() },
     { id: 'zen',         label: 'Toggle Zen mode',   group: 'View', icon: 'Minimize2', keys: 'Ctrl+Shift+Z', run: () => nemusStore.toggleZen() },
@@ -100,8 +100,9 @@
     { id: 'inline', label: 'Inline let', group: 'Edit', icon: 'FileSymlink', keys: 'Alt+Shift+N', run: () => nemusStore.requestInline() },
     { id: 'intentions', label: 'Show context actions / quick-fixes', group: 'Edit', icon: 'Lightbulb', keys: 'Alt+Enter', run: () => nemusStore.requestIntentions() },
     // Window
-    { id: 'settings',  label: 'Settings…',          group: 'Window', icon: 'Settings', keys: 'Ctrl+,', run: () => nemusStore.openSettings() },
-    { id: 'shortcuts', label: 'Keyboard Shortcuts', group: 'Window', icon: 'Keyboard', keys: 'F1',     run: () => nemusStore.openShortcuts() },
+    { id: 'docs',      label: 'Documentation',      group: 'Window', icon: 'BookOpen', keys: 'F1',       run: () => nemusStore.openDocs() },
+    { id: 'settings',  label: 'Settings…',          group: 'Window', icon: 'Settings', keys: 'Ctrl+,',   run: () => nemusStore.openSettings() },
+    { id: 'shortcuts', label: 'Keyboard Shortcuts', group: 'Window', icon: 'Keyboard', keys: 'Shift+F1', run: () => nemusStore.openShortcuts() },
   ]);
 
   let query = $state('');

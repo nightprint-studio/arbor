@@ -46,9 +46,9 @@
 {:else if projectActions.picker === 'export'}
   <FileExplorerModal
     mode="save"
-    title="Export to WAV"
-    extensions={['wav']}
-    initialFilename={`${projectStore.project?.name ?? 'nemus'}.wav`}
+    title={`Export to ${projectActions.exportFormat.toUpperCase()}`}
+    extensions={[projectActions.exportFormat]}
+    initialFilename={`${projectStore.project?.name ?? 'nemus'}.${projectActions.exportFormat}`}
     initialPath={projectStore.project?.path}
     onConfirm={projectActions.onConfirm}
     onCancel={projectActions.cancel}

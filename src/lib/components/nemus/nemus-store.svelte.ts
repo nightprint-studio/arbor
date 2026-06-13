@@ -85,6 +85,7 @@ function createNemusStore() {
   let shortcutsOpen = $state(false);
   let paletteOpen   = $state(false);
   let renameProjectOpen = $state(false);
+  let docsOpen      = $state(false);
 
   // ── Outline → editor jump relay (one-shot) ───────────────────────────────────
   let gotoRequest = $state<GotoRequest | null>(null);
@@ -211,6 +212,10 @@ function createNemusStore() {
     get renameProjectOpen() { return renameProjectOpen; },
     openRenameProject()  { renameProjectOpen = true; },
     closeRenameProject() { renameProjectOpen = false; },
+    get docsOpen() { return docsOpen; },
+    openDocs()   { docsOpen = true; },
+    closeDocs()  { docsOpen = false; },
+    toggleDocs() { docsOpen = !docsOpen; },
 
     // ── Outline / Problems → editor jump (one-shot; TabbedEditor consumes) ──
     get gotoRequest() { return gotoRequest; },

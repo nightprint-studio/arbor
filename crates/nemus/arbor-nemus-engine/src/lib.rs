@@ -29,6 +29,7 @@
 //! Reach the public API through [`prelude`] (workspace convention).
 
 pub mod clock;
+pub mod encode;
 pub mod error;
 pub mod prelude;
 pub mod render;

@@ -49,7 +49,9 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   // Window — discovery + layout. `Ctrl+K` matches Arbor's command palette so the
   // muscle memory carries across both windows.
   { id: 'command_palette', key: 'k', ctrl: true, scope: 'global', description: 'Open the Command Palette' },
-  { id: 'shortcuts',    key: 'F1', scope: 'global', description: 'Show the keyboard shortcuts' },
+  // `F1` opens the docs, `Shift+F1` the shortcuts cheat-sheet — matches Arbor.
+  { id: 'docs',         key: 'F1', scope: 'global', description: 'Open the documentation' },
+  { id: 'shortcuts',    key: 'F1', shift: true, scope: 'global', description: 'Show the keyboard shortcuts' },
   { id: 'settings',     key: ',', ctrl: true,  scope: 'global', description: 'Open Settings' },
   { id: 'zen',          key: 'z', ctrl: true, shift: true, scope: 'global', description: 'Toggle Zen mode' },
   { id: 'find',         key: 'f', ctrl: true,  scope: 'global', description: 'Find in file (editor) · search the Console / Problems' },

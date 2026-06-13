@@ -117,7 +117,8 @@ impl NemusConfig {
 }
 
 impl NemusRenderConfig {
-    /// The engine render config derived from these settings.
+    /// The engine render config derived from these settings. `format` defaults to
+    /// WAV; the per-export OGG/WAV choice is overlaid in `render::resolve_config`.
     pub fn render_config(&self) -> RenderConfig {
         RenderConfig {
             sample_rate: self.sample_rate,
@@ -127,6 +128,7 @@ impl NemusRenderConfig {
                 BitDepth::Int24
             },
             tail_max_secs: self.tail_max_secs,
+            format: arbor_nemus::prelude::Format::Wav,
         }
     }
 }

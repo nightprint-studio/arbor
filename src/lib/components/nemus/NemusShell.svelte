@@ -67,6 +67,7 @@
   import NemusShortcutsModal from './shell/NemusShortcutsModal.svelte';
   import NemusCommandPalette from './shell/NemusCommandPalette.svelte';
   import RenameProjectModal from './shell/RenameProjectModal.svelte';
+  import NemusDocsPanel from './shell/NemusDocsPanel.svelte';
   import InstrumentPreviewPanel from './preview/InstrumentPreviewPanel.svelte';
   import { NEMUS_BINDINGS, matchesNemus } from './nemus-keybindings';
 
@@ -178,13 +179,13 @@
   // While any overlay (Settings / Shortcuts / Command Palette) is open it owns
   // the keyboard — Esc (handled by the modal / palette) closes it. Only the
   // palette toggle is honoured through, so Ctrl+K also dismisses it.
-  const overlayOpen = $derived(nemusStore.settingsOpen || nemusStore.shortcutsOpen || nemusStore.paletteOpen || nemusStore.renameProjectOpen);
+  const overlayOpen = $derived(nemusStore.settingsOpen || nemusStore.shortcutsOpen || nemusStore.paletteOpen || nemusStore.renameProjectOpen || nemusStore.docsOpen);
 
   function onKeyDown(e: KeyboardEvent) {
     for (const b of NEMUS_BINDINGS) {
       if (b.scope === 'editor' && !editorScoped) continue;
       if (!matchesNemus(e, b)) continue;
-      if (overlayOpen && !(b.id === 'command_palette' && nemusStore.paletteOpen)) return;
+      if (overlayOpen && !((b.id === 'command_palette' && nemusStore.paletteOpen) || (b.id === 'docs' && nemusStore.docsOpen))) return;
       e.preventDefault();
       if (b.id === 'goto_line') editor?.openGoto();
       else if (b.id === 'new_file') editor?.newFile();
@@ -192,6 +193,7 @@
       else if (b.id === 'seek_to_start') void nemusEngine.seekToStart();
       else if (b.id === 'seek_to_end') void nemusEngine.seekToEnd(arrangementStore.contentEnd);
       else if (b.id === 'command_palette') nemusStore.togglePalette();
+      else if (b.id === 'docs') nemusStore.toggleDocs();
       else if (b.id === 'shortcuts') nemusStore.openShortcuts();
       else if (b.id === 'settings') nemusStore.openSettings();
       else if (b.id === 'zen') nemusStore.toggleZen();
@@ -374,6 +376,7 @@
 {#if nemusStore.shortcutsOpen}<NemusShortcutsModal onClose={() => nemusStore.closeShortcuts()} />{/if}
 {#if nemusStore.paletteOpen}<NemusCommandPalette onClose={() => nemusStore.closePalette()} />{/if}
 {#if nemusStore.renameProjectOpen}<RenameProjectModal onClose={() => nemusStore.closeRenameProject()} />{/if}
+{#if nemusStore.docsOpen}<NemusDocsPanel onClose={() => nemusStore.closeDocs()} />{/if}
 
 <style>
   .shell {
