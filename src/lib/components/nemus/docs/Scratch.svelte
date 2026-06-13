@@ -7,7 +7,7 @@
 
 <h2>The Scratch panel</h2>
 <p>
-  Open <strong>Scratch</strong> with <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd>,
+  Open <strong>Scratch</strong> with <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd>,
   the flask icon on the bottom rail, or the Command Palette. Paste or type a snippet,
   or press <strong>Load selection</strong> to pull in whatever is selected in the
   editor. As you edit, the panel evaluates the snippet and lists every event it

@@ -96,7 +96,7 @@
     { id: 'p_console',   label: 'Toggle Console',    group: 'View', icon: 'Terminal',         run: () => nemusStore.toggleBottom('console') },
     { id: 'p_problems',  label: 'Toggle Problems',   group: 'View', icon: 'AlertTriangle',    run: () => nemusStore.toggleBottom('problems') },
     { id: 'p_jobs',      label: 'Toggle Jobs',       group: 'View', icon: 'Boxes',            run: () => nemusStore.toggleBottom('jobs') },
-    { id: 'p_scratch',   label: 'Toggle Scratch (expression evaluator)', group: 'View', icon: 'FlaskConical', keys: 'Alt+Shift+S', run: () => nemusStore.toggleBottom('scratch') },
+    { id: 'p_scratch',   label: 'Toggle Scratch (expression evaluator)', group: 'View', icon: 'FlaskConical', keys: 'Ctrl+Shift+S', run: () => nemusStore.toggleBottom('scratch') },
     { id: 'p_inspector', label: 'Toggle Inspector',  group: 'View', icon: 'Crosshair',        run: () => nemusStore.toggleRight('inspector') },
     { id: 'p_docs',      label: 'Toggle Language reference', group: 'View', icon: 'Braces',    run: () => nemusStore.toggleRight('docs') },
     { id: 'c_viz',       label: 'Toggle Arrangement', group: 'View', icon: 'PanelLeft',       run: () => nemusStore.toggleCollapseUi() },

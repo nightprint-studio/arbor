@@ -48,9 +48,11 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   // when nothing is selected), isolated from the song transport. Mirrors the
   // right-click→Play / Outline Play / Scratch path.
   { id: 'play_selection', key: 'Enter', ctrl: true, shift: true, scope: 'editor', description: 'Play selection one-shot (or the file)' },
-  // `Alt+Shift+S` (AltGr-safe; Ctrl+S is Save) — toggle the Scratch panel
-  // (expression evaluator / mini audio tester).
-  { id: 'toggle_scratch', key: 's', alt: true, shift: true, scope: 'global', description: 'Toggle the Scratch panel' },
+  // `Ctrl+Shift+S` — toggle the Scratch panel (expression evaluator / mini audio
+  // tester). NOT Alt+Shift+S: Windows reserves Alt+Shift to switch keyboard layout,
+  // so the OS eats it before the webview. Ctrl+Shift+S avoids that and the webview
+  // devtools letters (I / J / C).
+  { id: 'toggle_scratch', key: 's', ctrl: true, shift: true, scope: 'global', description: 'Toggle the Scratch panel' },
   { id: 'seek_to_start',  key: '[', ctrl: true, shift: true, scope: 'global', description: 'Skip to start (cycle 0)' },
   { id: 'seek_to_end',    key: ']', ctrl: true, shift: true, scope: 'global', description: 'Skip to end of arrangement' },
   // Window — discovery + layout. `Ctrl+K` matches Arbor's command palette so the

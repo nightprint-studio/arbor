@@ -260,7 +260,7 @@
   const leftBottom = $derived<ActivityRailItem[]>([
     { id: 'mixer',    tooltip: 'Mixer',    icon: SlidersHorizontal, active: nemusStore.bottomPanel === 'mixer',    onclick: () => nemusStore.toggleBottom('mixer') },
     { id: 'preview',  tooltip: 'Preview',  icon: Piano,         active: nemusStore.bottomPanel === 'preview',  onclick: () => nemusStore.toggleBottom('preview') },
-    { id: 'scratch',  tooltip: 'Scratch · Alt+Shift+S', icon: FlaskConical, active: nemusStore.bottomPanel === 'scratch', onclick: () => nemusStore.toggleBottom('scratch') },
+    { id: 'scratch',  tooltip: 'Scratch · Ctrl+Shift+S', icon: FlaskConical, active: nemusStore.bottomPanel === 'scratch', onclick: () => nemusStore.toggleBottom('scratch') },
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
     { id: 'inspector', tooltip: 'Inspector', icon: Crosshair, active: nemusStore.rightPanel === 'inspector', onclick: () => nemusStore.toggleRight('inspector') },
