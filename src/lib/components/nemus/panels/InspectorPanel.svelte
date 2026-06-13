@@ -18,6 +18,7 @@
   import Knob from '$lib/components/shared/ui/Knob.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import PeakMeter from './PeakMeter.svelte';
+  import FxControls from './FxControls.svelte';
   import { mixerStore, PAN_CENTER, DELAY_DEFAULT } from '../stores/mixer.svelte';
   import { metersStore, diagnosticsStore } from '../stores/engine.svelte';
   import { arrangementStore, noteName } from '../viz/arrangement.svelte';
@@ -136,6 +137,10 @@
           <p class="insp-subhint">No delay in source — turning a knob adds <code>.delay(…)</code> to this track.</p>
         {/if}
       {/if}
+
+      <!-- FX chain (code-first): parametric EQ + compressor strip inserts. -->
+      <div class="insp-section">FX · code-first</div>
+      <FxControls index={track.index} color={track.color} />
 
       <div class="insp-section">Pattern</div>
       <div class="insp-row"><span>haps / window</span><code>{track.hapCount}</code></div>

@@ -41,6 +41,8 @@ pub struct MeterTap {
     /// DSP load `0..1`: callback compute time / buffer wall-time (smoothed),
     /// stored as `f32` bits.
     dsp_load: AtomicU32,
+    /// Master limiter gain reduction `0..1` (`0` = none), stored as `f32` bits.
+    gain_reduction: AtomicU32,
 }
 
 /// A consistent-enough read of the [`MeterTap`] for one front-end frame. Built on
@@ -56,6 +58,8 @@ pub struct MeterSnapshot {
     pub voices: u32,
     /// DSP load `0.0..~1.0` (1.0 ≈ the callback is using its whole time budget).
     pub dsp_load: f32,
+    /// Master limiter gain reduction `0.0..1.0` (`0` = none, larger = more ducking).
+    pub gain_reduction: f32,
 }
 
 impl MeterTap {
@@ -68,6 +72,7 @@ impl MeterTap {
             track_count: AtomicUsize::new(0),
             voices: AtomicU32::new(0),
             dsp_load: AtomicU32::new(0),
+            gain_reduction: AtomicU32::new(0),
         })
     }
 
@@ -126,6 +131,16 @@ impl MeterTap {
         f32::from_bits(self.dsp_load.load(Ordering::Relaxed))
     }
 
+    /// Store the master limiter gain reduction `0..1`.
+    pub fn store_gain_reduction(&self, v: f32) {
+        self.gain_reduction.store(v.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Read the held gain reduction (for the callback's own decay ballistics).
+    pub fn load_gain_reduction(&self) -> f32 {
+        f32::from_bits(self.gain_reduction.load(Ordering::Relaxed))
+    }
+
     // ── Non-RT reader (called from the shell) ──────────────────────────────────
 
     /// Snapshot the current telemetry for one front-end frame.
@@ -136,6 +151,7 @@ impl MeterTap {
             tracks: (0..n).map(|i| self.load_track(i)).collect(),
             voices: self.voices.load(Ordering::Relaxed),
             dsp_load: self.load_dsp_load(),
+            gain_reduction: self.load_gain_reduction(),
         }
     }
 }

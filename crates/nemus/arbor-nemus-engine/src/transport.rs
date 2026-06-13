@@ -37,7 +37,7 @@ use arbor_nemus_audio::prelude::{AudioCommand, AudioSink, DelayConfig, TrackConf
 use arbor_nemus_pattern::prelude::{ControlMap, SourceKind, TempoMap, Time, Tracks};
 
 use crate::clock::Epoch;
-use crate::schedule::{delay_config_for, schedule_span};
+use crate::schedule::{delay_config_for, schedule_span, track_fx_commands};
 
 /// Look-ahead window in milliseconds (how far ahead of "now" we schedule).
 pub const LOOKAHEAD_MS: u64 = 100;
@@ -359,7 +359,15 @@ impl<S: AudioSink> Transport<S> {
                 name: t.name.clone(),
             })
             .collect();
-        self.sink.send(AudioCommand::ConfigureTracks(cfg))
+        self.sink.send(AudioCommand::ConfigureTracks(cfg))?;
+        // Per-track FX inserts (parametric EQ + compressor) implied by the source.
+        // Strip-level and constant per track, so they ride the (re)configure rather
+        // than the per-onset path. Best-effort: at a swap boundary the queue is
+        // essentially empty, and the next eval re-sends them anyway.
+        for cmd in track_fx_commands(&self.tracks) {
+            let _ = self.sink.send(cmd);
+        }
+        Ok(())
     }
 }
 

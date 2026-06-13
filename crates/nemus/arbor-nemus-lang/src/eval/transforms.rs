@@ -10,7 +10,9 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use arbor_nemus_pattern::prelude::{silence, stack, ControlMap, HoldSpec, Pattern, Scale, SourceSpan};
+use arbor_nemus_pattern::prelude::{
+    silence, stack, CompSpec, ControlMap, EqBandSpec, EqShape, HoldSpec, Pattern, Scale, SourceSpan,
+};
 
 use crate::convert::{as_int, as_number, as_param, as_pattern, as_str, f64_to_time};
 use crate::error::{LangError, LangErrorKind, Result};
@@ -187,6 +189,10 @@ pub fn make_transform(
         // ── §F delay (writes the ControlMap delay fields) ───────────────────
         "delay" => make_delay(args, span),
 
+        // ── Strip inserts: parametric EQ + compressor (per-track FX) ─────────
+        "eq" => make_eq(args, span),
+        "comp" => make_comp(args, span),
+
         "every" => {
             arity(name, args, 2, span)?;
             let n = as_int(&args[0], span)?;
@@ -291,6 +297,87 @@ fn make_delay(args: &[Value], span: SourceSpan) -> Result<Transform> {
             c
         }))
     }))
+}
+
+/// Default EQ band Q when omitted.
+const EQ_DEFAULT_Q: f64 = 0.7;
+/// Default compressor attack / release / knee when omitted.
+const COMP_DEFAULT_ATTACK: f64 = 0.005;
+const COMP_DEFAULT_RELEASE: f64 = 0.1;
+const COMP_DEFAULT_KNEE: f64 = 6.0;
+
+/// `eq(kind, freq, gainDb, q?)` — append one band to the track's parametric-EQ
+/// strip insert (chainable: each call adds a band). `kind` ∈ `peak` | `low` (low
+/// shelf) | `high` (high shelf) | `hpf` | `lpf`; `gainDb` is ignored for hpf/lpf.
+/// The audio engine realises one EQ chain per track from these bands.
+fn make_eq(args: &[Value], span: SourceSpan) -> Result<Transform> {
+    if args.len() < 3 || args.len() > 4 {
+        return Err(LangError::at(
+            span,
+            LangErrorKind::Arity {
+                name: "eq".to_string(),
+                expected: 3, // 3..4; report the minimum
+                got: args.len(),
+            },
+        ));
+    }
+    let kind = parse_eq_shape(&as_str(&args[0], span)?, span)?;
+    let freq = as_number(&args[1], span)?;
+    let gain_db = as_number(&args[2], span)?;
+    let q = match args.get(3) {
+        Some(v) => as_number(v, span)?,
+        None => EQ_DEFAULT_Q,
+    };
+    let band = EqBandSpec { kind, freq, gain_db, q };
+    Ok(Transform::new(move |p| Ok(p.add_eq(band))))
+}
+
+/// Parse an `.eq(...)` band-shape keyword.
+fn parse_eq_shape(s: &str, span: SourceSpan) -> Result<EqShape> {
+    match s.to_ascii_lowercase().as_str() {
+        "peak" | "bell" => Ok(EqShape::Peak),
+        "low" | "lowshelf" => Ok(EqShape::LowShelf),
+        "high" | "highshelf" => Ok(EqShape::HighShelf),
+        "hpf" | "highpass" => Ok(EqShape::Hpf),
+        "lpf" | "lowpass" => Ok(EqShape::Lpf),
+        _ => Err(LangError::at(
+            span,
+            LangErrorKind::Other(format!(
+                "unknown EQ band kind `{s}` (use peak | low | high | hpf | lpf)"
+            )),
+        )),
+    }
+}
+
+/// `comp(thresholdDb, ratio, attack?, release?, makeup?, knee?)` — set the
+/// track's compressor strip insert. Optional times default to a gentle bus
+/// compressor. The audio engine realises one compressor per track.
+fn make_comp(args: &[Value], span: SourceSpan) -> Result<Transform> {
+    if args.len() < 2 || args.len() > 6 {
+        return Err(LangError::at(
+            span,
+            LangErrorKind::Arity {
+                name: "comp".to_string(),
+                expected: 2, // 2..6; report the minimum
+                got: args.len(),
+            },
+        ));
+    }
+    let num_or = |i: usize, default: f64| -> Result<f64> {
+        match args.get(i) {
+            Some(v) => as_number(v, span),
+            None => Ok(default),
+        }
+    };
+    let spec = CompSpec {
+        threshold_db: as_number(&args[0], span)?,
+        ratio: as_number(&args[1], span)?,
+        attack: num_or(2, COMP_DEFAULT_ATTACK)?,
+        release: num_or(3, COMP_DEFAULT_RELEASE)?,
+        makeup_db: num_or(4, 0.0)?,
+        knee_db: num_or(5, COMP_DEFAULT_KNEE)?,
+    };
+    Ok(Transform::new(move |p| Ok(p.comp(spec))))
 }
 
 /// `hold()` / `hold(n)` / `hold(n, "s")` — the monophonic held-note (drone / pad)

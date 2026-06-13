@@ -87,6 +87,9 @@ pub enum NemusControl {
     SetTrackSolo { track: u32, solo: bool },
     /// Override the master-strip gain (linear).
     SetMasterGain { gain: f32 },
+    /// Set the shared reverb-return decay (procedural IR length, in seconds). A
+    /// global mix control like the master gain — session-only, not in the source.
+    SetReverb { seconds: f32 },
 
     /// Tear the session down (drop the cpal stream on this thread) and exit.
     Shutdown,

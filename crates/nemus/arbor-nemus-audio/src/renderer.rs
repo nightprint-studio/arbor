@@ -156,6 +156,11 @@ pub struct Renderer {
     master: Master,
     reverb: Reverb,
     limiter: Limiter,
+    /// Deepest limiter gain-reduction multiplier `0..1` over the current `process`
+    /// block (1 = none). Block-local like `track_peak`: reset to 1.0 at the top of
+    /// `process`, min'd each frame; the callback reads it via [`limiter_reduction`]
+    /// (Self::limiter_reduction) for the master GR meter, applying its own decay.
+    limiter_gr_min: f32,
     registry: Registry,
     /// Resident audio for `File` (`sample`/`audio`) voices, keyed by path.
     files: SampleBank,
@@ -209,6 +214,7 @@ impl Renderer {
             master: Master::default(),
             reverb: Reverb::procedural(DEFAULT_REVERB_SECS, sample_rate as f32),
             limiter: Limiter::new(0.95, 0.05, sample_rate as f32),
+            limiter_gr_min: 1.0,
             registry: Registry::new(),
             files: SampleBank::new(),
             // Pre-reserve so per-block `push`es don't grow the heap in the RT
@@ -263,6 +269,8 @@ impl Renderer {
         for p in &mut self.track_peak {
             *p = [0.0; 2];
         }
+        // Reset the block limiter gain-reduction floor; `render_frame` mins into it.
+        self.limiter_gr_min = 1.0;
 
         // 1. Apply commands. Voice triggers are queued (sample-accurate); mixer
         //    / transport commands take effect immediately. A queued voice clears
@@ -322,6 +330,13 @@ impl Renderer {
     /// caller applies meter ballistics, as with the master peak).
     pub fn track_peaks(&self) -> &[Frame] {
         &self.track_peak
+    }
+
+    /// Deepest master limiter **gain reduction** `0..1` over the most recent
+    /// `process` block (`0` = none, `0.3` ≈ −3 dB-ish of ducking). For the
+    /// out-of-band GR meter; not decayed (the caller applies meter ballistics).
+    pub fn limiter_reduction(&self) -> f32 {
+        1.0 - self.limiter_gr_min
     }
 
     // ── internals ────────────────────────────────────────────────────────────
@@ -714,7 +729,10 @@ impl Renderer {
         master[1] += wet[1];
 
         // Master limiter.
-        self.limiter.process(master)
+        let out = self.limiter.process(master);
+        // Tap the deepest reduction this block for the out-of-band GR meter.
+        self.limiter_gr_min = self.limiter_gr_min.min(self.limiter.current_gain());
+        out
     }
 }
 

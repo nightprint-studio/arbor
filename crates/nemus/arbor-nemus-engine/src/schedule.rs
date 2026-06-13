@@ -34,9 +34,12 @@ use std::collections::HashSet;
 use std::ops::Range;
 
 use arbor_nemus_audio::prelude::{
-    AudioCommand, DelayConfig, VoiceEvent, VoiceParams, VoiceSource,
+    AudioCommand, CompSettings, DelayConfig, EqBand, EqBandKind, VoiceEvent, VoiceParams,
+    VoiceSource,
 };
-use arbor_nemus_pattern::prelude::{ControlMap, Hap, HoldSpec, SourceKind, Tracks};
+use arbor_nemus_pattern::prelude::{
+    CompSpec, ControlMap, EqBandSpec, EqShape, Hap, HoldSpec, SourceKind, Tracks,
+};
 
 use crate::clock::Epoch;
 
@@ -235,6 +238,74 @@ pub fn delay_config_for(ev: &VoiceEvent, epoch: &Epoch, sample_rate: u32) -> Opt
     ))
 }
 
+/// How many opening cycles to probe for a track's EQ / compressor spec. EQ and
+/// compressor are strip-level and constant per track (their `.eq(...)`/`.comp(...)`
+/// args are literals), so a representative hap suffices — this window is wide
+/// enough to catch it even when a track rests for the first few cycles.
+const FX_PROBE_CYCLES: i64 = 16;
+
+/// The per-track FX-insert commands (parametric EQ + compressor) a track set
+/// implies. Unlike the per-onset delay bus, EQ/comp are strip-level and constant
+/// per track, so they are derived **once** when the track set is staged: query
+/// each track for the first hap carrying an `eq`/`comp` spec and convert it.
+///
+/// Every track gets **both** an [`AudioCommand::SetTrackEq`] and an
+/// [`AudioCommand::SetTrackComp`] — an empty band list / `None` when the source
+/// sets none. This keeps the strip authoritative to the source: a
+/// [`AudioCommand::ConfigureTracks`] re-config *preserves* existing inserts where
+/// indices line up, so a removed `.eq(...)` / `.comp(...)` must be cleared
+/// explicitly (the same "every eval re-baselines the strips" rule as gain/pan).
+/// Pure.
+pub fn track_fx_commands(tracks: &Tracks<ControlMap>) -> Vec<AudioCommand> {
+    use arbor_nemus_pattern::prelude::{Time, TimeSpan};
+    let probe = TimeSpan::new(Time::ZERO, Time::int(FX_PROBE_CYCLES));
+    let mut cmds = Vec::with_capacity(tracks.tracks.len() * 2);
+    for (i, t) in tracks.tracks.iter().enumerate() {
+        let track = i as u32;
+        let haps = t.pattern.query(probe);
+        let bands = haps
+            .iter()
+            .find_map(|h| h.value.eq.as_ref())
+            .map(|eq| eq.iter().map(eq_band_to_audio).collect())
+            .unwrap_or_default();
+        cmds.push(AudioCommand::SetTrackEq(track, bands));
+        let comp = haps
+            .iter()
+            .find_map(|h| h.value.comp.as_ref())
+            .map(comp_to_audio);
+        cmds.push(AudioCommand::SetTrackComp(track, comp));
+    }
+    cmds
+}
+
+/// Map a language EQ band spec onto the audio crate's biquad band.
+fn eq_band_to_audio(b: &EqBandSpec) -> EqBand {
+    EqBand {
+        kind: match b.kind {
+            EqShape::Peak => EqBandKind::Peak,
+            EqShape::LowShelf => EqBandKind::LowShelf,
+            EqShape::HighShelf => EqBandKind::HighShelf,
+            EqShape::Hpf => EqBandKind::Hpf,
+            EqShape::Lpf => EqBandKind::Lpf,
+        },
+        freq: b.freq as f32,
+        gain_db: b.gain_db as f32,
+        q: b.q as f32,
+    }
+}
+
+/// Map a language compressor spec onto the audio crate's compressor settings.
+fn comp_to_audio(c: &CompSpec) -> CompSettings {
+    CompSettings {
+        threshold_db: c.threshold_db as f32,
+        ratio: c.ratio as f32,
+        attack: c.attack as f32,
+        release: c.release as f32,
+        makeup_db: c.makeup_db as f32,
+        knee_db: c.knee_db as f32,
+    }
+}
+
 /// Resolve the symbolic source: a user file marker wins over a named sound/inst.
 fn resolve_source(v: &ControlMap) -> VoiceSource {
     if let Some(path) = &v.source_file {
@@ -418,6 +489,25 @@ mod tests {
         // No delay field → no config.
         let plain = voice_event_from_hap(&hap(ControlMap::sound("bd"), Time::ZERO, Time::ONE), 0, &e, sr, 0).unwrap();
         assert!(delay_config_for(&plain, &e, sr).is_none());
+    }
+
+    #[test]
+    fn track_fx_commands_sets_specs_and_clears_unset_tracks() {
+        let band = EqBandSpec { kind: EqShape::Hpf, freq: 80.0, gain_db: 0.0, q: 0.7 };
+        let comp = CompSpec {
+            threshold_db: -18.0, ratio: 4.0, attack: 0.005, release: 0.1, makeup_db: 0.0, knee_db: 6.0,
+        };
+        // Track 0 carries an EQ band + a compressor; track 1 carries neither.
+        let t0 = track("drums", seq(vec![pure(ControlMap::sound("bd"))]).add_eq(band).comp(comp));
+        let t1 = track("bass", seq(vec![pure(ControlMap::sound("sn"))]));
+        let cmds = track_fx_commands(&tracks(vec![t0, t1]));
+        // Track 0: the band + the compressor.
+        assert!(cmds.iter().any(|c| matches!(c, AudioCommand::SetTrackEq(0, b) if b.len() == 1)));
+        assert!(cmds.iter().any(|c| matches!(c, AudioCommand::SetTrackComp(0, Some(_)))));
+        // Track 1: an explicit clear (empty EQ + no compressor) so a removed
+        // `.eq(...)` / `.comp(...)` resets the preserved strip.
+        assert!(cmds.iter().any(|c| matches!(c, AudioCommand::SetTrackEq(1, b) if b.is_empty())));
+        assert!(cmds.iter().any(|c| matches!(c, AudioCommand::SetTrackComp(1, None))));
     }
 
     #[test]

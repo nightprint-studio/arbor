@@ -290,6 +290,12 @@ impl Limiter {
         }
         [out[0] * self.gain, out[1] * self.gain]
     }
+
+    /// Current gain-reduction multiplier `0..1` (1 = no reduction). Read out-of-band
+    /// by the renderer for the master gain-reduction meter; never feeds back into DSP.
+    pub fn current_gain(&self) -> f32 {
+        self.gain
+    }
 }
 
 /// A stereo parametric-EQ chain: one biquad section per [`EqBand`], per channel.

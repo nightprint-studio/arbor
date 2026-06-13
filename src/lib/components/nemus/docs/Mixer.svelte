@@ -12,6 +12,30 @@
   <li><strong>Room</strong> — reverb send (code-first; reflects the <code>.room(…)</code> literal).</li>
   <li><strong>Mute / Solo</strong> — mute writes <code>.gain(0)</code> into the source; solo is live-only.</li>
 </ul>
+<p>
+  The <strong>master</strong> strip adds a <strong>gain-reduction meter</strong> beside its
+  peak meter: a bar that drops from the top — with a dB readout — whenever the master
+  limiter is ducking the mix. A steady reading means the output is being clamped; pull the
+  master fader (or track gains) down until it only flickers on the loudest hits.
+</p>
+
+<h2>FX chain (EQ &amp; compressor)</h2>
+<p>
+  The Inspector's <strong>FX</strong> section edits a track's parametric EQ and
+  compressor — the <code>.eq(…)</code> / <code>.comp(…)</code> strip inserts. The EQ
+  shows a live response curve; <strong>add band</strong> stacks as many bands as you
+  like (peak, shelf, high-/low-pass), each with frequency / gain / Q knobs. The
+  compressor exposes threshold, ratio, attack, release, make-up and knee. Like room
+  and delay these are <strong>code-first</strong>: the knobs reflect the source
+  literals and commit straight back, so the effect is reproducible from the code.
+</p>
+<p>
+  At the end of the mixer the <strong>reverb return</strong> strip shows the shared
+  reverb bus: each track's <code>room</code> send appears as a bar feeding in, and a
+  <strong>decay</strong> knob sets the bus length. Decay is a global, session-only
+  control (like the master fader) — it isn't written to the <code>.nemus</code> and
+  persists across re-evaluations.
+</p>
 
 <h2>Live vs. code-first</h2>
 <div class="callout accent">

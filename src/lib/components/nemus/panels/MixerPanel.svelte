@@ -29,6 +29,8 @@
   import Fader from '$lib/components/shared/ui/Fader.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import PeakMeter from './PeakMeter.svelte';
+  import GainReductionMeter from './GainReductionMeter.svelte';
+  import ReverbReturnStrip from './ReverbReturnStrip.svelte';
   import { nemusStore } from '../nemus-store.svelte';
   import { mixerStore, GAIN_UNITY, PAN_CENTER } from '../stores/mixer.svelte';
   import { metersStore, diagnosticsStore } from '../stores/engine.svelte';
@@ -62,6 +64,13 @@
     const db = 20 * Math.log10(g);
     const r = Math.abs(db) < 0.05 ? 0 : db;
     return `${r > 0 ? '+' : ''}${r.toFixed(1)}`;
+  }
+  /** Gain reduction (linear `0..1`) → a negative dB readout for the master GR meter. */
+  function grDb(reduction: number): string {
+    const g = Math.max(0, 1 - reduction);
+    if (reduction < 0.001) return '0.0';
+    if (g <= 0.0001) return '-∞';
+    return (20 * Math.log10(g)).toFixed(1);
   }
 </script>
 
@@ -126,14 +135,21 @@
         <div class="strip-name master-name"><span class="nm">MASTER</span></div>
         <div class="fader">
           <div class="fader-controls">
+            <div class="gr" use:tooltip={'Limiter gain reduction'}><GainReductionMeter reduction={metersStore.gainReduction} /></div>
             <div class="meter"><PeakMeter peak={metersStore.master} /></div>
             <Fader value={mixerStore.masterGain} max={1} default={GAIN_UNITY} unity={GAIN_UNITY}
                    color="var(--accent)" ariaLabel="Master gain" onchange={(v) => mixerStore.setMasterGain(v)} />
           </div>
           <span class="kval">{gainDb(mixerStore.masterGain)}<span class="kunit">dB</span></span>
         </div>
-        <div class="ms-row"><span class="dsp" use:tooltip={'DSP load'}>{Math.round(metersStore.dspLoad * 100)}%</span></div>
+        <div class="ms-row">
+          <span class="dsp" use:tooltip={'Limiter gain reduction'}>GR {grDb(metersStore.gainReduction)}</span>
+          <span class="dsp" use:tooltip={'DSP load'}>{Math.round(metersStore.dspLoad * 100)}%</span>
+        </div>
       </div>
+
+      <!-- Reverb return: the shared reverb bus (decay + converging room sends). -->
+      <ReverbReturnStrip />
     </div>
   {/if}
   </div>
@@ -186,6 +202,8 @@
     display: flex; align-items: stretch; justify-content: center; gap: 9px;
   }
   .meter { flex-shrink: 0; min-height: 0; }
+  /* Master GR meter slot — stretches to the fader height like the peak meter. */
+  .gr { flex-shrink: 0; min-height: 0; display: flex; }
 
   .knobs-row { display: flex; align-items: flex-start; justify-content: center; gap: 5px; flex-shrink: 0; }
   .kcol { display: flex; flex-direction: column; align-items: center; gap: 1px; }

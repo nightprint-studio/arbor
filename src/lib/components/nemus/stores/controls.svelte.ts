@@ -14,11 +14,14 @@
  */
 
 import { parseNemus } from '../editor/nemus-lang';
-import { extractTrackControls, type TrackControls, type DelayValues } from '../editor/nemus-edit';
+import {
+  extractTrackControls,
+  type TrackControls, type DelayValues, type CompValues, type EqBandValue,
+} from '../editor/nemus-edit';
 import { projectStore } from './project.svelte';
 
 /** Which controls can be calculated (non-literal → not committable). */
-export type ControlName = 'gain' | 'pan' | 'room' | 'delay';
+export type ControlName = 'gain' | 'pan' | 'room' | 'delay' | 'comp';
 
 function createControlsStore() {
   let byTrack = $state<Map<number, TrackControls>>(new Map());
@@ -45,6 +48,10 @@ function createControlsStore() {
     hasRoom(i: number): boolean { return byTrack.get(i)?.room != null; },
     /** Current delay literals for track `i`, or null when absent. */
     delay(i: number): DelayValues | null { return byTrack.get(i)?.delay ?? null; },
+    /** Current parametric-EQ bands for track `i` (source order), or empty. */
+    eq(i: number): EqBandValue[] { return byTrack.get(i)?.eq ?? []; },
+    /** Current compressor literals for track `i`, or null when absent. */
+    comp(i: number): CompValues | null { return byTrack.get(i)?.comp ?? null; },
     /** Whether control `k` of track `i` is a calculated (non-literal) argument —
      *  committing it would be a no-op, so the UI marks it read-only. */
     isCalculated(i: number, k: ControlName): boolean {

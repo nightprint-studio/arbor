@@ -660,6 +660,32 @@ fn transforms() -> Vec<DslEntry> {
             "lead.delay(0.1875, 0.4, 0.5)",
         ),
         entry(
+            "eq", DslKind::Transform, "eq(kind, freq, gainDb, q?, pat) -> pat  ·  pat.eq(kind, freq, gainDb, q?)",
+            "Add one band to the track's parametric EQ (a strip insert — chain calls to add more bands). `kind` is \"peak\", \"low\" (low shelf), \"high\" (high shelf), \"hpf\" or \"lpf\". `gainDb` is ignored for hpf/lpf.",
+            vec![
+                DslParam::req("kind", "band shape: peak | low | high | hpf | lpf"),
+                DslParam::req("freq", "centre / corner frequency in Hz"),
+                DslParam::req("gainDb", "boost / cut in dB (peak / shelf only)"),
+                DslParam::opt("q", "bandwidth (peak) / resonance", "0.7"),
+                pat(),
+            ],
+            "pad.eq(\"hpf\", 80, 0).eq(\"peak\", 3000, -4, 1.2)",
+        ),
+        entry(
+            "comp", DslKind::Transform, "comp(thresholdDb, ratio, attack?, release?, makeup?, knee?, pat) -> pat  ·  pat.comp(thresholdDb, ratio, …)",
+            "Add a compressor to the track (a strip insert). Reduces dynamics above `thresholdDb` by `ratio`:1, with optional attack / release / make-up / knee.",
+            vec![
+                DslParam::req("thresholdDb", "threshold in dBFS (e.g. -18)"),
+                DslParam::req("ratio", "compression ratio (e.g. 4 = 4:1)"),
+                DslParam::opt("attack", "attack time in seconds", "0.005"),
+                DslParam::opt("release", "release time in seconds", "0.1"),
+                DslParam::opt("makeup", "make-up gain in dB", "0"),
+                DslParam::opt("knee", "soft-knee width in dB", "6"),
+                pat(),
+            ],
+            "drums.comp(-18, 4)",
+        ),
+        entry(
             "crush", DslKind::Transform, "crush(bits, pat) -> pat  ·  pat.crush(bits)",
             "Bitcrush: reduce resolution to `bits` for a lo-fi / digital sound. Patternisable.",
             vec![DslParam::req("bits", "bit depth (number or signal)"), pat()],
@@ -876,7 +902,7 @@ mod tests {
         "rev", "degrade", "palindrome", "fast", "slow", "gain", "pan", "room",
         "lpf", "hpf", "shift", "speed", "crush", "shape", "vel", "inst", "art",
         "hold", "scale", "add", "addDeg", "degradeBy", "sometimesBy", "chunk", "iter",
-        "swingBy", "delay", "every", "off", "sometimes", "jux", "log",
+        "swingBy", "delay", "eq", "comp", "every", "off", "sometimes", "jux", "log",
     ];
     const IMPLEMENTED_COMBINATORS: &[&str] = &[
         "par", "stack", "seq", "cat", "arrange", "cycles", "section", "track",

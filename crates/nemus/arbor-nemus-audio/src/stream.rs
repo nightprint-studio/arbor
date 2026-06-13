@@ -435,6 +435,7 @@ impl CallbackState {
             self.tap.store_track_count(n);
             self.tap.store_voices(0);
             self.tap.store_dsp_load(0.0);
+            self.tap.store_gain_reduction(0.0);
         } else {
             // Master + per-track peaks are this block's max |sample|, floored by the
             // decayed previous value so the meters fall smoothly; voices/DSP-load
@@ -471,6 +472,13 @@ impl CallbackState {
             let instant_load = if budget > 0.0 { elapsed.as_secs_f32() / budget } else { 0.0 };
             let prev_load = self.tap.load_dsp_load();
             self.tap.store_dsp_load(prev_load * 0.9 + instant_load * 0.1);
+
+            // Gain reduction: the deepest ducking this block, floored by the decayed
+            // previous value so the GR meter snaps down and recovers smoothly (same
+            // ballistics as the peaks).
+            let gr = self.renderer.limiter_reduction();
+            let prev_gr = self.tap.load_gain_reduction();
+            self.tap.store_gain_reduction(gr.max(prev_gr * METER_DECAY));
         }
 
         // Interleave the stereo frames into the device buffer. On the idle path the

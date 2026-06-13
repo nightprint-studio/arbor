@@ -370,10 +370,12 @@ pub async fn nemus_transport(
 }
 
 /// Push a **live mixer override** to the running session (no-op when stopped).
-/// `action` ∈ `gain` | `pan` | `mute` | `solo` | `master_gain`. These are
-/// ephemeral session tweaks: the next `nemus_eval` re-baselines the mixer from
-/// the source. `value` is `0..1` for gain/pan/master_gain, `0|1` for mute/solo;
-/// `track` is ignored for `master_gain`.
+/// `action` ∈ `gain` | `pan` | `mute` | `solo` | `master_gain` | `reverb`. These
+/// are ephemeral session tweaks: the next `nemus_eval` re-baselines the per-track
+/// mixer from the source (but `master_gain` / `reverb` are global, source-less, so
+/// they persist across evals). `value` is `0..1` for gain/pan/master_gain, `0|1`
+/// for mute/solo, decay **seconds** for `reverb`; `track` is ignored for the two
+/// global actions.
 #[tauri::command]
 pub async fn nemus_set_track(
     nemus: State<'_, NemusState>,
@@ -399,6 +401,7 @@ pub async fn nemus_set_track(
             solo: value != 0.0,
         },
         "master_gain" => NemusControl::SetMasterGain { gain: value as f32 },
+        "reverb" => NemusControl::SetReverb { seconds: value as f32 },
         other => return Err(AppError::Unsupported(format!("nemus set_track: {other}"))),
     };
     nemus.send_if_live(msg);

@@ -10,7 +10,7 @@
 //! [`Pattern`] and need no import — they are available wherever `Pattern` is.
 
 // ── Core types ──────────────────────────────────────────────────────────────
-pub use crate::control::{ControlMap, HoldSpec, SourceKind};
+pub use crate::control::{CompSpec, ControlMap, EqBandSpec, EqShape, HoldSpec, SourceKind};
 pub use crate::error::{PatternError, Result};
 pub use crate::hap::Hap;
 pub use crate::pattern::Pattern;

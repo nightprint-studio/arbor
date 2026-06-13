@@ -58,17 +58,21 @@ function createMetersStore() {
   let tracks  = $state<NemusStereoPeak[]>([]);
   let voices  = $state(0);
   let dspLoad = $state(0);
+  let gainReduction = $state(0);
 
   return {
     get master()  { return master; },
     get tracks()  { return tracks; },
     get voices()  { return voices; },
     get dspLoad() { return dspLoad; },
+    /** Master limiter gain reduction `0..1` (`0` = none, larger = more ducking). */
+    get gainReduction() { return gainReduction; },
     /** Peak `[l,r]` for a track index, or `[0,0]` when absent. */
     peak(track: number): NemusStereoPeak { return tracks[track] ?? [0, 0]; },
     subscribe(): Promise<UnlistenFn> {
       return onNemusMeters((m) => {
-        master = m.master; tracks = m.tracks; voices = m.voices; dspLoad = m.dsp_load;
+        master = m.master; tracks = m.tracks; voices = m.voices;
+        dspLoad = m.dsp_load; gainReduction = m.gain_reduction;
       });
     },
   };

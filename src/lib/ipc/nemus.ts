@@ -78,6 +78,8 @@ export interface NemusMeters {
   voices: number;
   /** DSP load `0.0..~1.0` (1.0 ≈ the audio callback is using its whole budget). */
   dsp_load: number;
+  /** Master limiter gain reduction `0.0..1.0` (`0` = none, larger = more ducking). */
+  gain_reduction: number;
 }
 
 /** One sounding source range, for the live editor highlight. */
@@ -426,13 +428,20 @@ export function nemusSounds(): Promise<NemusSoundList> {
 // real-time (smooth knob drag), released at the next eval. Surgical "commit
 // knob → source literal" is the future `nemus_set_literal`.
 
-/** A live mixer override target. `master_gain` ignores `track`. */
-export type NemusTrackAction = 'gain' | 'pan' | 'mute' | 'solo' | 'master_gain';
+/** A live mixer override target. `master_gain` / `reverb` ignore `track`. */
+export type NemusTrackAction = 'gain' | 'pan' | 'mute' | 'solo' | 'master_gain' | 'reverb';
 
-/** Push a live mixer override to the running session (no-op when stopped).
- *  `value` is 0..1 for gain/pan/master_gain, and 0|1 (off|on) for mute/solo. */
+/** Push a live mixer override to the running session (no-op when stopped). `value`
+ *  is 0..1 for gain/pan/master_gain, 0|1 (off|on) for mute/solo, and decay seconds
+ *  for `reverb`. */
 export function nemusSetTrack(action: NemusTrackAction, track: number | null, value: number): Promise<void> {
   return invoke('nemus_set_track', { action, track: track ?? null, value });
+}
+
+/** Set the shared reverb-return decay (procedural IR length, in seconds). A global
+ *  mix control like the master gain — session-only, persists across evals. */
+export function nemusSetReverb(seconds: number): Promise<void> {
+  return nemusSetTrack('reverb', null, seconds);
 }
 
 // ── nemus_audition_expr: one-off instrument preview from a generated snippet ────

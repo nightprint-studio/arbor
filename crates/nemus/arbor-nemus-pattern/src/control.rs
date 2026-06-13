@@ -45,6 +45,56 @@ pub enum HoldSpec {
     Seconds(f64),
 }
 
+/// One parametric-EQ band on a track's strip insert, authored with
+/// `.eq(kind, freq, gainDb, q?)`. Pure data: the audio engine maps it onto its own
+/// biquad band (the pattern crate stays audio-free). Like `delay`, it travels
+/// per-event but the engine realises it as a **per-track** strip insert.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EqBandSpec {
+    /// Band shape.
+    pub kind: EqShape,
+    /// Centre / corner frequency in Hz.
+    pub freq: f64,
+    /// Gain in dB (peak / shelf bands only; ignored for hpf/lpf).
+    pub gain_db: f64,
+    /// Quality factor (bandwidth for peak, slope for shelf, resonance for hpf/lpf).
+    pub q: f64,
+}
+
+/// The shape of an [`EqBandSpec`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EqShape {
+    /// Bell / peaking boost-cut around `freq`.
+    Peak,
+    /// Low shelf below `freq`.
+    LowShelf,
+    /// High shelf above `freq`.
+    HighShelf,
+    /// High-pass (rumble removal); `gain_db` ignored.
+    Hpf,
+    /// Low-pass (top-end taming); `gain_db` ignored.
+    Lpf,
+}
+
+/// Per-track compressor settings, authored with
+/// `.comp(thresholdDb, ratio, attack?, release?, makeup?, knee?)`. Pure data
+/// realised by the audio engine as a strip insert.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CompSpec {
+    /// Threshold in dBFS below which no reduction is applied.
+    pub threshold_db: f64,
+    /// Compression ratio (e.g. `4.0` = 4:1).
+    pub ratio: f64,
+    /// Attack time in seconds.
+    pub attack: f64,
+    /// Release time in seconds.
+    pub release: f64,
+    /// Make-up gain in dB applied after compression.
+    pub makeup_db: f64,
+    /// Soft-knee width in dB (0 = hard knee).
+    pub knee_db: f64,
+}
+
 /// A typed bag of controls describing a single event.
 ///
 /// Every field is `Option` — unset means "inherit / engine default". Build with
@@ -111,6 +161,15 @@ pub struct ControlMap {
     /// connects the note mono per track (like `legato`) and replaces the per-slot
     /// release with the [`HoldSpec`] policy. Realised by the audio engine.
     pub hold: Option<HoldSpec>,
+
+    // ── Strip inserts (per-track FX) ─────────────────────────────────────────
+    // EQ / compressor are strip-level (not per-voice). They travel per-event but
+    // the audio engine derives one config per track from them — like `delay`'s bus.
+    /// Per-track parametric-EQ bands (`.eq(...)`, chainable — each call appends a
+    /// band). Override on `combine`.
+    pub eq: Option<Vec<EqBandSpec>>,
+    /// Per-track compressor (`.comp(...)`). Override on `combine`.
+    pub comp: Option<CompSpec>,
 }
 
 impl ControlMap {
@@ -175,6 +234,8 @@ impl ControlMap {
             inst: other.inst.or(self.inst),
             art: other.art.or(self.art),
             hold: other.hold.or(self.hold),
+            eq: other.eq.or(self.eq),
+            comp: other.comp.or(self.comp),
         }
     }
 }

@@ -92,6 +92,8 @@ pub struct Meters {
     pub voices: u32,
     /// DSP load `0.0..~1.0` (1.0 ≈ the audio callback is using its whole budget).
     pub dsp_load: f32,
+    /// Master limiter gain reduction `0.0..1.0` (`0` = none, larger = more ducking).
+    pub gain_reduction: f32,
 }
 
 /// One sounding source range, for the live editor highlight. `start`/`end` are

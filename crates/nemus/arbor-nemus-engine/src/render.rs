@@ -22,7 +22,7 @@ use std::collections::HashSet;
 use crate::clock::Epoch;
 use crate::encode::{Format, RenderSink};
 use crate::error::{EngineError, Result};
-use crate::schedule::{delay_config_for, schedule_span};
+use crate::schedule::{delay_config_for, schedule_span, track_fx_commands};
 
 /// Frames per render block. Small enough that `start_frame`s land in the right
 /// block, large enough to keep the per-block overhead negligible offline. Shares
@@ -186,8 +186,13 @@ pub fn render_offline_with_progress(
     let mut block: Vec<Frame> = vec![[0.0, 0.0]; BLOCK_FRAMES];
     let mut frame_cursor: u64 = 0;
 
-    // Mixer layout up front, then one Voice-bearing block at a time.
-    let mut initial = Some(AudioCommand::ConfigureTracks(track_configs.clone()));
+    // Mixer layout up front (plus the per-track FX inserts implied by the source),
+    // then one Voice-bearing block at a time.
+    let mut initial: Option<Vec<AudioCommand>> = Some({
+        let mut v = vec![AudioCommand::ConfigureTracks(track_configs.clone())];
+        v.extend(track_fx_commands(tracks));
+        v
+    });
 
     // Capture (don't `?`) a mid-loop write error so we can still finalize: a WAV
     // whose header is never written back (RIFF/`data` chunk sizes) is unplayable
@@ -237,8 +242,9 @@ pub fn render_offline_with_progress(
             }
         }
 
-        // The first block also carries the initial ConfigureTracks, ahead of voices.
-        let mut cmds = initial.take().into_iter().chain(voice_cmds);
+        // The first block also carries the initial ConfigureTracks + FX inserts,
+        // ahead of voices.
+        let mut cmds = initial.take().into_iter().flatten().chain(voice_cmds);
 
         let out = &mut block[..block_len];
         renderer.process(&mut cmds, out);

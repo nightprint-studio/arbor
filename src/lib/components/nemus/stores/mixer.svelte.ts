@@ -35,14 +35,15 @@
  * representation, so it stays live-only — never written to the source.
  */
 
-import { nemusSetTrack } from '$lib/ipc/nemus';
+import { nemusSetTrack, nemusSetReverb } from '$lib/ipc/nemus';
 import { arrangementStore, noteName, type VizLane } from '../viz/arrangement.svelte';
 import { projectStore } from './project.svelte';
 import { nemusStore } from '../nemus-store.svelte';
 import { controlsStore } from './controls.svelte';
 import { laneColor } from '../palette';
 import {
-  DELAY_DEFAULT_FB, DELAY_DEFAULT_MIX, type ControlEdit, type DelayValues,
+  DELAY_DEFAULT_FB, DELAY_DEFAULT_MIX, EQ_DEFAULT_BAND, COMP_DEFAULTS,
+  type ControlEdit, type DelayValues, type EqBandValue, type CompValues,
 } from '../editor/nemus-edit';
 
 /** Neutral baselines — a fresh strip is unity gain, centre pan. */
@@ -50,6 +51,9 @@ export const GAIN_UNITY = 1;
 export const PAN_CENTER = 0.5;
 /** A fresh delay (knob seed when the source has none): a quarter-cycle echo. */
 export const DELAY_DEFAULT: DelayValues = { t: 0.25, fb: DELAY_DEFAULT_FB, mix: DELAY_DEFAULT_MIX };
+/** Default shared reverb-return decay in seconds — mirrors the renderer's
+ *  `DEFAULT_REVERB_SECS`, so the knob reads true before the first change. */
+export const REVERB_DECAY_DEFAULT = 0.5;
 
 /** One mixer strip = one arrangement lane, enriched with a display name. */
 export interface MixerTrack {
@@ -97,6 +101,11 @@ function createMixerStore() {
   let gains  = $state<Record<number, number>>({});
   let pans   = $state<Record<number, number>>({});
   let master = $state(GAIN_UNITY);
+  // Shared reverb-return decay (seconds). Global + session-only like `master` —
+  // not in the source, so NOT cleared on rebaseline.
+  let reverbDecay = $state(REVERB_DECAY_DEFAULT);
+  // Debounce for the (allocating) reverb-IR rebuild — see `setReverbDecay`.
+  let reverbTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Code-first knob buffers (index → value). These mirror the SOURCE literal
   // (seeded from controlsStore) and commit back to it; the buffer just holds the
@@ -104,16 +113,25 @@ function createMixerStore() {
   // rebaseline (the source becomes authoritative again).
   let roomBuf  = $state<Record<number, number>>({});
   let delayBuf = $state<Record<number, DelayValues>>({});
+  // EQ / compressor (strip inserts) — code-first like room/delay. `eqBuf` holds the
+  // full band list mid-edit; `compBuf` the six compressor params.
+  let eqBuf    = $state<Record<number, EqBandValue[]>>({});
+  let compBuf  = $state<Record<number, CompValues>>({});
 
   // Debounced commit: a knob drag fires many onchange; commit (which re-evals)
   // once the gesture settles. Holds the latest pending edit per (index,control)
   // so gain/pan/room/delay drags all coalesce into one write per gesture.
   let commitTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingEdits = new Map<number, Map<string, ControlEdit>>();
+  /** Coalesce key: per-band for EQ (so different bands don't clobber each other),
+   *  else the control kind. */
+  function commitKey(e: ControlEdit): string {
+    return e.kind === 'eqBand' ? `eqBand:${e.band}` : e.kind;
+  }
   function scheduleCommit(index: number, edit: ControlEdit) {
     let m = pendingEdits.get(index);
     if (!m) { m = new Map(); pendingEdits.set(index, m); }
-    m.set(edit.kind, edit);
+    m.set(commitKey(edit), edit);
     if (commitTimer) clearTimeout(commitTimer);
     commitTimer = setTimeout(flushCommits, 280);
   }
@@ -134,8 +152,16 @@ function createMixerStore() {
    *  race (the immediate write is the newer intent). */
   function commitNow(index: number, edits: ControlEdit[]) {
     const m = pendingEdits.get(index);
-    if (m) for (const e of edits) m.delete(e.kind);
+    if (m) for (const e of edits) m.delete(commitKey(e));
     nemusStore.requestCommit(index, edits);
+  }
+  /** Drop any pending (debounced) EQ-band edits for a track. Called before a
+   *  structural EQ change (add / remove) re-indexes the bands, so a queued
+   *  per-band rewrite can't land on the wrong band after the re-parse. */
+  function dropPendingEq(index: number) {
+    const m = pendingEdits.get(index);
+    if (!m) return;
+    for (const k of [...m.keys()]) if (k.startsWith('eqBand:')) m.delete(k);
   }
 
   /** Mute/unmute strip `i`, writing the source gain (the decision the user made:
@@ -231,8 +257,73 @@ function createMixerStore() {
       scheduleCommit(i, { kind: 'delay', ...next });
     },
 
+    // ── EQ / compressor: code-first strip inserts (seed from source) ──
+    /** Parametric-EQ bands for track `i` (mid-edit buffer, else source). */
+    eq(i: number): EqBandValue[] { return eqBuf[i] ?? controlsStore.eq(i); },
+    eqActive(i: number) { return this.eq(i).length > 0; },
+    /** Edit one parameter of band `b` (merging the band), committing in place. */
+    setEqBand(i: number, b: number, patch: Partial<EqBandValue>) {
+      const cur = this.eq(i).map((band) => ({ ...band }));
+      if (!cur[b]) return;
+      cur[b] = { ...cur[b], ...patch };
+      eqBuf = { ...eqBuf, [i]: cur };
+      scheduleCommit(i, { kind: 'eqBand', band: b, value: cur[b] });
+    },
+    /** Append a fresh band at the chain tail (immediate — a structural change). */
+    addEqBand(i: number) {
+      dropPendingEq(i);
+      const band = { ...EQ_DEFAULT_BAND };
+      eqBuf = { ...eqBuf, [i]: [...this.eq(i), band] };
+      commitNow(i, [{ kind: 'eqAdd', value: band }]);
+    },
+    /** Remove band `b` (immediate — a structural change). */
+    removeEqBand(i: number, b: number) {
+      dropPendingEq(i);
+      eqBuf = { ...eqBuf, [i]: this.eq(i).filter((_, k) => k !== b) };
+      commitNow(i, [{ kind: 'eqRemove', band: b }]);
+    },
+
+    /** Compressor settings for track `i` (mid-edit buffer, else source). */
+    comp(i: number): CompValues | null { return compBuf[i] ?? controlsStore.comp(i); },
+    compActive(i: number) { return compBuf[i] != null || controlsStore.comp(i) != null; },
+    compCalculated(i: number) { return controlsStore.isCalculated(i, 'comp'); },
+    /** Set one compressor parameter, merging with the current settings, and commit. */
+    setCompParam(i: number, key: keyof CompValues, v: number) {
+      const next = { ...(this.comp(i) ?? COMP_DEFAULTS), [key]: v };
+      compBuf = { ...compBuf, [i]: next };
+      scheduleCommit(i, { kind: 'comp', value: next });
+    },
+    /** Add a compressor with defaults (when the track has none). */
+    addComp(i: number) {
+      const next = { ...COMP_DEFAULTS };
+      compBuf = { ...compBuf, [i]: next };
+      scheduleCommit(i, { kind: 'comp', value: next });
+    },
+    /** Remove the compressor (immediate — a structural change). */
+    removeComp(i: number) {
+      const m = pendingEdits.get(i);
+      if (m) m.delete('comp');
+      const next = { ...compBuf };
+      delete next[i];
+      compBuf = next;
+      commitNow(i, [{ kind: 'compRemove' }]);
+    },
+
     get masterGain() { return master; },
     setMasterGain(v: number) { master = v; void nemusSetTrack('master_gain', null, v); },
+
+    // ── reverb return: shared bus decay (global, session-only, like master gain) ──
+    get reverbDecay() { return reverbDecay; },
+    /** Set the reverb decay. The knob updates instantly, but the audio command is
+     *  DEBOUNCED: changing the procedural IR rebuilds the reverb (an allocation on
+     *  the audio thread), so a drag must not fire it per frame — only on settle. */
+    setReverbDecay(v: number) {
+      reverbDecay = v;
+      if (reverbTimer) clearTimeout(reverbTimer);
+      reverbTimer = setTimeout(() => { reverbTimer = null; void nemusSetReverb(v); }, 140);
+    },
+    /** Each track's reverb send (its `room` value), for the return-bus visual. */
+    roomSend(i: number) { return this.room(i); },
 
     // ── mute / solo: shared store (index key) + live override ──
     isMuted(i: number)  { return nemusStore.isMuted(String(i)); },
@@ -281,6 +372,7 @@ function createMixerStore() {
     rebaseline() {
       gains = {}; pans = {};
       roomBuf = {}; delayBuf = {};
+      eqBuf = {}; compBuf = {};
     },
   };
 }

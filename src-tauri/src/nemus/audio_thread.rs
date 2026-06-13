@@ -19,7 +19,7 @@ use tauri::AppHandle;
 
 use arbor_nemus::prelude::{
     open_output_stream, schedule_span, AudioCommand, AudioError, AudioSink, ControlMap, Epoch,
-    OutputStream, Registry, StreamSink, TempoMap, Time, TimeSpan, Tracks, Transport,
+    OutputStream, Registry, ReverbIr, StreamSink, TempoMap, Time, TimeSpan, Tracks, Transport,
 };
 
 use super::config::NemusConfig;
@@ -233,6 +233,12 @@ impl Session {
             NemusControl::SetMasterGain { gain } => {
                 let _ = self.transport.sink_mut().send(AudioCommand::SetMasterGain(gain));
             }
+            NemusControl::SetReverb { seconds } => {
+                let _ = self
+                    .transport
+                    .sink_mut()
+                    .send(AudioCommand::SetReverbIr(ReverbIr::Procedural { seconds }));
+            }
             NemusControl::Shutdown => return false,
         }
         true
@@ -432,6 +438,7 @@ fn emit_transport_and_meters(
             tracks: m.tracks,
             voices: m.voices,
             dsp_load: m.dsp_load,
+            gain_reduction: m.gain_reduction,
         },
     );
 }

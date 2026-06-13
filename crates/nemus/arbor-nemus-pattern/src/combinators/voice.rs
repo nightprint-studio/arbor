@@ -9,7 +9,7 @@
 //! they are pure data on the hap.
 
 use crate::combinators::compose::stack;
-use crate::control::{ControlMap, HoldSpec};
+use crate::control::{CompSpec, ControlMap, EqBandSpec, HoldSpec};
 use crate::pattern::Pattern;
 use crate::pitch::Scale;
 use crate::time::Time;
@@ -132,6 +132,25 @@ impl Pattern<ControlMap> {
         let name = name.into();
         self.fmap(move |mut c| {
             c.art = Some(name.clone());
+            c
+        })
+    }
+
+    /// Append one band to the track's parametric-EQ strip insert (`.eq(...)`,
+    /// chainable — each call adds a band). Strip-level (not per-voice): the audio
+    /// engine derives one EQ chain per track from these. Constant like `art`.
+    pub fn add_eq(self, band: EqBandSpec) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            c.eq.get_or_insert_with(Vec::new).push(band);
+            c
+        })
+    }
+
+    /// Set the track's compressor strip insert (`.comp(...)`). Strip-level; the
+    /// audio engine derives one compressor per track from this. Constant like `art`.
+    pub fn comp(self, spec: CompSpec) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            c.comp = Some(spec);
             c
         })
     }

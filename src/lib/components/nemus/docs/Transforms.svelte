@@ -28,6 +28,22 @@ stack(flute, oboe)                    // double a line across two instruments</c
   </tbody>
 </table>
 
+<h2>Per-track FX (strip inserts)</h2>
+<p>
+  <code>.eq(…)</code> and <code>.comp(…)</code> are <strong>track-level</strong> effects: they
+  configure the channel strip, not each note. Chain several <code>.eq</code> calls to build a
+  parametric EQ band by band; one <code>.comp</code> sets the compressor.
+</p>
+<table>
+  <thead><tr><th>Transform</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>.eq(kind, freq, gainDb, q?)</code></td><td>add one EQ band — <code>kind</code> is <code>"peak"</code>, <code>"low"</code> / <code>"high"</code> (shelf), <code>"hpf"</code> or <code>"lpf"</code> (<code>gainDb</code> ignored for hpf/lpf)</td></tr>
+    <tr><td><code>.comp(thresholdDb, ratio, attack?, release?, makeup?, knee?)</code></td><td>compress dynamics above the threshold by <code>ratio</code>:1</td></tr>
+  </tbody>
+</table>
+<pre><code>let pad = chords.inst("synth.pad").eq("hpf", 80, 0).eq("peak", 3000, -4, 1.2)
+let drums = kit.comp(-18, 4)            // glue the kit with a 4:1 bus compressor</code></pre>
+
 <h2>Time &amp; pitch</h2>
 <table>
   <thead><tr><th>Transform</th><th>Meaning</th></tr></thead>
