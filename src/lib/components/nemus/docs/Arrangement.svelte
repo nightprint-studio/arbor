@@ -30,8 +30,26 @@
 <ul>
   <li><strong>Drag the ruler</strong> to scrub the play cursor; <strong>wheel</strong> over it (or <kbd>Shift</kbd> + wheel anywhere) scrolls the timeline.</li>
   <li><kbd>↑</kbd> / <kbd>↓</kbd> move between lanes, <kbd>←</kbd> / <kbd>→</kbd> nudge the cursor, <kbd>Home</kbd> seeks to the start.</li>
+  <li><kbd>F8</kbd> plays from the cursor (punch-in) instead of from the top.</li>
   <li>The view toolbar toggles waveform, follow-playhead, grid and event labels.</li>
 </ul>
+
+<h2>Loop region</h2>
+<p>
+  <strong><kbd>Alt</kbd> + drag the ruler</strong> to mark a loop region (snapped to whole
+  bars). While it's on, playback cycles within it — handy for working a section. The
+  <strong>loop toggle</strong> in the view toolbar (or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
+  <kbd>L</kbd>) switches it on and off without losing the region; <kbd>Esc</kbd> clears it.
+</p>
+
+<h2>Markers</h2>
+<p>
+  Drop named jump points on the ruler: <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd> adds
+  one at the cursor, or <strong>right-click the ruler</strong> to add one where you click.
+  Click a marker to seek to it; right-click it to <strong>rename</strong> or delete it.
+  Navigate hands-free with <kbd>Ctrl</kbd> + <kbd>←</kbd> / <kbd>→</kbd> (jump to the previous /
+  next marker).
+</p>
 
 <div class="callout">
   The Outline panel mirrors this: expand a track to jump straight to any of its sections.

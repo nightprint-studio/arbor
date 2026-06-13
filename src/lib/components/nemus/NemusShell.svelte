@@ -42,7 +42,8 @@
   import { onMount, onDestroy, type Snippet } from 'svelte';
   import type { UnlistenFn } from '@tauri-apps/api/event';
   import { nemusStore } from './nemus-store.svelte';
-  import { nemusEngine, diagnosticsStore } from './stores/engine.svelte';
+  import { nemusEngine, diagnosticsStore, transportStore } from './stores/engine.svelte';
+  import { transportUiStore } from './stores/transport-ui.svelte';
   import { configStore } from './stores/config.svelte';
   import { packsStore } from './stores/packs.svelte';
   import { modelsStore } from './stores/models.svelte';
@@ -121,6 +122,21 @@
     unFsWatch?.();
     unLibs?.();
     fileWatchStore.stop();
+  });
+
+  // Loop region enforcement (FE-driven, rides the existing seek): while playing
+  // inside an enabled loop, jump back to its start when the playhead crosses the
+  // end. ~30 fps transport granularity is fine for a practice/section loop.
+  // `loopArmed` stops re-seeking every frame while still past the end (BE catch-up).
+  let loopArmed = true;
+  $effect(() => {
+    const raw = transportStore.cycle; // dep (~30 fps)
+    if (!transportStore.playing || !transportUiStore.loopActive) { loopArmed = true; return; }
+    const loop = transportUiStore.loop!;
+    const period = arrangementStore.loopCycles;
+    const disp = period > 0 ? raw % period : raw;
+    if (disp < loop.end - 0.05) loopArmed = true;
+    else if (loopArmed) { loopArmed = false; void nemusEngine.seek(loop.start); }
   });
 
   // On project open/switch: load the declared libraries and auto-sync any that
@@ -205,6 +221,15 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
+    // Esc clears the loop region. Global (the loop is global state) but yields Esc
+    // to the editor (CodeMirror owns it for autocomplete / multi-cursor) and to any
+    // open overlay (which closes on Esc). Only fires when a loop actually exists, so
+    // it never swallows a plain Esc otherwise.
+    if (e.key === 'Escape' && !overlayOpen && !editorScoped && transportUiStore.loop) {
+      transportUiStore.clearLoop();
+      e.preventDefault();
+      return;
+    }
     for (const b of NEMUS_BINDINGS) {
       if (b.scope === 'editor' && !editorScoped) continue;
       if (!matchesNemus(e, b)) continue;
@@ -215,8 +240,11 @@
       else if (b.id === 'run_stop') void nemusEngine.toggleRun(projectStore.activeSource, projectStore.project?.path);
       else if (b.id === 'play_selection') playSelectionOrFile();
       else if (b.id === 'toggle_scratch') nemusStore.toggleBottom('scratch');
-      else if (b.id === 'seek_to_start') void nemusEngine.seekToStart();
-      else if (b.id === 'seek_to_end') void nemusEngine.seekToEnd(arrangementStore.contentEnd);
+      else if (b.id === 'seek_to_start') { transportUiStore.setCursor(0); void nemusEngine.seekToStart(); }
+      else if (b.id === 'seek_to_end') { transportUiStore.setCursor(arrangementStore.contentEnd); void nemusEngine.seekToEnd(arrangementStore.contentEnd); }
+      else if (b.id === 'play_from_cursor') transportUiStore.playFromCursor();
+      else if (b.id === 'toggle_loop') transportUiStore.toggleLoop();
+      else if (b.id === 'add_marker') transportUiStore.addMarker(transportUiStore.cursor);
       else if (b.id === 'command_palette') nemusStore.togglePalette();
       else if (b.id === 'docs') nemusStore.toggleDocs();
       else if (b.id === 'shortcuts') nemusStore.openShortcuts();

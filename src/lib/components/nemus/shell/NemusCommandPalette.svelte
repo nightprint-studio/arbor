@@ -16,6 +16,7 @@
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
+    Repeat, PlayCircle, MapPin,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -31,6 +32,7 @@
   import { mixerStore } from '../stores/mixer.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
   import { librariesStore } from '../stores/libraries.svelte';
+  import { transportUiStore } from '../stores/transport-ui.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -42,6 +44,7 @@
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
+    Repeat, PlayCircle, MapPin,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -64,6 +67,20 @@
       run: () => void nemusEngine.seekToStart() },
     { id: 'seek_end',   label: 'Skip to end',   group: 'Transport', icon: 'SkipForward', keys: 'Ctrl+Shift+]',
       run: () => void nemusEngine.seekToEnd(arrangementStore.contentEnd) },
+    { id: 'play_from_cursor', label: 'Play from cursor (punch-in)', group: 'Transport', icon: 'PlayCircle', keys: 'F8',
+      run: () => transportUiStore.playFromCursor() },
+    { id: 'toggle_loop', label: transportUiStore.loopActive ? 'Loop region: off' : 'Loop region: on', group: 'Transport', icon: 'Repeat', keys: 'Ctrl+Shift+L',
+      run: () => transportUiStore.toggleLoop() },
+    { id: 'clear_loop', label: 'Clear loop region', group: 'Transport', icon: 'Repeat',
+      run: () => transportUiStore.clearLoop() },
+    { id: 'add_marker', label: 'Add marker at cursor', group: 'Transport', icon: 'MapPin', keys: 'Ctrl+Shift+M',
+      run: () => transportUiStore.addMarker(transportUiStore.cursor) },
+    { id: 'next_marker', label: 'Jump to next marker', group: 'Transport', icon: 'SkipForward', keys: 'Ctrl+→',
+      run: () => transportUiStore.seekNextMarker() },
+    { id: 'prev_marker', label: 'Jump to previous marker', group: 'Transport', icon: 'SkipBack', keys: 'Ctrl+←',
+      run: () => transportUiStore.seekPrevMarker() },
+    { id: 'clear_markers', label: 'Clear all markers', group: 'Transport', icon: 'MapPin',
+      run: () => transportUiStore.clearMarkers() },
     { id: 'play_selection', label: 'Play selection one-shot', group: 'Transport', icon: 'FlaskConical', keys: 'Ctrl+Shift+Enter',
       run: async () => {
         const file = projectStore.activeSource;

@@ -54,6 +54,9 @@
   <tbody>
     <tr><td><kbd>Ctrl</kbd> + click</td><td>Editor: go to declaration · Arrangement: reveal the source of an event</td></tr>
     <tr><td>Drag ruler</td><td>Scrub the play cursor</td></tr>
+    <tr><td><kbd>Alt</kbd> + drag ruler</td><td>Set the loop region (<kbd>Esc</kbd> clears it)</td></tr>
+    <tr><td>Right-click ruler</td><td>Add a marker here · right-click a marker to rename / delete</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>Arrangement: jump to the previous / next marker</td></tr>
     <tr><td>Wheel / <kbd>Shift</kbd> + wheel</td><td>Scroll the timeline horizontally</td></tr>
   </tbody>
 </table>

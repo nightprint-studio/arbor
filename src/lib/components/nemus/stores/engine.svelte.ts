@@ -207,6 +207,11 @@ function createNemusEngine() {
     /** Stop playback (the clock keeps its position). */
     async stop(): Promise<void> { await nemusStop(); },
 
+    /** Start playback of the already-staged arrangement from the current playhead,
+     *  WITHOUT re-evaluating (used by play-from-cursor after a seek). A no-op when
+     *  nothing is staged / no session is open. */
+    async play(): Promise<void> { await nemusPlay(); },
+
     /** Run if stopped, stop if running. */
     async toggleRun(source: string, projectDir?: string): Promise<void> {
       if (transportStore.playing) await this.stop();

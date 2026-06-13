@@ -8,9 +8,13 @@
    * Sticky-left so it stays in view while the (much wider) timeline scrolls.
    * Imports only nemus-local + the shared tooltip action.
    */
-  import { AudioLines, Crosshair, Grid3x3, Tag } from 'lucide-svelte';
+  import { AudioLines, Crosshair, Grid3x3, Tag, Repeat } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { arrViewOptions as o } from './arr-view-options.svelte';
+  import { transportUiStore } from '../stores/transport-ui.svelte';
+
+  const hasLoop = $derived(transportUiStore.loop != null);
+  const loopOn = $derived(transportUiStore.loopActive);
 
   const toggles = $derived([
     { key: 'waveform', icon: AudioLines, on: o.waveform, toggle: () => o.toggleWaveform(),
@@ -38,6 +42,19 @@
       <t.icon size={14} />
     </button>
   {/each}
+  <span class="tb-div"></span>
+  <button
+    class="tb-btn"
+    class:on={loopOn}
+    type="button"
+    disabled={!hasLoop}
+    aria-pressed={loopOn}
+    aria-label="Loop region"
+    use:tooltip={{ content: 'Loop region', description: hasLoop ? 'Cycle playback within the loop (Alt-drag the ruler to set it · Esc clears)' : 'Alt-drag the ruler to set a loop region' }}
+    onclick={() => transportUiStore.toggleLoop()}
+  >
+    <Repeat size={14} />
+  </button>
 </div>
 
 <style>
@@ -72,4 +89,7 @@
     outline: none;
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
   }
+  .tb-btn:disabled { opacity: 0.4; cursor: default; }
+  .tb-btn:disabled:hover { background: transparent; color: var(--text-muted); }
+  .tb-div { width: 1px; height: 14px; background: var(--border-subtle); margin: 0 4px; flex-shrink: 0; }
 </style>

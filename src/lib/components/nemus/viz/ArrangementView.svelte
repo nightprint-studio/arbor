@@ -20,7 +20,9 @@
    *
    * Imports only shared/ui (+ the shared ContextMenu overlay) + nemus-local.
    */
-  import { PanelLeftClose, PanelRightClose, VolumeX, Headphones, FileInput } from 'lucide-svelte';
+  import { PanelLeftClose, PanelRightClose, VolumeX, Headphones, FileInput, Pencil, Trash2, MapPin } from 'lucide-svelte';
+  import MarkerRenameModal from '../shell/MarkerRenameModal.svelte';
+  import type { Marker } from '../stores/transport-ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { importActions } from '../stores/import-actions.svelte';
   import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
@@ -30,6 +32,7 @@
   import { arrangementStore, noteName, VIEW_CYCLES, type VizLane } from './arrangement.svelte';
   import { arrViewOptions } from './arr-view-options.svelte';
   import { transportStore, nemusEngine, diagnosticsStore } from '../stores/engine.svelte';
+  import { transportUiStore } from '../stores/transport-ui.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { nemusStore } from '../nemus-store.svelte';
   import { mixerStore } from '../stores/mixer.svelte';
@@ -104,7 +107,18 @@
   const playing   = $derived(transportStore.playing);
   const loopCycles = $derived(arrangementStore.loopCycles);
   const displayCycle = $derived(loopCycles > 0 ? playCycle % loopCycles : playCycle);
-  let   cursorCycle = $state(0); // seek anchor (last ruler click / arrow seek)
+  // Seek anchor (last ruler click / arrow seek) — global so play-from-cursor and
+  // the loop watch (NemusShell) share it.
+  const cursorCycle = $derived(transportUiStore.cursor);
+
+  // Markers (named jump points), drawn as ruler pins + faint lane guides.
+  const markers = $derived(transportUiStore.markers);
+
+  // Loop region (in arrangement cycles), drawn on the ruler + across the lanes.
+  const loop = $derived(transportUiStore.loop);
+  const loopActive = $derived(transportUiStore.loopActive);
+  const loopStartX = $derived(loop ? headW + loop.start * PX : 0);
+  const loopW = $derived(loop ? (loop.end - loop.start) * PX : 0);
 
   const playX   = $derived(headW + displayCycle * PX);
   const cursorX = $derived(headW + cursorCycle * PX);
@@ -125,8 +139,9 @@
 
   let rulerEl = $state<HTMLElement | null>(null);
   function seekTo(cyc: number) {
-    cursorCycle = Math.max(0, Math.round(cyc * 4) / 4);
-    void nemusEngine.seek(cursorCycle);
+    const snapped = Math.max(0, Math.round(cyc * 4) / 4);
+    transportUiStore.setCursor(snapped);
+    void nemusEngine.seek(snapped);
   }
   /** Pixel → cycle under the ruler, clamped to the visible timeline. */
   function rulerCycleAt(clientX: number): number {
@@ -137,17 +152,35 @@
   // Press-and-drag scrub: seek continuously while the mouse is down (DAW-style),
   // not just on a single click. We snap to quarter-cycles and only re-seek when
   // the snapped position actually changes, so a drag fires at most one IPC per
-  // crossed beat — never a flood of per-pixel seeks.
+  // crossed beat — never a flood of per-pixel seeks. **Alt+drag sets the loop
+  // region** instead of scrubbing (snapped to whole cycles / bars).
   function startScrub(e: MouseEvent) {
     if (e.button !== 0) return;
     e.preventDefault();
+    if (e.altKey) { startLoopDrag(e); return; }
     let last = -1;
     const apply = (clientX: number) => {
       const snapped = Math.max(0, Math.round(rulerCycleAt(clientX) * 4) / 4);
       if (snapped === last) return;
       last = snapped;
-      cursorCycle = snapped;
+      transportUiStore.setCursor(snapped);
       void nemusEngine.seek(snapped);
+    };
+    apply(e.clientX);
+    const onMove = (ev: MouseEvent) => apply(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+  /** Alt+drag on the ruler → define the loop region (snapped to whole cycles). */
+  function startLoopDrag(e: MouseEvent) {
+    const anchor = Math.round(rulerCycleAt(e.clientX));
+    const apply = (clientX: number) => {
+      const cur = Math.round(rulerCycleAt(clientX));
+      transportUiStore.setLoop(anchor, cur);
     };
     apply(e.clientX);
     const onMove = (ev: MouseEvent) => apply(ev.clientX);
@@ -292,6 +325,9 @@
         : Math.max(0, base - 1));
       e.preventDefault();
     }
+    // Ctrl+←/→ jumps between markers; plain ←/→ nudges the cursor by a cycle.
+    else if (e.key === 'ArrowRight' && (e.ctrlKey || e.metaKey)) { transportUiStore.seekNextMarker(); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft'  && (e.ctrlKey || e.metaKey)) { transportUiStore.seekPrevMarker(); e.preventDefault(); }
     else if (e.key === 'ArrowRight'){ seekTo(cursorCycle + 1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft') { seekTo(cursorCycle - 1); e.preventDefault(); }
     else if (e.key === 'Home')      { seekTo(0); e.preventDefault(); }
@@ -318,6 +354,35 @@
     if (id === 'mute') mixerStore.toggleMute(ctx.track);
     else if (id === 'solo') mixerStore.toggleSolo(ctx.track);
     ctx = null;
+  }
+
+  // ── Markers: ruler pins (click → seek), context menu (rename / delete), and
+  // right-click on the empty ruler to drop one. ─────────────────────────────────
+  let markerCtx = $state<{ x: number; y: number; marker: Marker } | null>(null);
+  let renamingMarker = $state<Marker | null>(null);
+  const markerCtxItems = $derived<MenuItem[]>(
+    markerCtx
+      ? [
+          { id: 'rename', label: 'Rename marker…', icon: Pencil },
+          { id: 'delete', label: 'Delete marker', icon: Trash2 },
+        ]
+      : [],
+  );
+  function openMarkerMenu(e: MouseEvent, marker: Marker) {
+    e.preventDefault();
+    e.stopPropagation(); // don't also trigger the ruler's "add marker here"
+    markerCtx = { x: e.clientX, y: e.clientY, marker };
+  }
+  function onMarkerCtxSelect(id: string) {
+    if (!markerCtx) return;
+    if (id === 'rename') renamingMarker = markerCtx.marker;
+    else if (id === 'delete') transportUiStore.removeMarker(markerCtx.marker.id);
+    markerCtx = null;
+  }
+  /** Right-click the ruler (not a pin) → add a marker at that cycle. */
+  function addMarkerAt(e: MouseEvent) {
+    e.preventDefault();
+    transportUiStore.addMarker(Math.round(rulerCycleAt(e.clientX) * 4) / 4);
   }
 </script>
 
@@ -352,7 +417,20 @@
           </button>
         </div>
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="arr-ruler" bind:this={rulerEl} onmousedown={startScrub} onwheel={wheelToHorizontal} use:tooltip={'Drag to scrub · wheel to scroll'}>
+        <div class="arr-ruler" bind:this={rulerEl} onmousedown={startScrub} oncontextmenu={addMarkerAt} onwheel={wheelToHorizontal} use:tooltip={'Drag to scrub · Alt-drag to set a loop · right-click to add a marker · wheel to scroll'}>
+          {#if loop}
+            <div class="ruler-loop" class:off={!loopActive} style="left: {loop.start * PX}px; width: {loopW}px;"></div>
+          {/if}
+          {#each markers as m (m.id)}
+            <button class="ruler-marker" style="left: {m.cycle * PX}px;"
+                    onmousedown={(e) => e.stopPropagation()}
+                    onclick={() => seekTo(m.cycle)}
+                    oncontextmenu={(e) => openMarkerMenu(e, m)}
+                    use:tooltip={`Marker “${m.label}” · click to seek · right-click to rename / delete`}
+                    aria-label={`Marker ${m.label}`}>
+              <MapPin size={9} /><span class="ml">{m.label}</span>
+            </button>
+          {/each}
           {#each arrangementStore.rulerSections as s (s.name + '@' + s.start)}
             <div class="ruler-chip" style="left: {s.start * PX}px; width: {(s.end - s.start) * PX}px; --sc: {sectionColor(s.name)}">
               <span>{s.name}</span>
@@ -417,6 +495,14 @@
 
       <!-- Overlays -->
       {#if lanes.length}
+        {#if loop}
+          <div class="arr-loop" class:off={!loopActive} style="left: {loopStartX}px; width: {loopW}px;"></div>
+          <div class="arr-loop-edge" style="left: {loopStartX}px;"></div>
+          <div class="arr-loop-edge" style="left: {loopStartX + loopW}px;"></div>
+        {/if}
+        {#each markers as m (m.id)}
+          <div class="arr-marker-guide" style="left: {headW + m.cycle * PX}px;"></div>
+        {/each}
         {#if arrangementStore.contentEnd > 0 && arrangementStore.contentEnd < VIEW}
           <div class="arr-end" style="left: {endX}px;"></div>
         {/if}
@@ -443,6 +529,14 @@
 
 {#if ctx}
   <ContextMenu items={ctxItems} x={ctx.x} y={ctx.y} onSelect={onCtxSelect} onClose={() => (ctx = null)} />
+{/if}
+
+{#if markerCtx}
+  <ContextMenu items={markerCtxItems} x={markerCtx.x} y={markerCtx.y} onSelect={onMarkerCtxSelect} onClose={() => (markerCtx = null)} />
+{/if}
+
+{#if renamingMarker}
+  <MarkerRenameModal marker={renamingMarker} onClose={() => (renamingMarker = null)} />
 {/if}
 
 <style>
@@ -539,6 +633,29 @@
     color: var(--text-secondary); white-space: nowrap;
   }
 
+  /* Loop region band along the bottom of the ruler (visual only — Alt-drag sets
+     it, the toolbar toggle enables/disables, Esc clears). Dimmed when switched off. */
+  .ruler-loop {
+    position: absolute; left: 0; bottom: 0; height: 5px;
+    background: var(--accent); border-radius: 2px;
+    pointer-events: none; opacity: 0.9;
+  }
+  .ruler-loop.off { opacity: 0.3; }
+
+  /* Marker pin on the ruler (click → seek, right-click → rename / delete). */
+  .ruler-marker {
+    position: absolute; top: 1px; z-index: 2;
+    display: inline-flex; align-items: center; gap: 2px;
+    height: 13px; padding: 0 3px 0 1px;
+    background: color-mix(in srgb, var(--info) 28%, var(--bg-base));
+    border: none; border-left: 2px solid var(--info); border-radius: 0 3px 3px 0;
+    color: var(--info); cursor: pointer; white-space: nowrap;
+    transition: background var(--transition-fast);
+  }
+  .ruler-marker:hover { background: color-mix(in srgb, var(--info) 42%, var(--bg-base)); }
+  .ruler-marker:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
+  .ruler-marker .ml { font-size: 8.5px; font-weight: 700; letter-spacing: 0.3px; color: var(--text-secondary); }
+
   /* ── Rows ── */
   .arr-rows { display: flex; flex-direction: column; }
   .arr-row { display: flex; height: 72px; border-bottom: 1px solid var(--border-subtle); }
@@ -599,6 +716,12 @@
      lane area (the absolute origin is the whole `.arr-inner`). */
   .arr-end { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1px; background: color-mix(in srgb, var(--border-strong, var(--text-disabled)) 60%, transparent); border-left: 1px dashed color-mix(in srgb, var(--text-disabled) 60%, transparent); pointer-events: none; z-index: 2; }
   .arr-progress { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; background: color-mix(in srgb, var(--accent) 7%, transparent); pointer-events: none; z-index: 3; }
+  /* Loop region overlay across the lanes — a faint accent wash + bright edges. */
+  .arr-loop { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; background: color-mix(in srgb, var(--accent) 9%, transparent); pointer-events: none; z-index: 2; }
+  .arr-loop.off { background: color-mix(in srgb, var(--text-disabled) 6%, transparent); }
+  .arr-loop-edge { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1px; background: color-mix(in srgb, var(--accent) 55%, transparent); pointer-events: none; z-index: 3; }
+  /* Marker guide line through the lanes (paired with the ruler pin above it). */
+  .arr-marker-guide { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1px; background: color-mix(in srgb, var(--info) 35%, transparent); pointer-events: none; z-index: 2; }
   .arr-cursor { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1px; background: color-mix(in srgb, var(--accent) 70%, transparent); pointer-events: none; z-index: 4; }
   .cursor-flag { position: absolute; top: 0; left: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid var(--accent); }
   .arr-playhead { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1.5px; background: var(--text-primary); opacity: 0.7; pointer-events: none; z-index: 4; transition: opacity var(--transition-fast); }
