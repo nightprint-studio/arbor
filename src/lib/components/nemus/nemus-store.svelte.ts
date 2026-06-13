@@ -111,6 +111,9 @@ function createNemusStore() {
   let extractSeq = $state(0);
   let inlineSeq  = $state(0);
 
+  // ── Intentions popup relay (one-shot, Alt+Enter) ──────────────────────────────
+  let intentionsSeq = $state(0);
+
   // ── Live editor caret (footer Ln/Col) ────────────────────────────────────────
   let caretLine = $state(1);
   let caretCol  = $state(1);
@@ -251,6 +254,10 @@ function createNemusStore() {
     requestRename()  { if (collapseTabpane) collapseTabpane = false; renameSeq++; },
     requestExtract() { if (collapseTabpane) collapseTabpane = false; extractSeq++; },
     requestInline()  { if (collapseTabpane) collapseTabpane = false; inlineSeq++; },
+
+    // ── intentions popup (one-shot; TabbedEditor consumes) ──
+    get intentionsSeq() { return intentionsSeq; },
+    requestIntentions() { if (collapseTabpane) collapseTabpane = false; intentionsSeq++; },
 
     // ── live caret (footer) ──
     get caretLine() { return caretLine; },

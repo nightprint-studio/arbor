@@ -14,7 +14,7 @@ pub use crate::control::{ControlMap, HoldSpec, SourceKind};
 pub use crate::error::{PatternError, Result};
 pub use crate::hap::Hap;
 pub use crate::pattern::Pattern;
-pub use crate::pitch::{parse_note, Scale, MIDDLE_C};
+pub use crate::pitch::{mode_table, parse_note, Scale, ScaleMode, MIDDLE_C};
 pub use crate::span::{SourceSpan, TimeSpan};
 pub use crate::tempo::TempoMap;
 pub use crate::time::Time;

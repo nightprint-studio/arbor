@@ -66,16 +66,26 @@
   let selected = $state(0);
   let panelEl = $state<HTMLElement | null>(null);
   let inputEl = $state<HTMLInputElement | null>(null);
+  // Who held focus (the editor) before we stole it — restored when the picker is
+  // cancelled with Esc so the caret doesn't vanish. Captured only on the open
+  // transition (not on every filter keystroke, which would capture our own input).
+  let prevFocus: HTMLElement | null = null;
+  let wasOpen = false;
 
   // Fresh open OR a changed result set (e.g. live filtering) → reset to the top and
   // take focus so the keyboard works immediately (the filter field if present,
   // else the panel for arrow-nav).
   $effect(() => {
+    if (open && !wasOpen) prevFocus = document.activeElement as HTMLElement | null;
+    wasOpen = open;
     if (!open) return;
     void items;
     selected = 0;
     queueMicrotask(() => (filterable ? inputEl : panelEl)?.focus());
   });
+
+  /** Hand focus back to whoever had it (the editor) — keeps the caret visible. */
+  function restoreFocus() { prevFocus?.focus?.(); }
 
   function move(delta: number) {
     const n = items.length;
@@ -90,7 +100,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+    if (e.key === 'Escape') { e.preventDefault(); restoreFocus(); onClose(); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
     else if (e.key === 'Enter') { e.preventDefault(); choose(selected); }

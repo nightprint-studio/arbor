@@ -5,11 +5,14 @@
 //! ```toml
 //! name = "My Song"
 //! audience = "for the festival set"
-//! libraries = ["lib/drums.nemus"]   # imported-only; their tracks(…) are ignored
+//!
+//! [libraries]                        # external GitHub modules (see libraries.rs)
+//! drums = "github:octocat/nemus-drums@v1"
 //! ```
 //! Everything is optional; a folder with no `nemus.toml` is still a valid project
-//! (name = folder name, no libraries). `.nemus` files are discovered by walking
-//! the folder recursively; `library` flags those listed under `libraries`.
+//! (name = folder name). `.nemus` files are discovered by walking the folder
+//! recursively. The `[libraries]` table is owned by [`super::libraries`]; this
+//! module only reads `name` / `audience` and lists the project's own files.
 
 use std::path::{Path, PathBuf};
 
@@ -24,8 +27,9 @@ use crate::error::AppError;
 struct Manifest {
     name: Option<String>,
     audience: Option<String>,
-    /// Project-relative paths (forward slashes) of import-only library files.
-    libraries: Option<Vec<String>>,
+    // `[libraries]` (external GitHub modules) is parsed by `super::libraries`; it
+    // is intentionally NOT a field here (serde ignores the unknown table), so this
+    // module stays decoupled from the dependency model.
 }
 
 /// One `.nemus` file in a project (source read lazily on the FE via `fs_*`).
@@ -65,14 +69,13 @@ pub async fn nemus_open_project(dir: String) -> Result<NemusProjectInfo, AppErro
         .clone()
         .unwrap_or_else(|| folder_name(&dir));
     let audience = manifest.audience.clone().unwrap_or_default();
-    let libraries = manifest.libraries.clone().unwrap_or_default();
 
     let mut nemus_files: Vec<PathBuf> = Vec::new();
     collect_nemus(&dir, &mut nemus_files);
 
     let mut files: Vec<NemusProjectFile> = nemus_files
         .into_iter()
-        .filter_map(|p| project_file(&dir, &p, &libraries))
+        .filter_map(|p| project_file(&dir, &p))
         .collect();
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
 
@@ -121,7 +124,7 @@ fn read_manifest(dir: &Path) -> Result<Manifest, AppError> {
 }
 
 /// Build a [`NemusProjectFile`] for `path` relative to `dir`.
-fn project_file(dir: &Path, path: &Path, libraries: &[String]) -> Option<NemusProjectFile> {
+fn project_file(dir: &Path, path: &Path) -> Option<NemusProjectFile> {
     let rel = path
         .strip_prefix(dir)
         .ok()?
@@ -130,7 +133,10 @@ fn project_file(dir: &Path, path: &Path, libraries: &[String]) -> Option<NemusPr
     let name = path.file_name()?.to_string_lossy().to_string();
     Some(NemusProjectFile {
         path: path.to_string_lossy().to_string(),
-        library: libraries.iter().any(|l| l == &rel),
+        // `library` (import-only local files) is deprecated — external modules now
+        // live in `[libraries]` (GitHub) and import via `$lib/…`. Kept false so the
+        // FE field stays stable.
+        library: false,
         rel,
         name,
     })

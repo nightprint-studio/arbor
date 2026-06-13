@@ -38,6 +38,9 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   { id: 'rename',  key: 'F6', shift: true, scope: 'editor', description: 'Rename the symbol under the caret (+ all its uses)' },
   { id: 'extract', key: 'v', alt: true, shift: true, scope: 'editor', description: 'Extract the selected pattern into a named let' },
   { id: 'inline',  key: 'n', alt: true, shift: true, scope: 'editor', description: 'Inline the let under the caret into its uses' },
+  // `Alt+Enter` (IntelliJ "Show Context Actions") — quick-fixes / refactors at the
+  // caret (fix an instrument, transpose notes, rename / inline / extract).
+  { id: 'intentions', key: 'Enter', alt: true, scope: 'editor', description: 'Show context actions / quick-fixes at the caret' },
   // Transport. `Shift+F9` (IntelliJ-style) leaves `Ctrl+Space` free for the
   // editor's autocomplete (the universal completion trigger).
   { id: 'run_stop',       key: 'F9', shift: true, scope: 'global', description: 'Toggle Run / Stop' },

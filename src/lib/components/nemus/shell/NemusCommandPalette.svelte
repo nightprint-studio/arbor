@@ -15,7 +15,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink,
+    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -28,6 +28,7 @@
   import { modelsStore } from '../stores/models.svelte';
   import { mixerStore } from '../stores/mixer.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
+  import { librariesStore } from '../stores/libraries.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -38,7 +39,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft, PenLine, FileOutput, FileSymlink,
+    AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -73,6 +74,7 @@
     { id: 'dl_basic_pitch', label: 'Download polyphonic model (basic-pitch)', group: 'Project', icon: 'Download', run: () => void modelsStore.download('basic-pitch') },
     { id: 'dl_demucs', label: 'Download stem-split model (Demucs)', group: 'Project', icon: 'Download', run: () => void modelsStore.download('demucs') },
     { id: 'models', label: 'Manage transcription models…', group: 'Project', icon: 'Boxes', run: () => nemusStore.openSettings() },
+    { id: 'sync_libs', label: 'Sync libraries (download / update)', group: 'Project', icon: 'Library', run: () => void librariesStore.sync() },
     // Panels
     { id: 'p_files',     label: 'Toggle Files',      group: 'View', icon: 'Files',            run: () => nemusStore.toggleLeft('files') },
     { id: 'p_outline',   label: 'Toggle Outline',    group: 'View', icon: 'ListTree',         run: () => nemusStore.toggleLeft('outline') },
@@ -95,6 +97,7 @@
     { id: 'rename', label: 'Rename symbol…', group: 'Edit', icon: 'PenLine', keys: 'Shift+F6', run: () => nemusStore.requestRename() },
     { id: 'extract', label: 'Extract selection to let…', group: 'Edit', icon: 'FileOutput', keys: 'Alt+Shift+V', run: () => nemusStore.requestExtract() },
     { id: 'inline', label: 'Inline let', group: 'Edit', icon: 'FileSymlink', keys: 'Alt+Shift+N', run: () => nemusStore.requestInline() },
+    { id: 'intentions', label: 'Show context actions / quick-fixes', group: 'Edit', icon: 'Lightbulb', keys: 'Alt+Enter', run: () => nemusStore.requestIntentions() },
     // Window
     { id: 'settings',  label: 'Settings…',          group: 'Window', icon: 'Settings', keys: 'Ctrl+,', run: () => nemusStore.openSettings() },
     { id: 'shortcuts', label: 'Keyboard Shortcuts', group: 'Window', icon: 'Keyboard', keys: 'F1',     run: () => nemusStore.openShortcuts() },

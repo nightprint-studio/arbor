@@ -36,6 +36,7 @@
   import TabbedEditor from './editor/TabbedEditor.svelte';
   import UsagesPopover from './editor/UsagesPopover.svelte';
   import StructurePopover from './editor/StructurePopover.svelte';
+  import IntentionsPopover from './editor/IntentionsPopover.svelte';
 
   import { onMount, onDestroy, type Snippet } from 'svelte';
   import type { UnlistenFn } from '@tauri-apps/api/event';
@@ -54,6 +55,8 @@
   import { mixerStore } from './stores/mixer.svelte';
   import { referenceStore } from './stores/reference.svelte';
   import { soundsStore } from './stores/sounds.svelte';
+  import { scalesStore } from './stores/scales.svelte';
+  import { librariesStore } from './stores/libraries.svelte';
   import { arrangementStore } from './viz/arrangement.svelte';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -74,6 +77,7 @@
   let unPacks:  UnlistenFn | null = null;
   let unModels: UnlistenFn | null = null;
   let unFsWatch: UnlistenFn | null = null;
+  let unLibs:   UnlistenFn | null = null;
 
   onMount(async () => {
     // Live engine + sample-pack + transcription-model streams (each nemus window
@@ -81,6 +85,8 @@
     unEngine = await nemusEngine.subscribe();
     unPacks  = await packsStore.subscribe();
     unModels = await modelsStore.subscribe();
+    // Library-sync job completion (refresh + toast when a sync finishes).
+    unLibs = await librariesStore.subscribe();
     // External-change detection for the open .nemus file (IDE-style reload prompt).
     unFsWatch = await onFsChanged(() => void fileWatchStore.onChanged());
     void configStore.loadConfig();
@@ -89,6 +95,8 @@
     // The DSL reference catalogue (autocomplete + hover + Docs panel). Static —
     // loaded once; failure leaves the editor working, just without language hints.
     void referenceStore.load();
+    // The scale catalogue powers the scale-aware quick-fixes (snap / change-scale).
+    void scalesStore.load();
     // The resolvable instrument registry powers `inst("…")` autocomplete — load
     // it up front so completions work without opening the Sound bank panel.
     void soundsStore.refresh();
@@ -105,7 +113,18 @@
     unPacks?.();
     unModels?.();
     unFsWatch?.();
+    unLibs?.();
     fileWatchStore.stop();
+  });
+
+  // On project open/switch: load the declared libraries and auto-sync any that
+  // aren't present yet (the user opted into fetch-if-missing on open).
+  $effect(() => {
+    const path = projectStore.project?.path;
+    if (!path) return;
+    void librariesStore.refresh(path).then(() => {
+      if (librariesStore.missing > 0) void librariesStore.sync();
+    });
   });
 
   // Watch the directory of the active file for external edits (re-armed on tab
@@ -144,6 +163,7 @@
     startRename: () => void;
     startExtract: () => void;
     inlineSymbol: () => void;
+    showIntentions: () => void;
   } | null>(null);
   let editorEl = $state<HTMLElement | null>(null);
   let editorScoped = $state(true);
@@ -180,6 +200,7 @@
       else if (b.id === 'rename') editor?.startRename();
       else if (b.id === 'extract') editor?.startExtract();
       else if (b.id === 'inline') editor?.inlineSymbol();
+      else if (b.id === 'intentions') editor?.showIntentions();
       else if (b.id === 'new_project') projectActions.newProject();
       else if (b.id === 'open_project') projectActions.openProject();
       else if (b.id === 'open_file') projectActions.openFile();
@@ -339,6 +360,9 @@
 
 <!-- Floating "file structure" popover (Ctrl+F12 / Command Palette) — one mount. -->
 <StructurePopover />
+
+<!-- Floating "context actions" popover (Alt+Enter / Command Palette) — one mount. -->
+<IntentionsPopover />
 
 {#if nemusStore.settingsOpen}<NemusSettingsModal onClose={() => nemusStore.closeSettings()} />{/if}
 {#if nemusStore.shortcutsOpen}<NemusShortcutsModal onClose={() => nemusStore.closeShortcuts()} />{/if}

@@ -7,6 +7,7 @@
 //! turned into [`NemusDiagnostics`] with spans — they are *diagnostics*, not
 //! command failures, so `nemus_eval` still returns `Ok`.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -19,15 +20,28 @@ use arbor_nemus::prelude::{
 
 use super::events::{emit, Diagnostic, NemusDiagnostics, LogLine, EVT_LOG};
 
-/// A filesystem [`SourceLoader`]: resolves `import` paths against the `.nemus`
-/// file's directory. Lives only for the duration of one evaluation (never
-/// captured into the output), so `Rc` is fine.
+/// A filesystem [`SourceLoader`]. A `$lib/<name>/<file>` import resolves against
+/// the synced external-library cache (`libs`, name → cache dir); every other path
+/// resolves against the project directory (`base`). Lives only for one evaluation
+/// (never captured into the output), so `Rc` is fine.
 struct FsLoader {
     base: PathBuf,
+    libs: BTreeMap<String, PathBuf>,
 }
 
 impl SourceLoader for FsLoader {
     fn load(&self, path: &str) -> Result<String, String> {
+        if let Some(rest) = path.strip_prefix("$lib/") {
+            let (name, file) = rest
+                .split_once('/')
+                .ok_or_else(|| format!("import {path}: expected $lib/<name>/<file>"))?;
+            let dir = self.libs.get(name).ok_or_else(|| {
+                format!("library `{name}` is not synced — run Sync libraries (import {path})")
+            })?;
+            let resolved = dir.join(file);
+            return std::fs::read_to_string(&resolved)
+                .map_err(|e| format!("cannot read import {path}: {e}"));
+        }
         let resolved = self.base.join(path);
         std::fs::read_to_string(&resolved)
             .map_err(|e| format!("cannot read import {}: {e}", resolved.display()))
@@ -73,7 +87,10 @@ pub fn evaluate_source(
 ) -> Result<EvalOutput, NemusDiagnostics> {
     let program = parse(source).map_err(|e| NemusDiagnostics::one(to_diagnostic(&e)))?;
 
-    let loader: Rc<dyn SourceLoader> = Rc::new(FsLoader { base: base_dir });
+    // The synced external libraries (`$lib/<name>/…`) resolve from the project's
+    // lock; a normal relative import still resolves against `base_dir`.
+    let libs = super::libraries::resolve_dirs(&base_dir);
+    let loader: Rc<dyn SourceLoader> = Rc::new(FsLoader { base: base_dir, libs });
     let log: Arc<dyn LogSink> = Arc::new(AppLogSink {
         app: app.clone(),
         threshold: cfg.log_threshold,

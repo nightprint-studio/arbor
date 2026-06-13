@@ -26,8 +26,11 @@
   import { nemusStore } from '../nemus-store.svelte';
   import { usagesStore, type UsageItem, type UsageAnchor } from '../stores/usages.svelte';
   import { structureStore } from '../stores/structure.svelte';
+  import { intentionsStore } from '../stores/intentions.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import type { NemusSymbol } from './nemus-lang';
+  import type { IntentionItem } from './nemus-intentions';
+  import type { EditChange } from './nemus-edit';
 
   type EditorController = {
     focus: () => void;
@@ -43,6 +46,10 @@
     prepareExtract: () => { from: number; to: number; suggested: string; anchor: UsageAnchor | null } | null;
     applyExtract: (from: number, to: number, name: string) => { ok: boolean; error?: string; note?: string };
     applyInline: () => { ok: boolean; error?: string; note?: string };
+    getIntentions: () => { items: IntentionItem[]; anchor: UsageAnchor | null } | null;
+    applyIntentionEdits: (edits: EditChange[]) => void;
+    prepareChangeScale: () => { spec: string; anchor: UsageAnchor | null } | null;
+    applyChangeScale: (newSpec: string) => { ok: boolean; error?: string; note?: string };
     commitControls: (
       index: number,
       edits: import('./nemus-edit').ControlEdit[],
@@ -196,6 +203,30 @@
     if (seq > 0) inlineSymbol();
   });
 
+  // ── Intentions relay: open from shortcut/palette, and apply the chosen action ─
+  let lastIntentOpenSeq = 0;
+  $effect(() => {
+    const seq = nemusStore.intentionsSeq;
+    if (seq === lastIntentOpenSeq) return;
+    lastIntentOpenSeq = seq;
+    if (seq > 0) showIntentions();
+  });
+  let lastIntentPickSeq = 0;
+  $effect(() => {
+    const seq = intentionsStore.pendingSeq;
+    if (seq === lastIntentPickSeq) return;
+    lastIntentPickSeq = seq;
+    const it = intentionsStore.pending;
+    if (!it) return;
+    if (it.ui === 'rename') startRename();
+    else if (it.ui === 'extract') startExtract();
+    else if (it.ui === 'scale') startChangeScale();
+    else if (it.edits) {
+      editorComp?.applyIntentionEdits(it.edits);
+      if (it.note) toastStore.show(it.note, 'success');
+    }
+  });
+
   // ── Goto-line overlay (Ctrl+G) ───────────────────────────────────────────────
   let gotoOpen = $state(false);
   let gotoValue = $state('');
@@ -236,7 +267,7 @@
   // Rename + Extract share a small floating name input (anchored at the caret);
   // Inline applies straight away. The pure planners live in `nemus-refactor`;
   // here we only drive the UI and surface the outcome as a toast.
-  type RefactorKind = 'rename' | 'extract';
+  type RefactorKind = 'rename' | 'extract' | 'scale';
   let refactor = $state<{
     kind: RefactorKind;
     title: string;
@@ -267,6 +298,13 @@
     openRefactorInput({ kind: 'extract', title: 'Extract to let', value: r.suggested, from: r.from, to: r.to, error: null, anchor: r.anchor });
   }
 
+  /** Change the scale at the caret (Alt+Enter on a `.scale("…")`). */
+  function startChangeScale() {
+    const r = editorComp?.prepareChangeScale();
+    if (!r) { toastStore.show('Place the caret on a .scale("…") call', 'info'); return; }
+    openRefactorInput({ kind: 'scale', title: 'Change scale', value: r.spec, error: null, anchor: r.anchor });
+  }
+
   /** Inline the let under the caret (Alt+Shift+N / Command Palette). */
   export function inlineSymbol() {
     const r = editorComp?.applyInline();
@@ -275,11 +313,21 @@
     else if (r.note) toastStore.show(r.note, 'success');
   }
 
+  /** Show the context-actions popup at the caret (Alt+Enter / Command Palette). */
+  export function showIntentions() {
+    const r = editorComp?.getIntentions();
+    if (!r) return;
+    if (!r.items.length) { toastStore.show('No context actions here', 'info'); return; }
+    intentionsStore.openWith(r.items, r.anchor);
+  }
+
   function commitRefactor() {
     if (!refactor) return;
     const res = refactor.kind === 'rename'
       ? editorComp?.applyRename(refactor.oldName ?? '', refactor.value)
-      : editorComp?.applyExtract(refactor.from ?? 0, refactor.to ?? 0, refactor.value);
+      : refactor.kind === 'scale'
+        ? editorComp?.applyChangeScale(refactor.value)
+        : editorComp?.applyExtract(refactor.from ?? 0, refactor.to ?? 0, refactor.value);
     if (!res) { refactor = null; return; }
     if (!res.ok) { refactor = { ...refactor, error: res.error ?? 'Refactor failed' }; return; }
     if (res.note) toastStore.show(res.note, 'success');
@@ -287,7 +335,7 @@
   }
   function onRefactorKey(e: KeyboardEvent) {
     if (e.key === 'Enter') { e.preventDefault(); commitRefactor(); }
-    else if (e.key === 'Escape') { e.preventDefault(); refactor = null; }
+    else if (e.key === 'Escape') { e.preventDefault(); refactor = null; editorComp?.focus(); }
   }
   const refactorPos = $derived.by(() => {
     const a = refactor?.anchor;
@@ -319,7 +367,7 @@
   }
   function onGotoKey(e: KeyboardEvent) {
     if (e.key === 'Enter') { e.preventDefault(); commitGoto(); }
-    else if (e.key === 'Escape') { e.preventDefault(); gotoOpen = false; }
+    else if (e.key === 'Escape') { e.preventDefault(); gotoOpen = false; editorComp?.focus(); }
   }
 
   async function copySource() {

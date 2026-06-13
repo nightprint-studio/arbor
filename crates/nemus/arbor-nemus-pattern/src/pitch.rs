@@ -60,6 +60,44 @@ fn midi_from(pitch_class: i32, octave: i32) -> f64 {
     ((octave + 1) * 12 + pitch_class) as f64
 }
 
+/// A named mode: its canonical name, accepted aliases, and one-octave ascending
+/// semitone intervals. The single source of truth for both [`Scale::parse`] and
+/// the catalogue tooling consumes ([`mode_table`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScaleMode {
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+    pub intervals: &'static [i32],
+}
+
+/// Every mode `Scale::parse` accepts. Adding a mode here surfaces it everywhere
+/// (parser + the editor's scale catalogue) at once.
+const MODES: &[ScaleMode] = &[
+    ScaleMode { name: "major",         aliases: &["ionian"],                 intervals: &[0, 2, 4, 5, 7, 9, 11] },
+    ScaleMode { name: "minor",         aliases: &["aeolian"],                intervals: &[0, 2, 3, 5, 7, 8, 10] },
+    ScaleMode { name: "dorian",        aliases: &[],                         intervals: &[0, 2, 3, 5, 7, 9, 10] },
+    ScaleMode { name: "phrygian",      aliases: &[],                         intervals: &[0, 1, 3, 5, 7, 8, 10] },
+    ScaleMode { name: "lydian",        aliases: &[],                         intervals: &[0, 2, 4, 6, 7, 9, 11] },
+    ScaleMode { name: "mixolydian",    aliases: &[],                         intervals: &[0, 2, 4, 5, 7, 9, 10] },
+    ScaleMode { name: "locrian",       aliases: &[],                         intervals: &[0, 1, 3, 5, 6, 8, 10] },
+    ScaleMode { name: "harmonicminor", aliases: &["harmonic_minor"],         intervals: &[0, 2, 3, 5, 7, 8, 11] },
+    ScaleMode { name: "melodicminor",  aliases: &["melodic_minor"],          intervals: &[0, 2, 3, 5, 7, 9, 11] },
+    ScaleMode { name: "majpent",       aliases: &["majorpentatonic"],        intervals: &[0, 2, 4, 7, 9] },
+    ScaleMode { name: "minpent",       aliases: &["minorpentatonic"],        intervals: &[0, 3, 5, 7, 10] },
+    // Japanese pentatonic / hexatonic modes (used in the author's pieces).
+    ScaleMode { name: "hirajoshi",     aliases: &[],                         intervals: &[0, 2, 3, 7, 8] },
+    ScaleMode { name: "insen",         aliases: &["in_sen", "in-sen"],       intervals: &[0, 1, 5, 7, 10] },
+    ScaleMode { name: "iwato",         aliases: &[],                         intervals: &[0, 1, 5, 6, 10] },
+    ScaleMode { name: "kumoi",         aliases: &[],                         intervals: &[0, 2, 3, 7, 9] },
+    ScaleMode { name: "chromatic",     aliases: &[],                         intervals: &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] },
+];
+
+/// The full mode catalogue (canonical entries) — for the editor's scale-aware
+/// tooling (snap-to-scale, change-scale). Aliases live on each entry.
+pub fn mode_table() -> &'static [ScaleMode] {
+    MODES
+}
+
 /// A scale: a root pitch class plus ascending semitone intervals (one octave).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scale {
@@ -68,29 +106,13 @@ pub struct Scale {
 }
 
 impl Scale {
-    /// Look up a named mode's interval set.
+    /// Look up a named mode's interval set (by canonical name or any alias).
     fn mode_intervals(mode: &str) -> Result<Vec<i32>> {
-        let v = match mode {
-            "major" | "ionian" => vec![0, 2, 4, 5, 7, 9, 11],
-            "minor" | "aeolian" => vec![0, 2, 3, 5, 7, 8, 10],
-            "dorian" => vec![0, 2, 3, 5, 7, 9, 10],
-            "phrygian" => vec![0, 1, 3, 5, 7, 8, 10],
-            "lydian" => vec![0, 2, 4, 6, 7, 9, 11],
-            "mixolydian" => vec![0, 2, 4, 5, 7, 9, 10],
-            "locrian" => vec![0, 1, 3, 5, 6, 8, 10],
-            "harmonicminor" | "harmonic_minor" => vec![0, 2, 3, 5, 7, 8, 11],
-            "melodicminor" | "melodic_minor" => vec![0, 2, 3, 5, 7, 9, 11],
-            "majpent" | "majorpentatonic" => vec![0, 2, 4, 7, 9],
-            "minpent" | "minorpentatonic" => vec![0, 3, 5, 7, 10],
-            // Japanese pentatonic / hexatonic modes (used in the author's pieces).
-            "hirajoshi" => vec![0, 2, 3, 7, 8],
-            "insen" | "in_sen" | "in-sen" => vec![0, 1, 5, 7, 10],
-            "iwato" => vec![0, 1, 5, 6, 10],
-            "kumoi" => vec![0, 2, 3, 7, 9],
-            "chromatic" => (0..12).collect(),
-            other => return Err(PatternError::UnknownScale(other.to_string())),
-        };
-        Ok(v)
+        MODES
+            .iter()
+            .find(|m| m.name == mode || m.aliases.contains(&mode))
+            .map(|m| m.intervals.to_vec())
+            .ok_or_else(|| PatternError::UnknownScale(mode.to_string()))
     }
 
     /// Parse a `"<root>:<mode>"` spec, e.g. `"c:minor"`, `"ef:dorian"`.

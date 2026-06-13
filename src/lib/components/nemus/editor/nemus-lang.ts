@@ -377,7 +377,7 @@ export function tracksReferencing(tree: Tree, name: string): number[] {
  *  editor offer value completions scoped to a builtin (e.g. instrument names in
  *  `inst("…")`, and to *suppress* language completions inside any other string).
  *  Null when the cursor isn't inside a call's string argument. */
-export function stringArgCallAt(tree: Tree, offset: number): { from: number; fn: string } | null {
+export function stringArgCallAt(tree: Tree, offset: number): { from: number; to: number; fn: string } | null {
   const at = tree.rootNode.descendantForIndex(offset);
   if (!at) return null;
   // Nearest enclosing string literal (the argument being typed).
@@ -391,7 +391,9 @@ export function stringArgCallAt(tree: Tree, offset: number): { from: number; fn:
     if (str.startIndex < args.startIndex || str.endIndex > args.endIndex) continue;
     const callee = cur.childForFieldName('function') ?? cur.childForFieldName('method');
     if (callee?.type !== 'identifier') return null;
-    return { from: str.startIndex + 1, fn: callee.text };
+    // `from`/`to` bracket the string *content* (between the quotes), the range a
+    // value completion / quick-fix replaces.
+    return { from: str.startIndex + 1, to: str.endIndex - 1, fn: callee.text };
   }
   return null;
 }

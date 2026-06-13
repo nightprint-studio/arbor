@@ -20,10 +20,12 @@
     from './nemus-cm';
   import { nemusFormat } from '$lib/ipc/nemus';
   import type { NemusIntelSource } from './nemus-intel';
-  import { extractSymbols, identifierAt, identifierUsages, tracksReferencing, type NemusSymbol } from './nemus-lang';
+  import { extractSymbols, identifierAt, identifierUsages, tracksReferencing, stringArgCallAt, type NemusSymbol } from './nemus-lang';
   import { symbolHighlightStore } from '../stores/symbol-highlight.svelte';
-  import { buildControlEdits, type ControlEdit } from './nemus-edit';
+  import { buildControlEdits, type ControlEdit, type EditChange } from './nemus-edit';
   import { renamePlan, extractTarget, extractLetPlan, inlinePlan, freshName } from './nemus-refactor';
+  import { collectIntentions, changeScalePlan, type IntentionItem } from './nemus-intentions';
+  import { scalesStore } from '../stores/scales.svelte';
   import type { UsageItem, UsageAnchor } from '../stores/usages.svelte';
   import { diagnosticsStore, activeHapsStore } from '../stores/engine.svelte';
   import { referenceStore } from '../stores/reference.svelte';
@@ -339,6 +341,61 @@
     const name = identifierAt(tree, head) ?? (head > 0 ? identifierAt(tree, head - 1) : null);
     if (!name) return { ok: false, error: 'Place the caret on a let name' };
     const plan = inlinePlan(tree, view.state.doc.toString(), name);
+    if (plan.error) return { ok: false, error: plan.error };
+    if (plan.changes.length) view.dispatch({ changes: plan.changes });
+    view.focus();
+    return { ok: true, note: plan.note };
+  }
+
+  // ── Intentions (Alt+Enter quick-fixes) ───────────────────────────────────────
+
+  /** The context actions available at the caret / selection (rename · inline ·
+   *  extract · fix unresolved instrument · transpose notes), plus a caret anchor
+   *  for the popup. Empty list when nothing applies. */
+  export function getIntentions(): { items: IntentionItem[]; anchor: UsageAnchor | null } | null {
+    if (!view) return null;
+    const tree = getNemusTree(view);
+    if (!tree) return { items: [], anchor: null };
+    const sel = view.state.selection.main;
+    const items = collectIntentions({
+      tree,
+      src: view.state.doc.toString(),
+      head: sel.head, from: sel.from, to: sel.to,
+      instruments: soundsStore.instruments.map((i) => i.name),
+      scales: scalesStore.modes,
+    });
+    return { items, anchor: anchorAt(sel.head) };
+  }
+
+  /** Apply an "edit" intention's change set (one undoable transaction). */
+  export function applyIntentionEdits(edits: EditChange[]): void {
+    if (!view || !edits.length) return;
+    const sorted = [...edits].sort((a, b) => a.from - b.from || a.to - b.to);
+    view.dispatch({ changes: sorted });
+    view.focus();
+  }
+
+  // ── Change scale (Alt+Enter on a `.scale("…")`) ───────────────────────────────
+
+  /** The current scale spec when the caret sits in a `.scale("…")` string (so the
+   *  host can open an input prefilled with it), or null. */
+  export function prepareChangeScale(): { spec: string; anchor: UsageAnchor | null } | null {
+    if (!view) return null;
+    const tree = getNemusTree(view);
+    if (!tree) return null;
+    const head = view.state.selection.main.head;
+    const sa = stringArgCallAt(tree, head);
+    if (!sa || sa.fn !== 'scale') return null;
+    return { spec: view.state.doc.toString().slice(sa.from, sa.to), anchor: anchorAt(head) };
+  }
+
+  /** Change the scale at the caret to `newSpec`, re-spelling its notes to keep
+   *  their degree (one undoable transaction). */
+  export function applyChangeScale(newSpec: string): RefactorOutcome {
+    if (!view) return { ok: false };
+    const tree = getNemusTree(view);
+    if (!tree) return { ok: false, error: 'Editor not ready' };
+    const plan = changeScalePlan(tree, view.state.doc.toString(), view.state.selection.main.head, newSpec, scalesStore.modes);
     if (plan.error) return { ok: false, error: plan.error };
     if (plan.changes.length) view.dispatch({ changes: plan.changes });
     view.focus();

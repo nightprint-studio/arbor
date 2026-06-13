@@ -570,6 +570,41 @@ export function nemusFormat(source: string): Promise<string> {
   return invoke('nemus_format', { source });
 }
 
+/** One scale mode in the catalogue: canonical name + aliases + ascending semitone
+ *  intervals (one octave from the root). */
+export interface NemusScaleMode {
+  name: string;
+  aliases: string[];
+  intervals: number[];
+}
+
+/** Read the scale-mode catalogue (`.scale("root:mode")` modes); load once. */
+export function nemusScales(): Promise<NemusScaleMode[]> {
+  return invoke('nemus_scales');
+}
+
+// ── External libraries (`[libraries]` in nemus.toml → `$lib/…` imports) ────────
+
+/** One declared library's state: its source spec, the pinned commit SHA (when
+ *  locked), and whether its cache is present (synced). */
+export interface NemusLibraryStatus {
+  name: string;
+  source: string;
+  sha: string | null;
+  synced: boolean;
+}
+
+/** The project's declared libraries with their lock / sync state. */
+export function nemusLibraries(projectDir: string): Promise<NemusLibraryStatus[]> {
+  return invoke('nemus_libraries', { projectDir });
+}
+
+/** Start a background sync of the project's libraries (resolve refs → SHAs,
+ *  download missing commits, rewrite `nemus.lock`). Returns the job id. */
+export function nemusSyncLibraries(projectDir: string): Promise<string> {
+  return invoke('nemus_sync_libraries', { projectDir });
+}
+
 // ── Audio / MIDI import (WAV → MIDI, MIDI → .nemus) ───────────────────────────
 
 /** Options for the import commands (all optional; the backend fills defaults). */

@@ -52,7 +52,11 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Refactor</div>
-    <div class="fc-desc">Reshape code without retyping it. <strong>Rename</strong> (<kbd>Shift</kbd>+<kbd>F6</kbd>) renames a <code>let</code> / <code>fn</code> / <code>import</code> and every use at once. <strong>Extract</strong> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>) lifts a selected pattern into a named <code>let</code> and leaves the name in its place — the phrase-factoring move, on demand. <strong>Inline</strong> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>) is the inverse. <strong>File structure</strong> (<kbd>Ctrl</kbd>+<kbd>F12</kbd>) jumps to any symbol; <strong>Format</strong> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>) reflows the file to canonical style.</div>
+    <div class="fc-desc">Reshape code without retyping it. <strong>Rename</strong> (<kbd>Shift</kbd>+<kbd>F6</kbd>) renames a <code>let</code> / <code>fn</code> / <code>import</code> and every use at once. <strong>Extract</strong> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>) lifts a selected pattern into a named <code>let</code> and leaves the name in its place — the phrase-factoring move, on demand. <strong>Inline</strong> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>) is the inverse. <strong>Context actions</strong> (<kbd>Alt</kbd>+<kbd>Enter</kbd>) gathers the quick-fixes that apply where the caret is: fix an unresolved <code>inst("…")</code> by picking the closest installed instrument, transpose the note (or selection) by a semitone or octave in place, snap an out-of-scale note to the nearest degree of the enclosing <code>.scale("…")</code>, change that scale (re-spelling its notes to keep their degree), or reach rename / inline / extract. <strong>File structure</strong> (<kbd>Ctrl</kbd>+<kbd>F12</kbd>) jumps to any symbol; <strong>Format</strong> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>) reflows the file to canonical style.</div>
+  </div>
+  <div class="feature-card">
+    <div class="fc-title">Libraries</div>
+    <div class="fc-desc">Reuse <code>.nemus</code> modules from GitHub. Declare them in <code>nemus.toml</code> under <code>[libraries]</code> (e.g. <code>drums = "github:owner/repo@v1"</code>), then import their <code>let</code> / <code>fn</code> with <code>import &#123; … &#125; from "$lib/drums/groove.nemus"</code>. <strong>Sync libraries</strong> (Command Palette) downloads each one pinned to a commit SHA into a shared cache and records it in <code>nemus.lock</code> for reproducible builds; opening a project auto-fetches any that are missing. Public GitHub repos.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Inspector</div>
@@ -185,6 +189,7 @@ arrange(
     <tr><td><kbd>Shift</kbd>+<kbd>F6</kbd></td><td>Rename the symbol under the caret + all its uses (editor)</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></td><td>Extract the selected pattern into a named <code>let</code> (editor)</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>Inline the <code>let</code> under the caret into its uses (editor)</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd></td><td>Context actions / quick-fixes at the caret (editor)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration · preview an <code>inst("…")</code> / <code>s("…")</code> name (editor) · reveal hap source (arrangement)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (editor focused) · else search the Console / Problems</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>
