@@ -12,6 +12,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { arrViewOptions as o } from './arr-view-options.svelte';
   import { transportUiStore } from '../stores/transport-ui.svelte';
+  import TempoControl from './TempoControl.svelte';
 
   const hasLoop = $derived(transportUiStore.loop != null);
   const loopOn = $derived(transportUiStore.loopActive);
@@ -80,6 +81,8 @@
     <Hourglass size={14} />
     {#if countIn > 0}<span class="cnt">{countIn}</span>{/if}
   </button>
+  <span class="tb-div"></span>
+  <TempoControl />
 </div>
 
 <style>

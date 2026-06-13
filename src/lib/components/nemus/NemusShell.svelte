@@ -44,6 +44,7 @@
   import { nemusStore } from './nemus-store.svelte';
   import { nemusEngine, diagnosticsStore, transportStore } from './stores/engine.svelte';
   import { transportUiStore } from './stores/transport-ui.svelte';
+  import { tempoStore } from './stores/tempo.svelte';
   import { configStore } from './stores/config.svelte';
   import { packsStore } from './stores/packs.svelte';
   import { modelsStore } from './stores/models.svelte';
@@ -174,6 +175,9 @@
   $effect(() => {
     void diagnosticsStore.errors; // dep: a fresh array is set on each eval
     arrangementStore.schedule();
+    // The source's tempo is authoritative again after an eval — drop any live
+    // tap-tempo / nudge override (mirrors the mixer's gain/pan rebaseline).
+    tempoStore.reset();
   });
 
   // Mirror layout changes to the persisted window state (debounced in the

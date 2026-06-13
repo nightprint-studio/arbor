@@ -16,7 +16,7 @@
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin, Timer, Hourglass,
+    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -33,6 +33,7 @@
   import { arrangementStore } from '../viz/arrangement.svelte';
   import { librariesStore } from '../stores/libraries.svelte';
   import { transportUiStore } from '../stores/transport-ui.svelte';
+  import { tempoStore } from '../stores/tempo.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -44,7 +45,7 @@
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin, Timer, Hourglass,
+    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -73,6 +74,14 @@
       run: () => transportUiStore.toggleMetronome() },
     { id: 'cycle_count_in', label: transportUiStore.countIn > 0 ? `Count-in: ${transportUiStore.countIn} bar${transportUiStore.countIn > 1 ? 's' : ''} (step)` : 'Count-in: add pre-roll', group: 'Transport', icon: 'Hourglass', keys: 'Ctrl+Shift+U',
       run: () => transportUiStore.cycleCountIn() },
+    { id: 'tap_tempo', label: 'Tap tempo', group: 'Transport', icon: 'Gauge',
+      run: () => tempoStore.tap() },
+    { id: 'tempo_up', label: 'Tempo +1 BPM', group: 'Transport', icon: 'Plus',
+      run: () => tempoStore.nudge(1) },
+    { id: 'tempo_down', label: 'Tempo −1 BPM', group: 'Transport', icon: 'Minus',
+      run: () => tempoStore.nudge(-1) },
+    { id: 'tempo_reset', label: 'Reset tempo to the score', group: 'Transport', icon: 'RotateCcw',
+      run: () => tempoStore.reset() },
     { id: 'toggle_loop', label: transportUiStore.loopActive ? 'Loop region: off' : 'Loop region: on', group: 'Transport', icon: 'Repeat', keys: 'Ctrl+Shift+L',
       run: () => transportUiStore.toggleLoop() },
     { id: 'clear_loop', label: 'Clear loop region', group: 'Transport', icon: 'Repeat',

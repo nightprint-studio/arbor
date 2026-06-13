@@ -36,6 +36,17 @@
   <li>The <strong>count-in</strong> toggle (or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd>) steps a 1- or 2-bar metronome pre-roll: playback waits that many bars, clicking you in, before the song starts. It applies to the next play (from the top or from the cursor).</li>
 </ul>
 
+<h2>Tempo</h2>
+<p>
+  The view toolbar carries a live <strong>tempo</strong> readout in BPM: the
+  <strong>−</strong> / <strong>+</strong> buttons nudge it by 1 BPM (hold <kbd>Shift</kbd>
+  for ±5), and <strong>TAP</strong> sets it from your taps — tap in time, or focus it and
+  press <kbd>Space</kbd> in rhythm. This is a <em>live override</em> (handy for matching or
+  feeling out a tempo): it's released on the next run, when the score's own
+  <code>cps(…)</code> / <code>tempo(…)</code> takes over again. Click the readout to drop the
+  override and follow the score immediately.
+</p>
+
 <h2>Loop region</h2>
 <p>
   <strong><kbd>Alt</kbd> + drag the ruler</strong> to mark a loop region (snapped to whole
