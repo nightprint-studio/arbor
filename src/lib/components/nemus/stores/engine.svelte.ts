@@ -157,6 +157,12 @@ export const audioErrorStore  = createAudioErrorStore();
 // ── Engine controller (transport actions + one-call subscription) ────────────────
 
 function createNemusEngine() {
+  // Monotonic token: only the most recent eval's inline diagnostics may win.
+  // Debounced edits can put two evals in flight (a fast failing one and a slow
+  // succeeding one that stages samples), and they can resolve out of order — an
+  // older result must never clobber a newer one's lint.
+  let evalSeq = 0;
+
   return {
     /** Whether the scheduler is running (delegates to the transport stream). */
     get running() { return transportStore.playing; },
@@ -175,10 +181,13 @@ function createNemusEngine() {
       return () => { for (const un of uns) un(); };
     },
 
-    /** Evaluate `source`, push diagnostics, and return them. Does not play. */
+    /** Evaluate `source`, push diagnostics, and return them. Does not play.
+     *  Stale inline results (a newer eval started meanwhile) are dropped so they
+     *  can't overwrite fresher lint. */
     async eval(source: string, projectDir?: string): Promise<NemusDiagnostic[]> {
+      const seq = ++evalSeq;
       const d = await nemusEval(source, projectDir);
-      diagnosticsStore.set(d.errors);
+      if (seq === evalSeq) diagnosticsStore.set(d.errors);
       return d.errors;
     },
 

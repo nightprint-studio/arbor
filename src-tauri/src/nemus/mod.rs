@@ -289,13 +289,20 @@ pub async fn nemus_eval(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    let diagnostics = match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
+    match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
         Ok(output) => {
             // Surface sound/instrument references the registry can't resolve as
             // editor errors (the renderer would silently fall back to the synth).
             // Done before the arrangement is moved to the live session below.
             let known = validate::known_instruments(&cfg);
             let errors = validate::validate_instruments(&output.tracks, &known);
+            let diagnostics = NemusDiagnostics { errors };
+            // Publish diagnostics to the editor *before* the (possibly slow) sample
+            // staging below. Decoding newly-referenced sample voices can take a
+            // while (a large `gm_` pack especially); if the emit waited for it, a
+            // stale error from a mid-edit snapshot would linger on screen until the
+            // decode finished. The editor's lint must never wait on audio.
+            emit(&app, EVT_DIAGNOSTICS, diagnostics.clone());
             // Stash for replay on the next play, and push live if already running.
             {
                 let mut latest = nemus.latest.lock().unwrap_or_else(|e| e.into_inner());
@@ -308,13 +315,13 @@ pub async fn nemus_eval(
             // Push live if a session is running, decoding any new sample voices
             // off the RT thread (so editing while playing never freezes audio).
             nemus.stage_tracks(&cfg, output.tracks, output.cps, output.tempo).await;
-            NemusDiagnostics { errors }
+            Ok(diagnostics)
         }
-        Err(diags) => diags,
-    };
-
-    emit(&app, EVT_DIAGNOSTICS, diagnostics.clone());
-    Ok(diagnostics)
+        Err(diags) => {
+            emit(&app, EVT_DIAGNOSTICS, diags.clone());
+            Ok(diags)
+        }
+    }
 }
 
 /// Transport control. `action` ∈ `play` | `stop` | `seek` | `set_cps`; `value`
