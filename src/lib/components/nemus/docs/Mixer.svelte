@@ -29,11 +29,20 @@
 </p>
 
 <h2>Rendering to a file</h2>
+<p>
+  The export button in the title bar is a split control. Clicking it exports
+  straight away using the last-chosen format; its chevron opens a menu to pick
+  the format (WAV or OGG Vorbis) or to <strong>Edit export…</strong>.
+</p>
 <ol class="step-list">
-  <li>Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd> (or the Render button in the title bar).</li>
-  <li>Pick how many times the arrangement's natural loop should repeat.</li>
-  <li>The render runs as a background job; progress shows in the title bar and the Jobs panel.</li>
+  <li>Press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd> (or <strong>Edit export…</strong> from the export menu) to open the options dialog.</li>
+  <li>Choose the format and how many times the arrangement's natural loop should repeat — the dialog shows a live duration · size estimate.</li>
+  <li>The render runs in the background; progress shows in the title bar and the <strong>Downloads &amp; Exports</strong> overlay, where a <strong>Stop</strong> button cancels it mid-render (the partial file is discarded).</li>
 </ol>
 <p>
   Sample rate, bit depth and the reverb tail are set under <strong>Settings → Render</strong>.
+</p>
+<p>
+  The same overlay lists sample-bank and model downloads and library syncs — each
+  can be stopped the same way.
 </p>

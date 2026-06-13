@@ -207,20 +207,41 @@ fn start_sync(app: &AppHandle, project_dir: PathBuf) -> String {
     job_id
 }
 
+/// Terminal outcome of a library sync.
+enum SyncOutcome {
+    Completed,
+    /// The user stopped it via `cancel_job`; libraries already pinned stay pinned.
+    Cancelled,
+}
+
+/// True once the user cancelled the sync job (Transfers overlay Stop button).
+fn is_cancelled(app: &AppHandle, job_id: &str) -> bool {
+    app.state::<crate::AppState>()
+        .jobs
+        .lock()
+        .map(|j| j.is_cancelled(job_id))
+        .unwrap_or(false)
+}
+
 /// Resolve + download every declared library, rewriting the lock as it goes (so a
 /// partial run still pins what it fetched). Returns an aggregated error message
-/// when one or more libraries fail.
-async fn sync_all(app: &AppHandle, project_dir: &Path, job_id: &str) -> Result<(), String> {
+/// when one or more libraries fail. Checks `is_cancelled` before each library so
+/// `cancel_job` stops the run at the next boundary (what's already fetched stays).
+async fn sync_all(app: &AppHandle, project_dir: &Path, job_id: &str) -> Result<SyncOutcome, String> {
     let declared = declared(project_dir);
     if declared.is_empty() {
         log_line(app, job_id, "No [libraries] declared.");
-        return Ok(());
+        return Ok(SyncOutcome::Completed);
     }
     let http = client();
     let mut lock = read_lock(project_dir);
     let mut errors: Vec<String> = Vec::new();
 
     for (name, source) in declared {
+        if is_cancelled(app, job_id) {
+            log_line(app, job_id, "Cancelled.");
+            return Ok(SyncOutcome::Cancelled);
+        }
         log_line(app, job_id, &format!("Resolving {name} = {source}"));
         match sync_one(&http, &source).await {
             Ok(sha) => {
@@ -236,7 +257,7 @@ async fn sync_all(app: &AppHandle, project_dir: &Path, job_id: &str) -> Result<(
         }
     }
 
-    if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
+    if errors.is_empty() { Ok(SyncOutcome::Completed) } else { Err(errors.join("; ")) }
 }
 
 /// Resolve one source's ref → SHA and ensure the commit's tree is cached.
@@ -341,9 +362,10 @@ fn log_line(app: &AppHandle, job_id: &str, line: &str) {
     };
 }
 
-fn finish_job(app: &AppHandle, job_id: &str, result: Result<(), String>) {
+fn finish_job(app: &AppHandle, job_id: &str, result: Result<SyncOutcome, String>) {
     let (status, success, error) = match result {
-        Ok(()) => (JobStatus::Completed { exit_code: 0 }, true, None),
+        Ok(SyncOutcome::Completed) => (JobStatus::Completed { exit_code: 0 }, true, None),
+        Ok(SyncOutcome::Cancelled) => (JobStatus::Cancelled, false, None),
         Err(e) => {
             tracing::warn!("nemus: library sync failed ({job_id}): {e}");
             (JobStatus::Failed { error: e.clone() }, false, Some(e))

@@ -108,6 +108,11 @@ function createProjectActions() {
      *  resets the loop count to the default each time so the dialog is
      *  predictable. */
     exportWav()   { exportLoops = DEFAULT_RENDER_LOOPS; exportOptionsOpen = true; },
+    /** Quick export (IntelliJ "run current configuration") — skip the options
+     *  dialog and go straight to the save picker, reusing the last-chosen
+     *  format + loop count. The split-button's main action; "Edit export…"
+     *  (→ `exportWav`) is the dialog path for tweaking the details first. */
+    quickExport() { picker = 'export'; },
     /** Confirm export options → advance to the save picker (step 2). */
     confirmExportOptions() { exportOptionsOpen = false; picker = 'export'; },
     /** Dismiss the export options dialog without exporting. */

@@ -203,9 +203,26 @@ fn start_download(app: &AppHandle, id: &str, name: &str, url: &str, dest: PathBu
     job_id
 }
 
+/// Terminal outcome of a model download.
+enum DownloadOutcome {
+    Completed,
+    /// The user stopped it via `cancel_job`; the `.part` temp was removed.
+    Cancelled,
+}
+
+/// True once the user cancelled the download job (Transfers overlay Stop button).
+fn is_cancelled(app: &AppHandle, job_id: &str) -> bool {
+    app.state::<crate::AppState>()
+        .jobs
+        .lock()
+        .map(|j| j.is_cancelled(job_id))
+        .unwrap_or(false)
+}
+
 /// Stream `url` to `dest` (via a `.part` temp + rename), emitting throttled
-/// progress on the job.
-async fn download_file(app: &AppHandle, url: &str, dest: &Path, job_id: &str) -> Result<(), String> {
+/// progress on the job. Polls `is_cancelled` per chunk so `cancel_job` stops the
+/// download (the partial `.part` is removed) instead of running to completion.
+async fn download_file(app: &AppHandle, url: &str, dest: &Path, job_id: &str) -> Result<DownloadOutcome, String> {
     use futures_util::StreamExt;
     use std::io::Write;
 
@@ -226,6 +243,11 @@ async fn download_file(app: &AppHandle, url: &str, dest: &Path, job_id: &str) ->
     let mut last_pct: i32 = -1;
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
+        if is_cancelled(app, job_id) {
+            drop(file);
+            let _ = std::fs::remove_file(&tmp);
+            return Ok(DownloadOutcome::Cancelled);
+        }
         let chunk = chunk.map_err(|e| format!("download interrupted: {e}"))?;
         file.write_all(&chunk).map_err(|e| format!("write: {e}"))?;
         received += chunk.len() as u64;
@@ -245,13 +267,14 @@ async fn download_file(app: &AppHandle, url: &str, dest: &Path, job_id: &str) ->
     file.flush().map_err(|e| format!("flush: {e}"))?;
     drop(file);
     std::fs::rename(&tmp, dest).map_err(|e| format!("finalize: {e}"))?;
-    Ok(())
+    Ok(DownloadOutcome::Completed)
 }
 
-fn finish_job(app: &AppHandle, job_id: &str, outcome: Result<(), String>) {
+fn finish_job(app: &AppHandle, job_id: &str, outcome: Result<DownloadOutcome, String>) {
     let state = app.state::<crate::AppState>();
     let (status, success, error) = match outcome {
-        Ok(()) => (JobStatus::Completed { exit_code: 0 }, true, None),
+        Ok(DownloadOutcome::Completed) => (JobStatus::Completed { exit_code: 0 }, true, None),
+        Ok(DownloadOutcome::Cancelled) => (JobStatus::Cancelled, false, None),
         Err(e) => (JobStatus::Failed { error: e.clone() }, false, Some(e)),
     };
     if let Ok(mut jobs) = state.jobs.lock() {

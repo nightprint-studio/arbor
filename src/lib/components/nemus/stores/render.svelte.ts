@@ -11,6 +11,7 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
+import { cancelJob } from '$lib/feedback/ipc/job';
 
 /**
  * Default number of times the offline bounce repeats the arrangement's natural
@@ -102,10 +103,31 @@ function createRenderStore() {
   // The shared transfers-overlay entry id for the in-flight export (the output
   // path, unique per render); null when idle.
   let transferId: string | null = null;
+  // The backend render job id, known once `nemusRender` resolves. Held so the
+  // Stop button can cancel it; `cancelled` gates the late job-done so a
+  // user-initiated stop reads as a cancel, not a failure.
+  let jobId: string | null = null;
+  let cancelled = false;
 
   function disarm() {
     if (unlisten) { unlisten(); unlisten = null; }
     if (unlistenProgress) { unlistenProgress(); unlistenProgress = null; }
+  }
+
+  /** Stop the in-flight render (the Transfers overlay Stop button). Tells the
+   *  backend to cancel the job, then returns the button to idle and marks the
+   *  transfer cancelled. If the job id isn't known yet (the `nemusRender` call
+   *  is still in flight) the cancel is deferred until `track` resolves it. */
+  function requestCancel() {
+    if (status !== 'rendering') return;
+    cancelled = true;
+    if (jobId) void cancelJob(jobId).catch(() => {});
+    disarm();
+    if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
+    status = 'idle';
+    const id = transferId;
+    transferId = null;
+    if (id) transfersStore.cancelled(id);
   }
   function settle(s: RenderStatus, err?: string) {
     disarm();
@@ -140,15 +162,18 @@ function createRenderStore() {
       status = 'rendering';
       file = basename(outPath);
       error = null;
+      cancelled = false;
+      jobId = null;
       // Surface the export in the shared transfers overlay, with a live percent
       // streamed from the backend render job (`arbor://job-progress`). Carries the
-      // output path so the overlay can reveal the finished WAV in the explorer.
+      // output path so the overlay can reveal the finished WAV in the explorer, and
+      // a `cancel` handler so the overlay shows a Stop button.
       transferId = outPath;
       transfersStore.start({
         id: outPath, kind: 'export', label: file, sublabel: 'Rendering…', progress: 0, path: outPath,
+        cancel: () => requestCancel(),
       });
 
-      let jobId: string | null = null;
       const buffered: JobDone[] = [];
       let bufferedPct: number | null = null;
       unlisten = await listen<JobDone>('arbor://job-done', (e) => {
@@ -170,6 +195,11 @@ function createRenderStore() {
         settle('failed', err instanceof Error ? err.message : String(err));
         return;
       }
+      // Stop pressed before the id was known → cancel now that we have it.
+      // Disarm here too: if the Stop landed while a listener was still being
+      // registered, requestCancel's disarm missed it, so a late job-done could
+      // otherwise flip the (now idle) status back to failed.
+      if (cancelled) { disarm(); void cancelJob(jobId).catch(() => {}); return; }
       // Drain anything that landed before the id was known.
       if (bufferedPct != null && transferId) transfersStore.update(transferId, { progress: bufferedPct });
       const hit = buffered.find((p) => p.job_id === jobId);

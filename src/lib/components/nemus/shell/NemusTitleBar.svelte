@@ -13,6 +13,7 @@
     Play, Square, SkipBack, SkipForward, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
     PanelLeft, PanelRight, Minimize2, Check, AlertTriangle,
     FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut, FolderPen,
+    FileAudio, SlidersHorizontal,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
@@ -41,14 +42,30 @@
   const arrangementEnd = $derived(arrangementStore.contentEnd);
   const arrangementEmpty = $derived(arrangementStore.empty);
 
-  // Export button reflects the render job: spinner while bouncing, then a brief
-  // ✓ / ⚠ so the user sees it finished (or why it didn't) instead of nothing.
+  // Export split button reflects the render job: spinner while bouncing, then a
+  // brief ✓ / ⚠ so the user sees it finished (or why it didn't) instead of
+  // nothing. Idle tip echoes the active format — the main action quick-exports
+  // it; the chevron opens the format / "Edit export…" menu.
+  const exportFmtLabel = $derived(projectActions.exportFormat.toUpperCase());
   const exportTip = $derived(
     renderStore.status === 'rendering' ? `Rendering ${renderStore.file ?? 'audio'}…`
     : renderStore.status === 'done'    ? `Exported ${renderStore.file ?? 'audio'}`
     : renderStore.status === 'failed'  ? `Render failed${renderStore.error ? `: ${renderStore.error}` : ''}`
-    : 'Export audio (Ctrl+Shift+R)',
+    : `Export ${exportFmtLabel}`,
   );
+
+  // Export menu (chevron): pick the default format (single-select check) or open
+  // the full options dialog for loops + live duration/size estimate.
+  const exportMenu = $derived<DropdownItem[]>([
+    { kind: 'separator', label: 'Format' },
+    { kind: 'item', id: 'wav', label: 'WAV — lossless PCM', icon: FileAudio,
+      active: projectActions.exportFormat === 'wav', onclick: () => projectActions.setExportFormat('wav') },
+    { kind: 'item', id: 'ogg', label: 'OGG Vorbis — compressed', icon: FileAudio,
+      active: projectActions.exportFormat === 'ogg', onclick: () => projectActions.setExportFormat('ogg') },
+    { kind: 'separator' },
+    { kind: 'item', id: 'edit', label: 'Edit export…', icon: SlidersHorizontal,
+      shortcut: 'Ctrl+Shift+R', onclick: () => projectActions.exportWav() },
+  ]);
 
   /** Last path segment (forward- or back-slash) for a recents label. */
   function basename(path: string): string {
@@ -173,21 +190,38 @@
 
       <div class="gtb-sep"></div>
 
-      <button
-        class="gtb-run-icon"
-        class:rendering={renderStore.active}
-        class:ok={renderStore.status === 'done'}
-        class:err={renderStore.status === 'failed'}
-        onclick={() => projectActions.exportWav()}
-        disabled={renderStore.active}
-        use:tooltip={exportTip}
-        aria-label="Export audio"
-      >
-        {#if renderStore.status === 'rendering'}<Spinner size={13} />
-        {:else if renderStore.status === 'done'}<Check size={14} />
-        {:else if renderStore.status === 'failed'}<AlertTriangle size={14} />
-        {:else}<Download size={14} />{/if}
-      </button>
+      <!-- Export split: main = quick export (last format), chevron = format / Edit export… -->
+      <Dropdown items={exportMenu} position="fixed" direction="down" width="230px">
+        {#snippet trigger({ open, toggle })}
+          <div class="gtb-export" class:open>
+            <button
+              class="gtb-run-icon gtb-export-main"
+              class:rendering={renderStore.active}
+              class:ok={renderStore.status === 'done'}
+              class:err={renderStore.status === 'failed'}
+              onclick={() => projectActions.quickExport()}
+              disabled={renderStore.active}
+              use:tooltip={exportTip}
+              aria-label="Export audio"
+            >
+              {#if renderStore.status === 'rendering'}<Spinner size={13} />
+              {:else if renderStore.status === 'done'}<Check size={14} />
+              {:else if renderStore.status === 'failed'}<AlertTriangle size={14} />
+              {:else}<Download size={14} />{/if}
+              <span class="gtb-export-fmt">{exportFmtLabel}</span>
+            </button>
+            <button
+              class="gtb-export-chevron"
+              onclick={toggle}
+              disabled={renderStore.active}
+              use:tooltip={'Export options'}
+              aria-haspopup="menu" aria-expanded={open} aria-label="Export options" tabindex="-1"
+            >
+              <ChevronDown size={11} />
+            </button>
+          </div>
+        {/snippet}
+      </Dropdown>
     </div>
   {/snippet}
 
@@ -269,6 +303,37 @@
   .gtb-run-icon.ok { color: var(--success); }
   .gtb-run-icon.err { color: var(--error); }
   .gtb-run-icon:disabled { cursor: default; }
+
+  /* ── Export split (quick export + format / options menu) ──
+     Main icon keeps the .gtb-run-icon status feedback; chevron is a slim
+     attached toggle so the pair reads as one control. */
+  .gtb-export { display: flex; align-items: center; height: 28px; -webkit-app-region: no-drag; }
+  .gtb-export .gtb-export-main {
+    width: auto;
+    gap: 5px;
+    padding: 0 8px;
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  }
+  /* Active export format — shown on the button so the target is legible at a
+     glance (and tracks the format picked from the chevron menu). */
+  .gtb-export-fmt {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .gtb-export-chevron {
+    display: flex; align-items: center; justify-content: center;
+    width: 15px; height: 28px;
+    background: transparent; border: none;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    color: var(--text-muted); cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    -webkit-app-region: no-drag;
+  }
+  .gtb-export-chevron:hover { background: var(--bg-hover); color: var(--text-secondary); }
+  .gtb-export.open .gtb-export-chevron { background: var(--bg-hover); color: var(--accent); }
+  .gtb-export-chevron:disabled { cursor: default; opacity: 0.5; }
 
   .gtb-log {
     display: flex; align-items: center; gap: 6px;

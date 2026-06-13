@@ -10,7 +10,11 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { nemusLibraries, nemusSyncLibraries, type NemusLibraryStatus } from '$lib/ipc/nemus';
-import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
+import { cancelJob } from '$lib/feedback/ipc/job';
+
+/** Stable transfers-overlay id for the sync (only one runs at a time). */
+const SYNC_TRANSFER_ID = 'nemus:library-sync';
 
 function createLibrariesStore() {
   let items   = $state<NemusLibraryStatus[]>([]);
@@ -24,16 +28,31 @@ function createLibrariesStore() {
     try { items = await nemusLibraries(dir); } catch { items = []; }
   }
 
-  /** Start a background sync (no-op without a project / while already syncing). */
+  /** Cancel the in-flight sync (the Downloads & Exports overlay Stop button).
+   *  Clears the job mapping first so the late `job-done` is ignored. */
+  async function cancel() {
+    const job = syncJobId;
+    syncing = false;
+    syncJobId = null;
+    if (job) { try { await cancelJob(job); } catch { /* already gone */ } }
+    transfersStore.cancelled(SYNC_TRANSFER_ID);
+  }
+
+  /** Start a background sync (no-op without a project / while already syncing).
+   *  Surfaced in the shared Downloads & Exports overlay with a Stop button —
+   *  the sync has no single percent, so the bar is indeterminate. */
   async function sync() {
     if (!projectDir || syncing) return;
     syncing = true;
+    transfersStore.start({
+      id: SYNC_TRANSFER_ID, kind: 'download', label: 'Libraries', sublabel: 'Syncing…',
+      progress: null, cancel: () => { void cancel(); },
+    });
     try {
       syncJobId = await nemusSyncLibraries(projectDir);
-      toastStore.show('Syncing libraries…', 'info');
     } catch {
       syncing = false;
-      toastStore.show('Could not start library sync', 'error');
+      transfersStore.fail(SYNC_TRANSFER_ID, 'Could not start library sync');
     }
   }
 
@@ -46,10 +65,10 @@ function createLibrariesStore() {
         syncing = false;
         syncJobId = null;
         if (ev.payload.success) {
-          toastStore.show('Libraries synced', 'success');
+          transfersStore.finish(SYNC_TRANSFER_ID);
           if (projectDir) void refresh(projectDir);
         } else {
-          toastStore.show(`Library sync failed: ${ev.payload.error ?? 'unknown error'}`, 'error');
+          transfersStore.fail(SYNC_TRANSFER_ID, ev.payload.error ?? 'sync failed');
         }
       },
     );
@@ -63,6 +82,7 @@ function createLibrariesStore() {
     get count()   { return items.length; },
     refresh,
     sync,
+    cancel,
     subscribe,
   };
 }

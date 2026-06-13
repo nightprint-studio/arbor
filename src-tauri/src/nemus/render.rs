@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use arbor_nemus::prelude::{render_offline_with_progress, ControlMap, RenderConfig, Tracks};
+use arbor_nemus::prelude::{render_offline_with_progress, ControlMap, RenderConfig, RenderOutcome, Tracks};
 
 use crate::jobs::{JobInfo, JobRegistry, JobStatus};
 
@@ -29,6 +29,17 @@ pub struct RenderOpts {
     pub sample_rate: Option<u32>,
     /// Output container/codec: `"wav"` | `"ogg"`. Defaults to WAV.
     pub format: Option<String>,
+}
+
+/// True once the user cancelled the render job (the Transfers overlay Stop
+/// button → `cancel_job` → `JobStatus::Cancelled` in the registry). Polled by
+/// the render core's cooperative cancellation between blocks.
+fn job_is_cancelled(app: &AppHandle, job_id: &str) -> bool {
+    app.state::<crate::AppState>()
+        .jobs
+        .lock()
+        .map(|j| j.is_cancelled(job_id))
+        .unwrap_or(false)
 }
 
 /// Resolve the effective [`RenderConfig`] by overlaying `opts` onto `base`.
@@ -126,21 +137,35 @@ pub fn spawn_render(
                     );
                 }
             };
+            // Cooperative cancellation: the render core polls this before each
+            // block, so `cancel_job` (the Transfers overlay Stop button) stops the
+            // bounce instead of running to completion. Locking the (uncontended)
+            // job registry once per block is cheap and off the RT path.
+            let cancel_app = app.clone();
+            let cancel_job_id = job_id_thread.clone();
+            let should_cancel = move || job_is_cancelled(&cancel_app, &cancel_job_id);
             // Catch a panic in the render core so the job reports Failed (with a
             // surfaced message) instead of hanging on Running and leaving an
             // unfinalized, unplayable WAV with no explanation.
-            let outcome: Result<(), String> = match std::panic::catch_unwind(
+            let outcome: Result<RenderOutcome, String> = match std::panic::catch_unwind(
                 std::panic::AssertUnwindSafe(|| {
-                    render_offline_with_progress(&tracks, cps, cycles, &cfg, &out_path, on_progress)
+                    render_offline_with_progress(&tracks, cps, cycles, &cfg, &out_path, on_progress, should_cancel)
                 }),
             ) {
-                Ok(Ok(())) => Ok(()),
+                Ok(Ok(o)) => Ok(o),
                 Ok(Err(e)) => Err(e.to_string()),
                 Err(_) => Err("render thread panicked (see the log for details)".to_string()),
             };
             let state = app.state::<crate::AppState>();
             let (status, success, error) = match outcome {
-                Ok(()) => (JobStatus::Completed { exit_code: 0 }, true, None),
+                Ok(RenderOutcome::Completed) => (JobStatus::Completed { exit_code: 0 }, true, None),
+                // Cancelled: drop the partial WAV (the user stopped it — a stray
+                // half-render is just clutter) and report it as a cancel, not a
+                // failure, so the overlay shows "Cancelled".
+                Ok(RenderOutcome::Cancelled) => {
+                    let _ = std::fs::remove_file(&out_path);
+                    (JobStatus::Cancelled, false, None)
+                }
                 Err(msg) => (JobStatus::Failed { error: msg.clone() }, false, Some(msg)),
             };
             if let Ok(mut jobs) = state.jobs.lock() {

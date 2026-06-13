@@ -93,6 +93,18 @@ impl RenderProgress {
     }
 }
 
+/// How an offline render ended: it ran to completion, or the caller's
+/// `should_cancel` requested an early stop. On `Cancelled` the file on disk is
+/// still finalized (a valid, if partial, WAV) — it's the caller's choice to keep
+/// or delete it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderOutcome {
+    /// The full `cycles` (+ tail) were rendered.
+    Completed,
+    /// `should_cancel` returned true mid-bounce; the partial file was finalized.
+    Cancelled,
+}
+
 /// Render `cycles` cycles of `tracks` (at `cps`) to a stereo WAV at `out_path`,
 /// plus a trailing tail up to [`RenderConfig::tail_max_secs`].
 ///
@@ -111,13 +123,17 @@ pub fn render_offline(
     cfg: &RenderConfig,
     out_path: &Path,
 ) -> Result<()> {
-    render_offline_with_progress(tracks, cps, cycles, cfg, out_path, |_| {})
+    render_offline_with_progress(tracks, cps, cycles, cfg, out_path, |_| {}, || false).map(|_| ())
 }
 
-/// Like [`render_offline`], but reports progress: `on_progress` is invoked after
-/// each block is written (and once at the start) with the running
-/// [`RenderProgress`]. The callback runs on the render thread — keep it cheap
-/// (the shell throttles + forwards it as an event). Anything else is identical.
+/// Like [`render_offline`], but reports progress and is **cancellable**:
+/// `on_progress` is invoked after each block is written (and once at the start)
+/// with the running [`RenderProgress`], and `should_cancel` is polled before each
+/// block — when it returns true the bounce stops early, the partial file is
+/// finalized, and [`RenderOutcome::Cancelled`] is returned. Both callbacks run on
+/// the render thread — keep them cheap (the shell throttles progress + forwards it
+/// as an event, and checks a job flag for cancellation). Anything else is
+/// identical to [`render_offline`].
 pub fn render_offline_with_progress(
     tracks: &Tracks<ControlMap>,
     cps: f64,
@@ -125,7 +141,8 @@ pub fn render_offline_with_progress(
     cfg: &RenderConfig,
     out_path: &Path,
     mut on_progress: impl FnMut(RenderProgress),
-) -> Result<()> {
+    should_cancel: impl Fn() -> bool,
+) -> Result<RenderOutcome> {
     let sr = cfg.sample_rate;
     let epoch = Epoch::start(cps);
 
@@ -177,8 +194,16 @@ pub fn render_offline_with_progress(
     // even though megabytes of samples reached disk. A short, *valid* file (and a
     // surfaced error) beats a large corrupt one.
     let mut write_err: Option<EngineError> = None;
+    let mut cancelled = false;
     on_progress(RenderProgress { done_frames: 0, total_frames });
     while frame_cursor < total_frames {
+        // Cooperative cancellation: bail before doing this block's work. The file
+        // is still finalized below (valid, partial), and the caller decides whether
+        // to keep or delete it.
+        if should_cancel() {
+            cancelled = true;
+            break;
+        }
         let block_len = ((total_frames - frame_cursor) as usize).min(BLOCK_FRAMES);
         let block_end = frame_cursor + block_len as u64;
 
@@ -226,11 +251,12 @@ pub fn render_offline_with_progress(
         on_progress(RenderProgress { done_frames: frame_cursor, total_frames });
     }
 
-    // Always finalize, even after a write error, so the file is valid/playable.
+    // Always finalize, even after a write error or a cancel, so the file is
+    // valid/playable (a WAV whose header is never written back is unplayable).
     let finalized = sink.finalize();
     match write_err {
         Some(e) => Err(e),
-        None => finalized,
+        None => finalized.map(|()| if cancelled { RenderOutcome::Cancelled } else { RenderOutcome::Completed }),
     }
 }
 
