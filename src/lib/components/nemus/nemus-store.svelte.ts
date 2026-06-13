@@ -105,6 +105,12 @@ function createNemusStore() {
   // the shortcut / palette ask it to open the file-structure picker. ────────────
   let structureSeq = $state(0);
 
+  // ── Refactor relays (one-shot) — rename / extract / inline are driven by the
+  // editor (tree + selection); the palette asks for them via these bumped seqs. ─
+  let renameSeq  = $state(0);
+  let extractSeq = $state(0);
+  let inlineSeq  = $state(0);
+
   // ── Live editor caret (footer Ln/Col) ────────────────────────────────────────
   let caretLine = $state(1);
   let caretCol  = $state(1);
@@ -237,6 +243,14 @@ function createNemusStore() {
       if (collapseTabpane) collapseTabpane = false; // editor must be mounted to read the tree
       structureSeq++;
     },
+
+    // ── refactors (one-shot; TabbedEditor consumes) ──
+    get renameSeq()  { return renameSeq; },
+    get extractSeq() { return extractSeq; },
+    get inlineSeq()  { return inlineSeq; },
+    requestRename()  { if (collapseTabpane) collapseTabpane = false; renameSeq++; },
+    requestExtract() { if (collapseTabpane) collapseTabpane = false; extractSeq++; },
+    requestInline()  { if (collapseTabpane) collapseTabpane = false; inlineSeq++; },
 
     // ── live caret (footer) ──
     get caretLine() { return caretLine; },

@@ -51,6 +51,10 @@
     <div class="fc-desc">The tracks, functions, constants and imports of the active file. Click a symbol to jump to its declaration; <kbd>Ctrl</kbd>+<kbd>Click</kbd> a name in the editor to follow it (cross-file too).</div>
   </div>
   <div class="feature-card">
+    <div class="fc-title">Refactor</div>
+    <div class="fc-desc">Reshape code without retyping it. <strong>Rename</strong> (<kbd>Shift</kbd>+<kbd>F6</kbd>) renames a <code>let</code> / <code>fn</code> / <code>import</code> and every use at once. <strong>Extract</strong> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>) lifts a selected pattern into a named <code>let</code> and leaves the name in its place — the phrase-factoring move, on demand. <strong>Inline</strong> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>) is the inverse. <strong>File structure</strong> (<kbd>Ctrl</kbd>+<kbd>F12</kbd>) jumps to any symbol; <strong>Format</strong> (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>) reflows the file to canonical style.</div>
+  </div>
+  <div class="feature-card">
     <div class="fc-title">Inspector</div>
     <div class="fc-desc">Detail for the selected track: voice, meters, the live mix values, pattern statistics (hap count, pitch range), and the code-first <strong>delay</strong> knobs (time / feedback / mix) that write a <code>.delay(…)</code> into the source. Clicking an event in the arrangement also shows that event's detail (note, position, length) here.</div>
   </div>
@@ -178,6 +182,9 @@ arrange(
     <tr><td><kbd>Alt</kbd>+<kbd>F7</kbd></td><td>Find usages of the symbol at the caret (editor)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>F12</kbd></td><td>File structure — jump to any track / fn / let / import (editor)</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd></td><td>Format document — reformat to canonical style (editor)</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>F6</kbd></td><td>Rename the symbol under the caret + all its uses (editor)</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></td><td>Extract the selected pattern into a named <code>let</code> (editor)</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>Inline the <code>let</code> under the caret into its uses (editor)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration · preview an <code>inst("…")</code> / <code>s("…")</code> name (editor) · reveal hap source (arrangement)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (editor focused) · else search the Console / Problems</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>

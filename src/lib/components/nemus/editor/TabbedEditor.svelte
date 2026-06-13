@@ -38,6 +38,11 @@
     findUsages: () => { name: string | null; items: UsageItem[]; anchor: UsageAnchor | null } | null;
     getStructure: () => NemusSymbol[];
     formatDocument: () => Promise<{ ok: boolean; error?: string }>;
+    prepareRename: () => { name: string; anchor: UsageAnchor | null } | null;
+    applyRename: (oldName: string, newName: string) => { ok: boolean; error?: string; note?: string };
+    prepareExtract: () => { from: number; to: number; suggested: string; anchor: UsageAnchor | null } | null;
+    applyExtract: (from: number, to: number, name: string) => { ok: boolean; error?: string; note?: string };
+    applyInline: () => { ok: boolean; error?: string; note?: string };
     commitControls: (
       index: number,
       edits: import('./nemus-edit').ControlEdit[],
@@ -170,6 +175,27 @@
     if (seq > 0) openStructure();
   });
 
+  // ── Refactor relays (Command Palette → store seq; shortcuts call directly) ───
+  let lastRenameSeq = 0, lastExtractSeq = 0, lastInlineSeq = 0;
+  $effect(() => {
+    const seq = nemusStore.renameSeq;
+    if (seq === lastRenameSeq) return;
+    lastRenameSeq = seq;
+    if (seq > 0) startRename();
+  });
+  $effect(() => {
+    const seq = nemusStore.extractSeq;
+    if (seq === lastExtractSeq) return;
+    lastExtractSeq = seq;
+    if (seq > 0) startExtract();
+  });
+  $effect(() => {
+    const seq = nemusStore.inlineSeq;
+    if (seq === lastInlineSeq) return;
+    lastInlineSeq = seq;
+    if (seq > 0) inlineSymbol();
+  });
+
   // ── Goto-line overlay (Ctrl+G) ───────────────────────────────────────────────
   let gotoOpen = $state(false);
   let gotoValue = $state('');
@@ -205,6 +231,73 @@
   export function openStructure() {
     structureStore.openWith(editorComp?.getStructure() ?? []);
   }
+
+  // ── Structural refactors (rename · extract → let · inline) ───────────────────
+  // Rename + Extract share a small floating name input (anchored at the caret);
+  // Inline applies straight away. The pure planners live in `nemus-refactor`;
+  // here we only drive the UI and surface the outcome as a toast.
+  type RefactorKind = 'rename' | 'extract';
+  let refactor = $state<{
+    kind: RefactorKind;
+    title: string;
+    value: string;
+    error: string | null;
+    anchor: UsageAnchor | null;
+    oldName?: string;       // rename
+    from?: number; to?: number; // extract
+  } | null>(null);
+  let refactorInputEl = $state<HTMLInputElement | null>(null);
+
+  function openRefactorInput(next: NonNullable<typeof refactor>) {
+    refactor = next;
+    queueMicrotask(() => { refactorInputEl?.focus(); refactorInputEl?.select(); });
+  }
+
+  /** Rename the symbol under the caret (Shift+F6 / Command Palette). */
+  export function startRename() {
+    const r = editorComp?.prepareRename();
+    if (!r) { toastStore.show('Place the caret on a name you defined (let / fn / import)', 'info'); return; }
+    openRefactorInput({ kind: 'rename', title: 'Rename', value: r.name, oldName: r.name, error: null, anchor: r.anchor });
+  }
+
+  /** Extract the selected pattern into a named let (Alt+Shift+V / Command Palette). */
+  export function startExtract() {
+    const r = editorComp?.prepareExtract();
+    if (!r) { toastStore.show('Select a complete pattern to extract', 'info'); return; }
+    openRefactorInput({ kind: 'extract', title: 'Extract to let', value: r.suggested, from: r.from, to: r.to, error: null, anchor: r.anchor });
+  }
+
+  /** Inline the let under the caret (Alt+Shift+N / Command Palette). */
+  export function inlineSymbol() {
+    const r = editorComp?.applyInline();
+    if (!r) return;
+    if (!r.ok) { if (r.error) toastStore.show(r.error, 'warning'); }
+    else if (r.note) toastStore.show(r.note, 'success');
+  }
+
+  function commitRefactor() {
+    if (!refactor) return;
+    const res = refactor.kind === 'rename'
+      ? editorComp?.applyRename(refactor.oldName ?? '', refactor.value)
+      : editorComp?.applyExtract(refactor.from ?? 0, refactor.to ?? 0, refactor.value);
+    if (!res) { refactor = null; return; }
+    if (!res.ok) { refactor = { ...refactor, error: res.error ?? 'Refactor failed' }; return; }
+    if (res.note) toastStore.show(res.note, 'success');
+    refactor = null;
+  }
+  function onRefactorKey(e: KeyboardEvent) {
+    if (e.key === 'Enter') { e.preventDefault(); commitRefactor(); }
+    else if (e.key === 'Escape') { e.preventDefault(); refactor = null; }
+  }
+  const refactorPos = $derived.by(() => {
+    const a = refactor?.anchor;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = a ? a.x : vw / 2 - 130;
+    let y = a ? a.y + 6 : vh / 3;
+    x = Math.min(Math.max(8, x), vw - 268);
+    y = Math.min(Math.max(8, y), vh - 120);
+    return { x, y };
+  });
 
   /** Find usages of the identifier under the caret → open the floating popover
    *  anchored at the caret (Alt+F7 / Command Palette). No-op when the caret isn't
@@ -301,6 +394,23 @@
       <input bind:this={gotoInputEl} bind:value={gotoValue} onkeydown={onGotoKey} onblur={() => gotoOpen = false} placeholder="Line or line:col…" inputmode="numeric" />
     </div>
   {/if}
+
+  {#if refactor}
+    <div class="ed-refactor" role="dialog" aria-label={refactor.title} style="left: {refactorPos.x}px; top: {refactorPos.y}px;">
+      <span class="rf-title">{refactor.title}</span>
+      <input
+        bind:this={refactorInputEl}
+        bind:value={refactor.value}
+        onkeydown={onRefactorKey}
+        onblur={() => (refactor = null)}
+        spellcheck="false"
+        autocapitalize="off"
+        autocomplete="off"
+        placeholder="New name…"
+      />
+      {#if refactor.error}<span class="rf-err">{refactor.error}</span>{/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -369,4 +479,25 @@
     font-size: 12px; width: 140px;
   }
   .ed-goto input::placeholder { color: var(--text-disabled); }
+
+  /* Refactor name input (rename / extract) — anchored at the caret (viewport
+     coords, hence fixed), keyboard-driven (Enter commits, Esc cancels). */
+  .ed-refactor {
+    position: fixed;
+    z-index: var(--z-popup, 1000);
+    display: flex; flex-direction: column; gap: 4px;
+    width: 260px;
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-popup);
+    padding: 7px 9px;
+  }
+  .rf-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
+  .ed-refactor input {
+    background: var(--bg-input); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); padding: 4px 7px; outline: none;
+    color: var(--text-primary); font-family: var(--font-code); font-size: 12px;
+  }
+  .ed-refactor input:focus { border-color: var(--border-focus, var(--accent)); }
+  .ed-refactor input::placeholder { color: var(--text-disabled); }
+  .rf-err { font-size: 10.5px; color: var(--error); line-height: 1.3; }
 </style>

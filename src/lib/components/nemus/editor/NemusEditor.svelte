@@ -23,6 +23,7 @@
   import { extractSymbols, identifierAt, identifierUsages, tracksReferencing, type NemusSymbol } from './nemus-lang';
   import { symbolHighlightStore } from '../stores/symbol-highlight.svelte';
   import { buildControlEdits, type ControlEdit } from './nemus-edit';
+  import { renamePlan, extractTarget, extractLetPlan, inlinePlan, freshName } from './nemus-refactor';
   import type { UsageItem, UsageAnchor } from '../stores/usages.svelte';
   import { diagnosticsStore, activeHapsStore } from '../stores/engine.svelte';
   import { referenceStore } from '../stores/reference.svelte';
@@ -265,6 +266,83 @@
     const tree = getNemusTree(view);
     if (!tree) return [];
     return extractSymbols(tree).outline;
+  }
+
+  // ── Structural refactors (rename · extract → let · inline) ───────────────────
+  // The pure planners live in `nemus-refactor`; these resolve the live tree +
+  // selection, dispatch the change set as one undoable transaction, and return a
+  // result the host turns into a toast (or keeps the rename/extract input open on
+  // an error). `Outcome` is the shared shape.
+
+  type RefactorOutcome = { ok: boolean; error?: string; note?: string };
+
+  function anchorAt(pos: number): UsageAnchor | null {
+    const c = view?.coordsAtPos(pos);
+    return c ? { x: c.left, y: c.bottom } : null;
+  }
+
+  /** The user symbol under the caret to rename, or null (not on a name you
+   *  defined). Restricted to declared symbols so a builtin can't be renamed. */
+  export function prepareRename(): { name: string; anchor: UsageAnchor | null } | null {
+    if (!view) return null;
+    const tree = getNemusTree(view);
+    if (!tree) return null;
+    const head = view.state.selection.main.head;
+    const name = identifierAt(tree, head) ?? (head > 0 ? identifierAt(tree, head - 1) : null);
+    if (!name) return null;
+    const { defs, imports } = extractSymbols(tree);
+    if (!defs.has(name) && !imports.has(name)) return null;
+    return { name, anchor: anchorAt(head) };
+  }
+
+  export function applyRename(oldName: string, newName: string): RefactorOutcome {
+    if (!view) return { ok: false };
+    const tree = getNemusTree(view);
+    if (!tree) return { ok: false, error: 'Editor not ready' };
+    const plan = renamePlan(tree, oldName, newName);
+    if (plan.error) return { ok: false, error: plan.error };
+    if (plan.changes.length) view.dispatch({ changes: plan.changes });
+    view.focus();
+    return { ok: true, note: plan.note };
+  }
+
+  /** The current selection if it cleanly spans a host expression (so it can be
+   *  extracted), plus a suggested fresh name + caret anchor. Null otherwise. */
+  export function prepareExtract(): { from: number; to: number; suggested: string; anchor: UsageAnchor | null } | null {
+    if (!view) return null;
+    const tree = getNemusTree(view);
+    if (!tree) return null;
+    const sel = view.state.selection.main;
+    if (sel.empty) return null;
+    const t = extractTarget(tree, view.state.doc.toString(), sel.from, sel.to);
+    if (!t) return null;
+    return { from: t.from, to: t.to, suggested: freshName(tree, 'phrase'), anchor: anchorAt(t.to) };
+  }
+
+  export function applyExtract(from: number, to: number, name: string): RefactorOutcome {
+    if (!view) return { ok: false };
+    const tree = getNemusTree(view);
+    if (!tree) return { ok: false, error: 'Editor not ready' };
+    const plan = extractLetPlan(tree, view.state.doc.toString(), from, to, name);
+    if (plan.error) return { ok: false, error: plan.error };
+    if (plan.changes.length) view.dispatch({ changes: plan.changes });
+    view.focus();
+    return { ok: true, note: plan.note };
+  }
+
+  /** Inline the `let` under the caret into its uses (and delete the declaration). */
+  export function applyInline(): RefactorOutcome {
+    if (!view) return { ok: false };
+    const tree = getNemusTree(view);
+    if (!tree) return { ok: false, error: 'Editor not ready' };
+    const head = view.state.selection.main.head;
+    const name = identifierAt(tree, head) ?? (head > 0 ? identifierAt(tree, head - 1) : null);
+    if (!name) return { ok: false, error: 'Place the caret on a let name' };
+    const plan = inlinePlan(tree, view.state.doc.toString(), name);
+    if (plan.error) return { ok: false, error: plan.error };
+    if (plan.changes.length) view.dispatch({ changes: plan.changes });
+    view.focus();
+    return { ok: true, note: plan.note };
   }
 
   /** Commit mixer/inspector control values into the source as literals (one

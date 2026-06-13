@@ -141,6 +141,9 @@
     openSearch: () => void;
     formatDocument: () => void;
     openStructure: () => void;
+    startRename: () => void;
+    startExtract: () => void;
+    inlineSymbol: () => void;
   } | null>(null);
   let editorEl = $state<HTMLElement | null>(null);
   let editorScoped = $state(true);
@@ -174,6 +177,9 @@
       else if (b.id === 'find_usages') nemusStore.requestFindUsages();
       else if (b.id === 'format_document') editor?.formatDocument();
       else if (b.id === 'find_method') editor?.openStructure();
+      else if (b.id === 'rename') editor?.startRename();
+      else if (b.id === 'extract') editor?.startExtract();
+      else if (b.id === 'inline') editor?.inlineSymbol();
       else if (b.id === 'new_project') projectActions.newProject();
       else if (b.id === 'open_project') projectActions.openProject();
       else if (b.id === 'open_file') projectActions.openFile();

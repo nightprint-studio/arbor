@@ -32,6 +32,12 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   // `Ctrl+F12` (IntelliJ "File Structure") — filterable jump to any symbol in the
   // file. Ctrl-prefixed so it doesn't collide with the webview's bare-F12 devtools.
   { id: 'find_method', key: 'F12', ctrl: true, scope: 'editor', description: 'File structure — find a track / fn / let / import' },
+  // Structural refactors. `Shift+F6` (IntelliJ rename); extract/inline use
+  // `Alt+Shift+<letter>` because IntelliJ's Ctrl+Alt+V / Ctrl+Alt+N are forbidden
+  // (Ctrl+Alt+letter Arbor hard rule). V = extract Variable, N = iNline.
+  { id: 'rename',  key: 'F6', shift: true, scope: 'editor', description: 'Rename the symbol under the caret (+ all its uses)' },
+  { id: 'extract', key: 'v', alt: true, shift: true, scope: 'editor', description: 'Extract the selected pattern into a named let' },
+  { id: 'inline',  key: 'n', alt: true, shift: true, scope: 'editor', description: 'Inline the let under the caret into its uses' },
   // Transport. `Shift+F9` (IntelliJ-style) leaves `Ctrl+Space` free for the
   // editor's autocomplete (the universal completion trigger).
   { id: 'run_stop',       key: 'F9', shift: true, scope: 'global', description: 'Toggle Run / Stop' },

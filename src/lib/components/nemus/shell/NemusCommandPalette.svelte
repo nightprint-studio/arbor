@@ -15,7 +15,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft,
+    AlignLeft, PenLine, FileOutput, FileSymlink,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -38,7 +38,7 @@
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, PanelLeft, PanelRight, Search, Settings,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
-    AlignLeft,
+    AlignLeft, PenLine, FileOutput, FileSymlink,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -92,6 +92,9 @@
     { id: 'structure',   label: 'File structure (find method / variable)', group: 'View', icon: 'ListTree', keys: 'Ctrl+F12', run: () => nemusStore.requestStructure() },
     // Edit
     { id: 'format', label: 'Format document', group: 'Edit', icon: 'AlignLeft', keys: 'Alt+Shift+L', run: () => nemusStore.requestFormat() },
+    { id: 'rename', label: 'Rename symbol…', group: 'Edit', icon: 'PenLine', keys: 'Shift+F6', run: () => nemusStore.requestRename() },
+    { id: 'extract', label: 'Extract selection to let…', group: 'Edit', icon: 'FileOutput', keys: 'Alt+Shift+V', run: () => nemusStore.requestExtract() },
+    { id: 'inline', label: 'Inline let', group: 'Edit', icon: 'FileSymlink', keys: 'Alt+Shift+N', run: () => nemusStore.requestInline() },
     // Window
     { id: 'settings',  label: 'Settings…',          group: 'Window', icon: 'Settings', keys: 'Ctrl+,', run: () => nemusStore.openSettings() },
     { id: 'shortcuts', label: 'Keyboard Shortcuts', group: 'Window', icon: 'Keyboard', keys: 'F1',     run: () => nemusStore.openShortcuts() },

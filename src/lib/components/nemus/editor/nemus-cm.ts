@@ -88,7 +88,19 @@ class NemusHighlighter {
       tr.effects.some((e) => e.is(nemusParserReady)));
 
     if (u.docChanged) {
-      if (this.tree) {
+      // Incremental Tree-sitter editing is only coordinate-correct for a SINGLE
+      // contiguous change (the typing case): there `fromA === fromB`, so the
+      // old/new offsets map cleanly onto one `tree.edit`. A transaction with
+      // *several* changes (a refactor like inline/rename, a multi-span undo, a
+      // knob→source commit) mixes the old- and new-document coordinate frames
+      // across edits and corrupts the incremental tree — the highlight then reads
+      // garbage until the next full reparse. So for multi-change transactions we
+      // skip the incremental edit and reparse from scratch (rare + user-initiated,
+      // so the cost is negligible), keeping per-keystroke typing incremental.
+      let changeCount = 0;
+      u.changes.iterChanges(() => { changeCount += 1; });
+      const incremental = changeCount === 1 && this.tree !== null;
+      if (incremental) {
         u.changes.iterChanges((fromA, toA, fromB, toB) => {
           this.tree!.edit({
             startIndex: fromA, oldEndIndex: toA, newEndIndex: toB,
@@ -98,7 +110,7 @@ class NemusHighlighter {
           });
         });
       }
-      this.reparse(u.state, true);
+      this.reparse(u.state, incremental);
     } else if (forced || (!this.tree && this.parser)) {
       this.reparse(u.state, false);
     }
