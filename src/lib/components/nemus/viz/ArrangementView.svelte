@@ -33,6 +33,7 @@
   import Minimap from './Minimap.svelte';
   import { arrangementStore, noteName, VIEW_CYCLES, type VizLane } from './arrangement.svelte';
   import { arrViewOptions, ZOOM_STEP } from './arr-view-options.svelte';
+  import { laneSizes } from './lane-sizes.svelte';
   import { transportStore, nemusEngine, diagnosticsStore } from '../stores/engine.svelte';
   import { transportUiStore } from '../stores/transport-ui.svelte';
   import { projectStore } from '../stores/project.svelte';
@@ -248,6 +249,23 @@
     syncView();
   }
 
+  // ── Lane resize: drag the bottom edge of a track header to grow/shrink its lane
+  // (the piano-roll spreads vertically). Double-click the handle resets it. ───────
+  function startLaneResize(e: MouseEvent, track: number) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation(); // don't let the header click select / drag-scrub
+    const startY = e.clientY;
+    const startH = laneSizes.height(track);
+    const onMove = (ev: MouseEvent) => laneSizes.setHeight(track, startH + (ev.clientY - startY));
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
   // ── Auto-follow: keep the playhead in view while playing (re-armed on each
   // play start; ANY manual horizontal scroll pins it until the next start). ──────
   let scrollEl = $state<HTMLElement | null>(null);
@@ -444,7 +462,7 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div class="arr" tabindex="0" role="group" aria-label="Arrangement" onkeydown={onKeydown}>
-  <div class="arr-scroll" bind:this={scrollEl} onscroll={onScroll} onwheel={onArrWheel}>
+  <div class="arr-scroll" class:hide-hbar={lanes.length && arrViewOptions.minimap} bind:this={scrollEl} onscroll={onScroll} onwheel={onArrWheel}>
     <div class="arr-inner" style="--head-w: {headW}px; --tl-w: {timelineW}px;">
       <!-- View toolbar (sticky-left, stays put as the timeline scrolls) -->
       <div class="arr-toolbar-row">
@@ -505,7 +523,7 @@
           {@const muted = nemusStore.isMuted(laneKey(lane.track))}
           {@const soloed = nemusStore.isSoloed(laneKey(lane.track))}
           {@const dimmed = muted || (soloActive && !soloed)}
-          <div class="arr-row" class:selected={selectedTrack === lane.track} class:sym-hl={symbolHighlightStore.has(lane.track)} style="--c: {color}">
+          <div class="arr-row" class:selected={selectedTrack === lane.track} class:sym-hl={symbolHighlightStore.has(lane.track)} style="--c: {color}; height: {laneSizes.height(lane.track)}px">
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <div class="arr-head" class:collapsed onclick={() => selectTrack(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)} use:tooltip={laneInfo(lane)}>
               <span class="arr-colorbar"></span>
@@ -519,6 +537,12 @@
                 {#if soloed}<Headphones size={12} class="st-solo" />{/if}
                 {#if muted}<VolumeX size={12} class="st-mute" />{/if}
               </div>
+              <!-- Resize the lane: drag the bottom edge; double-click resets it. -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="arr-resize" class:custom={laneSizes.isCustom(lane.track)}
+                   onmousedown={(e) => startLaneResize(e, lane.track)}
+                   ondblclick={(e) => { e.stopPropagation(); laneSizes.reset(lane.track); }}
+                   use:tooltip={'Drag to resize the lane · double-click to reset'}></div>
             </div>
             <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <div class="arr-lane" onclick={() => selectTrack(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)}>
@@ -618,7 +642,15 @@
   }
   .arr:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
   .arr-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
-  /* Minimap: a fixed-height overview strip below the scrolling timeline. */
+  /* Hide the native HORIZONTAL scrollbar ONLY while the minimap is shown — then the
+     minimap (drag its viewport box) is the horizontal scroll control, so a raw
+     scrollbar wedged between the timeline and the minimap is redundant. With the
+     minimap off, the native scrollbar comes back so horizontal scrolling stays
+     reachable. Native scrolling (wheel / trackpad / programmatic) works either way;
+     vertical keeps the app's themed scrollbar. */
+  .arr-scroll.hide-hbar::-webkit-scrollbar:horizontal { height: 0; }
+  /* Minimap: a fixed-height overview strip directly below the timeline (now flush,
+     with no scrollbar between them). */
   .arr-minimap {
     flex-shrink: 0;
     height: 40px;
@@ -754,6 +786,26 @@
   .arr-head:hover { background: var(--bg-hover); }
   .arr-head.collapsed { padding: 0; gap: 5px; }
   .arr-colorbar { width: 4px; align-self: stretch; background: var(--c); flex-shrink: 0; }
+  /* Lane resize grip — a thin zone along the header's bottom edge. Invisible until
+     hovered; accent-tinted once the lane has a custom height. */
+  .arr-resize {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 6px;
+    cursor: row-resize;
+    z-index: 6;
+  }
+  .arr-resize::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 2px;
+    background: transparent;
+    transition: background var(--transition-fast);
+  }
+  .arr-resize:hover::after { background: color-mix(in srgb, var(--accent) 60%, transparent); }
+  .arr-resize.custom::after { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+  .arr-resize.custom:hover::after { background: color-mix(in srgb, var(--accent) 60%, transparent); }
   .arr-head-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding-left: 4px; }
   .arr-name { font-size: 12.5px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .arr-voice { font-size: 10px; color: var(--text-muted); font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

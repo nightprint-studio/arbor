@@ -16,7 +16,7 @@
     Crosshair, BookOpen, Minimize2, Maximize2, PanelLeft, PanelRight, Search, Settings, Piano,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map,
+    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map, StretchVertical,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -35,6 +35,7 @@
   import { transportUiStore } from '../stores/transport-ui.svelte';
   import { tempoStore } from '../stores/tempo.svelte';
   import { arrViewOptions } from '../viz/arr-view-options.svelte';
+  import { laneSizes } from '../viz/lane-sizes.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -46,7 +47,7 @@
     Crosshair, BookOpen, Minimize2, Maximize2, PanelLeft, PanelRight, Search, Settings, Piano,
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
-    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map,
+    Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map, StretchVertical,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -133,6 +134,7 @@
     { id: 'zoom_in',     label: 'Zoom in timeline',  group: 'View', icon: 'ZoomIn',  run: () => arrViewOptions.zoomIn() },
     { id: 'zoom_out',    label: 'Zoom out timeline', group: 'View', icon: 'ZoomOut', run: () => arrViewOptions.zoomOut() },
     { id: 'zoom_reset',  label: 'Reset timeline zoom', group: 'View', icon: 'RotateCcw', run: () => arrViewOptions.zoomReset() },
+    { id: 'reset_lane_heights', label: 'Reset lane heights', group: 'View', icon: 'StretchVertical', run: () => laneSizes.resetAll() },
     { id: 'p_inspector', label: 'Toggle Inspector',  group: 'View', icon: 'Crosshair',        run: () => nemusStore.toggleRight('inspector') },
     { id: 'p_docs',      label: 'Toggle Language reference', group: 'View', icon: 'Braces',    run: () => nemusStore.toggleRight('docs') },
     { id: 'c_viz',       label: 'Toggle Arrangement', group: 'View', icon: 'PanelLeft',       run: () => nemusStore.toggleCollapseUi() },
