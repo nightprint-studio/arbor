@@ -8,7 +8,7 @@
    * Sticky-left so it stays in view while the (much wider) timeline scrolls.
    * Imports only nemus-local + the shared tooltip action.
    */
-  import { AudioLines, Crosshair, Grid3x3, Tag, Repeat, Timer, Hourglass, Map, ZoomIn, ZoomOut } from 'lucide-svelte';
+  import { AudioLines, Crosshair, Grid3x3, Tag, Repeat, Timer, Hourglass, Map, ZoomIn, ZoomOut, Gauge } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { arrViewOptions as o, MIN_ZOOM, MAX_ZOOM } from './arr-view-options.svelte';
   import { transportUiStore } from '../stores/transport-ui.svelte';
@@ -31,6 +31,8 @@
       tip: { content: 'Labels', description: 'Show note / sound names on events when they fit' } },
     { key: 'minimap', icon: Map, on: o.minimap, toggle: () => o.toggleMinimap(),
       tip: { content: 'Minimap', description: 'Show the overview strip + viewport box below the timeline' } },
+    { key: 'velocity', icon: Gauge, on: o.velocity, toggle: () => o.toggleVelocity(),
+      tip: { content: 'Velocity heatmap', description: 'Colour events by gain — quieter notes fade, full-gain notes stay vivid' } },
   ] as const);
 </script>
 

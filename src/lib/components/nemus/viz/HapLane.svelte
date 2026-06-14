@@ -85,7 +85,14 @@
     start: number; end: number; kind: Kind;
     /** Note-name label (pitched events only), shown when the block is wide. */
     label: string | null;
+    /** Gain mapped to 0..1 (unity = 1), for the velocity heatmap. */
+    vel: number;
   }
+
+  // Gain → 0..1 velocity. Unity (1.0) and louder read as full; attenuated events
+  // dim. `null` gain = unity. The heatmap uses this to fade quiet events back.
+  const velOf = (h: NemusQueryHap) => Math.max(0, Math.min(1, h.gain ?? 1));
+  const showVelocity = $derived(arrViewOptions.velocity);
 
   function clamp(v: number) { return Math.max(0, Math.min(100 - PITCH_H, v)); }
 
@@ -130,13 +137,13 @@
         const frac = (h.note - lo) / pitchSpan;            // 0 = lowest, 1 = highest
         const center = VPAD + (1 - frac) * (100 - 2 * VPAD); // high notes near the top
         out.push({ key, hap: h, x, w, top: clamp(center - PITCH_H / 2), h: PITCH_H,
-          start: h.start, end: h.end, kind: 'note', label: noteName(h.note) });
+          start: h.start, end: h.end, kind: 'note', label: noteName(h.note), vel: velOf(h) });
       } else {
         const row = h.sound ? (drumRow.get(h.sound) ?? 0) : 0;
         const frac = drumRows === 1 ? 0.5 : row / (drumRows - 1);
         const center = VPAD + frac * (100 - 2 * VPAD);
         out.push({ key, hap: h, x, w, top: clamp(center - DRUM_H / 2), h: DRUM_H,
-          start: h.start, end: h.end, kind: 'audio', label: h.sound ?? null });
+          start: h.start, end: h.end, kind: 'audio', label: h.sound ?? null, vel: velOf(h) });
       }
     });
     return out;
@@ -291,7 +298,8 @@
       class:selected={selectedKey === b.key}
       class:span-sel={inSelection?.(b.hap)}
       class:muffled={showWave && b.kind === 'audio'}
-      style="left: {b.x}px; width: {b.w}px; top: {b.top}%; height: {b.h}%;"
+      class:vel={showVelocity}
+      style="left: {b.x}px; width: {b.w}px; top: {b.top}%; height: {b.h}%; --vel: {b.vel};"
       use:tooltip={hapTip(b.hap)}
       onclick={(e) => pick(b.hap, e)}
     >
@@ -358,6 +366,10 @@
     transition: background var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
   }
   .hap.drum { border-radius: 3px; }
+  /* Velocity / gain heatmap: fade attenuated events toward the lane background so
+     dynamics read at a glance. `--vel` is the event's gain mapped to 0..1 (unity =
+     vivid). Hover / active / selected (declared after) still take over. */
+  .hap.vel { background: color-mix(in srgb, var(--c) calc(30% + var(--vel) * 65%), var(--bg-base)); }
   .hap:hover { background: color-mix(in srgb, var(--c) 80%, #fff); box-shadow: 0 0 0 1px color-mix(in srgb, #fff 35%, transparent); }
 
   /* When the waveform skin is shown, dim the underlying audio blocks so the wave

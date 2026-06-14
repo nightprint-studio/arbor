@@ -131,6 +131,7 @@
     { id: 'p_scratch',   label: 'Toggle Scratch (expression evaluator)', group: 'View', icon: 'FlaskConical', keys: 'Ctrl+Shift+S', run: () => nemusStore.toggleBottom('scratch') },
     { id: 'p_keyboard',  label: 'Toggle Keyboard (live notes)', group: 'View', icon: 'Piano',          run: () => nemusStore.toggleBottom('keyboard') },
     { id: 'p_minimap',   label: arrViewOptions.minimap ? 'Hide minimap' : 'Show minimap', group: 'View', icon: 'Map', run: () => arrViewOptions.toggleMinimap() },
+    { id: 'p_velocity',  label: arrViewOptions.velocity ? 'Hide velocity heatmap' : 'Show velocity heatmap', group: 'View', icon: 'Gauge', run: () => arrViewOptions.toggleVelocity() },
     { id: 'zoom_in',     label: 'Zoom in timeline',  group: 'View', icon: 'ZoomIn',  run: () => arrViewOptions.zoomIn() },
     { id: 'zoom_out',    label: 'Zoom out timeline', group: 'View', icon: 'ZoomOut', run: () => arrViewOptions.zoomOut() },
     { id: 'zoom_reset',  label: 'Reset timeline zoom', group: 'View', icon: 'RotateCcw', run: () => arrViewOptions.zoomReset() },
