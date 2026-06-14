@@ -34,6 +34,12 @@ s(&lbrace;bd sd, hh hh hh&rbrace;%4)  // &lbrace;..&rbrace;%n polymeter: lanes s
   per cycle, <code>bd(&lt;3 5&gt;,8)</code> alternates the Euclid pulses.
 </div>
 
+<div class="callout">
+  Not sure which <code>(n,k)</code> you want? <strong>Insert euclidean rhythm…</strong>
+  (Command Palette) opens a generator: pick the sound/note, hits, steps and rotation,
+  see the step pattern, preview it, and drop the expression in at the caret.
+</div>
+
 <h2>Splicing host values</h2>
 <pre><code>let riff = n(c4 e4 g4)
 n($riff $riff a4)   // $name splices a bound pattern as a leaf</code></pre>

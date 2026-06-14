@@ -24,7 +24,17 @@ n(0 1 2).scale("a:minor")</code></pre>
 <p>
   Bare integers in a note island are scale degrees; <code>.scale("root:mode")</code>
   resolves them to pitches. Degree <code>0</code> is the tonic at the default octave.
+  Stacking degrees a third apart in parallel lanes builds diatonic chords —
+  <code>n(0 4 5 3 &amp; 2 6 7 5 &amp; 4 8 9 7).scale("c:major")</code> is a I–V–vi–IV
+  progression whose chord qualities follow the scale.
 </p>
+
+<div class="callout">
+  <strong>Insert chord progression…</strong> (Command Palette) builds exactly that for
+  you: pick a key, a progression (<code>I V vi IV</code> or <code>1 5 6 4</code>) and
+  triads or sevenths, preview it, and drop it in at the caret. <strong>Insert euclidean
+  rhythm…</strong> does the same for <code>(n,k)</code> rhythms.
+</div>
 
 <h2>Transposing</h2>
 <pre><code>theme.add(12)      // up one octave (semitones)

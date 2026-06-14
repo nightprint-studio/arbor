@@ -20,6 +20,8 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import NemusEditor from './NemusEditor.svelte';
+  import EuclidGenModal from '../shell/EuclidGenModal.svelte';
+  import ChordProgModal from '../shell/ChordProgModal.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { nemusEngine } from '../stores/engine.svelte';
@@ -210,6 +212,22 @@
     if (seq === lastFreezeSeq) return;
     lastFreezeSeq = seq;
     if (seq > 0) startFreeze();
+  });
+  let euclidOpen = $state(false);
+  let lastEuclidSeq = 0;
+  $effect(() => {
+    const seq = nemusStore.euclidSeq;
+    if (seq === lastEuclidSeq) return;
+    lastEuclidSeq = seq;
+    if (seq > 0) euclidOpen = true;
+  });
+  let chordOpen = $state(false);
+  let lastChordSeq = 0;
+  $effect(() => {
+    const seq = nemusStore.chordSeq;
+    if (seq === lastChordSeq) return;
+    lastChordSeq = seq;
+    if (seq > 0) chordOpen = true;
   });
 
   // ── Intentions relay: open from shortcut/palette, and apply the chosen action ─
@@ -496,6 +514,22 @@
     </div>
   {/if}
 </div>
+
+{#if euclidOpen}
+  <EuclidGenModal
+    projectDir={projectStore.project?.path}
+    onInsert={(text) => editorComp?.insertAtCursor(text)}
+    onClose={() => { euclidOpen = false; editorComp?.focus(); }}
+  />
+{/if}
+
+{#if chordOpen}
+  <ChordProgModal
+    projectDir={projectStore.project?.path}
+    onInsert={(text) => editorComp?.insertAtCursor(text)}
+    onClose={() => { chordOpen = false; editorComp?.focus(); }}
+  />
+{/if}
 
 <style>
   .ed {

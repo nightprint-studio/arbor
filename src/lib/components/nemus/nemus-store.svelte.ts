@@ -119,6 +119,8 @@ function createNemusStore() {
   let extractSeq = $state(0);
   let inlineSeq  = $state(0);
   let freezeSeq  = $state(0);
+  let euclidSeq  = $state(0);
+  let chordSeq   = $state(0);
 
   // ── Intentions popup relay (one-shot, Alt+Enter) ──────────────────────────────
   let intentionsSeq = $state(0);
@@ -273,10 +275,14 @@ function createNemusStore() {
     get extractSeq() { return extractSeq; },
     get inlineSeq()  { return inlineSeq; },
     get freezeSeq()  { return freezeSeq; },
+    get euclidSeq()  { return euclidSeq; },
+    get chordSeq()   { return chordSeq; },
     requestRename()  { if (collapseTabpane) collapseTabpane = false; renameSeq++; },
     requestExtract() { if (collapseTabpane) collapseTabpane = false; extractSeq++; },
     requestInline()  { if (collapseTabpane) collapseTabpane = false; inlineSeq++; },
     requestFreeze()  { if (collapseTabpane) collapseTabpane = false; freezeSeq++; },
+    requestEuclid()  { if (collapseTabpane) collapseTabpane = false; euclidSeq++; },
+    requestChord()   { if (collapseTabpane) collapseTabpane = false; chordSeq++; },
 
     // ── intentions popup (one-shot; TabbedEditor consumes) ──
     get intentionsSeq() { return intentionsSeq; },

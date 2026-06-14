@@ -424,6 +424,18 @@
     view.focus();
   }
 
+  /** Insert `text` at the caret (replacing the selection if any), leaving the
+   *  caret right after the inserted text. Used by generator flows (euclidean…). */
+  export function insertAtCursor(text: string): void {
+    if (!view || !text) return;
+    const sel = view.state.selection.main;
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: text },
+      selection: { anchor: sel.from + text.length },
+    });
+    view.focus();
+  }
+
   // ── Change scale (Alt+Enter on a `.scale("…")`) ───────────────────────────────
 
   /** The current scale spec when the caret sits in a `.scale("…")` string (so the
