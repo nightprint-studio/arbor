@@ -12,7 +12,14 @@ use crate::combinators::compose::stack;
 use crate::control::{CompSpec, ControlMap, EqBandSpec, HoldSpec};
 use crate::pattern::Pattern;
 use crate::pitch::Scale;
+use crate::rng::{time_to_rand, SEED_HUMANIZE_GAIN, SEED_HUMANIZE_TIME};
+use crate::span::TimeSpan;
 use crate::time::Time;
+
+/// Resolution of the quantised timing jitter: a random instant is snapped to one
+/// of `±HUMANIZE_RES` exact sub-steps of the amount, so the shift stays an exact
+/// rational (no `f64` drift in the time pipeline) while still feeling continuous.
+const HUMANIZE_RES: i64 = 4096;
 
 /// A numeric control argument: a constant, or a pattern sampled per event.
 #[derive(Clone, Debug)]
@@ -208,12 +215,72 @@ impl Pattern<ControlMap> {
         let right = f(self).pan(1.0);
         stack(vec![left, right])
     }
+
+    /// "Humanize" the part: nudge each onset by a small random amount of time and
+    /// wobble its gain, so a quantised line breathes like a played one. Both
+    /// jitters are **seeded by the event's onset** (independent streams), so the
+    /// feel is identical every loop and a re-eval never disturbs fixed cycles.
+    ///
+    /// - `time_amt` — max timing shift in **cycles**, symmetric `±time_amt`
+    ///   (0 = no timing jitter).
+    /// - `vel_amt` — gain wobble depth, a multiplier in `[1 - vel_amt, 1 + vel_amt]`
+    ///   (0 = no gain jitter); it multiplies the existing gain via `combine`.
+    ///
+    /// The query window is widened by `time_amt` so an onset nudged *into* `span`
+    /// from just outside is not lost, and fragments nudged out are re-clipped — a
+    /// neighbouring-block query catches them at their real position.
+    pub fn humanize(self, time_amt: Time, vel_amt: f64) -> Pattern<ControlMap> {
+        let time_amt = time_amt.max(Time::ZERO);
+        let vel_amt = vel_amt.max(0.0);
+        if time_amt == Time::ZERO && vel_amt == 0.0 {
+            return self;
+        }
+        Pattern::new(move |span: TimeSpan| {
+            let widened = TimeSpan::new(span.begin - time_amt, span.end + time_amt);
+            let mut out = Vec::new();
+            for h in self.query(widened) {
+                let onset = h.onset();
+                let dt = jitter_time(onset, time_amt);
+                let shifted = h.map_time(|t| t + dt);
+                // Keep only what still overlaps the *original* window, re-clipping
+                // `part` so onset detection downstream stays correct.
+                if let Some(part) = shifted.part.sect(span) {
+                    let mut hh = shifted;
+                    hh.part = part;
+                    if vel_amt > 0.0 {
+                        let mut overlay = ControlMap::default();
+                        overlay.gain = Some(jitter_gain(onset, vel_amt));
+                        hh.value = std::mem::take(&mut hh.value).combine(overlay);
+                    }
+                    out.push(hh);
+                }
+            }
+            out
+        })
+    }
+}
+
+/// Symmetric timing jitter in `±amt`, quantised to [`HUMANIZE_RES`] exact
+/// sub-steps and seeded by the onset (so it is stable per instant).
+fn jitter_time(onset: Time, amt: Time) -> Time {
+    if amt == Time::ZERO {
+        return Time::ZERO;
+    }
+    let r = time_to_rand(onset, SEED_HUMANIZE_TIME); // [0, 1)
+    let k = (((2.0 * r) - 1.0) * HUMANIZE_RES as f64).round() as i64; // [-RES, RES]
+    amt * Time::new(k, HUMANIZE_RES)
+}
+
+/// Gain wobble factor in `[1 - amt, 1 + amt]` (clamped ≥ 0), seeded by the onset.
+fn jitter_gain(onset: Time, amt: f64) -> f64 {
+    let r = time_to_rand(onset, SEED_HUMANIZE_GAIN); // [0, 1)
+    (1.0 + amt * (2.0 * r - 1.0)).max(0.0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combinators::compose::{fastcat, pure};
+    use crate::combinators::compose::{fastcat, pure, silence};
     use crate::combinators::generative::rand;
     use crate::span::TimeSpan;
 
@@ -274,5 +341,49 @@ mod tests {
         let pans: Vec<_> = haps.iter().filter_map(|h| h.value.pan).collect();
         assert!(pans.contains(&0.0));
         assert!(pans.contains(&1.0));
+    }
+
+    #[test]
+    fn humanize_timing_shifts_onsets_within_bounds() {
+        let amt = Time::new(1, 16);
+        // Slot 0 is a rest so no onset sits on the cycle boundary (which could
+        // legitimately drift into the adjacent cycle and skew the count).
+        let p = fastcat(vec![silence(), note(60.0), note(62.0), note(64.0)]).humanize(amt, 0.0);
+        let a = p.query(TimeSpan::cycle(0));
+        assert_eq!(a, p.query(TimeSpan::cycle(0))); // deterministic every loop
+        let onsets: Vec<_> = a.iter().filter(|h| h.has_onset()).collect();
+        assert_eq!(onsets.len(), 3); // interior onsets — none lost, none doubled
+        let grid = [Time::new(1, 4), Time::new(1, 2), Time::new(3, 4)];
+        for h in &onsets {
+            let b = h.whole.unwrap().begin;
+            let near = grid.iter().any(|g| {
+                let d = b - *g;
+                d <= amt && d >= -amt
+            });
+            assert!(near, "onset {b:?} not within ±{amt:?} of a slot");
+        }
+        // The jitter is real, not a silent no-op (deterministic, but non-trivial).
+        assert!((0..8).any(|i| jitter_time(Time::new(i, 8), amt) != Time::ZERO));
+    }
+
+    #[test]
+    fn humanize_wobbles_gain_in_range_and_is_deterministic() {
+        let p = fastcat(vec![note(60.0), note(62.0)]).humanize(Time::ZERO, 0.2);
+        let a = p.query(TimeSpan::cycle(0));
+        let b = p.query(TimeSpan::cycle(0));
+        assert_eq!(a, b); // identical every loop (seeded per onset)
+        for h in &a {
+            let g = h.value.gain.unwrap();
+            assert!((0.8..=1.2).contains(&g), "gain {g} out of ±0.2");
+        }
+        // Different onsets → different wobble.
+        assert_ne!(a[0].value.gain, a[1].value.gain);
+    }
+
+    #[test]
+    fn humanize_zero_is_identity() {
+        let base = fastcat(vec![note(60.0), note(62.0)]);
+        let h = base.clone().humanize(Time::ZERO, 0.0);
+        assert_eq!(base.query(TimeSpan::cycle(0)), h.query(TimeSpan::cycle(0)));
     }
 }

@@ -271,6 +271,14 @@ export function collectIntentions(ctx: IntentionContext): IntentionItem[] {
   if (et) {
     items.push({ id: 'extract', label: 'Extract selection to let…', ui: 'extract' });
     items.push({ id: 'freeze', label: 'Freeze pattern to notes', ui: 'freeze', freeze: { from: et.from, to: et.to } });
+    // Wrap the selected pattern in `.humanize()` (gentle defaults — tweak the
+    // args after) so a quantised line breathes.
+    items.push({
+      id: 'humanize',
+      label: 'Humanize pattern (timing + gain)',
+      edits: [{ from: et.to, to: et.to, insert: '.humanize()' }],
+      note: 'Wrapped in .humanize()',
+    });
   }
 
   // Symbol under the caret → rename + inline.

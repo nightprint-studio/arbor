@@ -188,6 +188,21 @@ fn onsets(p: &Pattern<ControlMap>, cyc: i64) -> Vec<Hap<ControlMap>> {
 }
 
 #[test]
+fn parse_then_eval_humanize() {
+    // humanize wobbles gain (here only gain, no timing jitter) seeded per onset:
+    // every onset survives, each gets a gain near 1, and two onsets differ.
+    let p = eval_first_track("s(bd sd hh sd).humanize(0, 0.2)");
+    let h = onsets(&p, 0);
+    assert_eq!(h.len(), 4); // none lost
+    let gains: Vec<f64> = h.iter().map(|x| x.value.gain.unwrap()).collect();
+    assert!(gains.iter().all(|g| (0.8..=1.2).contains(g)));
+    assert!(gains[0] != gains[1]); // independent per onset
+    // Deterministic every loop.
+    let g_again: Vec<f64> = onsets(&p, 0).iter().map(|x| x.value.gain.unwrap()).collect();
+    assert_eq!(gains, g_again);
+}
+
+#[test]
 fn parse_then_eval_note_sequence() {
     let p = eval_first_track("n(c4 e4 g4)");
     let mut notes: Vec<f64> = onsets(&p, 0).iter().filter_map(|h| h.value.note).collect();

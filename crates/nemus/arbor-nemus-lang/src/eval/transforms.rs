@@ -185,6 +185,7 @@ pub fn make_transform(
             let n = as_int(&args[1], span)?;
             Ok(Transform::new(move |p| Ok(p.swing_by(amount, n))))
         }
+        "humanize" => make_humanize(args, span),
 
         // ── §F delay (writes the ControlMap delay fields) ───────────────────
         "delay" => make_delay(args, span),
@@ -258,6 +259,38 @@ pub fn make_transform(
             LangErrorKind::NotCallable(format!("transform `{name}`")),
         )),
     }
+}
+
+/// Default timing jitter (in cycles) when omitted from `humanize`.
+const HUMANIZE_DEFAULT_TIME: f64 = 0.02;
+/// Default gain wobble depth when omitted from `humanize`.
+const HUMANIZE_DEFAULT_VEL: f64 = 0.1;
+
+/// `humanize()` / `humanize(t)` / `humanize(t, v)` — nudge each onset by up to
+/// `t` cycles and wobble its gain by up to `±v` (both seeded per onset, so the
+/// feel is stable every loop). Omitted args default to `t = 0.02` cycles,
+/// `v = 0.1`.
+fn make_humanize(args: &[Value], span: SourceSpan) -> Result<Transform> {
+    if args.len() > 2 {
+        return Err(LangError::at(
+            span,
+            LangErrorKind::Arity {
+                name: "humanize".to_string(),
+                expected: 2, // 0..2; report the maximum
+                got: args.len(),
+            },
+        ));
+    }
+    let t = match args.first() {
+        Some(v) => as_number(v, span)?,
+        None => HUMANIZE_DEFAULT_TIME,
+    };
+    let v = match args.get(1) {
+        Some(v) => as_number(v, span)?,
+        None => HUMANIZE_DEFAULT_VEL,
+    };
+    let tt = f64_to_time(t);
+    Ok(Transform::new(move |p| Ok(p.humanize(tt, v))))
 }
 
 /// Default delay feedback when `fb` is omitted.

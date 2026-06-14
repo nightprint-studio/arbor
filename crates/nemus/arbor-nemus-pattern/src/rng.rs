@@ -20,6 +20,10 @@ pub const SEED_DEGRADE: u64 = 0x10ce_5eed_de92_ade5;
 pub const SEED_SOMETIMES: u64 = 0x5044_e715_0e71_e500;
 pub const SEED_RAND: u64 = 0x2a2a_2a2a_2a2a_2a2a;
 pub const SEED_CHOOSE: u64 = 0xc400_5e00_c400_5e00;
+// `humanize` jitters timing and gain off two independent streams so the micro
+// shift of an onset never correlates with its loudness wobble.
+pub const SEED_HUMANIZE_TIME: u64 = 0x4855_4d41_4e7a_5449;
+pub const SEED_HUMANIZE_GAIN: u64 = 0x4855_4d41_4e7a_4741;
 
 /// SplitMix64 finalizer — a strong integer bit-mixer.
 fn mix64(mut x: u64) -> u64 {

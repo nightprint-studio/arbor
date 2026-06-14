@@ -562,6 +562,16 @@ fn transforms() -> Vec<DslEntry> {
             ],
             "s(hh*8).swingBy(0.1, 8)",
         ),
+        entry(
+            "humanize", DslKind::Transform, "humanize(t?, v?, pat) -> pat  ·  pat.humanize(t?, v?)",
+            "Make a quantised line breathe: nudge each onset by up to `t` cycles and wobble its gain by up to `±v`. Both are seeded per onset, so the feel is identical every loop. With no args it applies gentle defaults (t = 0.02 cycles, v = 0.1).",
+            vec![
+                DslParam::opt("t", "max timing shift in cycles (± , 0 = none)", "0.02"),
+                DslParam::opt("v", "gain wobble depth (± , 0 = none)", "0.1"),
+                pat(),
+            ],
+            "s(hh*16).humanize(0.01, 0.15)",
+        ),
         // Periodic / echo / probability
         entry(
             "every", DslKind::Transform, "every(n, tf, pat) -> pat  ·  pat.every(n, tf)",
@@ -902,7 +912,7 @@ mod tests {
         "rev", "degrade", "palindrome", "fast", "slow", "gain", "pan", "room",
         "lpf", "hpf", "shift", "speed", "crush", "shape", "vel", "inst", "art",
         "hold", "scale", "add", "addDeg", "degradeBy", "sometimesBy", "chunk", "iter",
-        "swingBy", "delay", "eq", "comp", "every", "off", "sometimes", "jux", "log",
+        "swingBy", "humanize", "delay", "eq", "comp", "every", "off", "sometimes", "jux", "log",
     ];
     const IMPLEMENTED_COMBINATORS: &[&str] = &[
         "par", "stack", "seq", "cat", "arrange", "cycles", "section", "track",
