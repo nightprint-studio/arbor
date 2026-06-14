@@ -46,6 +46,7 @@
   import type { UnlistenFn } from '@tauri-apps/api/event';
   import { nemusStore } from './nemus-store.svelte';
   import { nemusEngine, diagnosticsStore, transportStore } from './stores/engine.svelte';
+  import { levelAnalysisStore } from './stores/level-analysis.svelte';
   import { transportUiStore } from './stores/transport-ui.svelte';
   import { tempoStore } from './stores/tempo.svelte';
   import { configStore } from './stores/config.svelte';
@@ -206,6 +207,10 @@
     // The source's tempo is authoritative again after an eval — drop any live
     // tap-tempo / nudge override (mirrors the mixer's gain/pan rebaseline).
     tempoStore.reset();
+    // An edit invalidates the offline level-analysis snapshot (its clip windows
+    // were measured against the old source) — clear the LEDs / underlines so a
+    // stale result never lingers; the user re-runs "Check levels" when ready.
+    levelAnalysisStore.clear();
   });
 
   // Mirror layout changes to the persisted window state (debounced in the

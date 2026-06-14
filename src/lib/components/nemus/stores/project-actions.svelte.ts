@@ -17,6 +17,8 @@ import { arrangementStore } from '../viz/arrangement.svelte';
 import { nemusRender, nemusRenderStems, nemusExportMidi } from '$lib/ipc/nemus';
 import { fsWriteTextFile } from '$lib/ipc/fs';
 import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
+import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+import { levelAnalysisStore } from './level-analysis.svelte';
 
 export type NemusPicker =
   | 'new' | 'new-file' | 'open-project' | 'open-file'
@@ -177,6 +179,18 @@ function createProjectActions() {
     return arrangementStore.loopCycles * exportLoops;
   }
 
+  /** Run the offline level analysis on the active source (no playback) and toast
+   *  the verdict. The mixer clip LEDs + the editor underlines update from the
+   *  shared store; the analysis clears on the next edit. */
+  async function runCheckLevels() {
+    if (levelAnalysisStore.running) return;
+    await levelAnalysisStore.analyze(projectStore.activeSource, projectStore.project?.path);
+    if (!levelAnalysisStore.ran) return;
+    const n = levelAnalysisStore.clippedCount;
+    if (n === 0) toastStore.show('No clipping found', 'success');
+    else toastStore.show(`${n} track${n === 1 ? '' : 's'} clip — see the red underlines / mixer`, 'warning');
+  }
+
   return {
     get picker() { return picker; },
     get exportOptionsOpen() { return exportOptionsOpen; },
@@ -241,6 +255,10 @@ function createProjectActions() {
     /** Export the arrangement as a Standard MIDI File (note data, no audio) —
      *  opens the `.mid` save picker; the write is instant on confirm. */
     exportMidi()  { picker = 'export-midi'; },
+    /** Whether a level analysis is currently running. */
+    get checkingLevels() { return levelAnalysisStore.running; },
+    /** Analyze the arrangement for clipping without playing it (offline render). */
+    checkLevels() { void runCheckLevels(); },
     /** Confirm export options → advance to the save picker (step 2). */
     confirmExportOptions() { exportOptionsOpen = false; picker = 'export'; },
     /** Dismiss the export options dialog without exporting. */

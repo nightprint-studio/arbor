@@ -72,6 +72,8 @@ export interface MixerTrack {
   hasContinuous: boolean;
   /** Hap count over the queried window (pattern density hint). */
   hapCount: number;
+  /** Peak simultaneous voices (static polyphony) — the track's voice cost. */
+  polyphony: number;
 }
 
 /** Track names from the active source: `track("name", …)` in declaration order
@@ -205,11 +207,23 @@ function createMixerStore() {
       noteCount: l.noteCount,
       hasContinuous: l.hasContinuous,
       hapCount: l.haps.length,
+      polyphony: l.polyphony,
     }));
+  });
+
+  // The track carrying the most simultaneous voices — the first place to look when
+  // the voice/CPU budget runs hot. Null until an arrangement is loaded; ties keep
+  // the lowest index (stable).
+  const heaviestTrack = $derived.by<MixerTrack | null>(() => {
+    let best: MixerTrack | null = null;
+    for (const t of tracks) if (t.polyphony > 0 && (!best || t.polyphony > best.polyphony)) best = t;
+    return best;
   });
 
   return {
     get tracks() { return tracks; },
+    /** The track with the highest peak polyphony (the heaviest voice load), or null. */
+    get heaviestTrack() { return heaviestTrack; },
     byIndex(i: number): MixerTrack | null { return tracks.find((t) => t.index === i) ?? null; },
 
     // ── gain / pan: live ephemeral override + debounced write-through ──

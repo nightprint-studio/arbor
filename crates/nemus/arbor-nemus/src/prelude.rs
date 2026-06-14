@@ -56,10 +56,10 @@ pub use arbor_nemus_audio::prelude::{
 // Clock, the pure scheduling core, the real-time transport, and the offline
 // render driver. `Result` omitted; `EngineError` kept by name.
 pub use arbor_nemus_engine::prelude::{
-    delay_config_for, export_midi, render_offline, render_offline_with_progress, schedule_span,
-    voice_event_from_hap, BitDepth, Epoch, EngineError, Format, MidiExportSummary, RenderConfig,
-    RenderOutcome, RenderProgress, RenderSink, Transport, DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS,
-    LOOKAHEAD_MS,
+    analyze_levels, delay_config_for, export_midi, render_offline, render_offline_with_progress,
+    schedule_span, voice_event_from_hap, BitDepth, ClipWindow, Epoch, EngineError, Format,
+    LevelAnalysis, MidiExportSummary, RenderConfig, RenderOutcome, RenderProgress, RenderSink,
+    Transport, DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS, LOOKAHEAD_MS,
 };
 
 // ── arbor-nemus-import — deterministic MIDI → .nemus (the "faithful" path) ────

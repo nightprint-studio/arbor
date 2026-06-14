@@ -1539,6 +1539,7 @@ pub fn run() {
             nemus::nemus_render,
             nemus::nemus_render_stems,
             nemus::nemus_export_midi,
+            nemus::nemus_analyze_levels,
             nemus::nemus_packs,
             nemus::nemus_pack_download,
             nemus::nemus_pack_reindex,

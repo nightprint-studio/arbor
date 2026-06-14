@@ -6,9 +6,11 @@
    * meters streams (no RAF, no mock); they idle naturally when stopped because
    * the engine stops emitting movement.
    */
-  import { Activity, Cpu, AudioWaveform, AlertTriangle, Clock } from 'lucide-svelte';
+  import { Activity, Cpu, AudioWaveform, AlertTriangle, Clock, Music } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { transportStore, metersStore, audioErrorStore } from '../stores/engine.svelte';
+  import { mixerStore } from '../stores/mixer.svelte';
+  import { keyStore } from '../stores/key.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
   import { configStore } from '../stores/config.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
@@ -26,6 +28,31 @@
   let { footerExtra }: { footerExtra?: Snippet } = $props();
 
   const dspPct  = $derived(Math.round(metersStore.dspLoad * 100));
+  // DSP load is the audio CPU budget; warn/crit thresholds tint the readout.
+  const dspLevel = $derived(
+    metersStore.dspLoad >= 0.85 ? 'crit' : metersStore.dspLoad >= 0.6 ? 'warn' : 'ok',
+  );
+  // The heaviest track (peak polyphony) — surfaced in the voices tooltip so a hot
+  // voice budget points straight at the track to thin out.
+  const heaviest = $derived(mixerStore.heaviestTrack);
+  const voicesTip = $derived(
+    heaviest
+      ? `${metersStore.voices} voices sounding now · heaviest track: ${heaviest.name} (up to ${heaviest.polyphony})`
+      : `${metersStore.voices} voices sounding now`,
+  );
+  const dspTip = $derived(
+    dspLevel === 'ok' ? 'Audio DSP load (CPU budget)' : 'Audio DSP load running hot — thin voices / FX',
+  );
+  // Detected key + out-of-scale tally (the editor underlines the offending notes).
+  const keyTip = $derived.by(() => {
+    const a = keyStore.analysis;
+    if (!a.spec) return '';
+    const cov = Math.round(a.coverage * 100);
+    const off = a.offScale.length;
+    return off
+      ? `Detected key: ${a.label} · ${cov}% in scale · ${off} note${off === 1 ? '' : 's'} out of scale (underlined in the editor)`
+      : `Detected key: ${a.label} · ${cov}% in scale`;
+  });
   // Live audio-output sample rate (the badge) — distinct from the *render* sample
   // rate used by the estimate below.
   const srLabel = $derived(`${transportStore.sampleRate / 1000} kHz`);
@@ -81,9 +108,23 @@
     <span class:live={transportStore.playing}>{transportStore.position}</span>
   </span>
   <span class="gf-item">cps {cpsLabel}</span>
+  {#if keyStore.analysis.spec}
+    <span class="gf-item" class:warn={keyStore.hasOffScale} use:tooltip={keyTip}>
+      <Music size={12} /> {keyStore.analysis.label}
+    </span>
+  {/if}
   <span class="gf-sep"></span>
-  <span class="gf-item"><AudioWaveform size={12} /> {metersStore.voices} voices</span>
-  <span class="gf-item"><Cpu size={12} /> {dspPct}% DSP</span>
+  <span class="gf-item" use:tooltip={voicesTip}><AudioWaveform size={12} /> {metersStore.voices} voices</span>
+  <span class="gf-item" class:warn={dspLevel === 'warn'} class:crit={dspLevel === 'crit'} use:tooltip={dspTip}>
+    <Cpu size={12} /> {dspPct}% DSP
+  </span>
+  {#if metersStore.anyClipped}
+    <button type="button" class="gf-item gf-clip"
+            use:tooltip={`Clipping — ${metersStore.clipCount} source${metersStore.clipCount === 1 ? '' : 's'} hit 0 dBFS. Click to reset.`}
+            onclick={() => metersStore.resetClips()}>
+      <AlertTriangle size={12} /> CLIP
+    </button>
+  {/if}
   <span class="gf-sep"></span>
   {#if audioErrorStore.message}
     <span class="gf-item gf-error" use:tooltip={audioErrorStore.message}>
@@ -119,8 +160,22 @@
   .gf-pos { font-variant-numeric: tabular-nums; }
   .gf-estimate { font-variant-numeric: tabular-nums; }
   .gf-pos .live { color: var(--success); font-weight: 600; }
+  /* DSP/CPU budget tint — warn (amber) / crit (red), icon follows the text. */
+  .gf-item.warn { color: var(--warning); }
+  .gf-item.warn :global(svg) { color: var(--warning); }
+  .gf-item.crit { color: var(--error); font-weight: 600; }
+  .gf-item.crit :global(svg) { color: var(--error); }
   .gf-error { color: var(--error); }
   .gf-error :global(svg) { color: var(--error); }
+  /* Latched clip badge — a reset button styled like a status item. */
+  .gf-clip {
+    border: none; background: transparent; cursor: pointer;
+    font: inherit; padding: 0 4px; height: 16px; border-radius: var(--radius-sm);
+    color: var(--error); font-weight: 700; letter-spacing: 0.4px;
+  }
+  .gf-clip :global(svg) { color: var(--error); }
+  .gf-clip:hover { background: color-mix(in srgb, var(--error) 16%, transparent); }
+  .gf-clip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
   .gf-spacer { flex: 1; }
   .gf-sep { width: 1px; height: 12px; background: var(--border-subtle); }
 </style>

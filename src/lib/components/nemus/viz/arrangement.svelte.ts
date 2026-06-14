@@ -35,6 +35,29 @@ export interface VizLane {
   hasContinuous: boolean;
   /** Count of pitched haps (for the lane subtitle). */
   noteCount: number;
+  /** Max simultaneous voices in the lane (peak polyphony) — the static "voice
+   *  cost" of the track, used for the heaviest-track / budget readout. */
+  polyphony: number;
+}
+
+/** Peak simultaneous voices across a lane's haps: a sweep line over onsets/offsets
+ *  (offset before onset at the same instant, so touching notes don't overlap),
+ *  plus a floor of one sustained voice per continuous signal. */
+function maxPolyphony(haps: NemusQueryHap[]): number {
+  let sustained = 0;
+  const edges: { t: number; d: number }[] = [];
+  for (const h of haps) {
+    if (h.has_onset) {
+      edges.push({ t: h.start, d: 1 }, { t: h.end, d: -1 });
+    } else {
+      sustained++;
+    }
+  }
+  edges.sort((a, b) => a.t - b.t || a.d - b.d);
+  let cur = 0;
+  let max = 0;
+  for (const e of edges) { cur += e.d; if (cur > max) max = cur; }
+  return max + sustained;
 }
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -83,7 +106,7 @@ function buildLanes(haps: NemusQueryHap[], allSections: NemusQuerySection[]): Vi
       if (!h.has_onset) hasContinuous = true;
     }
     const sounds = [...counts.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0]);
-    lanes.push({ track, haps: hs, sections, sounds, noteLo, noteHi, hasContinuous, noteCount });
+    lanes.push({ track, haps: hs, sections, sounds, noteLo, noteHi, hasContinuous, noteCount, polyphony: maxPolyphony(hs) });
   }
   return lanes;
 }

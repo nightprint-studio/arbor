@@ -739,6 +739,79 @@ pub async fn nemus_export_midi(
     Ok(MidiExportResult { tracks: summary.tracks, notes: summary.notes })
 }
 
+/// One overload window from the offline level analysis (see [`nemus_analyze_levels`]):
+/// a track index plus the cycle range whose post-fader level exceeds 0 dBFS.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct ClipWindowDto {
+    pub track: u32,
+    /// Window start in cycles (absolute timeline).
+    pub start: f64,
+    /// Window end in cycles.
+    pub end: f64,
+    /// Deepest post-fader peak in the window, linear (`1.0` = 0 dBFS).
+    pub peak: f32,
+}
+
+/// Result of an offline level analysis: per-track peak (linear, post-fader) and the
+/// clip windows over the loop.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LevelAnalysisResult {
+    pub track_peaks: Vec<f32>,
+    pub clips: Vec<ClipWindowDto>,
+}
+
+/// Analyze `source` for clipping **without playing it**: a silent offline render
+/// over the arrangement's loop period that measures each track's post-fader peak
+/// and reports where it exceeds 0 dBFS. Quick (no file IO, no audio output), run
+/// off the async worker. A bad snippet resolves to an empty result (lints live
+/// elsewhere), so it's safe to call live while editing.
+#[tauri::command]
+pub async fn nemus_analyze_levels(
+    app: AppHandle,
+    source: String,
+    project_dir: Option<String>,
+) -> Result<LevelAnalysisResult, AppError> {
+    let cfg = nemus_config();
+    let base = project_dir
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let output = match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
+        Ok(o) => o,
+        Err(_diags) => return Ok(LevelAnalysisResult { track_peaks: Vec::new(), clips: Vec::new() }),
+    };
+
+    // Same tempo + loop-period choices as the WAV / MIDI bounce, so the analysis
+    // matches what an export would produce.
+    let cps = output
+        .tempo
+        .points
+        .first()
+        .map(|p| p.1)
+        .or(output.cps)
+        .unwrap_or(cfg.default_cps);
+    let (_haps, _sections, loop_cycles) =
+        query::collect_haps(&output.tracks, query::SNIPPET_WINDOW);
+    let cycles = loop_cycles.max(1);
+    let sr = cfg.render.render_config().sample_rate;
+
+    let tracks = output.tracks;
+    let analysis = tauri::async_runtime::spawn_blocking(move || {
+        arbor_nemus::prelude::analyze_levels(&tracks, cps, cycles, sr)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
+
+    Ok(LevelAnalysisResult {
+        track_peaks: analysis.track_peaks,
+        clips: analysis
+            .clips
+            .into_iter()
+            .map(|c| ClipWindowDto { track: c.track, start: c.start_cycle, end: c.end_cycle, peak: c.peak })
+            .collect(),
+    })
+}
+
 /// List every downloadable sample pack (VSCO, Dirt-Samples, drum machines, …)
 /// with its current install status.
 #[tauri::command]

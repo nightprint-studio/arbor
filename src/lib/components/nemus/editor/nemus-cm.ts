@@ -16,7 +16,7 @@
  * editor for free — and the pane sits on `--bg-base` like the Step-0 editor.
  */
 
-import { EditorView, ViewPlugin, Decoration, lineNumbers } from '@codemirror/view';
+import { EditorView, ViewPlugin, Decoration, lineNumbers, hoverTooltip } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import {
   EditorState, StateField, StateEffect, RangeSetBuilder, type Extension,
@@ -205,6 +205,93 @@ export function toActiveHapMarks(
     const from = b2u(h.start);
     const to = b2u(h.end);
     if (to > from && to <= len) out.push({ from, to, track: h.track });
+  }
+  return out;
+}
+
+// ── Editor warning underlines (out-of-scale notes · clip-risk events) ──────────
+//
+// A small family of advisory underline layers, separate from the active-hap
+// highlight and the eval lint: the FE detectors mark source ranges, painted as a
+// wavy underline (amber for out-of-key, red for clip-risk) with a message shown
+// on hover. Each "kind" is its own layer (own colour + StateEffect) but they
+// share the shape, so a factory builds them. Marks are kept as plain data (with
+// their messages) so the hover can look one up at a position, and positions
+// re-map through edits so the underline + hover track typing until the next pass.
+
+/** One advisory mark: a CM offset range plus the message shown on hover. */
+export interface WarnMark { from: number; to: number; message: string; }
+
+/** Build one underline layer (a class-tinted mark) fed by its own StateEffect. */
+function makeWarnLayer(cls: string) {
+  const mark = Decoration.mark({ class: cls });
+  const set = StateEffect.define<WarnMark[]>();
+  const field = StateField.define<WarnMark[]>({
+    create: () => [],
+    update(marks, tr) {
+      let next = marks;
+      if (tr.docChanged) {
+        next = marks
+          .map((m) => ({ from: tr.changes.mapPos(m.from), to: tr.changes.mapPos(m.to, 1), message: m.message }))
+          .filter((m) => m.to > m.from);
+      }
+      for (const e of tr.effects) if (e.is(set)) next = e.value;
+      return next;
+    },
+    provide: (f) =>
+      EditorView.decorations.from(f, (marks) => {
+        const builder = new RangeSetBuilder<Decoration>();
+        for (const m of [...marks].sort((a, b) => a.from - b.from || a.to - b.to)) {
+          if (m.to > m.from) builder.add(m.from, m.to, mark);
+        }
+        return builder.finish();
+      }),
+  });
+  return { set, field };
+}
+
+const offScaleLayer = makeWarnLayer('cm-grv-offscale');
+const clipRiskLayer = makeWarnLayer('cm-grv-clip');
+
+/** Push the out-of-scale note marks (amber) — notes outside the detected key. */
+export const setOutOfScale = offScaleLayer.set;
+/** Push the clip-risk event marks (red) — events whose level is likely to clip. */
+export const setClipRisk = clipRiskLayer.set;
+
+/** Hover any advisory mark → its message in a styled tooltip. */
+const warnHover = hoverTooltip((view, pos) => {
+  for (const layer of [offScaleLayer, clipRiskLayer]) {
+    const marks = view.state.field(layer.field, false);
+    const m = marks?.find((x) => pos >= x.from && pos <= x.to);
+    if (!m) continue;
+    return {
+      pos: m.from,
+      end: m.to,
+      above: true,
+      create() {
+        const dom = document.createElement('div');
+        dom.className = 'cm-grv-warn-tip';
+        dom.textContent = m.message;
+        return { dom };
+      },
+    };
+  }
+  return null;
+});
+
+/** Convert advisory marks (UTF-8 byte ranges + message) into doc-clamped CM marks
+ *  for `src`. Ranges outside the current buffer are dropped (stale / other file). */
+export function toWarnMarks(
+  notes: { from: number; to: number; message: string }[],
+  src: string,
+): WarnMark[] {
+  const b2u = makeByteToU16(src);
+  const len = src.length;
+  const out: WarnMark[] = [];
+  for (const n of notes) {
+    const from = b2u(n.from);
+    const to = b2u(n.to);
+    if (to > from && to <= len) out.push({ from, to, message: n.message });
   }
   return out;
 }
@@ -489,6 +576,33 @@ export const nemusTheme = EditorView.theme(
       boxShadow: 'inset 0 -2px 0 0 var(--grv-hap)',
       borderRadius: '2px',
     },
+    // Out-of-scale note — a soft amber wavy underline (a warning, not an error).
+    '.cm-grv-offscale': {
+      textDecoration: 'underline wavy var(--warning)',
+      textDecorationSkipInk: 'none',
+      textUnderlineOffset: '3px',
+    },
+    // Clip-risk event — a red wavy underline (a likely level overload).
+    '.cm-grv-clip': {
+      textDecoration: 'underline wavy var(--error)',
+      textDecorationSkipInk: 'none',
+      textUnderlineOffset: '3px',
+    },
+    // Hover bubble for an advisory mark (out-of-scale / clip-risk).
+    '.cm-grv-warn-tip': {
+      padding: '4px 8px',
+      fontFamily: 'var(--font-ui-sans)',
+      fontSize: '11.5px',
+      lineHeight: '1.4',
+      color: 'var(--text-primary)',
+      maxWidth: '260px',
+    },
+    '.cm-tooltip:has(.cm-grv-warn-tip)': {
+      backgroundColor: 'var(--bg-overlay)',
+      border: '1px solid var(--border-subtle)',
+      borderRadius: 'var(--radius-sm)',
+      boxShadow: 'var(--shadow-popup)',
+    },
   },
   { dark: true },
 );
@@ -543,6 +657,9 @@ export function createNemusExtensions(opts: NemusExtensionsOptions = {}): Extens
     // order follows registration order).
     occurrenceHighlight({ onSymbol: opts.onSymbol, onSelection: opts.onSelection }),
     activeHapsField,
+    offScaleLayer.field,
+    clipRiskLayer.field,
+    warnHover,
     lintGutter(),
     // Editing ergonomics (comments, autoclose, delete-line, soft wrap, folding).
     // Placed before the base keymap so its `Mod-/` / `Mod-y` win over the

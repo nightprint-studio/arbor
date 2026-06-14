@@ -252,38 +252,16 @@ pub fn render_offline_with_progress(
         let mut voice_cmds: Vec<AudioCommand> = Vec::new();
         if frame_cursor < arrangement_frames {
             let span_end = block_end.min(arrangement_frames);
-            let events = schedule_span(
+            voice_cmds = schedule_block(
                 tracks,
                 &epoch,
                 sr,
+                start_frame,
                 (start_frame + frame_cursor)..(start_frame + span_end),
                 &mut next_id,
+                &mut sustained_started,
+                &mut delay_state,
             );
-            for ev in events {
-                // Re-base the absolute onset onto the output's local timeline (a
-                // no-op for a whole-arrangement bounce, where `start_frame == 0`).
-                let mut ev = ev;
-                ev.start_frame -= start_frame;
-                if let VoiceSource::File {
-                    path,
-                    kind: SourceKind::Sustained,
-                } = &ev.source
-                {
-                    if !sustained_started.insert((ev.track, path.clone())) {
-                        continue;
-                    }
-                }
-                // Reconfigure the track's delay bus only when its config changes.
-                if let Some(AudioCommand::SetTrackDelay(track, cfg)) =
-                    delay_config_for(&ev, &epoch, sr)
-                {
-                    if delay_state.get(&track) != Some(&cfg) {
-                        delay_state.insert(track, cfg);
-                        voice_cmds.push(AudioCommand::SetTrackDelay(track, cfg));
-                    }
-                }
-                voice_cmds.push(AudioCommand::Voice(ev));
-            }
         }
 
         // The first block also carries the initial ConfigureTracks + FX inserts,
@@ -350,6 +328,187 @@ pub fn render_offline_with_progress(
         Some(e) => Err(e),
         None => finalized.map(|()| if cancelled { RenderOutcome::Cancelled } else { RenderOutcome::Completed }),
     }
+}
+
+/// Schedule the voices whose onset lands in `abs_range` (absolute frames) into the
+/// command list for one render block: re-bases each onset onto the output-local
+/// timeline (subtracting `start_frame`), dedups sustained file sources across the
+/// render, and emits a `SetTrackDelay` only when a track's delay bus actually
+/// changes. Shared by the offline bounce and the level analyzer so both drive the
+/// `Renderer` through identical scheduling.
+#[allow(clippy::too_many_arguments)]
+fn schedule_block(
+    tracks: &Tracks<ControlMap>,
+    epoch: &Epoch,
+    sr: u32,
+    start_frame: u64,
+    abs_range: std::ops::Range<u64>,
+    next_id: &mut u64,
+    sustained_started: &mut HashSet<(u32, String)>,
+    delay_state: &mut HashMap<u32, DelayConfig>,
+) -> Vec<AudioCommand> {
+    let mut voice_cmds: Vec<AudioCommand> = Vec::new();
+    for ev in schedule_span(tracks, epoch, sr, abs_range, next_id) {
+        // Re-base the absolute onset onto the output's local timeline (a no-op for
+        // a whole-arrangement run, where `start_frame == 0`).
+        let mut ev = ev;
+        ev.start_frame -= start_frame;
+        if let VoiceSource::File {
+            path,
+            kind: SourceKind::Sustained,
+        } = &ev.source
+        {
+            if !sustained_started.insert((ev.track, path.clone())) {
+                continue;
+            }
+        }
+        // Reconfigure the track's delay bus only when its config changes.
+        if let Some(AudioCommand::SetTrackDelay(track, cfg)) = delay_config_for(&ev, epoch, sr) {
+            if delay_state.get(&track) != Some(&cfg) {
+                delay_state.insert(track, cfg);
+                voice_cmds.push(AudioCommand::SetTrackDelay(track, cfg));
+            }
+        }
+        voice_cmds.push(AudioCommand::Voice(ev));
+    }
+    voice_cmds
+}
+
+/// A contiguous stretch where one track's post-fader level exceeds full scale —
+/// an overload that clips (or forces the master limiter). Times are in cycles on
+/// the arrangement timeline.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipWindow {
+    /// Mixer-strip / arrangement-lane index.
+    pub track: u32,
+    /// Window start (cycles, inclusive).
+    pub start_cycle: f64,
+    /// Window end (cycles, exclusive).
+    pub end_cycle: f64,
+    /// Deepest post-fader peak in the window, linear (`1.0` = 0 dBFS).
+    pub peak: f32,
+}
+
+/// The result of an offline level analysis: per-track peak over the bounce plus the
+/// clip windows. Peaks are **post-fader, pre-limiter** — the level that actually
+/// overloads — so a track over `1.0` would clip even though the master limiter
+/// would mask it on playback.
+#[derive(Clone, Debug, Default)]
+pub struct LevelAnalysis {
+    /// Peak `max(|L|, |R|)` per track over the whole analysis, linear.
+    pub track_peaks: Vec<f32>,
+    /// Contiguous overload windows (adjacent clipping blocks merged).
+    pub clips: Vec<ClipWindow>,
+}
+
+/// Post-fader peak at/above which a track is overloading (0 dBFS).
+const CLIP_LEVEL: f32 = 1.0;
+
+/// Render `cycles` cycles of `tracks` (at `cps`) **silently**, off the real-time
+/// path, and report where it would clip.
+///
+/// Drives the same `Renderer` + scheduling as [`render_offline`], but instead of
+/// writing samples it taps the per-track post-fader peak each block
+/// ([`Renderer::track_peaks`](arbor_nemus_audio::prelude::Renderer::track_peaks))
+/// and merges the over-0 dBFS stretches into per-track [`ClipWindow`]s. No file, no
+/// audio output — a pure measurement, so the editor / mixer can warn about clipping
+/// without the user starting playback. No tail (overloads only happen while voices
+/// sound) and no normalization (we want the *raw* levels).
+pub fn analyze_levels(
+    tracks: &Tracks<ControlMap>,
+    cps: f64,
+    cycles: u32,
+    sample_rate: u32,
+) -> LevelAnalysis {
+    let track_count = tracks.tracks.len();
+    if cycles == 0 || track_count == 0 {
+        return LevelAnalysis::default();
+    }
+    let sr = sample_rate;
+    let epoch = Epoch::start(cps);
+    let fpc = epoch.frames_per_cycle(sr);
+
+    let track_configs: Vec<TrackConfig> = tracks
+        .tracks
+        .iter()
+        .map(|t| TrackConfig { name: t.name.clone() })
+        .collect();
+    let mut renderer = Renderer::new(sr, &track_configs);
+    renderer.registry_mut().install_builtin_synths();
+    preload_file_sources(&mut renderer, tracks, 0, cycles);
+
+    let arrangement_frames = (cycles as f64 * fpc).round() as u64;
+
+    let mut next_id: u64 = 0;
+    let mut sustained_started: HashSet<(u32, String)> = HashSet::new();
+    let mut delay_state: HashMap<u32, DelayConfig> = HashMap::new();
+
+    let mut block: Vec<Frame> = vec![[0.0, 0.0]; BLOCK_FRAMES];
+    let mut frame_cursor: u64 = 0;
+
+    let mut initial: Option<Vec<AudioCommand>> = Some({
+        let mut v = vec![AudioCommand::ConfigureTracks(track_configs.clone())];
+        v.extend(track_fx_commands(tracks));
+        v
+    });
+
+    let mut peaks = vec![0.0f32; track_count];
+    // Open clip window per track: (start cycle, running peak), merged across blocks.
+    let mut open: Vec<Option<(f64, f32)>> = vec![None; track_count];
+    let mut clips: Vec<ClipWindow> = Vec::new();
+
+    while frame_cursor < arrangement_frames {
+        let block_len = ((arrangement_frames - frame_cursor) as usize).min(BLOCK_FRAMES);
+        let block_end = frame_cursor + block_len as u64;
+
+        let voice_cmds = schedule_block(
+            tracks,
+            &epoch,
+            sr,
+            0,
+            frame_cursor..block_end,
+            &mut next_id,
+            &mut sustained_started,
+            &mut delay_state,
+        );
+        let mut cmds = initial.take().into_iter().flatten().chain(voice_cmds);
+        let out = &mut block[..block_len];
+        renderer.process(&mut cmds, out);
+
+        let block_start_cycle = frame_cursor as f64 / fpc;
+        for (i, peak_frame) in renderer.track_peaks().iter().enumerate() {
+            if i >= track_count {
+                break;
+            }
+            let p = peak_frame[0].max(peak_frame[1]);
+            if p > peaks[i] {
+                peaks[i] = p;
+            }
+            if p >= CLIP_LEVEL {
+                match &mut open[i] {
+                    Some((_, wp)) => {
+                        if p > *wp {
+                            *wp = p;
+                        }
+                    }
+                    None => open[i] = Some((block_start_cycle, p)),
+                }
+            } else if let Some((start, wp)) = open[i].take() {
+                clips.push(ClipWindow { track: i as u32, start_cycle: start, end_cycle: block_start_cycle, peak: wp });
+            }
+        }
+
+        frame_cursor = block_end;
+    }
+    // Close any window still open at the end of the bounce.
+    let end_cycle = arrangement_frames as f64 / fpc;
+    for (i, slot) in open.into_iter().enumerate() {
+        if let Some((start, wp)) = slot {
+            clips.push(ClipWindow { track: i as u32, start_cycle: start, end_cycle, peak: wp });
+        }
+    }
+
+    LevelAnalysis { track_peaks: peaks, clips }
 }
 
 /// Scan `cycles` cycles of `tracks` for distinct file-source paths and preload
@@ -420,6 +579,36 @@ mod tests {
         let cleanup = std::fs::remove_file(&out);
         assert_eq!(res.expect("region render"), RenderOutcome::Completed);
         assert!(cleanup.is_ok(), "region render should have produced the WAV file");
+    }
+
+    #[test]
+    fn analyze_levels_flags_a_hot_track() {
+        use arbor_nemus_pattern::prelude::{pure, track, tracks, ControlMap};
+        // A note boosted far past unity must overload (peak > 0 dBFS) and report a
+        // clip window for its track.
+        let loud = pure(ControlMap::note(60.0)).gain(50.0);
+        let t = tracks(vec![track("loud", loud)]);
+        let a = analyze_levels(&t, 1.0, 1, DEFAULT_SAMPLE_RATE);
+        assert_eq!(a.track_peaks.len(), 1);
+        assert!(a.track_peaks[0] > 1.0, "hot track should peak over full scale, got {}", a.track_peaks[0]);
+        assert!(a.clips.iter().any(|c| c.track == 0), "expected a clip window for the loud track");
+    }
+
+    #[test]
+    fn analyze_levels_quiet_track_has_no_clips() {
+        use arbor_nemus_pattern::prelude::{pure, track, tracks, ControlMap};
+        let quiet = pure(ControlMap::note(60.0)).gain(0.1);
+        let t = tracks(vec![track("quiet", quiet)]);
+        let a = analyze_levels(&t, 1.0, 1, DEFAULT_SAMPLE_RATE);
+        assert!(a.clips.is_empty(), "a quiet track should not clip");
+    }
+
+    #[test]
+    fn analyze_levels_zero_cycles_is_inert() {
+        use arbor_nemus_pattern::prelude::{pure, track, tracks, ControlMap};
+        let t = tracks(vec![track("t", pure(ControlMap::note(60.0)))]);
+        let a = analyze_levels(&t, 1.0, 0, DEFAULT_SAMPLE_RATE);
+        assert!(a.track_peaks.is_empty() && a.clips.is_empty());
     }
 
     #[test]

@@ -144,6 +144,9 @@
 
       <div class="insp-section">Pattern</div>
       <div class="insp-row"><span>haps / window</span><code>{track.hapCount}</code></div>
+      <div class="insp-row" use:tooltip={'Peak simultaneous voices — this track’s voice cost'}>
+        <span>max voices</span><code>{track.polyphony}</code>
+      </div>
       <div class="insp-row"><span>sounds</span><code>{track.sounds.length ? track.sounds.slice(0, 4).join(' ') : '—'}</code></div>
       <div class="insp-row"><span>pitch range</span><code>{pitchRange(track.noteLo, track.noteHi)}</code></div>
       {#if track.hasContinuous}<div class="insp-row"><span>signal</span><code>continuous</code></div>{/if}

@@ -118,6 +118,7 @@
     { id: 'export_region', label: 'Export loop region…', group: 'Project', icon: 'Crop',  run: () => projectActions.exportRegion() },
     { id: 'export_stems', label: 'Export stems…',    group: 'Project', icon: 'Layers',     run: () => projectActions.exportStems() },
     { id: 'export_midi',  label: 'Export MIDI…',     group: 'Project', icon: 'FileMusic',  run: () => projectActions.exportMidi() },
+    { id: 'check_levels', label: 'Check levels (clip analysis)', group: 'Project', icon: 'Gauge', run: () => projectActions.checkLevels() },
     { id: 'import',       label: 'Import audio / MIDI…', group: 'Project', icon: 'FileInput', keys: 'Alt+Shift+I', run: () => importActions.start() },
     { id: 'convert_midi', label: 'Convert WAV to MIDI…', group: 'Project', icon: 'FileAudio', run: () => importActions.startConvert() },
     { id: 'dl_basic_pitch', label: 'Download polyphonic model (basic-pitch)', group: 'Project', icon: 'Download', run: () => void modelsStore.download('basic-pitch') },

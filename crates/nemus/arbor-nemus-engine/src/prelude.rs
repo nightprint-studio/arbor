@@ -22,5 +22,8 @@ pub use crate::render::{
     RenderProgress, DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS,
 };
 
+// ── Offline level analysis (clip detection without playback) ─────────────────
+pub use crate::render::{analyze_levels, ClipWindow, LevelAnalysis};
+
 // ── Offline MIDI export ──────────────────────────────────────────────────────
 pub use crate::midi::{export_midi, MidiExportSummary};

@@ -28,7 +28,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Mixer</div>
-    <div class="fc-desc">One strip per track with live meters and gain / pan knobs. Dragging a knob is heard instantly (a live override) and is <strong>written back</strong> into the <code>.nemus</code> source as a <code>.gain(…)</code> / <code>.pan(…)</code> literal shortly after the gesture rests — no commit step. The room knob and the Inspector's delay knobs are code-first the same way. Muting a track writes <code>.gain(0)</code> into the source; unmuting restores the previous gain.</div>
+    <div class="fc-desc">One strip per track with live meters and gain / pan knobs. Dragging a knob is heard instantly (a live override) and is <strong>written back</strong> into the <code>.nemus</code> source as a <code>.gain(…)</code> / <code>.pan(…)</code> literal shortly after the gesture rests — no commit step. The room knob and the Inspector's delay knobs are code-first the same way. Muting a track writes <code>.gain(0)</code> into the source; unmuting restores the previous gain. Each strip (and the master) has a <strong>clip light</strong> that latches red if its output reaches 0 dBFS during playback; it also surfaces as a <strong>CLIP</strong> badge in the footer. Click either to reset — and each playthrough starts clean. Two checks catch clipping <strong>without playback</strong>: as you type, an event whose <strong>authored gain is boosted well above unity</strong> (e.g. <code>.gain(3)</code>) is underlined in red; and <strong>Check levels</strong> (Command Palette) runs a silent offline render of the loop and reports the <em>real</em> overloads — the sum of simultaneous voices through the FX — lighting the clip LEDs of the tracks that clip and underlining the notes sounding at each clip (hover for how far over 0 dBFS). The analysis clears when you edit; re-run it when ready.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Preview</div>
@@ -60,7 +60,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Inspector</div>
-    <div class="fc-desc">Detail for the selected track: voice, meters, the live mix values, pattern statistics (hap count, pitch range), and the code-first <strong>delay</strong> knobs (time / feedback / mix) that write a <code>.delay(…)</code> into the source. Clicking an event in the arrangement also shows that event's detail (note, position, length) here.</div>
+    <div class="fc-desc">Detail for the selected track: voice, meters, the live mix values, pattern statistics (hap count, pitch range, peak <strong>voices</strong>), and the code-first <strong>delay</strong> knobs (time / feedback / mix) that write a <code>.delay(…)</code> into the source. Clicking an event in the arrangement also shows that event's detail (note, position, length) here. The footer tracks the live voice count and the <strong>DSP load</strong> (the audio CPU budget — it tints amber, then red, as it runs hot); the voices tooltip names the heaviest track so you know what to thin out.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Zen &amp; collapse</div>
@@ -150,6 +150,9 @@ arrange(
 
 <h2>Tempo</h2>
 <p><code>cps(n)</code> sets a constant clock (cycles-per-second). For tempo that changes over the song, use a <strong>tempo map</strong>: <code>tempo(cycles(8, 0.5), cycles(16, 0.6))</code> plays 8 cycles at 0.5 cps, then 16 at 0.6, then loops. The tempo changes on whole-cycle boundaries and the playhead position stays continuous; the footer shows the live tempo. (Smooth accelerando / rubato is a future addition — for now tempo steps between segments.)</p>
+
+<h2>Key detection</h2>
+<p>The footer continuously <strong>detects the key</strong> of the playing material — it fits the best scale (major, the modes, melodic / harmonic minor, and pentatonics including <em>hirajoshi</em> / <em>in-sen</em> / <em>iwato</em> / <em>kumoi</em>) to your notes and shows it, e.g. <code>E♭ dorian</code>. Notes that fall <strong>outside</strong> the detected scale are underlined in amber in the editor — hover one to see which note and key (e.g. <em>C♯4 isn't in C harmonic minor</em>) — and the footer key readout turns amber; its tooltip reports the coverage and how many notes are out of scale. It's advisory — a chromatic passing note is fine — but it makes an accidental wrong note easy to spot.</p>
 
 <h2>Playing &amp; rendering</h2>
 <ol class="step-list">

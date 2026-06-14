@@ -34,6 +34,7 @@
   import { nemusStore } from '../nemus-store.svelte';
   import { mixerStore, GAIN_UNITY, PAN_CENTER } from '../stores/mixer.svelte';
   import { metersStore, diagnosticsStore } from '../stores/engine.svelte';
+  import { levelAnalysisStore } from '../stores/level-analysis.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
   import { controlsStore } from '../stores/controls.svelte';
 
@@ -65,6 +66,16 @@
     const r = Math.abs(db) < 0.05 ? 0 : db;
     return `${r > 0 ? '+' : ''}${r.toFixed(1)}`;
   }
+  /** A track clips if the live meter latched it OR the offline analysis flagged it. */
+  function clipped(i: number): boolean {
+    return metersStore.isClipped(i) || levelAnalysisStore.isClipped(i);
+  }
+  /** Clear both clip sources (runtime latch + offline analysis snapshot). */
+  function resetClips() {
+    metersStore.resetClips();
+    levelAnalysisStore.clear();
+  }
+
   /** Gain reduction (linear `0..1`) → a negative dB readout for the master GR meter. */
   function grDb(reduction: number): string {
     const g = Math.max(0, 1 - reduction);
@@ -93,6 +104,10 @@
           <button class="strip-name" use:tooltip={t.voice} onclick={() => mixerStore.select(t.index)}>
             <span class="dot"></span><span class="nm">{t.name}</span>
           </button>
+
+          <button type="button" class="clip-led" class:on={clipped(t.index)}
+                  use:tooltip={clipped(t.index) ? 'Clipped (over 0 dBFS) — click to reset' : 'No clipping'}
+                  aria-label="{t.name} clip indicator" onclick={resetClips}></button>
 
           <div class="fader">
             <div class="fader-controls">
@@ -133,6 +148,9 @@
       <!-- Master strip -->
       <div class="strip master">
         <div class="strip-name master-name"><span class="nm">MASTER</span></div>
+        <button type="button" class="clip-led" class:on={metersStore.masterClipped}
+                use:tooltip={metersStore.masterClipped ? 'Master clipped (over 0 dBFS) — click to reset' : 'No clipping'}
+                aria-label="Master clip indicator" onclick={resetClips}></button>
         <div class="fader">
           <div class="fader-controls">
             <div class="gr" use:tooltip={'Limiter gain reduction'}><GainReductionMeter reduction={metersStore.gainReduction} /></div>
@@ -182,6 +200,17 @@
   .strip-name.master-name { cursor: default; }
   .strip-name.master-name:hover { background: transparent; }
   .dot { width: 7px; height: 7px; border-radius: 2px; background: var(--c); flex-shrink: 0; }
+
+  /* Clip light — a thin latched bar at the top of each strip (DAW clip LED).
+     Dim until the strip hits 0 dBFS, then red+glow; click anywhere resets all. */
+  .clip-led {
+    width: 60%; height: 4px; flex-shrink: 0; padding: 0; border: none;
+    border-radius: 2px; background: var(--bg-input); cursor: pointer;
+    transition: background var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .clip-led:hover { background: var(--bg-hover); }
+  .clip-led.on { background: var(--error); box-shadow: 0 0 6px var(--error); }
+  .clip-led:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
   .nm {
     font-size: 11px; font-weight: 600;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

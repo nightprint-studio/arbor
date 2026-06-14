@@ -189,6 +189,23 @@ export interface NemusMidiExport {
   notes: number;
 }
 
+/** One clip window from `nemus_analyze_levels`: a track + cycle range over 0 dBFS. */
+export interface NemusClipWindow {
+  track: number;
+  /** Window start in cycles (absolute timeline). */
+  start: number;
+  /** Window end in cycles. */
+  end: number;
+  /** Deepest post-fader peak in the window, linear (1.0 = 0 dBFS). */
+  peak: number;
+}
+
+/** Result of `nemus_analyze_levels`: per-track post-fader peak (linear) + clips. */
+export interface NemusLevelAnalysis {
+  track_peaks: number[];
+  clips: NemusClipWindow[];
+}
+
 /** A `nemus_transport` verb. */
 export type NemusTransportAction = 'play' | 'stop' | 'seek' | 'set_cps';
 
@@ -267,6 +284,18 @@ export function nemusExportMidi(
   projectDir?: string,
 ): Promise<NemusMidiExport> {
   return invoke('nemus_export_midi', { source, projectDir: projectDir ?? null, path });
+}
+
+/**
+ * Analyze `source` for clipping **without playing it** — a silent offline render
+ * over the loop period that reports per-track post-fader peaks + the cycle windows
+ * over 0 dBFS. A bad snippet resolves to an empty result.
+ */
+export function nemusAnalyzeLevels(
+  source: string,
+  projectDir?: string,
+): Promise<NemusLevelAnalysis> {
+  return invoke('nemus_analyze_levels', { source, projectDir: projectDir ?? null });
 }
 
 /** List every downloadable sample pack with its install status. */

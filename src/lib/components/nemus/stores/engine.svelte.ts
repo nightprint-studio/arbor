@@ -53,12 +53,24 @@ function createTransportStore() {
 
 // ── Meters / telemetry ──────────────────────────────────────────────────────────
 
+/** Peak at/over 0 dBFS (full scale) — a clip / overload. Per-track peaks are
+ *  post-fader (pre-master-limiter) so they genuinely exceed this; the master is
+ *  limited and rarely will. The indicator LATCHES (a DAW clip light) until reset. */
+const CLIP_LEVEL = 1.0;
+
 function createMetersStore() {
   let master  = $state<NemusStereoPeak>([0, 0]);
   let tracks  = $state<NemusStereoPeak[]>([]);
   let voices  = $state(0);
   let dspLoad = $state(0);
   let gainReduction = $state(0);
+  // Latched clip state — set on any frame that reaches full scale, held until a
+  // manual reset (or the next playthrough). A transient over-0 dBFS can show in a
+  // single meter frame, so latching is what makes it catchable.
+  let masterClipped = $state(false);
+  let clippedTracks = $state<Set<number>>(new Set());
+
+  const clips = (p: NemusStereoPeak) => p[0] >= CLIP_LEVEL || p[1] >= CLIP_LEVEL;
 
   return {
     get master()  { return master; },
@@ -69,10 +81,29 @@ function createMetersStore() {
     get gainReduction() { return gainReduction; },
     /** Peak `[l,r]` for a track index, or `[0,0]` when absent. */
     peak(track: number): NemusStereoPeak { return tracks[track] ?? [0, 0]; },
+    // ── Clip latch (over 0 dBFS) ──────────────────────────────────────────────
+    /** Has the master output latched a clip since the last reset? */
+    get masterClipped() { return masterClipped; },
+    /** Has track `i` clipped (post-fader) since the last reset? */
+    isClipped(i: number): boolean { return clippedTracks.has(i); },
+    /** Any clip latched at all (master or a track). */
+    get anyClipped(): boolean { return masterClipped || clippedTracks.size > 0; },
+    /** Distinct latched sources, for the footer tooltip. */
+    get clipCount(): number { return clippedTracks.size + (masterClipped ? 1 : 0); },
+    /** Clear every latched clip (the clip-light reset). */
+    resetClips() { masterClipped = false; clippedTracks = new Set(); },
     subscribe(): Promise<UnlistenFn> {
       return onNemusMeters((m) => {
         master = m.master; tracks = m.tracks; voices = m.voices;
         dspLoad = m.dsp_load; gainReduction = m.gain_reduction;
+        // Latch clips. Reassign the Set only when a *new* index trips, so steady
+        // playback never churns reactive state frame after frame.
+        if (clips(master)) masterClipped = true;
+        let next: Set<number> | null = null;
+        for (let i = 0; i < tracks.length; i++) {
+          if (clips(tracks[i]) && !clippedTracks.has(i)) (next ??= new Set(clippedTracks)).add(i);
+        }
+        if (next) clippedTracks = next;
       });
     },
   };
@@ -200,6 +231,7 @@ function createNemusEngine() {
      *  A failed eval leaves the last good arrangement staged, so play still
      *  sounds the previous result. */
     async run(source: string, projectDir?: string): Promise<void> {
+      metersStore.resetClips(); // each playthrough starts with a clean clip light
       await this.eval(source, projectDir);
       await nemusPlay();
     },
@@ -210,7 +242,7 @@ function createNemusEngine() {
     /** Start playback of the already-staged arrangement from the current playhead,
      *  WITHOUT re-evaluating (used by play-from-cursor after a seek). A no-op when
      *  nothing is staged / no session is open. */
-    async play(): Promise<void> { await nemusPlay(); },
+    async play(): Promise<void> { metersStore.resetClips(); await nemusPlay(); },
 
     /** Run if stopped, stop if running. */
     async toggleRun(source: string, projectDir?: string): Promise<void> {

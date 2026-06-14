@@ -16,7 +16,7 @@
   import { setDiagnostics } from '@codemirror/lint';
   import { openSearchPanel } from '@codemirror/search';
 
-  import { createNemusExtensions, setActiveHaps, toActiveHapMarks, toCmDiagnostics, getNemusTree }
+  import { createNemusExtensions, setActiveHaps, toActiveHapMarks, setOutOfScale, setClipRisk, toWarnMarks, toCmDiagnostics, getNemusTree }
     from './nemus-cm';
   import { nemusFormat } from '$lib/ipc/nemus';
   import type { NemusIntelSource } from './nemus-intel';
@@ -29,6 +29,9 @@
   import { scalesStore } from '../stores/scales.svelte';
   import type { UsageItem, UsageAnchor } from '../stores/usages.svelte';
   import { diagnosticsStore, activeHapsStore, nemusEngine } from '../stores/engine.svelte';
+  import { keyStore } from '../stores/key.svelte';
+  import { clipLintStore } from '../stores/clip-lint.svelte';
+  import { levelAnalysisStore } from '../stores/level-analysis.svelte';
   import { referenceStore } from '../stores/reference.svelte';
   import { soundsStore } from '../stores/sounds.svelte';
   import { previewStore } from '../stores/preview.svelte';
@@ -202,6 +205,23 @@
     view.dispatch({ effects: setActiveHaps.of(toActiveHapMarks(activeHapsStore.haps, src)) });
   }
   $effect(() => { void activeHapsStore.haps; pushActiveHaps(); });
+
+  // ── key detector → out-of-scale underline ───────────────────────────────────
+  function pushOffScale() {
+    if (!view) return;
+    const src = view.state.doc.toString();
+    view.dispatch({ effects: setOutOfScale.of(toWarnMarks(keyStore.offScale, src)) });
+  }
+  $effect(() => { void keyStore.offScale; pushOffScale(); });
+
+  // ── clip-risk underlines (static gain lint + offline level analysis) ─────────
+  function pushClipRisk() {
+    if (!view) return;
+    const src = view.state.doc.toString();
+    const marks = [...clipLintStore.marks, ...levelAnalysisStore.marks];
+    view.dispatch({ effects: setClipRisk.of(toWarnMarks(marks, src)) });
+  }
+  $effect(() => { void clipLintStore.marks; void levelAnalysisStore.marks; pushClipRisk(); });
 
   // ── Imperative API ──────────────────────────────────────────────────────────
   export function focus() { view?.focus(); }
