@@ -133,9 +133,25 @@ impl Value {
     }
 }
 
+/// A launchable scene declared with `scene("name", track(...), …)`: a bundle of
+/// per-track pattern variations the clip launcher fires together. Each clip is a
+/// named `Track`; launching the scene overrides the same-named base track at the
+/// next cycle boundary (a clip whose name has no matching base track is inert).
+///
+/// Scenes are a side-channel of evaluation — like `cps`/`tempo` they register a
+/// declaration and produce no pattern in the linear output; the launcher reads
+/// [`EvalOutput::scenes`] and substitutes the chosen clips into the staged tracks.
+#[derive(Clone, Debug)]
+pub struct Scene {
+    /// The scene label shown as a launcher row (string).
+    pub name: String,
+    /// One clip per targeted track (`track(name, pat)`), in source order.
+    pub clips: Vec<Track<ControlMap>>,
+}
+
 /// The result of evaluating a whole program: the clock rate (if `cps(...)` was
-/// called), the tempo automation (if `tempo(...)` was called), and the output
-/// channels.
+/// called), the tempo automation (if `tempo(...)` was called), the output
+/// channels, and any launchable `scene(...)` declarations.
 #[derive(Clone, Debug)]
 pub struct EvalOutput {
     /// Cycles per second, if set by `cps(...)`. Ignored when `tempo` is non-empty.
@@ -144,4 +160,6 @@ pub struct EvalOutput {
     pub tempo: TempoMap,
     /// The output channels (a bare top-level pattern becomes one anonymous track).
     pub tracks: Tracks<ControlMap>,
+    /// Launchable scenes from `scene(...)`, in source order; empty when none.
+    pub scenes: Vec<Scene>,
 }

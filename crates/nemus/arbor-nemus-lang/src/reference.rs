@@ -454,6 +454,15 @@ fn keywords() -> Vec<DslEntry> {
             vec![DslParam::req("segments", "one or more `cycles(n, cps)` tempo segments")],
             "tempo(cycles(8, 0.5), cycles(16, 0.6))",
         ),
+        entry(
+            "scene", DslKind::Keyword, "scene(name, track(...), …)",
+            "Declare a launchable scene for the clip launcher: a bundle of per-track pattern variations. Each `track(name, pat)` clip overrides the same-named base track when the scene (or that single clip) is fired, quantized to the next cycle boundary. Targets a track by name; a clip with no matching base track is inert.",
+            vec![
+                DslParam::req("name", "the scene/row label (string), e.g. \"chorus\""),
+                DslParam::req("clips", "one or more `track(name, pattern)` clips to fire"),
+            ],
+            "scene(\"chorus\", track(\"drums\", s(bd bd sn bd)), track(\"bass\", n(c2 c2 ef2 g2)))",
+        ),
     ]
 }
 
@@ -859,7 +868,7 @@ mod tests {
             .copied()
             .chain(generator_names().iter().copied())
             .chain(log_names().iter().copied())
-            .chain(["cps", "tempo"]) // the two builtin keywords (not free identifiers)
+            .chain(["cps", "tempo", "scene"]) // builtin keywords (not free identifiers)
             .collect();
         // `stack` is an alias of `par` and `tracks`/`track`/`section` are
         // constructors — all flow through is_combinator.
@@ -916,8 +925,8 @@ mod tests {
     ];
     const IMPLEMENTED_COMBINATORS: &[&str] = &[
         "par", "stack", "seq", "cat", "arrange", "cycles", "section", "track",
-        "tracks", "rand", "choose", "sample", "audio", "cps", "tempo", "trace",
-        "debug", "info", "warn", "error",
+        "tracks", "rand", "choose", "sample", "audio", "cps", "tempo", "scene",
+        "trace", "debug", "info", "warn", "error",
     ];
     const IMPLEMENTED_SIGNALS: &[&str] = &["sine", "saw", "isaw", "tri", "square"];
 }

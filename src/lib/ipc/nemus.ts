@@ -452,6 +452,50 @@ export function nemusQuery(cycles: number): Promise<NemusQueryHaps> {
   return invoke('nemus_query', { cycles });
 }
 
+// ── nemus_scenes: clip-launcher scene metadata ─────────────────────────────────
+
+/** One clip in a scene: the base track it targets (by name) and the resolved
+ *  column index — `null` when no base track carries that name (an inert clip). */
+export interface NemusSceneClip {
+  track: string;
+  track_index: number | null;
+}
+
+/** One launchable scene: its label (launcher row) and the clips it fires. */
+export interface NemusScene {
+  name: string;
+  clips: NemusSceneClip[];
+}
+
+/** `nemus_scenes` result: the base track names (launcher columns, mixer order)
+ *  and the declared `scene(...)` rows. Empty until an arrangement with a
+ *  `scene(...)` has been evaluated. */
+export interface NemusScenes {
+  tracks: string[];
+  scenes: NemusScene[];
+}
+
+/** Read the launchable scenes of the last-evaluated arrangement (the clip-launcher
+ *  grid). Off the audio thread — safe to call while playing. */
+export function nemusScenes(): Promise<NemusScenes> {
+  return invoke('nemus_scenes');
+}
+
+/** One entry of a launch selection: base track `track` plays the clip that scene
+ *  `scene` declares for it. Tracks absent from the selection keep their base. */
+export interface NemusClipSelection {
+  track: number;
+  scene: string;
+}
+
+/** Fire the launcher's current selection: re-stage the last-evaluated tracks with
+ *  the chosen scenes' clips substituted into their same-named base tracks,
+ *  quantized to the next cycle boundary. An empty selection restores every track
+ *  to its base (stop all). No-op until an eval has succeeded. */
+export function nemusLaunch(selection: NemusClipSelection[]): Promise<void> {
+  return invoke('nemus_launch', { selection });
+}
+
 // ── nemus_sounds: the resolvable instrument list (registry introspection) ──────
 
 export type NemusInstrumentKind = 'synth' | 'sample' | 'sfz';

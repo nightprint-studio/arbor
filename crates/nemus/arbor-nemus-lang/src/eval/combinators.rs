@@ -11,7 +11,7 @@ use crate::convert::{as_int, as_number, as_pattern, as_str};
 use crate::error::{LangError, LangErrorKind, Result};
 use crate::eval::Ctx;
 use crate::inject::LogLevel;
-use crate::value::Value;
+use crate::value::{Scene, Value};
 
 use std::rc::Rc;
 
@@ -32,7 +32,7 @@ pub fn is_combinator(name: &str) -> bool {
     combinator_names().iter().any(|n| *n == name)
         || generator_names().iter().any(|n| *n == name)
         || log_names().iter().any(|n| *n == name)
-        || matches!(name, "cps" | "tempo")
+        || matches!(name, "cps" | "tempo" | "scene")
 }
 
 /// A bare continuous signal source (`sine`, `saw`, …) — a unipolar `0..1`
@@ -142,6 +142,25 @@ pub fn eval_builtin_call(
                 .map(|v| as_tempo_seg(v, span))
                 .collect::<Result<Vec<(u32, f64)>>>()?;
             *ctx.tempo.borrow_mut() = TempoMap::from_segments(&segs);
+            Ok(Value::Unit)
+        }
+        // `scene("name", track(...), …)` — register a launchable clip-launcher
+        // scene. The first arg is the label; the rest are `track(...)` clips that
+        // override the same-named base track when the scene is fired. Side-effecting
+        // like `cps`/`tempo`: it contributes no pattern to the linear output.
+        "scene" => {
+            if args.is_empty() {
+                return Err(LangError::at(
+                    span,
+                    LangErrorKind::Arity { name: "scene".to_string(), expected: 1, got: 0 },
+                ));
+            }
+            let mut it = args.into_iter();
+            let name = as_str(&it.next().unwrap(), span)?;
+            let clips = it
+                .map(|v| as_track(v, span))
+                .collect::<Result<Vec<Track<ControlMap>>>>()?;
+            ctx.scenes.borrow_mut().push(Scene { name, clips });
             Ok(Value::Unit)
         }
 

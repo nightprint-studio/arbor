@@ -32,6 +32,7 @@ pub mod query;
 pub mod reference;
 mod render;
 pub mod scales;
+pub mod scenes;
 mod sound_catalog;
 pub mod sounds;
 pub mod state;
@@ -45,7 +46,7 @@ use std::thread::JoinHandle;
 use tauri::{AppHandle, Manager, State};
 
 use arbor_nemus::prelude::{
-    materialize_source, ControlMap, IslandKind, TempoMap, Time, TimeSpan, Tracks,
+    materialize_source, ControlMap, IslandKind, Scene, TempoMap, Time, TimeSpan, Tracks,
 };
 
 use crate::error::AppError;
@@ -89,6 +90,9 @@ struct Latest {
     tracks: Tracks<ControlMap>,
     cps: Option<f64>,
     tempo: TempoMap,
+    /// Launchable `scene(...)` declarations from the same evaluation, read by the
+    /// clip launcher (`nemus_scenes`) and substituted into `tracks` when fired.
+    scenes: Vec<Scene>,
 }
 
 impl NemusState {
@@ -315,6 +319,7 @@ pub async fn nemus_eval(
                     tracks: output.tracks.clone(),
                     cps: output.cps,
                     tempo: output.tempo.clone(),
+                    scenes: output.scenes.clone(),
                 });
             }
             // Push live if a session is running, decoding any new sample voices

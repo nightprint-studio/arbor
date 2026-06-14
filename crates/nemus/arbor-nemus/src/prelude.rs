@@ -34,8 +34,8 @@ pub use arbor_nemus_lang::prelude::{
     emit, emit_expr, evaluate, materialize_island, materialize_source, parse, reference, BinOp, Ctx,
     DslEntry, DslKind, DslParam, Env, EvalConfig, EvalOutput, Expr, ExprKind, FnDef, Func, Ident,
     Import, Island, IslandKind, Item, LangError, LangErrorKind, Leaf, LetBind, LogLevel, LogSink,
-    Mini, MiniArg, MiniKind, NoImports, Postfix, Program, SilentLog, SourceLoader, Transform, UnOp,
-    Value,
+    Mini, MiniArg, MiniKind, NoImports, Postfix, Program, Scene, SilentLog, SourceLoader, Transform,
+    UnOp, Value,
 };
 
 // ── arbor-nemus-audio — the DSP / real-time backend ──────────────────────────

@@ -17,7 +17,7 @@
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
     Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map as MapIcon, StretchVertical,
-    FileMusic, Layers, Crop, Snowflake, Grid3x3,
+    FileMusic, Layers, Crop, Snowflake, Grid3x3, LayoutGrid,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -37,6 +37,7 @@
   import { tempoStore } from '../stores/tempo.svelte';
   import { arrViewOptions } from '../viz/arr-view-options.svelte';
   import { laneSizes } from '../viz/lane-sizes.svelte';
+  import { launcherStore } from '../stores/launcher.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -49,7 +50,7 @@
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
     Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map: MapIcon, StretchVertical,
-    FileMusic, Layers, Crop, Snowflake, Grid3x3,
+    FileMusic, Layers, Crop, Snowflake, Grid3x3, LayoutGrid,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -136,6 +137,16 @@
     { id: 'p_jobs',      label: 'Toggle Jobs',       group: 'View', icon: 'Boxes',            run: () => nemusStore.toggleBottom('jobs') },
     { id: 'p_scratch',   label: 'Toggle Scratch (expression evaluator)', group: 'View', icon: 'FlaskConical', keys: 'Ctrl+Shift+S', run: () => nemusStore.toggleBottom('scratch') },
     { id: 'p_keyboard',  label: 'Toggle Keyboard (live notes)', group: 'View', icon: 'Piano',          run: () => nemusStore.toggleBottom('keyboard') },
+    { id: 'p_launcher',  label: 'Toggle Clip launcher', group: 'View', icon: 'LayoutGrid', keys: 'Ctrl+Shift+G', run: () => nemusStore.toggleBottom('launcher') },
+    // Launcher: one entry per declared scene + stop-all (keyboard-first firing).
+    ...launcherStore.scenes.map((s) => ({
+      id: `launch_scene_${s.name}`, label: `Launch scene "${s.name}"`, group: 'Launcher', icon: 'LayoutGrid',
+      run: () => launcherStore.launchScene(s.name),
+    })),
+    ...(launcherStore.anyActive
+      ? [{ id: 'launch_stop_all', label: 'Stop all clips', group: 'Launcher', icon: 'Square', run: () => launcherStore.stopAll() }]
+      : []),
+    { id: 'launch_quantum', label: `Launch quantization: ${launcherStore.quantum} ${launcherStore.quantum === 1 ? 'cycle' : 'cycles'} (cycle)`, group: 'Launcher', icon: 'LayoutGrid', run: () => launcherStore.cycleQuantum() },
     { id: 'p_minimap',   label: arrViewOptions.minimap ? 'Hide minimap' : 'Show minimap', group: 'View', icon: 'Map', run: () => arrViewOptions.toggleMinimap() },
     { id: 'p_velocity',  label: arrViewOptions.velocity ? 'Hide velocity heatmap' : 'Show velocity heatmap', group: 'View', icon: 'Gauge', run: () => arrViewOptions.toggleVelocity() },
     { id: 'zoom_in',     label: 'Zoom in timeline',  group: 'View', icon: 'ZoomIn',  run: () => arrViewOptions.zoomIn() },

@@ -12,7 +12,7 @@
    */
   import {
     Files, ListTree, Music4, Terminal, AlertTriangle,
-    SlidersHorizontal, Crosshair, Braces, Boxes, Piano, Music2, FlaskConical, Minimize2,
+    SlidersHorizontal, Crosshair, Braces, Boxes, Piano, Music2, FlaskConical, Minimize2, LayoutGrid,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { tooltip } from '$lib/actions/tooltip';
@@ -35,6 +35,7 @@
   import DocsPanel from './panels/DocsPanel.svelte';
   import ScratchPanel from './panels/ScratchPanel.svelte';
   import KeyboardPanel from './panels/KeyboardPanel.svelte';
+  import LauncherPanel from './panels/LauncherPanel.svelte';
 
   import ArrangementView from './viz/ArrangementView.svelte';
   import TabbedEditor from './editor/TabbedEditor.svelte';
@@ -47,6 +48,7 @@
   import { nemusStore } from './nemus-store.svelte';
   import { nemusEngine, diagnosticsStore, transportStore } from './stores/engine.svelte';
   import { levelAnalysisStore } from './stores/level-analysis.svelte';
+  import { launcherStore } from './stores/launcher.svelte';
   import { transportUiStore } from './stores/transport-ui.svelte';
   import { tempoStore } from './stores/tempo.svelte';
   import { configStore } from './stores/config.svelte';
@@ -146,6 +148,13 @@
     else if (loopArmed) { loopArmed = false; void nemusEngine.seek(loop.start); }
   });
 
+  // Clip launcher: drive armed launches to their quantization boundary. The store
+  // fires the backend one cycle before the target line and promotes the highlight
+  // when the line is crossed (absolute cycle, so the grid survives the loop).
+  $effect(() => {
+    launcherStore.onTransport(transportStore.cycle, transportStore.playing);
+  });
+
   // Performance mode maximises the window (chrome already hidden by `chromeHidden`)
   // off the store flag. We use maximise — NOT OS `setFullscreen` — because the nemus
   // window is decorationless (`decorations: false`), and toggling native fullscreen
@@ -175,7 +184,18 @@
   let wasPlaying = false;
   $effect(() => {
     const p = transportStore.playing;
-    if (p && !wasPlaying) { transportUiStore.syncMetronome(); transportUiStore.syncCountIn(); }
+    if (p && !wasPlaying) {
+      transportUiStore.syncMetronome();
+      transportUiStore.syncCountIn();
+      // Re-apply any launched clips: Play stages the base tracks, which would
+      // otherwise clobber a selection armed while stopped.
+      launcherStore.resync();
+    } else if (!p && wasPlaying) {
+      // One transport Stop clears the launcher too (cells go idle, next play =
+      // base) — no second click in the grid. The grid's own Stop is the soft
+      // "clips off, keep playing" action.
+      launcherStore.onStop();
+    }
     wasPlaying = p;
   });
 
@@ -211,6 +231,15 @@
     // were measured against the old source) — clear the LEDs / underlines so a
     // stale result never lingers; the user re-runs "Check levels" when ready.
     levelAnalysisStore.clear();
+  });
+
+  // Refresh the clip-launcher grid only while its panel is open — `scene(...)`
+  // declarations change with the source, but querying them on every eval for
+  // everyone who isn't launching clips is wasted IPC (it ran on every load/edit).
+  // Loads when the launcher opens and after each eval while it's open.
+  $effect(() => {
+    void diagnosticsStore.errors; // dep: re-fetch on each eval
+    if (nemusStore.bottomPanel === 'launcher') void launcherStore.load();
   });
 
   // Mirror layout changes to the persisted window state (debounced in the
@@ -287,6 +316,7 @@
       else if (b.id === 'run_stop') void nemusEngine.toggleRun(projectStore.activeSource, projectStore.project?.path);
       else if (b.id === 'play_selection') playSelectionOrFile();
       else if (b.id === 'toggle_scratch') nemusStore.toggleBottom('scratch');
+      else if (b.id === 'toggle_launcher') nemusStore.toggleBottom('launcher');
       else if (b.id === 'seek_to_start') { transportUiStore.setCursor(0); void nemusEngine.seekToStart(); }
       else if (b.id === 'seek_to_end') { transportUiStore.setCursor(arrangementStore.contentEnd); void nemusEngine.seekToEnd(arrangementStore.contentEnd); }
       else if (b.id === 'play_from_cursor') transportUiStore.playFromCursor();
@@ -339,6 +369,7 @@
     { id: 'mixer',    tooltip: 'Mixer',    icon: SlidersHorizontal, active: nemusStore.bottomPanel === 'mixer',    onclick: () => nemusStore.toggleBottom('mixer') },
     { id: 'preview',  tooltip: 'Preview',  icon: Music2,        active: nemusStore.bottomPanel === 'preview',  onclick: () => nemusStore.toggleBottom('preview') },
     { id: 'keyboard', tooltip: 'Keyboard (live notes)', icon: Piano, active: nemusStore.bottomPanel === 'keyboard', onclick: () => nemusStore.toggleBottom('keyboard') },
+    { id: 'launcher', tooltip: 'Clip launcher', icon: LayoutGrid, active: nemusStore.bottomPanel === 'launcher', onclick: () => nemusStore.toggleBottom('launcher') },
     { id: 'scratch',  tooltip: 'Scratch · Ctrl+Shift+S', icon: FlaskConical, active: nemusStore.bottomPanel === 'scratch', onclick: () => nemusStore.toggleBottom('scratch') },
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
@@ -369,6 +400,7 @@
   {#if nemusStore.bottomPanel === 'mixer'}<MixerPanel />
   {:else if nemusStore.bottomPanel === 'preview'}<InstrumentPreviewPanel />
   {:else if nemusStore.bottomPanel === 'keyboard'}<KeyboardPanel />
+  {:else if nemusStore.bottomPanel === 'launcher'}<LauncherPanel />
   {:else if nemusStore.bottomPanel === 'console'}<ConsolePanel />
   {:else if nemusStore.bottomPanel === 'problems'}<ProblemsPanel />
   {:else if nemusStore.bottomPanel === 'scratch'}<ScratchPanel />

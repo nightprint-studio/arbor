@@ -28,7 +28,7 @@ use crate::env::Env;
 use crate::error::{LangError, LangErrorKind, Result};
 use crate::inject::{LogLevel, LogSink, SourceLoader};
 use crate::parse::parse;
-use crate::value::{EvalOutput, Func, Value};
+use crate::value::{EvalOutput, Func, Scene, Value};
 
 /// Guards against runaway recursion that the static check can't see (e.g. a
 /// `let`-bound lambda that refers to its own binding).
@@ -48,6 +48,8 @@ pub struct Ctx {
     pub cps: Cell<Option<f64>>,
     /// Set by `tempo(...)` — piecewise-constant tempo automation (empty = unset).
     pub tempo: RefCell<TempoMap>,
+    /// Accumulated `scene(...)` declarations, in source order.
+    pub scenes: RefCell<Vec<Scene>>,
     /// Current call depth (runtime totality guard).
     depth: Cell<u32>,
     /// Import path stack for cycle detection.
@@ -76,6 +78,7 @@ pub fn evaluate(
         config,
         cps: Cell::new(None),
         tempo: RefCell::new(TempoMap::none()),
+        scenes: RefCell::new(Vec::new()),
         depth: Cell::new(0),
         import_stack: RefCell::new(Vec::new()),
     });
@@ -107,13 +110,15 @@ pub fn evaluate(
         }
     }
 
-    // Bind before the struct literal so the `Ref` is dropped here, not held into
+    // Bind before the struct literal so the `Ref`s are dropped here, not held into
     // the tail expression (which would outlive `ctx`).
     let tempo = ctx.tempo.borrow().clone();
+    let scenes = ctx.scenes.borrow().clone();
     Ok(EvalOutput {
         cps: ctx.cps.get(),
         tempo,
         tracks: outputs_to_tracks(outputs)?,
+        scenes,
     })
 }
 
@@ -497,6 +502,8 @@ fn load_module(ctx: &Rc<Ctx>, path: &str) -> Result<HashMap<String, Value>> {
         config: ctx.config,
         cps: Cell::new(None),
         tempo: RefCell::new(TempoMap::none()),
+        // A library's own `scene(...)` declarations are ignored, like its output.
+        scenes: RefCell::new(Vec::new()),
         depth: Cell::new(0),
         import_stack: RefCell::new(ctx.import_stack.borrow().clone()),
     });

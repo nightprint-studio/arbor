@@ -175,6 +175,33 @@ fn eval_first_track(src: &str) -> Pattern<ControlMap> {
     out.tracks.tracks[0].pattern.clone()
 }
 
+#[test]
+fn parse_then_eval_scene_declaration() {
+    // `scene(...)` is a side-channel like `cps`/`tempo`: it registers a launchable
+    // scene, adds no pattern to the output tracks, and keeps source order + names.
+    let src = r#"
+tracks(track("drums", s(bd sn)), track("bass", n(c2 g1)))
+scene("chorus", track("drums", s(bd bd sn bd)), track("bass", n(c2 ef2)))
+scene("break", track("drums", s(bd ~ ~ ~)))
+"#;
+    let out = evaluate(
+        &parse(src).unwrap_or_else(|e| panic!("parse: {e}")),
+        Rc::new(NoImports),
+        Arc::new(SilentLog),
+        EvalConfig::default(),
+    )
+    .unwrap_or_else(|e| panic!("eval: {e}"));
+
+    // Scenes don't leak into the channel list.
+    assert_eq!(out.tracks.tracks.len(), 2);
+    assert_eq!(out.scenes.len(), 2);
+    assert_eq!(out.scenes[0].name, "chorus");
+    assert_eq!(out.scenes[0].clips.len(), 2);
+    assert_eq!(out.scenes[0].clips[0].name, "drums");
+    assert_eq!(out.scenes[1].name, "break");
+    assert_eq!(out.scenes[1].clips.len(), 1);
+}
+
 fn onsets(p: &Pattern<ControlMap>, cyc: i64) -> Vec<Hap<ControlMap>> {
     // Queries are unordered (Tidal-style); `rev` reflects times without
     // reordering the Vec, so the consumer sorts by onset — as the engine will.

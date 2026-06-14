@@ -26,7 +26,7 @@ export type LeftPanel = 'files' | 'outline' | 'soundbank';
  *  mini audio tester, and the live **Keyboard** (piano that lights the notes
  *  sounding at the playhead). (Find-usages is a floating popover, not a docked
  *  panel — see `usagesStore`.) */
-export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs' | 'preview' | 'scratch' | 'keyboard';
+export type BottomPanel = 'console' | 'problems' | 'mixer' | 'jobs' | 'preview' | 'scratch' | 'keyboard' | 'launcher';
 /** Right-rail panels. */
 export type RightPanel = 'inspector' | 'docs';
 

@@ -1551,6 +1551,8 @@ pub fn run() {
             // nemus Fase 4: arrangement query / sound bank / live mixer /
             // window state / project model (all additive)
             nemus::query::nemus_query,
+            nemus::scenes::nemus_scenes,
+            nemus::scenes::nemus_launch,
             nemus::sounds::nemus_sounds,
             nemus::nemus_set_track,
             nemus::nemus_audition_expr,

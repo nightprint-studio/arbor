@@ -53,6 +53,9 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   // so the OS eats it before the webview. Ctrl+Shift+S avoids that and the webview
   // devtools letters (I / J / C).
   { id: 'toggle_scratch', key: 's', ctrl: true, shift: true, scope: 'global', description: 'Toggle the Scratch panel' },
+  // `Ctrl+Shift+G` (G = Grid; AltGr-safe, clear of the webview devtools letters
+  // I / J / C). Toggle the Clip launcher — the live session grid of scenes.
+  { id: 'toggle_launcher', key: 'g', ctrl: true, shift: true, scope: 'global', description: 'Toggle the Clip launcher (session grid)' },
   { id: 'seek_to_start',  key: '[', ctrl: true, shift: true, scope: 'global', description: 'Skip to start (cycle 0)' },
   { id: 'seek_to_end',    key: ']', ctrl: true, shift: true, scope: 'global', description: 'Skip to end of arrangement' },
   // `F8` (near Run/Stop on F9) — start playback from the edit cursor, not cycle 0.
