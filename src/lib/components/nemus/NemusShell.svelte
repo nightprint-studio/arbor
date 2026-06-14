@@ -65,6 +65,7 @@
   import { soundsStore } from './stores/sounds.svelte';
   import { scalesStore } from './stores/scales.svelte';
   import { librariesStore } from './stores/libraries.svelte';
+  import { scratchStore } from './stores/scratch.svelte';
   import { arrangementStore } from './viz/arrangement.svelte';
   import { panelSizes } from './stores/panel-sizes.svelte';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
@@ -101,6 +102,7 @@
     // External-change detection for the open .nemus file (IDE-style reload prompt).
     unFsWatch = await onFsChanged(() => void fileWatchStore.onChanged());
     void configStore.loadConfig();
+    void scratchStore.restore(); // bring back the scratch tabs from the last session
     void packsStore.refresh();
     void modelsStore.refresh();
     // The DSL reference catalogue (autocomplete + hover + Docs panel). Static —

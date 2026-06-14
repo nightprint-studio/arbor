@@ -19,8 +19,10 @@
   Scratch is <strong>tabbed</strong> — keep several experiments side by side. The
   <kbd>+</kbd> opens a fresh tab, and <em>Load selection</em> / <em>Send to Scratch</em>
   each open the chunk in its own tab. <strong>Double-click a tab</strong> to give it a
-  title. A snippet is resolved against the active file's constants, functions and
-  imports, so a bare variable (or a no-argument function) evaluates and plays here too.
+  title. Scratch tabs <strong>persist across sessions</strong>, so your experiments are
+  there when you come back. A snippet is resolved against the active file's constants,
+  functions and imports, so a bare variable (or a no-argument function) evaluates and
+  plays here too.
 </p>
 
 <h2>Quick play</h2>

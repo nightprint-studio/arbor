@@ -9,14 +9,22 @@
    * (`NemusInstrument`) is nemus-specific, so this lives under nemus/panels.
    */
   import { slide } from 'svelte/transition';
-  import { Waves, Piano, Drum, Copy, Check, Info, Volume2 } from 'lucide-svelte';
+  import { Waves, Piano, Drum, Copy, Check, Info, Volume2, Star } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { animStore } from '$lib/stores/animations.svelte';
   import { previewStore } from '../stores/preview.svelte';
+  import { workspaceStore } from '../stores/workspace.svelte';
   import type { NemusInstrument } from '$lib/ipc/nemus';
 
   let { inst }: { inst: NemusInstrument } = $props();
+
+  const isFavorite = $derived(workspaceStore.isFavoriteSound(inst.name));
+
+  function preview() {
+    workspaceStore.addRecentSound(inst.name);
+    previewStore.show(inst);
+  }
 
   const kindLabel = $derived(
     inst.kind === 'synth' ? 'Synth preset'
@@ -31,6 +39,7 @@
 
   async function copyName() {
     await copyToClipboard(inst.name);
+    workspaceStore.addRecentSound(inst.name);
     copied = true;
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copied = false; }, 1400);
@@ -52,9 +61,17 @@
       </span>
     </button>
 
+    <button class="sbi-info-btn fav" class:on={isFavorite}
+            aria-label={isFavorite ? `Unfavourite ${inst.name}` : `Favourite ${inst.name}`}
+            aria-pressed={isFavorite}
+            use:tooltip={isFavorite ? 'Remove from favourites' : 'Add to favourites'}
+            onclick={() => workspaceStore.toggleFavoriteSound(inst.name)}>
+      <Star size={13} />
+    </button>
+
     <button class="sbi-info-btn" aria-label={`Preview ${inst.name}`}
             use:tooltip={'Preview instrument'}
-            onclick={() => previewStore.show(inst)}>
+            onclick={preview}>
       <Volume2 size={13} />
     </button>
 
@@ -129,6 +146,14 @@
   }
   .sbi-info-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
   .sbi-info-btn.on { color: var(--accent); }
+  /* Favourite star: gold when on; only revealed on row hover when off (keeps the
+     row clean), always visible when favourited. */
+  .sbi-info-btn.fav { opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast); }
+  .sbi-row:hover .sbi-info-btn.fav, .sbi-info-btn.fav:focus-visible { opacity: 1; }
+  .sbi-info-btn.fav.on { opacity: 1; color: var(--warning); }
+  .sbi-info-btn.fav.on:hover { color: var(--warning); }
+  /* Fill the star when favourited (lucide paths inherit the svg fill). */
+  .sbi-info-btn.fav.on :global(svg) { fill: var(--warning); }
 
   .sbi-info { padding: 2px 10px 8px 26px; }
   .sbi-desc {

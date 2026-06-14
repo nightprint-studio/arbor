@@ -593,6 +593,10 @@ export interface NemusWorkspaceState {
   /** Project folder to reopen on launch, or null. */
   last_project: string | null;
   layout: NemusLayoutState;
+  /** Sound-bank favourites (instrument names). */
+  favorite_sounds: string[];
+  /** Recently-used instrument names, most-recent first. */
+  recent_sounds: string[];
 }
 
 /** Read the persisted nemus window state (recents + last project + layout). */
@@ -603,6 +607,46 @@ export function getNemusState(): Promise<NemusWorkspaceState> {
 /** Persist the nemus window state. */
 export function setNemusState(state: NemusWorkspaceState): Promise<void> {
   return invoke('set_nemus_state', { state });
+}
+
+/** A project's open editor tabs, restored when it's reopened (lives in
+ *  `<project>/.nemus/tabs.json`). */
+export interface NemusProjectTabs {
+  open_file_paths: string[];
+  active_file_path: string | null;
+}
+
+/** Read a project's open-tab snapshot (empty on first open). */
+export function getNemusProjectTabs(projectPath: string): Promise<NemusProjectTabs> {
+  return invoke('get_nemus_project_tabs', { projectPath });
+}
+
+/** Persist a project's open-tab snapshot under its own `.nemus/` folder. */
+export function setNemusProjectTabs(projectPath: string, tabs: NemusProjectTabs): Promise<void> {
+  return invoke('set_nemus_project_tabs', { projectPath, tabs });
+}
+
+/** One persisted scratch tab (the transient eval result is not saved). */
+export interface NemusScratchTab {
+  id: string;
+  name: string;
+  source: string;
+}
+
+/** The persisted scratch workspace (global, in the nemus data dir). */
+export interface NemusScratchTabs {
+  tabs: NemusScratchTab[];
+  active_id: string | null;
+}
+
+/** Read the persisted scratch tabs (empty on first run). */
+export function getNemusScratchTabs(): Promise<NemusScratchTabs> {
+  return invoke('get_nemus_scratch_tabs');
+}
+
+/** Persist the scratch tabs. */
+export function setNemusScratchTabs(tabs: NemusScratchTabs): Promise<void> {
+  return invoke('set_nemus_scratch_tabs', { tabs });
 }
 
 // ── nemus_lang_reference: the canonical DSL catalogue (autocomplete + hover) ───

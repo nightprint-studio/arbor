@@ -12,10 +12,13 @@
 import { SvelteMap } from 'svelte/reactivity';
 import {
   nemusOpenProject, nemusCreateProject, nemusSetProjectName,
+  getNemusProjectTabs, setNemusProjectTabs,
   type NemusProjectInfo, type NemusProjectFile,
 } from '$lib/ipc/nemus';
 import { fsReadTextFile, fsWriteTextFile } from '$lib/ipc/fs';
 import { workspaceStore } from './workspace.svelte';
+
+const TABS_PERSIST_DELAY = 400;
 
 function createProjectStore() {
   let project        = $state<NemusProjectInfo | null>(null);
@@ -23,6 +26,9 @@ function createProjectStore() {
   const sources      = new SvelteMap<string, string>();
   let activeFilePath = $state<string | null>(null);
   let openFilePaths  = $state<string[]>([]);
+  // Suppress tab-persist while we're restoring a snapshot (avoid echoing it back).
+  let restoring = false;
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** First non-library file (the playable entry), or the first file, or null. */
   function entryFile(p: NemusProjectInfo): NemusProjectFile | null {
@@ -34,6 +40,38 @@ function createProjectStore() {
     if (sources.has(path)) return;
     try { sources.set(path, await fsReadTextFile(path)); }
     catch { sources.set(path, ''); }
+  }
+
+  /** Persist the open tabs to `<project>/.nemus/tabs.json` (debounced). */
+  function schedulePersistTabs() {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      if (!project || restoring) return;
+      void setNemusProjectTabs(project.path, {
+        open_file_paths: [...openFilePaths],
+        active_file_path: activeFilePath,
+      }).catch(() => {});
+    }, TABS_PERSIST_DELAY);
+  }
+
+  /** Restore a project's saved open tabs (filtered to files that still exist).
+   *  Returns false when there's no usable snapshot (caller opens the entry file). */
+  async function restoreTabs(info: NemusProjectInfo): Promise<boolean> {
+    try {
+      const snap = await getNemusProjectTabs(info.path);
+      const known = new Set(info.files.map(f => f.path));
+      const paths = snap.open_file_paths.filter(p => known.has(p));
+      if (!paths.length) return false;
+      for (const p of paths) await ensureLoaded(p);
+      openFilePaths = paths;
+      activeFilePath = snap.active_file_path && paths.includes(snap.active_file_path)
+        ? snap.active_file_path
+        : paths[0];
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   return {
@@ -52,14 +90,23 @@ function createProjectStore() {
     async open(dir: string) {
       const info = await nemusOpenProject(dir);
       project = info;
-      const entry = entryFile(info);
-      if (entry) {
-        await ensureLoaded(entry.path);
-        activeFilePath = entry.path;
-        openFilePaths = [entry.path];
-      } else {
-        activeFilePath = null;
-        openFilePaths = [];
+      // Restore the saved open tabs; if there's no snapshot, open the entry file.
+      restoring = true;
+      try {
+        const restored = await restoreTabs(info);
+        if (!restored) {
+          const entry = entryFile(info);
+          if (entry) {
+            await ensureLoaded(entry.path);
+            activeFilePath = entry.path;
+            openFilePaths = [entry.path];
+          } else {
+            activeFilePath = null;
+            openFilePaths = [];
+          }
+        }
+      } finally {
+        restoring = false;
       }
       workspaceStore.addRecent(dir);
     },
@@ -69,6 +116,7 @@ function createProjectStore() {
       await ensureLoaded(path);
       activeFilePath = path;
       if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
+      schedulePersistTabs();
     },
 
     /** Close a tab; pick a neighbour as active (mirrors the Step-0 logic). */
@@ -81,6 +129,7 @@ function createProjectStore() {
           ? openFilePaths[Math.min(idx, openFilePaths.length - 1)]
           : null;
       }
+      schedulePersistTabs();
     },
 
     /** Reorder the open tabs (drag-to-reorder in the tab strip). Indices are into
@@ -92,6 +141,7 @@ function createProjectStore() {
       const [moved] = arr.splice(fromIndex, 1);
       arr.splice(toIndex, 0, moved);
       openFilePaths = arr;
+      schedulePersistTabs();
     },
 
     /** Update the cached source (editor edits route here). */

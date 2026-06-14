@@ -17,6 +17,7 @@ import {
 } from '$lib/ipc/nemus';
 
 const RECENTS_CAP = 10;
+const RECENT_SOUNDS_CAP = 16;
 const LAYOUT_PERSIST_DELAY = 400;
 
 const DEFAULT_LAYOUT: NemusLayoutState = {
@@ -34,6 +35,8 @@ function createWorkspaceStore() {
   let recentProjects = $state<string[]>([]);
   let lastProject    = $state<string | null>(null);
   let layout         = $state<NemusLayoutState>({ ...DEFAULT_LAYOUT });
+  let favoriteSounds = $state<string[]>([]);
+  let recentSounds   = $state<string[]>([]);
   let loaded         = $state(false);
 
   function snapshot(): NemusWorkspaceState {
@@ -41,6 +44,8 @@ function createWorkspaceStore() {
       recent_projects: [...recentProjects],
       last_project:    lastProject,
       layout:          { ...layout },
+      favorite_sounds: [...favoriteSounds],
+      recent_sounds:   [...recentSounds],
     };
   }
 
@@ -50,6 +55,8 @@ function createWorkspaceStore() {
     get recentProjects() { return recentProjects; },
     get lastProject()    { return lastProject; },
     get layout()         { return layout; },
+    get favoriteSounds() { return favoriteSounds; },
+    get recentSounds()   { return recentSounds; },
     get loaded()         { return loaded; },
 
     /** Fetch the persisted state. On failure keep the defaults (first run /
@@ -60,6 +67,8 @@ function createWorkspaceStore() {
         recentProjects = s.recent_projects ?? [];
         lastProject    = s.last_project ?? null;
         layout         = { ...DEFAULT_LAYOUT, ...(s.layout ?? {}) };
+        favoriteSounds = s.favorite_sounds ?? [];
+        recentSounds   = s.recent_sounds ?? [];
         loaded = true;
       } catch {
         // Keep defaults; the next call retries.
@@ -86,6 +95,21 @@ function createWorkspaceStore() {
       layout = { ...next };
       if (layoutTimer !== null) clearTimeout(layoutTimer);
       layoutTimer = setTimeout(() => { layoutTimer = null; persist(); }, LAYOUT_PERSIST_DELAY);
+    },
+
+    // ── Sound-bank favourites + recents (global, persisted) ──────────────────
+    isFavoriteSound(name: string): boolean { return favoriteSounds.includes(name); },
+    /** Toggle an instrument's favourite state. Persists. */
+    toggleFavoriteSound(name: string) {
+      favoriteSounds = favoriteSounds.includes(name)
+        ? favoriteSounds.filter(n => n !== name)
+        : [...favoriteSounds, name];
+      persist();
+    },
+    /** Record an instrument as recently used (dedupe, front, cap). Persists. */
+    addRecentSound(name: string) {
+      recentSounds = [name, ...recentSounds.filter(n => n !== name)].slice(0, RECENT_SOUNDS_CAP);
+      persist();
     },
   };
 }

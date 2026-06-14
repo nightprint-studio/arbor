@@ -16,7 +16,7 @@
    *
    * Imports only shared/ui (+ the tooltip action) + nemus-local.
    */
-  import { Music4, Waves, Piano, Download, Check, RefreshCw, Boxes, HardDrive, Trash2 } from 'lucide-svelte';
+  import { Music4, Waves, Piano, Download, Check, RefreshCw, Boxes, HardDrive, Trash2, Star, Clock } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
@@ -30,6 +30,7 @@
   import SoundBankItem from './SoundBankItem.svelte';
   import { soundsStore } from '../stores/sounds.svelte';
   import { packsStore } from '../stores/packs.svelte';
+  import { workspaceStore } from '../stores/workspace.svelte';
   import type { NemusInstrument, NemusPack } from '$lib/ipc/nemus';
 
   let query = $state('');
@@ -39,6 +40,18 @@
   }
   const synths   = $derived(match(soundsStore.synths));
   const samplers = $derived(match(soundsStore.samplers));
+
+  // Favourites + recently-used: resolve the persisted names against the live
+  // registry (so a removed pack's voice simply drops out), filtered by the search.
+  const byName = $derived(new Map(soundsStore.instruments.map((i) => [i.name, i])));
+  const favorites = $derived(match(
+    workspaceStore.favoriteSounds.map((n) => byName.get(n)).filter((i): i is NemusInstrument => !!i),
+  ));
+  const recents = $derived(match(
+    workspaceStore.recentSounds.map((n) => byName.get(n)).filter((i): i is NemusInstrument => !!i),
+  ));
+  let openFav    = $state(true);
+  let openRecent = $state(true);
 
   // Samplers grouped by their origin pack (Dirt-Samples, drum machines, …) so the
   // bank isn't one flat list of hundreds of voices. Ordered to match the pack
@@ -203,6 +216,20 @@
         <SearchBar bind:query showRegex={false} showCounter={false}
                    placeholder="Filter voices…" ariaLabel="Filter instruments" />
       </div>
+
+      {#if favorites.length}
+        <SidebarSection label="Favourites" expanded={openFav} onToggle={() => openFav = !openFav} badge={favorites.length}>
+          {#snippet icon()}<Star size={13} />{/snippet}
+          {#each favorites as inst (inst.name)}<SoundBankItem {inst} />{/each}
+        </SidebarSection>
+      {/if}
+
+      {#if recents.length}
+        <SidebarSection label="Recently used" expanded={openRecent} onToggle={() => openRecent = !openRecent} badge={recents.length}>
+          {#snippet icon()}<Clock size={13} />{/snippet}
+          {#each recents as inst (inst.name)}<SoundBankItem {inst} />{/each}
+        </SidebarSection>
+      {/if}
 
       <SidebarSection label="Synth presets" expanded={showSynth} onToggle={() => openSynth = !openSynth} badge={synths.length}>
         {#snippet icon()}<Waves size={13} />{/snippet}

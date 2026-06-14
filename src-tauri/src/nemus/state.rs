@@ -1,14 +1,17 @@
-//! Persisted nemus **window** state — recents, last project, panel layout.
+//! Persisted nemus **window** state — recents, last project, panel layout,
+//! sound-bank favourites/recents, and open-tab snapshots.
 //!
-//! A dedicated file (`<nemus-data>/state.json`), deliberately **not** the
-//! typed `[nemus]` config (those are engine settings), **not** the per-project
-//! `nemus.toml` (that's the project model), and **not** `localStorage` (hard rule
-//! #11). This is global, app-level window state. Missing / unparseable → defaults,
-//! so a first launch or a corrupt file just starts clean.
+//! Global window state lives in `<nemus-data>/state.json`; the **scratch** tabs
+//! are global too (`<nemus-data>/scratch.json`); per-project **open editor tabs**
+//! live next to the project in `<project>/.nemus/tabs.json`, so a project carries
+//! its own session. Deliberately **not** the typed `[nemus]` config (engine
+//! settings), **not** the per-project `nemus.toml` (the project model), and
+//! **not** `localStorage` (hard rule #11). Missing / unparseable → defaults, so a
+//! first launch or a corrupt file just starts clean.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::error::AppError;
 
@@ -38,31 +41,113 @@ pub struct NemusWorkspaceState {
     pub last_project: Option<String>,
     /// The window's panel arrangement.
     pub layout: NemusLayoutState,
+    /// Sound-bank favourites (instrument names), no particular order.
+    pub favorite_sounds: Vec<String>,
+    /// Recently-used instrument names, most-recent first.
+    pub recent_sounds: Vec<String>,
 }
+
+// ── Generic JSON file helpers ────────────────────────────────────────────────
+
+/// Read + parse a JSON file, falling back to the type's default when the file is
+/// missing or unparseable (a clean start, never an error).
+fn read_json<T: Default + DeserializeOwned>(path: &Path) -> T {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+/// Write a value as pretty JSON, creating the parent directory if needed.
+fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), AppError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| AppError::Other(e.to_string()))?;
+    }
+    let text = serde_json::to_string_pretty(value).map_err(|e| AppError::Other(e.to_string()))?;
+    std::fs::write(path, text).map_err(|e| AppError::Other(e.to_string()))
+}
+
+// ── Global window state (`<nemus-data>/state.json`) ──────────────────────────
 
 /// `<nemus-data>/state.json`.
 fn state_path() -> PathBuf {
     arbor_core::prelude::nemus_data_dir().join("state.json")
 }
 
-/// Read the persisted nemus window state. A missing or unreadable/unparseable
-/// file yields defaults (clean start), never an error.
+/// Read the persisted nemus window state (defaults on a missing/corrupt file).
 #[tauri::command]
 pub fn get_nemus_state() -> Result<NemusWorkspaceState, AppError> {
-    let path = state_path();
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Ok(NemusWorkspaceState::default());
-    };
-    Ok(serde_json::from_str(&text).unwrap_or_default())
+    Ok(read_json(&state_path()))
 }
 
 /// Persist the nemus window state (pretty JSON), creating the dir if needed.
 #[tauri::command]
 pub fn set_nemus_state(state: NemusWorkspaceState) -> Result<(), AppError> {
-    let path = state_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| AppError::Other(e.to_string()))?;
-    }
-    let text = serde_json::to_string_pretty(&state).map_err(|e| AppError::Other(e.to_string()))?;
-    std::fs::write(&path, text).map_err(|e| AppError::Other(e.to_string()))
+    write_json(&state_path(), &state)
+}
+
+// ── Per-project open tabs (`<project>/.nemus/tabs.json`) ──────────────────────
+
+/// The open editor tabs of a project, restored when it's reopened.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct NemusProjectTabs {
+    /// Absolute paths of the open `.nemus` tabs, in tab order.
+    pub open_file_paths: Vec<String>,
+    /// The active tab's path, or `None`.
+    pub active_file_path: Option<String>,
+}
+
+fn project_tabs_path(project_path: &str) -> PathBuf {
+    Path::new(project_path).join(".nemus").join("tabs.json")
+}
+
+/// Read a project's open-tab snapshot (defaults to none on first open).
+#[tauri::command]
+pub fn get_nemus_project_tabs(project_path: String) -> Result<NemusProjectTabs, AppError> {
+    Ok(read_json(&project_tabs_path(&project_path)))
+}
+
+/// Persist a project's open-tab snapshot under its own `.nemus/` folder.
+#[tauri::command]
+pub fn set_nemus_project_tabs(
+    project_path: String,
+    tabs: NemusProjectTabs,
+) -> Result<(), AppError> {
+    write_json(&project_tabs_path(&project_path), &tabs)
+}
+
+// ── Scratch tabs (global, `<nemus-data>/scratch.json`) ───────────────────────
+
+/// One persisted scratch tab (the transient eval result is **not** saved).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct NemusScratchTab {
+    pub id: String,
+    pub name: String,
+    pub source: String,
+}
+
+/// The scratch workspace: the tabs + which one was active.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct NemusScratchTabs {
+    pub tabs: Vec<NemusScratchTab>,
+    pub active_id: Option<String>,
+}
+
+fn scratch_tabs_path() -> PathBuf {
+    arbor_core::prelude::nemus_data_dir().join("scratch.json")
+}
+
+/// Read the persisted scratch tabs (defaults to none).
+#[tauri::command]
+pub fn get_nemus_scratch_tabs() -> Result<NemusScratchTabs, AppError> {
+    Ok(read_json(&scratch_tabs_path()))
+}
+
+/// Persist the scratch tabs (global, in the nemus data dir).
+#[tauri::command]
+pub fn set_nemus_scratch_tabs(tabs: NemusScratchTabs) -> Result<(), AppError> {
+    write_json(&scratch_tabs_path(), &tabs)
 }

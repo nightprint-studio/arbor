@@ -39,10 +39,15 @@ tracks(
   <li><strong>Files</strong> — the project's <code>.nemus</code> files, with a per-file summary.</li>
   <li><strong>Outline</strong> — tracks, functions and constants in the active file; tracks expand to their sections.</li>
   <li><strong>Language reference</strong> — every island, combinator, transform and signal, searchable.</li>
+  <li><strong>Sound bank</strong> — the engine's resolvable voices + downloadable sample packs. Click a voice to copy its name; star it to keep it in <strong>Favourites</strong>, and voices you use surface under <strong>Recently used</strong>.</li>
   <li><strong>Mixer</strong> — a fader per track, driven by the live engine.</li>
   <li><strong>Inspector</strong> — the selected track's character and the picked event.</li>
   <li><strong>Keyboard</strong> — a piano that lights the notes sounding at the playhead, coloured per track.</li>
 </ul>
+<p>
+  Your open tabs are remembered per project (reopened with it), and the Scratch tabs come
+  back too — so reopening a project picks up where you left off.
+</p>
 
 <h2>Going full-screen</h2>
 <p>
