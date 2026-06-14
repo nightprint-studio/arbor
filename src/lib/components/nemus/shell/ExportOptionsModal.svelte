@@ -22,6 +22,7 @@
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
+  import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import RenderFormatFields from './RenderFormatFields.svelte';
   import { Download } from 'lucide-svelte';
 
@@ -134,6 +135,29 @@
             onchange={(v) => projectActions.setExportLoops(v)}
           />
         </FormRow>
+
+        <FormRow label="Normalize" description="Match a target integrated loudness (LUFS, BS.1770) across the whole bounce; peak-limited so it never clips.">
+          <div class="norm">
+            <Toggle
+              checked={projectActions.exportNormalizeOn}
+              ariaLabel="Normalize loudness"
+              onchange={(v) => projectActions.setExportNormalizeOn(v)}
+            />
+            {#if projectActions.exportNormalizeOn}
+              <NumberStepper
+                id="export-normalize"
+                value={projectActions.exportNormalizeTarget}
+                min={-40}
+                max={0}
+                step={1}
+                narrow
+                ariaLabel="Target loudness in LUFS"
+                onchange={(v) => projectActions.setExportNormalizeTarget(v)}
+              />
+              <span class="norm-unit">LUFS</span>
+            {/if}
+          </div>
+        </FormRow>
       </div>
 
       <div class="summary">
@@ -233,5 +257,15 @@
     margin: 0;
     font-size: var(--font-size-xs);
     color: var(--warning, var(--text-secondary));
+  }
+  .norm {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .norm-unit {
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
   }
 </style>

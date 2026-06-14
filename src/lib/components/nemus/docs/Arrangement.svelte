@@ -56,6 +56,8 @@
   bars). While it's on, playback cycles within it — handy for working a section. The
   <strong>loop toggle</strong> in the view toolbar (or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
   <kbd>L</kbd>) switches it on and off without losing the region; <kbd>Esc</kbd> clears it.
+  With a region set, <strong>Export loop region…</strong> (export menu / Command Palette)
+  bounces just that span to its own audio file.
 </p>
 
 <h2>Markers</h2>

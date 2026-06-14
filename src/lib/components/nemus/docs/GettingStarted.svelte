@@ -13,8 +13,22 @@
   <li>Edit a file. Every track is a pattern — a sequence of notes or samples over time.</li>
   <li>Press <kbd>Shift</kbd> + <kbd>F9</kbd> to <strong>Run</strong>. The engine evaluates the source and starts the transport.</li>
   <li>Keep editing while it plays. Re-evaluation re-baselines the arrangement, mixer and inspector.</li>
-  <li>Render to an audio file when you're happy (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd>).</li>
+  <li>Export when you're happy — audio (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd>) or a MIDI file.</li>
 </ol>
+
+<div class="callout">
+  <strong>Exporting.</strong> The export split-button (and the Command Palette) offers
+  a <strong>WAV / OGG audio</strong> bounce — the full rendered sound —
+  <strong>Export loop region…</strong>, which bounces just the span you set as the
+  loop region on the ruler, <strong>Export stems…</strong>, which writes one audio
+  file per track into a folder you pick (each track rendered in isolation, ready to
+  mix elsewhere), or <strong>Export MIDI…</strong>, which writes the arrangement's
+  note data to a <code>.mid</code> (one track per nemus track; pitched notes plus
+  recognised drum sounds as General-MIDI percussion) to take into any other DAW.
+  The MIDI export bakes the song's natural loop period, once. <strong>Edit export…</strong>
+  adds an optional <strong>Normalize</strong> to a target loudness (LUFS) for the audio
+  bounce, peak-limited so it never clips.
+</div>
 
 <h2>A first file</h2>
 <pre><code>cps(0.5)

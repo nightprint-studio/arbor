@@ -17,6 +17,7 @@
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
     Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map, StretchVertical,
+    FileMusic, Layers, Crop,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -48,6 +49,7 @@
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
     Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map, StretchVertical,
+    FileMusic, Layers, Crop,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -113,6 +115,9 @@
     { id: 'save',         label: 'Save file',        group: 'Project', icon: 'Save',       keys: 'Ctrl+S',       run: () => projectActions.save() },
     { id: 'rename_project', label: 'Rename project…', group: 'Project', icon: 'FolderPen', run: () => { if (projectStore.project) nemusStore.openRenameProject(); } },
     { id: 'export',       label: 'Export audio…',    group: 'Project', icon: 'Download',   keys: 'Ctrl+Shift+R', run: () => projectActions.exportWav() },
+    { id: 'export_region', label: 'Export loop region…', group: 'Project', icon: 'Crop',  run: () => projectActions.exportRegion() },
+    { id: 'export_stems', label: 'Export stems…',    group: 'Project', icon: 'Layers',     run: () => projectActions.exportStems() },
+    { id: 'export_midi',  label: 'Export MIDI…',     group: 'Project', icon: 'FileMusic',  run: () => projectActions.exportMidi() },
     { id: 'import',       label: 'Import audio / MIDI…', group: 'Project', icon: 'FileInput', keys: 'Alt+Shift+I', run: () => importActions.start() },
     { id: 'convert_midi', label: 'Convert WAV to MIDI…', group: 'Project', icon: 'FileAudio', run: () => importActions.startConvert() },
     { id: 'dl_basic_pitch', label: 'Download polyphonic model (basic-pitch)', group: 'Project', icon: 'Download', run: () => void modelsStore.download('basic-pitch') },

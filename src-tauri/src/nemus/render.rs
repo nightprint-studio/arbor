@@ -21,6 +21,10 @@ use crate::jobs::{JobInfo, JobRegistry, JobStatus};
 pub struct RenderOpts {
     /// How many cycles of the arrangement to bounce.
     pub cycles: u32,
+    /// First cycle of the bounce window (a region export). Defaults to `0` (the
+    /// whole arrangement from the top) when absent.
+    #[serde(default)]
+    pub start_cycle: Option<u32>,
     /// `"int24"` | `"float32"` — overrides the config default when present.
     pub bit_depth: Option<String>,
     /// Trailing tail in seconds — overrides the config default when present.
@@ -29,6 +33,10 @@ pub struct RenderOpts {
     pub sample_rate: Option<u32>,
     /// Output container/codec: `"wav"` | `"ogg"`. Defaults to WAV.
     pub format: Option<String>,
+    /// Target integrated loudness (LUFS) to normalize to, or absent for no
+    /// normalization (the default). A per-export choice, never persisted.
+    #[serde(default)]
+    pub normalize_lufs: Option<f32>,
 }
 
 /// True once the user cancelled the render job (the Transfers overlay Stop
@@ -58,22 +66,16 @@ pub fn resolve_config(base: RenderConfig, opts: &RenderOpts) -> RenderConfig {
             Some(_) => Format::Wav,
             None => base.format,
         },
+        normalize: opts.normalize_lufs.or(base.normalize),
     }
 }
 
-/// Spawn a background render job. Returns the job id immediately; the WAV is
-/// written off-thread and completion is reported via the Jobs overlay.
-pub fn spawn_render(
-    app: &AppHandle,
-    tracks: Tracks<ControlMap>,
-    cps: f64,
-    cycles: u32,
-    cfg: RenderConfig,
-    out_path: PathBuf,
-) -> String {
+/// Register a hidden, cancellable nemus render/stems job (routed to the nemus
+/// feedback host) and emit its `job-started`. Returns the job id, or `""` if the
+/// registry lock is poisoned (the caller bails). Shared by the single-WAV bounce
+/// and the per-track stems export so they register identically.
+fn register_render_job(app: &AppHandle, name: &str, command: &str) -> String {
     let state = app.state::<crate::AppState>();
-    let name = format!("Render {}", out_path.display());
-    let command = format!("render {cycles} cycles @ {cps} cps");
     let job_id = {
         let mut jobs = match state.jobs.lock() {
             Ok(j) => j,
@@ -82,9 +84,9 @@ pub fn spawn_render(
         let id = jobs.new_id();
         jobs.register(JobInfo {
             id: id.clone(),
-            name: name.clone(),
+            name: name.to_string(),
             plugin_name: "nemus".to_string(),
-            command: command.clone(),
+            command: command.to_string(),
             started_at: JobRegistry::now_secs(),
             status: JobStatus::Running,
             category: Some("Renders".to_string()),
@@ -104,17 +106,47 @@ pub fn spawn_render(
         });
         id
     };
-    // Register the job (hidden) so its terminal event has a registry entry; the
-    // visible surface is the Transfers overlay, fed by job-progress / job-done.
     let _ = app.emit("arbor://job-started", serde_json::json!({
         "job_id":      &job_id,
-        "name":        &name,
+        "name":        name,
         "plugin_name": "nemus",
-        "command":     &command,
+        "command":     command,
         "category":    "Renders",
         "hidden":      true,
         "target":      "nemus",
     }));
+    job_id
+}
+
+/// Sanitize a track name into a safe filename stem (`NN_name.ext`). Keeps
+/// alphanumerics / dash / underscore / space, collapses everything else to `_`;
+/// an empty result falls back to `track`.
+fn safe_stem(name: &str) -> String {
+    let s: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | ' ') { c } else { '_' })
+        .collect();
+    let s = s.trim();
+    if s.is_empty() { "track".to_string() } else { s.to_string() }
+}
+
+/// Spawn a background render job. Returns the job id immediately; the WAV is
+/// written off-thread and completion is reported via the Jobs overlay.
+pub fn spawn_render(
+    app: &AppHandle,
+    tracks: Tracks<ControlMap>,
+    cps: f64,
+    start_cycle: u32,
+    cycles: u32,
+    cfg: RenderConfig,
+    out_path: PathBuf,
+) -> String {
+    let name = format!("Render {}", out_path.display());
+    let command = format!("render {cycles} cycles @ {cps} cps from cycle {start_cycle}");
+    let job_id = register_render_job(app, &name, &command);
+    if job_id.is_empty() {
+        return job_id;
+    }
 
     let app = app.clone();
     let job_id_thread = job_id.clone();
@@ -149,7 +181,7 @@ pub fn spawn_render(
             // unfinalized, unplayable WAV with no explanation.
             let outcome: Result<RenderOutcome, String> = match std::panic::catch_unwind(
                 std::panic::AssertUnwindSafe(|| {
-                    render_offline_with_progress(&tracks, cps, cycles, &cfg, &out_path, on_progress, should_cancel)
+                    render_offline_with_progress(&tracks, cps, start_cycle, cycles, &cfg, &out_path, on_progress, should_cancel)
                 }),
             ) {
                 Ok(Ok(o)) => Ok(o),
@@ -178,6 +210,116 @@ pub fn spawn_render(
         })
     {
         tracing::error!("nemus: failed to spawn render thread: {e}");
+    }
+
+    job_id
+}
+
+/// Spawn a background **stems** export: bounce each track to its own WAV/OGG in
+/// `out_dir` (`NN_name.ext`), in non-real-time. One tracked job covers the whole
+/// set, with progress spanning all stems; cancellation stops between/within
+/// stems (already-written stems are left in place — they're valid files). Each
+/// stem renders the track in isolation (a one-track `Tracks`), so its baked
+/// gain/pan/EX inserts carry over but other tracks don't bleed in.
+pub fn spawn_render_stems(
+    app: &AppHandle,
+    tracks: Tracks<ControlMap>,
+    cps: f64,
+    start_cycle: u32,
+    cycles: u32,
+    cfg: RenderConfig,
+    out_dir: PathBuf,
+) -> String {
+    let count = tracks.tracks.len();
+    let name = format!("Stems {}", out_dir.display());
+    let command = format!("stems {count} tracks · {cycles} cycles @ {cps} cps from cycle {start_cycle}");
+    let job_id = register_render_job(app, &name, &command);
+    if job_id.is_empty() {
+        return job_id;
+    }
+
+    let ext = cfg.format.extension();
+    let app = app.clone();
+    let job_id_thread = job_id.clone();
+    // Plain OS thread: each stem render is blocking CPU/IO, not async.
+    if let Err(e) = std::thread::Builder::new()
+        .name(format!("nemus-stems-{job_id}"))
+        .spawn(move || {
+            let total = count.max(1);
+            // Best-effort: a real write error surfaces from the first stem render.
+            let _ = std::fs::create_dir_all(&out_dir);
+
+            // Overall percent across all stems (stem `idx` contributes its own
+            // 0..1 fraction within its 1/total slice). Throttled to whole steps.
+            let last_pct = std::cell::Cell::new(-1i32);
+            let mut outcome: Result<RenderOutcome, String> = Ok(RenderOutcome::Completed);
+
+            for (idx, track) in tracks.tracks.iter().enumerate() {
+                if job_is_cancelled(&app, &job_id_thread) {
+                    outcome = Ok(RenderOutcome::Cancelled);
+                    break;
+                }
+                let stem = Tracks { tracks: vec![track.clone()] };
+                let file = out_dir.join(format!("{:02}_{}.{ext}", idx + 1, safe_stem(&track.name)));
+
+                // Per-stem closures own clones of the handle + job id (mirroring
+                // the single-render path); `last` is a shared ref into the
+                // loop-scoped counter so the overall percent persists across stems.
+                let p_app = app.clone();
+                let p_job = job_id_thread.clone();
+                let last = &last_pct;
+                let on_progress = move |p: arbor_nemus::prelude::RenderProgress| {
+                    let overall = ((idx as f32 + p.fraction()) / total as f32 * 100.0).round() as i32;
+                    if overall != last.get() {
+                        last.set(overall);
+                        let _ = p_app.emit(
+                            "arbor://job-progress",
+                            serde_json::json!({ "job_id": p_job, "pct": overall }),
+                        );
+                    }
+                };
+                let c_app = app.clone();
+                let c_job = job_id_thread.clone();
+                let should_cancel = move || job_is_cancelled(&c_app, &c_job);
+
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    render_offline_with_progress(&stem, cps, start_cycle, cycles, &cfg, &file, on_progress, should_cancel)
+                }));
+                match res {
+                    Ok(Ok(RenderOutcome::Completed)) => {}
+                    Ok(Ok(RenderOutcome::Cancelled)) => {
+                        outcome = Ok(RenderOutcome::Cancelled);
+                        break;
+                    }
+                    Ok(Err(e)) => {
+                        outcome = Err(e.to_string());
+                        break;
+                    }
+                    Err(_) => {
+                        outcome = Err("stems render thread panicked (see the log for details)".to_string());
+                        break;
+                    }
+                }
+            }
+
+            let state = app.state::<crate::AppState>();
+            let (status, success, error) = match outcome {
+                Ok(RenderOutcome::Completed) => (JobStatus::Completed { exit_code: 0 }, true, None),
+                // Cancelled: keep the stems already written (each is a valid file)
+                // and report a cancel, not a failure.
+                Ok(RenderOutcome::Cancelled) => (JobStatus::Cancelled, false, None),
+                Err(msg) => (JobStatus::Failed { error: msg.clone() }, false, Some(msg)),
+            };
+            if let Ok(mut jobs) = state.jobs.lock() {
+                jobs.set_status(&job_id_thread, status);
+            }
+            let _ = app.emit(
+                "arbor://job-done",
+                serde_json::json!({ "job_id": job_id_thread, "success": success, "error": error }),
+            );
+        })
+    {
+        tracing::error!("nemus: failed to spawn stems thread: {e}");
     }
 
     job_id

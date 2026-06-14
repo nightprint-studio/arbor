@@ -139,6 +139,9 @@ impl NemusRenderConfig {
             } else {
                 Format::Wav
             },
+            // Normalization is a per-export choice, overlaid in
+            // `render::resolve_config` — not a persisted default.
+            normalize: None,
         }
     }
 }

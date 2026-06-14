@@ -12,11 +12,15 @@
 import { projectStore } from './project.svelte';
 import { renderStore, DEFAULT_RENDER_LOOPS } from './render.svelte';
 import { configStore } from './config.svelte';
+import { transportUiStore } from './transport-ui.svelte';
 import { arrangementStore } from '../viz/arrangement.svelte';
-import { nemusRender } from '$lib/ipc/nemus';
+import { nemusRender, nemusRenderStems, nemusExportMidi } from '$lib/ipc/nemus';
 import { fsWriteTextFile } from '$lib/ipc/fs';
+import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
 
-export type NemusPicker = 'new' | 'new-file' | 'open-project' | 'open-file' | 'export' | null;
+export type NemusPicker =
+  | 'new' | 'new-file' | 'open-project' | 'open-file'
+  | 'export' | 'export-region' | 'export-stems' | 'export-midi' | null;
 
 /** Last path segment (forward- or back-slash). */
 function basename(path: string): string {
@@ -55,6 +59,15 @@ function createProjectActions() {
   let exportSampleRate  = $state(48_000);
   let exportBitDepth    = $state('int24');
   let exportTail        = $state(4.0);
+  // LUFS normalization (per-export, session-sticky, off by default). When on, the
+  // bounce is normalized to `exportNormalizeTarget` LUFS (peak-limited in the
+  // engine). Stems deliberately skip this — normalizing each stem alone would
+  // wreck their relative balance.
+  let exportNormalizeOn     = $state(false);
+  let exportNormalizeTarget = $state(-14);
+  // Region export window (first cycle + length), snapshotted from the loop region
+  // when the flow launches so the save-picker confirm bounces exactly that span.
+  let regionWindow      = $state<{ start: number; cycles: number } | null>(null);
 
   /** Reset the render-format overrides to the current global defaults. Called at
    *  each export entry point (quick export + the options dialog) so both start
@@ -98,11 +111,62 @@ function createProjectActions() {
         nemusRender(
           projectStore.activeSource,
           path,
+          { cycles, format: currentFormat(), sample_rate: exportSampleRate, bit_depth: exportBitDepth, tail_max_secs: exportTail, normalize_lufs: exportNormalizeOn ? exportNormalizeTarget : undefined },
+          projectStore.project?.path,
+        ),
+        path,
+      );
+    } else if (mode === 'export-region') {
+      // Bounce only the loop region [start, start+cycles) into a single file.
+      const w = regionWindow;
+      regionWindow = null;
+      if (w) {
+        void renderStore.track(
+          nemusRender(
+            projectStore.activeSource,
+            path,
+            { cycles: w.cycles, start_cycle: w.start, format: currentFormat(), sample_rate: exportSampleRate, bit_depth: exportBitDepth, tail_max_secs: exportTail, normalize_lufs: exportNormalizeOn ? exportNormalizeTarget : undefined },
+            projectStore.project?.path,
+          ),
+          path,
+        );
+      }
+    } else if (mode === 'export-stems') {
+      // One WAV/OGG per track, written into the chosen folder. Same render
+      // config as the WAV bounce; tracked via the title-bar badge + overlay
+      // (the job reveals the folder on finish).
+      const cycles = (arrangementStore.loopCycles || 1) * exportLoops;
+      void renderStore.track(
+        nemusRenderStems(
+          projectStore.activeSource,
+          path,
           { cycles, format: currentFormat(), sample_rate: exportSampleRate, bit_depth: exportBitDepth, tail_max_secs: exportTail },
           projectStore.project?.path,
         ),
         path,
       );
+    } else if (mode === 'export-midi') {
+      void runMidiExport(path);
+    }
+  }
+
+  /** Export the arrangement to a `.mid` file. Instant (note-only, no audio job),
+   *  but still surfaced in the shared Downloads & Exports overlay for parity with
+   *  the WAV export — start → finish/fail, with a result summary on success. */
+  async function runMidiExport(path: string) {
+    const id = path;
+    transfersStore.start({
+      id, kind: 'export', label: basename(path), sublabel: 'Writing MIDI…', progress: 0, path,
+    });
+    try {
+      const r = await nemusExportMidi(
+        projectStore.activeSource,
+        path,
+        projectStore.project?.path,
+      );
+      transfersStore.finish(id, `${r.notes} notes · ${r.tracks} tracks`);
+    } catch (e) {
+      transfersStore.fail(id, e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -134,6 +198,10 @@ function createProjectActions() {
     setExportSampleRate(n: number) { exportSampleRate = n; },
     setExportBitDepth(d: string)   { exportBitDepth = d; },
     setExportTail(s: number)       { exportTail = Math.max(0, s); },
+    get exportNormalizeOn()        { return exportNormalizeOn; },
+    get exportNormalizeTarget()    { return exportNormalizeTarget; },
+    setExportNormalizeOn(v: boolean) { exportNormalizeOn = v; },
+    setExportNormalizeTarget(n: number) { exportNormalizeTarget = Math.max(-40, Math.min(0, Math.round(n) || -14)); },
 
     /** Open the "new nemus project" folder picker. */
     newProject()  { picker = 'new'; },
@@ -153,6 +221,26 @@ function createProjectActions() {
      *  and the global render defaults. The split-button's main action; "Edit
      *  export…" (→ `exportWav`) is the dialog path for tweaking the details. */
     quickExport() { loadRenderDefaults(); picker = 'export'; },
+    /** Whether a loop region is defined — a region export needs a span to bounce. */
+    get canExportRegion() {
+      const lp = transportUiStore.loop;
+      return lp != null && lp.end > lp.start;
+    },
+    /** Export only the loop region `[start, end)` to a single WAV/OGG. No-op when
+     *  no region is set; opens the save picker seeded from Settings → Render. */
+    exportRegion() {
+      const lp = transportUiStore.loop;
+      if (!lp || lp.end <= lp.start) return;
+      regionWindow = { start: Math.max(0, Math.floor(lp.start)), cycles: Math.max(1, Math.round(lp.end - lp.start)) };
+      loadRenderDefaults();
+      picker = 'export-region';
+    },
+    /** Export per-track stems (one WAV/OGG per track) into a chosen folder —
+     *  opens the folder picker; seeds the render config from Settings → Render. */
+    exportStems() { exportLoops = DEFAULT_RENDER_LOOPS; loadRenderDefaults(); picker = 'export-stems'; },
+    /** Export the arrangement as a Standard MIDI File (note data, no audio) —
+     *  opens the `.mid` save picker; the write is instant on confirm. */
+    exportMidi()  { picker = 'export-midi'; },
     /** Confirm export options → advance to the save picker (step 2). */
     confirmExportOptions() { exportOptionsOpen = false; picker = 'export'; },
     /** Dismiss the export options dialog without exporting. */
@@ -160,7 +248,7 @@ function createProjectActions() {
     /** Flush the active buffer to disk (no-op when there's no active file). */
     save()        { void projectStore.save().catch(() => {}); },
 
-    cancel()      { picker = null; },
+    cancel()      { picker = null; regionWindow = null; },
     onConfirm,
   };
 }

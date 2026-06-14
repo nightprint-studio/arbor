@@ -13,7 +13,7 @@
     Play, Square, SkipBack, SkipForward, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
     PanelLeft, PanelRight, Minimize2, Check, AlertTriangle,
     FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut, FolderPen,
-    FileAudio, SlidersHorizontal,
+    FileAudio, FileMusic, Layers, Crop, SlidersHorizontal,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
@@ -63,6 +63,12 @@
     { kind: 'item', id: 'ogg', label: 'OGG Vorbis — compressed', icon: FileAudio,
       active: projectActions.exportFormat === 'ogg', onclick: () => projectActions.setExportFormat('ogg') },
     { kind: 'separator' },
+    { kind: 'item', id: 'region', label: 'Export loop region…', icon: Crop,
+      disabled: !projectActions.canExportRegion, onclick: () => projectActions.exportRegion() },
+    { kind: 'item', id: 'stems', label: 'Export stems…', icon: Layers,
+      onclick: () => projectActions.exportStems() },
+    { kind: 'item', id: 'midi', label: 'Export MIDI…', icon: FileMusic,
+      onclick: () => projectActions.exportMidi() },
     { kind: 'item', id: 'edit', label: 'Edit export…', icon: SlidersHorizontal,
       shortcut: 'Ctrl+Shift+R', onclick: () => projectActions.exportWav() },
   ]);
@@ -83,6 +89,9 @@
     { kind: 'separator', label: 'Project' },
     { kind: 'item', id: 'save',   label: 'Save',           icon: Save,     shortcut: 'Ctrl+S',       onclick: () => projectActions.save() },
     { kind: 'item', id: 'export', label: 'Export audio…', icon: Download, shortcut: 'Ctrl+Shift+R', onclick: () => projectActions.exportWav() },
+    { kind: 'item', id: 'export_region', label: 'Export loop region…', icon: Crop, disabled: !projectActions.canExportRegion, onclick: () => projectActions.exportRegion() },
+    { kind: 'item', id: 'export_stems', label: 'Export stems…', icon: Layers, onclick: () => projectActions.exportStems() },
+    { kind: 'item', id: 'export_midi', label: 'Export MIDI…', icon: FileMusic, onclick: () => projectActions.exportMidi() },
     { kind: 'separator' },
     { kind: 'item', id: 'close', label: 'Close Window', icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },
   ]);

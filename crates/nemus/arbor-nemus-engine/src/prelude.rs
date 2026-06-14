@@ -21,3 +21,6 @@ pub use crate::render::{
     render_offline, render_offline_with_progress, BitDepth, RenderConfig, RenderOutcome,
     RenderProgress, DEFAULT_BIT_DEPTH, DEFAULT_TAIL_MAX_SECS,
 };
+
+// ── Offline MIDI export ──────────────────────────────────────────────────────
+pub use crate::midi::{export_midi, MidiExportSummary};

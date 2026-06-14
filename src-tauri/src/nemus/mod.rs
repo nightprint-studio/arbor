@@ -573,11 +573,129 @@ pub async fn nemus_render(
         &app,
         output.tracks,
         cps,
+        opts.start_cycle.unwrap_or(0),
         opts.cycles,
         render_cfg,
         std::path::PathBuf::from(path),
     );
     Ok(job_id)
+}
+
+/// Render `source` to **per-track stems** (one WAV/OGG per track) in `dir`, on a
+/// background job. Returns the job id. Like [`nemus_render`] but bounces each
+/// track in isolation; evaluation errors fail the export.
+#[tauri::command]
+pub async fn nemus_render_stems(
+    app: AppHandle,
+    source: String,
+    project_dir: Option<String>,
+    dir: String,
+    opts: RenderOpts,
+) -> Result<String, AppError> {
+    let cfg = nemus_config();
+    let base = project_dir
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let output = match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
+        Ok(o) => o,
+        Err(diags) => {
+            emit(&app, EVT_DIAGNOSTICS, diags.clone());
+            let msg = diags
+                .errors
+                .first()
+                .map(|d| d.message.clone())
+                .unwrap_or_else(|| "evaluation failed".to_string());
+            return Err(AppError::Nemus(msg));
+        }
+    };
+
+    let cps = output
+        .tempo
+        .points
+        .first()
+        .map(|p| p.1)
+        .or(output.cps)
+        .unwrap_or(cfg.default_cps);
+    let render_cfg = render::resolve_config(cfg.render.render_config(), &opts);
+    let job_id = render::spawn_render_stems(
+        &app,
+        output.tracks,
+        cps,
+        opts.start_cycle.unwrap_or(0),
+        opts.cycles,
+        render_cfg,
+        std::path::PathBuf::from(dir),
+    );
+    Ok(job_id)
+}
+
+/// Result of a MIDI export: how many MIDI tracks + notes were written. Surfaced
+/// to the front end for the export notification.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct MidiExportResult {
+    /// MIDI tracks written (one per nemus track that produced ≥1 note).
+    pub tracks: u32,
+    /// Total notes written across all tracks.
+    pub notes: u32,
+}
+
+/// Export `source` to a Standard MIDI File at `path`, baking the arrangement's
+/// natural loop period (one pass of the song). Unlike [`nemus_render`] this is a
+/// quick, note-only walk (no audio), so it resolves with the written summary
+/// directly rather than running as a tracked job. Evaluation errors fail the
+/// export (and are emitted as diagnostics for the editor).
+#[tauri::command]
+pub async fn nemus_export_midi(
+    app: AppHandle,
+    source: String,
+    project_dir: Option<String>,
+    path: String,
+) -> Result<MidiExportResult, AppError> {
+    let cfg = nemus_config();
+    let base = project_dir
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let output = match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
+        Ok(o) => o,
+        Err(diags) => {
+            emit(&app, EVT_DIAGNOSTICS, diags.clone());
+            let msg = diags
+                .errors
+                .first()
+                .map(|d| d.message.clone())
+                .unwrap_or_else(|| "evaluation failed".to_string());
+            return Err(AppError::Nemus(msg));
+        }
+    };
+
+    // Same tempo choice as the WAV bounce (starting `tempo(...)` point, else the
+    // script's `cps(...)`, else the configured default).
+    let cps = output
+        .tempo
+        .points
+        .first()
+        .map(|p| p.1)
+        .or(output.cps)
+        .unwrap_or(cfg.default_cps);
+    // Bake the arrangement's detected loop period — the whole song, once.
+    let (_haps, _sections, loop_cycles) =
+        query::collect_haps(&output.tracks, query::SNIPPET_WINDOW);
+    let cycles = loop_cycles.max(1);
+
+    // The walk + SMF write is quick, but keep it off the async worker (it can run
+    // past the UI's 50ms budget on a long song); only the `Send` `Tracks` moves in.
+    let tracks = output.tracks;
+    let out = std::path::PathBuf::from(path);
+    let summary = tauri::async_runtime::spawn_blocking(move || {
+        arbor_nemus::prelude::export_midi(&tracks, cps, cycles, &out)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
+    .map_err(|e| AppError::Nemus(e.to_string()))?;
+
+    Ok(MidiExportResult { tracks: summary.tracks, notes: summary.notes })
 }
 
 /// List every downloadable sample pack (VSCO, Dirt-Samples, drum machines, …)

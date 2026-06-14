@@ -31,6 +31,7 @@
 pub mod clock;
 pub mod encode;
 pub mod error;
+pub mod midi;
 pub mod prelude;
 pub mod render;
 pub mod schedule;

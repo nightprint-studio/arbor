@@ -1537,6 +1537,8 @@ pub fn run() {
             nemus::nemus_eval,
             nemus::nemus_transport,
             nemus::nemus_render,
+            nemus::nemus_render_stems,
+            nemus::nemus_export_midi,
             nemus::nemus_packs,
             nemus::nemus_pack_download,
             nemus::nemus_pack_reindex,

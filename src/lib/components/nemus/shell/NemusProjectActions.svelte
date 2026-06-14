@@ -54,4 +54,35 @@
     onCancel={projectActions.cancel}
     onClose={projectActions.cancel}
   />
+{:else if projectActions.picker === 'export-region'}
+  <FileExplorerModal
+    mode="save"
+    title={`Export region to ${projectActions.exportFormat.toUpperCase()}`}
+    extensions={[projectActions.exportFormat]}
+    initialFilename={`${projectStore.project?.name ?? 'nemus'}-region.${projectActions.exportFormat}`}
+    initialPath={projectStore.project?.path}
+    onConfirm={projectActions.onConfirm}
+    onCancel={projectActions.cancel}
+    onClose={projectActions.cancel}
+  />
+{:else if projectActions.picker === 'export-stems'}
+  <FileExplorerModal
+    mode="folder"
+    title="Export stems — pick a folder"
+    initialPath={projectStore.project?.path}
+    onConfirm={projectActions.onConfirm}
+    onCancel={projectActions.cancel}
+    onClose={projectActions.cancel}
+  />
+{:else if projectActions.picker === 'export-midi'}
+  <FileExplorerModal
+    mode="save"
+    title="Export to MIDI"
+    extensions={['mid']}
+    initialFilename={`${projectStore.project?.name ?? 'nemus'}.mid`}
+    initialPath={projectStore.project?.path}
+    onConfirm={projectActions.onConfirm}
+    onCancel={projectActions.cancel}
+    onClose={projectActions.cancel}
+  />
 {/if}

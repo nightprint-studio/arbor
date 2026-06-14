@@ -59,6 +59,11 @@ pub struct RenderConfig {
     /// Output container/codec (WAV vs Ogg Vorbis). Default [`Format::Wav`].
     /// This is a per-export choice, not a persisted preference.
     pub format: Format,
+    /// Target **integrated loudness** (LUFS, ITU-R BS.1770) to normalize the
+    /// bounce to, or `None` to leave levels untouched (the default). A typical
+    /// streaming target is `-14.0`. Applied as a single broadband gain after the
+    /// render, peak-limited so it never clips.
+    pub normalize: Option<f32>,
 }
 
 impl Default for RenderConfig {
@@ -68,6 +73,7 @@ impl Default for RenderConfig {
             bit_depth: DEFAULT_BIT_DEPTH,
             tail_max_secs: DEFAULT_TAIL_MAX_SECS,
             format: Format::Wav,
+            normalize: None,
         }
     }
 }
@@ -123,20 +129,27 @@ pub fn render_offline(
     cfg: &RenderConfig,
     out_path: &Path,
 ) -> Result<()> {
-    render_offline_with_progress(tracks, cps, cycles, cfg, out_path, |_| {}, || false).map(|_| ())
+    render_offline_with_progress(tracks, cps, 0, cycles, cfg, out_path, |_| {}, || false).map(|_| ())
 }
 
-/// Like [`render_offline`], but reports progress and is **cancellable**:
+/// Like [`render_offline`], but renders an **arbitrary cycle window** with
+/// progress + cancellation. The bounce covers `[start_cycle, start_cycle + cycles)`
+/// (a region export), plus the usual trailing tail; pass `start_cycle = 0` for the
+/// whole arrangement. The output file always starts at frame 0 — voices in the
+/// window are re-based onto the output's local timeline, so the region plays from
+/// the top of the file. Onsets that fall *before* `start_cycle` are not captured
+/// (a region starts clean), matching a DAW's loop-region bounce.
+///
 /// `on_progress` is invoked after each block is written (and once at the start)
 /// with the running [`RenderProgress`], and `should_cancel` is polled before each
 /// block — when it returns true the bounce stops early, the partial file is
 /// finalized, and [`RenderOutcome::Cancelled`] is returned. Both callbacks run on
 /// the render thread — keep them cheap (the shell throttles progress + forwards it
-/// as an event, and checks a job flag for cancellation). Anything else is
-/// identical to [`render_offline`].
+/// as an event, and checks a job flag for cancellation).
 pub fn render_offline_with_progress(
     tracks: &Tracks<ControlMap>,
     cps: f64,
+    start_cycle: u32,
     cycles: u32,
     cfg: &RenderConfig,
     out_path: &Path,
@@ -145,6 +158,11 @@ pub fn render_offline_with_progress(
 ) -> Result<RenderOutcome> {
     let sr = cfg.sample_rate;
     let epoch = Epoch::start(cps);
+    // Frame offset of the region's first cycle. Voices are queried at absolute
+    // frames (from the epoch) but written at output-local frames, so we subtract
+    // this from every scheduled onset to re-base the region onto `[0, …)`.
+    let fpc = epoch.frames_per_cycle(sr);
+    let start_frame = (start_cycle as f64 * fpc).round() as u64;
 
     let track_configs: Vec<TrackConfig> = tracks
         .tracks
@@ -165,14 +183,30 @@ pub fn render_offline_with_progress(
     // preload them before the block loop — without this, file sources render as
     // synth. Best-effort: a missing/undecodable file is left to the synth
     // fallback rather than aborting the bounce.
-    preload_file_sources(&mut renderer, tracks, cycles);
+    preload_file_sources(&mut renderer, tracks, start_cycle, cycles);
 
     // Total length: the requested cycles + a tail for releases / reverb.
-    let arrangement_frames = (cycles as f64 * epoch.frames_per_cycle(sr)).round() as u64;
+    let arrangement_frames = (cycles as f64 * fpc).round() as u64;
     let tail_frames = (cfg.tail_max_secs.max(0.0) as f64 * sr as f64).round() as u64;
     let total_frames = arrangement_frames + tail_frames;
 
     let mut sink = RenderSink::open(cfg.format, cfg, out_path)?;
+
+    // Optional LUFS normalization: when a target is set we meter the whole bounce
+    // (ITU-R BS.1770 integrated loudness) and buffer the frames, then apply a
+    // single peak-limited gain and write at the end — a one-pass measurement that
+    // sets the level without re-rendering. `None` streams straight to disk. A
+    // failed meter init silently falls back to no normalization.
+    let mut meter = match cfg.normalize {
+        Some(_) => ebur128::EbuR128::new(2, sr, ebur128::Mode::I).ok(),
+        None => None,
+    };
+    let mut norm_buffer: Vec<Frame> = Vec::new();
+    let mut interleaved: Vec<f32> = Vec::new();
+    if meter.is_some() {
+        norm_buffer.reserve(total_frames as usize);
+        interleaved.reserve(BLOCK_FRAMES * 2);
+    }
 
     // Voice-id counter and cross-render sustained dedup, threaded across blocks
     // (the schedule core is pure, so this state lives here — like the transport).
@@ -218,8 +252,18 @@ pub fn render_offline_with_progress(
         let mut voice_cmds: Vec<AudioCommand> = Vec::new();
         if frame_cursor < arrangement_frames {
             let span_end = block_end.min(arrangement_frames);
-            let events = schedule_span(tracks, &epoch, sr, frame_cursor..span_end, &mut next_id);
+            let events = schedule_span(
+                tracks,
+                &epoch,
+                sr,
+                (start_frame + frame_cursor)..(start_frame + span_end),
+                &mut next_id,
+            );
             for ev in events {
+                // Re-base the absolute onset onto the output's local timeline (a
+                // no-op for a whole-arrangement bounce, where `start_frame == 0`).
+                let mut ev = ev;
+                ev.start_frame -= start_frame;
                 if let VoiceSource::File {
                     path,
                     kind: SourceKind::Sustained,
@@ -248,13 +292,55 @@ pub fn render_offline_with_progress(
 
         let out = &mut block[..block_len];
         renderer.process(&mut cmds, out);
-        if let Err(e) = sink.write_block(out) {
+        if let Some(m) = meter.as_mut() {
+            // Normalizing: meter this block, then buffer it for the deferred pass.
+            interleaved.clear();
+            for &[l, r] in out.iter() {
+                interleaved.push(l);
+                interleaved.push(r);
+            }
+            let _ = m.add_frames_f32(&interleaved);
+            norm_buffer.extend_from_slice(out);
+        } else if let Err(e) = sink.write_block(out) {
             write_err = Some(e);
             break;
         }
 
         frame_cursor = block_end;
         on_progress(RenderProgress { done_frames: frame_cursor, total_frames });
+    }
+
+    // Deferred normalization pass: scale the buffered bounce to the target LUFS
+    // (peak-limited) and write it. Skipped on cancel (the partial buffer is
+    // discarded — the caller drops the file anyway) or after a prior write error.
+    if let (Some(m), Some(target)) = (meter.as_ref(), cfg.normalize) {
+        if !cancelled && write_err.is_none() {
+            let measured = m.loudness_global().unwrap_or(f64::NEG_INFINITY);
+            // Silence / un-measurable loudness → leave the level untouched.
+            let mut gain: f32 = if measured.is_finite() && measured > -70.0 {
+                10f64.powf((f64::from(target) - measured) / 20.0) as f32
+            } else {
+                1.0
+            };
+            // Peak-limit so the gain never pushes a sample past full scale.
+            let peak = norm_buffer
+                .iter()
+                .fold(0.0f32, |mx, &[l, r]| mx.max(l.abs()).max(r.abs()));
+            const CEILING: f32 = 0.999;
+            if peak > 0.0 && peak * gain > CEILING {
+                gain = CEILING / peak;
+            }
+            for f in norm_buffer.iter_mut() {
+                f[0] *= gain;
+                f[1] *= gain;
+            }
+            for chunk in norm_buffer.chunks(BLOCK_FRAMES) {
+                if let Err(e) = sink.write_block(chunk) {
+                    write_err = Some(e);
+                    break;
+                }
+            }
+        }
     }
 
     // Always finalize, even after a write error or a cancel, so the file is
@@ -275,11 +361,19 @@ pub fn render_offline_with_progress(
 /// preload is **best-effort**: the `Renderer` keys files by the exact path string
 /// `resolve_source` stamps on `VoiceSource::File`, so a successful preload always
 /// hits, and a failure (missing/undecodable file) is left to the synth fallback.
-fn preload_file_sources(renderer: &mut Renderer, tracks: &Tracks<ControlMap>, cycles: u32) {
+fn preload_file_sources(
+    renderer: &mut Renderer,
+    tracks: &Tracks<ControlMap>,
+    start_cycle: u32,
+    cycles: u32,
+) {
     if cycles == 0 {
         return;
     }
-    let span = TimeSpan::new(Time::int(0), Time::int(cycles as i64));
+    let span = TimeSpan::new(
+        Time::int(start_cycle as i64),
+        Time::int((start_cycle + cycles) as i64),
+    );
     let mut seen: HashSet<String> = HashSet::new();
     for t in &tracks.tracks {
         for hap in t.pattern.query(span) {
@@ -303,6 +397,29 @@ mod tests {
         assert_eq!(c.bit_depth, DEFAULT_BIT_DEPTH);
         assert_eq!(c.tail_max_secs, DEFAULT_TAIL_MAX_SECS);
         assert_eq!(c.format, Format::Wav);
+        assert_eq!(c.normalize, None);
+    }
+
+    #[test]
+    fn region_render_offset_succeeds_and_writes_file() {
+        use arbor_nemus_pattern::prelude::{fastcat, pure, track, tracks};
+        use arbor_nemus_pattern::prelude::ControlMap;
+
+        // A four-step melody; render only the window starting at cycle 1 (length 1).
+        let melody = fastcat(vec![
+            pure(ControlMap::note(60.0)),
+            pure(ControlMap::note(62.0)),
+            pure(ControlMap::note(64.0)),
+            pure(ControlMap::note(65.0)),
+        ]);
+        let t = tracks(vec![track("lead", melody)]);
+        let out = std::env::temp_dir().join("nemus_render_region.wav");
+        let res = render_offline_with_progress(
+            &t, 1.0, 1, 1, &RenderConfig::default(), &out, |_| {}, || false,
+        );
+        let cleanup = std::fs::remove_file(&out);
+        assert_eq!(res.expect("region render"), RenderOutcome::Completed);
+        assert!(cleanup.is_ok(), "region render should have produced the WAV file");
     }
 
     #[test]

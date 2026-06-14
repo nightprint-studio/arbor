@@ -172,12 +172,21 @@ export interface NemusAudioDevice {
 /** Options for `nemus_render`. `cycles` is required (a Pattern has no length). */
 export interface NemusRenderOpts {
   cycles: number;
+  /** First cycle of the bounce window (a region export). Defaults to 0 (whole
+   *  arrangement) when omitted. */
+  start_cycle?: number;
   /** `int24` | `float32` — overrides the config default when set. */
   bit_depth?: string;
   tail_max_secs?: number;
   sample_rate?: number;
   /** `wav` | `ogg` — output container/codec. Defaults to WAV. */
   format?: string;
+}
+
+/** Result of `nemus_export_midi`: tracks + notes written to the `.mid`. */
+export interface NemusMidiExport {
+  tracks: number;
+  notes: number;
 }
 
 /** A `nemus_transport` verb. */
@@ -231,6 +240,33 @@ export function nemusRender(
   projectDir?: string,
 ): Promise<string> {
   return invoke('nemus_render', { source, projectDir: projectDir ?? null, path, opts });
+}
+
+/**
+ * Render `source` to per-track **stems** (one WAV/OGG per track) in `dir`, on a
+ * background job. Returns the job id immediately; progress + completion flow
+ * through the Jobs / Downloads & Exports overlay (same as {@link nemusRender}).
+ */
+export function nemusRenderStems(
+  source: string,
+  dir: string,
+  opts: NemusRenderOpts,
+  projectDir?: string,
+): Promise<string> {
+  return invoke('nemus_render_stems', { source, projectDir: projectDir ?? null, dir, opts });
+}
+
+/**
+ * Export `source` to a Standard MIDI File at `path`, baking the arrangement's
+ * natural loop period (one pass of the song). Note-only (no audio), so it
+ * resolves with the written {@link NemusMidiExport} summary directly — no job.
+ */
+export function nemusExportMidi(
+  source: string,
+  path: string,
+  projectDir?: string,
+): Promise<NemusMidiExport> {
+  return invoke('nemus_export_midi', { source, projectDir: projectDir ?? null, path });
 }
 
 /** List every downloadable sample pack with its install status. */

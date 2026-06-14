@@ -17,10 +17,16 @@ arbor-nemus-pattern = { path = "../arbor-nemus-pattern" }
 arbor-nemus-audio   = { path = "../arbor-nemus-audio" }
 thiserror.workspace = true
 hound = "3"
+# MIDI (SMF) writer for the offline MIDI export (`midi::export_midi`) — pure-Rust,
+# zero system deps, same crate the import/transcribe path already uses.
+midly.workspace = true
 # Ogg Vorbis encoder for the offline render's OGG export (vendored libvorbis/aoTuV,
 # no system deps — same vendored-C posture as git2/mlua). Quarantined behind
 # `encode::OggSink` so it's swappable.
 vorbis_rs = "0.5"
+# EBU R128 / ITU-R BS.1770 loudness meter for the offline render's optional LUFS
+# normalization. Pure-Rust port of libebur128, no system deps.
+ebur128 = "0.1"
 
 [lints.rust]
 missing_debug_implementations = "warn"
