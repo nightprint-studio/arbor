@@ -1554,6 +1554,7 @@ pub fn run() {
             nemus::nemus_set_track,
             nemus::nemus_audition_expr,
             nemus::nemus_eval_snippet,
+            nemus::nemus_materialize,
             nemus::nemus_play_snippet,
             nemus::nemus_stop_snippet,
             nemus::state::get_nemus_state,

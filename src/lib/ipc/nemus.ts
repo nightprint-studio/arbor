@@ -554,6 +554,14 @@ export function nemusPlaySnippet(source: string, projectDir?: string): Promise<v
   return invoke('nemus_play_snippet', { source, projectDir: projectDir ?? null });
 }
 
+/** **Freeze** a pattern: evaluate a self-contained snippet (the caller prepends the
+ *  file's constants/imports) and return its first track materialized over one cycle
+ *  to canonical literal source (`n(c4 e4 g4)` / `s(bd sn)`). Empty string when the
+ *  snippet doesn't evaluate or yields no onsets. */
+export function nemusMaterialize(source: string, projectDir?: string): Promise<string> {
+  return invoke('nemus_materialize', { source, projectDir: projectDir ?? null });
+}
+
 /** Stop an in-flight snippet preview early (clears the audition bus only; a playing
  *  song is untouched). No-op when nothing is running. */
 export function nemusStopSnippet(): Promise<void> {

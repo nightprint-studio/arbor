@@ -57,3 +57,14 @@
   Resting the caret on a name (no selection) still tints the lanes that reference it —
   the selection highlight is the finer-grained, per-region version.
 </div>
+
+<h2>Freeze a pattern to notes</h2>
+<p>
+  Select a generative pattern — a euclidean rhythm, a randomised melody, a degree run
+  through a scale — and press <kbd>Alt</kbd> + <kbd>Enter</kbd> → <strong>Freeze pattern
+  to notes</strong> (also in the Command Palette). The selection is evaluated (resolved
+  against the file's constants and imports) and replaced in place with the concrete
+  literal notes it produces over one cycle — e.g. <code>n("0 .. 4").scale("c:major")</code>
+  becomes <code>n(c4 e4 g4)</code>. Handy for committing a happy accident, or for taking a
+  generated phrase and editing it by hand.
+</p>

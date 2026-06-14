@@ -17,7 +17,7 @@
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
     Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map, StretchVertical,
-    FileMusic, Layers, Crop,
+    FileMusic, Layers, Crop, Snowflake,
   } from 'lucide-svelte';
   import CommandPaletteShell, {
     type PaletteItem, type PaletteSection,
@@ -49,7 +49,7 @@
     Keyboard, Command, ArrowDownToLine, Boxes, FileInput, FileAudio, SearchCode,
     AlignLeft, PenLine, FileOutput, FileSymlink, Lightbulb, Library, FolderPen, Braces, FlaskConical,
     Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map, StretchVertical,
-    FileMusic, Layers, Crop,
+    FileMusic, Layers, Crop, Snowflake,
   };
   const iconResolver = (name: string): Component => ICONS[name] ?? Command;
 
@@ -155,6 +155,7 @@
     { id: 'rename', label: 'Rename symbol…', group: 'Edit', icon: 'PenLine', keys: 'Shift+F6', run: () => nemusStore.requestRename() },
     { id: 'extract', label: 'Extract selection to let…', group: 'Edit', icon: 'FileOutput', keys: 'Alt+Shift+V', run: () => nemusStore.requestExtract() },
     { id: 'inline', label: 'Inline let', group: 'Edit', icon: 'FileSymlink', keys: 'Alt+Shift+N', run: () => nemusStore.requestInline() },
+    { id: 'freeze', label: 'Freeze pattern to notes', group: 'Edit', icon: 'Snowflake', run: () => nemusStore.requestFreeze() },
     { id: 'intentions', label: 'Show context actions / quick-fixes', group: 'Edit', icon: 'Lightbulb', keys: 'Alt+Enter', run: () => nemusStore.requestIntentions() },
     // Window
     { id: 'docs',      label: 'Documentation',      group: 'Window', icon: 'BookOpen', keys: 'F1',       run: () => nemusStore.openDocs() },

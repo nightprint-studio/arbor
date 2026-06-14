@@ -30,8 +30,12 @@ export interface IntentionItem {
   /** Toast shown on success. */
   note?: string;
   /** A host-UI intention: re-open an input flow instead of editing now (rename /
-   *  extract need a name; change-scale needs the new scale spec). */
-  ui?: 'rename' | 'extract' | 'scale';
+   *  extract need a name; change-scale needs the new scale spec), or a host-async
+   *  one (`freeze` evaluates the selection in the backend and splices the result). */
+  ui?: 'rename' | 'extract' | 'scale' | 'freeze';
+  /** For a `freeze` intention: the source range to replace with the materialized
+   *  literal notes (the selected pattern expression). */
+  freeze?: { from: number; to: number };
 }
 
 /** What the editor hands the planner: the live tree + caret/selection + the set
@@ -262,9 +266,11 @@ export function collectIntentions(ctx: IntentionContext): IntentionItem[] {
   const items: IntentionItem[] = [];
   const hasSel = to > from;
 
-  // Extract the selection into a named let.
-  if (hasSel && extractTarget(tree, src, from, to)) {
+  // Extract the selection into a named let / freeze it to concrete notes.
+  const et = hasSel ? extractTarget(tree, src, from, to) : null;
+  if (et) {
     items.push({ id: 'extract', label: 'Extract selection to let…', ui: 'extract' });
+    items.push({ id: 'freeze', label: 'Freeze pattern to notes', ui: 'freeze', freeze: { from: et.from, to: et.to } });
   }
 
   // Symbol under the caret → rename + inline.

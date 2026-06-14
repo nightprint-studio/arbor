@@ -118,6 +118,7 @@ function createNemusStore() {
   let renameSeq  = $state(0);
   let extractSeq = $state(0);
   let inlineSeq  = $state(0);
+  let freezeSeq  = $state(0);
 
   // ── Intentions popup relay (one-shot, Alt+Enter) ──────────────────────────────
   let intentionsSeq = $state(0);
@@ -271,9 +272,11 @@ function createNemusStore() {
     get renameSeq()  { return renameSeq; },
     get extractSeq() { return extractSeq; },
     get inlineSeq()  { return inlineSeq; },
+    get freezeSeq()  { return freezeSeq; },
     requestRename()  { if (collapseTabpane) collapseTabpane = false; renameSeq++; },
     requestExtract() { if (collapseTabpane) collapseTabpane = false; extractSeq++; },
     requestInline()  { if (collapseTabpane) collapseTabpane = false; inlineSeq++; },
+    requestFreeze()  { if (collapseTabpane) collapseTabpane = false; freezeSeq++; },
 
     // ── intentions popup (one-shot; TabbedEditor consumes) ──
     get intentionsSeq() { return intentionsSeq; },

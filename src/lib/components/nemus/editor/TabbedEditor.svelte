@@ -28,6 +28,8 @@
   import { structureStore } from '../stores/structure.svelte';
   import { intentionsStore } from '../stores/intentions.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+  import { withFileDeps } from './nemus-lang';
+  import { nemusMaterialize } from '$lib/ipc/nemus';
   import type { NemusSymbol } from './nemus-lang';
   import type { IntentionItem } from './nemus-intentions';
   import type { EditChange } from './nemus-edit';
@@ -202,6 +204,13 @@
     lastInlineSeq = seq;
     if (seq > 0) inlineSymbol();
   });
+  let lastFreezeSeq = 0;
+  $effect(() => {
+    const seq = nemusStore.freezeSeq;
+    if (seq === lastFreezeSeq) return;
+    lastFreezeSeq = seq;
+    if (seq > 0) startFreeze();
+  });
 
   // ── Intentions relay: open from shortcut/palette, and apply the chosen action ─
   let lastIntentOpenSeq = 0;
@@ -221,6 +230,7 @@
     if (it.ui === 'rename') startRename();
     else if (it.ui === 'extract') startExtract();
     else if (it.ui === 'scale') startChangeScale();
+    else if (it.ui === 'freeze' && it.freeze) void freezeRange(it.freeze.from, it.freeze.to);
     else if (it.edits) {
       editorComp?.applyIntentionEdits(it.edits);
       if (it.note) toastStore.show(it.note, 'success');
@@ -303,6 +313,32 @@
     const r = editorComp?.prepareChangeScale();
     if (!r) { toastStore.show('Place the caret on a .scale("…") call', 'info'); return; }
     openRefactorInput({ kind: 'scale', title: 'Change scale', value: r.spec, error: null, anchor: r.anchor });
+  }
+
+  /** Freeze the selected pattern to concrete notes: evaluate it (resolved against
+   *  the file's constants/imports) and replace the selection with the literal
+   *  `n(…)` / `s(…)` it produces over one cycle. Alt+Enter intention + palette. */
+  async function freezeRange(from: number, to: number) {
+    const src = projectStore.activeSource;
+    const fragment = src.slice(from, to);
+    if (!fragment.trim()) return;
+    try {
+      const snippet = await withFileDeps(src, fragment);
+      const frozen = await nemusMaterialize(snippet, projectStore.project?.path);
+      if (!frozen.trim()) { toastStore.show('Nothing to freeze in the selection', 'info'); return; }
+      editorComp?.applyIntentionEdits([{ from, to, insert: frozen }]);
+      toastStore.show('Frozen to notes', 'success');
+    } catch {
+      toastStore.show('Could not freeze the pattern', 'warning');
+    }
+  }
+
+  /** Palette/shortcut entry: freeze the current selection (resolved to a complete
+   *  pattern span, like Extract). */
+  export function startFreeze() {
+    const r = editorComp?.prepareExtract();
+    if (!r) { toastStore.show('Select a complete pattern to freeze', 'info'); return; }
+    void freezeRange(r.from, r.to);
   }
 
   /** Inline the let under the caret (Alt+Shift+N / Command Palette). */

@@ -44,7 +44,9 @@ use std::thread::JoinHandle;
 
 use tauri::{AppHandle, Manager, State};
 
-use arbor_nemus::prelude::{ControlMap, TempoMap, Tracks};
+use arbor_nemus::prelude::{
+    materialize_source, ControlMap, IslandKind, TempoMap, Time, TimeSpan, Tracks,
+};
 
 use crate::error::AppError;
 
@@ -519,6 +521,45 @@ pub async fn nemus_play_snippet(
     nemus.ensure_session(&app, &cfg);
     nemus.audition(&cfg, output.tracks, cps, cycles).await;
     Ok(())
+}
+
+/// **Freeze** a pattern: evaluate `source` (a self-contained snippet — the front
+/// end prepends the file's constants/imports) and materialize the first track's
+/// pattern over one cycle to canonical literal source (`n(c4 e4 g4)` / `s(bd sn)`),
+/// the unit the editor splices back in to replace a generative expression with the
+/// concrete notes it produces. Returns an empty string when the snippet doesn't
+/// evaluate or yields no onsets (the caller leaves the source untouched). Pure
+/// (no audio, no live state) — runs on the command thread.
+#[tauri::command]
+pub async fn nemus_materialize(
+    app: AppHandle,
+    source: String,
+    project_dir: Option<String>,
+) -> Result<String, AppError> {
+    let cfg = nemus_config();
+    let base = project_dir
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let output = match eval::evaluate_source(&app, &source, base, cfg.eval_config()) {
+        Ok(o) => o,
+        Err(_diags) => return Ok(String::new()), // bad snippet → no-op (lints live elsewhere)
+    };
+    let Some(track) = output.tracks.tracks.first() else {
+        return Ok(String::new());
+    };
+    // Freeze one cycle — the common case (euclid / random / chord generators are
+    // per-cycle). A multi-cycle pattern captures its first cycle.
+    let haps = track.pattern.query(TimeSpan::new(Time::int(0), Time::int(1)));
+    if haps.is_empty() {
+        return Ok(String::new());
+    }
+    // Note island when any onset carries a pitch; a sound island only when there
+    // are sounds and no notes; default to notes (covers scale-degree patterns).
+    let any_note = haps.iter().any(|h| h.value.note.is_some());
+    let any_sound = haps.iter().any(|h| h.value.sound.is_some());
+    let kind = if any_note || !any_sound { IslandKind::Note } else { IslandKind::Sound };
+    Ok(materialize_source(kind, &haps))
 }
 
 /// Stop an in-flight snippet preview early (clears the audition bus only). The song
