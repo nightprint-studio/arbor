@@ -104,6 +104,10 @@ pub enum Value {
     Arrangement(Pattern<ControlMap>, Vec<SectionSpan>, u32),
     /// One named channel (`track(name, pat)`).
     Track(Track<ControlMap>),
+    /// A launchable clip variation declared inside a `track(...)`
+    /// (`clip(scene_name, pat)`): the scene label it belongs to + its pattern. The
+    /// owning track pairs it with its own name when registering the scene.
+    Clip(String, Pattern<ControlMap>),
     /// The track list output (`tracks(...)`).
     Tracks(Tracks<ControlMap>),
     /// No meaningful value (a log statement, `cps(...)`).
@@ -127,6 +131,7 @@ impl Value {
             Value::TempoSeg { .. } => "tempo segment",
             Value::Arrangement(..) => "arrangement",
             Value::Track(_) => "track",
+            Value::Clip(..) => "clip",
             Value::Tracks(_) => "tracks",
             Value::Unit => "unit",
         }

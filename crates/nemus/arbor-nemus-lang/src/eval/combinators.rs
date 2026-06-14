@@ -32,7 +32,7 @@ pub fn is_combinator(name: &str) -> bool {
     combinator_names().iter().any(|n| *n == name)
         || generator_names().iter().any(|n| *n == name)
         || log_names().iter().any(|n| *n == name)
-        || matches!(name, "cps" | "tempo" | "scene")
+        || matches!(name, "cps" | "tempo")
 }
 
 /// A bare continuous signal source (`sine`, `saw`, …) — a unipolar `0..1`
@@ -92,18 +92,44 @@ pub fn eval_builtin_call(
             let pat = as_pattern(args.into_iter().nth(2).unwrap(), span)?;
             Ok(Value::Section(section(name, n.max(0) as u32, pat)))
         }
+        // `track(name, pattern, clip(...), …)` — one named channel, plus any number
+        // of trailing `clip(...)` launch variations. The clips register into their
+        // scene (keyed by clip name), each paired with this track's own name, so the
+        // clip launcher's rows are built from the tracks that own the clips.
         "track" => {
-            arity("track", &args, 2, span)?;
-            let name = as_str(&args[0], span)?;
-            // A track over an `arrange(...)` carries its section layout; over a
-            // plain pattern it has none.
-            let chan = match args.into_iter().nth(1).unwrap() {
+            if args.len() < 2 {
+                return Err(LangError::at(
+                    span,
+                    LangErrorKind::Arity { name: "track".to_string(), expected: 2, got: args.len() },
+                ));
+            }
+            let mut it = args.into_iter();
+            let name = as_str(&it.next().unwrap(), span)?;
+            // A track over an `arrange(...)` carries its section layout; over a plain
+            // pattern it has none.
+            let chan = match it.next().unwrap() {
                 Value::Arrangement(pat, sections, period) => {
-                    track_with_sections(name, pat, sections, period)
+                    track_with_sections(name.clone(), pat, sections, period)
                 }
-                other => track(name, as_pattern(other, span)?),
+                other => track(name.clone(), as_pattern(other, span)?),
             };
+            for v in it {
+                match v {
+                    Value::Clip(scene_name, pat) => {
+                        register_clip(ctx, &scene_name, track(name.clone(), pat));
+                    }
+                    other => return Err(type_err(span, "clip (clip(name, pattern))", &other)),
+                }
+            }
             Ok(Value::Track(chan))
+        }
+        // `clip(name, pattern)` — a launchable variation of the enclosing track for
+        // the scene `name`. Only meaningful as a trailing argument of `track(...)`.
+        "clip" => {
+            arity("clip", &args, 2, span)?;
+            let name = as_str(&args[0], span)?;
+            let pat = as_pattern(args.into_iter().nth(1).unwrap(), span)?;
+            Ok(Value::Clip(name, pat))
         }
         "tracks" => {
             let chans = flatten_varargs(args)
@@ -144,26 +170,6 @@ pub fn eval_builtin_call(
             *ctx.tempo.borrow_mut() = TempoMap::from_segments(&segs);
             Ok(Value::Unit)
         }
-        // `scene("name", track(...), …)` — register a launchable clip-launcher
-        // scene. The first arg is the label; the rest are `track(...)` clips that
-        // override the same-named base track when the scene is fired. Side-effecting
-        // like `cps`/`tempo`: it contributes no pattern to the linear output.
-        "scene" => {
-            if args.is_empty() {
-                return Err(LangError::at(
-                    span,
-                    LangErrorKind::Arity { name: "scene".to_string(), expected: 1, got: 0 },
-                ));
-            }
-            let mut it = args.into_iter();
-            let name = as_str(&it.next().unwrap(), span)?;
-            let clips = it
-                .map(|v| as_track(v, span))
-                .collect::<Result<Vec<Track<ControlMap>>>>()?;
-            ctx.scenes.borrow_mut().push(Scene { name, clips });
-            Ok(Value::Unit)
-        }
-
         "trace" => log_fn(ctx, LogLevel::Trace, args, span),
         "debug" => log_fn(ctx, LogLevel::Debug, args, span),
         "info" => log_fn(ctx, LogLevel::Info, args, span),
@@ -171,6 +177,18 @@ pub fn eval_builtin_call(
         "error" => log_fn(ctx, LogLevel::Error, args, span),
 
         _ => Err(LangError::at(span, LangErrorKind::UnknownName(name.to_string()))),
+    }
+}
+
+/// Append a clip to its scene (find-or-create by name), preserving first-seen
+/// scene order. The clip is a single-channel `Track` named after its owning track,
+/// so the launcher can substitute it into that track when the scene fires.
+fn register_clip(ctx: &Rc<Ctx>, scene_name: &str, clip: Track<ControlMap>) {
+    let mut scenes = ctx.scenes.borrow_mut();
+    if let Some(s) = scenes.iter_mut().find(|s| s.name == scene_name) {
+        s.clips.push(clip);
+    } else {
+        scenes.push(Scene { name: scene_name.to_string(), clips: vec![clip] });
     }
 }
 

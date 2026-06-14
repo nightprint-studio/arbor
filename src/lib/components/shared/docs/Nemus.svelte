@@ -28,7 +28,7 @@
   </div>
   <div class="feature-card">
     <div class="fc-title">Clip launcher</div>
-    <div class="fc-desc">A session grid for performing the song live, like Ableton's clip view. Declare <strong>scenes</strong> in the source — <code>scene("chorus", track("drums", s(bd bd sn bd)), track("bass", n(c2 ef2)))</code> — and each becomes a row of <em>clips</em>, one per named track (the columns). Click a clip to swap just that track to its variation — combine clips from different scenes this way to mix. Click the scene's launch button to fire the <strong>whole row as one picture</strong>: every track with a clip plays it, and every track <em>without</em> a clip in that row returns to base (an empty cell stops it). Each column header shows which scene that track is currently playing. Every change is <strong>quantized</strong>: a launched clip lights up at once and <em>pulses</em> until the next grid line — 1, 2 or 4 cycles, chosen in the panel header — where the audio actually swaps. Click an active clip (or <strong>Stop</strong>) to return a track to what the code plays. Clips are authored in code and target tracks <strong>by name</strong>, so the base must use <code>track("name", …)</code>; a clip pointing at a missing track is flagged and ignored. The launcher rides the running song: launch a clip from a stopped transport and the song <strong>starts</strong> with that clip; while it plays, fire more to reshape the arrangement live. It never plays a clip in isolation — the rest of the tracks keep playing what the code says.</div>
+    <div class="fc-desc">A session grid for performing the song live, like Ableton's clip view. Add <strong>clips</strong> to a track in the source — <code>track("drums", base, clip("chorus", s(bd bd sn bd)), clip("break", s(bd ~ ~ ~)))</code> — and each clip is a launchable variation of that track. The columns are the tracks; a <strong>scene</strong> is the row formed by every clip sharing a name. Click a clip to swap just that track to its variation — combine clips from different scenes this way to mix. Click the scene's launch button to fire the <strong>whole row as one picture</strong>: every track with a clip plays it, and every track <em>without</em> a clip in that row returns to base (an empty cell stops it). Each column header shows which scene that track is currently playing. Every change is <strong>quantized</strong>: a launched clip lights up at once and <em>pulses</em> until the next grid line — 1, 2 or 4 cycles, chosen in the panel header — where the audio actually swaps. Click an active clip (or <strong>Stop</strong>) to return a track to what the code plays. Clips are authored in code and target tracks <strong>by name</strong>, so the base must use <code>track("name", …)</code>; a clip pointing at a missing track is flagged and ignored. The launcher rides the running song: launch a clip from a stopped transport and the song <strong>starts</strong> with that clip; while it plays, fire more to reshape the arrangement live. It never plays a clip in isolation — the rest of the tracks keep playing what the code says.</div>
   </div>
   <div class="feature-card">
     <div class="fc-title">Mixer</div>
@@ -132,12 +132,16 @@ arrange(
   track("bass",  bassline(c2)),
   track("drums", arrange(cycles(4, ~), cycles(24, drumGroove), cycles(4, ~))),
 )</pre>
-<p>For live performance, <code>scene("name", track("track", pattern), …)</code> declares a launchable <strong>clip</strong> variation for one or more tracks. Scenes don't sound on their own — they feed the <strong>Clip launcher</strong> grid, where firing one swaps its clips into the same-named base tracks at the next cycle boundary. A clip targets a track <em>by name</em>, so the base must give that track a name.</p>
-<pre class="code-block">scene("chorus",
-  track("drums", s(bd bd sn bd)),
-  track("bass",  n(c2 c2 ef2 g2)),
-)
-scene("break", track("drums", s(bd ~ ~ ~)))</pre>
+<p>For live performance, add <code>clip("scene", pattern)</code> arguments to a track. Each is a launchable variation of <em>that</em> track for the <strong>Clip launcher</strong>; a <strong>scene</strong> is the row formed by every clip sharing a name across tracks. Firing a scene swaps its clips into their tracks at the next cycle boundary; tracks with no clip for that scene return to base.</p>
+<pre class="code-block">tracks(
+  track("drums", s(bd ~ sd ~),
+    clip("chorus", s(bd bd sn bd)),
+    clip("break",  s(bd ~ ~ ~)),
+  ),
+  track("bass", n(c2 g1),
+    clip("chorus", n(c2 c2 ef2 g2)),
+  ),
+)</pre>
 
 <h3>Generators &amp; signals</h3>
 <p>Where a value is needed you can compute one. <strong>Generators</strong> produce values: <code>rand(lo, hi)</code> is a per-event random in a range, <code>choose(a, b, c)</code> picks one. <strong>Signals</strong> (<code>sine</code>, <code>saw</code>, <code>isaw</code>, <code>tri</code>, <code>square</code>) are continuous 0..1 LFOs you rescale with <code>.range(lo, hi)</code> and reshape with <code>.fast</code> / <code>.slow</code>. Both are <strong>seeded by cycle</strong>, so they're identical every loop — the same bar always sounds the same.</p>

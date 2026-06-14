@@ -238,13 +238,23 @@ fn combinators() -> Vec<DslEntry> {
             "section(\"DROP\", 16, drop)",
         ),
         entry(
-            "track", DslKind::Combinator, "track(name, pat) -> track",
-            "One named mixer channel: a name plus its pattern. `arrange`/`cat`/`par` build the timeline inside it.",
+            "track", DslKind::Combinator, "track(name, pat, ...clips) -> track",
+            "One named mixer channel: a name plus its pattern. `arrange`/`cat`/`par` build the timeline inside it. Trailing `clip(name, pat)` arguments declare launchable variations of this track for the clip launcher (one per scene).",
             vec![
                 DslParam::req("name", "the channel/strip name (string)"),
                 DslParam::req("pat", "the pattern this track plays"),
+                DslParam::opt("clips", "zero or more `clip(scene, pattern)` launcher variations", "none"),
             ],
-            "track(\"bass\", bassline(c2))",
+            "track(\"bass\", bassline(c2), clip(\"break\", n(c2 ~ ~ ~)))",
+        ),
+        entry(
+            "clip", DslKind::Combinator, "clip(scene, pat) -> clip",
+            "A launchable variation of the enclosing track for the clip launcher, under the row labelled `scene`. Only valid as a trailing argument of `track(...)`. Firing that scene swaps this pattern into the track at the next cycle boundary; tracks with no clip for the scene return to base.",
+            vec![
+                DslParam::req("scene", "the scene/row label this clip belongs to (string)"),
+                DslParam::req("pat", "the pattern to play when the scene is launched"),
+            ],
+            "clip(\"chorus\", s(bd bd sn bd))",
         ),
         entry(
             "tracks", DslKind::Combinator, "tracks(...tracks | list) -> output",
@@ -453,15 +463,6 @@ fn keywords() -> Vec<DslEntry> {
             "A piecewise-constant tempo map: each `cycles(n, cps)` plays `n` cycles at that cps; the tempo steps on cycle boundaries and the map loops over the total. Wins over `cps(…)`.",
             vec![DslParam::req("segments", "one or more `cycles(n, cps)` tempo segments")],
             "tempo(cycles(8, 0.5), cycles(16, 0.6))",
-        ),
-        entry(
-            "scene", DslKind::Keyword, "scene(name, track(...), …)",
-            "Declare a launchable scene for the clip launcher: a bundle of per-track pattern variations. Each `track(name, pat)` clip overrides the same-named base track when the scene (or that single clip) is fired, quantized to the next cycle boundary. Targets a track by name; a clip with no matching base track is inert.",
-            vec![
-                DslParam::req("name", "the scene/row label (string), e.g. \"chorus\""),
-                DslParam::req("clips", "one or more `track(name, pattern)` clips to fire"),
-            ],
-            "scene(\"chorus\", track(\"drums\", s(bd bd sn bd)), track(\"bass\", n(c2 c2 ef2 g2)))",
         ),
     ]
 }
@@ -868,7 +869,7 @@ mod tests {
             .copied()
             .chain(generator_names().iter().copied())
             .chain(log_names().iter().copied())
-            .chain(["cps", "tempo", "scene"]) // builtin keywords (not free identifiers)
+            .chain(["cps", "tempo"]) // builtin keywords (not free identifiers)
             .collect();
         // `stack` is an alias of `par` and `tracks`/`track`/`section` are
         // constructors — all flow through is_combinator.
@@ -925,7 +926,7 @@ mod tests {
     ];
     const IMPLEMENTED_COMBINATORS: &[&str] = &[
         "par", "stack", "seq", "cat", "arrange", "cycles", "section", "track",
-        "tracks", "rand", "choose", "sample", "audio", "cps", "tempo", "scene",
+        "tracks", "clip", "rand", "choose", "sample", "audio", "cps", "tempo",
         "trace", "debug", "info", "warn", "error",
     ];
     const IMPLEMENTED_SIGNALS: &[&str] = &["sine", "saw", "isaw", "tri", "square"];

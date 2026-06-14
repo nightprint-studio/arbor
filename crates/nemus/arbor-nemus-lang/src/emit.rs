@@ -245,7 +245,10 @@ fn write_call(out: &mut String, name: &str, args: &[Expr], indent: usize) {
         out.push_str("()");
         return;
     }
-    if MULTILINE_CALLS.contains(&name) {
+    // `track(name, pat, clip(...), …)` reads best as a vertical list once it carries
+    // clips; a plain `track(name, pat)` stays inline.
+    let multiline = MULTILINE_CALLS.contains(&name) || (name == "track" && args.len() > 2);
+    if multiline {
         out.push_str("(\n");
         for arg in args {
             push_indent(out, indent + 1);

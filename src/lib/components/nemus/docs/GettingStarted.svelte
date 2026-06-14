@@ -16,19 +16,20 @@
   <li>Export when you're happy — audio (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd>) or a MIDI file.</li>
 </ol>
 
-<div class="callout">
-  <strong>Exporting.</strong> The export split-button (and the Command Palette) offers
-  a <strong>WAV / OGG audio</strong> bounce — the full rendered sound —
-  <strong>Export loop region…</strong>, which bounces just the span you set as the
-  loop region on the ruler, <strong>Export stems…</strong>, which writes one audio
-  file per track into a folder you pick (each track rendered in isolation, ready to
-  mix elsewhere), or <strong>Export MIDI…</strong>, which writes the arrangement's
-  note data to a <code>.mid</code> (one track per nemus track; pitched notes plus
-  recognised drum sounds as General-MIDI percussion) to take into any other DAW.
-  The MIDI export bakes the song's natural loop period, once. <strong>Edit export…</strong>
-  adds an optional <strong>Normalize</strong> to a target loudness (LUFS) for the audio
-  bounce, peak-limited so it never clips.
-</div>
+<h2>Exporting</h2>
+<p>
+  The export split-button in the title bar (and the Command Palette) writes your song to a
+  file. Click it to bounce straight away in the remembered format; its chevron opens the
+  full menu:
+</p>
+<ul>
+  <li><strong>Audio (WAV / OGG)</strong> — the full rendered mix.</li>
+  <li><strong>Export loop region…</strong> — bounces just the span you marked as the loop region on the ruler.</li>
+  <li><strong>Export stems…</strong> — one audio file per track into a folder you pick, each rendered in isolation (ready to mix elsewhere).</li>
+  <li><strong>Export MIDI…</strong> — the arrangement's note data to a <code>.mid</code> (one track per nemus track; pitched notes plus recognised drum sounds as General-MIDI percussion) for any other DAW. It bakes the song's natural loop period, once.</li>
+  <li><strong>Edit export…</strong> — the options dialog: format, sample rate / bit depth / reverb tail, how many times the loop repeats, and an optional <strong>Normalize</strong> to a target loudness (LUFS), peak-limited so it never clips.</li>
+</ul>
+<p>See <em>Mixer &amp; render</em> for the full render options.</p>
 
 <h2>A first file</h2>
 <pre><code>cps(0.5)
