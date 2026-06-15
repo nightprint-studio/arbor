@@ -2,16 +2,19 @@
   /** Files panel — the open project's `.nemus` files, grouped by folder. Click
    *  opens the file as an editor tab; the New button scaffolds a starter file.
    *  Driven by the real `projectStore` (path-keyed). */
-  import { FileMusic, BookLock, FolderOpen, Plus, Folder } from 'lucide-svelte';
+  import { FileMusic, BookLock, FolderOpen, Plus, Folder, FilePen, Trash2, MoreHorizontal } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import Badge from '$lib/components/shared/ui/Badge.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import ContextMenu, { type MenuItem, type MenuAction } from '$lib/components/shared/ContextMenu.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+  import { nemusStore } from '../nemus-store.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { fileMetaStore, type NemusFileMeta } from '../stores/file-meta.svelte';
+  import { fsRevealInDir } from '$lib/ipc/fs';
   import type { NemusProjectFile } from '$lib/ipc/nemus';
 
   const files = $derived(projectStore.files);
@@ -42,6 +45,31 @@
     if (path) fileMetaStore.refresh(path, projectStore.activeSource);
   });
 
+  // ── Per-file context menu (right-click / hover ⋯) → rename / delete / reveal ──
+  // The rename + delete modals are hosted once in NemusShell (shared with the
+  // command palette); here we only open them via the store.
+  let menu = $state<{ x: number; y: number; file: NemusProjectFile } | null>(null);
+
+  const menuActions: MenuAction[] = [
+    { id: 'rename', label: 'Rename', icon: FilePen },
+    { id: 'delete', label: 'Delete', icon: Trash2, danger: true },
+  ];
+  const menuItems: MenuItem[] = [
+    { id: 'reveal', label: 'Reveal in File Explorer', icon: FolderOpen },
+  ];
+
+  function openMenu(e: MouseEvent, file: NemusProjectFile) {
+    menu = { x: e.clientX, y: e.clientY, file };
+  }
+  function onMenuSelect(id: string) {
+    const file = menu?.file;
+    menu = null;
+    if (!file) return;
+    if (id === 'rename') nemusStore.openRenameFile(file.path);
+    else if (id === 'delete') nemusStore.openDeleteFile(file.path);
+    else if (id === 'reveal') void fsRevealInDir(file.path).catch(() => {});
+  }
+
   function fmtBytes(n: number): string {
     if (n < 1024) return `${n} B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
@@ -59,7 +87,11 @@
 {#snippet fileRow(f: NemusProjectFile)}
   {@const active = projectStore.activeFilePath === f.path}
   {@const meta = fileMetaStore.get(f.path)}
-  <SidebarItem selected={active} onclick={() => projectStore.openFile(f.path)}>
+  <SidebarItem
+    selected={active}
+    onclick={() => projectStore.openFile(f.path)}
+    oncontextmenu={(e) => openMenu(e, f)}
+  >
     {#snippet icon()}
       {#if f.library}<BookLock size={13} />{:else}<FileMusic size={13} />{/if}
     {/snippet}
@@ -75,13 +107,16 @@
       {#if active}<span class="active-dot" use:tooltip={'Open in the editor'}></span>{/if}
       {#if f.library}<span use:tooltip={'Library — its tracks() output is ignored'}><Badge variant="tone" tone="neutral" size="sm" label="lib" /></span>{/if}
     {/snippet}
+    {#snippet actions()}
+      <button onclick={(e) => { e.stopPropagation(); openMenu(e, f); }} use:tooltip={'File actions'} aria-label="File actions"><MoreHorizontal size={14} /></button>
+    {/snippet}
   </SidebarItem>
 {/snippet}
 
 <PanelShell title="Files" count={files.length}>
   {#snippet icon()}<FolderOpen size={13} />{/snippet}
   {#snippet actions()}
-    <button class="ps-btn ps-btn-accent" onclick={() => projectActions.newFile()} use:tooltip={'New .nemus (Ctrl+N)'} aria-label="New file"><Plus size={14} /></button>
+    <button class="ps-btn ps-btn-accent" onclick={() => projectActions.newFile()} use:tooltip={{ content: 'New .nemus', shortcut: 'Ctrl+N' }} aria-label="New file"><Plus size={14} /></button>
   {/snippet}
 
   {#if files.length === 0}
@@ -104,6 +139,16 @@
     </div>
   {/if}
 </PanelShell>
+
+{#if menu}
+  <ContextMenu
+    x={menu.x} y={menu.y}
+    actions={menuActions}
+    items={menuItems}
+    onSelect={onMenuSelect}
+    onClose={() => (menu = null)}
+  />
+{/if}
 
 <style>
   .files { padding: 4px 0; }

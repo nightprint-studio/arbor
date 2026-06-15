@@ -7,7 +7,7 @@
 //! vs. sustained playback.
 
 use crate::combinators::compose::pure;
-use crate::control::{ControlMap, SourceKind};
+use crate::control::{ControlMap, SourceKind, SpeechSpec};
 use crate::pattern::Pattern;
 
 /// Build a file-source marker carrying its playback kind.
@@ -26,6 +26,16 @@ pub fn sample(path: impl Into<String>) -> Pattern<ControlMap> {
 /// plays it sustained from the start of the track.
 pub fn audio(path: impl Into<String>) -> Pattern<ControlMap> {
     file_source(path, SourceKind::Sustained)
+}
+
+/// A spoken-word source (`speech("hello")`): a hap carrying a [`SpeechSpec`]
+/// marker each cycle. The shell synthesizes it offline into a one-shot sample;
+/// builder methods (`.engine`/`.pitch`/`.rate`/`.mouth`/`.throat`/`.voice`/
+/// `.lang`) refine the request before it is rendered.
+pub fn speech(text: impl Into<String>) -> Pattern<ControlMap> {
+    let mut c = ControlMap::default();
+    c.speech = Some(SpeechSpec::new(text));
+    pure(c)
 }
 
 #[cfg(test)]

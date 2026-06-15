@@ -20,10 +20,10 @@ pub use crate::error::{NemusError, Result};
 pub use arbor_nemus_pattern::prelude::{
     arrange, audio, cat, choose, cycles, euclid_with, fast_with, fastcat, isaw, mode_table, par,
     parse_note, polymeter, pure, rand, sample, saw, section, section_layout, seq, silence, sine,
-    slow_with, slowcat, square, stack, time_to_index, time_to_rand, timecat, track,
+    slow_with, slowcat, speech, square, stack, time_to_index, time_to_rand, timecat, track,
     track_with_sections, tracks, tri, ControlMap, Hap, HoldSpec, Param, Pattern, PatternError,
-    Scale, ScaleMode, Section, SectionSpan, SourceKind, SourceSpan, TempoMap, Time, TimeSpan,
-    Track, Tracks, MIDDLE_C,
+    Scale, ScaleMode, Section, SectionSpan, SourceKind, SourceSpan, SpeechEngine, SpeechSpec,
+    TempoMap, Time, TimeSpan, Track, Tracks, MIDDLE_C,
 };
 
 // ── arbor-nemus-lang — text ↔ Pattern ────────────────────────────────────────
@@ -44,12 +44,13 @@ pub use arbor_nemus_lang::prelude::{
 // offline/test recorder. `SourceKind` listed above (identical); `Result` omitted;
 // `AudioError` kept by name.
 pub use arbor_nemus_audio::prelude::{
-    list_manifest_instruments, list_output_devices, open_output_stream, AudioCommand, AudioDevice,
-    AudioError, AudioSink, CompSettings, DecodedAudio, DelayConfig, EqBand, EqBandKind, Frame,
-    InstrumentInfo, InstrumentKind, MeterSnapshot, MeterTap, OutputStream, Registry, Renderer,
-    ReverbIr, StreamSink, SynthPreset, TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource,
-    Waveform, RecordingSink, DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE, DEFAULT_VOICE_CAPACITY,
-    MAX_METER_TRACKS,
+    list_manifest_instruments, list_output_devices, open_output_stream, synthesize_speech,
+    synthesize_speech_spec,
+    AudioCommand, AudioDevice, AudioError, AudioSink, CompSettings, DecodedAudio, DelayConfig,
+    EqBand, EqBandKind, Frame, InstrumentInfo, InstrumentKind, MeterSnapshot, MeterTap, OutputStream,
+    Registry, Renderer, ReverbIr, SpeechEngineKind, SpeechParams, StreamSink, SynthPreset,
+    TrackConfig, VoiceEvent, VoiceId, VoiceParams, VoiceSource, Waveform, RecordingSink,
+    DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE, DEFAULT_VOICE_CAPACITY, MAX_METER_TRACKS,
 };
 
 // ── arbor-nemus-engine — the timing runtime ──────────────────────────────────

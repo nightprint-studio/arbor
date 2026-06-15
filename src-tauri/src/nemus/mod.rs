@@ -35,6 +35,7 @@ pub mod scales;
 pub mod scenes;
 mod sound_catalog;
 pub mod sounds;
+mod speech;
 pub mod state;
 mod validate;
 
@@ -157,7 +158,11 @@ impl NemusState {
         };
 
         // Does this arrangement pull in a voice the live registry doesn't have yet?
-        let referenced = validate::referenced_instruments(&tracks);
+        // Speech sources count too: their content-addressed keys join the set so a
+        // new `speech(...)` triggers a rebuild (which synthesizes + registers it).
+        let speech_specs = validate::referenced_speech(&tracks);
+        let mut referenced = validate::referenced_instruments(&tracks);
+        referenced.extend(speech_specs.iter().map(|s| s.registry_key()));
         let target: Option<HashSet<String>> = {
             let have = loaded.lock().unwrap_or_else(|e| e.into_inner());
             if referenced.is_subset(&have) {
@@ -174,8 +179,9 @@ impl NemusState {
             Some(names) => {
                 let cfg2 = cfg.clone();
                 let names2 = names.clone();
+                let specs2 = speech_specs.clone();
                 match tauri::async_runtime::spawn_blocking(move || {
-                    audio_thread::build_registry(&cfg2, &names2)
+                    audio_thread::build_registry(&cfg2, &names2, &specs2)
                 })
                 .await
                 {
@@ -207,7 +213,10 @@ impl NemusState {
         };
 
         // Decode any referenced instrument off-thread when the live registry lacks it.
-        let referenced = validate::referenced_instruments(&tracks);
+        // Speech sources join the set the same way as in `stage_tracks`.
+        let speech_specs = validate::referenced_speech(&tracks);
+        let mut referenced = validate::referenced_instruments(&tracks);
+        referenced.extend(speech_specs.iter().map(|s| s.registry_key()));
         let target: Option<HashSet<String>> = {
             let have = loaded.lock().unwrap_or_else(|e| e.into_inner());
             if referenced.is_subset(&have) {
@@ -220,8 +229,9 @@ impl NemusState {
             Some(names) => {
                 let cfg2 = cfg.clone();
                 let names2 = names.clone();
+                let specs2 = speech_specs.clone();
                 match tauri::async_runtime::spawn_blocking(move || {
-                    audio_thread::build_registry(&cfg2, &names2)
+                    audio_thread::build_registry(&cfg2, &names2, &specs2)
                 })
                 .await
                 {
@@ -304,7 +314,10 @@ pub async fn nemus_eval(
             // editor errors (the renderer would silently fall back to the synth).
             // Done before the arrangement is moved to the live session below.
             let known = validate::known_instruments(&cfg);
-            let errors = validate::validate_instruments(&output.tracks, &known);
+            let mut errors = validate::validate_instruments(&output.tracks, &known);
+            // Also flag speech controls (`.pitch`/`.rate`/…) chained onto a
+            // non-speech source — a silent no-op, so a warning, not an error.
+            errors.extend(validate::lint_speech_knobs(&source));
             let diagnostics = NemusDiagnostics { errors };
             // Publish diagnostics to the editor *before* the (possibly slow) sample
             // staging below. Decoding newly-referenced sample voices can take a

@@ -107,8 +107,11 @@ export const fsShowProperties = (path: string) => invoke<void>('fs_show_properti
  *  path — `.exe` yields its embedded icon), as a `data:image/png;base64,…` URI. */
 export const fsIcon = (query: string, size: number) => invoke<string>('fs_icon', { query, size });
 /** Start watching `path` for changes (replaces any prior watch). Emits the
- *  `arbor://fs-changed` Tauri event on any change in the directory. */
-export const fsWatchStart  = (path: string) => invoke<void>('fs_watch_start', { path });
+ *  `arbor://fs-changed` Tauri event on any change in the directory. Pass
+ *  `recursive = true` to also catch changes in sub-folders (e.g. a project tree);
+ *  the flat explorer leaves it false. */
+export const fsWatchStart  = (path: string, recursive = false) =>
+  invoke<void>('fs_watch_start', { path, recursive });
 /** Stop the active filesystem watch. */
 export const fsWatchStop   = () => invoke<void>('fs_watch_stop');
 /** Subscribe to this window's `arbor://fs-changed` signal (fired when the watched

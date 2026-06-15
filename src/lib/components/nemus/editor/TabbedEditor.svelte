@@ -460,7 +460,7 @@
         {/each}
       </div>
       <div class="ed-actions">
-        <button class="ed-tool" use:tooltip={'Go to line (Ctrl+G)'} aria-label="Go to line" onclick={openGoto}><Hash size={13} /></button>
+        <button class="ed-tool" use:tooltip={{ content: 'Go to line', shortcut: 'Ctrl+G' }} aria-label="Go to line" onclick={openGoto}><Hash size={13} /></button>
         <button class="ed-tool" use:tooltip={copied ? 'Copied!' : 'Copy source'} aria-label="Copy source" onclick={copySource}><Copy size={13} /></button>
       </div>
     </div>

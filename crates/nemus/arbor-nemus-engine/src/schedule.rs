@@ -306,9 +306,19 @@ fn comp_to_audio(c: &CompSpec) -> CompSettings {
     }
 }
 
-/// Resolve the symbolic source: a user file marker wins over a named sound/inst.
+/// Resolve the symbolic source. A `speech(...)` request wins (the shell renders
+/// it offline into a one-shot sample registered under its content-addressed
+/// key, so here it resolves like any named sound); then a user file marker; then
+/// a named sound/inst.
 fn resolve_source(v: &ControlMap) -> VoiceSource {
-    if let Some(path) = &v.source_file {
+    if let Some(spec) = &v.speech {
+        VoiceSource::Named {
+            sound: Some(spec.registry_key()),
+            variant: None,
+            inst: None,
+            art: None,
+        }
+    } else if let Some(path) = &v.source_file {
         VoiceSource::File {
             path: path.clone(),
             kind: v.source_kind.unwrap_or(SourceKind::OneShot),

@@ -35,6 +35,16 @@ drums = "github:owner/repo@v1"</code></pre>
   <li><strong>Outline</strong> mirrors the active file's tracks, functions and constants — click a symbol to jump, <kbd>Ctrl</kbd> + click a name in the editor to follow it (cross-file too).</li>
 </ul>
 
+<h2>Workspaces</h2>
+<p>
+  Group related projects into named, colour-coded <strong>workspaces</strong> — switch between
+  them from the project dropdown in the title bar, or manage them with <strong>Manage
+  workspaces…</strong> (the dropdown or the Command Palette). When a workspace is active, the
+  dropdown lists its member projects for one-click swapping; with none active it falls back to
+  your recents. Add the open project to a workspace from the manage dialog. Workspaces are saved
+  with the rest of the nemus window state.
+</p>
+
 <h2>Picking up where you left off</h2>
 <p>
   Your open tabs are remembered <strong>per project</strong> (in the project's <code>.nemus/</code>

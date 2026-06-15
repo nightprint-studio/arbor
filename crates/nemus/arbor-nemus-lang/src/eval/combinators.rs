@@ -3,8 +3,8 @@
 
 use arbor_nemus_pattern::prelude::{
     arrange, audio, cat, choose, cycles, isaw, rand, sample, saw, section, section_layout, seq,
-    sine, square, stack, time_to_index, track, track_with_sections, tracks, tri, ControlMap, Hap,
-    Pattern, Section, SourceSpan, TempoMap, TimeSpan, Track,
+    sine, speech, square, stack, time_to_index, track, track_with_sections, tracks, tri, ControlMap,
+    Hap, Pattern, Section, SourceSpan, TempoMap, TimeSpan, Track,
 };
 
 use crate::convert::{as_int, as_number, as_pattern, as_str};
@@ -153,6 +153,10 @@ pub fn eval_builtin_call(
         "audio" => {
             arity("audio", &args, 1, span)?;
             Ok(Value::Pattern(audio(as_str(&args[0], span)?)))
+        }
+        "speech" => {
+            arity("speech", &args, 1, span)?;
+            Ok(Value::Pattern(speech(as_str(&args[0], span)?)))
         }
 
         "cps" => {

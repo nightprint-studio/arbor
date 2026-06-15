@@ -16,7 +16,7 @@
    *
    * Imports only shared/ui (+ the tooltip action) + nemus-local.
    */
-  import { Music4, Waves, Piano, Download, Check, RefreshCw, Boxes, HardDrive, Trash2, Star, Clock } from 'lucide-svelte';
+  import { Music4, Waves, Piano, Download, Check, RefreshCw, Boxes, HardDrive, Trash2, Star, Clock, Link2, Plus, ArrowRight } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
@@ -31,6 +31,7 @@
   import { soundsStore } from '../stores/sounds.svelte';
   import { packsStore } from '../stores/packs.svelte';
   import { workspaceStore } from '../stores/workspace.svelte';
+  import { aliasesStore } from '../stores/aliases.svelte';
   import type { NemusInstrument, NemusPack } from '$lib/ipc/nemus';
 
   let query = $state('');
@@ -52,6 +53,28 @@
   ));
   let openFav    = $state(true);
   let openRecent = $state(true);
+
+  // ── Aliases: global `name → target` renames (e.g. kick → RolandTR808_bd) ──────
+  // Driven by the alias store; loaded by NemusShell. The engine resolves them on
+  // the next eval/run, so editing here + Run is enough.
+  let openAliases   = $state(false);
+  let newAliasName   = $state('');
+  let newAliasTarget = $state('');
+  const aliasRows = $derived(
+    q ? aliasesStore.entries.filter((a) => a.name.toLowerCase().includes(q) || a.target.toLowerCase().includes(q))
+      : aliasesStore.entries,
+  );
+  function addAlias() {
+    const name = newAliasName.trim();
+    const target = newAliasTarget.trim();
+    if (!name || !target) return;
+    aliasesStore.set(name, target);
+    newAliasName = '';
+    newAliasTarget = '';
+  }
+  function onNewAliasKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') { e.preventDefault(); addAlias(); }
+  }
 
   // Samplers grouped by their origin pack (Dirt-Samples, drum machines, …) so the
   // bank isn't one flat list of hundreds of voices. Ordered to match the pack
@@ -217,6 +240,32 @@
                    placeholder="Filter voices…" ariaLabel="Filter instruments" />
       </div>
 
+      <SidebarSection label="Aliases" expanded={openAliases || (!!q && aliasRows.length > 0)} onToggle={() => openAliases = !openAliases} badge={aliasesStore.count}>
+        {#snippet icon()}<Link2 size={13} />{/snippet}
+        <div class="aliases">
+          <p class="alias-hint">Your own names for any voice, usable in <code>s(…)</code> / <code>inst(…)</code>. Global; applies on the next run.</p>
+          {#each aliasRows as a (a.name)}
+            <div class="alias-row">
+              <input class="alias-in name" value={a.name} aria-label="Alias name"
+                     onchange={(e) => aliasesStore.rename(a.name, e.currentTarget.value)} />
+              <ArrowRight size={12} class="alias-arrow" />
+              <input class="alias-in target" value={a.target} aria-label="Alias target" list="alias-targets"
+                     onchange={(e) => aliasesStore.set(a.name, e.currentTarget.value)} />
+              <button class="alias-del" use:tooltip={'Remove alias'} aria-label="Remove alias" onclick={() => aliasesStore.remove(a.name)}><Trash2 size={12} /></button>
+            </div>
+          {/each}
+          <div class="alias-row add">
+            <input class="alias-in name" bind:value={newAliasName} placeholder="alias" aria-label="New alias name" onkeydown={onNewAliasKeydown} />
+            <ArrowRight size={12} class="alias-arrow" />
+            <input class="alias-in target" bind:value={newAliasTarget} placeholder="target voice" aria-label="New alias target" list="alias-targets" onkeydown={onNewAliasKeydown} />
+            <button class="alias-add" use:tooltip={'Add alias'} aria-label="Add alias" disabled={!newAliasName.trim() || !newAliasTarget.trim()} onclick={addAlias}><Plus size={13} /></button>
+          </div>
+        </div>
+        <datalist id="alias-targets">
+          {#each soundsStore.instruments as inst (inst.name)}<option value={inst.name}></option>{/each}
+        </datalist>
+      </SidebarSection>
+
       {#if favorites.length}
         <SidebarSection label="Favourites" expanded={openFav} onToggle={() => openFav = !openFav} badge={favorites.length}>
           {#snippet icon()}<Star size={13} />{/snippet}
@@ -281,6 +330,32 @@
 <style>
   .bank { padding: 4px 0; }
   .bank-filter { padding: 2px 10px 6px; }
+
+  /* Aliases editor */
+  .aliases { display: flex; flex-direction: column; gap: 5px; padding: 4px 10px 8px; }
+  .alias-hint { margin: 0 0 2px; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+  .alias-hint code { font-family: var(--font-code); font-size: 10.5px; }
+  .alias-row { display: flex; align-items: center; gap: 5px; }
+  .alias-row :global(.alias-arrow) { color: var(--text-disabled); flex-shrink: 0; }
+  .alias-in {
+    flex: 1; min-width: 0;
+    height: 24px; padding: 0 7px;
+    background: var(--bg-input); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); color: var(--text-primary);
+    font-family: var(--font-code); font-size: 11.5px;
+  }
+  .alias-in::placeholder { color: var(--text-disabled); }
+  .alias-in:focus { outline: none; border-color: var(--border-focus); }
+  .alias-del, .alias-add {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; flex-shrink: 0;
+    background: transparent; border: none; border-radius: var(--radius-sm);
+    color: var(--text-muted); cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .alias-del:hover { background: var(--error-subtle); color: var(--error); }
+  .alias-add:hover:not(:disabled) { background: var(--accent-subtle); color: var(--accent); }
+  .alias-add:disabled { opacity: 0.45; cursor: default; }
 
   .loading { padding: 24px 12px; }
 

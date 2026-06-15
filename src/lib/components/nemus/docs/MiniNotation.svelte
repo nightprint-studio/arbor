@@ -1,3 +1,7 @@
+<script lang="ts">
+  import NemusCode from '../editor/NemusCode.svelte';
+</script>
+
 <h1>Mini-notation</h1>
 <p class="doc-lead">
   Inside an island — <code>s(…)</code> for samples, <code>n(…)</code> for pitches — space
@@ -6,14 +10,14 @@
 </p>
 
 <h2>Sequences &amp; rests</h2>
-<pre><code>s(bd hh sd hh)     // four even slots
+<NemusCode code={`s(bd hh sd hh)     // four even slots
 s(bd ~ sd ~)       // ~ is a silent slot
-n(c4 e4 _ g4)      // _ extends the previous note into the next slot</code></pre>
+n(c4 e4 _ g4)      // _ extends the previous note into the next slot`} />
 
 <h2>Grouping &amp; alternation</h2>
-<pre><code>s(bd [hh hh] sd)   // [..] packs several events into one slot
-s(bd &lt;sd cp&gt;)      // &lt;..&gt; plays one element per cycle (alternates)
-s(&lbrace;bd sd, hh hh hh&rbrace;%4)  // &lbrace;..&rbrace;%n polymeter: lanes step at n slots/cycle</code></pre>
+<NemusCode code={`s(bd [hh hh] sd)   // [..] packs several events into one slot
+s(bd <sd cp>)      // <..> plays one element per cycle (alternates)
+s({bd sd, hh hh hh}%4)  // {..}%n polymeter: lanes step at n slots/cycle`} />
 
 <h2>Postfixes</h2>
 <table>
@@ -41,5 +45,5 @@ s(&lbrace;bd sd, hh hh hh&rbrace;%4)  // &lbrace;..&rbrace;%n polymeter: lanes s
 </div>
 
 <h2>Splicing host values</h2>
-<pre><code>let riff = n(c4 e4 g4)
-n($riff $riff a4)   // $name splices a bound pattern as a leaf</code></pre>
+<NemusCode code={`let riff = n(c4 e4 g4)
+n($riff $riff a4)   // $name splices a bound pattern as a leaf`} />

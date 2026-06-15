@@ -10,7 +10,9 @@
 //! [`Pattern`] and need no import — they are available wherever `Pattern` is.
 
 // ── Core types ──────────────────────────────────────────────────────────────
-pub use crate::control::{CompSpec, ControlMap, EqBandSpec, EqShape, HoldSpec, SourceKind};
+pub use crate::control::{
+    CompSpec, ControlMap, EqBandSpec, EqShape, HoldSpec, SourceKind, SpeechEngine, SpeechSpec,
+};
 pub use crate::error::{PatternError, Result};
 pub use crate::hap::Hap;
 pub use crate::pattern::Pattern;
@@ -36,8 +38,8 @@ pub use crate::combinators::signal::{isaw, saw, sine, square, tri};
 pub use crate::combinators::generative::{choose, rand};
 pub use crate::combinators::voice::Param;
 
-// ── Combinators: file sources ────────────────────────────────────────────────
-pub use crate::combinators::source::{audio, sample};
+// ── Combinators: file + speech sources ───────────────────────────────────────
+pub use crate::combinators::source::{audio, sample, speech};
 
 // ── RNG (for engine/consumers needing the same deterministic stream) ─────────
 pub use crate::rng::{time_to_index, time_to_rand};

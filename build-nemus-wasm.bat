@@ -12,7 +12,8 @@ rem  Prerequisites:
 rem    - tree-sitter CLI on PATH                 (tree-sitter --version)
 rem    - Emscripten (emcc) on PATH OR Docker Desktop running
 rem    - "yarn install" already run              (provides the runtime core)
-rem  Re-run after changing grammar.js / scanner.c (after tree-sitter generate).
+rem  Re-run after changing grammar.js / scanner.c — it regenerates the parser
+rem  (tree-sitter generate) and then rebuilds the wasm.
 rem ===========================================================================
 
 set "ROOT=%~dp0"
@@ -27,9 +28,20 @@ echo Root: %ROOT%
 
 if not exist "%DEST%" mkdir "%DEST%"
 
-rem --- 1) compile the grammar -> tree-sitter-nemus.wasm -----------------------
+rem --- 1) regenerate the parser from grammar.js ------------------------------
+rem  Picks up grammar.js / scanner.c changes (parser.c + the external-scanner
+rem  wiring) so the wasm + the Rust build compile the current grammar.
 echo.
-echo [1/2] Building grammar wasm (Docker/Emscripten)...
+echo [1/3] Generating parser (tree-sitter generate)...
+pushd "%CRATE%"
+tree-sitter generate
+set "RC=%ERRORLEVEL%"
+popd
+if not "%RC%"=="0" goto :generate_failed
+
+rem --- 2) compile the grammar -> tree-sitter-nemus.wasm -----------------------
+echo.
+echo [2/3] Building grammar wasm (Docker/Emscripten)...
 pushd "%CRATE%"
 tree-sitter build --wasm
 set "RC=%ERRORLEVEL%"
@@ -40,9 +52,9 @@ move /Y "%CRATE%\tree-sitter-nemus.wasm" "%DEST%\tree-sitter-nemus.wasm" >nul
 if errorlevel 1 goto :build_failed
 echo       OK -^> static\nemus\tree-sitter-nemus.wasm
 
-rem --- 2) copy the web-tree-sitter runtime core ------------------------------
+rem --- 3) copy the web-tree-sitter runtime core ------------------------------
 echo.
-echo [2/2] Copying runtime core...
+echo [3/3] Copying runtime core...
 if not exist "%CORE%" goto :no_core
 copy /Y "%CORE%" "%DEST%\tree-sitter.wasm" >nul
 if errorlevel 1 goto :copy_failed
@@ -63,6 +75,14 @@ echo === Done. static\nemus\ now contains: ===
 dir /b "%DEST%\*.wasm"
 echo.
 echo Reload the nemus window (Ctrl+R) to pick up the new wasm.
+goto :end
+
+:generate_failed
+echo.
+echo ERROR: tree-sitter generate failed (exit %RC%).
+echo   - Is the tree-sitter CLI on PATH?         tree-sitter --version
+echo   - Does crates\nemus\arbor-nemus-lang\grammar.js parse?
+echo   - Does crates\nemus\arbor-nemus-lang\tree-sitter.json exist?
 goto :end
 
 :build_failed

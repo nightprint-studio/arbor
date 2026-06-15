@@ -95,6 +95,98 @@ pub struct CompSpec {
     pub knee_db: f64,
 }
 
+/// Which speech engine renders a [`SpeechSpec`]. Pure marker here — the audio
+/// crate maps it to a concrete synthesizer (Fase 2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SpeechEngine {
+    /// Software Automatic Mouth — a retro "electronic" formant voice.
+    #[default]
+    Sam,
+    /// The host operating system's text-to-speech (WinRT / AVSpeech / …).
+    System,
+}
+
+impl SpeechEngine {
+    /// Stable lowercase tag (used in the registry key + DSL `.engine(...)`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpeechEngine::Sam => "sam",
+            SpeechEngine::System => "system",
+        }
+    }
+}
+
+/// A spoken-word source request, authored with `speech("…")` and its builder
+/// chain. **Pure data** here (this crate is audio-free): the shell synthesizes it
+/// offline into a one-shot sample and the audio engine plays it. SAM knobs
+/// (`pitch`/`rate`/`mouth`/`throat`) default to the original SAM values; `voice`/
+/// `lang` only matter for [`SpeechEngine::System`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpeechSpec {
+    /// The text to speak (or a phoneme string when `phonetic`).
+    pub text: String,
+    /// Which engine renders it.
+    pub engine: SpeechEngine,
+    /// SAM pitch (0–255, default 64).
+    pub pitch: u8,
+    /// SAM utterance rate (0–255, default 72) — the DSL's `.rate()`.
+    pub rate: u8,
+    /// SAM mouth (F1) openness (0–255, default 128).
+    pub mouth: u8,
+    /// SAM throat (F2) openness (0–255, default 128).
+    pub throat: u8,
+    /// System-engine voice name (ignored by SAM).
+    pub voice: Option<String>,
+    /// System-engine BCP-47 language tag (ignored by SAM).
+    pub lang: Option<String>,
+    /// SAM "sing" mode: hold a monotone instead of the speech contour.
+    pub singmode: bool,
+    /// Treat `text` as a raw phoneme string instead of natural-language text.
+    pub phonetic: bool,
+}
+
+impl SpeechSpec {
+    /// A new request for `text` with the engine + SAM defaults.
+    pub fn new(text: impl Into<String>) -> Self {
+        SpeechSpec {
+            text: text.into(),
+            engine: SpeechEngine::Sam,
+            pitch: 64,
+            rate: 72,
+            mouth: 128,
+            throat: 128,
+            voice: None,
+            lang: None,
+            singmode: false,
+            phonetic: false,
+        }
+    }
+
+    /// A deterministic, content-addressed registry name (`"speech:<hash>"`) for
+    /// the rendered buffer. The shell registers the synthesized sample under this
+    /// name and the engine resolves the source to it — both compute the same key,
+    /// so identical requests share one decoded buffer. A stable FNV-1a hash (not
+    /// `DefaultHasher`) so the key is reproducible across runs and machines.
+    pub fn registry_key(&self) -> String {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis
+        let mut feed = |bytes: &[u8]| {
+            for &b in bytes {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x0000_0100_0000_01b3); // FNV prime
+            }
+        };
+        feed(self.engine.as_str().as_bytes());
+        feed(&[self.pitch, self.rate, self.mouth, self.throat]);
+        feed(&[self.singmode as u8, self.phonetic as u8]);
+        feed(self.voice.as_deref().unwrap_or("").as_bytes());
+        feed(&[0]);
+        feed(self.lang.as_deref().unwrap_or("").as_bytes());
+        feed(&[0]);
+        feed(self.text.as_bytes());
+        format!("speech:{h:016x}")
+    }
+}
+
 /// A typed bag of controls describing a single event.
 ///
 /// Every field is `Option` — unset means "inherit / engine default". Build with
@@ -116,6 +208,9 @@ pub struct ControlMap {
     /// Playback kind of `source_file` — one-shot vs sustained. Only meaningful
     /// alongside `source_file`; realised by the audio engine.
     pub source_kind: Option<SourceKind>,
+    /// A spoken-word source request (`speech("…")`). Synthesized offline by the
+    /// shell into a one-shot sample and played through the normal sample path.
+    pub speech: Option<SpeechSpec>,
 
     // ── Controls ────────────────────────────────────────────────────────────
     /// Amplitude, multiplicative (default `1`).
@@ -218,6 +313,7 @@ impl ControlMap {
             degree: other.degree.or(self.degree),
             source_file: other.source_file.or(self.source_file),
             source_kind: other.source_kind.or(self.source_kind),
+            speech: other.speech.or(self.speech),
             gain: combine_gain(self.gain, other.gain),
             pan: other.pan.or(self.pan),
             room: other.room.or(self.room),

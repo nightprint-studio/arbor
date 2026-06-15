@@ -58,6 +58,10 @@ export const NEMUS_BINDINGS: NemusBinding[] = [
   { id: 'toggle_launcher', key: 'g', ctrl: true, shift: true, scope: 'global', description: 'Toggle the Clip launcher (session grid)' },
   { id: 'seek_to_start',  key: '[', ctrl: true, shift: true, scope: 'global', description: 'Skip to start (cycle 0)' },
   { id: 'seek_to_end',    key: ']', ctrl: true, shift: true, scope: 'global', description: 'Skip to end of arrangement' },
+  // Step back / forward by the configurable skip distance (Settings → default 1 bar).
+  // `Ctrl+[` / `Ctrl+]` (matched on physical BracketLeft/Right, layout-tolerant).
+  { id: 'step_back', key: '[', ctrl: true, scope: 'global', description: 'Step the playhead back by the skip distance' },
+  { id: 'step_fwd',  key: ']', ctrl: true, scope: 'global', description: 'Step the playhead forward by the skip distance' },
   // `F8` (near Run/Stop on F9) — start playback from the edit cursor, not cycle 0.
   { id: 'play_from_cursor', key: 'F8', scope: 'global', description: 'Play from the cursor (punch-in)' },
   // `Ctrl+Shift+L` (L = loop; AltGr-safe). Cycle playback within the loop region.

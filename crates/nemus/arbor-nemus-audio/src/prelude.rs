@@ -37,6 +37,13 @@ pub use crate::registry::{
 };
 pub use crate::synth::{NoiseColor, SynthShape, Waveform};
 
+// ── Speech synthesis (text → spoken-word sample source) ──────────────────────
+// Rendered offline into a `DecodedAudio` (like a decoded file), then played
+// through the normal `Sample` path. The `speech(...)` DSL source builds on this.
+pub use crate::speech::{
+    synthesize_speech, synthesize_speech_spec, SpeechEngineKind, SpeechParams,
+};
+
 // ── Test / offline recorder sink ─────────────────────────────────────────────
 pub use crate::testing::RecordingSink;
 

@@ -1,3 +1,7 @@
+<script lang="ts">
+  import NemusCode from '../editor/NemusCode.svelte';
+</script>
+
 <h1>Arrangement &amp; sections</h1>
 <p class="doc-lead">
   The arrangement view is a read-only DAW timeline of what you wrote. Each
@@ -6,10 +10,10 @@
 </p>
 
 <h2>Sections</h2>
-<pre><code>track("Violoncelli", arrange(
+<NemusCode code={`track("Violoncelli", arrange(
   section("Esposizione", 16, celli_theme),
   section("Tutti", 16, celli_harmony),
-))</code></pre>
+))`} />
 <p>
   <code>arrange(section("name", bars, pattern), …)</code> lays sections end to end. Give
   every track the same sections and the bands line up across the whole arrangement, so the
@@ -34,6 +38,7 @@
   <li>The <strong>minimap</strong> below the timeline shows the whole arrangement with a viewport box — drag it to pan. Toggle it from the view toolbar.</li>
   <li><kbd>↑</kbd> / <kbd>↓</kbd> move between lanes, <kbd>←</kbd> / <kbd>→</kbd> nudge the cursor, <kbd>Home</kbd> seeks to the start.</li>
   <li><kbd>F8</kbd> plays from the cursor (punch-in) instead of from the top.</li>
+  <li>The title-bar transport adds <strong>step back / forward</strong> (<kbd>Ctrl</kbd> + <kbd>[</kbd> / <kbd>]</kbd>) either side of <strong>skip to start / end</strong> — they move the playhead by the step distance set in Settings (default one bar). The playhead loops back to the start at the song's end.</li>
   <li>The view toolbar toggles waveform, follow-playhead, grid, event labels, the minimap and the <strong>velocity heatmap</strong> (events coloured by gain — quieter notes fade, full-gain notes stay vivid).</li>
   <li>The <strong>metronome</strong> toggle (or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd>) adds an audible click on every beat, accented on the bar — a monitoring aid that bypasses the mix (mute / solo don't silence it).</li>
   <li>The <strong>count-in</strong> toggle (or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>U</kbd>) steps a 1- or 2-bar metronome pre-roll: playback waits that many bars, clicking you in, before the song starts. It applies to the next play (from the top or from the cursor).</li>

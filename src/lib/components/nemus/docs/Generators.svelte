@@ -1,4 +1,8 @@
 <!-- Nemus docs — Generators. Plain semantic HTML; DocsShell supplies the typography. -->
+<script lang="ts">
+  import NemusCode from '../editor/NemusCode.svelte';
+</script>
+
 <h1>Generators</h1>
 <p class="doc-lead">
   Generators write music for you — euclidean rhythms, chord progressions, randomised
@@ -11,8 +15,8 @@
   <code>(n, k)</code> spreads <code>n</code> hits as evenly as possible over <code>k</code>
   steps — the basis of countless grooves. A third number rotates the pattern:
 </p>
-<pre><code>s(bd(3,8))        // three kicks over eight steps
-n(c2(5,8,2))      // five notes over eight, rotated by two</code></pre>
+<NemusCode code={`s(bd(3,8))        // three kicks over eight steps
+n(c2(5,8,2))      // five notes over eight, rotated by two`} />
 <p>
   The <strong>Insert euclidean rhythm…</strong> dialog (Command Palette) builds one
   interactively: pick the leaf, set hits / steps / rotation, preview it, and insert at the cursor.

@@ -15,7 +15,7 @@ import {
   getNemusProjectTabs, setNemusProjectTabs,
   type NemusProjectInfo, type NemusProjectFile,
 } from '$lib/ipc/nemus';
-import { fsReadTextFile, fsWriteTextFile } from '$lib/ipc/fs';
+import { fsReadTextFile, fsWriteTextFile, fsRename, fsTrash } from '$lib/ipc/fs';
 import { workspaceStore } from './workspace.svelte';
 
 const TABS_PERSIST_DELAY = 400;
@@ -167,6 +167,55 @@ function createProjectStore() {
       const trimmed = name.trim();
       if (!trimmed || trimmed === project.name) return;
       project = await nemusSetProjectName(project.path, trimmed);
+    },
+
+    /** Re-scan the project folder and refresh only the `.nemus` file list — open
+     *  tabs, cached buffers and the active selection are untouched. Used after a
+     *  delete/rename and by the FS watcher when a file appears/disappears on disk
+     *  (so the Files sidebar tracks the folder without a full re-open). */
+    async refreshFiles() {
+      if (!project) return;
+      try {
+        const info = await nemusOpenProject(project.path);
+        // Keep the live manifest identity but adopt the fresh file list (+ any
+        // name/audience edited on disk meanwhile).
+        project = { ...project, name: info.name, audience: info.audience, files: info.files };
+      } catch { /* folder vanished mid-flight — leave the stale list */ }
+    },
+
+    /** Whether `path` is one of the project's current `.nemus` files. */
+    hasFile(path: string): boolean {
+      return !!project?.files.some(f => f.path === path);
+    },
+
+    /** Move a `.nemus` file to the OS trash (recoverable), close its tab, drop its
+     *  cached buffer and refresh the file list. No-op when nothing is open. */
+    async deleteFile(path: string) {
+      await fsTrash([path]);
+      this.closeFile(path);
+      sources.delete(path);
+      await this.refreshFiles();
+    },
+
+    /** Rename a `.nemus` file in place (same folder). `newName` is a bare file name
+     *  (extension optional — `.nemus` is appended when missing). Migrates the cached
+     *  buffer + any open tab to the new path and refreshes the list. Returns the new
+     *  absolute path, or null when the rename was a no-op / invalid. */
+    async renameFile(path: string, newName: string): Promise<string | null> {
+      const trimmed = newName.trim();
+      if (!trimmed || /[\\/]/.test(trimmed)) return null;
+      const finalName = trimmed.toLowerCase().endsWith('.nemus') ? trimmed : `${trimmed}.nemus`;
+      const idx = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+      const newPath = `${path.slice(0, idx)}${path[idx]}${finalName}`;
+      if (newPath === path) return null;
+      await fsRename(path, newPath);
+      // Migrate the cached source + open tab + selection to the new path.
+      if (sources.has(path)) { sources.set(newPath, sources.get(path) ?? ''); sources.delete(path); }
+      openFilePaths = openFilePaths.map(p => (p === path ? newPath : p));
+      if (activeFilePath === path) activeFilePath = newPath;
+      schedulePersistTabs();
+      await this.refreshFiles();
+      return newPath;
     },
   };
 }

@@ -1,5 +1,9 @@
 <!-- Nemus docs — Getting Started. Plain semantic HTML; DocsShell/PluginDocBlock
      supplies the typography. -->
+<script lang="ts">
+  import NemusCode from '../editor/NemusCode.svelte';
+</script>
+
 <h1>Getting started</h1>
 <p class="doc-lead">
   nemus is a music live-coding studio. You write a <code>.nemus</code> file — a small,
@@ -32,11 +36,11 @@
 <p>See <em>Mixer &amp; render</em> for the full render options.</p>
 
 <h2>A first file</h2>
-<pre><code>cps(0.5)
+<NemusCode code={`cps(0.5)
 
 tracks(
   track("lead", n(c4 e4 g4 c5).inst("synth.lead")),
-)</code></pre>
+)`} />
 <p>
   <code>cps(0.5)</code> sets the clock to half a cycle per second. <code>tracks(…)</code>
   is the output: each <code>track("name", pattern)</code> becomes one strip in the

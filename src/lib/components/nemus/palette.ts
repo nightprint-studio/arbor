@@ -9,14 +9,14 @@
  * one source of truth keyed by the BE-stable strip index.
  */
 const LANE_COLORS = [
-  '#5b9bd5', // bass — blue
-  '#9d7cd8', // pad — violet
-  '#e0823d', // drums — amber
-  '#54b399', // arp — teal
-  '#e15c7f', // lead — rose
-  '#d4a843', // gold
-  '#6cabdd', // sky
-  '#b06ab3', // orchid
+  '#4ea6ff', // bass — neon blue
+  '#b388ff', // pad — neon violet
+  '#ff9e3d', // drums — neon amber
+  '#3ddc97', // arp — neon green/teal
+  '#ff5d8f', // lead — neon rose
+  '#ffd23d', // neon gold
+  '#4dd2ff', // neon cyan
+  '#d46bff', // neon orchid
 ];
 
 export function laneColor(idx: number): string {

@@ -336,7 +336,11 @@
   .nav-item-child.active { background: rgba(77,120,204,0.10); }
 
   .docs-content {
-    flex: 1; overflow-y: auto; background: var(--bg-base); border-radius: 12px;
+    /* `min-width: 0` is essential: as a flex child it would otherwise grow to its
+       widest content (a long table cell / unbreakable code token), pushing the
+       whole prose column past the panel — every paragraph then reads as one
+       off-window line. Clamping it to the available width lets the content wrap. */
+    flex: 1; min-width: 0; overflow-y: auto; background: var(--bg-base); border-radius: 12px;
     scrollbar-width: thin; scrollbar-color: var(--border) transparent;
   }
   .docs-content::-webkit-scrollbar { width: 5px; }

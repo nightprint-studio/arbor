@@ -1,3 +1,7 @@
+<script lang="ts">
+  import NemusCode from '../editor/NemusCode.svelte';
+</script>
+
 <h1>Transforms &amp; combinators</h1>
 <p class="doc-lead">
   Patterns chain with methods. Combinators build bigger patterns from smaller ones;
@@ -13,8 +17,8 @@
     <tr><td><code>choose(a, b, …)</code></td><td>pick one at random per cycle</td></tr>
   </tbody>
 </table>
-<pre><code>let theme = cat(m_a, m_b, m_c, m_d)   // 4 bars, one motif per cycle
-stack(flute, oboe)                    // double a line across two instruments</code></pre>
+<NemusCode code={`let theme = cat(m_a, m_b, m_c, m_d)   // 4 bars, one motif per cycle
+stack(flute, oboe)                    // double a line across two instruments`} />
 
 <h2>Voicing &amp; mix</h2>
 <table>
@@ -41,8 +45,8 @@ stack(flute, oboe)                    // double a line across two instruments</c
     <tr><td><code>.comp(thresholdDb, ratio, attack?, release?, makeup?, knee?)</code></td><td>compress dynamics above the threshold by <code>ratio</code>:1</td></tr>
   </tbody>
 </table>
-<pre><code>let pad = chords.inst("synth.pad").eq("hpf", 80, 0).eq("peak", 3000, -4, 1.2)
-let drums = kit.comp(-18, 4)            // glue the kit with a 4:1 bus compressor</code></pre>
+<NemusCode code={`let pad = chords.inst("synth.pad").eq("hpf", 80, 0).eq("peak", 3000, -4, 1.2)
+let drums = kit.comp(-18, 4)            // glue the kit with a 4:1 bus compressor`} />
 
 <h2>Time &amp; pitch</h2>
 <table>
@@ -55,8 +59,8 @@ let drums = kit.comp(-18, 4)            // glue the kit with a 4:1 bus compresso
   </tbody>
 </table>
 
-<pre><code>let violini = theme.inst("strings.violin_section").gain(0.9).room(0.18).art("legato")
-let flauti  = theme.add(12).inst("ww.flute").gain(0.4)   // doubled an octave up</code></pre>
+<NemusCode code={`let violini = theme.inst("strings.violin_section").gain(0.9).room(0.18).art("legato")
+let flauti  = theme.add(12).inst("ww.flute").gain(0.4)   // doubled an octave up`} />
 
 <div class="callout accent">
   See the <strong>Language reference</strong> panel for the full, searchable catalogue of

@@ -199,7 +199,7 @@
     </button>
     <div class="scr-spacer"></div>
     <button class="scr-btn primary" onclick={() => void play()} disabled={!active.source.trim()}
-            use:tooltip={'Play one-shot (Ctrl+Enter)'}>
+            use:tooltip={{ content: 'Play one-shot', shortcut: 'Ctrl+Enter' }}>
       <Play size={12} fill="currentColor" /> Play
     </button>
     <button class="scr-btn" onclick={stop} use:tooltip={'Stop the preview'}>

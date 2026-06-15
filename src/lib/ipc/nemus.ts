@@ -161,6 +161,8 @@ export interface NemusConfig {
   packs_dir: string | null;
   /** Chosen audio output device (cpal name), or null for the host default. */
   output_device: string | null;
+  /** Transport step-back/forward distance in cycles (bars). Default 1. */
+  skip_step_cycles: number;
 }
 
 /** One selectable audio output device (`nemus_audio_devices`). */
@@ -703,6 +705,18 @@ export interface NemusLayoutState {
   collapse_editor: boolean;
 }
 
+/** One named project workspace — a group of `.nemus` projects with a colour. */
+export interface NemusProjectWorkspace {
+  /** Stable id (generated on the FE). */
+  id: string;
+  /** Display name. */
+  name: string;
+  /** Index into the workspace colour palette. */
+  color_idx: number;
+  /** Member project folders (absolute paths). */
+  project_paths: string[];
+}
+
 /** The dedicated nemus window state file. */
 export interface NemusWorkspaceState {
   /** Recently-opened project folders, most-recent first. */
@@ -714,6 +728,10 @@ export interface NemusWorkspaceState {
   favorite_sounds: string[];
   /** Recently-used instrument names, most-recent first. */
   recent_sounds: string[];
+  /** Named project workspaces (groups of `.nemus` projects). */
+  workspaces: NemusProjectWorkspace[];
+  /** The active workspace id, or null. */
+  active_workspace: string | null;
 }
 
 /** Read the persisted nemus window state (recents + last project + layout). */
@@ -741,6 +759,40 @@ export function getNemusProjectTabs(projectPath: string): Promise<NemusProjectTa
 /** Persist a project's open-tab snapshot under its own `.nemus/` folder. */
 export function setNemusProjectTabs(projectPath: string, tabs: NemusProjectTabs): Promise<void> {
   return invoke('set_nemus_project_tabs', { projectPath, tabs });
+}
+
+/** A project's persisted master-bus mix (no `.nemus` source representation). */
+export interface NemusProjectMix {
+  /** Master output gain (0..1, linear). */
+  master_gain: number;
+  /** Shared reverb-return decay in seconds. */
+  reverb_decay: number;
+}
+
+/** Read a project's master mix (defaults to unity / 0.5s on first open). */
+export function getNemusProjectMix(projectPath: string): Promise<NemusProjectMix> {
+  return invoke('get_nemus_project_mix', { projectPath });
+}
+
+/** Persist a project's master mix under its own `.nemus/` folder. */
+export function setNemusProjectMix(projectPath: string, mix: NemusProjectMix): Promise<void> {
+  return invoke('set_nemus_project_mix', { projectPath, mix });
+}
+
+// ── Global sound aliases (`alias → target` name map) ───────────────────────────
+//
+// A user-defined map resolved by the audio registry so `s("kick")` plays the
+// target voice. Global (not per-project / per-file), persisted in the nemus data
+// dir; the engine re-reads it when building a session registry.
+
+/** Read the global sound-alias map (`alias → target`). */
+export function getNemusAliases(): Promise<Record<string, string>> {
+  return invoke('get_nemus_aliases');
+}
+
+/** Persist the global sound-alias map. Takes effect on the next eval / run. */
+export function setNemusAliases(aliases: Record<string, string>): Promise<void> {
+  return invoke('set_nemus_aliases', { aliases });
 }
 
 /** One persisted scratch tab (the transient eval result is not saved). */

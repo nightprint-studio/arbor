@@ -37,7 +37,7 @@ module.exports = grammar({
   externals: $ => [
     $.island_start,         // `s(` `sound(` `n(` `note(`  — pushes island mode
     $.island_end,           // the `)` that closes an island — pops island mode
-    $.sound_name,           // island sound leaf  (sound mode): [a-z][a-z0-9]*
+    $.sound_name,           // island sound leaf  (sound mode): [A-Za-z][A-Za-z0-9_]* (pack voices: RolandTR909_bd)
     $.note_name,            // island note leaf   (note mode):  [a-g](s|f)?[0-9]?
     $.chord_name,           // island chord after `'`
     $.note_literal,         // host pitch literal: [a-g](s|f)?[0-9]+ (octave required)

@@ -57,7 +57,13 @@ typedef struct {
 
 static inline bool is_digit(int32_t c) { return c >= '0' && c <= '9'; }
 static inline bool is_lower(int32_t c) { return c >= 'a' && c <= 'z'; }
+static inline bool is_upper(int32_t c) { return c >= 'A' && c <= 'Z'; }
 static inline bool is_note_letter(int32_t c) { return c >= 'a' && c <= 'g'; }
+// A sound leaf: `[A-Za-z][A-Za-z0-9_]*`. Pack voices carry mixed-case, underscored
+// names (`RolandTR909_bd`, `LinnDrum_sn`, `gm_celesta`) and user aliases can too,
+// so a sound name is a full identifier-shape word — NOT just `[a-z][a-z0-9]*`.
+static inline bool is_sound_start(int32_t c) { return is_lower(c) || is_upper(c); }
+static inline bool is_sound_cont(int32_t c) { return is_sound_start(c) || is_digit(c) || c == '_'; }
 static inline bool is_ident_start(int32_t c) {
   return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }
@@ -176,9 +182,9 @@ bool tree_sitter_nemus_external_scanner_scan(void *payload, TSLexer *lexer,
   }
 
   // 2. Mode-tracked island leaves.
-  if (mode == MODE_SOUND && valid_symbols[SOUND_NAME] && is_lower(c)) {
-    advance(lexer); // [a-z][a-z0-9]*
-    while (is_lower(lexer->lookahead) || is_digit(lexer->lookahead)) advance(lexer);
+  if (mode == MODE_SOUND && valid_symbols[SOUND_NAME] && is_sound_start(c)) {
+    advance(lexer); // [A-Za-z][A-Za-z0-9_]*  (pack voices: RolandTR909_bd, gm_celesta)
+    while (is_sound_cont(lexer->lookahead)) advance(lexer);
     lexer->mark_end(lexer);
     lexer->result_symbol = SOUND_NAME;
     return true;

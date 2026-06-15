@@ -51,6 +51,12 @@ export interface CommitRequest {
   seq: number;
 }
 
+/** Last path segment (forward- or back-slash) — file/folder basename. */
+function basename(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
 function createNemusStore() {
   // ── Selection ──────────────────────────────────────────────────────────────
   // Track selection is keyed by the BE-stable strip INDEX (as a string), shared
@@ -91,7 +97,13 @@ function createNemusStore() {
   let shortcutsOpen = $state(false);
   let paletteOpen   = $state(false);
   let renameProjectOpen = $state(false);
+  let workspacesOpen = $state(false);
   let docsOpen      = $state(false);
+  // File rename / delete targets — hosted once in NemusShell, opened from BOTH the
+  // Files sidebar context menu AND the command palette (active file), so the modal
+  // lives in one place (no per-consumer duplication).
+  let renameFileTarget = $state<{ path: string; name: string } | null>(null);
+  let deleteFileTarget = $state<{ path: string; name: string } | null>(null);
 
   // ── Outline → editor jump relay (one-shot) ───────────────────────────────────
   let gotoRequest = $state<GotoRequest | null>(null);
@@ -226,6 +238,17 @@ function createNemusStore() {
     get renameProjectOpen() { return renameProjectOpen; },
     openRenameProject()  { renameProjectOpen = true; },
     closeRenameProject() { renameProjectOpen = false; },
+    get workspacesOpen() { return workspacesOpen; },
+    openWorkspaces()  { workspacesOpen = true; },
+    closeWorkspaces() { workspacesOpen = false; },
+
+    // ── File rename / delete (shared sidebar + palette host) ──
+    get renameFileTarget() { return renameFileTarget; },
+    get deleteFileTarget() { return deleteFileTarget; },
+    openRenameFile(path: string) { renameFileTarget = { path, name: basename(path) }; },
+    closeRenameFile() { renameFileTarget = null; },
+    openDeleteFile(path: string) { deleteFileTarget = { path, name: basename(path) }; },
+    closeDeleteFile() { deleteFileTarget = null; },
     get docsOpen() { return docsOpen; },
     openDocs()   { docsOpen = true; },
     closeDocs()  { docsOpen = false; },

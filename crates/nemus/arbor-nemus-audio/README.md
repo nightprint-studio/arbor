@@ -91,6 +91,14 @@ SFZ region vs. fallback) is the registry's job — the engine only forwards symb
   block exposes `reset()` so a transport stop (`StopAll`) can flush its tail to exact silence.
 - `defaults.rs` — shared audio defaults (`DEFAULT_SAMPLE_RATE`, `DEFAULT_BLOCK_FRAMES`), the single
   source of truth the cpal stream, the offline render driver, and the shell config all reference.
+- `speech/` — **spoken-word synthesis** (`synthesize_speech`), rendered **offline** into a
+  `DecodedAudio` (mono `f32`) exactly like a decoded file, so it plays through the normal `Sample`
+  path and `chop`/`speed`/etc. apply for free. The first engine (`SpeechEngineKind::Sam`) is a
+  faithful Rust port of the SAM (Software Automatic Mouth) reconstruction `discordier/sam-js`
+  (`text → reciter → parser → renderer`, 8-bit PCM @ 22050 Hz), giving an inherently "electronic"
+  retro voice with `pitch`/`rate`/`mouth`/`throat` knobs. Pure compute, no new dependencies (std
+  `OnceLock`/`HashMap`). Vendored under a fair-use determination by the project owner. A system-TTS
+  engine (WinRT, mac/linux behind `cfg`) is planned as a second engine behind the same `SpeechParams`.
 
 ### Registry articulations + round-robin
 

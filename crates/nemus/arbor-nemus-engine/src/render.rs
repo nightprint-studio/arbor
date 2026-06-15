@@ -12,8 +12,8 @@
 use std::path::Path;
 
 use arbor_nemus_audio::prelude::{
-    AudioCommand, DelayConfig, Frame, Renderer, SourceKind, TrackConfig, VoiceSource,
-    DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE,
+    synthesize_speech_spec, AudioCommand, DelayConfig, Frame, Renderer, SourceKind, TrackConfig,
+    VoiceSource, DEFAULT_BLOCK_FRAMES, DEFAULT_SAMPLE_RATE,
 };
 use arbor_nemus_pattern::prelude::{ControlMap, Time, TimeSpan, Tracks};
 use std::collections::HashMap;
@@ -184,6 +184,7 @@ pub fn render_offline_with_progress(
     // synth. Best-effort: a missing/undecodable file is left to the synth
     // fallback rather than aborting the bounce.
     preload_file_sources(&mut renderer, tracks, start_cycle, cycles);
+    preload_speech_sources(&mut renderer, tracks, start_cycle, cycles);
 
     // Total length: the requested cycles + a tail for releases / reverb.
     let arrangement_frames = (cycles as f64 * fpc).round() as u64;
@@ -436,6 +437,7 @@ pub fn analyze_levels(
     let mut renderer = Renderer::new(sr, &track_configs);
     renderer.registry_mut().install_builtin_synths();
     preload_file_sources(&mut renderer, tracks, 0, cycles);
+    preload_speech_sources(&mut renderer, tracks, 0, cycles);
 
     let arrangement_frames = (cycles as f64 * fpc).round() as u64;
 
@@ -539,6 +541,40 @@ fn preload_file_sources(
             if let Some(path) = &hap.value.source_file {
                 if seen.insert(path.clone()) {
                     let _ = renderer.preload_file(Path::new(path));
+                }
+            }
+        }
+    }
+}
+
+/// Synthesize every distinct `speech(...)` source over the window and register it
+/// into the `Renderer`'s registry under its content-addressed key — the offline
+/// analogue of the live shell's off-thread synthesis, so speech voices render in
+/// the bounce instead of the synth fallback. Deduped; SAM is fast enough to run
+/// inline. No disk cache here (that's the live shell's concern).
+fn preload_speech_sources(
+    renderer: &mut Renderer,
+    tracks: &Tracks<ControlMap>,
+    start_cycle: u32,
+    cycles: u32,
+) {
+    if cycles == 0 {
+        return;
+    }
+    let span = TimeSpan::new(
+        Time::int(start_cycle as i64),
+        Time::int((start_cycle + cycles) as i64),
+    );
+    let mut seen: HashSet<String> = HashSet::new();
+    for t in &tracks.tracks {
+        for hap in t.pattern.query(span) {
+            if let Some(spec) = &hap.value.speech {
+                let key = spec.registry_key();
+                if seen.insert(key.clone()) {
+                    let audio = synthesize_speech_spec(spec);
+                    if !audio.samples.is_empty() {
+                        renderer.registry_mut().insert_sample(key, audio);
+                    }
                 }
             }
         }

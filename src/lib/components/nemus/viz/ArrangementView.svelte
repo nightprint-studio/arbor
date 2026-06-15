@@ -50,7 +50,18 @@
   // so every `* PX` position (ruler, lanes, overlays, HapLane) re-lays-out on zoom.
   const BASE_PX = 26;
   const PX = $derived(BASE_PX * arrViewOptions.zoom);
-  const VIEW = VIEW_CYCLES;
+  // Discovery window for the query (wide enough to detect any reasonable period);
+  // the store clips the result to ONE period, so the drawn timeline is a single
+  // pass of the song — never N repetitions.
+  const QUERY_CYCLES = VIEW_CYCLES;
+  // Drawn width = the song's one-pass length (period / content), rounded up to a
+  // 4-cycle bar with a readable minimum. Falls back to the discovery window only
+  // while nothing has been evaluated (so the empty grid still has sensible bars).
+  const VIEW = $derived.by(() => {
+    const span = arrangementStore.loopCycles || arrangementStore.contentEnd;
+    if (span <= 0) return QUERY_CYCLES;
+    return Math.max(8, Math.ceil(span / 4) * 4);
+  });
   const timelineW = $derived(VIEW * PX);
 
   let collapsed = $state(false);
@@ -59,7 +70,7 @@
   // ── Live data: re-query on every eval (diagnostics reassign = eval happened) ──
   $effect(() => {
     void diagnosticsStore.errors; // dep: a fresh array reference is pushed on each eval
-    arrangementStore.schedule(VIEW);
+    arrangementStore.schedule(QUERY_CYCLES);
   });
 
   const lanes = $derived(arrangementStore.lanes);
@@ -135,7 +146,7 @@
   const viewStartCycle = $derived(PX > 0 ? scrollLeftPx / PX : 0);
   const viewEndCycle   = $derived(PX > 0 ? (scrollLeftPx + viewportW - headW) / PX : 0);
 
-  const bars = Array.from({ length: VIEW / 4 + 1 }, (_, i) => i * 4);
+  const bars = $derived(Array.from({ length: Math.floor(VIEW / 4) + 1 }, (_, i) => i * 4));
 
   // ── Time ruler (footer): cycles → wall-clock. One cycle = 1/cps seconds; the
   // live transport cps drives it, falling back to a sane default before the first
@@ -302,6 +313,23 @@
       lastAutoScrollLeft = scrollEl.scrollLeft; // remember the clamped value we set
     }
   });
+  // Explicit seeks WHILE STOPPED — skip-to-start / skip-to-end / step / marker jumps
+  // move the cursor but the play-follow above is gated on `playing`, so the view
+  // wouldn't scroll. Bring the cursor into view when it lands off-screen (e.g.
+  // "skip to start" scrolls the timeline back to cycle 0). Scrubbing within the
+  // viewport keeps the cursor in view, so this won't fight a drag.
+  $effect(() => {
+    const x = cursorX; // dep
+    if (playing || !scrollEl) return;
+    const vw = scrollEl.clientWidth;
+    const sl = scrollEl.scrollLeft;
+    if (x < sl + headW || x > sl + vw - 16) {
+      scrollEl.scrollLeft = Math.max(0, x - headW - vw / 3);
+      lastAutoScrollLeft = scrollEl.scrollLeft;
+      syncView();
+    }
+  });
+
   /** Pin the follow when the user scrolls horizontally themselves — covers the
    *  scrollbar / trackpad-pan / keyboard cases that `wheel` alone misses. Our own
    *  programmatic scrolls match `lastAutoScrollLeft`, so they don't pin. */
@@ -785,7 +813,8 @@
   }
   .arr-head:hover { background: var(--bg-hover); }
   .arr-head.collapsed { padding: 0; gap: 5px; }
-  .arr-colorbar { width: 4px; align-self: stretch; background: var(--c); flex-shrink: 0; }
+  /* Neon track spine: the lane accent glows so the DAW reads vivid, not flat. */
+  .arr-colorbar { width: 4px; align-self: stretch; background: var(--c); flex-shrink: 0; box-shadow: 0 0 8px color-mix(in srgb, var(--c) 70%, transparent); }
   /* Lane resize grip — a thin zone along the header's bottom edge. Invisible until
      hovered; accent-tinted once the lane has a custom height. */
   .arr-resize {
@@ -849,8 +878,8 @@
   .arr-marker-guide { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1px; background: color-mix(in srgb, var(--info) 35%, transparent); pointer-events: none; z-index: 2; }
   .arr-cursor { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1px; background: color-mix(in srgb, var(--accent) 70%, transparent); pointer-events: none; z-index: 4; }
   .cursor-flag { position: absolute; top: 0; left: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid var(--accent); }
-  .arr-playhead { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1.5px; background: var(--text-primary); opacity: 0.7; pointer-events: none; z-index: 4; transition: opacity var(--transition-fast); }
-  .arr-playhead.idle { opacity: 0.32; }
+  .arr-playhead { position: absolute; top: calc(var(--tb-h) + var(--ruler-h)); bottom: 0; width: 1.5px; background: var(--accent); opacity: 0.85; pointer-events: none; z-index: 4; transition: opacity var(--transition-fast); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 80%, transparent); }
+  .arr-playhead.idle { opacity: 0.4; box-shadow: none; }
   .playhead-flag { position: absolute; top: 0; left: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid var(--text-primary); }
 
   /* ── Time ruler (footer) ── */

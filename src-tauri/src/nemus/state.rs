@@ -9,6 +9,7 @@
 //! **not** `localStorage` (hard rule #11). Missing / unparseable → defaults, so a
 //! first launch or a corrupt file just starts clean.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -31,6 +32,21 @@ pub struct NemusLayoutState {
     pub collapse_editor: bool,
 }
 
+/// One named project workspace — an Arbor-style group of `.nemus` projects with a
+/// colour, switchable from the title bar.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct NemusProjectWorkspace {
+    /// Stable id (generated on the FE).
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Index into the FE workspace colour palette.
+    pub color_idx: u32,
+    /// Member project folders (absolute paths).
+    pub project_paths: Vec<String>,
+}
+
 /// The dedicated nemus window state file.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -45,6 +61,10 @@ pub struct NemusWorkspaceState {
     pub favorite_sounds: Vec<String>,
     /// Recently-used instrument names, most-recent first.
     pub recent_sounds: Vec<String>,
+    /// Named project workspaces (groups of `.nemus` projects).
+    pub workspaces: Vec<NemusProjectWorkspace>,
+    /// The active workspace id, or `None` (no workspace selected).
+    pub active_workspace: Option<String>,
 }
 
 // ── Generic JSON file helpers ────────────────────────────────────────────────
@@ -115,6 +135,77 @@ pub fn set_nemus_project_tabs(
     tabs: NemusProjectTabs,
 ) -> Result<(), AppError> {
     write_json(&project_tabs_path(&project_path), &tabs)
+}
+
+// ── Per-project mix state (`<project>/.nemus/mix.json`) ───────────────────────
+//
+// Master gain + shared reverb-return decay have NO `.nemus` source representation
+// (they're mixer-only, session-level), so without this they reset to defaults on
+// every reopen. Persisted next to the project so a song carries its master mix.
+
+/// A project's persisted master-bus mix (no source representation).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NemusProjectMix {
+    /// Master output gain (0..1, linear). Default unity.
+    pub master_gain: f32,
+    /// Shared reverb-return decay in seconds. Default 0.5.
+    pub reverb_decay: f32,
+}
+
+impl Default for NemusProjectMix {
+    fn default() -> Self {
+        NemusProjectMix { master_gain: 1.0, reverb_decay: 0.5 }
+    }
+}
+
+fn project_mix_path(project_path: &str) -> PathBuf {
+    Path::new(project_path).join(".nemus").join("mix.json")
+}
+
+/// Read a project's master mix (defaults to unity / 0.5s on first open).
+#[tauri::command]
+pub fn get_nemus_project_mix(project_path: String) -> Result<NemusProjectMix, AppError> {
+    Ok(read_json(&project_mix_path(&project_path)))
+}
+
+/// Persist a project's master mix under its own `.nemus/` folder.
+#[tauri::command]
+pub fn set_nemus_project_mix(
+    project_path: String,
+    mix: NemusProjectMix,
+) -> Result<(), AppError> {
+    write_json(&project_mix_path(&project_path), &mix)
+}
+
+// ── Global sound aliases (`<nemus-data>/aliases.json`) ───────────────────────
+//
+// User-defined `alias → target` name map (e.g. `kick = "RolandTR808_bd"`),
+// resolved by the audio registry so `s("kick")` plays the target. Global (NOT
+// per-project / per-file), so it's a dedicated app-data file the engine reads
+// when building a session registry.
+
+fn aliases_path() -> PathBuf {
+    arbor_core::prelude::nemus_data_dir().join("aliases.json")
+}
+
+/// Read the global sound-alias map (defaults to empty on first run / corrupt file).
+/// Also used by the registry builder, not just the command.
+pub fn load_aliases() -> HashMap<String, String> {
+    read_json(&aliases_path())
+}
+
+/// Read the global sound-alias map (`alias → target`).
+#[tauri::command]
+pub fn get_nemus_aliases() -> Result<HashMap<String, String>, AppError> {
+    Ok(load_aliases())
+}
+
+/// Persist the global sound-alias map. Takes effect on the next eval / session
+/// rebuild (the registry builder re-reads this file).
+#[tauri::command]
+pub fn set_nemus_aliases(aliases: HashMap<String, String>) -> Result<(), AppError> {
+    write_json(&aliases_path(), &aliases)
 }
 
 // ── Scratch tabs (global, `<nemus-data>/scratch.json`) ───────────────────────

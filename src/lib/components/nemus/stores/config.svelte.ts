@@ -24,6 +24,7 @@ function createConfigStore() {
   let vscoDir       = $state<string | null>(null);
   let packsDir      = $state<string | null>(null);
   let outputDevice  = $state<string | null>(null);
+  let skipStep      = $state(1);
   let loaded        = $state(false);
 
   function snapshot(): NemusConfig {
@@ -35,6 +36,7 @@ function createConfigStore() {
       vsco_dir:       vscoDir,
       packs_dir:      packsDir,
       output_device:  outputDevice,
+      skip_step_cycles: skipStep,
     };
   }
 
@@ -48,6 +50,10 @@ function createConfigStore() {
     get vscoDir()       { return vscoDir; },
     get packsDir()      { return packsDir; },
     get outputDevice()  { return outputDevice; },
+    /** Transport step distance in cycles (bars) for the step-back/forward buttons. */
+    get skipStep()      { return skipStep; },
+    /** Human label for the step distance (`1 cycle` / `4 cycles`). */
+    get skipStepLabel() { return `${skipStep} ${skipStep === 1 ? 'cycle' : 'cycles'}`; },
     get loaded()        { return loaded; },
 
     async loadConfig() {
@@ -60,6 +66,7 @@ function createConfigStore() {
         vscoDir       = cfg.vsco_dir;
         packsDir      = cfg.packs_dir;
         outputDevice  = cfg.output_device ?? null;
+        skipStep      = cfg.skip_step_cycles ?? 1;
         loaded = true;
       } catch {
         // First-run / backend not ready — keep defaults; next call retries.
@@ -79,6 +86,13 @@ function createConfigStore() {
     setDefaultCps(cps: number) {
       if (defaultCps === cps) return;
       defaultCps = cps;
+      persist();
+    },
+    /** Set the transport step distance (cycles); clamped to a sane 0.25–16 range. */
+    setSkipStep(cycles: number) {
+      const v = Math.min(16, Math.max(0.25, cycles || 1));
+      if (skipStep === v) return;
+      skipStep = v;
       persist();
     },
     setVscoDir(dir: string | null) {

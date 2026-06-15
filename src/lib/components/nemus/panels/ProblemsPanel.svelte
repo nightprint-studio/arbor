@@ -10,6 +10,9 @@
   import { nemusStore } from '../nemus-store.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { diagnosticsStore } from '../stores/engine.svelte';
+  import { keyStore } from '../stores/key.svelte';
+  import { clipLintStore } from '../stores/clip-lint.svelte';
+  import { levelAnalysisStore } from '../stores/level-analysis.svelte';
   import { makeByteToU16 } from '../editor/nemus-lang';
   import type { NemusDiagnostic } from '$lib/ipc/nemus';
 
@@ -22,9 +25,26 @@
     if (nemusStore.findPending) { searchEl?.focus(); searchEl?.select(); nemusStore.clearFind(); }
   });
 
+  // Editor lint that lives client-side (out-of-scale notes, clip-risk gain, offline
+  // level analysis) shows as editor underlines — surface it in Problems too, as
+  // warnings, so the panel is the single place to see everything the editor flags.
+  // Deduped by span+message (the off-scale + clip passes can't overlap, but a span
+  // could repeat across stores).
+  const clientWarnings = $derived.by<NemusDiagnostic[]>(() => {
+    const seen = new Set<string>();
+    const out: NemusDiagnostic[] = [];
+    for (const m of [...keyStore.offScale, ...clipLintStore.marks, ...levelAnalysisStore.marks]) {
+      const k = `${m.from}:${m.to}:${m.message}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ message: m.message, severity: 'warning', start: m.from, end: m.to });
+    }
+    return out;
+  });
+
   // 'info' is folded into the "warnings" bucket (a third minor category with no
   // dedicated chip yet) so every diagnostic is reachable.
-  const problems = $derived(diagnosticsStore.errors);
+  const problems = $derived([...diagnosticsStore.errors, ...clientWarnings]);
   const isError  = (sev: string) => sev === 'error';
   const errorCount = $derived(problems.filter(p => isError(p.severity)).length);
   const warnCount  = $derived(problems.filter(p => !isError(p.severity)).length);

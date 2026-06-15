@@ -11,7 +11,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use arbor_nemus_pattern::prelude::{
-    silence, stack, CompSpec, ControlMap, EqBandSpec, EqShape, HoldSpec, Pattern, Scale, SourceSpan,
+    silence, stack, CompSpec, ControlMap, EqBandSpec, EqShape, HoldSpec, Pattern, Scale,
+    SourceSpan, SpeechEngine,
 };
 
 use crate::convert::{as_int, as_number, as_param, as_pattern, as_str, f64_to_time};
@@ -124,6 +125,44 @@ pub fn make_transform(
             let s = as_str(&args[0], span)?;
             Ok(Transform::new(move |p| Ok(p.art(s.clone()))))
         }
+
+        // ── Speech-source controls (refine a `speech(...)` source) ───────────
+        "engine" => {
+            arity(name, args, 1, span)?;
+            let e = parse_speech_engine(&as_str(&args[0], span)?, span)?;
+            Ok(Transform::new(move |p| Ok(p.speech_engine(e))))
+        }
+        "voice" => {
+            arity(name, args, 1, span)?;
+            let s = as_str(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.speech_voice(s.clone()))))
+        }
+        "lang" => {
+            arity(name, args, 1, span)?;
+            let s = as_str(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.speech_lang(s.clone()))))
+        }
+        "pitch" => {
+            arity(name, args, 1, span)?;
+            let v = as_u8(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.speech_pitch(v))))
+        }
+        "rate" => {
+            arity(name, args, 1, span)?;
+            let v = as_u8(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.speech_rate(v))))
+        }
+        "mouth" => {
+            arity(name, args, 1, span)?;
+            let v = as_u8(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.speech_mouth(v))))
+        }
+        "throat" => {
+            arity(name, args, 1, span)?;
+            let v = as_u8(&args[0], span)?;
+            Ok(Transform::new(move |p| Ok(p.speech_throat(v))))
+        }
+
         "hold" => make_hold(args, span),
         "scale" => {
             arity(name, args, 1, span)?;
@@ -377,6 +416,25 @@ fn parse_eq_shape(s: &str, span: SourceSpan) -> Result<EqShape> {
             span,
             LangErrorKind::Other(format!(
                 "unknown EQ band kind `{s}` (use peak | low | high | hpf | lpf)"
+            )),
+        )),
+    }
+}
+
+/// Coerce a numeric argument to a SAM 0..255 byte (rounded + clamped).
+fn as_u8(v: &Value, span: SourceSpan) -> Result<u8> {
+    Ok(as_number(v, span)?.round().clamp(0.0, 255.0) as u8)
+}
+
+/// Parse a `.engine(...)` keyword into a [`SpeechEngine`].
+fn parse_speech_engine(s: &str, span: SourceSpan) -> Result<SpeechEngine> {
+    match s.to_ascii_lowercase().as_str() {
+        "sam" => Ok(SpeechEngine::Sam),
+        "system" | "os" | "tts" => Ok(SpeechEngine::System),
+        _ => Err(LangError::at(
+            span,
+            LangErrorKind::Other(format!(
+                "unknown speech engine `{s}` (use \"sam\" or \"system\")"
             )),
         )),
     }

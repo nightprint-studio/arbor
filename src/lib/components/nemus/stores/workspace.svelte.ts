@@ -13,12 +13,21 @@
 
 import {
   getNemusState, setNemusState,
-  type NemusLayoutState, type NemusWorkspaceState,
+  type NemusLayoutState, type NemusWorkspaceState, type NemusProjectWorkspace,
 } from '$lib/ipc/nemus';
 
 const RECENTS_CAP = 10;
 const RECENT_SOUNDS_CAP = 16;
 const LAYOUT_PERSIST_DELAY = 400;
+
+/** Neon-ish workspace accent palette (Arbor-style coloured groups), kept nemus-local
+ *  so a workspace colour is stable across themes. Indexed by `color_idx`. */
+export const WORKSPACE_COLORS = [
+  '#4ea6ff', '#3ddc97', '#ff9e3d', '#ff5d8f', '#b388ff', '#ffd23d', '#4dd2ff', '#d46bff',
+];
+export function workspaceColor(idx: number): string {
+  return WORKSPACE_COLORS[((idx % WORKSPACE_COLORS.length) + WORKSPACE_COLORS.length) % WORKSPACE_COLORS.length];
+}
 
 const DEFAULT_LAYOUT: NemusLayoutState = {
   left_panel:    'files',
@@ -37,6 +46,8 @@ function createWorkspaceStore() {
   let layout         = $state<NemusLayoutState>({ ...DEFAULT_LAYOUT });
   let favoriteSounds = $state<string[]>([]);
   let recentSounds   = $state<string[]>([]);
+  let workspaces     = $state<NemusProjectWorkspace[]>([]);
+  let activeWorkspace = $state<string | null>(null);
   let loaded         = $state(false);
 
   function snapshot(): NemusWorkspaceState {
@@ -46,6 +57,8 @@ function createWorkspaceStore() {
       layout:          { ...layout },
       favorite_sounds: [...favoriteSounds],
       recent_sounds:   [...recentSounds],
+      workspaces:      workspaces.map(w => ({ ...w, project_paths: [...w.project_paths] })),
+      active_workspace: activeWorkspace,
     };
   }
 
@@ -57,6 +70,12 @@ function createWorkspaceStore() {
     get layout()         { return layout; },
     get favoriteSounds() { return favoriteSounds; },
     get recentSounds()   { return recentSounds; },
+    get workspaces()     { return workspaces; },
+    get activeWorkspace() { return activeWorkspace; },
+    /** The active workspace object, or null. */
+    get activeWorkspaceObj(): NemusProjectWorkspace | null {
+      return workspaces.find(w => w.id === activeWorkspace) ?? null;
+    },
     get loaded()         { return loaded; },
 
     /** Fetch the persisted state. On failure keep the defaults (first run /
@@ -69,6 +88,8 @@ function createWorkspaceStore() {
         layout         = { ...DEFAULT_LAYOUT, ...(s.layout ?? {}) };
         favoriteSounds = s.favorite_sounds ?? [];
         recentSounds   = s.recent_sounds ?? [];
+        workspaces     = s.workspaces ?? [];
+        activeWorkspace = s.active_workspace ?? null;
         loaded = true;
       } catch {
         // Keep defaults; the next call retries.
@@ -109,6 +130,54 @@ function createWorkspaceStore() {
     /** Record an instrument as recently used (dedupe, front, cap). Persists. */
     addRecentSound(name: string) {
       recentSounds = [name, ...recentSounds.filter(n => n !== name)].slice(0, RECENT_SOUNDS_CAP);
+      persist();
+    },
+
+    // ── Named project workspaces (groups of `.nemus` projects) ──────────────────
+    /** Create a workspace (next palette colour by count), make it active, persist.
+     *  Returns its id. */
+    createWorkspace(name: string): string {
+      const id = crypto.randomUUID();
+      workspaces = [...workspaces, { id, name: name.trim() || 'Workspace', color_idx: workspaces.length, project_paths: [] }];
+      activeWorkspace = id;
+      persist();
+      return id;
+    },
+    renameWorkspace(id: string, name: string) {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      workspaces = workspaces.map(w => (w.id === id ? { ...w, name: trimmed } : w));
+      persist();
+    },
+    setWorkspaceColor(id: string, colorIdx: number) {
+      workspaces = workspaces.map(w => (w.id === id ? { ...w, color_idx: colorIdx } : w));
+      persist();
+    },
+    deleteWorkspace(id: string) {
+      workspaces = workspaces.filter(w => w.id !== id);
+      if (activeWorkspace === id) activeWorkspace = null;
+      persist();
+    },
+    /** Set (or clear) the active workspace. Persists. */
+    setActiveWorkspace(id: string | null) {
+      if (activeWorkspace === id) return;
+      activeWorkspace = id;
+      persist();
+    },
+    /** Add a project folder to a workspace (dedupe). Persists. */
+    addProjectToWorkspace(id: string, path: string) {
+      workspaces = workspaces.map(w =>
+        w.id === id && !w.project_paths.includes(path)
+          ? { ...w, project_paths: [...w.project_paths, path] }
+          : w,
+      );
+      persist();
+    },
+    /** Remove a project folder from a workspace. Persists. */
+    removeProjectFromWorkspace(id: string, path: string) {
+      workspaces = workspaces.map(w =>
+        w.id === id ? { ...w, project_paths: w.project_paths.filter(p => p !== path) } : w,
+      );
       persist();
     },
   };

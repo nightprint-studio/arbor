@@ -9,7 +9,7 @@
 //! they are pure data on the hap.
 
 use crate::combinators::compose::stack;
-use crate::control::{CompSpec, ControlMap, EqBandSpec, HoldSpec};
+use crate::control::{CompSpec, ControlMap, EqBandSpec, HoldSpec, SpeechEngine};
 use crate::pattern::Pattern;
 use crate::pitch::Scale;
 use crate::rng::{time_to_rand, SEED_HUMANIZE_GAIN, SEED_HUMANIZE_TIME};
@@ -139,6 +139,83 @@ impl Pattern<ControlMap> {
         let name = name.into();
         self.fmap(move |mut c| {
             c.art = Some(name.clone());
+            c
+        })
+    }
+
+    // ── Speech-source controls ───────────────────────────────────────────────
+    // Each refines the `SpeechSpec` carried by a `speech("…")` source. Constant
+    // (not patternised), like `inst`/`art`, and a **no-op on a non-speech hap**
+    // (there is no spec to refine) — the language layer warns about that misuse.
+
+    /// Choose the speech engine (`.engine("sam"|"system")`).
+    pub fn speech_engine(self, engine: SpeechEngine) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            if let Some(s) = c.speech.as_mut() {
+                s.engine = engine;
+            }
+            c
+        })
+    }
+
+    /// SAM pitch (0–255).
+    pub fn speech_pitch(self, v: u8) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            if let Some(s) = c.speech.as_mut() {
+                s.pitch = v;
+            }
+            c
+        })
+    }
+
+    /// SAM utterance rate (`.rate()`, 0–255).
+    pub fn speech_rate(self, v: u8) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            if let Some(s) = c.speech.as_mut() {
+                s.rate = v;
+            }
+            c
+        })
+    }
+
+    /// SAM mouth (F1) openness (0–255).
+    pub fn speech_mouth(self, v: u8) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            if let Some(s) = c.speech.as_mut() {
+                s.mouth = v;
+            }
+            c
+        })
+    }
+
+    /// SAM throat (F2) openness (0–255).
+    pub fn speech_throat(self, v: u8) -> Pattern<ControlMap> {
+        self.fmap(move |mut c| {
+            if let Some(s) = c.speech.as_mut() {
+                s.throat = v;
+            }
+            c
+        })
+    }
+
+    /// System-engine voice name (ignored by SAM).
+    pub fn speech_voice(self, name: impl Into<String>) -> Pattern<ControlMap> {
+        let name = name.into();
+        self.fmap(move |mut c| {
+            if let Some(s) = c.speech.as_mut() {
+                s.voice = Some(name.clone());
+            }
+            c
+        })
+    }
+
+    /// System-engine language tag (ignored by SAM).
+    pub fn speech_lang(self, name: impl Into<String>) -> Pattern<ControlMap> {
+        let name = name.into();
+        self.fmap(move |mut c| {
+            if let Some(s) = c.speech.as_mut() {
+                s.lang = Some(name.clone());
+            }
             c
         })
     }

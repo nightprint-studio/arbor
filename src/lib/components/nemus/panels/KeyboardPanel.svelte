@@ -11,7 +11,7 @@
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { nemusStore } from '../nemus-store.svelte';
-  import { transportStore } from '../stores/engine.svelte';
+  import { transportStore, activeHapsStore } from '../stores/engine.svelte';
   import { arrangementStore, noteName, type VizLane } from '../viz/arrangement.svelte';
   import { laneColor } from '../palette';
 
@@ -25,19 +25,12 @@
   const MAX_SPAN = 60;   // cap so keys stay wide enough to read
 
   const lanes      = $derived(arrangementStore.lanes);
-  const loopCycles = $derived(arrangementStore.loopCycles);
-  // Looped playhead position, matching the ruler (the song repeats every period).
-  const pos = $derived(
-    transportStore.playing
-      ? (loopCycles > 0 ? transportStore.cycle % loopCycles : transportStore.cycle)
-      : -1, // stopped: nothing sounds
-  );
 
   const hasPitched = $derived(lanes.some((l) => l.noteLo != null));
   const range  = $derived(computeRange(lanes));
   const keys   = $derived(buildKeys(range.lo, range.hi));
   // midi → lane colour of the (lowest-index) track currently sounding it.
-  const active = $derived(computeActive(lanes, pos));
+  const active = $derived(computeActive(lanes));
 
   /** Whole-octave pitch span fitted to the arrangement, clamped to a readable width. */
   function computeRange(ls: VizLane[]): { lo: number; hi: number } {
@@ -77,16 +70,24 @@
     return { whites, blacks, w };
   }
 
-  /** The notes sounding at `pos`, mapped to their owning track's colour. Lowest
-   *  track index wins a shared note (stable colour). `pos < 0` (stopped) = none. */
-  function computeActive(ls: VizLane[], at: number): Map<number, string> {
+  /** The notes sounding RIGHT NOW, mapped to their owning track's colour. Driven by
+   *  the BE-authoritative active-hap set (the same source the editor highlight uses)
+   *  rather than re-deriving from the ~30 fps playhead — so a key clears the instant
+   *  its note stops (the BE emits a fresh set on every change), never leaving a stale
+   *  highlight lit. Notes are matched to the live spans by their source byte-range;
+   *  a chord literal shares one span, so every note it carries lights. Lowest track
+   *  index wins a shared note (stable colour). Stopped → empty. */
+  function computeActive(ls: VizLane[]): Map<number, string> {
     const out = new Map<number, string>();
-    if (at < 0) return out;
+    if (!transportStore.playing) return out;
+    const live = activeHapsStore.haps;
+    if (!live.length) return out;
+    const liveSpans = new Set(live.map((h) => `${h.start}:${h.end}`));
     for (const l of ls) {
       const c = laneColor(l.track);
       for (const h of l.haps) {
-        if (h.note == null) continue;
-        if (h.start <= at && at < h.end && !out.has(h.note)) out.set(h.note, c);
+        if (h.note == null || h.span_start == null || h.span_end == null) continue;
+        if (liveSpans.has(`${h.span_start}:${h.span_end}`) && !out.has(h.note)) out.set(h.note, c);
       }
     }
     return out;

@@ -28,6 +28,7 @@ pub mod prelude;
 pub mod registry;
 pub mod renderer;
 pub mod seam;
+pub mod speech;
 pub mod stream;
 pub mod testing;
 

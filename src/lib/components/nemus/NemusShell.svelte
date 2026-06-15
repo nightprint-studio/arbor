@@ -66,6 +66,7 @@
   import { mixerStore } from './stores/mixer.svelte';
   import { referenceStore } from './stores/reference.svelte';
   import { soundsStore } from './stores/sounds.svelte';
+  import { aliasesStore } from './stores/aliases.svelte';
   import { scalesStore } from './stores/scales.svelte';
   import { librariesStore } from './stores/libraries.svelte';
   import { scratchStore } from './stores/scratch.svelte';
@@ -79,6 +80,8 @@
   import NemusShortcutsModal from './shell/NemusShortcutsModal.svelte';
   import NemusCommandPalette from './shell/NemusCommandPalette.svelte';
   import RenameProjectModal from './shell/RenameProjectModal.svelte';
+  import RenameFileModal from './shell/RenameFileModal.svelte';
+  import WorkspacesModal from './shell/WorkspacesModal.svelte';
   import NemusDocsPanel from './shell/NemusDocsPanel.svelte';
   import InstrumentPreviewPanel from './preview/InstrumentPreviewPanel.svelte';
   import { NEMUS_BINDINGS, matchesNemus } from './nemus-keybindings';
@@ -93,6 +96,17 @@
   let unModels: UnlistenFn | null = null;
   let unFsWatch: UnlistenFn | null = null;
   let unLibs:   UnlistenFn | null = null;
+
+  // Delete-file confirm busy flag (the modal is hosted below; the store holds the
+  // target, opened from the Files sidebar or the command palette).
+  let deleteFileBusy = $state(false);
+  async function confirmDeleteFile() {
+    const t = nemusStore.deleteFileTarget;
+    if (!t || deleteFileBusy) return;
+    deleteFileBusy = true;
+    try { await projectStore.deleteFile(t.path); nemusStore.closeDeleteFile(); }
+    finally { deleteFileBusy = false; }
+  }
 
   onMount(async () => {
     // Live engine + sample-pack + transcription-model streams (each nemus window
@@ -116,6 +130,8 @@
     // The resolvable instrument registry powers `inst("…")` autocomplete — load
     // it up front so completions work without opening the Sound bank panel.
     void soundsStore.refresh();
+    // Global sound aliases (resolved by the engine; shown in the Sound bank).
+    void aliasesStore.load();
     // Restore the persisted layout, then best-effort reopen the last project.
     await workspaceStore.load();
     nemusStore.applyLayout(workspaceStore.layout);
@@ -187,6 +203,8 @@
     if (p && !wasPlaying) {
       transportUiStore.syncMetronome();
       transportUiStore.syncCountIn();
+      mixerStore.syncMaster(); // master gain + reverb are session-only — re-apply on play
+
       // Re-apply any launched clips: Play stages the base tracks, which would
       // otherwise clobber a selection armed while stopped.
       launcherStore.resync();
@@ -204,6 +222,9 @@
   $effect(() => {
     const path = projectStore.project?.path;
     if (!path) return;
+    // Restore the per-project master mix (master gain + reverb decay — neither has
+    // a .nemus representation, so without this they'd reset on every reopen).
+    void mixerStore.loadMix(path);
     void librariesStore.refresh(path).then(() => {
       if (librariesStore.missing > 0) void librariesStore.sync();
     });
@@ -319,6 +340,8 @@
       else if (b.id === 'toggle_launcher') nemusStore.toggleBottom('launcher');
       else if (b.id === 'seek_to_start') { transportUiStore.setCursor(0); void nemusEngine.seekToStart(); }
       else if (b.id === 'seek_to_end') { transportUiStore.setCursor(arrangementStore.contentEnd); void nemusEngine.seekToEnd(arrangementStore.contentEnd); }
+      else if (b.id === 'step_back') transportUiStore.stepBy(-configStore.skipStep, arrangementStore.contentEnd);
+      else if (b.id === 'step_fwd')  transportUiStore.stepBy(configStore.skipStep, arrangementStore.contentEnd);
       else if (b.id === 'play_from_cursor') transportUiStore.playFromCursor();
       else if (b.id === 'toggle_loop') transportUiStore.toggleLoop();
       else if (b.id === 'add_marker') transportUiStore.addMarker(transportUiStore.cursor);
@@ -369,8 +392,8 @@
     { id: 'mixer',    tooltip: 'Mixer',    icon: SlidersHorizontal, active: nemusStore.bottomPanel === 'mixer',    onclick: () => nemusStore.toggleBottom('mixer') },
     { id: 'preview',  tooltip: 'Preview',  icon: Music2,        active: nemusStore.bottomPanel === 'preview',  onclick: () => nemusStore.toggleBottom('preview') },
     { id: 'keyboard', tooltip: 'Keyboard (live notes)', icon: Piano, active: nemusStore.bottomPanel === 'keyboard', onclick: () => nemusStore.toggleBottom('keyboard') },
-    { id: 'launcher', tooltip: 'Clip launcher', icon: LayoutGrid, active: nemusStore.bottomPanel === 'launcher', onclick: () => nemusStore.toggleBottom('launcher') },
-    { id: 'scratch',  tooltip: 'Scratch · Ctrl+Shift+S', icon: FlaskConical, active: nemusStore.bottomPanel === 'scratch', onclick: () => nemusStore.toggleBottom('scratch') },
+    { id: 'launcher', tooltip: 'Clip launcher', shortcut: 'Ctrl+Shift+G', icon: LayoutGrid, active: nemusStore.bottomPanel === 'launcher', onclick: () => nemusStore.toggleBottom('launcher') },
+    { id: 'scratch',  tooltip: 'Scratch', shortcut: 'Ctrl+Shift+S', icon: FlaskConical, active: nemusStore.bottomPanel === 'scratch', onclick: () => nemusStore.toggleBottom('scratch') },
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
     { id: 'inspector', tooltip: 'Inspector', icon: Crosshair, active: nemusStore.rightPanel === 'inspector', onclick: () => nemusStore.toggleRight('inspector') },
@@ -484,7 +507,7 @@
       class="perf-exit"
       type="button"
       aria-label="Exit performance mode"
-      use:tooltip={{ content: 'Exit performance mode · F11', description: 'Leave full-screen and bring the chrome back' }}
+      use:tooltip={{ content: 'Exit performance mode', shortcut: 'F11', description: 'Leave full-screen and bring the chrome back' }}
       onclick={() => nemusStore.setPerformance(false)}
     >
       <Minimize2 size={14} />
@@ -530,6 +553,26 @@
 {#if nemusStore.shortcutsOpen}<NemusShortcutsModal onClose={() => nemusStore.closeShortcuts()} />{/if}
 {#if nemusStore.paletteOpen}<NemusCommandPalette onClose={() => nemusStore.closePalette()} />{/if}
 {#if nemusStore.renameProjectOpen}<RenameProjectModal onClose={() => nemusStore.closeRenameProject()} />{/if}
+{#if nemusStore.workspacesOpen}<WorkspacesModal onClose={() => nemusStore.closeWorkspaces()} />{/if}
+{#if nemusStore.renameFileTarget}
+  <RenameFileModal
+    path={nemusStore.renameFileTarget.path}
+    currentName={nemusStore.renameFileTarget.name}
+    onClose={() => nemusStore.closeRenameFile()}
+  />
+{/if}
+{#if nemusStore.deleteFileTarget}
+  <ConfirmModal
+    title="Delete file"
+    message={`Move “${nemusStore.deleteFileTarget.name}” to the Recycle Bin?`}
+    detail="The file is recoverable from the OS trash."
+    variant="danger"
+    confirmLabel="Delete"
+    busy={deleteFileBusy}
+    onConfirm={confirmDeleteFile}
+    onCancel={() => nemusStore.closeDeleteFile()}
+  />
+{/if}
 {#if nemusStore.docsOpen}<NemusDocsPanel onClose={() => nemusStore.closeDocs()} />{/if}
 
 <style>

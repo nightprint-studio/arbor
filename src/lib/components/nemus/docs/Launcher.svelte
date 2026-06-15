@@ -1,5 +1,9 @@
 <!-- Nemus docs — Clip launcher & scenes. Plain semantic HTML; DocsShell supplies
-     the typography. -->
+     the typography. Code samples use NemusCode (real syntax highlight). -->
+<script lang="ts">
+  import NemusCode from '../editor/NemusCode.svelte';
+</script>
+
 <h1>Clip launcher &amp; scenes</h1>
 <p class="doc-lead">
   The clip launcher is a session grid for performing the song live — like a hardware
@@ -8,7 +12,7 @@
 </p>
 
 <h2>Declaring clips</h2>
-<pre><code>tracks(
+<NemusCode code={`tracks(
   track("drums", s(bd ~ sd ~),
     clip("chorus", s(bd bd sn bd)),
     clip("break",  s(bd ~ ~ ~)),
@@ -16,7 +20,7 @@
   track("bass", n(c2 g1),
     clip("chorus", n(c2 c2 ef2 g2)),
   ),
-)</code></pre>
+)`} />
 <p>
   A <strong>clip</strong> is a launchable variation of <em>its own</em> track: add
   <code>clip("scene", pattern)</code> arguments after a track's base pattern. The clip belongs

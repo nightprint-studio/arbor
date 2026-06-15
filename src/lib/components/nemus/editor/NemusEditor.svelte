@@ -38,8 +38,8 @@
   import { scratchStore } from '../stores/scratch.svelte';
   import { projectStore } from '../stores/project.svelte';
   import { nemusStore } from '../nemus-store.svelte';
-  import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import { Play, FlaskConical } from 'lucide-svelte';
+  import ContextMenu, { type MenuItem, type MenuAction } from '$lib/components/shared/ContextMenu.svelte';
+  import { Play, FlaskConical, Copy, Scissors, ClipboardPaste } from 'lucide-svelte';
 
   // Autocomplete + hover read the DSL catalogue live from the store (snapshotted
   // at call time — the store loads asynchronously, so completions light up once
@@ -109,6 +109,14 @@
     e.preventDefault();
     ctx = { x: e.clientX, y: e.clientY, text: view.state.doc.sliceString(sel.from, sel.to) };
   }
+  // Standard clipboard quick-actions (Windows-11 icon bar) — restored because our
+  // custom menu pre-empts the native one whenever there's a selection, which would
+  // otherwise drop copy/cut/paste.
+  const ctxActions: MenuAction[] = [
+    { id: 'cut',   label: 'Cut',   icon: Scissors,       shortcut: 'Ctrl+X' },
+    { id: 'copy',  label: 'Copy',  icon: Copy,           shortcut: 'Ctrl+C' },
+    { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V' },
+  ];
   const ctxItems: MenuItem[] = [
     { id: 'play',    label: 'Play selection',     icon: Play },
     { id: 'scratch', label: 'Send to Scratch',    icon: FlaskConical },
@@ -117,6 +125,22 @@
     const text = ctx?.text;
     const src = view?.state.doc.toString() ?? '';
     ctx = null;
+    // Clipboard ops act on the live selection (keeps CodeMirror undo history).
+    if (id === 'copy') { if (text) void navigator.clipboard.writeText(text).catch(() => {}); return; }
+    if (id === 'cut') {
+      if (text) { try { await navigator.clipboard.writeText(text); } catch { /* clipboard denied */ } }
+      view?.dispatch(view.state.replaceSelection(''));
+      view?.focus();
+      return;
+    }
+    if (id === 'paste') {
+      try {
+        const clip = await navigator.clipboard.readText();
+        if (clip) view?.dispatch(view.state.replaceSelection(clip));
+      } catch { /* clipboard denied */ }
+      view?.focus();
+      return;
+    }
     if (!text) return;
     // Resolve the selection against the file's preamble so a bare variable (or any
     // expression using file-level bindings) actually plays, not silently nothing.
@@ -505,7 +529,7 @@
 <div class="grv-editor" bind:this={hostEl} oncontextmenu={onContextMenu}></div>
 
 {#if ctx}
-  <ContextMenu items={ctxItems} x={ctx.x} y={ctx.y} onSelect={onCtxSelect} onClose={() => (ctx = null)} />
+  <ContextMenu actions={ctxActions} items={ctxItems} x={ctx.x} y={ctx.y} onSelect={onCtxSelect} onClose={() => (ctx = null)} />
 {/if}
 
 <style>

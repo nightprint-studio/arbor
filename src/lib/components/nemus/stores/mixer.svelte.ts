@@ -35,7 +35,7 @@
  * representation, so it stays live-only — never written to the source.
  */
 
-import { nemusSetTrack, nemusSetReverb } from '$lib/ipc/nemus';
+import { nemusSetTrack, nemusSetReverb, getNemusProjectMix, setNemusProjectMix } from '$lib/ipc/nemus';
 import { arrangementStore, noteName, type VizLane } from '../viz/arrangement.svelte';
 import { projectStore } from './project.svelte';
 import { nemusStore } from '../nemus-store.svelte';
@@ -103,11 +103,26 @@ function createMixerStore() {
   let gains  = $state<Record<number, number>>({});
   let pans   = $state<Record<number, number>>({});
   let master = $state(GAIN_UNITY);
-  // Shared reverb-return decay (seconds). Global + session-only like `master` —
-  // not in the source, so NOT cleared on rebaseline.
+  // Shared reverb-return decay (seconds). Like `master`, this has no `.nemus`
+  // source representation, so it's NOT cleared on rebaseline — but it IS persisted
+  // per-project (`.nemus/mix.json`) so the master mix survives a reopen.
   let reverbDecay = $state(REVERB_DECAY_DEFAULT);
   // Debounce for the (allocating) reverb-IR rebuild — see `setReverbDecay`.
   let reverbTimer: ReturnType<typeof setTimeout> | null = null;
+  // Debounced persist of the master mix (master gain + reverb decay) to the open
+  // project's `.nemus/mix.json`. Suppressed while loading a project's saved mix.
+  let mixPersistTimer: ReturnType<typeof setTimeout> | null = null;
+  let loadingMix = false;
+  function persistMix() {
+    if (loadingMix) return;
+    const path = projectStore.project?.path;
+    if (!path) return;
+    if (mixPersistTimer) clearTimeout(mixPersistTimer);
+    mixPersistTimer = setTimeout(() => {
+      mixPersistTimer = null;
+      void setNemusProjectMix(path, { master_gain: master, reverb_decay: reverbDecay }).catch(() => {});
+    }, 300);
+  }
 
   // Code-first knob buffers (index → value). These mirror the SOURCE literal
   // (seeded from controlsStore) and commit back to it; the buffer just holds the
@@ -324,7 +339,32 @@ function createMixerStore() {
     },
 
     get masterGain() { return master; },
-    setMasterGain(v: number) { master = v; void nemusSetTrack('master_gain', null, v); },
+    setMasterGain(v: number) { master = v; void nemusSetTrack('master_gain', null, v); persistMix(); },
+
+    // ── Master mix persistence (per-project; master gain + reverb have no source) ──
+    /** Load the project's saved master mix and push it to the (possibly not-yet-open)
+     *  session. Call on project open. A missing file yields the defaults. */
+    async loadMix(projectPath: string) {
+      loadingMix = true;
+      try {
+        const mix = await getNemusProjectMix(projectPath);
+        master = mix.master_gain;
+        reverbDecay = mix.reverb_decay;
+      } catch {
+        master = GAIN_UNITY;
+        reverbDecay = REVERB_DECAY_DEFAULT;
+      } finally {
+        loadingMix = false;
+      }
+      this.syncMaster();
+    },
+    /** Re-push the master gain + reverb decay to the running session. Called after a
+     *  load and on play-start (both are session-only on the BE, so a value set while
+     *  stopped / before the device opened must be re-sent). No-op audio when stopped. */
+    syncMaster() {
+      void nemusSetTrack('master_gain', null, master);
+      void nemusSetReverb(reverbDecay);
+    },
 
     // ── reverb return: shared bus decay (global, session-only, like master gain) ──
     get reverbDecay() { return reverbDecay; },
@@ -335,6 +375,7 @@ function createMixerStore() {
       reverbDecay = v;
       if (reverbTimer) clearTimeout(reverbTimer);
       reverbTimer = setTimeout(() => { reverbTimer = null; void nemusSetReverb(v); }, 140);
+      persistMix();
     },
     /** Each track's reverb send (its `room` value), for the return-bus visual. */
     roomSend(i: number) { return this.room(i); },

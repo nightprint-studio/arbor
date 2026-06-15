@@ -16,6 +16,9 @@
     id: string;
     /** Tooltip text (flown out beside the rail). */
     tooltip?: string;
+    /** Optional keybinding hint rendered Arbor-style (Kbd caps) inside the
+     *  tooltip — preferred over inlining `· Ctrl+…` into `tooltip`. */
+    shortcut?: string;
     /** Lucide-style icon component, rendered at `iconSize`. */
     icon?: any;
     /** Icon size in px (default 18). */
@@ -99,7 +102,7 @@
     <button
       class="ab-btn"
       class:ab-active={item.active}
-      use:tooltip={item.tooltip ?? ''}
+      use:tooltip={item.shortcut ? { content: item.tooltip ?? '', shortcut: item.shortcut } : (item.tooltip ?? '')}
       aria-pressed={item.active}
       aria-label={item.ariaLabel ?? item.tooltip}
       onclick={item.onclick}

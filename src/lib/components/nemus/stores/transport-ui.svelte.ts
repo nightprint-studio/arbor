@@ -13,7 +13,7 @@
  * timeline — `raw % loopCycles`), matching the ruler.
  */
 
-import { nemusEngine } from './engine.svelte';
+import { nemusEngine, transportStore } from './engine.svelte';
 import { nemusSetMetronome, nemusSetCountIn } from '$lib/ipc/nemus';
 
 /** Count-in cycles when stepping the toolbar control: off → 1 → 2 bars → off. */
@@ -77,6 +77,20 @@ function createTransportUiStore() {
     toggleLoop() { if (this.loop) loopOn = !loopOn; },
     /** Remove the loop entirely. */
     clearLoop() { loopStart = null; loopEnd = null; loopOn = false; },
+
+    // ── Step back / forward ──────────────────────────────────────────────────
+    /** Move the playhead by `delta` cycles (negative = back) from the CURRENT
+     *  playhead, clamped to the song `[0, contentEnd]`, and sync the cursor so the
+     *  ruler/scroll follows. Steps on the displayed (loop-wrapped) position so it
+     *  respects the one-pass song length. `contentEnd <= 0` clamps only at 0. */
+    stepBy(delta: number, contentEnd: number) {
+      const period = contentEnd > 0 ? contentEnd : null;
+      const base = period != null ? transportStore.cycle % period : transportStore.cycle;
+      let next = base + delta;
+      next = Math.max(0, period != null ? Math.min(period, next) : next);
+      cursor = next;
+      void nemusEngine.seek(next);
+    },
 
     // ── Play-from-cursor / punch-in ──────────────────────────────────────────
     /** Seek to the cursor and start playback there (not from cycle 0). */

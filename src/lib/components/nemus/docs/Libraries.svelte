@@ -1,4 +1,8 @@
 <!-- Nemus docs — Libraries. Plain semantic HTML; DocsShell supplies the typography. -->
+<script lang="ts">
+  import NemusCode from '../editor/NemusCode.svelte';
+</script>
+
 <h1>Libraries</h1>
 <p class="doc-lead">
   Reuse <code>.nemus</code> modules across projects — your own helpers, or shared kits and
@@ -14,7 +18,7 @@ drums = "github:owner/repo@v1"</code></pre>
   commit). Then import its <code>let</code> / <code>fn</code> declarations through the
   <code>$lib/</code> prefix:
 </p>
-<pre><code>import &lbrace; kick, snare &rbrace; from "$lib/drums/groove.nemus"</code></pre>
+<NemusCode code={`import { kick, snare } from "$lib/drums/groove.nemus"`} />
 
 <h2>Syncing</h2>
 <p>

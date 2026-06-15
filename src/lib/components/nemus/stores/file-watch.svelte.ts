@@ -38,22 +38,29 @@ function createFileWatchStore() {
   return {
     get pending() { return pending; },
 
-    /** (Re)watch the directory of the active file. Idempotent per directory, so
-     *  switching between tabs in the same folder doesn't churn the watcher. */
+    /** (Re)watch the project folder (recursively) so BOTH external edits to the
+     *  active file AND files added/removed/renamed anywhere in the project are
+     *  detected. Falls back to the active file's directory when no project is open
+     *  (a lone Open File…). Idempotent per directory, so a tab switch within the
+     *  same project never churns the watcher. */
     async watchActive() {
-      const path = projectStore.activeFilePath;
-      if (!path) return;
-      const dir = dirOf(path);
+      const projectRoot = projectStore.project?.path ?? null;
+      const dir = projectRoot ?? dirOf(projectStore.activeFilePath ?? '');
       if (!dir || dir === watchedDir) return;
       watchedDir = dir;
-      try { await fsWatchStart(dir); } catch { /* watch is best-effort */ }
+      // Recursive when watching a whole project tree (so files added in sub-folders
+      // surface); a lone Open File… watches just its directory.
+      try { await fsWatchStart(dir, projectRoot != null); } catch { /* best-effort */ }
     },
 
-    /** A change fired in the watched directory: re-read the active file and, if it
-     *  differs from the editor buffer (i.e. an external edit, not our own save),
-     *  stage a reload prompt. A read failure (e.g. the file was deleted) is
-     *  ignored — nothing to reload to. */
+    /** A change fired in the watched tree. Two concerns:
+     *  1. The Files sidebar tracks the folder — re-scan so an added/removed/renamed
+     *     `.nemus` shows without a manual reload.
+     *  2. The active file may have been edited externally — re-read it and, if it
+     *     differs from the editor buffer (not our own save), stage a reload prompt.
+     *  A read failure (e.g. the file was deleted) is ignored — nothing to reload. */
     async onChanged() {
+      void projectStore.refreshFiles();
       const path = projectStore.activeFilePath;
       if (!path) return;
       let disk: string;

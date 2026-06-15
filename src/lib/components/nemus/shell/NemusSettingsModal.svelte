@@ -75,6 +75,12 @@
             <Select value={configStore.logThreshold} options={logOptions} onchange={(v) => configStore.setLogThreshold(v as NemusLogThreshold)} />
           </FormRow>
         </div>
+        <div class="card">
+          <div class="card-section-title"><Music size={12} /> Transport</div>
+          <FormRow label="Step distance" description="How far the step-back / step-forward buttons (Ctrl+[ / Ctrl+]) move the playhead.">
+            <NumberStepper value={configStore.skipStep} min={0.25} max={16} step={0.25} narrow suffix="cyc" onchange={(v) => configStore.setSkipStep(v)} ariaLabel="Step distance in cycles" />
+          </FormRow>
+        </div>
       {:else if active === 'audio'}
         <div class="section-header">
           <h2>Audio output</h2>

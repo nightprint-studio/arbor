@@ -19,7 +19,8 @@ use tauri::AppHandle;
 
 use arbor_nemus::prelude::{
     open_output_stream, schedule_span, AudioCommand, AudioError, AudioSink, ControlMap, Epoch,
-    OutputStream, Registry, ReverbIr, StreamSink, TempoMap, Time, TimeSpan, Tracks, Transport,
+    OutputStream, Registry, ReverbIr, SpeechSpec, StreamSink, TempoMap, Time, TimeSpan, Tracks,
+    Transport,
 };
 
 use super::config::NemusConfig;
@@ -114,10 +115,31 @@ pub fn run(
 /// instruments, **decoded** from their installed packs (the slow part — seconds
 /// for a big pack). Called off the RT thread (the command's blocking worker) so
 /// the decode never stalls playback; the audio thread only consumes the result.
-pub(super) fn build_registry(cfg: &NemusConfig, needed: &HashSet<String>) -> Registry {
+pub(super) fn build_registry(
+    cfg: &NemusConfig,
+    needed: &HashSet<String>,
+    speech: &[SpeechSpec],
+) -> Registry {
     let mut registry = Registry::new();
     registry.install_builtin_synths();
-    packs::load_subset_into(cfg, &mut registry, needed);
+    // Global name aliases (`s("kick")` → `RolandTR808_bd`). Install them so the RT
+    // resolve maps the alias, AND expand the decode set with each referenced
+    // alias's TARGET — `needed` carries the source names (the alias), but the pack
+    // manifest only has the target, so without this the target's samples never
+    // decode and the alias falls back to the synth.
+    let aliases = super::state::load_aliases();
+    let mut needed = needed.clone();
+    for (alias, target) in &aliases {
+        registry.add_alias(alias, target);
+        if needed.contains(alias) {
+            needed.insert(target.clone());
+        }
+    }
+    packs::load_subset_into(cfg, &mut registry, &needed);
+    // Synthesize + register any referenced `speech(...)` sources (off-thread,
+    // memoised on disk). The keys are part of `needed`, so a new speech request
+    // triggers this rebuild path just like a new sample voice.
+    super::speech::register_into(&mut registry, speech, &needed);
     registry
 }
 
@@ -180,7 +202,7 @@ impl Session {
         // Build the synths-only registry once and keep it; the stream takes a clone
         // (sharing the Arc sample data), so a later device switch can reopen without
         // a rebuild.
-        let registry = build_registry(cfg, &HashSet::new());
+        let registry = build_registry(cfg, &HashSet::new(), &[]);
         let (sink, stream) = open_output_stream(device.as_deref(), Vec::new(), registry.clone())?;
         Ok(Session {
             transport: Transport::new(sink, cfg.default_cps),

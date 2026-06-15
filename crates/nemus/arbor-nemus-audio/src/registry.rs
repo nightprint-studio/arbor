@@ -251,6 +251,10 @@ pub struct InstrumentInfo {
 #[derive(Clone, Debug)]
 pub struct Registry {
     entries: HashMap<String, Entry>,
+    /// User-defined name aliases (`alias → target`): a leaf/inst named `alias`
+    /// resolves as if it were `target`. Applied before the entry lookup, one hop
+    /// (no chains), so `s("kick")` can play `RolandTR808_bd`. Empty by default.
+    aliases: HashMap<String, String>,
     instruments: Vec<SfzInstrument>,
     bank: SampleBank,
     fallback: SynthPreset,
@@ -260,6 +264,7 @@ impl Default for Registry {
     fn default() -> Self {
         Registry {
             entries: HashMap::new(),
+            aliases: HashMap::new(),
             instruments: Vec::new(),
             bank: SampleBank::new(),
             fallback: SynthPreset::default(),
@@ -319,6 +324,32 @@ impl Registry {
     /// built-in voices without a manifest file.
     pub fn insert_synth(&mut self, name: impl Into<String>, preset: SynthPreset) {
         self.entries.insert(name.into(), Entry::Synth(preset));
+    }
+
+    /// Register an already-decoded one-shot sample under `name` (non-RT). Used for
+    /// **synthesized** sources the shell renders off-thread (e.g. `speech(...)`):
+    /// it keeps the audio resident in the bank and resolves `name` to it through
+    /// the normal sample path. The name doubles as the bank key (one variant).
+    pub fn insert_sample(&mut self, name: impl Into<String>, audio: crate::decode::DecodedAudio) {
+        let name = name.into();
+        let sample = Sample::from_decoded(audio);
+        self.bank.insert(name.clone(), sample);
+        self.entries.insert(name.clone(), Entry::Sample { variants: vec![name] });
+    }
+
+    /// Register a name **alias** (`alias → target`): resolving `alias` (as a sound
+    /// leaf or `.inst`) behaves as if `target` were named. One hop, no chains — a
+    /// `target` that is itself an alias is NOT followed. Non-RT setup. The shell
+    /// installs these from the global alias table; the target's samples must be in
+    /// the registry (decode the *target* name, not the alias).
+    pub fn add_alias(&mut self, alias: impl Into<String>, target: impl Into<String>) {
+        self.aliases.insert(alias.into(), target.into());
+    }
+
+    /// The target a name aliases to, if any (one hop). Lets the shell expand the
+    /// lazy-decode set: a referenced alias must decode its *target*'s samples.
+    pub fn alias_target(&self, name: &str) -> Option<&str> {
+        self.aliases.get(name).map(String::as_str)
     }
 
     /// Install nemus's always-available built-in voices, with **no manifest and
@@ -534,9 +565,11 @@ impl Registry {
         art: Option<&str>,
         seed: u64,
     ) -> ResolvedVoice {
-        // Prefer an explicit instrument, then a sound leaf.
+        // Prefer an explicit instrument, then a sound leaf. Apply a name alias
+        // (one hop) before the lookup so `s("kick")` resolves its target voice.
         let name = inst.or(sound);
-        let entry = name.and_then(|n| self.entries.get(n));
+        let resolved = name.map(|n| self.aliases.get(n).map(String::as_str).unwrap_or(n));
+        let entry = resolved.and_then(|n| self.entries.get(n));
 
         match entry {
             Some(Entry::Synth(preset)) => ResolvedVoice::Synth(*preset),

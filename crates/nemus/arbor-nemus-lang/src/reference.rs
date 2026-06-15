@@ -296,6 +296,12 @@ fn generators() -> Vec<DslEntry> {
             vec![DslParam::req("path", "project-relative path to a long audio file")],
             "track(\"vocals\", audio(\"vox/take.wav\"))",
         ),
+        entry(
+            "speech", DslKind::Generator, "speech(\"text\") -> pat",
+            "Synthesize spoken-word audio as a one-shot sample — an inherently electronic, retro voice. Refine with `.engine`/`.pitch`/`.rate`/`.mouth`/`.throat` (SAM) or `.voice`/`.lang` (system engine). It plays through the normal sample path, so `.chop`-style slicing, `.speed`, `.gain`, etc. all apply.",
+            vec![DslParam::req("text", "the words to speak (English text)")],
+            "speech(\"hello world\").pitch(64).rate(72)",
+        ),
     ]
 }
 
@@ -747,6 +753,49 @@ fn transforms() -> Vec<DslEntry> {
             vec![DslParam::req("name", "articulation name (string)"), pat()],
             "strings.art(\"pizzicato\")",
         ),
+        // Speech-source controls (refine a `speech(...)` source; no-op elsewhere)
+        entry(
+            "engine", DslKind::Transform, "engine(name, pat) -> pat  ·  pat.engine(name)",
+            "Select the speech engine for a `speech(...)` source: \"sam\" (electronic formant voice, default) or \"system\" (the OS text-to-speech). No effect on a non-speech pattern.",
+            vec![DslParam::req("name", "\"sam\" or \"system\""), pat()],
+            "speech(\"hi\").engine(\"system\")",
+        ),
+        entry(
+            "voice", DslKind::Transform, "voice(name, pat) -> pat  ·  pat.voice(name)",
+            "System-engine voice name for a `speech(...)` source (only the \"system\" engine; ignored by SAM).",
+            vec![DslParam::req("name", "an OS voice id"), pat()],
+            "speech(\"bonjour\").engine(\"system\").lang(\"fr-FR\").voice(\"m\")",
+        ),
+        entry(
+            "lang", DslKind::Transform, "lang(tag, pat) -> pat  ·  pat.lang(tag)",
+            "System-engine language tag for a `speech(...)` source, e.g. \"fr-FR\" (only the \"system\" engine; ignored by SAM).",
+            vec![DslParam::req("tag", "BCP-47 language tag, e.g. \"fr-FR\""), pat()],
+            "speech(\"magnifique\").engine(\"system\").lang(\"fr-FR\")",
+        ),
+        entry(
+            "pitch", DslKind::Transform, "pitch(n, pat) -> pat  ·  pat.pitch(n)",
+            "SAM voice pitch for a `speech(...)` source, 0..255 (default 64) — lower is deeper. Speech sources only (≠ `.shift`, which transposes any sample).",
+            vec![DslParam::req("n", "pitch 0..255"), pat()],
+            "speech(\"deep\").pitch(40)",
+        ),
+        entry(
+            "rate", DslKind::Transform, "rate(n, pat) -> pat  ·  pat.rate(n)",
+            "SAM utterance rate for a `speech(...)` source, 0..255 (default 72) — higher speaks faster. Distinct from playback `.speed`. Speech sources only.",
+            vec![DslParam::req("n", "rate 0..255"), pat()],
+            "speech(\"fast talk\").rate(40)",
+        ),
+        entry(
+            "mouth", DslKind::Transform, "mouth(n, pat) -> pat  ·  pat.mouth(n)",
+            "SAM mouth (F1 formant) openness for a `speech(...)` source, 0..255 (default 128). Speech sources only.",
+            vec![DslParam::req("n", "0..255"), pat()],
+            "speech(\"vowels\").mouth(200)",
+        ),
+        entry(
+            "throat", DslKind::Transform, "throat(n, pat) -> pat  ·  pat.throat(n)",
+            "SAM throat (F2 formant) openness for a `speech(...)` source, 0..255 (default 128). Speech sources only.",
+            vec![DslParam::req("n", "0..255"), pat()],
+            "speech(\"robot\").throat(96)",
+        ),
         entry(
             "hold", DslKind::Transform,
             "hold(pat) -> pat  ·  pat.hold()  ·  pat.hold(n)  ·  pat.hold(n, \"s\")",
@@ -923,10 +972,11 @@ mod tests {
         "lpf", "hpf", "shift", "speed", "crush", "shape", "vel", "inst", "art",
         "hold", "scale", "add", "addDeg", "degradeBy", "sometimesBy", "chunk", "iter",
         "swingBy", "humanize", "delay", "eq", "comp", "every", "off", "sometimes", "jux", "log",
+        "engine", "voice", "lang", "pitch", "rate", "mouth", "throat",
     ];
     const IMPLEMENTED_COMBINATORS: &[&str] = &[
         "par", "stack", "seq", "cat", "arrange", "cycles", "section", "track",
-        "tracks", "clip", "rand", "choose", "sample", "audio", "cps", "tempo",
+        "tracks", "clip", "rand", "choose", "sample", "audio", "speech", "cps", "tempo",
         "trace", "debug", "info", "warn", "error",
     ];
     const IMPLEMENTED_SIGNALS: &[&str] = &["sine", "saw", "isaw", "tri", "square"];

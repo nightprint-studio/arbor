@@ -187,7 +187,7 @@
     box-shadow: inset 0 0 0 1px transparent;
     transition: box-shadow var(--transition-fast);
   }
-  .strip.selected { box-shadow: inset 0 0 0 1px var(--c); }
+  .strip.selected { box-shadow: inset 0 0 0 1px var(--c), 0 0 12px color-mix(in srgb, var(--c) 22%, transparent); }
   .strip.master { background: color-mix(in srgb, var(--accent) 8%, var(--bg-elevated)); margin-left: 4px; }
 
   .strip-name {
@@ -199,7 +199,7 @@
   .strip-name:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); }
   .strip-name.master-name { cursor: default; }
   .strip-name.master-name:hover { background: transparent; }
-  .dot { width: 7px; height: 7px; border-radius: 2px; background: var(--c); flex-shrink: 0; }
+  .dot { width: 7px; height: 7px; border-radius: 2px; background: var(--c); flex-shrink: 0; box-shadow: 0 0 6px color-mix(in srgb, var(--c) 75%, transparent); }
 
   /* Clip light — a thin latched bar at the top of each strip (DAW clip LED).
      Dim until the strip hits 0 dBFS, then red+glow; click anywhere resets all. */

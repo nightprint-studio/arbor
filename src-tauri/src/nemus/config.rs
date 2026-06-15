@@ -47,6 +47,9 @@ pub struct NemusConfig {
     /// Chosen audio output device, by cpal device name. `None` → the host default
     /// (also the fallback if the named device is no longer present).
     pub output_device: Option<String>,
+    /// How far the transport "step back / step forward" buttons move the playhead,
+    /// in cycles (bars). Default `1.0`.
+    pub skip_step_cycles: f64,
     /// Offline-render defaults. Declared last: as a nested TOML table it must
     /// follow every scalar field, or `toml` serialization fails once an override
     /// above is set ("values must be emitted before tables").
@@ -65,6 +68,7 @@ impl Default for NemusConfig {
             basic_pitch_url: None,
             demucs_url: None,
             output_device: None,
+            skip_step_cycles: 1.0,
             render: NemusRenderConfig::default(),
         }
     }

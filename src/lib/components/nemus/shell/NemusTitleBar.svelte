@@ -10,10 +10,10 @@
    * (project switcher, transport, log threshold) are authored here as snippets.
    */
   import {
-    Play, Square, SkipBack, SkipForward, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
+    Play, Square, SkipBack, SkipForward, Rewind, FastForward, ChevronDown, FolderGit2, Download, Settings, ScrollText, Keyboard,
     PanelLeft, PanelRight, Minimize2, Check, AlertTriangle,
     FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut, FolderPen,
-    FileAudio, FileMusic, Layers, Crop, SlidersHorizontal,
+    FileAudio, FileMusic, Layers, Crop, SlidersHorizontal, LayoutGrid,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
@@ -33,6 +33,7 @@
   import { projectStore } from '../stores/project.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { renderStore } from '../stores/render.svelte';
+  import { transportUiStore } from '../stores/transport-ui.svelte';
   import { arrangementStore } from '../viz/arrangement.svelte';
 
   let recentOpen = $state(false);
@@ -106,17 +107,34 @@
     { kind: 'item', id: 'shortcuts', label: 'Keyboard Shortcuts…', icon: Keyboard,  shortcut: 'Shift+F1', onclick: () => nemusStore.openShortcuts() },
   ]);
 
-  // ── Project fast-swap (recents + open) ────────────────────────────────────────
+  // ── Project fast-swap (workspaces + their projects / recents + open) ──────────
   const projectName = $derived(projectStore.project?.name ?? 'No project');
+  const activeWs = $derived(workspaceStore.activeWorkspaceObj);
+  // When a workspace is active, its member projects are the swap list; otherwise
+  // fall back to the global recents.
+  const swapPaths = $derived(activeWs ? activeWs.project_paths : workspaceStore.recentProjects);
   const projectItems = $derived<DropdownItem[]>([
-    ...workspaceStore.recentProjects.map(path => ({
+    // Workspaces section: switch the active group (or clear it), then Manage…
+    ...(workspaceStore.workspaces.length
+      ? [
+          { kind: 'separator' as const, label: 'Workspaces' },
+          ...workspaceStore.workspaces.map(w => ({
+            kind: 'item' as const, id: `ws:${w.id}`, label: w.name, icon: Layers,
+            active: w.id === workspaceStore.activeWorkspace,
+            onclick: () => workspaceStore.setActiveWorkspace(w.id === workspaceStore.activeWorkspace ? null : w.id),
+          })),
+        ]
+      : []),
+    { kind: 'item' as const, id: '__manage_ws', label: 'Manage workspaces…', icon: LayoutGrid, onclick: () => nemusStore.openWorkspaces() },
+    { kind: 'separator' as const, label: activeWs ? `${activeWs.name} · projects` : 'Recent' },
+    ...swapPaths.map(path => ({
       kind: 'item' as const, id: path, label: basename(path), subtitle: path,
       icon: FolderGit2, active: path === projectStore.project?.path,
       onclick: () => void projectStore.open(path).catch(() => {}),
     })),
-    ...(workspaceStore.recentProjects.length ? [{ kind: 'separator' as const }] : []),
     ...(projectStore.project
-      ? [{ kind: 'item' as const, id: '__rename', label: 'Rename project…', icon: FolderPen, onclick: () => nemusStore.openRenameProject() }]
+      ? [{ kind: 'separator' as const },
+         { kind: 'item' as const, id: '__rename', label: 'Rename project…', icon: FolderPen, onclick: () => nemusStore.openRenameProject() }]
       : []),
     { kind: 'item' as const, id: '__open', label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => projectActions.openProject() },
   ]);
@@ -173,25 +191,42 @@
       <button
         class="gtb-run-icon"
         onclick={() => void nemusEngine.seekToStart()}
-        use:tooltip={'Skip to start (Ctrl+Shift+[)'}
+        use:tooltip={{ content: 'Skip to start', shortcut: 'Ctrl+Shift+[' }}
         aria-label="Skip to start"
       >
         <SkipBack size={14} fill="currentColor" />
       </button>
       <button
+        class="gtb-run-icon"
+        onclick={() => transportUiStore.stepBy(-configStore.skipStep, arrangementEnd)}
+        use:tooltip={{ content: `Step back ${configStore.skipStepLabel}`, shortcut: 'Ctrl+[' }}
+        aria-label="Step back"
+      >
+        <Rewind size={14} fill="currentColor" />
+      </button>
+      <button
         class="gtb-run"
         class:running={nemusEngine.running}
         onclick={() => void nemusEngine.toggleRun(projectStore.activeSource, projectStore.project?.path)}
-        use:tooltip={nemusEngine.running ? 'Stop (Shift+F9)' : 'Run (Shift+F9)'}
+        use:tooltip={{ content: nemusEngine.running ? 'Stop' : 'Run', shortcut: 'Shift+F9' }}
         aria-label={nemusEngine.running ? 'Stop' : 'Run'}
       >
         {#if nemusEngine.running}<Square size={14} fill="currentColor" />{:else}<Play size={14} fill="currentColor" />{/if}
       </button>
       <button
         class="gtb-run-icon"
+        onclick={() => transportUiStore.stepBy(configStore.skipStep, arrangementEnd)}
+        disabled={arrangementEmpty}
+        use:tooltip={{ content: `Step forward ${configStore.skipStepLabel}`, shortcut: 'Ctrl+]' }}
+        aria-label="Step forward"
+      >
+        <FastForward size={14} fill="currentColor" />
+      </button>
+      <button
+        class="gtb-run-icon"
         onclick={() => void nemusEngine.seekToEnd(arrangementEnd)}
         disabled={arrangementEmpty}
-        use:tooltip={'Skip to end (Ctrl+Shift+])'}
+        use:tooltip={{ content: 'Skip to end', shortcut: 'Ctrl+Shift+]' }}
         aria-label="Skip to end"
       >
         <SkipForward size={14} fill="currentColor" />

@@ -25,6 +25,7 @@ import type { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 
 import type { NemusDslEntry, NemusDslKind, NemusInstrument } from '$lib/ipc/nemus';
+import { aliasesStore } from '../stores/aliases.svelte';
 import { getNemusTree } from './nemus-cm';
 import {
   extractSymbols, identifierAt, stringArgCallAt,
@@ -105,6 +106,20 @@ function articulationCompletions(instruments: NemusInstrument[]): Completion[] {
   return out;
 }
 
+/** Distinct string labels already passed as the first argument of `fn(...)` in the
+ *  document — e.g. every `section("INTRO", …)` label, or every `clip("chorus", …)`
+ *  scene label. Powers reuse-completion so the same label is spelled identically
+ *  across lanes/tracks (matching labels share a colour + a launcher row). The
+ *  currently-typed (unterminated) literal has no closing quote, so it never
+ *  suggests itself. */
+function firstStringArgs(doc: string, fn: string): string[] {
+  const re = new RegExp(`\\b${fn}\\(\\s*"([^"]+)"`, 'g');
+  const seen = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(doc)) !== null) seen.add(m[1]);
+  return [...seen];
+}
+
 /** Build a completion item for a resolvable instrument (offered inside `inst`).
  *  Synths sort first (always available); the side `info` lists articulations. */
 function instrumentCompletion(i: NemusInstrument): Completion {
@@ -115,6 +130,15 @@ function instrumentCompletion(i: NemusInstrument): Completion {
     info: i.articulations.length ? `Articulations: ${i.articulations.join(', ')}` : undefined,
     boost: i.kind === 'synth' ? 1 : 0,
   };
+}
+
+/** Completions for the user's global sound aliases — they resolve to a real voice,
+ *  so they're offered alongside the instruments inside `inst("…")`. The detail
+ *  shows the target so the alias's meaning is visible in the popup. */
+function aliasCompletions(): Completion[] {
+  return aliasesStore.entries.map((a) => ({
+    label: a.name, type: 'constant', detail: `alias → ${a.target}`, boost: 2,
+  }));
 }
 
 /** Build a completion item from a local declaration. */
@@ -162,7 +186,9 @@ export function nemusCompletion(src: NemusIntelSource): CompletionSource {
       const call = stringArgCallAt(tree, context.pos);
       if (call) {
         if (call.fn === 'inst') {
-          const opts = src.instruments().map(instrumentCompletion);
+          // The resolvable instruments + the user's global aliases (which resolve to
+          // a real voice, so they're valid here too).
+          const opts = [...src.instruments().map(instrumentCompletion), ...aliasCompletions()];
           if (opts.length === 0) return null;
           // Dotted names (`synth.lead`, `strings.violin`) stay valid as you type.
           return { from: call.from, options: opts, validFor: /^[A-Za-z0-9_.\/-]*$/ };
@@ -171,6 +197,20 @@ export function nemusCompletion(src: NemusIntelSource): CompletionSource {
           const opts = articulationCompletions(src.instruments());
           if (opts.length === 0) return null;
           return { from: call.from, options: opts, validFor: /^[A-Za-z0-9_.-]*$/ };
+        }
+        // `section("…")` / `clip("…")`: complete with the labels already used in the
+        // file, so a section label or clip's scene row is spelled the same across
+        // every lane/track (matching labels share a colour + a launcher row).
+        if (call.fn === 'section' || call.fn === 'clip') {
+          const doc = context.state.doc.toString();
+          const isSection = call.fn === 'section';
+          const names = firstStringArgs(doc, call.fn);
+          const opts: Completion[] = names.map((n) => ({
+            label: n, type: isSection ? 'constant' : 'enum',
+            detail: isSection ? 'section' : 'scene',
+          }));
+          if (opts.length === 0) return null;
+          return { from: call.from, options: opts, validFor: /^[^"]*$/ };
         }
         // Any other string argument: suppress the language completions (a builtin
         // name inside a quoted path/pattern is never what the user wants).

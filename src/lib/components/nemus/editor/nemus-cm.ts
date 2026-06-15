@@ -640,6 +640,20 @@ const nemusSearchKeymap = searchKeymap.filter((b) => b.key !== 'Mod-f');
  * opens the editor search (pane focused) or the Console search (otherwise) and
  * calls `openSearch()` imperatively, keeping one authoritative router.
  */
+/** Minimal read-only viewer extensions — just the nemus theme + syntax highlight,
+ *  no gutters / line numbers / active-line / search / lint. For rendering inert
+ *  `.nemus` snippets (the in-app Docs code samples) with the SAME colours as the
+ *  editor, so the docs can never drift from the live highlighter. */
+export function createNemusViewerExtensions(): Extension {
+  return [
+    nemusTheme,
+    nemusHighlight,
+    EditorView.lineWrapping,
+    EditorView.editable.of(false),
+    EditorState.readOnly.of(true),
+  ];
+}
+
 export function createNemusExtensions(opts: NemusExtensionsOptions = {}): Extension {
   const exts: Extension[] = [
     nemusTheme,

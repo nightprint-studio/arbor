@@ -864,7 +864,11 @@ fn watchers() -> &'static Mutex<HashMap<String, notify::RecommendedWatcher>> {
 }
 
 #[tauri::command]
-pub fn fs_watch_start(window: tauri::WebviewWindow, path: String) -> Result<(), AppError> {
+pub fn fs_watch_start(
+    window: tauri::WebviewWindow,
+    path: String,
+    recursive: Option<bool>,
+) -> Result<(), AppError> {
     use notify::{RecursiveMode, Watcher};
     use tauri::{Emitter, Manager};
 
@@ -894,8 +898,13 @@ pub fn fs_watch_start(window: tauri::WebviewWindow, path: String) -> Result<(), 
     })
     .map_err(|e| AppError::Other(format!("Cannot create watcher: {e}")))?;
 
+    let mode = if recursive.unwrap_or(false) {
+        RecursiveMode::Recursive
+    } else {
+        RecursiveMode::NonRecursive
+    };
     watcher
-        .watch(Path::new(&path), RecursiveMode::NonRecursive)
+        .watch(Path::new(&path), mode)
         .map_err(|e| AppError::Other(format!("Cannot watch path: {e}")))?;
 
     // Drop watchers whose window has since closed (no reliable stop on window

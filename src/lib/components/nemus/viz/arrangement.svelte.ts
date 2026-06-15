@@ -60,6 +60,20 @@ function maxPolyphony(haps: NemusQueryHap[]): number {
   return max + sustained;
 }
 
+/** Clip a list of `{start, end}`-bearing items to one arrangement period
+ *  `[0, period)`: drop anything that begins on/after the period, and trim a span
+ *  that crosses the boundary back to it. `period <= 0` (nothing evaluated) is a
+ *  no-op. Generic over hap / section so both clip identically. */
+function clipToPeriod<T extends { start: number; end: number }>(items: T[], period: number): T[] {
+  if (period <= 0) return items;
+  const out: T[] = [];
+  for (const it of items) {
+    if (it.start >= period - 1e-9) continue;
+    out.push(it.end > period ? { ...it, end: period } : it);
+  }
+  return out;
+}
+
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 /** MIDI → scientific pitch name (C4 = 60), for lane subtitles / tooltips. */
@@ -133,9 +147,14 @@ function createArrangementStore() {
     loading = true;
     try {
       const res = await nemusQuery(cycles);
-      haps = res.haps;
-      sections = res.sections;
-      loopCycles = res.loop_cycles;
+      // The query window is a DISCOVERY window (wide enough to detect the period);
+      // the song repeats every `loop_cycles`, so we draw exactly ONE pass — clip
+      // everything to `[0, loop_cycles)` instead of showing N repetitions. The
+      // playhead already wraps at the period, so this reads as a single looping song.
+      const period = res.loop_cycles;
+      haps     = clipToPeriod(res.haps, period);
+      sections = clipToPeriod(res.sections, period);
+      loopCycles = period;
       cps = res.cps;
       loaded = true;
     } catch {
