@@ -37,7 +37,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Read-only ops (exists, is_file, is_dir, read, list, glob)
+// Read-only ops (exists, is_file, is_dir, read, read_bytes, list, glob)
 // ─────────────────────────────────────────────────────────────────────────
 fn install_read_ops(lua: &Lua, fs_table: &Table, fp: &FsPerm) -> Result<()> {
     // exists(path) → boolean   (read perm — never fails)
@@ -90,6 +90,26 @@ fn install_read_ops(lua: &Lua, fs_table: &Table, fp: &FsPerm) -> Result<()> {
             }
         }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
         fs_table.set("read", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    }
+
+    // read_bytes(path) → content | (nil, err)
+    //
+    // Raw read: returns the file's exact bytes as a Lua string with NO UTF-8
+    // validation and NO BOM stripping. `read` rejects non-UTF-8 input
+    // (`read_to_string`) and eats the BOM — both fatal for callers that
+    // inspect or repair encodings (mojibake / charset / BOM checks). Lua
+    // strings are byte buffers, so the content round-trips losslessly.
+    {
+        let fp = fp.clone();
+        let fn_ = lua.create_function(move |lua_ctx, path: String| -> LuaTuple {
+            let p = PathBuf::from(&path);
+            check_fs_read(lua_ctx, &p, &fp)?;
+            match std::fs::read(&p) {
+                Ok(bytes) => ok2(lua_ctx, lua_ctx.create_string(&bytes)?),
+                Err(e)    => err2(lua_ctx, format!("fs.read_bytes {path}: {e}")),
+            }
+        }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+        fs_table.set("read_bytes", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     }
 
     // list(dir) → (entries[], nil) | (nil, err)
@@ -167,6 +187,27 @@ fn install_write_ops(lua: &Lua, fs_table: &Table, fp: &FsPerm) -> Result<()> {
             }
         }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
         fs_table.set("write", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+    }
+
+    // write_bytes(path, content) → (true, nil) | (nil, err)
+    //
+    // Write the exact bytes of `content` (a Lua string, taken as a raw byte
+    // buffer — NO UTF-8 validation). `write` takes `content: String`, which
+    // mlua rejects when the Lua string holds non-UTF-8 bytes; that makes it
+    // impossible to round-trip a `read_bytes` result for a non-UTF-8 / legacy
+    // file. Pairs with `read_bytes` for byte-faithful read-modify-write.
+    {
+        let fp = fp.clone();
+        let fn_ = lua.create_function(move |lua_ctx, (path, content): (String, mlua::String)| -> LuaTuple {
+            let p = PathBuf::from(&path);
+            check_fs_write(lua_ctx, &p, &fp)?;
+            if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
+            match std::fs::write(&p, &content.as_bytes()[..]) {
+                Ok(_)  => ok2(lua_ctx, true),
+                Err(e) => err2(lua_ctx, format!("fs.write_bytes {path}: {e}")),
+            }
+        }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
+        fs_table.set("write_bytes", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     }
 
     // append(path, content) → (true, nil) | (nil, err)
