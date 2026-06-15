@@ -909,6 +909,8 @@ pub fn run() {
             commands::diff_commands::get_commit_diff,
             commands::diff_commands::get_commit_diff_meta,
             commands::diff_commands::get_commit_file_diff,
+            commands::diff_commands::get_commits_range_diff_meta,
+            commands::diff_commands::get_commits_range_file_diff,
             commands::diff_commands::get_workdir_diff,
             commands::diff_commands::get_workdir_diff_stream,
             commands::diff_commands::get_branch_diff,

@@ -91,6 +91,7 @@
     <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Hop to the nearest occupied lane on the left / right (closest commit by row)</td></tr>
     <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>Jump one viewport up / down (linear, ignores lanes)</td></tr>
     <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Select the newest / oldest loaded commit</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd></td><td>Extend the selection to multiple commits — the Detail panel shows the <em>combined</em> changes across them (also <kbd>Ctrl</kbd>+click / <kbd>Shift</kbd>+click commits with the mouse)</td></tr>
   </tbody>
 </table>
 
@@ -229,7 +230,7 @@
     <tr><td><kbd>Enter</kbd></td><td>Open folder · open file · confirm pick · confirm delete</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Confirm the pick from anywhere (including the save-name field)</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd></td><td>Open the Properties (Info) panel for the cursor item</td></tr>
-    <tr><td><kbd>Menu</kbd> / <kbd>Shift</kbd>+<kbd>F10</kbd></td><td>Open the context menu on the cursor item</td></tr>
+    <tr><td><Kbd action="open_context_menu" size="sm" /></td><td>Open the context menu on the cursor item</td></tr>
     <tr><td>Type any letter</td><td>Type-ahead — keystrokes route into the filter field automatically</td></tr>
     <tr><td><kbd>↓</kbd> in filter field</td><td>Step into the file list (cursor sits on the first match)</td></tr>
   </tbody>
@@ -239,11 +240,11 @@
 <table class="shortcuts-table">
   <thead><tr><th>Target</th><th>How to open</th></tr></thead>
   <tbody>
-    <tr><td>Commit (graph)</td><td>Right-click commit row</td></tr>
+    <tr><td>Anywhere (keyboard)</td><td><Kbd action="open_context_menu" size="sm" /> — opens the context menu wherever the focus is (commit, sidebar item, worktree, File Explorer entry…); rebindable in the Keyboard Shortcuts panel</td></tr>
+    <tr><td>Commit (graph)</td><td>Right-click commit row · or <Kbd action="open_context_menu" size="sm" /> on the selected commit</td></tr>
     <tr><td>Branch (sidebar)</td><td>Right-click branch item</td></tr>
     <tr><td>File (stage area / diff list)</td><td>Right-click file entry</td></tr>
     <tr><td>Tab (tab bar)</td><td>Right-click tab</td></tr>
-    <tr><td>File Explorer entry (keyboard)</td><td><kbd>Menu</kbd> key or <kbd>Shift</kbd>+<kbd>F10</kbd> on the cursor row</td></tr>
   </tbody>
 </table>
 <p class="hint">

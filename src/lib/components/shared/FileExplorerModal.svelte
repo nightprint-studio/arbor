@@ -37,6 +37,8 @@
   import { getFileIcon, getFolderIcon } from '$lib/utils/file-icons';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
+  import { keybindingsStore } from '$lib/stores/keybindings.svelte';
+  import { matchesBinding } from '$lib/utils/keybindings';
   import { tooltip } from '$lib/actions/tooltip';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import {
@@ -1287,12 +1289,12 @@
     if (entry && !selected.has(entry.path)) { selected = new Set([entry.path]); anchor = entry.path; lead = entry.path; }
     ctxMenu = { x: e.clientX, y: e.clientY, entry };
   }
-  // The ContextMenu key / Shift+F10 fire a *native* `contextmenu` event on the
+  // The ContextMenu ("Menu") key fires a *native* `contextmenu` event on the
   // focused element (the list container) in addition to our keydown — which
   // would re-open a background menu over the one we just placed. This one-shot
   // flag lets the container's `oncontextmenu` swallow that synthetic event.
   let kbdCtxGuard = false;
-  /** Open the context menu from the keyboard (ContextMenu key / Shift+F10) on the
+  /** Open the context menu from the keyboard (ContextMenu / "Menu" key) on the
    *  cursor row — anchored to that row's rect — or, with no cursor, as a
    *  background menu near the top of the list. */
   function openCtxKeyboard() {
@@ -1518,7 +1520,7 @@
     }
     if (zone.closest?.('.fx-sidebar') || zone.closest?.('.fx-preview')) return;
     // Open the context menu from the keyboard, on the cursor row.
-    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) { e.preventDefault(); openCtxKeyboard(); return; }
+    if (matchesBinding(e, keybindingsStore.getBinding('open_context_menu'))) { e.preventDefault(); openCtxKeyboard(); return; }
     switch (e.key) {
       case 'Enter': {
         if (inInput) return; e.preventDefault();
@@ -2734,7 +2736,7 @@
   .fx-ch-static { font-size: 10.5px; font-weight: 600; color: var(--text-disabled); text-transform: uppercase; letter-spacing: 0.4px; }
   .fx-sort { color: var(--accent); font-size: 9px; }
 
-  .fx-list { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; position: relative; }
+  .fx-list { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; position: relative; padding: 5px 0; }
   /* The list is one focusable listbox; the active option (.fx-row.lead) is the
      visible cursor, so the container itself needs no focus outline. */
   .fx-list:focus { outline: none; }

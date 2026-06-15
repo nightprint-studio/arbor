@@ -577,6 +577,80 @@ pub fn get_commit_file_diff(
     Err(AppError::Other(format!("file '{path}' not found in commit diff")))
 }
 
+/// Metadata-only cumulative range diff between two commits (file list + stats,
+/// no hunks). Given `base_oid_str` (oldest) and `target_oid_str` (newest),
+/// diffs from base's first parent tree to target's tree — the "compare
+/// revisions" view. Mirrors `get_commit_diff_meta` but spans a range, so no
+/// stash untracked-parent handling.
+pub fn get_commits_range_diff_meta(
+    repo: &Repository,
+    base_oid_str: &str,
+    target_oid_str: &str,
+    algo: Option<&str>,
+) -> Result<Vec<DiffFile>> {
+    let base_oid =
+        Oid::from_str(base_oid_str).map_err(|_| AppError::CommitNotFound(base_oid_str.to_string()))?;
+    let target_oid =
+        Oid::from_str(target_oid_str).map_err(|_| AppError::CommitNotFound(target_oid_str.to_string()))?;
+    let base_commit = repo.find_commit(base_oid)?;
+    let target_commit = repo.find_commit(target_oid)?;
+    let new_tree = target_commit.tree()?;
+
+    let mut opts = DiffOptions::new();
+    opts.context_lines(0);
+    apply_algo(&mut opts, algo);
+
+    let diff = if base_commit.parent_count() == 0 {
+        repo.diff_tree_to_tree(None, Some(&new_tree), Some(&mut opts))?
+    } else {
+        let parent = base_commit.parent(0)?;
+        let old_tree = parent.tree()?;
+        repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut opts))?
+    };
+
+    Ok(parse_diff_meta_stats(&diff))
+}
+
+/// Parse the hunks of a single file inside a cumulative range diff. Returns the
+/// matching `DiffFile` with hunks populated, or `Err` if no delta matches
+/// `path`. Used by the lazy loader after `get_commits_range_diff_meta`.
+pub fn get_commits_range_file_diff(
+    repo: &Repository,
+    base_oid_str: &str,
+    target_oid_str: &str,
+    path: &str,
+    context_lines: u32,
+    algo: Option<&str>,
+    overrides: Option<&EncodingOverrides>,
+) -> Result<DiffFile> {
+    let base_oid =
+        Oid::from_str(base_oid_str).map_err(|_| AppError::CommitNotFound(base_oid_str.to_string()))?;
+    let target_oid =
+        Oid::from_str(target_oid_str).map_err(|_| AppError::CommitNotFound(target_oid_str.to_string()))?;
+    let base_commit = repo.find_commit(base_oid)?;
+    let target_commit = repo.find_commit(target_oid)?;
+    let new_tree = target_commit.tree()?;
+
+    let mut opts = DiffOptions::new();
+    opts.context_lines(context_lines);
+    opts.pathspec(path);
+    apply_algo(&mut opts, algo);
+
+    let diff = if base_commit.parent_count() == 0 {
+        repo.diff_tree_to_tree(None, Some(&new_tree), Some(&mut opts))?
+    } else {
+        let parent = base_commit.parent(0)?;
+        let old_tree = parent.tree()?;
+        repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut opts))?
+    };
+
+    if let Some(i) = find_delta_index(&diff, path) {
+        return parse_diff_one(repo, &diff, i, overrides);
+    }
+
+    Err(AppError::Other(format!("file '{path}' not found in range diff")))
+}
+
 /// Find the delta index in `diff` whose new- or old-file path matches `path`.
 /// Used when a pathspec narrows the diff to one file but the index may not be 0
 /// (e.g. when libgit2 still emits other paths in the deltas list).

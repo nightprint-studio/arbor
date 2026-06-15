@@ -44,7 +44,7 @@
     <tr><td>Jump a page</td><td><Kbd label="PageUp" /> / <Kbd label="PageDown" /></td></tr>
     <tr><td>Extend the selection</td><td>Hold <Kbd label="Shift" /> while moving the cursor</td></tr>
     <tr><td>Open folder / file</td><td><Kbd label="Enter" /> or double-click</td></tr>
-    <tr><td>Open the context menu</td><td><Kbd label="Menu" /> or <Kbd label="Shift+F10" /></td></tr>
+    <tr><td>Open the context menu</td><td><Kbd action="open_context_menu" /></td></tr>
     <tr><td>Properties (Info panel)</td><td><Kbd label="Alt+Enter" /></td></tr>
     <tr><td>Cycle panes (sidebar · list · panel · activity bar)</td><td><Kbd label="F6" /> / <Kbd label="Shift+F6" /></td></tr>
     <tr><td>Edit the address</td><td><Kbd label="Ctrl+L" /></td></tr>
@@ -56,7 +56,7 @@
 </table>
 
 <h2>Managing files</h2>
-<p>Right-click an item (or the background) for the full menu — or open it from the keyboard on the cursor row with the <Kbd label="Menu" /> key or <Kbd label="Shift+F10" />. The menu is fully keyboard-driven: <Kbd label="Up" /> / <Kbd label="Down" /> move, type a letter to jump, <Kbd label="Right" /> / <Kbd label="Left" /> open / close a submenu (e.g. <strong>Git</strong>), <Kbd label="Enter" /> activates, <Kbd label="Esc" /> closes. Common actions are also on the keyboard directly:</p>
+<p>Right-click an item (or the background) for the full menu — or open it from the keyboard on the cursor row with <Kbd action="open_context_menu" />. The menu is fully keyboard-driven: <Kbd label="Up" /> / <Kbd label="Down" /> move, type a letter to jump, <Kbd label="Right" /> / <Kbd label="Left" /> open / close a submenu (e.g. <strong>Git</strong>), <Kbd label="Enter" /> activates, <Kbd label="Esc" /> closes. Common actions are also on the keyboard directly:</p>
 <ul class="step-list">
   <li><strong>New folder / file</strong>, <strong>Rename</strong> (<Kbd label="F2" />), <strong>Cut / Copy / Paste</strong> (<Kbd label="Ctrl+X" /> / <Kbd label="Ctrl+C" /> / <Kbd label="Ctrl+V" />).</li>
   <li><strong>Delete</strong> to Recycle Bin (<Kbd label="Delete" />) or permanently (<Kbd label="Shift+Delete" />).</li>

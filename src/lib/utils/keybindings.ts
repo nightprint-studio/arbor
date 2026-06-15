@@ -105,6 +105,12 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
 
   // Navigation (graph)
   jump_to_head:   { key: 'Home',  ctrl: true,                description: 'Jump to HEAD commit',   group: 'Navigation' },
+  // Open the context menu wherever the focus is — the graph (on the selected
+  // commit), sidebar items, worktrees, the File Explorer. Ctrl+Shift+K works on
+  // every keyboard (the dedicated "Menu" key is missing on most laptops); the
+  // physical Menu key still opens menus natively too. Shift+F10 is intentionally
+  // left to the Run shortcut.
+  open_context_menu: { key: 'k', ctrl: true, shift: true,    description: 'Open context menu',     group: 'Navigation' },
 
   // Git
   fetch:          { key: 'f',     ctrl: true,  shift: true,  description: 'Fetch all remotes',     group: 'Git' },
@@ -167,11 +173,15 @@ export function matchesBinding(event: KeyboardEvent, binding: Keybinding): boole
   return false;
 }
 
+// Friendlier display names for keys whose `KeyboardEvent.key` value reads
+// awkwardly (the dedicated context-menu key reports as 'ContextMenu').
+const KEY_DISPLAY: Record<string, string> = { ContextMenu: 'Menu' };
+
 export function formatBinding(binding: Keybinding): string {
   const parts: string[] = [];
   if (binding.ctrl)  parts.push('Ctrl');
   if (binding.alt)   parts.push('Alt');
   if (binding.shift) parts.push('Shift');
-  parts.push(binding.key.length === 1 ? binding.key.toUpperCase() : binding.key);
+  parts.push(KEY_DISPLAY[binding.key] ?? (binding.key.length === 1 ? binding.key.toUpperCase() : binding.key));
   return parts.join('+');
 }

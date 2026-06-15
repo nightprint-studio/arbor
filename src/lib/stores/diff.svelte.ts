@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { DiffFile } from '../types/git';
 import type { DiffConfig, DiffMode, DiffAlgorithm, FileListView } from '../types/config';
 import { getDiffConfig, setDiffConfig } from '$lib/ipc/config';
-import { getCommitFileDiff } from '$lib/ipc/diff';
+import { getCommitFileDiff, getCommitsRangeFileDiff } from '$lib/ipc/diff';
 
 type StreamStartedPayload = {
   job_id: string;
@@ -139,7 +139,11 @@ function createDiffStore() {
   /// hunks must be fetched per-file via `getCommitFileDiff`. The dispatcher
   /// also uses this as a guard to discard stale fetch results when the user
   /// jumps to a different commit before a previous fetch resolves.
-  let commitContext = $state<{ tabId: string; oid: string } | null>(null);
+  /// `baseOid`, when present, switches this context into cumulative-range mode:
+  /// per-file hunks come from `getCommitsRangeFileDiff(baseOid, oid)` instead of
+  /// the single-commit loader, so a multi-commit selection lazy-loads the same
+  /// way a single commit does.
+  let commitContext = $state<{ tabId: string; oid: string; baseOid?: string } | null>(null);
   /// Bumped on every commit context change. Per-file fetches capture the
   /// value at launch and re-check on completion — stale results are dropped.
   let commitSeq = 0;
@@ -188,7 +192,10 @@ function createDiffStore() {
       np.add(path);
       pendingPaths = np;
     }
-    void getCommitFileDiff(ctx.tabId, ctx.oid, path)
+    const fetchFile = ctx.baseOid
+      ? getCommitsRangeFileDiff(ctx.tabId, ctx.baseOid, ctx.oid, path)
+      : getCommitFileDiff(ctx.tabId, ctx.oid, path);
+    void fetchFile
       .then(parsed => applyCommitFileDetail(parsed, seenSeq))
       .catch(() => {
         if (seenSeq !== commitSeq) return;
@@ -225,8 +232,8 @@ function createDiffStore() {
   /// be fetched per-path via `getCommitFileDiff`. Call before `setFiles()`.
   /// Bumps the sequence number so any pending fetches from the previous
   /// commit are discarded when they return.
-  function setCommitContext(tabId: string, oid: string) {
-    commitContext = { tabId, oid };
+  function setCommitContext(tabId: string, oid: string, baseOid?: string) {
+    commitContext = { tabId, oid, baseOid };
     commitSeq++;
   }
 

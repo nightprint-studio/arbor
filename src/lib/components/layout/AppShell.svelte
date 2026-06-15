@@ -1270,6 +1270,29 @@
         onboardingStore.open;
       if (modalOpen) return;
 
+      // The context-menu shortcut (`open_context_menu`, Ctrl+Shift+K by
+      // default — rebindable in the Keyboard Shortcuts panel) opens the menu
+      // wherever the focus is — sidebar item, worktree row, issue, …. Surfaces
+      // that need a target other than
+      // the focused element (the commit graph wants the *selected* row, not
+      // the focused scroll-area) handle it locally and stopPropagation, so we
+      // never reach here for them. For everything else this is the generic
+      // path: re-dispatch as a `contextmenu` event on the focused element so
+      // its existing right-click handler fires, positioned at its top-left.
+      if (matchesBinding(e, keybindingsStore.getBinding('open_context_menu'))) {
+        const el = document.activeElement as HTMLElement | null;
+        if (el && el !== document.body) {
+          e.preventDefault();
+          const r = el.getBoundingClientRect();
+          el.dispatchEvent(new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true,
+            clientX: Math.round(r.left + Math.min(16, r.width / 2)),
+            clientY: Math.round(r.top + Math.min(r.height, 24)),
+          }));
+        }
+        return;
+      }
+
       // Check plugin keybindings first (they take priority over unbound app keys).
       const pluginKb = contributionStore.forPoint('arbor:keybinding')
         .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))

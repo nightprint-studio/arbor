@@ -380,7 +380,6 @@
       oncontextmenu={(e) => handleContextMenu(e, wt)}
       onkeydown={(e) => {
         if (e.key === 'Enter') handleDblClick(wt);
-        else if (e.key === 'F10' && e.shiftKey) handleContextMenu(e as unknown as MouseEvent, wt);
       }}
     >
       <span class="wt-project-icon" aria-hidden="true">
