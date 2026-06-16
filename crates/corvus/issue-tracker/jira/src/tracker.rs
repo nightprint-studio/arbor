@@ -250,16 +250,12 @@ impl IssueTracker for JiraTracker {
         ProviderDescriptor {
             id: "jira".into(),
             display_name: "Jira".into(),
+            description: Some("Atlassian issue tracker — API Token & OAuth".into()),
             icon: "jira".into(),
             auth_methods: vec![
                 AuthMethod {
-                    id: "oauth".into(),
-                    label: "Connect with Jira (OAuth)".into(),
-                    kind: AuthMethodKind::OAuth,
-                },
-                AuthMethod {
                     id: "basic".into(),
-                    label: "API token".into(),
+                    label: "API Token (recommended)".into(),
                     kind: AuthMethodKind::Fields {
                         fields: vec![
                             AuthField {
@@ -285,6 +281,11 @@ impl IssueTracker for JiraTracker {
                             },
                         ],
                     },
+                },
+                AuthMethod {
+                    id: "oauth".into(),
+                    label: "OAuth 2.0 (requires Atlassian app)".into(),
+                    kind: AuthMethodKind::OAuth,
                 },
             ],
         }

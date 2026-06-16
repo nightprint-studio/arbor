@@ -17,16 +17,17 @@ impl IssueTracker for LinearTracker {
         ProviderDescriptor {
             id:           "linear".into(),
             display_name: "Linear".into(),
+            description:  Some("Issue tracker — OAuth & Personal API Key".into()),
             icon:         "linear".into(),
             auth_methods: vec![
                 AuthMethod {
                     id:    "oauth".into(),
-                    label: "Connect with Linear".into(),
+                    label: "OAuth (recommended)".into(),
                     kind:  AuthMethodKind::OAuth,
                 },
                 AuthMethod {
                     id:    "pat".into(),
-                    label: "API key".into(),
+                    label: "Personal API Key".into(),
                     kind:  AuthMethodKind::Fields {
                         fields: vec![AuthField {
                             key:         "token".into(),

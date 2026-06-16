@@ -68,6 +68,7 @@ mod tests {
             ProviderDescriptor {
                 id: self.id.into(),
                 display_name: self.id.into(),
+                description: None,
                 icon: self.id.into(),
                 auth_methods: vec![AuthMethod {
                     id: "oauth".into(),

@@ -4,8 +4,17 @@ use crate::AppState;
 use crate::error::AppError;
 use crate::integrations::{
     Issue, IssueComment, IssueFilterOptions, IssueFilters, IssueUser, LinearAuthStatus,
+    ProviderDescriptor,
 };
 use crate::integrations::jira_types::JiraAuthStatus;
+
+/// List the registered issue-tracker providers with their self-describing
+/// connect forms (id, icon, description, auth methods + fields). Drives the
+/// generic settings UI.
+#[tauri::command]
+pub fn list_issue_providers() -> Result<Vec<ProviderDescriptor>, AppError> {
+    Ok(crate::integrations::registry::registry().descriptors())
+}
 
 #[tauri::command]
 pub async fn linear_get_auth_status(

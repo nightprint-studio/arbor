@@ -1,8 +1,14 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   Issue, IssueComment, IssueFilterOptions, IssueFilters,
-  IssueUser, LinearAuthStatus, JiraAuthStatus,
+  IssueUser, LinearAuthStatus, JiraAuthStatus, ProviderDescriptor,
 } from '$lib/types/issues';
+
+/** The registered issue-tracker providers with their self-describing connect
+ *  forms (id, icon, description, auth methods + fields). Drives the settings UI. */
+export function listIssueProviders(): Promise<ProviderDescriptor[]> {
+  return invoke('list_issue_providers');
+}
 
 export function linearGetAuthStatus(): Promise<LinearAuthStatus> {
   return invoke('linear_get_auth_status');

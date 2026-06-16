@@ -18,9 +18,13 @@ pub struct ProviderDescriptor {
     pub id: String,
     /// Human label (e.g. `"Linear"`).
     pub display_name: String,
+    /// One-line subtitle for the settings card (e.g. the auth methods offered).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Brand icon id the FE's `BrandIcon` resolves (e.g. `"linear"`).
     pub icon: String,
-    /// The ways a user can authenticate this tracker, in display order.
+    /// The ways a user can authenticate, in **display order** — the first is the
+    /// recommended/default method (the FE's primary "Connect" action).
     pub auth_methods: Vec<AuthMethod>,
 }
 
@@ -121,6 +125,7 @@ mod tests {
         let d = ProviderDescriptor {
             id: "linear".into(),
             display_name: "Linear".into(),
+            description: Some("Issue tracker".into()),
             icon: "linear".into(),
             auth_methods: vec![
                 AuthMethod { id: "oauth".into(), label: "Connect with Linear".into(), kind: AuthMethodKind::OAuth },
@@ -155,6 +160,7 @@ mod tests {
         let d = ProviderDescriptor {
             id: "jira".into(),
             display_name: "Jira".into(),
+            description: None,
             icon: "jira".into(),
             auth_methods: vec![AuthMethod {
                 id: "basic".into(),
