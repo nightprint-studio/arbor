@@ -152,6 +152,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "corvus-brp",
+ "corvus-git-provider-api",
+ "corvus-git-provider-github",
  "corvus-issue-tracker-api",
  "corvus-issue-tracker-jira",
  "corvus-issue-tracker-linear",
@@ -1229,6 +1231,34 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "corvus-git-provider-api"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "corvus-git-provider-github"
+version = "0.3.0"
+dependencies = [
+ "arbor-ipc",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "corvus-git-provider-api",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

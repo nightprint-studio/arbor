@@ -9,11 +9,6 @@
 use crate::auth::DeviceFlowInfo;
 use crate::git_provider::types::error::ProviderError;
 
-pub fn revoke_token() -> Result<(), ProviderError> {
-    crate::git_provider::oauth::github_flow::disconnect()
-        .map_err(|e| ProviderError::Internal(e.to_string()))
-}
-
 /// Kicks off the Device Authorization Grant via the existing implementation.
 /// Returns the verification info (user code + URL) the UI should display.
 pub async fn start(app: tauri::AppHandle) -> Result<DeviceFlowInfo, ProviderError> {

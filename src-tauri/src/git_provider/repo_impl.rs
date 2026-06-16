@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use crate::error::{AppError, Result};
 use crate::git_provider::ci_impl::{
@@ -10,56 +10,11 @@ const MAX_PREVIEW_BYTES: u64 = 512 * 1024; // 512 KB text preview limit
 const MAX_IMAGE_BYTES:   u64 = 5 * 1024 * 1024; // 5 MB image limit
 
 // ---------------------------------------------------------------------------
-// Public types
+// Public types — defined in `corvus-git-provider-api`, re-exported here so the
+// REST client code below and external `repo_impl::*` call sites keep resolving.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RemoteAccount {
-    pub provider:      String,         // "github" | "gitlab"
-    pub username:      String,
-    pub display_name:  Option<String>,
-    pub avatar_url:    Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RemoteRepo {
-    pub id:               String,      // numeric ID string from API
-    pub name:             String,
-    pub namespace:        String,      // org or user login
-    pub full_name:        String,      // "namespace/name"
-    pub description:      Option<String>,
-    pub private:          bool,
-    pub default_branch:   String,
-    pub language:         Option<String>,
-    pub stars:            u32,
-    pub updated_at:       String,      // ISO 8601
-    pub clone_url_https:  String,
-    pub clone_url_ssh:    Option<String>,
-    pub web_url:          String,
-    pub provider:         String,
-    pub is_fork:          bool,
-    pub is_archived:      bool,
-    pub size_kb:          Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RemoteTreeEntry {
-    pub name:       String,
-    pub path:       String,
-    pub entry_type: String,    // "file" | "dir" | "submodule" | "symlink"
-    pub size:       Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RemoteFileContent {
-    pub path:       String,
-    pub content:    String,            // UTF-8 text (empty for binary/image)
-    pub image_data: Option<String>,    // data:<mime>;base64,<data>
-    pub size:       u64,
-    pub is_binary:  bool,
-    pub is_image:   bool,
-    pub mime_type:  Option<String>,
-}
+pub use corvus_git_provider_api::repo::*;
 
 // ---------------------------------------------------------------------------
 // Account listing

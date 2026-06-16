@@ -1,0 +1,21 @@
+[package]
+name         = "corvus-git-provider-github"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Keyring-free GitHub implementation of the corvus GitProvider trait. Holds an Arc<dyn SessionProvider>; the shell injects credentials + OAuth refresh."
+
+[dependencies]
+corvus-git-provider-api = { path = "../api" }
+arbor-ipc   = { path = "../../../foundation/ipc" }
+async-trait = { workspace = true }
+reqwest     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+base64      = { workspace = true }
+tracing     = { workspace = true }
+chrono      = { version = "0.4", features = ["serde"] }
+# `security.rs` fans the 3 source fetches out with `tokio::join!`.
+tokio       = { workspace = true }

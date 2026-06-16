@@ -16,10 +16,19 @@ use std::sync::{LazyLock, Mutex};
 use serde::Deserialize;
 
 use crate::git_provider::{
-    github::api as gh_api,
+    ci_impl::{get_github_token, github_send_with_refresh},
     gitlab::api as gl_api,
     helpers::ResolvedProvider,
 };
+
+// GitHub REST constants — formerly `github/api.rs`, removed when GitHub moved
+// to the keyring-free `corvus-git-provider-github` crate. This shell-side avatar
+// lookup (commit-graph layer) keeps its own copy + reuses `ci_impl`'s token
+// lookup / 401-refresh sender.
+const GITHUB_API_BASE: &str = "https://api.github.com";
+const GH_USER_AGENT:   &str = "arbor-git-gui/1.0";
+const GH_ACCEPT_JSON:  &str = "application/vnd.github+json";
+const GH_API_VERSION:  &str = "2022-11-28";
 
 static CACHE: LazyLock<Mutex<HashMap<String, Option<String>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -80,18 +89,18 @@ fn parse_github_noreply(email: &str) -> Option<String> {
 }
 
 async fn fetch_github(email: &str) -> Option<String> {
-    let token = gh_api::get_token().ok().flatten()?;
+    let token = get_github_token().ok().flatten()?;
     let client = reqwest::Client::new();
 
     // Fast path: noreply emails encode the username directly.
     if let Some(username) = parse_github_noreply(email) {
-        let url = format!("{}/users/{}", gh_api::GITHUB_API_BASE, percent_encode(&username));
-        let resp = gh_api::github_send_with_refresh(
+        let url = format!("{}/users/{}", GITHUB_API_BASE, percent_encode(&username));
+        let resp = github_send_with_refresh(
             |tok| client.get(&url)
                 .header("Authorization", format!("Bearer {tok}"))
-                .header("Accept", gh_api::ACCEPT_JSON)
-                .header("X-GitHub-Api-Version", gh_api::API_VERSION)
-                .header("User-Agent", gh_api::USER_AGENT),
+                .header("Accept", GH_ACCEPT_JSON)
+                .header("X-GitHub-Api-Version", GH_API_VERSION)
+                .header("User-Agent", GH_USER_AGENT),
             &token,
         ).await.ok()?;
         if !resp.status().is_success() { return None; }
@@ -106,15 +115,15 @@ async fn fetch_github(email: &str) -> Option<String> {
     let q = format!("{}+in:email", email);
     let url = format!(
         "{}/search/users?q={}&per_page=1",
-        gh_api::GITHUB_API_BASE,
+        GITHUB_API_BASE,
         percent_encode(&q),
     );
-    let resp = gh_api::github_send_with_refresh(
+    let resp = github_send_with_refresh(
         |tok| client.get(&url)
             .header("Authorization", format!("Bearer {tok}"))
-            .header("Accept", gh_api::ACCEPT_JSON)
-            .header("X-GitHub-Api-Version", gh_api::API_VERSION)
-            .header("User-Agent", gh_api::USER_AGENT),
+            .header("Accept", GH_ACCEPT_JSON)
+            .header("X-GitHub-Api-Version", GH_API_VERSION)
+            .header("User-Agent", GH_USER_AGENT),
         &token,
     ).await.ok()?;
     if !resp.status().is_success() { return None; }

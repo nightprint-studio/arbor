@@ -8,73 +8,11 @@ use chrono::{DateTime, Utc};
 // concurrent 401-driven refreshes for us — the senders below just call them.
 
 // ---------------------------------------------------------------------------
-// Public types
+// Public types — defined in `corvus-git-provider-api`, re-exported here so the
+// REST client code below and external `ci_impl::*` call sites keep resolving.
 // ---------------------------------------------------------------------------
 
-/// Information about a detected CI/CD provider for a repo.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CiProviderInfo {
-    /// "github" | "gitlab"
-    pub provider: String,
-    pub remote_url: String,
-    /// True when an OAuth token is available for this provider.
-    pub has_token: bool,
-    /// GitHub: repository owner (login).
-    pub owner: Option<String>,
-    /// GitHub: repository name.
-    pub repo_name: Option<String>,
-    /// GitLab: namespace + path, e.g. "myorg/myrepo".
-    pub project_path: Option<String>,
-    /// GitLab: API base URL (https://gitlab.com for hosted; custom for self-hosted).
-    pub gitlab_base_url: Option<String>,
-}
-
-/// A single CI pipeline run / workflow run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CiRun {
-    pub id: String,
-    pub name: String,
-    /// "pending" | "running" | "success" | "failed" | "cancelled"
-    pub status: String,
-    /// Branch / ref name.
-    pub branch: String,
-    /// Short (8-char) commit SHA.
-    pub commit_sha: String,
-    /// URL to open in the browser.
-    pub web_url: String,
-    /// ISO 8601 creation timestamp (let the frontend parse it).
-    pub created_at: String,
-    /// "github" | "gitlab"
-    pub provider: String,
-    /// Wall-clock duration in seconds (None when still running or unknown).
-    pub duration_secs: Option<f64>,
-}
-
-/// A GitHub Actions workflow definition (used for the "create pipeline" modal).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CiWorkflow {
-    pub id:   String,
-    pub name: String,
-    /// Relative path inside the repo, e.g. ".github/workflows/ci.yml".
-    pub path: String,
-}
-
-/// A single job within a CI pipeline run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CiJob {
-    pub id: String,
-    pub name: String,
-    /// Stage name — "Jobs" for GitHub (no native stage concept).
-    pub stage: String,
-    /// Same status vocabulary as CiRun.
-    pub status: String,
-    /// Wall-clock duration in seconds.
-    pub duration_secs: Option<f64>,
-    /// URL to open in the browser for job logs.
-    pub web_url: String,
-    /// When true, pipeline success is not blocked by this job's failure.
-    pub allow_failure: bool,
-}
+pub use corvus_git_provider_api::ci::*;
 
 // ---------------------------------------------------------------------------
 // Provider detection
@@ -313,77 +251,7 @@ where
 // GitHub Actions API
 // ---------------------------------------------------------------------------
 
-pub async fn fetch_github_runs(
-    owner: &str,
-    repo:  &str,
-    token: &str,
-) -> Result<Vec<CiRun>> {
-    let url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/actions/runs?per_page=30"
-    );
-    let client = reqwest::Client::new();
-    let resp = github_send_with_refresh(
-        |tok| client.get(&url)
-            .header("Authorization", format!("Bearer {tok}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "arbor-git-gui/1.0"),
-        token,
-    ).await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body   = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!("GitHub API {status}: {body}")));
-    }
-
-    #[derive(Deserialize)]
-    struct RunsResponse {
-        workflow_runs: Vec<GhRun>,
-    }
-    #[derive(Deserialize)]
-    struct GhRun {
-        id:              i64,
-        name:            Option<String>,
-        run_number:      i64,
-        status:          Option<String>,
-        conclusion:      Option<String>,
-        head_branch:     Option<String>,
-        head_sha:        String,
-        html_url:        String,
-        created_at:      String,
-        run_started_at:  Option<String>,
-        updated_at:      Option<String>,
-    }
-
-    let parsed: RunsResponse = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Other(format!("GitHub API parse error: {e}")))?;
-
-    Ok(parsed.workflow_runs.into_iter().map(|r| {
-        let sha    = &r.head_sha[..8.min(r.head_sha.len())];
-        let status = map_github_status(r.status.as_deref(), r.conclusion.as_deref());
-        let dur    = if status != "running" && status != "pending" {
-            parse_iso_duration(r.run_started_at.as_deref(), r.updated_at.as_deref())
-        } else {
-            None
-        };
-        CiRun {
-            id:            r.id.to_string(),
-            name:          r.name.unwrap_or_else(|| format!("Run #{}", r.run_number)),
-            status,
-            branch:        r.head_branch.unwrap_or_default(),
-            commit_sha:    sha.to_string(),
-            web_url:       r.html_url,
-            created_at:    r.created_at,
-            provider:      "github".into(),
-            duration_secs: dur,
-        }
-    }).collect())
-}
-
-/// Same as `fetch_github_runs` but filtered server-side to runs whose
+/// Filtered server-side to runs whose
 /// `head_branch` matches `branch`. Used by the MR/PR detail modal.
 pub async fn fetch_github_runs_for_branch(
     owner:  &str,
@@ -475,35 +343,6 @@ async fn fetch_github_runs_with_query(
             duration_secs: dur,
         }
     }).collect())
-}
-
-pub async fn retrigger_github_run(
-    owner:  &str,
-    repo:   &str,
-    run_id: &str,
-    token:  &str,
-) -> Result<()> {
-    let url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/rerun"
-    );
-    let client = reqwest::Client::new();
-    let resp = github_send_with_refresh(
-        |tok| client.post(&url)
-            .header("Authorization", format!("Bearer {tok}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "arbor-git-gui/1.0")
-            .header("Content-Length", "0"),
-        token,
-    ).await?;
-
-    // 201 Created is the success response for this endpoint.
-    if resp.status().is_success() || resp.status().as_u16() == 201 {
-        return Ok(());
-    }
-    let status = resp.status();
-    let body   = resp.text().await.unwrap_or_default();
-    Err(AppError::Other(format!("GitHub retrigger {status}: {body}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -666,60 +505,6 @@ pub async fn retrigger_gitlab_pipeline(
 // GitHub: fetch jobs for a single workflow run
 // ---------------------------------------------------------------------------
 
-pub async fn fetch_github_jobs(
-    owner:  &str,
-    repo:   &str,
-    run_id: &str,
-    token:  &str,
-) -> Result<Vec<CiJob>> {
-    let url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/jobs?per_page=100"
-    );
-    let client = reqwest::Client::new();
-    let resp = github_send_with_refresh(
-        |tok| client.get(&url)
-            .header("Authorization", format!("Bearer {tok}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "arbor-git-gui/1.0"),
-        token,
-    ).await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body   = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!("GitHub jobs API {status}: {body}")));
-    }
-
-    #[derive(Deserialize)]
-    struct JobsResponse { jobs: Vec<GhJob> }
-    #[derive(Deserialize)]
-    struct GhJob {
-        id:           i64,
-        name:         String,
-        status:       Option<String>,
-        conclusion:   Option<String>,
-        started_at:   Option<String>,
-        completed_at: Option<String>,
-        html_url:     String,
-    }
-
-    let parsed: JobsResponse = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Other(format!("GitHub jobs parse error: {e}")))?;
-
-    Ok(parsed.jobs.into_iter().map(|j| CiJob {
-        id:            j.id.to_string(),
-        name:          j.name,
-        stage:         "Jobs".into(),
-        status:        map_github_status(j.status.as_deref(), j.conclusion.as_deref()),
-        duration_secs: parse_iso_duration(j.started_at.as_deref(), j.completed_at.as_deref()),
-        web_url:       j.html_url,
-        allow_failure: false,
-    }).collect())
-}
-
 // ---------------------------------------------------------------------------
 // GitLab: fetch jobs for a single pipeline
 // ---------------------------------------------------------------------------
@@ -779,91 +564,6 @@ pub async fn fetch_gitlab_jobs(
 // ---------------------------------------------------------------------------
 // GitHub: list workflows (for the "create run" modal)
 // ---------------------------------------------------------------------------
-
-pub async fn list_github_workflows(
-    owner: &str,
-    repo:  &str,
-    token: &str,
-) -> Result<Vec<CiWorkflow>> {
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/actions/workflows");
-    let client = reqwest::Client::new();
-    let resp = github_send_with_refresh(
-        |tok| client.get(&url)
-            .header("Authorization", format!("Bearer {tok}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "arbor-git-gui/1.0"),
-        token,
-    ).await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body   = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!("GitHub workflows API {status}: {body}")));
-    }
-
-    #[derive(Deserialize)]
-    struct WfResponse { workflows: Vec<GhWorkflow> }
-    #[derive(Deserialize)]
-    struct GhWorkflow { id: i64, name: String, path: String, state: String }
-
-    let parsed: WfResponse = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Other(format!("GitHub workflows parse error: {e}")))?;
-
-    Ok(parsed.workflows.into_iter()
-        .filter(|w| w.state == "active")
-        .map(|w| CiWorkflow { id: w.id.to_string(), name: w.name, path: w.path })
-        .collect())
-}
-
-// ---------------------------------------------------------------------------
-// GitHub: trigger a workflow_dispatch event
-// ---------------------------------------------------------------------------
-
-pub async fn create_github_dispatch(
-    owner:       &str,
-    repo:        &str,
-    workflow_id: &str,
-    branch:      &str,
-    inputs:      &[(String, String)],
-    token:       &str,
-) -> Result<()> {
-    let url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches"
-    );
-
-    // Build body with serde structs to avoid an extra dep.
-    #[derive(Serialize)]
-    struct Body {
-        r#ref: String,
-        inputs: std::collections::HashMap<String, String>,
-    }
-    let body = Body {
-        r#ref: branch.to_string(),
-        inputs: inputs.iter().cloned().collect(),
-    };
-
-    let client = reqwest::Client::new();
-    let resp = github_send_with_refresh(
-        |tok| client.post(&url)
-            .header("Authorization", format!("Bearer {tok}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "arbor-git-gui/1.0")
-            .json(&body),
-        token,
-    ).await?;
-
-    // 204 No Content = success; GitHub does not return a run ID immediately.
-    if resp.status().as_u16() == 204 || resp.status().is_success() {
-        return Ok(());
-    }
-    let status = resp.status();
-    let body   = resp.text().await.unwrap_or_default();
-    Err(AppError::Other(format!("GitHub dispatch {status}: {body}")))
-}
 
 // ---------------------------------------------------------------------------
 // GitLab: create a new pipeline run

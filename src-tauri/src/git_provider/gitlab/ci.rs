@@ -29,7 +29,7 @@ pub async fn list_ci_runs(
     let token = token(base_url)?;
     crate::git_provider::ci_impl::fetch_gitlab_pipelines(path, base_url, &token)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn get_ci_run(
@@ -49,7 +49,7 @@ pub async fn fetch_ci_jobs(
     let token = token(base_url)?;
     crate::git_provider::ci_impl::fetch_gitlab_jobs(path, base_url, run_id, &token)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn fetch_ci_job_log(
@@ -69,7 +69,7 @@ pub async fn retrigger_ci_run(
     let token = token(base_url)?;
     crate::git_provider::ci_impl::retrigger_gitlab_pipeline(path, base_url, run_id, &token)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn cancel_ci_run(
@@ -106,7 +106,7 @@ pub async fn create_ci_pipeline(
         &token,
     )
     .await
-    .map_err(ProviderError::from)?;
+    .map_err(crate::git_provider::app_err_to_provider)?;
     // GitLab returns the new pipeline id; the full record arrives via
     // `list_ci_runs` on next refresh. Return a placeholder consistent with
     // the GitHub provider.

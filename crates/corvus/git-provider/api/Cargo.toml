@@ -1,0 +1,29 @@
+[package]
+name         = "corvus-git-provider-api"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Provider-agnostic git-host contract for Corvus: DTOs (merge requests, CI runs, releases, repo-native issues, webhooks, security findings, …), the async object-safe `GitProvider` trait, and a host-keyed trait-object registry. The leaf the GitHub/GitLab impls build on."
+
+[dependencies]
+serde       = { workspace = true }
+# The `GitProvider` trait is async (network I/O) and object-safe (held as
+# `Arc<dyn GitProvider>` in the registry) — async-trait provides both.
+async-trait = { workspace = true }
+thiserror   = { workspace = true }
+# `ProviderError` impls `From<reqwest::Error>` / `From<serde_json::Error>` so the
+# provider impl crates (corvus-git-provider-{github,gitlab}) can `?` HTTP/JSON
+# errors straight into the trait's error type. The orphan rule forces those
+# `From` impls to live next to `ProviderError` — hence the deps here. The
+# contract crate pulls no client logic, only the error-conversion surface.
+reqwest     = { workspace = true }
+serde_json  = { workspace = true }
+# Pure security helpers (`age_days_from_iso`) compute finding age against now;
+# matches the version src-tauri already pins (not in `[workspace.dependencies]`).
+chrono      = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+# Asserts the DTOs' on-the-wire shape stays byte-identical to the frontend.
+serde_json = { workspace = true }

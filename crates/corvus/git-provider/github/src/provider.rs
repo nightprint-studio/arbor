@@ -1,64 +1,45 @@
-//! GitHub provider — `struct GithubProvider` + `impl GitProvider`.
+//! `struct GithubProvider` + `impl GitProvider` — keyring-free assembly.
 //!
-//! Single host-keyed instance: one GithubProvider serves every
-//! `github.com` repo on the user's tabs. Repo context is supplied via
-//! `RepoRef` / `MrId` parameters on each method.
+//! Mirrors the old `git_provider::github::mod` EXACTLY (same kind/host/
+//! web_base_url/capabilities, identical `Unsupported` feature strings, same
+//! OAuth-Unsupported messages), but each method delegates to this crate's
+//! domain free-fns passing `&self.http` instead of the old `github/<domain>`
+//! delegates. Credentials/OAuth/revoke stay out-of-band in the shell.
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::git_provider::{
-    GitProvider, ProviderKind,
-    types::{
-        Capabilities, ProviderUser, OAuthHandle,
-        RemoteRepoInfo, RepoCreateRequest, ListReposOpts, RepoRef,
-        MrInfo, MrId, MrDetail, MrComment, MrFile, MrCreateRequest,
-        MrUpdateRequest, MergeOpts, MrConflict, MrFilter,
-        CiRun, CiJob, CiWorkflow, CiFilter, PipelineCreateRequest,
-        Release, ReleaseCreateRequest,
-        RepoIssue, IssueCreateRequest, IssueFilter,
-        Webhook, WebhookCreateRequest,
-        BranchProtection,
-        SecuritySummary, SecurityFinding, SecurityFilters,
-        error::ProviderError,
-    },
-};
+use arbor_ipc::prelude::SessionProvider;
+use corvus_git_provider_api::prelude::*;
 
-pub mod api;
-pub mod auth;
-pub mod repo;
-pub mod mr;
-pub mod ci;
-pub mod releases;
-pub mod issues;
-pub mod webhooks;
-pub mod security;
+use crate::http::GithubHttp;
+use crate::{auth, branch, ci, issues, mr, releases, repo, security, webhooks};
 
+/// A GitHub provider bound to one account's injected credentials.
+///
+/// Single host-keyed instance: one `GithubProvider` serves every `github.com`
+/// repo on the user's tabs. Repo context is supplied via `RepoRef` / `MrId`
+/// parameters on each method.
 pub struct GithubProvider {
-    host:         String,
-    web_base_url: String,
+    http: GithubHttp,
 }
 
 impl GithubProvider {
-    /// Default `github.com` instance. Phase 4 may add a constructor for
-    /// GitHub Enterprise (`new_enterprise(host)`).
-    pub fn new() -> Self {
-        Self {
-            host:         "github.com".into(),
-            web_base_url: api::GITHUB_WEB_BASE.into(),
-        }
+    /// Build a provider. `account` is the opaque credential path the shell maps
+    /// to the keyring (the shell passes `"github.com"`); the base URL + auth
+    /// header come from the injected session.
+    pub fn new(session: Arc<dyn SessionProvider>, account: impl Into<String>) -> Self {
+        Self { http: GithubHttp::new(session, account) }
     }
-}
-
-impl Default for GithubProvider {
-    fn default() -> Self { Self::new() }
 }
 
 #[async_trait]
 impl GitProvider for GithubProvider {
     // ── Identity ─────────────────────────────────────────────────────────
     fn kind(&self) -> ProviderKind { ProviderKind::GitHub }
-    fn host(&self) -> &str { &self.host }
-    fn web_base_url(&self) -> &str { &self.web_base_url }
+    fn host(&self) -> &str { "github.com" }
+    fn web_base_url(&self) -> &str { "https://github.com" }
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             mr:                true,
@@ -78,9 +59,9 @@ impl GitProvider for GithubProvider {
     }
 
     // ── Auth ─────────────────────────────────────────────────────────────
-    fn has_token(&self) -> bool { auth::has_token() }
+    fn has_token(&self) -> bool { self.http.has_credentials() }
     async fn current_user(&self) -> Result<ProviderUser, ProviderError> {
-        auth::current_user().await
+        auth::current_user(&self.http).await
     }
     async fn start_oauth(&self) -> Result<OAuthHandle, ProviderError> {
         // Legacy flow needs an AppHandle which the trait can't carry —
@@ -95,156 +76,164 @@ impl GitProvider for GithubProvider {
         })
     }
     async fn revoke_token(&self) -> Result<(), ProviderError> {
-        crate::git_provider::oauth::github::revoke_token()
+        // The shell still drives OAuth + revoke out-of-band; the crate must NOT
+        // call oauth/keyring code.
+        Err(ProviderError::Unsupported {
+            feature: "revoke_token (handled by oauth::github::revoke_token)".into(),
+        })
     }
 
     // ── Repo CRUD ────────────────────────────────────────────────────────
     async fn create_repo(&self, req: RepoCreateRequest) -> Result<RemoteRepoInfo, ProviderError> {
-        repo::create_repo(req).await
+        repo::create_repo(&self.http, req).await
     }
     async fn get_repo(&self, owner: &str, name: &str) -> Result<RemoteRepoInfo, ProviderError> {
-        repo::get_repo(owner, name).await
+        repo::get_repo(&self.http, owner, name).await
     }
     async fn list_user_repos(&self, opts: ListReposOpts) -> Result<Vec<RemoteRepoInfo>, ProviderError> {
-        repo::list_user_repos(opts).await
+        repo::list_user_repos(&self.http, opts).await
     }
     async fn list_org_repos(&self, org: &str, opts: ListReposOpts) -> Result<Vec<RemoteRepoInfo>, ProviderError> {
-        repo::list_org_repos(org, opts).await
+        repo::list_org_repos(&self.http, org, opts).await
     }
     async fn search_repos(&self, query: &str) -> Result<Vec<RemoteRepoInfo>, ProviderError> {
-        repo::search_repos(query).await
+        repo::search_repos(&self.http, query).await
     }
 
     // ── MR / PR ──────────────────────────────────────────────────────────
     async fn list_mrs(&self, repo: &RepoRef, filter: MrFilter) -> Result<Vec<MrInfo>, ProviderError> {
-        mr::list_mrs(repo, filter).await
+        mr::list_mrs(&self.http, repo, filter).await
     }
     async fn get_mr(&self, id: &MrId) -> Result<MrDetail, ProviderError> {
-        mr::get_mr(id).await
+        mr::get_mr(&self.http, id).await
     }
     async fn create_mr(&self, repo: &RepoRef, req: MrCreateRequest) -> Result<MrInfo, ProviderError> {
-        mr::create_mr(repo, req).await
+        mr::create_mr(&self.http, repo, req).await
     }
     async fn update_mr(&self, id: &MrId, req: MrUpdateRequest) -> Result<MrInfo, ProviderError> {
-        mr::update_mr(id, req).await
+        mr::update_mr(&self.http, id, req).await
     }
-    async fn close_mr(&self, id: &MrId) -> Result<(), ProviderError> { mr::close_mr(id).await }
-    async fn reopen_mr(&self, id: &MrId) -> Result<(), ProviderError> { mr::reopen_mr(id).await }
+    async fn close_mr(&self, id: &MrId) -> Result<(), ProviderError> {
+        mr::close_mr(&self.http, id).await
+    }
+    async fn reopen_mr(&self, id: &MrId) -> Result<(), ProviderError> {
+        mr::reopen_mr(&self.http, id).await
+    }
     async fn merge_mr(&self, id: &MrId, opts: MergeOpts) -> Result<(), ProviderError> {
-        mr::merge_mr(id, opts).await
+        mr::merge_mr(&self.http, id, opts).await
     }
     async fn list_mr_comments(&self, id: &MrId) -> Result<Vec<MrComment>, ProviderError> {
-        mr::list_mr_comments(id).await
+        mr::list_mr_comments(&self.http, id).await
     }
     async fn add_mr_comment(&self, id: &MrId, body: &str) -> Result<MrComment, ProviderError> {
-        mr::add_mr_comment(id, body).await
+        mr::add_mr_comment(&self.http, id, body).await
     }
     async fn list_mr_files(&self, id: &MrId) -> Result<Vec<MrFile>, ProviderError> {
-        mr::list_mr_files(id).await
+        mr::list_mr_files(&self.http, id).await
     }
     async fn fetch_mr_diff(&self, id: &MrId) -> Result<String, ProviderError> {
-        mr::fetch_mr_diff(id).await
+        mr::fetch_mr_diff(&self.http, id).await
     }
     async fn check_mr_conflict(&self, id: &MrId) -> Result<MrConflict, ProviderError> {
-        mr::check_mr_conflict(id).await
+        mr::check_mr_conflict(&self.http, id).await
     }
     async fn list_mr_reviewers(&self, id: &MrId) -> Result<Vec<ProviderUser>, ProviderError> {
-        mr::list_mr_reviewers(id).await
+        mr::list_mr_reviewers(&self.http, id).await
     }
     async fn request_mr_review(&self, id: &MrId, user: &str) -> Result<(), ProviderError> {
-        mr::request_mr_review(id, user).await
+        mr::request_mr_review(&self.http, id, user).await
     }
     async fn approve_mr(&self, id: &MrId) -> Result<(), ProviderError> {
-        mr::approve_mr(id).await
+        mr::approve_mr(&self.http, id).await
     }
 
     // ── CI / CD ──────────────────────────────────────────────────────────
     async fn list_ci_runs(&self, repo: &RepoRef, filter: CiFilter) -> Result<Vec<CiRun>, ProviderError> {
-        ci::list_ci_runs(repo, filter).await
+        ci::list_ci_runs(&self.http, repo, filter).await
     }
     async fn get_ci_run(&self, repo: &RepoRef, run_id: &str) -> Result<CiRun, ProviderError> {
-        ci::get_ci_run(repo, run_id).await
+        ci::get_ci_run(&self.http, repo, run_id).await
     }
     async fn fetch_ci_jobs(&self, repo: &RepoRef, run_id: &str) -> Result<Vec<CiJob>, ProviderError> {
-        ci::fetch_ci_jobs(repo, run_id).await
+        ci::fetch_ci_jobs(&self.http, repo, run_id).await
     }
     async fn fetch_ci_job_log(&self, repo: &RepoRef, job_id: &str) -> Result<String, ProviderError> {
-        ci::fetch_ci_job_log(repo, job_id).await
+        ci::fetch_ci_job_log(&self.http, repo, job_id).await
     }
     async fn retrigger_ci_run(&self, repo: &RepoRef, run_id: &str) -> Result<(), ProviderError> {
-        ci::retrigger_ci_run(repo, run_id).await
+        ci::retrigger_ci_run(&self.http, repo, run_id).await
     }
     async fn cancel_ci_run(&self, repo: &RepoRef, run_id: &str) -> Result<(), ProviderError> {
-        ci::cancel_ci_run(repo, run_id).await
+        ci::cancel_ci_run(&self.http, repo, run_id).await
     }
     async fn list_ci_workflows(&self, repo: &RepoRef) -> Result<Vec<CiWorkflow>, ProviderError> {
-        ci::list_ci_workflows(repo).await
+        ci::list_ci_workflows(&self.http, repo).await
     }
     async fn create_ci_pipeline(&self, repo: &RepoRef, req: PipelineCreateRequest) -> Result<CiRun, ProviderError> {
-        ci::create_ci_pipeline(repo, req).await
+        ci::create_ci_pipeline(&self.http, repo, req).await
     }
 
     // ── Releases (STUB) ──────────────────────────────────────────────────
     async fn list_releases(&self, repo: &RepoRef) -> Result<Vec<Release>, ProviderError> {
-        releases::list_releases(repo).await
+        releases::list_releases(&self.http, repo).await
     }
     async fn get_release(&self, repo: &RepoRef, id: &str) -> Result<Release, ProviderError> {
-        releases::get_release(repo, id).await
+        releases::get_release(&self.http, repo, id).await
     }
     async fn create_release(&self, repo: &RepoRef, req: ReleaseCreateRequest) -> Result<Release, ProviderError> {
-        releases::create_release(repo, req).await
+        releases::create_release(&self.http, repo, req).await
     }
     async fn delete_release(&self, repo: &RepoRef, id: &str) -> Result<(), ProviderError> {
-        releases::delete_release(repo, id).await
+        releases::delete_release(&self.http, repo, id).await
     }
 
     // ── Repo issues (STUB) ───────────────────────────────────────────────
     async fn list_repo_issues(&self, repo: &RepoRef, filter: IssueFilter) -> Result<Vec<RepoIssue>, ProviderError> {
-        issues::list_repo_issues(repo, filter).await
+        issues::list_repo_issues(&self.http, repo, filter).await
     }
     async fn get_repo_issue(&self, repo: &RepoRef, id: &str) -> Result<RepoIssue, ProviderError> {
-        issues::get_repo_issue(repo, id).await
+        issues::get_repo_issue(&self.http, repo, id).await
     }
     async fn create_repo_issue(&self, repo: &RepoRef, req: IssueCreateRequest) -> Result<RepoIssue, ProviderError> {
-        issues::create_repo_issue(repo, req).await
+        issues::create_repo_issue(&self.http, repo, req).await
     }
     async fn comment_repo_issue(&self, repo: &RepoRef, id: &str, body: &str) -> Result<(), ProviderError> {
-        issues::comment_repo_issue(repo, id, body).await
+        issues::comment_repo_issue(&self.http, repo, id, body).await
     }
     async fn close_repo_issue(&self, repo: &RepoRef, id: &str) -> Result<(), ProviderError> {
-        issues::close_repo_issue(repo, id).await
+        issues::close_repo_issue(&self.http, repo, id).await
     }
 
     // ── Webhooks (STUB) ──────────────────────────────────────────────────
     async fn list_webhooks(&self, repo: &RepoRef) -> Result<Vec<Webhook>, ProviderError> {
-        webhooks::list_webhooks(repo).await
+        webhooks::list_webhooks(&self.http, repo).await
     }
     async fn create_webhook(&self, repo: &RepoRef, req: WebhookCreateRequest) -> Result<Webhook, ProviderError> {
-        webhooks::create_webhook(repo, req).await
+        webhooks::create_webhook(&self.http, repo, req).await
     }
     async fn delete_webhook(&self, repo: &RepoRef, id: &str) -> Result<(), ProviderError> {
-        webhooks::delete_webhook(repo, id).await
+        webhooks::delete_webhook(&self.http, repo, id).await
     }
 
     // ── Branches via REST (STUB) ─────────────────────────────────────────
-    async fn list_remote_branches(&self, _repo: &RepoRef) -> Result<Vec<String>, ProviderError> {
-        Err(ProviderError::Unsupported { feature: "list_remote_branches".into() })
+    async fn list_remote_branches(&self, repo: &RepoRef) -> Result<Vec<String>, ProviderError> {
+        branch::list_remote_branches(&self.http, repo).await
     }
-    async fn get_default_branch(&self, _repo: &RepoRef) -> Result<String, ProviderError> {
-        Err(ProviderError::Unsupported { feature: "get_default_branch".into() })
+    async fn get_default_branch(&self, repo: &RepoRef) -> Result<String, ProviderError> {
+        branch::get_default_branch(&self.http, repo).await
     }
-    async fn protect_branch(&self, _repo: &RepoRef, _branch: &str, _req: BranchProtection) -> Result<(), ProviderError> {
-        Err(ProviderError::Unsupported { feature: "protect_branch".into() })
+    async fn protect_branch(&self, repo: &RepoRef, branch: &str, req: BranchProtection) -> Result<(), ProviderError> {
+        crate::branch::protect_branch(&self.http, repo, branch, req).await
     }
 
     // ── Security dashboard ───────────────────────────────────────────────
     async fn supports_security(&self, repo: &RepoRef) -> Result<bool, ProviderError> {
-        security::supports_security(repo).await
+        security::supports_security(&self.http, repo).await
     }
     async fn fetch_security_summary(&self, repo: &RepoRef, range_days: u32) -> Result<SecuritySummary, ProviderError> {
-        security::fetch_security_summary(repo, range_days).await
+        security::fetch_security_summary(&self.http, repo, range_days).await
     }
     async fn fetch_security_findings(&self, repo: &RepoRef, filters: SecurityFilters) -> Result<Vec<SecurityFinding>, ProviderError> {
-        security::fetch_security_findings(repo, filters).await
+        security::fetch_security_findings(&self.http, repo, filters).await
     }
 }

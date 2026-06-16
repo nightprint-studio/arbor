@@ -37,7 +37,7 @@ pub async fn supports_security(
     };
     crate::git_provider::security_impl::gitlab_supports_security(path, base_url, &tok)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn fetch_security_summary(
@@ -51,7 +51,7 @@ pub async fn fetch_security_summary(
         path, base_url, &token, range_days,
     )
     .await
-    .map_err(ProviderError::from)
+    .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn fetch_security_findings(
@@ -65,7 +65,7 @@ pub async fn fetch_security_findings(
         path, base_url, &token, &filters,
     )
     .await
-    .map_err(ProviderError::from)?;
+    .map_err(crate::git_provider::app_err_to_provider)?;
 
     // Server-side filtering covers severity/state/report_type; the `search`
     // clause is host-side. Apply it here so callers always get a

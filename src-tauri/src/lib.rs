@@ -344,7 +344,10 @@ impl AppState {
         // GitLab instances are registered lazily on first use via
         // `git_provider::helpers::provider_for_tab`.
         let mut providers = GitProviderRegistry::new();
-        providers.register(Arc::new(GithubProvider::new()));
+        providers.register(Arc::new(GithubProvider::new(
+            Arc::new(crate::git_provider::session::GithubSessionProvider::new()),
+            "github.com",
+        )));
         providers.register(Arc::new(GitlabProvider::new()));
 
         // Hook broker — built here (rather than in `setup()`) so the field can

@@ -1,214 +1,13 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use crate::error::{AppError, Result};
 use crate::git_provider::ci_impl::{detect_from_remotes, CiProviderInfo};
 
 // ---------------------------------------------------------------------------
-// Public types
+// Public types — defined in `corvus-git-provider-api`, re-exported here so the
+// REST client code below and external `mr_impl::*` call sites keep resolving.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum MrState {
-    Open,
-    Closed,
-    Merged,
-}
-
-impl std::fmt::Display for MrState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MrState::Open   => write!(f, "open"),
-            MrState::Closed => write!(f, "closed"),
-            MrState::Merged => write!(f, "merged"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MrUser {
-    pub login:        String,
-    pub display_name: String,
-    pub avatar_url:   Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MrLabel {
-    pub name:  String,
-    pub color: String, // hex, e.g. "d73a4a"
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MrCheck {
-    pub name:       String,
-    /// "pending" | "running" | "success" | "failed" | "cancelled" | "skipped"
-    pub status:     String,
-    pub url:        Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MrComment {
-    pub id:         String,
-    pub author:     MrUser,
-    pub body:       String,
-    pub created_at: String,
-    /// Heuristic flag: true when the author looks like a bot account.
-    /// GitHub: login ends with "[bot]" (the canonical bot suffix).
-    /// GitLab: login or display name contains "bot" (case-insensitive).
-    /// Lets the frontend hide automated comments by default.
-    #[serde(default)]
-    pub is_bot:     bool,
-}
-
-/// Activity entry for the MR/PR timeline — anything that's not a regular
-/// user comment: state changes, label edits, assignments, force-pushes,
-/// system notes, etc. Surfaced separately from `MrComment` so the UI can
-/// filter Comments / Bots / Activity independently.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MrEvent {
-    pub id:         String,
-    /// Coarse category — drives the icon and filter group on the frontend.
-    /// Known values: "state" (closed/reopened/merged/draft toggles),
-    /// "label", "assign", "review", "commit" (push/force-push),
-    /// "rename", "system" (catch-all).
-    pub kind:       String,
-    /// The user who triggered the event. May be a bot for automated events.
-    pub actor:      MrUser,
-    /// Pre-rendered, human-readable summary ("added label bug",
-    /// "force-pushed the source branch", "marked as ready for review", …).
-    pub summary:    String,
-    pub created_at: String,
-}
-
-/// Full information about a single Pull Request / Merge Request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MergeRequest {
-    /// Provider-native numeric ID (PR number on GitHub, MR iid on GitLab).
-    pub number:        u64,
-    pub title:         String,
-    pub description:   String,
-    pub state:         MrState,
-    pub is_draft:      bool,
-    pub author:        MrUser,
-    pub source_branch: String,
-    pub target_branch: String,
-    pub web_url:       String,
-    pub created_at:    String,
-    pub updated_at:    String,
-    pub labels:        Vec<MrLabel>,
-    pub assignees:     Vec<MrUser>,
-    pub reviewers:     Vec<MrUser>,
-    /// "pending" | "success" | "failed" | "none"
-    pub checks_status: String,
-    /// Whether the MR can be cleanly merged. None = unknown.
-    pub mergeable:     Option<bool>,
-    /// "github" | "gitlab"
-    pub provider:      String,
-    pub comments_count: u32,
-    /// Squash commits on merge (set at creation / from API).
-    #[serde(default)]
-    pub squash:        bool,
-    /// Delete source branch after merge.
-    #[serde(default)]
-    pub delete_branch: bool,
-    /// SHA of the commit that was created on the target branch when this MR/PR
-    /// was merged (squash commit SHA for squash merges, merge commit SHA for
-    /// regular merges).  None for open/closed-without-merge MRs.
-    #[serde(default)]
-    pub merge_commit_sha: Option<String>,
-    /// SHA of the source branch tip at the time of merge (head.sha).
-    #[serde(default)]
-    pub head_sha: String,
-    /// SHA of the target branch tip just before the merge (base.sha).
-    #[serde(default)]
-    pub base_sha: String,
-    /// Auto-merge is currently armed on this PR/MR — it will merge itself when
-    /// required checks pass (GitHub) / the pipeline succeeds (GitLab).
-    /// While armed, the manual merge button + squash/delete-branch flags in
-    /// the detail modal are suppressed; a "Disable auto-merge" affordance is
-    /// shown instead.
-    #[serde(default)]
-    pub auto_merge_enabled: bool,
-}
-
-/// Lightweight hint for cross-referencing merged PRs/MRs in the graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MergedMrHint {
-    /// Name of the source (feature) branch.
-    pub source_branch:    String,
-    /// SHA of the merge/squash commit created on the target branch.
-    /// May not exist locally if the user hasn't fetched yet.
-    pub merge_commit_sha: String,
-    /// SHA of the feature branch tip at the time of merge (head.sha).
-    /// Always present in the local graph.
-    pub head_sha:         String,
-    /// SHA of the target branch tip just before the merge (base.sha).
-    /// Can be used as a fallback anchor when merge_commit_sha isn't local yet.
-    pub base_sha:         String,
-}
-
-/// Parameters for creating a new PR/MR.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateMrParams {
-    pub title:          String,
-    pub description:    Option<String>,
-    pub source_branch:  String,
-    pub target_branch:  String,
-    pub is_draft:       bool,
-    pub labels:         Vec<String>,
-    /// Squash commits on merge (applied at merge-time for GitHub; set on GitLab at creation).
-    #[serde(default)]
-    pub squash:         bool,
-    /// Delete the source branch after a successful merge.
-    #[serde(default)]
-    pub delete_branch:  bool,
-    /// Request auto-merge once checks pass (GitHub) / pipeline succeeds (GitLab).
-    /// Merge/delete-branch options remain editable later from the detail modal.
-    #[serde(default)]
-    pub auto_merge:     bool,
-}
-
-/// Full detail for the detail modal (MR + comments + activity events + checks).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MrDetail {
-    pub mr:       MergeRequest,
-    pub comments: Vec<MrComment>,
-    /// Timeline events (state changes, label edits, assignments, etc.).
-    /// Empty when the provider/API doesn't surface them — the frontend
-    /// handles that gracefully by hiding the Activity filter chip.
-    #[serde(default)]
-    pub events:   Vec<MrEvent>,
-    pub checks:   Vec<MrCheck>,
-}
-
-/// A single changed file in a PR / MR.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MrFileDiff {
-    pub filename:  String,
-    /// "added" | "modified" | "removed" | "renamed"
-    pub status:    String,
-    pub additions: u32,
-    pub deletions: u32,
-    pub patch:     Option<String>,
-}
-
-/// A commit belonging to a PR / MR.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MrCommit {
-    pub sha:     String,
-    /// First line of the commit message.
-    pub message: String,
-    pub author:  String,
-    pub date:    String,
-    pub web_url: Option<String>,
-}
+pub use corvus_git_provider_api::mr::*;
 
 // ---------------------------------------------------------------------------
 // Provider resolution (delegates to ci_client)
@@ -224,114 +23,6 @@ pub fn provider_from_remotes(
 // ---------------------------------------------------------------------------
 // GitHub Pull Requests
 // ---------------------------------------------------------------------------
-
-pub async fn list_github_prs(
-    owner: &str,
-    repo:  &str,
-    token: &str,
-    state: &str, // "open" | "closed" | "all"
-) -> Result<Vec<MergeRequest>> {
-    let url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/pulls?state={state}&per_page=50&sort=updated&direction=desc"
-    );
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "arbor-git-gui/1.0")
-        .send()
-        .await
-        .map_err(|e| AppError::Other(format!("GitHub API request failed: {e}")))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body   = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!("GitHub API {status}: {body}")));
-    }
-
-    let body = resp.text().await
-        .map_err(|e| AppError::Other(format!("GitHub PR body read error: {e}")))?;
-    let prs: Vec<GhPr> = serde_json::from_str(&body)
-        .map_err(|e| AppError::Other(format!("GitHub PR parse error: {e} — body: {}", &body[..body.len().min(300)])))?;
-
-    Ok(prs.into_iter().map(|p| github_pr_to_mr(p, owner, repo)).collect())
-}
-
-pub async fn get_github_pr(
-    owner:  &str,
-    repo:   &str,
-    number: u64,
-    token:  &str,
-) -> Result<MrDetail> {
-    let client = reqwest::Client::new();
-
-    // Fetch PR itself
-    let pr_url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
-    let pr_resp = client.get(&pr_url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "arbor-git-gui/1.0")
-        .send().await
-        .map_err(|e| AppError::Other(format!("GitHub PR get failed: {e}")))?;
-
-    if !pr_resp.status().is_success() {
-        let s = pr_resp.status();
-        let b = pr_resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!("GitHub API {s}: {b}")));
-    }
-    let pr: GhPrDetail = pr_resp.json().await
-        .map_err(|e| AppError::Other(format!("GitHub PR detail parse: {e}")))?;
-
-    let mut mr = github_pr_detail_to_mr(pr, owner, repo);
-
-    // Fetch issue comments (general comments on the PR thread)
-    let comments_url = format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments?per_page=50");
-    let comments_resp = client.get(&comments_url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "arbor-git-gui/1.0")
-        .send().await;
-
-    let comments: Vec<MrComment> = match comments_resp {
-        Ok(r) if r.status().is_success() => {
-            let raw: Vec<GhComment> = r.json().await.unwrap_or_default();
-            raw.into_iter().map(gh_comment_to_mr).collect()
-        }
-        _ => vec![],
-    };
-
-    mr.comments = comments;
-
-    // Fetch issue events (label/assign/state/etc.) — separate endpoint from
-    // comments. Failures are non-fatal: an empty events list just hides the
-    // Activity filter on the frontend.
-    let events_url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/issues/{number}/events?per_page=100"
-    );
-    let events_resp = client.get(&events_url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "arbor-git-gui/1.0")
-        .send().await;
-
-    let events: Vec<MrEvent> = match events_resp {
-        Ok(r) if r.status().is_success() => {
-            let raw: Vec<GhEvent> = r.json().await.unwrap_or_default();
-            raw.into_iter().filter_map(gh_event_to_mr).collect()
-        }
-        _ => vec![],
-    };
-    mr.events = events;
-
-    // Checks left empty; checks_status on the MR itself shows the summary.
-    mr.checks   = vec![];
-    Ok(mr)
-}
 
 /// Returns `(MergeRequest, Option<node_id>)`.  `node_id` is the GraphQL Relay
 /// ID of the PR — required to enable auto-merge via the GraphQL mutation.
@@ -546,83 +237,6 @@ fn map_auto_merge_error(raw: &str) -> Option<AppError> {
         ));
     }
     None
-}
-
-pub async fn merge_github_pr(
-    owner:        &str,
-    repo:         &str,
-    number:       u64,
-    merge_method: &str, // "merge" | "squash" | "rebase"
-    token:        &str,
-) -> Result<()> {
-    let body = serde_json::json!({ "merge_method": merge_method });
-    let client = reqwest::Client::new();
-    let resp = client
-        .put(format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}/merge"))
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "arbor-git-gui/1.0")
-        .json(&body)
-        .send().await
-        .map_err(|e| AppError::Other(format!("GitHub merge PR failed: {e}")))?;
-
-    if resp.status().is_success() || resp.status().as_u16() == 200 {
-        return Ok(());
-    }
-    let s = resp.status();
-    let b = resp.text().await.unwrap_or_default();
-    Err(AppError::Other(format!("GitHub merge PR {s}: {b}")))
-}
-
-pub async fn update_github_pr_state(
-    owner:  &str,
-    repo:   &str,
-    number: u64,
-    state:  &str, // "open" | "closed"
-    token:  &str,
-) -> Result<()> {
-    let body = serde_json::json!({ "state": state });
-    let client = reqwest::Client::new();
-    let resp = client
-        .patch(format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}"))
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "arbor-git-gui/1.0")
-        .json(&body)
-        .send().await
-        .map_err(|e| AppError::Other(format!("GitHub update PR failed: {e}")))?;
-
-    if resp.status().is_success() { return Ok(()); }
-    let s = resp.status();
-    let b = resp.text().await.unwrap_or_default();
-    Err(AppError::Other(format!("GitHub update PR {s}: {b}")))
-}
-
-pub async fn add_github_pr_comment(
-    owner:  &str,
-    repo:   &str,
-    number: u64,
-    body:   &str,
-    token:  &str,
-) -> Result<()> {
-    let payload = serde_json::json!({ "body": body });
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments"))
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "arbor-git-gui/1.0")
-        .json(&payload)
-        .send().await
-        .map_err(|e| AppError::Other(format!("GitHub add comment failed: {e}")))?;
-
-    if resp.status().is_success() { return Ok(()); }
-    let s = resp.status();
-    let b = resp.text().await.unwrap_or_default();
-    Err(AppError::Other(format!("GitHub add comment {s}: {b}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -1041,30 +655,6 @@ pub async fn disable_gitlab_auto_merge(
 // Auto-merge capability detection
 // ---------------------------------------------------------------------------
 
-/// Per-repo capability flags surfaced to the Create-MR modal so it can hide
-/// or disable options the upstream provider rejects.
-///
-/// Currently scoped to auto-merge — GitHub gates this on the repo-level
-/// `Allow auto-merge` setting, and arming MWPS on GitLab requires the
-/// project to have CI jobs enabled.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MrCapabilities {
-    /// `true` when arming auto-merge / MWPS at PR/MR creation time is
-    /// expected to succeed.  Defaults to `true` on any detection failure
-    /// (missing token, network error, …) so the user can still try.
-    pub auto_merge_supported: bool,
-    /// User-facing reason when `auto_merge_supported = false` — used as
-    /// the disabled-checkbox tooltip.
-    pub auto_merge_reason:    Option<String>,
-}
-
-impl Default for MrCapabilities {
-    fn default() -> Self {
-        Self { auto_merge_supported: true, auto_merge_reason: None }
-    }
-}
-
 /// Query the GitHub repo endpoint and return the value of `allow_auto_merge`.
 /// Falls back to `true` when the field is absent (e.g. unauthenticated /
 /// non-admin response) so the option stays available — the create call will
@@ -1128,24 +718,6 @@ pub async fn fetch_gitlab_mwps_supported(
 // ---------------------------------------------------------------------------
 // MR/PR feature availability probe
 // ---------------------------------------------------------------------------
-
-/// Whether the remote repository accepts merge/pull requests at all.
-///
-/// Drives the sidebar EmptyState + Command-Palette gating so a repo with
-/// MRs disabled doesn't surface broken actions or 404s.  Defaults to
-/// `enabled = true` on any probe failure (permissive — the user can still
-/// try and the failing call will surface a normal error).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MrFeatureStatus {
-    pub enabled: bool,
-    /// User-facing explanation when `enabled = false`.
-    pub reason:  Option<String>,
-}
-
-impl Default for MrFeatureStatus {
-    fn default() -> Self { Self { enabled: true, reason: None } }
-}
 
 /// GitHub probe: archived or disabled repos cannot accept new PRs and the
 /// `/pulls` endpoint may 404 on certain configurations.
@@ -1495,37 +1067,6 @@ struct GhPr {
 }
 
 #[derive(Deserialize)]
-struct GhPrDetail {
-    number:       u64,
-    title:        String,
-    #[serde(default)]
-    body:         Option<String>,
-    state:        String,
-    draft:        Option<bool>,
-    merged:       Option<bool>,
-    #[serde(default)]
-    merge_commit_sha: Option<String>,
-    user:         GhUser,
-    head:         GhRef,
-    base:         GhRef,
-    html_url:     String,
-    created_at:   String,
-    updated_at:   String,
-    #[serde(default)]
-    labels:       Vec<GhLabel>,
-    #[serde(default)]
-    assignees:    Vec<GhUser>,
-    #[serde(default)]
-    requested_reviewers: Vec<GhUser>,
-    #[serde(default)]
-    comments:     u32,
-    mergeable:    Option<bool>,
-    /// Present + non-null when auto-merge is armed. See `GhPr.auto_merge`.
-    #[serde(default)]
-    auto_merge:   Option<serde_json::Value>,
-}
-
-#[derive(Deserialize)]
 struct GhUser {
     login:      String,
     #[serde(default)]
@@ -1544,45 +1085,6 @@ struct GhRef {
 struct GhLabel {
     name:  String,
     color: String,
-}
-
-#[derive(Deserialize)]
-struct GhComment {
-    id:         i64,
-    user:       GhUser,
-    body:       String,
-    created_at: String,
-}
-
-/// GitHub `/issues/{n}/events` payload — a heterogeneous list of timeline
-/// events. We parse only the fields we render; everything else is ignored.
-#[derive(Deserialize)]
-struct GhEvent {
-    id:         i64,
-    /// "labeled" | "unlabeled" | "assigned" | "unassigned" | "closed" |
-    /// "reopened" | "merged" | "renamed" | "head_ref_force_pushed" |
-    /// "head_ref_deleted" | "head_ref_restored" | "review_requested" |
-    /// "review_request_removed" | "convert_to_draft" | "ready_for_review" |
-    /// "auto_merge_enabled" | "auto_merge_disabled" | "milestoned" |
-    /// "demilestoned" | "locked" | "unlocked" | … (many more, fall through to system)
-    event:      String,
-    #[serde(default)]
-    actor:      Option<GhUser>,
-    created_at: String,
-    #[serde(default)]
-    label:      Option<GhLabel>,
-    #[serde(default)]
-    assignee:   Option<GhUser>,
-    #[serde(default)]
-    requested_reviewer: Option<GhUser>,
-    #[serde(default)]
-    rename:     Option<GhRename>,
-}
-
-#[derive(Deserialize)]
-struct GhRename {
-    from: String,
-    to:   String,
 }
 
 fn github_pr_to_mr(p: GhPr, _owner: &str, _repo: &str) -> MergeRequest {
@@ -1620,129 +1122,12 @@ fn github_pr_to_mr(p: GhPr, _owner: &str, _repo: &str) -> MergeRequest {
     }
 }
 
-fn github_pr_detail_to_mr(p: GhPrDetail, _owner: &str, _repo: &str) -> MrDetail {
-    let state = match (p.state.as_str(), p.merged) {
-        (_, Some(true)) => MrState::Merged,
-        ("closed", _)   => MrState::Closed,
-        _               => MrState::Open,
-    };
-    let auto_merge_enabled = p.auto_merge.as_ref().map_or(false, |v| !v.is_null());
-    let mr = MergeRequest {
-        number:        p.number,
-        title:         p.title,
-        description:   p.body.unwrap_or_default(),
-        state,
-        is_draft:      p.draft.unwrap_or(false),
-        author:        gh_user_to_mr(p.user),
-        source_branch: p.head.ref_name,
-        target_branch: p.base.ref_name,
-        web_url:       p.html_url,
-        created_at:    p.created_at,
-        updated_at:    p.updated_at,
-        labels:        p.labels.into_iter().map(|l| MrLabel { name: l.name, color: l.color }).collect(),
-        assignees:     p.assignees.into_iter().map(gh_user_to_mr).collect(),
-        reviewers:     p.requested_reviewers.into_iter().map(gh_user_to_mr).collect(),
-        checks_status: "none".into(),
-        mergeable:     p.mergeable,
-        provider:      "github".into(),
-        comments_count: p.comments,
-        squash:        false,
-        delete_branch: false,
-        merge_commit_sha: p.merge_commit_sha,
-        head_sha:         p.head.sha,
-        base_sha:         p.base.sha,
-        auto_merge_enabled,
-    };
-    MrDetail { mr, comments: vec![], events: vec![], checks: vec![] }
-}
-
 fn gh_user_to_mr(u: GhUser) -> MrUser {
     MrUser {
         login:        u.login.clone(),
         display_name: u.name.unwrap_or(u.login),
         avatar_url:   u.avatar_url,
     }
-}
-
-fn gh_comment_to_mr(c: GhComment) -> MrComment {
-    let is_bot = is_bot_login(&c.user.login);
-    MrComment {
-        id:         c.id.to_string(),
-        author:     gh_user_to_mr(c.user),
-        body:       c.body,
-        created_at: c.created_at,
-        is_bot,
-    }
-}
-
-/// Convert a GitHub issue/PR event into an `MrEvent`. Returns None for
-/// event types we don't surface (e.g. `subscribed`, `mentioned`, `referenced`),
-/// which are mostly noise on the timeline.
-fn gh_event_to_mr(e: GhEvent) -> Option<MrEvent> {
-    // The "ghost" actor is GitHub's placeholder for deleted users.
-    let actor = e.actor
-        .map(gh_user_to_mr)
-        .unwrap_or_else(|| MrUser {
-            login: "ghost".into(),
-            display_name: "Unknown".into(),
-            avatar_url: None,
-        });
-
-    let (kind, summary) = match e.event.as_str() {
-        "labeled"    => ("label", format!("added the **{}** label",
-                            e.label.as_ref().map(|l| l.name.as_str()).unwrap_or("?"))),
-        "unlabeled"  => ("label", format!("removed the **{}** label",
-                            e.label.as_ref().map(|l| l.name.as_str()).unwrap_or("?"))),
-        "assigned"   => ("assign", format!("assigned **{}**",
-                            e.assignee.as_ref().map(|u| u.login.as_str()).unwrap_or("someone"))),
-        "unassigned" => ("assign", format!("unassigned **{}**",
-                            e.assignee.as_ref().map(|u| u.login.as_str()).unwrap_or("someone"))),
-        "review_requested"       => ("review", format!("requested a review from **{}**",
-                            e.requested_reviewer.as_ref().map(|u| u.login.as_str()).unwrap_or("someone"))),
-        "review_request_removed" => ("review", format!("removed review request from **{}**",
-                            e.requested_reviewer.as_ref().map(|u| u.login.as_str()).unwrap_or("someone"))),
-        "closed"     => ("state",  "closed this".to_string()),
-        "reopened"   => ("state",  "reopened this".to_string()),
-        "merged"     => ("state",  "merged this".to_string()),
-        "convert_to_draft"  => ("state", "marked this as a draft".to_string()),
-        "ready_for_review"  => ("state", "marked this as ready for review".to_string()),
-        "auto_merge_enabled"  => ("state", "enabled auto-merge".to_string()),
-        "auto_merge_disabled" => ("state", "disabled auto-merge".to_string()),
-        "head_ref_force_pushed" => ("commit", "force-pushed the source branch".to_string()),
-        "head_ref_deleted"      => ("commit", "deleted the source branch".to_string()),
-        "head_ref_restored"     => ("commit", "restored the source branch".to_string()),
-        "renamed"    => {
-            let r = e.rename.as_ref();
-            let from = r.map(|x| x.from.as_str()).unwrap_or("?");
-            let to   = r.map(|x| x.to.as_str()).unwrap_or("?");
-            ("rename", format!("renamed from “{from}” to “{to}”"))
-        }
-        "milestoned"   => ("system", "added a milestone".to_string()),
-        "demilestoned" => ("system", "removed a milestone".to_string()),
-        "locked"       => ("system", "locked the conversation".to_string()),
-        "unlocked"     => ("system", "unlocked the conversation".to_string()),
-        // Drop noisy / non-actionable events outright.
-        "subscribed" | "unsubscribed" | "mentioned" | "referenced"
-            | "head_ref_cleaned" | "marked_as_duplicate" | "unmarked_as_duplicate"
-            => return None,
-        _ => return None,
-    };
-
-    Some(MrEvent {
-        id:         e.id.to_string(),
-        kind:       kind.to_string(),
-        actor,
-        summary,
-        created_at: e.created_at,
-    })
-}
-
-/// GitHub bot accounts always carry the canonical `[bot]` suffix on the login
-/// (e.g. `dependabot[bot]`, `renovate[bot]`). Conservative — won't catch
-/// service accounts that opted out of the suffix.
-fn is_bot_login(login: &str) -> bool {
-    let l = login.to_ascii_lowercase();
-    l.ends_with("[bot]") || l == "github-actions"
 }
 
 /// GitLab doesn't expose a flag, so fall back to a name/login heuristic.
@@ -1943,40 +1328,6 @@ struct GlMrDiff {
     deleted_file: bool,
     renamed_file: bool,
     diff:         String,
-}
-
-pub async fn get_github_pr_files(
-    owner:  &str,
-    repo:   &str,
-    number: u64,
-    token:  &str,
-) -> Result<Vec<MrFileDiff>> {
-    let url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/pulls/{number}/files?per_page=100"
-    );
-    let resp = reqwest::Client::new()
-        .get(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "arbor-git-gui/1.0")
-        .send().await
-        .map_err(|e| AppError::Other(format!("GitHub PR files request failed: {e}")))?;
-
-    if !resp.status().is_success() {
-        let s = resp.status();
-        let b = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!("GitHub PR files {s}: {b}")));
-    }
-    let files: Vec<GhPrFile> = resp.json().await
-        .map_err(|e| AppError::Other(format!("GitHub PR files parse: {e}")))?;
-    Ok(files.into_iter().map(|f| MrFileDiff {
-        filename:  f.filename,
-        status:    f.status,
-        additions: f.additions,
-        deletions: f.deletions,
-        patch:     f.patch,
-    }).collect())
 }
 
 pub async fn get_gitlab_mr_files(

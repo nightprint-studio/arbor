@@ -109,9 +109,11 @@ pub async fn get_github_user(state: State<'_, AppState>) -> Result<Option<Provid
 }
 
 #[tauri::command]
-pub async fn disconnect_github(state: State<'_, AppState>) -> Result<(), AppError> {
-    let provider = provider_by_host(&state, "github.com")?;
-    provider.revoke_token().await.map_err(pe)
+pub async fn disconnect_github(_state: State<'_, AppState>) -> Result<(), AppError> {
+    // Revoke is a keyring/OAuth concern owned by the shell — the keyring-free
+    // `corvus-git-provider-github` crate can't (and its `revoke_token` returns
+    // `Unsupported`). Same out-of-band pattern as Linear/Jira disconnect.
+    crate::git_provider::oauth::github_flow::disconnect()
 }
 
 /// Attempt to silently refresh the stored GitHub OAuth access token.

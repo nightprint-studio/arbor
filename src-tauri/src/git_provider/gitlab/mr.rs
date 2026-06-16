@@ -49,7 +49,7 @@ pub async fn list_mrs(
     let state = map_state(filter.state.as_deref());
     crate::git_provider::mr_impl::list_gitlab_mrs(path, base_url, &token, state)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn get_mr(base_url: &str, id: &MrId) -> Result<MrDetail, ProviderError> {
@@ -57,7 +57,7 @@ pub async fn get_mr(base_url: &str, id: &MrId) -> Result<MrDetail, ProviderError
     let token = token(base_url)?;
     crate::git_provider::mr_impl::get_gitlab_mr(path, base_url, iid, &token)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn create_mr(
@@ -69,7 +69,7 @@ pub async fn create_mr(
     let token = token(base_url)?;
     crate::git_provider::mr_impl::create_gitlab_mr(path, base_url, &req, &token)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn update_mr(
@@ -85,7 +85,7 @@ pub async fn close_mr(base_url: &str, id: &MrId) -> Result<(), ProviderError> {
     let token = token(base_url)?;
     crate::git_provider::mr_impl::update_gitlab_mr_state(path, base_url, iid, "close", &token)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn reopen_mr(base_url: &str, id: &MrId) -> Result<(), ProviderError> {
@@ -93,7 +93,7 @@ pub async fn reopen_mr(base_url: &str, id: &MrId) -> Result<(), ProviderError> {
     let token = token(base_url)?;
     crate::git_provider::mr_impl::update_gitlab_mr_state(path, base_url, iid, "reopen", &token)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn merge_mr(
@@ -105,7 +105,7 @@ pub async fn merge_mr(
     let token = token(base_url)?;
     crate::git_provider::mr_impl::merge_gitlab_mr(path, base_url, iid, opts.squash, opts.delete_branch, &token)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn list_mr_comments(_base_url: &str, _id: &MrId) -> Result<Vec<MrComment>, ProviderError> {
@@ -121,7 +121,7 @@ pub async fn add_mr_comment(
     let token = token(base_url)?;
     crate::git_provider::mr_impl::add_gitlab_mr_note(path, base_url, iid, body, &token)
         .await
-        .map_err(ProviderError::from)?;
+        .map_err(crate::git_provider::app_err_to_provider)?;
     // GitLab's note POST does return the created note, but the existing
     // helper discards it — Phase 5 will fix this. For now return a minimal
     // placeholder so the trait surface is honored.
@@ -143,7 +143,7 @@ pub async fn list_mr_files(base_url: &str, id: &MrId) -> Result<Vec<MrFile>, Pro
     let token = token(base_url)?;
     crate::git_provider::mr_impl::get_gitlab_mr_files(path, base_url, iid, &token)
         .await
-        .map_err(ProviderError::from)
+        .map_err(crate::git_provider::app_err_to_provider)
 }
 
 pub async fn fetch_mr_diff(_base_url: &str, _id: &MrId) -> Result<String, ProviderError> {

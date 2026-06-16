@@ -1,16 +1,13 @@
 //! Provider registry — host → `Arc<dyn GitProvider>` lookup.
 //!
-//! Populated at app boot (Phase 4 wires this) with one provider per
+//! Populated at app boot (the shell wires this) with one provider per
 //! registered host: always `github.com`, always `gitlab.com`, plus any
-//! self-hosted GitLab instance discovered through `credential_store`.
-//!
-//! Phase 1: registry exists and is empty. The convenience helpers below
-//! (`for_active_tab`, `for_remote_url`) return `None` until populated.
+//! self-hosted GitLab instance discovered through the credential store.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::GitProvider;
+use crate::provider::GitProvider;
 
 /// In-memory map keyed by hostname (lowercased).
 #[derive(Default)]
@@ -58,7 +55,7 @@ impl GitProviderRegistry {
 
 /// Parse the hostname out of an HTTPS or SSH-style git remote URL.
 /// `None` for unrecognizable shapes.
-fn host_from_url(url: &str) -> Option<String> {
+pub fn host_from_url(url: &str) -> Option<String> {
     if let Some(rest) = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")) {
         let end = rest.find('/').unwrap_or(rest.len());
         let host = &rest[..end];

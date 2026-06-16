@@ -71,6 +71,19 @@ pub trait SessionProvider: Send + Sync {
     /// credential, runs the provider's refresh, and returns the new session.
     /// Errors when there's nothing to refresh (e.g. a static API token).
     async fn refresh(&self, account: &str) -> Result<AuthSession>;
+
+    /// Cheap, synchronous presence probe: does a credential exist for `account`?
+    ///
+    /// Backends whose trait surface has a sync "is connected" affordance (e.g.
+    /// `GitProvider::has_token`) need this without paying for an async keyring
+    /// read or an HTTP round-trip. The default is `true` — providers that only
+    /// resolve lazily (and whose callers never ask) need not implement it; the
+    /// shell adapters that gate UI on token presence override it with a real
+    /// keyring check.
+    fn has_credentials(&self, account: &str) -> bool {
+        let _ = account;
+        true
+    }
 }
 
 #[cfg(test)]
