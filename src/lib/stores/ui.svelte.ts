@@ -1,8 +1,9 @@
 import { getRecentRepos, addRecentRepo as addRecentRepoIpc } from '$lib/ipc/config';
 import type { StashEntry } from '$lib/types/git';
+import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+import { loadPixels, saveRatio } from '$lib/utils/panel-ratio';
 
 export type Panel = 'graph' | 'settings' | 'plugins' | 'rebase' | 'about' | 'docs';
-export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 /**
  * Bottom panel slot. Historically an enum of built-in sections; now also accepts
  * plugin-registered bottom panels encoded as `"plugin:<name>:<id>"`. Only ONE
@@ -12,29 +13,6 @@ export type ToastKind = 'info' | 'success' | 'warning' | 'error';
  */
 export type BuiltinBottomSection = 'stage' | 'detail' | 'terminal' | 'jobs' | 'pipelines' | 'plugin-logs';
 export type BottomSection = BuiltinBottomSection | `plugin:${string}`;
-
-export interface ToastAction {
-  label: string;
-  /** Side-effect to run when the user clicks the action button. The toast
-   *  is dismissed automatically afterwards. Kept as a closure (not data)
-   *  because toasts don't survive a reload — for persisted click actions
-   *  use `notificationsStore.add(..., action)` instead. */
-  onClick: () => void;
-}
-
-export interface Toast {
-  id: string;
-  kind: ToastKind;
-  message: string;
-  duration: number;
-  /** Wall-clock ms when the toast was added.  Used by the unified
-   *  bottom-right stack to interleave toasts with notifications in
-   *  chronological order. */
-  addedAt: number;
-  /** Optional clickable action rendered as a button on the right side
-   *  of the toast (e.g. "Open" → deep-links to a pipeline run). */
-  action?: ToastAction;
-}
 
 const SIDEBAR_RATIO_KEY       = 'arbor:sidebar-ratio';
 const RIGHT_SIDEBAR_RATIO_KEY = 'arbor:right-sidebar-ratio';
@@ -61,24 +39,6 @@ const BOTTOM_LAST_SECTION_KEY = 'arbor:bottom-last-section';
 // so the generic toggle shortcut can re-open the last view after a close.
 const MAIN_VIEW_KEY           = 'arbor:main-view';
 const MAIN_VIEW_LAST_KEY      = 'arbor:main-view-last';
-
-function loadPixels(key: string, defaultPx: number, min: number, max: number, useHeight = false): number {
-  try {
-    const ratio = parseFloat(localStorage.getItem(key) ?? '');
-    if (!isNaN(ratio) && ratio > 0) {
-      const ref = useHeight ? window.innerHeight : window.innerWidth;
-      return Math.max(min, Math.min(max, Math.round(ratio * ref)));
-    }
-  } catch { /* ignore */ }
-  return defaultPx;
-}
-
-function saveRatio(key: string, px: number, useHeight = false) {
-  try {
-    const ref = useHeight ? window.innerHeight : window.innerWidth;
-    localStorage.setItem(key, String(px / ref));
-  } catch { /* ignore */ }
-}
 
 function createUiStore() {
   let sidebarWidth      = $state(loadPixels(SIDEBAR_RATIO_KEY, 240, 160, 500));
@@ -143,6 +103,7 @@ function createUiStore() {
    *  that pre-fill the palette with a workspace-aware verb. */
   let pendingPaletteVerb       = $state<string | null>(null);
   let jobsOverlayOpen          = $state(false);
+  let transfersOverlayOpen     = $state(false);
   let notificationsOverlayOpen = $state(false);
   let securityOverlayOpen      = $state(false);
   let parkedModalsOverlayOpen  = $state(false);
@@ -157,7 +118,6 @@ function createUiStore() {
   let stashConflictFiles       = $state<string[]>([]);
   let stashBlockingFiles       = $state<string[]>([]);
   let stashBlockingPop         = $state(false);
-  let toasts            = $state<Toast[]>([]);
   let isModalOpen       = $state(false);
   let modalContent      = $state<string | null>(null);
   let recentRepos       = $state<string[]>([]);
@@ -184,8 +144,6 @@ function createUiStore() {
   let shortcutsHelpOpen       = $state(false);
 
   let appFocused        = $state(true);   // tracks window focus / visibility
-
-  let toastCounter = 0;
 
   function setPanel(p: Panel) { activePanel = p; }
   function setAppFocused(v: boolean) { appFocused = v; }
@@ -448,6 +406,8 @@ function createUiStore() {
   function toggleRecentQuickSwitch()              { recentQuickSwitchOpen = !recentQuickSwitchOpen; }
   function setRecentQuickSwitchOpen(v: boolean)   { recentQuickSwitchOpen = v; }
   function setJobsOverlayOpen(v: boolean)         { jobsOverlayOpen = v; }
+  function toggleTransfersOverlay()               { transfersOverlayOpen = !transfersOverlayOpen; }
+  function setTransfersOverlayOpen(v: boolean)    { transfersOverlayOpen = v; }
   function toggleNotificationsOverlay()           { notificationsOverlayOpen = !notificationsOverlayOpen; }
   function setNotificationsOverlayOpen(v: boolean){ notificationsOverlayOpen = v; }
   function toggleSecurityOverlay()                { securityOverlayOpen = !securityOverlayOpen; }
@@ -481,23 +441,6 @@ function createUiStore() {
     recentRepos = [normalized, ...recentRepos.filter(p => p.replace(/\\/g, '/') !== normalized)].slice(0, 10);
     // Persist to backend (fire-and-forget).
     addRecentRepoIpc(normalized).catch(() => {});
-  }
-
-  function showToast(
-    message: string,
-    kind: ToastKind = 'info',
-    duration = 3500,
-    action?: ToastAction,
-  ): string {
-    const id = `toast-${++toastCounter}`;
-    toasts.push({ id, kind, message, duration, addedAt: Date.now(), action });
-    setTimeout(() => dismissToast(id), duration);
-    return id;
-  }
-
-  function dismissToast(id: string) {
-    const idx = toasts.findIndex(t => t.id === id);
-    if (idx !== -1) toasts.splice(idx, 1);
   }
 
   function openModal(content: string)  { modalContent = content; isModalOpen = true; }
@@ -545,6 +488,7 @@ function createUiStore() {
     get commandPaletteOpen()             { return commandPaletteOpen; },
     get pendingPaletteVerb()             { return pendingPaletteVerb; },
     get jobsOverlayOpen()                { return jobsOverlayOpen; },
+    get transfersOverlayOpen()           { return transfersOverlayOpen; },
     get notificationsOverlayOpen()       { return notificationsOverlayOpen; },
     get securityOverlayOpen()            { return securityOverlayOpen; },
     get parkedModalsOverlayOpen()        { return parkedModalsOverlayOpen; },
@@ -559,7 +503,9 @@ function createUiStore() {
     get checkoutConflictModalOpen()      { return checkoutConflictModalOpen; },
     get checkoutConflictTabId()          { return checkoutConflictTabId; },
     get checkoutConflictBranch()         { return checkoutConflictBranch; },
-    get toasts()                 { return toasts; },
+    /** Transient toasts for this window — delegated to the feedback toast
+     *  store. `showToast` / `dismissToast` below forward to the same store. */
+    get toasts()                 { return toastStore.toasts; },
     get isModalOpen()            { return isModalOpen; },
     get modalContent()           { return modalContent; },
     get recentRepos()            { return recentRepos; },
@@ -588,6 +534,7 @@ function createUiStore() {
     setSearchVisible, setCommandPaletteOpen, toggleCommandPalette,
     openCommandPaletteWithVerb, takePendingPaletteVerb,
     toggleJobsOverlay, setJobsOverlayOpen,
+    toggleTransfersOverlay, setTransfersOverlayOpen,
     openMergeModal, closeMergeModal,
     openStashConflictModal, closeStashConflictModal,
     openCheckoutConflictModal, closeCheckoutConflictModal,
@@ -596,7 +543,9 @@ function createUiStore() {
     toggleParkedModalsOverlay, setParkedModalsOverlayOpen,
     toggleRecentQuickSwitch, setRecentQuickSwitchOpen,
     openRepoBrowser, closeRepoBrowser,
-    loadRecentRepos, addRecentRepo, showToast, dismissToast, openModal, closeModal,
+    loadRecentRepos, addRecentRepo, openModal, closeModal,
+    showToast:    toastStore.show,
+    dismissToast: toastStore.dismiss,
   };
 }
 

@@ -39,6 +39,7 @@
   import { copyToClipboard } from '$lib/utils/clipboard';
   import PluginIcon from './PluginIcon.svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
+  import { uiStore } from '$lib/stores/ui.svelte';
 
   import type { SidebarNodeCtx } from './sidebar-nodes/ctx';
   import { nodeType, nodeKey, fieldKey } from './sidebar-nodes/helpers';
@@ -354,7 +355,7 @@
 
 <div class="plugin-panel">
   {#if bottomMode}
-    <BottomPanelHeader title={title || pluginName} />
+    <BottomPanelHeader title={title || pluginName} onClose={() => uiStore.setActiveBottomSection(null)} />
   {:else if title}
     <div class="panel-header">
       <span class="panel-title">{title}</span>

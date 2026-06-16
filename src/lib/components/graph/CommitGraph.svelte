@@ -15,7 +15,7 @@
   import TicketPickerModal from '../shared/TicketPickerModal.svelte';
   import NotesModal from './NotesModal.svelte';
   import AddWorktreeModal from '../sidebar/AddWorktreeModal.svelte';
-  import { PanelBottom, X, ArrowUpToLine, FileSearch, Archive, StickyNote, Download, Layers, Loader, Link2, Globe, Tag, Tags } from 'lucide-svelte';
+  import { PanelBottom, X, ArrowUpToLine, FileSearch, Archive, StickyNote, Download, Layers, Loader, Link2, Globe, Monitor, GitBranch, Tag, Tags } from 'lucide-svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
@@ -29,9 +29,11 @@
   import { getGraph, getGraphForFile, getRepoFingerprint, exportGraphSvg } from '$lib/ipc/graph';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { graphConfigStore } from '$lib/stores/graph_config.svelte';
+  import { keybindingsStore } from '$lib/stores/keybindings.svelte';
+  import { matchesBinding } from '$lib/utils/keybindings';
   import { getStatus } from '$lib/ipc/stage';
   import { validateRepoPath, reportRepoMissing } from '$lib/ipc/missing';
-  import { getCommitDiffMeta, getWorkdirDiff } from '$lib/ipc/diff';
+  import { getCommitDiffMeta, getCommitsRangeDiffMeta, getWorkdirDiff } from '$lib/ipc/diff';
   import { createBranch, createTag, checkoutBranch, stashSave } from '$lib/ipc/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
   import { getBranchPolicy, assertBranchNameAllowed } from '$lib/utils/branch-policy';
@@ -39,7 +41,7 @@
   import { localTagTracker } from '$lib/stores/local-tags.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { ticketLinksStore } from '$lib/stores/ticket_links.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
@@ -419,6 +421,39 @@
     await copyToClipboard(name, { successToast: `Copied "${name}"`, errorToast: 'Copy failed' });
   }
 
+  // Same collapse treatment as tags, applied to branches: when a commit holds
+  // several branches (beyond the current/HEAD one, which always stays visible)
+  // they fight for horizontal space and overflow the refs column. We render
+  // them as one compact "N branches" chip that expands into this popup.
+  let branchesPopup = $state<{ x: number; y: number; branches: RefLabel[] } | null>(null);
+
+  const branchesPopupItems = $derived.by<MenuItem[]>(() => {
+    if (!branchesPopup) return [];
+    const items: MenuItem[] = [];
+    branchesPopup.branches.forEach((b, i) => {
+      if (i > 0) items.push({ id: `sep-${b.name}`, label: '', separator: true });
+      items.push({
+        id:        `branch-${b.name}`,
+        label:     b.name,
+        subtitle:  'Click to copy',
+        icon:      b.ref_type === 'remote_branch' ? Globe : Monitor,
+        iconColor: 'var(--accent)',
+      });
+    });
+    return items;
+  });
+
+  function openBranchesPopupAt(x: number, y: number, branches: RefLabel[]) {
+    branchesPopup = { x, y, branches };
+  }
+
+  async function handleBranchesPopupSelect(id: string) {
+    const name = id.replace(/^branch-/, '');
+    branchesPopup = null;
+    if (!name) return;
+    await copyToClipboard(name, { successToast: `Copied "${name}"`, errorToast: 'Copy failed' });
+  }
+
   // Resolves ANY ref name (local or remote) to the color_index that should be
   // used to render its label. Centralised on the graph store so the sidebar's
   // BranchTree reads from the same source — without that, the sidebar's branch
@@ -658,6 +693,7 @@
     const bottom = uiStore.activeBottomSection;
     if (!tab) return;
     if (!oid) return;
+    if (graphStore.rangeSelection) return;  // multi-commit range loads explicitly
     if (mode !== 'commit') return;          // stash/workdir have their own loaders
     if (bottom !== 'detail') return;        // panel closed → don't preload
     if (graphStore.selectedDetail?.oid === oid) return; // already loaded
@@ -895,13 +931,73 @@
     }
   }
 
-  async function handleSelectCommit(node: CommitNode) {
+  // Resolve the {base, target} oids for a set of selected commits using row
+  // order: newest = smallest row, oldest = largest row. The cumulative range
+  // diff then runs from base's first parent to target.
+  function rangeBounds(oids: Set<string>): { baseOid: string; targetOid: string } | null {
+    if (!data || oids.size < 2) return null;
+    let oldest: CommitNode | null = null;
+    let newest: CommitNode | null = null;
+    for (const n of data.nodes) {
+      if (!oids.has(n.oid)) continue;
+      if (!oldest || n.row > oldest.row) oldest = n;
+      if (!newest || n.row < newest.row) newest = n;
+    }
+    return oldest && newest ? { baseOid: oldest.oid, targetOid: newest.oid } : null;
+  }
+
+  // Load the combined diff for the current multi-selection (or fall back to the
+  // single-commit loader when the selection collapsed to one). Mirrors
+  // loadCommitContent's lazy-meta flow but in range mode (baseOid set).
+  async function loadRangeContent() {
     if (!tab) return;
-    graphStore.selectCommit(node.oid);
+    const bounds = rangeBounds(graphStore.selectedOids);
+    if (!bounds) {                                   // 0/1 selected → single path
+      graphStore.setRangeSelection(null);
+      if (graphStore.selectedOid) await loadCommitContent(graphStore.selectedOid);
+      return;
+    }
+    graphStore.setRangeSelection({ ...bounds, count: graphStore.selectedOids.size });
+    graphStore.setDetail(null);                      // range has no single commit detail
+    try {
+      diffStore.setCommitContext(tab.id, bounds.targetOid, bounds.baseOid);
+      const files = await getCommitsRangeDiffMeta(tab.id, bounds.baseOid, bounds.targetOid);
+      diffStore.setFiles(files);
+    } catch (err) {
+      uiStore.showToast(`${err}`, 'error');
+    }
+  }
+
+  // Build the contiguous span of oids between the anchor row and a target row
+  // (inclusive), in row order — used by Shift-click range selection.
+  function rowSpan(anchorOid: string, targetOid: string): string[] {
+    if (!data) return [targetOid];
+    const a = data.nodes.findIndex(n => n.oid === anchorOid);
+    const b = data.nodes.findIndex(n => n.oid === targetOid);
+    if (a === -1 || b === -1) return [targetOid];
+    const [lo, hi] = a <= b ? [a, b] : [b, a];
+    return data.nodes.slice(lo, hi + 1).map(n => n.oid);
+  }
+
+  async function handleSelectCommit(node: CommitNode, e?: MouseEvent) {
+    if (!tab) return;
     uiStore.setActiveBottomSection('detail');
-    // Detail fetch is driven by the auto-refresh effect above — it triggers
-    // once Svelte has flushed selectCommit + setActiveBottomSection together,
-    // which also avoids the parallel fetch we used to issue here.
+    if (e && (e.ctrlKey || e.metaKey)) {
+      // Toggle this commit in/out of the multi-selection.
+      graphStore.toggleSelected(node.oid);
+      await loadRangeContent();
+      return;
+    }
+    if (e && e.shiftKey && graphStore.selectedOid && graphStore.selectedOid !== node.oid) {
+      // Extend the selection to a contiguous span from the anchor to here.
+      const anchor = graphStore.selectedOid;
+      graphStore.selectRange(rowSpan(anchor, node.oid), node.oid);
+      await loadRangeContent();
+      return;
+    }
+    // Plain click → single selection; the auto-refresh effect above loads it
+    // once Svelte flushes selectCommit + setActiveBottomSection together.
+    graphStore.selectCommit(node.oid);
   }
 
   // ── Keyboard navigation (graph viewport must have focus) ────────────────
@@ -972,10 +1068,69 @@
     return closestPerLane.get(bestLane)!.idx;
   }
 
+  // Keyboard equivalent of Shift-click range select: the row from which a
+  // Shift+Arrow extension started. Reset to null on any plain (single) move.
+  let kbSelAnchor: string | null = null;
+
+  // Shift+Up/Down — grow/shrink the multi-selection by one row, keeping the
+  // anchor fixed (linear row order, so it stays predictable across lanes).
+  function extendSelectionKeyboard(dir: 1 | -1) {
+    if (!data) return;
+    const nodes = data.nodes;
+    const leadOid = graphStore.selectedOid;
+    if (!leadOid) return;
+    if (kbSelAnchor === null) kbSelAnchor = leadOid;
+    const leadIdx = nodes.findIndex(n => n.oid === leadOid);
+    if (leadIdx === -1) return;
+    const nextIdx = Math.min(nodes.length - 1, Math.max(0, leadIdx + dir));
+    const newLead = nodes[nextIdx];
+    if (!newLead) return;
+    uiStore.setActiveBottomSection('detail');
+    const span = rowSpan(kbSelAnchor, newLead.oid);
+    if (span.length <= 1) {
+      graphStore.selectCommit(newLead.oid);   // collapsed back onto the anchor
+      kbSelAnchor = null;
+    } else {
+      graphStore.selectRange(span, newLead.oid);
+      void loadRangeContent();
+    }
+    ensureRowVisible(nextIdx);
+  }
+
   function handleGraphKeydown(e: KeyboardEvent) {
-    // Bare keys only — modifier chords (Ctrl+Home, …) belong to AppShell.
-    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
     if (!data || data.nodes.length === 0) return;
+
+    // Context-menu shortcut (rebindable — defaults to the "Menu" key) — open
+    // the menu for the *selected* commit (the logical cursor), not the focused
+    // scroll-area. Checked before the modifier reject so a remap to a chord
+    // still works, and stops bubbling so AppShell's generic fallback (which
+    // would anchor on the scroll-area background) doesn't also fire.
+    if (matchesBinding(e, keybindingsStore.getBinding('open_context_menu'))) {
+      e.preventDefault();
+      e.stopPropagation();
+      const node = graphStore.selectedOid ? data.nodes.find(n => n.oid === graphStore.selectedOid) : null;
+      const selRow = scrollEl?.querySelector('.commit-row.selected') as HTMLElement | null;
+      if (node && selRow) {
+        const r = selRow.getBoundingClientRect();
+        contextMenu = { x: Math.round(r.left + 24), y: Math.round(r.top + r.height / 2), node };
+      } else {
+        const r = scrollEl?.getBoundingClientRect();
+        if (r) bgContextMenu = { x: Math.round(r.left + 24), y: Math.round(r.top + 24) };
+      }
+      return;
+    }
+
+    // Shift+Up/Down extends the selection (keyboard Shift-click). Any other
+    // modifier chord (Ctrl+Home, …) belongs to AppShell.
+    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      extendSelectionKeyboard(e.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+
+    // A plain cursor move ends any keyboard range extension.
+    kbSelAnchor = null;
 
     const nodes = data.nodes;
     const last  = nodes.length - 1;
@@ -1370,7 +1525,13 @@
           diffStore.selectFile(previousPath);
         }
       };
-      if (graphStore.panelMode === 'commit' && graphStore.selectedOid) {
+      const rs = graphStore.rangeSelection;
+      if (graphStore.panelMode === 'commit' && rs) {
+        diffStore.setCommitContext(tab.id, rs.targetOid, rs.baseOid);
+        getCommitsRangeDiffMeta(tab.id, rs.baseOid, rs.targetOid)
+          .then(files => { diffStore.setFiles(files); restore(files); })
+          .catch(() => {});
+      } else if (graphStore.panelMode === 'commit' && graphStore.selectedOid) {
         diffStore.setCommitContext(tab.id, graphStore.selectedOid);
         getCommitDiffMeta(tab.id, graphStore.selectedOid)
           .then(files => { diffStore.setFiles(files); restore(files); })
@@ -1605,7 +1766,7 @@
             {@const rx = nodeX(node.lane)}
             {@const ry = nodeY(node.row) - ROW_HEIGHT / 2}
             {@const rw = graphTrackWidth - rx}
-            {@const isSelected = node.oid === graphStore.selectedOid}
+            {@const isSelected = graphStore.selectedOids.has(node.oid)}
             {#if rw > 0}
               <rect
                 x={rx} y={ry}
@@ -1658,11 +1819,11 @@
           {#each visibleNodes as node (node.oid)}
             <GraphNode
               {node}
-              selected={node.oid === graphStore.selectedOid}
+              selected={graphStore.selectedOids.has(node.oid)}
               highlighted={graphStore.highlightedOids.has(node.oid)}
               synced={syncedRow >= 0 && node.row >= syncedRow}
               bisectMark={bisectMarks.get(node.oid) ?? null}
-              onclick={() => handleSelectCommit(node)}
+              onclick={(e) => handleSelectCommit(node, e)}
               oncontextmenu={(e) => handleContextMenu(e, node)}
             />
           {/each}
@@ -1757,13 +1918,13 @@
           {#each visibleNodes as node (node.oid)}
             <div
               class="commit-row"
-              class:selected={node.oid === graphStore.selectedOid}
+              class:selected={graphStore.selectedOids.has(node.oid)}
               class:is-head={node.is_head}
               class:highlighted={graphStore.highlightedOids.has(node.oid)}
               class:dimmed={searchActive && !graphStore.highlightedOids.has(node.oid)}
               class:synced={syncedRow >= 0 && node.row >= syncedRow}
               style="top: {nodeY(node.row) - ROW_HEIGHT / 2 + GRAPH_VPAD}px; height: {ROW_HEIGHT}px; grid-template-columns: {gridTemplate}"
-              onclick={() => handleSelectCommit(node)}
+              onclick={(e) => handleSelectCommit(node, e)}
               oncontextmenu={(e) => handleContextMenu(e, node)}
               role="row"
               tabindex="0"
@@ -1787,10 +1948,31 @@
                   )}
                   {@const tags     = node.refs.filter(r => r.ref_type === 'tag')}
                   {@const collapseTags = tags.length > 1 || (branches.length > 0 && tags.length > 0)}
+                  <!-- The current/HEAD local branch stays inline (it's "where you
+                       are"); any further branches collapse into a chip so a
+                       commit carrying many branches doesn't blow out the column. -->
+                  {@const headBranches  = branches.filter(b => b.is_current && b.ref_type === 'local_branch')}
+                  {@const otherBranches = branches.filter(b => !(b.is_current && b.ref_type === 'local_branch'))}
+                  {@const collapseBranches = otherBranches.length >= 2}
                   <div class="cell cell-refs">
-                    {#each branches as ref (ref.name)}
+                    {#each headBranches as ref (ref.name)}
                       <BranchLabel {ref} colorIndex={refColorByName.get(ref.name) ?? node.color_index} />
                     {/each}
+                    {#if collapseBranches}
+                      <button
+                        type="button"
+                        class="tag-stack branch-stack"
+                        use:tooltip={`${otherBranches.length} branch${otherBranches.length !== 1 ? 'es' : ''} on this commit — click to expand`}
+                        onclick={(e) => { e.stopPropagation(); openBranchesPopupAt(e.clientX, e.clientY, otherBranches); }}
+                      >
+                        <GitBranch size={11} />
+                        <span class="tag-stack-count">{otherBranches.length}</span>
+                      </button>
+                    {:else}
+                      {#each otherBranches as ref (ref.name)}
+                        <BranchLabel {ref} colorIndex={refColorByName.get(ref.name) ?? node.color_index} />
+                      {/each}
+                    {/if}
                     {#if collapseTags}
                       <button
                         type="button"
@@ -1905,6 +2087,16 @@
       items={tagsPopupItems}
       onSelect={handleTagsPopupSelect}
       onClose={() => (tagsPopup = null)}
+    />
+  {/if}
+
+  {#if branchesPopup}
+    <ContextMenu
+      x={branchesPopup.x}
+      y={branchesPopup.y}
+      items={branchesPopupItems}
+      onSelect={handleBranchesPopupSelect}
+      onClose={() => (branchesPopup = null)}
     />
   {/if}
 </div>
@@ -2318,6 +2510,15 @@
   .tag-stack-count {
     line-height: 1;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Branch variant of the collapse chip — same shape as `.tag-stack`, but
+     accent-coloured (and with a branch glyph) so it reads as "branches
+     collapsed here", distinct from the tag-coloured tag chip. */
+  .branch-stack {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 38%, transparent);
   }
 
   .cell-subject {

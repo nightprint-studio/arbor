@@ -91,6 +91,7 @@
     <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Hop to the nearest occupied lane on the left / right (closest commit by row)</td></tr>
     <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd></td><td>Jump one viewport up / down (linear, ignores lanes)</td></tr>
     <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Select the newest / oldest loaded commit</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd></td><td>Extend the selection to multiple commits — the Detail panel shows the <em>combined</em> changes across them (also <kbd>Ctrl</kbd>+click / <kbd>Shift</kbd>+click commits with the mouse)</td></tr>
   </tbody>
 </table>
 
@@ -162,6 +163,33 @@
   </tbody>
 </table>
 
+<h2>nemus (Music live-coding)</h2>
+<p class="hint">
+  The nemus window keeps its own binding set (it's a self-contained studio, not the
+  main Git UI), so these are fixed rather than rebindable. Editor-scoped keys fire
+  only when the code tab pane has focus. See the <strong>nemus (Music)</strong> page
+  for the full window tour.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>Run / Stop the transport</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Command Palette (nemus)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>Open / new project</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open a <code>.nemus</code> file</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New <code>.nemus</code> file (editor pane)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active file</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>G</kbd></td><td>Go to line (editor pane)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Click</kbd></td><td>Go to declaration — fn / let / import, incl. cross-file</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (editor pane focused) · else search the Console / Problems</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Export / render to WAV</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd></td><td>Commit mixer gain / pan overrides to source</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Toggle Zen mode</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Open nemus Settings</td></tr>
+    <tr><td><kbd>F1</kbd></td><td>Show nemus keyboard shortcuts</td></tr>
+  </tbody>
+</table>
+
 <h2>Diff viewer</h2>
 <table class="shortcuts-table">
   <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
@@ -202,7 +230,7 @@
     <tr><td><kbd>Enter</kbd></td><td>Open folder · open file · confirm pick · confirm delete</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Confirm the pick from anywhere (including the save-name field)</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>Enter</kbd></td><td>Open the Properties (Info) panel for the cursor item</td></tr>
-    <tr><td><kbd>Menu</kbd> / <kbd>Shift</kbd>+<kbd>F10</kbd></td><td>Open the context menu on the cursor item</td></tr>
+    <tr><td><Kbd action="open_context_menu" size="sm" /></td><td>Open the context menu on the cursor item</td></tr>
     <tr><td>Type any letter</td><td>Type-ahead — keystrokes route into the filter field automatically</td></tr>
     <tr><td><kbd>↓</kbd> in filter field</td><td>Step into the file list (cursor sits on the first match)</td></tr>
   </tbody>
@@ -212,11 +240,11 @@
 <table class="shortcuts-table">
   <thead><tr><th>Target</th><th>How to open</th></tr></thead>
   <tbody>
-    <tr><td>Commit (graph)</td><td>Right-click commit row</td></tr>
+    <tr><td>Anywhere (keyboard)</td><td><Kbd action="open_context_menu" size="sm" /> — opens the context menu wherever the focus is (commit, sidebar item, worktree, File Explorer entry…); rebindable in the Keyboard Shortcuts panel</td></tr>
+    <tr><td>Commit (graph)</td><td>Right-click commit row · or <Kbd action="open_context_menu" size="sm" /> on the selected commit</td></tr>
     <tr><td>Branch (sidebar)</td><td>Right-click branch item</td></tr>
     <tr><td>File (stage area / diff list)</td><td>Right-click file entry</td></tr>
     <tr><td>Tab (tab bar)</td><td>Right-click tab</td></tr>
-    <tr><td>File Explorer entry (keyboard)</td><td><kbd>Menu</kbd> key or <kbd>Shift</kbd>+<kbd>F10</kbd> on the cursor row</td></tr>
   </tbody>
 </table>
 <p class="hint">

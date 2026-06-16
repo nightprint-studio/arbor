@@ -603,6 +603,7 @@ fn install_clone(ctx: &ApiCtx, lua: &Lua, repo_table: &Table) -> Result<()> {
                 is_system:       false,
                 finished_at:     None,
                 hidden:          false,
+                target:          None,
             };
             jobs.register(info);
         }

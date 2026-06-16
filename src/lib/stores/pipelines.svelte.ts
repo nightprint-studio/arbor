@@ -5,7 +5,7 @@ import { withLoading } from '$lib/utils/async-state';
 import { cacheStore } from './cache.svelte';
 import { listPipelineDefs, listPipelineRuns } from '$lib/ipc/pipeline';
 import { uiStore } from './ui.svelte';
-import { notificationsStore } from './notifications.svelte';
+import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Pipeline step-output coalescing

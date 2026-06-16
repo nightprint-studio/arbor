@@ -28,7 +28,7 @@
   import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
   import { listWorktrees } from '$lib/ipc/worktree';
   import { getStatus } from '$lib/ipc/stage';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { pipelinesStore } from '$lib/stores/pipelines.svelte';
   import { retrigerCiRun, fetchMrCiRuns } from '$lib/ipc/pipeline';
   import CiPipelineDetailModal from '$lib/components/pipeline/CiPipelineDetailModal.svelte';

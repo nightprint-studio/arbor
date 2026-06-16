@@ -8,6 +8,8 @@ use tauri_plugin_deep_link::DeepLinkExt;
 mod app_ctx;
 mod error;
 mod explorer_window;
+mod nemus;
+mod nemus_window;
 mod process_ext;
 mod platform;
 mod efficiency;
@@ -484,7 +486,14 @@ pub fn run() {
         .manage(explorer_window::PendingReveals::default())
         .manage(explorer_window::ExplorerClipboard::default())
         .manage(explorer_window::DragOverlayText::default())
+        .manage(nemus::NemusState::default())
         .setup(|app| {
+            // One-time storage split: move nemus's data out of the old
+            // `<arbor-data>/nemus` tree into its own `<nemus-data>` root and seed
+            // nemus's standalone config from Arbor's legacy `[nemus]` section.
+            // Cheap no-op once migrated; runs before the nemus window can open.
+            crate::nemus::migrate_storage();
+
             // Wire the `arbor-cloud` crate against AppState: registers the
             // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
             // into Tauri state so command + plugin-namespace layers can pull
@@ -828,6 +837,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // The nemus window closing for real tears down its audio
+                    // session (drops the cpal stream on the audio thread, stops
+                    // sound). Lazy ownership: nothing happens if it never played.
+                    if window.label() == crate::nemus_window::NEMUS_WINDOW_LABEL {
+                        crate::nemus::shutdown(window.app_handle());
+                    }
                     #[cfg(not(debug_assertions))]
                     {
                         // Close-to-tray applies ONLY to the main window. Auxiliary
@@ -894,6 +909,8 @@ pub fn run() {
             commands::diff_commands::get_commit_diff,
             commands::diff_commands::get_commit_diff_meta,
             commands::diff_commands::get_commit_file_diff,
+            commands::diff_commands::get_commits_range_diff_meta,
+            commands::diff_commands::get_commits_range_file_diff,
             commands::diff_commands::get_workdir_diff,
             commands::diff_commands::get_workdir_diff_stream,
             commands::diff_commands::get_branch_diff,
@@ -1219,22 +1236,36 @@ pub fn run() {
             // Filesystem browser
             commands::fs_commands::fs_read_dir,
             commands::fs_commands::list_fs_roots,
+            commands::fs_commands::list_wsl_distros,
             commands::fs_commands::fs_create_dir,
             commands::fs_commands::fs_create_file,
             commands::fs_commands::fs_write_text_file,
             commands::fs_commands::fs_read_text_file,
             commands::fs_commands::fs_rename,
+            commands::fs_commands::fs_rename_many,
             commands::fs_commands::fs_delete,
             commands::fs_commands::fs_copy,
             commands::fs_commands::fs_move,
+            commands::fs_commands::fs_duplicate,
+            commands::fs_commands::fs_cancel_op,
+            commands::fs_commands::fs_dir_size,
+            commands::fs_commands::fs_paths_size,
+            commands::fs_commands::fs_overview_stats,
             commands::fs_commands::fs_trash,
             commands::fs_commands::fs_delete_many,
+            commands::fs_commands::fs_untrash,
+            commands::fs_commands::fs_trash_list,
+            commands::fs_commands::fs_trash_restore,
+            commands::fs_commands::fs_trash_purge,
+            commands::fs_commands::fs_trash_empty,
             commands::fs_commands::fs_search,
             commands::fs_commands::fs_zip,
             commands::fs_commands::fs_unzip,
             commands::fs_commands::fs_set_wallpaper,
             commands::fs_commands::fs_open_default,
             commands::fs_commands::fs_reveal_in_dir,
+            commands::fs_commands::fs_open_terminal,
+            commands::fs_commands::fs_expand_path,
             commands::fs_commands::fs_show_properties,
             commands::fs_commands::fs_icon,
             commands::fs_commands::fs_watch_start,
@@ -1516,6 +1547,61 @@ pub fn run() {
             explorer_window::drag_overlay_move,
             explorer_window::drag_overlay_hide,
             explorer_window::explorer_drop_dispatch,
+            // Dedicated nemus (music live-coding) window
+            nemus_window::open_nemus_window,
+            // nemus engine: eval / transport / render / sample packs / config
+            nemus::nemus_eval,
+            nemus::nemus_transport,
+            nemus::nemus_render,
+            nemus::nemus_render_stems,
+            nemus::nemus_export_midi,
+            nemus::nemus_analyze_levels,
+            nemus::nemus_packs,
+            nemus::nemus_pack_download,
+            nemus::nemus_pack_reindex,
+            nemus::nemus_pack_delete,
+            nemus::get_nemus_config,
+            nemus::set_nemus_config,
+            nemus::nemus_audio_devices,
+            nemus::nemus_set_output_device,
+            // nemus Fase 4: arrangement query / sound bank / live mixer /
+            // window state / project model (all additive)
+            nemus::query::nemus_query,
+            nemus::scenes::nemus_scenes,
+            nemus::scenes::nemus_launch,
+            nemus::sounds::nemus_sounds,
+            nemus::nemus_set_track,
+            nemus::nemus_audition_expr,
+            nemus::nemus_eval_snippet,
+            nemus::nemus_materialize,
+            nemus::nemus_play_snippet,
+            nemus::nemus_stop_snippet,
+            nemus::state::get_nemus_state,
+            nemus::state::set_nemus_state,
+            nemus::state::get_nemus_project_tabs,
+            nemus::state::set_nemus_project_tabs,
+            nemus::state::get_nemus_project_mix,
+            nemus::state::set_nemus_project_mix,
+            nemus::state::get_nemus_aliases,
+            nemus::state::set_nemus_aliases,
+            nemus::state::get_nemus_scratch_tabs,
+            nemus::state::set_nemus_scratch_tabs,
+            nemus::project::nemus_open_project,
+            nemus::project::nemus_create_project,
+            nemus::project::nemus_set_project_name,
+            nemus::reference::nemus_lang_reference,
+            nemus::format::nemus_format,
+            nemus::scales::nemus_scales,
+            nemus::libraries::nemus_libraries,
+            nemus::libraries::nemus_sync_libraries,
+            // nemus import: WAV → MIDI (transcription) / MIDI → .nemus (deterministic)
+            nemus::import::nemus_convert_wav_to_midi,
+            nemus::import::nemus_import_audio_as_nemus,
+            nemus::import::nemus_import_midi_as_nemus,
+            // nemus ONNX transcription models (download on-demand)
+            nemus::models::nemus_models,
+            nemus::models::nemus_download_model,
+            nemus::models::nemus_delete_model,
         ])
     .run(tauri::generate_context!())
         .expect("error while running arbor");

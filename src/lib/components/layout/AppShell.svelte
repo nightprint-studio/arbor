@@ -14,7 +14,8 @@
   import PluginSidebarPanel from '../plugins/PluginSidebarPanel.svelte';
   import PluginTreeSidebar from '../plugins/PluginTreeSidebar.svelte';
   import PluginViewPanel from '../plugins/PluginViewPanel.svelte';
-  import ResizablePanel from './ResizablePanel.svelte';
+  import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
+  import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import Sidebar from '../sidebar/Sidebar.svelte';
   import CommitGraph from '../graph/CommitGraph.svelte';
   import CommitDetailPanel from '../graph/CommitDetailPanel.svelte';
@@ -40,20 +41,15 @@
   import MarkdownEditorModal from '../shared/MarkdownEditorModal.svelte';
   import { markdownStore } from '$lib/stores/markdown.svelte';
   import { hasOpenModal } from '../shared/Modal.svelte';
-  import ToastItem from '../shared/Toast.svelte';
   import TerminalPanel from '../terminal/TerminalPanel.svelte';
-  import JobsOverlay from '../jobs/JobsOverlay.svelte';
   import JobOutputPanel from '../jobs/JobOutputPanel.svelte';
   import PluginLogsPanel from '../plugins/PluginLogsPanel.svelte';
   import { pluginLogsStore } from '$lib/stores/pluginLogs.svelte';
   import PipelinesPanel from '../pipeline/PipelinesPanel.svelte';
   import PipelineRunDetailModal from '../pipeline/PipelineRunDetailModal.svelte';
-  import NotificationsOverlay from '../shared/NotificationsOverlay.svelte';
   import KeystrokesOverlay   from '../shared/KeystrokesOverlay.svelte';
   import { keystrokesStore }  from '$lib/stores/keystrokes.svelte';
-  import NotificationItem    from '../shared/NotificationItem.svelte';
-  import OperationsOverlay   from '../shared/OperationsOverlay.svelte';
-  import { setupOperationBridge } from '$lib/utils/operations-bridge';
+  import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
   import RecentReposModal from '../shared/RecentReposModal.svelte';
   import DepsExplorerModal from '../shared/DepsExplorerModal.svelte';
   import { depsExplorerStore } from '$lib/stores/depsExplorer.svelte';
@@ -127,25 +123,6 @@
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
 
-  // Custom transition: collapses/expands width (proper IDE sidebar behaviour).
-  function sidebarSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
-    const w = node.getBoundingClientRect().width;
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t: number) => `width: ${t * w}px; min-width: 0; overflow: hidden;`,
-    };
-  }
-
-  // Custom transition: collapses/expands height (IDE bottom panel behaviour).
-  function bottomSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
-    const h = node.getBoundingClientRect().height;
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t: number) => `height: ${t * h}px; min-height: 0; overflow: hidden;`,
-    };
-  }
   import { animStore } from '$lib/stores/animations.svelte';
   import { tabsStore, setTabsPersistHook } from '$lib/stores/tabs.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
@@ -161,7 +138,7 @@
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
-  import { jobsStore } from '$lib/stores/jobs.svelte';
+  import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { diffStore } from '$lib/stores/diff.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { explorerStore } from '$lib/stores/explorer.svelte';
@@ -180,7 +157,7 @@
   import type { InitRepoOptions } from '$lib/types/git';
   import { terminalCreate } from '$lib/ipc/terminal';
   import { keybindingsStore } from '$lib/stores/keybindings.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { mrStore } from '$lib/stores/mr.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { worktreeStore } from '$lib/stores/worktree.svelte';
@@ -776,16 +753,12 @@
       });
 
       workspacesStore.setupListeners();
-      // Bridges Tauri progress events (pull/workspace bulk/linked-WT sync) into
-      // the OperationsOverlay store.  Returns a teardown closure — we don't
-      // call it here because AppShell is mounted for the app's lifetime.
-      setupOperationBridge();
     } finally {
       tabsStore.endInit();
     }
   });
 
-  // Listen for open-recent events from MenuBar
+  // Listen for open-recent events from the title bar's hamburger menu
   $effect(() => {
     function onOpenRecent(e: Event) {
       handleOpenRepo((e as CustomEvent<string>).detail);
@@ -1297,6 +1270,29 @@
         onboardingStore.open;
       if (modalOpen) return;
 
+      // The context-menu shortcut (`open_context_menu`, Ctrl+Shift+K by
+      // default — rebindable in the Keyboard Shortcuts panel) opens the menu
+      // wherever the focus is — sidebar item, worktree row, issue, …. Surfaces
+      // that need a target other than
+      // the focused element (the commit graph wants the *selected* row, not
+      // the focused scroll-area) handle it locally and stopPropagation, so we
+      // never reach here for them. For everything else this is the generic
+      // path: re-dispatch as a `contextmenu` event on the focused element so
+      // its existing right-click handler fires, positioned at its top-left.
+      if (matchesBinding(e, keybindingsStore.getBinding('open_context_menu'))) {
+        const el = document.activeElement as HTMLElement | null;
+        if (el && el !== document.body) {
+          e.preventDefault();
+          const r = el.getBoundingClientRect();
+          el.dispatchEvent(new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true,
+            clientX: Math.round(r.left + Math.min(16, r.width / 2)),
+            clientY: Math.round(r.top + Math.min(r.height, 24)),
+          }));
+        }
+        return;
+      }
+
       // Check plugin keybindings first (they take priority over unbound app keys).
       const pluginKb = contributionStore.forPoint('arbor:keybinding')
         .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
@@ -1416,10 +1412,10 @@
     { name: 'titlebar',       selector: '.titlebar' },
     { name: 'tabs',           selector: '.tabbar-wrap' },
     { name: 'activity-left',  selector: '.activity-bar[data-side="left"]' },
-    { name: 'sidebar',        selector: '.sidebar-wrap' },
+    { name: 'sidebar',        selector: '[data-panel="left"]' },
     { name: 'graph',          selector: '.graph-area' },
-    { name: 'bottom',         selector: '.bottom-wrap' },
-    { name: 'right-sidebar',  selector: '.right-sidebar-wrap' },
+    { name: 'bottom',         selector: '[data-panel="bottom"]' },
+    { name: 'right-sidebar',  selector: '[data-panel="right"]' },
     { name: 'activity-right', selector: '.activity-bar[data-side="right"]' },
     { name: 'statusbar',      selector: '.statusbar' },
   ];
@@ -1481,42 +1477,9 @@
     // callback immediately unlistens the ghost listener.
     const unlistenPlugin = setupTauriListeners([
       {
-        event: 'plugin:toast',
-        handler: (e: { payload: { plugin: string; message: string; level: string } }) => {
-          const { plugin, message, level } = e.payload;
-          uiStore.showToast(`[${plugin}] ${message}`, (level as any) ?? 'info');
-        },
-      },
-      {
         event: 'plugin:form',
         handler: (e: { payload: PluginFormConfig }) => {
           pluginStore.setPendingForm(e.payload);
-        },
-      },
-      {
-        // In-app notification center (from arbor.notify). The plugin can mute
-        // either channel via `toast = false` (no transient pop) or
-        // `persist = false` (skip the bell — useful for "kicked off"
-        // chatter that the user doesn't need to read again later).
-        // Both default to true → existing call sites keep their behavior.
-        //
-        // A persisted notification ALREADY surfaces in the bottom-right
-        // transient stack via `notificationsStore.transient` (NotificationItem
-        // is interleaved with toasts in `feedItems`), so calling `showToast`
-        // on top would render two cards for one event. Only fall back to the
-        // toast path when the caller opted OUT of persistence — that's the
-        // one mode where a transient pop is the only channel.
-        event: 'plugin:notification',
-        handler: (e: { payload: { plugin: string; title: string; message: string; level: string; toast?: boolean; persist?: boolean; action?: import('$lib/stores/notifications.svelte').NotificationAction } }) => {
-          const { plugin, title, message, level, toast, persist, action } = e.payload;
-          const showToast   = toast   !== false;
-          const persistBell = persist !== false;
-          if (persistBell) {
-            notificationsStore.add(title, message, (level as any) ?? 'info', plugin, action);
-          } else if (showToast) {
-            const toastMsg = message ? `${title} — ${message}` : title;
-            uiStore.showToast(toastMsg, (level as any) ?? 'info', 5000);
-          }
         },
       },
       {
@@ -1621,10 +1584,6 @@
     // deps-explorer plugin and pops the IntelliJ-style modal.
     const unlistenDepsExplorer = depsExplorerStore.setupListeners();
 
-    // Job events
-    const unlistenJobs = jobsStore.setupListeners();
-    jobsStore.load();
-
     // Plugin log stream
     const unlistenPluginLogs = pluginLogsStore.setupListeners();
     pluginLogsStore.load();
@@ -1652,7 +1611,6 @@
       unlistenContributions();
       unlistenContainers();
       unlistenDepsExplorer();
-      unlistenJobs();
       unlistenPluginLogs();
       unlistenPipelines();
       unlistenLinks();
@@ -1675,23 +1633,6 @@
   const hasRepo           = $derived(tabsStore.activeTab !== null);
   const activePanel       = $derived(uiStore.activePanel);
 
-  // Merged feed for the bottom-right stack: toasts + transient notifications
-  // sorted by insertion time (ascending — oldest at top, newest just above
-  // the operations zone). Only freshly-added notifications appear here; the
-  // full archive lives in the bell overlay. Operation cards render after
-  // this loop and stay anchored at the bottom of the column.
-  type FeedItem =
-    | { kind: 'toast';        key: string; ts: number; value: typeof uiStore.toasts[number] }
-    | { kind: 'notification'; key: string; ts: number; value: typeof notificationsStore.notifications[number] };
-  const feedItems = $derived.by<FeedItem[]>(() => {
-    const out: FeedItem[] = [];
-    for (const t of uiStore.toasts)
-      out.push({ kind: 'toast',        key: `t:${t.id}`, ts: t.addedAt,  value: t });
-    for (const n of notificationsStore.transient)
-      out.push({ kind: 'notification', key: `n:${n.id}`, ts: n.timestamp, value: n });
-    out.sort((a, b) => a.ts - b.ts);
-    return out;
-  });
   const showSettings      = $derived(activePanel === 'settings');
   const showPlugins       = $derived(activePanel === 'plugins');
   const showAbout         = $derived(activePanel === 'about');
@@ -2003,17 +1944,6 @@
     }
   });
 
-  // Custom horizontal-slide transition for the activity bars. Mirrors the
-  // existing `sidebarSlide` helper above but parametrised so it can be
-  // applied to a 38-px wrapper without measuring layout each time.
-  function barSlide(node: HTMLElement, { duration = 200 }: { duration?: number } = {}) {
-    const w = node.getBoundingClientRect().width || 38;
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t: number) => `width: ${t * w}px; min-width: 0; overflow: hidden;`,
-    };
-  }
 </script>
 
 <!-- Boot-time splash overlay. Self-mounts at startup, listens for
@@ -2040,75 +1970,67 @@
         onManageWorkspaces={() => workspaceManagerOpen = true}
       />
     {:else}
-      <div class="workspace">
-        <!-- Edge hover triggers for the hidden activity-bar mode. Two
-             independent 4-px sliders: hovering the left edge reveals the
-             built-in bar (DOM-leftmost), hovering the right edge reveals
-             the plugin bar (DOM-rightmost). A global mousemove watcher per
-             side clears its flag once the cursor leaves the 38-px peek
-             strip — see `onPeekLeftStart` / `onPeekRightStart` above. -->
-        {#if appearanceStore.activityBarPosition === 'hidden'}
-          <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
-          <div
-            class="activity-bar-edge-trigger edge-left"
-            aria-hidden="true"
-            onmouseenter={onPeekLeftStart}
-          ></div>
-          <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
-          <div
-            class="activity-bar-edge-trigger edge-right"
-            aria-hidden="true"
-            onmouseenter={onPeekRightStart}
-          ></div>
-        {/if}
-        <!-- Built-in activity bar: always mounted unless `hidden` + not peeking.
-             A horizontal-slide transition handles the mount/unmount animation. -->
-        {#if showBuiltinBar}
-          <div class="ab-slot" transition:barSlide={{ duration: animStore.dPanel }}>
-            <ActivityBarLeft />
-          </div>
-        {/if}
+      <WorkspaceShell showLeftRail={showBuiltinBar} showRightRail={showPluginBar}>
+        <!-- Edge hover triggers for the hidden activity-bar mode: two 4-px
+             sliders that reveal the rails on hover when the bars are hidden.
+             The rail slide-in + showBuiltin/showPlugin gating live in
+             <WorkspaceShell>; the peek-state watchers are wired here. -->
+        {#snippet beforeRails()}
+          {#if appearanceStore.activityBarPosition === 'hidden'}
+            <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
+            <div
+              class="activity-bar-edge-trigger edge-left"
+              aria-hidden="true"
+              onmouseenter={onPeekLeftStart}
+            ></div>
+            <!-- svelte-ignore a11y_no_static_element_interactions a11y_mouse_events_have_key_events -->
+            <div
+              class="activity-bar-edge-trigger edge-right"
+              aria-hidden="true"
+              onmouseenter={onPeekRightStart}
+            ></div>
+          {/if}
+        {/snippet}
 
-        <!-- Inset panels container: gaps reveal the workspace bg (IntelliJ-style) -->
-        <div class="panels">
+        {#snippet leftRail()}<ActivityBarLeft />{/snippet}
+        {#snippet rightRail()}<ActivityBarRight />{/snippet}
+
+        {#snippet panels()}
           <!-- Sidebar: shown when a top section is active -->
           {#if showSidebar}
-            <div class="sidebar-wrap"
-                 transition:sidebarSlide={{ duration: animStore.dPanel }}>
-              <ResizablePanel
-                direction="horizontal"
-                initialSize={uiStore.sidebarWidth}
-                minSize={160}
-                maxSize={500}
-                onResize={uiStore.setSidebarWidth}
-              >
-                {#if uiStore.activeSidebarSection === 'gitflow'}
-                  <GitFlowPanel />
-                {:else if uiStore.activeSidebarSection === 'mr'}
-                  <MrSidebar onOpenCreate={openCreateMr} onOpenDetail={openMrDetail} />
-                {:else if uiStore.activeSidebarSection === 'issues'}
-                  <IssuesSidebar />
-                {:else if uiStore.activeSidebarSection === 'files'}
-                  <FileTreePanel />
-                {:else if uiStore.activeSidebarSection === 'reflog'}
-                  <ReflogPanel />
-                {:else if uiStore.activeSidebarSection === 'stats'}
-                  <StatsPanel onOpenFull={() => statsOverlayOpen = true} />
-                {:else if uiStore.activeSidebarSection === 'security'}
-                  <SecurityPanel />
-                {:else if uiStore.activeSidebarSection === 'studio'}
-                  <StudioPanel />
-                {:else if leftPluginKey}
-                  {#if isTreeKind(leftPluginKey)}
-                    <PluginTreeSidebar pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
-                  {:else}
-                    <PluginSidebarPanel pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
-                  {/if}
+            <PanelCard
+              orientation="left"
+              initialSize={uiStore.sidebarWidth}
+              minSize={160}
+              maxSize={500}
+              onResize={uiStore.setSidebarWidth}
+            >
+              {#if uiStore.activeSidebarSection === 'gitflow'}
+                <GitFlowPanel />
+              {:else if uiStore.activeSidebarSection === 'mr'}
+                <MrSidebar onOpenCreate={openCreateMr} onOpenDetail={openMrDetail} />
+              {:else if uiStore.activeSidebarSection === 'issues'}
+                <IssuesSidebar />
+              {:else if uiStore.activeSidebarSection === 'files'}
+                <FileTreePanel />
+              {:else if uiStore.activeSidebarSection === 'reflog'}
+                <ReflogPanel />
+              {:else if uiStore.activeSidebarSection === 'stats'}
+                <StatsPanel onOpenFull={() => statsOverlayOpen = true} />
+              {:else if uiStore.activeSidebarSection === 'security'}
+                <SecurityPanel />
+              {:else if uiStore.activeSidebarSection === 'studio'}
+                <StudioPanel />
+              {:else if leftPluginKey}
+                {#if isTreeKind(leftPluginKey)}
+                  <PluginTreeSidebar pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
                 {:else}
-                  <Sidebar />
+                  <PluginSidebarPanel pluginName={leftPluginKey.plugin_name} panelId={leftPluginKey.panel_id} />
                 {/if}
-              </ResizablePanel>
-            </div>
+              {:else}
+                <Sidebar />
+              {/if}
+            </PanelCard>
           {/if}
 
           <!-- Main column: editor card (tabs + graph + bisect) + optional
@@ -2164,88 +2086,30 @@
                  or a plugin-registered panel.  Outer div handles open/close
                  animation; inner {#key} fades on panel switch. -->
             {#if showBottomStage || showBottomDetail || showTerminal || showJobOutput || showPipelines || showPluginLogs || showPluginBottom}
-            <div class="bottom-wrap"
-                 data-bottom-panel
-                 transition:bottomSlide={{ duration: animStore.dPanel }}
-                 onintrostart={() => { bottomTransitioning = true; }}
-                 onintroend={() => { bottomTransitioning = false; uiStore.notifyBottomPanelReady(); }}
-                 onoutrostart={() => { bottomTransitioning = true; }}
-                 onoutroend={() => { bottomTransitioning = false; }}>
-              {#if showBottomStage}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={100}
-                  maxSize={600}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+              <PanelCard
+                orientation="bottom"
+                initialSize={uiStore.bottomHeight}
+                minSize={showPipelines ? 140 : (showTerminal || showJobOutput || showPluginLogs) ? 120 : 100}
+                maxSize={(showTerminal || showJobOutput || showPipelines || showPluginLogs) ? 700 : 600}
+                onResize={uiStore.setBottomHeight}
+                onintrostart={() => { bottomTransitioning = true; }}
+                onintroend={() => { bottomTransitioning = false; uiStore.notifyBottomPanelReady(); }}
+                onoutrostart={() => { bottomTransitioning = true; }}
+                onoutroend={() => { bottomTransitioning = false; }}
+              >
+                {#if showBottomStage}
                   <StageArea />
-                </ResizablePanel>
-              {:else if showBottomDetail}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={100}
-                  maxSize={600}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showBottomDetail}
                   <CommitDetailPanel />
-                </ResizablePanel>
-              {:else if showTerminal}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={120}
-                  maxSize={700}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showTerminal}
                   <TerminalPanel />
-                </ResizablePanel>
-              {:else if showJobOutput}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={120}
-                  maxSize={700}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showJobOutput}
                   <JobOutputPanel />
-                </ResizablePanel>
-              {:else if showPipelines}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={140}
-                  maxSize={700}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showPipelines}
                   <PipelinesPanel />
-                </ResizablePanel>
-              {:else if showPluginLogs}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={120}
-                  maxSize={700}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showPluginLogs}
                   <PluginLogsPanel />
-                </ResizablePanel>
-              {:else if showPluginBottom && bottomPluginKey}
-                <ResizablePanel
-                  direction="vertical"
-                  initialSize={uiStore.bottomHeight}
-                  minSize={100}
-                  maxSize={600}
-                  onResize={uiStore.setBottomHeight}
-                  reverse
-                >
+                {:else if showPluginBottom && bottomPluginKey}
                   {#if isTreeKind(bottomPluginKey)}
                     <PluginTreeSidebar
                       pluginName={bottomPluginKey.plugin_name}
@@ -2259,52 +2123,36 @@
                       bottomMode
                     />
                   {/if}
-                </ResizablePanel>
-              {/if}
-            </div>
+                {/if}
+              </PanelCard>
             {/if}
             {/if}
           </div>
 
           <!-- Right sidebar panel — plugin-registered panels (side="right"). -->
           {#if showRightSidebar && rightPluginKey}
-            <div class="right-sidebar-wrap"
-                 transition:sidebarSlide={{ duration: animStore.dPanel }}>
-              <ResizablePanel
-                direction="horizontal"
-                initialSize={uiStore.rightSidebarWidth}
-                minSize={160}
-                maxSize={500}
-                onResize={uiStore.setRightSidebarWidth}
-                reverse
-              >
-                {#if isTreeKind(rightPluginKey)}
-                  <PluginTreeSidebar
-                    pluginName={rightPluginKey.plugin_name}
-                    panelId={rightPluginKey.panel_id}
-                  />
-                {:else}
-                  <PluginSidebarPanel
-                    pluginName={rightPluginKey.plugin_name}
-                    panelId={rightPluginKey.panel_id}
-                  />
-                {/if}
-              </ResizablePanel>
-            </div>
+            <PanelCard
+              orientation="right"
+              initialSize={uiStore.rightSidebarWidth}
+              minSize={160}
+              maxSize={500}
+              onResize={uiStore.setRightSidebarWidth}
+            >
+              {#if isTreeKind(rightPluginKey)}
+                <PluginTreeSidebar
+                  pluginName={rightPluginKey.plugin_name}
+                  panelId={rightPluginKey.panel_id}
+                />
+              {:else}
+                <PluginSidebarPanel
+                  pluginName={rightPluginKey.plugin_name}
+                  panelId={rightPluginKey.panel_id}
+                />
+              {/if}
+            </PanelCard>
           {/if}
-        </div>
-
-        <!-- Right ActivityBar: hidden completely when no plugin has
-             registered a right-side entry. Wrapped in the same slide-in
-             transition as the built-in bar so peeking the right edge
-             animates symmetrically. -->
-        {#if showPluginBar}
-          <div class="ab-slot" transition:barSlide={{ duration: animStore.dPanel }}>
-            <ActivityBarRight />
-          </div>
-        {/if}
-
-      </div>
+        {/snippet}
+      </WorkspaceShell>
     {/if}
   </div>
 
@@ -2314,20 +2162,7 @@
        listener lives on the store and stays attached only while enabled. -->
   <KeystrokesOverlay />
 
-  <!-- Jobs overlay (floating above statusbar) -->
-  {#if uiStore.jobsOverlayOpen}
-    <div transition:fly={{ y: 10, duration: animStore.dBase, easing: cubicOut }}>
-      <JobsOverlay />
-    </div>
-  {/if}
 
-  <!-- Notifications archive overlay (toggleable bell panel — full history;
-       new notifications also live transiently in the bottom-right stack). -->
-  {#if uiStore.notificationsOverlayOpen}
-    <div transition:fly={{ y: 10, duration: animStore.dBase, easing: cubicOut }}>
-      <NotificationsOverlay />
-    </div>
-  {/if}
 
   <!-- Security quick-overlay (floating above statusbar, click-outside) -->
   {#if uiStore.securityOverlayOpen}
@@ -2343,9 +2178,8 @@
     </div>
   {/if}
 
-  <!-- OperationsOverlay is rendered INSIDE the bottom-right unified stack
-       above (so it's always anchored at the bottom of the column). -->
-
+  <!-- The bottom-right feedback column (toasts, notifications, operations) is
+       rendered by <FeedbackHost id="main"> above. -->
 
   <!-- MR detail modal -->
   {#if mrModalOpen && mrModalMr}
@@ -2595,17 +2429,11 @@
           and notifications scroll up over time.
        Single fixed-positioned column avoids the cross-overlay overlap we
        used to fight by chasing z-index values. -->
-  <div class="bottom-right-stack" aria-live="polite" aria-atomic="false">
-    <WorktreeLinkSyncSummary />
-    {#each feedItems as item (item.key)}
-      {#if item.kind === 'toast'}
-        <ToastItem toast={item.value} />
-      {:else}
-        <NotificationItem notif={item.value} alwaysShowDismiss />
-      {/if}
-    {/each}
-    <OperationsOverlay />
-  </div>
+  <FeedbackHost id="main" main>
+    {#snippet children()}
+      <WorktreeLinkSyncSummary />
+    {/snippet}
+  </FeedbackHost>
 
   <!-- Lazy-loaded — SettingsPanel and DocsPanel modules stay out of the
        initial JS heap until the user opens them. The dev warmup in onMount
@@ -2757,8 +2585,8 @@
   <!-- Modal: Linked Worktrees (cross-project sync) -->
   <WorktreeLinkManagerModal />
   <AddToWorktreeLinkModal />
-  <!-- WorktreeLinkSyncSummary is rendered inside .bottom-right-stack above so
-       it stacks with toasts instead of overlapping them. -->
+  <!-- WorktreeLinkSyncSummary is rendered inside <FeedbackHost> above (passed
+       as its header snippet) so it stacks with toasts instead of overlapping. -->
 
   <!-- Modal: About — self-contained (uses shared Modal shell). Lazy-loaded. -->
   <Lazy
@@ -2793,17 +2621,6 @@
 </div>
 
 <style>
-  /* Activity-bar wrapper. The bar component owns its own 38px width; the
-     wrapper exists purely so the Svelte slide transition can animate
-     `width` on a host element without colliding with the bar's own
-     :global(.activity-bar) rules. flex-shrink:0 keeps the bar from being
-     squeezed when the workspace is narrow. */
-  .ab-slot {
-    display: flex;
-    flex-shrink: 0;
-    overflow: hidden;
-  }
-
   .shell {
     display: flex;
     flex-direction: column;
@@ -2820,32 +2637,6 @@
     flex-direction: column;
     overflow: hidden;
     position: relative;
-  }
-
-  /* ── Workspace: flex row containing ActivityBar + panels container.
-     The workspace background is the "gap" colour revealed between panels,
-     giving the IntelliJ-style soft-rounded inset look.  ActivityBar sits
-     flush against the left edge; the inset starts at `.panels`. */
-  .workspace {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    background: var(--bg-elevated);
-  }
-
-  /* Inset container that holds the sidebar + main column.
-     A small 4px gap between panels reveals the workspace bg colour and
-     keeps the rounded-corner "stacco" visible between sidebar and editor.
-     No top padding: the titlebar flows directly into the panels. */
-  .panels {
-    display: flex;
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-    gap: 4px;
-    padding: 0 4px 4px 4px;
   }
 
   .main-col {
@@ -2876,47 +2667,5 @@
     position: relative;
   }
 
-  /* ── Panel layout wrappers (transitions applied inline via Svelte transition:) ── */
-  .sidebar-wrap {
-    display: flex;
-    height: 100%;
-    flex-shrink: 0;
-    overflow: hidden;
-    background: var(--bg-base);
-    border-radius: var(--radius-lg);
-  }
-  /* Mirror of .sidebar-wrap on the right of .panels. Background + radius
-     match so it reads as a floating card just like the left one. */
-  .right-sidebar-wrap {
-    display: flex;
-    height: 100%;
-    flex-shrink: 0;
-    overflow: hidden;
-    background: var(--bg-base);
-    border-radius: var(--radius-lg);
-  }
-
-  .bottom-wrap {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    overflow: hidden;
-    background: var(--bg-base);
-    border-radius: var(--radius-lg);
-  }
-
-  .bottom-right-stack {
-    position: fixed;
-    bottom: 36px;
-    right: 16px;
-    z-index: 800;
-    display: flex;
-    flex-direction: column; /* sync summary on top, toasts below; new toasts append at the bottom */
-    align-items: flex-end;
-    gap: 8px;
-    pointer-events: none;
-    max-width: calc(100vw - 32px);
-  }
-  .bottom-right-stack > :global(*) { pointer-events: auto; }
 
 </style>

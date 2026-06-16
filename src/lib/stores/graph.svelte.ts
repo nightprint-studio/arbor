@@ -11,6 +11,14 @@ function createGraphStore() {
   let graphDataTabId   = $state<string | null>(null);
   let selectedOid      = $state<string | null>(null);
   let selectedDetail   = $state<CommitDetail | null>(null);
+  /// Full multi-selection (always contains `selectedOid`, the lead/anchor). A
+  /// single-commit selection is just a one-element set; Ctrl/Shift-click grow
+  /// it. When it holds more than one commit the detail panel shows the
+  /// cumulative range diff instead of a single commit.
+  let selectedOids     = $state<Set<string>>(new Set());
+  /// Set while a multi-commit range is being shown — `null` for single select.
+  /// `baseOid` = oldest selected commit, `targetOid` = newest.
+  let rangeSelection   = $state<{ baseOid: string; targetOid: string; count: number } | null>(null);
   let isLoading        = $state(false);
   // Raw value bound to the search input; filtered results use `searchQueryDebounced`
   // so we don't re-run an O(n) .filter() over thousands of commits on every keystroke.
@@ -234,10 +242,38 @@ function createGraphStore() {
   }
   function selectCommit(oid: string | null) {
     selectedOid = oid;
+    selectedOids = oid ? new Set([oid]) : new Set();
+    rangeSelection = null;
     panelMode = 'commit';
     selectedStash = null;
     highlightedBranchName = null;
     if (!oid) selectedDetail = null;
+  }
+
+  /// Ctrl/Cmd-click: toggle `oid` in the selection, making it the new lead.
+  /// Removing the last commit collapses back to an empty selection.
+  function toggleSelected(oid: string) {
+    const next = new Set(selectedOids);
+    if (next.has(oid)) next.delete(oid); else next.add(oid);
+    selectedOids = next;
+    panelMode = 'commit';
+    selectedStash = null;
+    if (next.size === 0) { selectedOid = null; selectedDetail = null; rangeSelection = null; }
+    else { selectedOid = next.has(oid) ? oid : (next.values().next().value ?? null); }
+  }
+
+  /// Shift-click: replace the selection with an explicit list of oids (the
+  /// contiguous span the caller computed from row order), `lead` becoming the
+  /// anchor. Detail loading is driven by the caller.
+  function selectRange(oids: string[], lead: string) {
+    selectedOids = new Set(oids);
+    selectedOid = lead;
+    panelMode = 'commit';
+    selectedStash = null;
+  }
+
+  function setRangeSelection(r: { baseOid: string; targetOid: string; count: number } | null) {
+    rangeSelection = r;
   }
   function setDetail(detail: CommitDetail | null) { selectedDetail = detail; }
   function setLoading(v: boolean)                 { isLoading = v; }
@@ -279,12 +315,16 @@ function createGraphStore() {
     panelMode = stash ? 'stash' : 'commit';
     selectedOid = null;
     selectedDetail = null;
+    selectedOids = new Set();
+    rangeSelection = null;
   }
   function setWorkdirMode() {
     panelMode = 'workdir';
     selectedOid = null;
     selectedDetail = null;
     selectedStash = null;
+    selectedOids = new Set();
+    rangeSelection = null;
   }
 
   /** Trigger a full graph + sidebar reload by bumping the refresh counter.
@@ -305,12 +345,15 @@ function createGraphStore() {
     highlightedList = []; currentMatchIdx = 0;
     scrollToBranchName = null; highlightedBranchName = null; scrollToHeadTick = 0; scrollToCommitOid = null; panelMode = 'commit';
     selectedStash = null; fileFilter = null;
+    selectedOids = new Set(); rangeSelection = null;
   }
 
   return {
     get graphData()          { return graphData; },
     get graphDataTabId()     { return graphDataTabId; },
     get selectedOid()        { return selectedOid; },
+    get selectedOids()       { return selectedOids; },
+    get rangeSelection()     { return rangeSelection; },
     get selectedDetail()     { return selectedDetail; },
     get selectedNode()       { return selectedNode; },
     get refColorByName()     { return refColorByName; },
@@ -330,7 +373,7 @@ function createGraphStore() {
     get refreshTick()        { return refreshTick; },
     get fileFilter()         { return fileFilter; },
     notifyGraphLoaded, awaitGraphLoaded,
-    setGraph, appendGraph, applyHeadMove, setStashes, selectCommit, setDetail,
+    setGraph, appendGraph, applyHeadMove, setStashes, selectCommit, toggleSelected, selectRange, setRangeSelection, setDetail,
     refresh, filterByFile, clearFileFilter,
     setLoading, setSearch, setHighlighted,
     nextMatch, prevMatch,

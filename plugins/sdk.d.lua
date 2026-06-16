@@ -246,17 +246,38 @@ function Fs.is_file(path) end
 ---@return boolean
 function Fs.is_dir(path) end
 
----Read the full contents of a file as a UTF-8 string.
+---Read the full contents of a file as a UTF-8 string. A leading UTF-8 BOM is
+---stripped. Fails on input that isn't valid UTF-8 — use `read_bytes` for
+---non-UTF-8 / binary files or when the BOM matters.
 ---@param  path string
 ---@return string|nil content
 ---@return string|nil err
 function Fs.read(path) end
 
+---Read the exact bytes of a file as a Lua string, with NO UTF-8 validation
+---and NO BOM stripping. Use for non-UTF-8 / binary content, or when a check
+---needs to see the raw bytes (encoding / mojibake / BOM inspection).
+---@param  path string
+---@return string|nil content
+---@return string|nil err
+function Fs.read_bytes(path) end
+
 ---Write content to a file, creating any missing parent directories.
+---`content` must be valid UTF-8 — use `write_bytes` for raw / non-UTF-8 bytes.
 ---Requires `fs = "write"` in plugin.toml.
 ---@param path    string
 ---@param content string
 function Fs.write(path, content) end
+
+---Write the exact bytes of `content` (a Lua string taken as a raw byte
+---buffer, NO UTF-8 validation), creating any missing parent directories.
+---Pairs with `read_bytes` for byte-faithful read-modify-write of non-UTF-8 /
+---legacy-encoded / binary files. Requires `fs = "write"` in plugin.toml.
+---@param path    string
+---@param content string
+---@return boolean|nil ok
+---@return string|nil  err
+function Fs.write_bytes(path, content) end
 
 ---List directory contents. Returns an array of { name, is_file, is_dir }.
 ---@param  dir string

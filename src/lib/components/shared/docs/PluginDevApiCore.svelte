@@ -138,7 +138,14 @@ arbor.json_studio.open({
 <h2>arbor.fs — filesystem</h2>
 <p>Requires the <code>fs</code> permission: <code>"read"</code> for read-only ops, <code>"write"</code> for read+write. The <code>fs_scope</code> field controls path bounds — empty (default) sandboxes to the active repo; <code>["*"]</code> grants unrestricted access; any other list extends the active-repo sandbox with those absolute paths. All read/write functions return <code>result, nil</code> on success or <code>nil, err</code> on failure.</p>
 <pre class="language-lua">{@html highlight(`local content, err = arbor.fs.read("/path/to/file.txt")
-local ok,      err = arbor.fs.write("/path/to/out.txt", content)
+-- read_bytes: raw bytes, NO UTF-8 validation, NO BOM stripping. Use it for
+-- non-UTF-8 / binary files or when the BOM matters (read() rejects invalid
+-- UTF-8 and eats the BOM).
+local raw,     err = arbor.fs.read_bytes("/path/to/legacy.txt")
+local ok,      err = arbor.fs.write("/path/to/out.txt", content)        -- UTF-8 only
+-- write_bytes: raw bytes, no UTF-8 validation. Round-trips read_bytes for
+-- non-UTF-8 / legacy files (read_bytes → modify → write_bytes).
+local ok,      err = arbor.fs.write_bytes("/path/to/legacy.txt", raw)
 local entries      = arbor.fs.list("/path/to/dir")  -- array of {name, is_file, is_dir}
 local joined       = arbor.fs.join("/base", "sub", "file.txt")
 local exists       = arbor.fs.exists("/path")

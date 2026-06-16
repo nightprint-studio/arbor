@@ -2,7 +2,7 @@
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-svelte';
-  import type { Toast } from '$lib/stores/ui.svelte';
+  import type { Toast } from '$lib/feedback/stores/toasts.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
 

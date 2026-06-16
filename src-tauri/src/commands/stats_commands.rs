@@ -84,6 +84,7 @@ pub async fn export_repo_stats(
             is_system:       true,
             finished_at:     None,
             hidden:          false,
+            target:          None,
         });
         id
     };

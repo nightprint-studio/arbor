@@ -5,7 +5,7 @@
   import { cubicOut }       from 'svelte/easing';
   import { animStore }      from '$lib/stores/animations.svelte';
   import { fsWriteTextFile } from '$lib/ipc/fs';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import FileExplorerModal     from './FileExplorerModal.svelte';
   import Modal               from './Modal.svelte';
   import ModalHeader         from './ModalHeader.svelte';
@@ -29,7 +29,7 @@
     GitPullRequest, Search, FolderPlus, Download, Settings, TicketCheck,
     FileDown, StickyNote, FolderTree, FolderOpen, History, Bug, BarChart2,
     Monitor, Database, Shield, ShieldCheck, Cloud, Tag, Share2, FolderX,
-    Palette, Link2, Store,
+    Palette, Link2, Store, Music4,
   } from 'lucide-svelte';
 
   // ── Section components ───────────────────────────────────────────────────────
@@ -82,6 +82,7 @@
   import Security       from './docs/Security.svelte';
   import DeepLinks      from './docs/DeepLinks.svelte';
   import Marketplace    from './docs/Marketplace.svelte';
+  import Nemus          from './docs/Nemus.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -128,6 +129,7 @@
         { id: 'terminal',        label: 'Terminal',           icon: TerminalSquare },
         { id: 'command-palette', label: 'Command Palette',    icon: Search         },
         { id: 'shortcuts',       label: 'Keyboard Shortcuts', icon: Keyboard       },
+        { id: 'nemus',           label: 'nemus (Music)',      icon: Music4         },
         { id: 'statistics',      label: 'Statistics',         icon: BarChart2      },
       ],
     },
@@ -192,6 +194,7 @@
     'terminal':        Terminal,
     'command-palette': CommandPalette,
     'shortcuts':       Shortcuts,
+    'nemus':           Nemus,
     'jobs':            BackgroundJobs,
     'notifications':   Notifications,
     'pipelines':       Pipelines,

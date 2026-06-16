@@ -5,7 +5,7 @@
   import { statsStore } from '$lib/stores/stats.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { exportRepoStats } from '$lib/ipc/stats';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import CommitHeatmap    from './CommitHeatmap.svelte';
   import TimeDistribution from './TimeDistribution.svelte';
   import ContributorBar   from './ContributorBar.svelte';

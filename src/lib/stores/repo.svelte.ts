@@ -43,7 +43,7 @@ function createRepoStore() {
     // renders it as a transient card at bottom-right for ~6 seconds, so
     // we don't double up with a separate toast.  The bell badge keeps it
     // visible after the transient fades.
-    void import('./notifications.svelte').then(({ notificationsStore }) => {
+    void import('$lib/feedback/stores/notifications.svelte').then(({ notificationsStore }) => {
       notificationsStore.add(
         'Merge conflicts to resolve',
         `${count} file${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} resolution${op !== 'operation' ? ` (${op} in progress)` : ''}. Open the Stage area to fix them.`,

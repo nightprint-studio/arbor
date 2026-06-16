@@ -14,7 +14,7 @@
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { firePluginAction, execHook } from '$lib/ipc/plugin';
   import { handlePullResult, handlePullThrown } from '$lib/utils/pullResultHandler';
-  import { startPullOperation } from '$lib/utils/operations-bridge';
+  import { startPullOperation } from '$lib/feedback/bridge/operations-bridge';
   import type { ActivityBarEntry, ComboOption } from '$lib/types/plugin';
   import { ACTIVITY_BAR_POINT, parseActivityBarEntry } from '$lib/contributions/activity-bar';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
@@ -22,6 +22,7 @@
   import StashDialog from '$lib/components/shared/internal/StashDialog.svelte';
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import { tooltipForAction } from '$lib/utils/shortcut';
+  import { formatBinding } from '$lib/utils/keybindings';
   import { tooltip } from '$lib/actions/tooltip';
 
   const tab        = $derived(tabsStore.activeTab);
@@ -123,6 +124,34 @@
 
   function actionComboOptions(combo: RepoCombo): ComboOption[] {
     return combo.options.filter(o => o.action);
+  }
+
+  // Plugin-registered keybindings, so a combo's run button can advertise the
+  // very chord the user would press (e.g. run-action binds Shift+F10 to the
+  // "run:run" action, which is also this combo's run_action). Matching on the
+  // action id keeps this generic — any plugin combo whose run_action equals a
+  // keybinding it registered gets the hint, with zero new contract surface.
+  const pluginKeybindings = $derived(
+    contributionStore.forPoint('arbor:keybinding')
+      .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name))
+      .map(c => {
+        const p = c.payload as { key?: string; ctrl?: boolean; shift?: boolean; alt?: boolean; action?: string };
+        return { plugin: c.plugin_name, key: p.key ?? '', ctrl: !!p.ctrl, shift: !!p.shift, alt: !!p.alt, action: p.action ?? '' };
+      })
+  );
+
+  function comboRunShortcut(combo: RepoCombo): string | undefined {
+    if (!combo.run_action) return undefined;
+    const kb = pluginKeybindings.find(k => k.plugin === combo.plugin_name && k.action !== '' && k.action === combo.run_action);
+    return kb && kb.key
+      ? formatBinding({ key: kb.key, ctrl: kb.ctrl, shift: kb.shift, alt: kb.alt, description: '', group: '' })
+      : undefined;
+  }
+
+  function comboRunTooltip(combo: RepoCombo, selLabel: string) {
+    const content = combo.tooltip ?? `Run: ${selLabel}`;
+    const shortcut = comboRunShortcut(combo);
+    return shortcut ? { content, shortcut } : content;
   }
 
   // ── Tab change → fire on_repo_open on all plugins ────────────────────────
@@ -449,7 +478,7 @@
               <div class="repo-combo" class:combo-open={open}>
                 <button
                   class="action-btn combo-run-btn"
-                  use:tooltip={combo.tooltip ?? `Run: ${selLabel}`}
+                  use:tooltip={comboRunTooltip(combo, selLabel)}
                   disabled={!tab}
                   onclick={() => { close(); runCombo(combo); }}
                 >

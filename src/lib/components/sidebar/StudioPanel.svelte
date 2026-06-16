@@ -33,7 +33,7 @@
   import { tomlStudioStore } from '$lib/stores/toml-studio.svelte';
   import { yamlStudioStore } from '$lib/stores/yaml-studio.svelte';
   import { propertiesStudioStore } from '$lib/stores/properties-studio.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import type { StudioFileEntry, StudioFileKind } from '$lib/ipc/studio';
   import { tooltip } from '$lib/actions/tooltip';
 

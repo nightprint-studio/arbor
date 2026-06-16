@@ -162,6 +162,9 @@
     padding: 1px 4px;
     border-radius: var(--radius-sm);
     color: var(--accent);
+    /* Long inline tokens (`s(RolandTR808_bd …)`, `<Machine>_<drum>`) must break
+       rather than force the prose column wider than the panel. */
+    overflow-wrap: anywhere;
   }
   .doc-block :global(pre) {
     background: var(--bg-elevated);
@@ -206,6 +209,9 @@
     border-bottom: 1px solid var(--border-subtle);
     vertical-align: top;
     line-height: 1.55;
+    /* Break long code-y cell content so a wide row can't stretch the table past
+       the panel (the `width: 100%` table can then shrink to the column). */
+    overflow-wrap: anywhere;
   }
   .doc-block :global(tbody tr:last-child td) { border-bottom: none; }
   .doc-block :global(a) { color: var(--accent); }

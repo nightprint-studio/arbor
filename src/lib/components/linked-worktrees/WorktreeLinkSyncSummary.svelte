@@ -5,7 +5,7 @@
   import { animStore } from '$lib/stores/animations.svelte';
   import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   // Mirror every sync result into the persistent notifications overlay so

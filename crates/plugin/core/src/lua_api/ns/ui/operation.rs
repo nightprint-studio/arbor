@@ -32,6 +32,7 @@
 
 use mlua::{Lua, Table};
 
+use arbor_feedback::prelude::{EVENT_OP_FINISH, EVENT_OP_START, EVENT_OP_UPDATE};
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
 
@@ -66,6 +67,10 @@ fn install_start(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
         })?;
         let subtitle: Option<String> = cfg.get::<Option<String>>("subtitle").ok().flatten();
         let current:  Option<String> = cfg.get::<Option<String>>("current").ok().flatten();
+        // Optional window-routing target. Absent → main window. The frontend
+        // remembers `id → target` from this start event and filters the later
+        // update / finish events (which carry only the id) by it.
+        let target:   Option<String> = cfg.get::<Option<String>>("target").ok().flatten();
 
         // Steps must be an array of { key, label, detail?, status? } tables.
         let steps_tbl: Table = cfg.get("steps").map_err(|_| {
@@ -92,13 +97,14 @@ fn install_start(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
 
         let _ = lua_ctx; // unused — kept for symmetry with other installers
         if let Some(ref h) = handle {
-            let _ = h.emit("arbor://plugin-operation-start", serde_json::json!({
+            let _ = h.emit(EVENT_OP_START, serde_json::json!({
                 "id":       scoped_id(&pname, &raw_id),
                 "plugin":   &pname,
                 "title":    title,
                 "subtitle": subtitle,
                 "steps":    steps,
                 "current":  current,
+                "target":   target,
             }));
         }
         Ok(())
@@ -128,7 +134,7 @@ fn install_set_current(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> 
             _ => None,
         };
         if let Some(ref h) = handle {
-            let _ = h.emit("arbor://plugin-operation-update", serde_json::json!({
+            let _ = h.emit(EVENT_OP_UPDATE, serde_json::json!({
                 "id":      scoped_id(&pname, &id),
                 "plugin":  &pname,
                 "kind":    "set_current",
@@ -149,7 +155,7 @@ fn install_update_step(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> 
         let status: Option<String> = patch.get::<Option<String>>("status").ok().flatten();
         let detail: Option<String> = patch.get::<Option<String>>("detail").ok().flatten();
         if let Some(ref h) = handle {
-            let _ = h.emit("arbor://plugin-operation-update", serde_json::json!({
+            let _ = h.emit(EVENT_OP_UPDATE, serde_json::json!({
                 "id":     scoped_id(&pname, &id),
                 "plugin": &pname,
                 "kind":   "update_step",
@@ -176,7 +182,7 @@ fn install_finish(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
             None => (None, None),
         };
         if let Some(ref h) = handle {
-            let _ = h.emit("arbor://plugin-operation-finish", serde_json::json!({
+            let _ = h.emit(EVENT_OP_FINISH, serde_json::json!({
                 "id":      scoped_id(&pname, &id),
                 "plugin":  &pname,
                 "summary": summary,

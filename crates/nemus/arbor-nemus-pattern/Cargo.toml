@@ -1,0 +1,16 @@
+[package]
+name         = "arbor-nemus-pattern"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "nemus — pure, deterministic pattern algebra (Pattern = TimeSpan -> [Hap]) with exact rational time, source spans and per-cycle seeded RNG. Zero external dependencies."
+
+# Pure algebra, std-only by design (hard requirement): exact time, RNG and the
+# pitch/scale model are all hand-rolled so the crate compiles/tests instantly
+# and stays trivially splittable. DO NOT add dependencies here.
+[dependencies]
+
+[lints.rust]
+missing_debug_implementations = "warn"

@@ -1,0 +1,35 @@
+[package]
+name         = "arbor-nemus-transcribe"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "nemus — audio (WAV) → MIDI transcription behind a swappable `Transcriber` trait. Ships a zero-dependency built-in DSP backend (onset→GM drums, monophonic YIN pitch); ML backends (basic-pitch, Demucs via ONNX) plug into the same trait. Output is an in-memory `midly::Smf` for the deterministic `.nemus` converter, or a `.mid` on disk."
+
+# WAV → MIDI. The `Transcriber` trait is the seam (D1's "implementazione
+# sostituibile"); the built-in `DspTranscriber` is always available and needs no
+# extra crates. The interchange is `midly::Smf` (in memory for the transient
+# WAV→.nemus path, written to disk for "convert to .mid"). Audio decode is reused
+# from `arbor-nemus-audio` (`DecodedAudio`).
+[features]
+default = []
+# ONNX backends (basic-pitch / Demucs). Pulls `ort`, whose default
+# `download-binaries` feature fetches a prebuilt onnxruntime and links it INTO the
+# binary (no runtime to ship — only the models download on demand). Off by
+# default so the crate builds with no native ONNX dependency; the app turns it on.
+onnx = ["dep:ort"]
+
+[dependencies]
+arbor-nemus-audio = { path = "../arbor-nemus-audio" }
+midly.workspace     = true
+thiserror.workspace = true
+# Pinned: ort 2.x is pre-1.0 and its API still shifts between rc releases, so a
+# loose range could pull an incompatible API. Bump deliberately.
+# `directml` adds the DirectML execution provider (GPU on Windows); sessions
+# register it with automatic CPU fallback, so it's a pure speed-up with no new
+# build/runtime requirement (the prebuilt onnxruntime already bundles DML).
+ort = { version = "=2.0.0-rc.12", optional = true, features = ["directml"] }
+
+[lints.rust]
+missing_debug_implementations = "warn"

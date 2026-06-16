@@ -1,16 +1,14 @@
 <script lang="ts">
-  import { ArrowUp, ArrowDown, GitBranch, Tag, AlertCircle, GitMerge, Loader, Bell, Clock, Undo2, ShieldAlert, Minimize2 } from 'lucide-svelte';
+  import { ArrowUp, ArrowDown, GitBranch, Tag, AlertCircle, GitMerge, Clock, Undo2, ShieldAlert } from 'lucide-svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { repoStore } from '$lib/stores/repo.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { jobsStore } from '$lib/stores/jobs.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
   import { securityStore } from '$lib/stores/security.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
-  import { parkedModalsStore } from '$lib/stores/parked-modals.svelte';
   import type { RepoStatus } from '$lib/types/git';
   import Contribution from '$lib/components/shared/Contribution.svelte';
   import PluginIcon   from '$lib/components/plugins/PluginIcon.svelte';
+  import FeedbackStatusButtons from '$lib/feedback/FeedbackStatusButtons.svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { tooltip } from '$lib/actions/tooltip';
 
@@ -92,13 +90,6 @@
   const securityHasCriticalOrHigh = $derived(
     !!securitySummary && (securitySummary.counts.critical + securitySummary.counts.high) > 0
   );
-
-  const runningJobs  = $derived(jobsStore.runningCount);
-  // Visible job total: hidden jobs are excluded from the badge unless the
-  // user has flipped the "Show hidden" toggle on the Jobs panels.
-  const totalJobs    = $derived(jobsStore.runningCount + jobsStore.finishedCount);
-
-  const parkedCount  = $derived(parkedModalsStore.count);
 
   async function copyRefName(text: string, kind: 'branch' | 'tag') {
     if (await copyToClipboard(text, { errorToast: 'Copy failed' })) {
@@ -312,70 +303,9 @@
     {/snippet}
   </Contribution>
 
-  <!-- Jobs badge (IntelliJ-style) -->
+  <!-- Jobs · minimized dialogs · notifications — shared with the Nemus footer. -->
   <div class="status-sep"></div>
-  <button
-    class="job-badge"
-    class:job-badge-running={runningJobs > 0}
-    class:job-badge-idle={totalJobs === 0}
-    use:tooltip={{
-      content: runningJobs > 0
-        ? `${runningJobs} job${runningJobs > 1 ? 's' : ''} running`
-        : totalJobs > 0
-          ? 'All jobs finished'
-          : 'No jobs',
-      description: 'Click to view',
-    }}
-    onclick={() => uiStore.toggleJobsOverlay()}
-  >
-    {#if runningJobs > 0}
-      <span class="job-spinner"><Loader size={12} /></span>
-      <span>{runningJobs}</span>
-    {:else if totalJobs > 0}
-      <span class="job-done-dot">●</span>
-      <span>{totalJobs}</span>
-    {:else}
-      <Loader size={12} />
-    {/if}
-  </button>
-
-  <!-- Minimized dialogs (parked modals) — always visible, click opens
-       the floating panel anchored above this badge. Same affordance
-       shape as Jobs / Notifications so they read as a cluster. -->
-  <button
-    class="parked-badge"
-    class:parked-badge-has={parkedCount > 0}
-    use:tooltip={{
-      content: parkedCount > 0
-        ? `${parkedCount} minimized dialog${parkedCount > 1 ? 's' : ''}`
-        : 'No minimized dialogs',
-      description: 'Click to view',
-    }}
-    onclick={() => uiStore.toggleParkedModalsOverlay()}
-  >
-    <Minimize2 size={12} />
-    {#if parkedCount > 0}
-      <span class="parked-count">{parkedCount > 99 ? '99+' : parkedCount}</span>
-    {/if}
-  </button>
-
-  <!-- Notifications bell -->
-  <button
-    class="notif-badge"
-    class:notif-badge-has={notificationsStore.count > 0}
-    use:tooltip={{
-      content: notificationsStore.count > 0
-        ? `${notificationsStore.count} notification${notificationsStore.count > 1 ? 's' : ''}`
-        : 'No notifications',
-      description: 'Click to view',
-    }}
-    onclick={() => uiStore.toggleNotificationsOverlay()}
-  >
-    <Bell size={13} />
-    {#if notificationsStore.count > 0}
-      <span class="notif-count">{notificationsStore.count > 99 ? '99+' : notificationsStore.count}</span>
-    {/if}
-  </button>
+  <FeedbackStatusButtons parked />
 </div>
 
 <style>
@@ -527,118 +457,6 @@
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .repo-path:hover { background: rgba(255,255,255,0.06); color: var(--text-muted); }
-
-  /* ── Jobs badge ─────────────────────────────────────────────────────────── */
-  .job-badge {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    height: 100%;
-    padding: 0 10px;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    font-family: var(--font-ui-sans);
-    font-size: var(--font-size-sm);
-    font-weight: 500;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .job-badge:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
-
-  .job-badge-running {
-    color: var(--accent);
-  }
-
-  .job-badge-idle {
-    color: var(--text-muted);
-  }
-
-  .job-spinner {
-    display: flex;
-    align-items: center;
-    animation: spin 1.2s linear infinite;
-  }
-
-  .job-done-dot {
-    font-size: 8px;
-    color: var(--success);
-  }
-
-
-  /* ── Parked-modals badge ──────────────────────────────────────────────────
-     Same shape as the notifications bell so the right cluster reads as a
-     unified group. Muted when empty; accent when at least one entry is
-     parked, with a count pill mirroring the bell. */
-  .parked-badge {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    height: 100%;
-    padding: 0 10px;
-    background: transparent;
-    border: none;
-    border-left: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    font-family: var(--font-ui-sans);
-    font-size: var(--font-size-sm);
-    font-weight: 500;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .parked-badge:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
-  .parked-badge-has   { color: var(--accent); }
-
-  .parked-count {
-    font-size: 11px;
-    font-weight: 700;
-    background: var(--accent);
-    color: var(--text-on-accent);
-    border-radius: var(--radius-md);
-    padding: 0 4px;
-    min-width: 16px;
-    text-align: center;
-    line-height: 16px;
-  }
-
-  /* ── Notifications badge ────────────────────────────────────────────────── */
-  .notif-badge {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    height: 100%;
-    padding: 0 10px;
-    background: transparent;
-    border: none;
-    border-left: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    font-family: var(--font-ui-sans);
-    font-size: var(--font-size-sm);
-    font-weight: 500;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-  .notif-badge:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
-
-  .notif-badge-has { color: var(--accent); }
-
-  .notif-count {
-    font-size: 11px;
-    font-weight: 700;
-    background: var(--accent);
-    color: var(--text-on-accent);
-    border-radius: var(--radius-md);
-    padding: 0 4px;
-    min-width: 16px;
-    text-align: center;
-    line-height: 16px;
-  }
 
   /* ── Plugin-contributed status bar items ──────────────────────────────────
      Shared shape for both left and right segments. */

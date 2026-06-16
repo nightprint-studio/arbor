@@ -3,7 +3,7 @@
   import { cubicOut } from 'svelte/easing';
   import { X, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-svelte';
   import ProgressStepper from '$lib/components/shared/ui/ProgressStepper.svelte';
-  import { operationsStore } from '$lib/stores/operations.svelte';
+  import { operationsStore } from '$lib/feedback/stores/operations.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 

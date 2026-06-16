@@ -16,6 +16,9 @@
     icon?: Snippet;
     /** Main content (label + inline badges) */
     children: Snippet;
+    /** Optional secondary line under the label (muted), e.g. a metadata summary.
+     *  When set the row becomes two-line; absent it stays a single line. */
+    subtitle?: Snippet;
     /** Right-side always-visible badges */
     badges?: Snippet;
     /** Action buttons revealed on hover */
@@ -32,6 +35,7 @@
     oncontextmenu,
     icon,
     children,
+    subtitle,
     badges,
     actions,
   }: Props = $props();
@@ -61,8 +65,9 @@
     </span>
   {/if}
 
-  <span class="item-content">
+  <span class="item-content" class:with-subtitle={subtitle}>
     {@render children()}
+    {#if subtitle}<span class="item-subtitle">{@render subtitle()}</span>{/if}
   </span>
 
   {#if badges}
@@ -118,6 +123,23 @@
     white-space: nowrap;
     font-size: var(--font-size-xs);
     color: var(--text-primary);
+  }
+  /* Two-line variant: stack the label over a muted secondary line. Only applied
+     when a `subtitle` snippet is passed, so single-line rows are untouched. */
+  .item-content.with-subtitle {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    overflow: visible;
+  }
+  .item-subtitle {
+    font-size: 10px;
+    line-height: 1.25;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .item-badges {

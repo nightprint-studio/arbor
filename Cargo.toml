@@ -10,12 +10,20 @@ members = [
     "crates/arbor-auth",
     "crates/arbor-cloud",
     "crates/arbor-process-ext",
+    "crates/arbor-feedback",
     "crates/core",
     "crates/plugin/api",
     "crates/plugin/core",
     "crates/plugin/marketplace",
     "crates/plugin/types",
     "crates/scheduler",
+    "crates/nemus/arbor-nemus-pattern",
+    "crates/nemus/arbor-nemus-lang",
+    "crates/nemus/arbor-nemus-audio",
+    "crates/nemus/arbor-nemus-engine",
+    "crates/nemus/arbor-nemus-import",
+    "crates/nemus/arbor-nemus-transcribe",
+    "crates/nemus/arbor-nemus",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────
@@ -55,6 +63,9 @@ sha2    = "0.10"
 uuid   = { version = "1", features = ["v4"] }
 dirs   = "6.0.0"
 regex  = "1"
+# MIDI (SMF) read/write — pure-Rust, zero-dep. Used by the nemus import/transcribe
+# crates: parse an external/transient `.mid` and write `.mid` on disk.
+midly  = "0.5"
 
 # Tauri (member crates that need AppHandle / Manager pull this in)
 tauri = { version = "2.11.0", features = ["tray-icon", "image-png", "image-ico", "protocol-asset"] }

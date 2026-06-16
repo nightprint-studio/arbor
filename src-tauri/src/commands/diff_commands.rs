@@ -93,6 +93,61 @@ pub async fn get_commit_file_diff(
     .map_err(|e| AppError::Other(format!("get_commit_file_diff task panicked: {e}")))?
 }
 
+/// Metadata-only cumulative range diff — file list (path, status, +/- stats)
+/// from `base_oid`'s first parent to `target_oid`, without parsing any hunks.
+/// Paired with `get_commits_range_file_diff` for the lazy "compare revisions"
+/// viewer: the file list shows instantly, each file's hunks fetched on demand.
+#[tauri::command]
+pub async fn get_commits_range_diff_meta(
+    state: State<'_, AppState>,
+    tab_id: String,
+    base_oid: String,
+    target_oid: String,
+    diff_algo: Option<String>,
+) -> Result<Vec<crate::git::diff::DiffFile>, AppError> {
+    let repo_path = {
+        let mut mgr = state.lock_repos()?;
+        mgr.get(&tab_id)?.path.clone()
+    };
+    tokio::task::spawn_blocking(move || {
+        let repo = git2::Repository::open(&repo_path)?;
+        crate::git::diff::get_commits_range_diff_meta(&repo, &base_oid, &target_oid, diff_algo.as_deref())
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("get_commits_range_diff_meta task panicked: {e}")))?
+}
+
+/// Per-file cumulative range diff — parses hunks for a single file inside the
+/// range from `base_oid`'s first parent to `target_oid`. Use after
+/// `get_commits_range_diff_meta` populated the file list to fill in hunks on demand.
+#[tauri::command]
+pub async fn get_commits_range_file_diff(
+    state: State<'_, AppState>,
+    tab_id: String,
+    base_oid: String,
+    target_oid: String,
+    path: String,
+    context_lines: Option<u32>,
+    diff_algo: Option<String>,
+    encoding_overrides: Overrides,
+) -> Result<crate::git::diff::DiffFile, AppError> {
+    let ctx = context_lines.unwrap_or_else(|| {
+        state.lock_config().map(|c| c.diff.context_lines).unwrap_or(3)
+    });
+    let repo_path = {
+        let mut mgr = state.lock_repos()?;
+        mgr.get(&tab_id)?.path.clone()
+    };
+    tokio::task::spawn_blocking(move || {
+        let repo = git2::Repository::open(&repo_path)?;
+        crate::git::diff::get_commits_range_file_diff(
+            &repo, &base_oid, &target_oid, &path, ctx, diff_algo.as_deref(), encoding_overrides.as_ref(),
+        )
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("get_commits_range_file_diff task panicked: {e}")))?
+}
+
 #[tauri::command]
 pub async fn get_workdir_diff(
     state: State<'_, AppState>,
@@ -175,6 +230,7 @@ pub fn get_workdir_diff_stream(
             is_system: true,
             finished_at: None,
             hidden: false,
+            target: None,
         });
         id
     };

@@ -9,7 +9,7 @@
   import { themeStore, type ImportResult } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { notificationsStore } from '$lib/stores/notifications.svelte';
+  import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
   import { fsReadTextFile, fsWriteTextFile } from '$lib/ipc/fs';
   import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import ColorSwatch from '$lib/components/shared/ui/ColorSwatch.svelte';

@@ -549,10 +549,15 @@ fn insert_into_tree(
     value: &str,
 ) {
     if segments.is_empty() {
-        // Leaf write at the current position. If a container already
-        // exists here, stash the leaf as `$value` so both the prefix's
-        // own value AND its sub-keys remain visible.
+        // Leaf write at the current position. A *non-empty* container here is a
+        // real prefix collision (`foo.sub=…` already created children): stash the
+        // leaf as `$value` so both the prefix's own value AND its sub-keys stay
+        // visible. An *empty* mapping is just the placeholder the parent created
+        // for this exact key — it's a plain leaf, not a collision.
         match root {
+            TreeNode::Mapping(m) if m.is_empty() => {
+                *root = TreeNode::Leaf(value.to_string());
+            }
             TreeNode::Mapping(m) => {
                 m.insert(VALUE_SENTINEL.to_string(), TreeNode::Leaf(value.to_string()));
             }

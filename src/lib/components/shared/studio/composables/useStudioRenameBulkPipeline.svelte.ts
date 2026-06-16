@@ -11,7 +11,7 @@
  */
 
 import { studioStore } from '$lib/stores/studio.svelte';
-import { notificationsStore } from '$lib/stores/notifications.svelte';
+import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
 import type { StudioFileKind } from '$lib/ipc/studio';
 import type {
   BulkEditOpenDoc, BulkEditResult,

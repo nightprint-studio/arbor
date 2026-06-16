@@ -112,6 +112,7 @@ impl CloudHost for ArborCloudHost {
                 hidden:          info.hidden,
                 is_system:       info.is_system,
                 finished_at:     None,
+                target:          None,
             });
         }
     }

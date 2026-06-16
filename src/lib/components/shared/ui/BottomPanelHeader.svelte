@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { uiStore } from '$lib/stores/ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {
@@ -24,9 +23,13 @@
      * `.ps-btn-success` / `.ps-btn-active` classes for consistent styling.
      */
     actions?: Snippet;
-    /** Custom close handler. Defaults to `uiStore.setActiveBottomSection(null)`. */
+    /**
+     * Close handler. Omit → no close button is rendered (the panel is not
+     * closable from its own header). The host owns what "close" means
+     * (deactivate the bottom section, toggle a store flag, …).
+     */
     onClose?: () => void;
-    /** Hide the close button — rare, only when the caller manages close itself. */
+    /** Force-hide the close button even when `onClose` is set. */
     hideClose?: boolean;
   }
 
@@ -39,11 +42,6 @@
     onClose,
     hideClose = false,
   }: Props = $props();
-
-  function handleClose() {
-    if (onClose) onClose();
-    else uiStore.setActiveBottomSection(null);
-  }
 </script>
 
 <div class="bp-header">
@@ -63,12 +61,12 @@
   {#if actions}
     <div class="bp-actions">{@render actions()}</div>
   {/if}
-  {#if !hideClose}
+  {#if onClose && !hideClose}
     <!-- Same red-dot affordance used by `<ModalHeader>` so the close
          control reads consistently across modals and bottom panels. -->
     <button
       class="mac-close-btn bp-close"
-      onclick={handleClose}
+      onclick={onClose}
       use:tooltip={'Close panel'}
       aria-label="Close panel"
     ></button>

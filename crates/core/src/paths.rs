@@ -50,3 +50,36 @@ pub fn arbor_cache_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("arbor")
 }
+
+// ── nemus ───────────────────────────────────────────────────────────────────
+//
+// nemus (the live-coding music workspace) owns its own top-level namespace,
+// sibling to `arbor` rather than nested under it: `%APPDATA%\nemus` instead of
+// `%APPDATA%\arbor\nemus`. It's effectively a separate app sharing the same
+// binary, so its config + the (potentially multi-GB) sample banks live apart.
+// A future "shared" segment can still be carved out under `arbor` for anything
+// the two genuinely co-own.
+
+/// `~/.config/nemus` on Linux, `%APPDATA%\nemus` on Windows,
+/// `~/Library/Application Support/nemus` on macOS.
+///
+/// Falls back to `./nemus` when `dirs::config_dir()` is unavailable.
+pub fn nemus_config_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("nemus")
+}
+
+/// Convenience: join a relative path under [`nemus_config_dir`].
+pub fn nemus_config_path<P: AsRef<Path>>(sub: P) -> PathBuf {
+    nemus_config_dir().join(sub)
+}
+
+/// `~/.local/share/nemus` on Linux, `%APPDATA%\nemus` on Windows,
+/// `~/Library/Application Support/nemus` on macOS. Home of the downloaded
+/// sample packs, the VSCO 2 bank, and the nemus window state.
+pub fn nemus_data_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("nemus")
+}

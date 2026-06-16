@@ -1,0 +1,31 @@
+[package]
+name         = "arbor-nemus"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "nemus — facade crate: re-exports the public surface of the four nemus crates (pattern + lang + audio + engine) through a single curated prelude, with one unified error type. Consumers (the Arbor shell) use `arbor_nemus::prelude::*` and never reach into the individual crates."
+
+# Thin facade: no logic of its own beyond the unified `NemusError`. It depends on
+# all four nemus crates and stitches their preludes into one. The only genuine
+# name collision across the four preludes is the per-crate `Result` alias, which
+# the facade resolves by exposing a single `NemusError`/`Result` (see error.rs);
+# every other symbol is either single-homed or an identical re-export.
+[features]
+default = []
+# Forward the ONNX transcription backends (basic-pitch / Demucs) — links
+# onnxruntime into the binary. The shell turns this on.
+onnx = ["arbor-nemus-transcribe/onnx"]
+
+[dependencies]
+arbor-nemus-pattern    = { path = "../arbor-nemus-pattern" }
+arbor-nemus-lang       = { path = "../arbor-nemus-lang" }
+arbor-nemus-audio      = { path = "../arbor-nemus-audio" }
+arbor-nemus-engine     = { path = "../arbor-nemus-engine" }
+arbor-nemus-import     = { path = "../arbor-nemus-import" }
+arbor-nemus-transcribe = { path = "../arbor-nemus-transcribe" }
+thiserror.workspace    = true
+
+[lints.rust]
+missing_debug_implementations = "warn"

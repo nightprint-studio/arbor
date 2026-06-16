@@ -23,7 +23,7 @@
   import type { PluginSidebarSection } from '$lib/types/plugin';
   import { SIDEBAR_POINT, parseSidebarSection } from '$lib/contributions/sidebar';
   import PluginIcon from '../plugins/PluginIcon.svelte';
-  import ActivityBar from './ActivityBar.svelte';
+  import ActivityBar from '$lib/components/shared/ui/ActivityBar.svelte';
   // Right-side activity bar: tooltips fly out to the left away from the bar.
   import { tooltipLeft as tooltip } from '$lib/actions/tooltip';
 

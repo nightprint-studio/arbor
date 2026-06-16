@@ -474,7 +474,7 @@
 </script>
 
 <div class="pipe-root">
-  <BottomPanelHeader title="Pipelines">
+  <BottomPanelHeader title="Pipelines" onClose={() => uiStore.setActiveBottomSection(null)}>
     {#snippet icon()}<Workflow size={14} />{/snippet}
     <!-- Sub-tabs live inline in the header so they don't claim a second
          strip of chrome below. The `pipe-tabs` class trims the underline

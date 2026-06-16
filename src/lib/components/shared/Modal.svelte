@@ -36,7 +36,7 @@
   import { tooltipState } from '$lib/stores/tooltip.svelte';
   import { parkedModalsStore } from '$lib/stores/parked-modals.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import ActivityBar from '$lib/components/layout/ActivityBar.svelte';
+  import ActivityBar from '$lib/components/shared/ui/ActivityBar.svelte';
 
   type Size = 'sm' | 'md' | 'lg' | 'full';
 

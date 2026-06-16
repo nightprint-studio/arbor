@@ -11,7 +11,7 @@
 <table class="shortcuts-table">
   <thead><tr><th>Function</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>arbor.notify{`{`} message, title?, level?, action? {`}`}</code></td><td>Add a persistent notification to the in-app notification center. <code>level</code>: <code>"info" | "success" | "warning" | "error"</code> (default <code>"info"</code>). See the <em>arbor.notify</em> section below.</td></tr>
+    <tr><td><code>arbor.notify{`{`} message, title?, level?, action?, target? {`}`}</code></td><td>Add a persistent notification to the in-app notification center. <code>level</code>: <code>"info" | "success" | "warning" | "error"</code> (default <code>"info"</code>). Optional <code>target</code> routes it to a specific window's feedback host. See the <em>arbor.notify</em> section below.</td></tr>
     <tr><td><code>arbor.ui.form(config)</code></td><td>Display an input form modal; submitting fires <code>submit_action</code></td></tr>
     <tr><td><code>arbor.ui.confirm&#123; message, confirm_label?, confirm_variant?, state? &#125;</code></td><td>Confirmation dialog. Returns a Promise that resolves with <code>true</code> on confirm and <code>false</code> on cancel. <code>confirm_variant</code>: <code>"primary" | "danger" | "ghost"</code>.</td></tr>
     <tr><td><code>arbor.ui.pick_file(opts)</code></td><td>Native file/folder picker. Fires <code>opts.action</code> with <code>&#123; path, ...opts.extra &#125;</code> on confirm; empty <code>path</code> on cancel. <code>opts.mode</code>: <code>"file"</code> (default), <code>"folder"</code>, <code>"save"</code>. Optional: <code>title</code>, <code>extensions</code>, <code>initial_path</code>.</td></tr>
@@ -43,7 +43,7 @@
     <tr><td><code>arbor.ui.form.set_sidecar(id|nil)</code></td><td>Switch the active sidecar in a Studio-shaped modal (when <code>activity_bar</code> is configured). Pass <code>nil</code> to close any open pane. Unknown <code>id</code> logs a host warning + no-op. See <em>Studio-shaped modal chrome</em> below.</td></tr>
     <tr><td><code>arbor.ui.form.set_state_block(name, cfg?)</code></td><td>Swap the modal body for a fallback block. <code>name</code> ∈ <code>"loading"</code> / <code>"error"</code> / <code>"empty"</code>; <code>nil</code> clears and renders the body again. Mutually exclusive at render time.</td></tr>
     <tr><td><code>arbor.ui.form.close()</code></td><td>Programmatically dismiss the currently-open form. Pair with <code>keep_open = true</code> on the form config when submit launches a follow-up flow (file picker, second form): the modal stays mounted while the secondary flow is up, and you call <code>close()</code> once it completes.</td></tr>
-    <tr><td><code>arbor.ui.operation.start&#123;…&#125;</code></td><td>Push a progress card into the operations overlay (same widget used by Pull / Fetch-all / Pull-all). Config: <code>&#123;id, title, subtitle?, steps[&#123;key,label&#125;], current?&#125;</code>. The id is plugin-scoped server-side — collisions across plugins are impossible.</td></tr>
+    <tr><td><code>arbor.ui.operation.start&#123;…&#125;</code></td><td>Push a progress card into the operations overlay (same widget used by Pull / Fetch-all / Pull-all). Config: <code>&#123;id, title, subtitle?, steps[&#123;key,label&#125;], current?, target?&#125;</code>. The id is plugin-scoped server-side — collisions across plugins are impossible. Optional <code>target</code> routes the card to a specific window's feedback host (absent → main window); later <code>set_current</code> / <code>update_step</code> / <code>finish</code> calls follow the card automatically.</td></tr>
     <tr><td><code>arbor.ui.operation.set_current(id, step_key, detail?)</code></td><td>Move the active-step pointer; auto-completes earlier rows and leaves later ones pending.</td></tr>
     <tr><td><code>arbor.ui.operation.update_step(id, step_key, &#123;status?, detail?&#125;)</code></td><td>Patch a single row. <code>status</code>: <code>"pending"|"completed"|"skipped"|"error"</code>. Avoid setting <code>"active"</code> here — use <code>set_current</code> instead (sticky active = forever spinner).</td></tr>
     <tr><td><code>arbor.ui.operation.finish(id, &#123;summary?, error?&#125;)</code></td><td>Close the card. It lingers a few seconds with the summary or error, then auto-dismisses.</td></tr>
@@ -284,13 +284,16 @@ end)
 arbor.ui.clear_theme_tokens()`, '.lua')}</pre>
 
 <h2>arbor.notify — persistent notifications</h2>
-<p>Adds a notification to the in-app notification center (bell icon in the status bar). Notifications persist until the user explicitly dismisses them. An optional <code>action</code> table renders a click button on the notification that triggers a built-in side-effect. Boundary validation: <code>message</code> must be a non-empty string and <code>level</code> (when supplied) must be one of <code>"info"|"success"|"warning"|"error"</code> — invalid input raises a Lua error.</p>
-<pre class="language-lua">{@html highlight(`-- arbor.notify{ message, title?, level?, action? }
+<p>Adds a notification to the in-app notification center (bell icon in the status bar). Notifications persist until the user explicitly dismisses them. An optional <code>action</code> table renders a click button on the notification that triggers a built-in side-effect. An optional <code>target</code> routes the notification to a specific window's feedback host (e.g. <code>"nemus"</code>); when absent it goes to the main window, which also receives every untagged notification. Boundary validation: <code>message</code> must be a non-empty string and <code>level</code> (when supplied) must be one of <code>"info"|"success"|"warning"|"error"</code> — invalid input raises a Lua error.</p>
+<pre class="language-lua">{@html highlight(`-- arbor.notify{ message, title?, level?, action?, target? }
 -- level: "info" | "success" | "warning" | "error"  (default "info")
 
 arbor.notify{ title = "Build succeeded", message = "Release build completed", level = "success" }
 arbor.notify{ title = "Build failed",    message = "Exited with code 2 — see Jobs panel", level = "error" }
 arbor.notify{ message = "Config reloaded" }    -- title-less, defaults to "info"
+
+-- Routed to a specific window's feedback host (absent → main window):
+arbor.notify{ message = "Render finished", level = "success", target = "nemus" }
 
 -- With a click action: button shown in the overlay; clicking runs the
 -- associated side-effect and dismisses the notification.

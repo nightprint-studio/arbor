@@ -21,7 +21,7 @@
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
-  import ActivityBar from './ActivityBar.svelte';
+  import ActivityBar from '$lib/components/shared/ui/ActivityBar.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   // Activity bar is a narrow vertical rail; tooltips fly out to the right
   // so they don't overlap the bar itself.
@@ -224,6 +224,35 @@
     return tooltipForAction(label, 'toggle_issues_sidebar');
   }
 
+  // ── Built-in section button metadata ─────────────────────────────────────────
+  // The built-in top/bottom buttons are structurally identical (icon + active
+  // accent + toggle); they differ only by tooltip and which store/toggle they
+  // drive. The tooltip table keeps that the only per-button data — a label +
+  // (where one exists) the keybinding action so the live shortcut shows in the
+  // tooltip. A bare string is used where there's no bound shortcut. `issues` is
+  // dynamic (provider name) so it's resolved separately.
+  const BUILTIN_TIPS: Record<string, { label: string; action: string } | string> = {
+    branches:  { label: 'Branches & Stashes',      action: 'toggle_branches_sidebar' },
+    gitflow:   { label: 'Git Flow',                action: 'toggle_gitflow_sidebar'  },
+    mr:        { label: 'Pull / Merge Requests',   action: 'toggle_mr_sidebar'       },
+    files:     { label: 'Files',                   action: 'toggle_files_sidebar'    },
+    reflog:    { label: 'Reflog',                  action: 'toggle_reflog_sidebar'   },
+    stats:     { label: 'Repository Statistics',   action: 'toggle_stats_sidebar'    },
+    security:  { label: 'Security',                action: 'toggle_security_sidebar' },
+    studio:    'Studio — RON / JSON / TOML index',
+    pipelines: { label: 'Pipelines',               action: 'toggle_pipelines_panel'  },
+    stage:     { label: 'Stage & Commit',          action: 'stage_view'              },
+    detail:    'Commit Detail',
+    terminal:  { label: 'Terminal',                action: 'toggle_terminal'         },
+  };
+
+  function builtinTip(id: string): TooltipInput {
+    if (id === 'issues') return issuesTip();
+    const t = BUILTIN_TIPS[id];
+    if (!t) return '';
+    return typeof t === 'string' ? t : tooltipForAction(t.label, t.action);
+  }
+
   // ── Brand icon resolution for the built-in MR / Issues buttons ───────────────
   // Mirrors what IntelliJ does: when a provider is detected, the sidebar icon
   // becomes the provider's brand mark (rendered monochrome via <BrandIcon>, so
@@ -256,125 +285,41 @@
   // a loading / "not available" state based on `providerSupportState`.
 </script>
 
+<!-- Shared shape for every built-in section button (top + bottom). The only
+     bespoke case is the brand-icon swap for mr / issues when a provider is
+     detected; everything else flows through `id` + the passed-in state. -->
+{#snippet builtinButton(id: string, tip: TooltipInput, active: boolean, onClick: () => void)}
+  {@const IconComp = BUILTIN_ICONS[id] as any}
+  <button
+    class="ab-btn"
+    class:ab-active={active}
+    use:tooltip={tip}
+    aria-pressed={active}
+    onclick={onClick}
+  >
+    {#if id === 'mr' && mrBrand}
+      <BrandIcon brand={mrBrand} size={18} />
+    {:else if id === 'issues' && issuesBrand}
+      <BrandIcon brand={issuesBrand} size={18} />
+    {:else}
+      <IconComp size={20} />
+    {/if}
+  </button>
+{/snippet}
+
 <ActivityBar side="left">
   {#snippet top()}
+    <!-- Built-in top sections (branches … studio). `security` and `studio`
+         are always present in the list even where unavailable — their panels
+         render the "not available" / probing copy themselves. -->
     {#each topItems as item (item.id)}
-      {#if item.kind === 'builtin'}
-        {@const IconComp = BUILTIN_ICONS[item.id] as any}
-
-        {#if item.id === 'branches'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeSidebarSection === 'branches'}
-            use:tooltip={tooltipForAction('Branches & Stashes', 'toggle_branches_sidebar')}
-            aria-pressed={uiStore.activeSidebarSection === 'branches'}
-            onclick={() => uiStore.toggleSidebarSection('branches')}
-          >
-            <IconComp size={20} />
-          </button>
-
-        {:else if item.id === 'gitflow'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeSidebarSection === 'gitflow'}
-            use:tooltip={tooltipForAction('Git Flow', 'toggle_gitflow_sidebar')}
-            aria-pressed={uiStore.activeSidebarSection === 'gitflow'}
-            onclick={() => uiStore.toggleSidebarSection('gitflow')}
-          >
-            <IconComp size={20} />
-          </button>
-
-        {:else if item.id === 'mr'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeSidebarSection === 'mr'}
-            use:tooltip={tooltipForAction('Pull / Merge Requests', 'toggle_mr_sidebar')}
-            aria-pressed={uiStore.activeSidebarSection === 'mr'}
-            onclick={() => uiStore.toggleSidebarSection('mr')}
-          >
-            {#if mrBrand}
-              <BrandIcon brand={mrBrand} size={18} />
-            {:else}
-              <IconComp size={20} />
-            {/if}
-          </button>
-
-        {:else if item.id === 'issues'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeSidebarSection === 'issues'}
-            use:tooltip={issuesTip()}
-            aria-pressed={uiStore.activeSidebarSection === 'issues'}
-            onclick={() => uiStore.toggleSidebarSection('issues')}
-          >
-            {#if issuesBrand}
-              <BrandIcon brand={issuesBrand} size={18} />
-            {:else}
-              <IconComp size={20} />
-            {/if}
-          </button>
-
-        {:else if item.id === 'files'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeSidebarSection === 'files'}
-            use:tooltip={tooltipForAction('Files', 'toggle_files_sidebar')}
-            aria-pressed={uiStore.activeSidebarSection === 'files'}
-            onclick={() => uiStore.toggleSidebarSection('files')}
-          >
-            <IconComp size={20} />
-          </button>
-
-        {:else if item.id === 'reflog'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeSidebarSection === 'reflog'}
-            use:tooltip={tooltipForAction('Reflog', 'toggle_reflog_sidebar')}
-            aria-pressed={uiStore.activeSidebarSection === 'reflog'}
-            onclick={() => uiStore.toggleSidebarSection('reflog')}
-          >
-            <IconComp size={20} />
-          </button>
-
-        {:else if item.id === 'stats'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeSidebarSection === 'stats'}
-            use:tooltip={tooltipForAction('Repository Statistics', 'toggle_stats_sidebar')}
-            aria-pressed={uiStore.activeSidebarSection === 'stats'}
-            onclick={() => uiStore.toggleSidebarSection('stats')}
-          >
-            <IconComp size={20} />
-          </button>
-
-        {:else if item.id === 'security'}
-          <!-- Always rendered so users can confirm the dashboard is wired
-               up even on repos where it isn't available. The SecurityPanel
-               handles the "not available" / probing copy itself. -->
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeSidebarSection === 'security'}
-            use:tooltip={tooltipForAction('Security', 'toggle_security_sidebar')}
-            aria-pressed={uiStore.activeSidebarSection === 'security'}
-            onclick={() => uiStore.toggleSidebarSection('security')}
-          >
-            <IconComp size={20} />
-          </button>
-
-        {:else if item.id === 'studio'}
-          <!-- Studio: project-wide index of .ron / .json / .toml files,
-               clicking jumps into the matching viewer (RON / JSON Studio,
-               TOML viewer is on the roadmap). -->
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeSidebarSection === 'studio'}
-            use:tooltip={'Studio — RON / JSON / TOML index'}
-            aria-pressed={uiStore.activeSidebarSection === 'studio'}
-            onclick={() => uiStore.toggleSidebarSection('studio')}
-          >
-            <IconComp size={20} />
-          </button>
-        {/if}
+      {#if item.kind === 'builtin' && BUILTIN_ICONS[item.id]}
+        {@render builtinButton(
+          item.id,
+          builtinTip(item.id),
+          uiStore.activeSidebarSection === item.id,
+          () => uiStore.toggleSidebarSection(item.id),
+        )}
       {/if}
     {/each}
 
@@ -412,53 +357,13 @@
 
   {#snippet bottom()}
     {#each bottomItems as item (item.id)}
-      {#if item.kind === 'builtin'}
-        {@const IconComp = BUILTIN_ICONS[item.id] as any}
-
-        {#if item.id === 'pipelines'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeBottomSection === 'pipelines'}
-            use:tooltip={tooltipForAction('Pipelines', 'toggle_pipelines_panel')}
-            aria-pressed={uiStore.activeBottomSection === 'pipelines'}
-            onclick={() => uiStore.toggleBottomSection('pipelines')}
-          >
-            <IconComp size={20} />
-          </button>
-
-        {:else if item.id === 'stage'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeBottomSection === 'stage'}
-            use:tooltip={tooltipForAction('Stage & Commit', 'stage_view')}
-            aria-pressed={uiStore.activeBottomSection === 'stage'}
-            onclick={() => uiStore.toggleBottomSection('stage')}
-          >
-            <IconComp size={20} />
-          </button>
-
-        {:else if item.id === 'detail'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeBottomSection === 'detail'}
-            use:tooltip={'Commit Detail'}
-            aria-pressed={uiStore.activeBottomSection === 'detail'}
-            onclick={() => uiStore.toggleBottomSection('detail')}
-          >
-            <IconComp size={20} />
-          </button>
-
-        {:else if item.id === 'terminal'}
-          <button
-            class="ab-btn"
-            class:ab-active={uiStore.activeBottomSection === 'terminal'}
-            use:tooltip={tooltipForAction('Terminal', 'toggle_terminal')}
-            aria-pressed={uiStore.activeBottomSection === 'terminal'}
-            onclick={() => uiStore.toggleBottomSection('terminal')}
-          >
-            <IconComp size={20} />
-          </button>
-        {/if}
+      {#if item.kind === 'builtin' && BUILTIN_ICONS[item.id]}
+        {@render builtinButton(
+          item.id,
+          builtinTip(item.id),
+          uiStore.activeBottomSection === item.id,
+          () => uiStore.toggleBottomSection(item.id as any),
+        )}
 
       {:else if item.kind === 'plugin'}
         {@const entry = pluginEntryFor(item.id)}
@@ -552,7 +457,7 @@
 
 <style>
   /* Container, button, group, spacer, separator and emoji styles live in the
-     shared <ActivityBar> shell (layout/ActivityBar.svelte) as :global() rules
+     shared <ActivityBar> shell (shared/ui/ActivityBar.svelte) as :global() rules
      so they apply equally on the left and right rails. This file only owns
      the combo widget — a left-only construct used by plugin-registered combos
      (e.g. compile-action's run-config picker). */

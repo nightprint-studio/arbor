@@ -61,6 +61,22 @@ export const getCommitFileDiff = (tabId: string, oid: string, path: string) =>
     encodingOverrides: overridesForTab(tabId),
   });
 
+/// Cumulative diff across a multi-commit selection: the net tree diff from the
+/// FIRST PARENT of `baseOid` (the oldest selected commit) to `targetOid` (the
+/// newest). Metadata-only — pair with `getCommitsRangeFileDiff` for lazy hunks,
+/// mirroring the single-commit meta/file pair above.
+export const getCommitsRangeDiffMeta = (tabId: string, baseOid: string, targetOid: string) =>
+  invoke<DiffFile[]>('get_commits_range_diff_meta', {
+    tabId, baseOid, targetOid, diffAlgo: getDiffAlgo(),
+  });
+
+export const getCommitsRangeFileDiff = (tabId: string, baseOid: string, targetOid: string, path: string) =>
+  invoke<DiffFile>('get_commits_range_file_diff', {
+    tabId, baseOid, targetOid, path,
+    contextLines: getContextLines(), diffAlgo: getDiffAlgo(),
+    encodingOverrides: overridesForTab(tabId),
+  });
+
 export const getWorkdirDiff = (tabId: string, staged: boolean) =>
   invoke<DiffFile[]>('get_workdir_diff', {
     tabId, staged,

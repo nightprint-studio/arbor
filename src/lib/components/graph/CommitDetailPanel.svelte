@@ -7,7 +7,7 @@
   import DiffViewer, { type DiffViewerApi } from '../diff/DiffViewer.svelte';
   import DiffToolbar from '../diff/DiffToolbar.svelte';
   import ResizablePanel from '../layout/ResizablePanel.svelte';
-  import { Archive, HardDriveDownload, GitCommit, X, StickyNote, ChevronUp, ChevronDown, Play, CornerDownLeft, Trash2, Link2 } from 'lucide-svelte';
+  import { Archive, HardDriveDownload, GitCommit, GitCompareArrows, X, StickyNote, ChevronUp, ChevronDown, Play, CornerDownLeft, Trash2, Link2 } from 'lucide-svelte';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import { applyStashAction, popStashAction, dropStashAction } from '$lib/utils/stash-actions';
   import BottomPanelHeader from '../shared/ui/BottomPanelHeader.svelte';
@@ -67,9 +67,11 @@
   const mode   = $derived(graphStore.panelMode);
   const detail = $derived(graphStore.selectedDetail);
   const stash  = $derived(graphStore.selectedStash);
+  const range  = $derived(graphStore.rangeSelection);
   const files  = $derived(diffStore.files);
 
   const hasContent = $derived(
+    (mode === 'commit' && !!range && files.length > 0) ||
     (mode === 'commit' && !!detail) ||
     (mode === 'stash' && !!stash) ||
     (mode === 'workdir' && files.length > 0)
@@ -93,7 +95,7 @@
 </script>
 
 <div class="detail-root">
-  <BottomPanelHeader title="Commit">
+  <BottomPanelHeader title="Commit" onClose={() => uiStore.setActiveBottomSection(null)}>
     {#snippet icon()}<GitCommit size={14} />{/snippet}
     {#snippet children()}
       {#if diffStore.selectedFile && diffApi}
@@ -114,7 +116,25 @@
 
   <div class="detail-toolbar">
     {#if hasContent}
-      {#if mode === 'commit' && detail}
+      {#if mode === 'commit' && range}
+        <!-- ── Multi-commit range banner ── -->
+        <div class="panel-header panel-header-alt">
+          <span class="mode-icon range-icon"><GitCompareArrows size={16} /></span>
+          <div class="commit-info">
+            <div class="commit-summary">{range.count} commits selected</div>
+            <div class="commit-meta">
+              <span class="sha-muted">combined changes</span>
+              <span class="sep">·</span>
+              <code class="sha">{range.baseOid.slice(0, 7)}</code>
+              <span class="sep">..</span>
+              <code class="sha">{range.targetOid.slice(0, 7)}</code>
+              <span class="sep">·</span>
+              <span class="sha-muted">{files.length} file{files.length !== 1 ? 's' : ''} changed</span>
+            </div>
+          </div>
+        </div>
+
+      {:else if mode === 'commit' && detail}
 
         {#if headerExpanded}
           <!-- ── Expanded header ── -->
@@ -344,6 +364,7 @@
   }
   .stash-icon   { background: rgba(226,163,53,0.12); color: var(--warning); }
   .workdir-icon { background: rgba(77,120,204,0.12);  color: var(--accent);  }
+  .range-icon   { background: var(--accent-subtle);   color: var(--accent);  }
 
   /* Stash header toolbar — same three actions as the sidebar StashList
      row + the graph bubble hover toolbar. Compact icon-only buttons so

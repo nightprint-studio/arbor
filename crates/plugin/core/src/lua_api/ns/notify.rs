@@ -26,6 +26,7 @@
 
 use mlua::{Lua, LuaSerdeExt, Table};
 
+use arbor_feedback::prelude::{emit_notification, NotificationPayload};
 use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
 
@@ -75,19 +76,22 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
         let toast: bool   = cfg_table.get::<Option<bool>>("toast").ok().flatten().unwrap_or(true);
         let persist: bool = cfg_table.get::<Option<bool>>("persist").ok().flatten().unwrap_or(true);
 
+        // Optional window-routing target. Absent → main window (the only host
+        // that also renders untagged notifications).
+        let target: Option<String> = cfg_table.get::<Option<String>>("target").ok().flatten();
+
         if let Some(ref h) = handle {
-            let mut payload = serde_json::json!({
-                "plugin":  pname,
-                "title":   title,
-                "message": message,
-                "level":   level,
-                "toast":   toast,
-                "persist": persist,
-            });
-            if let Some(act) = action_json {
-                payload["action"] = act;
-            }
-            let _ = h.emit("plugin:notification", payload);
+            let payload = NotificationPayload {
+                plugin:  pname.clone(),
+                title,
+                message,
+                level,
+                toast,
+                persist,
+                action: action_json,
+                target,
+            };
+            emit_notification(&**h, &payload);
         }
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;

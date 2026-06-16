@@ -2,10 +2,10 @@
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { X, Info, CheckCircle, AlertTriangle, XCircle, ChevronRight } from 'lucide-svelte';
-  import { notificationsStore, dispatchNotificationAction } from '$lib/stores/notifications.svelte';
+  import { notificationsStore, dispatchNotificationAction } from '$lib/feedback/stores/notifications.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
-  import type { AppNotification } from '$lib/stores/notifications.svelte';
+  import type { AppNotification } from '$lib/feedback/stores/notifications.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {

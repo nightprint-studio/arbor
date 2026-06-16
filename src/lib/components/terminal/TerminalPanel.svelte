@@ -80,7 +80,7 @@
        Title + global terminal actions (new tab + shell picker). The X
        close button is provided by `BottomPanelHeader` itself, so we no
        longer carry our own close button in the tab bar. -->
-  <BottomPanelHeader title="Terminal">
+  <BottomPanelHeader title="Terminal" onClose={() => uiStore.setActiveBottomSection(null)}>
     {#snippet icon()}<TerminalSquare size={14} />{/snippet}
     {#snippet children()}
       {#if terminalStore.tabs.length > 0}

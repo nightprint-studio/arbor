@@ -1,14 +1,10 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { fly, fade } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
-  import { animStore } from '$lib/stores/animations.svelte';
-  // Direct imports cover only icons referenced as `<Foo />` literals in this
-  // file's markup (no dynamic name → component lookup). Anything used via
-  // string lookup (verb icons, plugin-supplied command icons, action items
-  // built in code) goes through the shared PLUGIN_ICONS registry — no
-  // duplicate per-component map allowed (PLUGIN_ICONS is the single source).
-  import { Zap, Search, ChevronRight } from 'lucide-svelte';
+  // The palette delegates all rendering + keyboard to the agnostic shell; the
+  // only icon referenced here is the `Zap` fallback in `getIcon` (the verb /
+  // action / plugin icons are string keys resolved through PLUGIN_ICONS — no
+  // duplicate per-component map allowed, PLUGIN_ICONS is the single source).
+  import { Zap } from 'lucide-svelte';
   import { laneColor } from '$lib/utils/graph-renderer';
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import { copyToClipboard } from '$lib/utils/clipboard';
@@ -30,7 +26,7 @@
   import type { WorkspaceDef, RepoRegistryEntry } from '$lib/types/workspace';
   import { activityBarConfigStore } from '$lib/stores/activityBarConfig.svelte';
   import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
-  import { openExplorerWindow } from '$lib/ipc/app';
+  import { openExplorerWindow, openNemusWindow } from '$lib/ipc/app';
   import { openFolder } from '$lib/utils/reveal';
   import {
     checkoutBranch, checkoutBranchSafe, mergeBranch, deleteBranch, createBranch,
@@ -43,7 +39,7 @@
   import { handlePullResult, handlePullThrown } from '$lib/utils/pullResultHandler';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
   import { applyPostCheckout } from '$lib/utils/applyPostCheckout';
-  import { startPullOperation } from '$lib/utils/operations-bridge';
+  import { startPullOperation } from '$lib/feedback/bridge/operations-bridge';
   import { cherryPick, revertCommit, stageAll, unstageAll, discardAll } from '$lib/ipc/stage';
   import { updateAllSubmodules } from '$lib/ipc/submodule';
   import { getCommitDetail, openRepo as ipcOpenRepo, getGraph, getRepoFiles } from '$lib/ipc/graph';
@@ -67,11 +63,12 @@
     linearSearchIssues, jiraSearchIssues,
   } from '$lib/ipc/issues';
   import { getBranchPolicy, assertBranchNameAllowed, type BranchPolicy } from '$lib/utils/branch-policy';
-  import Kbd from '$lib/components/shared/internal/Kbd.svelte';
-  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { shortcutFor } from '$lib/utils/shortcut';
-  import { tooltip } from '$lib/actions/tooltip';
+  import CommandPaletteShell, {
+    type PaletteSection as ShellSection,
+    type PaletteVerbChip as ShellVerbChip,
+  } from '$lib/components/shared/ui/CommandPaletteShell.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -125,8 +122,8 @@
   // ── State ────────────────────────────────────────────────────────────────────
 
   let query        = $state('');
-  let selectedIdx  = $state(0);
-  let inputEl      = $state<HTMLInputElement | undefined>(undefined);
+  // selectedIdx + scroll + ghost + highlight now live in CommandPaletteShell.
+  let inputEl      = $state<HTMLInputElement | null>(null);
 
   // Verb chip — when set, the palette is in Phase 2 (target picker).
   let selectedVerb = $state<VerbDef | null>(null);
@@ -159,7 +156,6 @@
   /// project files.
   let worktrees    = $state<WorktreeInfo[]>([]);
   let worktreesLoaded = $state(false);
-  let loading     = $state(false);
 
   // Debounce timer for commit search
   let commitDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -187,7 +183,6 @@
     autoPromoting = true;
     selectedVerb = v;
     query = rest;
-    selectedIdx = 0;
     commits = [];
     createBranchStep = 'name';
     pendingBranchName = '';
@@ -222,7 +217,6 @@
 
   function clearVerb() {
     selectedVerb = null;
-    selectedIdx = 0;
     query = '';
     commits = [];
     createBranchStep = 'name';
@@ -626,6 +620,10 @@
         title: 'Open File Explorer',
         subtitle: 'Standalone explorer window — browse, copy/move, delete, preview · also Ctrl+Shift+E (global)',
         action: () => { void openExplorerWindow(); onClose(); } },
+      { id: 'action:nemus',        kind: 'action', icon: 'Activity',   group: 'System',
+        title: 'Open nemus (Music)',
+        subtitle: 'Standalone music live-coding window — write patterns, hear soundtracks',
+        action: () => { void openNemusWindow(); onClose(); } },
       { id: 'action:docs',         kind: 'action', icon: 'FileText',  group: 'System',
         title: 'Documentation',
         action: () => { uiStore.setPanel('docs'); onClose(); } },
@@ -940,7 +938,6 @@
     const tabId = tabsStore.activeTabId;
     if (!tabId) return;
     try {
-      loading = true;
       const [b, t, s, st, rm] = await Promise.all([
         invoke<BranchInfo[]>('list_local_branches', { tabId }),
         invoke<TagInfo[]>('list_tags', { tabId }),
@@ -953,9 +950,7 @@
       status   = s;
       stashes  = st;
       remotes  = rm;
-    } catch { /* repo not open */ } finally {
-      loading = false;
-    }
+    } catch { /* repo not open */ }
   }
 
   /// Cheap one-shot fetch of the full project file list (tracked + untracked,
@@ -2323,26 +2318,30 @@
 
   // ── Flat list for keyboard nav ───────────────────────────────────────────────
 
-  const flatItems = $derived(sections.flatMap(s => s.items));
-
-  // ── Ghost text ───────────────────────────────────────────────────────────────
-
-  const ghostSuffix = $derived(computeGhost(query, flatItems));
-
-  function computeGhost(q: string, items: PaletteItem[]): string {
-    if (!q || items.length === 0) return '';
-    const lq = q.toLowerCase();
-    const first = items.find(i => i.title.toLowerCase().startsWith(lq));
-    if (!first) return '';
-    return first.title.slice(q.length);
-  }
-
-  // ── Keep selection in bounds ─────────────────────────────────────────────────
-
-  $effect(() => {
-    flatItems; // track
-    if (selectedIdx >= flatItems.length) selectedIdx = Math.max(0, flatItems.length - 1);
-  });
+  // ── Shell-facing projections ─────────────────────────────────────────────────
+  // The internal sections carry `kind`/`score`; the agnostic shell only needs
+  // the display shape, so map `kind` → its two visual flags (`mono` for
+  // identifier titles, `isVerb` for the target-picker chevron).
+  const shellSections = $derived<ShellSection[]>(
+    sections.map(s => ({
+      id:    s.id,
+      label: s.label,
+      items: s.items.map(it => ({
+        id:        it.id,
+        title:     it.title,
+        subtitle:  it.subtitle,
+        icon:      it.icon,
+        iconColor: it.iconColor,
+        shortcut:  it.shortcut,
+        mono:      it.kind === 'branch' || it.kind === 'tag',
+        isVerb:    it.kind === 'verb',
+        action:    it.action,
+      })),
+    })),
+  );
+  const verbChip = $derived<ShellVerbChip | null>(
+    selectedVerb ? { title: selectedVerb.title, icon: selectedVerb.icon } : null,
+  );
 
   // ── Query reactive effects ───────────────────────────────────────────────────
 
@@ -2387,89 +2386,48 @@
       const kind = verb.targetKind;
       issueDebounce = setTimeout(() => runIssueSearch(kind, q), 250);
     }
-    selectedIdx = 0;
   });
 
-  // ── Keyboard handler ─────────────────────────────────────────────────────────
-
-  function onKeydown(e: KeyboardEvent) {
-    // Backspace at the very start of the input.
-    //   • Default behaviour: removes the verb chip.
-    //   • Create-branch step='parent': rewind to step='name' and put the
-    //     captured name back into the input so the user can edit it.
-    if (e.key === 'Backspace' && selectedVerb && query === '') {
-      e.preventDefault();
-      if (selectedVerb.id === 'create-branch' && createBranchStep === 'parent') {
-        const restore = pendingBranchName;
-        pendingBranchName = '';
-        createBranchStep = 'name';
-        commits = [];
-        query = restore;
-        selectedIdx = 0;
-        tick().then(() => {
-          if (inputEl) inputEl.selectionStart = inputEl.selectionEnd = query.length;
-        });
-      } else {
-        clearVerb();
-      }
-      return;
-    }
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      selectedIdx = Math.min(selectedIdx + 1, flatItems.length - 1);
-      scrollIntoView();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      selectedIdx = Math.max(selectedIdx - 1, 0);
-      scrollIntoView();
-    } else if (
+  // ── Host-specific keyboard (create-branch multi-step) ───────────────────────
+  // Everything universal — ↑/↓ move, Enter run, Esc close, Tab-complete (ghost),
+  // Backspace clear-verb — is owned by CommandPaletteShell. This `keydownCapture`
+  // only intercepts the two keys whose meaning differs for the create-branch
+  // verb, running BEFORE the shell and returning true to consume the event.
+  function paletteKeydown(e: KeyboardEvent): boolean {
+    // Tab in step 'name': capture the typed branch name → parent picker.
+    // Must beat the shell's ghost Tab-complete, hence the capture hook.
+    if (
       e.key === 'Tab' &&
       selectedVerb?.id === 'create-branch' &&
       createBranchStep === 'name' &&
       query.trim()
     ) {
-      // Capture the typed branch name and switch to parent picker.
-      // Must run before the ghost-suffix Tab branch below — when the only
-      // list item starts with the query, ghostSuffix would otherwise win.
       e.preventDefault();
       pendingBranchName = query.trim();
       query = '';
       createBranchStep = 'parent';
-      selectedIdx = 0;
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      flatItems[selectedIdx]?.action();
-    } else if (e.key === 'Tab' && ghostSuffix) {
-      e.preventDefault();
-      // Find the item the ghost is previewing (same lookup as computeGhost).
-      // For verb items, run their action so we enter the verb chip cleanly —
-      // otherwise filling the multi-word title triggers the auto-promote
-      // effect, which splits on the first space and may map the first word
-      // to a *different* verb (e.g. "Go to Tag" → focus-branch via 'go' alias).
-      const lq = query.toLowerCase();
-      const matched = flatItems.find(i => i.title.toLowerCase().startsWith(lq));
-      if (matched?.kind === 'verb') {
-        matched.action();
-      } else {
-        query = query + ghostSuffix;
-        // Move cursor to end
-        tick().then(() => {
-          if (inputEl) { inputEl.selectionStart = inputEl.selectionEnd = query.length; }
-        });
-      }
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
+      return true;
     }
-  }
-
-  let listEl = $state<HTMLElement | undefined>(undefined);
-
-  function scrollIntoView() {
-    tick().then(() => {
-      const el = listEl?.querySelector<HTMLElement>(`[data-idx="${selectedIdx}"]`);
-      el?.scrollIntoView({ block: 'nearest' });
-    });
+    // Backspace at col 0 in step 'parent': rewind to 'name' with the captured
+    // name restored for editing (instead of the shell's clear-verb default).
+    if (
+      e.key === 'Backspace' &&
+      query === '' &&
+      selectedVerb?.id === 'create-branch' &&
+      createBranchStep === 'parent'
+    ) {
+      e.preventDefault();
+      const restore = pendingBranchName;
+      pendingBranchName = '';
+      createBranchStep = 'name';
+      commits = [];
+      query = restore;
+      tick().then(() => {
+        if (inputEl) inputEl.selectionStart = inputEl.selectionEnd = query.length;
+      });
+      return true;
+    }
+    return false;
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2537,30 +2495,10 @@
     uiStore.takePendingPaletteVerb(); // consume so we don't loop
   });
 
+  // Icon resolver handed to the shell — verb/action/plugin icons are string
+  // keys, resolved through the shared PLUGIN_ICONS registry (Zap fallback).
   function getIcon(name: string) {
     return (PLUGIN_ICONS[name] ?? Zap) as typeof Zap;
-  }
-
-  /** Highlight matching chars in a title */
-  function highlightTitle(title: string, q: string): string {
-    if (!q) return escHtml(title);
-    const lq = q.toLowerCase();
-    const lt = title.toLowerCase();
-    if (lt.startsWith(lq)) {
-      return `<span class="hl">${escHtml(title.slice(0, q.length))}</span>${escHtml(title.slice(q.length))}`;
-    }
-    // highlight first occurrence
-    const idx = lt.indexOf(lq);
-    if (idx !== -1) {
-      return escHtml(title.slice(0, idx))
-        + `<span class="hl">${escHtml(title.slice(idx, idx + q.length))}</span>`
-        + escHtml(title.slice(idx + q.length));
-    }
-    return escHtml(title);
-  }
-
-  function escHtml(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   // Placeholder flips between Phase 1 and Phase 2 so the user always knows
@@ -2587,144 +2525,43 @@
     if (selectedVerb) return `Filter ${TARGET_KIND_LABEL[selectedVerb.targetKind]}…`;
     return "Type a command… (checkout, cherry-pick, stash, goto commit…)";
   });
+
+  // Label for the shell's centred spinner while a verb's targets load.
+  const loadingLabel = $derived(
+    `Loading ${selectedVerb ? TARGET_KIND_LABEL[selectedVerb.targetKind] : 'data'}…`,
+  );
 </script>
 
-<!-- Backdrop -->
-<div
-  class="palette-backdrop"
-  role="presentation"
-  onmousedown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-  transition:fade={{ duration: animStore.dBase }}
+<CommandPaletteShell
+  {onClose}
+  iconResolver={getIcon}
+  sections={shellSections}
+  bind:query
+  bind:inputEl
+  {placeholder}
+  {verbChip}
+  onClearVerb={clearVerb}
+  loading={targetsLoading}
+  {loadingLabel}
+  phase1Hint="or type a verb + space"
+  onKeydownCapture={paletteKeydown}
 >
-  <div class="palette-container" role="dialog" aria-modal="true" aria-label="Command Palette"
-       transition:fly={{ y: -16, duration: animStore.dPanel, easing: cubicOut }}>
-
-    <!-- Input row -->
-    <div class="palette-header">
-      <Search size={15} class="search-icon" />
-
-      {#if selectedVerb}
-        {@const VerbIcon = getIcon(selectedVerb.icon)}
-        <button
-          class="verb-chip"
-          onclick={clearVerb}
-          use:tooltip={{ content: 'Clear verb', shortcut: 'Backspace' }}
-          aria-label="Clear {selectedVerb.title} verb"
-        >
-          <VerbIcon size={12} />
-          <span class="verb-chip-label">{selectedVerb.title}</span>
-          <ChevronRight size={12} class="verb-chip-arrow" />
-        </button>
-      {/if}
-
-      <div class="input-ghost-wrapper">
-        <input
-          bind:this={inputEl}
-          bind:value={query}
-          onkeydown={onKeydown}
-          {placeholder}
-          autocomplete="off"
-          spellcheck="false"
-          class="palette-input"
-        />
-        {#if ghostSuffix}
-          <!-- Ghost overlay positioned over the input -->
-          <span class="ghost-overlay" aria-hidden="true">
-            <span class="ghost-typed">{query}</span><span class="ghost-suffix">{ghostSuffix}</span>
-          </span>
-        {/if}
-      </div>
-
-      {#if ghostSuffix}
-        <kbd class="tab-hint">Tab</kbd>
-      {/if}
-      <button class="mac-close-btn" onclick={onClose} use:tooltip={{ content: 'Close', shortcut: 'Esc' }} aria-label="Close"></button>
-    </div>
-
-    <!-- Results -->
-    <div class="palette-results" bind:this={listEl}>
-      {#if flatItems.length === 0 && targetsLoading}
-        <div class="loading">
-          <Spinner size="md" label={`Loading ${selectedVerb ? TARGET_KIND_LABEL[selectedVerb.targetKind] : 'data'}…`} />
-        </div>
-      {:else if flatItems.length === 0 && !loading}
-        <div class="empty">
-          {#if selectedVerb}
-            {#if query.trim()}
-              No {TARGET_KIND_LABEL[selectedVerb.targetKind]} matching <strong>{query.trim()}</strong>
-            {:else if selectedVerb.targetKind === 'commit'}
-              Type at least 2 characters to search commits
-            {:else}
-              No {TARGET_KIND_LABEL[selectedVerb.targetKind]} available
-            {/if}
-          {:else if query}
-            No command matches <strong>{query}</strong>
-          {:else}
-            Pick a command to start
-          {/if}
-        </div>
+  {#snippet emptyMessage()}
+    {#if selectedVerb}
+      {#if query.trim()}
+        No {TARGET_KIND_LABEL[selectedVerb.targetKind]} matching <strong>{query.trim()}</strong>
+      {:else if selectedVerb.targetKind === 'commit'}
+        Type at least 2 characters to search commits
       {:else}
-        {#snippet renderItems()}
-          {#each sections as section}
-            <div class="section-header">{section.label}</div>
-            {#each section.items as item}
-              {@const idx = flatItems.indexOf(item)}
-              {@const isSelected = idx === selectedIdx}
-              {@const ItemIcon = getIcon(item.icon)}
-              <button
-                class="palette-item"
-                class:selected={isSelected}
-                class:item-branch={item.kind === 'branch'}
-                class:item-tag={item.kind === 'tag'}
-                data-idx={idx}
-                onmouseenter={() => { selectedIdx = idx; }}
-                onclick={() => item.action()}
-                use:tooltip={item.subtitle ?? item.title}
-              >
-                <span class="item-icon" style={item.iconColor ? `color: ${item.iconColor}` : ''}>
-                  <ItemIcon size={14} />
-                </span>
-                <span class="item-body">
-                  <span class="item-title" style={item.iconColor ? `color: ${item.iconColor}` : ''}>
-                    {@html highlightTitle(item.title, query)}
-                  </span>
-                  {#if item.subtitle}
-                    <span class="item-subtitle">{item.subtitle}</span>
-                  {/if}
-                </span>
-                {#if item.shortcut}
-                  <span class="item-shortcut-slot"><Kbd label={item.shortcut} size="sm" tone="muted" /></span>
-                {/if}
-                {#if item.kind === 'verb'}
-                  <span class="verb-marker" use:tooltip={'Select to pick a target'}>
-                    <ChevronRight size={14} />
-                  </span>
-                {/if}
-                {#if isSelected}
-                  <span class="enter-hint">↵</span>
-                {/if}
-              </button>
-            {/each}
-          {/each}
-        {/snippet}
-        {@render renderItems()}
+        No {TARGET_KIND_LABEL[selectedVerb.targetKind]} available
       {/if}
-    </div>
-
-    <!-- Footer -->
-    <div class="palette-footer">
-      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
-      <span><kbd>↵</kbd> {selectedVerb ? 'run' : 'pick command'}</span>
-      {#if ghostSuffix}<span><kbd>Tab</kbd> complete</span>{/if}
-      {#if selectedVerb}
-        <span><kbd>⌫</kbd> clear verb</span>
-      {:else}
-        <span class="hint-muted">or type <kbd>verb</kbd> + space</span>
-      {/if}
-      <span><kbd>Esc</kbd> close</span>
-    </div>
-  </div>
-</div>
+    {:else if query}
+      No command matches <strong>{query}</strong>
+    {:else}
+      Pick a command to start
+    {/if}
+  {/snippet}
+</CommandPaletteShell>
 
 {#if pendingConfirm}
   <ConfirmModal
@@ -2741,300 +2578,3 @@
     }}
   />
 {/if}
-
-<style>
-  /* ── Backdrop ───────────────────────────────────────────────────────────────── */
-
-  .palette-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: var(--z-menu);
-    /* `backdrop-filter: blur()` removed — see Modal.svelte for rationale.
-       Bumped the dim from 0.62 to 0.78 to compensate. */
-    background: rgba(0, 0, 0, 0.78);
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding-top: 10vh;
-  }
-
-  /* ── Container ──────────────────────────────────────────────────────────────── */
-
-  .palette-container {
-    width: min(640px, 90vw);
-    max-height: 70vh;
-    background: var(--bg-base);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    /* Same premium shadow as MrModal */
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  /* ── Header ─────────────────────────────────────────────────────────────────── */
-
-  .palette-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 14px;
-    background: var(--bg-elevated);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  :global(.search-icon) {
-    color: var(--text-muted);
-    flex-shrink: 0;
-  }
-
-  /* ── Verb chip (Phase 2 indicator) ─────────────────────────────────────── */
-  .verb-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 4px 3px 9px;
-    background: color-mix(in srgb, var(--accent) 18%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-    border-radius: 999px;
-    color: var(--accent);
-    font: 600 12px/1 var(--font-ui-sans);
-    letter-spacing: 0.01em;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background var(--anim-dur-fast), border-color var(--anim-dur-fast);
-    animation: verbChipIn var(--anim-dur-fast) ease-out;
-  }
-
-  .verb-chip:hover {
-    background: color-mix(in srgb, var(--accent) 28%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-  }
-
-  .verb-chip-label {
-    white-space: nowrap;
-  }
-
-  :global(.verb-chip-arrow) {
-    opacity: 0.7;
-  }
-
-  @keyframes verbChipIn {
-    from { opacity: 0; transform: translateX(-6px); }
-    to   { opacity: 1; transform: none; }
-  }
-
-  /* Ghost text wrapper — input + overlay stacked */
-  .input-ghost-wrapper {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-  }
-
-  .palette-input {
-    width: 100%;
-    background: transparent;
-    border: none;
-    outline: none;
-    color: var(--text-primary);
-    font: 13px/1.4 var(--font-ui-sans);
-    caret-color: var(--accent);
-    position: relative;
-    z-index: 1;
-  }
-
-  .palette-input::placeholder {
-    color: var(--text-disabled);
-  }
-
-  .ghost-overlay {
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    font: 13px/1.4 var(--font-ui-sans);
-    pointer-events: none;
-    white-space: pre;
-    z-index: 0;
-  }
-
-  .ghost-typed  { color: transparent; }
-  .ghost-suffix { color: var(--text-disabled); }
-
-  .tab-hint {
-    font-size: 10px;
-    padding: 1px 5px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    background: var(--bg-base);
-    flex-shrink: 0;
-  }
-
-  /* ── Results ────────────────────────────────────────────────────────────────── */
-
-  .palette-results {
-    flex: 1;
-    overflow-y: auto;
-    padding: 6px 0 4px;
-    scroll-behavior: smooth;
-  }
-
-  .empty {
-    padding: 32px 20px;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 13px;
-  }
-
-  .loading {
-    padding: 32px 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    font-size: 13px;
-  }
-
-  .section-header {
-    padding: 8px 16px 3px;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-disabled);
-    user-select: none;
-  }
-
-  .palette-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: calc(100% - 12px);
-    margin: 1px 6px;
-    padding: 6px 10px;
-    background: none;
-    border: none;
-    cursor: pointer;
-    text-align: left;
-    color: var(--text-primary);
-    font-size: 13px;
-    font-family: var(--font-ui-sans);
-    transition: background 80ms;
-    border-radius: var(--radius-sm);
-  }
-
-  .palette-item:hover {
-    background: var(--bg-hover);
-  }
-
-  /* Keyboard-selected item gets a subtle accent tint (same as MrModal selected file) */
-  .palette-item.selected {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
-    outline: none;
-  }
-
-  .item-icon {
-    color: var(--text-muted);
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-  }
-
-  .palette-item.selected .item-icon { color: var(--accent); }
-
-  .item-body {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-
-  .item-title {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Branch/tag titles are identifiers, not prose — monospace makes them
-     instantly recognisable next to plain-text commands and tightens the
-     visual link with the graph's branch labels. */
-  .palette-item.item-branch .item-title,
-  .palette-item.item-tag    .item-title {
-    font-family: var(--font-code);
-    font-size: 12.5px;
-  }
-
-  :global(.item-title .hl) {
-    color: var(--accent);
-    font-weight: 600;
-  }
-
-  .item-subtitle {
-    font-size: 11px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .item-shortcut-slot {
-    flex-shrink: 0;
-    display: inline-flex;
-  }
-
-  .enter-hint {
-    font-size: 12px;
-    color: var(--text-muted);
-    flex-shrink: 0;
-    opacity: 0.7;
-  }
-
-  /* Chevron marker on verb items — signals "this will open a target picker" */
-  .verb-marker {
-    display: flex;
-    align-items: center;
-    color: var(--text-disabled);
-    flex-shrink: 0;
-    transition: color var(--anim-dur-fast), transform var(--anim-dur-fast);
-  }
-
-  .palette-item.selected .verb-marker {
-    color: var(--accent);
-    transform: translateX(2px);
-  }
-
-  /* ── Footer ─────────────────────────────────────────────────────────────────── */
-
-  .palette-footer {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 7px 14px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-elevated);
-    font-size: 10px;
-    color: var(--text-disabled);
-    flex-shrink: 0;
-  }
-
-  .palette-footer kbd {
-    font-size: 10px;
-    padding: 1px 4px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-base);
-    color: var(--text-muted);
-  }
-
-  .palette-footer span { display: flex; align-items: center; gap: 4px; }
-
-  .hint-muted kbd {
-    opacity: 0.6;
-  }
-</style>

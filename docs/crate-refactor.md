@@ -68,7 +68,14 @@ arbor                               (era src-tauri/) — tauri shell, commands, 
 
 ### Round 2 (futuro, non in questo refactor)
 
+Roadmap operativa: [`docs/migration-roadmap.md`](migration-roadmap.md).
+Piano/analisi: [`docs/crate-refactor-round2.md`](crate-refactor-round2.md):
+scorporo app-standalone (nemus, esplora risorse), crate `arbor-fs`, e il layer
+plugin WebAssembly (wasmtime + ABI su `PluginValue`; candidati: studi,
+cloud-storage, db-query). Crate ancora previsti qui:
+
 - `arbor-git` (libgit2 + cli, due moduli interni)
+- `arbor-fs` (operazioni FS pure, consumate da esplora + comandi generici)
 - `arbor-workspaces` (la feature multi-repo)
 - `arbor-linked-worktrees`
 - `arbor-terminal`

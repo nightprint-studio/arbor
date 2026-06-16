@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export interface FsEntry {
   name:     string;
@@ -6,12 +7,13 @@ export interface FsEntry {
   is_dir:   boolean;
   size:     number | null;
   modified: number | null;  // Unix timestamp ms
+  created:  number | null;  // Unix timestamp ms (null when the FS has no birth time)
 }
 
 export interface FsRoot {
   name: string;
   path: string;
-  kind: 'home' | 'desktop' | 'documents' | 'downloads' | 'drive';
+  kind: 'home' | 'desktop' | 'documents' | 'downloads' | 'drive' | 'wsl';
 }
 
 /** Read a directory — returns entries with metadata. Dot-prefixed entries
@@ -23,6 +25,11 @@ export const fsReadDir = (path: string, showHidden = false) =>
 export const listFsRoots = () =>
   invoke<FsRoot[]>('list_fs_roots');
 
+/** Installed WSL distributions as `\\wsl.localhost\<distro>` roots (Windows;
+ *  empty elsewhere or when WSL isn't installed). */
+export const listWslDistros = () =>
+  invoke<FsRoot[]>('list_wsl_distros');
+
 export const fsCreateDir      = (path: string)                      => invoke<void>('fs_create_dir',        { path });
 export const fsCreateFile     = (path: string)                      => invoke<void>('fs_create_file',       { path });
 export const fsWriteTextFile  = (path: string, content: string)     => invoke<void>('fs_write_text_file',   { path, content });
@@ -31,12 +38,62 @@ export const fsRename         = (oldPath: string, newPath: string)  => invoke<vo
 export const fsDelete         = (path: string)                      => invoke<void>('fs_delete',            { path });
 
 // ── File explorer: copy / move / delete / open / watch ─────────────────────
-/** Copy entries into `destDir`; returns the created destination paths. */
-export const fsCopy        = (sources: string[], destDir: string) => invoke<string[]>('fs_copy', { sources, destDir });
-/** Move (cut+paste) entries into `destDir`; returns the new paths. */
-export const fsMove        = (sources: string[], destDir: string) => invoke<string[]>('fs_move', { sources, destDir });
+/** Copy entries into `destDir`; returns the created destination paths. With
+ *  `overwrite`, same-named items merge into / replace the existing entry
+ *  instead of getting a " (2)" suffix. */
+export const fsCopy        = (sources: string[], destDir: string, overwrite = false, opId?: string) => invoke<string[]>('fs_copy', { sources, destDir, overwrite, opId: opId ?? null });
+/** Move (cut+paste) entries into `destDir`; returns the new paths. With
+ *  `overwrite`, same-named items merge into / replace the existing entry. */
+export const fsMove        = (sources: string[], destDir: string, overwrite = false, opId?: string) => invoke<string[]>('fs_move', { sources, destDir, overwrite, opId: opId ?? null });
+/** Duplicate entries in place ("file (2).ext"). Returns the created paths. */
+export const fsDuplicate   = (paths: string[], opId?: string) => invoke<string[]>('fs_duplicate', { paths, opId: opId ?? null });
+/** Request cancellation of a running copy/move/duplicate by its op id. */
+export const fsCancelOp    = (opId: string) => invoke<void>('fs_cancel_op', { opId });
+/** One old→new rename pair for a batch rename. */
+export interface RenamePair { from: string; to: string; }
+/** Batch-rename many entries atomically (two-phase, collision-safe). */
+export const fsRenameMany  = (pairs: RenamePair[]) => invoke<string[]>('fs_rename_many', { pairs });
+
+/** Recursive size of a folder (bytes + file/dir counts). */
+export interface DirSize { bytes: number; files: number; dirs: number; }
+export const fsDirSize     = (path: string) => invoke<DirSize>('fs_dir_size', { path });
+/** Combined recursive size of several paths (multi-selection footer). */
+export const fsPathsSize   = (paths: string[]) => invoke<DirSize>('fs_paths_size', { paths });
+
+/** Per-drive storage usage for the Overview dashboard. */
+export interface DriveUsage { name: string; path: string; total: number | null; free: number | null; }
+export interface OverviewStats { drives: DriveUsage[]; total_capacity: number; total_free: number; }
+export const fsOverviewStats = () => invoke<OverviewStats>('fs_overview_stats');
+
+/** One item in the Recycle Bin / trash. */
+export interface TrashEntry { id: string; name: string; original_path: string; deleted_at: number | null; }
+/** List trash items (newest first). Empty on macOS. */
+export const fsTrashList    = () => invoke<TrashEntry[]>('fs_trash_list');
+/** Restore trashed items to their original location (Windows/Linux). */
+export const fsTrashRestore = (ids: string[]) => invoke<void>('fs_trash_restore', { ids });
+/** Permanently delete trashed items (Windows/Linux). */
+export const fsTrashPurge   = (ids: string[]) => invoke<void>('fs_trash_purge', { ids });
+/** Empty the whole Recycle Bin (Windows/Linux). */
+export const fsTrashEmpty   = () => invoke<void>('fs_trash_empty');
+
+/** Progress event for a long-running file operation (copy/move/duplicate). */
+export interface FsOpProgress {
+  op_id: string;
+  kind: 'copy' | 'move' | 'duplicate';
+  done_files: number;
+  total_files: number;
+  done_bytes: number;
+  total_bytes: number;
+  current: string;
+}
+/** Subscribe to this window's file-operation progress events. */
+export const onFsOpProgress = (cb: (p: FsOpProgress) => void): Promise<UnlistenFn> =>
+  listen<FsOpProgress>('arbor://fs-op-progress', e => cb(e.payload));
 /** Move entries to the OS trash / Recycle Bin (recoverable). */
 export const fsTrash       = (paths: string[]) => invoke<void>('fs_trash', { paths });
+/** Restore previously-trashed entries to their original locations (undo of
+ *  `fsTrash`). Windows / Linux only. */
+export const fsUntrash     = (paths: string[]) => invoke<void>('fs_untrash', { paths });
 /** Permanently delete entries from disk (Shift+Delete). */
 export const fsDeleteMany  = (paths: string[]) => invoke<void>('fs_delete_many', { paths });
 /** Recursively search `root` for entries whose name matches `query` (glob when
@@ -58,6 +115,14 @@ export const fsSetWallpaper = (path: string) => invoke<void>('fs_set_wallpaper',
 export const fsOpenDefault = (path: string) => invoke<void>('fs_open_default', { path });
 /** Reveal a path in the OS file manager, selecting it. */
 export const fsRevealInDir = (path: string) => invoke<void>('fs_reveal_in_dir', { path });
+/** Open the OS terminal rooted at `path` (the folder, or a file's parent),
+ *  detached so it outlives Arbor. Windows Terminal / cmd · Terminal.app ·
+ *  the first available Linux terminal emulator. */
+export const fsOpenTerminal = (path: string) => invoke<void>('fs_open_terminal', { path });
+/** Expand `%VAR%` / `$VAR` / leading `~` in a typed path. The virtual names
+ *  `appdata` / `localappdata` / `home` resolve cross-platform, so `%appdata%`
+ *  works on every OS. Returns the input unchanged when there's nothing to expand. */
+export const fsExpandPath = (path: string) => invoke<string>('fs_expand_path', { path });
 /** Open the built-in explorer window at a path (focusing/reusing it per the
  *  one-window setting). `reveal = true` selects the file inside its folder;
  *  `reveal = false` just opens the folder. Used when the user routes the app's
@@ -106,10 +171,17 @@ export const fsShowProperties = (path: string) => invoke<void>('fs_show_properti
  *  path — `.exe` yields its embedded icon), as a `data:image/png;base64,…` URI. */
 export const fsIcon = (query: string, size: number) => invoke<string>('fs_icon', { query, size });
 /** Start watching `path` for changes (replaces any prior watch). Emits the
- *  `arbor://fs-changed` Tauri event on any change in the directory. */
-export const fsWatchStart  = (path: string) => invoke<void>('fs_watch_start', { path });
+ *  `arbor://fs-changed` Tauri event on any change in the directory. Pass
+ *  `recursive = true` to also catch changes in sub-folders (e.g. a project tree);
+ *  the flat explorer leaves it false. */
+export const fsWatchStart  = (path: string, recursive = false) =>
+  invoke<void>('fs_watch_start', { path, recursive });
 /** Stop the active filesystem watch. */
 export const fsWatchStop   = () => invoke<void>('fs_watch_stop');
+/** Subscribe to this window's `arbor://fs-changed` signal (fired when the watched
+ *  directory changes; carries no payload — re-read what you care about). */
+export const onFsChanged   = (cb: () => void): Promise<UnlistenFn> =>
+  listen('arbor://fs-changed', () => cb());
 
 // ── File explorer: git awareness (TortoiseGit-style overlays + actions) ─────
 /** Overlay badge for one explorer entry (or a rolled-up folder). */
