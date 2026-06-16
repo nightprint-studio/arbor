@@ -164,6 +164,22 @@ export interface ExplorerColumnConfig {
   visible: boolean;
 }
 
+/** A saved search: query + advanced filters + (optional) root folder. */
+export interface ExplorerSavedSearch {
+  id: string;
+  name: string;
+  query: string;
+  /** Folder to search in; empty → the current folder at run time. */
+  root: string;
+  recursive: boolean;
+  /** Kind ids to keep (image/document/video/audio/code/archive/folder/other). */
+  kinds: string[];
+  min_bytes: number | null;
+  max_bytes: number | null;
+  modified_after: number | null;
+  modified_before: number | null;
+}
+
 /** Built-in file explorer preferences. `git_awareness` + `global_shortcut`
  *  are host-level switches (also editable from the SettingsPanel); the display
  *  defaults are edited from the explorer's own in-window settings page. */
@@ -211,6 +227,11 @@ export interface ExplorerConfig {
   /** Details-view column order + visibility. Empty → built-in order with the
    *  default-on set shown. `name` is always shown first. */
   columns: ExplorerColumnConfig[];
+  /** User-pinned favourite folders (absolute paths), shown alongside the OS
+   *  standard locations in the sidebar. */
+  pinned_favourites: string[];
+  /** Saved searches surfaced as their own sidebar section. */
+  saved_searches: ExplorerSavedSearch[];
 }
 
 /** UI animation preferences. `enabled=false` collapses every transition

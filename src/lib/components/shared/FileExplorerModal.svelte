@@ -33,6 +33,7 @@
     List, LayoutGrid, Grid2x2, Grid3x3,
     Plus, Minus, Undo2, Redo2, EyeOff, GitCompare, CheckCircle2, Save,
     SquareTerminal, Code2, Check, RotateCcw,
+    CopyPlus, StarOff, Trash, Filter as FilterIcon, Bookmark,
   } from 'lucide-svelte';
   import Icon from '@iconify/svelte';
   import { getFileIcon, getFolderIcon } from '$lib/utils/file-icons';
@@ -43,9 +44,11 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import {
-    fsReadDir, listFsRoots, fsRename, fsCreateDir, fsCreateFile,
+    fsReadDir, listFsRoots, listWslDistros, fsRename, fsCreateDir, fsCreateFile,
     fsCopy, fsMove, fsTrash, fsUntrash, fsDeleteMany, fsOpenDefault, fsRevealInDir, fsShowProperties, fsIcon,
     fsOpenTerminal, fsExpandPath,
+    fsDuplicate, fsCancelOp, fsRenameMany, fsDirSize, fsPathsSize, fsOverviewStats,
+    fsTrashList, fsTrashRestore, fsTrashPurge, fsTrashEmpty, onFsOpProgress,
     fsZip, fsUnzip, fsSetWallpaper, fsSearch,
     fsReadTextFile, fsWatchStart, fsWatchStop,
     fsGitStatus, fsGitStage, fsGitUnstage, fsGitDiscard, fsGitIgnore, fsOpenInArbor, fsGitChanges,
@@ -53,18 +56,20 @@
     explorerClipSet, explorerClipGet, explorerClipClear,
     ensureDragOverlay, dragOverlayShow, dragOverlayMove, dragOverlayHide, explorerDropDispatch,
     type FsEntry, type FsRoot, type FsGitStatus, type GitBadge, type GitRepoMarker, type GitChange, type GitChanges, type FsBranch,
-    type ExplorerRevealPayload, type ClipData,
+    type ExplorerRevealPayload, type ClipData, type FsOpProgress, type DirSize, type OverviewStats, type TrashEntry,
   } from '$lib/ipc/fs';
   import { listRegistryRepos, listWorkspaces } from '$lib/ipc/workspace';
   import { openInIde, getIdeConfig, startIdeDetection } from '$lib/ipc/worktree';
   import type { IdeConfig, DetectedIde } from '$lib/types/git';
   import { workspaceColorVar, type RepoRegistryEntry, type WorkspaceDef } from '$lib/types/workspace';
   import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS, mergeColumns } from '$lib/stores/explorer.svelte';
+  import type { ExplorerSavedSearch } from '$lib/types/config';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { dispatchDeepLink } from '$lib/ipc/deep-link';
   import { copyDeepLinkFromRemote } from '$lib/utils/deep-link-builder';
   import Modal from './Modal.svelte';
   import FileExplorerSettings from './FileExplorerSettings.svelte';
+  import FileExplorerBatchRename from './FileExplorerBatchRename.svelte';
   import ConfirmModal from './ConfirmModal.svelte';
   import ExternalLinkConfirmModal from './ExternalLinkConfirmModal.svelte';
   import BranchSwitchPopup from './BranchSwitchPopup.svelte';
@@ -81,9 +86,8 @@
   import Dropdown, { type DropdownItem } from './ui/Dropdown.svelte';
   import Tabs, { type TabItem } from './ui/Tabs.svelte';
   import ContextMenu, { type MenuItem, type MenuAction } from './ContextMenu.svelte';
-  import { overviewStats, kindBreakdown, totalFiles } from '$lib/mocks/fileExplorerMock';
 
-  type View = 'overview' | 'browse' | 'settings';
+  type View = 'overview' | 'browse' | 'settings' | 'trash';
   interface ExpTab { id: string; view: View; path: string; history: string[]; historyIdx: number; }
 
   // `onClose` drives the modal usage (Esc / backdrop / header close button).
@@ -127,6 +131,9 @@
   const isPicker = mode !== null;
   // svelte-ignore state_referenced_locally
   const pickerMulti = isPicker && mode === 'file' && multiple && !!onConfirmMulti;
+  // macOS can't Put-Back to the original location, so Restore recovers to the
+  // Desktop there — surfaced in the Recycle Bin view + restore toast.
+  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '');
   // Save-mode filename (editable in the footer). Clicking/double-clicking a file
   // populates it; Enter / the Save button commit `currentPath + filename`.
   // svelte-ignore state_referenced_locally
@@ -260,6 +267,7 @@
   })));
 
   let roots       = $state<FsRoot[]>([]);
+  let wslDistros  = $state<FsRoot[]>([]);
   let projects    = $state<RepoRegistryEntry[]>([]);
   let workspaces  = $state<WorkspaceDef[]>([]);
   let activeWorkspaceId = $state<string | null>(null);
@@ -306,6 +314,32 @@
   let historyBusy = $state(false);
   function pushHistory(e: HistoryEntry) { undoStack = [...undoStack, e]; redoStack = []; }
 
+  // ── Long file-operation progress (copy / move / duplicate) ────────────────
+  // The backend emits throttled `arbor://fs-op-progress` keyed by an op id we
+  // generate per operation; a Cancel button calls `fs_cancel_op`. The progress
+  // card only shows for non-trivial ops (so quick pastes don't flash).
+  let fsOp = $state<FsOpProgress | null>(null);
+  let activeOpId: string | null = null;
+  let fsOpSeq = 0;
+  function nextOpId(): string { return `fxop-${fsOpSeq++}-${Math.round(performance.now())}`; }
+  const fsOpVisible = $derived(!!fsOp && (fsOp.total_files > 50 || fsOp.total_bytes > 16 * 1024 * 1024));
+  function cancelFsOp() { if (fsOp) void fsCancelOp(fsOp.op_id).catch(() => {}); }
+  function opVerb(kind: string): string { return kind === 'move' ? 'Moving' : kind === 'duplicate' ? 'Duplicating' : 'Copying'; }
+  function opPct(p: FsOpProgress): number {
+    if (p.total_bytes > 0) return Math.min(100, Math.round((p.done_bytes / p.total_bytes) * 100));
+    if (p.total_files > 0) return Math.min(100, Math.round((p.done_files / p.total_files) * 100));
+    return 0;
+  }
+  /** Run a file op with a fresh op id, clearing the progress card when it ends. */
+  async function runFsOp<T>(fn: (opId: string) => Promise<T>): Promise<T> {
+    const opId = nextOpId();
+    activeOpId = opId;
+    try { return await fn(opId); }
+    finally { if (activeOpId === opId) { activeOpId = null; fsOp = null; } }
+  }
+  /** True when an error string is a user-initiated cancel (no error toast). */
+  function isCancel(e: unknown): boolean { return String(e).toLowerCase().includes('cancel'); }
+
   let listEl = $state<HTMLElement | null>(null);
   let sidebarEl = $state<HTMLElement | null>(null);
 
@@ -345,10 +379,59 @@
     if (recents.length > cap) { recents = recents.slice(0, cap); lsSet(RECENTS_KEY, recents); }
   });
 
+  // ── Overview dashboard (real storage stats) ───────────────────────────────
+  let overview = $state<OverviewStats | null>(null);
+  let overviewSeq = 0;
+  async function loadOverview() {
+    const seq = ++overviewSeq;
+    try { const s = await fsOverviewStats(); if (seq === overviewSeq) overview = s; }
+    catch { if (seq === overviewSeq) overview = null; }
+  }
+
   // ── Active-tab projections ────────────────────────────────────────────────
   const view        = $derived(activeTab.view);
   const currentPath = $derived(activeTab.path);
   const favourites  = $derived(roots.filter(r => r.kind !== 'drive'));
+  // User-pinned folders shown in the Favourites section alongside the OS roots.
+  const pinnedFavs  = $derived(
+    explorerStore.pinnedFavourites.map(p => ({
+      path: p,
+      name: p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p,
+    })),
+  );
+  // Refresh the real storage stats whenever the Overview becomes visible.
+  $effect(() => { if (view === 'overview') void loadOverview(); });
+  const overviewUsed = $derived(overview ? Math.max(0, overview.total_capacity - overview.total_free) : 0);
+
+  // ── Folder size on demand (Info panel) ────────────────────────────────────
+  let folderSize = $state<{ path: string; size: DirSize | null; busy: boolean } | null>(null);
+  async function calcFolderSize(path: string) {
+    folderSize = { path, size: null, busy: true };
+    try { const s = await fsDirSize(path); folderSize = { path, size: s, busy: false }; }
+    catch { folderSize = { path, size: null, busy: false }; }
+  }
+
+  // ── Selection size (footer "N selected · X total") ────────────────────────
+  // Debounced recursive size of the current selection, so the footer can show
+  // a total without blocking on every arrow-key selection change.
+  let selSize = $state<DirSize | null>(null);
+  let selSizeSeq = 0;
+  $effect(() => {
+    const paths = [...selected]; // track selection changes
+    selSize = null;
+    if (paths.length === 0) return;
+    const timer = setTimeout(async () => {
+      const seq = ++selSizeSeq;
+      try { const s = await fsPathsSize(paths); if (seq === selSizeSeq) selSize = s; }
+      catch { /* ignore */ }
+    }, 250);
+    return () => clearTimeout(timer);
+  });
+  const selectionInfo = $derived.by(() => {
+    const n = selected.size;
+    if (n === 0) return '';
+    return `${n} selected${selSize ? ` · ${formatSize(selSize.bytes)}` : ''}`;
+  });
   const drives      = $derived(roots.filter(r => r.kind === 'drive'));
   const activeRepoPath = $derived(tabsStore.activeTab?.path ?? null);
   const defaultBrowsePath = $derived(favourites[0]?.path ?? drives[0]?.path ?? '');
@@ -540,14 +623,14 @@
   // ── Explorer tab strip ────────────────────────────────────────────────────
   const tabItems = $derived<TabItem[]>(tabs.map(t => ({
     id: t.id,
-    label: t.view === 'overview' ? 'Overview' : t.view === 'settings' ? 'Settings' : (t.path.split(/[\\/]/).filter(Boolean).pop() || t.path || 'Browse'),
-    icon: t.view === 'overview' ? LayoutDashboard : t.view === 'settings' ? Settings2 : Folder,
+    label: t.view === 'overview' ? 'Overview' : t.view === 'settings' ? 'Settings' : t.view === 'trash' ? 'Recycle Bin' : (t.path.split(/[\\/]/).filter(Boolean).pop() || t.path || 'Browse'),
+    icon: t.view === 'overview' ? LayoutDashboard : t.view === 'settings' ? Settings2 : t.view === 'trash' ? Trash : Folder,
     closable: tabs.length > 1,
   })));
   function syncActive() {
     cancelCreate(); cancelRename(); ctxMenu = null; filterQuery = ''; addressEditing = false; clearSelection();
     if (activeTab.view === 'browse') navigate(activeTab.path, false);
-    else { rawEntries = []; loadError = ''; gitStatus = null; fsWatchStop().catch(() => {}); }
+    else { rawEntries = []; loadError = ''; gitStatus = null; fsWatchStop().catch(() => {}); if (activeTab.view === 'trash') void loadTrash(); }
   }
   function switchTab(id: string) { activeTabId = id; syncActive(); }
   function addTab() { const t = mkTab('overview', ''); tabs = [...tabs, t]; activeTabId = t.id; syncActive(); }
@@ -570,6 +653,7 @@
   async function navigate(path: string, pushHist = true) {
     if (!path) return;
     cancelCreate(); cancelRename(); ctxMenu = null; deleteReq = null; filterQuery = ''; addressEditing = false;
+    filterOpen = false; clearAdvFilters();
     const t = activeTab;
     t.view = 'browse'; t.path = path;
     if (pushHist) { t.history = [...t.history.slice(0, t.historyIdx + 1), path]; t.historyIdx = t.history.length - 1; }
@@ -626,6 +710,73 @@
   function exitSettings() {
     if (activeTab.path) navigate(activeTab.path, false);
     else showOverview();
+  }
+
+  // ── Recycle Bin view ──────────────────────────────────────────────────────
+  let trashItems   = $state<TrashEntry[]>([]);
+  let trashLoading = $state(false);
+  let trashError   = $state('');
+  let trashSel     = $state<Set<string>>(new Set());
+  let trashAnchor  = $state<string>(''); // last clicked row — anchor for Shift+click ranges
+  let trashBusy    = $state(false);
+  let trashEmptyReq = $state(false);
+  async function loadTrash() {
+    trashLoading = true; trashError = '';
+    try { trashItems = await fsTrashList(); trashSel = new Set(); trashAnchor = ''; }
+    catch (e) { trashError = String(e); trashItems = []; }
+    finally { trashLoading = false; }
+  }
+  function showTrash() {
+    cancelCreate(); cancelRename(); ctxMenu = null; deleteReq = null; addressEditing = false; clearSelection();
+    activeTab.view = 'trash';
+    gitStatus = null;
+    fsWatchStop().catch(() => {});
+    void loadTrash();
+  }
+  function toggleTrashSel(id: string) {
+    const n = new Set(trashSel);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    trashSel = n;
+    trashAnchor = id;
+  }
+  /** Row click with modifier support: Shift extends the selection from the
+   *  anchor to the clicked row (file-manager range select); plain / Ctrl click
+   *  toggles a single row and moves the anchor. */
+  function clickTrashRow(id: string, e: MouseEvent) {
+    if (e.shiftKey && trashAnchor) {
+      const ids = trashItems.map(t => t.id);
+      const a = ids.indexOf(trashAnchor), b = ids.indexOf(id);
+      if (a >= 0 && b >= 0) {
+        const [lo, hi] = a <= b ? [a, b] : [b, a];
+        const n = new Set(trashSel);
+        for (let i = lo; i <= hi; i++) n.add(ids[i]);
+        trashSel = n;
+        return;
+      }
+    }
+    toggleTrashSel(id);
+  }
+  const trashAllSelected = $derived(trashItems.length > 0 && trashSel.size === trashItems.length);
+  function toggleTrashAll() { trashSel = trashAllSelected ? new Set() : new Set(trashItems.map(t => t.id)); }
+  async function restoreTrash() {
+    if (!trashSel.size || trashBusy) return;
+    trashBusy = true;
+    try { const n = trashSel.size; await fsTrashRestore([...trashSel]); uiStore.showToast(`Restored ${n} item${n !== 1 ? 's' : ''}${isMac ? ' to the Desktop' : ''}`, 'success'); await loadTrash(); }
+    catch (e) { uiStore.showToast(`Restore failed: ${e}`, 'error'); }
+    finally { trashBusy = false; }
+  }
+  async function purgeTrash() {
+    if (!trashSel.size || trashBusy) return;
+    trashBusy = true;
+    try { await fsTrashPurge([...trashSel]); uiStore.showToast(`Deleted ${trashSel.size} item${trashSel.size !== 1 ? 's' : ''}`, 'success'); await loadTrash(); }
+    catch (e) { uiStore.showToast(`Delete failed: ${e}`, 'error'); }
+    finally { trashBusy = false; }
+  }
+  async function emptyTrash() {
+    trashBusy = true;
+    try { await fsTrashEmpty(); uiStore.showToast('Recycle Bin emptied', 'success'); await loadTrash(); }
+    catch (e) { uiStore.showToast(`Empty failed: ${e}`, 'error'); }
+    finally { trashBusy = false; trashEmptyReq = false; }
   }
 
   // Reset actions for the in-explorer settings page. These own the ephemeral
@@ -902,6 +1053,106 @@
   /** Recursive mode is active only with a non-empty query in browse view. */
   const recursiveActive = $derived(recursiveSearch && view === 'browse' && filterQuery.trim().length > 0);
 
+  // ── Advanced filters (kind / size / date) ─────────────────────────────────
+  interface AdvFilters { kinds: Set<string>; minBytes: number | null; maxBytes: number | null; modifiedAfter: number | null; }
+  let advFilters = $state<AdvFilters>({ kinds: new Set(), minBytes: null, maxBytes: null, modifiedAfter: null });
+  const advActive = $derived(advFilters.kinds.size > 0 || advFilters.minBytes != null || advFilters.maxBytes != null || advFilters.modifiedAfter != null);
+  let filterOpen   = $state(false);
+  let datePresetMs = $state<number | null>(null); // chosen "modified within" window, for highlight
+  function clearAdvFilters() { advFilters = { kinds: new Set(), minBytes: null, maxBytes: null, modifiedAfter: null }; datePresetMs = null; }
+
+  const _MB = 1024 * 1024, _GB = 1024 * _MB;
+  const SIZE_PRESETS = [
+    { label: 'Any',      min: null,      max: null },
+    { label: '< 1 MB',   min: null,      max: _MB },
+    { label: '1–100 MB', min: _MB,       max: 100 * _MB },
+    { label: '> 100 MB', min: 100 * _MB, max: null },
+    { label: '> 1 GB',   min: _GB,       max: null },
+  ];
+  const DATE_PRESETS = [
+    { label: 'Any',          ms: null },
+    { label: 'Today',        ms: 86_400_000 },
+    { label: 'Last 7 days',  ms: 7 * 86_400_000 },
+    { label: 'Last 30 days', ms: 30 * 86_400_000 },
+    { label: 'This year',    ms: 365 * 86_400_000 },
+  ];
+  const FILTER_KINDS: [string, string][] = [
+    ['folder', 'Folders'], ['image', 'Images'], ['video', 'Video'], ['audio', 'Audio'],
+    ['document', 'Documents'], ['code', 'Code'], ['archive', 'Archives'], ['other', 'Other'],
+  ];
+  function toggleKind(k: string) {
+    const n = new Set(advFilters.kinds);
+    if (n.has(k)) n.delete(k); else n.add(k);
+    advFilters = { ...advFilters, kinds: n };
+  }
+  function setSizeFilter(min: number | null, max: number | null) { advFilters = { ...advFilters, minBytes: min, maxBytes: max }; }
+  function sizeActive(p: { min: number | null; max: number | null }) { return advFilters.minBytes === p.min && advFilters.maxBytes === p.max; }
+  function setDateFilter(ms: number | null) { datePresetMs = ms; advFilters = { ...advFilters, modifiedAfter: ms == null ? null : Date.now() - ms }; }
+
+  // ── Saved searches ────────────────────────────────────────────────────────
+  let savePrompt = $state<string | null>(null); // editable name while the save dialog is open
+  function newSearchId() { return `ss-${Date.now()}-${Math.round(Math.random() * 1e6)}`; }
+  function openSaveSearch() {
+    if (!filterQuery.trim() && !advActive) return;
+    savePrompt = filterQuery.trim() || 'Saved search';
+    tick().then(() => { const i = document.getElementById('fx-save-search') as HTMLInputElement | null; i?.select(); });
+  }
+  function commitSaveSearch() {
+    const name = (savePrompt ?? '').trim();
+    if (!name) { savePrompt = null; return; }
+    explorerStore.addSavedSearch({
+      id: newSearchId(), name,
+      query: filterQuery,
+      root: currentPath,
+      recursive: recursiveSearch,
+      kinds: [...advFilters.kinds],
+      min_bytes: advFilters.minBytes,
+      max_bytes: advFilters.maxBytes,
+      modified_after: advFilters.modifiedAfter,
+      modified_before: null,
+    });
+    savePrompt = null;
+    uiStore.showToast('Search saved', 'success');
+  }
+  async function applySavedSearch(s: ExplorerSavedSearch) {
+    filterOpen = false;
+    if (s.root && normPath(s.root) !== normPath(currentPath)) await navigate(s.root);
+    else if (view !== 'browse' && s.root) await navigate(s.root);
+    if (recursiveSearch !== s.recursive) explorerStore.setRecursiveSearch(s.recursive);
+    advFilters = { kinds: new Set(s.kinds ?? []), minBytes: s.min_bytes ?? null, maxBytes: s.max_bytes ?? null, modifiedAfter: s.modified_after ?? null };
+    datePresetMs = null;
+    filterQuery = s.query ?? '';
+  }
+
+  const KIND_EXT: Record<string, string[]> = {
+    image:    ['png','jpg','jpeg','gif','webp','bmp','svg','ico','tif','tiff','avif','heic'],
+    video:    ['mp4','mkv','mov','avi','webm','flv','wmv','m4v','mpg','mpeg'],
+    audio:    ['mp3','wav','flac','ogg','m4a','aac','wma','opus','aiff'],
+    archive:  ['zip','rar','7z','tar','gz','bz2','xz','zst','tgz'],
+    document: ['pdf','doc','docx','xls','xlsx','ppt','pptx','odt','ods','txt','md','rtf','csv'],
+    code:     ['js','ts','tsx','jsx','rs','py','go','java','c','cpp','h','hpp','cs','rb','php','swift','kt','sh','json','toml','yaml','yml','xml','html','css','scss','lua','vue','svelte','sql'],
+  };
+  function kindOf(e: FsEntry): string {
+    if (e.is_dir) return 'folder';
+    const ext = extOf(e.name);
+    for (const [kind, exts] of Object.entries(KIND_EXT)) if (exts.includes(ext)) return kind;
+    return 'other';
+  }
+  /** Does `e` pass the active advanced filters? */
+  function passesAdv(e: FsEntry): boolean {
+    if (advFilters.kinds.size && !advFilters.kinds.has(kindOf(e))) return false;
+    // Size / date filters apply to files only (folders have no own size).
+    if (!e.is_dir) {
+      const sz = e.size ?? 0;
+      if (advFilters.minBytes != null && sz < advFilters.minBytes) return false;
+      if (advFilters.maxBytes != null && sz > advFilters.maxBytes) return false;
+    } else if (advFilters.minBytes != null || advFilters.maxBytes != null) {
+      return false; // a size filter excludes folders
+    }
+    if (advFilters.modifiedAfter != null && (e.modified ?? 0) < advFilters.modifiedAfter) return false;
+    return true;
+  }
+
   const entries = $derived(rawEntries.filter(e => {
     if (!showHidden && e.name.startsWith('.')) return false;
     // File-picker extension whitelist hides non-matching files (folders stay
@@ -912,7 +1163,8 @@
   const sorted = $derived.by(() => {
     // Recursive results arrive already filtered (and hidden-aware) from the
     // backend; the local list is filtered here with the same matcher.
-    const list = recursiveActive ? [...searchResults] : entries.filter(e => matchName(e.name));
+    let list = recursiveActive ? [...searchResults] : entries.filter(e => matchName(e.name));
+    if (advActive) list = list.filter(passesAdv);
     list.sort((a, b) => {
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
       const byName = () => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
@@ -1224,7 +1476,7 @@
   async function runPaste(op: 'copy' | 'cut', paths: string[], dest: string, overwrite: boolean) {
     try {
       if (op === 'copy') {
-        const created = await fsCopy(paths, dest, overwrite);
+        const created = await runFsOp(id => fsCopy(paths, dest, overwrite, id));
         // An overwrite paste can't be cleanly undone (it replaced files we can't
         // bring back), so only record the safe, non-destructive case.
         if (!overwrite) pushHistory({
@@ -1233,12 +1485,57 @@
           redo: async () => { await fsCopy(paths, dest, false); },
         });
       } else {
-        const moved = await fsMove(paths, dest, overwrite);
+        const moved = await runFsOp(id => fsMove(paths, dest, overwrite, id));
         clipboard = null; void explorerClipClear();
         if (!overwrite) pushMoveHistory(paths, moved);
       }
       await refreshCurrent();
-    } catch (e) { uiStore.showToast(`Paste failed: ${e}`, 'error'); }
+    } catch (e) {
+      if (isCancel(e)) { uiStore.showToast('Operation cancelled', 'info'); await refreshCurrent(); }
+      else uiStore.showToast(`Paste failed: ${e}`, 'error');
+    }
+  }
+
+  // ── Batch rename ──────────────────────────────────────────────────────────
+  let batchRenameItems = $state<{ name: string; path: string }[] | null>(null);
+  function openBatchRename() {
+    const paths = actionPaths();
+    if (paths.length < 2) return;
+    const set = new Set(paths);
+    batchRenameItems = sorted.filter(e => set.has(e.path)).map(e => ({ name: e.name, path: e.path }));
+  }
+  async function applyBatchRename(pairs: { from: string; to: string }[]) {
+    batchRenameItems = null;
+    if (!pairs.length) return;
+    try {
+      await fsRenameMany(pairs);
+      pushHistory({
+        label: 'Rename',
+        undo: () => fsRenameMany(pairs.map(p => ({ from: p.to, to: p.from }))).then(() => {}),
+        redo: () => fsRenameMany(pairs).then(() => {}),
+      });
+      clearSelection();
+      await refreshCurrent();
+      uiStore.showToast(`Renamed ${pairs.length} item${pairs.length !== 1 ? 's' : ''}`, 'success');
+    } catch (e) { uiStore.showToast(`Rename failed: ${e}`, 'error'); }
+  }
+
+  /** Duplicate the current selection in place ("file (2).ext"). */
+  async function doDuplicate() {
+    const paths = actionPaths();
+    if (!paths.length || view !== 'browse') return;
+    try {
+      const created = await runFsOp(id => fsDuplicate(paths, id));
+      pushHistory({
+        label: 'Duplicate',
+        undo: () => fsTrash(created),
+        redo: async () => { await fsDuplicate(paths); },
+      });
+      await refreshCurrent();
+    } catch (e) {
+      if (isCancel(e)) { uiStore.showToast('Operation cancelled', 'info'); await refreshCurrent(); }
+      else uiStore.showToast(`Duplicate failed: ${e}`, 'error');
+    }
   }
   /** Record a move (cut-paste or drag) as an undoable history entry. Undo/redo
    *  rename each item exactly back/forward, preserving its original location. */
@@ -1391,11 +1688,14 @@
     const toMove = paths.filter(p => normPath(parentOf(p) ?? '') !== normPath(currentPath));
     if (!toMove.length) { try { await getCurrentWindow().setFocus(); } catch { /* ignore */ } return; }
     try {
-      const moved = await fsMove(toMove, currentPath);
+      const moved = await runFsOp(id => fsMove(toMove, currentPath, false, id));
       pushMoveHistory(toMove, moved);
       await refreshCurrent();
       uiStore.showToast(`Moved ${toMove.length} item${toMove.length !== 1 ? 's' : ''} here`, 'success');
-    } catch (e) { uiStore.showToast(`Move failed: ${e}`, 'error'); }
+    } catch (e) {
+      if (isCancel(e)) { uiStore.showToast('Operation cancelled', 'info'); await refreshCurrent(); }
+      else uiStore.showToast(`Move failed: ${e}`, 'error');
+    }
     try { await getCurrentWindow().setFocus(); } catch { /* ignore */ }
   }
 
@@ -1411,8 +1711,11 @@
   async function moveInto(target: string) {
     const paths = dragPaths.filter(p => p && p !== target);
     if (!paths.length) return;
-    try { const moved = await fsMove(paths, target); pushMoveHistory(paths, moved); clearSelection(); await refreshCurrent(); }
-    catch (err) { uiStore.showToast(`Move failed: ${err}`, 'error'); }
+    try { const moved = await runFsOp(id => fsMove(paths, target, false, id)); pushMoveHistory(paths, moved); clearSelection(); await refreshCurrent(); }
+    catch (err) {
+      if (isCancel(err)) { uiStore.showToast('Operation cancelled', 'info'); await refreshCurrent(); }
+      else uiStore.showToast(`Move failed: ${err}`, 'error');
+    }
   }
 
   // ── Compress / extract (ZIP) ────────────────────────────────────────────────
@@ -1622,10 +1925,18 @@
     }
     if (entry) {
       items.push(
-        { id: 'sep1',      label: '', separator: true },
-        { id: 'copy-path', label: 'Copy Path', icon: Link2, disabled: multi },
-        { id: 'sep-arch',  label: '', separator: true },
+        { id: 'sep1',       label: '', separator: true },
+        { id: 'duplicate',  label: multi ? `Duplicate ${selected.size} items` : 'Duplicate', icon: CopyPlus },
+        { id: 'rename',     label: multi ? `Rename ${selected.size} items…` : 'Rename', icon: Pencil, shortcut: multi ? undefined : 'F2' },
+        { id: 'copy-path',  label: 'Copy Path', icon: Link2, disabled: multi },
       );
+      // Pin / unpin a single folder to the sidebar Favourites.
+      if (entry.is_dir && singleSelection) {
+        items.push(explorerStore.isPinned(entry.path)
+          ? { id: 'unpin', label: 'Remove from Favourites', icon: StarOff }
+          : { id: 'pin',   label: 'Add to Favourites',      icon: Star });
+      }
+      items.push({ id: 'sep-arch', label: '', separator: true });
       if (zipTarget) items.push({ id: 'extract', label: 'Extract here', icon: PackageOpen, iconColor: 'var(--info)' });
       if (!singleCompressed) items.push({ id: 'compress', label: multi ? `Compress ${selected.size} to ZIP` : 'Compress to ZIP', icon: Archive });
       if (imageTarget) items.push({ id: 'wallpaper', label: 'Set as desktop background', icon: ImageIcon });
@@ -1699,7 +2010,10 @@
       case 'cut':        doCut(); break;
       case 'copy':       doCopy(); break;
       case 'paste':      doPaste(); break;
-      case 'rename':     if (entry) startRename(entry); break;
+      case 'duplicate':  void doDuplicate(); break;
+      case 'rename':     if (selected.size > 1) openBatchRename(); else if (entry) startRename(entry); break;
+      case 'pin':        if (entry) explorerStore.pinFavourite(entry.path); break;
+      case 'unpin':      if (entry) explorerStore.unpinFavourite(entry.path); break;
       case 'delete':     askDelete(false); break;
       case 'copy-path':  if (entry) copyToClipboard(entry.path, { successToast: 'Path copied' }); break;
       case 'new-folder': startCreate('folder'); break;
@@ -2159,6 +2473,7 @@
   let focusUnlisten: UnlistenFn | null = null;
   let registryUnlisten: UnlistenFn | null = null;
   let ideUnlisten: UnlistenFn | null = null;
+  let fsOpUnlisten: UnlistenFn | null = null;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let rootsTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -2189,6 +2504,9 @@
     // so there's no Overview/empty flash.
     if (isPicker && initialPath) await navigate(initialPath);
     try { roots = await listFsRoots(); } catch { /* ignore */ }
+    // WSL distros (Windows): loaded once — not on the removable-media poll, to
+    // avoid spawning wsl.exe repeatedly.
+    try { wslDistros = await listWslDistros(); } catch { /* ignore */ }
     // Picker fallback: if no initial path (or it failed to open), land on the
     // first favourite/drive so the user is never stranded on an empty view.
     if (isPicker && (!currentPath || loadError)) {
@@ -2218,6 +2536,9 @@
       startIdeDetection().catch(() => { /* backend unavailable during HMR */ });
     }
     try { unlisten = await listen('arbor://fs-changed', () => scheduleRefresh()); } catch { /* ignore */ }
+    // Long-op progress (copy/move/duplicate) — only adopt frames for the op we
+    // started, so a stale frame from a finished op can't reopen the card.
+    try { fsOpUnlisten = await onFsOpProgress(p => { if (p.op_id === activeOpId) fsOp = p; }); } catch { /* ignore */ }
     // Shared clipboard: seed the local mirror from the process-wide clipboard
     // (a copy may predate this window) and track changes so copy/cut/paste work
     // across every open explorer window.
@@ -2259,7 +2580,7 @@
       else if (view === 'browse') listEl?.focus();
     });
   });
-  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); registryUnlisten?.(); ideUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); });
+  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); registryUnlisten?.(); ideUnlisten?.(); fsOpUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); });
 </script>
 
 {#snippet sbLabel(id: string, Ico: typeof Folder, text: string)}
@@ -2283,10 +2604,35 @@
       <button class="fx-sb-item" class:active={view === 'overview'} onclick={showOverview} use:tooltip={sidebarCollapsed ? 'Overview' : ''}>
         <span class="fx-sb-ico"><LayoutDashboard size={14} /></span><span class="fx-sb-text">Overview</span>
       </button>
+      <button class="fx-sb-item" class:active={view === 'trash'} onclick={showTrash} use:tooltip={sidebarCollapsed ? 'Recycle Bin' : ''}>
+        <span class="fx-sb-ico"><Trash size={14} /></span><span class="fx-sb-text">Recycle Bin</span>
+      </button>
       <button class="fx-sb-item" class:active={view === 'settings'} onclick={showSettings} use:tooltip={sidebarCollapsed ? { content: 'Settings', shortcut: 'Ctrl+,' } : ''}>
         <span class="fx-sb-ico"><Settings2 size={14} /></span><span class="fx-sb-text">Settings</span>
       </button>
     </div>
+  {/if}
+{/snippet}
+
+{#snippet secSavedSearches()}
+  {#if explorerStore.savedSearches.length && !isPicker}
+    {@render sbLabel('savedsearches', Bookmark, 'Saved searches')}
+    {#if sectionOpen('savedsearches')}
+      <div class="fx-sb-list">
+        {#each explorerStore.savedSearches as s (s.id)}
+          <button class="fx-sb-item fx-sb-item-pinned" onclick={() => void applySavedSearch(s)}
+                  oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); explorerStore.removeSavedSearch(s.id); }}
+                  use:tooltip={sidebarCollapsed ? s.name : { content: s.name, description: 'Right-click to remove' }}>
+            <span class="fx-sb-ico"><Search size={13} /></span><span class="fx-sb-text">{s.name}</span>
+            {#if !sidebarCollapsed}
+              <span class="fx-sb-unpin" role="button" tabindex="-1" aria-label="Remove saved search"
+                    onclick={(e) => { e.stopPropagation(); explorerStore.removeSavedSearch(s.id); }}
+                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); explorerStore.removeSavedSearch(s.id); } }}><X size={11} /></span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
   {/if}
 {/snippet}
 
@@ -2307,7 +2653,7 @@
 {/snippet}
 
 {#snippet secFavourites()}
-  {#if favourites.length}
+  {#if favourites.length || pinnedFavs.length}
     {@render sbLabel('favourites', Star, 'Favourites')}
     {#if sectionOpen('favourites')}
       <div class="fx-sb-list">
@@ -2315,6 +2661,19 @@
           {@const I = rootIcon(r.kind)}
           <button class="fx-sb-item" class:active={view === 'browse' && currentPath === r.path} onclick={() => navigate(r.path)} use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : r.path}>
             <span class="fx-sb-ico"><I size={14} /></span><span class="fx-sb-text">{r.name}</span>
+          </button>
+        {/each}
+        {#each pinnedFavs as r (r.path)}
+          <button class="fx-sb-item fx-sb-item-pinned" class:active={view === 'browse' && currentPath === r.path}
+                  onclick={() => navigate(r.path)}
+                  oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); explorerStore.unpinFavourite(r.path); }}
+                  use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : { content: r.path, description: 'Right-click to remove from Favourites' }}>
+            <span class="fx-sb-ico"><Star size={14} /></span><span class="fx-sb-text">{r.name}</span>
+            {#if !sidebarCollapsed}
+              <span class="fx-sb-unpin" role="button" tabindex="-1" aria-label="Remove from Favourites"
+                    onclick={(e) => { e.stopPropagation(); explorerStore.unpinFavourite(r.path); }}
+                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); explorerStore.unpinFavourite(r.path); } }}><X size={11} /></span>
+            {/if}
           </button>
         {/each}
       </div>
@@ -2381,6 +2740,22 @@
           {/if}
         {/each}
       {/if}
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet secLinux()}
+  {#if wslDistros.length}
+    {@render sbLabel('linux', SquareTerminal, 'Linux')}
+    {#if sectionOpen('linux')}
+      <div class="fx-sb-list">
+        {#each wslDistros as d (d.path)}
+          <button class="fx-sb-item" class:active={view === 'browse' && normPath(currentPath).startsWith(normPath(d.path))} onclick={() => navigate(d.path)}
+                  use:tooltip={sidebarCollapsed ? `${d.name} — WSL` : { content: d.name, description: d.path }}>
+            <span class="fx-sb-ico"><Box size={14} /></span><span class="fx-sb-text">{d.name}</span>
+          </button>
+        {/each}
+      </div>
     {/if}
   {/if}
 {/snippet}
@@ -2469,6 +2844,8 @@
           <span class="fx-crumb-single">Overview</span>
         {:else if view === 'settings'}
           <span class="fx-crumb-single">Settings</span>
+        {:else if view === 'trash'}
+          <span class="fx-crumb-single">Recycle Bin</span>
         {:else}
           <div class="fx-breadcrumb">
             {#each breadcrumbs as crumb, i (crumb.path)}
@@ -2510,7 +2887,9 @@
           {#if s.id === 'library'}{#if !isPicker}{@render secLibrary()}{/if}
           {:else if s.id === 'recents'}{@render secRecents()}
           {:else if s.id === 'favourites'}{@render secFavourites()}
+          {:else if s.id === 'savedsearches'}{@render secSavedSearches()}
           {:else if s.id === 'devices'}{@render secDevices()}
+          {:else if s.id === 'linux'}{@render secLinux()}
           {:else if s.id === 'projects'}{@render secProjects()}
           {/if}
         {/if}
@@ -2528,20 +2907,28 @@
       {#if view === 'overview'}
         <div class="fx-overview">
           <div class="fx-stat-row">
-            {#each overviewStats as s (s.label)}
-              <Card variant="flat" padding="md" class="fx-stat"><div class="fx-stat-val">{s.value}</div><div class="fx-stat-label">{s.label}</div></Card>
-            {/each}
-            <Card variant="flat" padding="md" class="fx-stat fx-stat-files"><div class="fx-stat-val">{totalFiles.toLocaleString('en-US')}</div><div class="fx-stat-label">Total files</div></Card>
+            <Card variant="flat" padding="md" class="fx-stat"><div class="fx-stat-val">{overview ? formatSize(overview.total_capacity) : '—'}</div><div class="fx-stat-label">Total capacity</div></Card>
+            <Card variant="flat" padding="md" class="fx-stat"><div class="fx-stat-val">{overview ? formatSize(overview.total_free) : '—'}</div><div class="fx-stat-label">Free space</div></Card>
+            <Card variant="flat" padding="md" class="fx-stat"><div class="fx-stat-val">{overview ? formatSize(overviewUsed) : '—'}</div><div class="fx-stat-label">Used</div></Card>
+            <Card variant="flat" padding="md" class="fx-stat fx-stat-files"><div class="fx-stat-val">{drives.length}</div><div class="fx-stat-label">Device{drives.length !== 1 ? 's' : ''}</div></Card>
           </div>
-          <section class="fx-section">
-            <h3 class="fx-h3">File kinds <span class="fx-demo">demo data</span></h3>
-            <div class="fx-bar" role="img" aria-label="File kind breakdown">
-              {#each kindBreakdown as k (k.kind)}<div class="fx-bar-seg" style="flex: {k.count}; background: {k.color};" use:tooltip={`${k.kind}: ${k.count.toLocaleString('en-US')}`}></div>{/each}
-            </div>
-            <div class="fx-legend">
-              {#each kindBreakdown as k (k.kind)}<span class="fx-legend-item"><span class="fx-legend-dot" style="background: {k.color};"></span>{k.kind}<span class="fx-legend-count">{k.count.toLocaleString('en-US')}</span></span>{/each}
-            </div>
-          </section>
+          {#if overview && overview.drives.some(d => d.total != null)}
+            <section class="fx-section">
+              <h3 class="fx-h3">Storage</h3>
+              <div class="fx-drives">
+                {#each overview.drives as d (d.path)}
+                  {#if d.total != null && d.total > 0}
+                    {@const usedPct = Math.min(100, Math.round(((d.total - (d.free ?? 0)) / d.total) * 100))}
+                    <button class="fx-drive" onclick={() => navigate(d.path)} use:tooltip={`${d.path} — ${formatSize((d.free ?? 0))} free of ${formatSize(d.total)}`}>
+                      <div class="fx-drive-head"><HardDrive size={14} /><span class="fx-drive-name">{d.name}</span><span class="fx-drive-pct">{usedPct}%</span></div>
+                      <div class="fx-drive-bar"><div class="fx-drive-fill" class:full={usedPct >= 90} style="width:{usedPct}%"></div></div>
+                      <span class="fx-drive-sub">{formatSize(d.free ?? 0)} free of {formatSize(d.total)}</span>
+                    </button>
+                  {/if}
+                {/each}
+              </div>
+            </section>
+          {/if}
           {#if drives.length}
             <section class="fx-section"><h3 class="fx-h3">Devices</h3>
               <div class="fx-grid">{#each drives as d (d.path)}<Card variant="flat" padding="md" hoverable class="fx-tile"><button class="fx-loc-btn" onclick={() => navigate(d.path)}><span class="fx-tile-ico"><HardDrive size={18} /></span><span class="fx-tile-col"><span class="fx-tile-name">{d.name}</span><span class="fx-tile-sub">Local Disk</span></span></button></Card>{/each}</div>
@@ -2561,6 +2948,41 @@
           onResetLayout={resetLayout}
           viewMemoryCount={viewByPath.size}
           recentsCount={recents.length} />
+      {:else if view === 'trash'}
+        <!-- ── Recycle Bin ── -->
+        <div class="fx-trash-bar">
+          <label class="fx-trash-all" use:tooltip={'Select all'}>
+            <input type="checkbox" checked={trashAllSelected} onchange={toggleTrashAll} disabled={!trashItems.length} />
+            <span>{trashSel.size ? `${trashSel.size} selected` : `${trashItems.length} item${trashItems.length !== 1 ? 's' : ''}`}</span>
+          </label>
+          <span class="fx-trash-actions">
+            <button class="fx-trash-btn" disabled={!trashSel.size || trashBusy} onclick={restoreTrash}
+                    use:tooltip={isMac ? { content: 'Restore', description: 'Recovers to the Desktop (macOS has no Put Back)' } : ''}><RotateCcw size={13} /> Restore</button>
+            <button class="fx-trash-btn danger" disabled={!trashSel.size || trashBusy} onclick={purgeTrash}><Trash2 size={13} /> Delete</button>
+            <button class="fx-trash-btn danger" disabled={!trashItems.length || trashBusy} onclick={() => trashEmptyReq = true}><Trash size={13} /> Empty</button>
+            <button class="fx-icon-btn" onclick={loadTrash} use:tooltip={'Refresh'} aria-label="Refresh"><RefreshCw size={13} class={trashLoading ? 'spin' : ''} /></button>
+          </span>
+        </div>
+        <div class="fx-trash-list">
+          {#if trashLoading}
+            <div class="fx-state"><Spinner size="sm" /> Loading…</div>
+          {:else if trashError}
+            <div class="fx-state error"><AlertCircle size={14} /> {trashError}</div>
+          {:else if !trashItems.length}
+            <div class="fx-state">The Recycle Bin is empty.</div>
+          {:else}
+            {#each trashItems as it (it.id)}
+              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+              <div class="fx-trash-row" class:selected={trashSel.has(it.id)} onclick={(e) => clickTrashRow(it.id, e)}>
+                <input type="checkbox" class="fx-trash-check" checked={trashSel.has(it.id)} tabindex="-1" aria-hidden="true" />
+                <span class="fx-entry-ico"><Icon icon={entryIcon(it.name, false)} width={16} height={16} /></span>
+                <span class="fx-trash-name" title={it.name}>{it.name}</span>
+                <span class="fx-trash-from" title={it.original_path}>{it.original_path}</span>
+                <span class="fx-trash-when">{it.deleted_at != null ? formatDate(it.deleted_at * 1000) : ''}</span>
+              </div>
+            {/each}
+          {/if}
+        </div>
       {:else}
         <!-- ── Browser ── -->
         <div class="fx-filter-row">
@@ -2580,6 +3002,42 @@
                   use:tooltip={{ content: recursiveSearch ? 'Recursive search on' : 'Recursive search off', description: 'Search inside all subfolders' }}><FolderSearch size={13} /></button>
           <button class="fx-toggle" class:active={showHidden} aria-pressed={showHidden} onclick={() => explorerStore.setShowHidden(!showHidden)}
                   use:tooltip={{ content: showHidden ? 'Hide hidden files' : 'Show hidden files', description: 'Files starting with a dot' }}><Eye size={13} /></button>
+          <button class="fx-toggle" class:active={advActive || filterOpen} aria-pressed={filterOpen} onclick={() => filterOpen = !filterOpen}
+                  use:tooltip={{ content: 'Filters', description: 'Filter by kind, size and date' }}><FilterIcon size={13} /></button>
+          <button class="fx-toggle" disabled={!filterQuery.trim() && !advActive} onclick={openSaveSearch}
+                  use:tooltip={{ content: 'Save search', description: 'Pin this query + filters to the sidebar' }}><Bookmark size={13} /></button>
+          {#if filterOpen}
+            <div class="fx-filter-pop">
+              <div class="fx-fp-sec">
+                <div class="fx-fp-head">Kind</div>
+                <div class="fx-fp-chips">
+                  {#each FILTER_KINDS as [k, label] (k)}
+                    <button class="fx-fp-chip" class:on={advFilters.kinds.has(k)} onclick={() => toggleKind(k)}>{label}</button>
+                  {/each}
+                </div>
+              </div>
+              <div class="fx-fp-sec">
+                <div class="fx-fp-head">Size</div>
+                <div class="fx-fp-chips">
+                  {#each SIZE_PRESETS as p (p.label)}
+                    <button class="fx-fp-chip" class:on={sizeActive(p)} onclick={() => setSizeFilter(p.min, p.max)}>{p.label}</button>
+                  {/each}
+                </div>
+              </div>
+              <div class="fx-fp-sec">
+                <div class="fx-fp-head">Modified</div>
+                <div class="fx-fp-chips">
+                  {#each DATE_PRESETS as p (p.label)}
+                    <button class="fx-fp-chip" class:on={datePresetMs === p.ms} onclick={() => setDateFilter(p.ms)}>{p.label}</button>
+                  {/each}
+                </div>
+              </div>
+              <div class="fx-fp-foot">
+                <button class="fx-fp-clear" disabled={!advActive} onclick={clearAdvFilters}>Clear filters</button>
+                <button class="fx-fp-done" onclick={() => filterOpen = false}>Done</button>
+              </div>
+            </div>
+          {/if}
         </div>
 
         {#if !isGrid}
@@ -2774,7 +3232,19 @@
           <dl class="fx-pv-meta">
             <div class="fx-pv-row"><dt>Type</dt><dd>{e.is_dir ? 'Folder' : (extOf(e.name).toUpperCase() || 'File') + ' file'}</dd></div>
             {#if !e.is_dir && e.size != null}<div class="fx-pv-row"><dt>Size</dt><dd>{formatSize(e.size)}</dd></div>{/if}
+            {#if e.is_dir}
+              <div class="fx-pv-row"><dt>Size</dt><dd>
+                {#if folderSize && folderSize.path === e.path && folderSize.size}
+                  {formatSize(folderSize.size.bytes)} · {folderSize.size.files.toLocaleString('en-US')} files, {folderSize.size.dirs.toLocaleString('en-US')} folders
+                {:else if folderSize && folderSize.path === e.path && folderSize.busy}
+                  <Spinner size="sm" /> Calculating…
+                {:else}
+                  <button class="fx-info-calc" onclick={() => void calcFolderSize(e.path)}>Calculate</button>
+                {/if}
+              </dd></div>
+            {/if}
             {#if e.modified != null}<div class="fx-pv-row"><dt>Modified</dt><dd>{formatDate(e.modified)}</dd></div>{/if}
+            {#if e.created != null}<div class="fx-pv-row"><dt>Created</dt><dd>{formatDate(e.created)}</dd></div>{/if}
             <div class="fx-pv-row fx-pv-path"><dt>Path</dt><dd>{e.path}</dd></div>
           </dl>
           {@const repoInfo = repoInfoFor(e)}
@@ -2812,6 +3282,16 @@
       </aside>
     {/if}
   </div>
+  {#if fsOpVisible && fsOp}
+    <div class="fx-op" role="status" aria-live="polite">
+      <div class="fx-op-top">
+        <span class="fx-op-title">{opVerb(fsOp.kind)} · {fsOp.done_files} / {fsOp.total_files}</span>
+        <button class="fx-op-cancel" onclick={cancelFsOp} use:tooltip={'Cancel'} aria-label="Cancel operation"><X size={13} /></button>
+      </div>
+      <div class="fx-op-bar"><div class="fx-op-fill" style="width:{opPct(fsOp)}%"></div></div>
+      {#if fsOp.current}<span class="fx-op-detail" title={fsOp.current}>{fsOp.current}</span>{/if}
+    </div>
+  {/if}
   </div>
 {/snippet}
 
@@ -2836,7 +3316,7 @@
       </ModalFooter>
     {:else if view === 'browse'}
       <ModalFooter align="between">
-        <span class="fx-foot-info">{footerInfo}{#if clipboard}<span class="fx-clip"> · {clipboard.op === 'cut' ? 'Cut' : 'Copied'} {clipboard.paths.length}</span>{/if}</span>
+        <span class="fx-foot-info">{selected.size > 0 ? selectionInfo : footerInfo}{#if clipboard}<span class="fx-clip"> · {clipboard.op === 'cut' ? 'Cut' : 'Copied'} {clipboard.paths.length}</span>{/if}</span>
         <span class="fx-foot-right">
           {#if gitStatus?.in_repo && gitStatus.branch}
             <button type="button" class="fx-foot-branch" class:active={!!branchPopup}
@@ -2916,6 +3396,40 @@
 
 {#if colMenu}
   <ContextMenu x={colMenu.x} y={colMenu.y} items={columnMenuItems()} onSelect={handleColumnMenu} onClose={() => colMenu = null} />
+{/if}
+
+{#if batchRenameItems}
+  <FileExplorerBatchRename items={batchRenameItems} onCancel={() => batchRenameItems = null} onApply={applyBatchRename} />
+{/if}
+
+{#if savePrompt !== null}
+  <Modal onClose={() => savePrompt = null} width="440px" height="220px" ariaLabel="Save search">
+    {#snippet header()}<ModalHeader onClose={() => savePrompt = null} title="Save search" />{/snippet}
+    <div class="fx-savedlg">
+      <label class="fx-savedlg-label" for="fx-save-search">Name</label>
+      <input id="fx-save-search" class="fx-savedlg-input" type="text" bind:value={savePrompt} spellcheck="false" autocomplete="off"
+             onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commitSaveSearch(); } if (e.key === 'Escape') { e.preventDefault(); savePrompt = null; } }} />
+      <p class="fx-savedlg-hint">Saves the query{advActive ? ' + filters' : ''} and folder. Click it in the sidebar to re-run.</p>
+    </div>
+    {#snippet footer()}
+      <ModalFooter align="end">
+        <Button variant="ghost" onclick={() => savePrompt = null}>Cancel</Button>
+        <Button variant="primary" disabled={!(savePrompt ?? '').trim()} onclick={commitSaveSearch}>Save</Button>
+      </ModalFooter>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if trashEmptyReq}
+  <ConfirmModal
+    title="Empty Recycle Bin?"
+    message={`Permanently delete all ${trashItems.length} item${trashItems.length !== 1 ? 's' : ''} in the Recycle Bin? This can't be undone.`}
+    detail="This cannot be undone."
+    variant="danger"
+    confirmLabel="Empty"
+    busy={trashBusy}
+    onConfirm={emptyTrash}
+    onCancel={() => trashEmptyReq = false} />
 {/if}
 
 {#if extLinkReq}
@@ -3038,8 +3552,62 @@
   .fx-addr-tab { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 9.5px; line-height: 1; padding: 2px 5px; background: var(--bg-overlay); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-muted); pointer-events: none; font-family: var(--font-ui-sans); }
 
   /* ══ Body ══ */
-  .fx-root { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  .fx-root { height: 100%; display: flex; flex-direction: column; overflow: hidden; position: relative; }
   .fx-body { flex: 1; display: flex; overflow: hidden; background: var(--bg-elevated); gap: 6px; }
+
+  /* ── Long-operation progress card (copy / move / duplicate) ─────────────── */
+  .fx-op { position: absolute; right: 12px; bottom: 12px; width: 320px; max-width: calc(100% - 24px); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg, 0 6px 24px rgba(0,0,0,0.35)); padding: 10px 12px; z-index: 20; display: flex; flex-direction: column; gap: 7px; }
+  .fx-op-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .fx-op-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .fx-op-cancel { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: none; background: transparent; color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast); }
+  .fx-op-cancel:hover { background: var(--bg-hover); color: var(--danger); }
+  .fx-op-bar { height: 5px; border-radius: 3px; background: var(--bg-base); overflow: hidden; }
+  .fx-op-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 120ms linear; }
+  .fx-op-detail { font-size: 10.5px; color: var(--text-muted); font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx-info-calc { background: transparent; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--accent); cursor: pointer; font-size: 11px; padding: 1px 8px; transition: background var(--transition-fast); }
+  .fx-info-calc:hover { background: var(--bg-hover); }
+
+  /* ── Advanced-filter popover ───────────────────────────────────────────── */
+  .fx-filter-pop { position: absolute; right: 6px; top: calc(100% + 2px); z-index: 25; width: 320px; max-width: calc(100vw - 32px); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg, 0 6px 24px rgba(0,0,0,0.35)); padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .fx-fp-head { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }
+  .fx-fp-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .fx-fp-chip { background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 12px; color: var(--text-secondary); font-size: 11.5px; padding: 3px 10px; cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
+  .fx-fp-chip:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .fx-fp-chip.on { background: var(--accent-subtle); border-color: transparent; color: var(--accent); }
+  .fx-fp-foot { display: flex; justify-content: space-between; align-items: center; padding-top: 4px; border-top: 1px solid var(--border-subtle); }
+  .fx-fp-clear { background: transparent; border: none; color: var(--text-muted); font-size: 11.5px; cursor: pointer; padding: 4px 2px; }
+  .fx-fp-clear:hover:not(:disabled) { color: var(--danger); }
+  .fx-fp-clear:disabled { opacity: 0.4; cursor: default; }
+  .fx-fp-done { background: var(--accent); border: none; color: #fff; border-radius: var(--radius-sm); font-size: 11.5px; padding: 4px 14px; cursor: pointer; }
+
+  /* ── Recycle Bin view ──────────────────────────────────────────────────── */
+  .fx-trash-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 38px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
+  .fx-trash-all { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+  .fx-trash-actions { display: inline-flex; align-items: center; gap: 6px; }
+  .fx-trash-btn { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 11.5px; padding: 3px 9px; cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
+  .fx-trash-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+  .fx-trash-btn.danger:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+  .fx-trash-btn:disabled { opacity: 0.4; cursor: default; }
+  .fx-trash-list { flex: 1; overflow-y: auto; padding: 4px 0; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+  .fx-trash-row { display: flex; align-items: center; gap: 10px; padding: 5px 12px; cursor: pointer; font-size: 12.5px; user-select: none; }
+  .fx-trash-check { pointer-events: none; flex-shrink: 0; }
+  .fx-trash-row:hover { background: var(--bg-hover); }
+  .fx-trash-row.selected { background: var(--bg-selected); }
+  .fx-trash-name { color: var(--text-primary); flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 100px; }
+  .fx-trash-from { color: var(--text-muted); font-size: 11px; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .fx-trash-when { color: var(--text-disabled); font-size: 11px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+  /* ── Save-search dialog ────────────────────────────────────────────────── */
+  .fx-savedlg { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .fx-savedlg-label { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+  .fx-savedlg-input { background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-ui-sans); font-size: 13px; padding: 6px 9px; outline: none; }
+  .fx-savedlg-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px rgba(61,127,255,0.2); }
+  .fx-savedlg-hint { font-size: 11px; color: var(--text-muted); margin: 2px 0 0; }
+
+  /* Pinned favourite rows — show the remove (×) affordance on hover. */
+  .fx-sb-item-pinned .fx-sb-unpin { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: var(--radius-sm); color: var(--text-disabled); opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast); }
+  .fx-sb-item-pinned:hover .fx-sb-unpin { opacity: 1; }
+  .fx-sb-unpin:hover { background: var(--bg-hover); color: var(--danger); }
 
   /* ── Sidebar ── */
   .fx-sidebar { width: 196px; flex-shrink: 0; background: var(--bg-base); border-radius: var(--radius-lg); overflow-y: auto; padding-bottom: 8px; display: flex; flex-direction: column; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; transition: width var(--anim-dur-panel, 180ms) cubic-bezier(.16,1,.3,1); }
@@ -3108,14 +3676,16 @@
   :global(.fx-stat-files) { border-color: var(--accent-subtle) !important; }
   .fx-section { margin-top: 22px; }
   .fx-h3 { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.04em; display: flex; align-items: center; gap: 8px; }
-  .fx-demo { font-size: 9px; font-weight: 600; color: var(--text-disabled); background: var(--bg-overlay); padding: 1px 6px; border-radius: var(--radius-sm); letter-spacing: 0.02em; }
-  .fx-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; gap: 2px; }
-  .fx-bar-seg { min-width: 4px; transition: filter var(--transition-fast); }
-  .fx-bar-seg:hover { filter: brightness(1.2); }
-  .fx-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
-  .fx-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-secondary); }
-  .fx-legend-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
-  .fx-legend-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .fx-drives { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  .fx-drive { display: flex; flex-direction: column; gap: 7px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 11px 12px; cursor: pointer; text-align: left; transition: border-color var(--transition-fast), background var(--transition-fast); }
+  .fx-drive:hover { border-color: var(--border); background: var(--bg-hover); }
+  .fx-drive-head { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+  .fx-drive-name { font-size: 13px; font-weight: 600; color: var(--text-primary); flex: 1; }
+  .fx-drive-pct { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .fx-drive-bar { height: 6px; border-radius: 3px; background: var(--bg-base); overflow: hidden; }
+  .fx-drive-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+  .fx-drive-fill.full { background: var(--danger); }
+  .fx-drive-sub { font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .fx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
   :global(.fx-tile) { min-width: 0; }
   .fx-tile-ico { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--bg-hover); color: var(--text-secondary); flex-shrink: 0; }

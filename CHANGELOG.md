@@ -21,6 +21,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - File Explorer: **Open in editor** and **Open in Terminal** in the context menu (on an item or the folder background) — the editor entry lists the detected and custom IDEs with the configured default badged; the terminal opens rooted at the folder (Windows Terminal/cmd · Terminal.app · the first available Linux terminal).
 - File Explorer: the address bar now expands shell-style shortcuts on **Enter** — `%appdata%`, `$HOME`, `${VAR}` and a leading `~`; the virtual names `%appdata%` / `%localappdata%` / `%home%` resolve to the right folder on every OS.
 - File Explorer: **configurable details-view columns** — drag a header to reorder, right-click any header to show/hide columns or reset, and sort by clicking. New optional columns (Date created, Extension, Git status) join the existing Name / Date modified / Type / Size; Name is mandatory and always first. Persisted to your Arbor config.
+- File Explorer: **progress bar with Cancel** for large copy / move / duplicate operations.
+- File Explorer: **Duplicate** (in-place copy), and **batch rename** for a multi-selection (find/replace, case, sequence numbering, with live preview).
+- File Explorer: **pinnable Favourites** — add any folder to the sidebar Favourites section (right-click → Add to Favourites) and remove it again.
+- File Explorer: the **Overview** dashboard now shows real storage stats (capacity / free / used and per-drive usage bars) instead of placeholder data.
+- File Explorer: a dedicated **Recycle Bin** view (Restore / Delete / Empty) on Windows, Linux and macOS — Restore puts items back to their original location on Windows/Linux and recovers them to the Desktop on macOS.
+- File Explorer: a **Linux** sidebar section listing your installed **WSL distributions** (Windows), browsable like any folder via `\\wsl.localhost\<distro>`.
+- File Explorer: **Saved searches** — pin a query + filters + folder to the sidebar and re-run it with one click.
+- File Explorer: **advanced filters** by kind, size and modified date, and a **selection summary** (item count + total size) in the footer.
+- File Explorer: a folder's Info panel can **calculate its size** (and contained file/folder counts) recursively on demand.
 
 ### Changed
 

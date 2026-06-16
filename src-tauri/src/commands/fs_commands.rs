@@ -1,7 +1,10 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
+use tauri::Emitter;
 
 use crate::error::AppError;
 
@@ -30,6 +33,67 @@ pub fn fs_create_file(path: String) -> Result<(), AppError> {
 pub fn fs_rename(old_path: String, new_path: String) -> Result<(), AppError> {
     std::fs::rename(&old_path, &new_path)
         .map_err(|e| AppError::Other(format!("Cannot rename: {e}")))
+}
+
+/// One old→new rename pair for a batch rename.
+#[derive(Debug, serde::Deserialize)]
+pub struct RenamePair {
+    pub from: String,
+    pub to:   String,
+}
+
+/// Batch-rename in two phases so order-independent shuffles (e.g. `a→b, b→c`,
+/// or swapping two names) don't clobber each other: every source is first moved
+/// to a unique temp name, then to its final name. Validates up front that the
+/// final names are unique and don't collide with files left untouched. All
+/// targets share the parent of their source.
+#[tauri::command]
+pub fn fs_rename_many(pairs: Vec<RenamePair>) -> Result<Vec<String>, AppError> {
+    use std::collections::HashSet;
+    // Reject duplicate destinations early — two files can't take the same name.
+    let mut seen = HashSet::new();
+    for p in &pairs {
+        let to = Path::new(&p.to);
+        let parent = to.parent().unwrap_or_else(|| Path::new(""));
+        let key = parent.join(to.file_name().unwrap_or_default());
+        if !seen.insert(key) {
+            return Err(AppError::Other(format!(
+                "Two items would be renamed to the same name: {}",
+                to.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+            )));
+        }
+    }
+    // Reject a destination that already exists and isn't itself being renamed
+    // away in this batch (so shifting a contiguous block is fine, overwriting an
+    // unrelated file is not).
+    let froms: HashSet<PathBuf> = pairs.iter().map(|p| PathBuf::from(&p.from)).collect();
+    for p in &pairs {
+        let to = Path::new(&p.to);
+        if to.exists() && !froms.contains(to) {
+            return Err(AppError::Other(format!(
+                "A file named '{}' already exists",
+                to.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+            )));
+        }
+    }
+    // Phase 1: source → unique temp.
+    let mut temps: Vec<(PathBuf, String)> = Vec::with_capacity(pairs.len());
+    for (i, p) in pairs.iter().enumerate() {
+        let from = Path::new(&p.from);
+        let parent = from.parent().unwrap_or_else(|| Path::new("."));
+        let tmp = parent.join(format!(".arbor-rename-{i}.tmp"));
+        std::fs::rename(from, &tmp)
+            .map_err(|e| AppError::Other(format!("Cannot rename {}: {e}", p.from)))?;
+        temps.push((tmp, p.to.clone()));
+    }
+    // Phase 2: temp → final.
+    let mut out = Vec::with_capacity(temps.len());
+    for (tmp, to) in &temps {
+        std::fs::rename(tmp, to)
+            .map_err(|e| AppError::Other(format!("Cannot rename to {to}: {e}")))?;
+        out.push(to.clone());
+    }
+    Ok(out)
 }
 
 /// Write a text file, creating it (or overwriting it) at the given path.
@@ -353,6 +417,180 @@ fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Progress + cancellation for long-running file operations (copy / move /
+// duplicate). A per-`op_id` cancel flag lets the UI abort a running op; a
+// throttled `arbor://fs-op-progress` event drives the explorer's progress bar.
+// ---------------------------------------------------------------------------
+
+/// Process-wide registry of cancel flags keyed by op_id.
+fn cancel_registry() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    static REG: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    REG.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn register_op(op_id: &str) -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    if let Ok(mut m) = cancel_registry().lock() {
+        m.insert(op_id.to_string(), flag.clone());
+    }
+    flag
+}
+fn unregister_op(op_id: &str) {
+    if let Ok(mut m) = cancel_registry().lock() {
+        m.remove(op_id);
+    }
+}
+
+/// Request cancellation of a running file operation. No-op for unknown ids
+/// (the op may have already finished). Cooperative: the op stops at the next
+/// file boundary.
+#[tauri::command]
+pub fn fs_cancel_op(op_id: String) {
+    if let Ok(m) = cancel_registry().lock() {
+        if let Some(flag) = m.get(&op_id) {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct FsOpProgress {
+    op_id:       String,
+    kind:        String,
+    done_files:  u64,
+    total_files: u64,
+    done_bytes:  u64,
+    total_bytes: u64,
+    current:     String,
+}
+
+/// Drives progress emission + cancellation for one file operation. When `app`
+/// is `None` (no op_id supplied) every method is a cheap no-op, so the copy
+/// path is identical whether or not the caller wants progress.
+struct OpProgress {
+    app:         Option<tauri::AppHandle>,
+    op_id:       String,
+    kind:        &'static str,
+    total_files: u64,
+    total_bytes: u64,
+    done_files:  u64,
+    done_bytes:  u64,
+    last_emit:   Instant,
+    cancel:      Arc<AtomicBool>,
+}
+
+impl OpProgress {
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+    /// Emit a progress event, throttled to ~80ms unless `force`d (used for the
+    /// initial and final frames so the bar starts and reaches 100%).
+    fn emit(&mut self, current: &str, force: bool) {
+        if self.app.is_none() {
+            return;
+        }
+        if !force && self.last_emit.elapsed().as_millis() < 80 {
+            return;
+        }
+        self.last_emit = Instant::now();
+        let payload = FsOpProgress {
+            op_id:       self.op_id.clone(),
+            kind:        self.kind.to_string(),
+            done_files:  self.done_files,
+            total_files: self.total_files,
+            done_bytes:  self.done_bytes,
+            total_bytes: self.total_bytes,
+            current:     current.to_string(),
+        };
+        if let Some(app) = &self.app {
+            let _ = app.emit("arbor://fs-op-progress", payload);
+        }
+    }
+}
+
+/// Recursively count the files and total bytes under `src` so the progress bar
+/// has a denominator. Symlinks are counted as files (not followed).
+fn scan_totals(src: &Path, files: &mut u64, bytes: &mut u64) {
+    match std::fs::symlink_metadata(src) {
+        Ok(meta) if meta.is_dir() => {
+            if let Ok(rd) = std::fs::read_dir(src) {
+                for e in rd.flatten() {
+                    scan_totals(&e.path(), files, bytes);
+                }
+            }
+        }
+        Ok(meta) => { *files += 1; *bytes += meta.len(); }
+        Err(_) => {}
+    }
+}
+
+/// Sentinel error used to mark a user-cancelled operation, so callers can swap
+/// it for a friendly outcome instead of a red error toast.
+const CANCELLED_MSG: &str = "Operation cancelled";
+
+/// Progress- and cancel-aware recursive copy. Mirrors `copy_recursive` but
+/// reports each copied file and bails out (with `CANCELLED_MSG`) when the op's
+/// cancel flag is set.
+fn copy_tree(src: &Path, dst: &Path, prog: &mut OpProgress) -> Result<(), AppError> {
+    if prog.cancelled() {
+        return Err(AppError::Other(CANCELLED_MSG.into()));
+    }
+    let meta = std::fs::symlink_metadata(src)
+        .map_err(|e| AppError::Other(format!("Cannot read {}: {e}", src.display())))?;
+    if meta.is_dir() {
+        std::fs::create_dir_all(dst)
+            .map_err(|e| AppError::Other(format!("Cannot create {}: {e}", dst.display())))?;
+        for entry in std::fs::read_dir(src)
+            .map_err(|e| AppError::Other(format!("Cannot read {}: {e}", src.display())))?
+        {
+            let entry = entry.map_err(|e| AppError::Other(format!("{e}")))?;
+            copy_tree(&entry.path(), &dst.join(entry.file_name()), prog)?;
+        }
+    } else {
+        if let Some(parent) = dst.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::copy(src, dst)
+            .map_err(|e| AppError::Other(format!("Cannot copy {}: {e}", src.display())))?;
+        prog.done_files += 1;
+        prog.done_bytes += meta.len();
+        let name = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        prog.emit(&name, false);
+    }
+    Ok(())
+}
+
+/// Build an `OpProgress` for an operation. With an `op_id` it registers a
+/// cancel flag, pre-scans `sources` for the totals, and emits live; without
+/// one it's a no-op tracker (the fast path for small / scriptless calls).
+fn make_progress(
+    app: &tauri::AppHandle,
+    op_id: &Option<String>,
+    kind: &'static str,
+    sources: &[String],
+) -> OpProgress {
+    match op_id {
+        Some(id) => {
+            let cancel = register_op(id);
+            let (mut tf, mut tb) = (0u64, 0u64);
+            for s in sources { scan_totals(Path::new(s), &mut tf, &mut tb); }
+            let mut p = OpProgress {
+                app: Some(app.clone()), op_id: id.clone(), kind,
+                total_files: tf, total_bytes: tb, done_files: 0, done_bytes: 0,
+                last_emit: Instant::now(), cancel,
+            };
+            p.emit("", true); // initial frame so the bar appears at 0%
+            p
+        }
+        None => OpProgress {
+            app: None, op_id: String::new(), kind,
+            total_files: 0, total_bytes: 0, done_files: 0, done_bytes: 0,
+            last_emit: Instant::now(), cancel: Arc::new(AtomicBool::new(false)),
+        },
+    }
+}
+
 /// Copy each of `sources` into `dest_dir`. With `overwrite = false` (default)
 /// name collisions are resolved Explorer-style (" (2)", " (3)", …); with
 /// `overwrite = true` each item keeps its name and merges into any existing
@@ -360,30 +598,37 @@ fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// list of created / merged destination paths.
 #[tauri::command]
 pub async fn fs_copy(
+    app: tauri::AppHandle,
     sources: Vec<String>,
     dest_dir: String,
     overwrite: Option<bool>,
+    op_id: Option<String>,
 ) -> Result<Vec<String>, AppError> {
     let overwrite = overwrite.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
-        let dir = Path::new(&dest_dir);
-        let mut created = Vec::with_capacity(sources.len());
-        for s in &sources {
-            let src = Path::new(s);
-            let name = src
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .ok_or_else(|| AppError::Other(format!("Invalid source path: {s}")))?;
-            let dst = if overwrite {
-                dir.join(&name)
-            } else {
-                unique_dest(dir, &name)
-            };
-            copy_recursive(src, &dst)
-                .map_err(|e| AppError::Other(format!("Cannot copy {name}: {e}")))?;
-            created.push(dst.to_string_lossy().to_string());
-        }
-        Ok(created)
+        let mut prog = make_progress(&app, &op_id, "copy", &sources);
+        let result: Result<Vec<String>, AppError> = (|| {
+            let dir = Path::new(&dest_dir);
+            let mut created = Vec::with_capacity(sources.len());
+            for s in &sources {
+                let src = Path::new(s);
+                let name = src
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .ok_or_else(|| AppError::Other(format!("Invalid source path: {s}")))?;
+                let dst = if overwrite {
+                    dir.join(&name)
+                } else {
+                    unique_dest(dir, &name)
+                };
+                copy_tree(src, &dst, &mut prog)?;
+                created.push(dst.to_string_lossy().to_string());
+            }
+            prog.emit("", true); // final 100% frame
+            Ok(created)
+        })();
+        if let Some(id) = &op_id { unregister_op(id); }
+        result
     })
     .await
     .map_err(|e| AppError::Other(format!("fs_copy task panicked: {e}")))?
@@ -396,50 +641,97 @@ pub async fn fs_copy(
 /// list of new paths. Moving into the same directory is a no-op.
 #[tauri::command]
 pub async fn fs_move(
+    app: tauri::AppHandle,
     sources: Vec<String>,
     dest_dir: String,
     overwrite: Option<bool>,
+    op_id: Option<String>,
 ) -> Result<Vec<String>, AppError> {
     let overwrite = overwrite.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
-        let dir = Path::new(&dest_dir);
-        let mut moved = Vec::with_capacity(sources.len());
-        for s in &sources {
-            let src = Path::new(s);
-            let name = src
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .ok_or_else(|| AppError::Other(format!("Invalid source path: {s}")))?;
-            // No-op when the destination is the source's own parent.
-            if src.parent() == Some(dir) {
-                moved.push(s.clone());
-                continue;
-            }
-            // Refuse to move a directory into itself or a descendant.
-            if dir.starts_with(src) {
-                return Err(AppError::Other("Cannot move a folder into itself".into()));
-            }
-            let dst = if overwrite {
-                dir.join(&name)
-            } else {
-                unique_dest(dir, &name)
-            };
-            if std::fs::rename(src, &dst).is_err() {
-                copy_recursive(src, &dst)
-                    .map_err(|e| AppError::Other(format!("Cannot move {name}: {e}")))?;
-                let removed = if src.is_dir() {
-                    std::fs::remove_dir_all(src)
+        // Same-volume moves are instant renames (no progress); only the
+        // cross-volume copy+delete fallback reports progress, so we still build
+        // the tracker up front (it pre-scans the totals for that case).
+        let mut prog = make_progress(&app, &op_id, "move", &sources);
+        let result: Result<Vec<String>, AppError> = (|| {
+            let dir = Path::new(&dest_dir);
+            let mut moved = Vec::with_capacity(sources.len());
+            for s in &sources {
+                if prog.cancelled() {
+                    return Err(AppError::Other(CANCELLED_MSG.into()));
+                }
+                let src = Path::new(s);
+                let name = src
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .ok_or_else(|| AppError::Other(format!("Invalid source path: {s}")))?;
+                // No-op when the destination is the source's own parent.
+                if src.parent() == Some(dir) {
+                    moved.push(s.clone());
+                    continue;
+                }
+                // Refuse to move a directory into itself or a descendant.
+                if dir.starts_with(src) {
+                    return Err(AppError::Other("Cannot move a folder into itself".into()));
+                }
+                let dst = if overwrite {
+                    dir.join(&name)
                 } else {
-                    std::fs::remove_file(src)
+                    unique_dest(dir, &name)
                 };
-                removed.map_err(|e| AppError::Other(format!("Cannot remove source {name}: {e}")))?;
+                if std::fs::rename(src, &dst).is_err() {
+                    copy_tree(src, &dst, &mut prog)?;
+                    let removed = if src.is_dir() {
+                        std::fs::remove_dir_all(src)
+                    } else {
+                        std::fs::remove_file(src)
+                    };
+                    removed.map_err(|e| AppError::Other(format!("Cannot remove source {name}: {e}")))?;
+                }
+                moved.push(dst.to_string_lossy().to_string());
             }
-            moved.push(dst.to_string_lossy().to_string());
-        }
-        Ok(moved)
+            prog.emit("", true);
+            Ok(moved)
+        })();
+        if let Some(id) = &op_id { unregister_op(id); }
+        result
     })
     .await
     .map_err(|e| AppError::Other(format!("fs_move task panicked: {e}")))?
+}
+
+/// Duplicate each of `sources` in place (same parent folder), Explorer-style:
+/// `report.pdf` → `report (2).pdf`, a second time → `report (3).pdf`. Returns
+/// the created paths. Progress/cancel work exactly like `fs_copy`.
+#[tauri::command]
+pub async fn fs_duplicate(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+    op_id: Option<String>,
+) -> Result<Vec<String>, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let mut prog = make_progress(&app, &op_id, "duplicate", &paths);
+        let result: Result<Vec<String>, AppError> = (|| {
+            let mut created = Vec::with_capacity(paths.len());
+            for s in &paths {
+                let src = Path::new(s);
+                let parent = src.parent()
+                    .ok_or_else(|| AppError::Other(format!("Cannot duplicate a root path: {s}")))?;
+                let name = src.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .ok_or_else(|| AppError::Other(format!("Invalid source path: {s}")))?;
+                let dst = unique_dest(parent, &name);
+                copy_tree(src, &dst, &mut prog)?;
+                created.push(dst.to_string_lossy().to_string());
+            }
+            prog.emit("", true);
+            Ok(created)
+        })();
+        if let Some(id) = &op_id { unregister_op(id); }
+        result
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("fs_duplicate task panicked: {e}")))?
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +807,224 @@ fn untrash_paths(_paths: Vec<String>) -> Result<(), AppError> {
     Err(AppError::Other(
         "Restoring from the Trash isn't supported on macOS".into(),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Recycle Bin view — list / restore / purge / empty
+// ---------------------------------------------------------------------------
+// Windows + Linux are backed by `trash::os_limited` (with original locations,
+// so restore is a true "Put Back"). macOS has no such API, so it's backed by
+// the user's ~/.Trash directory directly: list reads it, purge/empty remove
+// from it, and restore recovers to the Desktop (the original path isn't stored
+// anywhere readable, so a real Put Back isn't possible there).
+
+/// One item currently in the OS trash / Recycle Bin.
+#[derive(Debug, Serialize, Clone)]
+pub struct TrashEntry {
+    /// Opaque, stable handle (the OS trash id) used to restore / purge it.
+    pub id:            String,
+    pub name:          String,
+    /// Original absolute path it was deleted from (parent + name).
+    pub original_path: String,
+    /// Deletion time as a Unix timestamp in seconds (`None` when unknown).
+    pub deleted_at:    Option<i64>,
+}
+
+#[cfg(not(target_os = "macos"))]
+fn trash_list_blocking() -> Result<Vec<TrashEntry>, AppError> {
+    use trash::os_limited::list;
+    let mut items = list().map_err(|e| AppError::Other(format!("Cannot read the Recycle Bin: {e}")))?;
+    // Newest first.
+    items.sort_by(|a, b| b.time_deleted.cmp(&a.time_deleted));
+    Ok(items
+        .into_iter()
+        .map(|it| {
+            let original = it.original_parent.join(&it.name);
+            TrashEntry {
+                id:            it.id.to_string_lossy().to_string(),
+                name:          it.name.to_string_lossy().to_string(),
+                original_path: original.to_string_lossy().to_string(),
+                deleted_at:    Some(it.time_deleted),
+            }
+        })
+        .collect())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_trash_dir() -> Result<PathBuf, AppError> {
+    dirs::home_dir()
+        .map(|h| h.join(".Trash"))
+        .ok_or_else(|| AppError::Other("No home directory".into()))
+}
+
+#[cfg(target_os = "macos")]
+fn trash_list_blocking() -> Result<Vec<TrashEntry>, AppError> {
+    let dir = macos_trash_dir()?;
+    let mut out: Vec<TrashEntry> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name == ".DS_Store" { continue; }
+            // The mtime in ~/.Trash is the moment the item was trashed.
+            let deleted_at = e
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64);
+            out.push(TrashEntry {
+                id:            e.path().to_string_lossy().to_string(), // path doubles as the id
+                name,
+                original_path: String::new(), // not recorded / readable on macOS
+                deleted_at,
+            });
+        }
+    }
+    out.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+    Ok(out)
+}
+
+/// Recover the given ~/.Trash items to the Desktop (macOS can't Put Back to the
+/// original location, which isn't stored). Collision-resolved like a paste.
+#[cfg(target_os = "macos")]
+fn macos_trash_restore(ids: &[String]) -> Result<(), AppError> {
+    let dest = dirs::desktop_dir()
+        .or_else(dirs::home_dir)
+        .ok_or_else(|| AppError::Other("No restore destination".into()))?;
+    for id in ids {
+        let src = Path::new(id);
+        if !src.exists() { continue; }
+        let name = src
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .ok_or_else(|| AppError::Other(format!("Invalid item: {id}")))?;
+        let target = unique_dest(&dest, &name);
+        std::fs::rename(src, &target)
+            .map_err(|e| AppError::Other(format!("Cannot restore {name}: {e}")))?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_trash_purge(ids: &[String]) -> Result<(), AppError> {
+    for id in ids {
+        let p = Path::new(id);
+        if !p.exists() { continue; }
+        let r = if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) };
+        r.map_err(|e| AppError::Other(format!("Cannot delete: {e}")))?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_trash_empty() -> Result<(), AppError> {
+    // Prefer Finder (handles locked items / permissions); fall back to a direct
+    // sweep of ~/.Trash when AppleScript isn't available.
+    let scripted = std::process::Command::new("osascript")
+        .args(["-e", "tell application \"Finder\" to empty trash"])
+        .output();
+    if let Ok(o) = scripted {
+        if o.status.success() { return Ok(()); }
+    }
+    let dir = macos_trash_dir()?;
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            let _ = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+        }
+    }
+    Ok(())
+}
+
+/// List the items currently in the Recycle Bin / trash (newest first).
+#[tauri::command]
+pub async fn fs_trash_list() -> Result<Vec<TrashEntry>, AppError> {
+    tokio::task::spawn_blocking(trash_list_blocking)
+        .await
+        .map_err(|e| AppError::Other(format!("fs_trash_list task panicked: {e}")))?
+}
+
+/// Resolve the requested ids against the current trash listing. Errors when an
+/// id no longer matches anything (the item was already restored / purged).
+#[cfg(not(target_os = "macos"))]
+fn collect_trash_items(ids: &[String]) -> Result<Vec<trash::TrashItem>, AppError> {
+    use trash::os_limited::list;
+    let items = list().map_err(|e| AppError::Other(format!("Cannot read the Recycle Bin: {e}")))?;
+    let want: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+    let picked: Vec<trash::TrashItem> = items
+        .into_iter()
+        .filter(|it| want.contains(it.id.to_string_lossy().as_ref()))
+        .collect();
+    if picked.is_empty() && !ids.is_empty() {
+        return Err(AppError::Other("Selected items are no longer in the Recycle Bin".into()));
+    }
+    Ok(picked)
+}
+
+/// Restore trashed items (by id). Windows + Linux put them back to their
+/// original location; macOS recovers them to the Desktop (no Put-Back API).
+#[tauri::command]
+pub async fn fs_trash_restore(ids: Vec<String>) -> Result<(), AppError> {
+    #[cfg(target_os = "macos")]
+    {
+        return tokio::task::spawn_blocking(move || macos_trash_restore(&ids))
+            .await
+            .map_err(|e| AppError::Other(format!("fs_trash_restore task panicked: {e}")))?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        tokio::task::spawn_blocking(move || {
+            let items = collect_trash_items(&ids)?;
+            trash::os_limited::restore_all(items)
+                .map_err(|e| AppError::Other(format!("Cannot restore: {e}")))
+        })
+        .await
+        .map_err(|e| AppError::Other(format!("fs_trash_restore task panicked: {e}")))?
+    }
+}
+
+/// Permanently delete trashed items (by id) — they leave the Recycle Bin for
+/// good. Windows + Linux + macOS.
+#[tauri::command]
+pub async fn fs_trash_purge(ids: Vec<String>) -> Result<(), AppError> {
+    #[cfg(target_os = "macos")]
+    {
+        return tokio::task::spawn_blocking(move || macos_trash_purge(&ids))
+            .await
+            .map_err(|e| AppError::Other(format!("fs_trash_purge task panicked: {e}")))?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        tokio::task::spawn_blocking(move || {
+            let items = collect_trash_items(&ids)?;
+            trash::os_limited::purge_all(items)
+                .map_err(|e| AppError::Other(format!("Cannot delete: {e}")))
+        })
+        .await
+        .map_err(|e| AppError::Other(format!("fs_trash_purge task panicked: {e}")))?
+    }
+}
+
+/// Empty the Recycle Bin entirely (permanent). Windows + Linux + macOS.
+#[tauri::command]
+pub async fn fs_trash_empty() -> Result<(), AppError> {
+    #[cfg(target_os = "macos")]
+    {
+        return tokio::task::spawn_blocking(macos_trash_empty)
+            .await
+            .map_err(|e| AppError::Other(format!("fs_trash_empty task panicked: {e}")))?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        tokio::task::spawn_blocking(move || {
+            use trash::os_limited::{list, purge_all};
+            let items = list().map_err(|e| AppError::Other(format!("Cannot read the Recycle Bin: {e}")))?;
+            if items.is_empty() { return Ok(()); }
+            purge_all(items).map_err(|e| AppError::Other(format!("Cannot empty the Recycle Bin: {e}")))
+        })
+        .await
+        .map_err(|e| AppError::Other(format!("fs_trash_empty task panicked: {e}")))?
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1193,4 +1703,204 @@ pub async fn list_fs_roots() -> Vec<FsRoot> {
     tokio::task::spawn_blocking(list_fs_roots_blocking)
         .await
         .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// WSL distributions (Windows) — mounted under \\wsl.localhost\<distro>
+// ---------------------------------------------------------------------------
+
+/// Enumerate installed WSL distributions via `wsl.exe --list --quiet` and map
+/// each to its `\\wsl.localhost\<distro>` UNC root (browsable by `fs_read_dir`
+/// like any other path). `wsl.exe` prints UTF-16LE, so we decode accordingly.
+/// Returns empty when WSL isn't installed (the command fails) or off-Windows.
+#[cfg(windows)]
+fn enumerate_wsl() -> Vec<FsRoot> {
+    use crate::process_ext::NoWindowExt;
+    let Ok(out) = std::process::Command::new("wsl.exe")
+        .args(["--list", "--quiet"])
+        .no_window()
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    // Decode UTF-16LE (skip a leading BOM if present).
+    let u16s: Vec<u16> = out.stdout.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let text = String::from_utf16_lossy(&u16s);
+    text.lines()
+        .map(|l| l.trim().trim_matches('\u{0}').trim_matches('\u{feff}').trim())
+        .filter(|n| !n.is_empty())
+        .map(|name| FsRoot {
+            name: name.to_string(),
+            path: format!(r"\\wsl.localhost\{name}"),
+            kind: "wsl".to_string(),
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn enumerate_wsl() -> Vec<FsRoot> {
+    Vec::new()
+}
+
+/// List installed WSL distributions as navigable roots. Loaded once (not on the
+/// removable-media poll) since spawning `wsl.exe` repeatedly would be wasteful.
+#[tauri::command]
+pub async fn list_wsl_distros() -> Vec<FsRoot> {
+    tokio::task::spawn_blocking(enumerate_wsl)
+        .await
+        .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// Recursive directory size (folder Properties) + selection info
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Clone)]
+pub struct DirSize {
+    /// Total bytes of all files under the path (directories themselves: 0).
+    pub bytes: u64,
+    /// File count (excluding directories).
+    pub files: u64,
+    /// Sub-directory count (excluding the path itself).
+    pub dirs:  u64,
+}
+
+fn dir_size_blocking(path: &Path) -> DirSize {
+    let mut acc = DirSize { bytes: 0, files: 0, dirs: 0 };
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for entry in rd.flatten() {
+            match entry.metadata() {
+                Ok(meta) if meta.is_dir() => { acc.dirs += 1; stack.push(entry.path()); }
+                Ok(meta) => { acc.files += 1; acc.bytes += meta.len(); }
+                Err(_) => {}
+            }
+        }
+    }
+    acc
+}
+
+/// Recursively compute the size (bytes + file/dir counts) under `path`. Used by
+/// the explorer's folder Properties and the multi-selection footer. Runs on the
+/// blocking pool — a deep tree can take a while, so callers show a spinner.
+#[tauri::command]
+pub async fn fs_dir_size(path: String) -> Result<DirSize, AppError> {
+    tokio::task::spawn_blocking(move || dir_size_blocking(Path::new(&path)))
+        .await
+        .map_err(|e| AppError::Other(format!("fs_dir_size task panicked: {e}")))
+}
+
+/// Total size of several paths at once (folders recursed, files summed) — the
+/// multi-selection footer's "N items · X total" figure.
+#[tauri::command]
+pub async fn fs_paths_size(paths: Vec<String>) -> Result<DirSize, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let mut acc = DirSize { bytes: 0, files: 0, dirs: 0 };
+        for p in &paths {
+            let path = Path::new(p);
+            match std::fs::symlink_metadata(path) {
+                Ok(meta) if meta.is_dir() => {
+                    acc.dirs += 1;
+                    let sub = dir_size_blocking(path);
+                    acc.bytes += sub.bytes; acc.files += sub.files; acc.dirs += sub.dirs;
+                }
+                Ok(meta) => { acc.files += 1; acc.bytes += meta.len(); }
+                Err(_) => {}
+            }
+        }
+        acc
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("fs_paths_size task panicked: {e}")))
+}
+
+// ---------------------------------------------------------------------------
+// Overview dashboard — real storage stats per drive
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Clone)]
+pub struct DriveUsage {
+    pub name:  String,
+    pub path:  String,
+    /// Total capacity in bytes. `None` when the platform/volume can't report it.
+    pub total: Option<u64>,
+    /// Free (available-to-caller) bytes. `None` when unavailable.
+    pub free:  Option<u64>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct OverviewStats {
+    pub drives:         Vec<DriveUsage>,
+    /// Sum of known drive capacities (bytes).
+    pub total_capacity: u64,
+    /// Sum of known free space (bytes).
+    pub total_free:     u64,
+}
+
+#[cfg(windows)]
+fn disk_free_total(path: &str) -> Option<(u64, u64)> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = std::ffi::OsStr::new(path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut free_avail: u64 = 0;
+    let mut total: u64 = 0;
+    let mut total_free: u64 = 0;
+    let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free_avail, &mut total, &mut total_free) };
+    if ok != 0 { Some((free_avail, total)) } else { None }
+}
+
+#[cfg(not(windows))]
+fn disk_free_total(path: &str) -> Option<(u64, u64)> {
+    // No std API for free space, so shell out to `df` (present on both Linux and
+    // macOS) rather than pull in a new crate. `-P` forces single-line POSIX
+    // output, `-k` reports 1024-byte blocks. Columns:
+    //   Filesystem  1024-blocks  Used  Available  Capacity  Mounted-on
+    let out = std::process::Command::new("df")
+        .args(["-k", "-P", path])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let line = text.lines().nth(1)?; // skip the header row
+    let cols: Vec<&str> = line.split_whitespace().collect();
+    if cols.len() < 4 {
+        return None;
+    }
+    let total_kb: u64 = cols[1].parse().ok()?;
+    let avail_kb: u64 = cols[3].parse().ok()?;
+    Some((avail_kb.saturating_mul(1024), total_kb.saturating_mul(1024)))
+}
+
+/// Real Overview dashboard stats: capacity / free space per drive (Windows;
+/// `None` on platforms without a std API). The frontend renders the per-drive
+/// usage bars and the aggregate capacity / free / used figures from this.
+#[tauri::command]
+pub async fn fs_overview_stats() -> OverviewStats {
+    tokio::task::spawn_blocking(|| {
+        let drives = list_fs_roots_blocking()
+            .into_iter()
+            .filter(|r| r.kind == "drive")
+            .map(|r| {
+                let (free, total) = match disk_free_total(&r.path) {
+                    Some((f, t)) => (Some(f), Some(t)),
+                    None => (None, None),
+                };
+                DriveUsage { name: r.name, path: r.path, total, free }
+            })
+            .collect::<Vec<_>>();
+        let total_capacity = drives.iter().filter_map(|d| d.total).sum();
+        let total_free     = drives.iter().filter_map(|d| d.free).sum();
+        OverviewStats { drives, total_capacity, total_free }
+    })
+    .await
+    .unwrap_or(OverviewStats { drives: Vec::new(), total_capacity: 0, total_free: 0 })
 }

@@ -1,5 +1,5 @@
 import { getExplorerConfig, setExplorerConfig } from '$lib/ipc/config';
-import type { ExplorerConfig, ExplorerView, ExplorerSort, ExplorerStartup, ExplorerSectionConfig, ExplorerColumnConfig } from '$lib/types/config';
+import type { ExplorerConfig, ExplorerView, ExplorerSort, ExplorerStartup, ExplorerSectionConfig, ExplorerColumnConfig, ExplorerSavedSearch } from '$lib/types/config';
 
 const DEFAULT: ExplorerConfig = {
   git_awareness:         false,
@@ -19,6 +19,8 @@ const DEFAULT: ExplorerConfig = {
   remembered_external_schemes: [],
   reveal_in_builtin:     false,
   columns:               [],
+  pinned_favourites:     [],
+  saved_searches:        [],
 };
 
 export const MAX_RECENTS_MIN = 1;
@@ -27,11 +29,13 @@ export const MAX_RECENTS_MAX = 50;
 /** Canonical sidebar sections in built-in order, with display labels. The
  *  config stores order + visibility against these ids. */
 export const EXPLORER_SECTIONS: { id: string; label: string }[] = [
-  { id: 'library',    label: 'Library' },
-  { id: 'recents',    label: 'Recents' },
-  { id: 'favourites', label: 'Favourites' },
-  { id: 'devices',    label: 'Devices' },
-  { id: 'projects',   label: 'Projects' },
+  { id: 'library',      label: 'Library' },
+  { id: 'recents',      label: 'Recents' },
+  { id: 'favourites',   label: 'Favourites' },
+  { id: 'savedsearches', label: 'Saved searches' },
+  { id: 'devices',      label: 'Devices' },
+  { id: 'linux',        label: 'Linux' },
+  { id: 'projects',     label: 'Projects' },
 ];
 
 /** Resolve the persisted (possibly empty/partial) section list against the
@@ -128,6 +132,8 @@ function createExplorerStore() {
   let rememberedSchemes   = $state<string[]>([]);
   let revealInBuiltin     = $state<boolean>(DEFAULT.reveal_in_builtin);
   let columns             = $state<ExplorerColumnConfig[]>([]);
+  let pinnedFavourites    = $state<string[]>([]);
+  let savedSearches       = $state<ExplorerSavedSearch[]>([]);
   let loaded              = $state(false);
 
   async function loadConfig() {
@@ -146,6 +152,8 @@ function createExplorerStore() {
       maxRecents          = clampRecents(cfg.max_recents);
       sidebarSections     = Array.isArray(cfg.sidebar_sections) ? cfg.sidebar_sections : [];
       columns             = Array.isArray(cfg.columns) ? cfg.columns : [];
+      pinnedFavourites    = Array.isArray(cfg.pinned_favourites) ? cfg.pinned_favourites.filter((s): s is string => typeof s === 'string') : [];
+      savedSearches       = Array.isArray(cfg.saved_searches) ? cfg.saved_searches : [];
       openExternalLinks   = !!cfg.open_external_links;
       openWebLinks        = !!cfg.open_web_links;
       revealInBuiltin     = !!cfg.reveal_in_builtin;
@@ -173,6 +181,8 @@ function createExplorerStore() {
       max_recents:           maxRecents,
       sidebar_sections:      sidebarSections,
       columns,
+      pinned_favourites:     pinnedFavourites,
+      saved_searches:        savedSearches,
       open_external_links:   openExternalLinks,
       open_web_links:        openWebLinks,
       remembered_external_schemes: rememberedSchemes,
@@ -200,6 +210,42 @@ function createExplorerStore() {
   function setColumns(list: ExplorerColumnConfig[]) { columns = list; persist(); }
   /** Reset columns to the built-in order + default visibility. */
   function resetColumns() { if (columns.length === 0) return; columns = []; persist(); }
+
+  // ── Pinned favourites ─────────────────────────────────────────────────
+  function normFav(p: string): string { return p.replace(/[\\/]+$/, ''); }
+  function isPinned(path: string): boolean {
+    const n = normFav(path).toLowerCase();
+    return pinnedFavourites.some(p => normFav(p).toLowerCase() === n);
+  }
+  function pinFavourite(path: string) {
+    const p = normFav(path);
+    if (!p || isPinned(p)) return;
+    pinnedFavourites = [...pinnedFavourites, p];
+    persist();
+  }
+  function unpinFavourite(path: string) {
+    const n = normFav(path).toLowerCase();
+    const next = pinnedFavourites.filter(p => normFav(p).toLowerCase() !== n);
+    if (next.length === pinnedFavourites.length) return;
+    pinnedFavourites = next;
+    persist();
+  }
+
+  // ── Saved searches ────────────────────────────────────────────────────
+  function addSavedSearch(s: ExplorerSavedSearch) {
+    savedSearches = [...savedSearches, s];
+    persist();
+  }
+  function removeSavedSearch(id: string) {
+    const next = savedSearches.filter(s => s.id !== id);
+    if (next.length === savedSearches.length) return;
+    savedSearches = next;
+    persist();
+  }
+  function renameSavedSearch(id: string, name: string) {
+    savedSearches = savedSearches.map(s => s.id === id ? { ...s, name } : s);
+    persist();
+  }
 
   // ── Generic external-link opening (address bar) ──────────────────────────
   function setOpenExternalLinks(on: boolean) { if (openExternalLinks === on) return; openExternalLinks = on; persist(); }
@@ -255,6 +301,8 @@ function createExplorerStore() {
     get maxRecents()          { return maxRecents; },
     get sidebarSections()     { return sidebarSections; },
     get columns()             { return columns; },
+    get pinnedFavourites()    { return pinnedFavourites; },
+    get savedSearches()       { return savedSearches; },
     get openExternalLinks()   { return openExternalLinks; },
     get openWebLinks()        { return openWebLinks; },
     get rememberedSchemes()   { return rememberedSchemes; },
@@ -273,6 +321,12 @@ function createExplorerStore() {
     setSidebarSections,
     setColumns,
     resetColumns,
+    isPinned,
+    pinFavourite,
+    unpinFavourite,
+    addSavedSearch,
+    removeSavedSearch,
+    renameSavedSearch,
     setOpenExternalLinks,
     setOpenWebLinks,
     setRevealInBuiltin,

@@ -211,6 +211,14 @@ pub struct ExplorerConfig {
     /// `name` is always shown first regardless of what's stored.
     #[serde(default)]
     pub columns: Vec<ExplorerColumnConfig>,
+    /// User-pinned favourite folders shown in the sidebar's Favourites section,
+    /// in addition to the OS standard locations. Absolute paths.
+    #[serde(default)]
+    pub pinned_favourites: Vec<String>,
+    /// Saved searches surfaced as their own sidebar section. Each captures a
+    /// query + filters + (optional) root folder and re-runs on click.
+    #[serde(default)]
+    pub saved_searches: Vec<ExplorerSavedSearch>,
 }
 
 /// One sidebar section's persisted order + visibility. Mirrors
@@ -231,6 +239,36 @@ pub struct ExplorerColumnConfig {
     pub id: String,
     /// Whether the column is shown.
     pub visible: bool,
+}
+
+/// A saved search: a query plus the advanced filters and (optional) root it was
+/// captured with. The frontend owns filter semantics; this is opaque storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplorerSavedSearch {
+    pub id:    String,
+    pub name:  String,
+    #[serde(default)]
+    pub query: String,
+    /// Folder the search runs in. Empty → the current folder at run time.
+    #[serde(default)]
+    pub root:  String,
+    /// Recurse into subfolders.
+    #[serde(default)]
+    pub recursive: bool,
+    /// Kind ids to keep (`image`/`document`/`video`/`audio`/`code`/`archive`/
+    /// `folder`/`other`). Empty → all kinds.
+    #[serde(default)]
+    pub kinds: Vec<String>,
+    /// Minimum / maximum size in bytes (`None` → unbounded).
+    #[serde(default)]
+    pub min_bytes: Option<u64>,
+    #[serde(default)]
+    pub max_bytes: Option<u64>,
+    /// Keep items modified at/after — or at/before — these Unix-ms timestamps.
+    #[serde(default)]
+    pub modified_after:  Option<i64>,
+    #[serde(default)]
+    pub modified_before: Option<i64>,
 }
 
 fn default_explorer_view() -> String { "details".into() }
@@ -260,6 +298,8 @@ impl Default for ExplorerConfig {
             remembered_external_schemes: Vec::new(),
             reveal_in_builtin:    false,
             columns:              Vec::new(),
+            pinned_favourites:    Vec::new(),
+            saved_searches:       Vec::new(),
         }
     }
 }

@@ -13,7 +13,7 @@ export interface FsEntry {
 export interface FsRoot {
   name: string;
   path: string;
-  kind: 'home' | 'desktop' | 'documents' | 'downloads' | 'drive';
+  kind: 'home' | 'desktop' | 'documents' | 'downloads' | 'drive' | 'wsl';
 }
 
 /** Read a directory — returns entries with metadata. Dot-prefixed entries
@@ -24,6 +24,11 @@ export const fsReadDir = (path: string, showHidden = false) =>
 /** Return quick-access roots (common dirs + drives). */
 export const listFsRoots = () =>
   invoke<FsRoot[]>('list_fs_roots');
+
+/** Installed WSL distributions as `\\wsl.localhost\<distro>` roots (Windows;
+ *  empty elsewhere or when WSL isn't installed). */
+export const listWslDistros = () =>
+  invoke<FsRoot[]>('list_wsl_distros');
 
 export const fsCreateDir      = (path: string)                      => invoke<void>('fs_create_dir',        { path });
 export const fsCreateFile     = (path: string)                      => invoke<void>('fs_create_file',       { path });
@@ -36,10 +41,54 @@ export const fsDelete         = (path: string)                      => invoke<vo
 /** Copy entries into `destDir`; returns the created destination paths. With
  *  `overwrite`, same-named items merge into / replace the existing entry
  *  instead of getting a " (2)" suffix. */
-export const fsCopy        = (sources: string[], destDir: string, overwrite = false) => invoke<string[]>('fs_copy', { sources, destDir, overwrite });
+export const fsCopy        = (sources: string[], destDir: string, overwrite = false, opId?: string) => invoke<string[]>('fs_copy', { sources, destDir, overwrite, opId: opId ?? null });
 /** Move (cut+paste) entries into `destDir`; returns the new paths. With
  *  `overwrite`, same-named items merge into / replace the existing entry. */
-export const fsMove        = (sources: string[], destDir: string, overwrite = false) => invoke<string[]>('fs_move', { sources, destDir, overwrite });
+export const fsMove        = (sources: string[], destDir: string, overwrite = false, opId?: string) => invoke<string[]>('fs_move', { sources, destDir, overwrite, opId: opId ?? null });
+/** Duplicate entries in place ("file (2).ext"). Returns the created paths. */
+export const fsDuplicate   = (paths: string[], opId?: string) => invoke<string[]>('fs_duplicate', { paths, opId: opId ?? null });
+/** Request cancellation of a running copy/move/duplicate by its op id. */
+export const fsCancelOp    = (opId: string) => invoke<void>('fs_cancel_op', { opId });
+/** One old→new rename pair for a batch rename. */
+export interface RenamePair { from: string; to: string; }
+/** Batch-rename many entries atomically (two-phase, collision-safe). */
+export const fsRenameMany  = (pairs: RenamePair[]) => invoke<string[]>('fs_rename_many', { pairs });
+
+/** Recursive size of a folder (bytes + file/dir counts). */
+export interface DirSize { bytes: number; files: number; dirs: number; }
+export const fsDirSize     = (path: string) => invoke<DirSize>('fs_dir_size', { path });
+/** Combined recursive size of several paths (multi-selection footer). */
+export const fsPathsSize   = (paths: string[]) => invoke<DirSize>('fs_paths_size', { paths });
+
+/** Per-drive storage usage for the Overview dashboard. */
+export interface DriveUsage { name: string; path: string; total: number | null; free: number | null; }
+export interface OverviewStats { drives: DriveUsage[]; total_capacity: number; total_free: number; }
+export const fsOverviewStats = () => invoke<OverviewStats>('fs_overview_stats');
+
+/** One item in the Recycle Bin / trash. */
+export interface TrashEntry { id: string; name: string; original_path: string; deleted_at: number | null; }
+/** List trash items (newest first). Empty on macOS. */
+export const fsTrashList    = () => invoke<TrashEntry[]>('fs_trash_list');
+/** Restore trashed items to their original location (Windows/Linux). */
+export const fsTrashRestore = (ids: string[]) => invoke<void>('fs_trash_restore', { ids });
+/** Permanently delete trashed items (Windows/Linux). */
+export const fsTrashPurge   = (ids: string[]) => invoke<void>('fs_trash_purge', { ids });
+/** Empty the whole Recycle Bin (Windows/Linux). */
+export const fsTrashEmpty   = () => invoke<void>('fs_trash_empty');
+
+/** Progress event for a long-running file operation (copy/move/duplicate). */
+export interface FsOpProgress {
+  op_id: string;
+  kind: 'copy' | 'move' | 'duplicate';
+  done_files: number;
+  total_files: number;
+  done_bytes: number;
+  total_bytes: number;
+  current: string;
+}
+/** Subscribe to this window's file-operation progress events. */
+export const onFsOpProgress = (cb: (p: FsOpProgress) => void): Promise<UnlistenFn> =>
+  listen<FsOpProgress>('arbor://fs-op-progress', e => cb(e.payload));
 /** Move entries to the OS trash / Recycle Bin (recoverable). */
 export const fsTrash       = (paths: string[]) => invoke<void>('fs_trash', { paths });
 /** Restore previously-trashed entries to their original locations (undo of
