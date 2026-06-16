@@ -17,7 +17,7 @@
 use tauri::Emitter;
 
 use arbor_auth::oauth2::{InstalledAppFlow, refresh_token};
-use arbor_auth::BodyFormat;
+use arbor_auth::prelude::BodyFormat;
 
 use crate::auth::credential_store;
 use crate::error::{AppError, Result};

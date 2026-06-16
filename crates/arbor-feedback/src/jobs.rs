@@ -240,7 +240,7 @@ impl JobRegistry {
 pub fn kill_process(pid: u32) {
     #[cfg(target_os = "windows")]
     {
-        use arbor_process_ext::NoWindowExt;
+        use arbor_process_ext::prelude::NoWindowExt;
         let _ = std::process::Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/F", "/T"])
             .no_window()

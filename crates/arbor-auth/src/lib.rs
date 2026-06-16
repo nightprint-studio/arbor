@@ -24,7 +24,5 @@ pub mod error;
 pub mod html;
 pub mod oauth2;
 pub mod pkce;
+pub mod prelude;
 pub mod types;
-
-pub use error::{AuthError, Result};
-pub use types::{BodyFormat, DeviceCode, TokenResponse};

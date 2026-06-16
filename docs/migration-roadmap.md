@@ -43,6 +43,8 @@ indipendenti dopo M0 → si possono alternare. M3→M4→M5 sono la spina del pr
 
 ## M0 — Decisioni, naming lock, scaffolding
 
+**Stato**: ✅ **fatto** — layout `foundation/` confermato (i crate esistenti restano flat, niente move); `tarpc` + `zeroize` aggiunti a `[workspace.dependencies]` (parcheggiati, unused → smoke build pulito); scheletri `crates/foundation/{fs,ipc,shell-common}` creati (compilano vuoti, prelude per ognuno, in `members`).
+
 **Obiettivo**: sbloccare tutto fissando le scelte e la forma del workspace.
 **Dipende da**: niente.
 **Decisioni** ⚠️ (le 9 di round2 §Decisioni aperte): `wasmtime` come dep · formato ABI · cloud WASM-vs-subprocess · DB manager framing · sede SDK WASM · launcher sì/no · identità taskbar · timing engine multi-app · capability generiche. **Naming già deciso**: Arbor/Corvus/Merula/Sitta.
@@ -57,6 +59,8 @@ indipendenti dopo M0 → si possono alternare. M3→M4→M5 sono la spina del pr
 **Sblocca**: tutto.
 
 ## M1 — Foundation Modello D: `arbor-fs` + `arbor-ipc` + `arbor-shell-common` + debito prelude
+
+**Stato**: 🚧 **in corso** — **M1a `arbor-fs` fatto** (FS puro estratto da `fs_commands.rs`: read/mutate/copy-move-dup con `ProgressSink`+`CancelToken` iniettati, trash, zip, roots/WSL/overview, path-expand; i comandi sono thin wrapper, `From<FsError> for AppError` preserva la wire string; watcher + glue OS restano nello shell). **M1b `arbor-ipc`** = design ([`docs/ipc-design.md`](ipc-design.md)) + scheletro `BrokerClient`/`Event` + ping loopback in-process (tarpc parcheggiato, flip a M3). **M1c `arbor-shell-common`** = scheletro router + credential broker (cache+zeroize). **M1d** = prelude per auth/cloud/process-ext.
 
 **Obiettivo**: i fondamentali condivisi del Modello D (1 FE + N BE): FS puro, il transport shell↔BE, e il runtime dello shell (host WebView + router + credential broker).
 **Dipende da**: M0.
@@ -76,13 +80,15 @@ indipendenti dopo M0 → si possono alternare. M3→M4→M5 sono la spina del pr
 
 ## M2 — Completare round 1: domini → crate `corvus-*`
 
+**Stato**: 🚧 **in corso**. **Ordine adottato per rischio** (no-compile in sessione): si parte dal dominio leaf più piccolo/isolato per stabilire il pattern, poi i grossi. **`corvus-brp` FATTO** (655 righe, leaf): crate `crates/corvus/brp` con prelude + **unit test** (capability ingestion, SSE frame parsing, status); `src-tauri/src/brp/` rimosso, i 4 consumer (lib.rs/brp_commands/ns_shell/brp) usano `corvus_brp::prelude::`; stub round1 `crates/brp` (`arbor-brp`) cancellato. **Dimensioni rimanenti**: git_provider ~9.2k righe/47 file (il più grosso e accoppiato), pipeline ~3.5k, integrations ~1.9k (jira+linear). Lo step 6 (contribution namespace/hook runtime-agnostic) NON ancora fatto per brp — il namespace `arbor.brp.*` vive ancora in `ns_shell/brp.rs` e importa il crate; la contribuzione runtime-agnostic arriva con M6.
+
 **Obiettivo**: tirare fuori da `src-tauri` i domini git-client come crate, **già col nome finale**.
 **Dipende da**: M0 (naming). Segue il piano round 1 PR #5-#9.
 **Step** (un dominio per volta, ognuno compila):
 1. `corvus-git-provider-{api,github,gitlab}` ← `src-tauri/src/git_provider/`.
 2. `corvus-issue-tracker-{api,github,gitlab,jira,linear}` ← `src-tauri/src/integrations/`.
 3. `corvus-pipeline-{api,core}` ← `src-tauri/src/pipeline/`.
-4. `corvus-brp` ← `src-tauri/src/brp/`.
+4. ✅ `corvus-brp` ← `src-tauri/src/brp/` (FATTO).
 5. `arbor-plugin-marketplace` (PR #5) — atterra col pattern nuovo (multi-host arriva in M6).
 6. Ogni dominio **contribuisce i suoi namespace/hook/permission** in modo runtime-agnostic (pattern `NamespaceContributor` di `arbor-plugin-api`), spostandoli da `ns_shell/`.
 **Deliverable**: `src-tauri` più sottile; domini come crate; `HOOK_CATALOG` si svuota verso i domini.

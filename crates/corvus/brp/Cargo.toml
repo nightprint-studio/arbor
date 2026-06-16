@@ -1,15 +1,13 @@
 [package]
-name         = "arbor-brp"
+name         = "corvus-brp"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "Bevy Remote Protocol client (JSON-RPC + SSE watch). Earmarked to be moved into a Lua plugin once the runtime supports it; isolated as a crate to keep the cut clean."
+description  = "Bevy Remote Protocol client (JSON-RPC + SSE watch) for Corvus. Earmarked to become a Lua plugin once the runtime supports it; isolated as a crate to keep the cut clean."
 
 [dependencies]
-arbor-core = { path = "../core" }
-
 serde        = { workspace = true }
 serde_json   = { workspace = true }
 thiserror    = { workspace = true }

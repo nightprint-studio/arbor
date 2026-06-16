@@ -1,0 +1,17 @@
+[package]
+name         = "arbor-ipc"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Transport-agnostic IPC for Arbor's Model D (1 FE + N BE): typed tarpc request/response + a one-way push-event channel, in-process today and named-pipe/unix-socket tomorrow."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+# tarpc + tokio are intentionally NOT wired yet — the M1 skeleton ships only the
+# transport-agnostic contract (BrokerClient, Event) plus an in-process loopback.
+# The named-pipe / unix-socket transport and the tarpc codegen land at the M3
+# in-process→IPC flip. See docs/ipc-design.md.

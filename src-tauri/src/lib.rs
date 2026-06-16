@@ -38,7 +38,6 @@ mod yaml_studio;
 mod properties_studio;
 mod studio;
 mod cloud;
-mod brp;
 mod marketplace;
 
 use crate::error::{AppError, Result};
@@ -60,7 +59,7 @@ use crate::studio::format::StudioRegistry;
 use crate::cloud::{CloudCancellations, CloudPendingOps};
 // `crate::cloud` is now a thin shim around the `arbor-cloud` workspace
 // crate — see `cloud/mod.rs` for the layout / Phase A vs Phase B split.
-use crate::brp::BrpRegistry;
+use corvus_brp::prelude::BrpRegistry;
 use arbor_plugin_marketplace::prelude::MarketplaceRegistry;
 use std::sync::OnceLock;
 use arbor_scheduler::prelude::Scheduler;

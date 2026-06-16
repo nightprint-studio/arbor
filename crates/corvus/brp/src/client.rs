@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-/// Failure modes surfaced to callers. Kept separate from `crate::error::AppError`
+/// Failure modes surfaced to callers. Kept separate from the host's `AppError`
 /// so the BRP layer stays unaware of the wider app — the Tauri command layer
 /// is what folds `BrpError` into `AppError`.
 #[derive(Debug, Error)]
@@ -139,5 +139,23 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..n])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_leaves_short_strings_intact() {
+        assert_eq!(truncate("short", 200), "short");
+    }
+
+    #[test]
+    fn truncate_clips_long_strings_with_ellipsis() {
+        let s = "x".repeat(250);
+        let out = truncate(&s, 200);
+        assert_eq!(out.chars().filter(|c| *c == 'x').count(), 200);
+        assert!(out.ends_with('…'));
     }
 }

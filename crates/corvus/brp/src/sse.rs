@@ -209,3 +209,29 @@ fn truncate(s: &str, n: usize) -> String {
         format!("{}…", &s[..n])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_sse_data_strips_one_leading_space() {
+        assert_eq!(parse_sse_data("data: {\"a\":1}\n").as_deref(), Some("{\"a\":1}"));
+        assert_eq!(parse_sse_data("data:{\"a\":1}\n").as_deref(), Some("{\"a\":1}"));
+    }
+
+    #[test]
+    fn parse_sse_data_joins_multiple_data_lines() {
+        assert_eq!(
+            parse_sse_data("data: line1\ndata: line2\n").as_deref(),
+            Some("line1\nline2")
+        );
+    }
+
+    #[test]
+    fn parse_sse_data_ignores_non_data_frames() {
+        // Comment / heartbeat / other SSE fields → no payload.
+        assert_eq!(parse_sse_data(": keep-alive\n"), None);
+        assert_eq!(parse_sse_data("event: ping\nid: 7\n"), None);
+    }
+}

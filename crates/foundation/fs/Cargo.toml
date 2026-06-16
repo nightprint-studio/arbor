@@ -1,0 +1,29 @@
+[package]
+name         = "arbor-fs"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Pure filesystem operations for Arbor (read/write/copy/move/delete/list/search/trash/zip), Tauri-free. Consumed by the file explorer and the generic FS commands."
+
+[dependencies]
+serde     = { workspace = true }
+thiserror = { workspace = true }
+dirs      = { workspace = true }
+regex     = { workspace = true }
+# Console-window suppression for the `wsl.exe` enumeration. Same foundation dep
+# the shell uses; keeps WSL roots out of a popped CMD window.
+arbor-process-ext = { path = "../../arbor-process-ext" }
+# Cross-platform move-to-trash + Recycle Bin listing/restore/purge (Windows /
+# macOS / freedesktop). Same version the shell pinned pre-split.
+trash = "5"
+# ZIP compress / extract for the explorer's archive actions.
+zip   = "2"
+
+# GetLogicalDrives (drive enumeration) + GetDiskFreeSpaceExW (Overview usage).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+] }

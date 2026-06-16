@@ -139,6 +139,7 @@ dependencies = [
  "arbor-cloud",
  "arbor-core",
  "arbor-feedback",
+ "arbor-fs",
  "arbor-nemus",
  "arbor-plugin-api",
  "arbor-plugin-core",
@@ -149,6 +150,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
+ "corvus-brp",
  "cron",
  "dirs",
  "encoding_rs",
@@ -257,6 +259,29 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "arbor-fs"
+version = "0.3.0"
+dependencies = [
+ "arbor-process-ext",
+ "dirs",
+ "regex",
+ "serde",
+ "thiserror 2.0.18",
+ "trash",
+ "windows-sys 0.52.0",
+ "zip",
+]
+
+[[package]]
+name = "arbor-ipc"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -414,6 +439,16 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "arbor-shell-common"
+version = "0.3.0"
+dependencies = [
+ "arbor-ipc",
+ "keyring",
+ "thiserror 2.0.18",
+ "zeroize",
 ]
 
 [[package]]
@@ -1176,6 +1211,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9b4739a805a62757a83e5654fa3faabec0442666b263bb2287d5a8185bfd953"
 dependencies = [
  "bindgen",
+]
+
+[[package]]
+name = "corvus-brp"
+version = "0.3.0"
+dependencies = [
+ "futures-util",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

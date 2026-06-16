@@ -1,0 +1,16 @@
+[package]
+name         = "arbor-shell-common"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Arbor shell runtime (Model D): the router (FE invoke → arbor-ipc → BE) and the credential broker — the sole keyring holder, with an in-memory access-token cache (zeroize-on-drop)."
+
+[dependencies]
+arbor-ipc = { path = "../ipc" }
+# Sole keyring holder (the broker). FE / backends / plugins never link this.
+keyring   = { workspace = true }
+# Wipe the in-memory access-token cache on drop.
+zeroize   = { workspace = true }
+thiserror = { workspace = true }

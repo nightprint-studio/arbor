@@ -1,4 +1,4 @@
-//! Bevy Remote Protocol client.
+//! Bevy Remote Protocol client (Corvus).
 //!
 //! Phase 1 — read-only HTTP JSON-RPC. Phase 2 adds SSE watch streams; the
 //! registry now also tracks live subscriptions so they can be aborted when
@@ -12,8 +12,14 @@
 //! BRP 0.18 method names are namespaced under `world.*` / `registry.*` /
 //! `rpc.*`. See `methods` below — these are the only strings we need to
 //! hard-code here since the rest is just JSON pass-through.
+//!
+//! ## Public API: use the [`prelude`]
+//!
+//! Workspace convention — reach this crate's surface through
+//! `corvus_brp::prelude::...`.
 
 pub mod client;
+pub mod prelude;
 pub mod sse;
 
 use std::collections::HashMap;
@@ -352,3 +358,77 @@ pub mod methods {
 }
 
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:15702";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn has_method_is_soft_true_when_empty() {
+        let caps = BrpCapabilities::default();
+        // No probe yet → don't false-negative.
+        assert!(caps.has_method("world.query"));
+    }
+
+    #[test]
+    fn has_method_is_exact_once_probed() {
+        let mut caps = BrpCapabilities::default();
+        caps.methods = vec!["world.query".into()];
+        assert!(caps.has_method("world.query"));
+        assert!(!caps.has_method("world.spawn_entity"));
+    }
+
+    #[test]
+    fn ingest_discover_handles_string_and_object_shapes() {
+        let mut caps = BrpCapabilities::default();
+        // `methods` as bare strings.
+        caps.ingest_discover(&json!({ "methods": ["world.query", "rpc.discover"] }));
+        // `result` as objects with a `name` field; dedup with the above.
+        caps.ingest_discover(&json!({ "result": [{ "name": "world.query" }, { "name": "world.get_components" }] }));
+        assert_eq!(
+            caps.methods,
+            vec!["rpc.discover", "world.get_components", "world.query"]
+        );
+    }
+
+    #[test]
+    fn ingest_schema_classifies_short_names_and_recurses_one_level() {
+        let mut caps = BrpCapabilities::default();
+        // Type map wrapped under an envelope key → recurse one level.
+        caps.ingest_schema(&json!({
+            "components": {
+                "bevy_core::name::Name": {},
+                "bevy_ecs::hierarchy::ChildOf": {},
+                "bevy_hierarchy::components::parent::Parent": {},
+                "my_game::Children": {},
+                "my_game::Health": {},
+            }
+        }));
+        assert_eq!(caps.name_types, vec!["bevy_core::name::Name"]);
+        assert_eq!(
+            caps.parent_types,
+            vec![
+                "bevy_ecs::hierarchy::ChildOf",
+                "bevy_hierarchy::components::parent::Parent"
+            ]
+        );
+        assert_eq!(caps.children_types, vec!["my_game::Children"]);
+        assert_eq!(caps.all_types.len(), 5);
+    }
+
+    #[test]
+    fn ingest_schema_ignores_non_type_maps() {
+        let mut caps = BrpCapabilities::default();
+        caps.ingest_schema(&json!({ "nope": 1, "still": "no paths here" }));
+        assert!(caps.all_types.is_empty());
+    }
+
+    #[test]
+    fn status_from_no_session_is_disconnected() {
+        let s = BrpStatus::from_session(None);
+        assert!(!s.connected);
+        assert!(s.endpoint.is_none());
+        assert!(s.capabilities.is_none());
+    }
+}

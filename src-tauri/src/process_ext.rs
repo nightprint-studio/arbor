@@ -6,4 +6,4 @@
 //! unchanged because the re-export preserves the `crate::process_ext::NoWindowExt`
 //! path.
 
-pub use arbor_process_ext::NoWindowExt;
+pub use arbor_process_ext::prelude::NoWindowExt;

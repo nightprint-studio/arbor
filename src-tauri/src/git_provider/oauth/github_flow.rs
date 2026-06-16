@@ -25,7 +25,7 @@
 use tauri::Emitter;
 
 use arbor_auth::oauth2::{DeviceFlow, PollOutcome, refresh_token};
-use arbor_auth::{AuthError, BodyFormat};
+use arbor_auth::prelude::{AuthError, BodyFormat};
 
 use crate::auth::DeviceFlowInfo;
 use crate::auth::credential_store;

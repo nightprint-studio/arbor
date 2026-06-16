@@ -56,13 +56,13 @@ pub enum AppError {
     Other(String),
 }
 
-/// Bridge `arbor_cloud::CloudError` into the host error enum so cloud
+/// Bridge `arbor_cloud::prelude::CloudError` into the host error enum so cloud
 /// commands can `?`-propagate without bespoke mapping at every call site.
 /// Mapping is variant-by-variant to preserve the existing wire shape (the
 /// frontend matches on the prefix in the message string).
-impl From<arbor_cloud::CloudError> for AppError {
-    fn from(e: arbor_cloud::CloudError) -> Self {
-        use arbor_cloud::CloudError as C;
+impl From<arbor_cloud::prelude::CloudError> for AppError {
+    fn from(e: arbor_cloud::prelude::CloudError) -> Self {
+        use arbor_cloud::prelude::CloudError as C;
         match e {
             C::Io(e)          => AppError::Io(e),
             C::Json(e)        => AppError::Json(e),
@@ -131,6 +131,22 @@ impl From<arbor_plugin_core::prelude::PluginCoreError> for AppError {
 impl From<arbor_nemus::prelude::NemusError> for AppError {
     fn from(e: arbor_nemus::prelude::NemusError) -> Self {
         AppError::Nemus(e.to_string())
+    }
+}
+
+/// Bridge `arbor_fs::FsError` into the host enum. Mapped so the wire string the
+/// explorer shows is byte-for-byte what it was before the FS logic moved into
+/// the `arbor-fs` crate: IO failures keep their action context, cancellation
+/// reuses the `Cancelled` message, and the pre-formatted string variants pass
+/// through as `Other`.
+impl From<arbor_fs::prelude::FsError> for AppError {
+    fn from(e: arbor_fs::prelude::FsError) -> Self {
+        use arbor_fs::prelude::FsError as F;
+        match e {
+            F::Io { context, source } => AppError::Other(format!("{context}: {source}")),
+            F::Cancelled              => AppError::Cancelled,
+            F::Invalid(s) | F::Trash(s) | F::Zip(s) | F::Unsupported(s) => AppError::Other(s),
+        }
     }
 }
 

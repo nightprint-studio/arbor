@@ -12,7 +12,7 @@ use serde_json::Value;
 use tauri::State;
 
 use crate::AppState;
-use crate::brp::{BrpClient, BrpError, BrpRegistry, BrpSession, BrpStatus, DEFAULT_ENDPOINT, probe_capabilities};
+use corvus_brp::prelude::{BrpClient, BrpError, BrpRegistry, BrpSession, BrpStatus, DEFAULT_ENDPOINT, probe_capabilities};
 use crate::error::AppError;
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;

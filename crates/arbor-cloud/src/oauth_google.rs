@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use arbor_auth::oauth2::{InstalledAppFlow, refresh_token};
-use arbor_auth::{BodyFormat, TokenResponse};
+use arbor_auth::prelude::{BodyFormat, TokenResponse};
 
 use crate::auth_gcs::{now_secs, RefreshedToken, StoredOAuth};
 use crate::error::{CloudError, Result};

@@ -3,7 +3,7 @@
 //! All cloud logic now lives in `crates/arbor-cloud`. This module:
 //!   * re-exports the cloud crate's modules so existing call sites
 //!     (`crate::cloud::types::CloudConnection`, etc.) keep compiling;
-//!   * defines [`ArborCloudHost`], the `arbor_cloud::CloudHost` impl that
+//!   * defines [`ArborCloudHost`], the `arbor_cloud::host::CloudHost` impl that
 //!     bridges into `AppState`'s `JobRegistry` / `PluginHost` / Tauri
 //!     events / cancellation maps;
 //!   * exposes [`install`] which the Tauri `setup()` calls once to (a)
@@ -35,7 +35,7 @@ pub use arbor_cloud::host::{CloudCancellations, CloudPendingOps};
 
 // ── CloudHost impl ─────────────────────────────────────────────────────────
 
-/// Bridges `arbor_cloud::CloudHost` onto the host's `AppState` registries
+/// Bridges `arbor_cloud::host::CloudHost` onto the host's `AppState` registries
 /// + the Tauri event bus. Constructed once at startup and managed as
 /// `Arc<dyn CloudHost>` so the command + plugin-namespace layers can pull
 /// it back out of Tauri State without knowing the concrete type.

@@ -237,7 +237,7 @@ async fn gcloud_print_access_token() -> Result<String> {
     // startup cost is enough to matter on Windows.
     let out = tokio::task::spawn_blocking(|| {
         use std::process::Command;
-        use arbor_process_ext::NoWindowExt;
+        use arbor_process_ext::prelude::NoWindowExt;
         Command::new("gcloud")
             .args(["auth", "print-access-token"])
             .no_window()

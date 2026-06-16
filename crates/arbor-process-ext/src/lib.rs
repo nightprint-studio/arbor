@@ -5,6 +5,8 @@
 //! `.output()` to prevent a visible CMD/shell window from appearing when the
 //! process is created from within a GUI process (e.g. Tauri WebView).
 
+pub mod prelude;
+
 pub trait NoWindowExt {
     fn no_window(&mut self) -> &mut Self;
 }

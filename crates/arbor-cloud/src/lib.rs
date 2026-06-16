@@ -20,9 +20,7 @@ pub mod host;
 pub mod oauth_google;
 pub mod operator;
 pub mod ops;
+pub mod prelude;
 pub mod secrets;
 pub mod transfer;
 pub mod types;
-
-pub use error::{CloudError, Result};
-pub use host::{CloudCancellations, CloudHost, CloudJobInfo, CloudJobStatus, CloudPendingOps};

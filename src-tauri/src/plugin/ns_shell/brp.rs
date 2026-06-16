@@ -39,7 +39,7 @@ use std::time::Duration;
 use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
-use crate::brp::{
+use corvus_brp::prelude::{
     BrpClient, BrpSession, BrpStatus, DEFAULT_ENDPOINT, WatchEvent, WatchSub, probe_capabilities,
     run_watch_stream,
 };
@@ -607,8 +607,8 @@ fn error_envelope(
     serde_json::json!({ "ok": false, "error": err })
 }
 
-fn error_from_brp(e: crate::brp::BrpError) -> serde_json::Value {
-    use crate::brp::BrpError;
+fn error_from_brp(e: corvus_brp::prelude::BrpError) -> serde_json::Value {
+    use corvus_brp::prelude::BrpError;
     match e {
         BrpError::Transport(m) => error_envelope("transport", &m, None, None),
         BrpError::Status { status, body } => error_envelope(
