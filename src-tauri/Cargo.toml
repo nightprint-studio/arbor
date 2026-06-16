@@ -53,6 +53,8 @@ tauri-build = { version = "2.6.1", features = [] }
 arbor-process-ext = { path = "../crates/arbor-process-ext" }
 arbor-fs          = { path = "../crates/foundation/fs" }
 corvus-brp        = { path = "../crates/corvus/brp" }
+corvus-issue-tracker-api = { path = "../crates/corvus/issue-tracker/api" }
+corvus-pipeline-api = { path = "../crates/corvus/pipeline/api" }
 arbor-feedback    = { path = "../crates/arbor-feedback" }
 arbor-cloud       = { path = "../crates/arbor-cloud" }
 arbor-auth        = { path = "../crates/arbor-auth" }

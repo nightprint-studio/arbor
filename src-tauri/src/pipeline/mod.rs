@@ -2,10 +2,14 @@
 // the GitProvider refactor.  This module keeps only the provider-neutral
 // pipeline orchestrator.
 
-pub mod vars;
+// The pure expression engine (run variables + condition tree/parser/evaluator)
+// now lives in `corvus-pipeline-api`. Re-exported as `vars` so existing
+// `pipeline::vars::*` / `super::vars::*` call sites keep resolving; `condition`
+// is a thin shell module that re-exports the crate's condition API and adds the
+// `StepDef`-carrying `IfBlock`.
+pub use corvus_pipeline_api::vars;
 pub mod builtin;
 pub mod condition;
-pub mod condition_parser;
 
 pub use vars::{VarValue, RunContext, CaptureSpec, CaptureSource};
 pub use builtin::BuiltinSpec;

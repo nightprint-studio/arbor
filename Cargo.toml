@@ -16,6 +16,8 @@ members = [
     "crates/foundation/ipc",
     "crates/foundation/shell-common",
     "crates/corvus/brp",
+    "crates/corvus/issue-tracker/api",
+    "crates/corvus/pipeline/api",
     "crates/plugin/api",
     "crates/plugin/core",
     "crates/plugin/marketplace",

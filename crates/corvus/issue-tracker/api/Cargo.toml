@@ -1,0 +1,11 @@
+[package]
+name         = "corvus-issue-tracker-api"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Provider-agnostic issue-tracker DTOs for Corvus (Issue, comments, filters, …) plus pure helpers. The leaf the Jira/Linear/GitHub/GitLab impls build on."
+
+[dependencies]
+serde = { workspace = true }

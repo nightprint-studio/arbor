@@ -151,6 +151,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "corvus-brp",
+ "corvus-issue-tracker-api",
+ "corvus-pipeline-api",
  "cron",
  "dirs",
  "encoding_rs",
@@ -1223,6 +1225,23 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "corvus-issue-tracker-api"
+version = "0.3.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "corvus-pipeline-api"
+version = "0.3.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 

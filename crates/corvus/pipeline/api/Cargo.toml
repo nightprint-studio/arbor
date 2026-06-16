@@ -1,0 +1,14 @@
+[package]
+name         = "corvus-pipeline-api"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Pure pipeline expression engine for Corvus: run variables (typed store + ${var} interpolation + transform chain) and the if-block condition language (structured tree + free-form parser + evaluator). No host coupling."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+regex      = { workspace = true }
+tracing    = { workspace = true }

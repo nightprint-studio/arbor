@@ -29,7 +29,7 @@
 //! defined(maven_version) && ${maven_version} ~~ "3."
 //! ```
 
-use super::condition::{CompareOp, Condition};
+use crate::condition::{CompareOp, Condition};
 
 /// Parse a free-form condition expression. Returns a structured `Condition`
 /// tree that the runtime evaluates without further parsing.
@@ -392,13 +392,13 @@ fn strip_var_ref(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::vars::{RunContext, VarValue};
+    use crate::vars::{RunContext, VarValue};
 
     fn eval(expr: &str, set: &[(&str, VarValue)]) -> bool {
         let mut ctx = RunContext::new();
         for (k, v) in set { ctx.set(*k, v.clone()); }
         let cond = parse(expr).expect("parse");
-        super::super::condition::evaluate(&cond, &ctx)
+        crate::condition::evaluate(&cond, &ctx)
     }
 
     #[test]
