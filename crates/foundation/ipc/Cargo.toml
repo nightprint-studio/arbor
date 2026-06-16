@@ -11,7 +11,15 @@ description  = "Transport-agnostic IPC for Arbor's Model D (1 FE + N BE): typed 
 serde      = { workspace = true }
 serde_json = { workspace = true }
 thiserror  = { workspace = true }
+# The credential contract (`SessionProvider`) is async — resolving a session is
+# I/O (keyring read + OAuth refresh), and backend call sites are async. The trait
+# is object-safe via async-trait so providers hold `Arc<dyn SessionProvider>`.
+async-trait = { workspace = true }
 # tarpc + tokio are intentionally NOT wired yet — the M1 skeleton ships only the
 # transport-agnostic contract (BrokerClient, Event) plus an in-process loopback.
 # The named-pipe / unix-socket transport and the tarpc codegen land at the M3
 # in-process→IPC flip. See docs/ipc-design.md.
+
+[dev-dependencies]
+# Drive the async SessionProvider contract test without pulling a full runtime.
+futures-executor = { workspace = true }

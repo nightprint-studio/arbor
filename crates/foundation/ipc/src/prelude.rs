@@ -4,5 +4,6 @@
 //! `arbor_ipc::prelude::...`. The submodules stay `pub` for rustdoc navigation.
 
 pub use crate::client::{Bytes, BrokerClient, LoopbackBroker};
+pub use crate::credential::{AuthSession, CredentialError, SessionProvider};
 pub use crate::error::{IpcError, Result};
 pub use crate::event::Event;

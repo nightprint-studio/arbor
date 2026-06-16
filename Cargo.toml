@@ -17,6 +17,8 @@ members = [
     "crates/foundation/shell-common",
     "crates/corvus/brp",
     "crates/corvus/issue-tracker/api",
+    "crates/corvus/issue-tracker/linear",
+    "crates/corvus/issue-tracker/jira",
     "crates/corvus/pipeline/api",
     "crates/plugin/api",
     "crates/plugin/core",

@@ -6,6 +6,12 @@
 //! canonical call-site path.
 
 pub use crate::branch_name_for_issue;
+pub use crate::error::{IssueTrackerError, Result};
+pub use crate::provider::{
+    AuthField, AuthMethod, AuthMethodKind, AuthStatus, FieldWidget, NewIssue, ProviderDescriptor,
+};
+pub use crate::registry::IssueTrackerRegistry;
+pub use crate::tracker::IssueTracker;
 pub use crate::types::{
     BodyFormat, Issue, IssueAttachment, IssueComment, IssueCycle, IssueFilterOptions, IssueFilters,
     IssueLabel, IssueMilestone, IssueProject, IssueStatus, IssueTeam, IssueUser, LinearAuthStatus,

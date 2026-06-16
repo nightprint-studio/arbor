@@ -5,17 +5,23 @@
 //! the frontend renders a single model regardless of the backing tracker, plus
 //! provider-agnostic helpers like [`branch_name_for_issue`].
 //!
-//! This is the leaf `*-api` crate (pure data + pure helpers, `serde` only). A
-//! `trait IssueTracker` will join it when the per-provider impls move into their
-//! own crates and a second implementation justifies the abstraction — until
-//! then the host calls the provider modules directly.
+//! This is the leaf `*-api` crate: the DTOs + pure helpers, plus the async
+//! [`tracker::IssueTracker`] trait, the self-describing
+//! [`provider::ProviderDescriptor`], and the [`registry::IssueTrackerRegistry`]
+//! of `Arc<dyn IssueTracker>`. The per-provider crates (`corvus-issue-tracker-
+//! linear`, `-jira`, …) implement the trait; the host registers them and the FE
+//! drives off the descriptors. No transport/keyring types live here.
 //!
 //! ## Public API: use the [`prelude`]
 //!
 //! Workspace convention — reach this crate's surface through
 //! `corvus_issue_tracker_api::prelude::...`.
 
+pub mod error;
 pub mod prelude;
+pub mod provider;
+pub mod registry;
+pub mod tracker;
 pub mod types;
 
 use types::Issue;

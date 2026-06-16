@@ -115,6 +115,7 @@ indipendenti dopo M0 → si possono alternare. M3→M4→M5 sono la spina del pr
 **Deliverable**: `arbor` avvia, spawna `corvus-be`, la git GUI gira come **Corvus via IPC**; `src-tauri` rimosso; loghi Arbor + Corvus.
 **Gate**: feature git invariate; **un crash di `corvus-be` non porta giù lo shell** (crash-isolation visibile); credenziali via broker con caching.
 **Rischio/Size**: alto / **XL**. **Incrementale**: prima `BrokerClient` **in-process** (loopback, un solo processo) per spostare i 547 comandi dietro `arbor-ipc` senza rompere nulla; *poi* sposta `corvus-be` in processo separato (flip del backend del `BrokerClient`).
+**Pre-flip (pulizia, FATTO)**: il **seam credenziali keyring-free** è in piedi — `arbor_ipc::prelude::SessionProvider` (contratto async `session`/`refresh` → `AuthSession { base_url, auth_header }`, niente `keyring`/HTTP). È ciò che sblocca l'estrazione **keyring-free** dei domini coupled (linear/jira, git_provider): tengono `Arc<dyn SessionProvider>` invece di chiamare `credential_store`+keyring. Una sola session-shape copre Bearer a endpoint fisso (Linear), base per-tenant Bearer/Basic (Jira), e basi self-hosted. Impl da adapter shell per-provider (keyring read + OAuth refresh). Linear estratto in `corvus-issue-tracker-linear` + registry `IssueTracker` con descriptor self-describing.
 **Sblocca**: pattern Modello D per M4/M5.
 
 ## M4 — Merula: `merula-be` + `fe-merula` (+ rename nemus→merula)

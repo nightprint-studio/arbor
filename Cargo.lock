@@ -140,6 +140,7 @@ dependencies = [
  "arbor-core",
  "arbor-feedback",
  "arbor-fs",
+ "arbor-ipc",
  "arbor-nemus",
  "arbor-plugin-api",
  "arbor-plugin-core",
@@ -152,6 +153,8 @@ dependencies = [
  "chrono",
  "corvus-brp",
  "corvus-issue-tracker-api",
+ "corvus-issue-tracker-jira",
+ "corvus-issue-tracker-linear",
  "corvus-pipeline-api",
  "cron",
  "dirs",
@@ -281,6 +284,8 @@ dependencies = [
 name = "arbor-ipc"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
+ "futures-executor",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1232,7 +1237,37 @@ dependencies = [
 name = "corvus-issue-tracker-api"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "corvus-issue-tracker-jira"
+version = "0.3.0"
+dependencies = [
+ "ammonia",
+ "arbor-core",
+ "arbor-ipc",
+ "async-trait",
+ "corvus-issue-tracker-api",
+ "futures-util",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "corvus-issue-tracker-linear"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
+ "arbor-ipc",
+ "async-trait",
+ "corvus-issue-tracker-api",
+ "reqwest 0.12.28",
+ "serde_json",
 ]
 
 [[package]]

@@ -54,7 +54,10 @@ arbor-process-ext = { path = "../crates/arbor-process-ext" }
 arbor-fs          = { path = "../crates/foundation/fs" }
 corvus-brp        = { path = "../crates/corvus/brp" }
 corvus-issue-tracker-api = { path = "../crates/corvus/issue-tracker/api" }
+corvus-issue-tracker-linear = { path = "../crates/corvus/issue-tracker/linear" }
+corvus-issue-tracker-jira = { path = "../crates/corvus/issue-tracker/jira" }
 corvus-pipeline-api = { path = "../crates/corvus/pipeline/api" }
+arbor-ipc         = { path = "../crates/foundation/ipc" }
 arbor-feedback    = { path = "../crates/arbor-feedback" }
 arbor-cloud       = { path = "../crates/arbor-cloud" }
 arbor-auth        = { path = "../crates/arbor-auth" }

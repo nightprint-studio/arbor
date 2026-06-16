@@ -83,22 +83,11 @@ pub struct JiraConfig {
     pub auth_method: String,
     /// Human-readable host, e.g. "mycompany.atlassian.net"
     pub domain:      Option<String>,
-    /// Agile REST base (used for sprints), derived from base_url.
-    pub agile_url:   String,
 }
 
 /// Pick REST API version based on domain: Cloud (.atlassian.net) → v3, Server/DC → v2.
 fn api_version(domain: &str) -> &'static str {
     if domain.ends_with(".atlassian.net") { "3" } else { "2" }
-}
-
-/// Derive the Jira Agile REST base from the main REST base URL.
-fn agile_url_from(base: &str) -> String {
-    if let Some(pos) = base.rfind("/rest/api/") {
-        format!("{}/rest/agile/1.0", &base[..pos])
-    } else {
-        base.to_string()
-    }
 }
 
 /// Returns the active Jira config, or `None` when no credentials are stored.
@@ -112,7 +101,6 @@ pub fn get_config() -> Result<Option<JiraConfig>> {
         let domain = credential_store::get(KR_DOMAIN, "v")?
             .map(|d| format!("{d}.atlassian.net"));
         return Ok(Some(JiraConfig {
-            agile_url:   agile_url_from(&base),
             base_url:    base,
             auth_header: format!("Bearer {token}"),
             auth_method: "oauth".into(),
@@ -137,7 +125,6 @@ pub fn get_config() -> Result<Option<JiraConfig>> {
             format!("Bearer {api_token}")
         };
         return Ok(Some(JiraConfig {
-            agile_url:   agile_url_from(&base),
             base_url:    base,
             auth_method: if is_cloud { "basic".into() } else { "pat".into() },
             auth_header,

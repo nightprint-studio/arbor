@@ -29,6 +29,7 @@
 //! `arbor_ipc::prelude::...`.
 
 pub mod client;
+pub mod credential;
 pub mod error;
 pub mod event;
 pub mod prelude;

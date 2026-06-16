@@ -1,6 +1,8 @@
 pub mod linear;
 pub mod jira;
 pub mod jira_types;
+pub mod registry;
+mod token_source;
 
 // Provider-agnostic DTOs (Issue, comments, filters, …) and pure helpers
 // (`branch_name_for_issue`) now live in the `corvus-issue-tracker-api` crate.
@@ -41,27 +43,11 @@ pub async fn lookup_by_identifier(
     let id = identifier.trim();
     if id.is_empty() { return Ok(None); }
     let Some(tracker) = tracker_for_repo(repo_path) else { return Ok(None); };
-    match tracker.as_str() {
-        "linear" => {
-            let candidates = linear::search_issues(IssueFilters {
-                query: Some(id.to_string()),
-                limit: Some(10),
-                ..Default::default()
-            }).await?;
-            // Linear's number-only match across teams can return multiple
-            // hits — pick the one whose human identifier matches verbatim.
-            Ok(candidates.into_iter()
-                .find(|i| i.identifier.eq_ignore_ascii_case(id)))
-        }
-        "jira" => {
-            // Jira's get_issue raises on missing keys. We swallow that and
-            // surface it as Ok(None) so the caller can render the bare key
-            // without dropping the whole release-notes generation.
-            match jira::get_issue(id).await {
-                Ok(issue) => Ok(Some(issue)),
-                Err(_)    => Ok(None),
-            }
-        }
-        _ => Ok(None),
+
+    // Registered trackers (Linear + Jira) self-resolve via the trait — each
+    // impl handles its own "missing key → None" semantics.
+    match registry::registry().get(&tracker) {
+        Some(t) => t.lookup_by_identifier(id).await.map_err(registry::to_app_error),
+        None => Ok(None),
     }
 }

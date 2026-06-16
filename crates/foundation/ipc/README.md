@@ -16,13 +16,21 @@ Full design: [`docs/ipc-design.md`](../../../docs/ipc-design.md).
 ## Public API: use the prelude
 
 Reach the surface through `arbor_ipc::prelude::...`:
-`BrokerClient`, `LoopbackBroker`, `Bytes`, `Event`, `IpcError`.
+`BrokerClient`, `LoopbackBroker`, `Bytes`, `Event`, `IpcError`,
+`SessionProvider`, `AuthSession`, `CredentialError`.
 
 ## Contents (M1b skeleton)
 
 - **`client`** — `BrokerClient` (the transport-agnostic request/response trait
   the shell router speaks to) + `LoopbackBroker` (in-process dispatch, used by
   M3's in-process-first step and by the ping round-trip test here).
+- **`credential`** — `SessionProvider`, the async keyring-free credential
+  contract a backend depends on (`session` / `refresh`, yielding an
+  `AuthSession { base_url, auth_header }`), so the coupled domains (issue
+  trackers, git providers) can be extracted holding only the contract, not the
+  keyring-holding broker. Implemented by per-provider shell adapters (keyring
+  read + provider OAuth refresh). One session shape covers fixed-endpoint
+  `Bearer` (Linear), per-tenant `Bearer`/`Basic` (Jira), and self-hosted bases.
 - **`event`** — `Event`, the one-way BE→shell push enum (the shell re-emits
   `Event::Notify { topic, payload }` to the FE as a Tauri event).
 - **`error`** — `IpcError`.

@@ -5,7 +5,14 @@ edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "Provider-agnostic issue-tracker DTOs for Corvus (Issue, comments, filters, …) plus pure helpers. The leaf the Jira/Linear/GitHub/GitLab impls build on."
+description  = "Provider-agnostic issue-tracker contract for Corvus: DTOs (Issue, comments, filters, …), the async `IssueTracker` trait + self-describing `ProviderDescriptor`, and a trait-object registry. The leaf the Jira/Linear/GitHub/GitLab impls build on."
 
 [dependencies]
-serde = { workspace = true }
+serde       = { workspace = true }
+# The `IssueTracker` trait is async (network I/O) and object-safe (held as
+# `Arc<dyn IssueTracker>` in the registry) — async-trait provides both.
+async-trait = { workspace = true }
+
+[dev-dependencies]
+# Asserts the descriptor's on-the-wire shape (the FE contract).
+serde_json = { workspace = true }

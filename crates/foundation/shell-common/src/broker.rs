@@ -7,10 +7,17 @@
 //! leave the broker — it hands out scoped results, not the raw secret, wherever
 //! it can (token boundary, F4/D2).
 //!
-//! M1c scope: a compiling broker that caches one keyring entry. The real
-//! refresh→access exchange (an HTTP round-trip to the provider) plugs into
-//! [`CredentialBroker::access_token`] where this skeleton currently returns the
-//! stored secret directly.
+//! In Arbor's model the stored secret *is* the token (a PAT or an OAuth access
+//! token); a stale token is renewed by an **external** OAuth flow that re-stores
+//! it via [`CredentialBroker::store_refresh`], not by a refresh→access exchange
+//! inside the broker. So `access_token` legitimately hands out the stored secret
+//! (cached with a TTL); on a `401`/`403` the caller [`CredentialBroker::invalidate`]s
+//! and the next read picks up the re-stored secret.
+//!
+//! This struct is only the **keyring cache primitive** — it doesn't know any
+//! provider's OAuth refresh. The keyring-free [`arbor_ipc::prelude::SessionProvider`]
+//! contract that backends hold is implemented by **per-provider shell adapters**
+//! that compose this broker (the keyring read) with the provider's refresh flow.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
