@@ -2438,6 +2438,7 @@
         <button class="fx-nav-btn" onclick={goUp}      disabled={!canUp}      use:tooltip={{ content: 'Up', shortcut: 'Backspace' }} aria-label="Up"><ArrowUp size={14} /></button>
       </div>
       {#if view === 'browse'}
+        <span class="fx-nav-sep" aria-hidden="true"></span>
         <div class="fx-nav-btns">
           <button class="fx-nav-btn" onclick={doUndo} disabled={!undoStack.length || historyBusy} use:tooltip={undoStack.length ? `Undo ${undoStack.at(-1)?.label.toLowerCase()} (Ctrl+Z)` : 'Nothing to undo'} aria-label="Undo"><Undo2 size={14} /></button>
           <button class="fx-nav-btn" onclick={doRedo} disabled={!redoStack.length || historyBusy} use:tooltip={redoStack.length ? `Redo ${redoStack.at(-1)?.label.toLowerCase()} (Ctrl+Shift+Z)` : 'Nothing to redo'} aria-label="Redo"><Redo2 size={14} /></button>
@@ -3014,6 +3015,7 @@
 
   /* ══ Header chrome ══ */
   .fx-nav-btns { display: inline-flex; gap: 2px; flex-shrink: 0; }
+  .fx-nav-sep { width: 1px; height: 16px; background: var(--border); flex-shrink: 0; }
   .fx-nav-btn, .fx-icon-btn { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: transparent; border: none; border-radius: var(--radius-sm); color: var(--text-secondary); cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast); }
   .fx-nav-btn:hover:not(:disabled), .fx-icon-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
   .fx-nav-btn:disabled, .fx-icon-btn:disabled { opacity: 0.3; cursor: default; }
