@@ -12,6 +12,9 @@ serde       = { workspace = true }
 # The `IssueTracker` trait is async (network I/O) and object-safe (held as
 # `Arc<dyn IssueTracker>` in the registry) — async-trait provides both.
 async-trait = { workspace = true }
+# The self-describing `ProviderDescriptor` the trait returns is the shared,
+# domain-agnostic contract (one type the git-host side + the generic FE speak).
+corvus-provider-descriptor = { path = "../../provider-descriptor" }
 
 [dev-dependencies]
 # Asserts the descriptor's on-the-wire shape (the FE contract).

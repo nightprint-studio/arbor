@@ -5,92 +5,34 @@
   import FormRow from '$lib/components/shared/ui/FormRow.svelte';
   import Select from '$lib/components/shared/ui/Select.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import IssueProviderCard, { type ProviderBinding } from '$lib/components/shared/internal/IssueProviderCard.svelte';
+  import ProviderConnectionCard from '$lib/components/shared/internal/ProviderConnectionCard.svelte';
+  import { issueProviders } from '$lib/ipc/providers';
+  import type { ProviderDescriptor } from '$lib/types/providers';
   import { issuesStore } from '$lib/stores/issues.svelte';
-  import {
-    listIssueProviders, linearGetAuthStatus, linearSaveToken, linearLogout,
-    jiraGetAuthStatus, jiraSaveBasicAuth,
-  } from '$lib/ipc/issues';
-  import { startLinearOAuth, disconnectLinearOAuth, startJiraOAuth, disconnectJira } from '$lib/ipc/auth';
-  import type { IssueSortField, IssueSortDir, ProviderDescriptor } from '$lib/types/issues';
+  import type { IssueSortField } from '$lib/types/issues';
   import { SORT_FIELD_LABELS } from '$lib/types/issues';
 
+  // The connect UI is fully generic: fetch the self-describing descriptors and
+  // render one card per provider. No per-provider code, no bindings.
   let descriptors = $state<ProviderDescriptor[]>([]);
 
   onMount(async () => {
-    try { descriptors = await listIssueProviders(); } catch { descriptors = []; }
+    try { descriptors = await issueProviders.list(); } catch { descriptors = []; }
   });
 
-  // ── Per-provider glue (the irreducible bits the descriptor can't carry) ──────
-  // Connect/disconnect/status use the direct IPC; `afterChange` refreshes the
-  // shared store only when the sidebar is currently showing that provider.
-
-  function syncIfActive(id: 'linear' | 'jira') {
+  // Keep the Issues sidebar in sync when the user connects/disconnects the
+  // provider it's currently showing.
+  function syncIfActive(id: string) {
     if (issuesStore.activeProvider === id) void issuesStore.loadAuthStatus();
   }
-
-  const bindings: Record<string, ProviderBinding> = {
-    linear: {
-      brandColor:       'var(--brand-linear)',
-      oauthEvent:       'arbor://linear-oauth-done',
-      startOAuth:       () => startLinearOAuth(),
-      connectFields:    async (v) => { await linearSaveToken(v.token); },
-      disconnect:       async () => { await linearLogout(); await disconnectLinearOAuth().catch(() => {}); },
-      loadStatus:       async () => {
-        const s = await linearGetAuthStatus();
-        return {
-          authenticated: s.authenticated,
-          user: s.user ? { displayName: s.user.displayName, email: s.user.email, avatarUrl: s.user.avatarUrl } : null,
-          domain: null,
-        };
-      },
-      afterChange:      () => syncIfActive('linear'),
-      oauthHintIdle:    'Opens Linear in the browser to authorize Arbor.',
-      oauthHintWaiting: 'Browser opened — approve access in Linear then return here.',
-      oauthIdleLabel:   'Authorize with Linear',
-      advancedProvider: 'linear',
-    },
-    jira: {
-      brandColor:       'var(--brand-jira)',
-      oauthEvent:       'arbor://jira-oauth-done',
-      startOAuth:       () => startJiraOAuth(),
-      connectFields:    async (v) => { await jiraSaveBasicAuth(v.email ?? '', v.api_token, v.domain); },
-      disconnect:       async () => { await disconnectJira(); },
-      loadStatus:       async () => {
-        const s = await jiraGetAuthStatus();
-        return {
-          authenticated: s.authenticated,
-          user: s.user ? { displayName: s.user.displayName, email: s.user.email, avatarUrl: s.user.avatarUrl } : null,
-          domain: s.domain,
-        };
-      },
-      afterChange:      () => syncIfActive('jira'),
-      validateFields:   (v) => {
-        const isCloud = (v.domain ?? '').trim().endsWith('.atlassian.net');
-        return !(isCloud && !(v.email ?? '').trim());
-      },
-      fieldsHint:       (v) => {
-        const isCloud = (v.domain ?? '').trim().endsWith('.atlassian.net');
-        return isCloud
-          ? 'Jira Cloud: email + API token from id.atlassian.com → Security → API tokens.'
-          : 'Jira Data Center/Server: Personal Access Token from Jira → Profile → Personal Access Tokens.';
-      },
-      oauthHintIdle:    'Opens Atlassian in the browser to authorize Arbor. Requires a configured Atlassian OAuth app.',
-      oauthHintWaiting: 'Browser opened — approve access in Atlassian then return here.',
-      oauthIdleLabel:   'Authorize with Atlassian',
-      advancedProvider: 'jira',
-    },
-  };
 </script>
 
 <SectionHeader title="Issue Trackers" description="Connect to project management tools. Tokens are stored in the OS keychain." />
 
 {#each descriptors as d (d.id)}
-  {#if bindings[d.id]}
-    <div class="provider-slot">
-      <IssueProviderCard descriptor={d} binding={bindings[d.id]} />
-    </div>
-  {/if}
+  <div class="provider-slot">
+    <ProviderConnectionCard descriptor={d} service={issueProviders} onchange={() => syncIfActive(d.id)} />
+  </div>
 {/each}
 
 <!-- ── Display Preferences ── -->

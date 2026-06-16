@@ -103,7 +103,14 @@ pub async fn start_github_device_flow(app_handle: tauri::AppHandle) -> Result<De
                 Some(e.to_string())
             }
         };
-        let _ = app.emit("arbor://github-oauth-done", result);
+        let _ = app.emit("arbor://github-oauth-done", result.clone());
+        // Unified, by-id completion event for the generic connection layer —
+        // one FE listener routes by `id` so concurrent logins update the right
+        // card. Kept alongside the legacy provider-specific event above.
+        let _ = app.emit(
+            "arbor://provider-oauth-done",
+            serde_json::json!({ "id": "github", "ok": result.is_none(), "error": result }),
+        );
     });
 
     Ok(info)

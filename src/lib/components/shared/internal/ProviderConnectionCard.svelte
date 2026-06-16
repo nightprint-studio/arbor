@@ -1,59 +1,16 @@
-<script lang="ts" module>
-  /** A user identity shown on a connected provider card. */
-  export interface ProviderUserInfo {
-    displayName: string;
-    email:       string | null;
-    avatarUrl:   string | null;
-  }
-
-  /** Current connection status for one provider. */
-  export interface ProviderStatus {
-    authenticated: boolean;
-    user:          ProviderUserInfo | null;
-    domain?:       string | null;
-  }
-
-  /**
-   * The irreducible per-provider glue the generic card can't derive from the
-   * descriptor: the OAuth browser dance (provider-specific command + event),
-   * the field-form submit, disconnect, and status fetch — plus optional UX
-   * nuances (extra validation, dynamic hints).
-   */
-  export interface ProviderBinding {
-    /** Brand-coloured CSS value for CTAs, e.g. `"var(--brand-linear)"`. */
-    brandColor: string;
-    /** Tauri event fired when the OAuth redirect completes (payload: boolean). */
-    oauthEvent: string;
-    /** Begin the OAuth flow; returns the authorize URL to open in the browser. */
-    startOAuth(): Promise<string>;
-    /** Connect using a field form (values keyed by `AuthField.key`). */
-    connectFields(values: Record<string, string>): Promise<void>;
-    /** Disconnect / forget credentials. */
-    disconnect(): Promise<void>;
-    /** Fetch the current connection status. */
-    loadStatus(): Promise<ProviderStatus>;
-    /** Called after a successful connect/disconnect (e.g. to sync a store). */
-    afterChange?(): void;
-    /** Extra validation beyond per-field `required` (e.g. Jira email when Cloud). */
-    validateFields?(values: Record<string, string>): boolean;
-    /** Dynamic hint shown above a field form (e.g. Cloud vs Server guidance). */
-    fieldsHint?(values: Record<string, string>): string;
-    /** OAuth form copy. */
-    oauthHintIdle:    string;
-    oauthHintWaiting: string;
-    oauthIdleLabel:   string;
-    /** Provider key for the "use my own OAuth app" advanced panel (optional). */
-    advancedProvider?: 'linear' | 'jira';
-  }
-</script>
-
 <script lang="ts">
-  import { XCircle, Eye, EyeOff, ChevronDown, ChevronRight, Settings2 } from 'lucide-svelte';
+  import { XCircle, Eye, EyeOff, ChevronDown, ChevronRight, Settings2, Copy, ExternalLink } from 'lucide-svelte';
   import { listen } from '@tauri-apps/api/event';
   import { openUrl } from '@tauri-apps/plugin-opener';
-  import type { ProviderDescriptor, AuthMethod } from '$lib/types/issues';
+  import { onDestroy } from 'svelte';
+  import type { ProviderDescriptor, AuthMethod, ProviderUserInfo, ProviderOAuthDone } from '$lib/types/providers';
+  import { type ProviderConnectionService, PROVIDER_OAUTH_DONE_EVENT } from '$lib/ipc/providers';
+  import { fieldsOf, isFieldRequired, resolveHint, canSubmitFields } from '$lib/utils/providerRules';
   import { uiStore } from '$lib/stores/ui.svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
+  import { tooltip } from '$lib/actions/tooltip';
   import SplitButton from '$lib/components/shared/ui/SplitButton.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import BrandTile, { type Brand } from './BrandTile.svelte';
   import ProviderConnectionStatus from './ProviderConnectionStatus.svelte';
   import OAuthBrowserAuthForm from './OAuthBrowserAuthForm.svelte';
@@ -64,86 +21,101 @@
 
   interface Props {
     descriptor: ProviderDescriptor;
-    binding:    ProviderBinding;
+    /** The domain's generic, by-id connection IPC (issue or git). The card is
+     *  identical for both — only the injected service differs. */
+    service:    ProviderConnectionService;
+    /** Optional callback after a successful connect/disconnect (e.g. sync a store). */
+    onchange?:  () => void;
   }
 
-  let { descriptor, binding }: Props = $props();
+  let { descriptor, service, onchange }: Props = $props();
 
-  let state       = $state<ConnState>('checking');
-  let method      = $state<string | null>(null);
-  let fieldValues = $state<Record<string, string>>({});
-  let showSecret  = $state<Record<string, boolean>>({});
-  let saving      = $state(false);
-  let formError   = $state('');
+  let state        = $state<ConnState>('checking');
+  let method       = $state<string | null>(null);
+  let fieldValues  = $state<Record<string, string>>({});
+  let showSecret   = $state<Record<string, boolean>>({});
+  let saving       = $state(false);
+  let formError    = $state('');
   let oauthWaiting = $state(false);
   let oauthError   = $state('');
+  let deviceInfo   = $state<{ userCode: string; verificationUri: string } | null>(null);
   let advancedOpen = $state(false);
-  let user        = $state<ProviderUserInfo | null>(null);
-  let domain      = $state<string | null>(null);
+  let user         = $state<ProviderUserInfo | null>(null);
+  let accountLabel = $state<string | null>(null);
   let oauthUnsub: (() => void) | null = null;
 
   const activeMethod = $derived<AuthMethod | undefined>(
     descriptor.authMethods.find((m) => m.id === method),
   );
+  const hasOAuth = $derived(descriptor.authMethods.some((m) => m.kind.type === 'oauth'));
+  const connectOptions = $derived(descriptor.authMethods.map((m) => ({ id: m.id, label: m.label })));
+  const brandColor = $derived(descriptor.brandColor ?? 'var(--accent)');
+  const formHint = $derived(
+    activeMethod?.kind.type === 'fields' ? resolveHint(activeMethod.kind.hints, fieldValues) : null,
+  );
+  const canSubmit = $derived(canSubmitFields(activeMethod, fieldValues));
 
-  // ── Status ─────────────────────────────────────────────────────────────────
+  // Re-check whenever the bound descriptor changes.
   $effect(() => {
-    // Re-checks whenever the bound provider changes.
     void descriptor.id;
     void refreshStatus();
   });
 
+  onDestroy(() => { oauthUnsub?.(); });
+
   async function refreshStatus() {
     state = 'checking';
     try {
-      const s = await binding.loadStatus();
+      const s = await service.authStatus(descriptor.id);
       if (s.authenticated) {
-        state  = 'connected';
-        user   = s.user;
-        domain = s.domain ?? null;
+        state = 'connected';
+        user = s.user ?? null;
+        accountLabel = s.accountLabel ?? null;
       } else {
-        state = 'disconnected';
-        user = null; domain = null;
+        state = 'disconnected'; user = null; accountLabel = null;
       }
     } catch {
-      state = 'disconnected';
-      user = null; domain = null;
+      state = 'disconnected'; user = null; accountLabel = null;
     }
   }
 
-  // ── Method selection ─────────────────────────────────────────────────────────
   function pickMethod(id: string) {
-    method = id;
-    formError = ''; oauthError = '';
+    method = id; formError = ''; oauthError = '';
     const m = descriptor.authMethods.find((x) => x.id === id);
-    if (m?.kind.type === 'oauth') startOAuthFlow();
+    if (m?.kind.type === 'oauth') void startOAuthFlow(id);
   }
 
-  function cancelMethod() {
-    method = null; formError = ''; oauthError = '';
-  }
+  function cancelMethod() { method = null; formError = ''; oauthError = ''; }
 
   // ── OAuth ──────────────────────────────────────────────────────────────────
-  async function startOAuthFlow() {
-    oauthWaiting = true; oauthError = '';
+  async function startOAuthFlow(methodId: string) {
+    oauthWaiting = true; oauthError = ''; deviceInfo = null;
     state = 'connecting';
     oauthUnsub?.();
-    oauthUnsub = await listen<boolean>(binding.oauthEvent, ({ payload }) => {
+    // One listener on the unified event, routed by provider id — so two
+    // concurrent OAuth logins each settle their own card.
+    oauthUnsub = await listen<ProviderOAuthDone>(PROVIDER_OAUTH_DONE_EVENT, ({ payload }) => {
+      if (payload.id !== descriptor.id) return;
       oauthUnsub?.(); oauthUnsub = null;
-      oauthWaiting = false;
-      if (payload) {
+      oauthWaiting = false; deviceInfo = null;
+      if (payload.ok) {
         method = null;
         void refreshStatus();
-        binding.afterChange?.();
-        uiStore.showToast(`${descriptor.displayName} connected via OAuth`, 'success');
+        onchange?.();
+        uiStore.showToast(`${descriptor.displayName} connected`, 'success');
       } else {
         state = 'disconnected';
-        oauthError = 'OAuth failed — check your client ID or try again.';
+        oauthError = payload.error ?? 'OAuth failed — please try again.';
       }
     });
     try {
-      const url = await binding.startOAuth();
-      try { await openUrl(url); } catch { /* user can copy */ }
+      const start = await service.startOauth(descriptor.id, methodId);
+      if (start.type === 'redirect') {
+        try { await openUrl(start.url); } catch { /* user can copy from the browser */ }
+      } else {
+        deviceInfo = { userCode: start.userCode, verificationUri: start.verificationUri };
+        try { await openUrl(start.verificationUri); } catch { /* user can open manually */ }
+      }
     } catch (err) {
       oauthWaiting = false; state = 'disconnected';
       oauthError = String(err);
@@ -151,31 +123,24 @@
     }
   }
 
-  // ── Field form ───────────────────────────────────────────────────────────────
-  function fieldsOf(m: AuthMethod | undefined) {
-    return m && m.kind.type === 'fields' ? m.kind.fields : [];
+  function copyDeviceCode() {
+    if (deviceInfo) void copyToClipboard(deviceInfo.userCode, { successToast: 'Code copied to clipboard' });
+  }
+  function openVerification() {
+    if (deviceInfo) openUrl(deviceInfo.verificationUri).catch(() => {});
   }
 
-  const canSubmit = $derived.by(() => {
-    const fields = fieldsOf(activeMethod);
-    if (fields.length === 0) return false;
-    for (const f of fields) {
-      if (f.required && !(fieldValues[f.key]?.trim())) return false;
-    }
-    if (binding.validateFields && !binding.validateFields(fieldValues)) return false;
-    return true;
-  });
-
-  async function submitFields() {
+  // ── Field form ───────────────────────────────────────────────────────────────
+  async function submitFields(methodId: string) {
     if (!canSubmit) return;
     saving = true; formError = '';
     try {
       const values: Record<string, string> = {};
       for (const f of fieldsOf(activeMethod)) values[f.key] = (fieldValues[f.key] ?? '').trim();
-      await binding.connectFields(values);
+      await service.connectFields(descriptor.id, methodId, values);
       fieldValues = {}; method = null;
       await refreshStatus();
-      binding.afterChange?.();
+      onchange?.();
       uiStore.showToast(`${descriptor.displayName} connected`, 'success');
     } catch (e) {
       formError = String(e);
@@ -186,20 +151,18 @@
 
   // ── Disconnect / cancel ──────────────────────────────────────────────────────
   async function disconnect() {
-    oauthUnsub?.(); oauthUnsub = null; oauthWaiting = false;
-    await binding.disconnect().catch(() => {});
-    state = 'disconnected'; method = null;
-    user = null; domain = null; oauthError = ''; formError = '';
-    binding.afterChange?.();
+    oauthUnsub?.(); oauthUnsub = null; oauthWaiting = false; deviceInfo = null;
+    await service.disconnect(descriptor.id).catch(() => {});
+    state = 'disconnected'; method = null; user = null; accountLabel = null;
+    oauthError = ''; formError = '';
+    onchange?.();
     uiStore.showToast(`${descriptor.displayName} disconnected`, 'info');
   }
 
   function cancelConnecting() {
-    oauthWaiting = false; state = 'disconnected'; method = null;
+    oauthWaiting = false; deviceInfo = null; state = 'disconnected'; method = null;
     oauthUnsub?.(); oauthUnsub = null;
   }
-
-  const connectOptions = $derived(descriptor.authMethods.map((m) => ({ id: m.id, label: m.label })));
 </script>
 
 <div class="provider-card" class:flow-active={state === 'connecting'}>
@@ -214,7 +177,7 @@
       </div>
       <ProviderConnectionStatus
         state={state}
-        connectingLabel="Waiting for browser…"
+        connectingLabel="Waiting…"
         onDisconnect={disconnect}
         onCancel={cancelConnecting}
       >
@@ -222,7 +185,7 @@
           {#if method === null}
             <SplitButton
               label="Connect"
-              color={binding.brandColor}
+              color={brandColor}
               direction="down"
               options={connectOptions}
               onclick={() => { const first = descriptor.authMethods[0]; if (first) pickMethod(first.id); }}
@@ -235,33 +198,49 @@
 
     {#if state === 'connected' && user}
       <ProviderUserBadge
-        avatarUrl={user.avatarUrl}
+        avatarUrl={user.avatarUrl ?? null}
         name={user.displayName}
-        secondary={user.email ?? domain}
+        secondary={user.email ?? accountLabel}
       />
     {/if}
 
     <!-- OAuth method -->
     {#if activeMethod?.kind.type === 'oauth'}
-      <OAuthBrowserAuthForm
-        waiting={oauthWaiting}
-        error={oauthError}
-        brandColor={binding.brandColor}
-        hintIdle={binding.oauthHintIdle}
-        hintWaiting={binding.oauthHintWaiting}
-        idleLabel={binding.oauthIdleLabel}
-        busyLabel="Waiting for browser…"
-        onAuthorize={startOAuthFlow}
-        onCancel={() => { oauthWaiting = false; method = null; oauthError = ''; oauthUnsub?.(); }}
-      />
+      {#if deviceInfo}
+        <div class="inline-form">
+          <p class="form-hint">Open the verification page and enter this code:</p>
+          <div class="device-code-row">
+            <code class="device-code">{deviceInfo.userCode}</code>
+            <button class="device-copy" type="button" use:tooltip={'Copy code'} onclick={copyDeviceCode}><Copy size={12} /></button>
+            <button class="device-open" type="button" onclick={openVerification}>
+              <ExternalLink size={11} /> Open {deviceInfo.verificationUri.replace(/^https?:\/\//, '')}
+            </button>
+          </div>
+          <p class="form-hint">Arbor will detect the authorisation automatically.</p>
+          <div class="inline-form-row">
+            {#if oauthWaiting}<Spinner size={11} />{/if}
+            <button class="btn-cancel" type="button" onclick={cancelConnecting}>Cancel</button>
+          </div>
+        </div>
+      {:else}
+        <OAuthBrowserAuthForm
+          waiting={oauthWaiting}
+          error={oauthError}
+          brandColor={brandColor}
+          hintIdle="Opens {descriptor.displayName} in the browser to authorize Arbor."
+          hintWaiting="Browser opened — approve access then return here."
+          idleLabel="Authorize with {descriptor.displayName}"
+          busyLabel="Waiting for browser…"
+          onAuthorize={() => startOAuthFlow(method ?? '')}
+          onCancel={() => { oauthWaiting = false; method = null; oauthError = ''; oauthUnsub?.(); oauthUnsub = null; }}
+        />
+      {/if}
     {/if}
 
     <!-- Field-form method -->
     {#if activeMethod?.kind.type === 'fields'}
       <div class="inline-form">
-        {#if binding.fieldsHint}
-          <p class="form-hint">{binding.fieldsHint(fieldValues)}</p>
-        {/if}
+        {#if formHint}<p class="form-hint">{formHint}</p>{/if}
         {#each fieldsOf(activeMethod) as field (field.key)}
           {#if field.widget === 'secret'}
             <div class="input-with-addon">
@@ -285,7 +264,7 @@
           {/if}
         {/each}
         <div class="inline-form-row">
-          <button class="btn-save" style="background:{binding.brandColor}" onclick={submitFields} disabled={saving || !canSubmit}>
+          <button class="btn-save" style="background:{brandColor}" onclick={() => submitFields(method ?? '')} disabled={saving || !canSubmit}>
             {saving ? 'Connecting…' : 'Connect'}
           </button>
           <button class="btn-cancel" type="button" onclick={cancelMethod}>Cancel</button>
@@ -294,14 +273,14 @@
       </div>
     {/if}
 
-    {#if binding.advancedProvider}
+    {#if hasOAuth}
       <button class="advanced-toggle" type="button" onclick={() => advancedOpen = !advancedOpen}>
         {#if advancedOpen}<ChevronDown size={11} />{:else}<ChevronRight size={11} />{/if}
         <Settings2 size={11} />
         Advanced — use my own OAuth app
       </button>
       {#if advancedOpen}
-        <OAuthAdvancedPanel provider={binding.advancedProvider} />
+        <OAuthAdvancedPanel provider={descriptor.id as 'linear' | 'jira' | 'github' | 'gitlab'} />
       {/if}
     {/if}
   </div>
@@ -346,21 +325,38 @@
 
   .form-hint { font-size: 10.5px; color: var(--text-muted); margin: 0; line-height: 1.5; }
 
-  .advanced-toggle {
-    display: inline-flex; align-items: center; gap: 5px;
-    align-self: flex-start;
-    padding: 4px 8px;
+  .device-code-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .device-code {
+    font-family: var(--font-code); font-size: 18px; font-weight: 700; letter-spacing: 0.18em;
+    padding: 6px 12px; background: var(--bg-base); color: var(--accent);
+    border: 1px solid var(--border); border-radius: var(--radius-sm); user-select: all;
+  }
+  .device-copy {
+    display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
     background: transparent; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    cursor: pointer; transition: all var(--transition-fast);
+  }
+  .device-copy:hover { color: var(--text-primary); background: var(--bg-hover); }
+  .device-open {
+    display: flex; align-items: center; gap: 5px; padding: 5px 10px;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-family: var(--font-ui-sans); font-size: 11px;
+    cursor: pointer; transition: all var(--transition-fast); white-space: nowrap;
+  }
+  .device-open:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+  .advanced-toggle {
+    display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+    padding: 4px 8px; background: transparent; color: var(--text-muted);
     border: 1px dashed var(--border); border-radius: var(--radius-sm);
     font-family: var(--font-ui-sans); font-size: 11px;
     cursor: pointer; transition: all var(--transition-fast);
   }
   .advanced-toggle:hover { color: var(--text-primary); border-color: var(--accent); background: var(--bg-hover); }
 
-  .provider-error {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 11px; color: var(--error, #f87171);
-  }
+  .provider-error { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--error, #f87171); }
 
   .text-input {
     padding: 5px 8px; background: var(--bg-input); color: var(--text-primary);

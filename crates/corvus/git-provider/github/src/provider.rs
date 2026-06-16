@@ -11,6 +11,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use arbor_ipc::prelude::SessionProvider;
+// `corvus_git_provider_api::prelude` re-exports the descriptor vocabulary
+// (`ProviderDescriptor`, `AuthMethod`, `OAuthFlow`, …) the trait returns.
 use corvus_git_provider_api::prelude::*;
 
 use crate::http::GithubHttp;
@@ -37,6 +39,76 @@ impl GithubProvider {
 #[async_trait]
 impl GitProvider for GithubProvider {
     // ── Identity ─────────────────────────────────────────────────────────
+    fn descriptor(&self) -> ProviderDescriptor {
+        ProviderDescriptor {
+            id:           "github".into(),
+            domain:       ProviderDomain::GitHost,
+            display_name: "GitHub".into(),
+            description:  Some(
+                "Connect your GitHub account to manage pull requests, CI runs, \
+                 and security alerts."
+                    .into(),
+            ),
+            icon:         "github".into(),
+            brand_color:  Some("var(--brand-github)".into()),
+            // OAuth (Device Authorization Grant) is the recommended path; PAT and
+            // username+password save Git-over-HTTPS credentials via the generic
+            // `save_credential(host, username, password)` command (the shell
+            // connector maps these field keys 1:1).
+            auth_methods: vec![
+                AuthMethod {
+                    id:    "oauth".into(),
+                    label: "OAuth (browser)".into(),
+                    kind:  AuthMethodKind::OAuth { flow: OAuthFlow::Device },
+                },
+                AuthMethod {
+                    id:    "pat".into(),
+                    label: "Personal Access Token".into(),
+                    kind:  AuthMethodKind::Fields {
+                        fields: vec![AuthField {
+                            key:           "token".into(),
+                            label:         "Personal Access Token".into(),
+                            widget:        FieldWidget::Secret,
+                            required:      true,
+                            required_when: None,
+                            placeholder:   Some("ghp_…".into()),
+                        }],
+                        hints: vec![FieldHint {
+                            text: "Generate at github.com → Settings → Developer settings → \
+                                   Personal access tokens. Used for Git over HTTPS."
+                                .into(),
+                            when: None,
+                        }],
+                    },
+                },
+                AuthMethod {
+                    id:    "userpass".into(),
+                    label: "Username + Password".into(),
+                    kind:  AuthMethodKind::Fields {
+                        fields: vec![
+                            AuthField {
+                                key:           "username".into(),
+                                label:         "Username".into(),
+                                widget:        FieldWidget::Text,
+                                required:      true,
+                                required_when: None,
+                                placeholder:   None,
+                            },
+                            AuthField {
+                                key:           "password".into(),
+                                label:         "Password / Token".into(),
+                                widget:        FieldWidget::Secret,
+                                required:      true,
+                                required_when: None,
+                                placeholder:   None,
+                            },
+                        ],
+                        hints: vec![],
+                    },
+                },
+            ],
+        }
+    }
     fn kind(&self) -> ProviderKind { ProviderKind::GitHub }
     fn host(&self) -> &str { "github.com" }
     fn web_base_url(&self) -> &str { "https://github.com" }

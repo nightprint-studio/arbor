@@ -29,6 +29,7 @@ mod integrations;
 mod workspace;
 mod linked_worktrees;
 mod git_provider;
+mod provider_connect;
 mod branding;
 mod deep_link;
 mod json_studio;
@@ -1331,6 +1332,16 @@ pub fn run() {
             // Issues / provider-agnostic
             commands::issues_commands::branch_name_for_issue,
             commands::issues_commands::list_issue_providers,
+            // Generic by-id provider connection (additive; per-provider commands stay)
+            commands::provider_commands::issue_provider_auth_status,
+            commands::provider_commands::issue_provider_connect_fields,
+            commands::provider_commands::issue_provider_start_oauth,
+            commands::provider_commands::issue_provider_disconnect,
+            commands::provider_commands::list_git_providers,
+            commands::provider_commands::git_provider_auth_status,
+            commands::provider_commands::git_provider_connect_fields,
+            commands::provider_commands::git_provider_start_oauth,
+            commands::provider_commands::git_provider_disconnect,
             // Inline image proxy (issue/MR/PR body & comment preview)
             commands::image_commands::fetch_remote_image,
             // Merge conflict resolution

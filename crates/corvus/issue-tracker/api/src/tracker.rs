@@ -8,8 +8,10 @@
 
 use async_trait::async_trait;
 
+use corvus_provider_descriptor::prelude::ProviderDescriptor;
+
 use crate::error::Result;
-use crate::provider::{AuthStatus, NewIssue, ProviderDescriptor};
+use crate::provider::{AuthStatus, NewIssue};
 use crate::types::{Issue, IssueComment, IssueFilterOptions, IssueFilters};
 
 /// One issue tracker (Linear, Jira, GitHub/GitLab Issues, …).

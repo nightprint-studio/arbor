@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::provider::ProviderDescriptor;
+use corvus_provider_descriptor::prelude::ProviderDescriptor;
 use crate::tracker::IssueTracker;
 
 /// A registry of issue trackers keyed by [`ProviderDescriptor::id`].
@@ -53,7 +53,8 @@ impl IssueTrackerRegistry {
 mod tests {
     use super::*;
     use crate::error::Result;
-    use crate::provider::{AuthMethod, AuthMethodKind, AuthStatus, NewIssue};
+    use crate::provider::{AuthStatus, NewIssue};
+    use corvus_provider_descriptor::prelude::{AuthMethod, AuthMethodKind, OAuthFlow, ProviderDomain};
     use crate::tracker::IssueTracker;
     use crate::types::{Issue, IssueComment, IssueFilterOptions, IssueFilters};
     use async_trait::async_trait;
@@ -67,13 +68,15 @@ mod tests {
         fn descriptor(&self) -> ProviderDescriptor {
             ProviderDescriptor {
                 id: self.id.into(),
+                domain: ProviderDomain::IssueTracker,
                 display_name: self.id.into(),
                 description: None,
                 icon: self.id.into(),
+                brand_color: None,
                 auth_methods: vec![AuthMethod {
                     id: "oauth".into(),
                     label: "Connect".into(),
-                    kind: AuthMethodKind::OAuth,
+                    kind: AuthMethodKind::OAuth { flow: OAuthFlow::Redirect },
                 }],
             }
         }

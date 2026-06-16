@@ -14,6 +14,8 @@
 
 use async_trait::async_trait;
 
+use corvus_provider_descriptor::prelude::ProviderDescriptor;
+
 use crate::auth::{OAuthHandle, ProviderUser};
 use crate::branch::BranchProtection;
 use crate::capability::Capabilities;
@@ -37,6 +39,10 @@ use crate::webhook::{Webhook, WebhookCreateRequest};
 #[async_trait]
 pub trait GitProvider: Send + Sync {
     // ── Identity ─────────────────────────────────────────────────────────
+    /// What the FE renders to list and connect this git host (id, icon, auth
+    /// methods). Static metadata — the shell exposes it via a generic
+    /// `list_git_providers` IPC and never authors it itself.
+    fn descriptor(&self) -> ProviderDescriptor;
     fn kind(&self) -> ProviderKind;
     /// Hostname this instance is bound to (e.g. `github.com`,
     /// `gitlab.example.org`). Used as the registry key.

@@ -7,8 +7,11 @@
 
 pub use crate::branch_name_for_issue;
 pub use crate::error::{IssueTrackerError, Result};
-pub use crate::provider::{
-    AuthField, AuthMethod, AuthMethodKind, AuthStatus, FieldWidget, NewIssue, ProviderDescriptor,
+pub use crate::provider::{AuthStatus, NewIssue};
+// The descriptor vocabulary is the shared, domain-agnostic contract.
+pub use corvus_provider_descriptor::prelude::{
+    AuthField, AuthMethod, AuthMethodKind, FieldHint, FieldMatch, FieldRule, FieldWidget, OAuthFlow,
+    ProviderDescriptor, ProviderDomain,
 };
 pub use crate::registry::IssueTrackerRegistry;
 pub use crate::tracker::IssueTracker;

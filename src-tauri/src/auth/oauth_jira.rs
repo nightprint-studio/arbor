@@ -228,6 +228,14 @@ pub async fn start_jira_oauth(app_handle: tauri::AppHandle) -> Result<String> {
             }
         };
         let _ = app.emit("arbor://jira-oauth-done", ok);
+        // Unified, by-id completion event for the generic connection layer —
+        // one FE listener routes by `id`. Kept alongside the legacy event above.
+        // The legacy flow only carries a bool, so `error` is a generic message.
+        let error = if ok { None } else { Some("Jira authorization failed") };
+        let _ = app.emit(
+            "arbor://provider-oauth-done",
+            serde_json::json!({ "id": "jira", "ok": ok, "error": error }),
+        );
     });
 
     Ok(auth_url)

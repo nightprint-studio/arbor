@@ -17,6 +17,11 @@ pub use crate::mr::{
     MrFilter, MrId, MrInfo, MrLabel, MrState, MrUpdateRequest, MrUser, ReviewState,
 };
 pub use crate::provider::GitProvider;
+// The descriptor vocabulary is the shared, domain-agnostic contract.
+pub use corvus_provider_descriptor::prelude::{
+    AuthField, AuthMethod, AuthMethodKind, AuthStatus, FieldHint, FieldMatch, FieldRule,
+    FieldWidget, OAuthFlow, OAuthStart, ProviderDescriptor, ProviderDomain, ProviderUserInfo,
+};
 pub use crate::registry::{host_from_url, GitProviderRegistry};
 pub use crate::release::{Release, ReleaseAsset, ReleaseCreateRequest};
 pub use crate::repo::{

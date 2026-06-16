@@ -5,15 +5,14 @@
 //! is re-exported here so existing `crate::git_provider::*` call sites keep
 //! resolving. This module owns only the shell glue: the concrete
 //! `GithubProvider` / `GitlabProvider` impls, the host-keyed registration, the
-//! REST client modules (`mr_impl`, `ci_impl`, `repo_impl`, `security_impl`),
-//! the keyring/OAuth-coupled token lookups, and the AppState resolution helpers.
+//! REST client modules (`mr_impl`, `ci_impl`, `repo_impl`) for the helpers the
+//! command layer still calls directly, the keyring/OAuth-coupled token lookups,
+//! and the AppState resolution helpers.
 //!
 //! Adding a new provider is a matter of creating a `git_provider/<name>/`
 //! module with `struct <Name>Provider` and `impl GitProvider for ...`.
 
-pub use corvus_git_provider_api::prelude::{
-    GitProvider, GitProviderRegistry, ProviderError, ProviderKind,
-};
+pub use corvus_git_provider_api::prelude::{GitProvider, GitProviderRegistry, ProviderKind};
 
 pub mod types;
 pub mod detect;
@@ -29,7 +28,6 @@ pub mod helpers;
 pub mod mr_impl;
 pub mod ci_impl;
 pub mod repo_impl;
-pub mod security_impl;
 pub mod security_export;
 pub mod avatar_lookup;
 

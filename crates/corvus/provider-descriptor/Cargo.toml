@@ -1,0 +1,14 @@
+[package]
+name         = "corvus-provider-descriptor"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Shared, domain-agnostic provider-connection contract for Corvus: the self-describing `ProviderDescriptor` (auth methods, fields, declarative validation/hint rules), `AuthStatus`, and `OAuthStart`. One type both the issue-tracker and git-host connection layers (and the single generic frontend) speak — so the UI carries zero per-provider knowledge."
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

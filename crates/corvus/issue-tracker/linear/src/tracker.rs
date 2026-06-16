@@ -5,8 +5,8 @@ use serde_json::{json, Value};
 
 use corvus_issue_tracker_api::prelude::{
     AuthField, AuthMethod, AuthMethodKind, AuthStatus, FieldWidget, Issue, IssueComment,
-    IssueFilterOptions, IssueFilters, IssueTracker, IssueTrackerError, NewIssue, ProviderDescriptor,
-    Result,
+    IssueFilterOptions, IssueFilters, IssueTracker, IssueTrackerError, NewIssue, OAuthFlow,
+    ProviderDescriptor, ProviderDomain, Result,
 };
 
 use crate::{map, LinearTracker};
@@ -16,26 +16,30 @@ impl IssueTracker for LinearTracker {
     fn descriptor(&self) -> ProviderDescriptor {
         ProviderDescriptor {
             id:           "linear".into(),
+            domain:       ProviderDomain::IssueTracker,
             display_name: "Linear".into(),
             description:  Some("Issue tracker — OAuth & Personal API Key".into()),
             icon:         "linear".into(),
+            brand_color:  Some("var(--brand-linear)".into()),
             auth_methods: vec![
                 AuthMethod {
                     id:    "oauth".into(),
                     label: "OAuth (recommended)".into(),
-                    kind:  AuthMethodKind::OAuth,
+                    kind:  AuthMethodKind::OAuth { flow: OAuthFlow::Redirect },
                 },
                 AuthMethod {
                     id:    "pat".into(),
                     label: "Personal API Key".into(),
                     kind:  AuthMethodKind::Fields {
                         fields: vec![AuthField {
-                            key:         "token".into(),
-                            label:       "Personal API key".into(),
-                            widget:      FieldWidget::Secret,
-                            required:    true,
-                            placeholder: Some("lin_api_…".into()),
+                            key:           "token".into(),
+                            label:         "Personal API Key".into(),
+                            widget:        FieldWidget::Secret,
+                            required:      true,
+                            required_when: None,
+                            placeholder:   Some("lin_api_…".into()),
                         }],
+                        hints:  vec![],
                     },
                 },
             ],

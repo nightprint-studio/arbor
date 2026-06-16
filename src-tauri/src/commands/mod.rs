@@ -48,3 +48,4 @@ pub mod brp_commands;
 pub mod marketplace_commands;
 pub mod scheduler_commands;
 pub mod image_commands;
+pub mod provider_commands;

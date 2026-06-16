@@ -23,6 +23,9 @@ serde_json  = { workspace = true }
 # Pure security helpers (`age_days_from_iso`) compute finding age against now;
 # matches the version src-tauri already pins (not in `[workspace.dependencies]`).
 chrono      = { version = "0.4", features = ["serde"] }
+# The self-describing `ProviderDescriptor` the trait returns is the shared,
+# domain-agnostic contract (one type the issue-tracker side + the generic FE speak).
+corvus-provider-descriptor = { path = "../../provider-descriptor" }
 
 [dev-dependencies]
 # Asserts the DTOs' on-the-wire shape stays byte-identical to the frontend.

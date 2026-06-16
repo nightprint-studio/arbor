@@ -66,6 +66,126 @@ impl GitlabProvider {
 
 #[async_trait]
 impl GitProvider for GitlabProvider {
+    // ── Descriptor ───────────────────────────────────────────────────────
+    fn descriptor(&self) -> ProviderDescriptor {
+        // gitlab.com connects via OAuth (Authorization Code + PKCE); self-hosted
+        // instances authenticate with a Personal Access Token entered as an
+        // HTTP-Basic credential (`oauth2:<token>`) — same field keys the generic
+        // `save_credential(host, username, password)` command already expects.
+        let auth_methods = if self.self_hosted {
+            vec![AuthMethod {
+                id:    "pat".into(),
+                label: "Personal Access Token".into(),
+                kind:  AuthMethodKind::Fields {
+                    fields: vec![
+                        AuthField {
+                            key:           "username".into(),
+                            label:         "Username".into(),
+                            widget:        FieldWidget::Text,
+                            required:      true,
+                            required_when: None,
+                            placeholder:   Some("oauth2".into()),
+                        },
+                        AuthField {
+                            key:           "password".into(),
+                            label:         "Personal Access Token".into(),
+                            widget:        FieldWidget::Secret,
+                            required:      true,
+                            required_when: None,
+                            placeholder:   Some("glpat-…".into()),
+                        },
+                    ],
+                    hints: vec![FieldHint {
+                        text: "Create a token with the `api` scope in your GitLab \
+                               instance's User Settings → Access Tokens."
+                            .into(),
+                        when: None,
+                    }],
+                },
+            }]
+        } else {
+            // gitlab.com: OAuth (recommended) + PAT / username+password, which
+            // save Git-over-HTTPS credentials via the generic
+            // `save_credential(host, username, password)` command. The optional
+            // `host` field lets the user point a PAT/userpass at a self-hosted
+            // instance (empty ⇒ gitlab.com), mirroring the old "Self-hosted" box.
+            let host_field = || AuthField {
+                key:           "host".into(),
+                label:         "Host".into(),
+                widget:        FieldWidget::Url,
+                required:      false,
+                required_when: None,
+                placeholder:   Some("gitlab.com (or gitlab.company.com)".into()),
+            };
+            vec![
+                AuthMethod {
+                    id:    "oauth".into(),
+                    label: "OAuth (browser)".into(),
+                    kind:  AuthMethodKind::OAuth { flow: OAuthFlow::Redirect },
+                },
+                AuthMethod {
+                    id:    "pat".into(),
+                    label: "Personal Access Token".into(),
+                    kind:  AuthMethodKind::Fields {
+                        fields: vec![
+                            host_field(),
+                            AuthField {
+                                key:           "token".into(),
+                                label:         "Personal Access Token".into(),
+                                widget:        FieldWidget::Secret,
+                                required:      true,
+                                required_when: None,
+                                placeholder:   Some("glpat-…".into()),
+                            },
+                        ],
+                        hints: vec![FieldHint {
+                            text: "Create a token with the `api` scope (User Settings → \
+                                   Access Tokens). Leave host empty for gitlab.com."
+                                .into(),
+                            when: None,
+                        }],
+                    },
+                },
+                AuthMethod {
+                    id:    "userpass".into(),
+                    label: "Username + Password".into(),
+                    kind:  AuthMethodKind::Fields {
+                        fields: vec![
+                            host_field(),
+                            AuthField {
+                                key:           "username".into(),
+                                label:         "Username".into(),
+                                widget:        FieldWidget::Text,
+                                required:      true,
+                                required_when: None,
+                                placeholder:   None,
+                            },
+                            AuthField {
+                                key:           "password".into(),
+                                label:         "Password / Token".into(),
+                                widget:        FieldWidget::Secret,
+                                required:      true,
+                                required_when: None,
+                                placeholder:   None,
+                            },
+                        ],
+                        hints: vec![],
+                    },
+                },
+            ]
+        };
+
+        ProviderDescriptor {
+            id:           "gitlab".into(),
+            domain:       ProviderDomain::GitHost,
+            display_name: "GitLab".into(),
+            description:  Some("GitLab — merge requests, pipelines & security.".into()),
+            icon:         "gitlab".into(),
+            brand_color:  Some("var(--brand-gitlab)".into()),
+            auth_methods,
+        }
+    }
+
     // ── Identity ─────────────────────────────────────────────────────────
     fn kind(&self) -> ProviderKind { ProviderKind::GitLab }
     fn host(&self) -> &str { &self.host }

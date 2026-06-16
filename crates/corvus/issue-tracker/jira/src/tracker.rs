@@ -5,9 +5,10 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use corvus_issue_tracker_api::prelude::{
-    AuthField, AuthMethod, AuthMethodKind, AuthStatus, FieldWidget, Issue, IssueComment,
-    IssueFilterOptions, IssueFilters, IssueLabel, IssueStatus, IssueTeam, IssueTracker,
-    IssueTrackerError, IssueUser, NewIssue, ProviderDescriptor, Result,
+    AuthField, AuthMethod, AuthMethodKind, AuthStatus, FieldHint, FieldMatch, FieldRule,
+    FieldWidget, Issue, IssueComment, IssueFilterOptions, IssueFilters, IssueLabel, IssueStatus,
+    IssueTeam, IssueTracker, IssueTrackerError, IssueUser, NewIssue, OAuthFlow, ProviderDescriptor,
+    ProviderDomain, Result,
 };
 
 use crate::{map, JiraTracker};
@@ -249,9 +250,11 @@ impl IssueTracker for JiraTracker {
     fn descriptor(&self) -> ProviderDescriptor {
         ProviderDescriptor {
             id: "jira".into(),
+            domain: ProviderDomain::IssueTracker,
             display_name: "Jira".into(),
             description: Some("Atlassian issue tracker — API Token & OAuth".into()),
             icon: "jira".into(),
+            brand_color: Some("var(--brand-jira)".into()),
             auth_methods: vec![
                 AuthMethod {
                     id: "basic".into(),
@@ -263,13 +266,20 @@ impl IssueTracker for JiraTracker {
                                 label: "Site".into(),
                                 widget: FieldWidget::Url,
                                 required: true,
-                                placeholder: Some("mycompany.atlassian.net".into()),
+                                required_when: None,
+                                placeholder: Some("you.atlassian.net".into()),
                             },
                             AuthField {
                                 key: "email".into(),
                                 label: "Email".into(),
                                 widget: FieldWidget::Text,
                                 required: false,
+                                // Jira Cloud (*.atlassian.net) needs email + API token;
+                                // Data Center/Server uses a bare PAT with no email.
+                                required_when: Some(FieldRule {
+                                    field: "domain".into(),
+                                    matches: FieldMatch::EndsWith(".atlassian.net".into()),
+                                }),
                                 placeholder: Some("you@company.com".into()),
                             },
                             AuthField {
@@ -277,7 +287,21 @@ impl IssueTracker for JiraTracker {
                                 label: "API token".into(),
                                 widget: FieldWidget::Secret,
                                 required: true,
+                                required_when: None,
                                 placeholder: None,
+                            },
+                        ],
+                        hints: vec![
+                            FieldHint {
+                                text: "Jira Cloud: email + API token from id.atlassian.com → Security → API tokens.".into(),
+                                when: Some(FieldRule {
+                                    field: "domain".into(),
+                                    matches: FieldMatch::EndsWith(".atlassian.net".into()),
+                                }),
+                            },
+                            FieldHint {
+                                text: "Jira Data Center/Server: Personal Access Token from Jira → Profile → Personal Access Tokens.".into(),
+                                when: None,
                             },
                         ],
                     },
@@ -285,7 +309,7 @@ impl IssueTracker for JiraTracker {
                 AuthMethod {
                     id: "oauth".into(),
                     label: "OAuth 2.0 (requires Atlassian app)".into(),
-                    kind: AuthMethodKind::OAuth,
+                    kind: AuthMethodKind::OAuth { flow: OAuthFlow::Redirect },
                 },
             ],
         }
