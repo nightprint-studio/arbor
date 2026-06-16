@@ -58,6 +58,7 @@ corvus-issue-tracker-linear = { path = "../crates/corvus/issue-tracker/linear" }
 corvus-issue-tracker-jira = { path = "../crates/corvus/issue-tracker/jira" }
 corvus-git-provider-api = { path = "../crates/corvus/git-provider/api" }
 corvus-git-provider-github = { path = "../crates/corvus/git-provider/github" }
+corvus-git-provider-gitlab = { path = "../crates/corvus/git-provider/gitlab" }
 corvus-pipeline-api = { path = "../crates/corvus/pipeline/api" }
 arbor-ipc         = { path = "../crates/foundation/ipc" }
 arbor-feedback    = { path = "../crates/arbor-feedback" }

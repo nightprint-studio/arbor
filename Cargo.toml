@@ -21,6 +21,7 @@ members = [
     "crates/corvus/issue-tracker/jira",
     "crates/corvus/git-provider/api",
     "crates/corvus/git-provider/github",
+    "crates/corvus/git-provider/gitlab",
     "crates/corvus/pipeline/api",
     "crates/plugin/api",
     "crates/plugin/core",

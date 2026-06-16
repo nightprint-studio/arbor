@@ -11,8 +11,6 @@
 //! Adding a new provider is a matter of creating a `git_provider/<name>/`
 //! module with `struct <Name>Provider` and `impl GitProvider for ...`.
 
-use crate::error::AppError;
-
 pub use corvus_git_provider_api::prelude::{
     GitProvider, GitProviderRegistry, ProviderError, ProviderKind,
 };
@@ -21,7 +19,6 @@ pub mod types;
 pub mod detect;
 pub mod oauth;
 pub mod session;
-pub mod gitlab;
 pub mod helpers;
 
 // ── Implementation modules ───────────────────────────────────────────────────
@@ -36,29 +33,8 @@ pub mod security_impl;
 pub mod security_export;
 pub mod avatar_lookup;
 
-// GitHub is now the keyring-free `corvus-git-provider-github` crate; the shell
-// injects credentials via `session::GithubSessionProvider`. GitLab still lives
-// in-tree until its own extraction (Chunk 3).
+// GitHub + GitLab are now the keyring-free `corvus-git-provider-{github,gitlab}`
+// crates; the shell injects credentials via `session::{Github,Gitlab}SessionProvider`.
 pub use corvus_git_provider_github::prelude::GithubProvider;
-pub use gitlab::GitlabProvider;
+pub use corvus_git_provider_gitlab::prelude::GitlabProvider;
 pub use helpers::{provider_for_tab, provider_for_path, mr_id_from};
-
-/// Map a shell `AppError` into the provider-contract `ProviderError`.
-///
-/// Replaces the old `impl From<AppError> for ProviderError` — that conversion
-/// can no longer be a `From` impl now that `ProviderError` lives in a separate
-/// crate (the orphan rule forbids it in either crate). The delegate modules in
-/// `github/` and `gitlab/` apply it via `.map_err(app_err_to_provider)`.
-///
-/// Recognises the canonical "GitHub/GitLab API 404" shape produced by
-/// `mr_impl`/`ci_impl` so the trait layer surfaces a typed `NotFound` instead
-/// of swallowing it into `Internal`. This drives the sidebar EmptyState (MR
-/// feature unavailable) and lets the frontend degrade gracefully without
-/// parsing error strings.
-pub fn app_err_to_provider(err: AppError) -> ProviderError {
-    let s = err.to_string();
-    if s.contains("API 404") {
-        return ProviderError::NotFound(s);
-    }
-    ProviderError::Internal(s)
-}

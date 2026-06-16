@@ -16,17 +16,18 @@ use std::sync::{LazyLock, Mutex};
 use serde::Deserialize;
 
 use crate::git_provider::{
-    ci_impl::{get_github_token, github_send_with_refresh},
-    gitlab::api as gl_api,
+    ci_impl::{get_github_token, get_gitlab_token, github_send_with_refresh, gitlab_send_with_refresh},
     helpers::ResolvedProvider,
 };
 
-// GitHub REST constants — formerly `github/api.rs`, removed when GitHub moved
-// to the keyring-free `corvus-git-provider-github` crate. This shell-side avatar
-// lookup (commit-graph layer) keeps its own copy + reuses `ci_impl`'s token
-// lookup / 401-refresh sender.
+// GitHub/GitLab REST constants — formerly `github/api.rs` + `gitlab/api.rs`,
+// removed when both providers moved to the keyring-free
+// `corvus-git-provider-{github,gitlab}` crates. This shell-side avatar lookup
+// (commit-graph layer) keeps its own copy + reuses `ci_impl`'s token lookup /
+// 401-refresh senders.
 const GITHUB_API_BASE: &str = "https://api.github.com";
-const GH_USER_AGENT:   &str = "arbor-git-gui/1.0";
+const GITLAB_COM_WEB:  &str = "https://gitlab.com";
+const USER_AGENT:      &str = "arbor-git-gui/1.0";
 const GH_ACCEPT_JSON:  &str = "application/vnd.github+json";
 const GH_API_VERSION:  &str = "2022-11-28";
 
@@ -100,7 +101,7 @@ async fn fetch_github(email: &str) -> Option<String> {
                 .header("Authorization", format!("Bearer {tok}"))
                 .header("Accept", GH_ACCEPT_JSON)
                 .header("X-GitHub-Api-Version", GH_API_VERSION)
-                .header("User-Agent", GH_USER_AGENT),
+                .header("User-Agent", USER_AGENT),
             &token,
         ).await.ok()?;
         if !resp.status().is_success() { return None; }
@@ -123,7 +124,7 @@ async fn fetch_github(email: &str) -> Option<String> {
             .header("Authorization", format!("Bearer {tok}"))
             .header("Accept", GH_ACCEPT_JSON)
             .header("X-GitHub-Api-Version", GH_API_VERSION)
-            .header("User-Agent", GH_USER_AGENT),
+            .header("User-Agent", USER_AGENT),
         &token,
     ).await.ok()?;
     if !resp.status().is_success() { return None; }
@@ -141,9 +142,9 @@ async fn fetch_github(email: &str) -> Option<String> {
 
 async fn fetch_gitlab(resolved: &ResolvedProvider, email: &str) -> Option<String> {
     let base = resolved.info.gitlab_base_url.as_deref()
-        .unwrap_or(gl_api::GITLAB_COM_WEB)
+        .unwrap_or(GITLAB_COM_WEB)
         .trim_end_matches('/');
-    let token = gl_api::get_token(base).ok().flatten()?;
+    let token = get_gitlab_token(base).ok().flatten()?;
 
     // GitLab's `?search=` matches name, username and *public* email.
     let url = format!(
@@ -151,10 +152,10 @@ async fn fetch_gitlab(resolved: &ResolvedProvider, email: &str) -> Option<String
         percent_encode(email),
     );
     let client = reqwest::Client::new();
-    let resp = gl_api::gitlab_send_with_refresh(
+    let resp = gitlab_send_with_refresh(
         |tok| client.get(&url)
             .header("PRIVATE-TOKEN", tok)
-            .header("User-Agent", gl_api::USER_AGENT),
+            .header("User-Agent", USER_AGENT),
         base,
         &token,
     ).await.ok()?;

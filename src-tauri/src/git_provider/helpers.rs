@@ -104,7 +104,10 @@ fn lookup_or_register(
             if let Some(p) = registry.for_remote_url(&info.remote_url) {
                 return Ok(p);
             }
-            let provider = Arc::new(GitlabProvider::new_self_hosted(base_url));
+            let provider = Arc::new(GitlabProvider::new_self_hosted(
+                Arc::new(crate::git_provider::session::GitlabSessionProvider::new()),
+                base_url,
+            ));
             registry.register(provider.clone());
             return Ok(provider);
         }

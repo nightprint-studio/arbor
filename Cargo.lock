@@ -154,6 +154,7 @@ dependencies = [
  "corvus-brp",
  "corvus-git-provider-api",
  "corvus-git-provider-github",
+ "corvus-git-provider-gitlab",
  "corvus-issue-tracker-api",
  "corvus-issue-tracker-jira",
  "corvus-issue-tracker-linear",
@@ -1249,6 +1250,22 @@ dependencies = [
 
 [[package]]
 name = "corvus-git-provider-github"
+version = "0.3.0"
+dependencies = [
+ "arbor-ipc",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "corvus-git-provider-api",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "corvus-git-provider-gitlab"
 version = "0.3.0"
 dependencies = [
  "arbor-ipc",

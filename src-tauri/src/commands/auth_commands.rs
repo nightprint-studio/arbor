@@ -153,9 +153,11 @@ pub async fn get_gitlab_user(state: State<'_, AppState>) -> Result<Option<Provid
 }
 
 #[tauri::command]
-pub async fn disconnect_gitlab(state: State<'_, AppState>) -> Result<(), AppError> {
-    let provider = provider_by_host(&state, "gitlab.com")?;
-    provider.revoke_token().await.map_err(pe)
+pub async fn disconnect_gitlab(_state: State<'_, AppState>) -> Result<(), AppError> {
+    // Revoke is a keyring/OAuth concern owned by the shell — the keyring-free
+    // `corvus-git-provider-gitlab` crate's `revoke_token` returns `Unsupported`.
+    // Same out-of-band pattern as GitHub/Linear/Jira disconnect.
+    crate::git_provider::oauth::gitlab_flow::disconnect()
 }
 
 /// Attempt to silently refresh the stored GitLab OAuth access token.

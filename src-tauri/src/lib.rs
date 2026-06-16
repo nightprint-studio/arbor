@@ -348,7 +348,9 @@ impl AppState {
             Arc::new(crate::git_provider::session::GithubSessionProvider::new()),
             "github.com",
         )));
-        providers.register(Arc::new(GitlabProvider::new()));
+        providers.register(Arc::new(GitlabProvider::new(
+            Arc::new(crate::git_provider::session::GitlabSessionProvider::new()),
+        )));
 
         // Hook broker — built here (rather than in `setup()`) so the field can
         // stay an immutable `Arc<HookDispatcher>`: the static catalog and the
