@@ -7,6 +7,7 @@ export interface FsEntry {
   is_dir:   boolean;
   size:     number | null;
   modified: number | null;  // Unix timestamp ms
+  created:  number | null;  // Unix timestamp ms (null when the FS has no birth time)
 }
 
 export interface FsRoot {
@@ -32,12 +33,18 @@ export const fsRename         = (oldPath: string, newPath: string)  => invoke<vo
 export const fsDelete         = (path: string)                      => invoke<void>('fs_delete',            { path });
 
 // ── File explorer: copy / move / delete / open / watch ─────────────────────
-/** Copy entries into `destDir`; returns the created destination paths. */
-export const fsCopy        = (sources: string[], destDir: string) => invoke<string[]>('fs_copy', { sources, destDir });
-/** Move (cut+paste) entries into `destDir`; returns the new paths. */
-export const fsMove        = (sources: string[], destDir: string) => invoke<string[]>('fs_move', { sources, destDir });
+/** Copy entries into `destDir`; returns the created destination paths. With
+ *  `overwrite`, same-named items merge into / replace the existing entry
+ *  instead of getting a " (2)" suffix. */
+export const fsCopy        = (sources: string[], destDir: string, overwrite = false) => invoke<string[]>('fs_copy', { sources, destDir, overwrite });
+/** Move (cut+paste) entries into `destDir`; returns the new paths. With
+ *  `overwrite`, same-named items merge into / replace the existing entry. */
+export const fsMove        = (sources: string[], destDir: string, overwrite = false) => invoke<string[]>('fs_move', { sources, destDir, overwrite });
 /** Move entries to the OS trash / Recycle Bin (recoverable). */
 export const fsTrash       = (paths: string[]) => invoke<void>('fs_trash', { paths });
+/** Restore previously-trashed entries to their original locations (undo of
+ *  `fsTrash`). Windows / Linux only. */
+export const fsUntrash     = (paths: string[]) => invoke<void>('fs_untrash', { paths });
 /** Permanently delete entries from disk (Shift+Delete). */
 export const fsDeleteMany  = (paths: string[]) => invoke<void>('fs_delete_many', { paths });
 /** Recursively search `root` for entries whose name matches `query` (glob when
@@ -59,6 +66,14 @@ export const fsSetWallpaper = (path: string) => invoke<void>('fs_set_wallpaper',
 export const fsOpenDefault = (path: string) => invoke<void>('fs_open_default', { path });
 /** Reveal a path in the OS file manager, selecting it. */
 export const fsRevealInDir = (path: string) => invoke<void>('fs_reveal_in_dir', { path });
+/** Open the OS terminal rooted at `path` (the folder, or a file's parent),
+ *  detached so it outlives Arbor. Windows Terminal / cmd · Terminal.app ·
+ *  the first available Linux terminal emulator. */
+export const fsOpenTerminal = (path: string) => invoke<void>('fs_open_terminal', { path });
+/** Expand `%VAR%` / `$VAR` / leading `~` in a typed path. The virtual names
+ *  `appdata` / `localappdata` / `home` resolve cross-platform, so `%appdata%`
+ *  works on every OS. Returns the input unchanged when there's nothing to expand. */
+export const fsExpandPath = (path: string) => invoke<string>('fs_expand_path', { path });
 /** Open the built-in explorer window at a path (focusing/reusing it per the
  *  one-window setting). `reveal = true` selects the file inside its folder;
  *  `reveal = false` just opens the folder. Used when the user routes the app's

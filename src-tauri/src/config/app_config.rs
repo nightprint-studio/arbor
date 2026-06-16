@@ -205,6 +205,12 @@ pub struct ExplorerConfig {
     /// own "Reveal in File Explorer" item always uses the OS (escape hatch).
     #[serde(default)]
     pub reveal_in_builtin: bool,
+    /// Details-view column order + visibility. Empty → built-in order with the
+    /// default-on set shown. Unknown ids are ignored; columns missing from the
+    /// list are appended in their built-in position with their default state.
+    /// `name` is always shown first regardless of what's stored.
+    #[serde(default)]
+    pub columns: Vec<ExplorerColumnConfig>,
 }
 
 /// One sidebar section's persisted order + visibility. Mirrors
@@ -214,6 +220,16 @@ pub struct ExplorerSectionConfig {
     /// Section id: `library` | `recents` | `favourites` | `devices` | `projects`.
     pub id: String,
     /// Whether the section is shown.
+    pub visible: bool,
+}
+
+/// One details-view column's persisted order + visibility.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplorerColumnConfig {
+    /// Column id: `name` | `modified` | `type` | `size` | `created` |
+    /// `extension` | `gitstatus`.
+    pub id: String,
+    /// Whether the column is shown.
     pub visible: bool,
 }
 
@@ -243,6 +259,7 @@ impl Default for ExplorerConfig {
             open_web_links:       false,
             remembered_external_schemes: Vec::new(),
             reveal_in_builtin:    false,
+            columns:              Vec::new(),
         }
     }
 }

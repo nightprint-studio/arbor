@@ -1,5 +1,5 @@
 import { getExplorerConfig, setExplorerConfig } from '$lib/ipc/config';
-import type { ExplorerConfig, ExplorerView, ExplorerSort, ExplorerStartup, ExplorerSectionConfig } from '$lib/types/config';
+import type { ExplorerConfig, ExplorerView, ExplorerSort, ExplorerStartup, ExplorerSectionConfig, ExplorerColumnConfig } from '$lib/types/config';
 
 const DEFAULT: ExplorerConfig = {
   git_awareness:         false,
@@ -18,6 +18,7 @@ const DEFAULT: ExplorerConfig = {
   open_web_links:        false,
   remembered_external_schemes: [],
   reveal_in_builtin:     false,
+  columns:               [],
 };
 
 export const MAX_RECENTS_MIN = 1;
@@ -45,6 +46,39 @@ export function mergeSidebarSections(saved: ExplorerSectionConfig[]): { id: stri
   }
   for (const s of EXPLORER_SECTIONS) {
     if (!seen.has(s.id)) out.push({ id: s.id, visible: true });
+  }
+  return out;
+}
+
+/** Canonical details-view columns in built-in order, with their default-on
+ *  state. The config stores order + visibility against these ids; the explorer
+ *  owns the presentation meta (label, width, alignment, sort key). `name` is
+ *  mandatory — always shown and always first. */
+export const EXPLORER_COLUMNS: { id: string; defaultVisible: boolean }[] = [
+  { id: 'name',      defaultVisible: true  },
+  { id: 'modified',  defaultVisible: true  },
+  { id: 'type',      defaultVisible: true  },
+  { id: 'size',      defaultVisible: true  },
+  { id: 'created',   defaultVisible: false },
+  { id: 'extension', defaultVisible: false },
+  { id: 'gitstatus', defaultVisible: false },
+];
+
+/** Resolve the persisted (possibly empty/partial) column list against the
+ *  canonical set: `name` forced first and visible, saved order kept for the
+ *  rest, unknown ids dropped, and any missing columns appended in their
+ *  built-in position with their default visibility. */
+export function mergeColumns(saved: ExplorerColumnConfig[]): { id: string; visible: boolean }[] {
+  const known = new Set(EXPLORER_COLUMNS.map(c => c.id));
+  const seen = new Set<string>(['name']);
+  const out: { id: string; visible: boolean }[] = [{ id: 'name', visible: true }];
+  for (const c of saved ?? []) {
+    if (c.id === 'name' || !known.has(c.id) || seen.has(c.id)) continue;
+    out.push({ id: c.id, visible: c.visible !== false });
+    seen.add(c.id);
+  }
+  for (const c of EXPLORER_COLUMNS) {
+    if (!seen.has(c.id)) out.push({ id: c.id, visible: c.defaultVisible });
   }
   return out;
 }
@@ -93,6 +127,7 @@ function createExplorerStore() {
   let openWebLinks        = $state<boolean>(DEFAULT.open_web_links);
   let rememberedSchemes   = $state<string[]>([]);
   let revealInBuiltin     = $state<boolean>(DEFAULT.reveal_in_builtin);
+  let columns             = $state<ExplorerColumnConfig[]>([]);
   let loaded              = $state(false);
 
   async function loadConfig() {
@@ -110,6 +145,7 @@ function createExplorerStore() {
       alwaysNewWindow     = !!cfg.always_new_window;
       maxRecents          = clampRecents(cfg.max_recents);
       sidebarSections     = Array.isArray(cfg.sidebar_sections) ? cfg.sidebar_sections : [];
+      columns             = Array.isArray(cfg.columns) ? cfg.columns : [];
       openExternalLinks   = !!cfg.open_external_links;
       openWebLinks        = !!cfg.open_web_links;
       revealInBuiltin     = !!cfg.reveal_in_builtin;
@@ -136,6 +172,7 @@ function createExplorerStore() {
       always_new_window:     alwaysNewWindow,
       max_recents:           maxRecents,
       sidebar_sections:      sidebarSections,
+      columns,
       open_external_links:   openExternalLinks,
       open_web_links:        openWebLinks,
       remembered_external_schemes: rememberedSchemes,
@@ -159,6 +196,10 @@ function createExplorerStore() {
   function setMaxRecents(n: number)        { const c = clampRecents(n); if (maxRecents === c) return; maxRecents = c; persist(); }
   /** Replace the sidebar section order/visibility (already a resolved list). */
   function setSidebarSections(list: ExplorerSectionConfig[]) { sidebarSections = list; persist(); }
+  /** Replace the details-view column order/visibility (already a resolved list). */
+  function setColumns(list: ExplorerColumnConfig[]) { columns = list; persist(); }
+  /** Reset columns to the built-in order + default visibility. */
+  function resetColumns() { if (columns.length === 0) return; columns = []; persist(); }
 
   // ── Generic external-link opening (address bar) ──────────────────────────
   function setOpenExternalLinks(on: boolean) { if (openExternalLinks === on) return; openExternalLinks = on; persist(); }
@@ -213,6 +254,7 @@ function createExplorerStore() {
     get alwaysNewWindow()     { return alwaysNewWindow; },
     get maxRecents()          { return maxRecents; },
     get sidebarSections()     { return sidebarSections; },
+    get columns()             { return columns; },
     get openExternalLinks()   { return openExternalLinks; },
     get openWebLinks()        { return openWebLinks; },
     get rememberedSchemes()   { return rememberedSchemes; },
@@ -229,6 +271,8 @@ function createExplorerStore() {
     setAlwaysNewWindow,
     setMaxRecents,
     setSidebarSections,
+    setColumns,
+    resetColumns,
     setOpenExternalLinks,
     setOpenWebLinks,
     setRevealInBuiltin,

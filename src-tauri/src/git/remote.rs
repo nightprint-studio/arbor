@@ -134,7 +134,15 @@ pub fn fetch(repo: &Repository, remote_name: &str) -> Result<FetchResult> {
     fetch_opts.download_tags(git2::AutotagOption::Auto);
     fetch_opts.prune(FetchPrune::On);
 
-    remote.fetch(&[] as &[&str], Some(&mut fetch_opts), None)?;
+    // Fetch *all* branches with an explicit wildcard refspec rather than the
+    // remote's configured one. A repo cloned with `--single-branch` (or whose
+    // `remote.<name>.fetch` was otherwise narrowed) only lists the current
+    // branch, so passing the empty refspec would update just that one ref —
+    // exactly the "fetch only updates the active branch" symptom. The standard
+    // `refs/remotes/<remote>/*` mapping mirrors what `git fetch <remote>` does
+    // on a normal clone.
+    let all_heads = format!("+refs/heads/*:refs/remotes/{remote_name}/*");
+    remote.fetch(&[all_heads.as_str()], Some(&mut fetch_opts), None)?;
 
     let stats = remote.stats();
     Ok(FetchResult {
@@ -236,10 +244,14 @@ pub fn pull(repo: &Repository, remote_name: &str) -> Result<()> {
             Some(id) => id,
             None => repo
                 .refname_to_id(&format!("refs/remotes/{remote_name}/{branch_name}"))
+                // No upstream config AND no conventional remote-tracking ref:
+                // after the fetch above, that means the branch simply isn't on
+                // the remote — it's local-only, so there's nothing to pull.
+                // (Suggesting `--set-upstream-to` here would be misleading: the
+                // ref it points at doesn't exist.)
                 .map_err(|_| crate::error::AppError::Other(format!(
-                    "No upstream tracking branch found for '{branch_name}'. \
-                     Push the branch first or set tracking with: \
-                     git branch --set-upstream-to={remote_name}/{branch_name}"
+                    "Branch '{branch_name}' is local-only — there's nothing to pull \
+                     (no '{remote_name}/{branch_name}' on the remote). Push it first, then pull."
                 )))?,
         }
     };

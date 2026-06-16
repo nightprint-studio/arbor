@@ -34,6 +34,13 @@ fn fire_hook(app: &AppHandle, hook: &str, payload: serde_json::Value) {
     app.state::<AppState>().fire_hook(hook, payload);
 }
 
+/// Broadcast that the repo registry and/or workspace membership changed, so
+/// every window (the main app AND any standalone File Explorer window) can
+/// reload its Projects view. Carries no payload — listeners re-query.
+fn emit_registry_changed(app: &AppHandle) {
+    let _ = app.emit("arbor://registry-changed", ());
+}
+
 fn workspace_payload(ws: &WorkspaceDef) -> serde_json::Value {
     serde_json::json!({
         "id":        ws.id,
@@ -240,6 +247,7 @@ pub fn create_workspace(
         ws
     };
     fire_hook(&app, "on_workspace_created", workspace_payload(&ws));
+    emit_registry_changed(&app);
     Ok(ws)
 }
 
@@ -278,6 +286,7 @@ pub fn update_workspace(
             .ok_or_else(|| AppError::Other(format!("workspace not found: {workspace_id}")))?
     };
     fire_hook(&app, "on_workspace_updated", workspace_payload(&ws));
+    emit_registry_changed(&app);
     Ok(ws)
 }
 
@@ -313,17 +322,22 @@ pub fn delete_workspace(
     for repo_id in member_ids {
         let _ = forget_repo_if_orphaned(&state, &repo_id, "workspace_deleted");
     }
+    emit_registry_changed(&app);
     Ok(())
 }
 
 #[tauri::command]
 pub fn reorder_workspaces(
+    app: AppHandle,
     state: State<'_, AppState>,
     ordered_ids: Vec<String>,
 ) -> Result<()> {
-    let mut store = state.lock_workspaces()?;
-    store.set_order(&ordered_ids);
-    store_io::save(&store)?;
+    {
+        let mut store = state.lock_workspaces()?;
+        store.set_order(&ordered_ids);
+        store_io::save(&store)?;
+    }
+    emit_registry_changed(&app);
     Ok(())
 }
 
@@ -446,6 +460,7 @@ pub fn add_repo_to_workspace(
         "workspace_id": workspace_id,
         "repo_id":      repo_id,
     }));
+    emit_registry_changed(&app);
     Ok(())
 }
 
@@ -470,6 +485,7 @@ pub fn remove_repo_from_workspace(
     // registry entry + recent-repos pointer, fire on_repo_deregistered). Kept
     // when it's still open in a tab — close_repo runs the same GC on tab close.
     let _ = forget_repo_if_orphaned(&state, &repo_id, "removed_from_last_workspace");
+    emit_registry_changed(&app);
     Ok(())
 }
 
@@ -495,6 +511,7 @@ pub fn move_repo_between_workspaces(
         "workspace_id": to_workspace_id,
         "repo_id":      repo_id,
     }));
+    emit_registry_changed(&app);
     Ok(())
 }
 
@@ -515,6 +532,7 @@ pub struct RepoRegistrationResult {
 /// current workspace's membership.
 #[tauri::command]
 pub fn register_repo_path(
+    app: AppHandle,
     state: State<'_, AppState>,
     path: String,
     remote_url: Option<String>,
@@ -551,6 +569,7 @@ pub fn register_repo_path(
             true
         }
     };
+    emit_registry_changed(&app);
     Ok(RepoRegistrationResult { id, existed, added_to_ws })
 }
 
@@ -561,6 +580,7 @@ pub fn register_repo_path(
 /// "not cloned" and offers Clone / Locate to resolve it.
 #[tauri::command]
 pub fn register_pending_repo(
+    app: AppHandle,
     state: State<'_, AppState>,
     name: String,
     remote_url: Option<String>,
@@ -571,24 +591,30 @@ pub fn register_pending_repo(
         registry_io::save(&reg)?;
         id
     };
+    emit_registry_changed(&app);
     Ok(id)
 }
 
 #[tauri::command]
 pub fn update_registry_repo(
+    app: AppHandle,
     state: State<'_, AppState>,
     repo_id: String,
     display_name: Option<String>,
     remote_url: Option<Option<String>>,
     path: Option<String>,
 ) -> Result<RepoRegistryEntry> {
-    let mut reg = state.lock_repo_registry()?;
-    if let Some(name) = display_name { reg.set_display_name(&repo_id, name)?; }
-    if let Some(url)  = remote_url   { reg.set_remote_url(&repo_id, url)?; }
-    if let Some(p)    = path         { reg.set_path(&repo_id, p)?; }
-    registry_io::save(&reg)?;
-    reg.get(&repo_id).cloned()
-        .ok_or_else(|| AppError::Other(format!("repo not found: {repo_id}")))
+    let entry = {
+        let mut reg = state.lock_repo_registry()?;
+        if let Some(name) = display_name { reg.set_display_name(&repo_id, name)?; }
+        if let Some(url)  = remote_url   { reg.set_remote_url(&repo_id, url)?; }
+        if let Some(p)    = path         { reg.set_path(&repo_id, p)?; }
+        registry_io::save(&reg)?;
+        reg.get(&repo_id).cloned()
+            .ok_or_else(|| AppError::Other(format!("repo not found: {repo_id}")))?
+    };
+    emit_registry_changed(&app);
+    Ok(entry)
 }
 
 /// Fully deregister a repo — removes it from the registry and from every
@@ -627,6 +653,7 @@ pub fn delete_registry_repo(
             "reason":  "registry_delete",
         }));
     }
+    emit_registry_changed(&app);
     Ok(())
 }
 

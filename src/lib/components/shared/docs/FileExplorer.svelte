@@ -27,8 +27,9 @@
 <ul class="step-list">
   <li><strong>Sidebar</strong> — Library (Overview / Settings), Recents, Favourites, Devices, and Projects (your Arbor-registered repos, grouped by workspace). Sections can be <strong>reordered and hidden</strong> from the settings page, or right-click a section header to hide it. It's fully arrow-navigable: reach it with <Kbd label="F6" />, which cycles focus across the explorer's panes — sidebar → list → right panel → right activity bar (<Kbd label="Shift+F6" /> goes back), no Tab needed. Within the sidebar, <Kbd label="Up" /> / <Kbd label="Down" /> move between headers and items, <Kbd label="Right" /> / <Kbd label="Left" /> expand / collapse a section or workspace group, <Kbd label="Enter" /> opens. Toggle the whole sidebar with <Kbd label="Ctrl+B" />.</li>
   <li><strong>Tabs</strong> — open several locations at once; each tab keeps its own history.</li>
-  <li><strong>Address bar</strong> — click it (or <Kbd label="Ctrl+L" />) to type a path, with <strong>ghost-text autocomplete</strong> (press <Kbd label="Tab" /> to complete). The breadcrumb is clickable.</li>
+  <li><strong>Address bar</strong> — click it (or <Kbd label="Ctrl+L" />) to type a path, with <strong>ghost-text autocomplete</strong> (press <Kbd label="Tab" /> to complete). The breadcrumb is clickable. Shell-style shortcuts are expanded on <Kbd label="Enter" />: <code>%appdata%</code>, <code>$HOME</code>, <code>${XDG_CONFIG_HOME}</code> and a leading <code>~</code>. The virtual names <code>%appdata%</code> / <code>%localappdata%</code> / <code>%home%</code> resolve to the right OS folder on every platform.</li>
   <li><strong>Views</strong> — Details list or Medium / Large / Extra-large icon grids; the choice is remembered per folder. Large grids show image thumbnails.</li>
+  <li><strong>Columns</strong> (details view) — click a column header to sort by it (the <strong>↑ / ↓</strong> arrow sits after the label and flips the direction on a second click). <strong>Drag a header</strong> to reorder columns, and <strong>right-click any header</strong> to show / hide columns or reset them. Available columns: Name (always shown, always first), Date modified, Type, Size, Date created, Extension and Git status — only the first four are on by default. The whole set is persisted to your Arbor config.</li>
   <li><strong>Filter & search</strong> — type to filter the current folder (wildcards <code>*</code> <code>?</code> supported); toggle <strong>recursive search</strong> to match inside every subfolder, and <strong>show hidden</strong> to include dotfiles.</li>
 </ul>
 
@@ -50,6 +51,8 @@
     <tr><td>Edit the address</td><td><Kbd label="Ctrl+L" /></td></tr>
     <tr><td>Type-ahead filter</td><td>Just start typing — then <Kbd label="Down" /> steps into the list (or <Kbd label="Enter" /> opens the first match)</td></tr>
     <tr><td>Select all</td><td><Kbd label="Ctrl+A" /></td></tr>
+    <tr><td>Clear the selection (in a picker, target the current folder itself)</td><td><Kbd label="Esc" /> or click empty space</td></tr>
+    <tr><td>Undo / Redo the last file operation</td><td><Kbd label="Ctrl+Z" /> / <Kbd label="Ctrl+Shift+Z" /></td></tr>
     <tr><td>Close the tab (or the explorer, if it's the last)</td><td><Kbd label="Ctrl+W" /></td></tr>
     <tr><td>Open the explorer settings</td><td><Kbd label="Ctrl+," /></td></tr>
   </tbody>
@@ -59,10 +62,13 @@
 <p>Right-click an item (or the background) for the full menu — or open it from the keyboard on the cursor row with <Kbd action="open_context_menu" />. The menu is fully keyboard-driven: <Kbd label="Up" /> / <Kbd label="Down" /> move, type a letter to jump, <Kbd label="Right" /> / <Kbd label="Left" /> open / close a submenu (e.g. <strong>Git</strong>), <Kbd label="Enter" /> activates, <Kbd label="Esc" /> closes. Common actions are also on the keyboard directly:</p>
 <ul class="step-list">
   <li><strong>New folder / file</strong>, <strong>Rename</strong> (<Kbd label="F2" />), <strong>Cut / Copy / Paste</strong> (<Kbd label="Ctrl+X" /> / <Kbd label="Ctrl+C" /> / <Kbd label="Ctrl+V" />).</li>
-  <li><strong>Delete</strong> to Recycle Bin (<Kbd label="Delete" />) or permanently (<Kbd label="Shift+Delete" />).</li>
+  <li><strong>Delete</strong> to Recycle Bin (<Kbd label="Delete" />) or permanently (<Kbd label="Shift+Delete" />) — both ask for confirmation first.</li>
   <li><strong>Move</strong> by dragging items onto a folder.</li>
+  <li><strong>Undo / Redo</strong> (<Kbd label="Ctrl+Z" /> / <Kbd label="Ctrl+Shift+Z" />, or the toolbar arrows) covers create, rename, move, paste and Recycle-Bin delete — an undone delete is restored from the Recycle Bin.</li>
+  <li><strong>Open in editor</strong> — open the item (or the current folder) in your IDE; a submenu lists the detected and custom editors with the configured default badged. <strong>Open in Terminal</strong> opens the OS terminal rooted at the folder (a file uses its parent).</li>
   <li><strong>Compress to ZIP</strong> / <strong>Extract here</strong>, <strong>Set as desktop background</strong> (images), <strong>Open with default app</strong>, <strong>Reveal in File Explorer</strong>, <strong>Copy Path</strong>, and <strong>Properties</strong>.</li>
 </ul>
+<p>Pasting an item whose name already exists in the destination asks what to do: <strong>Replace</strong> (merge folders and overwrite matching files), <strong>Keep both</strong> (the pasted copy gets a “ (2)” suffix), or <strong>Cancel</strong>.</p>
 
 <h2>Right rail: Preview, Info, Changes</h2>
 <p>The right rail renders a live <strong>Preview</strong> of the selected file (image, video, audio, or syntax-highlighted text), an <strong>Info</strong> panel with size / dates / path (and a repository section for repo folders), and a <strong>Changes</strong> panel when inside a git repo. Resize or expand the rail; toggle the preview with <Kbd label="Ctrl+Shift+B" />. <Kbd label="Alt+Enter" /> opens the Info panel for the cursor item (Windows-style Properties); from there a button opens the OS-native Properties sheet.</p>
@@ -84,7 +90,7 @@
 <table class="shortcuts-table">
   <thead><tr><th>Mode</th><th>What you pick</th></tr></thead>
   <tbody>
-    <tr><td><strong>Folder</strong></td><td>The folder you're in, or a selected sub-folder.</td></tr>
+    <tr><td><strong>Folder</strong></td><td>The folder you're in by default, or a sub-folder once you select one. Click empty space or press <Kbd label="Esc" /> to clear the selection and target the current folder itself.</td></tr>
     <tr><td><strong>File</strong></td><td>A file (optionally limited to certain extensions — non-matching files are hidden). Some pickers allow selecting multiple files with <Kbd label="Ctrl" /> / <Kbd label="Shift" />-click.</td></tr>
     <tr><td><strong>Save</strong></td><td>A folder plus a filename typed in the footer; a warning appears if a file with that name already exists.</td></tr>
   </tbody>

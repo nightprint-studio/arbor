@@ -158,6 +158,12 @@ export interface ExplorerSectionConfig {
   visible: boolean;
 }
 
+/** One details-view column's persisted order + visibility. */
+export interface ExplorerColumnConfig {
+  id: string;
+  visible: boolean;
+}
+
 /** Built-in file explorer preferences. `git_awareness` + `global_shortcut`
  *  are host-level switches (also editable from the SettingsPanel); the display
  *  defaults are edited from the explorer's own in-window settings page. */
@@ -202,6 +208,9 @@ export interface ExplorerConfig {
   /** Route the app's "Open / Reveal in File Explorer" actions into the built-in
    *  explorer window instead of the OS file manager. Off by default. */
   reveal_in_builtin: boolean;
+  /** Details-view column order + visibility. Empty → built-in order with the
+   *  default-on set shown. `name` is always shown first. */
+  columns: ExplorerColumnConfig[];
 }
 
 /** UI animation preferences. `enabled=false` collapses every transition

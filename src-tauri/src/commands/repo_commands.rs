@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
 use crate::git::repo::{RepoInfo, CloneOptions};
@@ -32,7 +32,7 @@ pub fn open_repo(
 }
 
 #[tauri::command]
-pub fn close_repo(state: State<'_, AppState>, tab_id: String) -> Result<(), AppError> {
+pub fn close_repo(app: AppHandle, state: State<'_, AppState>, tab_id: String) -> Result<(), AppError> {
     let (path, name) = {
         let mut mgr = state.lock_repos()?;
         let info = mgr.get(&tab_id)
@@ -57,9 +57,11 @@ pub fn close_repo(state: State<'_, AppState>, tab_id: String) -> Result<(), AppE
             .ok()
             .and_then(|reg| reg.find_by_path(&path).map(|e| e.id.clone()));
         if let Some(id) = repo_id {
-            let _ = crate::commands::workspace_commands::forget_repo_if_orphaned(
+            let forgotten = crate::commands::workspace_commands::forget_repo_if_orphaned(
                 &state, &id, "tab_closed_when_orphan",
-            );
+            ).unwrap_or(false);
+            // Dropping the registry entry changes the explorer's Projects view.
+            if forgotten { let _ = app.emit("arbor://registry-changed", ()); }
         }
     }
     Ok(())

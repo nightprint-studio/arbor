@@ -77,6 +77,9 @@ pub struct FsEntry {
     pub size:     Option<u64>,
     /// Last-modified time as Unix timestamp in milliseconds. `None` on error.
     pub modified: Option<i64>,
+    /// Creation time as Unix timestamp in milliseconds. `None` on error or on
+    /// platforms/filesystems that don't record a birth time (e.g. many Linux FS).
+    pub created:  Option<i64>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -90,6 +93,14 @@ pub struct FsRoot {
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
+
+/// Convert a filesystem timestamp into a Unix-epoch value in milliseconds,
+/// swallowing the `io::Result` and any pre-epoch / unsupported cases to `None`.
+fn to_unix_ms(t: std::io::Result<std::time::SystemTime>) -> Option<i64> {
+    t.ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+}
 
 fn read_dir_blocking(path: String, show_hidden: bool) -> Result<Vec<FsEntry>, AppError> {
     let base = Path::new(&path);
@@ -110,21 +121,16 @@ fn read_dir_blocking(path: String, show_hidden: bool) -> Result<Vec<FsEntry>, Ap
         let full_path = item.path();
         let path_str  = full_path.to_string_lossy().to_string();
 
-        let (is_dir, size, modified) = match item.metadata() {
+        let (is_dir, size, modified, created) = match item.metadata() {
             Ok(meta) => {
                 let is_dir = meta.is_dir();
                 let size   = if is_dir { None } else { Some(meta.len()) };
-                let modified = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_millis() as i64);
-                (is_dir, size, modified)
+                (is_dir, size, to_unix_ms(meta.modified()), to_unix_ms(meta.created()))
             }
-            Err(_) => (full_path.is_dir(), None, None),
+            Err(_) => (full_path.is_dir(), None, None, None),
         };
 
-        entries.push(FsEntry { name, path: path_str, is_dir, size, modified });
+        entries.push(FsEntry { name, path: path_str, is_dir, size, modified, created });
     }
 
     Ok(entries)
@@ -211,17 +217,15 @@ pub async fn fs_search(
                 }
                 if matches(&name) {
                     let size = meta.as_ref().and_then(|m| if m.is_dir() { None } else { Some(m.len()) });
-                    let modified = meta
-                        .as_ref()
-                        .and_then(|m| m.modified().ok())
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as i64);
+                    let modified = meta.as_ref().and_then(|m| to_unix_ms(m.modified()));
+                    let created  = meta.as_ref().and_then(|m| to_unix_ms(m.created()));
                     out.push(FsEntry {
                         name,
                         path: full.to_string_lossy().to_string(),
                         is_dir,
                         size,
                         modified,
+                        created,
                     });
                     if out.len() >= cap {
                         break;
@@ -349,10 +353,18 @@ fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Copy each of `sources` into `dest_dir`, resolving name collisions. Returns
-/// the list of created destination paths. Recursive for directories.
+/// Copy each of `sources` into `dest_dir`. With `overwrite = false` (default)
+/// name collisions are resolved Explorer-style (" (2)", " (3)", …); with
+/// `overwrite = true` each item keeps its name and merges into any existing
+/// folder of the same name, replacing colliding files (recursive). Returns the
+/// list of created / merged destination paths.
 #[tauri::command]
-pub async fn fs_copy(sources: Vec<String>, dest_dir: String) -> Result<Vec<String>, AppError> {
+pub async fn fs_copy(
+    sources: Vec<String>,
+    dest_dir: String,
+    overwrite: Option<bool>,
+) -> Result<Vec<String>, AppError> {
+    let overwrite = overwrite.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
         let dir = Path::new(&dest_dir);
         let mut created = Vec::with_capacity(sources.len());
@@ -362,7 +374,11 @@ pub async fn fs_copy(sources: Vec<String>, dest_dir: String) -> Result<Vec<Strin
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .ok_or_else(|| AppError::Other(format!("Invalid source path: {s}")))?;
-            let dst = unique_dest(dir, &name);
+            let dst = if overwrite {
+                dir.join(&name)
+            } else {
+                unique_dest(dir, &name)
+            };
             copy_recursive(src, &dst)
                 .map_err(|e| AppError::Other(format!("Cannot copy {name}: {e}")))?;
             created.push(dst.to_string_lossy().to_string());
@@ -374,10 +390,17 @@ pub async fn fs_copy(sources: Vec<String>, dest_dir: String) -> Result<Vec<Strin
 }
 
 /// Move each of `sources` into `dest_dir` (cut + paste). Falls back to
-/// copy-then-delete across volumes where `rename` can't work. Returns the
+/// copy-then-delete across volumes where `rename` can't work. With
+/// `overwrite = true` an item keeps its name and merges into / replaces an
+/// existing same-named entry instead of getting a " (2)" suffix. Returns the
 /// list of new paths. Moving into the same directory is a no-op.
 #[tauri::command]
-pub async fn fs_move(sources: Vec<String>, dest_dir: String) -> Result<Vec<String>, AppError> {
+pub async fn fs_move(
+    sources: Vec<String>,
+    dest_dir: String,
+    overwrite: Option<bool>,
+) -> Result<Vec<String>, AppError> {
+    let overwrite = overwrite.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
         let dir = Path::new(&dest_dir);
         let mut moved = Vec::with_capacity(sources.len());
@@ -396,7 +419,11 @@ pub async fn fs_move(sources: Vec<String>, dest_dir: String) -> Result<Vec<Strin
             if dir.starts_with(src) {
                 return Err(AppError::Other("Cannot move a folder into itself".into()));
             }
-            let dst = unique_dest(dir, &name);
+            let dst = if overwrite {
+                dir.join(&name)
+            } else {
+                unique_dest(dir, &name)
+            };
             if std::fs::rename(src, &dst).is_err() {
                 copy_recursive(src, &dst)
                     .map_err(|e| AppError::Other(format!("Cannot move {name}: {e}")))?;
@@ -446,6 +473,48 @@ pub async fn fs_delete_many(paths: Vec<String>) -> Result<(), AppError> {
     })
     .await
     .map_err(|e| AppError::Other(format!("fs_delete_many task panicked: {e}")))?
+}
+
+/// Restore previously-trashed entries back to their original locations — the
+/// "undo" of `fs_trash`. For each requested original path, the most recently
+/// deleted matching item in the Recycle Bin is restored. Backed by the OS trash
+/// index (Windows / Linux); not supported on macOS, where the trash exposes no
+/// restore API.
+#[tauri::command]
+pub async fn fs_untrash(paths: Vec<String>) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || untrash_paths(paths))
+        .await
+        .map_err(|e| AppError::Other(format!("fs_untrash task panicked: {e}")))?
+}
+
+#[cfg(not(target_os = "macos"))]
+fn untrash_paths(paths: Vec<String>) -> Result<(), AppError> {
+    use trash::os_limited::{list, restore_all};
+
+    let items =
+        list().map_err(|e| AppError::Other(format!("Cannot read the Recycle Bin: {e}")))?;
+    let mut to_restore = Vec::with_capacity(paths.len());
+    for p in &paths {
+        let want = Path::new(p);
+        // The most recently trashed item whose original full path matches.
+        let best = items
+            .iter()
+            .filter(|it| it.original_parent.join(&it.name).as_path() == want)
+            .max_by_key(|it| it.time_deleted)
+            .cloned();
+        match best {
+            Some(it) => to_restore.push(it),
+            None => return Err(AppError::Other(format!("Not found in the Recycle Bin: {p}"))),
+        }
+    }
+    restore_all(to_restore).map_err(|e| AppError::Other(format!("Cannot restore: {e}")))
+}
+
+#[cfg(target_os = "macos")]
+fn untrash_paths(_paths: Vec<String>) -> Result<(), AppError> {
+    Err(AppError::Other(
+        "Restoring from the Trash isn't supported on macOS".into(),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -586,6 +655,190 @@ pub fn fs_reveal_in_dir(app: tauri::AppHandle, path: String) -> Result<(), AppEr
     app.opener()
         .reveal_item_in_dir(path)
         .map_err(|e| AppError::Other(format!("Cannot reveal: {e}")))
+}
+
+/// Open the OS terminal rooted at `path` — the folder itself, or a file's
+/// parent folder. The terminal is spawned detached so it outlives Arbor.
+///
+/// - **Windows** → Windows Terminal (`wt.exe -d`), falling back to a classic
+///   `cmd.exe` console when `wt` isn't installed.
+/// - **macOS** → Terminal.app via `open -a Terminal`.
+/// - **Linux/BSD** → the first available common terminal emulator, launched
+///   with its working directory set to the folder.
+#[tauri::command]
+pub fn fs_open_terminal(path: String) -> Result<(), AppError> {
+    let p = Path::new(&path);
+    let dir = if p.is_dir() {
+        p.to_path_buf()
+    } else {
+        p.parent().map(Path::to_path_buf).unwrap_or_else(|| p.to_path_buf())
+    };
+    if !dir.exists() {
+        return Err(AppError::Other(format!("Path does not exist: {path}")));
+    }
+    open_terminal_at(&dir)
+}
+
+#[cfg(windows)]
+fn open_terminal_at(dir: &Path) -> Result<(), AppError> {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32          = 0x0000_0008;
+    const CREATE_NEW_CONSOLE: u32        = 0x0000_0010;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+
+    let dir_str = dir.to_string_lossy().to_string();
+    // Prefer Windows Terminal (its own window → DETACHED_PROCESS is fine).
+    let wt = std::process::Command::new("wt.exe")
+        .args(["-d", &dir_str])
+        .creation_flags(DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB)
+        .spawn();
+    if wt.is_ok() {
+        return Ok(());
+    }
+    // Fall back to a fresh cmd.exe console rooted at the folder. CREATE_NEW_CONSOLE
+    // gives the interactive window; breakaway escapes a dev-mode parent job (with
+    // the documented ERROR_ACCESS_DENIED fallback when breakaway isn't allowed).
+    let build = |flags: u32| {
+        std::process::Command::new("cmd.exe")
+            .current_dir(dir)
+            .creation_flags(flags)
+            .spawn()
+    };
+    build(CREATE_NEW_CONSOLE | CREATE_BREAKAWAY_FROM_JOB)
+        .or_else(|e| if e.raw_os_error() == Some(5) { build(CREATE_NEW_CONSOLE) } else { Err(e) })
+        .map(|_| ())
+        .map_err(|e| AppError::Other(format!("Cannot open terminal: {e}")))
+}
+
+#[cfg(target_os = "macos")]
+fn open_terminal_at(dir: &Path) -> Result<(), AppError> {
+    std::process::Command::new("open")
+        .arg("-a")
+        .arg("Terminal")
+        .arg(dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| AppError::Other(format!("Cannot open terminal: {e}")))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_terminal_at(dir: &Path) -> Result<(), AppError> {
+    use std::os::unix::process::CommandExt;
+    // Common terminal emulators, probed in order. Each one starts in the working
+    // directory we set on the command, so no per-terminal "cd here" flag is needed.
+    const TERMINALS: &[&str] = &[
+        "x-terminal-emulator", "gnome-terminal", "konsole",
+        "xfce4-terminal", "alacritty", "kitty", "tilix", "xterm",
+    ];
+    for prog in TERMINALS {
+        let spawned = std::process::Command::new(prog)
+            .current_dir(dir)
+            .process_group(0)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if spawned.is_ok() {
+            return Ok(());
+        }
+    }
+    Err(AppError::Other("No terminal emulator found".into()))
+}
+
+/// Expand environment-variable references and a leading `~` in a user-typed
+/// path, so the address bar accepts shell-style shortcuts like `%appdata%`
+/// (Windows) or `$HOME` / `~/code` (Unix). Both `%VAR%` and `$VAR` / `${VAR}`
+/// syntaxes are honoured on every platform; the virtual names `appdata` /
+/// `localappdata` / `home` resolve to the right OS folder everywhere, so
+/// `%appdata%` works on macOS and Linux too. Unknown variables are left intact.
+#[tauri::command]
+pub fn fs_expand_path(path: String) -> String {
+    expand_path_str(&path)
+}
+
+/// Resolve one variable name to a path value. Recognises a few cross-platform
+/// virtual names before falling back to a real environment variable (exact,
+/// then upper-cased so `%appdata%` matches `APPDATA`).
+fn resolve_path_var(name: &str) -> Option<String> {
+    let to_s = |p: PathBuf| p.to_string_lossy().into_owned();
+    match name.to_ascii_lowercase().as_str() {
+        "appdata"              => std::env::var("APPDATA").ok().or_else(|| dirs::config_dir().map(to_s)),
+        "localappdata"         => std::env::var("LOCALAPPDATA").ok().or_else(|| dirs::data_local_dir().map(to_s)),
+        "home" | "userprofile" => dirs::home_dir().map(to_s),
+        _ => std::env::var(name).ok().or_else(|| std::env::var(name.to_ascii_uppercase()).ok()),
+    }
+}
+
+fn expand_path_str(input: &str) -> String {
+    let mut s = input.trim().to_string();
+    if s.is_empty() {
+        return s;
+    }
+    // Leading ~ → home directory (bare `~`, or `~/…` / `~\…`).
+    if s == "~" || s.starts_with("~/") || s.starts_with("~\\") {
+        if let Some(home) = dirs::home_dir() {
+            s = format!("{}{}", home.to_string_lossy(), &s[1..]);
+        }
+    }
+    s = expand_percent_vars(&s);
+    s = expand_dollar_vars(&s);
+    s
+}
+
+/// Expand `%VAR%` tokens. A `%` with no closing `%`, or an unknown variable, is
+/// left verbatim (so a stray `%` in a real filename survives).
+fn expand_percent_vars(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '%' {
+            if let Some(rel) = chars[i + 1..].iter().position(|&c| c == '%') {
+                let end = i + 1 + rel;
+                let name: String = chars[i + 1..end].iter().collect();
+                if let Some(val) = resolve_path_var(&name) {
+                    out.push_str(&val);
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Expand `$VAR` and `${VAR}` tokens. Variable names are `[A-Za-z0-9_]`.
+fn expand_dollar_vars(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '$' && i + 1 < chars.len() {
+            let braced = chars[i + 1] == '{';
+            let start = if braced { i + 2 } else { i + 1 };
+            let mut end = start;
+            while end < chars.len()
+                && (chars[end].is_ascii_alphanumeric() || chars[end] == '_')
+                && !(braced && chars[end] == '}')
+            {
+                end += 1;
+            }
+            let name: String = chars[start..end].iter().collect();
+            let close_ok = !braced || (end < chars.len() && chars[end] == '}');
+            if !name.is_empty() && close_ok {
+                if let Some(val) = resolve_path_var(&name) {
+                    out.push_str(&val);
+                    i = if braced { end + 1 } else { end };
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }
 
 /// Open the OS-native file/folder **Properties** dialog for `path`.

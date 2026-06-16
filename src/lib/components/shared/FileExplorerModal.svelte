@@ -31,7 +31,8 @@
     ExternalLink, Link2, AlertCircle, Maximize2, Minimize2, Settings2,
     Archive, PackageOpen, Image as ImageIcon, FolderSearch,
     List, LayoutGrid, Grid2x2, Grid3x3,
-    Plus, Minus, Undo2, EyeOff, GitCompare, CheckCircle2, Save,
+    Plus, Minus, Undo2, Redo2, EyeOff, GitCompare, CheckCircle2, Save,
+    SquareTerminal, Code2, Check, RotateCcw,
   } from 'lucide-svelte';
   import Icon from '@iconify/svelte';
   import { getFileIcon, getFolderIcon } from '$lib/utils/file-icons';
@@ -43,7 +44,8 @@
   import { copyToClipboard } from '$lib/utils/clipboard';
   import {
     fsReadDir, listFsRoots, fsRename, fsCreateDir, fsCreateFile,
-    fsCopy, fsMove, fsTrash, fsDeleteMany, fsOpenDefault, fsRevealInDir, fsShowProperties, fsIcon,
+    fsCopy, fsMove, fsTrash, fsUntrash, fsDeleteMany, fsOpenDefault, fsRevealInDir, fsShowProperties, fsIcon,
+    fsOpenTerminal, fsExpandPath,
     fsZip, fsUnzip, fsSetWallpaper, fsSearch,
     fsReadTextFile, fsWatchStart, fsWatchStop,
     fsGitStatus, fsGitStage, fsGitUnstage, fsGitDiscard, fsGitIgnore, fsOpenInArbor, fsGitChanges,
@@ -54,8 +56,10 @@
     type ExplorerRevealPayload, type ClipData,
   } from '$lib/ipc/fs';
   import { listRegistryRepos, listWorkspaces } from '$lib/ipc/workspace';
+  import { openInIde, getIdeConfig, startIdeDetection } from '$lib/ipc/worktree';
+  import type { IdeConfig, DetectedIde } from '$lib/types/git';
   import { workspaceColorVar, type RepoRegistryEntry, type WorkspaceDef } from '$lib/types/workspace';
-  import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS } from '$lib/stores/explorer.svelte';
+  import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS, mergeColumns } from '$lib/stores/explorer.svelte';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { dispatchDeepLink } from '$lib/ipc/deep-link';
   import { copyDeepLinkFromRemote } from '$lib/utils/deep-link-builder';
@@ -211,7 +215,7 @@
     renamed: 'Renamed', conflicted: 'Conflicted', ignored: 'Ignored',
   };
 
-  type SortKey = 'name' | 'modified' | 'size';
+  type SortKey = 'name' | 'modified' | 'size' | 'type' | 'created' | 'extension';
   let sortKey = $state<SortKey>('name');
   let sortAsc = $state(true);
 
@@ -260,6 +264,11 @@
   let workspaces  = $state<WorkspaceDef[]>([]);
   let activeWorkspaceId = $state<string | null>(null);
 
+  // IDE awareness for the "Open in editor" context action. Loaded + probed on
+  // mount; the detection result fills `detectedIdes` (see onMount).
+  let ideConfig    = $state<IdeConfig | null>(null);
+  let detectedIdes = $state<DetectedIde[]>([]);
+
   let renamingPath = $state('');
   let renameValue  = $state('');
   let createKind   = $state<'folder' | 'file' | null>(null);
@@ -272,6 +281,30 @@
   // the intent explicit. Holds the selection paths while the dialog is open.
   let discardReq = $state<string[] | null>(null);
   let discardBusy = $state(false);
+  let deleteBusy = $state(false);
+  // Paste conflict prompt: a same-named entry already lives in the destination.
+  // Resolve with Replace (merge/overwrite), Keep both (" (2)" suffix) or Cancel.
+  let pasteReq = $state<{ op: 'copy' | 'cut'; paths: string[]; clashes: number; dest: string } | null>(null);
+  let pasteBusy = $state(false);
+  let pasteReplaceBtn = $state<HTMLButtonElement | undefined>(undefined);
+  // Keyboard-first: focus "Replace" the moment the conflict dialog appears so
+  // Enter resolves it and Tab cycles to the other choices.
+  $effect(() => { if (pasteReq) pasteReplaceBtn?.focus(); });
+
+  // ── Undo / redo history (per explorer session) ────────────────────────────
+  // Each entry captures its own inverse + replay as closures at action time, so
+  // undo/redo stay correct regardless of where the user has navigated since.
+  // Destructive-overwrite pastes are intentionally NOT recorded (their inverse
+  // can't restore the files they replaced).
+  interface HistoryEntry {
+    label: string;
+    undo: () => Promise<void>;
+    redo: () => Promise<void>;
+  }
+  let undoStack = $state<HistoryEntry[]>([]);
+  let redoStack = $state<HistoryEntry[]>([]);
+  let historyBusy = $state(false);
+  function pushHistory(e: HistoryEntry) { undoStack = [...undoStack, e]; redoStack = []; }
 
   let listEl = $state<HTMLElement | null>(null);
   let sidebarEl = $state<HTMLElement | null>(null);
@@ -730,7 +763,14 @@
       const scheme = externalScheme(t);
       if (scheme) { handleExternalLink(t, scheme); return; }
     }
-    if (t !== currentPath) await navigate(t);
+    // Shell-style shortcuts: `%appdata%`, `$HOME`, `~/code`, … resolve to real
+    // paths via the backend (env vars + cross-platform virtual names). Left as
+    // typed when there's nothing to expand or the lookup fails.
+    let target = t;
+    if (/[%$]/.test(target) || target.startsWith('~')) {
+      try { target = await fsExpandPath(target); } catch { /* keep as typed */ }
+    }
+    if (target !== currentPath) await navigate(target);
     // Hand focus back to the list so arrow-key navigation continues right after
     // a typed path, instead of stranding focus on the unmounted address input.
     tick().then(() => { if (view === 'browse') listEl?.focus(); });
@@ -875,15 +915,136 @@
     const list = recursiveActive ? [...searchResults] : entries.filter(e => matchName(e.name));
     list.sort((a, b) => {
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+      const byName = () => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
       let cmp = 0;
-      if (sortKey === 'name')     cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-      if (sortKey === 'modified') cmp = (a.modified ?? 0) - (b.modified ?? 0);
-      if (sortKey === 'size')     cmp = (a.size ?? 0) - (b.size ?? 0);
+      if (sortKey === 'name')           cmp = byName();
+      else if (sortKey === 'modified')  cmp = (a.modified ?? 0) - (b.modified ?? 0);
+      else if (sortKey === 'created')   cmp = (a.created ?? 0) - (b.created ?? 0);
+      else if (sortKey === 'size')      cmp = (a.size ?? 0) - (b.size ?? 0);
+      else if (sortKey === 'extension') cmp = extOf(a.name).localeCompare(extOf(b.name), undefined, { sensitivity: 'base' }) || byName();
+      else if (sortKey === 'type')      cmp = typeLabel(a).localeCompare(typeLabel(b), undefined, { sensitivity: 'base' }) || byName();
       return sortAsc ? cmp : -cmp;
     });
     return list;
   });
   function toggleSort(key: SortKey) { if (sortKey === key) sortAsc = !sortAsc; else { sortKey = key; sortAsc = true; } }
+
+  // ── Details-view columns (configurable order + visibility) ─────────────────
+  // The explorer owns each column's presentation meta (label, width, alignment,
+  // sort key); the persisted config (explorerStore.columns) owns only order +
+  // visibility, resolved through `mergeColumns`. `name` is mandatory and pinned
+  // first. A column without a `sortKey` is display-only (no header sort).
+  interface ColMeta { id: string; label: string; sortKey?: SortKey; align: 'left' | 'right'; width: number; }
+  const COL_META: Record<string, ColMeta> = {
+    name:      { id: 'name',      label: 'Name',          sortKey: 'name',      align: 'left',  width: 0   },
+    modified:  { id: 'modified',  label: 'Date modified', sortKey: 'modified',  align: 'left',  width: 152 },
+    type:      { id: 'type',      label: 'Type',          sortKey: 'type',      align: 'left',  width: 120 },
+    size:      { id: 'size',      label: 'Size',          sortKey: 'size',      align: 'right', width: 96  },
+    created:   { id: 'created',   label: 'Date created',  sortKey: 'created',   align: 'left',  width: 152 },
+    extension: { id: 'extension', label: 'Extension',     sortKey: 'extension', align: 'left',  width: 96  },
+    gitstatus: { id: 'gitstatus', label: 'Git status',                          align: 'left',  width: 120 },
+  };
+  const resolvedColumns = $derived(mergeColumns(explorerStore.columns).filter(c => COL_META[c.id]));
+  const visibleColumns  = $derived(resolvedColumns.filter(c => c.visible).map(c => COL_META[c.id]));
+  // Narrow mode (preview expanded): keep just Name + Size so the list stays usable.
+  const listColumns     = $derived(previewBig ? visibleColumns.filter(c => c.id === 'name' || c.id === 'size') : visibleColumns);
+
+  function typeLabel(e: FsEntry): string {
+    if (e.is_dir) return 'Folder';
+    const ext = extOf(e.name);
+    return ext ? `${ext.toUpperCase()} file` : 'File';
+  }
+  /** Plain-text value of a non-name column for `e`. */
+  function cellText(id: string, e: FsEntry): string {
+    switch (id) {
+      case 'modified':  return e.modified != null ? formatDate(e.modified) : '';
+      case 'created':   return e.created  != null ? formatDate(e.created)  : '—';
+      case 'size':      return !e.is_dir && e.size != null ? formatSize(e.size) : '';
+      case 'type':      return typeLabel(e);
+      case 'extension': return e.is_dir ? '' : extOf(e.name).toUpperCase();
+      case 'gitstatus': { const b = badgeFor(e); return b ? GIT_BADGE_LABEL[b] : ''; }
+      default: return '';
+    }
+  }
+
+  // ── Column drag-to-reorder + show/hide menu ────────────────────────────────
+  // WebView2's native HTML5 DnD is unreliable, so reorder runs on raw mouse
+  // events (like the tab strip): a >5px drag starts it; a plain click sorts.
+  let colHeadEl  = $state<HTMLElement | null>(null);
+  let colDragId  = $state<string | null>(null);
+  let colDropIdx = $state<number | null>(null);   // insertion slot among listColumns
+  let colDidDrag = false;                          // suppress the click-sort after a drag
+  let colMenu    = $state<{ x: number; y: number } | null>(null);
+
+  function startColDrag(e: MouseEvent, id: string) {
+    if (e.button !== 0 || id === 'name') return;   // name is locked first
+    const startX = e.clientX;
+    let active = false;
+    const onMove = (ev: MouseEvent) => {
+      if (!active) {
+        if (Math.abs(ev.clientX - startX) < 5) return;
+        active = true; colDragId = id; colDidDrag = true;
+        document.body.style.cursor = 'grabbing'; document.body.style.userSelect = 'none';
+      }
+      colDropIdx = computeColDrop(ev.clientX);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = ''; document.body.style.userSelect = '';
+      if (active && colDragId && colDropIdx != null) commitColReorder(colDragId, colDropIdx);
+      colDragId = null; colDropIdx = null;
+      setTimeout(() => { colDidDrag = false; }, 0);   // let the click handler skip its sort
+    };
+    window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+  }
+  /** Insertion slot for cursor X among the rendered header cells (≥1: never
+   *  before the locked Name column). */
+  function computeColDrop(x: number): number {
+    if (!colHeadEl) return 1;
+    const cells = Array.from(colHeadEl.querySelectorAll<HTMLElement>('.fx-col'));
+    for (let i = 0; i < cells.length; i++) {
+      const r = cells[i].getBoundingClientRect();
+      if (x < r.left + r.width / 2) return Math.max(1, i);
+    }
+    return cells.length;
+  }
+  function commitColReorder(id: string, insertIdx: number) {
+    const full = resolvedColumns.map(c => ({ id: c.id, visible: c.visible }));
+    const beforeId = insertIdx < listColumns.length ? listColumns[insertIdx].id : null;
+    const moved = full.find(c => c.id === id);
+    if (!moved || beforeId === id) return;
+    const without = full.filter(c => c.id !== id);
+    let at = beforeId ? without.findIndex(c => c.id === beforeId) : without.length;
+    if (at < 1) at = 1;                              // never before name
+    without.splice(at, 0, moved);
+    explorerStore.setColumns(without);
+  }
+  function onColHeadClick(col: ColMeta) {
+    if (colDidDrag || !col.sortKey) return;
+    toggleSort(col.sortKey);
+  }
+  function openColumnMenu(e: MouseEvent) {
+    e.preventDefault(); e.stopPropagation();
+    ctxMenu = null; sectionCtx = null;
+    colMenu = { x: e.clientX, y: e.clientY };
+  }
+  function columnMenuItems(): MenuItem[] {
+    const items: MenuItem[] = [{ id: 'col-h', label: 'Columns', header: true }];
+    for (const c of resolvedColumns) {
+      items.push({ id: `col:${c.id}`, label: COL_META[c.id].label, icon: c.visible ? Check : undefined, disabled: c.id === 'name' });
+    }
+    items.push({ id: 'col-sep', label: '', separator: true }, { id: 'col-reset', label: 'Reset columns', icon: RotateCcw });
+    return items;
+  }
+  function handleColumnMenu(id: string) {
+    colMenu = null;
+    if (id === 'col-reset') { explorerStore.resetColumns(); return; }
+    if (id.startsWith('col:')) {
+      const colId = id.slice('col:'.length);
+      if (colId === 'name') return;                  // mandatory
+      explorerStore.setColumns(resolvedColumns.map(c => ({ id: c.id, visible: c.id === colId ? !c.visible : c.visible })));
+    }
+  }
 
   // ── Recursive search (debounced backend walk) ───────────────────────────────
   let searchSeq = 0;
@@ -939,6 +1100,10 @@
 
   // ── Selection ──────────────────────────────────────────────────────────
   function clearSelection() { selected = new Set(); anchor = ''; lead = ''; }
+  /** Drop the selection but keep the keyboard cursor (lead) where it is. Used
+   *  by an empty-area click and the Escape shortcut — in a folder picker this
+   *  re-targets "the folder itself" (currentPath) instead of any sub-folder. */
+  function deselectAll() { selected = new Set(); anchor = ''; }
   function clickEntry(entry: FsEntry, ev?: MouseEvent) {
     if (consumeDragClick()) return;
     cancelCreate();
@@ -971,8 +1136,16 @@
     if (!isPicker || mode !== 'file' || !extensions || extensions.length === 0) return true;
     return extensions.includes(extOf(name));
   }
-  /** Folder mode target: a selected sub-folder, else the folder we're in. */
-  const pickerFolder = $derived.by(() => (leadEntry?.is_dir ? leadEntry.path : currentPath));
+  /** Folder mode target: a single *selected* sub-folder, else the folder we're
+   *  in. Based on the explicit selection (not the auto-seeded cursor) so that
+   *  clicking empty space / Escape reliably targets the current folder itself. */
+  const pickerFolder = $derived.by(() => {
+    if (selected.size === 1) {
+      const only = sorted.find(e => selected.has(e.path));
+      if (only?.is_dir) return only.path;
+    }
+    return currentPath;
+  });
   /** File mode (single) target: the selected matching file, or '' if none. */
   const pickerFile = $derived.by(() => (leadEntry && !leadEntry.is_dir && extOk(leadEntry.name) ? leadEntry.path : ''));
   /** File mode (multiple) targets: every selected matching file. */
@@ -1032,14 +1205,89 @@
   // `arbor://explorer-clip-changed` broadcast — copy here, paste there.
   function doCopy() { const p = actionPaths(); if (!p.length) return; clipboard = { op: 'copy', paths: p }; void explorerClipSet('copy', p); uiStore.showToast(`Copied ${p.length} item${p.length !== 1 ? 's' : ''}`, 'info'); }
   function doCut()  { const p = actionPaths(); if (!p.length) return; clipboard = { op: 'cut', paths: p }; void explorerClipSet('cut', p); }
+  /** Names already present in the current folder (lower-cased, for clash tests). */
+  function destNames(): Set<string> { return new Set(rawEntries.map(e => e.name.toLowerCase())); }
   async function doPaste() {
     if (!clipboard || !currentPath || view !== 'browse') return;
     const { op, paths } = clipboard;
+    // A same-named entry in the destination would otherwise silently become a
+    // " (2)" copy. Surface the conflict and let the user merge/replace instead.
+    const taken = destNames();
+    const clashes = op === 'copy'
+      ? paths.filter(p => taken.has(baseName(p).toLowerCase())).length
+      : paths.filter(p => taken.has(baseName(p).toLowerCase()) && normPath(parentOf(p) ?? '') !== normPath(currentPath)).length;
+    if (clashes > 0) { pasteReq = { op, paths, clashes, dest: currentPath }; return; }
+    await runPaste(op, paths, currentPath, false);
+  }
+  /** Perform the actual copy/move into `dest`. `overwrite` merges/replaces
+   *  same-named entries; otherwise collisions get a " (2)" suffix. */
+  async function runPaste(op: 'copy' | 'cut', paths: string[], dest: string, overwrite: boolean) {
     try {
-      if (op === 'copy') await fsCopy(paths, currentPath);
-      else { await fsMove(paths, currentPath); clipboard = null; void explorerClipClear(); }
+      if (op === 'copy') {
+        const created = await fsCopy(paths, dest, overwrite);
+        // An overwrite paste can't be cleanly undone (it replaced files we can't
+        // bring back), so only record the safe, non-destructive case.
+        if (!overwrite) pushHistory({
+          label: 'Paste',
+          undo: () => fsTrash(created),
+          redo: async () => { await fsCopy(paths, dest, false); },
+        });
+      } else {
+        const moved = await fsMove(paths, dest, overwrite);
+        clipboard = null; void explorerClipClear();
+        if (!overwrite) pushMoveHistory(paths, moved);
+      }
       await refreshCurrent();
     } catch (e) { uiStore.showToast(`Paste failed: ${e}`, 'error'); }
+  }
+  /** Record a move (cut-paste or drag) as an undoable history entry. Undo/redo
+   *  rename each item exactly back/forward, preserving its original location. */
+  function pushMoveHistory(sources: string[], moved: string[]) {
+    const pairs = sources.map((from, i) => ({ from, to: moved[i] })).filter(p => p.to && p.to !== p.from);
+    if (!pairs.length) return;
+    pushHistory({
+      label: 'Move',
+      undo: async () => { for (const p of pairs) await fsRename(p.to, p.from); },
+      redo: async () => { for (const p of pairs) await fsRename(p.from, p.to); },
+    });
+  }
+  function cancelPaste() { pasteReq = null; }
+  async function resolvePaste(overwrite: boolean) {
+    if (!pasteReq) return;
+    const { op, paths, dest } = pasteReq;
+    pasteBusy = true;
+    try { await runPaste(op, paths, dest, overwrite); }
+    finally { pasteBusy = false; pasteReq = null; }
+  }
+
+  // ── Undo / redo ────────────────────────────────────────────────────────────
+  async function doUndo() {
+    if (historyBusy) return;
+    const e = undoStack.at(-1);
+    if (!e) return;
+    historyBusy = true;
+    try {
+      await e.undo();
+      undoStack = undoStack.slice(0, -1);
+      redoStack = [...redoStack, e];
+      await refreshCurrent();
+      uiStore.showToast(`Undo: ${e.label.toLowerCase()}`, 'info');
+    } catch (err) { uiStore.showToast(`Undo failed: ${err}`, 'error'); }
+    finally { historyBusy = false; }
+  }
+  async function doRedo() {
+    if (historyBusy) return;
+    const e = redoStack.at(-1);
+    if (!e) return;
+    historyBusy = true;
+    try {
+      await e.redo();
+      redoStack = redoStack.slice(0, -1);
+      undoStack = [...undoStack, e];
+      await refreshCurrent();
+      uiStore.showToast(`Redo: ${e.label.toLowerCase()}`, 'info');
+    } catch (err) { uiStore.showToast(`Redo failed: ${err}`, 'error'); }
+    finally { historyBusy = false; }
   }
 
   // ── Drag & drop (move entries into a folder, or onto another window) ────────
@@ -1143,7 +1391,8 @@
     const toMove = paths.filter(p => normPath(parentOf(p) ?? '') !== normPath(currentPath));
     if (!toMove.length) { try { await getCurrentWindow().setFocus(); } catch { /* ignore */ } return; }
     try {
-      await fsMove(toMove, currentPath);
+      const moved = await fsMove(toMove, currentPath);
+      pushMoveHistory(toMove, moved);
       await refreshCurrent();
       uiStore.showToast(`Moved ${toMove.length} item${toMove.length !== 1 ? 's' : ''} here`, 'success');
     } catch (e) { uiStore.showToast(`Move failed: ${e}`, 'error'); }
@@ -1162,7 +1411,7 @@
   async function moveInto(target: string) {
     const paths = dragPaths.filter(p => p && p !== target);
     if (!paths.length) return;
-    try { await fsMove(paths, target); clearSelection(); await refreshCurrent(); }
+    try { const moved = await fsMove(paths, target); pushMoveHistory(paths, moved); clearSelection(); await refreshCurrent(); }
     catch (err) { uiStore.showToast(`Move failed: ${err}`, 'error'); }
   }
 
@@ -1237,15 +1486,23 @@
     if (paths.length) deleteReq = { paths, permanent };
   }
   async function confirmDelete() {
-    if (!deleteReq) return;
+    if (!deleteReq || deleteBusy) return;
     const { paths, permanent } = deleteReq;
-    deleteReq = null;
+    deleteBusy = true;
     try {
       if (permanent) await fsDeleteMany(paths); else await fsTrash(paths);
+      // Trashing is reversible (restore from the Recycle Bin); a permanent
+      // delete is gone for good, so it isn't recorded in history.
+      if (!permanent) pushHistory({
+        label: 'Delete',
+        undo: () => fsUntrash(paths),
+        redo: () => fsTrash(paths),
+      });
       clearSelection();
       await refreshCurrent();
       uiStore.showToast(permanent ? `Deleted ${paths.length} item${paths.length !== 1 ? 's' : ''}` : `Moved ${paths.length} item${paths.length !== 1 ? 's' : ''} to Recycle Bin`, 'success');
     } catch (e) { uiStore.showToast(`Delete failed: ${e}`, 'error'); }
+    finally { deleteBusy = false; deleteReq = null; }
   }
 
   // ── Rename / create ───────────────────────────────────────────────────────
@@ -1260,8 +1517,16 @@
     const old = renamingPath;
     cancelRename();
     if (!trimmed || !target || target.name === trimmed) return;
-    try { await fsRename(old, joinPath(currentPath, trimmed)); await refreshCurrent(); }
-    catch (e) { uiStore.showToast(`Rename failed: ${e}`, 'error'); }
+    const next = joinPath(currentPath, trimmed);
+    try {
+      await fsRename(old, next);
+      pushHistory({
+        label: 'Rename',
+        undo: () => fsRename(next, old),
+        redo: () => fsRename(old, next),
+      });
+      await refreshCurrent();
+    } catch (e) { uiStore.showToast(`Rename failed: ${e}`, 'error'); }
   }
   function cancelRename() { renamingPath = ''; renameValue = ''; }
   function startCreate(kind: 'folder' | 'file') {
@@ -1276,6 +1541,11 @@
     const path = joinPath(currentPath, name);
     try {
       if (kind === 'folder') await fsCreateDir(path); else await fsCreateFile(path);
+      pushHistory({
+        label: kind === 'folder' ? 'New folder' : 'New file',
+        undo: () => fsTrash([path]),
+        redo: () => (kind === 'folder' ? fsCreateDir(path) : fsCreateFile(path)),
+      });
       await refreshCurrent();
       selected = new Set([path]); lead = path; anchor = path;
     } catch (e) { uiStore.showToast(`Create failed: ${e}`, 'error'); }
@@ -1320,6 +1590,21 @@
       { id: 'delete', label: multi ? `Move ${selected.size} to Recycle Bin` : 'Move to Recycle Bin', icon: Trash2, shortcut: 'Del', danger: true },
     ];
   }
+  /** "Open in editor" menu entry: a submenu listing the detected (+ custom)
+   *  IDEs, the configured default badged. Collapses to a single direct action
+   *  when detection hasn't surfaced any IDE yet (opens the backend default). */
+  function editorMenuItem(): MenuItem {
+    const available = detectedIdes.filter(d => d.available);
+    const customs   = ideConfig?.custom_ides ?? [];
+    if (!available.length && !customs.length) {
+      return { id: 'editor:default', label: 'Open in editor', icon: Code2, iconColor: 'var(--accent)' };
+    }
+    const def = ideConfig?.default_ide;
+    const children: MenuItem[] = [];
+    for (const ide of available) children.push({ id: `editor:${ide.id}`, label: ide.name, icon: Code2, iconColor: 'var(--accent)', badge: def === ide.id ? 'Default' : undefined, badgeAccent: def === ide.id });
+    for (const c   of customs)   children.push({ id: `editor:${c.id}`,   label: c.name,   icon: Code2, iconColor: 'var(--accent)', badge: def === c.id   ? 'Default' : undefined, badgeAccent: def === c.id   });
+    return { id: 'editor', label: 'Open in editor', icon: Code2, iconColor: 'var(--accent)', children };
+  }
   function ctxItems(entry: FsEntry | null): MenuItem[] {
     const items: MenuItem[] = [];
     const multi = selected.size > 1;
@@ -1328,6 +1613,8 @@
         { id: 'open',   label: entry.is_dir ? 'Open' : 'Open with default app', icon: entry.is_dir ? FolderOpen : ExternalLink },
         { id: 'reveal', label: 'Reveal in File Explorer', icon: ExternalLink },
       );
+      // A picker is for choosing a path, not launching tools — keep it focused.
+      if (!isPicker) items.push(editorMenuItem(), { id: 'open-terminal', label: 'Open in Terminal', icon: SquareTerminal });
     }
     if (clipboard) {
       if (entry) items.push({ id: 'sep-paste', label: '', separator: true });
@@ -1377,6 +1664,14 @@
       { id: 'new-folder', label: 'New Folder', icon: FolderPlus, iconColor: 'var(--success)' },
       { id: 'new-file',   label: 'New File',   icon: FilePlus,   iconColor: 'var(--success)' },
     );
+    // Empty-area menu (no entry under the cursor): act on the current folder.
+    if (!entry && !isPicker && view === 'browse' && currentPath) {
+      items.push(
+        { id: 'sep-open', label: '', separator: true },
+        editorMenuItem(),
+        { id: 'open-terminal', label: 'Open in Terminal', icon: SquareTerminal },
+      );
+    }
     if (entry) items.push({ id: 'props', label: 'Properties', icon: Info });
     return items;
   }
@@ -1384,6 +1679,20 @@
     const entry = ctxMenu?.entry ?? null;
     const px = ctxMenu?.x ?? 0, py = ctxMenu?.y ?? 0;
     ctxMenu = null;
+    // Open-in-Terminal / Open-in-editor target the entry under the cursor, or the
+    // current folder for the empty-area menu. The `editor:<id>` ids are dynamic
+    // (one per detected IDE), so they're matched by prefix before the switch.
+    if (id === 'open-terminal') {
+      const p = entry?.path ?? currentPath;
+      if (p) fsOpenTerminal(p).catch(e => uiStore.showToast(`Open in Terminal: ${e}`, 'error'));
+      return;
+    }
+    if (id.startsWith('editor:')) {
+      const p = entry?.path ?? currentPath;
+      const ide = id.slice('editor:'.length);
+      if (p) void doOpenInEditor(p, ide === 'default' ? undefined : ide);
+      return;
+    }
     switch (id) {
       case 'open':       if (entry) openEntry(entry); break;
       case 'reveal':     if (entry) fsRevealInDir(entry.path).catch(e => uiStore.showToast(`${e}`, 'error')); break;
@@ -1407,6 +1716,12 @@
       case 'git-open':    if (entry) fsOpenInArbor(entry.path).catch(e => uiStore.showToast(`${e}`, 'error')); break;
       case 'git-copy-link': if (entry) void copyProjectLink(entry); break;
     }
+  }
+
+  /** Open `path` in an IDE — a specific one by id, or the configured default. */
+  async function doOpenInEditor(path: string, ideId?: string) {
+    try { await openInIde(path, ideId); }
+    catch (e) { uiStore.showToast(`Open in editor: ${e}`, 'error'); }
   }
 
   /** Copy a shareable `arbor://repo/open` link for the repo `entry` belongs to.
@@ -1457,6 +1772,9 @@
   // ── Keyboard ──────────────────────────────────────────────────────────────
   function onKeydown(e: KeyboardEvent) {
     if (renamingPath || createKind || addressEditing) return;
+    // A confirm dialog is open (delete / paste conflict / discard): let it own
+    // the keyboard (Enter/Esc) entirely instead of double-handling here.
+    if (deleteReq || pasteReq || discardReq) return;
     const inInput = (e.target as HTMLElement).tagName === 'INPUT';
     const mod = e.ctrlKey || e.metaKey;
     // F6 / Shift+F6: cycle focus across the explorer's panes — left sidebar →
@@ -1497,10 +1815,20 @@
     if (view !== 'browse') return;
     if (mod && !inInput) {
       const k = e.key.toLowerCase();
-      if (k === 'a') { e.preventDefault(); e.stopImmediatePropagation(); selectAll(); return; }
-      if (k === 'c') { e.preventDefault(); e.stopImmediatePropagation(); doCopy(); return; }
-      if (k === 'x') { e.preventDefault(); e.stopImmediatePropagation(); doCut();  return; }
-      if (k === 'v') { e.preventDefault(); e.stopImmediatePropagation(); doPaste(); return; }
+      // Undo / redo — Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y.
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) void doUndo(); return; }
+      if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) void doRedo(); return; }
+      // Select-all / clipboard. Repeat-guarded: a *held* combo (key auto-repeat)
+      // must fire once — otherwise Ctrl+C spams a toast per repeat tick.
+      if (k === 'a' || k === 'c' || k === 'x' || k === 'v') {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (e.repeat) return;
+        if (k === 'a') selectAll();
+        else if (k === 'c') doCopy();
+        else if (k === 'x') doCut();
+        else void doPaste();
+        return;
+      }
     }
     // Focus-zone gate: the bare-key navigation below drives the FILE LIST, so it
     // only runs when focus is in the list (or unfocused). When focus is parked on
@@ -1527,7 +1855,6 @@
         // Alt+Enter — Windows-style Properties: open the Info panel (the same
         // "Properties" the context menu opens) for the cursor item.
         if (e.altKey) { rightPanel = 'info'; return; }
-        if (deleteReq) { confirmDelete(); return; }
         if (isPicker) {
           // Drill into a selected sub-folder; otherwise commit the picker.
           if (leadEntry?.is_dir) openEntry(leadEntry); else pickerConfirm();
@@ -1536,6 +1863,14 @@
         if (leadEntry) openEntry(leadEntry); return;
       }
       case 'Delete': { if (inInput) return; e.preventDefault(); askDelete(e.shiftKey); return; }
+      case 'Escape': {
+        // Drop the selection (in a folder picker this re-targets the current
+        // folder itself). With nothing selected, fall through so the dialog /
+        // window closes as usual.
+        if (inInput) return;
+        if (selected.size > 0) { e.preventDefault(); e.stopImmediatePropagation(); deselectAll(); }
+        return;
+      }
       case 'F2': { if (inInput) return; e.preventDefault(); if (leadEntry) startRename(leadEntry); return; }
       case 'Backspace': if (!inInput) { e.preventDefault(); goUp(); } return;
       case 'ArrowLeft':
@@ -1822,8 +2157,21 @@
   let clipUnlisten: UnlistenFn | null = null;
   let dropUnlisten: UnlistenFn | null = null;
   let focusUnlisten: UnlistenFn | null = null;
+  let registryUnlisten: UnlistenFn | null = null;
+  let ideUnlisten: UnlistenFn | null = null;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let rootsTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** (Re)load the Projects sidebar source — registry repos + workspace groups.
+   *  Called on mount and whenever the backend broadcasts `registry-changed`
+   *  (deregister, move-between-workspaces, add/remove, rename, …), so the
+   *  sidebar stays live even in the standalone window. */
+  async function loadRegistry() {
+    try {
+      const [repos, snap] = await Promise.all([listRegistryRepos(), listWorkspaces()]);
+      projects = repos; workspaces = snap.workspaces; activeWorkspaceId = snap.active_workspace_id;
+    } catch { /* ignore */ }
+  }
 
   // Quick-access roots (favourites + drives) are static except for removable
   // media: a plugged/unplugged USB doesn't fire any event we listen to, so we
@@ -1847,17 +2195,28 @@
       const fb = defaultBrowsePath;
       if (fb) await navigate(fb);
     }
-    try {
-      const [repos, snap] = await Promise.all([listRegistryRepos(), listWorkspaces()]);
-      projects = repos; workspaces = snap.workspaces; activeWorkspaceId = snap.active_workspace_id;
-      // First ever run: expand all workspace groups by default (persisted via a
-      // one-shot flag so collapsing them all later isn't undone on reopen).
-      if (!lsGet('arbor:explorer-ws-init', false)) {
-        lsSet('arbor:explorer-ws-init', true);
-        const all = new Set<string>(['__unassigned__', ...snap.workspaces.map(w => w.id)]);
-        wsExpanded = all; lsSet('arbor:explorer-ws-expanded', [...all]);
-      }
-    } catch { /* ignore */ }
+    await loadRegistry();
+    // First ever run: expand all workspace groups by default (persisted via a
+    // one-shot flag so collapsing them all later isn't undone on reopen).
+    if (!lsGet('arbor:explorer-ws-init', false)) {
+      lsSet('arbor:explorer-ws-init', true);
+      const all = new Set<string>(['__unassigned__', ...workspaces.map(w => w.id)]);
+      wsExpanded = all; lsSet('arbor:explorer-ws-expanded', [...all]);
+    }
+    // Keep the Projects sidebar live: deregistering a repo or moving it between
+    // workspaces (from the main window or another explorer) broadcasts this.
+    try { registryUnlisten = await listen('arbor://registry-changed', () => { void loadRegistry(); }); } catch { /* ignore */ }
+    // IDE awareness for "Open in editor": load the configured IDEs and run a
+    // detection probe (results arrive via the event). Each window is its own JS
+    // context, so the standalone explorer detects independently of the main app.
+    // Skipped for pickers — they don't surface the editor/terminal actions.
+    if (!isPicker) {
+      try { ideConfig = await getIdeConfig(); } catch { /* defaults */ }
+      try {
+        ideUnlisten = await listen<DetectedIde[]>('arbor://ide-detection-done', ev => { detectedIdes = ev.payload; });
+      } catch { /* ignore */ }
+      startIdeDetection().catch(() => { /* backend unavailable during HMR */ });
+    }
     try { unlisten = await listen('arbor://fs-changed', () => scheduleRefresh()); } catch { /* ignore */ }
     // Shared clipboard: seed the local mirror from the process-wide clipboard
     // (a copy may predate this window) and track changes so copy/cut/paste work
@@ -1900,7 +2259,7 @@
       else if (view === 'browse') listEl?.focus();
     });
   });
-  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); });
+  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); registryUnlisten?.(); ideUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); });
 </script>
 
 {#snippet sbLabel(id: string, Ico: typeof Folder, text: string)}
@@ -2078,6 +2437,12 @@
         <button class="fx-nav-btn" onclick={goForward} disabled={!canForward} use:tooltip={{ content: 'Forward', shortcut: 'Alt+→' }} aria-label="Forward"><ArrowRight size={14} /></button>
         <button class="fx-nav-btn" onclick={goUp}      disabled={!canUp}      use:tooltip={{ content: 'Up', shortcut: 'Backspace' }} aria-label="Up"><ArrowUp size={14} /></button>
       </div>
+      {#if view === 'browse'}
+        <div class="fx-nav-btns">
+          <button class="fx-nav-btn" onclick={doUndo} disabled={!undoStack.length || historyBusy} use:tooltip={undoStack.length ? `Undo ${undoStack.at(-1)?.label.toLowerCase()} (Ctrl+Z)` : 'Nothing to undo'} aria-label="Undo"><Undo2 size={14} /></button>
+          <button class="fx-nav-btn" onclick={doRedo} disabled={!redoStack.length || historyBusy} use:tooltip={redoStack.length ? `Redo ${redoStack.at(-1)?.label.toLowerCase()} (Ctrl+Shift+Z)` : 'Nothing to redo'} aria-label="Redo"><Redo2 size={14} /></button>
+        </div>
+      {/if}
 {/snippet}
 
 {#snippet headerAddress()}
@@ -2217,11 +2582,23 @@
         </div>
 
         {#if !isGrid}
-          <div class="fx-col-head">
-            <div class="fx-col fx-col-name"><button class="fx-ch" onclick={() => toggleSort('name')}>Name {#if sortKey === 'name'}<span class="fx-sort">{sortAsc ? '↑' : '↓'}</span>{/if}</button></div>
-            <div class="fx-col fx-col-date"><button class="fx-ch" onclick={() => toggleSort('modified')}>Date modified {#if sortKey === 'modified'}<span class="fx-sort">{sortAsc ? '↑' : '↓'}</span>{/if}</button></div>
-            <div class="fx-col fx-col-type"><span class="fx-ch-static">Type</span></div>
-            <div class="fx-col fx-col-size"><button class="fx-ch fx-ch-right" onclick={() => toggleSort('size')}>Size {#if sortKey === 'size'}<span class="fx-sort">{sortAsc ? '↑' : '↓'}</span>{/if}</button></div>
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <div class="fx-col-head" bind:this={colHeadEl} oncontextmenu={openColumnMenu}>
+            {#each listColumns as col, i (col.id)}
+              <div class="fx-col {col.id === 'name' ? 'fx-col-name' : ''}"
+                   class:fx-col-right={col.align === 'right'}
+                   class:fx-col-drag={colDragId === col.id}
+                   class:fx-col-drop={colDropIdx === i}
+                   class:fx-col-drop-end={colDropIdx === listColumns.length && i === listColumns.length - 1}
+                   style={col.id === 'name' ? '' : `width:${col.width}px`}>
+                <button class="fx-colh" class:fx-colh-right={col.align === 'right'} class:sortable={!!col.sortKey}
+                        onmousedown={(e) => startColDrag(e, col.id)} onclick={() => onColHeadClick(col)}
+                        use:tooltip={col.id === 'name' ? '' : { content: col.label, description: 'Drag to reorder · right-click for columns', delay: 1200 }}>
+                  <span class="fx-colh-label">{col.label}</span>
+                  {#if col.sortKey && sortKey === col.sortKey}<span class="fx-sort">{sortAsc ? '↑' : '↓'}</span>{/if}
+                </button>
+              </div>
+            {/each}
           </div>
         {/if}
 
@@ -2232,7 +2609,11 @@
               <input id="fx-create" class="fx-inline" type="text" bind:value={createName} onclick={(e) => e.stopPropagation()} onblur={commitCreate}
                      onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter') commitCreate(); if (e.key === 'Escape') cancelCreate(); }} />
             </div>
-            <div class="fx-col fx-col-date"></div><div class="fx-col fx-col-type">{createKind === 'folder' ? 'Folder' : 'File'}</div><div class="fx-col fx-col-size"></div>
+            {#each listColumns as col (col.id)}
+              {#if col.id !== 'name'}
+                <div class="fx-col" class:fx-col-right={col.align === 'right'} style="width:{col.width}px">{col.id === 'type' ? (createKind === 'folder' ? 'Folder' : 'File') : ''}</div>
+              {/if}
+            {/each}
           </div>
         {/if}
 
@@ -2245,7 +2626,7 @@
              role="listbox" tabindex="0" aria-multiselectable="true" aria-label="Files"
              aria-activedescendant={leadIdx >= 0 ? `fx-opt-${leadIdx}` : undefined} onscroll={onScroll}
              oncontextmenu={(e) => { if (kbdCtxGuard) { kbdCtxGuard = false; e.preventDefault(); return; } if (!(e.target as HTMLElement).closest('.fx-row')) openCtx(e, null); }}
-             onclick={(e) => { if (consumeDragClick()) return; if (!(e.target as HTMLElement).closest('.fx-row')) clearSelection(); }}>
+             onclick={(e) => { if (consumeDragClick()) return; if (!(e.target as HTMLElement).closest('.fx-row')) deselectAll(); }}>
           {#if loading}
             <div class="fx-state"><Spinner size="sm" /> Loading…</div>
           {:else if loadError}
@@ -2302,9 +2683,11 @@
                           {/if}
                         {/if}
                       </div>
-                      <div class="fx-col fx-col-date">{entry.modified != null ? formatDate(entry.modified) : ''}</div>
-                      <div class="fx-col fx-col-type">{entry.is_dir ? 'Folder' : (extOf(entry.name).toUpperCase() || 'File') + ' file'}</div>
-                      <div class="fx-col fx-col-size">{!entry.is_dir && entry.size != null ? formatSize(entry.size) : ''}</div>
+                      {#each listColumns as col (col.id)}
+                        {#if col.id !== 'name'}
+                          <div class="fx-col" class:fx-col-right={col.align === 'right'} style="width:{col.width}px">{cellText(col.id, entry)}</div>
+                        {/if}
+                      {/each}
                     {/if}
                   </div>
                 {/each}
@@ -2432,19 +2815,7 @@
 {/snippet}
 
 {#snippet footerBody()}
-    {#if deleteReq}
-      <ModalFooter align="between">
-        <span class="fx-del-confirm">
-          <Trash2 size={13} class="fx-del-ico" />
-          {#if deleteReq.permanent}Permanently delete <strong>{deleteReq.paths.length}</strong> item{deleteReq.paths.length !== 1 ? 's' : ''}? This cannot be undone.
-          {:else}Move <strong>{deleteReq.paths.length}</strong> item{deleteReq.paths.length !== 1 ? 's' : ''} to the Recycle Bin?{/if}
-        </span>
-        <span class="fx-foot-actions">
-          <Button variant="ghost" size="sm" onclick={() => deleteReq = null}>Cancel</Button>
-          <Button variant="danger" size="sm" onclick={confirmDelete}>{deleteReq.permanent ? 'Delete' : 'Move to Recycle Bin'}</Button>
-        </span>
-      </ModalFooter>
-    {:else if isPicker}
+    {#if isPicker}
       <ModalFooter align="between">
         <span class="fx-foot-info fx-picker-foot">
           {#if mode === 'save'}
@@ -2542,6 +2913,10 @@
     onClose={() => sectionCtx = null} />
 {/if}
 
+{#if colMenu}
+  <ContextMenu x={colMenu.x} y={colMenu.y} items={columnMenuItems()} onSelect={handleColumnMenu} onClose={() => colMenu = null} />
+{/if}
+
 {#if extLinkReq}
   <ExternalLinkConfirmModal
     url={extLinkReq.url}
@@ -2571,6 +2946,48 @@
     onSelect={doCheckout}
     onClose={() => { if (!branchBusy) branchPopup = null; }}
   />
+{/if}
+
+{#if deleteReq}
+  <ConfirmModal
+    title={deleteReq.permanent ? 'Delete permanently?' : 'Move to Recycle Bin?'}
+    message={deleteReq.permanent
+      ? `Permanently delete ${deleteReq.paths.length} item${deleteReq.paths.length !== 1 ? 's' : ''}?`
+      : `Move ${deleteReq.paths.length} item${deleteReq.paths.length !== 1 ? 's' : ''} to the Recycle Bin?`}
+    detail={deleteReq.permanent
+      ? 'This cannot be undone.'
+      : 'You can restore it from the Recycle Bin, or with Undo (Ctrl+Z).'}
+    variant="danger"
+    confirmLabel={deleteReq.permanent ? 'Delete' : 'Move to Recycle Bin'}
+    busy={deleteBusy}
+    zIndex="var(--z-menu)"
+    onConfirm={confirmDelete}
+    onCancel={() => { if (!deleteBusy) deleteReq = null; }}
+  />
+{/if}
+
+{#if pasteReq}
+  <Modal onClose={() => { if (!pasteBusy) cancelPaste(); }} width="480px" ariaLabel="Paste conflict" zIndex="var(--z-menu)">
+    {#snippet header()}
+      <div class="fx-conflict-icon"><ClipboardPaste size={18} /></div>
+      <span class="modal-title">Items already exist</span>
+    {/snippet}
+    <div class="fx-conflict-body">
+      <p class="fx-conflict-msg">
+        <strong>{pasteReq.clashes}</strong> item{pasteReq.clashes !== 1 ? 's' : ''} with the same name
+        already exist{pasteReq.clashes === 1 ? 's' : ''} in <strong>{baseName(pasteReq.dest)}</strong>.
+      </p>
+      <p class="fx-conflict-detail">
+        Replace merges folders and overwrites existing files. Keep both leaves the
+        originals and adds the pasted copies with a “ (2)” suffix.
+      </p>
+    </div>
+    {#snippet footer()}
+      <Button variant="secondary" onclick={() => { if (!pasteBusy) cancelPaste(); }} type="button">Cancel</Button>
+      <Button variant="secondary" onclick={() => resolvePaste(false)} disabled={pasteBusy} type="button">Keep both</Button>
+      <Button variant="danger" onclick={() => resolvePaste(true)} disabled={pasteBusy} loading={pasteBusy} bind:element={pasteReplaceBtn} type="button">Replace</Button>
+    {/snippet}
+  </Modal>
 {/if}
 
 <style>
@@ -2677,7 +3094,6 @@
   /* Expanded preview: the list narrows (Date/Type columns drop) and the
      preview takes the rest of the body. */
   .fx-main.fx-narrow { flex: 0 0 300px; }
-  .fx-main.fx-narrow .fx-col-date, .fx-main.fx-narrow .fx-col-type { display: none; }
   .fx-tabbar { display: flex; align-items: stretch; height: 34px; padding: 0 4px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
   .fx-tabbar :global(.tabs) { flex: 1; min-width: 0; }
 
@@ -2725,16 +3141,22 @@
   :global(.fx-view-caret) { color: var(--text-muted); }
 
   .fx-col-head { display: flex; align-items: center; height: 26px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; user-select: none; }
-  .fx-col { display: flex; align-items: center; overflow: hidden; white-space: nowrap; height: 100%; }
-  .fx-col-name { flex: 1; min-width: 0; padding: 0 8px; }
-  .fx-col-date { width: 148px; flex-shrink: 0; padding: 0 6px; }
-  .fx-col-type { width: 90px; flex-shrink: 0; padding: 0 6px; }
-  .fx-col-size { width: 80px; flex-shrink: 0; padding: 0 8px; justify-content: flex-end; }
-  .fx-ch { background: transparent; border: none; cursor: pointer; font-family: var(--font-ui-sans); font-size: 10.5px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.4px; padding: 0; height: 100%; text-transform: uppercase; display: flex; align-items: center; gap: 4px; transition: color var(--transition-fast); }
-  .fx-ch:hover { color: var(--text-secondary); }
-  .fx-ch-right { margin-left: auto; }
-  .fx-ch-static { font-size: 10.5px; font-weight: 600; color: var(--text-disabled); text-transform: uppercase; letter-spacing: 0.4px; }
-  .fx-sort { color: var(--accent); font-size: 9px; }
+  .fx-col { display: flex; align-items: center; overflow: hidden; white-space: nowrap; height: 100%; flex-shrink: 0; padding: 0 6px; font-size: 11px; color: var(--text-muted); }
+  .fx-col-name { flex: 1 1 auto; min-width: 0; padding: 0 8px; }
+  .fx-col-right { justify-content: flex-end; }
+  /* Column header buttons. NOTE: a distinct class from `.fx-ch` (the Changes
+     panel) on purpose — sharing it let the panel's `flex-direction: column`
+     leak in and stack the sort arrow under the label. */
+  .fx-colh { flex: 1; min-width: 0; background: transparent; border: none; font-family: var(--font-ui-sans); font-size: 10.5px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.4px; padding: 0; height: 100%; text-transform: uppercase; display: flex; align-items: center; gap: 4px; transition: color var(--transition-fast); cursor: grab; }
+  .fx-colh.sortable { cursor: pointer; }
+  .fx-colh:hover { color: var(--text-secondary); }
+  .fx-colh-right { justify-content: flex-end; }
+  .fx-colh-label { overflow: hidden; text-overflow: ellipsis; }
+  .fx-sort { color: var(--accent); font-size: 9px; flex-shrink: 0; }
+  /* Drag-to-reorder feedback. */
+  .fx-col.fx-col-drag { opacity: 0.5; }
+  .fx-col.fx-col-drop { box-shadow: inset 2px 0 0 0 var(--accent); }
+  .fx-col.fx-col-drop-end { box-shadow: inset -2px 0 0 0 var(--accent); }
 
   .fx-list { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; position: relative; padding: 5px 0; }
   /* The list is one focusable listbox; the active option (.fx-row.lead) is the
@@ -2767,7 +3189,6 @@
 
   .fx-entry-name { font-size: 12px; color: var(--text-primary); font-family: var(--font-ui-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
   .fx-entry-loc { font-size: 10.5px; color: var(--text-disabled); font-family: var(--font-code); margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
-  .fx-col-date, .fx-col-type, .fx-col-size { font-size: 11px; color: var(--text-muted); }
   .fx-inline { flex: 1; min-width: 0; background: var(--bg-input); border: 1px solid var(--border-focus); border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-ui-sans); font-size: 12px; padding: 1px 5px; outline: none; box-shadow: 0 0 0 2px rgba(61,127,255,0.2); }
   .fx-state { display: flex; align-items: center; gap: 8px; padding: 20px 16px; font-size: 12px; color: var(--text-muted); }
   .fx-state.error { color: var(--error); }
@@ -2819,9 +3240,17 @@
   .fx-clip { color: var(--text-muted); }
   .fx-foot-path { font-size: 11px; color: var(--text-muted); font-family: var(--font-code); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
   .fx-foot-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  .fx-del-confirm { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); overflow: hidden; min-width: 0; }
-  :global(.fx-del-ico) { color: var(--error); flex-shrink: 0; }
-  .fx-del-confirm strong { color: var(--text-primary); }
+
+  /* ── Paste-conflict dialog ───────────────────────────────────────────────── */
+  .fx-conflict-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--warning-subtle); color: var(--warning); flex-shrink: 0;
+  }
+  .fx-conflict-body { color: var(--text-primary); font-family: var(--font-ui-sans); }
+  .fx-conflict-msg { font-size: var(--font-size-sm); line-height: 1.5; margin: 0; }
+  .fx-conflict-msg strong { color: var(--text-primary); }
+  .fx-conflict-detail { margin: 8px 0 0; font-size: var(--font-size-xs); color: var(--text-muted); line-height: 1.5; }
 
   /* ── Picker mode ─────────────────────────────────────────────────────────── */
   /* Header title chip (mode icon + dialog title), shown only as a picker. */
