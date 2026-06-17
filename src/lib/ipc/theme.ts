@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { platform } from './rpc';
 import type { Theme } from '$lib/types/theme';
 
@@ -33,5 +32,5 @@ export function notifyThemeChanged(
   vars:      Record<string, string>,
   source:    'user' | 'plugin' | 'init',
 ): Promise<void> {
-  return invoke('notify_theme_changed', { themeId, themeName, vars, source });
+  return platform('notify_theme_changed', { theme_id: themeId, theme_name: themeName, vars, source });
 }

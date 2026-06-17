@@ -16,13 +16,16 @@
 //! out they move into that binary unchanged.
 
 pub mod app;
+pub mod branding;
 pub mod config;
+pub mod deep_link;
 pub mod fs;
 pub mod jobs;
 pub mod marketplace;
 pub mod plugin;
 pub mod plugin_logs;
 pub mod plugin_templates;
+pub mod post_hooks;
 pub mod scheduler;
 pub mod session;
 pub mod terminal;

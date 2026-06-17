@@ -55,7 +55,7 @@ export const getFilesLastCommit = (tabId: string, paths: string[]) =>
  *  - `arbor://file-meta-batch` {tab_id, entries[]} progressively
  *  - `arbor://file-meta-done`  {tab_id} when complete */
 export const startFileMetaScan = (tabId: string) =>
-  invoke<void>('start_file_meta_scan', { tabId });
+  corvus<void>('start_file_meta_scan', { tab_id: tabId });
 
 /** Returns a fast fingerprint of the repo's current ref state (HEAD SHA + all refs).
  *  Used by the cache scheduler to detect remote changes without loading the full graph. */
@@ -72,4 +72,4 @@ export const exportGraphSvg = (
   outputPath: string,
   themeVars?: Record<string, string>,
 ) =>
-  invoke<string>('export_graph_svg', { tabId, outputPath, themeVars });
+  corvus<string>('export_graph_svg', { tab_id: tabId, output_path: outputPath, theme_vars: themeVars });

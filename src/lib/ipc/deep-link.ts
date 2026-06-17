@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 import type { DeepLinkConfig, DeepLinkLookup } from '../types/deep-link';
 
 /**
@@ -7,7 +8,7 @@ import type { DeepLinkConfig, DeepLinkLookup } from '../types/deep-link';
  * switch / open-here / clone-prompt.
  */
 export const findRepoByRemoteUrl = (url: string) =>
-  invoke<DeepLinkLookup>('find_repo_by_remote_url', { url });
+  platform<DeepLinkLookup>('find_repo_by_remote_url', { url });
 
 /**
  * Tell the backend its `arbor://deep-link` listener is mounted — drains the
@@ -28,7 +29,7 @@ export const dispatchDeepLink = (url: string) =>
   invoke<void>('dispatch_deep_link', { url });
 
 export const getDeepLinkConfig = () =>
-  invoke<DeepLinkConfig>('get_deep_link_config');
+  platform<DeepLinkConfig>('get_deep_link_config');
 
 export const setDeepLinkConfig = (config: DeepLinkConfig) =>
-  invoke<void>('set_deep_link_config', { config });
+  platform<void>('set_deep_link_config', { config });

@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { corvus } from './rpc';
 import type { WorktreeInfo, ProjectType, IdeConfig, DetectedIde } from '$lib/types/git';
 
@@ -31,7 +30,7 @@ export const setIdeConfig = (config: IdeConfig) =>
 /** Fire IDE detection as a non-cancellable background job.
  *  Returns the job_id. Results arrive via the `arbor://ide-detection-done` event. */
 export const startIdeDetection = () =>
-  invoke<string>('start_ide_detection');
+  corvus<string>('start_ide_detection');
 
 // ── Per-repo IDE preference (.arbor/config.toml → ide_id) ─────────────────────
 

@@ -1,5 +1,5 @@
-import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { platform } from '$lib/ipc/rpc';
 
 /**
  * Plugin-applied branding overrides — currently the app logo. Lives
@@ -33,7 +33,7 @@ async function init() {
   _started = true;
 
   try {
-    const dto = await invoke<BrandingDto>('get_branding');
+    const dto = await platform<BrandingDto>('get_branding');
     _logoSvg        = dto.logo_svg;
     _windowIconPath = dto.window_icon_path;
     _owner          = dto.owner;

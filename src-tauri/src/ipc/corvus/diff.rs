@@ -16,17 +16,24 @@
 //!
 //! No hooks fire in this domain.
 //!
-//! Two streaming commands are intentionally NOT migrated and remain inline in
-//! `commands/diff_commands.rs`: `get_workdir_diff_stream` (takes `AppHandle`,
-//! emits `arbor://diff-stream-*` events, registers a job) and
-//! `get_file_blame_streaming` (drives a `tauri::ipc::Channel` progress stream).
-//! A later emit/seam pass handles them.
+//! `get_workdir_diff_stream` is a deferred-emit handler: it returns a `job_id`
+//! immediately and streams `arbor://diff-stream-*` events from a background
+//! thread via the **event sink** (`Arc<dyn EventSink>` — [`AppState::event_sink`])
+//! instead of an `AppHandle`. The background thread reaches the job registry
+//! through a captured `Arc::clone(&state.jobs)`, never an `AppHandle`. Behavior
+//! (topics, payloads, job entries) is byte-identical to the old inline command.
+//!
+//! `get_file_blame_streaming` is intentionally NOT migrated and remains inline
+//! in `commands/diff_commands.rs` (drives a `tauri::ipc::Channel` progress
+//! stream). A later seam pass handles it.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::error::AppError;
 use crate::git::diff::{BlameLine, DiffFile};
 use crate::ipc::corvus;
+use crate::jobs::{JobInfo, JobStatus};
 use crate::AppState;
 
 /// Frontend supplies `encoding_overrides` as `{ [path]: "windows-1252" }`.
@@ -206,4 +213,171 @@ fn get_file_blame(
     };
     let repo = git2::Repository::open(&repo_path)?;
     crate::git::diff::get_file_blame(&repo, &path)
+}
+
+/// Stream workdir/index diff to the frontend file-by-file.
+///
+/// Phase 1 (synchronous, fast): compute the list of files + their delta status
+/// without parsing hunks, emit `arbor://diff-stream-started` with the count and
+/// metadata list so the UI can render a spinner + placeholder rows immediately.
+///
+/// Phase 2 (background thread): re-open the repo off the IPC thread, rebuild
+/// the diff, and parse each file's hunks one at a time, emitting
+/// `arbor://diff-stream-file` per file.  Emits `arbor://diff-stream-done` when
+/// all files are parsed (or on error via `arbor://diff-stream-error`).
+///
+/// Returns a `job_id` the frontend can use to correlate events for the current
+/// request and to show a job entry in the statusbar. The background thread
+/// emits through the captured event sink and reaches the job registry via a
+/// cloned `Arc` (no `AppHandle`).
+#[corvus::handler]
+fn get_workdir_diff_stream(
+    state: &AppState,
+    tab_id: String,
+    staged: bool,
+    context_lines: Option<u32>,
+    diff_algo: Option<String>,
+    encoding_overrides: Overrides,
+) -> Result<String, AppError> {
+    let sink = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+    let jobs = Arc::clone(&state.jobs);
+
+    let ctx = context_lines.unwrap_or_else(|| {
+        state.lock_config().map(|c| c.diff.context_lines).unwrap_or(3)
+    });
+
+    // Fast phase 1: compute metadata list on the IPC thread under the repo lock.
+    let (repo_path, meta) = {
+        let mut mgr = state.lock_repos()?;
+        let repo = mgr.get(&tab_id)?;
+        let repo_path = repo.path.clone();
+        let diff = crate::git::diff::build_workdir_diff(repo.inner(), staged, ctx, diff_algo.as_deref())?;
+        let meta = crate::git::diff::parse_diff_meta(&diff);
+        (repo_path, meta)
+    };
+
+    // Register a short-lived internal job so the UI can optionally surface
+    // the parsing activity (non-cancellable — parsing is cheap and in-process).
+    // Flagged as `is_system` so it is auto-purged from the Jobs overlay a few
+    // seconds after completion.
+    let job_id = {
+        let mut jobs = jobs.lock().map_err(|_| AppError::Other("jobs mutex poisoned".into()))?;
+        let id = jobs.new_id();
+        jobs.register(JobInfo {
+            id: id.clone(),
+            name: format!("Loading diff ({} files)", meta.len()),
+            plugin_name: "arbor".to_string(),
+            command: format!("diff-stream:{tab_id}"),
+            started_at: crate::jobs::JobRegistry::now_secs(),
+            status: JobStatus::Running,
+            category: Some("System".to_string()),
+            non_cancellable: true,
+            is_system: true,
+            finished_at: None,
+            hidden: false,
+            target: None,
+        });
+        id
+    };
+
+    // Emit started event synchronously so the frontend UI updates immediately.
+    sink.emit("arbor://diff-stream-started", serde_json::json!({
+        "job_id":      &job_id,
+        "tab_id":      &tab_id,
+        "staged":      staged,
+        "total_files": meta.len(),
+        "files":       &meta,
+    }));
+
+    // Short-circuit for empty diffs — no need to spawn a thread.
+    if meta.is_empty() {
+        sink.emit("arbor://diff-stream-done", serde_json::json!({
+            "job_id": &job_id,
+            "tab_id": &tab_id,
+        }));
+        if let Ok(mut jobs) = jobs.lock() {
+            jobs.set_status(&job_id, JobStatus::Completed { exit_code: 0 });
+        };
+        return Ok(job_id);
+    }
+
+    // Phase 2: spawn a background thread that re-opens the repo and parses
+    // each delta individually.  We deliberately do NOT hold the state mutex
+    // during this phase — other IPC calls (status refresh, graph load, …)
+    // can proceed concurrently.
+    let job_id_thread = job_id.clone();
+    let tab_id_thread = tab_id.clone();
+    let algo_thread   = diff_algo.clone();
+    let sink_bg       = Arc::clone(&sink);
+    let jobs_bg       = Arc::clone(&jobs);
+
+    let spawn_result = std::thread::Builder::new()
+        .name(format!("arbor-diff-stream-{job_id}"))
+        .spawn(move || {
+            let run = || -> Result<(), AppError> {
+                let repo = git2::Repository::open(&repo_path)
+                    .map_err(AppError::from)?;
+                let diff = crate::git::diff::build_workdir_diff(
+                    &repo,
+                    staged,
+                    ctx,
+                    algo_thread.as_deref(),
+                )?;
+                let total = diff.deltas().count();
+                for i in 0..total {
+                    let file = crate::git::diff::parse_diff_one(
+                        &repo, &diff, i, encoding_overrides.as_ref(),
+                    )?;
+                    sink_bg.emit("arbor://diff-stream-file", serde_json::json!({
+                        "job_id": &job_id_thread,
+                        "tab_id": &tab_id_thread,
+                        "index":  i,
+                        "total":  total,
+                        "file":   file,
+                    }));
+                }
+                Ok(())
+            };
+
+            match run() {
+                Ok(()) => {
+                    sink_bg.emit("arbor://diff-stream-done", serde_json::json!({
+                        "job_id": &job_id_thread,
+                        "tab_id": &tab_id_thread,
+                    }));
+                    if let Ok(mut jobs) = jobs_bg.lock() {
+                        jobs.set_status(&job_id_thread, JobStatus::Completed { exit_code: 0 });
+                    };
+                }
+                Err(e) => {
+                    let err = e.to_string();
+                    sink_bg.emit("arbor://diff-stream-error", serde_json::json!({
+                        "job_id": &job_id_thread,
+                        "tab_id": &tab_id_thread,
+                        "error":  err.clone(),
+                    }));
+                    if let Ok(mut jobs) = jobs_bg.lock() {
+                        jobs.set_status(&job_id_thread, JobStatus::Failed { error: err });
+                    };
+                }
+            }
+        });
+
+    if let Err(e) = spawn_result {
+        // Fail gracefully and mark the job accordingly so the UI can recover.
+        let err = format!("failed to spawn diff-stream thread: {e}");
+        sink.emit("arbor://diff-stream-error", serde_json::json!({
+            "job_id": &job_id,
+            "tab_id": &tab_id,
+            "error":  err.clone(),
+        }));
+        if let Ok(mut jobs) = jobs.lock() {
+            jobs.set_status(&job_id, JobStatus::Failed { error: err.clone() });
+        };
+        return Err(AppError::Other(err));
+    }
+
+    Ok(job_id)
 }

@@ -9,9 +9,16 @@
 //! `spawn_blocking` (see `crate::commands::rpc_commands`), so the heavy walk
 //! still runs off the Tauri runtime workers — behavior is identical.
 //!
-//! `studio_refresh_index` is **not** here: it captures an `AppHandle`, emits
-//! `arbor://studio-index-*` progress events, and fire-and-forget spawns the
-//! walk on the blocking pool. It stays inline as a keep-shell Tauri command.
+//! `studio_refresh_index` lives here too: it spawns the heavy walk on a
+//! background thread and streams `arbor://studio-index-*` progress events
+//! through the **event sink** instead of an `AppHandle`. The generic `rpc`
+//! handler returns its `Ok(())` immediately while the spawned thread keeps
+//! emitting — behavior is byte-identical to the old keep-shell command.
+
+use std::sync::Arc;
+
+use arbor_ipc::prelude::EventSink;
+use serde::Serialize;
 
 use crate::error::AppError;
 use crate::ipc::studio;
@@ -20,6 +27,92 @@ use crate::studio::{
     CrossRefDef, StudioFileEntry, StudioFileKind, UsageMatch,
 };
 use crate::AppState;
+
+/// Snapshot of the index state — emitted on every refresh tick + on
+/// completion so the sidebar can render a "Indexing N/M…" badge.
+#[derive(Debug, Clone, Serialize)]
+pub struct IndexProgress {
+    pub tab_id:    String,
+    pub processed: usize,
+    pub total:     usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct IndexDone {
+    pub tab_id:        String,
+    pub files_indexed: usize,
+    pub took_ms:       u64,
+}
+
+/// Trigger a background refresh of the persistent studio index. The
+/// IPC call returns as soon as the job is spawned — progress is
+/// streamed through frontend events:
+///
+///   * `arbor://studio-index-progress` — `IndexProgress { tab_id, processed, total }`
+///     emitted every ~25 files (or every file if total < 50).
+///   * `arbor://studio-index-done`     — `IndexDone     { tab_id, files_indexed, took_ms }`
+///     emitted exactly once when the walk finishes (success OR error).
+///
+/// The frontend's `studioStore` listens to these and surfaces a small
+/// progress badge in the Studio sidebar.
+#[studio::handler(program = "studio")]
+fn studio_refresh_index(state: &AppState, tab_id: String) -> Result<(), AppError> {
+    let sink = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+
+    let repo_path = {
+        let mut mgr = state.lock_repos()?;
+        mgr.get(&tab_id)?.path.clone()
+    };
+    let sink_bg = Arc::clone(&sink);
+    let tab_id_clone = tab_id.clone();
+    // Fire-and-forget — the heavy walk runs on a background thread so the
+    // calling worker stays responsive. We deliberately do NOT join the
+    // handle here: the IPC call resolves immediately, the thread emits
+    // events as it goes.
+    std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let mut last_emit = 0usize;
+        let mut cb: Box<index::ProgressFn> = {
+            let sink = Arc::clone(&sink_bg);
+            let tab_id = tab_id_clone.clone();
+            Box::new(move |processed: usize, total: usize| {
+                // Coarse throttling — emitting on every file kills the
+                // frontend event queue. Threshold scales down for small
+                // repos so the user still sees progress feedback.
+                let step = if total < 50 { 1 } else { (total / 40).max(1) };
+                if processed - last_emit >= step || processed == total {
+                    last_emit = processed;
+                    sink.emit(
+                        "arbor://studio-index-progress",
+                        serde_json::to_value(IndexProgress {
+                            tab_id: tab_id.clone(),
+                            processed,
+                            total,
+                        })
+                        .unwrap_or(serde_json::Value::Null),
+                    );
+                }
+            })
+        };
+        let result = index::refresh(&repo_path, Some(&mut *cb));
+        let files_indexed = result.as_ref().map(|i| i.files.len()).unwrap_or(0);
+        sink_bg.emit(
+            "arbor://studio-index-done",
+            serde_json::to_value(IndexDone {
+                tab_id: tab_id_clone,
+                files_indexed,
+                took_ms: started.elapsed().as_millis() as u64,
+            })
+            .unwrap_or(serde_json::Value::Null),
+        );
+        if let Err(e) = result {
+            tracing::warn!("studio index refresh failed: {e}");
+        }
+    });
+    Ok(())
+}
 
 /// Scan the active tab's repository for indexable data files. `kinds`
 /// filters the result: empty vec means "all supported kinds".

@@ -1,14 +1,15 @@
-//! IPC bridge for the in-memory branding overrides + the on_theme_changed
-//! hook trigger. Branding is owned by `AppState.branding`; this file only
-//! exposes thin readers/notifiers — Lua plugins write through the
-//! `arbor.ui.set_branding` / `arbor.ui.clear_branding` namespace.
+//! Lua-facing branding emitters — the `arbor://*` broadcasts used by the
+//! `arbor.ui.set_branding` / `arbor.ui.clear_branding` Lua namespace.
+//!
+//! The IPC readers/notifiers (`get_branding`, `notify_theme_changed`) have
+//! moved to the platform backend (`ipc/platform/branding.rs`). What stays here
+//! is the egress that takes an `AppHandle` and emits `arbor://*` events, which
+//! the in-process Lua API calls directly.
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 
 use crate::branding::Branding;
-use crate::error::AppError;
-use crate::AppState;
 
 #[derive(Serialize, Clone)]
 pub struct BrandingDto {
@@ -25,42 +26,6 @@ impl From<Branding> for BrandingDto {
             owner:            b.owner,
         }
     }
-}
-
-/// Snapshot of the current branding state — frontend reads this on init so
-/// the title-bar / welcome-screen logo is correct on first paint, then
-/// keeps in sync via the `arbor://branding-changed` event.
-#[tauri::command]
-pub fn get_branding(state: State<'_, AppState>) -> Result<BrandingDto, AppError> {
-    Ok(state.branding.snapshot().into())
-}
-
-/// Tell the backend that the active theme just changed (or that a plugin
-/// applied / removed an in-memory token overlay).  Fans out to every
-/// plugin's `on_theme_changed` handler.
-///
-/// `vars` is the *effective* set of CSS variables in force after the change
-/// (active theme + any plugin overlays merged).  `source` is one of
-/// `"user" | "plugin" | "init"` — purely informational, plugins use it to
-/// avoid re-reacting to their own writes.
-#[tauri::command]
-pub fn notify_theme_changed(
-    state:      State<'_, AppState>,
-    theme_id:   String,
-    theme_name: String,
-    vars:       std::collections::HashMap<String, String>,
-    source:     String,
-) -> Result<(), AppError> {
-    state.fire_hook(
-        "on_theme_changed",
-        serde_json::json!({
-            "theme_id":   theme_id,
-            "theme_name": theme_name,
-            "vars":       vars,
-            "source":     source,
-        }),
-    );
-    Ok(())
 }
 
 /// Helper for the Lua API to broadcast a branding change.  Lives here so

@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { platform, studio } from './rpc';
 
 /** File kinds the Studio sidebar can index. Mirrors `StudioFileKind` in
@@ -147,7 +146,7 @@ export const setStudioSettings = (settings: StudioSettings): Promise<void> =>
 /** Fire the background refresh job — IPC returns immediately, progress
  *  + completion arrive via Tauri events (see studio.svelte.ts listeners). */
 export const studioRefreshIndex = (tabId: string): Promise<void> =>
-  invoke<void>('studio_refresh_index', { tabId });
+  studio<void>('studio_refresh_index', { tab_id: tabId });
 
 export interface IndexProgressEvent {
   tab_id:    string;

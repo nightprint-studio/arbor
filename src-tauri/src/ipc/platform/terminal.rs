@@ -20,16 +20,24 @@
 //!
 //! No hooks fire in this domain.
 //!
+//! `start_shell_detection` spawns a background detection job that emits
+//! `arbor://job-*` and `arbor://shell-detection-done` from inside the thread.
+//! Reached through the generic broker it holds only `&AppState`, so the thread
+//! captures the **event sink** (`Arc<dyn EventSink>`) plus an `Arc` to the job
+//! registry instead of an `AppHandle` — byte-identical topics and payloads.
+//!
 //! NOT migrated (stays inline in `terminal_commands`, handled by a later
 //! emit/seam pass):
 //!   * `terminal_create` — takes an `AppHandle` and spawns a PTY that streams
 //!     output via the `arbor://terminal-*` events.
-//!   * `start_shell_detection` — takes an `AppHandle` and emits
-//!     `arbor://job-*` / `arbor://shell-detection-done`.
+
+use std::sync::Arc;
+
+use arbor_ipc::prelude::EventSink;
 
 use crate::error::AppError;
 use crate::ipc::platform;
-use crate::terminal::{self, BUILTIN_SHELLS, TerminalInfo, TerminalManager};
+use crate::terminal::{self, BUILTIN_SHELLS, DetectedShell, TerminalInfo, TerminalManager};
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -166,4 +174,95 @@ fn set_terminals_config(
     let snapshot = cfg.clone();
     drop(cfg);
     crate::config::app_config::save(&snapshot).map_err(|e| AppError::Other(e.to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// Shell detection
+// ---------------------------------------------------------------------------
+
+/// Kick off shell detection as a non-cancellable background job — mirrors
+/// `start_ide_detection`.  Results arrive via `arbor://shell-detection-done`.
+///
+/// Returns the job-id immediately; the detection runs in a background thread
+/// which emits `arbor://job-output`, `arbor://job-done` and
+/// `arbor://shell-detection-done` through the captured event sink.
+#[platform::handler(program = "platform")]
+fn start_shell_detection(state: &AppState) -> Result<String, AppError> {
+    use crate::jobs::{JobInfo, JobRegistry, JobStatus};
+
+    let sink: Arc<dyn EventSink> = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+    let jobs = Arc::clone(&state.jobs);
+
+    let path_overrides = {
+        let cfg = state.lock_config()?;
+        cfg.terminals.path_overrides.clone()
+    };
+
+    let job_id = {
+        let mut jobs = state.lock_jobs()?;
+        let id = jobs.new_id();
+        jobs.register(JobInfo {
+            id:              id.clone(),
+            name:            "Shell Detection".to_string(),
+            plugin_name:     "arbor".to_string(),
+            command:         "detect shells".to_string(),
+            started_at:      JobRegistry::now_secs(),
+            status:          JobStatus::Running,
+            category:        Some("System".to_string()),
+            non_cancellable: true,
+            is_system:       true,
+            finished_at:     None,
+            hidden:          false,
+            target:          None,
+        });
+        id
+    };
+
+    sink.emit("arbor://job-started", serde_json::json!({
+        "job_id":      &job_id,
+        "name":        "Shell Detection",
+        "plugin_name": "arbor",
+        "command":     "detect shells",
+        "category":    "System",
+    }));
+
+    let jid     = job_id.clone();
+    let sink_bg = Arc::clone(&sink);
+    let jobs_bg = Arc::clone(&jobs);
+    let _thread = std::thread::Builder::new()
+        .name("arbor-shell-detection".into())
+        .spawn(move || {
+            let results: Vec<DetectedShell> =
+                terminal::detect_available_shells(&path_overrides);
+
+            for r in &results {
+                let line = if r.available {
+                    format!("✓  {} — {}", r.name, r.detected_path.as_deref().unwrap_or(""))
+                } else {
+                    format!("✗  {} — not found", r.name)
+                };
+                if let Ok(mut jobs) = jobs_bg.lock() {
+                    jobs.append_output(&jid, line.clone());
+                };
+                sink_bg.emit("arbor://job-output", serde_json::json!({
+                    "job_id": &jid,
+                    "text":   line,
+                }));
+            }
+
+            if let Ok(mut jobs) = jobs_bg.lock() {
+                jobs.set_status(&jid, JobStatus::Completed { exit_code: 0 });
+            };
+
+            sink_bg.emit("arbor://job-done", serde_json::json!({
+                "job_id":    &jid,
+                "success":   true,
+                "exit_code": 0,
+            }));
+            sink_bg.emit("arbor://shell-detection-done", serde_json::json!(&results));
+        });
+
+    Ok(job_id)
 }

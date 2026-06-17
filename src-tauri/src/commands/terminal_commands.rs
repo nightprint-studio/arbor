@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::AppState;
 use crate::error::Result;
-use crate::terminal::{self, BUILTIN_SHELLS, DetectedShell, TerminalInfo};
+use crate::terminal::{self, BUILTIN_SHELLS, TerminalInfo};
 
 // ---------------------------------------------------------------------------
 // terminal_create
@@ -72,98 +72,4 @@ fn display_name_for(
         .and_then(|s| s.to_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| exe.to_string())
-}
-
-// ---------------------------------------------------------------------------
-// Shell detection
-// ---------------------------------------------------------------------------
-//
-// DEFERRED from the `platform` broker migration: takes an `AppHandle` and emits
-// `arbor://job-*` / `arbor://shell-detection-done`. Handled by a later
-// emit/seam pass.
-
-/// Kick off shell detection as a non-cancellable background job — mirrors
-/// `start_ide_detection`.  Results arrive via `arbor://shell-detection-done`.
-#[tauri::command]
-pub fn start_shell_detection(
-    state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
-) -> Result<String> {
-    use tauri::Emitter;
-    use crate::jobs::{JobInfo, JobRegistry, JobStatus};
-
-    let path_overrides = {
-        let cfg = state.lock_config()?;
-        cfg.terminals.path_overrides.clone()
-    };
-
-    let job_id = {
-        let mut jobs = state.lock_jobs()?;
-        let id = jobs.new_id();
-        jobs.register(JobInfo {
-            id:              id.clone(),
-            name:            "Shell Detection".to_string(),
-            plugin_name:     "arbor".to_string(),
-            command:         "detect shells".to_string(),
-            started_at:      JobRegistry::now_secs(),
-            status:          JobStatus::Running,
-            category:        Some("System".to_string()),
-            non_cancellable: true,
-            is_system:       true,
-            finished_at:     None,
-            hidden:          false,
-            target:          None,
-        });
-        id
-    };
-
-    let _ = app_handle.emit("arbor://job-started", serde_json::json!({
-        "job_id":      &job_id,
-        "name":        "Shell Detection",
-        "plugin_name": "arbor",
-        "command":     "detect shells",
-        "category":    "System",
-    }));
-
-    let jid    = job_id.clone();
-    let handle = app_handle.clone();
-    let _thread = std::thread::Builder::new()
-        .name("arbor-shell-detection".into())
-        .spawn(move || {
-            use tauri::Manager as _;
-            let results: Vec<DetectedShell> =
-                terminal::detect_available_shells(&path_overrides);
-
-            for r in &results {
-                let line = if r.available {
-                    format!("✓  {} — {}", r.name, r.detected_path.as_deref().unwrap_or(""))
-                } else {
-                    format!("✗  {} — not found", r.name)
-                };
-                let s = handle.state::<AppState>();
-                if let Ok(mut jobs) = s.jobs.lock() {
-                    jobs.append_output(&jid, line.clone());
-                };
-                let _ = handle.emit("arbor://job-output", serde_json::json!({
-                    "job_id": &jid,
-                    "text":   line,
-                }));
-            }
-
-            {
-                let s = handle.state::<AppState>();
-                if let Ok(mut jobs) = s.jobs.lock() {
-                    jobs.set_status(&jid, JobStatus::Completed { exit_code: 0 });
-                };
-            }
-
-            let _ = handle.emit("arbor://job-done", serde_json::json!({
-                "job_id":    &jid,
-                "success":   true,
-                "exit_code": 0,
-            }));
-            let _ = handle.emit("arbor://shell-detection-done", &results);
-        });
-
-    Ok(job_id)
 }

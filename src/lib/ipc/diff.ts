@@ -91,10 +91,10 @@ export const getWorkdirDiff = (tabId: string, staged: boolean) =>
 ///   arbor://diff-stream-done     { job_id, tab_id }
 ///   arbor://diff-stream-error    { job_id, tab_id, error }
 export const getWorkdirDiffStream = (tabId: string, staged: boolean) =>
-  invoke<string>('get_workdir_diff_stream', {
-    tabId, staged,
-    contextLines: getContextLines(), diffAlgo: getDiffAlgo(),
-    encodingOverrides: overridesForTab(tabId),
+  corvus<string>('get_workdir_diff_stream', {
+    tab_id: tabId, staged,
+    context_lines: getContextLines(), diff_algo: getDiffAlgo(),
+    encoding_overrides: overridesForTab(tabId),
   });
 
 export const getFileAtCommit = (tabId: string, oid: string, path: string) => {

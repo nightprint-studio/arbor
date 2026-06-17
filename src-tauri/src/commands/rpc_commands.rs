@@ -45,8 +45,11 @@ pub async fn rpc(
         let result = crate::ipc::dispatch_rpc(state.inner(), &program, &method, params.clone())?;
         // Fire any fire-and-forget plugin hook owed by this call, here in the
         // generic path so it runs once whether the method was served in-process
-        // or out-of-process by `corvus-be` (the handler itself fires none).
+        // or out-of-process (the handler itself fires none). Each backend has
+        // its own post-hooks table; the `program` guard inside makes the other
+        // a no-op.
         crate::ipc::corvus::post_hooks::fire(state.inner(), &program, &method, &params, &result);
+        crate::ipc::platform::post_hooks::fire(state.inner(), &program, &method, &params, &result);
         Ok(result)
     })
     .await
