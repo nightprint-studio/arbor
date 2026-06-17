@@ -982,27 +982,11 @@ pub fn run() {
             commands::repo_commands::init_repo,
             commands::repo_commands::clone_repo,
             commands::repo_commands::list_remote_branches_for_url,
-            // Graph
-            commands::graph_commands::get_graph,
-            commands::graph_commands::get_graph_for_file,
-            commands::graph_commands::get_repo_files,
-            commands::graph_commands::get_files_last_commit,
+            // Graph (read ops migrated to corvus; streaming/job ones deferred)
             commands::graph_commands::start_file_meta_scan,
-            commands::graph_commands::get_repo_file_tree,
-            commands::graph_commands::get_commit_detail,
-            commands::graph_commands::get_repo_fingerprint,
             commands::graph_commands::export_graph_svg,
-            // Diff
-            commands::diff_commands::get_commit_diff,
-            commands::diff_commands::get_commit_diff_meta,
-            commands::diff_commands::get_commit_file_diff,
-            commands::diff_commands::get_commits_range_diff_meta,
-            commands::diff_commands::get_commits_range_file_diff,
-            commands::diff_commands::get_workdir_diff,
+            // Diff (read ops migrated to corvus; streaming ones deferred)
             commands::diff_commands::get_workdir_diff_stream,
-            commands::diff_commands::get_branch_diff,
-            commands::diff_commands::get_file_at_commit,
-            commands::diff_commands::get_file_blame,
             commands::diff_commands::get_file_blame_streaming,
             // Stage
             commands::stage_commands::stage_file,
@@ -1048,15 +1032,6 @@ pub fn run() {
             // notes, reflog, bisect. The rest below are still inline
             // #[tauri::command]s, migrating domain by domain. See crate::ipc.
             commands::rpc_commands::rpc,
-            // Rebase
-            commands::rebase_commands::get_rebase_todo,
-            commands::rebase_commands::start_rebase,
-            commands::rebase_commands::rebase_continue,
-            commands::rebase_commands::rebase_abort,
-            commands::rebase_commands::rebase_skip,
-            commands::rebase_commands::get_rebase_state,
-            // Search
-            commands::search_commands::search_commits,
             // Auth — credentials
             commands::auth_commands::save_credential,
             commands::auth_commands::get_credential,
@@ -1239,33 +1214,8 @@ pub fn run() {
             // Container model (Phase 2 — ContributableModal)
             commands::plugin_commands::list_containers,
             commands::plugin_commands::get_container,
-            // Git Flow
-            commands::gitflow_commands::get_gitflow_config,
-            commands::gitflow_commands::get_gitflow_global_config,
-            commands::gitflow_commands::set_gitflow_global_config,
-            commands::gitflow_commands::set_gitflow_repo_config,
-            commands::gitflow_commands::clear_gitflow_repo_config,
-            commands::gitflow_commands::gitflow_get_status,
-            commands::gitflow_commands::gitflow_init,
-            commands::gitflow_commands::gitflow_init_create_main,
-            commands::gitflow_commands::gitflow_feature_start,
-            commands::gitflow_commands::gitflow_feature_finish,
-            commands::gitflow_commands::gitflow_release_start,
-            commands::gitflow_commands::gitflow_release_finish,
-            commands::gitflow_commands::gitflow_hotfix_start,
-            commands::gitflow_commands::gitflow_hotfix_finish,
-            commands::gitflow_commands::has_gitflow_repo_override,
             // Open in browser
             commands::remote_commands::open_in_browser,
-            // Submodules
-            commands::submodule_commands::list_submodules,
-            commands::submodule_commands::submodule_fetch,
-            commands::submodule_commands::submodule_pull,
-            commands::submodule_commands::submodule_push,
-            commands::submodule_commands::submodule_checkout,
-            commands::submodule_commands::submodule_list_branches,
-            commands::submodule_commands::update_submodule,
-            commands::submodule_commands::update_all_submodules,
             // Pipelines (plugin-defined)
             commands::pipeline_commands::list_pipeline_defs,
             commands::pipeline_commands::list_pipeline_runs,
@@ -1393,41 +1343,9 @@ pub fn run() {
             commands::provider_commands::git_provider_disconnect,
             // Inline image proxy (issue/MR/PR body & comment preview)
             commands::image_commands::fetch_remote_image,
-            // Merge conflict resolution
-            commands::merge_commands::merge_branch,
-            commands::merge_commands::get_conflict_content,
-            commands::merge_commands::get_conflict_presence,
-            commands::merge_commands::remove_conflict_file,
-            commands::merge_commands::resolve_conflict,
-            commands::merge_commands::resolve_stash_conflict,
-            commands::merge_commands::complete_merge,
-            commands::merge_commands::abort_merge,
-            commands::merge_commands::get_merge_message,
-            // Ticket links (commit ↔ ticket association)
-            commands::ticket_commands::get_commit_ticket_links,
-            commands::ticket_commands::add_ticket_link,
-            commands::ticket_commands::remove_ticket_link,
-            commands::ticket_commands::get_ticket_link_config,
-            commands::ticket_commands::set_ticket_link_repo_config,
-            commands::ticket_commands::validate_ticket_regex,
-            commands::ticket_commands::check_notes_push_config,
-            commands::ticket_commands::find_commits_for_ticket,
-            // Worktrees
-            commands::worktree_commands::list_worktrees,
-            commands::worktree_commands::add_worktree,
-            commands::worktree_commands::remove_worktree,
-            commands::worktree_commands::detect_project_type,
+            // Worktrees (migrated to corvus; IDE-detection streaming deferred)
             commands::worktree_commands::start_ide_detection,
-            commands::worktree_commands::open_in_ide,
-            commands::worktree_commands::get_ide_config,
-            commands::worktree_commands::set_ide_config,
-            commands::worktree_commands::get_repo_ide,
-            commands::worktree_commands::set_repo_ide,
-            // Recovery journal (pre-destructive snapshots)
-            commands::recovery_commands::list_recovery_entries,
-            commands::recovery_commands::preview_recovery_restore,
-            commands::recovery_commands::restore_recovery_entry,
-            commands::recovery_commands::delete_recovery_entry,
+            // Recovery journal — migrated to corvus (config stays here)
             commands::config_commands::get_recovery_config,
             commands::config_commands::set_recovery_config,
             // Remote repository browser
@@ -1460,13 +1378,8 @@ pub fn run() {
             commands::linked_worktree_commands::add_alias_group,
             commands::linked_worktree_commands::update_alias_group,
             commands::linked_worktree_commands::remove_alias_group,
-            // Git CLI executable detection / configuration
-            commands::git_cli_commands::get_git_status,
-            commands::git_cli_commands::redetect_git,
-            commands::git_cli_commands::verify_git_path,
-            commands::git_cli_commands::set_git_path,
+            // Git CLI detection/config (migrated to corvus; download deferred)
             commands::git_cli_commands::download_portable_git,
-            commands::git_cli_commands::cancel_git_download,
             // Deep-link router (arbor:// URLs)
             commands::deep_link_commands::find_repo_by_remote_url,
             commands::deep_link_commands::deep_link_ready,
@@ -1557,8 +1470,6 @@ pub fn run() {
             commands::cloud_commands::cloud_gcs_oauth_start,
             // Bevy Remote Protocol (Phase 1.0 — read-only HTTP)
             commands::brp_commands::brp_connect,
-            commands::brp_commands::brp_disconnect,
-            commands::brp_commands::brp_status,
             commands::brp_commands::brp_call,
             // Marketplace
             commands::marketplace_commands::marketplace_list_installed,

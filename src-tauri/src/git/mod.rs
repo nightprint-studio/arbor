@@ -7,7 +7,6 @@ pub mod status;
 pub mod branch;
 pub mod stash;
 pub mod remote;
-pub mod rebase;
 pub mod submodule;
 pub mod search;
 pub mod gitflow;

@@ -1,7 +1,8 @@
 //! Tauri commands for Bevy Remote Protocol — Phase 1.0.
 //!
-//! Connect/disconnect/call/status only. SSE watch + editing arrive in later
-//! phases. The frontend talks to these via `src/lib/ipc/brp.ts`; the Lua
+//! Connect + raw call here; disconnect/status moved to the generic `corvus`
+//! seam. SSE watch + editing arrive in later phases. The frontend talks to
+//! these via `src/lib/ipc/brp.ts`; the Lua
 //! `arbor.brp.*` namespace re-uses the same primitives directly from the
 //! plugin host (no IPC round-trip).
 
@@ -97,18 +98,10 @@ pub async fn brp_connect(
     Ok(status)
 }
 
-#[tauri::command]
-pub fn brp_disconnect(state: State<'_, AppState>) -> Result<BrpStatus, AppError> {
-    let mut reg = lock_brp(&state)?;
-    reg.clear();
-    Ok(BrpStatus::from_session(None))
-}
-
-#[tauri::command]
-pub fn brp_status(state: State<'_, AppState>) -> Result<BrpStatus, AppError> {
-    let reg = lock_brp(&state)?;
-    Ok(BrpStatus::from_session(reg.session()))
-}
+// `brp_disconnect` / `brp_status` migrated to the generic seam
+// (`ipc/corvus/brp.rs`); `brp_connect` / `brp_call` stay here — they are async
+// and return the structured `BrpCallError` envelope, which the registry's
+// stringly-typed error channel would flatten.
 
 #[derive(Debug, Deserialize)]
 pub struct BrpCallParams {

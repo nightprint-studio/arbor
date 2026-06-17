@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { RemoteInfo, FetchResult, PullResult, SearchQuery, SearchResult } from '../types/git';
 import { invalidateTabCache } from './cache-invalidate';
+import { corvus } from './rpc';
 
 // ── Read-only ─────────────────────────────────────────────────────────────────
 
@@ -8,7 +9,7 @@ export const listRemotes = (tabId: string) =>
   invoke<RemoteInfo[]>('list_remotes', { tabId });
 
 export const searchCommits = (tabId: string, query: SearchQuery) =>
-  invoke<SearchResult[]>('search_commits', { tabId, query });
+  corvus<SearchResult[]>('search_commits', { tab_id: tabId, query });
 
 /** Open the repository (or a specific commit/branch/tag) in the default browser.
  *  target: "repo" | "commit:{oid}" | "branch:{name}" | "tag:{name}" */

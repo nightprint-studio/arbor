@@ -15,10 +15,15 @@
 
 pub mod bisect;
 pub mod brp;
+pub mod diff;
+pub mod git_cli;
 pub mod gitflow;
+pub mod graph;
 pub mod merge;
 pub mod notes;
 pub mod post_hooks;
+pub mod rebase;
+pub mod recovery;
 pub mod reflog;
 pub mod reset;
 pub mod search;
@@ -26,6 +31,7 @@ pub mod stash;
 pub mod stats;
 pub mod submodule;
 pub mod tickets;
+pub mod worktree;
 
 // Re-export so backend handlers annotate with `#[corvus::handler]` — the
 // product's own namespace for the generic `arbor-rpc` attribute.

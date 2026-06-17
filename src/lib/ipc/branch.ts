@@ -47,7 +47,7 @@ export const mergeBranch = async (
   branchName: string,
   strategy?: MergeStrategy,
 ): Promise<MergeOutcome> => {
-  const r = await invoke<MergeOutcome>('merge_branch', { tabId, branchName, strategy });
+  const r = await corvus<MergeOutcome>('merge_branch', { tab_id: tabId, branch_name: branchName, strategy });
   invalidateTabCache(tabId);
   return r;
 };

@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { BrpConnectParams, BrpStatus } from '$lib/types/brp';
+import { corvus } from './rpc';
 
 /**
  * Probe the endpoint with `rpc.discover` and, on success, install it as the
@@ -11,10 +12,10 @@ export const brpConnect = (params: BrpConnectParams = {}) =>
   invoke<BrpStatus>('brp_connect', { params });
 
 export const brpDisconnect = () =>
-  invoke<BrpStatus>('brp_disconnect');
+  corvus<BrpStatus>('brp_disconnect');
 
 export const brpStatus = () =>
-  invoke<BrpStatus>('brp_status');
+  corvus<BrpStatus>('brp_status');
 
 /**
  * Raw JSON-RPC pass-through. `method` is one of `BrpMethod.*`, `params` is the

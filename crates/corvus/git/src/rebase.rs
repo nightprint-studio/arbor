@@ -1,7 +1,24 @@
+//! `rebase` domain — pure git logic, Tauri-free.
+//!
+//! Lifted verbatim from the shell handler bodies and the old
+//! `crate::git::rebase` module; only the couplings the crate refuses (the
+//! git-program global, the `AppError` enum) are swapped for the crate's
+//! explicit [`GitCli`] and [`GitError`]. The interactive-rebase flow keeps the
+//! same temp-todo-file + `GIT_SEQUENCE_EDITOR`/`GIT_EDITOR` no-op shape, the
+//! same "CONFLICT means paused, not failed" handling, and the same error
+//! mapping (`GitError::Io` for spawn, `GitError::Other` for non-zero exit) so
+//! behavior is byte-identical.
+//!
+//! The `on_rebase_start` / `on_rebase_abort` hooks fired around these calls
+//! stay shell-side (they are fire-and-forget and need the broker).
+//!
+//! [`RebaseState::in_progress`] is derived by the caller from the live
+//! `git2::RepositoryState`; this module only owns the wire type.
+
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, Result};
-use crate::process_ext::NoWindowExt;
+use crate::cli::GitCli;
+use crate::error::{GitError, Result};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,16 +68,16 @@ pub struct RebaseState {
 // ---------------------------------------------------------------------------
 
 /// Returns the list of commits between `base` and HEAD (exclusive, topological order).
-pub fn get_rebase_todo(repo_path: &str, base: &str) -> Result<Vec<RebaseTodoEntry>> {
-    let output = crate::git_cli::command()
+pub fn get_rebase_todo(git: &GitCli, repo_path: &str, base: &str) -> Result<Vec<RebaseTodoEntry>> {
+    let output = git
+        .command()
         .args(["log", "--oneline", &format!("{base}..HEAD")])
         .current_dir(repo_path)
-        .no_window()
         .output()
-        .map_err(|e| AppError::Io(e))?;
+        .map_err(GitError::Io)?;
 
     if !output.status.success() {
-        return Err(AppError::Other(
+        return Err(GitError::Other(
             String::from_utf8_lossy(&output.stderr).to_string(),
         ));
     }
@@ -91,6 +108,7 @@ pub fn get_rebase_todo(repo_path: &str, base: &str) -> Result<Vec<RebaseTodoEntr
 /// not block waiting for an interactive TTY editor — the existing commit message
 /// is kept unchanged.
 pub fn start_interactive_rebase(
+    git: &GitCli,
     repo_path: &str,
     base: &str,
     todo: &[RebaseTodoEntry],
@@ -114,16 +132,16 @@ pub fn start_interactive_rebase(
     #[cfg(not(windows))]
     let sequence_editor = format!("cp '{}' \"$1\"", todo_path_str);
 
-    let output = crate::git_cli::command()
+    let output = git
+        .command()
         .args(["rebase", "-i", base])
         .env("GIT_SEQUENCE_EDITOR", &sequence_editor)
         // no-op editor: keeps the existing commit message for any 'reword' step
         // instead of hanging waiting for a TTY editor.
         .env("GIT_EDITOR", noop_editor())
         .current_dir(repo_path)
-        .no_window()
         .output()
-        .map_err(AppError::Io)?;
+        .map_err(GitError::Io)?;
 
     // Clean up the temp file regardless of outcome.
     let _ = std::fs::remove_file(&todo_path);
@@ -134,25 +152,25 @@ pub fn start_interactive_rebase(
             // rebase paused on conflict — not an error per se
             return Ok(());
         }
-        return Err(AppError::Other(stderr));
+        return Err(GitError::Other(stderr));
     }
     Ok(())
 }
 
-pub fn rebase_continue(repo_path: &str) -> Result<()> {
+pub fn rebase_continue(git: &GitCli, repo_path: &str) -> Result<()> {
     // Set GIT_EDITOR to a no-op so that a 'reword' step in an interactive
     // rebase does not block waiting for an interactive TTY editor.
     // The existing commit message is kept unchanged.
-    let output = crate::git_cli::command()
+    let output = git
+        .command()
         .args(["rebase", "--continue"])
         .env("GIT_EDITOR", noop_editor())
         .current_dir(repo_path)
-        .no_window()
         .output()
-        .map_err(AppError::Io)?;
+        .map_err(GitError::Io)?;
 
     if !output.status.success() {
-        return Err(AppError::Other(
+        return Err(GitError::Other(
             String::from_utf8_lossy(&output.stderr).to_string(),
         ));
     }
@@ -167,30 +185,47 @@ fn noop_editor() -> &'static str {
     "true"
 }
 
-pub fn rebase_abort(repo_path: &str) -> Result<()> {
-    git_command(repo_path, &["rebase", "--abort"])
+pub fn rebase_abort(git: &GitCli, repo_path: &str) -> Result<()> {
+    git_command(git, repo_path, &["rebase", "--abort"])
 }
 
-pub fn rebase_skip(repo_path: &str) -> Result<()> {
-    git_command(repo_path, &["rebase", "--skip"])
+pub fn rebase_skip(git: &GitCli, repo_path: &str) -> Result<()> {
+    git_command(git, repo_path, &["rebase", "--skip"])
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn git_command(repo_path: &str, args: &[&str]) -> Result<()> {
-    let output = crate::git_cli::command()
+fn git_command(git: &GitCli, repo_path: &str, args: &[&str]) -> Result<()> {
+    let output = git
+        .command()
         .args(args)
         .current_dir(repo_path)
-        .no_window()
         .output()
-        .map_err(AppError::Io)?;
+        .map_err(GitError::Io)?;
 
     if !output.status.success() {
-        return Err(AppError::Other(
+        return Err(GitError::Other(
             String::from_utf8_lossy(&output.stderr).to_string(),
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rebase_action_display_mapping() {
+        // The todo file is line-oriented `<action> <oid> <summary>`; the action
+        // token must serialize to the exact git verbs or the rebase miswrites.
+        assert_eq!(RebaseAction::Pick.to_string(), "pick");
+        assert_eq!(RebaseAction::Reword.to_string(), "reword");
+        assert_eq!(RebaseAction::Edit.to_string(), "edit");
+        assert_eq!(RebaseAction::Squash.to_string(), "squash");
+        assert_eq!(RebaseAction::Fixup.to_string(), "fixup");
+        assert_eq!(RebaseAction::Drop.to_string(), "drop");
+    }
 }

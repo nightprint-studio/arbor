@@ -1,9 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
+import { corvus } from './rpc';
 import type { RecoveryConfig, RecoveryEntry, RecoveryRestorePreview } from '$lib/types/git';
 
 /** List all recovery snapshots for the given tab (newest first). */
 export function listRecoveryEntries(tabId: string): Promise<RecoveryEntry[]> {
-  return invoke<RecoveryEntry[]>('list_recovery_entries', { tabId });
+  return corvus<RecoveryEntry[]>('list_recovery_entries', { tab_id: tabId });
 }
 
 /** Preview what restoring a snapshot would change. */
@@ -11,7 +12,7 @@ export function previewRecoveryRestore(
   tabId: string,
   entryId: number,
 ): Promise<RecoveryRestorePreview> {
-  return invoke<RecoveryRestorePreview>('preview_recovery_restore', { tabId, entryId });
+  return corvus<RecoveryRestorePreview>('preview_recovery_restore', { tab_id: tabId, entry_id: entryId });
 }
 
 /** Restore a snapshot into the working directory.  A fresh snapshot of the
@@ -20,7 +21,7 @@ export function restoreRecoveryEntry(
   tabId: string,
   entryId: number,
 ): Promise<RecoveryEntry> {
-  return invoke<RecoveryEntry>('restore_recovery_entry', { tabId, entryId });
+  return corvus<RecoveryEntry>('restore_recovery_entry', { tab_id: tabId, entry_id: entryId });
 }
 
 /** Drop a snapshot from the journal + delete its pinning ref. */
@@ -28,7 +29,7 @@ export function deleteRecoveryEntry(
   tabId: string,
   entryId: number,
 ): Promise<void> {
-  return invoke<void>('delete_recovery_entry', { tabId, entryId });
+  return corvus<void>('delete_recovery_entry', { tab_id: tabId, entry_id: entryId });
 }
 
 /** Load the persisted snapshot policy (size limit + extension deny-list). */

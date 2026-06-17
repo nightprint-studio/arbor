@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import type {
   CommitQueryItem,
   LinkedCommitRef,
@@ -6,12 +5,13 @@ import type {
   TicketLinkConfig,
   TicketLinksRepoConfig,
 } from '$lib/types/git';
+import { corvus } from './rpc';
 
 export function getCommitTicketLinks(
   tabId:   string,
   commits: CommitQueryItem[],
 ): Promise<Record<string, TicketLink[]>> {
-  return invoke('get_commit_ticket_links', { tabId, commits });
+  return corvus('get_commit_ticket_links', { tab_id: tabId, commits });
 }
 
 export function addTicketLink(
@@ -20,7 +20,7 @@ export function addTicketLink(
   ticketId: string,
   tracker:  string,
 ): Promise<void> {
-  return invoke('add_ticket_link', { tabId, sha, ticketId, tracker });
+  return corvus('add_ticket_link', { tab_id: tabId, sha, ticket_id: ticketId, tracker });
 }
 
 export function removeTicketLink(
@@ -28,32 +28,32 @@ export function removeTicketLink(
   sha:      string,
   ticketId: string,
 ): Promise<void> {
-  return invoke('remove_ticket_link', { tabId, sha, ticketId });
+  return corvus('remove_ticket_link', { tab_id: tabId, sha, ticket_id: ticketId });
 }
 
 export function getTicketLinkConfig(tabId: string): Promise<TicketLinkConfig> {
-  return invoke('get_ticket_link_config', { tabId });
+  return corvus('get_ticket_link_config', { tab_id: tabId });
 }
 
 export function setTicketLinkRepoConfig(
   tabId:  string,
   config: TicketLinksRepoConfig,
 ): Promise<void> {
-  return invoke('set_ticket_link_repo_config', { tabId, config });
+  return corvus('set_ticket_link_repo_config', { tab_id: tabId, config });
 }
 
 /** Returns '' when valid, or an error message when the pattern is invalid or has no capture group. */
 export function validateTicketRegex(pattern: string): Promise<string> {
-  return invoke('validate_ticket_regex', { pattern });
+  return corvus('validate_ticket_regex', { pattern });
 }
 
 export function checkNotesPushConfig(tabId: string): Promise<boolean> {
-  return invoke('check_notes_push_config', { tabId });
+  return corvus('check_notes_push_config', { tab_id: tabId });
 }
 
 export function findCommitsForTicket(
   tabId:    string,
   ticketId: string,
 ): Promise<LinkedCommitRef[]> {
-  return invoke('find_commits_for_ticket', { tabId, ticketId });
+  return corvus('find_commits_for_ticket', { tab_id: tabId, ticket_id: ticketId });
 }

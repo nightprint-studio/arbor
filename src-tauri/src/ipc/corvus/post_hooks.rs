@@ -101,6 +101,20 @@ pub fn fire(state: &AppState, program: &str, method: &str, params: &Value, resul
             }));
         }
 
+        // ── rebase ── fire-and-forget. on_rebase_start's action_count comes
+        // from the request `todo` length (the handler returns () with no count).
+        "start_rebase" => {
+            let action_count = params.get("todo").and_then(Value::as_array).map(|a| a.len());
+            state.fire_hook("on_rebase_start", json!({
+                "tab_id": params.get("tab_id"),
+                "base": params.get("base"),
+                "action_count": action_count,
+            }));
+        }
+        "rebase_abort" => {
+            state.fire_hook("on_rebase_abort", json!({ "tab_id": params.get("tab_id") }));
+        }
+
         _ => {}
     }
 }

@@ -28,3 +28,10 @@ pub use crate::merge::{
     ConflictPresence, MergeOutcome, MergeStrategy,
 };
 pub use crate::search::{search_commits, AuthorInfo, SearchQuery, SearchResult};
+pub use crate::rebase::{
+    get_rebase_todo, rebase_abort, rebase_continue, rebase_skip, start_interactive_rebase,
+    RebaseAction, RebaseState, RebaseTodoEntry,
+};
+pub use crate::worktree::{
+    add_worktree, detect_project_type, list_worktrees, remove_worktree, ProjectType, WorktreeInfo,
+};

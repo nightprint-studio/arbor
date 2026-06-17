@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { corvus } from './rpc';
 import type { GraphData, CommitDetail, RepoInfo, InitRepoOptions, InitRepoResult, CloneOptions, RepoFileEntry } from '../types/git';
 
 export const openRepo = (path: string, tabId: string) =>
@@ -31,24 +32,24 @@ export const getRepoInfo = (tabId: string) =>
   invoke<RepoInfo>('get_repo_info', { tabId });
 
 export const getGraph = (tabId: string, offset = 0, limit = 500) =>
-  invoke<GraphData>('get_graph', { tabId, offset, limit });
+  corvus<GraphData>('get_graph', { tab_id: tabId, offset, limit });
 
 export const getGraphForFile = (tabId: string, filePath: string, offset = 0, limit = 500) =>
-  invoke<GraphData>('get_graph_for_file', { tabId, filePath, offset, limit });
+  corvus<GraphData>('get_graph_for_file', { tab_id: tabId, file_path: filePath, offset, limit });
 
 export const getCommitDetail = (tabId: string, oid: string) =>
-  invoke<CommitDetail>('get_commit_detail', { tabId, oid });
+  corvus<CommitDetail>('get_commit_detail', { tab_id: tabId, oid });
 
 export const getRepoFileTree = (tabId: string) =>
-  invoke<RepoFileEntry[]>('get_repo_file_tree', { tabId });
+  corvus<RepoFileEntry[]>('get_repo_file_tree', { tab_id: tabId });
 
 /** Fast: returns all tracked file paths from the index, no commit walking. */
 export const getRepoFiles = (tabId: string) =>
-  invoke<string[]>('get_repo_files', { tabId });
+  corvus<string[]>('get_repo_files', { tab_id: tabId });
 
 /** Lazy: returns the last commit that touched each path in the given list. */
 export const getFilesLastCommit = (tabId: string, paths: string[]) =>
-  invoke<RepoFileEntry[]>('get_files_last_commit', { tabId, paths });
+  corvus<RepoFileEntry[]>('get_files_last_commit', { tab_id: tabId, paths });
 
 /** Starts a background scan that emits:
  *  - `arbor://file-meta-batch` {tab_id, entries[]} progressively
@@ -59,7 +60,7 @@ export const startFileMetaScan = (tabId: string) =>
 /** Returns a fast fingerprint of the repo's current ref state (HEAD SHA + all refs).
  *  Used by the cache scheduler to detect remote changes without loading the full graph. */
 export const getRepoFingerprint = (tabId: string) =>
-  invoke<string>('get_repo_fingerprint', { tabId });
+  corvus<string>('get_repo_fingerprint', { tab_id: tabId });
 
 /** Kick off a background job that exports the full commit graph as an SVG file.
  *  Pass `themeVars` (the active theme's CSS-vars map) so the export matches

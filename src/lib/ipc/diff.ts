@@ -1,4 +1,5 @@
 import { invoke, Channel } from '@tauri-apps/api/core';
+import { corvus } from './rpc';
 import type { BlameLine, BlameProgress, DiffFile } from '../types/git';
 import { diffStore } from '$lib/stores/diff.svelte';
 import { tabsStore } from '$lib/stores/tabs.svelte';
@@ -39,10 +40,10 @@ function overridesForTab(tabId: string): EncodingOverrides | undefined {
 }
 
 export const getCommitDiff = (tabId: string, oid: string) =>
-  invoke<DiffFile[]>('get_commit_diff', {
-    tabId, oid,
-    contextLines: getContextLines(), diffAlgo: getDiffAlgo(),
-    encodingOverrides: overridesForTab(tabId),
+  corvus<DiffFile[]>('get_commit_diff', {
+    tab_id: tabId, oid,
+    context_lines: getContextLines(), diff_algo: getDiffAlgo(),
+    encoding_overrides: overridesForTab(tabId),
   });
 
 /// Metadata-only commit diff: file list + stats, no hunks. Pair with
@@ -50,15 +51,15 @@ export const getCommitDiff = (tabId: string, oid: string) =>
 /// Designed to keep "click on a commit" snappy even with `fullFile=true` —
 /// only the file the user actually opens pays the parse cost.
 export const getCommitDiffMeta = (tabId: string, oid: string) =>
-  invoke<DiffFile[]>('get_commit_diff_meta', {
-    tabId, oid, diffAlgo: getDiffAlgo(),
+  corvus<DiffFile[]>('get_commit_diff_meta', {
+    tab_id: tabId, oid, diff_algo: getDiffAlgo(),
   });
 
 export const getCommitFileDiff = (tabId: string, oid: string, path: string) =>
-  invoke<DiffFile>('get_commit_file_diff', {
-    tabId, oid, path,
-    contextLines: getContextLines(), diffAlgo: getDiffAlgo(),
-    encodingOverrides: overridesForTab(tabId),
+  corvus<DiffFile>('get_commit_file_diff', {
+    tab_id: tabId, oid, path,
+    context_lines: getContextLines(), diff_algo: getDiffAlgo(),
+    encoding_overrides: overridesForTab(tabId),
   });
 
 /// Cumulative diff across a multi-commit selection: the net tree diff from the
@@ -66,22 +67,22 @@ export const getCommitFileDiff = (tabId: string, oid: string, path: string) =>
 /// newest). Metadata-only — pair with `getCommitsRangeFileDiff` for lazy hunks,
 /// mirroring the single-commit meta/file pair above.
 export const getCommitsRangeDiffMeta = (tabId: string, baseOid: string, targetOid: string) =>
-  invoke<DiffFile[]>('get_commits_range_diff_meta', {
-    tabId, baseOid, targetOid, diffAlgo: getDiffAlgo(),
+  corvus<DiffFile[]>('get_commits_range_diff_meta', {
+    tab_id: tabId, base_oid: baseOid, target_oid: targetOid, diff_algo: getDiffAlgo(),
   });
 
 export const getCommitsRangeFileDiff = (tabId: string, baseOid: string, targetOid: string, path: string) =>
-  invoke<DiffFile>('get_commits_range_file_diff', {
-    tabId, baseOid, targetOid, path,
-    contextLines: getContextLines(), diffAlgo: getDiffAlgo(),
-    encodingOverrides: overridesForTab(tabId),
+  corvus<DiffFile>('get_commits_range_file_diff', {
+    tab_id: tabId, base_oid: baseOid, target_oid: targetOid, path,
+    context_lines: getContextLines(), diff_algo: getDiffAlgo(),
+    encoding_overrides: overridesForTab(tabId),
   });
 
 export const getWorkdirDiff = (tabId: string, staged: boolean) =>
-  invoke<DiffFile[]>('get_workdir_diff', {
-    tabId, staged,
-    contextLines: getContextLines(), diffAlgo: getDiffAlgo(),
-    encodingOverrides: overridesForTab(tabId),
+  corvus<DiffFile[]>('get_workdir_diff', {
+    tab_id: tabId, staged,
+    context_lines: getContextLines(), diff_algo: getDiffAlgo(),
+    encoding_overrides: overridesForTab(tabId),
   });
 
 /// Start a streaming workdir diff.  Returns a job_id.  The backend emits:
@@ -99,11 +100,11 @@ export const getWorkdirDiffStream = (tabId: string, staged: boolean) =>
 export const getFileAtCommit = (tabId: string, oid: string, path: string) => {
   const tab = tabsStore.tabs.find(t => t.id === tabId);
   const encodingOverride = tab ? encodingOverrides.get(tab.path, path) : undefined;
-  return invoke<string>('get_file_at_commit', { tabId, oid, path, encodingOverride });
+  return corvus<string>('get_file_at_commit', { tab_id: tabId, oid, path, encoding_override: encodingOverride });
 };
 
 export const getFileBlame = (tabId: string, path: string) =>
-  invoke<BlameLine[]>('get_file_blame', { tabId, path });
+  corvus<BlameLine[]>('get_file_blame', { tab_id: tabId, path });
 
 /**
  * Streaming blame. Resolves with the full line list once the history walk
@@ -122,8 +123,8 @@ export const getFileBlameStreaming = (
 };
 
 export const getBranchDiff = (tabId: string, fromRef: string, toRef: string) =>
-  invoke<DiffFile[]>('get_branch_diff', {
-    tabId, fromRef, toRef,
-    contextLines: getContextLines(), diffAlgo: getDiffAlgo(),
-    encodingOverrides: overridesForTab(tabId),
+  corvus<DiffFile[]>('get_branch_diff', {
+    tab_id: tabId, from_ref: fromRef, to_ref: toRef,
+    context_lines: getContextLines(), diff_algo: getDiffAlgo(),
+    encoding_overrides: overridesForTab(tabId),
   });

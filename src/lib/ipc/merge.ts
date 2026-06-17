@@ -1,6 +1,6 @@
-import { invoke } from '@tauri-apps/api/core';
 import type { ConflictContent, ConflictPresence } from '$lib/types/git';
 import { invalidateTabCache } from './cache-invalidate';
+import { corvus } from './rpc';
 
 /**
  * Return the three-way content (ours / theirs / base / working) for a
@@ -12,8 +12,8 @@ import { invalidateTabCache } from './cache-invalidate';
 export function getConflictContent(
   tabId: string, path: string, encodingOverride?: string,
 ): Promise<ConflictContent> {
-  return invoke<ConflictContent>('get_conflict_content', {
-    tabId, path, encodingOverride,
+  return corvus<ConflictContent>('get_conflict_content', {
+    tab_id: tabId, path, encoding_override: encodingOverride,
   });
 }
 
@@ -28,7 +28,7 @@ export function getConflictContent(
 export const resolveConflict = async (
   tabId: string, path: string, content: string, encoding?: string,
 ): Promise<void> => {
-  await invoke<void>('resolve_conflict', { tabId, path, content, encoding });
+  await corvus<void>('resolve_conflict', { tab_id: tabId, path, content, encoding });
   invalidateTabCache(tabId);
 };
 
@@ -36,7 +36,7 @@ export const resolveConflict = async (
 export const resolveStashConflict = async (
   tabId: string, path: string, content: string, encoding?: string,
 ): Promise<void> => {
-  await invoke<void>('resolve_stash_conflict', { tabId, path, content, encoding });
+  await corvus<void>('resolve_stash_conflict', { tab_id: tabId, path, content, encoding });
   invalidateTabCache(tabId);
 };
 
@@ -48,26 +48,26 @@ export const resolveStashConflict = async (
 export const removeConflictFile = async (
   tabId: string, path: string,
 ): Promise<void> => {
-  await invoke<void>('remove_conflict_file', { tabId, path });
+  await corvus<void>('remove_conflict_file', { tab_id: tabId, path });
   invalidateTabCache(tabId);
 };
 
 /** Create the merge commit with the given message. Returns the new commit OID. */
 export const completeMerge = async (tabId: string, message: string): Promise<string> => {
-  const oid = await invoke<string>('complete_merge', { tabId, message });
+  const oid = await corvus<string>('complete_merge', { tab_id: tabId, message });
   invalidateTabCache(tabId);
   return oid;
 };
 
 /** Abort the merge — equivalent to `git merge --abort`. */
 export const abortMerge = async (tabId: string): Promise<void> => {
-  await invoke<void>('abort_merge', { tabId });
+  await corvus<void>('abort_merge', { tab_id: tabId });
   invalidateTabCache(tabId);
 };
 
 /** Read the pre-filled merge commit message from `.git/MERGE_MSG`. */
 export function getMergeMessage(tabId: string): Promise<string> {
-  return invoke<string>('get_merge_message', { tabId });
+  return corvus<string>('get_merge_message', { tab_id: tabId });
 }
 
 /**
@@ -76,5 +76,5 @@ export function getMergeMessage(tabId: string): Promise<string> {
  * sidebar without loading every file's three-way content up front.
  */
 export function getConflictPresence(tabId: string): Promise<ConflictPresence[]> {
-  return invoke<ConflictPresence[]>('get_conflict_presence', { tabId });
+  return corvus<ConflictPresence[]>('get_conflict_presence', { tab_id: tabId });
 }

@@ -9,6 +9,7 @@
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { invoke } from '@tauri-apps/api/core';
+  import { corvus } from '$lib/ipc/rpc';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
@@ -839,7 +840,7 @@
     const tabId = tabsStore.activeTabId;
     if (!tabId) { onClose(); return; }
     try {
-      await invoke<void>('abort_merge', { tabId });
+      await corvus<void>('abort_merge', { tab_id: tabId });
       uiStore.showToast('Merge aborted', 'success');
     } catch (e) {
       uiStore.showToast(`Abort merge failed: ${e}`, 'error');
@@ -1041,8 +1042,8 @@
     // earlier query) rather than blanking the dropdown.
     if (!tabId || q.length < 2) { seedCommitsFromGraph(); return; }
     try {
-      commits = await invoke<SearchResult[]>('search_commits', {
-        tabId,
+      commits = await corvus<SearchResult[]>('search_commits', {
+        tab_id: tabId,
         query: { text: q, include_author: true, limit: 12 },
       });
     } catch { commits = []; }

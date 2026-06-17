@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { corvus } from './rpc';
 
 export type GitCliSource = 'config' | 'path' | 'portable' | 'missing';
 
@@ -26,18 +27,18 @@ export interface GitDownloadProgress {
 }
 
 export const getGitStatus = (): Promise<GitCliStatus> =>
-  invoke('get_git_status');
+  corvus('get_git_status');
 
 export const redetectGit = (): Promise<GitCliStatus> =>
-  invoke('redetect_git');
+  corvus('redetect_git');
 
 export const verifyGitPath = (path: string): Promise<string> =>
-  invoke('verify_git_path', { path });
+  corvus('verify_git_path', { path });
 
 /** When `path` is null/empty the override is cleared and detection re-runs
  *  (PATH → portable copy). */
 export const setGitPath = (path: string | null): Promise<GitCliStatus> =>
-  invoke('set_git_path', { path });
+  corvus('set_git_path', { path });
 
 export const downloadPortableGit = (): Promise<GitCliStatus> =>
   invoke('download_portable_git');
@@ -45,4 +46,4 @@ export const downloadPortableGit = (): Promise<GitCliStatus> =>
 /** Signal an in-flight portable-git download to abort.  Cooperative — the
  *  backend stops at the next chunk / 7z entry boundary. */
 export const cancelGitDownload = (): Promise<void> =>
-  invoke('cancel_git_download');
+  corvus('cancel_git_download');
