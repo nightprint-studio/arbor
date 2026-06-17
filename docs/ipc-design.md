@@ -191,8 +191,9 @@ Finché il transport è in-process (loopback) l'handshake è un no-op (stesso pr
 | M3 (a) sweep | in-process | `LoopbackBroker` reale — **stash + bisect + notes + reset/tags + stats + reflog (33 cmd, 6 domini)**; restano gli altri domini | 🔄 in corso |
 | M3 (b) seam | **processo `corvus-be` reale**, frame JSON su stdio | `ChildClient` + `SplitBroker` — ping/echo/emit out-of-process provati end-to-end | ✅ **fatto (Stage 1)** |
 | M3 (b) bisect | stdio | **bisect (11 cmd) servito da corvus-be**: logica in `corvus-git`, repo path via registry `tab_id→path` su `CorvusState` (push shell on open/close), fallback in-process | ✅ **fatto (Stage 2a)** |
-| M3 (b) stash | — | **logica stash estratta in `corvus-git`** (in-process via wrapper; recovery via callback, encoding via shim) | ✅ estratto (2b); OOP dopo `recovery` |
-| M3 (b) reset / recovery | stdio | estrarre `recovery`, poi stash+reset serviti da corvus-be (+ hook shell-side) | ⏭️ prossimo |
+| M3 (b) stash | — | **logica stash estratta in `corvus-git`** (in-process via wrapper; recovery via callback, encoding via shim) | ✅ estratto (2b); OOP pronto |
+| M3 (b) recovery | — | **logica recovery estratta in `corvus-git`** (in-process via wrapper; policy/retention come parametro, git via `GitCli`) | ✅ estratto (2b) |
+| M3 (b) reset | stdio | stash+reset serviti da corvus-be (+ hook shell-side); reset usa il recovery snapshot già estratto | ⏭️ prossimo |
 | M3 (b) hardening | named pipe / unix socket + nonce/ACL (+ tarpc/bincode opz.) | swap del byte-stream sotto `ChildClient` | dopo |
 
 ## Cosa c'è nello scheletro M1

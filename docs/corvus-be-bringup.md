@@ -95,12 +95,22 @@ on a missing backend.
     original signatures (so its ~6 in-process consumers — checkout-safe, graph
     markers, pull-with-stash, linked-worktree sync, the IPC handlers — are
     untouched): it builds the `GitCli` and binds the shell's `recovery::try_snapshot`
-    to the callback. Still **in-process**. **Next within 2b**: serve stash from
-    `corvus-be` — needs `recovery` extracted too (corvus-be must take the snapshot),
-    and the `on_stash_push`/`on_stash_pop` hooks fired shell-side after the OOP
-    call returns.
+    to the callback. Still **in-process**.
+  - **2b — recovery git extracted ✅**: the snapshot/journal logic (`snapshot_with_policy`,
+    `list_entries`, `preview_restore`, `restore`, `delete` + the `SnapshotPolicy` /
+    `RecoveryKind` / `RecoveryEntry` types) now lives in `corvus_git::recovery`. The
+    same two couplings were decoupled the same way: git invocation via the explicit
+    `GitCli`, and the **snapshot policy / retention** passed in as a parameter (so the
+    crate drags in neither the `git_cli` global nor the app config). **`crate::git::recovery`
+    is now a thin wrapper** keeping the original signatures + the config-loading
+    `snapshot` / `try_snapshot` convenience, so its ~9 in-process consumers
+    (checkout, discard, pull, reset, linked-worktree sync, the recovery IPC handlers)
+    are untouched. Still **in-process**. **Next within 2b**: serve stash from `corvus-be`
+    — the backend now has everything it needs (it binds the stash snapshot callback to
+    `corvus_git::recovery::snapshot_with_policy` with its own `GitCli` + a default/forwarded
+    policy), and fires `on_stash_push`/`on_stash_pop` shell-side after the OOP call returns.
   - **2c — reset**: `reset_to_commit` (+ tag create/delete) — also uses `recovery`
-    (hard-reset snapshot) and git2; lands after recovery is extracted.
+    (hard-reset snapshot) and git2; now unblocked (recovery extracted).
   - **Repos**: Stage-2 decision — the shell resolves `tab_id → repo path` and
     forwards the path so `corvus-be` opens by path (stateless per call, like the
     diff commands already do), deferring repo-lifecycle replication.

@@ -23,21 +23,27 @@ Local-git logic for **Corvus**, extracted Tauri-free so the in-process shell
 | `bisect` | `git bisect` in `--no-checkout` mode: start / mark / reset / undo + state read from `.git/BISECT_*` |
 | `bisect_sessions` | paused & completed sessions persisted under `<repo>/.arbor/bisect` |
 | `stash` | save / apply / pop / drop / rename / force-apply / abort + stash-file content |
+| `recovery` | snapshot-based safety net for destructive ops (journal under `.git/arbor-recovery`, pin/restore/prune) |
 | `encoding` | encoding-aware decode/encode (CP1252 ↔ UTF-8 ↔ UTF-16, BOM round-trip) |
 
-**Decoupling, not dependency.** Two things stash would otherwise drag in stay
-out of the crate:
+**Decoupling, not dependency.** Things these domains would otherwise drag in
+stay out of the crate, passed in by the caller instead:
 - **git invocation** → the explicit [`cli::GitCli`] (no global state).
-- **recovery snapshots** → a `snapshot: &dyn Fn(&Repository, &str)` callback the
-  caller passes; the shell binds it to its `recovery::try_snapshot`, so
-  `recovery` (and its `config` dependency) stays shell-side.
+- **snapshot policy / retention** → `recovery` takes the [`recovery::SnapshotPolicy`]
+  / `retention_days` as a parameter; the shell loads them from the app config and
+  forwards them, so `recovery` here drags in neither `git_cli` globals nor the
+  app config.
+- **recovery from stash** → `stash` takes a `snapshot: &dyn Fn(&Repository, &str)`
+  callback; the shell binds it to `recovery::try_snapshot` (now also crate-side),
+  keeping `stash` independent of `recovery`.
 
-Likewise **hooks** are not here: stash fires no hooks itself — the shell handler
-fires `on_stash_push` / `on_stash_pop` around the call.
+Likewise **hooks** are not here: these domains fire no hooks themselves — the
+shell handler fires `on_stash_push` / `on_stash_pop` (and, for reset,
+`on_tag_create` / `on_tag_delete`) around the call.
 
-**Next:** `reset` (hard-reset snapshot + tags). Serving stash/reset from
-`corvus-be` additionally needs `recovery` extracted (so the headless process can
-take the snapshot) — that's the next extraction.
+**Next:** `reset` (`reset_to_commit` + tag create/delete) — uses `recovery`
+(hard-reset snapshot) and git2. With `recovery` now extracted, both stash and
+reset can be served out-of-process by `corvus-be`.
 
 ## Public API: use the prelude
 
@@ -46,9 +52,11 @@ take the snapshot) — that's the next extraction.
 ## Tests
 
 `cargo test -p corvus-git` covers the pure output parsers (`Bisecting: N …`,
-`<sha> is the first bad commit`).
+`<sha> is the first bad commit`) and the recovery `SnapshotPolicy` exclusion
+rules (size cap, case-insensitive extension deny-list, ref-slug stability).
 
 ## Depends on
 
-`arbor-process-ext` (the `NoWindowExt` console-suppression), `serde`,
-`serde_json`, `thiserror`. No Tauri, no git2 (yet), no shell types.
+`arbor-process-ext` (the `NoWindowExt` console-suppression), `git2`
+(vendored-libgit2), `encoding_rs`, `serde`, `serde_json`, `thiserror`,
+`tracing`. No Tauri, no shell types.

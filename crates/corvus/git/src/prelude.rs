@@ -17,3 +17,7 @@ pub use crate::bisect_sessions::{
 pub use crate::stash::{
     StashApplyResult, StashBlockingContent, StashEntry, StashRef,
 };
+pub use crate::recovery::{
+    RecoveryEntry, RecoveryKind, RestorePreview, SkippedFile, SnapshotPolicy,
+    DEFAULT_DENY_EXTENSIONS, DEFAULT_MAX_FILE_SIZE, DEFAULT_RETENTION_DAYS,
+};

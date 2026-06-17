@@ -61,6 +61,7 @@ pub fn stash_rename(repo: &mut Repository, index: usize, new_message: &str) -> R
     Ok(corvus_git::stash::stash_rename(repo, index, new_message)?)
 }
 
+#[allow(dead_code)] // kept as a public wrapper; the snapshot variant is the one in use
 pub fn abort_stash_apply(workdir: &Path) -> Result<()> {
     Ok(corvus_git::stash::abort_stash_apply(&git(), workdir, &snapshot_other)?)
 }

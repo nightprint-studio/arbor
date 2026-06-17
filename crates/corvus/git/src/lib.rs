@@ -9,8 +9,9 @@
 //! Errors are a local [`error::GitError`]; the shell maps it to its `AppError`
 //! (preserving the wire string), `corvus-be` maps it to the IPC error string.
 //!
-//! First domain extracted: **bisect** ([`bisect`]) + saved sessions
-//! ([`bisect_sessions`]). Stash / reset land here next.
+//! Domains extracted so far: **bisect** ([`bisect`]) + saved sessions
+//! ([`bisect_sessions`]), **stash** ([`stash`]), encoding-aware decode
+//! ([`encoding`]) and the **recovery** snapshot journal ([`recovery`]).
 //!
 //! ## Public API: use the [`prelude`]
 
@@ -20,4 +21,5 @@ pub mod cli;
 pub mod encoding;
 pub mod error;
 pub mod prelude;
+pub mod recovery;
 pub mod stash;
