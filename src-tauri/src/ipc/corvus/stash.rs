@@ -44,15 +44,8 @@ fn stash_save(
             .to_path_buf()
     };
     let entry = crate::git::stash::stash_save(&workdir, message.as_deref(), include_untracked)?;
-    state.fire_hook(
-        "on_stash_push",
-        serde_json::json!({
-            "tab_id":            &tab_id,
-            "index":             entry.index,
-            "message":           &entry.message,
-            "include_untracked": include_untracked,
-        }),
-    );
+    // `on_stash_push` is fired routing-independently by `corvus::post_hooks`
+    // after the call returns (so it also fires when this method runs OOP).
     Ok(entry)
 }
 
@@ -63,13 +56,8 @@ fn stash_apply(state: &AppState, tab_id: String, index: usize) -> Result<StashAp
         let repo = mgr.get_mut(&tab_id)?;
         crate::git::stash::stash_apply(repo.inner_mut(), index)?
     };
-    // Only fire hook when clean apply (no conflicts)
-    if !result.has_conflicts {
-        state.fire_hook(
-            "on_stash_pop",
-            serde_json::json!({ "tab_id": &tab_id, "index": index, "drop": false }),
-        );
-    }
+    // `on_stash_pop` (drop:false, only when clean) is fired by
+    // `corvus::post_hooks` after the call returns — OOP-safe.
     Ok(result)
 }
 
@@ -80,13 +68,8 @@ fn stash_pop(state: &AppState, tab_id: String, index: usize) -> Result<StashAppl
         let repo = mgr.get_mut(&tab_id)?;
         crate::git::stash::stash_pop(repo.inner_mut(), index)?
     };
-    // Only fire hook when clean pop (no conflicts) — if conflicted, stash is still present
-    if !result.has_conflicts {
-        state.fire_hook(
-            "on_stash_pop",
-            serde_json::json!({ "tab_id": &tab_id, "index": index, "drop": true }),
-        );
-    }
+    // `on_stash_pop` (drop:true, only when clean) is fired by
+    // `corvus::post_hooks` after the call returns — OOP-safe.
     Ok(result)
 }
 

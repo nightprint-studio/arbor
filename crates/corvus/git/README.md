@@ -24,6 +24,7 @@ Local-git logic for **Corvus**, extracted Tauri-free so the in-process shell
 | `bisect_sessions` | paused & completed sessions persisted under `<repo>/.arbor/bisect` |
 | `stash` | save / apply / pop / drop / rename / force-apply / abort + stash-file content |
 | `recovery` | snapshot-based safety net for destructive ops (journal under `.git/arbor-recovery`, pin/restore/prune) |
+| `reset` | `git reset --soft/mixed/hard` via CLI + lightweight/annotated tag create/delete |
 | `encoding` | encoding-aware decode/encode (CP1252 ↔ UTF-8 ↔ UTF-16, BOM round-trip) |
 
 **Decoupling, not dependency.** Things these domains would otherwise drag in
@@ -41,9 +42,9 @@ Likewise **hooks** are not here: these domains fire no hooks themselves — the
 shell handler fires `on_stash_push` / `on_stash_pop` (and, for reset,
 `on_tag_create` / `on_tag_delete`) around the call.
 
-**Next:** `reset` (`reset_to_commit` + tag create/delete) — uses `recovery`
-(hard-reset snapshot) and git2. With `recovery` now extracted, both stash and
-reset can be served out-of-process by `corvus-be`.
+The shell keeps the hard-reset recovery snapshot (config-loading) and the OID
+validation around `reset::run_reset`, and fires `on_tag_create` / `on_tag_delete`
+around the tag calls — none of which belong in the crate.
 
 ## Public API: use the prelude
 

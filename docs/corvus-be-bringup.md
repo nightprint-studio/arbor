@@ -105,12 +105,29 @@ on a missing backend.
     is now a thin wrapper** keeping the original signatures + the config-loading
     `snapshot` / `try_snapshot` convenience, so its ~9 in-process consumers
     (checkout, discard, pull, reset, linked-worktree sync, the recovery IPC handlers)
-    are untouched. Still **in-process**. **Next within 2b**: serve stash from `corvus-be`
-    — the backend now has everything it needs (it binds the stash snapshot callback to
-    `corvus_git::recovery::snapshot_with_policy` with its own `GitCli` + a default/forwarded
-    policy), and fires `on_stash_push`/`on_stash_pop` shell-side after the OOP call returns.
-  - **2c — reset**: `reset_to_commit` (+ tag create/delete) — also uses `recovery`
-    (hard-reset snapshot) and git2; now unblocked (recovery extracted).
+    are untouched. Still **in-process**.
+  - **2b — stash served out-of-process ✅**: `corvus-be` now serves the 11 stash
+    methods against its own `CorvusState` (a `stash` module: opens the repo by the
+    shell-pushed path, `GitCli` from `git_program`, binds the force-apply / abort
+    recovery snapshot to `corvus_git::recovery::snapshot_with_policy` with **its own
+    `GitCli` + `SnapshotPolicy::default()`**). The in-process stash handlers stay as a
+    **fallback** (used only when `corvus-be` isn't running). **Hook seam**: the
+    `on_stash_push` / `on_stash_pop` firings were lifted *out* of the in-process
+    handlers into a new shell-side `crate::ipc::corvus::post_hooks`, called from the
+    generic `rpc` command **after a successful `dispatch_rpc`** — so they fire exactly
+    once whether the method ran in-process (loopback) or out-of-process. The payload
+    split is preserved (stash entry `index`/`message` from the result, `tab_id` /
+    `include_untracked` / pop-index from the params; the `on_stash_pop` pair fire only
+    when the apply/pop was conflict-free). **Known gap (settings):** the OOP recovery
+    snapshot uses the *default* policy, not the user's configured `[recovery]` limits —
+    closed by the settings migration (push the configured policy to `CorvusState`).
+  - **2c — reset git extracted ✅ (in-process)**: `reset_to_commit`'s CLI shell-out
+    (`corvus_git::reset::run_reset`) + `create_tag` / `delete_tag` (git2) now live in
+    `corvus_git::reset`; `GitError` gained `CommitNotFound`. The shell handler keeps
+    the OID validation, the `find_object` check, the Hard-mode `recovery::try_snapshot`
+    (config-loading) and the `on_tag_create` / `on_tag_delete` firings — these stay
+    shell-side. **Still in-process**; serving it OOP (a `reset` module in `corvus-be` +
+    moving the tag hooks into `post_hooks`) is the next reset step.
   - **Repos**: Stage-2 decision — the shell resolves `tab_id → repo path` and
     forwards the path so `corvus-be` opens by path (stateless per call, like the
     diff commands already do), deferring repo-lifecycle replication.

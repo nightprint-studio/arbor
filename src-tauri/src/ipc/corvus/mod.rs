@@ -15,6 +15,7 @@
 
 pub mod bisect;
 pub mod notes;
+pub mod post_hooks;
 pub mod reflog;
 pub mod reset;
 pub mod stash;

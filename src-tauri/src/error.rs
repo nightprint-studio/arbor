@@ -160,6 +160,7 @@ impl From<corvus_git::prelude::GitError> for AppError {
             G::Git(e)             => AppError::Git(e),
             G::Io(e)              => AppError::Io(e),
             G::StashNotFound(i)   => AppError::StashNotFound(i),
+            G::CommitNotFound(s)  => AppError::CommitNotFound(s),
             G::Other(s)           => AppError::Other(s),
         }
     }

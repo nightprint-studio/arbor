@@ -10,8 +10,9 @@
 //! (preserving the wire string), `corvus-be` maps it to the IPC error string.
 //!
 //! Domains extracted so far: **bisect** ([`bisect`]) + saved sessions
-//! ([`bisect_sessions`]), **stash** ([`stash`]), encoding-aware decode
-//! ([`encoding`]) and the **recovery** snapshot journal ([`recovery`]).
+//! ([`bisect_sessions`]), **stash** ([`stash`]), **reset** + tags ([`reset`]),
+//! encoding-aware decode ([`encoding`]) and the **recovery** snapshot journal
+//! ([`recovery`]).
 //!
 //! ## Public API: use the [`prelude`]
 
@@ -22,4 +23,5 @@ pub mod encoding;
 pub mod error;
 pub mod prelude;
 pub mod recovery;
+pub mod reset;
 pub mod stash;

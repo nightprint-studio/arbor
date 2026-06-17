@@ -19,6 +19,9 @@ pub enum GitError {
     #[error("Stash not found at index {0}")]
     StashNotFound(usize),
 
+    #[error("Commit not found: {0}")]
+    CommitNotFound(String),
+
     #[error("{0}")]
     Other(String),
 }

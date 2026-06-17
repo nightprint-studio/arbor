@@ -3,10 +3,10 @@
 The headless **git backend process** for Model D — the executable the shell
 spawns and talks to over IPC instead of running git in-process.
 
-## Status: Stage 2 — first git domain out-of-process
+## Status: Stage 2 — git domains moving out-of-process
 
-The process boundary is proven (Stage 1) and the **first real git domain,
-`bisect`, now runs here** (see
+The process boundary is proven (Stage 1) and the **`bisect` and `stash` domains
+now run here** (see
 [`docs/corvus-be-bringup.md`](../../../docs/corvus-be-bringup.md)). It owns a
 [`corvus_core::CorvusState`] and serves over **framed JSON on stdin/stdout**
 (stderr is left for logs):
@@ -17,14 +17,23 @@ The process boundary is proven (Stage 1) and the **first real git domain,
 | `__repo_register` / `__repo_deregister` | shell pushes a tab's repo path on open/close |
 | `__set_git_program` | shell pushes the resolved git binary |
 | `bisect_*` / `*_bisect_session` (11) | the bisect domain, via the shared `corvus-git` crate |
+| `stash_save` / `stash_apply` / `stash_pop` / `stash_drop` / `stash_rename` / `force_stash_apply` / `abort_stash_apply` / `list_stashes` / `list_graph_stash_refs` / `get_stash_file_content` / `write_workdir_file` (11) | the stash domain, via `corvus-git` (opens the repo by the pushed path) |
 
 The shell spawns this binary at startup, reads its `Hello` (the advertised method
 list), and routes exactly those methods to it out-of-process via a `SplitBroker`;
-everything else stays in-process. The bisect handlers resolve a `tab_id` to a
-repo path through the registry the shell pushes — no `RepoManager` here.
+everything else stays in-process. Handlers resolve a `tab_id` to a repo path
+through the registry the shell pushes — no `RepoManager` here.
+
+**Hooks stay shell-side.** `stash_save`/`apply`/`pop` owe fire-and-forget plugin
+hooks (`on_stash_push` / `on_stash_pop`); this process fires none — the shell
+fires them after the call returns, routing-independently
+(`crate::ipc::corvus::post_hooks`). **Recovery policy gap (known):** the
+force-apply / abort recovery snapshots use `SnapshotPolicy::default()` because
+this process has no app config yet — closing it is the first item of the settings
+migration.
 
 If this binary isn't built, the shell falls back to a pure in-process loopback
-(it keeps an in-process bisect copy too) — the app still works.
+(it keeps in-process copies of these domains too) — the app still works.
 
 ## How to exercise it
 
@@ -39,11 +48,12 @@ await __TAURI__.core.invoke('rpc', { program: 'corvus', method: 'be_emit', param
 
 ## Next
 
-`stash` and `reset` move here next (Stage 2b/2c): same shape as bisect, but they
-use `git2::Repository` and fire hooks, so `corvus-git`'s `GitError` gains a
-`Git(git2::Error)` variant and the shell keeps firing the (fire-and-forget) hooks
-after the call returns. They auto-advertise via `Hello` and auto-route
-out-of-process — no shell router change.
+`reset` moves here next (Stage 2c): its git logic is already extracted into
+`corvus-git` (`run_reset` + `create_tag` / `delete_tag`); serving it OOP needs a
+`reset` module here (open the repo by path, take the hard-reset recovery snapshot
+with this process's policy, validate the OID) plus moving `on_tag_create` /
+`on_tag_delete` into `post_hooks` (as was done for the stash hooks). It will
+auto-advertise via `Hello` and auto-route out-of-process — no shell router change.
 
 ## Depends on
 

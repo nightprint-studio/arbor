@@ -22,7 +22,7 @@ use crate::error::Result;
 // `crate::git::recovery::Recovery*` / `SnapshotPolicy` / `DEFAULT_*` paths
 // (config, recovery commands) keep resolving.
 pub use corvus_git::prelude::{
-    RecoveryEntry, RecoveryKind, RestorePreview, SkippedFile, SnapshotPolicy,
+    RecoveryEntry, RecoveryKind, RestorePreview, SnapshotPolicy,
     DEFAULT_DENY_EXTENSIONS, DEFAULT_MAX_FILE_SIZE, DEFAULT_RETENTION_DAYS,
 };
 

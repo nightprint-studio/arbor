@@ -41,7 +41,12 @@ pub async fn rpc(
     let params = params.unwrap_or(serde_json::Value::Null);
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        crate::ipc::dispatch_rpc(state.inner(), &program, &method, params)
+        let result = crate::ipc::dispatch_rpc(state.inner(), &program, &method, params.clone())?;
+        // Fire any fire-and-forget plugin hook owed by this call, here in the
+        // generic path so it runs once whether the method was served in-process
+        // or out-of-process by `corvus-be` (the handler itself fires none).
+        crate::ipc::corvus::post_hooks::fire(state.inner(), &program, &method, &params, &result);
+        Ok(result)
     })
     .await
     .map_err(|e| AppError::Other(format!("rpc task panicked: {e}")))?

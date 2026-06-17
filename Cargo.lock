@@ -1255,6 +1255,7 @@ dependencies = [
  "arbor-rpc",
  "corvus-core",
  "corvus-git",
+ "git2",
  "serde_json",
 ]
 

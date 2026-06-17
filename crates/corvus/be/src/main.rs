@@ -1,15 +1,17 @@
 //! `corvus-be` — the headless git backend process for Model D.
 //!
-//! **Stage 1 (the seam):** this binary exists to prove the process boundary end
-//! to end — spawn, framed-stdio handshake, request/response, event push, error
-//! wire-format — *before* the git domains move onto it. It owns a
-//! [`CorvusState`] and serves a small self-test method set; the shell spawns it,
-//! routes those methods to it out-of-process, and re-emits its events to the FE.
-//! See `docs/corvus-be-bringup.md`.
+//! Stage 1 proved the process boundary end to end (spawn, framed-stdio
+//! handshake, request/response, event push, error wire-format) with a self-test
+//! method set. Stage 2 moves the git domains onto it: each domain's handler
+//! functions live in their own module here, auto-advertised via `Hello` and
+//! auto-routed out-of-process by the shell's `SplitBroker`, once their git
+//! dependencies are extracted into the shared `corvus-git` crate. **bisect** and
+//! **stash** are served so far (reset next). See `docs/corvus-be-bringup.md`.
 //!
-//! The git domains (stash, reset, bisect, …) land here in Stage 2: their handler
-//! functions move into this crate (auto-advertised via `Hello`, auto-routed
-//! out-of-process) once their git dependencies are extracted from the shell.
+//! It owns a [`CorvusState`] (the shell pushes the open tabs' repo paths + the
+//! resolved git program into it); handlers resolve a `tab_id` to a path and run
+//! the shared `corvus-git` logic. The shell re-emits this process's events to the
+//! FE and fires any owed plugin hooks shell-side after the call returns.
 //!
 //! **stdout is the protocol channel** — all logs go to stderr.
 
@@ -22,10 +24,11 @@ use corvus_core::prelude::CorvusState;
 
 // Domain handler modules — their `#[arbor_rpc::handler]`s self-register via
 // inventory, so `arbor_rpc::registry()` collects them and `Hello` advertises
-// them. The shell pushes repo paths to `repo_registry`; `bisect` is the first
-// real git domain served out-of-process.
+// them. The shell pushes repo paths to `repo_registry`; `bisect` and `stash`
+// are the git domains served out-of-process so far.
 mod bisect;
 mod repo_registry;
+mod stash;
 
 // ── Self-test handlers (Stage 1) ────────────────────────────────────────────
 // Plain `#[arbor_rpc::handler]`s, exactly like the shell-side ones — the context

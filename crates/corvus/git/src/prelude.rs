@@ -21,3 +21,4 @@ pub use crate::recovery::{
     RecoveryEntry, RecoveryKind, RestorePreview, SkippedFile, SnapshotPolicy,
     DEFAULT_DENY_EXTENSIONS, DEFAULT_MAX_FILE_SIZE, DEFAULT_RETENTION_DAYS,
 };
+pub use crate::reset::{create_tag, delete_tag, run_reset, ResetMode};
