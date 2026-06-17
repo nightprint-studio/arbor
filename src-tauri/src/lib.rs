@@ -63,7 +63,7 @@ use crate::deep_link::DeepLinkBuffer;
 use crate::studio::format::StudioRegistry;
 use crate::cloud::{CloudCancellations, CloudPendingOps};
 // `crate::cloud` is now a thin shim around the `arbor-cloud` workspace
-// crate Ã¢â‚¬â€ see `cloud/mod.rs` for the layout / Phase A vs Phase B split.
+// crate ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â see `cloud/mod.rs` for the layout / Phase A vs Phase B split.
 use corvus_brp::prelude::BrpRegistry;
 use arbor_plugin_marketplace::prelude::MarketplaceRegistry;
 use arbor_shell_common::prelude::Router;
@@ -71,7 +71,7 @@ use std::sync::OnceLock;
 use arbor_scheduler::prelude::Scheduler;
 
 // ---------------------------------------------------------------------------
-// Application state Ã¢â‚¬â€ shared across all Tauri commands
+// Application state ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â shared across all Tauri commands
 // ---------------------------------------------------------------------------
 
 /// Build the [`HookDispatcher`]: register every static `HOOK_CATALOG` entry
@@ -102,12 +102,12 @@ fn build_hook_dispatcher(plugin_host: &Arc<Mutex<PluginHost>>) -> HookDispatcher
 
 pub struct AppState {
     pub repos:          Mutex<RepoManager>,
-    /// Arc-wrapped because the `arbor-cloud` CloudHost impl holds a clone Ã¢â‚¬â€
+    /// Arc-wrapped because the `arbor-cloud` CloudHost impl holds a clone ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
     /// both AppState's `lock_plugin_host()` helper and the cloud crate's
-    /// `host.fire_plugin_hook()` need access. Arc<Mutex<Ã¢â‚¬Â¦>> keeps both
+    /// `host.fire_plugin_hook()` need access. Arc<Mutex<ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦>> keeps both
     /// pointing at the same lock without ownership tricks.
     pub plugin_host:    Arc<Mutex<PluginHost>>,
-    /// Runtime-agnostic hook broker (PR #4 Ã¢â‚¬â€ `arbor-plugin-core`). Built once
+    /// Runtime-agnostic hook broker (PR #4 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â `arbor-plugin-core`). Built once
     /// in `new()` with the static `HOOK_CATALOG` registered and a single
     /// `LuaHookListener` bound to `plugin_host`. Domain code fires hooks
     /// through this (`fire_blocking` / `fire_vetoable_blocking` from sync
@@ -117,18 +117,18 @@ pub struct AppState {
     pub hook_dispatcher: Arc<HookDispatcher>,
     pub config:         Mutex<AppConfig>,
     pub terminals:      Mutex<TerminalManager>,
-    /// Arc-wrapped for the same reason as `plugin_host` Ã¢â‚¬â€ the cloud
+    /// Arc-wrapped for the same reason as `plugin_host` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the cloud
     /// crate's CloudHost impl needs to register/append/set status on jobs
     /// from its spawned tokio tasks.
     pub jobs:           Arc<Mutex<JobRegistry>>,
-    /// Ring-buffer of recent `arbor.log.*` entries from every plugin Ã¢â‚¬â€
+    /// Ring-buffer of recent `arbor.log.*` entries from every plugin ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
     /// powers the Plugin Logs bottom panel.
     pub plugin_logs:    Mutex<PluginLogBuffer>,
     pub pipelines:      Mutex<PipelineRegistry>,
     /// Wakes orchestrator threads queued behind the global concurrency cap
     /// (`config.pipelines.max_concurrent_runs`).  Notified whenever a run
     /// transitions out of `Running` so the next queued run can take its
-    /// slot. Always paired with `pipelines` Ã¢â‚¬â€ wait-protocol requires
+    /// slot. Always paired with `pipelines` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â wait-protocol requires
     /// holding the registry lock around `wait_timeout`.
     pub pipeline_cv:    Arc<std::sync::Condvar>,
     /// Per-tab ticket-link cache (auto-parsed + manual links).
@@ -137,7 +137,7 @@ pub struct AppState {
     pub app_focused:    Arc<AtomicBool>,
     /// The currently active tab ID as reported by the frontend.
     pub active_tab_id:  Arc<Mutex<Option<String>>>,
-    /// Per-tab stats cache: tab_id Ã¢â€ â€™ (head_sha, computed stats).
+    /// Per-tab stats cache: tab_id ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ (head_sha, computed stats).
     /// Arc so background threads can hold a reference after the command returns.
     pub stats_cache: Arc<Mutex<HashMap<String, (String, crate::git::stats::RepoStats)>>>,
     /// Set of tab IDs currently being computed to prevent duplicate runs.
@@ -145,7 +145,7 @@ pub struct AppState {
     /// Installed toolchain registry (toolchains/<kind>.json).
     pub toolchain_registry: Arc<Mutex<ToolchainRegistry>>,
     /// Central registry of every repo Arbor has ever been shown.
-    /// Referenced by workspaces by UUID Ã¢â‚¬â€ path edits flow from here.
+    /// Referenced by workspaces by UUID ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â path edits flow from here.
     pub repo_registry: Mutex<RepoRegistry>,
     /// List of user-defined workspaces (plus the implicit Scratch one) and
     /// currently-active workspace id.  Tab snapshots live in separate files.
@@ -154,43 +154,43 @@ pub struct AppState {
     /// session.json.  `take()`-able: the welcome screen pulls it once on
     /// first launch after upgrade, leaving `None` for subsequent launches.
     pub migration_report: Mutex<Option<crate::workspace::migration::MigrationReport>>,
-    /// Linked Worktrees Ã¢â‚¬â€ cross-project sync.  Persisted to linked_worktrees.toml.
+    /// Linked Worktrees ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â cross-project sync.  Persisted to linked_worktrees.toml.
     pub linked_worktrees: Mutex<WorktreeLinkRegistry>,
     /// Set of link ids currently being synced.  Read by the public checkout
     /// command to suppress recursive triggering of link sync from a
     /// propagated checkout (the orchestrator calls git ops directly, not the
     /// public command, so this guard is mostly defensive).
     pub link_sync_in_progress: Mutex<HashSet<String>>,
-    /// Unified registry of remote git host clients (GitHub / GitLab / Ã¢â‚¬Â¦).
-    /// Populated at boot Ã¢â‚¬â€ see `git_provider/`.
+    /// Unified registry of remote git host clients (GitHub / GitLab / ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦).
+    /// Populated at boot ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â see `git_provider/`.
     pub git_providers: Mutex<GitProviderRegistry>,
     /// In-memory branding overrides applied by plugins (logo, etc.).
     pub branding: BrandingState,
-    /// Cold-start buffer for `arbor://Ã¢â‚¬Â¦` URLs received before the frontend
+    /// Cold-start buffer for `arbor://ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦` URLs received before the frontend
     /// has signalled readiness via the `deep_link_ready` IPC.
     pub deep_link_buffer: Arc<DeepLinkBuffer>,
     /// Unified per-format backend registry (RON / JSON / TOML / YAML /
     /// `.properties`). Each backend owns its own document state behind
-    /// its own interior Mutex; this registry is immutable after init Ã¢â‚¬â€
+    /// its own interior Mutex; this registry is immutable after init ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
     /// see `studio/format/registry.rs` + FROZEN F17 in
     /// `project_studio_multi_format.md`. JSON state lives inside
-    /// `JsonBackend` since Phase 3.a Ã¢â‚¬â€ no separate AppState field.
+    /// `JsonBackend` since Phase 3.a ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no separate AppState field.
     pub studio_registry: Arc<StudioRegistry>,
     /// Per-job cancellation flags for cloud-storage transfer tasks (which
-    /// run as in-process tokio tasks, not subprocesses Ã¢â‚¬â€ so the standard
+    /// run as in-process tokio tasks, not subprocesses ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â so the standard
     /// PID-kill cancel path doesn't apply). `cancel_job` flips the right
     /// flag before falling through. Earmarked to be deleted alongside the
     /// rest of the cloud-storage host code when WASM lands.
     pub cloud_cancellations: Arc<CloudCancellations>,
-    /// stream_id Ã¢â€ â€™ JobRegistry job_id for `download_many` calls with
+    /// stream_id ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ JobRegistry job_id for `download_many` calls with
     /// `keep_open=true` (chunk-merge flow). `cloud_report_done` reads +
     /// removes the entry to finalize the job once the merge phase ends.
     pub cloud_pending_ops: Arc<CloudPendingOps>,
-    /// Bevy Remote Protocol Ã¢â‚¬â€ singleton live session against one Bevy game
+    /// Bevy Remote Protocol ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â singleton live session against one Bevy game
     /// at a time. Read-only HTTP for Phase 1; SSE watch + editing in later
     /// phases. See `project_bevy_brp_client.md` memory.
     pub brp: Mutex<BrpRegistry>,
-    /// Plugin & theme marketplace registry Ã¢â‚¬â€ lives in
+    /// Plugin & theme marketplace registry ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â lives in
     /// `arbor-plugin-marketplace`, wired to the shell via
     /// `TauriMarketplaceHost`.
     pub marketplace: Mutex<MarketplaceRegistry>,
@@ -208,7 +208,7 @@ pub struct AppState {
     /// progress events, so events never land before listeners exist. The
     /// fallback timeout means a hung / missing frontend can't strand boot.
     pub frontend_ready: Arc<(Mutex<bool>, Condvar)>,
-    /// Shared trigger engine Ã¢â‚¬â€ drives both the marketplace auto-refresh
+    /// Shared trigger engine ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â drives both the marketplace auto-refresh
     /// and every plugin-declared `arbor.scheduler.register`. Filled inside
     /// `setup()` once the Tokio runtime handle is reachable (an `OnceLock`
     /// because `AppState::new()` runs before the runtime is available).
@@ -219,10 +219,10 @@ pub struct AppState {
     /// (one process); the same router will front a pipe/socket-backed client
     /// once the backends split out. Filled inside `setup()` (it captures the
     /// `AppHandle` the loopback dispatch needs, which `AppState::new()` predates)
-    /// Ã¢â‚¬â€ an `OnceLock` like [`scheduler`](Self::scheduler). Read via
+    /// ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â an `OnceLock` like [`scheduler`](Self::scheduler). Read via
     /// [`AppState::router`].
     pub router: Arc<OnceLock<Arc<Router>>>,
-    /// The Corvus (git) backend's headless state Ã¢â‚¬â€ the seed of `corvus-be`
+    /// The Corvus (git) backend's headless state ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the seed of `corvus-be`
     /// (`corvus-core`). Published in `setup()` (it needs the `AppHandle` to back
     /// its event sink, which `AppState::new()` predates, hence the `OnceLock`).
     /// Today it holds only the event egress: a Model-D handler reached through
@@ -230,13 +230,13 @@ pub struct AppState {
     /// [`event_sink`](Self::event_sink) route through here so handlers push
     /// events without taking an `AppHandle`. As git domains are extracted this
     /// gains fields and handlers shift to `&CorvusState`; at the process split
-    /// it moves into `corvus-be` and its sink flips to the `arbor-ipc` channel Ã¢â‚¬â€
+    /// it moves into `corvus-be` and its sink flips to the `arbor-ipc` channel ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
     /// the call sites stay put.
     pub corvus: Arc<OnceLock<CorvusState>>,
 }
 
 impl AppState {
-    // Ã¢â€â‚¬Ã¢â€â‚¬ Mutex lock helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Mutex lock helpers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
     // Each helper wraps the raw `.lock()` call, logs the poisoning context and
     // converts it to the typed `AppError::MutexPoisoned` variant so callers get
     // a meaningful error message instead of a silent panic.
@@ -255,9 +255,9 @@ impl AppState {
         })
     }
 
-    /// Fire a hook to every subscribing plugin, synchronously Ã¢â‚¬â€ the common
+    /// Fire a hook to every subscribing plugin, synchronously ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the common
     /// case for Tauri command threads. Thin wrapper over the hook dispatcher
-    /// that bridges `serde_json::Value` Ã¢â€ â€™ `PluginValue` so call sites stay
+    /// that bridges `serde_json::Value` ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ `PluginValue` so call sites stay
     /// terse. Async contexts can call `state.hook_dispatcher.fire(...).await`
     /// directly instead.
     pub fn fire_hook(&self, hook: &str, ctx: serde_json::Value) {
@@ -269,13 +269,13 @@ impl AppState {
     /// through the generic `rpc` command (which hold only `&AppState`, not an
     /// `AppHandle`): it routes through [`CorvusState`], whose sink in-process
     /// forwards to `AppHandle::emit` and post-split becomes an `arbor-ipc`
-    /// `Event::Notify` the shell re-emits Ã¢â‚¬â€ the call site doesn't change. A drop
+    /// `Event::Notify` the shell re-emits ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the call site doesn't change. A drop
     /// before the backend is wired is logged, not panicked (only during early
     /// boot). The payload is serialized to JSON here, exactly as crossing the
     /// IPC boundary will require.
     pub fn emit<S: serde::Serialize>(&self, event: &str, payload: S) {
         let Some(corvus) = self.corvus.get() else {
-            tracing::warn!("AppState::emit('{event}') before backend was wired Ã¢â‚¬â€ dropped");
+            tracing::warn!("AppState::emit('{event}') before backend was wired ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â dropped");
             return;
         };
         match serde_json::to_value(payload) {
@@ -285,7 +285,7 @@ impl AppState {
     }
 
     /// A cloneable handle to the frontend event egress, for background
-    /// threads/tasks that outlive a handler and emit from inside Ã¢â‚¬â€ they capture
+    /// threads/tasks that outlive a handler and emit from inside ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â they capture
     /// this (`Arc<dyn EventSink>`, `Send + 'static`) instead of an `AppHandle`,
     /// so they're already shaped for the `corvus-be` split. `None` only before
     /// `setup()` wires the backend.
@@ -382,7 +382,7 @@ impl AppState {
             let snap = git_cli::detect(configured.as_deref());
             match (&snap.path, snap.source) {
                 (Some(p), Some(src)) => tracing::info!("git executable: {} ({src})", p.display()),
-                _ => tracing::warn!("no git executable found Ã¢â‚¬â€ frontend will prompt"),
+                _ => tracing::warn!("no git executable found ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â frontend will prompt"),
             }
         }
         // Run the one-shot workspace migration before loading the current
@@ -391,7 +391,7 @@ impl AppState {
         let repo_registry = crate::workspace::registry::load();
         let workspaces    = crate::workspace::store::load();
         // Only keep the report around if it actually represents work done.
-        // `already_migrated` means both files existed Ã¢â‚¬â€ nothing to surface.
+        // `already_migrated` means both files existed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â nothing to surface.
         let stored_report = if migration_report.already_migrated { None } else { Some(migration_report) };
         // Seed the GitProvider registry with the always-on hosts.  Self-hosted
         // GitLab instances are registered lazily on first use via
@@ -405,7 +405,7 @@ impl AppState {
             Arc::new(crate::git_provider::session::GitlabSessionProvider::new()),
         )));
 
-        // Hook broker Ã¢â‚¬â€ built here (rather than in `setup()`) so the field can
+        // Hook broker ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â built here (rather than in `setup()`) so the field can
         // stay an immutable `Arc<HookDispatcher>`: the static catalog and the
         // `LuaHookListener` (bound to the just-created `plugin_host`) are the
         // only inputs, and neither needs the Tauri `AppHandle`.
@@ -421,7 +421,7 @@ impl AppState {
             jobs:           Arc::new(Mutex::new(JobRegistry::default())),
             plugin_logs:    Mutex::new(PluginLogBuffer::default()),
             // Seed the registry with runs persisted on disk (terminal/resumable
-            // ones Ã¢â‚¬â€ Running/Pending get coerced to Failed by `load_persisted_runs`).
+            // ones ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Running/Pending get coerced to Failed by `load_persisted_runs`).
             // The internal counter is advanced past the highest recovered id.
             pipelines:      Mutex::new(crate::pipeline::registry_from_disk()),
             pipeline_cv:    Arc::new(std::sync::Condvar::new()),
@@ -465,7 +465,7 @@ impl AppState {
 
     /// Shared trigger engine, once `setup()` has built it. Returns `None`
     /// during the brief window between `AppState::new()` and the scheduler
-    /// being wired in Ã¢â‚¬â€ callers in that window should log + skip rather
+    /// being wired in ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â callers in that window should log + skip rather
     /// than panic.
     pub fn scheduler(&self) -> Option<Arc<Scheduler>> {
         self.scheduler.get().cloned()
@@ -473,7 +473,7 @@ impl AppState {
 
     /// The Model-D IPC router, once `setup()` has built it. Returns `None`
     /// during the brief window between `AppState::new()` and the router being
-    /// wired in Ã¢â‚¬â€ commands only route after `setup()` returns, so in practice
+    /// wired in ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â commands only route after `setup()` returns, so in practice
     /// every command sees `Some`.
     pub fn router(&self) -> Option<Arc<Router>> {
         self.router.get().cloned()
@@ -497,7 +497,7 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
 
     // Single-instance + deep-link: the main Arbor UI must never run as a second
-    // process / second window Ã¢â‚¬â€ a duplicate launch (incl. every `arbor://Ã¢â‚¬Â¦` URL
+    // process / second window ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a duplicate launch (incl. every `arbor://ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦` URL
     // invocation) short-circuits and just focuses the running instance's `main`
     // window. Only the dedicated File Explorer window (`explorer-*`) is allowed
     // to be multi-window, and that's an in-process concern, not a second
@@ -505,7 +505,7 @@ pub fn run() {
     //
     // This is **always on in release** (the actual app the user runs), but
     // intentionally **OFF in plain `cargo tauri dev`**: the single-instance lock
-    // fights the dev runner's rebuild/relaunch cycle Ã¢â‚¬â€ on relaunch the new
+    // fights the dev runner's rebuild/relaunch cycle ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â on relaunch the new
     // process detects the still-running prior dev process as the primary, calls
     // the callback and exits immediately, leaving the terminal detached and a
     // stale (blank) webview behind. Opt in for dev with the `deep-link-dev`
@@ -532,7 +532,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        // OS-global shortcut (Ctrl+Shift+E) Ã¢â€ â€™ dedicated File Explorer window.
+        // OS-global shortcut (Ctrl+Shift+E) ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ dedicated File Explorer window.
         // The handler only reacts on key-down for our one registered combo;
         // the combo itself is registered in `setup()` below.
         .plugin(
@@ -564,7 +564,7 @@ pub fn run() {
             // Wire the `arbor-cloud` crate against AppState: registers the
             // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
             // into Tauri state so command + plugin-namespace layers can pull
-            // it back out. Must run before any cloud command can fire Ã¢â‚¬â€ safe
+            // it back out. Must run before any cloud command can fire ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â safe
             // here because commands only route once `Builder::run()` enters
             // its event loop, which happens after `setup()` returns.
             crate::cloud::install(&app.handle());
@@ -573,7 +573,7 @@ pub fn run() {
             // AppState. Today it fronts an in-process `LoopbackBroker` capturing
             // this `AppHandle`; the same router will front a pipe/socket client
             // once the product backends split out. Must run before any command
-            // routes Ã¢â‚¬â€ safe here because commands only fire once `Builder::run()`
+            // routes ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â safe here because commands only fire once `Builder::run()`
             // enters its event loop, after `setup()` returns.
             {
                 let state = app.state::<AppState>();
@@ -597,14 +597,14 @@ pub fn run() {
 
             // Register the `arbor://` URI scheme at runtime.  This is what
             // makes deep links work in `--no-bundle` builds where there is no
-            // installer to write the registry entry Ã¢â‚¬â€ every dev launch points
+            // installer to write the registry entry ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â every dev launch points
             // the scheme at the binary that just started.  No-op on platforms
             // where the bundler/OS already owns the registration.
             //
             // URLs received here are routed through `DeepLinkBuffer`, which
-            // either emits to the frontend immediately (warm path Ã¢â‚¬â€ listener
+            // either emits to the frontend immediately (warm path ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â listener
             // is mounted) or buffers until `deep_link_ready` flushes (cold
-            // start Ã¢â‚¬â€ webview hasn't booted yet).
+            // start ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â webview hasn't booted yet).
             #[cfg(all(desktop, any(not(debug_assertions), feature = "deep-link-dev")))]
             {
                 if let Err(e) = app.deep_link().register("arbor") {
@@ -629,7 +629,7 @@ pub fn run() {
                     }
                 });
 
-                // Cold-start URLs Ã¢â‚¬â€ when the OS launched Arbor by clicking a
+                // Cold-start URLs ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â when the OS launched Arbor by clicking a
                 // link, the URL is sitting in argv but `on_open_url` may not
                 // re-fire for it depending on the platform.  Drain
                 // `get_current()` defensively into the same buffer.
@@ -650,7 +650,7 @@ pub fn run() {
 
                 // Tauri's `async_runtime::spawn` is usable from sync
                 // `setup()` and runs the future on its internal Tokio
-                // runtime Ã¢â‚¬â€ capture `Handle::current()` from inside that
+                // runtime ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â capture `Handle::current()` from inside that
                 // future to get the runtime handle the scheduler needs.
                 let (tx, rx) = std::sync::mpsc::sync_channel::<tokio::runtime::Handle>(1);
                 tauri::async_runtime::spawn(async move {
@@ -671,7 +671,7 @@ pub fn run() {
                 // ContributionRegistry so the coalesced
                 // `arbor://contributions-changed` /
                 // `arbor://containers-changed` emits stay routed to the
-                // frontend (PR #4 Ã¢â‚¬â€ `arbor-plugin-core` migration).
+                // frontend (PR #4 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â `arbor-plugin-core` migration).
                 {
                     let mut host = state
                         .plugin_host
@@ -703,14 +703,14 @@ pub fn run() {
                 }
             }
 
-            // Marketplace auto-refresh Ã¢â‚¬â€ one entry in the shared engine.
+            // Marketplace auto-refresh ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â one entry in the shared engine.
             // Settings reads ride the `gate` closure so toggling
             // `refresh_hours` / `poll_minutes` reconfigures on the fly.
             crate::marketplace::scheduler::install(app.handle().clone());
 
             // Plugin loading moved to a background thread so the webview can
             // mount + render its boot-splash overlay BEFORE the (potentially
-            // slow) discover Ã¢â€ â€™ topo-sort Ã¢â€ â€™ `load_plugin` pass blocks the
+            // slow) discover ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ topo-sort ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ `load_plugin` pass blocks the
             // UI thread. The thread emits `arbor://boot-progress` events per
             // plugin and a final `arbor://boot-done` event for the splash to
             // dismiss itself.
@@ -724,7 +724,7 @@ pub fn run() {
             // Synchronous handshake: setup() returns ONLY after the boot
             // thread has acquired the plugin_host mutex. Without this gate,
             // there's a window between `thread::spawn` returning and the OS
-            // actually scheduling the boot thread Ã¢â‚¬â€ during which the WebView
+            // actually scheduling the boot thread ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â during which the WebView
             // can mount and AppShell.onMount can fire IPCs (list_plugin_info,
             // list_plugin_contributions) that win the lock first, find an
             // empty host, and seed frontend stores with empty state.
@@ -765,7 +765,7 @@ pub fn run() {
                             );
                             if remaining.is_zero() {
                                 tracing::warn!(
-                                    "frontend_ready handshake timed out after 5s Ã¢â‚¬â€ proceeding (BootSplash will recover via get_boot_state)"
+                                    "frontend_ready handshake timed out after 5s ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â proceeding (BootSplash will recover via get_boot_state)"
                                 );
                                 break;
                             }
@@ -774,7 +774,7 @@ pub fn run() {
                             ready = g;
                             if wait_res.timed_out() && !*ready {
                                 tracing::warn!(
-                                    "frontend_ready handshake timed out after 5s Ã¢â‚¬â€ proceeding (BootSplash will recover via get_boot_state)"
+                                    "frontend_ready handshake timed out after 5s ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â proceeding (BootSplash will recover via get_boot_state)"
                                 );
                                 break;
                             }
@@ -782,8 +782,8 @@ pub fn run() {
                     }
 
                     // PluginHost's app context / api installer / extra
-                    // roots are wired up in the early setup block above Ã¢â‚¬â€
-                    // before this thread acquires the lock Ã¢â‚¬â€ so the boot
+                    // roots are wired up in the early setup block above ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
+                    // before this thread acquires the lock ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â so the boot
                     // thread goes straight to `reload()`.
 
                     let plugins_enabled = state
@@ -810,7 +810,7 @@ pub fn run() {
                     };
 
                     if !plugins_enabled {
-                        tracing::info!("plugin system disabled by config Ã¢â‚¬â€ skipping load");
+                        tracing::info!("plugin system disabled by config ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â skipping load");
                         mark_done(serde_json::json!({
                             "skipped": true,
                             "reason":  "plugin system disabled in config",
@@ -828,7 +828,7 @@ pub fn run() {
 
                     emit_progress(serde_json::json!({
                         "phase":   "starting-schedulers",
-                        "message": "Starting plugin schedulersÃ¢â‚¬Â¦",
+                        "message": "Starting plugin schedulersÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦",
                     }));
                     host.start_all_schedulers();
 
@@ -836,7 +836,7 @@ pub fn run() {
                     // `arbor://plugins-reloaded` so every store/component that
                     // refreshes on that signal (contributionStore, pluginStore
                     // via PluginPanel, containerStore, depsExplorerStore,
-                    // DocsPanel, PluginSidebarPanel, Ã¢â‚¬Â¦) re-reads with the
+                    // DocsPanel, PluginSidebarPanel, ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦) re-reads with the
                     // host fully populated. Without this, listeners attached
                     // during AppShell mount sit idle waiting for an event
                     // that only the manual Refresh button would fire.
@@ -860,17 +860,17 @@ pub fn run() {
             // applies EcoQoS runs on a dedicated worker thread that coalesces
             // focus/resize bursts and re-scans periodically while unfocused
             // (to catch renderers spawned in the background). Window events
-            // below only signal the desired state Ã¢â‚¬â€ they never scan on the
+            // below only signal the desired state ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â they never scan on the
             // UI/event thread, which previously froze the app on resume.
             crate::efficiency::init();
 
-            // Re-apply the main window icon after sleep/resume Ã¢â‚¬â€ works
+            // Re-apply the main window icon after sleep/resume ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â works
             // around a Windows + WebView2 quirk that drops the taskbar's
             // small HICON on wake. Active in debug and release alike since
             // the bug is OS-level.
             crate::taskbar_icon_refresh::install(app.handle());
 
-            // System tray Ã¢â‚¬â€ only in release builds
+            // System tray ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â only in release builds
             #[cfg(not(debug_assertions))]
             {
                 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -934,7 +934,7 @@ pub fn run() {
                     {
                         // Close-to-tray applies ONLY to the main window. Auxiliary
                         // windows (the dedicated File Explorer, the drag-ghost
-                        // overlay) close for real Ã¢â‚¬â€ otherwise a closed explorer is
+                        // overlay) close for real ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â otherwise a closed explorer is
                         // merely hidden and reopening re-summons the same stale
                         // window instead of a fresh one.
                         if window.label() == "main" {
@@ -989,57 +989,34 @@ pub fn run() {
             commands::diff_commands::get_workdir_diff_stream,
             commands::diff_commands::get_file_blame_streaming,
             // Stage
-            commands::stage_commands::stage_file,
-            commands::stage_commands::unstage_file,
-            commands::stage_commands::stage_all,
-            commands::stage_commands::unstage_all,
-            commands::stage_commands::stage_patch,
-            commands::stage_commands::discard_file,
-            commands::stage_commands::discard_all,
             commands::stage_commands::commit,
-            commands::stage_commands::cherry_pick,
-            commands::stage_commands::revert_commit,
-            commands::stage_commands::get_git_commit_template,
             // Branches
-            commands::branch_commands::get_status,
-            commands::branch_commands::list_local_branches,
-            commands::branch_commands::list_remote_branches,
-            commands::branch_commands::list_tags,
-            commands::branch_commands::get_nearest_tag,
-            commands::branch_commands::create_branch,
             commands::branch_commands::delete_branch,
             commands::branch_commands::rename_branch,
             commands::branch_commands::checkout_branch,
             commands::branch_commands::checkout_branch_safe,
             commands::branch_commands::checkout_remote_as_local,
             commands::branch_commands::checkout_remote_as_local_safe,
-            commands::branch_commands::checkout_commit,
-            commands::branch_commands::checkout_commit_safe,
-            commands::branch_commands::list_merged_branches,
-            commands::branch_commands::delete_branches,
-            commands::branch_commands::list_merged_remote_branches,
-            commands::branch_commands::delete_remote_branches,
-            commands::branch_commands::rename_remote_branch,
             // Remote
             commands::remote_commands::list_remotes,
             commands::remote_commands::fetch_remote,
             commands::remote_commands::push_branch,
             commands::remote_commands::pull_branch,
-            // Generic Model-D IPC entry point Ã¢â‚¬â€ the FE forwards every product
+            // Generic Model-D IPC entry point ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the FE forwards every product
             // command here as (program, method, params); the shell router
             // dispatches to the right backend. Migrated domains route through
             // here (handlers in crate::ipc::corvus::*): stash, reset/tags,
             // notes, reflog, bisect. The rest below are still inline
             // #[tauri::command]s, migrating domain by domain. See crate::ipc.
             commands::rpc_commands::rpc,
-            // Auth Ã¢â‚¬â€ credentials
+            // Auth ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â credentials
             commands::auth_commands::save_credential,
             commands::auth_commands::get_credential,
             commands::auth_commands::delete_credential,
             commands::auth_commands::save_default_credential,
             commands::auth_commands::has_default_credential,
             commands::auth_commands::delete_default_credential,
-            // Auth Ã¢â‚¬â€ provider OAuth connect/status/disconnect/refresh flow through
+            // Auth ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â provider OAuth connect/status/disconnect/refresh flow through
             // the generic {issue,git}_provider_* commands (see provider_commands).
             // Plugins
             commands::plugin_commands::set_plugins_enabled,
@@ -1080,10 +1057,10 @@ pub fn run() {
             // Pipelines orchestrator config
             // Issues config
             // MR/PR Activity timeline defaults
-            // Appearance preferences (window control style, font scale, Ã¢â‚¬Â¦)
+            // Appearance preferences (window control style, font scale, ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦)
             commands::config_commands::set_explorer_config,
             // UI animations preferences (enabled, speed)
-            // Commit preferences (host-wide template fallback, Ã¢â‚¬Â¦)
+            // Commit preferences (host-wide template fallback, ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦)
             // First-run onboarding tour state
             // "What's New" modal state (last-seen app version)
             // Branches sidebar (global behaviour + per-repo grouping state)
@@ -1100,14 +1077,14 @@ pub fn run() {
             // App focus / active-tab state (used by focus-gated schedulers)
             commands::plugin_commands::set_app_focus,
             commands::plugin_commands::set_active_tab,
-            // Boot state Ã¢â‚¬â€ polled by BootSplash to recover from listener-timing race
+            // Boot state ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â polled by BootSplash to recover from listener-timing race
             commands::plugin_commands::get_boot_state,
-            // Boot handshake Ã¢â‚¬â€ BootSplash flips this once listeners are attached
+            // Boot handshake ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â BootSplash flips this once listeners are attached
             commands::plugin_commands::frontend_ready,
             // Toolchains
-            // Cross-plugin contribution model Ã¢â‚¬â€ tree snapshots and custom
+            // Cross-plugin contribution model ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â tree snapshots and custom
             // icons are read through the unified registry, no parallel IPC.
-            // Container model (Phase 2 Ã¢â‚¬â€ ContributableModal)
+            // Container model (Phase 2 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ContributableModal)
             // Open in browser
             commands::remote_commands::open_in_browser,
             // Pipelines (plugin-defined)
@@ -1120,7 +1097,7 @@ pub fn run() {
             commands::pipeline_commands::resume_pipeline_run,
             commands::pipeline_commands::discard_pipeline_run,
             commands::pipeline_commands::is_pipeline_locked,
-            // Pipelines (CI/CD Ã¢â‚¬â€ GitHub Actions + GitLab CI)
+            // Pipelines (CI/CD ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â GitHub Actions + GitLab CI)
             commands::pipeline_commands::get_ci_provider,
             commands::pipeline_commands::fetch_ci_runs,
             commands::pipeline_commands::fetch_mr_ci_runs,
@@ -1146,7 +1123,7 @@ pub fn run() {
             commands::fs_commands::fs_icon,
             commands::fs_commands::fs_watch_start,
             commands::fs_commands::fs_watch_stop,
-            // File Explorer git awareness Ã¢â‚¬â€ status overlays, inline actions,
+            // File Explorer git awareness ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â status overlays, inline actions,
             // and "Open in Arbor" delegation for the heavy git operations.
             commands::fs_git_commands::fs_git_status,
             commands::fs_git_commands::fs_git_stage,
@@ -1213,7 +1190,7 @@ pub fn run() {
             commands::image_commands::fetch_remote_image,
             // Worktrees (migrated to corvus; IDE-detection streaming deferred)
             commands::worktree_commands::start_ide_detection,
-            // Recovery journal Ã¢â‚¬â€ migrated to corvus (config stays here)
+            // Recovery journal ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â migrated to corvus (config stays here)
             // Remote repository browser
             commands::repo_browser_commands::rb_list_accounts,
             commands::repo_browser_commands::rb_list_repos,
@@ -1254,7 +1231,7 @@ pub fn run() {
             commands::missing_commands::report_repo_missing,
             commands::missing_commands::remove_recent_repo,
             commands::missing_commands::cleanup_missing_recent_repos,
-            // Studio Multi-Format backbone (FROZEN F17) Ã¢â‚¬â€ one set of
+            // Studio Multi-Format backbone (FROZEN F17) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â one set of
             // commands dispatched via `AppState.studio_registry` to a
             // per-format `StudioFormatBackend` impl. RON + JSON are
             // registered today; TOML / YAML / .properties join later phases.
@@ -1295,20 +1272,9 @@ pub fn run() {
             crate::studio::format::commands::studio_bulk_edit_apply,
             crate::studio::format::commands::studio_yaml_to_properties,
             crate::studio::format::commands::studio_properties_to_yaml,
-            // studio sidebar Ã¢â‚¬â€ project-wide .ron/.json/.toml index.
-            commands::studio_commands::studio_scan_repo,
-            commands::studio_commands::studio_scan_cross_refs,
-            commands::studio_commands::studio_find_usages,
-            commands::studio_commands::studio_scan_broken_refs,
-            commands::studio_commands::studio_add_external,
-            commands::studio_commands::studio_remove_external,
-            commands::studio_commands::studio_get_config,
-            commands::studio_commands::studio_toggle_exclude,
-            commands::studio_commands::studio_bind_schema,
-            commands::studio_commands::studio_unbind_schema,
-            commands::studio_commands::studio_toggle_reference_field,
+            // studio sidebar ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â project-wide .ron/.json/.toml index.
             commands::studio_commands::studio_refresh_index,
-            // cloud-storage plugin Ã¢â‚¬â€ opendal-backed GCS (S3/Azure ready in backend).
+            // cloud-storage plugin ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â opendal-backed GCS (S3/Azure ready in backend).
             commands::cloud_commands::cloud_secret_set,
             commands::cloud_commands::cloud_secret_exists,
             commands::cloud_commands::cloud_secret_delete,
@@ -1329,7 +1295,7 @@ pub fn run() {
             commands::cloud_commands::cloud_report_progress,
             commands::cloud_commands::cloud_report_done,
             commands::cloud_commands::cloud_gcs_oauth_start,
-            // Bevy Remote Protocol (Phase 1.0 Ã¢â‚¬â€ read-only HTTP)
+            // Bevy Remote Protocol (Phase 1.0 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â read-only HTTP)
             commands::brp_commands::brp_connect,
             commands::brp_commands::brp_call,
             // Marketplace
@@ -1404,7 +1370,7 @@ pub fn run() {
             nemus::scales::nemus_scales,
             nemus::libraries::nemus_libraries,
             nemus::libraries::nemus_sync_libraries,
-            // nemus import: WAV Ã¢â€ â€™ MIDI (transcription) / MIDI Ã¢â€ â€™ .nemus (deterministic)
+            // nemus import: WAV ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ MIDI (transcription) / MIDI ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ .nemus (deterministic)
             nemus::import::nemus_convert_wav_to_midi,
             nemus::import::nemus_import_audio_as_nemus,
             nemus::import::nemus_import_midi_as_nemus,

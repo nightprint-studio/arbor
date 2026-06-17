@@ -940,9 +940,9 @@
     if (!tabId) return;
     try {
       const [b, t, s, st, rm] = await Promise.all([
-        invoke<BranchInfo[]>('list_local_branches', { tabId }),
-        invoke<TagInfo[]>('list_tags', { tabId }),
-        invoke<RepoStatus>('get_status', { tabId }),
+        corvus<BranchInfo[]>('list_local_branches', { tab_id: tabId }),
+        corvus<TagInfo[]>('list_tags', { tab_id: tabId }),
+        corvus<RepoStatus>('get_status', { tab_id: tabId }),
         listStashes(tabId).catch(() => [] as StashEntry[]),
         listRemotes(tabId).catch(() => [] as RemoteInfo[]),
       ]);

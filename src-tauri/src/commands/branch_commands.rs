@@ -2,15 +2,17 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::error::AppError;
-use crate::git::branch::{BranchInfo, RemoteRenameResult, TagInfo};
+use crate::git::branch::BranchInfo;
 use crate::git::stash::StashEntry;
-use crate::git::status::RepoStatus;
 use crate::AppState;
 use crate::linked_worktrees;
 
 /// Look up the RepoRegistry UUID for a given tab.  Returns None if the tab
 /// is not registered (defensive — every opened tab should be).
-fn repo_id_for_tab(state: &AppState, tab_id: &str) -> Option<String> {
+///
+/// `pub(crate)` so the migrated `corvus::branch` handlers (e.g. `create_branch`,
+/// the alias-conflict check) can reuse it without duplicating the lookup.
+pub(crate) fn repo_id_for_tab(state: &AppState, tab_id: &str) -> Option<String> {
     let path = {
         let mut mgr = state.lock_repos().ok()?;
         let info = mgr.get(tab_id).ok()?;
@@ -29,6 +31,10 @@ fn repo_id_for_tab(state: &AppState, tab_id: &str) -> Option<String> {
 
 /// Returned by every `checkout_*_safe` command so the frontend knows whether a
 /// pre-checkout stash needs to be re-applied and whether that re-apply had conflicts.
+///
+/// `pub(crate)` so the migrated `corvus::branch::checkout_commit_safe` handler
+/// shares the exact same DTO and serde shape as the deferred safe-checkout
+/// commands below.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckoutResult {
     pub stash_conflicts: Vec<String>,
@@ -59,7 +65,10 @@ pub struct CheckoutResult {
 ///
 /// Mirrors the pull auto-stash dance (stash → mutate → apply, never pop, so
 /// the stash survives conflicts and apply errors).
-fn safe_checkout_with_stash<F>(
+///
+/// `pub(crate)` so the migrated `corvus::branch::checkout_commit_safe` handler
+/// reuses this without re-implementing the stash dance.
+pub(crate) fn safe_checkout_with_stash<F>(
     state: &AppState,
     tab_id: &str,
     do_checkout: F,
@@ -176,96 +185,19 @@ where
 /// True when a CheckoutResult represents a fully clean operation (no stash
 /// re-apply error, no stash conflicts). Used to gate hook firing and side
 /// effects like worktree-link sync.
-fn checkout_is_clean(r: &CheckoutResult) -> bool {
+///
+/// `pub(crate)` — also referenced by the `corvus` post-hook gating mirror.
+pub(crate) fn checkout_is_clean(r: &CheckoutResult) -> bool {
     r.stash_apply_error.is_none() && r.stash_conflicts.is_empty()
 }
 
-#[tauri::command]
-pub fn get_status(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<RepoStatus, AppError> {
-    // Read the detect_renames flag from user config BEFORE taking the repos
-    // lock, so we don't nest the two mutexes.
-    let detect_renames = state
-        .lock_config()
-        .map(|c| c.status.detect_renames)
-        .unwrap_or(true);
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::status::get_status_with(repo.inner(), detect_renames)
-}
-
-#[tauri::command]
-pub fn list_local_branches(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<Vec<BranchInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_local_branches(repo.inner())
-}
-
-#[tauri::command]
-pub fn list_remote_branches(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<Vec<BranchInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_remote_branches(repo.inner())
-}
-
-#[tauri::command]
-pub fn list_tags(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<Vec<TagInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_tags(repo.inner())
-}
-
-#[tauri::command]
-pub fn get_nearest_tag(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<Option<String>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(crate::git::branch::get_nearest_tag(repo.inner()))
-}
-
-#[tauri::command]
-pub fn create_branch(
-    state: State<'_, AppState>,
-    tab_id: String,
-    name: String,
-    from_oid: String,
-) -> Result<BranchInfo, AppError> {
-    // Refuse names that would conflict with an active alias mapping in any
-    // space this repo belongs to.  The user must remove the alias first.
-    if let Some(repo_id) = repo_id_for_tab(&state, &tab_id) {
-        if let Ok(reg) = state.lock_linked_worktrees() {
-            let all = reg.list();
-            if let Some(link_name) = linked_worktrees::aliases::alias_blocks_branch_name(&all, &repo_id, &name) {
-                return Err(AppError::Other(format!(
-                    "branch '{name}' is reserved by an alias in worktree link '{link_name}' — remove the alias to free this name"
-                )));
-            }
-        }
-    }
-    let info = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::branch::create_branch(repo.inner(), &name, &from_oid)?
-    };
-    state.fire_hook(
-        "on_branch_create",
-        serde_json::json!({ "tab_id": &tab_id, "name": &name, "from_oid": &from_oid }),
-    );
-    Ok(info)
-}
+// ---------------------------------------------------------------------------
+// Deferred commands — each takes an `AppHandle` to emit
+// `arbor://worktree-links-changed` and/or drive the worktree-link checkout-sync
+// orchestrator. They wait for the later emit/seam pass; the leaf-clean siblings
+// (list/create/delete-remote/rename-remote/commit-checkout/status) moved to
+// `crate::ipc::corvus::branch`.
+// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub fn delete_branch(
@@ -453,147 +385,4 @@ pub fn checkout_remote_as_local_safe(
     }
 
     Ok(result)
-}
-
-/// Non-safe commit checkout — kept for backward compat. Errors out on dirty
-/// workdir (libgit2 Conflict). New callers should use `checkout_commit_safe`.
-#[tauri::command]
-pub fn checkout_commit(
-    state: State<'_, AppState>,
-    tab_id: String,
-    oid: String,
-) -> Result<(), AppError> {
-    {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::branch::checkout_commit_detached(repo.inner(), &oid)?;
-    }
-    state.fire_hook(
-        "on_checkout",
-        serde_json::json!({ "tab_id": &tab_id, "oid": &oid }),
-    );
-    Ok(())
-}
-
-/// Stash-safe detached commit checkout: stash dirty workdir → detach HEAD →
-/// re-apply stash. Mirrors `checkout_branch_safe` for the detached-HEAD case.
-#[tauri::command]
-pub fn checkout_commit_safe(
-    state: State<'_, AppState>,
-    tab_id: String,
-    oid: String,
-) -> Result<CheckoutResult, AppError> {
-    let oid_for_checkout = oid.clone();
-    let result = safe_checkout_with_stash(
-        &state,
-        &tab_id,
-        |r| {
-            crate::git::branch::checkout_commit_detached(r, &oid_for_checkout)?;
-            Ok(None)
-        },
-    )?;
-
-    if checkout_is_clean(&result) {
-        state.fire_hook(
-            "on_checkout",
-            serde_json::json!({ "tab_id": &tab_id, "oid": &oid }),
-        );
-    }
-
-    Ok(result)
-}
-
-#[tauri::command]
-pub fn list_merged_branches(
-    state: State<'_, AppState>,
-    tab_id: String,
-    target: String,
-) -> Result<Vec<BranchInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_merged_branches(repo.inner(), &target)
-}
-
-#[tauri::command]
-pub fn list_merged_remote_branches(
-    state: State<'_, AppState>,
-    tab_id: String,
-    target: String,
-) -> Result<Vec<BranchInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_merged_remote_branches(repo.inner(), &target)
-}
-
-#[tauri::command]
-pub fn delete_remote_branches(
-    state: State<'_, AppState>,
-    tab_id: String,
-    names: Vec<String>,
-) -> Result<Vec<String>, AppError> {
-    let deleted_names: Vec<String> = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        let failed = crate::git::branch::delete_remote_branches(repo.inner(), &names);
-        names.iter().filter(|n| !failed.contains(n)).cloned().collect()
-    };
-    if !deleted_names.is_empty() {
-        state.fire_hook(
-            "on_branch_delete",
-            serde_json::json!({ "tab_id": &tab_id, "names": &deleted_names }),
-        );
-    }
-    // Return the failed names (same convention as delete_branches)
-    let failed: Vec<String> = names.into_iter().filter(|n| !deleted_names.contains(n)).collect();
-    Ok(failed)
-}
-
-#[tauri::command]
-pub fn rename_remote_branch(
-    state: State<'_, AppState>,
-    tab_id: String,
-    old_full_name: String,
-    new_short_name: String,
-    rename_local: bool,
-) -> Result<RemoteRenameResult, AppError> {
-    let result = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::branch::rename_remote_branch(
-            repo.inner(),
-            &old_full_name,
-            &new_short_name,
-            rename_local,
-        )?
-    };
-    state.fire_hook(
-        "on_branch_rename",
-        serde_json::json!({
-            "tab_id": &tab_id,
-            "old_name": &old_full_name,
-            "new_name": &result.new_full_name,
-            "local_renamed": result.local_renamed,
-        }),
-    );
-    Ok(result)
-}
-
-#[tauri::command]
-pub fn delete_branches(
-    state: State<'_, AppState>,
-    tab_id: String,
-    names: Vec<String>,
-) -> Result<Vec<String>, AppError> {
-    let deleted = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::branch::delete_branches(repo.inner(), &names)
-    };
-    if !deleted.is_empty() {
-        state.fire_hook(
-            "on_branch_delete",
-            serde_json::json!({ "tab_id": &tab_id, "names": &deleted }),
-        );
-    }
-    Ok(deleted)
 }

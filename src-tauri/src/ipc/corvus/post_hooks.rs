@@ -115,8 +115,76 @@ pub fn fire(state: &AppState, program: &str, method: &str, params: &Value, resul
             state.fire_hook("on_rebase_abort", json!({ "tab_id": params.get("tab_id") }));
         }
 
+        // ── branch ── fire-and-forget. The migrated handlers fire no hooks;
+        // payloads mirror the original inline fires (P = from params, R = from
+        // result).
+        "create_branch" => {
+            state.fire_hook("on_branch_create", json!({
+                "tab_id":   params.get("tab_id"),    // P
+                "name":     params.get("name"),      // P
+                "from_oid": params.get("from_oid"),  // P
+            }));
+        }
+        // `delete_branches` returns the Vec<String> of deleted local names.
+        "delete_branches" => {
+            if result.as_array().map(|a| !a.is_empty()).unwrap_or(false) {
+                state.fire_hook("on_branch_delete", json!({
+                    "tab_id": params.get("tab_id"),  // P
+                    "names":  result,                // R (deleted names)
+                }));
+            }
+        }
+        // `delete_remote_branches` returns the FAILED names; the original inline
+        // fired with the *deleted* set (requested names − failed).
+        "delete_remote_branches" => {
+            let names  = params.get("names").and_then(Value::as_array).cloned().unwrap_or_default();
+            let failed = result.as_array().cloned().unwrap_or_default();
+            let deleted: Vec<&Value> = names.iter().filter(|n| !failed.contains(n)).collect();
+            if !deleted.is_empty() {
+                state.fire_hook("on_branch_delete", json!({
+                    "tab_id": params.get("tab_id"),  // P
+                    "names":  deleted,               // P − R
+                }));
+            }
+        }
+        "rename_remote_branch" => {
+            state.fire_hook("on_branch_rename", json!({
+                "tab_id":        params.get("tab_id"),         // P
+                "old_name":      params.get("old_full_name"),  // P
+                "new_name":      result.get("new_full_name"),  // R
+                "local_renamed": result.get("local_renamed"),  // R
+            }));
+        }
+        "checkout_commit" => {
+            state.fire_hook("on_checkout", json!({
+                "tab_id": params.get("tab_id"),  // P
+                "oid":    params.get("oid"),     // P
+            }));
+        }
+        // Safe (auto-stash) checkout: only fire when the working tree landed
+        // clean (no stash-apply error, no stash conflicts) — same gate the
+        // original inline fire used.
+        "checkout_commit_safe" if clean_checkout(result) => {
+            state.fire_hook("on_checkout", json!({
+                "tab_id": params.get("tab_id"),  // P
+                "oid":    params.get("oid"),     // P
+            }));
+        }
+
         _ => {}
     }
+}
+
+/// A safe-checkout result that landed clean: no stash-apply error and no
+/// remaining stash conflicts. Missing/!expected shapes → treated as not-clean
+/// (no hook), the safe default.
+fn clean_checkout(result: &Value) -> bool {
+    result.get("stash_apply_error").map(Value::is_null).unwrap_or(false)
+        && result
+            .get("stash_conflicts")
+            .and_then(Value::as_array)
+            .map(|a| a.is_empty())
+            .unwrap_or(false)
 }
 
 /// A `StashApplyResult` with no conflicts. Missing/!bool → treated as conflicted

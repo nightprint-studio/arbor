@@ -35,6 +35,7 @@ pub mod corvus;
 pub mod event_sink;
 pub mod platform;
 pub mod split_broker;
+pub mod studio;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -95,6 +96,16 @@ pub fn build_router(app: &AppHandle) -> Router {
             platform::dispatch(&platform_handle, method, params)
         }));
     router.register("platform", platform_loopback);
+
+    // Studio backend: the standalone CI/pipeline-config editor. In-process only
+    // for now — no `studio-be` process yet — routing to the loopback that
+    // dispatches against this binary's `studio`-tagged handlers.
+    let studio_handle = app.clone();
+    let studio_loopback: Arc<dyn BrokerClient> =
+        Arc::new(LoopbackBroker::new(move |method, params| {
+            studio::dispatch(&studio_handle, method, params)
+        }));
+    router.register("studio", studio_loopback);
 
     router
 }

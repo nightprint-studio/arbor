@@ -25,3 +25,8 @@ export const corvus = <R>(method: string, params: Record<string, unknown> = {}):
  *  jobs, fs, terminal, app metadata — everything that isn't a product). */
 export const platform = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('platform', method, params);
+
+/** Bound helper for the Studio backend (standalone CI/pipeline-config editor:
+ *  YAML convert/format/validate, schema reflection). */
+export const studio = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
+  rpc<R>('studio', method, params);

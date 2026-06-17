@@ -14,6 +14,7 @@
 //! binary unchanged.
 
 pub mod bisect;
+pub mod branch;
 pub mod brp;
 pub mod diff;
 pub mod git_cli;
@@ -27,6 +28,7 @@ pub mod recovery;
 pub mod reflog;
 pub mod reset;
 pub mod search;
+pub mod stage;
 pub mod stash;
 pub mod stats;
 pub mod submodule;

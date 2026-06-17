@@ -7,19 +7,19 @@ import { tabsStore } from '../stores/tabs.svelte';
 // ── Read-only ─────────────────────────────────────────────────────────────────
 
 export const listLocalBranches = (tabId: string) =>
-  invoke<BranchInfo[]>('list_local_branches', { tabId });
+  corvus<BranchInfo[]>('list_local_branches', { tab_id: tabId });
 
 export const listRemoteBranches = (tabId: string) =>
-  invoke<BranchInfo[]>('list_remote_branches', { tabId });
+  corvus<BranchInfo[]>('list_remote_branches', { tab_id: tabId });
 
 export const listTags = (tabId: string) =>
-  invoke<TagInfo[]>('list_tags', { tabId });
+  corvus<TagInfo[]>('list_tags', { tab_id: tabId });
 
 export const listMergedBranches = (tabId: string, target: string) =>
-  invoke<BranchInfo[]>('list_merged_branches', { tabId, target });
+  corvus<BranchInfo[]>('list_merged_branches', { tab_id: tabId, target });
 
 export const listMergedRemoteBranches = (tabId: string, target: string) =>
-  invoke<BranchInfo[]>('list_merged_remote_branches', { tabId, target });
+  corvus<BranchInfo[]>('list_merged_remote_branches', { tab_id: tabId, target });
 
 export const listStashes = (tabId: string) =>
   corvus<StashEntry[]>('list_stashes', { tab_id: tabId });
@@ -31,7 +31,7 @@ export const listGraphStashRefs = (tabId: string) =>
   corvus<StashRef[]>('list_graph_stash_refs', { tab_id: tabId });
 
 export const getNearestTag = (tabId: string) =>
-  invoke<string | null>('get_nearest_tag', { tabId });
+  corvus<string | null>('get_nearest_tag', { tab_id: tabId });
 
 // ── Writes (invalidate cache on success) ─────────────────────────────────────
 
@@ -53,7 +53,7 @@ export const mergeBranch = async (
 };
 
 export const createBranch = async (tabId: string, name: string, fromOid: string): Promise<BranchInfo> => {
-  const r = await invoke<BranchInfo>('create_branch', { tabId, name, fromOid });
+  const r = await corvus<BranchInfo>('create_branch', { tab_id: tabId, name, from_oid: fromOid });
   invalidateTabCache(tabId);
   return r;
 };
@@ -65,14 +65,14 @@ export const deleteBranch = async (tabId: string, name: string): Promise<void> =
 
 /** Returns names of branches that failed to delete. */
 export const deleteBranches = async (tabId: string, names: string[]): Promise<string[]> => {
-  const failed = await invoke<string[]>('delete_branches', { tabId, names });
+  const failed = await corvus<string[]>('delete_branches', { tab_id: tabId, names });
   invalidateTabCache(tabId);
   return failed;
 };
 
 /** Push-delete remote branches. Returns names that failed. Names are "remote/branch" format. */
 export const deleteRemoteBranches = async (tabId: string, names: string[]): Promise<string[]> => {
-  const failed = await invoke<string[]>('delete_remote_branches', { tabId, names });
+  const failed = await corvus<string[]>('delete_remote_branches', { tab_id: tabId, names });
   invalidateTabCache(tabId);
   return failed;
 };
@@ -95,8 +95,8 @@ export const renameRemoteBranch = async (
   newShortName: string,
   renameLocal: boolean,
 ): Promise<RemoteRenameResult> => {
-  const r = await invoke<RemoteRenameResult>('rename_remote_branch', {
-    tabId, oldFullName, newShortName, renameLocal,
+  const r = await corvus<RemoteRenameResult>('rename_remote_branch', {
+    tab_id: tabId, old_full_name: oldFullName, new_short_name: newShortName, rename_local: renameLocal,
   });
   invalidateTabCache(tabId);
   return r;
@@ -164,7 +164,7 @@ export const checkoutRemoteAsLocalSafe = async (
 };
 
 export const checkoutCommit = async (tabId: string, oid: string): Promise<void> => {
-  await invoke<void>('checkout_commit', { tabId, oid });
+  await corvus<void>('checkout_commit', { tab_id: tabId, oid });
   invalidateTabCache(tabId);
   // Detached HEAD: clear the branch chip.
   tabsStore.updateTab(tabId, { currentBranch: null });
@@ -172,7 +172,7 @@ export const checkoutCommit = async (tabId: string, oid: string): Promise<void> 
 
 /** Stash-safe detached commit checkout. */
 export const checkoutCommitSafe = async (tabId: string, oid: string): Promise<CheckoutResult> => {
-  const result = await invoke<CheckoutResult>('checkout_commit_safe', { tabId, oid });
+  const result = await corvus<CheckoutResult>('checkout_commit_safe', { tab_id: tabId, oid });
   invalidateTabCache(tabId);
   if (!result.stash_apply_error && result.stash_conflicts.length === 0) {
     // Detached HEAD: clear the branch chip.

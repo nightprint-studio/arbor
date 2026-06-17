@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { platform } from './rpc';
+import { platform, studio } from './rpc';
 
 /** File kinds the Studio sidebar can index. Mirrors `StudioFileKind` in
  *  `src-tauri/src/studio/mod.rs` — keep in sync. Phase 5.a adds `yaml`
@@ -66,13 +66,13 @@ export interface SchemaOverrideCfg {
 }
 
 export const studioGetConfig = (tabId: string): Promise<StudioConfig> =>
-  invoke<StudioConfig>('studio_get_config', { tabId });
+  studio<StudioConfig>('studio_get_config', { tab_id: tabId });
 
 export const studioToggleExclude = (
   tabId:        string,
   relativePath: string,
 ): Promise<boolean> =>
-  invoke<boolean>('studio_toggle_exclude', { tabId, relativePath });
+  studio<boolean>('studio_toggle_exclude', { tab_id: tabId, relative_path: relativePath });
 
 /** Register an external file or folder under the active project.
  *  Path can be absolute or relative; the host canonicalises it
@@ -83,7 +83,7 @@ export const studioAddExternal = (
   path:  string,
   label?: string,
 ): Promise<void> =>
-  invoke('studio_add_external', { tabId, path, label });
+  studio('studio_add_external', { tab_id: tabId, path, label });
 
 /** Drop an external registration by path. Returns `true` when the
  *  entry was actually removed (caller may want to skip a no-op
@@ -92,7 +92,7 @@ export const studioRemoveExternal = (
   tabId: string,
   path:  string,
 ): Promise<boolean> =>
-  invoke<boolean>('studio_remove_external', { tabId, path });
+  studio<boolean>('studio_remove_external', { tab_id: tabId, path });
 
 export const studioBindSchema = (
   tabId:           string,
@@ -103,19 +103,19 @@ export const studioBindSchema = (
    *  back to the built-in convention; pass an array to replace. */
   referenceFields: string[] | null = null,
 ): Promise<void> =>
-  invoke('studio_bind_schema', {
-    tabId,
-    relativePath,
-    rsFile,
-    rootType,
-    referenceFields,
+  studio('studio_bind_schema', {
+    tab_id:           tabId,
+    relative_path:    relativePath,
+    rs_file:          rsFile,
+    root_type:        rootType,
+    reference_fields: referenceFields,
   });
 
 export const studioUnbindSchema = (
   tabId:        string,
   relativePath: string,
 ): Promise<boolean> =>
-  invoke<boolean>('studio_unbind_schema', { tabId, relativePath });
+  studio<boolean>('studio_unbind_schema', { tab_id: tabId, relative_path: relativePath });
 
 /** Flip a single field name in the reference-field list of the binding
  *  that matches `relativePath`. Returns the new state: `true` when the
@@ -126,7 +126,11 @@ export const studioToggleReferenceField = (
   relativePath: string,
   field:        string,
 ): Promise<boolean> =>
-  invoke<boolean>('studio_toggle_reference_field', { tabId, relativePath, field });
+  studio<boolean>('studio_toggle_reference_field', {
+    tab_id:        tabId,
+    relative_path: relativePath,
+    field,
+  });
 
 /** Persistent project-wide cross-ref index toggle + tunables. Mirrors
  *  `crate::config::app_config::StudioSettings`. */
@@ -163,7 +167,7 @@ export const studioScanRepo = (
   tabId: string,
   kinds: StudioFileKind[] = [],
 ): Promise<StudioFileEntry[]> =>
-  invoke<StudioFileEntry[]>('studio_scan_repo', { tabId, kinds });
+  studio<StudioFileEntry[]>('studio_scan_repo', { tab_id: tabId, kinds });
 
 /** A single top-level definition surfaced by the project-wide
  *  cross-ref scanner — see `src-tauri/src/studio/mod.rs::CrossRefDef`.
@@ -191,7 +195,7 @@ export const studioScanCrossRefs = (
   tabId: string,
   kinds: StudioFileKind[] | null = null,
 ): Promise<CrossRefDef[]> =>
-  invoke<CrossRefDef[]>('studio_scan_cross_refs', { tabId, kinds });
+  studio<CrossRefDef[]>('studio_scan_cross_refs', { tab_id: tabId, kinds });
 
 /** A reverse hit: a reference field somewhere in the repo whose value
  *  equals the queried target id. Field path matches the AST path scheme
@@ -214,7 +218,7 @@ export const studioFindUsages = (
   target: string,
   kinds:  StudioFileKind[] | null = null,
 ): Promise<UsageMatch[]> =>
-  invoke<UsageMatch[]>('studio_find_usages', { tabId, target, kinds });
+  studio<UsageMatch[]>('studio_find_usages', { tab_id: tabId, target, kinds });
 
 /** A reference field whose value doesn't match any `id`/`name`
  *  definition known to the project — a dangling pointer. Same
@@ -239,4 +243,4 @@ export const studioScanBrokenRefs = (
   tabId: string,
   kinds: StudioFileKind[] | null = null,
 ): Promise<BrokenRef[]> =>
-  invoke<BrokenRef[]>('studio_scan_broken_refs', { tabId, kinds });
+  studio<BrokenRef[]>('studio_scan_broken_refs', { tab_id: tabId, kinds });

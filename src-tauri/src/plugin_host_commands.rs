@@ -67,7 +67,10 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
         "arbor:git.branch_create" => {
             let name = req_str(&ctx, "name", id)?;
             let from_oid = get_str(&ctx, "from_oid").unwrap_or_else(|| "HEAD".to_string());
-            branch_commands::create_branch(state, tab_id, name, from_oid)?;
+            // Migrated to the corvus broker: route through the generic rpc path
+            // so `on_branch_create` fires exactly as for a user invocation.
+            corvus_rpc(state.inner(), "create_branch",
+                serde_json::json!({ "tab_id": tab_id, "name": name, "from_oid": from_oid }))?;
         }
         "arbor:git.checkout" => {
             let name = req_str(&ctx, "name", id)?;
@@ -78,10 +81,10 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
             branch_commands::delete_branch(app.clone(), state, tab_id, name)?;
         }
         "arbor:git.stage_all" => {
-            stage_commands::stage_all(state, tab_id)?;
+            corvus_rpc(state.inner(), "stage_all", serde_json::json!({ "tab_id": tab_id }))?;
         }
         "arbor:git.unstage_all" => {
-            stage_commands::unstage_all(state, tab_id)?;
+            corvus_rpc(state.inner(), "unstage_all", serde_json::json!({ "tab_id": tab_id }))?;
         }
         other => {
             return Err(AppError::Other(format!(
@@ -89,6 +92,16 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
             )));
         }
     }
+    Ok(())
+}
+
+/// Forward a now-migrated git command through the generic `corvus` rpc path so
+/// its post-call fire-and-forget plugin hooks fire exactly as for a
+/// user-initiated invocation (the handler itself fires none). Commands that
+/// fire no hook (e.g. `stage_all`) simply get a no-op `post_hooks::fire`.
+fn corvus_rpc(state: &AppState, method: &str, params: Value) -> Result<(), AppError> {
+    let result = crate::ipc::dispatch_rpc(state, "corvus", method, params.clone())?;
+    crate::ipc::corvus::post_hooks::fire(state, "corvus", method, &params, &result);
     Ok(())
 }
 
