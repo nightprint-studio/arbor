@@ -17,6 +17,7 @@ members = [
     "crates/foundation/shell-common",
     "crates/foundation/rpc",
     "crates/foundation/rpc-macros",
+    "crates/corvus/core",
     "crates/corvus/brp",
     "crates/corvus/issue-tracker/api",
     "crates/corvus/issue-tracker/linear",

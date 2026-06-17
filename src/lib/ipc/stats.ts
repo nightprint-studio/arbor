@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { corvus } from './rpc';
 
 /** Start a background stats computation for the given tab.
  *  Returns immediately. The result is delivered as a Tauri event:
@@ -8,10 +8,10 @@ import { invoke } from '@tauri-apps/api/core';
  *  If the HEAD hasn't changed since the last computation the cached
  *  result is emitted synchronously (no thread spawned). */
 export const computeRepoStats = (tabId: string): Promise<void> =>
-  invoke<void>('compute_repo_stats', { tabId });
+  corvus<void>('compute_repo_stats', { tab_id: tabId });
 
 /** Export repository statistics to a JSON or HTML file.
  *  Returns a job-id; the export runs in the background.
  *  @param format  'json' | 'html' */
 export const exportRepoStats = (tabId: string, outputPath: string, format: 'json' | 'html'): Promise<string> =>
-  invoke<string>('export_repo_stats', { tabId, outputPath, format });
+  corvus<string>('export_repo_stats', { tab_id: tabId, output_path: outputPath, format });

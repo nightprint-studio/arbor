@@ -1,11 +1,31 @@
-use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+//! `stats` domain — handlers routed through the in-process broker.
+//!
+//! Both commands spawn background work that outlives the call and emits frontend
+//! events from inside it. A handler reached through the generic `rpc` command
+//! holds only `&AppState` (no `AppHandle`), so the background thread captures the
+//! **event sink** (`Arc<dyn EventSink>` — [`AppState::event_sink`]) plus the
+//! specific `Arc`s it needs (the job registry), never an `AppHandle`. That's
+//! exactly the shape `corvus-be` will use once it splits out (sink → channel,
+//! registries → the backend's own state). Behavior is byte-identical to the old
+//! inline command — only the egress handle changed.
+
+use std::sync::{Arc, Mutex};
+
+use arbor_ipc::prelude::EventSink;
+
 use crate::error::AppError;
+use crate::ipc::corvus;
+use crate::jobs::JobRegistry;
 use crate::AppState;
 
-fn stats_finish_job(app_handle: &tauri::AppHandle, job_id: &str, success: bool, message: &str) {
-    let state = app_handle.state::<crate::AppState>();
-    if let Ok(mut jobs) = state.jobs.lock() {
+fn stats_finish_job(
+    sink: &Arc<dyn EventSink>,
+    jobs: &Arc<Mutex<JobRegistry>>,
+    job_id: &str,
+    success: bool,
+    message: &str,
+) {
+    if let Ok(mut jobs) = jobs.lock() {
         let status = if success {
             crate::jobs::JobStatus::Completed { exit_code: 0 }
         } else {
@@ -13,7 +33,7 @@ fn stats_finish_job(app_handle: &tauri::AppHandle, job_id: &str, success: bool, 
         };
         jobs.set_status(job_id, status);
     }
-    let _ = app_handle.emit("arbor://job-done", serde_json::json!({
+    sink.emit("arbor://job-done", serde_json::json!({
         "job_id":    job_id,
         "success":   success,
         "exit_code": if success { 0i32 } else { -1i32 },
@@ -24,7 +44,7 @@ fn stats_finish_job(app_handle: &tauri::AppHandle, job_id: &str, success: bool, 
     } else {
         ("Stats export failed", "error")
     };
-    let _ = app_handle.emit("plugin:notification", serde_json::json!({
+    sink.emit("plugin:notification", serde_json::json!({
         "plugin":  "arbor",
         "title":   title,
         "message": message,
@@ -36,15 +56,19 @@ fn stats_finish_job(app_handle: &tauri::AppHandle, job_id: &str, success: bool, 
 ///
 /// Returns a job-id immediately; the export runs in a background thread.
 /// Emits `arbor://job-done` and `plugin:notification` on completion.
-#[tauri::command]
-pub async fn export_repo_stats(
+#[corvus::handler]
+fn export_repo_stats(
+    state: &AppState,
     tab_id: String,
     output_path: String,
     format: String,
-    state: State<'_, AppState>,
-    app: AppHandle,
 ) -> Result<String, AppError> {
-    use crate::jobs::{JobInfo, JobRegistry, JobStatus};
+    use crate::jobs::{JobInfo, JobStatus};
+
+    let sink = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+    let jobs = Arc::clone(&state.jobs);
 
     // Grab repo path + name and check the stats cache — no mutex held into bg thread.
     let (repo_path, repo_name, cached_stats) = {
@@ -67,9 +91,14 @@ pub async fn export_repo_stats(
         (path, name, cached)
     };
 
+    // Snapshot any plugin-supplied logo override now (on the calling thread) so
+    // the background thread needs no access to the shell's branding state — just
+    // the owned value. Co-branded exports pick up the same logo the user sees.
+    let logo_override = state.branding.snapshot().logo_svg;
+
     // Register a job entry so it appears in the Jobs overlay immediately.
     let job_id = {
-        let mut jobs = state.jobs.lock()
+        let mut jobs = jobs.lock()
             .map_err(|_| AppError::Other("mutex poisoned".into()))?;
         let id = jobs.new_id();
         jobs.register(JobInfo {
@@ -89,7 +118,7 @@ pub async fn export_repo_stats(
         id
     };
 
-    let _ = app.emit("arbor://job-started", serde_json::json!({
+    sink.emit("arbor://job-started", serde_json::json!({
         "job_id":      &job_id,
         "name":        format!("Export Stats as {}", format.to_uppercase()),
         "plugin_name": "arbor",
@@ -97,16 +126,16 @@ pub async fn export_repo_stats(
         "category":    "Export",
     }));
 
-    let jid = job_id.clone();
-    let ah  = app.clone();
+    let jid      = job_id.clone();
+    let sink_bg  = Arc::clone(&sink);
+    let jobs_bg  = Arc::clone(&jobs);
 
-    tokio::task::spawn_blocking(move || {
+    std::thread::spawn(move || {
         let emit_line = |line: &str| {
-            let s = ah.state::<crate::AppState>();
-            if let Ok(mut jobs) = s.jobs.lock() {
+            if let Ok(mut jobs) = jobs_bg.lock() {
                 jobs.append_output(&jid, line.to_string());
             }
-            let _ = ah.emit("arbor://job-output", serde_json::json!({
+            sink_bg.emit("arbor://job-output", serde_json::json!({
                 "job_id": &jid,
                 "text":   line,
             }));
@@ -123,7 +152,7 @@ pub async fn export_repo_stats(
                 Err(e) => {
                     let err = format!("Cannot open repo: {e}");
                     emit_line(&format!("[error] {err}"));
-                    stats_finish_job(&ah, &jid, false, &err);
+                    stats_finish_job(&sink_bg, &jobs_bg, &jid, false, &err);
                     return;
                 }
             };
@@ -135,16 +164,13 @@ pub async fn export_repo_stats(
                 Err(e) => {
                     let err = format!("Failed to compute stats: {e}");
                     emit_line(&format!("[error] {err}"));
-                    stats_finish_job(&ah, &jid, false, &err);
+                    stats_finish_job(&sink_bg, &jobs_bg, &jid, false, &err);
                     return;
                 }
             }
         };
 
         emit_line(&format!("Writing {format} export…"));
-        // Honour any plugin-supplied logo override so co-branded exports
-        // pick up the same logo the user sees in-app.
-        let logo_override = ah.state::<crate::AppState>().branding.snapshot().logo_svg;
         match crate::git::stats_export::export_to_file(
             &stats,
             std::path::Path::new(&output_path),
@@ -155,11 +181,11 @@ pub async fn export_repo_stats(
             Ok(()) => {
                 let ok_msg = format!("Stats exported to '{output_path}'.");
                 emit_line(&ok_msg);
-                stats_finish_job(&ah, &jid, true, &ok_msg);
+                stats_finish_job(&sink_bg, &jobs_bg, &jid, true, &ok_msg);
             }
             Err(e) => {
                 emit_line(&format!("[error] {e}"));
-                stats_finish_job(&ah, &jid, false, &e);
+                stats_finish_job(&sink_bg, &jobs_bg, &jid, false, &e);
             }
         }
     });
@@ -176,12 +202,12 @@ pub async fn export_repo_stats(
 /// If the current HEAD matches the cached SHA the event is emitted
 /// synchronously from the cached value — no thread is spawned.
 /// If a computation is already running for that tab, this call is a no-op.
-#[tauri::command]
-pub async fn compute_repo_stats(
-    tab_id: String,
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<(), AppError> {
+#[corvus::handler]
+fn compute_repo_stats(state: &AppState, tab_id: String) -> Result<(), AppError> {
+    let sink = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+
     // ── 1. Extract the repo path, HEAD sha and exclusion config ─────────────
     let (repo_path, head_sha, exclude) = {
         let mut mgr = state.lock_repos()?;
@@ -221,7 +247,7 @@ pub async fn compute_repo_stats(
             if *cached_key == cache_key {
                 let stats = cached_stats.clone();
                 drop(cache);
-                let _ = app.emit("arbor://repo-stats-ready", serde_json::json!({
+                sink.emit("arbor://repo-stats-ready", serde_json::json!({
                     "tab_id": &tab_id,
                     "stats": stats,
                 }));
@@ -261,14 +287,14 @@ pub async fn compute_repo_stats(
                 if let Ok(mut cache) = cache_arc.lock() {
                     cache.insert(tab_id_bg.clone(), (cache_key, stats.clone()));
                 }
-                let _ = app.emit("arbor://repo-stats-ready", serde_json::json!({
+                sink.emit("arbor://repo-stats-ready", serde_json::json!({
                     "tab_id": &tab_id_bg,
                     "stats": stats,
                 }));
             }
             Err(e) => {
                 tracing::error!("stats computation failed for tab {tab_id_bg}: {e}");
-                let _ = app.emit("arbor://repo-stats-error", serde_json::json!({
+                sink.emit("arbor://repo-stats-error", serde_json::json!({
                     "tab_id": &tab_id_bg,
                     "error": e.to_string(),
                 }));

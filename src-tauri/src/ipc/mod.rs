@@ -29,6 +29,7 @@
 //! error mapping) before the wider sweep.
 
 pub mod corvus;
+pub mod event_sink;
 
 use std::sync::Arc;
 

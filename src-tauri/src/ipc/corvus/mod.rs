@@ -18,6 +18,7 @@ pub mod notes;
 pub mod reflog;
 pub mod reset;
 pub mod stash;
+pub mod stats;
 
 // Re-export so backend handlers annotate with `#[corvus::handler]` — the
 // product's own namespace for the generic `arbor-rpc` attribute.

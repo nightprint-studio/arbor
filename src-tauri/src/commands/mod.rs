@@ -25,7 +25,6 @@ pub mod issues_commands;
 pub mod merge_commands;
 pub mod ticket_commands;
 pub mod worktree_commands;
-pub mod stats_commands;
 pub mod theme_commands;
 pub mod recovery_commands;
 pub mod repo_browser_commands;

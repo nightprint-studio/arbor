@@ -154,6 +154,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "corvus-brp",
+ "corvus-core",
  "corvus-git-provider-api",
  "corvus-git-provider-github",
  "corvus-git-provider-gitlab",
@@ -1256,6 +1257,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "corvus-core"
+version = "0.3.0"
+dependencies = [
+ "arbor-ipc",
+ "serde_json",
 ]
 
 [[package]]

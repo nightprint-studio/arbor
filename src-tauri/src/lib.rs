@@ -2,6 +2,9 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::sync::atomic::AtomicBool;
 use std::collections::{HashMap, HashSet};
 use tauri::Manager;
+
+use arbor_ipc::prelude::EventSink;
+use corvus_core::prelude::CorvusState;
 #[cfg(any(not(debug_assertions), feature = "deep-link-dev"))]
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -219,6 +222,17 @@ pub struct AppState {
     /// — an `OnceLock` like [`scheduler`](Self::scheduler). Read via
     /// [`AppState::router`].
     pub router: Arc<OnceLock<Arc<Router>>>,
+    /// The Corvus (git) backend's headless state — the seed of `corvus-be`
+    /// (`corvus-core`). Published in `setup()` (it needs the `AppHandle` to back
+    /// its event sink, which `AppState::new()` predates, hence the `OnceLock`).
+    /// Today it holds only the event egress: a Model-D handler reached through
+    /// the generic `rpc` command holds `&AppState`, and [`emit`](Self::emit) /
+    /// [`event_sink`](Self::event_sink) route through here so handlers push
+    /// events without taking an `AppHandle`. As git domains are extracted this
+    /// gains fields and handlers shift to `&CorvusState`; at the process split
+    /// it moves into `corvus-be` and its sink flips to the `arbor-ipc` channel —
+    /// the call sites stay put.
+    pub corvus: Arc<OnceLock<CorvusState>>,
 }
 
 impl AppState {
@@ -249,6 +263,34 @@ impl AppState {
     pub fn fire_hook(&self, hook: &str, ctx: serde_json::Value) {
         self.hook_dispatcher
             .fire_blocking(hook, arbor_plugin_api::prelude::PluginValue::from_json(ctx));
+    }
+
+    /// Emit a frontend event. The Model-D-safe egress for IPC handlers reached
+    /// through the generic `rpc` command (which hold only `&AppState`, not an
+    /// `AppHandle`): it routes through [`CorvusState`], whose sink in-process
+    /// forwards to `AppHandle::emit` and post-split becomes an `arbor-ipc`
+    /// `Event::Notify` the shell re-emits — the call site doesn't change. A drop
+    /// before the backend is wired is logged, not panicked (only during early
+    /// boot). The payload is serialized to JSON here, exactly as crossing the
+    /// IPC boundary will require.
+    pub fn emit<S: serde::Serialize>(&self, event: &str, payload: S) {
+        let Some(corvus) = self.corvus.get() else {
+            tracing::warn!("AppState::emit('{event}') before backend was wired — dropped");
+            return;
+        };
+        match serde_json::to_value(payload) {
+            Ok(value) => corvus.emit(event, value),
+            Err(e) => tracing::warn!("AppState::emit('{event}') serialize failed: {e}"),
+        }
+    }
+
+    /// A cloneable handle to the frontend event egress, for background
+    /// threads/tasks that outlive a handler and emit from inside — they capture
+    /// this (`Arc<dyn EventSink>`, `Send + 'static`) instead of an `AppHandle`,
+    /// so they're already shaped for the `corvus-be` split. `None` only before
+    /// `setup()` wires the backend.
+    pub fn event_sink(&self) -> Option<Arc<dyn EventSink>> {
+        self.corvus.get().map(|c| c.event_sink())
     }
 
     pub fn lock_config(&self) -> Result<MutexGuard<'_, AppConfig>> {
@@ -417,6 +459,7 @@ impl AppState {
             frontend_ready:         Arc::new((Mutex::new(false), Condvar::new())),
             scheduler:              Arc::new(OnceLock::new()),
             router:                 Arc::new(OnceLock::new()),
+            corvus:                 Arc::new(OnceLock::new()),
         }
     }
 
@@ -533,8 +576,17 @@ pub fn run() {
             // routes — safe here because commands only fire once `Builder::run()`
             // enters its event loop, after `setup()` returns.
             {
+                let state = app.state::<AppState>();
+                // Seed the Corvus backend state (the in-process `corvus-be`): its
+                // first piece is the event egress, backed here by `AppHandle::emit`.
+                // Model-D handlers reached through the generic `rpc` command hold
+                // only `&AppState` and push events via `AppState::emit`, which
+                // routes through this `CorvusState`.
+                let sink: std::sync::Arc<dyn arbor_ipc::prelude::EventSink> =
+                    std::sync::Arc::new(crate::ipc::event_sink::TauriEventSink::new(app.handle().clone()));
+                let _ = state.corvus.set(corvus_core::prelude::CorvusState::new(sink));
                 let router = crate::ipc::build_router(app.handle());
-                let _ = app.state::<AppState>().router.set(std::sync::Arc::new(router));
+                let _ = state.router.set(std::sync::Arc::new(router));
             }
 
             // Register the configured OS-global File-Explorer shortcut (opt-in;
@@ -1385,8 +1437,6 @@ pub fn run() {
             commands::repo_browser_commands::rb_get_file_content,
             commands::repo_browser_commands::rb_download_file,
             // Repository statistics (background computation, result via event)
-            commands::stats_commands::compute_repo_stats,
-            commands::stats_commands::export_repo_stats,
             // Theme
             commands::theme_commands::list_custom_themes,
             commands::theme_commands::get_active_theme_id,

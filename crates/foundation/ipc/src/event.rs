@@ -19,3 +19,20 @@ pub enum Event {
     /// Liveness heartbeat (drives the auto-reconnect bookkeeping, CLAUDE.md).
     Ping,
 }
+
+/// Egress for backend → frontend events — the producer side of [`Event`].
+///
+/// A handler reached through the IPC seam holds only its backend state, never an
+/// `AppHandle`; it pushes events through an `EventSink`. In-process the shell
+/// backs it with `AppHandle::emit`; once a backend splits into its own process
+/// the sink wraps the [`Event`] channel and each `emit` becomes an
+/// `Event::Notify { topic, payload }` the shell re-emits to the FE. **The call
+/// site never changes — only the backing.**
+///
+/// Object-safe (one method, `serde_json::Value` payload) on purpose: backend
+/// state holds an `Arc<dyn EventSink>` that clones cheaply into background
+/// threads/tasks which outlive a call and emit from inside.
+pub trait EventSink: Send + Sync {
+    /// Emit the frontend event `topic` carrying `payload`.
+    fn emit(&self, topic: &str, payload: serde_json::Value);
+}

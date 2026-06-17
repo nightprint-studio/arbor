@@ -2,8 +2,8 @@
 
 Stato: **M3 Asse B — pilota in-process atterrato, in forma GENERICA, sweep in
 corso**. Lo scheletro `arbor-ipc` (transport-agnostic + loopback) è ora *usato
-sul serio*: **5 domini** (`stash` 11, `bisect` 11, `notes` 5, `reset`/tags 3,
-`reflog` 1 = **31 comandi**) instradano FE→shell→`Router`→`LoopbackBroker`→
+sul serio*: **6 domini** (`stash` 11, `bisect` 11, `notes` 5, `reset`/tags 3,
+`stats` 2, `reflog` 1 = **33 comandi**) instradano FE→shell→`Router`→`LoopbackBroker`→
 registry→handler→JSON, tutto in-process, con la wire-string d'errore preservata.
 La shell **non ridichiara nessuna firma per-comando**: un solo comando generico
 `rpc(program, method, params)` inoltra; le firme vivono una volta sola sul
@@ -43,6 +43,45 @@ design generico non ha.
   l'handler) → `arbor-rpc` resta product-agnostic. Errori handler attraversano
   come stringa `Display` (la wire-string). FE: `corvus("stash_save", {…})` (la
   stringa = nome funzione = vecchio nome comando).
+- **Contesto handler + threading (l'unblock dei domini grossi)**: l'handler riceve
+  **solo `&AppState`** (passato type-erased come `&dyn Any`). `AppState` espone le
+  due capability che servono ai comandi non-triviali:
+  - **`state.emit(event, payload)`** — egress eventi Model-D-safe. Instrada attraverso
+    **`CorvusState`** (crate `corvus-core`, vedi sotto) → un `arbor_ipc::EventSink`:
+    in-process inoltra ad `AppHandle::emit`; al flip a `corvus-be` il sink wrappa il
+    canale `arbor-ipc` e ogni emit diventa un `Event::Notify { topic, payload }` che lo
+    shell ri-emette — **il call-site non cambia, cambia solo il backing**. È così che un
+    handler emette senza prendere un `AppHandle` (gli ~84 comandi che lo facevano).
+  - **`state.event_sink() -> Option<Arc<dyn EventSink>>`** — handle d'egress **clonabile**
+    (`Send + 'static`) per i **thread di background** che sopravvivono al comando ed
+    emettono da dentro: catturano questo invece di un `AppHandle` (più gli `Arc` dei
+    registry che gli servono, es. `jobs`). È esattamente la forma di `corvus-be` (sink→
+    canale, registry→stato del backend) — **niente `AppHandle` nei thread**. Nessuna
+    escape-hatch `AppHandle` esposta: un handler riceve `{ &AppState, event_sink }` e
+    basta; un eventuale bisogno Tauri-only futuro avrà una capability dedicata, non un
+    handle catch-all.
+  - **Threading**: il comando `rpc` è **`async` + un solo `spawn_blocking` centrale**.
+    Ogni handler sync gira così sul **blocking pool** — off main thread (no freeze UI,
+    hard-rule #9) e off runtime-worker — ereditando l'offload che ogni comando git
+    pesante faceva da sé (diff/graph usavano `spawn_blocking` + reopen-by-path). Un
+    handler che vuole restare concorrente fa **brief-lock `repos` → clona il path →
+    rilascia → lavoro pesante su repo riaperto** (stessa forma del vecchio comando,
+    meno il wrapper). I comandi **`async fn` senza `.await` reale** (offload
+    fire-and-forget, es. `stats`) sono handler sync identici. Restano fuori dallo sweep
+    finché non si estende il contesto: i comandi che **awaitano I/O vero** (HTTP
+    provider/cloud) — servirebbe un dispatch async o un `block_on` nel blocking pool.
+- **Scaffold `corvus-be` avviato — crate `corvus-core`**: il primo paletto del
+  futuro backend headless. `corvus-core` (`crates/corvus/core`, Tauri-free, dipende
+  solo da `arbor-ipc`+serde_json) ospita **`CorvusState`** = il seme dello stato che
+  `corvus-be` possiederà. Oggi gira **in-process**: lo shell ne costruisce uno in
+  `setup()` con un `EventSink` Tauri-backed (`ipc/event_sink.rs::TauriEventSink`) e
+  `AppState` vi delega `emit`/`event_sink` (campo `AppState.corvus: OnceLock<CorvusState>`).
+  Per ora tiene **solo** l'egress eventi; cresce campo-per-campo man mano che i domini
+  git diventano transport-ready (prossimi: `JobRegistry` già Arc-shared, poi
+  `RepoManager`+`crate::git`). Quando terrà abbastanza, gli handler passano da
+  `&AppState` a `&CorvusState` e il crate + handler si spostano in `bins/corvus-be`,
+  parlando con lo shell via `arbor-ipc`. **Il trait `EventSink` vive in `arbor-ipc`**
+  (egress product-agnostic, accanto a `Event`): merula/sitta lo riuseranno.
 - **FE**: helper generico `corvus(method, params)` (`src/lib/ipc/rpc.ts`); i
   wrapper tipati in `ipc/branch.ts` restano (DX) ma instradano via `corvus(…)` con
   chiavi **snake_case** nei `params`. Firme dei wrapper / comportamento invariati.
@@ -148,7 +187,7 @@ Finché il transport è in-process (loopback) l'handshake è un no-op (stesso pr
 |------|-----------|----------------|--------|
 | M1   | — (solo loopback + ping, scheletro) | `LoopbackBroker` (ping) | ✅ fatto |
 | M3 (a) pilota | in-process | `LoopbackBroker` reale — **dominio `stash` (11 cmd)** via comando generico `rpc(program,method,params)` + registry, un processo | ✅ **fatto** |
-| M3 (a) sweep | in-process | `LoopbackBroker` reale — **stash + bisect + notes + reset/tags + reflog (31 cmd, 5 domini)**; restano gli altri domini | 🔄 in corso |
+| M3 (a) sweep | in-process | `LoopbackBroker` reale — **stash + bisect + notes + reset/tags + stats + reflog (33 cmd, 6 domini)**; restano gli altri domini | 🔄 in corso |
 | M3 (b) | named pipe / unix socket + tarpc | `PipeBroker` | flip a BE separato |
 
 ## Cosa c'è nello scheletro M1

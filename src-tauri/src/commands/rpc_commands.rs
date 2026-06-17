@@ -8,7 +8,7 @@
 //! shapes and return types live once, on the backend (see
 //! `crate::ipc::corvus`), and the FE keeps its typed wrappers for ergonomics.
 
-use tauri::State;
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::AppState;
@@ -16,18 +16,33 @@ use crate::AppState;
 /// Forward a product command to its backend.
 ///
 /// - `program` — which backend (`"corvus"` today; `"merula"` / `"sitta"` later).
-/// - `method` — the `"<domain>.<verb>"` the backend registered (e.g. `"stash.save"`).
+/// - `method` — the method the backend registered (= the handler's fn name,
+///   e.g. `"stash_save"`).
 /// - `params` — the handler's named arguments as a JSON object (snake_case keys
 ///   matching the handler signature); omitted/`null` for no-arg methods.
 ///
 /// The result is the handler's return value as JSON. Backend errors arrive with
 /// their original wire string preserved (see `crate::ipc::dispatch_rpc`).
+///
+/// `async` + a single central `spawn_blocking`: every sync handler reached
+/// through the router runs on the blocking pool — off the main thread (no UI
+/// freeze) and off the runtime workers — which is exactly the `spawn_blocking`
+/// each heavy inline git command used to do for itself. Handlers therefore stay
+/// plain sync functions; a handler that needs to keep concurrency just
+/// brief-locks `repos` to clone the path, drops the lock, then does its heavy
+/// work on a reopened repo (same shape as the old commands, minus the wrapper).
 #[tauri::command]
-pub fn rpc(
-    state: State<'_, AppState>,
+pub async fn rpc(
+    app: AppHandle,
     program: String,
     method: String,
     params: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, AppError> {
-    crate::ipc::dispatch_rpc(&state, &program, &method, params.unwrap_or(serde_json::Value::Null))
+    let params = params.unwrap_or(serde_json::Value::Null);
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        crate::ipc::dispatch_rpc(state.inner(), &program, &method, params)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("rpc task panicked: {e}")))?
 }
