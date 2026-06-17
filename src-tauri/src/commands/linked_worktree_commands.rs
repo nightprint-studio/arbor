@@ -18,23 +18,10 @@ fn emit_changed(app: &AppHandle) {
     let _ = app.emit("arbor://worktree-links-changed", serde_json::json!({}));
 }
 
-#[tauri::command]
-pub fn list_worktree_links(state: State<'_, AppState>) -> Result<Vec<WorktreeLink>, AppError> {
-    Ok(state.lock_linked_worktrees()?.list())
-}
-
-#[tauri::command]
-pub fn get_worktree_link(state: State<'_, AppState>, id: String) -> Result<Option<WorktreeLink>, AppError> {
-    Ok(state.lock_linked_worktrees()?.get(&id).cloned())
-}
-
-#[tauri::command]
-pub fn get_worktree_link_for_repo(
-    state: State<'_, AppState>,
-    repo_id: String,
-) -> Result<Option<WorktreeLink>, AppError> {
-    Ok(state.lock_linked_worktrees()?.find_by_repo(&repo_id).cloned())
-}
+// Read-only registry queries (`list_worktree_links`, `get_worktree_link`,
+// `get_worktree_link_for_repo`) migrated to the corvus broker — see
+// `ipc/corvus/linked_worktree.rs`. Only the AppHandle/emit-coupled mutations
+// remain here, pending the emit/seam pass.
 
 #[tauri::command]
 pub fn create_worktree_link(

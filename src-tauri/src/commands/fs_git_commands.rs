@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use git2::{build::CheckoutBuilder, BranchType, IndexAddOption, Repository, Status, StatusOptions};
+use git2::{build::CheckoutBuilder, IndexAddOption, Repository, Status, StatusOptions};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -315,121 +315,9 @@ fn not_in_repo(repos: HashMap<String, RepoMarker>) -> FsGitStatus {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Command — changes list (staged / unstaged, à la "Check for modifications")
-// ---------------------------------------------------------------------------
-
-/// One changed file, in either the staged (index) or unstaged (worktree) list.
-#[derive(Clone, Serialize)]
-pub struct GitChange {
-    /// Absolute path with native separators — matches `fsReadDir` entry paths so
-    /// the explorer can reveal/select the row.
-    pub path: String,
-    /// Repo-relative path (forward slashes) for display.
-    pub rel: String,
-    pub badge: GitBadge,
-}
-
-/// Full working-tree change list for the repo enclosing `dir`. A file edited
-/// after being staged appears in BOTH lists (its index side staged, its
-/// worktree side unstaged) — exactly like `git status`.
-#[derive(Clone, Default, Serialize)]
-pub struct GitChanges {
-    pub repo_root: Option<String>,
-    pub branch: Option<String>,
-    pub staged: Vec<GitChange>,
-    pub unstaged: Vec<GitChange>,
-}
-
-/// Badge for the index (staged) side of a status, if any.
-fn index_badge(s: Status) -> Option<GitBadge> {
-    if s.contains(Status::INDEX_NEW) {
-        Some(GitBadge::Added)
-    } else if s.intersects(Status::INDEX_MODIFIED | Status::INDEX_TYPECHANGE) {
-        Some(GitBadge::Modified)
-    } else if s.contains(Status::INDEX_DELETED) {
-        Some(GitBadge::Deleted)
-    } else if s.contains(Status::INDEX_RENAMED) {
-        Some(GitBadge::Renamed)
-    } else {
-        None
-    }
-}
-
-/// Badge for the worktree (unstaged) side of a status, if any. Conflicts are
-/// surfaced here so they never get lost in the staged list.
-fn worktree_badge(s: Status) -> Option<GitBadge> {
-    if s.contains(Status::CONFLICTED) {
-        Some(GitBadge::Conflicted)
-    } else if s.contains(Status::WT_NEW) {
-        Some(GitBadge::Untracked)
-    } else if s.intersects(Status::WT_MODIFIED | Status::WT_TYPECHANGE) {
-        Some(GitBadge::Modified)
-    } else if s.contains(Status::WT_DELETED) {
-        Some(GitBadge::Deleted)
-    } else if s.contains(Status::WT_RENAMED) {
-        Some(GitBadge::Renamed)
-    } else {
-        None
-    }
-}
-
-#[tauri::command]
-pub async fn fs_git_changes(dir: String) -> Result<GitChanges, AppError> {
-    tokio::task::spawn_blocking(move || {
-        let repo = match Repository::discover(&dir) {
-            Ok(r) => r,
-            Err(_) => return Ok(GitChanges::default()),
-        };
-        let Some(wd) = repo.workdir().map(|p| p.to_path_buf()) else {
-            return Ok(GitChanges::default());
-        };
-
-        let mut opts = StatusOptions::new();
-        opts.include_untracked(true)
-            .recurse_untracked_dirs(false)
-            .include_ignored(false)
-            .renames_head_to_index(false)
-            .renames_index_to_workdir(false);
-
-        let mut staged: Vec<GitChange> = Vec::new();
-        let mut unstaged: Vec<GitChange> = Vec::new();
-        if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
-            for entry in statuses.iter() {
-                let Some(rel) = entry.path() else { continue };
-                let s = entry.status();
-                let abs = wd.join(rel);
-                let path = abs
-                    .to_string_lossy()
-                    .trim_end_matches(|c| c == '/' || c == '\\')
-                    .to_string();
-                let rel_disp = rel.replace('\\', "/").trim_end_matches('/').to_string();
-                if let Some(badge) = index_badge(s) {
-                    staged.push(GitChange { path: path.clone(), rel: rel_disp.clone(), badge });
-                }
-                if let Some(badge) = worktree_badge(s) {
-                    unstaged.push(GitChange { path, rel: rel_disp, badge });
-                }
-            }
-        }
-        staged.sort_by(|a, b| a.rel.cmp(&b.rel));
-        unstaged.sort_by(|a, b| a.rel.cmp(&b.rel));
-
-        let (branch, ..) = branch_info(&repo);
-        Ok(GitChanges {
-            repo_root: Some(
-                wd.to_string_lossy()
-                    .trim_end_matches(|c| c == '/' || c == '\\')
-                    .to_string(),
-            ),
-            branch,
-            staged,
-            unstaged,
-        })
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("fs_git_changes task panicked: {e}")))?
-}
+// `fs_git_changes` (staged/unstaged change list) migrated to the corvus broker —
+// see `ipc/corvus/fs_git.rs`, along with its `GitChange`/`GitChanges` DTOs and
+// the `index_badge`/`worktree_badge` helpers.
 
 // ---------------------------------------------------------------------------
 // Commands — inline light actions (stage / unstage / discard / ignore)
@@ -609,36 +497,12 @@ pub async fn fs_git_ignore(paths: Vec<String>) -> Result<(), AppError> {
 }
 
 // ---------------------------------------------------------------------------
-// Commands — branch list + switch (checkout)
+// Command — branch switch (checkout)
 // ---------------------------------------------------------------------------
-
-/// One local branch, with a flag for the currently checked-out one.
-#[derive(Clone, Serialize)]
-pub struct FsBranch {
-    pub name: String,
-    pub is_head: bool,
-}
-
-/// Local branches of the repo enclosing `path`, sorted case-insensitively.
-#[tauri::command]
-pub async fn fs_git_branches(path: String) -> Result<Vec<FsBranch>, AppError> {
-    tokio::task::spawn_blocking(move || {
-        let repo = Repository::discover(&path)
-            .map_err(|_| AppError::Other("not inside a git repository".into()))?;
-        let mut out = Vec::new();
-        for b in repo.branches(Some(BranchType::Local))? {
-            let (branch, _) = b?;
-            let is_head = branch.is_head();
-            if let Some(name) = branch.name()?.map(String::from) {
-                out.push(FsBranch { name, is_head });
-            }
-        }
-        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        Ok(out)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("fs_git_branches task panicked: {e}")))?
-}
+//
+// The read-only branch list (`fs_git_branches`, with its `FsBranch` DTO)
+// migrated to the corvus broker — see `ipc/corvus/fs_git.rs`. The (mutating)
+// safe-checkout below stays inline pending the emit/seam pass.
 
 /// Switch the repo enclosing `path` to `branch` (a local branch name). Uses a
 /// SAFE checkout — refuses to overwrite uncommitted changes rather than
@@ -672,30 +536,8 @@ pub async fn fs_git_checkout(path: String, branch: String) -> Result<(), AppErro
     .map_err(|e| AppError::Other(format!("fs_git_checkout task panicked: {e}")))?
 }
 
-/// Resolve the remote URL of the repo enclosing `path` (a file or directory),
-/// for the explorer's "Copy project link". Prefers the remote named `origin`,
-/// falling back to the first remote. Returns `None` when `path` isn't inside a
-/// repo or the repo has no remote — the FE then toasts instead of copying a
-/// non-shareable link. `Repository::discover` walks up from any subpath, so the
-/// caller can pass the right-clicked entry directly.
-#[tauri::command]
-pub async fn fs_git_remote_url(path: String) -> Result<Option<String>, AppError> {
-    tokio::task::spawn_blocking(move || {
-        let Ok(repo) = Repository::discover(&path) else { return Ok(None) };
-        let remotes = repo.remotes()?;
-        let pick = remotes.iter().flatten().find(|n| *n == "origin")
-            .or_else(|| remotes.iter().flatten().next());
-        let Some(name) = pick else { return Ok(None) };
-        let url = repo
-            .find_remote(name)
-            .ok()
-            .and_then(|r| r.url().map(str::to_string))
-            .filter(|u| !u.trim().is_empty());
-        Ok(url)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("fs_git_remote_url task panicked: {e}")))?
-}
+// `fs_git_remote_url` (resolve origin/first remote for "Copy project link")
+// migrated to the corvus broker — see `ipc/corvus/fs_git.rs`.
 
 // ---------------------------------------------------------------------------
 // Command — heavy-action delegation ("Open in Arbor")

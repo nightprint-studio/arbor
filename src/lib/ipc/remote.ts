@@ -6,7 +6,7 @@ import { corvus } from './rpc';
 // ── Read-only ─────────────────────────────────────────────────────────────────
 
 export const listRemotes = (tabId: string) =>
-  invoke<RemoteInfo[]>('list_remotes', { tabId });
+  corvus<RemoteInfo[]>('list_remotes', { tab_id: tabId });
 
 export const searchCommits = (tabId: string, query: SearchQuery) =>
   corvus<SearchResult[]>('search_commits', { tab_id: tabId, query });

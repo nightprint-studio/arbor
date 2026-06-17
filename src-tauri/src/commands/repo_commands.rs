@@ -69,19 +69,6 @@ pub fn close_repo(app: AppHandle, state: State<'_, AppState>, tab_id: String) ->
     Ok(())
 }
 
-/// Returns true when `path` is inside a git repository.
-#[tauri::command]
-pub fn check_is_git_repo(path: String) -> bool {
-    crate::git::init::is_git_repo(&path)
-}
-
-/// Read user.name / user.email from the global git config.
-/// Returns ("", "") when the config is unavailable.
-#[tauri::command]
-pub fn get_git_identity() -> (String, String) {
-    crate::git::init::get_git_identity()
-}
-
 /// Initialise a new git repository, create optional files (.gitignore,
 /// LICENSE, README), optionally create a remote repo via the provider API,
 /// and make an initial commit. Fires the `on_repo_init` plugin hook.
@@ -240,12 +227,6 @@ async fn resolve_gitlab_namespace_id(path: &str) -> Result<Option<u64>, AppError
     Ok(id)
 }
 
-/// List branch names available on a remote URL (calls `git ls-remote --heads`).
-#[tauri::command]
-pub fn list_remote_branches_for_url(url: String) -> Result<Vec<String>, AppError> {
-    crate::git::repo::list_remote_branches(&url)
-}
-
 /// Clone a remote repository and open it as a new tab.
 ///
 /// The actual clone runs on tokio's blocking pool so the IPC thread stays free
@@ -272,21 +253,4 @@ pub async fn clone_repo(
     );
     crate::ipc::sync_repo_open(&state, &tab_id, &info.path);
     Ok(info)
-}
-
-#[tauri::command]
-pub fn get_repo_info(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<RepoInfo, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(RepoInfo {
-        tab_id: tab_id.clone(),
-        path: repo.path.clone(),
-        name: repo.name.clone(),
-        current_branch: repo.current_branch(),
-        is_bare: repo.inner().is_bare(),
-        is_empty: repo.inner().is_empty().unwrap_or(false),
-    })
 }

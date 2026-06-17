@@ -13,6 +13,7 @@
 //  different surface area, unrelated.)
 
 import { invoke } from '@tauri-apps/api/core';
+import { studio } from './rpc';
 import type {
   BulkEditAction,
   BulkEditOpenDoc,
@@ -349,10 +350,10 @@ export interface TypeSource {
 // ──────────────────────────────────────────────────────────────────────
 
 export const studioListFormats = (): Promise<FormatDescriptor[]> =>
-  invoke<FormatDescriptor[]>('studio_list_formats');
+  studio<FormatDescriptor[]>('studio_list_formats');
 
 export const studioDescribe = (formatId: StudioFormat): Promise<FormatDescriptor> =>
-  invoke<FormatDescriptor>('studio_describe', { formatId });
+  studio<FormatDescriptor>('studio_describe', { format_id: formatId });
 
 export interface StudioParseArgs {
   text?:         string;
@@ -371,83 +372,83 @@ export const studioParse = (
   invoke<StudioParseResult>('studio_parse', { formatId, ...args });
 
 export const studioClose = (formatId: StudioFormat, docId: string): Promise<void> =>
-  invoke('studio_close', { formatId, docId });
+  studio('studio_close', { format_id: formatId, doc_id: docId });
 
 export const studioGetEncoding = (
   formatId: StudioFormat,
   docId:    string,
 ): Promise<EncodingInfo> =>
-  invoke<EncodingInfo>('studio_get_encoding', { formatId, docId });
+  studio<EncodingInfo>('studio_get_encoding', { format_id: formatId, doc_id: docId });
 
 export const studioSetText = (
   formatId: StudioFormat,
   docId:    string,
   text:     string,
 ): Promise<StudioUpdateResult> =>
-  invoke<StudioUpdateResult>('studio_set_text', { formatId, docId, text });
+  studio<StudioUpdateResult>('studio_set_text', { format_id: formatId, doc_id: docId, text });
 
 export const studioGetRoot = <TKind extends string = string>(
   formatId: StudioFormat,
   docId:    string,
 ): Promise<StudioNodeView<TKind> | null> =>
-  invoke<StudioNodeView<TKind> | null>('studio_get_root', { formatId, docId });
+  studio<StudioNodeView<TKind> | null>('studio_get_root', { format_id: formatId, doc_id: docId });
 
 export const studioGetChildren = <TKind extends string = string>(
   formatId: StudioFormat,
   docId:    string,
   path:     string[],
 ): Promise<StudioNodeView<TKind>[]> =>
-  invoke<StudioNodeView<TKind>[]>('studio_get_children', { formatId, docId, path });
+  studio<StudioNodeView<TKind>[]>('studio_get_children', { format_id: formatId, doc_id: docId, path });
 
 export const studioGetValue = (
   formatId: StudioFormat,
   docId:    string,
   path:     string[],
 ): Promise<string> =>
-  invoke<string>('studio_get_value', { formatId, docId, path });
+  studio<string>('studio_get_value', { format_id: formatId, doc_id: docId, path });
 
 export const studioQuery = <TKind extends string = string>(
   formatId: StudioFormat,
   docId:    string,
   expr:     string,
 ): Promise<StudioQueryHit<TKind>[]> =>
-  invoke<StudioQueryHit<TKind>[]>('studio_query', { formatId, docId, expr });
+  studio<StudioQueryHit<TKind>[]>('studio_query', { format_id: formatId, doc_id: docId, expr });
 
 export const studioRawOriginal = (formatId: StudioFormat, docId: string): Promise<string> =>
-  invoke<string>('studio_raw_original', { formatId, docId });
+  studio<string>('studio_raw_original', { format_id: formatId, doc_id: docId });
 
 export const studioRawCurrent = (formatId: StudioFormat, docId: string): Promise<string> =>
-  invoke<string>('studio_raw_current', { formatId, docId });
+  studio<string>('studio_raw_current', { format_id: formatId, doc_id: docId });
 
 export const studioFormat = (formatId: StudioFormat, docId: string): Promise<string> =>
-  invoke<string>('studio_format', { formatId, docId });
+  studio<string>('studio_format', { format_id: formatId, doc_id: docId });
 
 export const studioToJson = (formatId: StudioFormat, docId: string): Promise<string> =>
-  invoke<string>('studio_to_json', { formatId, docId });
+  studio<string>('studio_to_json', { format_id: formatId, doc_id: docId });
 
 export const studioFromJson = (
   formatId: StudioFormat,
   docId:    string,
   jsonText: string,
 ): Promise<string> =>
-  invoke<string>('studio_from_json', { formatId, docId, jsonText });
+  studio<string>('studio_from_json', { format_id: formatId, doc_id: docId, json_text: jsonText });
 
 export const studioGetIndent = (formatId: StudioFormat, docId: string): Promise<string> =>
-  invoke<string>('studio_get_indent', { formatId, docId });
+  studio<string>('studio_get_indent', { format_id: formatId, doc_id: docId });
 
 export const studioSetIndent = (
   formatId: StudioFormat,
   docId:    string,
   indent:   string,
 ): Promise<void> =>
-  invoke('studio_set_indent', { formatId, docId, indent });
+  studio('studio_set_indent', { format_id: formatId, doc_id: docId, indent });
 
 export const studioApplyMutation = (
   formatId: StudioFormat,
   docId:    string,
   mutation: StudioMutation,
 ): Promise<StudioMutateResult> =>
-  invoke<StudioMutateResult>('studio_apply_mutation', { formatId, docId, mutation });
+  studio<StudioMutateResult>('studio_apply_mutation', { format_id: formatId, doc_id: docId, mutation });
 
 /** Phase 3.d — re-emit the doc with format-specific extras stripped.
  *  JSON Studio: drops comments + trailing commas (lossy). Backends
@@ -457,43 +458,43 @@ export const studioStripFeatures = (
   formatId: StudioFormat,
   docId:    string,
 ): Promise<StudioMutateResult> =>
-  invoke<StudioMutateResult>('studio_strip_features', { formatId, docId });
+  studio<StudioMutateResult>('studio_strip_features', { format_id: formatId, doc_id: docId });
 
 export const studioDiff = (
   formatId: StudioFormat,
   docId:    string,
 ): Promise<DiffHunk[]> =>
-  invoke<DiffHunk[]>('studio_diff', { formatId, docId });
+  studio<DiffHunk[]>('studio_diff', { format_id: formatId, doc_id: docId });
 
 export const studioTreeDiff = <TKind extends string = string>(
   formatId: StudioFormat,
   docId:    string,
 ): Promise<DiffTreeNode<TKind>> =>
-  invoke<DiffTreeNode<TKind>>('studio_tree_diff', { formatId, docId });
+  studio<DiffTreeNode<TKind>>('studio_tree_diff', { format_id: formatId, doc_id: docId });
 
 export const studioUndo = (formatId: StudioFormat, docId: string): Promise<StudioMutateResult> =>
-  invoke<StudioMutateResult>('studio_undo', { formatId, docId });
+  studio<StudioMutateResult>('studio_undo', { format_id: formatId, doc_id: docId });
 
 export const studioRedo = (formatId: StudioFormat, docId: string): Promise<StudioMutateResult> =>
-  invoke<StudioMutateResult>('studio_redo', { formatId, docId });
+  studio<StudioMutateResult>('studio_redo', { format_id: formatId, doc_id: docId });
 
 export const studioHistoryState = (
   formatId: StudioFormat,
   docId:    string,
 ): Promise<[boolean, boolean]> =>
-  invoke<[boolean, boolean]>('studio_history_state', { formatId, docId });
+  studio<[boolean, boolean]>('studio_history_state', { format_id: formatId, doc_id: docId });
 
 export const studioSnapshot = <TKind extends string = string>(
   formatId: StudioFormat,
   docId:    string,
 ): Promise<StudioDocSnapshot<TKind>> =>
-  invoke<StudioDocSnapshot<TKind>>('studio_snapshot', { formatId, docId });
+  studio<StudioDocSnapshot<TKind>>('studio_snapshot', { format_id: formatId, doc_id: docId });
 
 export const studioSourcePath = (
   formatId: StudioFormat,
   docId:    string,
 ): Promise<string | null> =>
-  invoke<string | null>('studio_source_path', { formatId, docId });
+  studio<string | null>('studio_source_path', { format_id: formatId, doc_id: docId });
 
 export interface StudioSaveArgs {
   docId:       string;

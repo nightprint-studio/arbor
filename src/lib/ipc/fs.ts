@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { platform } from './rpc';
+import { corvus, platform } from './rpc';
 
 export interface FsEntry {
   name:     string;
@@ -242,15 +242,15 @@ export interface GitChanges {
   unstaged: GitChange[];
 }
 /** Full staged/unstaged change list for the repo enclosing `dir`. */
-export const fsGitChanges = (dir: string) => invoke<GitChanges>('fs_git_changes', { dir });
+export const fsGitChanges = (dir: string) => corvus<GitChanges>('fs_git_changes', { dir });
 
 /** One local branch of a repo. */
 export interface FsBranch { name: string; is_head: boolean; }
 /** Local branches of the repo enclosing `path` (sorted, case-insensitive). */
-export const fsGitBranches = (path: string) => invoke<FsBranch[]>('fs_git_branches', { path });
+export const fsGitBranches = (path: string) => corvus<FsBranch[]>('fs_git_branches', { path });
 /** Switch the repo enclosing `path` to `branch` (safe checkout — fails on
  *  conflicting uncommitted changes). */
 export const fsGitCheckout = (path: string, branch: string) => invoke<void>('fs_git_checkout', { path, branch });
 /** Remote URL (origin, else first remote) of the repo enclosing `path`, or
  *  `null` when there's no repo / no remote. Used to build "Copy project link". */
-export const fsGitRemoteUrl = (path: string) => invoke<string | null>('fs_git_remote_url', { path });
+export const fsGitRemoteUrl = (path: string) => corvus<string | null>('fs_git_remote_url', { path });

@@ -7,11 +7,11 @@ export const openRepo = (path: string, tabId: string) =>
 
 /** Returns true when `path` is inside a git repository. */
 export const checkIsGitRepo = (path: string) =>
-  invoke<boolean>('check_is_git_repo', { path });
+  corvus<boolean>('check_is_git_repo', { path });
 
 /** Read user.name / user.email from the global git config. */
 export const getGitIdentity = () =>
-  invoke<[string, string]>('get_git_identity');
+  corvus<[string, string]>('get_git_identity');
 
 /** Initialise a new git repository with the given options. */
 export const initRepo = (path: string, tabId: string, options: InitRepoOptions) =>
@@ -22,14 +22,14 @@ export const closeRepo = (tabId: string) =>
 
 /** List branch names available on a remote URL without cloning. */
 export const listRemoteBranchesForUrl = (url: string) =>
-  invoke<string[]>('list_remote_branches_for_url', { url });
+  corvus<string[]>('list_remote_branches_for_url', { url });
 
 /** Clone a remote repository and open it as a new tab. */
 export const cloneRepo = (opts: CloneOptions, tabId: string) =>
   invoke<RepoInfo>('clone_repo', { opts, tabId });
 
 export const getRepoInfo = (tabId: string) =>
-  invoke<RepoInfo>('get_repo_info', { tabId });
+  corvus<RepoInfo>('get_repo_info', { tab_id: tabId });
 
 export const getGraph = (tabId: string, offset = 0, limit = 500) =>
   corvus<GraphData>('get_graph', { tab_id: tabId, offset, limit });

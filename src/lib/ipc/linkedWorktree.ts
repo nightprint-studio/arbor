@@ -1,16 +1,17 @@
 import { invoke } from '@tauri-apps/api/core';
+import { corvus } from './rpc';
 import type { WorktreeLink, AliasEntry, AliasGroup } from '../types/linkedWorktree';
 
 // ── Read ────────────────────────────────────────────────────────────────────
 
 export const listWorktreeLinks = () =>
-  invoke<WorktreeLink[]>('list_worktree_links');
+  corvus<WorktreeLink[]>('list_worktree_links');
 
 export const getWorktreeLink = (id: string) =>
-  invoke<WorktreeLink | null>('get_worktree_link', { id });
+  corvus<WorktreeLink | null>('get_worktree_link', { id });
 
 export const getWorktreeLinkForRepo = (repoId: string) =>
-  invoke<WorktreeLink | null>('get_worktree_link_for_repo', { repoId });
+  corvus<WorktreeLink | null>('get_worktree_link_for_repo', { repo_id: repoId });
 
 // ── Write ───────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { platform } from './rpc';
+import { corvus, platform } from './rpc';
 
 export type RepoPathStatus = 'ok' | 'missing' | 'unreachable' | 'not_a_repo';
 
@@ -23,22 +23,22 @@ export interface MissingProjectsConfig {
 }
 
 export const validateRepoPath  = (path: string): Promise<RepoPathValidation> =>
-  invoke('validate_repo_path', { path });
+  corvus('validate_repo_path', { path });
 
 export const validateRepoPaths = (paths: string[]): Promise<RepoPathValidation[]> =>
-  invoke('validate_repo_paths', { paths });
+  corvus('validate_repo_paths', { paths });
 
 export const relocateRepo = (repoId: string, newPath: string): Promise<RelocateResult> =>
   invoke('relocate_repo', { repoId, newPath });
 
 export const reportRepoMissing = (repoId: string, path: string, reason: RepoPathStatus): Promise<void> =>
-  invoke('report_repo_missing', { repoId, path, reason });
+  corvus('report_repo_missing', { repo_id: repoId, path, reason });
 
 export const removeRecentRepo = (path: string): Promise<void> =>
-  invoke('remove_recent_repo', { path });
+  corvus('remove_recent_repo', { path });
 
 export const cleanupMissingRecentRepos = (): Promise<string[]> =>
-  invoke('cleanup_missing_recent_repos');
+  corvus('cleanup_missing_recent_repos');
 
 export const getMissingProjectsConfig = (): Promise<MissingProjectsConfig> =>
   platform('get_missing_projects_config');

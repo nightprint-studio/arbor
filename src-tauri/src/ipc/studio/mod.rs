@@ -14,6 +14,7 @@
 //! move into that binary unchanged.
 
 pub mod config;
+pub mod format;
 pub mod index;
 
 // Re-export so backend handlers annotate with `#[studio::handler(...)]` — the

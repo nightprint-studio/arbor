@@ -7,7 +7,7 @@
  * Studio) will reuse the same commands when it lands.
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { studio } from './rpc';
 
 /** Result of `yaml → .properties`. */
 export interface YamlToPropertiesOutput {
@@ -25,7 +25,7 @@ export interface PropertiesToYamlOutput {
 /** Convert a YAML document to `.properties` text. Rejects multi-doc
  *  YAML streams with a structured error. */
 export const yamlToProperties = (text: string): Promise<YamlToPropertiesOutput> =>
-  invoke<YamlToPropertiesOutput>('studio_yaml_to_properties', { text });
+  studio<YamlToPropertiesOutput>('studio_yaml_to_properties', { text });
 
 /** Convert `.properties` text to a YAML document. `strings_only=true`
  *  disables best-effort scalar type inference (every value stays a
@@ -34,7 +34,7 @@ export const propertiesToYaml = (
   text: string,
   opts: { stringsOnly?: boolean } = {},
 ): Promise<PropertiesToYamlOutput> =>
-  invoke<PropertiesToYamlOutput>('studio_properties_to_yaml', {
+  studio<PropertiesToYamlOutput>('studio_properties_to_yaml', {
     text,
-    stringsOnly: opts.stringsOnly ?? false,
+    strings_only: opts.stringsOnly ?? false,
   });

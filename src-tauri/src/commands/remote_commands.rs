@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
 use crate::error::AppError;
-use crate::git::remote::{FetchResult, RemoteInfo};
+use crate::git::remote::FetchResult;
 use crate::git::stash::StashEntry;
 use crate::process_ext::NoWindowExt;
 use crate::AppState;
@@ -74,16 +74,6 @@ pub fn open_in_browser(
         .open_url(&url, None::<&str>)
         .map_err(|e| AppError::Other(format!("Failed to open browser: {}", e)))?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn list_remotes(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<Vec<RemoteInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::remote::list_remotes(repo.inner())
 }
 
 #[tauri::command]

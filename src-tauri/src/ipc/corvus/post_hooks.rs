@@ -171,6 +171,18 @@ pub fn fire(state: &AppState, program: &str, method: &str, params: &Value, resul
             }));
         }
 
+        // ── missing project ── `report_repo_missing` returns the resolved
+        // display name (Option<String>, JSON null when unresolved); the original
+        // always fired regardless.
+        "report_repo_missing" => {
+            state.fire_hook("on_project_missing", json!({
+                "repo_id": params.get("repo_id"),  // P
+                "path":    params.get("path"),     // P
+                "name":    result,                 // R (Option<String>)
+                "reason":  params.get("reason"),   // P
+            }));
+        }
+
         _ => {}
     }
 }
