@@ -6,32 +6,14 @@ use crate::git::repo::{RepoInfo, CloneOptions};
 use crate::git::init::InitRepoOptions;
 use crate::AppState;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InitRepoResult {
-    pub info: RepoInfo,
-    pub remote_url: Option<String>,
-    pub pushed: bool,
-    pub push_error: Option<String>,
-}
-
-#[tauri::command]
-pub fn open_repo(
-    state: State<'_, AppState>,
-    path: String,
-    tab_id: String,
-) -> Result<RepoInfo, AppError> {
-    let info = {
-        let mut mgr = state.lock_repos()?;
-        mgr.open(tab_id.clone(), &path)?
-    };
-    state.fire_hook(
-        "on_repo_open",
-        serde_json::json!({ "tab_id": &tab_id, "path": &info.path, "name": &info.name }),
-    );
-    crate::ipc::sync_repo_open(&state, &tab_id, &info.path);
-    Ok(info)
-}
-
+/// Close the repository tab `tab_id` in the repo manager.
+///
+/// DEFERRED from the broker migration: the orphan-GC step calls
+/// `workspace_commands::forget_repo_if_orphaned`, whose signature takes
+/// `&State<'_, AppState>` (a Tauri managed-state handle), not the `&AppState`
+/// a broker handler holds — and it manages an `AppHandle` egress
+/// (`arbor://registry-changed`). Migrating it cleanly needs that helper's
+/// signature relaxed to `&AppState`, which is out of scope for the repo pass.
 #[tauri::command]
 pub fn close_repo(app: AppHandle, state: State<'_, AppState>, tab_id: String) -> Result<(), AppError> {
     let (path, name) = {
@@ -67,6 +49,14 @@ pub fn close_repo(app: AppHandle, state: State<'_, AppState>, tab_id: String) ->
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InitRepoResult {
+    pub info: RepoInfo,
+    pub remote_url: Option<String>,
+    pub pushed: bool,
+    pub push_error: Option<String>,
 }
 
 /// Initialise a new git repository, create optional files (.gitignore,

@@ -3,7 +3,7 @@ import { corvus } from './rpc';
 import type { GraphData, CommitDetail, RepoInfo, InitRepoOptions, InitRepoResult, CloneOptions, RepoFileEntry } from '../types/git';
 
 export const openRepo = (path: string, tabId: string) =>
-  invoke<RepoInfo>('open_repo', { path, tabId });
+  corvus<RepoInfo>('open_repo', { path, tab_id: tabId });
 
 /** Returns true when `path` is inside a git repository. */
 export const checkIsGitRepo = (path: string) =>

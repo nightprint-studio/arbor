@@ -8,16 +8,21 @@
 //! the handler macro requires a context first arg, so they take `_state:
 //! &AppState` and ignore it — the decoded JSON args are unchanged.
 //!
-//! NOT migrated (stays inline in `missing_commands`, handled by a later
-//! emit/seam pass): `relocate_repo` — it takes an `AppHandle`, emits
-//! `arbor://repo-relocated`, and fires the `on_project_relocated` hook with an
-//! AppHandle-coupled emit on the same path.
+//! `relocate_repo` was the last AppHandle/emit-coupled holdout; it now lives
+//! here too. Its `arbor://repo-relocated` egress goes through the backend
+//! event sink ([`AppState::event_sink`]) instead of an `AppHandle`.
 //!
 //! Hooks: `report_repo_missing` fires `on_project_missing` after it succeeds.
 //! Per the generic-path rule the fire moved to
 //! [`crate::ipc::corvus::post_hooks`]; the handler returns the resolved
 //! display `name` (looked up from the registry) so the post-hook arm can build
 //! the payload from the result, with `repo_id`/`path`/`reason` from the params.
+//!
+//! `relocate_repo` likewise fires `on_project_relocated` from the post-hook
+//! path. The registry entry's `display_name`/`remote_url` aren't in the params,
+//! so the handler surfaces them on the result (`name`/`remote_url`, populated
+//! only when the relocation actually moved the path); the post-hook arm fires
+//! only when `old_path != new_path`, mirroring the original inline gate.
 
 use std::path::{Path, PathBuf};
 
@@ -25,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::ipc::corvus;
+use crate::workspace::registry as registry_io;
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -142,6 +148,104 @@ fn report_repo_missing(
     let name = state.lock_repo_registry().ok()
         .and_then(|reg| reg.get(&repo_id).map(|e| e.display_name.clone()));
     Ok(name)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelocateResult {
+    pub repo_id:  String,
+    pub old_path: String,
+    pub new_path: String,
+    pub validation: RepoPathValidation,
+    /// Registry display name of the relocated repo. Populated only when the
+    /// relocation actually moved the path (so the `on_project_relocated`
+    /// post-hook arm can build its payload); `None` on the same-folder no-op.
+    pub name: Option<String>,
+    /// Registry remote URL of the relocated repo. Same population rule as
+    /// `name` — fed into the post-hook payload from the result.
+    pub remote_url: Option<String>,
+}
+
+/// Point a registered repo at a new path on disk.  The frontend has already
+/// let the user pick the folder; we re-validate (defence-in-depth — the
+/// folder could vanish between picker and confirm) and only persist if the
+/// destination is a valid git repo.
+///
+/// The `on_project_relocated` hook is fired by the generic post-hook path
+/// (gated on `old_path != new_path`); this handler surfaces the registry
+/// entry's `name`/`remote_url` on the result so that arm can build the payload
+/// keyed off the absolute path (deps-explorer cache, IDE history, …).
+#[corvus::handler]
+fn relocate_repo(
+    state: &AppState,
+    repo_id: String,
+    new_path: String,
+) -> Result<RelocateResult, AppError> {
+    let validation = classify(&new_path);
+    if validation.status != RepoPathStatus::Ok {
+        return Err(AppError::Other(format!(
+            "Cannot relocate repository: {}",
+            validation.message,
+        )));
+    }
+
+    let old_path = {
+        let reg = state.lock_repo_registry()?;
+        reg.get(&repo_id)
+            .map(|e| e.path.clone())
+            .ok_or_else(|| AppError::Other(format!("repo not found: {repo_id}")))?
+    };
+
+    // Skip the write-then-read churn when the user picked the same folder.
+    if normalize(&old_path) == normalize(&new_path) {
+        return Ok(RelocateResult {
+            repo_id,
+            old_path: new_path.clone(),
+            new_path,
+            validation,
+            name: None,
+            remote_url: None,
+        });
+    }
+
+    let updated = {
+        let mut reg = state.lock_repo_registry()?;
+        reg.set_path(&repo_id, new_path.clone())?;
+        registry_io::save(&reg)?;
+        reg.get(&repo_id).cloned()
+    };
+
+    // Mirror into the recent_repos list so the WelcomeScreen doesn't keep
+    // showing the dead path.  Best-effort; failure here doesn't unwind.
+    if let Ok(mut cfg) = state.lock_config() {
+        let new_norm = normalize(&new_path);
+        let old_norm = normalize(&old_path);
+        cfg.recent_repos.retain(|p| normalize(p) != old_norm);
+        cfg.recent_repos.retain(|p| normalize(p) != new_norm);
+        cfg.recent_repos.insert(0, new_path.clone());
+        cfg.recent_repos.truncate(10);
+        let _ = crate::config::app_config::save(&cfg);
+    }
+
+    let (name, remote_url) = match &updated {
+        Some(entry) => (Some(entry.display_name.clone()), entry.remote_url.clone()),
+        None => (None, None),
+    };
+
+    // Notify the UI to swap the dead path for the new one. The `on_project_relocated`
+    // plugin hook is fired by the generic post-hook path (same `old_path != new_path`
+    // gate). Only emit when the registry entry resolved, matching the original inline
+    // `if let Some(entry) = updated` guard.
+    if updated.is_some() {
+        if let Some(sink) = state.event_sink() {
+            sink.emit("arbor://repo-relocated", serde_json::json!({
+                "repo_id":  &repo_id,
+                "old_path": &old_path,
+                "new_path": &new_path,
+            }));
+        }
+    }
+
+    Ok(RelocateResult { repo_id, old_path, new_path, validation, name, remote_url })
 }
 
 // ---------------------------------------------------------------------------

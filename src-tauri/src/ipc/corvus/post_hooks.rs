@@ -182,6 +182,41 @@ pub fn fire(state: &AppState, program: &str, method: &str, params: &Value, resul
                 "reason":  params.get("reason"),   // P
             }));
         }
+        // `relocate_repo` keeps emitting `arbor://repo-relocated` from the handler
+        // (best-effort); only the plugin hook moves here. Fire only on an actual
+        // move — the same-folder no-op leaves `name`/`old_path` null/equal.
+        "relocate_repo" if result.get("name").map(|v| !v.is_null()).unwrap_or(false) => {
+            state.fire_hook("on_project_relocated", json!({
+                "repo_id":    params.get("repo_id"),     // P
+                "old_path":   result.get("old_path"),    // R
+                "new_path":   params.get("new_path"),    // P
+                "name":       result.get("name"),        // R
+                "remote_url": result.get("remote_url"),  // R
+            }));
+        }
+
+        // ── repo open ── payload fully from params + the returned RepoInfo.
+        "open_repo" => {
+            state.fire_hook("on_repo_open", json!({
+                "tab_id": params.get("tab_id"),  // P
+                "path":   result.get("path"),    // R
+                "name":   result.get("name"),    // R
+            }));
+        }
+
+        // ── linked worktree ── member add/remove, both fields from params.
+        "add_worktree_link_member" => {
+            state.fire_hook("on_worktree_link_member_added", json!({
+                "link_id": params.get("link_id"),  // P
+                "repo_id": params.get("repo_id"),  // P
+            }));
+        }
+        "remove_worktree_link_member" => {
+            state.fire_hook("on_worktree_link_member_removed", json!({
+                "link_id": params.get("link_id"),  // P
+                "repo_id": params.get("repo_id"),  // P
+            }));
+        }
 
         _ => {}
     }

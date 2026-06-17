@@ -21,16 +21,16 @@ export const loadWorkspaceSnapshot = (workspaceId: string): Promise<TabSnapshot>
 export const createWorkspace = (
   name: string, colorIdx: number, repoIds: string[], groupId: string | null,
 ): Promise<WorkspaceDef> =>
-  invoke('create_workspace', { name, colorIdx, repoIds, groupId });
+  platform('create_workspace', { name, color_idx: colorIdx, repo_ids: repoIds, group_id: groupId });
 
 export const updateWorkspace = (workspaceId: string, patch: WorkspacePatch): Promise<WorkspaceDef> =>
-  invoke('update_workspace', { workspaceId, patch });
+  platform('update_workspace', { workspace_id: workspaceId, patch });
 
 export const deleteWorkspace = (workspaceId: string): Promise<void> =>
   invoke('delete_workspace', { workspaceId });
 
 export const reorderWorkspaces = (orderedIds: string[]): Promise<void> =>
-  invoke('reorder_workspaces', { orderedIds });
+  platform('reorder_workspaces', { ordered_ids: orderedIds });
 
 export const setActiveWorkspace = (workspaceId: string): Promise<WorkspaceDef> =>
   invoke('set_active_workspace', { workspaceId });
@@ -55,7 +55,7 @@ export const setWorkspaceGroup = (workspaceId: string, groupId: string | null): 
 // ── Repo membership ─────────────────────────────────────────────────────────
 
 export const addRepoToWorkspace = (workspaceId: string, repoId: string): Promise<void> =>
-  invoke('add_repo_to_workspace', { workspaceId, repoId });
+  platform('add_repo_to_workspace', { workspace_id: workspaceId, repo_id: repoId });
 
 export const removeRepoFromWorkspace = (workspaceId: string, repoId: string): Promise<void> =>
   invoke('remove_repo_from_workspace', { workspaceId, repoId });
@@ -63,14 +63,18 @@ export const removeRepoFromWorkspace = (workspaceId: string, repoId: string): Pr
 export const moveRepoBetweenWorkspaces = (
   fromWorkspaceId: string, toWorkspaceId: string, repoId: string,
 ): Promise<void> =>
-  invoke('move_repo_between_workspaces', { fromWorkspaceId, toWorkspaceId, repoId });
+  platform('move_repo_between_workspaces', {
+    from_workspace_id: fromWorkspaceId,
+    to_workspace_id:   toWorkspaceId,
+    repo_id:           repoId,
+  });
 
 // ── Registry ────────────────────────────────────────────────────────────────
 
 export const registerRepoPath = (
   path: string, remoteUrl: string | null, displayName: string | null,
 ): Promise<RepoRegistrationResult> =>
-  invoke('register_repo_path', { path, remoteUrl, displayName });
+  platform('register_repo_path', { path, remote_url: remoteUrl, display_name: displayName });
 
 /** Register a "pending" repo (declared via name + optional remote URL, not yet
  *  on disk). Returns the new registry id. Used by the non-blocking import so a
@@ -78,17 +82,17 @@ export const registerRepoPath = (
 export const registerPendingRepo = (
   name: string, remoteUrl: string | null,
 ): Promise<string> =>
-  invoke('register_pending_repo', { name, remoteUrl });
+  platform('register_pending_repo', { name, remote_url: remoteUrl });
 
 export const updateRegistryRepo = (
   repoId: string,
   patch: { display_name?: string; remote_url?: string | null; path?: string },
 ): Promise<RepoRegistryEntry> =>
-  invoke('update_registry_repo', {
-    repoId,
-    displayName: patch.display_name,
-    remoteUrl:   patch.remote_url !== undefined ? patch.remote_url : undefined,
-    path:        patch.path,
+  platform('update_registry_repo', {
+    repo_id:      repoId,
+    display_name: patch.display_name,
+    remote_url:   patch.remote_url !== undefined ? patch.remote_url : undefined,
+    path:         patch.path,
   });
 
 export const deleteRegistryRepo = (repoId: string): Promise<void> =>

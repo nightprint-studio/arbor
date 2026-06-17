@@ -42,14 +42,14 @@ export const fsDelete         = (path: string)                      => platform<
 /** Copy entries into `destDir`; returns the created destination paths. With
  *  `overwrite`, same-named items merge into / replace the existing entry
  *  instead of getting a " (2)" suffix. */
-export const fsCopy        = (sources: string[], destDir: string, overwrite = false, opId?: string) => invoke<string[]>('fs_copy', { sources, destDir, overwrite, opId: opId ?? null });
+export const fsCopy        = (sources: string[], destDir: string, overwrite = false, opId?: string) => platform<string[]>('fs_copy', { sources, dest_dir: destDir, overwrite, op_id: opId ?? null });
 /** Move (cut+paste) entries into `destDir`; returns the new paths. With
  *  `overwrite`, same-named items merge into / replace the existing entry. */
-export const fsMove        = (sources: string[], destDir: string, overwrite = false, opId?: string) => invoke<string[]>('fs_move', { sources, destDir, overwrite, opId: opId ?? null });
+export const fsMove        = (sources: string[], destDir: string, overwrite = false, opId?: string) => platform<string[]>('fs_move', { sources, dest_dir: destDir, overwrite, op_id: opId ?? null });
 /** Duplicate entries in place ("file (2).ext"). Returns the created paths. */
-export const fsDuplicate   = (paths: string[], opId?: string) => invoke<string[]>('fs_duplicate', { paths, opId: opId ?? null });
+export const fsDuplicate   = (paths: string[], opId?: string) => platform<string[]>('fs_duplicate', { paths, op_id: opId ?? null });
 /** Request cancellation of a running copy/move/duplicate by its op id. */
-export const fsCancelOp    = (opId: string) => invoke<void>('fs_cancel_op', { opId });
+export const fsCancelOp    = (opId: string) => platform<void>('fs_cancel_op', { op_id: opId });
 /** One old→new rename pair for a batch rename. */
 export interface RenamePair { from: string; to: string; }
 /** Batch-rename many entries atomically (two-phase, collision-safe). */

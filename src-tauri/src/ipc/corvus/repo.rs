@@ -4,11 +4,13 @@
 //! Each handler is the body the matching `#[tauri::command]` ran inline;
 //! `#[corvus::handler]` self-registers it under its own function name.
 //!
-//! Only the genuinely leaf-clean ops live here: path/identity probes and
-//! single-repo metadata reads. The coupled open/close/clone/init flows stay
-//! inline in `repo_commands` for a later pass — they mutate the open-repo set,
-//! call `sync_repo_*`, take an `AppHandle`, emit events, or run async (provider
-//! REST + network clone), and they fire repo-lifecycle hooks.
+//! The leaf-clean ops live here (path/identity probes and single-repo metadata
+//! reads) alongside the `open_repo` lifecycle flow. `open_repo` mutates the
+//! open-repo set and calls `sync_repo_open`, but emits nothing of its own and
+//! takes no `AppHandle`, so it migrates cleanly. The async provider/network
+//! flows (`init_repo`, `clone_repo`) and `close_repo` stay inline in
+//! `repo_commands` for a later pass — `close_repo`'s orphan-GC step calls a
+//! `workspace_commands` helper still typed against `&State<'_, AppState>`.
 //!
 //! `check_is_git_repo` / `get_git_identity` / `list_remote_branches_for_url`
 //! never touched `AppState`, but the handler macro requires a context first
@@ -17,7 +19,9 @@
 //! AppError>`, so the handlers wrap the same value in `Ok(...)` — the serde
 //! shape on the wire is identical (a JSON bool / 2-tuple).
 //!
-//! No hooks fire in this domain.
+//! The `on_repo_open` hook is fire-and-forget and fires from the generic `rpc`
+//! post-hooks path (see `post_hooks.rs`), not inline here — the migrated
+//! handler fires no hook itself.
 
 use crate::error::AppError;
 use crate::git::repo::RepoInfo;
@@ -55,4 +59,18 @@ fn get_repo_info(state: &AppState, tab_id: String) -> Result<RepoInfo, AppError>
         is_bare: repo.inner().is_bare(),
         is_empty: repo.inner().is_empty().unwrap_or(false),
     })
+}
+
+/// Open the repository at `path` under `tab_id` in the repo manager.
+///
+/// Fires `on_repo_open` from the post-hooks path (not here). Calls
+/// `sync_repo_open` to mirror the open into `corvus-be`.
+#[corvus::handler]
+fn open_repo(state: &AppState, path: String, tab_id: String) -> Result<RepoInfo, AppError> {
+    let info = {
+        let mut mgr = state.lock_repos()?;
+        mgr.open(tab_id.clone(), &path)?
+    };
+    crate::ipc::sync_repo_open(state, &tab_id, &info.path);
+    Ok(info)
 }

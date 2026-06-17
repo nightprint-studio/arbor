@@ -17,7 +17,6 @@ pub mod issues_commands;
 pub mod repo_browser_commands;
 pub mod workspace_commands;
 pub mod linked_worktree_commands;
-pub mod missing_commands;
 pub mod git_cli_commands;
 pub mod branding_commands;
 pub mod security_commands;

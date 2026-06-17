@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { corvus } from './rpc';
 import type { WorktreeLink, AliasEntry, AliasGroup } from '../types/linkedWorktree';
 
@@ -16,33 +15,33 @@ export const getWorktreeLinkForRepo = (repoId: string) =>
 // ── Write ───────────────────────────────────────────────────────────────────
 
 export const createWorktreeLink = (name: string, initialRepoIds: string[]) =>
-  invoke<WorktreeLink>('create_worktree_link', { name, initialRepoIds });
+  corvus<WorktreeLink>('create_worktree_link', { name, initial_repo_ids: initialRepoIds });
 
 export const deleteWorktreeLink = (id: string) =>
-  invoke<void>('delete_worktree_link', { id });
+  corvus<void>('delete_worktree_link', { id });
 
 export const renameWorktreeLink = (id: string, name: string) =>
-  invoke<void>('rename_worktree_link', { id, name });
+  corvus<void>('rename_worktree_link', { id, name });
 
 export const addWorktreeLinkMember = (linkId: string, repoId: string) =>
-  invoke<void>('add_worktree_link_member', { linkId, repoId });
+  corvus<void>('add_worktree_link_member', { link_id: linkId, repo_id: repoId });
 
 export const removeWorktreeLinkMember = (linkId: string, repoId: string) =>
-  invoke<void>('remove_worktree_link_member', { linkId, repoId });
+  corvus<void>('remove_worktree_link_member', { link_id: linkId, repo_id: repoId });
 
 export const setWorktreeLinkSyncEnabled = (linkId: string, enabled: boolean) =>
-  invoke<void>('set_worktree_link_sync_enabled', { linkId, enabled });
+  corvus<void>('set_worktree_link_sync_enabled', { link_id: linkId, enabled });
 
 export const setWorktreeLinkMemberSyncEnabled = (linkId: string, repoId: string, enabled: boolean) =>
-  invoke<void>('set_worktree_link_member_sync_enabled', { linkId, repoId, enabled });
+  corvus<void>('set_worktree_link_member_sync_enabled', { link_id: linkId, repo_id: repoId, enabled });
 
 // ── Aliases ─────────────────────────────────────────────────────────────────
 
 export const addAliasGroup = (linkId: string, members: AliasEntry[]) =>
-  invoke<AliasGroup>('add_alias_group', { linkId, members });
+  corvus<AliasGroup>('add_alias_group', { link_id: linkId, members });
 
 export const updateAliasGroup = (linkId: string, groupId: string, members: AliasEntry[]) =>
-  invoke<void>('update_alias_group', { linkId, groupId, members });
+  corvus<void>('update_alias_group', { link_id: linkId, group_id: groupId, members });
 
 export const removeAliasGroup = (linkId: string, groupId: string) =>
-  invoke<void>('remove_alias_group', { linkId, groupId });
+  corvus<void>('remove_alias_group', { link_id: linkId, group_id: groupId });

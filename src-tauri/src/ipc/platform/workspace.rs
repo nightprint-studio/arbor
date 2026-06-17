@@ -12,17 +12,18 @@
 //! commands there share them; the migrated handlers import them from that module
 //! so the serde shape the FE decodes is the same regardless of routing.
 //!
-//! NOT migrated here (left inline in `workspace_commands`, handled by the
-//! later emit/seam pass):
+//! The registry/workspace mutations whose only egress is `arbor://registry-changed`
+//! plus a *reconstructable* fire-and-forget hook are migrated here too: the emit
+//! goes through the backend **event sink** ([`AppState::event_sink`] →
+//! [`emit_registry_changed`]) and any hook moves out of the handler into the
+//! platform `post_hooks` table (so it fires exactly once whether the method is
+//! served in-process or, eventually, out-of-process). Migrated:
+//! `create_workspace`, `update_workspace`, `reorder_workspaces`,
+//! `add_repo_to_workspace`, `move_repo_between_workspaces`, `register_repo_path`,
+//! `register_pending_repo`, `update_registry_repo`.
 //!
-//!   - Anything that emits a frontend event directly — every mutation that
-//!     calls `emit_registry_changed` (`arbor://registry-changed`) or
-//!     `set_active_workspace` (`arbor://workspace-switched`): `create_workspace`,
-//!     `update_workspace`, `delete_workspace`, `reorder_workspaces`,
-//!     `set_active_workspace`, `add_repo_to_workspace`,
-//!     `remove_repo_from_workspace`, `move_repo_between_workspaces`,
-//!     `register_repo_path`, `register_pending_repo`, `update_registry_repo`,
-//!     `delete_registry_repo`.
+//! NOT migrated here (left inline in `workspace_commands`):
+//!
 //!   - The three import *commits* (`import_workspace_commit`,
 //!     `import_workspace_group_commit`, `import_bundle_commit`): each fires a
 //!     **variable number** of `on_workspace_created` / `on_workspace_updated`
@@ -35,20 +36,44 @@
 //!     background thread, and stream `arbor://job-*` / `arbor://workspace-*`
 //!     progress events.
 //!
-//! No fire-and-forget plugin hooks fire from the handlers migrated here.
+//! The fire-and-forget workspace hooks the migrated mutations used to fire
+//! inline (`on_workspace_created` / `_updated` / `_repo_added` / `_repo_removed`)
+//! now live in the platform `post_hooks` table, reconstructed from params and
+//! the handler's return value — the handlers here fire none themselves.
+//!
+//! Note on which mutations stayed deferred for hook reasons: the ones whose hook
+//! payload is NOT reconstructable from params+result — `delete_workspace` and
+//! `set_active_workspace` capture pre-mutation store state (the deleted
+//! workspace's full payload, the previous active id), and
+//! `remove_repo_from_workspace` / `delete_registry_repo` fire
+//! `on_repo_deregistered` conditionally off internal GC state — stay inline in
+//! `workspace_commands` (the single-fire post_hooks seam can't carry them).
 
 use crate::commands::workspace_commands::{
     probe_one, ExportedBundle, ExportedWorkspace, ExportedWorkspaceGroup, ImportGroupPreview,
     ImportGroupPreviewWorkspace, ImportPreview, ImportPreviewRepo, RepoHealth,
-    RepoRegistryEntryWithRoot, WorkspaceGroupPatch, WorkspacesSnapshot,
+    RepoRegistrationResult, RepoRegistryEntryWithRoot, WorkspaceGroupPatch, WorkspacePatch,
+    WorkspacesSnapshot,
 };
 use crate::error::AppError;
 use crate::ipc::platform;
 use crate::workspace::{
-    migration, snapshot as snapshot_io, store as store_io, CrossWsTabRef, RepoRegistryEntry,
-    TabMeta, TabSnapshot, WorkspaceDef, WorkspaceGroup,
+    migration, registry as registry_io, snapshot as snapshot_io, store as store_io, CrossWsTabRef,
+    RepoRegistryEntry, TabMeta, TabSnapshot, WorkspaceDef, WorkspaceGroup, SCRATCH_ID,
 };
 use crate::AppState;
+
+/// Broadcast that the repo registry and/or workspace membership changed, so
+/// every window (the main app AND any standalone File Explorer window) can
+/// reload its Projects view. Carries no payload — listeners re-query. Routes
+/// through the backend event sink (the Model-D-safe egress).
+fn emit_registry_changed(state: &AppState) -> Result<(), AppError> {
+    let sink = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+    sink.emit("arbor://registry-changed", serde_json::Value::Null);
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
 // Migration report
@@ -133,6 +158,222 @@ fn load_workspace_snapshot(
     workspace_id: String,
 ) -> Result<TabSnapshot, AppError> {
     Ok(snapshot_io::load(&workspace_id))
+}
+
+// ---------------------------------------------------------------------------
+// Mutation commands — workspaces. Each emits `arbor://registry-changed` via the
+// backend event sink; the fire-and-forget workspace hooks they used to fire
+// inline now live in the platform `post_hooks` table (reconstructed from
+// params+result). `delete_workspace` / `set_active_workspace` stay inline in
+// `workspace_commands` (pre-mutation-state hook payloads, not reconstructable).
+// ---------------------------------------------------------------------------
+
+#[platform::handler(program = "platform")]
+fn create_workspace(
+    state: &AppState,
+    name: String,
+    color_idx: u8,
+    repo_ids: Vec<String>,
+    group_id: Option<String>,
+) -> Result<WorkspaceDef, AppError> {
+    let ws = {
+        let mut store = state.lock_workspaces()?;
+        let ws = store.create(name, color_idx, repo_ids, group_id);
+        store_io::save(&store)?;
+        ws
+    };
+    // Hook `on_workspace_created` now fires from `post_hooks` (payload = R).
+    emit_registry_changed(state)?;
+    Ok(ws)
+}
+
+#[platform::handler(program = "platform")]
+fn update_workspace(
+    state: &AppState,
+    workspace_id: String,
+    patch: WorkspacePatch,
+) -> Result<WorkspaceDef, AppError> {
+    let ws = {
+        let mut store = state.lock_workspaces()?;
+        {
+            let ws = store
+                .get_mut(&workspace_id)
+                .ok_or_else(|| AppError::Other(format!("workspace not found: {workspace_id}")))?;
+            if let Some(name) = patch.name {
+                ws.name = name;
+            }
+            if let Some(color) = patch.color_idx {
+                ws.color_idx = color;
+            }
+            if let Some(group) = patch.group_id {
+                ws.group_id = group.filter(|s| !s.is_empty());
+            }
+            if let Some(ids) = patch.repo_ids {
+                // Dedupe — the management modal's keyed-each can't render
+                // the same id twice, and the dropdown count would lie.
+                let mut seen = std::collections::HashSet::new();
+                ws.repo_ids = ids.into_iter().filter(|id| seen.insert(id.clone())).collect();
+            }
+        }
+        store_io::save(&store)?;
+        store
+            .get(&workspace_id)
+            .cloned()
+            .ok_or_else(|| AppError::Other(format!("workspace not found: {workspace_id}")))?
+    };
+    // Hook `on_workspace_updated` now fires from `post_hooks` (payload = R).
+    emit_registry_changed(state)?;
+    Ok(ws)
+}
+
+#[platform::handler(program = "platform")]
+fn reorder_workspaces(state: &AppState, ordered_ids: Vec<String>) -> Result<(), AppError> {
+    {
+        let mut store = state.lock_workspaces()?;
+        store.set_order(&ordered_ids);
+        store_io::save(&store)?;
+    }
+    emit_registry_changed(state)?;
+    Ok(())
+}
+
+#[platform::handler(program = "platform")]
+fn add_repo_to_workspace(
+    state: &AppState,
+    workspace_id: String,
+    repo_id: String,
+) -> Result<(), AppError> {
+    {
+        let mut store = state.lock_workspaces()?;
+        store.add_repo(&workspace_id, &repo_id)?;
+        store_io::save(&store)?;
+    }
+    // Hook `on_workspace_repo_added` now fires from `post_hooks` (payload = P).
+    emit_registry_changed(state)?;
+    Ok(())
+}
+
+#[platform::handler(program = "platform")]
+fn move_repo_between_workspaces(
+    state: &AppState,
+    from_workspace_id: String,
+    to_workspace_id: String,
+    repo_id: String,
+) -> Result<(), AppError> {
+    {
+        let mut store = state.lock_workspaces()?;
+        store.remove_repo(&from_workspace_id, &repo_id)?;
+        store.add_repo(&to_workspace_id, &repo_id)?;
+        store_io::save(&store)?;
+    }
+    // Hooks `on_workspace_repo_removed` (from) + `on_workspace_repo_added` (to)
+    // now fire from `post_hooks` (both payloads = P).
+    emit_registry_changed(state)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Repo registry — registration + editing. (`delete_registry_repo` stays inline:
+// it fires `on_repo_deregistered` with pre-removal path/name, not
+// reconstructable from params+result.)
+// ---------------------------------------------------------------------------
+
+/// Upsert a repo path into the registry AND auto-add it to the active
+/// workspace if it isn't already a member of it.
+#[platform::handler(program = "platform")]
+fn register_repo_path(
+    state: &AppState,
+    path: String,
+    remote_url: Option<String>,
+    display_name: Option<String>,
+) -> Result<RepoRegistrationResult, AppError> {
+    let fallback_name = display_name.unwrap_or_else(|| {
+        std::path::Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "repository".to_string())
+    });
+    // If the caller didn't tell us the remote URL (typical for "Open folder…"
+    // and the deep-link clone path), probe `origin` from disk.  Without this
+    // the registry entry has `remote_url = None` and the deep-link router
+    // can't match `arbor://…?url=…` to this clone — it would fall through to
+    // the "needs clone" prompt every time.
+    let remote_url =
+        remote_url.or_else(|| crate::git::url::probe_origin_url(std::path::Path::new(&path)));
+    let (id, existed) = {
+        let mut reg = state.lock_repo_registry()?;
+        let existed = reg.find_by_path(&path).is_some();
+        let id = reg.upsert_by_path(&path, remote_url, &fallback_name);
+        registry_io::save(&reg)?;
+        (id, existed)
+    };
+    // Auto-add to active workspace if missing.
+    let added_to_ws = {
+        let mut store = state.lock_workspaces()?;
+        let active = store
+            .active_workspace_id
+            .clone()
+            .unwrap_or_else(|| SCRATCH_ID.to_string());
+        let ws = store
+            .get_mut(&active)
+            .ok_or_else(|| AppError::Other(format!("active workspace not found: {active}")))?;
+        if ws.repo_ids.iter().any(|i| i == &id) {
+            false
+        } else {
+            ws.repo_ids.push(id.clone());
+            store_io::save(&store)?;
+            true
+        }
+    };
+    emit_registry_changed(state)?;
+    Ok(RepoRegistrationResult { id, existed, added_to_ws })
+}
+
+/// Create a "pending" registry entry for a repo that's declared (name +
+/// optional remote URL) but not yet on disk — used by the non-blocking
+/// workspace import.  Returns the new id.
+#[platform::handler(program = "platform")]
+fn register_pending_repo(
+    state: &AppState,
+    name: String,
+    remote_url: Option<String>,
+) -> Result<String, AppError> {
+    let id = {
+        let mut reg = state.lock_repo_registry()?;
+        let id = reg.insert_pending(remote_url, &name);
+        registry_io::save(&reg)?;
+        id
+    };
+    emit_registry_changed(state)?;
+    Ok(id)
+}
+
+#[platform::handler(program = "platform")]
+fn update_registry_repo(
+    state: &AppState,
+    repo_id: String,
+    display_name: Option<String>,
+    remote_url: Option<Option<String>>,
+    path: Option<String>,
+) -> Result<RepoRegistryEntry, AppError> {
+    let entry = {
+        let mut reg = state.lock_repo_registry()?;
+        if let Some(name) = display_name {
+            reg.set_display_name(&repo_id, name)?;
+        }
+        if let Some(url) = remote_url {
+            reg.set_remote_url(&repo_id, url)?;
+        }
+        if let Some(p) = path {
+            reg.set_path(&repo_id, p)?;
+        }
+        registry_io::save(&reg)?;
+        reg.get(&repo_id)
+            .cloned()
+            .ok_or_else(|| AppError::Other(format!("repo not found: {repo_id}")))?
+    };
+    emit_registry_changed(state)?;
+    Ok(entry)
 }
 
 // ---------------------------------------------------------------------------

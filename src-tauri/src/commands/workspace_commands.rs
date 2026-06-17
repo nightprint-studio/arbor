@@ -161,26 +161,11 @@ pub struct RepoRegistryEntryWithRoot {
 // / `arbor://workspace-switched` FE events; left inline for the emit/seam pass).
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub fn create_workspace(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    name: String,
-    color_idx: u8,
-    repo_ids: Vec<String>,
-    group_id: Option<String>,
-) -> Result<WorkspaceDef> {
-    let ws = {
-        let mut store = state.lock_workspaces()?;
-        let ws = store.create(name, color_idx, repo_ids, group_id);
-        store_io::save(&store)?;
-        ws
-    };
-    fire_hook(&app, "on_workspace_created", workspace_payload(&ws));
-    emit_registry_changed(&app);
-    Ok(ws)
-}
+// `create_workspace` migrated to `crate::ipc::platform::workspace`
+// (`on_workspace_created` fires from platform `post_hooks`).
 
+// `WorkspacePatch` stays here (shared DTO imported by the migrated
+// `update_workspace` handler).
 #[derive(Debug, Deserialize)]
 pub struct WorkspacePatch {
     pub name:      Option<String>,
@@ -189,36 +174,8 @@ pub struct WorkspacePatch {
     pub repo_ids:  Option<Vec<String>>,
 }
 
-#[tauri::command]
-pub fn update_workspace(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    workspace_id: String,
-    patch: WorkspacePatch,
-) -> Result<WorkspaceDef> {
-    let ws = {
-        let mut store = state.lock_workspaces()?;
-        {
-            let ws = store.get_mut(&workspace_id)
-                .ok_or_else(|| AppError::Other(format!("workspace not found: {workspace_id}")))?;
-            if let Some(name)  = patch.name      { ws.name = name; }
-            if let Some(color) = patch.color_idx { ws.color_idx = color; }
-            if let Some(group) = patch.group_id  { ws.group_id  = group.filter(|s| !s.is_empty()); }
-            if let Some(ids)   = patch.repo_ids  {
-                // Dedupe — the management modal's keyed-each can't render
-                // the same id twice, and the dropdown count would lie.
-                let mut seen = std::collections::HashSet::new();
-                ws.repo_ids = ids.into_iter().filter(|id| seen.insert(id.clone())).collect();
-            }
-        }
-        store_io::save(&store)?;
-        store.get(&workspace_id).cloned()
-            .ok_or_else(|| AppError::Other(format!("workspace not found: {workspace_id}")))?
-    };
-    fire_hook(&app, "on_workspace_updated", workspace_payload(&ws));
-    emit_registry_changed(&app);
-    Ok(ws)
-}
+// `update_workspace` migrated to `crate::ipc::platform::workspace`
+// (`on_workspace_updated` fires from platform `post_hooks`).
 
 #[tauri::command]
 pub fn delete_workspace(
@@ -256,20 +213,8 @@ pub fn delete_workspace(
     Ok(())
 }
 
-#[tauri::command]
-pub fn reorder_workspaces(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    ordered_ids: Vec<String>,
-) -> Result<()> {
-    {
-        let mut store = state.lock_workspaces()?;
-        store.set_order(&ordered_ids);
-        store_io::save(&store)?;
-    }
-    emit_registry_changed(&app);
-    Ok(())
-}
+// `reorder_workspaces` migrated to `crate::ipc::platform::workspace`
+// (no hook; emits `arbor://registry-changed` via the event sink).
 
 #[tauri::command]
 pub fn set_active_workspace(
@@ -315,25 +260,8 @@ pub struct WorkspaceGroupPatch {
 // `arbor://registry-changed`; left inline for the emit/seam pass).
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub fn add_repo_to_workspace(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    workspace_id: String,
-    repo_id: String,
-) -> Result<()> {
-    {
-        let mut store = state.lock_workspaces()?;
-        store.add_repo(&workspace_id, &repo_id)?;
-        store_io::save(&store)?;
-    }
-    fire_hook(&app, "on_workspace_repo_added", serde_json::json!({
-        "workspace_id": workspace_id,
-        "repo_id":      repo_id,
-    }));
-    emit_registry_changed(&app);
-    Ok(())
-}
+// `add_repo_to_workspace` migrated to `crate::ipc::platform::workspace`
+// (`on_workspace_repo_added` fires from platform `post_hooks`).
 
 #[tauri::command]
 pub fn remove_repo_from_workspace(
@@ -360,36 +288,16 @@ pub fn remove_repo_from_workspace(
     Ok(())
 }
 
-#[tauri::command]
-pub fn move_repo_between_workspaces(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    from_workspace_id: String,
-    to_workspace_id: String,
-    repo_id: String,
-) -> Result<()> {
-    {
-        let mut store = state.lock_workspaces()?;
-        store.remove_repo(&from_workspace_id, &repo_id)?;
-        store.add_repo(&to_workspace_id, &repo_id)?;
-        store_io::save(&store)?;
-    }
-    fire_hook(&app, "on_workspace_repo_removed", serde_json::json!({
-        "workspace_id": from_workspace_id,
-        "repo_id":      repo_id,
-    }));
-    fire_hook(&app, "on_workspace_repo_added", serde_json::json!({
-        "workspace_id": to_workspace_id,
-        "repo_id":      repo_id,
-    }));
-    emit_registry_changed(&app);
-    Ok(())
-}
+// `move_repo_between_workspaces` migrated to `crate::ipc::platform::workspace`
+// (`on_workspace_repo_removed` + `on_workspace_repo_added` fire from platform
+// `post_hooks`).
 
 // ---------------------------------------------------------------------------
 // Repo registry — registration + editing + removal
 // ---------------------------------------------------------------------------
 
+// `RepoRegistrationResult` stays here (shared DTO imported by the migrated
+// `register_repo_path` handler).
 #[derive(Debug, Serialize)]
 pub struct RepoRegistrationResult {
     pub id:           String,
@@ -397,96 +305,9 @@ pub struct RepoRegistrationResult {
     pub added_to_ws:  bool,
 }
 
-/// Upsert a repo path into the registry AND auto-add it to the active
-/// workspace if it isn't already a member of it.  The boolean fields tell
-/// the UI whether a new entry was created and whether we touched the
-/// current workspace's membership.
-#[tauri::command]
-pub fn register_repo_path(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    path: String,
-    remote_url: Option<String>,
-    display_name: Option<String>,
-) -> Result<RepoRegistrationResult> {
-    let fallback_name = display_name.unwrap_or_else(|| {
-        std::path::Path::new(&path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "repository".to_string())
-    });
-    // If the caller didn't tell us the remote URL (typical for "Open folder…"
-    // and the deep-link clone path), probe `origin` from disk.  Without this
-    // the registry entry has `remote_url = None` and the deep-link router
-    // can't match `arbor://…?url=…` to this clone — it would fall through to
-    // the "needs clone" prompt every time.
-    let remote_url = remote_url.or_else(|| crate::git::url::probe_origin_url(std::path::Path::new(&path)));
-    let (id, existed) = {
-        let mut reg = state.lock_repo_registry()?;
-        let existed = reg.find_by_path(&path).is_some();
-        let id = reg.upsert_by_path(&path, remote_url, &fallback_name);
-        registry_io::save(&reg)?;
-        (id, existed)
-    };
-    // Auto-add to active workspace if missing.
-    let added_to_ws = {
-        let mut store = state.lock_workspaces()?;
-        let active = store.active_workspace_id.clone().unwrap_or_else(|| SCRATCH_ID.to_string());
-        let ws = store.get_mut(&active)
-            .ok_or_else(|| AppError::Other(format!("active workspace not found: {active}")))?;
-        if ws.repo_ids.iter().any(|i| i == &id) { false } else {
-            ws.repo_ids.push(id.clone());
-            store_io::save(&store)?;
-            true
-        }
-    };
-    emit_registry_changed(&app);
-    Ok(RepoRegistrationResult { id, existed, added_to_ws })
-}
-
-/// Create a "pending" registry entry for a repo that's declared (name +
-/// optional remote URL) but not yet on disk — used by the non-blocking
-/// workspace import.  Returns the new id so the caller can drop it straight
-/// into the imported workspace's member list; the manager then renders it as
-/// "not cloned" and offers Clone / Locate to resolve it.
-#[tauri::command]
-pub fn register_pending_repo(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    name: String,
-    remote_url: Option<String>,
-) -> Result<String> {
-    let id = {
-        let mut reg = state.lock_repo_registry()?;
-        let id = reg.insert_pending(remote_url, &name);
-        registry_io::save(&reg)?;
-        id
-    };
-    emit_registry_changed(&app);
-    Ok(id)
-}
-
-#[tauri::command]
-pub fn update_registry_repo(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    repo_id: String,
-    display_name: Option<String>,
-    remote_url: Option<Option<String>>,
-    path: Option<String>,
-) -> Result<RepoRegistryEntry> {
-    let entry = {
-        let mut reg = state.lock_repo_registry()?;
-        if let Some(name) = display_name { reg.set_display_name(&repo_id, name)?; }
-        if let Some(url)  = remote_url   { reg.set_remote_url(&repo_id, url)?; }
-        if let Some(p)    = path         { reg.set_path(&repo_id, p)?; }
-        registry_io::save(&reg)?;
-        reg.get(&repo_id).cloned()
-            .ok_or_else(|| AppError::Other(format!("repo not found: {repo_id}")))?
-    };
-    emit_registry_changed(&app);
-    Ok(entry)
-}
+// `register_repo_path` / `register_pending_repo` / `update_registry_repo`
+// migrated to `crate::ipc::platform::workspace` (no hooks; each emits
+// `arbor://registry-changed` via the event sink).
 
 /// Fully deregister a repo — removes it from the registry and from every
 /// workspace membership.  The path on disk is NOT touched.
