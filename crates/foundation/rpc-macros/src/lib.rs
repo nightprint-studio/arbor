@@ -10,13 +10,24 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, FnArg, ItemFn, LitStr, Pat, Type};
+use syn::parse::Parser;
+use syn::punctuated::Punctuated;
+use syn::{
+    parse_macro_input, Expr, ExprLit, FnArg, ItemFn, Lit, LitStr, MetaNameValue, Pat, Token, Type,
+};
 
 /// Register a function as an RPC handler.
 ///
-/// The method name is **optional**: `#[handler]` registers under the function's
-/// own name; `#[handler("custom.name")]` overrides it. Keep handler functions
-/// named after their endpoint and you never repeat the string.
+/// The attribute is **optional** and accepts three forms:
+/// - `#[handler]` — method name = the function's own name, default program.
+/// - `#[handler("custom.name")]` — override the method name, default program.
+/// - `#[handler(program = "platform", name = "custom.name")]` — set the
+///   backend program (the router's product label) and, optionally, the method
+///   name. Either key may be omitted; a missing `name` defaults to the
+///   function's own name, a missing `program` to the default (empty) program.
+///
+/// Keep handler functions named after their endpoint and you never repeat the
+/// method string; tag the whole module's handlers with one `program = …` each.
 ///
 /// Shape expected: `fn(&Ctx, arg1: T1, arg2: T2, …) -> Result<R, E>` where
 /// the **first parameter is the backend context** (a shared reference, e.g.
@@ -28,15 +39,45 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = parse_macro_input!(item as ItemFn);
     let fn_name = func.sig.ident.clone();
 
-    // Optional name argument; defaults to the function's own name.
-    let name: String = if attr.is_empty() {
-        fn_name.to_string()
-    } else {
-        match syn::parse::<LitStr>(attr) {
-            Ok(lit) => lit.value(),
-            Err(e) => return e.to_compile_error().into(),
+    // Parse the optional attribute. Three accepted shapes (see doc comment):
+    // empty, a bare string literal (method name), or a comma list of
+    // `key = "value"` pairs (`program` / `name`).
+    let mut program = String::new();
+    let mut name = fn_name.to_string();
+    if !attr.is_empty() {
+        if let Ok(lit) = syn::parse::<LitStr>(attr.clone()) {
+            name = lit.value();
+        } else {
+            let parser = Punctuated::<MetaNameValue, Token![,]>::parse_terminated;
+            let args = match parser.parse(attr) {
+                Ok(a) => a,
+                Err(e) => return e.to_compile_error().into(),
+            };
+            for nv in args {
+                let key = nv.path.get_ident().map(|i| i.to_string()).unwrap_or_default();
+                let val = match &nv.value {
+                    Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
+                    other => {
+                        return syn::Error::new_spanned(other, "handler arg value must be a string literal")
+                            .to_compile_error()
+                            .into();
+                    }
+                };
+                match key.as_str() {
+                    "program" => program = val,
+                    "name" => name = val,
+                    _ => {
+                        return syn::Error::new_spanned(
+                            &nv.path,
+                            "unknown handler arg (expected `program` or `name`)",
+                        )
+                        .to_compile_error()
+                        .into();
+                    }
+                }
+            }
         }
-    };
+    }
 
     let mut inputs = func.sig.inputs.iter();
 
@@ -89,6 +130,7 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         ::arbor_rpc::inventory::submit! {
             ::arbor_rpc::Entry {
+                program: #program,
                 name: #name,
                 call: |__ctx: &(dyn ::core::any::Any + 'static), __params: ::serde_json::Value|
                     -> ::core::result::Result<::serde_json::Value, ::std::string::String>

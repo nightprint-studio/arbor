@@ -46,6 +46,13 @@ pub type CallFn = fn(&(dyn Any + 'static), Value) -> Result<Value, String>;
 
 /// One registered handler. Emitted by [`handler`] via `inventory::submit!`.
 pub struct Entry {
+    /// The backend program this handler belongs to (the router's product
+    /// label, e.g. `"corvus"` / `"platform"`). The empty string is the
+    /// default/legacy program — handlers annotated with a bare `#[handler]`
+    /// (no `program = …`) register under it. Used by [`registry_for`] so a
+    /// shell binary that links several backends' handlers can still hand each
+    /// program only its own method set.
+    pub program: &'static str,
     pub name: &'static str,
     pub call: CallFn,
 }
@@ -60,10 +67,24 @@ pub fn decode_field<T: DeserializeOwned>(params: &Value, key: &str) -> Result<T,
     serde_json::from_value(v).map_err(|e| format!("arg '{key}': {e}"))
 }
 
-/// Collect every `#[handler]`-annotated function into a method → handler map.
-/// Build once and cache (the host holds it behind a `OnceLock`).
+/// Collect every `#[handler]`-annotated function into a method → handler map,
+/// across **all** programs. A separate `*-be` binary only links its own
+/// program's handlers, so this is already its exact method set; build once and
+/// cache (the host holds it behind a `OnceLock`).
 pub fn registry() -> HashMap<&'static str, CallFn> {
     inventory::iter::<Entry>().map(|e| (e.name, e.call)).collect()
+}
+
+/// Like [`registry`] but only the handlers belonging to `program`. The shell
+/// binary links several backends' handlers into one inventory while they await
+/// their out-of-process split; this lets each program's in-process dispatcher
+/// serve only its own methods (so a method never leaks across the program
+/// boundary, and same-named methods in different programs don't collide).
+pub fn registry_for(program: &str) -> HashMap<&'static str, CallFn> {
+    inventory::iter::<Entry>()
+        .filter(|e| e.program == program)
+        .map(|e| (e.name, e.call))
+        .collect()
 }
 
 #[cfg(test)]
@@ -83,6 +104,12 @@ mod tests {
     #[handler]
     fn ping(_ctx: &Ctx) -> Result<&'static str, String> {
         Ok("pong")
+    }
+
+    // Lives in a different program namespace; invisible to `registry_for("")`.
+    #[handler(program = "other", name = "other.tick")]
+    fn tick(_ctx: &Ctx) -> Result<i64, String> {
+        Ok(7)
     }
 
     #[test]
@@ -120,5 +147,32 @@ mod tests {
         let ctx = Ctx { base: 0 };
         let err = call(&ctx, serde_json::json!({ "lhs": "nope" })).unwrap_err();
         assert!(err.contains("lhs"));
+    }
+
+    #[test]
+    fn registry_for_partitions_by_program() {
+        // The default (empty) program holds the bare-`#[handler]` entries…
+        let default = registry_for("");
+        assert!(default.contains_key("test.add"));
+        assert!(default.contains_key("ping"));
+        assert!(!default.contains_key("other.tick"));
+
+        // …and a named program holds only its own.
+        let other = registry_for("other");
+        assert!(other.contains_key("other.tick"));
+        assert!(!other.contains_key("test.add"));
+        assert!(!other.contains_key("ping"));
+
+        // The unfiltered registry still sees everything.
+        let all = registry();
+        assert!(all.contains_key("test.add"));
+        assert!(all.contains_key("other.tick"));
+    }
+
+    #[test]
+    fn programmed_handler_runs() {
+        let call = registry_for("other")["other.tick"];
+        let out = call(&Ctx { base: 0 }, serde_json::Value::Null).unwrap();
+        assert_eq!(out, serde_json::json!(7));
     }
 }

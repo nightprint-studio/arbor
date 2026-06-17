@@ -1239,8 +1239,6 @@ pub fn run() {
             commands::security_commands::fetch_security_summary,
             commands::security_commands::fetch_security_findings,
             commands::security_commands::export_security_report,
-            // App-level metadata (About modal)
-            commands::app_commands::get_app_info,
             // Filesystem browser
             commands::fs_commands::fs_read_dir,
             commands::fs_commands::list_fs_roots,

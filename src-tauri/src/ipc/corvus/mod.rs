@@ -47,11 +47,13 @@ use tauri::{AppHandle, Manager};
 
 use crate::AppState;
 
-/// The `corvus` handler registry, collected once from every `#[handler]` in
-/// this backend's modules.
+/// The `corvus` handler registry, collected once from every bare `#[handler]`
+/// in this backend's modules. Filtered to the default (empty) program so the
+/// shell's `platform` handlers — which share this binary's inventory while they
+/// await their own out-of-process split — never leak into the corvus dispatch.
 fn registry() -> &'static HashMap<&'static str, CallFn> {
     static REG: OnceLock<HashMap<&'static str, CallFn>> = OnceLock::new();
-    REG.get_or_init(arbor_rpc::registry)
+    REG.get_or_init(|| arbor_rpc::registry_for(""))
 }
 
 /// Decode the JSON params, look the method up, run it against `AppState`,

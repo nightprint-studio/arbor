@@ -22,14 +22,18 @@
 //! only the registered `BrokerClient` changes (to a pipe/socket `tarpc` client)
 //! — the router, this module and the `rpc` command don't move.
 //!
-//! ## Scope (pilot)
+//! ## Programs
 //!
-//! Only the **stash** domain is registered so far (see [`corvus::stash`]); it's
-//! the vertical slice that proves the generic seam (reads, writes, hook-firing,
-//! error mapping) before the wider sweep.
+//! Two backends are registered: **`corvus`** (git — the bulk of the migrated
+//! domains, served in-process or by `corvus-be` when present) and
+//! **`platform`** (app-agnostic services: config/theme/session/workspace/jobs/
+//! fs/terminal/app metadata — in-process only for now, no `platform-be` yet).
+//! Each is a router product label; handlers self-register into their program's
+//! slice of the `arbor-rpc` inventory (see [`corvus`] / [`platform`]).
 
 pub mod corvus;
 pub mod event_sink;
+pub mod platform;
 pub mod split_broker;
 
 use std::collections::HashSet;
@@ -80,6 +84,17 @@ pub fn build_router(app: &AppHandle) -> Router {
             router.register("corvus", loopback);
         }
     }
+
+    // Platform backend: app-agnostic services (config/theme/session/workspace/
+    // jobs/fs/terminal/app metadata). In-process only for now — there is no
+    // `platform-be` process yet, so it routes straight to the loopback that
+    // dispatches against this binary's `platform`-tagged handlers.
+    let platform_handle = app.clone();
+    let platform_loopback: Arc<dyn BrokerClient> =
+        Arc::new(LoopbackBroker::new(move |method, params| {
+            platform::dispatch(&platform_handle, method, params)
+        }));
+    router.register("platform", platform_loopback);
 
     router
 }

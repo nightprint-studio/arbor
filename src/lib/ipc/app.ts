@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 
 export interface AppInfo {
   /** Semantic version, single source of truth from tauri.conf.json. */
@@ -11,7 +12,7 @@ export interface AppInfo {
 
 /** Read app metadata from the backend. Used by the About modal. */
 export function getAppInfo(): Promise<AppInfo> {
-  return invoke('get_app_info');
+  return platform<AppInfo>('get_app_info');
 }
 
 /** Open (or focus, if already open) the dedicated File Explorer window — the

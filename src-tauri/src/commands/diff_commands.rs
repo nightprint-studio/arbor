@@ -1,178 +1,23 @@
+//! Streaming diff/blame Tauri commands.
+//!
+//! The non-streaming diff/blame commands were migrated to broker handlers in
+//! `ipc/corvus/diff.rs`. The two commands here stay inline because they take an
+//! `AppHandle` / `tauri::ipc::Channel` and stream progress to the frontend
+//! (`arbor://diff-stream-*` events, a `BlameProgress` channel) — a later
+//! emit/seam pass will move them.
+
 use std::collections::HashMap;
 
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::error::AppError;
-use crate::git::diff::{BlameLine, DiffFile};
+use crate::git::diff::BlameLine;
 use crate::jobs::{JobInfo, JobStatus};
 use crate::AppState;
 
 /// Frontend supplies `encoding_overrides` as `{ [path]: "windows-1252" }`.
 /// `None` means "no overrides — auto-detect every file" (default behaviour).
 type Overrides = Option<HashMap<String, String>>;
-
-#[tauri::command]
-pub async fn get_commit_diff(
-    state: State<'_, AppState>,
-    tab_id: String,
-    oid: String,
-    context_lines: Option<u32>,
-    diff_algo: Option<String>,
-    encoding_overrides: Overrides,
-) -> Result<Vec<DiffFile>, AppError> {
-    let ctx = context_lines.unwrap_or_else(|| {
-        state.lock_config().map(|c| c.diff.context_lines).unwrap_or(3)
-    });
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::diff::get_commit_diff(
-            &repo, &oid, ctx, diff_algo.as_deref(), encoding_overrides.as_ref(),
-        )
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_commit_diff task panicked: {e}")))?
-}
-
-/// Metadata-only commit diff — returns the file list (path, status, +/- stats)
-/// without parsing any hunks. Paired with `get_commit_file_diff` for the lazy
-/// commit-detail viewer: clicking a commit shows the list instantly, then each
-/// file's hunks are fetched on demand only when the user selects it. This
-/// keeps the click responsive even on large commits and when the user has
-/// `full_file = true` (which would otherwise force libgit2 to walk every byte
-/// of every modified file before the IPC call returned).
-#[tauri::command]
-pub async fn get_commit_diff_meta(
-    state: State<'_, AppState>,
-    tab_id: String,
-    oid: String,
-    diff_algo: Option<String>,
-) -> Result<Vec<crate::git::diff::DiffFile>, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::diff::get_commit_diff_meta(&repo, &oid, diff_algo.as_deref())
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_commit_diff_meta task panicked: {e}")))?
-}
-
-/// Per-file commit diff — parses hunks for a single file inside the given
-/// commit. Use after `get_commit_diff_meta` populated the file list to fill in
-/// hunks on demand.
-#[tauri::command]
-pub async fn get_commit_file_diff(
-    state: State<'_, AppState>,
-    tab_id: String,
-    oid: String,
-    path: String,
-    context_lines: Option<u32>,
-    diff_algo: Option<String>,
-    encoding_overrides: Overrides,
-) -> Result<crate::git::diff::DiffFile, AppError> {
-    let ctx = context_lines.unwrap_or_else(|| {
-        state.lock_config().map(|c| c.diff.context_lines).unwrap_or(3)
-    });
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::diff::get_commit_file_diff(
-            &repo, &oid, &path, ctx, diff_algo.as_deref(), encoding_overrides.as_ref(),
-        )
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_commit_file_diff task panicked: {e}")))?
-}
-
-/// Metadata-only cumulative range diff — file list (path, status, +/- stats)
-/// from `base_oid`'s first parent to `target_oid`, without parsing any hunks.
-/// Paired with `get_commits_range_file_diff` for the lazy "compare revisions"
-/// viewer: the file list shows instantly, each file's hunks fetched on demand.
-#[tauri::command]
-pub async fn get_commits_range_diff_meta(
-    state: State<'_, AppState>,
-    tab_id: String,
-    base_oid: String,
-    target_oid: String,
-    diff_algo: Option<String>,
-) -> Result<Vec<crate::git::diff::DiffFile>, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::diff::get_commits_range_diff_meta(&repo, &base_oid, &target_oid, diff_algo.as_deref())
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_commits_range_diff_meta task panicked: {e}")))?
-}
-
-/// Per-file cumulative range diff — parses hunks for a single file inside the
-/// range from `base_oid`'s first parent to `target_oid`. Use after
-/// `get_commits_range_diff_meta` populated the file list to fill in hunks on demand.
-#[tauri::command]
-pub async fn get_commits_range_file_diff(
-    state: State<'_, AppState>,
-    tab_id: String,
-    base_oid: String,
-    target_oid: String,
-    path: String,
-    context_lines: Option<u32>,
-    diff_algo: Option<String>,
-    encoding_overrides: Overrides,
-) -> Result<crate::git::diff::DiffFile, AppError> {
-    let ctx = context_lines.unwrap_or_else(|| {
-        state.lock_config().map(|c| c.diff.context_lines).unwrap_or(3)
-    });
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::diff::get_commits_range_file_diff(
-            &repo, &base_oid, &target_oid, &path, ctx, diff_algo.as_deref(), encoding_overrides.as_ref(),
-        )
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_commits_range_file_diff task panicked: {e}")))?
-}
-
-#[tauri::command]
-pub async fn get_workdir_diff(
-    state: State<'_, AppState>,
-    tab_id: String,
-    staged: bool,
-    context_lines: Option<u32>,
-    diff_algo: Option<String>,
-    encoding_overrides: Overrides,
-) -> Result<Vec<DiffFile>, AppError> {
-    let ctx = context_lines.unwrap_or_else(|| {
-        state.lock_config().map(|c| c.diff.context_lines).unwrap_or(3)
-    });
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::diff::get_workdir_diff(
-            &repo, staged, ctx, diff_algo.as_deref(), encoding_overrides.as_ref(),
-        )
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_workdir_diff task panicked: {e}")))?
-}
 
 /// Stream workdir/index diff to the frontend file-by-file.
 ///
@@ -336,75 +181,10 @@ pub fn get_workdir_diff_stream(
     Ok(job_id)
 }
 
-#[tauri::command]
-pub async fn get_file_at_commit(
-    state: State<'_, AppState>,
-    tab_id: String,
-    oid: String,
-    path: String,
-    encoding_override: Option<String>,
-) -> Result<String, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::diff::get_file_at_commit(&repo, &oid, &path, encoding_override.as_deref())
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_file_at_commit task panicked: {e}")))?
-}
-
-#[tauri::command]
-pub async fn get_branch_diff(
-    state: State<'_, AppState>,
-    tab_id: String,
-    from_ref: String,
-    to_ref: String,
-    context_lines: Option<u32>,
-    diff_algo: Option<String>,
-    encoding_overrides: Overrides,
-) -> Result<Vec<DiffFile>, AppError> {
-    let ctx = context_lines.unwrap_or_else(|| {
-        state.lock_config().map(|c| c.diff.context_lines).unwrap_or(3)
-    });
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::diff::get_branch_diff(
-            &repo, &from_ref, &to_ref, ctx, diff_algo.as_deref(), encoding_overrides.as_ref(),
-        )
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_branch_diff task panicked: {e}")))?
-}
-
-#[tauri::command]
-pub async fn get_file_blame(
-    state: State<'_, AppState>,
-    tab_id: String,
-    path: String,
-) -> Result<Vec<BlameLine>, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::diff::get_file_blame(&repo, &path)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_file_blame task panicked: {e}")))?
-}
-
 /// Streaming blame: drives a determinate progress bar via `git blame
 /// --incremental` while the history walk runs, returning the assembled lines
-/// when it completes.  Total time is ≈ the same as [`get_file_blame`] — the
-/// win is live feedback on large files instead of an indeterminate spinner.
+/// when it completes.  Total time is ≈ the same as the non-streaming blame —
+/// the win is live feedback on large files instead of an indeterminate spinner.
 ///
 /// Falls back to the libgit2 path (no progress ticks) when no `git` binary is
 /// available, so the modal still works on a machine without git on PATH.

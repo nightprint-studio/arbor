@@ -1,88 +1,18 @@
-//! `merge` domain — thin shell wrapper over [`corvus_git::merge`].
+//! `merge` domain — Tauri-coupled MR conflict-resolution prep (streaming).
 //!
 //! The pure git logic (conflict three-way load, resolve/remove, merge-commit
 //! finaliser, `git merge`, `git merge --abort`, `MERGE_MSG` reader, and the
 //! `ConflictContent` / `ConflictPresence` / `MergeOutcome` / `MergeStrategy`
-//! types) now lives in the Tauri-free `corvus-git` crate. This module keeps
-//! the original shell signatures (no explicit `GitCli`) by resolving the
-//! shell's git program from [`crate::git_cli`] and forwarding — so existing
-//! callers compile unchanged and behavior is byte-identical.
+//! types) lives in the Tauri-free `corvus-git` crate and is reached directly
+//! by the broker handlers in `ipc/corvus/merge.rs`.
 //!
-//! The streaming MR-prep flow ([`prepare_mr_conflict_resolution`] & friends)
-//! stays here: it is Tauri-coupled (progress callbacks, job log streaming) and
-//! is consumed only by `mr_commands`.
-
-use git2::Repository;
+//! What stays here is only the streaming MR-prep flow
+//! ([`prepare_mr_conflict_resolution`] & friends): it is Tauri-coupled
+//! (progress callbacks, job log streaming) and is consumed only by
+//! `mr_commands`.
 
 use crate::error::Result;
 use crate::process_ext::NoWindowExt;
-
-// Re-export the types that moved into the crate so existing call sites
-// (`crate::git::merge::ConflictContent`, …) keep resolving.
-pub use corvus_git::merge::{ConflictContent, ConflictPresence, MergeOutcome, MergeStrategy};
-
-/// The shell's resolved git program as a `corvus-git` invoker.
-fn git() -> corvus_git::prelude::GitCli {
-    corvus_git::prelude::GitCli::from_optional(crate::git_cli::snapshot().path)
-}
-
-// ---------------------------------------------------------------------------
-// Forwarders — original shell signatures, delegating to corvus-git
-// ---------------------------------------------------------------------------
-
-pub fn get_conflict_presence(repo: &Repository) -> Result<Vec<ConflictPresence>> {
-    Ok(corvus_git::merge::get_conflict_presence(repo)?)
-}
-
-pub fn get_conflict_content(
-    repo: &Repository,
-    rel_path: &str,
-    encoding_override: Option<&str>,
-) -> Result<ConflictContent> {
-    Ok(corvus_git::merge::get_conflict_content(repo, rel_path, encoding_override)?)
-}
-
-pub fn resolve_stash_conflict(
-    repo: &mut Repository,
-    rel_path: &str,
-    content: &str,
-    encoding: Option<&str>,
-) -> Result<()> {
-    Ok(corvus_git::merge::resolve_stash_conflict(repo, rel_path, content, encoding)?)
-}
-
-pub fn remove_conflict_file(repo: &mut Repository, rel_path: &str) -> Result<()> {
-    Ok(corvus_git::merge::remove_conflict_file(repo, rel_path)?)
-}
-
-pub fn resolve_conflict(
-    repo: &mut Repository,
-    rel_path: &str,
-    content: &str,
-    encoding: Option<&str>,
-) -> Result<()> {
-    Ok(corvus_git::merge::resolve_conflict(repo, rel_path, content, encoding)?)
-}
-
-pub fn complete_merge(repo: &mut Repository, message: &str) -> Result<String> {
-    Ok(corvus_git::merge::complete_merge(repo, message)?)
-}
-
-pub fn merge_branch(
-    workdir: &std::path::Path,
-    branch_name: &str,
-    strategy: MergeStrategy,
-) -> Result<MergeOutcome> {
-    Ok(corvus_git::merge::merge_branch(&git(), workdir, branch_name, strategy)?)
-}
-
-pub fn abort_merge(workdir: &std::path::Path) -> Result<()> {
-    Ok(corvus_git::merge::abort_merge(&git(), workdir)?)
-}
-
-pub fn get_merge_message(repo: &Repository) -> Result<String> {
-    Ok(corvus_git::merge::get_merge_message(repo)?)
-}
 
 // ---------------------------------------------------------------------------
 // MR conflict-resolution prep — phased, streamable (stays shell-side)

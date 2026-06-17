@@ -27,7 +27,6 @@ pub mod missing_commands;
 pub mod git_cli_commands;
 pub mod branding_commands;
 pub mod security_commands;
-pub mod app_commands;
 pub mod avatar_commands;
 pub mod deep_link_commands;
 pub mod studio_commands;

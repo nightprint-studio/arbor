@@ -1,7 +1,16 @@
+//! Streaming/emit graph Tauri commands.
+//!
+//! The synchronous graph queries (`get_graph`, `get_commit_detail`,
+//! `get_repo_files`, fingerprint, …) were migrated to broker handlers in
+//! `ipc/corvus/graph.rs`. The two commands here stay inline because they take
+//! an `AppHandle` and stream progress to the frontend
+//! (`arbor://file-meta-*`, `arbor://job-*` events) — a later emit/seam pass
+//! will move them.
+
 use tauri::{Emitter, Manager, State};
 
 use crate::error::AppError;
-use crate::git::graph::{CommitDetail, GraphData, RepoFileEntry};
+use crate::git::graph::RepoFileEntry;
 use crate::AppState;
 
 #[derive(serde::Serialize, Clone)]
@@ -152,160 +161,6 @@ pub async fn start_file_meta_scan(
     });
 
     Ok(())
-}
-
-#[tauri::command]
-pub async fn get_repo_files(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<Vec<String>, AppError> {
-    // Grab the repo path under a brief lock then do the walk on the blocking
-    // pool so large repos don't freeze the IPC queue.
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::graph::get_repo_files(&repo)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_repo_files task panicked: {e}")))?
-}
-
-#[tauri::command]
-pub async fn get_files_last_commit(
-    state: State<'_, AppState>,
-    tab_id: String,
-    paths: Vec<String>,
-) -> Result<Vec<RepoFileEntry>, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::graph::get_files_last_commit(&repo, paths)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_files_last_commit task panicked: {e}")))?
-}
-
-/// Return a fast fingerprint of the repository's current ref state.
-/// Used by the frontend cache to detect whether anything has changed
-/// without loading the full graph.
-///
-/// Format: `<HEAD-SHA>|<ref1:sha1>,<ref2:sha2>,...` (refs sorted).
-///
-/// Only includes refs under `refs/heads/`, `refs/remotes/`, `refs/tags/` —
-/// pseudo-refs like `FETCH_HEAD` and `ORIG_HEAD` are touched on every git
-/// operation (even no-op fetches) and would make the fingerprint flap,
-/// triggering pointless graph reloads from `refreshIfChanged`.
-#[tauri::command]
-pub fn get_repo_fingerprint(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<String, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let inner = repo.inner();
-
-    let head = inner
-        .head()
-        .ok()
-        .and_then(|h| h.target())
-        .map(|oid| oid.to_string())
-        .unwrap_or_default();
-
-    let mut parts: Vec<String> = inner
-        .references()
-        .map_err(|e| AppError::Other(e.to_string()))?
-        .flatten()
-        .filter_map(|r| {
-            let name   = r.name()?.to_owned();
-            // Skip pseudo-refs (FETCH_HEAD, ORIG_HEAD, MERGE_HEAD, …) — they
-            // mutate on every operation regardless of actual state changes.
-            if !(name.starts_with("refs/heads/")
-              || name.starts_with("refs/remotes/")
-              || name.starts_with("refs/tags/"))
-            {
-                return None;
-            }
-            let target = r.target()?.to_string();
-            Some(format!("{}:{}", name, target))
-        })
-        .collect();
-    parts.sort_unstable();
-
-    Ok(format!("{}|{}", head, parts.join(",")))
-}
-
-#[tauri::command]
-pub async fn get_graph(
-    state: State<'_, AppState>,
-    tab_id: String,
-    offset: usize,
-    limit: usize,
-) -> Result<GraphData, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || -> Result<GraphData, AppError> {
-        // Mutable handle so we can feed `stash_foreach` on the same repo
-        // after the (immutable-only) graph walk finishes.
-        let mut repo = git2::Repository::open(&repo_path)?;
-        let mut data = crate::git::graph::load_graph(&repo, offset, limit)?;
-        // Stash collection is cheap (few entries, no deep diff). Failures
-        // are swallowed: a broken stash reflog shouldn't hide the graph.
-        data.stashes = crate::git::stash::collect_stash_refs(&mut repo)
-            .unwrap_or_default();
-        Ok(data)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_graph task panicked: {e}")))?
-}
-
-#[tauri::command]
-pub async fn get_graph_for_file(
-    state: State<'_, AppState>,
-    tab_id: String,
-    file_path: String,
-    offset: usize,
-    limit: usize,
-) -> Result<GraphData, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::graph::load_graph_for_file(&repo, &file_path, offset, limit)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_graph_for_file task panicked: {e}")))?
-}
-
-/// Async version: grabs the repo path and releases the mutex immediately,
-/// then opens a *fresh* Repository handle on a blocking thread so the scan
-/// does not starve other commands waiting for the lock.
-#[tauri::command]
-pub async fn get_repo_file_tree(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<Vec<RepoFileEntry>, AppError> {
-    // Hold the mutex only long enough to copy the path string.
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        repo.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::graph::get_repo_file_tree(&repo)
-    })
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 // ── SVG export helpers ───────────────────────────────────────────────────────
@@ -467,22 +322,4 @@ pub async fn export_graph_svg(
     });
 
     Ok(job_id)
-}
-
-#[tauri::command]
-pub async fn get_commit_detail(
-    state: State<'_, AppState>,
-    tab_id: String,
-    oid: String,
-) -> Result<CommitDetail, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::open(&repo_path)?;
-        crate::git::graph::get_commit_detail(&repo, &oid)
-    })
-    .await
-    .map_err(|e| AppError::Other(format!("get_commit_detail task panicked: {e}")))?
 }

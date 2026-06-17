@@ -15,7 +15,8 @@ use crate::AppState;
 
 /// Forward a product command to its backend.
 ///
-/// - `program` — which backend (`"corvus"` today; `"merula"` / `"sitta"` later).
+/// - `program` — which backend (`"corvus"` / `"platform"` today; `"merula"` /
+///   `"sitta"` later).
 /// - `method` — the method the backend registered (= the handler's fn name,
 ///   e.g. `"stash_save"`).
 /// - `params` — the handler's named arguments as a JSON object (snake_case keys

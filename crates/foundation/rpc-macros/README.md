@@ -3,7 +3,7 @@
 The proc-macro behind [`arbor-rpc`](../rpc). **Don't depend on this directly** —
 use `arbor_rpc::handler`, which re-exports it (the serde / serde_derive split).
 
-## `#[handler("method.name")]`
+## `#[handler]`
 
 Annotating a backend handler turns it into a self-registering RPC entry. The
 macro reads the function signature and generates:
@@ -15,6 +15,19 @@ macro reads the function signature and generates:
 Expected shape: `fn(&Ctx, arg1: T1, …) -> Result<R, E>` where the **first
 parameter is the backend context** (a shared reference, recovered by downcasting
 the dispatcher's `&dyn Any`), `R: Serialize`, and `E: Display`.
+
+### Attribute forms
+
+| Form | method name | program |
+|---|---|---|
+| `#[handler]` | the fn's own name | default (empty) |
+| `#[handler("custom.name")]` | `"custom.name"` | default (empty) |
+| `#[handler(program = "platform")]` | the fn's own name | `"platform"` |
+| `#[handler(program = "platform", name = "theme.get")]` | `"theme.get"` | `"platform"` |
+
+The `program` is the router's product label; it lands in `Entry.program` and
+drives `arbor_rpc::registry_for(program)`. Keys (`program`, `name`) take string
+literals, in any order.
 
 ## Why a separate crate
 

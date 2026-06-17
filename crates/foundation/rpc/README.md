@@ -16,6 +16,28 @@ fn stash_save(state: &AppState, tab_id: String, message: Option<String>, include
 The method name is optional — it defaults to the function's own name, so a
 handler named after its endpoint never repeats the string.
 
+### Program namespaces
+
+Each handler belongs to a **program** — the router's product label. A bare
+`#[handler]` registers under the default (empty) program; tag a handler with a
+program to put it in another backend's slice:
+
+```rust
+#[arbor_rpc::handler(program = "platform")]            // method = fn name
+fn get_app_info(state: &AppState) -> Result<AppInfo, AppError> { /* … */ }
+
+#[arbor_rpc::handler(program = "platform", name = "theme.get")]   // both set
+fn theme_get(state: &AppState) -> Result<Theme, AppError> { /* … */ }
+```
+
+`registry()` returns every handler regardless of program (a single `*-be`
+binary only links its own program's handlers, so that's already its exact
+method set). `registry_for(program)` returns just one program's handlers — used
+by the **shell**, which links several backends' handlers into one inventory
+while they await their out-of-process split, so each program's in-process
+dispatcher serves only its own methods (no cross-program leak, no same-name
+collision).
+
 The macro reads the signature and generates:
 
 - the JSON-argument decode (one `decode_field` per parameter, by name);
@@ -44,12 +66,13 @@ pattern.
 
 ## Public API: use the prelude
 
-`arbor_rpc::prelude::{handler, registry, decode_field, Entry, CallFn}`.
+`arbor_rpc::prelude::{handler, registry, registry_for, decode_field, Entry, CallFn}`.
 
 ## Tests
 
 `cargo test -p arbor-rpc` exercises the macro end-to-end: registration,
-arg-decode (incl. omitted `Option`), wrong-context error, bad-arg error.
+arg-decode (incl. omitted `Option`), wrong-context error, bad-arg error, and
+per-program partitioning (`registry_for`).
 
 ## Depends on
 
@@ -58,5 +81,7 @@ Tauri, no keyring, no product types.
 
 ## Consumed by
 
-`arbor` (the shell): `src-tauri/src/ipc/corvus/*` annotates its handlers and
-builds the registry. Future `*-be` backends share it unchanged.
+`arbor` (the shell): `src-tauri/src/ipc/corvus/*` (default program) and
+`src-tauri/src/ipc/platform/*` (`program = "platform"`) annotate their handlers;
+each dispatcher builds its slice with `registry_for(...)`. Future `*-be`
+backends share it unchanged.

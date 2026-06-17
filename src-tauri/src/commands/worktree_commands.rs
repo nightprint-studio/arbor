@@ -1,82 +1,18 @@
+//! IDE-detection Tauri command.
+//!
+//! The worktree CRUD + IDE config/launch commands were migrated to broker
+//! handlers in `ipc/corvus/worktree.rs`. `start_ide_detection` stays inline
+//! because it takes an `AppHandle` and streams probe results to the frontend
+//! (`arbor://job-*`, `arbor://ide-detection-done` events) — a later emit/seam
+//! pass will move it.
+
 use std::path::Path;
 use tauri::{Manager, State};
 
-use crate::config::app_config;
 use crate::error::AppError;
-use crate::git::worktree::{self, ProjectType, WorktreeInfo, BUILTIN_IDES};
+use crate::git::worktree::BUILTIN_IDES;
 use crate::AppState;
 use crate::process_ext::NoWindowExt;
-
-// ---------------------------------------------------------------------------
-// List
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn list_worktrees(
-    state: State<'_, AppState>,
-    tab_id: String,
-) -> Result<Vec<WorktreeInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let repo_path = Path::new(&repo.path);
-    worktree::list_worktrees(repo_path, repo_path)
-}
-
-// ---------------------------------------------------------------------------
-// Add
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn add_worktree(
-    state: State<'_, AppState>,
-    tab_id: String,
-    dest_path: String,
-    branch: String,
-    new_branch: Option<String>,
-) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let repo_path = Path::new(&repo.path);
-    worktree::add_worktree(
-        repo_path,
-        &dest_path,
-        &branch,
-        new_branch.as_deref(),
-    )
-}
-
-// ---------------------------------------------------------------------------
-// Remove
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn remove_worktree(
-    state: State<'_, AppState>,
-    tab_id: String,
-    worktree_path: String,
-) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let repo_path = Path::new(&repo.path);
-    worktree::remove_worktree(repo_path, &worktree_path)
-}
-
-// ---------------------------------------------------------------------------
-// Detect project type (standalone, no repo required)
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn detect_project_type(path: String) -> Result<ProjectType, AppError> {
-    let p = Path::new(&path);
-    if !p.exists() {
-        return Err(AppError::Other(format!("Path does not exist: {path}")));
-    }
-    Ok(worktree::detect_project_type(p))
-}
-
-// ---------------------------------------------------------------------------
-// IDE detection — background job
-// ---------------------------------------------------------------------------
 
 /// Kick off IDE detection as a non-cancellable background job.
 /// Each IDE is probed in a detached thread; results are broadcast via
@@ -212,119 +148,4 @@ fn probe_which(cmd: &str) -> Option<String> {
             let s = String::from_utf8_lossy(&o.stdout);
             s.lines().next().map(|l| l.trim().to_string())
         })
-}
-
-// ---------------------------------------------------------------------------
-// Open in IDE
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn open_in_ide(
-    state: State<'_, AppState>,
-    path: String,
-    ide_id: Option<String>,
-) -> Result<(), AppError> {
-    let config = state.lock_config()?;
-    let ide_cfg = config.ide.clone();
-    drop(config);
-
-    // Per-repo override (Settings → Project → External Integrations) wins
-    // over the global default when the caller didn't pin a specific IDE.
-    // Best-effort: a missing/unreadable `.arbor/config.toml` just falls
-    // through to the global default, the original behavior.
-    let repo_ide_id: Option<String> = if ide_id.is_none() {
-        crate::config::repo_config::load(&path).ok().and_then(|c| c.ide_id)
-    } else {
-        None
-    };
-
-    let effective_id = ide_id.as_deref()
-        .or(repo_ide_id.as_deref())
-        .unwrap_or(&ide_cfg.default_ide)
-        .to_owned();
-    let (command, extra_args) = resolve_ide(&effective_id, &ide_cfg)?;
-    worktree::open_in_ide(&path, &command, &extra_args)
-}
-
-// ---------------------------------------------------------------------------
-// Per-repo IDE preference (`.arbor/config.toml` → `ide_id`)
-// ---------------------------------------------------------------------------
-
-/// Read the project-bound IDE preference, or `None` when the repo defers
-/// to the global default. Convenience wrapper over `get_repo_config` so
-/// the Settings panel doesn't have to round-trip the whole RepoConfig.
-#[tauri::command]
-pub fn get_repo_ide(
-    state:  State<'_, AppState>,
-    tab_id: String,
-) -> Result<Option<String>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(crate::config::repo_config::load(&repo.path)?.ide_id)
-}
-
-/// Persist (or clear) the project-bound IDE preference. Pass `None` to
-/// remove the override and fall back to the global default.
-#[tauri::command]
-pub fn set_repo_ide(
-    state:  State<'_, AppState>,
-    tab_id: String,
-    ide_id: Option<String>,
-) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let mut cfg = crate::config::repo_config::load(&repo.path).unwrap_or_default();
-    cfg.ide_id = ide_id.filter(|s| !s.is_empty());
-    crate::config::repo_config::save(&repo.path, &cfg)
-}
-
-// ---------------------------------------------------------------------------
-// IDE config get/set
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn get_ide_config(
-    state: State<'_, AppState>,
-) -> Result<crate::config::app_config::IdeConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.ide.clone())
-}
-
-#[tauri::command]
-pub fn set_ide_config(
-    state: State<'_, AppState>,
-    config: crate::config::app_config::IdeConfig,
-) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.ide = config;
-    let cfg_clone = cfg.clone();
-    drop(cfg);
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
-
-// ---------------------------------------------------------------------------
-// Helper: resolve IDE command + args from config
-// ---------------------------------------------------------------------------
-
-fn resolve_ide(
-    ide_id: &str,
-    ide_cfg: &crate::config::app_config::IdeConfig,
-) -> Result<(String, Vec<String>), AppError> {
-    // 1. Custom user-defined IDEs
-    if let Some(custom) = ide_cfg.custom_ides.iter().find(|c| c.id == ide_id) {
-        return Ok((custom.command.clone(), custom.args.clone()));
-    }
-
-    // 2. Built-in IDE — check for a path override first
-    if let Some(builtin) = BUILTIN_IDES.iter().find(|b| b.id == ide_id) {
-        let cmd = if let Some(ov) = ide_cfg.path_overrides.get(ide_id) {
-            if !ov.is_empty() { ov.clone() } else { builtin.cmd.to_owned() }
-        } else {
-            builtin.cmd.to_owned()
-        };
-        let args = builtin.args.iter().map(|s| s.to_string()).collect();
-        return Ok((cmd, args));
-    }
-
-    Err(AppError::Other(format!("Unknown IDE '{ide_id}'")))
 }

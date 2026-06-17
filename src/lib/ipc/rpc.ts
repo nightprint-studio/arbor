@@ -20,3 +20,8 @@ export function rpc<R>(program: string, method: string, params: Record<string, u
 /** Bound helper for the Corvus (git) backend. */
 export const corvus = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('corvus', method, params);
+
+/** Bound helper for the Platform backend (config, theme, session, workspace,
+ *  jobs, fs, terminal, app metadata — everything that isn't a product). */
+export const platform = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
+  rpc<R>('platform', method, params);
