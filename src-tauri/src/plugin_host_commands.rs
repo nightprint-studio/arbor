@@ -20,7 +20,7 @@
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::commands::{branch_commands, remote_commands, stage_commands};
+use crate::commands::{branch_commands, remote_commands};
 use crate::error::AppError;
 use crate::AppState;
 
@@ -48,7 +48,11 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
         "arbor:git.commit" => {
             let message = req_str(&ctx, "message", id)?;
             let amend = get_bool(&ctx, "amend").unwrap_or(false);
-            stage_commands::commit(state, tab_id, message, amend)?;
+            // Migrated to the corvus broker: route through the generic rpc path.
+            // The handler fires `on_pre_commit` (vetoable) + `on_commit` inline,
+            // so a plugin veto surfaces here as an Err exactly as before.
+            corvus_rpc(state.inner(), "commit",
+                serde_json::json!({ "tab_id": tab_id, "message": message, "amend": amend }))?;
         }
         "arbor:git.push" => {
             let remote = get_str(&ctx, "remote").unwrap_or_else(|| "origin".to_string());

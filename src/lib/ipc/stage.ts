@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { corvus } from './rpc';
 import type { RepoStatus, CherryPickResult } from '../types/git';
 import { invalidateTabCache } from './cache-invalidate';
@@ -48,11 +47,11 @@ export const stagePatch = async (tabId: string, patch: string): Promise<void> =>
   invalidateTabCache(tabId);
 };
 
-// `commit` is intentionally still on the legacy `invoke` path: it fires the
-// vetoable `on_pre_commit` hook + `on_commit`, which the broker seam does not
-// yet support. It stays an inline #[tauri::command] until that pass.
+// `commit` fires the vetoable `on_pre_commit` hook + `on_commit`; the broker
+// handler fires them inline (the plugin host is co-located with the handler),
+// so a plugin veto comes back as a rejected promise.
 export const commitChanges = async (tabId: string, message: string, amend = false): Promise<string> => {
-  const oid = await invoke<string>('commit', { tabId, message, amend });
+  const oid = await corvus<string>('commit', { tab_id: tabId, message, amend });
   invalidateTabCache(tabId);
   return oid;
 };

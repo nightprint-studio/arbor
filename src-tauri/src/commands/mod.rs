@@ -1,6 +1,5 @@
 pub mod repo_commands;
 pub mod diff_commands;
-pub mod stage_commands;
 pub mod branch_commands;
 pub mod remote_commands;
 pub mod rpc_commands;

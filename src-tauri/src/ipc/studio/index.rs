@@ -17,7 +17,6 @@
 
 use std::sync::Arc;
 
-use arbor_ipc::prelude::EventSink;
 use serde::Serialize;
 
 use crate::error::AppError;
