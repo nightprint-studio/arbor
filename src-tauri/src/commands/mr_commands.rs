@@ -3,16 +3,8 @@ use tauri::State;
 use crate::AppState;
 use crate::error::{AppError, Result};
 use crate::git_provider::mr_impl::{
-    CreateMrParams, MergeRequest, MergedMrHint, MrCapabilities, MrDetail, MrFeatureStatus,
-    MrFileDiff, MrCommit,
-    get_github_pr_commits,    get_gitlab_mr_commits,
-    get_github_commit_files,  get_gitlab_commit_files,
-    mark_github_pr_ready,     mark_gitlab_mr_ready,
-    enable_github_auto_merge, enable_gitlab_auto_merge,
-    disable_github_auto_merge, disable_gitlab_auto_merge,
-    fetch_github_auto_merge_allowed, fetch_gitlab_mwps_supported,
-    fetch_github_pr_feature_enabled, fetch_gitlab_mr_feature_enabled,
-    wait_gitlab_merge_status_ready,
+    AutoMergeOpts, CreateMrParams, MergeRequest, MergedMrHint, MrCapabilities, MrDetail,
+    MrFeatureStatus, MrFileDiff, MrCommit,
 };
 use crate::git_provider::{
     provider_for_tab, mr_id_from,
@@ -78,60 +70,27 @@ pub async fn create_mr(
     let resolved = provider_for_tab(&state, &tab_id)?;
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
 
-    // Auto-merge requires the GitHub PR `node_id` (GraphQL) which the trait
-    // surface does not expose yet — keep the direct path for that branch.
-    // TODO(Phase 5): add `enable_auto_merge` to the trait.
-    let auto = params.auto_merge;
-    let squash = params.squash;
+    // Capture the flags we echo back / use for auto-merge before `params` is
+    // moved into `create_mr`.
+    let auto          = params.auto_merge;
+    let squash        = params.squash;
     let delete_branch = params.delete_branch;
 
-    let mr = match resolved.info.provider.as_str() {
-        "github" => {
-            let token = crate::git_provider::mr_impl::get_github_token()?
-                .ok_or_else(|| AppError::Other("GitHub token not found".into()))?;
-            let owner = resolved.info.owner.as_deref().unwrap_or("");
-            let repo  = resolved.info.repo_name.as_deref().unwrap_or("");
-            let (mr, node_id) = crate::git_provider::mr_impl::create_github_pr(owner, repo, &params, &token).await?;
+    let mut mr = resolved.provider.create_mr(&resolved.repo, params).await.map_err(pe)?;
+    // The provider may not echo these creation-time preferences back on the
+    // returned MR — keep them so the detail modal's merge defaults are right.
+    mr.squash        = squash;
+    mr.delete_branch = delete_branch;
 
-            if auto {
-                let method = if squash { "SQUASH" } else { "MERGE" };
-                match node_id {
-                    Some(id) => match enable_github_auto_merge(&id, method, &token).await {
-                        Ok(()) => emit_auto_merge_ok(&app_handle, mr.number),
-                        Err(e) => emit_auto_merge_err(&app_handle, mr.number, &e.to_string()),
-                    },
-                    None => emit_auto_merge_err(
-                        &app_handle,
-                        mr.number,
-                        "GitHub response missing node_id — cannot enable auto-merge.",
-                    ),
-                }
-            }
-            mr
+    if auto {
+        // The provider resolves any extra handle it needs internally (GitHub's
+        // GraphQL node id; GitLab's wait-for-mergeable poll).
+        let id = mr_id_from(&resolved, mr.number);
+        match resolved.provider.enable_auto_merge(&id, AutoMergeOpts { squash, delete_branch }).await {
+            Ok(())  => emit_auto_merge_ok(&app_handle, mr.number),
+            Err(e)  => emit_auto_merge_err(&app_handle, mr.number, &e.to_string()),
         }
-        "gitlab" => {
-            let mr = resolved.provider
-                .create_mr(&resolved.repo, params)
-                .await
-                .map_err(pe)?;
-
-            if auto {
-                let base  = resolved.info.gitlab_base_url.as_deref().unwrap_or("https://gitlab.com");
-                let token = crate::git_provider::mr_impl::get_gitlab_token(base)?
-                    .ok_or_else(|| AppError::Other("GitLab token not found".into()))?;
-                let path  = resolved.info.project_path.as_deref().unwrap_or("");
-                wait_gitlab_merge_status_ready(path, base, mr.number, &token).await;
-                match enable_gitlab_auto_merge(
-                    path, base, mr.number, squash, delete_branch, &token,
-                ).await {
-                    Ok(()) => emit_auto_merge_ok(&app_handle, mr.number),
-                    Err(e) => emit_auto_merge_err(&app_handle, mr.number, &e.to_string()),
-                }
-            }
-            mr
-        }
-        other => return Err(AppError::Other(format!("Unknown provider: {other}"))),
-    };
+    }
 
     fire_mr_hook(&state, "on_mr_opened", &mr);
     Ok(mr)
@@ -177,49 +136,10 @@ pub async fn get_mr_capabilities(
     };
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
 
-    match resolved.info.provider.as_str() {
-        "github" => {
-            let token = match crate::git_provider::mr_impl::get_github_token() {
-                Ok(Some(t)) => t,
-                _           => return Ok(MrCapabilities::default()),
-            };
-            let owner = resolved.info.owner.as_deref().unwrap_or("");
-            let repo  = resolved.info.repo_name.as_deref().unwrap_or("");
-            match fetch_github_auto_merge_allowed(owner, repo, &token).await {
-                Ok(true)  => Ok(MrCapabilities::default()),
-                Ok(false) => Ok(MrCapabilities {
-                    auto_merge_supported: false,
-                    auto_merge_reason:    Some(
-                        "Auto-merge is disabled for this repository — \
-                         enable it under Settings → General → Pull Requests on GitHub.".into(),
-                    ),
-                }),
-                // Probe failed — stay permissive.
-                Err(_) => Ok(MrCapabilities::default()),
-            }
-        }
-        "gitlab" => {
-            let base  = resolved.info.gitlab_base_url.as_deref().unwrap_or("https://gitlab.com");
-            let token = match crate::git_provider::mr_impl::get_gitlab_token(base) {
-                Ok(Some(t)) => t,
-                _           => return Ok(MrCapabilities::default()),
-            };
-            let path = resolved.info.project_path.as_deref().unwrap_or("");
-            match fetch_gitlab_mwps_supported(path, base, &token).await {
-                Ok(true)  => Ok(MrCapabilities::default()),
-                Ok(false) => Ok(MrCapabilities {
-                    auto_merge_supported: false,
-                    auto_merge_reason:    Some(
-                        "CI jobs are disabled for this project — there is no \
-                         pipeline to wait on, so merge-when-pipeline-succeeds \
-                         cannot be armed.".into(),
-                    ),
-                }),
-                Err(_) => Ok(MrCapabilities::default()),
-            }
-        }
-        _ => Ok(MrCapabilities::default()),
-    }
+    // The provider returns the permissive default on any internal probe failure;
+    // map a hard error (provider/transport) to the default too so the user can
+    // still try.
+    Ok(resolved.provider.auto_merge_allowed(&resolved.repo).await.unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------
@@ -242,29 +162,9 @@ pub async fn probe_mr_feature(
     };
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
 
-    match resolved.info.provider.as_str() {
-        "github" => {
-            let token = match crate::git_provider::mr_impl::get_github_token() {
-                Ok(Some(t)) => t,
-                _           => return Ok(MrFeatureStatus::default()),
-            };
-            let owner = resolved.info.owner.as_deref().unwrap_or("");
-            let repo  = resolved.info.repo_name.as_deref().unwrap_or("");
-            Ok(fetch_github_pr_feature_enabled(owner, repo, &token).await
-                .unwrap_or_default())
-        }
-        "gitlab" => {
-            let base  = resolved.info.gitlab_base_url.as_deref().unwrap_or("https://gitlab.com");
-            let token = match crate::git_provider::mr_impl::get_gitlab_token(base) {
-                Ok(Some(t)) => t,
-                _           => return Ok(MrFeatureStatus::default()),
-            };
-            let path  = resolved.info.project_path.as_deref().unwrap_or("");
-            Ok(fetch_gitlab_mr_feature_enabled(path, base, &token).await
-                .unwrap_or_default())
-        }
-        _ => Ok(MrFeatureStatus::default()),
-    }
+    // Permissive on any probe/transport failure (the failing call will surface
+    // a normal error later).
+    Ok(resolved.provider.mr_feature_status(&resolved.repo).await.unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------
@@ -281,24 +181,8 @@ pub async fn disable_mr_auto_merge(
 ) -> Result<()> {
     let resolved = provider_for_tab(&state, &tab_id)?;
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
-
-    match resolved.info.provider.as_str() {
-        "github" => {
-            let token = crate::git_provider::mr_impl::get_github_token()?
-                .ok_or_else(|| AppError::Other("GitHub token not found".into()))?;
-            let owner = resolved.info.owner.as_deref().unwrap_or("");
-            let repo  = resolved.info.repo_name.as_deref().unwrap_or("");
-            disable_github_auto_merge(owner, repo, number, &token).await?;
-        }
-        "gitlab" => {
-            let base  = resolved.info.gitlab_base_url.as_deref().unwrap_or("https://gitlab.com");
-            let token = crate::git_provider::mr_impl::get_gitlab_token(base)?
-                .ok_or_else(|| AppError::Other("GitLab token not found".into()))?;
-            let path = resolved.info.project_path.as_deref().unwrap_or("");
-            disable_gitlab_auto_merge(path, base, number, &token).await?;
-        }
-        other => return Err(AppError::Other(format!("Unknown provider: {other}"))),
-    }
+    let id = mr_id_from(&resolved, number);
+    resolved.provider.disable_auto_merge(&id).await.map_err(pe)?;
     Ok(())
 }
 
@@ -448,25 +332,8 @@ pub async fn mark_mr_ready(
 ) -> Result<()> {
     let resolved = provider_for_tab(&state, &tab_id)?;
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
-
-    // TODO(Phase 5): add `mark_mr_ready` to the trait.
-    match resolved.info.provider.as_str() {
-        "github" => {
-            let token = crate::git_provider::mr_impl::get_github_token()?
-                .ok_or_else(|| AppError::Other("GitHub token not found".into()))?;
-            let owner = resolved.info.owner.as_deref().unwrap_or("");
-            let repo  = resolved.info.repo_name.as_deref().unwrap_or("");
-            mark_github_pr_ready(owner, repo, number, &token).await?;
-        }
-        "gitlab" => {
-            let base  = resolved.info.gitlab_base_url.as_deref().unwrap_or("https://gitlab.com");
-            let token = crate::git_provider::mr_impl::get_gitlab_token(base)?
-                .ok_or_else(|| AppError::Other("GitLab token not found".into()))?;
-            let path  = resolved.info.project_path.as_deref().unwrap_or("");
-            mark_gitlab_mr_ready(path, base, number, &token).await?;
-        }
-        other => return Err(AppError::Other(format!("Unknown provider: {other}"))),
-    }
+    let id = mr_id_from(&resolved, number);
+    resolved.provider.mark_mr_ready(&id).await.map_err(pe)?;
     fire_mr_hook_by_number(&state, "on_mr_updated", number, &resolved.info.provider);
     Ok(())
 }
@@ -513,24 +380,8 @@ pub async fn get_mr_commits(
 ) -> Result<Vec<MrCommit>> {
     let resolved = provider_for_tab(&state, &tab_id)?;
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
-    // TODO(Phase 5): add `list_mr_commits` to the trait.
-    match resolved.info.provider.as_str() {
-        "github" => {
-            let token = crate::git_provider::mr_impl::get_github_token()?
-                .ok_or_else(|| AppError::Other("GitHub token not found".into()))?;
-            let owner = resolved.info.owner.as_deref().unwrap_or("");
-            let repo  = resolved.info.repo_name.as_deref().unwrap_or("");
-            get_github_pr_commits(owner, repo, number, &token).await
-        }
-        "gitlab" => {
-            let base  = resolved.info.gitlab_base_url.as_deref().unwrap_or("https://gitlab.com");
-            let token = crate::git_provider::mr_impl::get_gitlab_token(base)?
-                .ok_or_else(|| AppError::Other("GitLab token not found".into()))?;
-            let path  = resolved.info.project_path.as_deref().unwrap_or("");
-            get_gitlab_mr_commits(path, base, number, &token).await
-        }
-        other => Err(AppError::Other(format!("Unknown provider: {other}"))),
-    }
+    let id = mr_id_from(&resolved, number);
+    resolved.provider.list_mr_commits(&id).await.map_err(pe)
 }
 
 #[tauri::command]
@@ -541,24 +392,7 @@ pub async fn get_mr_commit_diff(
 ) -> Result<Vec<MrFileDiff>> {
     let resolved = provider_for_tab(&state, &tab_id)?;
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
-    // TODO(Phase 5): add `get_commit_diff` to the trait.
-    match resolved.info.provider.as_str() {
-        "github" => {
-            let token = crate::git_provider::mr_impl::get_github_token()?
-                .ok_or_else(|| AppError::Other("GitHub token not found".into()))?;
-            let owner = resolved.info.owner.as_deref().unwrap_or("");
-            let repo  = resolved.info.repo_name.as_deref().unwrap_or("");
-            get_github_commit_files(owner, repo, &sha, &token).await
-        }
-        "gitlab" => {
-            let base  = resolved.info.gitlab_base_url.as_deref().unwrap_or("https://gitlab.com");
-            let token = crate::git_provider::mr_impl::get_gitlab_token(base)?
-                .ok_or_else(|| AppError::Other("GitLab token not found".into()))?;
-            let path  = resolved.info.project_path.as_deref().unwrap_or("");
-            get_gitlab_commit_files(path, base, &sha, &token).await
-        }
-        other => Err(AppError::Other(format!("Unknown provider: {other}"))),
-    }
+    resolved.provider.get_commit_diff(&resolved.repo, &sha).await.map_err(pe)
 }
 
 // ---------------------------------------------------------------------------

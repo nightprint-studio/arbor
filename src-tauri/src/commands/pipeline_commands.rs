@@ -319,87 +319,17 @@ pub async fn fetch_mr_ci_runs(
 ) -> Result<Vec<CiRun>> {
     let resolved = provider_for_tab(&state, &tab_id)?;
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
-    let info = &resolved.info;
 
-    // TODO(Phase 5): the trait only exposes a single `list_ci_runs(branch)` —
-    // surface the parallel MR/SHA queries on the trait so this command can
-    // route through the provider too.
-    match info.provider.as_str() {
-        "github" => {
-            let token = crate::git_provider::ci_impl::get_github_token()?
-                .ok_or_else(|| AppError::Other("GitHub token not found".into()))?;
-            let owner = info.owner.as_deref().unwrap_or("");
-            let repo  = info.repo_name.as_deref().unwrap_or("");
-
-            let by_branch_fut = crate::git_provider::ci_impl::fetch_github_runs_for_branch(
-                owner, repo, &source_branch, &token,
-            );
-            let by_sha_fut = async {
-                if let Some(sha) = head_sha.as_deref().filter(|s| !s.is_empty()) {
-                    crate::git_provider::ci_impl::fetch_github_runs_for_sha(
-                        owner, repo, sha, &token,
-                    ).await
-                } else {
-                    Ok(Vec::new())
-                }
-            };
-            let (branch_res, sha_res) = tokio::join!(by_branch_fut, by_sha_fut);
-
-            // The branch query is the primary source; surface its error.
-            // The head-sha query is best-effort and may fail silently.
-            let mut runs = branch_res?;
-            if let Ok(sha_runs) = sha_res {
-                let seen: std::collections::HashSet<String> =
-                    runs.iter().map(|r| r.id.clone()).collect();
-                for r in sha_runs {
-                    if !seen.contains(&r.id) {
-                        runs.push(r);
-                    }
-                }
-            }
-            // Newest first by run id (numeric, descending).
-            runs.sort_by(|a, b| {
-                let ai = a.id.parse::<i64>().unwrap_or(0);
-                let bi = b.id.parse::<i64>().unwrap_or(0);
-                bi.cmp(&ai)
-            });
-            Ok(runs)
-        }
-        "gitlab" => {
-            let base  = info.gitlab_base_url.as_deref().unwrap_or("https://gitlab.com");
-            let token = crate::git_provider::ci_impl::get_gitlab_token(base)?
-                .ok_or_else(|| AppError::Other("GitLab token not found".into()))?;
-            let path  = info.project_path.as_deref().unwrap_or("");
-
-            let mr_pipelines_fut = crate::git_provider::ci_impl::fetch_gitlab_mr_pipelines(
-                path, base, mr_number, &token,
-            );
-            let branch_pipelines_fut = crate::git_provider::ci_impl::fetch_gitlab_pipelines(
-                path, base, &token,
-            );
-            let (mr_res, branch_res) = tokio::join!(mr_pipelines_fut, branch_pipelines_fut);
-
-            // MR endpoint is the authoritative source; if it fails, surface the error.
-            let mut runs = mr_res?;
-            if let Ok(branch_runs) = branch_res {
-                let seen: std::collections::HashSet<String> =
-                    runs.iter().map(|r| r.id.clone()).collect();
-                for r in branch_runs {
-                    if r.branch == source_branch && !seen.contains(&r.id) {
-                        runs.push(r);
-                    }
-                }
-            }
-            // Newest first by pipeline id (numeric, descending).
-            runs.sort_by(|a, b| {
-                let ai = a.id.parse::<i64>().unwrap_or(0);
-                let bi = b.id.parse::<i64>().unwrap_or(0);
-                bi.cmp(&ai)
-            });
-            Ok(runs)
-        }
-        other => Err(AppError::Other(format!("unknown CI provider: {other}"))),
-    }
+    // The provider does the MR-scoped aggregation internally (GitHub merges
+    // branch + head-sha runs; GitLab merges MR-pipeline + branch runs), keyed
+    // off `mr_number` being set on the filter.
+    let filter = CiFilter {
+        branch:    Some(source_branch),
+        mr_number: Some(mr_number as u64),
+        head_sha:  head_sha.filter(|s| !s.is_empty()),
+        ..Default::default()
+    };
+    resolved.provider.list_ci_runs(&resolved.repo, filter).await.map_err(pe)
 }
 
 /// Re-trigger (re-run) a CI run by its provider-native ID.

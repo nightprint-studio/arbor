@@ -3,14 +3,14 @@
 //! The provider *contract* — the `GitProvider` trait, `ProviderKind`, the
 //! registry, and every DTO — lives in the `corvus-git-provider-api` crate and
 //! is re-exported here so existing `crate::git_provider::*` call sites keep
-//! resolving. This module owns only the shell glue: the concrete
-//! `GithubProvider` / `GitlabProvider` impls, the host-keyed registration, the
-//! REST client modules (`mr_impl`, `ci_impl`, `repo_impl`) for the helpers the
-//! command layer still calls directly, the keyring/OAuth-coupled token lookups,
-//! and the AppState resolution helpers.
-//!
-//! Adding a new provider is a matter of creating a `git_provider/<name>/`
-//! module with `struct <Name>Provider` and `impl GitProvider for ...`.
+//! resolving. This module owns only the shell glue: the host-keyed
+//! registration (via the keyring-free `corvus-git-provider-{github,gitlab}`
+//! crates + `SessionProvider`), the keyring/OAuth-coupled token lookups, and
+//! the AppState resolution helpers. All MR/CI/security/repo-browser REST now
+//! flows through the `GitProvider` trait; the only shell-side REST left is the
+//! host-gated inline-image proxy (`image_proxy`, host-dynamic by design) plus
+//! provider detection + token + 401-refresh senders (`ci_impl`, used by
+//! `avatar_lookup` + `image_proxy`).
 
 pub use corvus_git_provider_api::prelude::{GitProvider, GitProviderRegistry, ProviderKind};
 
@@ -20,14 +20,17 @@ pub mod oauth;
 pub mod session;
 pub mod helpers;
 
-// ── Implementation modules ───────────────────────────────────────────────────
-// REST client code + provider-specific helpers that the trait impls in
-// `github/` and `gitlab/` delegate to. The DTO struct definitions they used to
-// own now live in `corvus-git-provider-api`; these modules re-export them so
-// the legacy `git_provider::mr_impl::MergeRequest` paths still resolve.
+// ── Shell-side helper modules ────────────────────────────────────────────────
+// `mr_impl` / `repo_impl` are now just DTO aliases (`pub use ...api::{mr,repo}::*`)
+// for legacy `git_provider::{mr_impl,repo_impl}::*` paths. `ci_impl` keeps
+// provider detection + token retrieval + the 401-refresh senders used by
+// `avatar_lookup` + `image_proxy`. `image_proxy` is the host-gated inline-image
+// fetch (host-dynamic → intentionally not a trait method). All MR/CI/repo-browser
+// REST now flows through the `GitProvider` trait.
 pub mod mr_impl;
 pub mod ci_impl;
 pub mod repo_impl;
+pub mod image_proxy;
 pub mod security_export;
 pub mod avatar_lookup;
 

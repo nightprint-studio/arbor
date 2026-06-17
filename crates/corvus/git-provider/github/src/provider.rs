@@ -171,6 +171,12 @@ impl GitProvider for GithubProvider {
     async fn search_repos(&self, query: &str) -> Result<Vec<RemoteRepoInfo>, ProviderError> {
         repo::search_repos(&self.http, query).await
     }
+    async fn browse_tree(&self, repo: &RepoRef, path: &str, branch: &str) -> Result<Vec<RemoteTreeEntry>, ProviderError> {
+        repo::browse_tree(&self.http, repo, path, branch).await
+    }
+    async fn get_file_content(&self, repo: &RepoRef, path: &str, branch: &str) -> Result<RemoteFileContent, ProviderError> {
+        repo::get_file_content(&self.http, repo, path, branch).await
+    }
 
     // ── MR / PR ──────────────────────────────────────────────────────────
     async fn list_mrs(&self, repo: &RepoRef, filter: MrFilter) -> Result<Vec<MrInfo>, ProviderError> {
@@ -217,6 +223,29 @@ impl GitProvider for GithubProvider {
     }
     async fn approve_mr(&self, id: &MrId) -> Result<(), ProviderError> {
         mr::approve_mr(&self.http, id).await
+    }
+    async fn list_mr_commits(&self, id: &MrId) -> Result<Vec<MrCommit>, ProviderError> {
+        mr::list_mr_commits(&self.http, id).await
+    }
+    async fn get_commit_diff(&self, repo: &RepoRef, sha: &str) -> Result<Vec<MrFile>, ProviderError> {
+        mr::get_commit_diff(&self.http, repo, sha).await
+    }
+    async fn mark_mr_ready(&self, id: &MrId) -> Result<(), ProviderError> {
+        mr::mark_mr_ready(&self.http, id).await
+    }
+
+    // ── Auto-merge ───────────────────────────────────────────────────────
+    async fn enable_auto_merge(&self, id: &MrId, opts: AutoMergeOpts) -> Result<(), ProviderError> {
+        mr::enable_auto_merge(&self.http, id, opts).await
+    }
+    async fn disable_auto_merge(&self, id: &MrId) -> Result<(), ProviderError> {
+        mr::disable_auto_merge(&self.http, id).await
+    }
+    async fn auto_merge_allowed(&self, repo: &RepoRef) -> Result<MrCapabilities, ProviderError> {
+        mr::auto_merge_allowed(&self.http, repo).await
+    }
+    async fn mr_feature_status(&self, repo: &RepoRef) -> Result<MrFeatureStatus, ProviderError> {
+        mr::mr_feature_status(&self.http, repo).await
     }
 
     // ── CI / CD ──────────────────────────────────────────────────────────

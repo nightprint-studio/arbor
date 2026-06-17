@@ -1,25 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   Issue, IssueComment, IssueFilterOptions, IssueFilters,
-  IssueUser, LinearAuthStatus, JiraAuthStatus, ProviderDescriptor,
+  LinearAuthStatus, JiraAuthStatus,
 } from '$lib/types/issues';
-
-/** The registered issue-tracker providers with their self-describing connect
- *  forms (id, icon, description, auth methods + fields). Drives the settings UI. */
-export function listIssueProviders(): Promise<ProviderDescriptor[]> {
-  return invoke('list_issue_providers');
-}
 
 export function linearGetAuthStatus(): Promise<LinearAuthStatus> {
   return invoke('linear_get_auth_status');
-}
-
-export function linearSaveToken(token: string): Promise<IssueUser> {
-  return invoke('linear_save_token', { token });
-}
-
-export function linearLogout(): Promise<void> {
-  return invoke('linear_logout');
 }
 
 export function linearSearchIssues(filters: IssueFilters): Promise<Issue[]> {
@@ -78,14 +64,6 @@ export function linearCreateIssue(params: {
 
 export function jiraGetAuthStatus(): Promise<JiraAuthStatus> {
   return invoke('jira_get_auth_status');
-}
-
-export function jiraSaveBasicAuth(email: string, apiToken: string, domain: string): Promise<IssueUser> {
-  return invoke('jira_save_basic_auth', { email, apiToken, domain });
-}
-
-export function jiraLogout(): Promise<void> {
-  return invoke('jira_logout');
 }
 
 export function jiraSearchIssues(filters: IssueFilters): Promise<Issue[]> {

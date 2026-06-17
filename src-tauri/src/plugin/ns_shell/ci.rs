@@ -78,6 +78,7 @@ fn install_runs(ctx: &ApiCtx, lua: &Lua, ci_table: &Table) -> Result<()> {
             branch,
             status,
             mr_number,
+            head_sha: None,
             page: None,
             per_page: per_page.or(Some(20)),
         };

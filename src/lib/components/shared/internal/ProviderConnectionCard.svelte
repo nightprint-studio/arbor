@@ -26,9 +26,14 @@
     service:    ProviderConnectionService;
     /** Optional callback after a successful connect/disconnect (e.g. sync a store). */
     onchange?:  () => void;
+    /** Layout. `card` (default) is the horizontal settings-row card; `compact`
+     *  is a centered vertical layout for narrow contexts (e.g. the Issues
+     *  sidebar setup panel). The connection logic is identical — only the
+     *  surrounding chrome differs. */
+    variant?:   'card' | 'compact';
   }
 
-  let { descriptor, service, onchange }: Props = $props();
+  let { descriptor, service, onchange, variant = 'card' }: Props = $props();
 
   let state        = $state<ConnState>('checking');
   let method       = $state<string | null>(null);
@@ -165,126 +170,148 @@
   }
 </script>
 
-<div class="provider-card" class:flow-active={state === 'connecting'}>
-  <BrandTile brand={descriptor.icon as Brand} />
-  <div class="provider-main">
-    <div class="provider-top">
-      <div class="provider-info">
-        <span class="provider-name">{descriptor.displayName}</span>
-        {#if descriptor.description}
-          <span class="provider-desc">{descriptor.description}</span>
-        {/if}
-      </div>
-      <ProviderConnectionStatus
-        state={state}
-        connectingLabel="Waiting…"
-        onDisconnect={disconnect}
-        onCancel={cancelConnecting}
-      >
-        {#snippet connect()}
-          {#if method === null}
-            <SplitButton
-              label="Connect"
-              color={brandColor}
-              direction="down"
-              options={connectOptions}
-              onclick={() => { const first = descriptor.authMethods[0]; if (first) pickMethod(first.id); }}
-              onselect={(id) => pickMethod(id)}
-            />
-          {/if}
-        {/snippet}
-      </ProviderConnectionStatus>
-    </div>
-
-    {#if state === 'connected' && user}
-      <ProviderUserBadge
-        avatarUrl={user.avatarUrl ?? null}
-        name={user.displayName}
-        secondary={user.email ?? accountLabel}
-      />
-    {/if}
-
-    <!-- OAuth method -->
-    {#if activeMethod?.kind.type === 'oauth'}
-      {#if deviceInfo}
-        <div class="inline-form">
-          <p class="form-hint">Open the verification page and enter this code:</p>
-          <div class="device-code-row">
-            <code class="device-code">{deviceInfo.userCode}</code>
-            <button class="device-copy" type="button" use:tooltip={'Copy code'} onclick={copyDeviceCode}><Copy size={12} /></button>
-            <button class="device-open" type="button" onclick={openVerification}>
-              <ExternalLink size={11} /> Open {deviceInfo.verificationUri.replace(/^https?:\/\//, '')}
-            </button>
-          </div>
-          <p class="form-hint">Arbor will detect the authorisation automatically.</p>
-          <div class="inline-form-row">
-            {#if oauthWaiting}<Spinner size={11} />{/if}
-            <button class="btn-cancel" type="button" onclick={cancelConnecting}>Cancel</button>
-          </div>
-        </div>
-      {:else}
-        <OAuthBrowserAuthForm
-          waiting={oauthWaiting}
-          error={oauthError}
-          brandColor={brandColor}
-          hintIdle="Opens {descriptor.displayName} in the browser to authorize Arbor."
-          hintWaiting="Browser opened — approve access then return here."
-          idleLabel="Authorize with {descriptor.displayName}"
-          busyLabel="Waiting for browser…"
-          onAuthorize={() => startOAuthFlow(method ?? '')}
-          onCancel={() => { oauthWaiting = false; method = null; oauthError = ''; oauthUnsub?.(); oauthUnsub = null; }}
+<!-- Connect/disconnect action row — identical across layouts. -->
+{#snippet statusRow()}
+  <ProviderConnectionStatus
+    state={state}
+    connectingLabel="Waiting…"
+    onDisconnect={disconnect}
+    onCancel={cancelConnecting}
+  >
+    {#snippet connect()}
+      {#if method === null}
+        <SplitButton
+          label="Connect"
+          color={brandColor}
+          direction="down"
+          options={connectOptions}
+          onclick={() => { const first = descriptor.authMethods[0]; if (first) pickMethod(first.id); }}
+          onselect={(id) => pickMethod(id)}
         />
       {/if}
-    {/if}
+    {/snippet}
+  </ProviderConnectionStatus>
+{/snippet}
 
-    <!-- Field-form method -->
-    {#if activeMethod?.kind.type === 'fields'}
+<!-- User badge (connected) + the active method's form + advanced panel —
+     identical across layouts. -->
+{#snippet body()}
+  {#if state === 'connected' && user}
+    <ProviderUserBadge
+      avatarUrl={user.avatarUrl ?? null}
+      name={user.displayName}
+      secondary={user.email ?? accountLabel}
+    />
+  {/if}
+
+  <!-- OAuth method -->
+  {#if activeMethod?.kind.type === 'oauth'}
+    {#if deviceInfo}
       <div class="inline-form">
-        {#if formHint}<p class="form-hint">{formHint}</p>{/if}
-        {#each fieldsOf(activeMethod) as field (field.key)}
-          {#if field.widget === 'secret'}
-            <div class="input-with-addon">
-              <input
-                class="text-input"
-                type={showSecret[field.key] ? 'text' : 'password'}
-                placeholder={field.placeholder ?? field.label}
-                bind:value={fieldValues[field.key]}
-              />
-              <button class="addon-btn" type="button" onclick={() => showSecret[field.key] = !showSecret[field.key]}>
-                {#if showSecret[field.key]}<EyeOff size={12} />{:else}<Eye size={12} />{/if}
-              </button>
-            </div>
-          {:else}
+        <p class="form-hint">Open the verification page and enter this code:</p>
+        <div class="device-code-row">
+          <code class="device-code">{deviceInfo.userCode}</code>
+          <button class="device-copy" type="button" use:tooltip={'Copy code'} onclick={copyDeviceCode}><Copy size={12} /></button>
+          <button class="device-open" type="button" onclick={openVerification}>
+            <ExternalLink size={11} /> Open {deviceInfo.verificationUri.replace(/^https?:\/\//, '')}
+          </button>
+        </div>
+        <p class="form-hint">Arbor will detect the authorisation automatically.</p>
+        <div class="inline-form-row">
+          {#if oauthWaiting}<Spinner size={11} />{/if}
+          <button class="btn-cancel" type="button" onclick={cancelConnecting}>Cancel</button>
+        </div>
+      </div>
+    {:else}
+      <OAuthBrowserAuthForm
+        waiting={oauthWaiting}
+        error={oauthError}
+        brandColor={brandColor}
+        hintIdle="Opens {descriptor.displayName} in the browser to authorize Arbor."
+        hintWaiting="Browser opened — approve access then return here."
+        idleLabel="Authorize with {descriptor.displayName}"
+        busyLabel="Waiting for browser…"
+        onAuthorize={() => startOAuthFlow(method ?? '')}
+        onCancel={() => { oauthWaiting = false; method = null; oauthError = ''; oauthUnsub?.(); oauthUnsub = null; }}
+      />
+    {/if}
+  {/if}
+
+  <!-- Field-form method -->
+  {#if activeMethod?.kind.type === 'fields'}
+    <div class="inline-form">
+      {#if formHint}<p class="form-hint">{formHint}</p>{/if}
+      {#each fieldsOf(activeMethod) as field (field.key)}
+        {#if field.widget === 'secret'}
+          <div class="input-with-addon">
             <input
               class="text-input"
-              type="text"
+              type={showSecret[field.key] ? 'text' : 'password'}
               placeholder={field.placeholder ?? field.label}
               bind:value={fieldValues[field.key]}
             />
-          {/if}
-        {/each}
-        <div class="inline-form-row">
-          <button class="btn-save" style="background:{brandColor}" onclick={() => submitFields(method ?? '')} disabled={saving || !canSubmit}>
-            {saving ? 'Connecting…' : 'Connect'}
-          </button>
-          <button class="btn-cancel" type="button" onclick={cancelMethod}>Cancel</button>
-        </div>
-        {#if formError}<div class="provider-error"><XCircle size={12} />{formError}</div>{/if}
+            <button class="addon-btn" type="button" onclick={() => showSecret[field.key] = !showSecret[field.key]}>
+              {#if showSecret[field.key]}<EyeOff size={12} />{:else}<Eye size={12} />{/if}
+            </button>
+          </div>
+        {:else}
+          <input
+            class="text-input"
+            type="text"
+            placeholder={field.placeholder ?? field.label}
+            bind:value={fieldValues[field.key]}
+          />
+        {/if}
+      {/each}
+      <div class="inline-form-row">
+        <button class="btn-save" style="background:{brandColor}" onclick={() => submitFields(method ?? '')} disabled={saving || !canSubmit}>
+          {saving ? 'Connecting…' : 'Connect'}
+        </button>
+        <button class="btn-cancel" type="button" onclick={cancelMethod}>Cancel</button>
       </div>
-    {/if}
+      {#if formError}<div class="provider-error"><XCircle size={12} />{formError}</div>{/if}
+    </div>
+  {/if}
 
-    {#if hasOAuth}
-      <button class="advanced-toggle" type="button" onclick={() => advancedOpen = !advancedOpen}>
-        {#if advancedOpen}<ChevronDown size={11} />{:else}<ChevronRight size={11} />{/if}
-        <Settings2 size={11} />
-        Advanced — use my own OAuth app
-      </button>
-      {#if advancedOpen}
-        <OAuthAdvancedPanel provider={descriptor.id as 'linear' | 'jira' | 'github' | 'gitlab'} />
-      {/if}
+  {#if hasOAuth}
+    <button class="advanced-toggle" type="button" onclick={() => advancedOpen = !advancedOpen}>
+      {#if advancedOpen}<ChevronDown size={11} />{:else}<ChevronRight size={11} />{/if}
+      <Settings2 size={11} />
+      Advanced — use my own OAuth app
+    </button>
+    {#if advancedOpen}
+      <OAuthAdvancedPanel provider={descriptor.id as 'linear' | 'jira' | 'github' | 'gitlab'} />
     {/if}
+  {/if}
+{/snippet}
+
+{#if variant === 'compact'}
+  <div class="provider-compact" class:flow-active={state === 'connecting'}>
+    <BrandTile brand={descriptor.icon as Brand} size={22} tileSize={42} />
+    <span class="pc-name">{descriptor.displayName}</span>
+    {#if descriptor.description}
+      <span class="pc-desc">{descriptor.description}</span>
+    {/if}
+    <div class="pc-action">{@render statusRow()}</div>
+    <div class="pc-body">{@render body()}</div>
   </div>
-</div>
+{:else}
+  <div class="provider-card" class:flow-active={state === 'connecting'}>
+    <BrandTile brand={descriptor.icon as Brand} />
+    <div class="provider-main">
+      <div class="provider-top">
+        <div class="provider-info">
+          <span class="provider-name">{descriptor.displayName}</span>
+          {#if descriptor.description}
+            <span class="provider-desc">{descriptor.description}</span>
+          {/if}
+        </div>
+        {@render statusRow()}
+      </div>
+      {@render body()}
+    </div>
+  </div>
+{/if}
 
 <style>
   .provider-card {
@@ -296,6 +323,22 @@
     transition: border-color var(--transition-fast);
   }
   .provider-card.flow-active { border-color: var(--accent); }
+
+  /* ── Compact (sidebar setup) layout ───────────────────────────────────────
+     Same connection logic, centered vertical chrome for narrow panels. */
+  .provider-compact {
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+    gap: 10px; padding: 28px 20px;
+  }
+  .pc-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+  .pc-desc { font-size: 11px; color: var(--text-muted); line-height: 1.5; max-width: 220px; }
+  .pc-action { display: flex; justify-content: center; }
+  .pc-body {
+    width: 100%; max-width: 240px;
+    display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+  }
+  /* The shared inline forms are left-aligned inside the centered column. */
+  .pc-body :global(.form-hint) { text-align: left; }
 
   .provider-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
   .provider-top  { display: flex; align-items: center; gap: 10px; }

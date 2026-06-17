@@ -12,9 +12,9 @@ pub use crate::error::ProviderError;
 pub use crate::issue::{IssueCreateRequest, IssueFilter, RepoIssue};
 pub use crate::kind::ProviderKind;
 pub use crate::mr::{
-    CreateMrParams, MergeOpts, MergeRequest, MergedMrHint, MrCapabilities, MrCheck, MrComment,
-    MrCommit, MrConflict, MrCreateRequest, MrDetail, MrEvent, MrFeatureStatus, MrFile, MrFileDiff,
-    MrFilter, MrId, MrInfo, MrLabel, MrState, MrUpdateRequest, MrUser, ReviewState,
+    AutoMergeOpts, CreateMrParams, MergeOpts, MergeRequest, MergedMrHint, MrCapabilities, MrCheck,
+    MrComment, MrCommit, MrConflict, MrCreateRequest, MrDetail, MrEvent, MrFeatureStatus, MrFile,
+    MrFileDiff, MrFilter, MrId, MrInfo, MrLabel, MrState, MrUpdateRequest, MrUser, ReviewState,
 };
 pub use crate::provider::GitProvider;
 // The descriptor vocabulary is the shared, domain-agnostic contract.
@@ -25,8 +25,9 @@ pub use corvus_provider_descriptor::prelude::{
 pub use crate::registry::{host_from_url, GitProviderRegistry};
 pub use crate::release::{Release, ReleaseAsset, ReleaseCreateRequest};
 pub use crate::repo::{
-    ListReposOpts, RemoteAccount, RemoteFileContent, RemoteRepo, RemoteRepoInfo, RemoteTreeEntry,
-    RepoCreateRequest, RepoRef, RepoVisibility,
+    build_file_content, mime_for_path, sort_tree, ListReposOpts, RemoteAccount,
+    RemoteFileContent, RemoteRepo, RemoteRepoInfo, RemoteTreeEntry, RepoCreateRequest, RepoRef,
+    RepoVisibility, MAX_IMAGE_BYTES, MAX_PREVIEW_BYTES,
 };
 pub use crate::security::{
     age_days_from_iso, apply_filters, compute_local_risk_score, median, medians_from_findings,

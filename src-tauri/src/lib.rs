@@ -991,28 +991,8 @@ pub fn run() {
             commands::auth_commands::save_default_credential,
             commands::auth_commands::has_default_credential,
             commands::auth_commands::delete_default_credential,
-            // Auth — GitHub OAuth (Device Authorization Grant)
-            commands::auth_commands::start_github_device_flow,
-            commands::auth_commands::get_github_status,
-            commands::auth_commands::get_github_user,
-            commands::auth_commands::disconnect_github,
-            commands::auth_commands::try_refresh_github_token,
-            // Auth — GitLab OAuth (Authorization Code + PKCE)
-            commands::auth_commands::start_gitlab_oauth,
-            commands::auth_commands::get_gitlab_status,
-            commands::auth_commands::get_gitlab_user,
-            commands::auth_commands::disconnect_gitlab,
-            commands::auth_commands::try_refresh_gitlab_token,
-            // Auth — Linear OAuth (Authorization Code + PKCE)
-            commands::auth_commands::start_linear_oauth,
-            commands::auth_commands::get_linear_oauth_status,
-            commands::auth_commands::disconnect_linear_oauth,
-            commands::auth_commands::try_refresh_linear_token,
-            // Auth — Jira OAuth (Authorization Code + PKCE) + Basic Auth
-            commands::auth_commands::start_jira_oauth,
-            commands::auth_commands::get_jira_oauth_status,
-            commands::auth_commands::disconnect_jira,
-            commands::auth_commands::try_refresh_jira_token,
+            // Auth — provider OAuth connect/status/disconnect/refresh flow through
+            // the generic {issue,git}_provider_* commands (see provider_commands).
             // Plugins
             commands::plugin_commands::list_plugins,
             commands::plugin_commands::get_plugin_directory,
@@ -1308,8 +1288,6 @@ pub fn run() {
             commands::mr_commands::mr_start_conflict_resolution,
             // Issues / Linear
             commands::issues_commands::linear_get_auth_status,
-            commands::issues_commands::linear_save_token,
-            commands::issues_commands::linear_logout,
             commands::issues_commands::linear_search_issues,
             commands::issues_commands::linear_get_issue,
             commands::issues_commands::linear_get_filter_options,
@@ -1319,8 +1297,6 @@ pub fn run() {
             commands::issues_commands::linear_create_issue,
             // Issues / Jira
             commands::issues_commands::jira_get_auth_status,
-            commands::issues_commands::jira_save_basic_auth,
-            commands::issues_commands::jira_logout,
             commands::issues_commands::jira_search_issues,
             commands::issues_commands::jira_get_issue,
             commands::issues_commands::jira_get_filter_options,

@@ -31,7 +31,7 @@ pub async fn fetch_remote_image(
         "linear" => crate::integrations::linear::fetch_image_bytes(&url).await?,
         "jira"   => crate::integrations::jira::fetch_image_bytes(&url).await?,
         "github" | "gitlab" => {
-            crate::git_provider::repo_impl::fetch_image_bytes(&provider, base_url.as_deref(), &url).await?
+            crate::git_provider::image_proxy::fetch_image_bytes(&provider, base_url.as_deref(), &url).await?
         }
         other => return Err(AppError::Other(format!("Unknown image provider: {other}"))),
     };

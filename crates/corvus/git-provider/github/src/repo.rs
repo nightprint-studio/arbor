@@ -191,6 +191,133 @@ pub(crate) async fn list_user_repos(
 }
 
 // ---------------------------------------------------------------------------
+// browse_tree — repo contents listing (ported from repo_impl::browse_github_tree)
+// ---------------------------------------------------------------------------
+//
+// GET /repos/{owner}/{repo}/contents/{path}?ref={branch}. The original took an
+// explicit token and built the request inline; here it routes through
+// `http.send` so the 401→refresh→retry seam applies. URL, headers, status check
+// and parse error strings are preserved verbatim; the result is sorted with the
+// shared `sort_tree`.
+
+/// Raw GitHub `/contents` entry — private to the crate.
+#[derive(Deserialize)]
+struct GhEntry {
+    name: String,
+    path: String,
+    #[serde(rename = "type")]
+    entry_type: String,
+    size: Option<u64>,
+}
+
+pub(crate) async fn browse_tree(
+    http: &GithubHttp,
+    repo: &RepoRef,
+    path: &str,
+    branch: &str,
+) -> Result<Vec<RemoteTreeEntry>, ProviderError> {
+    let owner = repo.owner_or_path.as_str();
+    let name = repo
+        .name
+        .as_deref()
+        .ok_or_else(|| ProviderError::BadRequest("GitHub RepoRef requires name".into()))?;
+
+    let url = if path.is_empty() {
+        format!("https://api.github.com/repos/{owner}/{name}/contents?ref={branch}")
+    } else {
+        format!("https://api.github.com/repos/{owner}/{name}/contents/{path}?ref={branch}")
+    };
+
+    let resp = http
+        .send(|s| {
+            http.client()
+                .get(&url)
+                .header("Authorization", &s.auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "arbor-git-gui/1.0")
+        })
+        .await?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub contents API {s}: {b}")));
+    }
+
+    let mut entries: Vec<RemoteTreeEntry> = resp
+        .json::<Vec<GhEntry>>()
+        .await
+        .map_err(|e| classify(format!("GitHub tree parse: {e}")))?
+        .into_iter()
+        .map(|e| RemoteTreeEntry {
+            name: e.name,
+            path: e.path,
+            entry_type: match e.entry_type.as_str() {
+                "dir" => "dir",
+                "symlink" => "symlink",
+                "submodule" => "submodule",
+                _ => "file",
+            }
+            .into(),
+            size: e.size,
+        })
+        .collect();
+
+    sort_tree(&mut entries);
+    Ok(entries)
+}
+
+// ---------------------------------------------------------------------------
+// get_file_content — raw file fetch (ported from repo_impl::fetch_github_file)
+// ---------------------------------------------------------------------------
+//
+// Bytes come from `https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}`
+// — a DIFFERENT host from the api base. `http.send` doesn't hardcode the host
+// (the URL lives in the closure), so we build the absolute raw URL with the same
+// `http.client()` and the session's `auth_header` (already `Bearer …` for OAuth,
+// preserving the original's bearer-token behavior) plus the `User-Agent`. The
+// 401→refresh→retry seam therefore still applies. URL, headers, status check and
+// error strings are preserved verbatim; bytes funnel through the shared
+// `build_file_content` (which here returns the value directly, so we `Ok`-wrap).
+
+pub(crate) async fn get_file_content(
+    http: &GithubHttp,
+    repo: &RepoRef,
+    path: &str,
+    branch: &str,
+) -> Result<RemoteFileContent, ProviderError> {
+    let owner = repo.owner_or_path.as_str();
+    let name = repo
+        .name
+        .as_deref()
+        .ok_or_else(|| ProviderError::BadRequest("GitHub RepoRef requires name".into()))?;
+
+    let url = format!("https://raw.githubusercontent.com/{owner}/{name}/{branch}/{path}");
+    let resp = http
+        .send(|s| {
+            http.client()
+                .get(&url)
+                .header("Authorization", &s.auth_header)
+                .header("User-Agent", "arbor-git-gui/1.0")
+        })
+        .await?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub raw file {s}: {b}")));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| classify(format!("GitHub file read: {e}")))?;
+    let mime = mime_for_path(path);
+    Ok(build_file_content(path, bytes.to_vec(), &mime))
+}
+
+// ---------------------------------------------------------------------------
 // list_org_repos / search_repos — Unsupported in the delegate (verbatim)
 // ---------------------------------------------------------------------------
 

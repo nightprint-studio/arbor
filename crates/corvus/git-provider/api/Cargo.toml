@@ -20,6 +20,9 @@ thiserror   = { workspace = true }
 # contract crate pulls no client logic, only the error-conversion surface.
 reqwest     = { workspace = true }
 serde_json  = { workspace = true }
+# `build_file_content` (pure: classifies remote file bytes, inlines small
+# images as base64 data URLs) is shared by both provider impls — lives here.
+base64      = { workspace = true }
 # Pure security helpers (`age_days_from_iso`) compute finding age against now;
 # matches the version src-tauri already pins (not in `[workspace.dependencies]`).
 chrono      = { version = "0.4", features = ["serde"] }

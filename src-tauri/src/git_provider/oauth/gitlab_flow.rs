@@ -111,9 +111,8 @@ pub async fn start_gitlab_oauth(app_handle: tauri::AppHandle) -> Result<String> 
                 Some(e.to_string())
             }
         };
-        let _ = app.emit("arbor://gitlab-oauth-done", result.clone());
         // Unified, by-id completion event for the generic connection layer —
-        // one FE listener routes by `id`. Kept alongside the legacy event above.
+        // one FE listener routes by `id`.
         let _ = app.emit(
             "arbor://provider-oauth-done",
             serde_json::json!({ "id": "gitlab", "ok": result.is_none(), "error": result }),

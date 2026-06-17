@@ -25,10 +25,42 @@ fn project_path<'a>(repo: &'a RepoRef) -> &'a str {
 pub(crate) async fn list_ci_runs(
     http: &GitlabHttp,
     repo: &RepoRef,
-    _filter: CiFilter,
+    filter: CiFilter,
 ) -> Result<Vec<CiRun>, ProviderError> {
     let path = project_path(repo);
-    fetch_gitlab_pipelines(http, path).await
+
+    // Branch-scoped (default) listing: regular pipelines list, newest-first.
+    let Some(mr_iid) = filter.mr_number else {
+        return fetch_gitlab_pipelines(http, path).await;
+    };
+
+    // MR-scoped listing: merge the MR-pipeline endpoint (authoritative,
+    // includes detached merge-request pipelines whose `ref` is
+    // `refs/merge-requests/{iid}/head`) with branch pipelines that match the
+    // MR's source branch. Both queries run concurrently.
+    let mr_pipelines_fut = fetch_gitlab_mr_pipelines(http, path, mr_iid);
+    let branch_pipelines_fut = fetch_gitlab_pipelines(http, path);
+    let (mr_res, branch_res) = tokio::join!(mr_pipelines_fut, branch_pipelines_fut);
+
+    // MR endpoint is the authoritative source; if it fails, surface the error.
+    let mut runs = mr_res?;
+    if let Ok(branch_runs) = branch_res {
+        let source_branch = filter.branch.as_deref().unwrap_or("");
+        let seen: std::collections::HashSet<String> =
+            runs.iter().map(|r| r.id.clone()).collect();
+        for r in branch_runs {
+            if r.branch == source_branch && !seen.contains(&r.id) {
+                runs.push(r);
+            }
+        }
+    }
+    // Newest first by pipeline id (numeric, descending).
+    runs.sort_by(|a, b| {
+        let ai = a.id.parse::<i64>().unwrap_or(0);
+        let bi = b.id.parse::<i64>().unwrap_or(0);
+        bi.cmp(&ai)
+    });
+    Ok(runs)
 }
 
 pub(crate) async fn get_ci_run(
@@ -164,6 +196,67 @@ async fn fetch_gitlab_pipelines(
     }).collect())
 }
 
+/// Fetch pipelines tied to a specific GitLab Merge Request.
+///
+/// Uses `GET /projects/:id/merge_requests/:iid/pipelines`, which returns
+/// pipelines associated with the MR — including **detached merge-request
+/// pipelines** whose `ref` is `refs/merge-requests/{iid}/head` and therefore
+/// don't show up when filtering the regular pipelines list by source branch.
+async fn fetch_gitlab_mr_pipelines(
+    http: &GitlabHttp,
+    project_path: &str,
+    mr_iid:       u64,
+) -> Result<Vec<CiRun>, ProviderError> {
+    let encoded = percent_encode_slash(project_path);
+    let url = format!(
+        "{}/api/v4/projects/{encoded}/merge_requests/{mr_iid}/pipelines",
+        http.base()
+    );
+    let resp = http.send(|s| http.client().get(&url)
+        .header("Authorization", &s.auth_header)
+        .header("User-Agent", "arbor-git-gui/1.0")).await?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body   = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitLab MR pipelines API {status}: {body}")));
+    }
+
+    // The MR pipelines endpoint is a slim variant — no `duration` field.
+    #[derive(Deserialize)]
+    struct GlMrPipeline {
+        id:         i64,
+        status:     String,
+        #[serde(rename = "ref")]
+        branch:     String,
+        sha:        String,
+        web_url:    String,
+        created_at: String,
+        updated_at: Option<String>,
+    }
+
+    let pipelines: Vec<GlMrPipeline> = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitLab MR pipelines parse error: {e}")))?;
+
+    Ok(pipelines.into_iter().map(|p| {
+        let sha = &p.sha[..8.min(p.sha.len())];
+        let dur = parse_iso_duration(Some(&p.created_at), p.updated_at.as_deref());
+        CiRun {
+            id:            p.id.to_string(),
+            name:          format!("Pipeline #{}", p.id),
+            status:        map_gitlab_status(&p.status),
+            branch:        p.branch,
+            commit_sha:    sha.to_string(),
+            web_url:       p.web_url,
+            created_at:    p.created_at,
+            provider:      "gitlab".into(),
+            duration_secs: dur,
+        }
+    }).collect())
+}
+
 async fn retrigger_gitlab_pipeline(
     http: &GitlabHttp,
     project_path: &str,
@@ -282,6 +375,16 @@ async fn create_gitlab_pipeline(
 // ---------------------------------------------------------------------------
 // Helpers (GitLab-only; map_github_status/parse_iso_duration are GitHub, not ported)
 // ---------------------------------------------------------------------------
+
+/// Wall-clock duration in seconds between two ISO-8601 timestamps.
+/// Returns `None` when either is missing/unparseable or the span is non-positive.
+fn parse_iso_duration(start: Option<&str>, end: Option<&str>) -> Option<f64> {
+    use chrono::{DateTime, Utc};
+    let t1 = start?.parse::<DateTime<Utc>>().ok()?;
+    let t2 = end?.parse::<DateTime<Utc>>().ok()?;
+    let ms = (t2 - t1).num_milliseconds();
+    if ms > 0 { Some(ms as f64 / 1000.0) } else { None }
+}
 
 fn map_gitlab_status(s: &str) -> String {
     match s {

@@ -33,6 +33,41 @@ pub(crate) async fn list_ci_runs(
     filter: CiFilter,
 ) -> Result<Vec<CiRun>, ProviderError> {
     let (owner, name) = repo_parts(repo)?;
+    // MR/PR-scoped aggregation: both providers can attach runs to a PR via
+    // paths a plain branch filter misses (fork PRs, `pull_request_target`,
+    // manual dispatch pinned to the head SHA). We hit `?branch=` and
+    // `?head_sha=` concurrently and dedupe by run id. The branch query is
+    // primary (its error surfaces); the head-sha query is best-effort.
+    if filter.mr_number.is_some() {
+        let branch = filter.branch.as_deref().unwrap_or("");
+        let by_branch_fut = fetch_github_runs_for_branch(http, owner, name, branch);
+        let by_sha_fut = async {
+            if let Some(sha) = filter.head_sha.as_deref().filter(|s| !s.is_empty()) {
+                fetch_github_runs_for_sha(http, owner, name, sha).await
+            } else {
+                Ok(Vec::new())
+            }
+        };
+        let (branch_res, sha_res) = tokio::join!(by_branch_fut, by_sha_fut);
+
+        let mut runs = branch_res?;
+        if let Ok(sha_runs) = sha_res {
+            let seen: std::collections::HashSet<String> =
+                runs.iter().map(|r| r.id.clone()).collect();
+            for r in sha_runs {
+                if !seen.contains(&r.id) {
+                    runs.push(r);
+                }
+            }
+        }
+        // Newest first by run id (numeric, descending).
+        runs.sort_by(|a, b| {
+            let ai = a.id.parse::<i64>().unwrap_or(0);
+            let bi = b.id.parse::<i64>().unwrap_or(0);
+            bi.cmp(&ai)
+        });
+        return Ok(runs);
+    }
     if let Some(branch) = filter.branch.as_deref() {
         fetch_github_runs_for_branch(http, owner, name, branch).await
     } else {
@@ -170,7 +205,6 @@ async fn fetch_github_runs_for_branch(
 /// Variant filtered server-side by `head_sha`. Useful as a complement to the
 /// branch query for PRs from forks and workflows that don't tag the source
 /// branch on the run (e.g. `pull_request_target`).
-#[allow(dead_code)]
 async fn fetch_github_runs_for_sha(
     http: &GithubHttp,
     owner: &str,

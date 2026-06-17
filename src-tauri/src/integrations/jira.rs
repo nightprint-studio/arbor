@@ -46,11 +46,6 @@ pub async fn get_auth_status() -> Result<JiraAuthStatus> {
     }
 }
 
-/// Remove stored Jira credentials.
-pub fn delete_credentials() -> Result<()> {
-    oauth_jira::disconnect()
-}
-
 // ── Operations (delegate to the crate) ────────────────────────────────────────
 
 pub async fn search_issues(filters: IssueFilters) -> Result<Vec<Issue>> {

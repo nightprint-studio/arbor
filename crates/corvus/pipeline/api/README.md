@@ -1,11 +1,11 @@
 # corvus-pipeline-api
 
-The pure pipeline expression engine for Corvus.
+The host-free pipeline **model + expression engine** for Corvus.
 
 ## Purpose
 
-The host-free evaluation core of Corvus pipelines, extracted from
-`src-tauri/src/pipeline/` (round-2 M2):
+The pure core of Corvus pipelines (no Tauri / no live orchestrator), extracted
+from `src-tauri/src/pipeline/` (round-2 M2):
 
 - **`vars`** — the per-run typed variable store (`RunContext` / `VarValue`),
   `${var}` / `${var:-fallback}` interpolation, and the declarative capture
@@ -15,25 +15,35 @@ The host-free evaluation core of Corvus pipelines, extracted from
 - **`condition_parser`** — recursive-descent parser for the free-form condition
   syntax (`${has_pom} && !${skip}`, `${count} > 10`, `defined(x)`, `matches(v,
   "re")`, …) → a `Condition` tree.
+- **`builtin`** — the small side-effecting op set (`file_exists`, `file_read`,
+  `env`, `json_get`, `path_join`, `set_var`, `echo`, `match`) the runtime
+  resolves directly to feed `${var}` captures.
+- **`if_block`** — the `if`/`elif`/`else` branch structure (`IfBlock`,
+  `IfBranch`, `BranchSelection`) whose bodies are `StepDef`s, plus branch
+  selection.
+- **`model`** — the step / stage / pipeline definitions (`StepDef`, `StageDef`,
+  `PipelineDef`, `LuaOpSpec`) and the run-state snapshots (`RunStatus`,
+  `StepRun`, `StageRun`, `PipelineRun`, `LogEvent`, `ResumeCursor`) the
+  orchestrator streams to the UI, plus the `parse_log_level` / `parse_stage_mode`
+  helpers.
 
-The orchestrator and the `IfBlock` (which carries `StepDef` step bodies) stay in
-the host `pipeline` module; this crate is only the evaluation primitives, so it
-depends on nothing but `serde` / `serde_json` / `regex` (+ `tracing` for one
-warn line) and is trivially unit-testable.
-
-When `pipeline-core` (the run orchestrator) extracts later, the step DTOs +
-external-step trait join this `*-api` leaf.
+The live orchestrator (the per-run thread, event emission, shell-process
+spawning, Lua-op dispatch) stays host-side; the in-memory run registry, JSON
+persistence, and the pure orchestration helpers live in `corvus-pipeline-core`.
 
 ## Public API: use the prelude
 
-Reach the surface through `corvus_pipeline_api::prelude::...`: `RunContext`,
-`VarValue`, `resolve_vars`, `Transform`/`apply_transforms`, `Condition`,
-`CompareOp`, `evaluate`, `parse`.
+Reach the surface through `corvus_pipeline_api::prelude::...`: the model types
+(`PipelineDef`, `StepDef`, `PipelineRun`, `RunStatus`, …), `parse_log_level` /
+`parse_stage_mode`, `run_builtin` / `BuiltinSpec`, `IfBlock` / `BranchSelection`,
+`RunContext`, `VarValue`, `resolve_vars`, `Transform` / `apply_transforms`,
+`Condition`, `CompareOp`, `evaluate`, `parse`.
 
 ## Tests
 
-The parser, the evaluator, and the variable/transform engine all carry unit
-tests (`cargo test -p corvus-pipeline-api`).
+The parser, the evaluator, the variable/transform engine, the builtins, the
+if-block selection, and the model helpers all carry unit tests
+(`cargo test -p corvus-pipeline-api`).
 
 ## Depends on
 
@@ -41,5 +51,7 @@ tests (`cargo test -p corvus-pipeline-api`).
 
 ## Consumed by
 
-`arbor` (the shell): `src-tauri/src/pipeline/` (the orchestrator + the
-`StepDef`-coupled `IfBlock`) and the `arbor.pipeline.*` plugin namespace.
+`corvus-pipeline-core` (the run registry + helpers) and `arbor` (the shell):
+`src-tauri/src/pipeline/` (the orchestrator) and the `arbor.pipeline.*` plugin
+namespace.
+</content>

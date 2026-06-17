@@ -31,10 +31,6 @@ fn save_token(token: &str) -> Result<()> {
     credential_store::save(KEYRING_HOST, KEYRING_USER, token)
 }
 
-pub fn delete_token() -> Result<()> {
-    credential_store::delete(KEYRING_HOST, KEYRING_USER)
-}
-
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 pub async fn validate_and_save_token(token: &str) -> Result<IssueUser> {

@@ -3,7 +3,7 @@ use tauri::State;
 use crate::AppState;
 use crate::error::AppError;
 use crate::integrations::{
-    Issue, IssueComment, IssueFilterOptions, IssueFilters, IssueUser, LinearAuthStatus,
+    Issue, IssueComment, IssueFilterOptions, IssueFilters, LinearAuthStatus,
     ProviderDescriptor,
 };
 use crate::integrations::jira_types::JiraAuthStatus;
@@ -21,21 +21,6 @@ pub async fn linear_get_auth_status(
     _state: State<'_, AppState>,
 ) -> Result<LinearAuthStatus, AppError> {
     crate::integrations::linear::get_auth_status().await
-}
-
-#[tauri::command]
-pub async fn linear_save_token(
-    _state: State<'_, AppState>,
-    token: String,
-) -> Result<IssueUser, AppError> {
-    crate::integrations::linear::validate_and_save_token(&token).await
-}
-
-#[tauri::command]
-pub async fn linear_logout(
-    _state: State<'_, AppState>,
-) -> Result<(), AppError> {
-    crate::integrations::linear::delete_token()
 }
 
 #[tauri::command]
@@ -135,23 +120,6 @@ pub async fn jira_get_auth_status(
     _state: State<'_, AppState>,
 ) -> Result<JiraAuthStatus, AppError> {
     crate::integrations::jira::get_auth_status().await
-}
-
-#[tauri::command]
-pub async fn jira_save_basic_auth(
-    _state: State<'_, AppState>,
-    email: String,
-    api_token: String,
-    domain: String,
-) -> Result<IssueUser, AppError> {
-    crate::integrations::jira::validate_and_save_basic(&email, &api_token, &domain).await
-}
-
-#[tauri::command]
-pub async fn jira_logout(
-    _state: State<'_, AppState>,
-) -> Result<(), AppError> {
-    crate::integrations::jira::delete_credentials()
 }
 
 #[tauri::command]

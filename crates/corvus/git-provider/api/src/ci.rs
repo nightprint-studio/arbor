@@ -74,8 +74,13 @@ pub struct CiFilter {
     pub branch:  Option<String>,
     /// "running" | "success" | "failed" | "cancelled" | "pending"
     pub status:  Option<String>,
-    /// MR/PR number — when set, returns runs scoped to that MR's source branch.
+    /// MR/PR number — when set, returns runs scoped to that MR (GitHub merges
+    /// branch + head-sha runs; GitLab merges MR-pipeline + branch runs).
     pub mr_number: Option<u64>,
+    /// Head commit SHA of the MR/PR. GitHub additionally queries runs pinned to
+    /// this SHA (fork PRs, `workflow_dispatch`) and merges them with the branch
+    /// runs. Ignored by GitLab.
+    pub head_sha: Option<String>,
     pub page:     Option<u32>,
     pub per_page: Option<u32>,
 }

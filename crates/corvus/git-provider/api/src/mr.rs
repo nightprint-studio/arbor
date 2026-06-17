@@ -293,6 +293,18 @@ pub struct MergeOpts {
     pub strategy:      Option<String>,
 }
 
+/// Options for arming auto-merge (GitHub) / merge-when-pipeline-succeeds
+/// (GitLab). The provider resolves any provider-native handle it needs
+/// internally (e.g. GitHub's GraphQL PR node id).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AutoMergeOpts {
+    /// Squash commits when the auto-merge fires.
+    pub squash:        bool,
+    /// Delete the source branch after the auto-merge fires. GitHub honors the
+    /// repo's own "delete branch on merge" setting; GitLab takes it here.
+    pub delete_branch: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MrConflict {
     pub has_conflicts: bool,

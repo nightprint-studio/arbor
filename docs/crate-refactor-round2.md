@@ -169,6 +169,17 @@ il global-shortcut sono `cfg(desktop)` e non avranno mai una storia WASM.
 
 ### B.3 — Arbor come launcher (processo condiviso, identità multiple)
 
+> ⚠️ **REVISIONE (decisione utente, 2026-06): il launcher è un prodotto con UI dedicata, stile JetBrains Toolbox.**
+> Questa sezione era stata scritta assumendo un launcher *senza UI* — solo il funnel
+> single-instance + deep-link + `set_icon` per-finestra (descritto sotto e in M12).
+> L'aspettativa reale è più ambiziosa: una **finestra-launcher dedicata** (la "home"/hub
+> di Arbor), analoga a **JetBrains Toolbox**, punto d'ingresso e di gestione. Attese:
+> - **Hub dei prodotti**: elenca Corvus / Merula / Sitta installati, apertura diretta della finestra-prodotto.
+> - **Hub progetti/workspace recenti**: lista navigabile (stile welcome-screen IntelliJ / "Projects" di Toolbox), apre il prodotto giusto sul progetto scelto.
+> - **Gestione install/update/versioni** dei prodotti — rilevante quando diventano `*-be` separati / bundle distinti (Modello D).
+> - È ciò che appare al lancio "nudo" di `arbor` (nessun `--window=`); da lì si saltano i prodotti.
+> **Conseguenze**: serve un `fe-launcher` (modulo FE *shared-only*, niente import di prodotto), una finestra `launcher` nello shell, storage proprio (prodotti/progetti/recenti, sotto `~/.config/arbor`). Il funnel sotto (single-instance + deep-link) resta valido come *plumbing* di routing, ma la UI dedicata è il vero deliverable. **In roadmap**: promosso da "polish M12" a milestone-prodotto a sé; **scope UI/UX da concordare prima del codice.**
+
 Variante al "binario separato": tenere **un solo processo host** ma esporre più
 **punti di lancio** (collegamenti/icone distinti) che convergono nello stesso
 processo via single-instance + routing degli argomenti. Dà identità desktop

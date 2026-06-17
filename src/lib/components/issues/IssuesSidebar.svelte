@@ -1,27 +1,37 @@
 <script lang="ts">
   import {
     TicketCheck, RefreshCw, Plus, Search, AlertCircle, Loader, Circle,
-    SlidersHorizontal, X, User, Filter, Loader2, ExternalLink,
-    Eye, EyeOff, ArrowUpDown, ArrowUp, ArrowDown,
+    SlidersHorizontal, X, User, Filter, ArrowUpDown, ArrowUp, ArrowDown,
   } from 'lucide-svelte';
+  import { onMount } from 'svelte';
   import type { IssueSortField } from '$lib/types/issues';
   import { SORT_FIELD_LABELS } from '$lib/types/issues';
-  import { openUrl } from '@tauri-apps/plugin-opener';
-  import { listen } from '@tauri-apps/api/event';
   import { issuesStore } from '$lib/stores/issues.svelte';
   import type { IssueProvider } from '$lib/stores/issues.svelte';
-  import { startLinearOAuth, startJiraOAuth } from '$lib/ipc/auth';
+  import { issueProviders } from '$lib/ipc/providers';
+  import type { ProviderDescriptor } from '$lib/types/providers';
   import { getRepoConfig, setRepoConfig } from '$lib/ipc/config';
   import { tabsStore } from '$lib/stores/tabs.svelte';
-  import { uiStore } from '$lib/stores/ui.svelte';
   import type { Issue, IssueStatus } from '$lib/types/issues';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Dropdown from '$lib/components/shared/ui/Dropdown.svelte';
   import FilterButton from '$lib/components/shared/ui/FilterButton.svelte';
   import BrandTile from '$lib/components/shared/internal/BrandTile.svelte';
+  import ProviderConnectionCard from '$lib/components/shared/internal/ProviderConnectionCard.svelte';
   import CreateIssueModal from './CreateIssueModal.svelte';
   import IssueContextMenu from './IssueContextMenu.svelte';
   import { tooltip } from '$lib/actions/tooltip';
+
+  // Self-describing issue-tracker descriptors — drive the generic connection
+  // card (compact variant) shown in the no-token setup state. The sidebar no
+  // longer hand-rolls per-provider OAuth/PAT/Basic forms.
+  let descriptors = $state<ProviderDescriptor[]>([]);
+  onMount(async () => {
+    try { descriptors = await issueProviders.list(); } catch { descriptors = []; }
+  });
+  const activeDescriptor = $derived(
+    descriptors.find((d) => d.id === issuesStore.activeProvider) ?? null,
+  );
 
   // ── Per-repo tracker config ───────────────────────────────────────────────
   const tab = $derived(tabsStore.activeTab);
@@ -77,85 +87,6 @@
   let searchQuery = $state('');
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
   let showFilters = $state(true);
-  // ── Linear no-token state ────────────────────────────────────────────────
-  let tokenInput    = $state('');
-  let tokenError    = $state('');
-  let tokenSaving   = $state(false);
-  let showTokenInput = $state(false);
-  let oauthWaiting   = $state(false);
-  let oauthError     = $state('');
-  let oauthUnsub: (() => void) | null = null;
-
-  // ── Jira no-token state ──────────────────────────────────────────────────
-  let jiraEmail        = $state('');
-  let jiraApiToken     = $state('');
-  let jiraDomain       = $state('');
-  let jiraShowToken    = $state(false);
-  let jiraBasicSaving  = $state(false);
-  let jiraBasicError   = $state('');
-  let jiraShowBasic    = $state(false);
-  let jiraOAuthWaiting = $state(false);
-  let jiraOAuthError   = $state('');
-  let jiraOAuthUnsub: (() => void) | null = null;
-
-  async function saveJiraBasicAuth() {
-    const isCloud = jiraDomain.trim().endsWith('.atlassian.net');
-    if (!jiraDomain.trim() || !jiraApiToken.trim() || (isCloud && !jiraEmail.trim())) return;
-    jiraBasicSaving = true; jiraBasicError = '';
-    try {
-      await issuesStore.saveJiraBasicAuth(jiraEmail.trim(), jiraApiToken.trim(), jiraDomain.trim());
-      jiraEmail = ''; jiraApiToken = ''; jiraDomain = '';
-      uiStore.showToast('Jira connected', 'success');
-    } catch (e) {
-      jiraBasicError = String(e);
-    } finally {
-      jiraBasicSaving = false;
-    }
-  }
-
-  async function startJiraOAuthFlow() {
-    jiraOAuthWaiting = true; jiraOAuthError = '';
-    jiraOAuthUnsub?.();
-    jiraOAuthUnsub = await listen<boolean>('arbor://jira-oauth-done', ({ payload }) => {
-      jiraOAuthUnsub?.(); jiraOAuthUnsub = null;
-      jiraOAuthWaiting = false;
-      if (payload) {
-        issuesStore.loadAuthStatus();
-        uiStore.showToast('Jira connected via OAuth', 'success');
-      } else {
-        jiraOAuthError = 'OAuth failed — please retry.';
-      }
-    });
-    try {
-      const url = await startJiraOAuth();
-      try { await openUrl(url); } catch { /* user can copy */ }
-    } catch (e) {
-      jiraOAuthWaiting = false; jiraOAuthError = String(e);
-      jiraOAuthUnsub?.(); jiraOAuthUnsub = null;
-    }
-  }
-
-  async function startOAuth() {
-    oauthWaiting = true; oauthError = '';
-    oauthUnsub?.();
-    oauthUnsub = await listen<boolean>('arbor://linear-oauth-done', ({ payload }) => {
-      oauthUnsub?.(); oauthUnsub = null;
-      oauthWaiting = false;
-      if (payload) {
-        issuesStore.loadAuthStatus();
-        uiStore.showToast('Linear connected via OAuth', 'success');
-      } else {
-        oauthError = 'OAuth failed — check your Client ID or try again.';
-      }
-    });
-    try {
-      const url = await startLinearOAuth();
-      try { await openUrl(url); } catch { /* user can copy */ }
-    } catch (e) {
-      oauthWaiting = false; oauthError = String(e);
-      oauthUnsub?.(); oauthUnsub = null;
-    }
-  }
 
   const SORT_FIELDS: IssueSortField[] = ['ticket_id', 'updated_at', 'created_at', 'priority', 'title', 'status'];
 
@@ -179,20 +110,6 @@
     searchTimeout = setTimeout(() => {
       issuesStore.setFilters({ query: searchQuery || undefined });
     }, 350);
-  }
-
-  async function saveToken() {
-    if (!tokenInput.trim()) return;
-    tokenError  = '';
-    tokenSaving = true;
-    try {
-      await issuesStore.saveToken(tokenInput.trim());
-      tokenInput = '';
-    } catch (e) {
-      tokenError = String(e);
-    } finally {
-      tokenSaving = false;
-    }
   }
 
   function toggleAssigneeMe() {
@@ -678,134 +595,22 @@
       </div>
 
     {:else if viewState === 'no-token'}
-
-      {#if trackerForRepo === 'jira'}
-        <!-- ── Jira setup ── -->
-        <div class="setup-view">
-          <BrandTile brand="jira" size={22} tileSize={42} class="setup-logo" />
-          <p class="setup-title">Connect Jira</p>
-
-          {#if !jiraShowBasic && !jiraOAuthWaiting}
-            <p class="setup-hint">Use your Atlassian API token to connect.</p>
-            <button class="setup-oauth-btn jira-connect-btn" onclick={() => (jiraShowBasic = true)}>
-              Connect with API Token
-            </button>
-            <div class="setup-divider"><span>or</span></div>
-            <button class="setup-pat-toggle" onclick={() => { jiraShowBasic = false; startJiraOAuthFlow(); }}>
-              Use OAuth 2.0
-            </button>
-          {/if}
-
-          {#if jiraShowBasic}
-            {@const isCloud = jiraDomain.trim().endsWith('.atlassian.net')}
-            <div class="setup-jira-form">
-              <input class="setup-input" type="text" placeholder="mycompany.atlassian.net" bind:value={jiraDomain} />
-              {#if isCloud}
-                <input class="setup-input" type="email" placeholder="your@email.com" bind:value={jiraEmail} />
-              {/if}
-              <div class="setup-token-row">
-                <input class="setup-input" style="flex:1"
-                  type={jiraShowToken ? 'text' : 'password'}
-                  placeholder={isCloud ? 'API token' : 'Personal Access Token (PAT)'}
-                  bind:value={jiraApiToken}
-                  onkeydown={(e) => e.key === 'Enter' && saveJiraBasicAuth()}
-                />
-                <button class="setup-eye-btn" onclick={() => jiraShowToken = !jiraShowToken}>
-                  {#if jiraShowToken}<EyeOff size={12} />{:else}<Eye size={12} />{/if}
-                </button>
-              </div>
-              {#if isCloud}
-                <p class="setup-hint" style="font-size:10px">
-                  Get API token at <code>id.atlassian.com → Security → API tokens</code>
-                </p>
-              {:else}
-                <p class="setup-hint" style="font-size:10px">
-                  Generate a PAT in Jira → Profile → Personal Access Tokens
-                </p>
-              {/if}
-              <div class="setup-row">
-                <button class="setup-btn jira-connect-btn"
-                        onclick={saveJiraBasicAuth}
-                        disabled={jiraBasicSaving || (isCloud && !jiraEmail.trim()) || !jiraApiToken.trim() || !jiraDomain.trim()}>
-                  {jiraBasicSaving ? 'Connecting…' : 'Connect'}
-                </button>
-                <button class="setup-pat-toggle" onclick={() => { jiraShowBasic = false; jiraBasicError = ''; }}>
-                  Cancel
-                </button>
-              </div>
-              {#if jiraBasicError}<p class="setup-error">{jiraBasicError}</p>{/if}
-            </div>
-          {/if}
-
-          {#if jiraOAuthWaiting}
-            <button class="setup-oauth-btn jira-connect-btn" disabled>
-              <Loader2 size={13} class="spin" /> Waiting for browser…
-            </button>
-            <p class="setup-hint">Approve access in Atlassian, then return here.</p>
-            <button class="setup-pat-toggle" onclick={() => { jiraOAuthWaiting = false; jiraOAuthUnsub?.(); }}>Cancel</button>
-          {/if}
-
-          {#if jiraOAuthError}<p class="setup-error">{jiraOAuthError}</p>{/if}
+      <!-- Connection is fully generic: the same descriptor-driven card the
+           settings page uses, in its compact (centered) layout. -->
+      {#if activeDescriptor}
+        <div class="setup-connect">
+          <ProviderConnectionCard
+            variant="compact"
+            descriptor={activeDescriptor}
+            service={issueProviders}
+            onchange={() => issuesStore.loadAuthStatus()}
+          />
           <button class="setup-back-btn" onclick={() => selectTracker('')}>← Change tracker</button>
         </div>
-
       {:else}
-        <!-- ── Linear setup ── -->
-        <div class="setup-view">
-          <TicketCheck size={32} class="setup-icon" />
-          <p class="setup-title">Connect Linear</p>
-
-          <!-- OAuth option (primary) -->
-          <button class="setup-oauth-btn" onclick={startOAuth} disabled={oauthWaiting}>
-            {#if oauthWaiting}
-              <Loader2 size={13} class="spin" /> Waiting for browser…
-            {:else}
-              <ExternalLink size={13} /> Authorize with OAuth
-            {/if}
-          </button>
-          {#if oauthWaiting}
-            <p class="setup-hint">Approve access in your browser, then return here.</p>
-          {/if}
-
-          {#if oauthError}
-            <p class="setup-error">{oauthError}</p>
-          {/if}
-
-          <!-- Divider + PAT toggle -->
-          <div class="setup-divider">
-            <span>or use a Personal API Key</span>
-          </div>
-
-          {#if !showTokenInput}
-            <button class="setup-pat-toggle" onclick={() => (showTokenInput = true)}>
-              Enter API Key manually
-            </button>
-          {:else}
-            <div class="setup-input-wrap">
-              <input
-                class="setup-input"
-                type="password"
-                placeholder="lin_api_…"
-                bind:value={tokenInput}
-                onkeydown={(e) => e.key === 'Enter' && saveToken()}
-              />
-              <button
-                class="setup-btn"
-                onclick={saveToken}
-                disabled={tokenSaving || !tokenInput.trim()}
-              >
-                {tokenSaving ? '…' : 'Save'}
-              </button>
-            </div>
-            <p class="setup-hint" style="font-size:10px">
-              Generate at <code>linear.app → Settings → API → Personal API keys</code>
-            </p>
-          {/if}
-
-          {#if tokenError}
-            <p class="setup-error">{tokenError}</p>
-          {/if}
-          <button class="setup-back-btn" onclick={() => selectTracker('')}>← Change tracker</button>
+        <div class="state-view">
+          <Loader size={22} class="state-icon spin" />
+          <p class="state-hint">Loading…</p>
         </div>
       {/if}
 
@@ -1086,55 +891,12 @@
     font-size: 11px; color: var(--text-muted); line-height: 1.55;
     max-width: 220px; margin: 0;
   }
-  .setup-hint code { font-family: var(--font-code); font-size: 10px; color: var(--accent); }
-  .setup-input-wrap { display: flex; gap: 6px; width: 100%; max-width: 240px; }
-  .setup-input {
-    flex: 1; padding: 6px 8px; font-size: 11px;
-    font-family: var(--font-code);
-    background: var(--bg-elevated); border: 1px solid var(--border);
-    border-radius: var(--radius-md); color: var(--text-primary); outline: none;
-    transition: border-color var(--transition-fast);
+  /* Compact connection card host (no-token setup) — the generic
+     ProviderConnectionCard supplies its own centered layout. */
+  .setup-connect {
+    display: flex; flex-direction: column; align-items: center;
+    padding-bottom: 18px;
   }
-  .setup-input:focus { border-color: var(--accent); }
-  .setup-btn {
-    padding: 6px 12px; font-size: 11px; font-weight: 600;
-    background: var(--accent); color: var(--bg-base);
-    border: none; border-radius: var(--radius-md); cursor: pointer;
-    transition: background var(--transition-fast);
-    white-space: nowrap;
-  }
-  .setup-btn:hover { background: var(--accent-hover); }
-  .setup-btn:disabled { opacity: 0.5; cursor: default; }
-  .setup-error { font-size: 10px; color: var(--error); max-width: 240px; }
-  .setup-oauth-btn {
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    width: 100%; max-width: 240px;
-    padding: 8px 14px; font-size: 12px; font-weight: 600;
-    background: var(--accent); color: var(--text-on-accent);
-    border: none; border-radius: var(--radius-md); cursor: pointer;
-    font-family: var(--font-ui-sans);
-    transition: background var(--transition-fast);
-  }
-  .setup-oauth-btn:hover:not(:disabled) { background: var(--accent-hover); }
-  .setup-oauth-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-
-  .setup-divider {
-    display: flex; align-items: center; gap: 8px;
-    width: 100%; max-width: 240px; color: var(--text-disabled);
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
-  }
-  .setup-divider::before, .setup-divider::after {
-    content: ''; flex: 1; height: 1px; background: var(--border-subtle);
-  }
-
-  .setup-pat-toggle {
-    font-size: 11px; color: var(--text-muted);
-    background: transparent; border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md); padding: 4px 12px; cursor: pointer;
-    font-family: var(--font-ui-sans);
-    transition: all var(--transition-fast);
-  }
-  .setup-pat-toggle:hover { color: var(--text-secondary); border-color: var(--border); }
 
   .setup-back-btn {
     font-size: 10px; color: var(--text-muted);
@@ -1144,27 +906,6 @@
     transition: color var(--transition-fast);
   }
   .setup-back-btn:hover { color: var(--text-secondary); }
-
-  /* Setup-flow brand tiles render via the shared BrandTile widget. */
-  /* Brand-coloured CTA buttons use absolute #fff foreground (theme-independent). */
-  .jira-connect-btn { background: #0052cc !important; color: #fff !important; }
-  .jira-connect-btn:hover:not(:disabled) { background: #003e99 !important; }
-
-  .setup-jira-form {
-    display: flex; flex-direction: column; gap: 6px;
-    width: 100%; max-width: 240px; align-items: stretch;
-  }
-  .setup-token-row { display: flex; gap: 0; }
-  .setup-token-row .setup-input { border-radius: var(--radius-md) 0 0 var(--radius-md); flex: 1; }
-  .setup-eye-btn {
-    display: flex; align-items: center; justify-content: center;
-    width: 28px; background: var(--bg-elevated); border: 1px solid var(--border);
-    border-left: none; border-radius: 0 var(--radius-md) var(--radius-md) 0;
-    cursor: pointer; color: var(--text-muted); flex-shrink: 0;
-    transition: color var(--transition-fast);
-  }
-  .setup-eye-btn:hover { color: var(--text-primary); }
-  .setup-row { display: flex; align-items: center; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
   /* ── Tracker selector ────────────────────────────────────────────────────── */
   .tracker-option {

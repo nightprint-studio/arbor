@@ -156,37 +156,3 @@ export interface IssueAuthStatus {
   domain?:       string | null;
   authMethod?:   string | null;
 }
-
-// ── Provider descriptors (self-describing connect forms) ──────────────────────
-// Mirror of `corvus-issue-tracker-api`'s `ProviderDescriptor` — the backend
-// declares what the settings UI must render to connect each tracker.
-
-export type FieldWidget = 'text' | 'secret' | 'url';
-
-export interface AuthField {
-  key:          string;
-  label:        string;
-  widget:       FieldWidget;
-  required:     boolean;
-  placeholder?: string;
-}
-
-/** Tagged union (serde `tag = "type"`): an OAuth button or a field form. */
-export type AuthMethodKind =
-  | { type: 'oauth' }
-  | { type: 'fields'; fields: AuthField[] };
-
-export interface AuthMethod {
-  id:    string;
-  label: string;
-  kind:  AuthMethodKind;
-}
-
-export interface ProviderDescriptor {
-  id:           string;
-  displayName:  string;
-  description?: string;
-  icon:         string;
-  /** Display order — the first method is the recommended/default action. */
-  authMethods:  AuthMethod[];
-}

@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
-use super::vars::{RunContext, VarValue, resolve_vars};
+use crate::vars::{RunContext, VarValue, resolve_vars};
 
 /// Each variant is its own kind/struct so plugins serialize a tagged JSON
 /// value (`{ "kind": "file_exists", "path": "..." }`). String fields are
@@ -142,7 +142,7 @@ pub fn run_builtin(spec: &BuiltinSpec, cwd: &str, ctx: &RunContext) -> BuiltinOu
             }
         }
         BuiltinSpec::SetVar { value } => {
-            let resolved = super::vars::resolve_vars_in_json(value, ctx);
+            let resolved = crate::vars::resolve_vars_in_json(value, ctx);
             BuiltinOutcome {
                 value: VarValue::from_json(&resolved),
                 lines: vec![format!("set_var = {}", resolved)],
@@ -201,5 +201,68 @@ pub fn describe(spec: &BuiltinSpec) -> String {
         BuiltinSpec::SetVar     { .. }     => "builtin set_var".into(),
         BuiltinSpec::Echo       { .. }     => "builtin echo".into(),
         BuiltinSpec::Match      { .. }     => "builtin match".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_var_seeds_a_numeric_literal() {
+        let ctx = RunContext::new();
+        let spec = BuiltinSpec::SetVar { value: serde_json::json!(3) };
+        let out = run_builtin(&spec, ".", &ctx);
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.value.as_string(), "3");
+    }
+
+    #[test]
+    fn json_get_walks_dotted_path() {
+        let ctx = RunContext::new();
+        let spec = BuiltinSpec::JsonGet {
+            source: r#"{"a":{"b":[10,20]}}"#.into(),
+            path: "a.b.1".into(),
+        };
+        let out = run_builtin(&spec, ".", &ctx);
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.value.as_string(), "20");
+    }
+
+    #[test]
+    fn json_get_reports_invalid_json() {
+        let ctx = RunContext::new();
+        let spec = BuiltinSpec::JsonGet { source: "not json".into(), path: "a".into() };
+        let out = run_builtin(&spec, ".", &ctx);
+        assert_eq!(out.exit_code, 1);
+    }
+
+    #[test]
+    fn env_falls_back_to_default_when_unset() {
+        let ctx = RunContext::new();
+        let spec = BuiltinSpec::Env {
+            name: "ARBOR_PIPELINE_TEST_DEFINITELY_UNSET_VAR".into(),
+            default: Some("fallback".into()),
+        };
+        let out = run_builtin(&spec, ".", &ctx);
+        assert_eq!(out.value.as_string(), "fallback");
+    }
+
+    #[test]
+    fn match_uses_regex_over_substring() {
+        let ctx = RunContext::new();
+        let spec = BuiltinSpec::Match {
+            target: "build-42".into(),
+            pattern: None,
+            regex: Some(r"\d+$".into()),
+        };
+        let out = run_builtin(&spec, ".", &ctx);
+        assert!(matches!(out.value, VarValue::Bool(true)));
+    }
+
+    #[test]
+    fn describe_labels_each_kind() {
+        assert_eq!(describe(&BuiltinSpec::Echo { message: "hi".into() }), "builtin echo");
+        assert!(describe(&BuiltinSpec::FileExists { path: "x".into() }).contains("file_exists"));
     }
 }

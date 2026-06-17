@@ -24,11 +24,13 @@ use crate::error::ProviderError;
 use crate::issue::{IssueCreateRequest, IssueFilter, RepoIssue};
 use crate::kind::ProviderKind;
 use crate::mr::{
-    MergeOpts, MrComment, MrConflict, MrCreateRequest, MrDetail, MrFile, MrFilter, MrId, MrInfo,
-    MrUpdateRequest,
+    AutoMergeOpts, MergeOpts, MrCapabilities, MrComment, MrCommit, MrConflict, MrCreateRequest,
+    MrDetail, MrFeatureStatus, MrFile, MrFilter, MrId, MrInfo, MrUpdateRequest,
 };
 use crate::release::{Release, ReleaseCreateRequest};
-use crate::repo::{ListReposOpts, RemoteRepoInfo, RepoCreateRequest, RepoRef};
+use crate::repo::{
+    ListReposOpts, RemoteFileContent, RemoteRepoInfo, RemoteTreeEntry, RepoCreateRequest, RepoRef,
+};
 use crate::security::{SecurityFilters, SecurityFinding, SecuritySummary};
 use crate::webhook::{Webhook, WebhookCreateRequest};
 
@@ -65,6 +67,19 @@ pub trait GitProvider: Send + Sync {
     async fn list_org_repos(&self, org: &str, opts: ListReposOpts) -> Result<Vec<RemoteRepoInfo>, ProviderError>;
     async fn search_repos(&self, query: &str) -> Result<Vec<RemoteRepoInfo>, ProviderError>;
 
+    // ── Remote repo browser (read-only file tree + content) ──────────────
+    /// List files/directories at `path` (empty = root) on `branch`.
+    async fn browse_tree(&self, repo: &RepoRef, path: &str, branch: &str) -> Result<Vec<RemoteTreeEntry>, ProviderError> {
+        let _ = (repo, path, branch);
+        Err(ProviderError::Unsupported { feature: "browse_tree".into() })
+    }
+    /// Fetch a single file's content (text inlined, small images as data URL,
+    /// the rest flagged binary — via `repo::build_file_content`).
+    async fn get_file_content(&self, repo: &RepoRef, path: &str, branch: &str) -> Result<RemoteFileContent, ProviderError> {
+        let _ = (repo, path, branch);
+        Err(ProviderError::Unsupported { feature: "get_file_content".into() })
+    }
+
     // ── MR / PR ──────────────────────────────────────────────────────────
     //
     // Repo-scoped methods take `&RepoRef` so a single host-keyed provider
@@ -84,6 +99,49 @@ pub trait GitProvider: Send + Sync {
     async fn list_mr_reviewers(&self, id: &MrId) -> Result<Vec<ProviderUser>, ProviderError>;
     async fn request_mr_review(&self, id: &MrId, user: &str) -> Result<(), ProviderError>;
     async fn approve_mr(&self, id: &MrId) -> Result<(), ProviderError>;
+
+    /// Commits belonging to an MR/PR.
+    async fn list_mr_commits(&self, id: &MrId) -> Result<Vec<MrCommit>, ProviderError> {
+        let _ = id;
+        Err(ProviderError::Unsupported { feature: "list_mr_commits".into() })
+    }
+    /// Per-file diff for a single commit SHA.
+    async fn get_commit_diff(&self, repo: &RepoRef, sha: &str) -> Result<Vec<MrFile>, ProviderError> {
+        let _ = (repo, sha);
+        Err(ProviderError::Unsupported { feature: "get_commit_diff".into() })
+    }
+    /// Remove draft status from an MR/PR (mark ready for review).
+    async fn mark_mr_ready(&self, id: &MrId) -> Result<(), ProviderError> {
+        let _ = id;
+        Err(ProviderError::Unsupported { feature: "mark_mr_ready".into() })
+    }
+
+    // ── Auto-merge / merge-when-pipeline-succeeds ────────────────────────
+    /// Arm auto-merge (GitHub) / MWPS (GitLab) on an open MR. The provider
+    /// resolves any extra handle it needs internally (e.g. GitHub's GraphQL
+    /// PR node id, GitLab's "wait for mergeable" poll).
+    async fn enable_auto_merge(&self, id: &MrId, opts: AutoMergeOpts) -> Result<(), ProviderError> {
+        let _ = (id, opts);
+        Err(ProviderError::Unsupported { feature: "enable_auto_merge".into() })
+    }
+    /// Cancel a previously-armed auto-merge / MWPS. Idempotent.
+    async fn disable_auto_merge(&self, id: &MrId) -> Result<(), ProviderError> {
+        let _ = id;
+        Err(ProviderError::Unsupported { feature: "disable_auto_merge".into() })
+    }
+    /// Whether arming auto-merge at creation time is expected to succeed
+    /// (repo-level "Allow auto-merge" on GitHub; CI jobs enabled on GitLab).
+    /// Permissive default (`auto_merge_supported = true`) so callers can still try.
+    async fn auto_merge_allowed(&self, repo: &RepoRef) -> Result<MrCapabilities, ProviderError> {
+        let _ = repo;
+        Ok(MrCapabilities::default())
+    }
+    /// Whether the repo accepts MRs/PRs at all (drives sidebar/palette gating).
+    /// Permissive default (`enabled = true`).
+    async fn mr_feature_status(&self, repo: &RepoRef) -> Result<MrFeatureStatus, ProviderError> {
+        let _ = repo;
+        Ok(MrFeatureStatus::default())
+    }
 
     // ── CI / CD ──────────────────────────────────────────────────────────
     async fn list_ci_runs(&self, repo: &RepoRef, filter: CiFilter) -> Result<Vec<CiRun>, ProviderError>;

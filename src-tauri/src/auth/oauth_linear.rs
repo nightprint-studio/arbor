@@ -98,10 +98,9 @@ pub async fn start_linear_oauth(app_handle: tauri::AppHandle) -> Result<String> 
                 false
             }
         };
-        let _ = app.emit("arbor://linear-oauth-done", ok);
         // Unified, by-id completion event for the generic connection layer —
-        // one FE listener routes by `id`. Kept alongside the legacy event above.
-        // The legacy flow only carries a bool, so `error` is a generic message.
+        // one FE listener (in ProviderConnectionCard) routes by `id`. The flow
+        // only carries a bool, so `error` is a generic message.
         let error = if ok { None } else { Some("Linear authorization failed") };
         let _ = app.emit(
             "arbor://provider-oauth-done",
@@ -150,12 +149,7 @@ pub async fn try_refresh() -> Result<bool> {
     Ok(true)
 }
 
-// ── Status / disconnect ───────────────────────────────────────────────────────
-
-/// Returns `true` when a Linear token (PAT or OAuth) is present in the keychain.
-pub fn get_status() -> Result<bool> {
-    Ok(credential_store::get(KR_HOST, KR_USER)?.is_some())
-}
+// ── Disconnect ────────────────────────────────────────────────────────────────
 
 /// Remove the Linear access token and refresh token from the keychain.
 pub fn disconnect() -> Result<()> {

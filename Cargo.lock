@@ -159,6 +159,7 @@ dependencies = [
  "corvus-issue-tracker-jira",
  "corvus-issue-tracker-linear",
  "corvus-pipeline-api",
+ "corvus-pipeline-core",
  "corvus-provider-descriptor",
  "cron",
  "dirs",
@@ -1242,6 +1243,7 @@ name = "corvus-git-provider-api"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "corvus-provider-descriptor",
  "reqwest 0.12.28",
@@ -1326,6 +1328,16 @@ version = "0.3.0"
 dependencies = [
  "regex",
  "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "corvus-pipeline-core"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
+ "corvus-pipeline-api",
  "serde_json",
  "tracing",
 ]

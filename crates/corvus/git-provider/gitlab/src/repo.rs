@@ -361,3 +361,137 @@ pub(crate) async fn create_repo(
     };
     get_repo(http, &owner, &name).await
 }
+
+// ---------------------------------------------------------------------------
+// browse_tree — paginated repository tree listing (ported from
+// repo_impl::browse_gitlab_tree). The project path comes from `RepoRef`
+// (`owner_or_path` = full project path; `name` unset). URL, query params,
+// headers, status handling, error strings and the `tree`→`dir` mapping are
+// preserved byte-for-byte; auth/refresh goes through `GitlabHttp::send` and
+// `AppError::Other(msg)` became `classify(msg)`.
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn browse_tree(
+    http: &GitlabHttp,
+    repo: &RepoRef,
+    path: &str,
+    branch: &str,
+) -> Result<Vec<RemoteTreeEntry>, ProviderError> {
+    let base = http.base();
+    let encoded = percent_encode_slash(repo.owner_or_path.as_str());
+    let mut all = Vec::new();
+    let mut page = 1u32;
+
+    loop {
+        let url = format!(
+            "{base}/api/v4/projects/{encoded}/repository/tree\
+             ?path={path}&ref={branch}&per_page=100&page={page}"
+        );
+        let resp = http
+            .send(|s| {
+                http.client()
+                    .get(&url)
+                    .header("Authorization", &s.auth_header)
+                    .header("User-Agent", "arbor-git-gui/1.0")
+            })
+            .await?;
+
+        if !resp.status().is_success() {
+            let s = resp.status();
+            let b = resp.text().await.unwrap_or_default();
+            return Err(classify(format!("GitLab tree API {s}: {b}")));
+        }
+
+        #[derive(Deserialize)]
+        struct GlEntry {
+            name: String,
+            path: String,
+            #[serde(rename = "type")]
+            entry_type: String,
+        }
+
+        let batch: Vec<GlEntry> = resp
+            .json()
+            .await
+            .map_err(|e| classify(format!("GitLab tree parse: {e}")))?;
+        let done = batch.len() < 100;
+
+        for e in batch {
+            all.push(RemoteTreeEntry {
+                name: e.name,
+                path: e.path,
+                entry_type: if e.entry_type == "tree" { "dir" } else { "file" }.into(),
+                size: None,
+            });
+        }
+        if done {
+            break;
+        }
+        page += 1;
+    }
+
+    sort_tree(&mut all);
+    Ok(all)
+}
+
+// ---------------------------------------------------------------------------
+// get_file_content — raw single-file fetch (ported from
+// repo_impl::fetch_gitlab_file). The bytes are funneled through the shared pure
+// helpers `mime_for_path` + `build_file_content`. URL, query param, headers,
+// status handling and error strings are preserved byte-for-byte; the per-segment
+// file-path encoding uses `encode_path_component` (ported verbatim below).
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn get_file_content(
+    http: &GitlabHttp,
+    repo: &RepoRef,
+    path: &str,
+    branch: &str,
+) -> Result<RemoteFileContent, ProviderError> {
+    let base = http.base();
+    let encoded_proj = percent_encode_slash(repo.owner_or_path.as_str());
+    let encoded_file = encode_path_component(path);
+    let url = format!(
+        "{base}/api/v4/projects/{encoded_proj}/repository/files/{encoded_file}/raw?ref={branch}"
+    );
+    let resp = http
+        .send(|s| {
+            http.client()
+                .get(&url)
+                .header("Authorization", &s.auth_header)
+                .header("User-Agent", "arbor-git-gui/1.0")
+        })
+        .await?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitLab raw file {s}: {b}")));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| classify(format!("GitLab file read: {e}")))?;
+    let mime = mime_for_path(path);
+    Ok(build_file_content(path, bytes.to_vec(), &mime))
+}
+
+/// Percent-encode a full file path for use in GitLab's single-segment file API.
+/// Ported verbatim from `repo_impl::encode_path_component` — the exact encoded
+/// set matters, so do NOT substitute a general-purpose encoder.
+fn encode_path_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for c in s.chars() {
+        match c {
+            '/' => out.push_str("%2F"),
+            ' ' => out.push_str("%20"),
+            '#' => out.push_str("%23"),
+            '?' => out.push_str("%3F"),
+            '&' => out.push_str("%26"),
+            '+' => out.push_str("%2B"),
+            c => out.push(c),
+        }
+    }
+    out
+}

@@ -660,6 +660,386 @@ pub(crate) async fn fetch_github_pr_feature_enabled(
     Ok(MrFeatureStatus::default())
 }
 
+pub(crate) async fn list_mr_commits(
+    http: &GithubHttp,
+    id: &MrId,
+) -> Result<Vec<MrCommit>, ProviderError> {
+    let (owner, name, number) = id_parts(id)?;
+    get_github_pr_commits(http, owner, name, number).await
+}
+
+pub(crate) async fn get_commit_diff(
+    http: &GithubHttp,
+    repo: &RepoRef,
+    sha: &str,
+) -> Result<Vec<MrFile>, ProviderError> {
+    let (owner, name) = repo_parts(repo)?;
+    get_github_commit_files(http, owner, name, sha).await
+}
+
+pub(crate) async fn mark_mr_ready(http: &GithubHttp, id: &MrId) -> Result<(), ProviderError> {
+    let (owner, name, number) = id_parts(id)?;
+    mark_github_pr_ready(http, owner, name, number).await
+}
+
+pub(crate) async fn enable_auto_merge(
+    http: &GithubHttp,
+    id: &MrId,
+    opts: AutoMergeOpts,
+) -> Result<(), ProviderError> {
+    let (owner, name, number) = id_parts(id)?;
+    let node_id = fetch_github_pr_node_id(http, owner, name, number).await?;
+    let merge_method = if opts.squash { "SQUASH" } else { "MERGE" };
+    enable_github_auto_merge(http, &node_id, merge_method).await
+}
+
+pub(crate) async fn disable_auto_merge(http: &GithubHttp, id: &MrId) -> Result<(), ProviderError> {
+    let (owner, name, number) = id_parts(id)?;
+    disable_github_auto_merge(http, owner, name, number).await
+}
+
+pub(crate) async fn auto_merge_allowed(
+    http: &GithubHttp,
+    repo: &RepoRef,
+) -> Result<MrCapabilities, ProviderError> {
+    let (owner, name) = repo_parts(repo)?;
+    let allowed = fetch_github_auto_merge_allowed(http, owner, name).await?;
+    if allowed {
+        Ok(MrCapabilities::default())
+    } else {
+        Ok(MrCapabilities {
+            auto_merge_supported: false,
+            auto_merge_reason: Some(
+                "Auto-merge is disabled for this repository — \
+                 enable it under Settings → General → Pull Requests on GitHub."
+                    .into(),
+            ),
+        })
+    }
+}
+
+pub(crate) async fn mr_feature_status(
+    http: &GithubHttp,
+    repo: &RepoRef,
+) -> Result<MrFeatureStatus, ProviderError> {
+    let (owner, name) = repo_parts(repo)?;
+    fetch_github_pr_feature_enabled(http, owner, name).await
+}
+
+// ---------------------------------------------------------------------------
+// PR commits + single-commit diff
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn get_github_pr_commits(
+    http: &GithubHttp,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> Result<Vec<MrCommit>, ProviderError> {
+    let url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/pulls/{number}/commits?per_page=100"
+    );
+    let resp = http
+        .send(|s| {
+            http.client()
+                .get(&url)
+                .header("Authorization", &s.auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "arbor-git-gui/1.0")
+        })
+        .await?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub PR commits {s}: {b}")));
+    }
+    let commits: Vec<GhPrCommit> = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitHub PR commits parse: {e}")))?;
+    Ok(commits
+        .into_iter()
+        .map(|c| MrCommit {
+            sha: c.sha.clone(),
+            message: c.commit.message.lines().next().unwrap_or("").to_string(),
+            author: c.commit.author.name,
+            date: c.commit.author.date,
+            web_url: Some(c.html_url),
+        })
+        .collect())
+}
+
+pub(crate) async fn get_github_commit_files(
+    http: &GithubHttp,
+    owner: &str,
+    repo: &str,
+    sha: &str,
+) -> Result<Vec<MrFileDiff>, ProviderError> {
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/commits/{sha}");
+    let resp = http
+        .send(|s| {
+            http.client()
+                .get(&url)
+                .header("Authorization", &s.auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "arbor-git-gui/1.0")
+        })
+        .await?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub commit {s}: {b}")));
+    }
+    let commit: GhCommitResponse = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitHub commit parse: {e}")))?;
+    Ok(commit
+        .files
+        .into_iter()
+        .map(|f| MrFileDiff {
+            filename: f.filename,
+            status: f.status,
+            additions: f.additions,
+            deletions: f.deletions,
+            patch: f.patch,
+        })
+        .collect())
+}
+
+// ---------------------------------------------------------------------------
+// Mark ready / auto-merge (REST node_id lookup + GraphQL mutations)
+// ---------------------------------------------------------------------------
+
+/// Resolve the GraphQL Relay `node_id` of a PR via REST `/pulls/{n}`. Shared by
+/// mark-ready, enable- and disable-auto-merge (GraphQL needs the node id, which
+/// the REST PR payload carries).
+async fn fetch_github_pr_node_id(
+    http: &GithubHttp,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> Result<String, ProviderError> {
+    let pr_url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
+    let resp = http
+        .send(|s| {
+            http.client()
+                .get(&pr_url)
+                .header("Authorization", &s.auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "arbor-git-gui/1.0")
+        })
+        .await?;
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub PR lookup {s}: {b}")));
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitHub PR parse: {e}")))?;
+    v.get("node_id")
+        .and_then(|n| n.as_str())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| classify("GitHub PR response missing node_id".into()))
+}
+
+/// POST a GraphQL document through the session/refresh wrapper. The shell used
+/// a raw `Bearer {token}` header; here the session's `auth_header` (already
+/// `Bearer …` for OAuth) is reused so the 401→refresh→retry path applies.
+async fn github_graphql(
+    http: &GithubHttp,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response, ProviderError> {
+    http.send(|s| {
+        http.client()
+            .post("https://api.github.com/graphql")
+            .header("Authorization", &s.auth_header)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "arbor-git-gui/1.0")
+            .json(body)
+    })
+    .await
+}
+
+/// Mark a GitHub PR as ready for review (removes draft status).
+/// GitHub's REST API does NOT support converting draft→ready; requires GraphQL.
+pub(crate) async fn mark_github_pr_ready(
+    http: &GithubHttp,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> Result<(), ProviderError> {
+    // Step 1: fetch the PR node_id (required by GraphQL).
+    let node_id = fetch_github_pr_node_id(http, owner, repo, number)
+        .await
+        .map_err(|e| classify(format!("GitHub mark ready (fetch node_id) {e}")))?;
+
+    // Step 2: GraphQL mutation markPullRequestReadyForReview.
+    let query = "mutation MarkReady($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { isDraft } } }";
+    let gql_body = serde_json::json!({ "query": query, "variables": { "id": node_id } });
+
+    let gql_resp = github_graphql(http, &gql_body)
+        .await
+        .map_err(|e| classify(format!("GitHub mark ready (GraphQL) {e}")))?;
+
+    if !gql_resp.status().is_success() {
+        let s = gql_resp.status();
+        let b = gql_resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub mark ready (GraphQL) {s}: {b}")));
+    }
+
+    // GraphQL always returns 200; check for errors in the response body.
+    let gql_data: serde_json::Value = gql_resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitHub mark ready (GraphQL parse): {e}")))?;
+    if let Some(errors) = gql_data.get("errors") {
+        let msg = errors.to_string();
+        return Err(classify(format!("GitHub mark ready (GraphQL errors): {msg}")));
+    }
+
+    Ok(())
+}
+
+/// Enable auto-merge on a GitHub PR via GraphQL.
+/// `merge_method` is one of `"MERGE" | "SQUASH" | "REBASE"`.
+pub(crate) async fn enable_github_auto_merge(
+    http: &GithubHttp,
+    pr_node_id: &str,
+    merge_method: &str,
+) -> Result<(), ProviderError> {
+    let method = match merge_method.to_uppercase().as_str() {
+        "SQUASH" => "SQUASH",
+        "REBASE" => "REBASE",
+        _ => "MERGE",
+    };
+    let query = "mutation($id: ID!, $m: PullRequestMergeMethod!) { \
+        enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $m }) { \
+            pullRequest { autoMergeRequest { enabledAt } } \
+        } }";
+    let body =
+        serde_json::json!({ "query": query, "variables": { "id": pr_node_id, "m": method } });
+
+    let resp = github_graphql(http, &body).await?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(map_auto_merge_error(&b)
+            .unwrap_or_else(|| classify(format!("GitHub auto-merge {s}: {b}"))));
+    }
+
+    let data: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitHub auto-merge parse: {e}")))?;
+    if let Some(errs) = data.get("errors") {
+        // Extract the first error message for a concise user-facing notice.
+        let msg = errs
+            .get(0)
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or(&errs.to_string())
+            .to_string();
+        return Err(map_auto_merge_error(&msg).unwrap_or_else(|| classify(msg)));
+    }
+    Ok(())
+}
+
+/// Disable auto-merge on a GitHub PR. Looks up the PR's GraphQL node ID first
+/// (REST `/pulls/{n}` carries `node_id`), then sends the `disablePullRequestAutoMerge`
+/// mutation. The mutation is a no-op when auto-merge isn't currently armed.
+pub(crate) async fn disable_github_auto_merge(
+    http: &GithubHttp,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> Result<(), ProviderError> {
+    // Resolve node_id via REST so we don't need a second auth flow for GraphQL.
+    let node_id = fetch_github_pr_node_id(http, owner, repo, number).await?;
+
+    let query = "mutation($id: ID!) { \
+        disablePullRequestAutoMerge(input: { pullRequestId: $id }) { \
+            pullRequest { number } \
+        } }";
+    let body = serde_json::json!({ "query": query, "variables": { "id": node_id } });
+
+    let resp = github_graphql(http, &body)
+        .await
+        .map_err(|e| classify(format!("GitHub disable auto-merge {e}")))?;
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitHub disable auto-merge {s}: {b}")));
+    }
+    let data: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitHub disable auto-merge parse: {e}")))?;
+    if let Some(errs) = data.get("errors") {
+        let msg = errs
+            .get(0)
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or(&errs.to_string())
+            .to_string();
+        return Err(classify(msg));
+    }
+    Ok(())
+}
+
+/// Detect the well-known "PR is not mergeable" failure modes from a raw provider
+/// error message and re-phrase them so the user understands *why* auto-merge
+/// couldn't be armed. Returns `None` when the message doesn't match any
+/// recognised shape — the caller falls back to surfacing the raw response.
+fn map_auto_merge_error(raw: &str) -> Option<ProviderError> {
+    // Try JSON first — GitHub REST/GraphQL wraps the message.
+    let probe: String = if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
+        v.get("message")
+            .and_then(|m| m.as_str())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| raw.to_string())
+    } else {
+        raw.to_string()
+    };
+    let lower = probe.to_lowercase();
+
+    if lower.contains("dirty")
+        || lower.contains("conflict")
+        || lower.contains("cannot be merged")
+        || lower.contains("not mergeable")
+    {
+        return Some(classify(
+            "This pull request has conflicts that must be resolved before \
+             auto-merge can be enabled. Rebase or merge the target branch in, \
+             fix the conflicts, then push."
+                .into(),
+        ));
+    }
+    if lower.contains("clean status") {
+        return Some(classify(
+            "Auto-merge needs a pending check or required review to gate on. \
+             This pull request is already mergeable — merge it directly instead."
+                .into(),
+        ));
+    }
+    if lower.contains("auto_merge") && lower.contains("disabled") {
+        return Some(classify(
+            "Auto-merge is disabled for this repository. Enable it in the \
+             repository settings, then try again."
+                .into(),
+        ));
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Internal GitHub raw types
 // ---------------------------------------------------------------------------
@@ -795,6 +1175,31 @@ struct GhPrFile {
     deletions: u32,
     #[serde(default)]
     patch: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GhPrCommit {
+    sha: String,
+    commit: GhCommitInner,
+    html_url: String,
+}
+
+#[derive(Deserialize)]
+struct GhCommitInner {
+    message: String,
+    author: GhCommitAuthor,
+}
+
+#[derive(Deserialize)]
+struct GhCommitAuthor {
+    name: String,
+    date: String,
+}
+
+#[derive(Deserialize)]
+struct GhCommitResponse {
+    #[serde(default)]
+    files: Vec<GhPrFile>,
 }
 
 // ---------------------------------------------------------------------------

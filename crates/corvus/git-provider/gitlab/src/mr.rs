@@ -171,6 +171,74 @@ pub(crate) async fn approve_mr(
     Err(ProviderError::Unsupported { feature: "approve_mr".into() })
 }
 
+pub(crate) async fn list_mr_commits(
+    http: &GitlabHttp,
+    id: &MrId,
+) -> Result<Vec<MrCommit>, ProviderError> {
+    let (path, iid) = id_parts(id)?;
+    get_gitlab_mr_commits(http, path, iid).await
+}
+
+pub(crate) async fn get_commit_diff(
+    http: &GitlabHttp,
+    repo: &RepoRef,
+    sha: &str,
+) -> Result<Vec<MrFileDiff>, ProviderError> {
+    let path = project_path(repo);
+    get_gitlab_commit_files(http, path, sha).await
+}
+
+pub(crate) async fn mark_mr_ready(http: &GitlabHttp, id: &MrId) -> Result<(), ProviderError> {
+    let (path, iid) = id_parts(id)?;
+    mark_gitlab_mr_ready(http, path, iid).await
+}
+
+pub(crate) async fn enable_auto_merge(
+    http: &GitlabHttp,
+    id: &MrId,
+    opts: AutoMergeOpts,
+) -> Result<(), ProviderError> {
+    let (path, iid) = id_parts(id)?;
+    // GitLab needs the MR's merge_status resolved before MWPS can be armed
+    // reliably; poll until it settles (best-effort, then attempt the merge).
+    wait_gitlab_merge_status_ready(http, path, iid).await;
+    enable_gitlab_auto_merge(http, path, iid, opts.squash, opts.delete_branch).await
+}
+
+pub(crate) async fn disable_auto_merge(http: &GitlabHttp, id: &MrId) -> Result<(), ProviderError> {
+    let (path, iid) = id_parts(id)?;
+    disable_gitlab_auto_merge(http, path, iid).await
+}
+
+pub(crate) async fn auto_merge_allowed(
+    http: &GitlabHttp,
+    repo: &RepoRef,
+) -> Result<MrCapabilities, ProviderError> {
+    let path = project_path(repo);
+    let supported = fetch_gitlab_mwps_supported(http, path).await?;
+    if supported {
+        Ok(MrCapabilities::default())
+    } else {
+        Ok(MrCapabilities {
+            auto_merge_supported: false,
+            auto_merge_reason: Some(
+                "CI jobs are disabled for this project — there is no \
+                 pipeline to wait on, so merge-when-pipeline-succeeds \
+                 cannot be armed."
+                    .into(),
+            ),
+        })
+    }
+}
+
+pub(crate) async fn mr_feature_status(
+    http: &GitlabHttp,
+    repo: &RepoRef,
+) -> Result<MrFeatureStatus, ProviderError> {
+    let path = project_path(repo);
+    fetch_gitlab_mr_feature_enabled(http, path).await
+}
+
 // ---------------------------------------------------------------------------
 // REST functions (ported verbatim from mr_impl, via GitlabHttp)
 // ---------------------------------------------------------------------------
@@ -601,34 +669,7 @@ pub(crate) async fn get_gitlab_mr_files(
         .map_err(|e| classify(format!("GitLab MR diffs parse: {e}")))?;
     Ok(diffs
         .into_iter()
-        .map(|d| {
-            let status = if d.new_file {
-                "added".into()
-            } else if d.deleted_file {
-                "removed".into()
-            } else if d.renamed_file {
-                "renamed".into()
-            } else {
-                "modified".into()
-            };
-            let additions = d
-                .diff
-                .lines()
-                .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
-                .count() as u32;
-            let deletions = d
-                .diff
-                .lines()
-                .filter(|l| l.starts_with('-') && !l.starts_with("---"))
-                .count() as u32;
-            MrFileDiff {
-                filename: d.new_path,
-                status,
-                additions,
-                deletions,
-                patch: if d.diff.is_empty() { None } else { Some(d.diff) },
-            }
-        })
+        .map(gl_diff_to_file)
         .collect())
 }
 
@@ -670,6 +711,232 @@ pub(crate) async fn get_gitlab_mr_commits(
             web_url: c.web_url,
         })
         .collect())
+}
+
+/// Per-file diff for a single commit SHA (Commits-tab drill-down).
+pub(crate) async fn get_gitlab_commit_files(
+    http: &GitlabHttp,
+    path: &str,
+    sha: &str,
+) -> Result<Vec<MrFileDiff>, ProviderError> {
+    let encoded = percent_encode_slash(path);
+    let url = format!(
+        "{}/api/v4/projects/{encoded}/repository/commits/{sha}/diff",
+        http.base()
+    );
+    let resp = http
+        .send(|s| {
+            http.client()
+                .get(&url)
+                .header("Authorization", &s.auth_header)
+                .header("User-Agent", "arbor-git-gui/1.0")
+        })
+        .await?;
+
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let b = resp.text().await.unwrap_or_default();
+        return Err(classify(format!("GitLab commit diff {s}: {b}")));
+    }
+    let diffs: Vec<GlMrDiff> = resp
+        .json()
+        .await
+        .map_err(|e| classify(format!("GitLab commit diff parse: {e}")))?;
+    Ok(diffs
+        .into_iter()
+        .map(gl_diff_to_file)
+        .collect())
+}
+
+/// Mark a GitLab MR as ready for review (removes Draft prefix).
+pub(crate) async fn mark_gitlab_mr_ready(
+    http: &GitlabHttp,
+    project_path: &str,
+    iid: u64,
+) -> Result<(), ProviderError> {
+    let encoded = percent_encode_slash(project_path);
+    // GitLab API supports draft:false directly since v14.x
+    let body = serde_json::json!({ "draft": false });
+    let url_ready = format!(
+        "{}/api/v4/projects/{encoded}/merge_requests/{iid}",
+        http.base()
+    );
+    let resp = http
+        .send(|s| {
+            http.client()
+                .put(&url_ready)
+                .header("Authorization", &s.auth_header)
+                .header("User-Agent", "arbor-git-gui/1.0")
+                .json(&body)
+        })
+        .await?;
+
+    if resp.status().is_success() {
+        return Ok(());
+    }
+    let s = resp.status();
+    let b = resp.text().await.unwrap_or_default();
+    Err(classify(format!("GitLab mark ready {s}: {b}")))
+}
+
+/// Poll the MR until GitLab finishes computing `merge_status` (it starts as
+/// `checking`/`unchecked` right after creation). Returns once the status is
+/// resolved, or after the timeout — callers should still attempt the merge
+/// either way so transient API hiccups don't block the user.
+pub(crate) async fn wait_gitlab_merge_status_ready(
+    http: &GitlabHttp,
+    project_path: &str,
+    iid: u64,
+) {
+    #[derive(Deserialize)]
+    struct StatusOnly {
+        merge_status: Option<String>,
+    }
+
+    let encoded = percent_encode_slash(project_path);
+    let url = format!(
+        "{}/api/v4/projects/{encoded}/merge_requests/{iid}",
+        http.base()
+    );
+
+    let delays_ms = [400u64, 600, 800, 1200, 1500, 1500];
+    for delay in delays_ms {
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        let resp = http
+            .send(|s| {
+                http.client()
+                    .get(&url)
+                    .header("Authorization", &s.auth_header)
+                    .header("User-Agent", "arbor-git-gui/1.0")
+            })
+            .await;
+        let Ok(r) = resp else { continue };
+        if !r.status().is_success() {
+            continue;
+        }
+        let Ok(s) = r.json::<StatusOnly>().await else {
+            continue;
+        };
+        match s.merge_status.as_deref() {
+            Some("checking") | Some("unchecked") | None => continue,
+            _ => return,
+        }
+    }
+}
+
+/// Enable "merge when pipeline succeeds" on a GitLab MR.
+/// When no pipeline exists this endpoint merges immediately, so upstream code
+/// should only call this when the MR has CI configured.  Any failure is
+/// bubbled up as an error so the caller can notify the user.
+pub(crate) async fn enable_gitlab_auto_merge(
+    http: &GitlabHttp,
+    project_path: &str,
+    iid: u64,
+    squash: bool,
+    delete_branch: bool,
+) -> Result<(), ProviderError> {
+    let encoded = percent_encode_slash(project_path);
+    let body = serde_json::json!({
+        "merge_when_pipeline_succeeds": true,
+        "squash":                       squash,
+        "should_remove_source_branch":  delete_branch,
+    });
+    let url = format!(
+        "{}/api/v4/projects/{encoded}/merge_requests/{iid}/merge",
+        http.base()
+    );
+    let resp = http
+        .send(|s| {
+            http.client()
+                .put(&url)
+                .header("Authorization", &s.auth_header)
+                .header("User-Agent", "arbor-git-gui/1.0")
+                .json(&body)
+        })
+        .await?;
+
+    if resp.status().is_success() {
+        return Ok(());
+    }
+    let s = resp.status();
+    let b = resp.text().await.unwrap_or_default();
+    Err(map_auto_merge_error(&b)
+        .unwrap_or_else(|| classify(format!("GitLab auto-merge {s}: {b}"))))
+}
+
+/// Cancel "merge when pipeline succeeds" on a GitLab MR.
+/// Idempotent — the endpoint returns 200 even if MWPS isn't currently armed.
+pub(crate) async fn disable_gitlab_auto_merge(
+    http: &GitlabHttp,
+    project_path: &str,
+    iid: u64,
+) -> Result<(), ProviderError> {
+    let encoded = percent_encode_slash(project_path);
+    let url = format!(
+        "{}/api/v4/projects/{encoded}/merge_requests/{iid}/cancel_merge_when_pipeline_succeeds",
+        http.base()
+    );
+    let resp = http
+        .send(|s| {
+            http.client()
+                .post(&url)
+                .header("Authorization", &s.auth_header)
+                .header("User-Agent", "arbor-git-gui/1.0")
+                .header("Content-Length", "0")
+        })
+        .await?;
+
+    if resp.status().is_success() {
+        return Ok(());
+    }
+    let s = resp.status();
+    let b = resp.text().await.unwrap_or_default();
+    Err(classify(format!("GitLab cancel-MWPS {s}: {b}")))
+}
+
+/// Detect the well-known "MR is not mergeable" failure modes from a raw
+/// provider error message and re-phrase them so the user understands *why*
+/// auto-merge couldn't be armed. Returns `None` when the message doesn't match
+/// any recognised shape — the caller falls back to surfacing the raw response.
+///
+/// GitLab variants (REST `merge` endpoint response body):
+///   - "Branch cannot be merged"
+///   - "merge request is not mergeable"
+///   - JSON {"message":"406 Branch cannot be merged"} / {"message":"...conflict..."}
+fn map_auto_merge_error(raw: &str) -> Option<ProviderError> {
+    // Try JSON first — GitLab wraps the message.
+    let probe: String = if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
+        v.get("message")
+            .and_then(|m| m.as_str())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| raw.to_string())
+    } else {
+        raw.to_string()
+    };
+    let lower = probe.to_lowercase();
+
+    if lower.contains("dirty") || lower.contains("conflict")
+        || lower.contains("cannot be merged") || lower.contains("not mergeable")
+    {
+        return Some(classify(
+            "This pull request has conflicts that must be resolved before \
+             auto-merge can be enabled. Rebase or merge the target branch in, \
+             fix the conflicts, then push.".into()
+        ));
+    }
+    if lower.contains("clean status") {
+        return Some(classify(
+            "Auto-merge needs a pending check or required review to gate on. \
+             This pull request is already mergeable — merge it directly instead.".into()
+        ));
+    }
+    if lower.contains("auto_merge") && lower.contains("disabled") {
+        return Some(classify(
+            "Auto-merge is disabled for this repository. Enable it in the \
+             repository settings, then try again.".into()
+        ));
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -767,6 +1034,38 @@ struct GlMrDiff {
     deleted_file: bool,
     renamed_file: bool,
     diff: String,
+}
+
+/// Map a raw GitLab diff entry to the wire `MrFileDiff`. Shared by the MR-level
+/// diff endpoint and the single-commit diff endpoint — both return the same
+/// `GlMrDiff` shape, so the status derivation + +/- line counting lives once.
+fn gl_diff_to_file(d: GlMrDiff) -> MrFileDiff {
+    let status = if d.new_file {
+        "added".into()
+    } else if d.deleted_file {
+        "removed".into()
+    } else if d.renamed_file {
+        "renamed".into()
+    } else {
+        "modified".into()
+    };
+    let additions = d
+        .diff
+        .lines()
+        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+        .count() as u32;
+    let deletions = d
+        .diff
+        .lines()
+        .filter(|l| l.starts_with('-') && !l.starts_with("---"))
+        .count() as u32;
+    MrFileDiff {
+        filename: d.new_path,
+        status,
+        additions,
+        deletions,
+        patch: if d.diff.is_empty() { None } else { Some(d.diff) },
+    }
 }
 
 #[derive(Deserialize)]

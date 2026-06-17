@@ -134,11 +134,6 @@ pub fn get_config() -> Result<Option<JiraConfig>> {
     Ok(None)
 }
 
-/// Returns `true` when any Jira credentials are present in the keychain.
-pub fn get_status() -> Result<bool> {
-    Ok(get_config()?.is_some())
-}
-
 /// Remove all Jira credentials from the keychain.
 pub fn disconnect() -> Result<()> {
     let _ = credential_store::delete(KR_TOKEN,   "v");
@@ -227,10 +222,9 @@ pub async fn start_jira_oauth(app_handle: tauri::AppHandle) -> Result<String> {
                 false
             }
         };
-        let _ = app.emit("arbor://jira-oauth-done", ok);
         // Unified, by-id completion event for the generic connection layer —
-        // one FE listener routes by `id`. Kept alongside the legacy event above.
-        // The legacy flow only carries a bool, so `error` is a generic message.
+        // one FE listener (in ProviderConnectionCard) routes by `id`. The flow
+        // only carries a bool, so `error` is a generic message.
         let error = if ok { None } else { Some("Jira authorization failed") };
         let _ = app.emit(
             "arbor://provider-oauth-done",

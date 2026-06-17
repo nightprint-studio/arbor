@@ -4,11 +4,10 @@ import type {
 import {
   linearGetAuthStatus, linearSearchIssues, linearGetIssue, linearGetFilterOptions,
   linearTransitionIssue, linearAddComment, linearCreateIssue,
-  linearSaveToken, linearLogout,
   jiraGetAuthStatus, jiraSearchIssues, jiraGetIssue, jiraGetFilterOptions,
   jiraTransitionIssue, jiraAddComment, jiraCreateIssue,
-  jiraSaveBasicAuth, jiraLogout,
 } from '$lib/ipc/issues';
+import { issueProviders } from '$lib/ipc/providers';
 import { getIssuesConfig, setIssuesConfig, getRepoConfig } from '$lib/ipc/config';
 import { tabsStore } from '$lib/stores/tabs.svelte';
 
@@ -117,36 +116,15 @@ function createIssuesStore() {
     }
   }
 
-  /** Save a Linear Personal API token. */
-  async function saveToken(token: string) {
-    authLoading = true;
-    try {
-      const user = await linearSaveToken(token);
-      authStatus = { authenticated: true, user };
-      await Promise.all([loadIssues(), loadFilterOptions()]);
-    } finally {
-      authLoading = false;
-    }
-  }
-
-  /** Save Jira Basic Auth credentials (email + API token + domain). */
-  async function saveJiraBasicAuth(email: string, apiToken: string, domain: string) {
-    authLoading = true;
-    try {
-      const user = await jiraSaveBasicAuth(email, apiToken, domain);
-      authStatus = { authenticated: true, user, domain, authMethod: domain.endsWith('.atlassian.net') ? 'basic' : 'pat' };
-      await Promise.all([loadIssues(), loadFilterOptions()]);
-    } finally {
-      authLoading = false;
-    }
-  }
-
+  /**
+   * Disconnect the active provider via the generic by-id connection IPC — the
+   * same path the settings card and the sidebar's connection card use. Connect
+   * is handled entirely by `ProviderConnectionCard`; the store only needs to
+   * tear down its cached auth state afterwards.
+   */
   async function logout() {
-    if (activeProvider === 'jira') {
-      await jiraLogout();
-    } else {
-      await linearLogout();
-    }
+    if (!activeProvider) return;
+    await issueProviders.disconnect(activeProvider);
     authStatus    = { authenticated: false, user: null };
     issues        = [];
     error         = null;
@@ -426,7 +404,7 @@ function createIssuesStore() {
     get sortedIssues()     { return sortedIssues; },
     // actions
     setProvider, loadProviderForTab,
-    loadAuthStatus, saveToken, saveJiraBasicAuth, logout,
+    loadAuthStatus, logout,
     loadFilterOptions, getFilterOptionsFor, getFilterOptionsErrorFor, loadIssues,
     setFilters, clearFilters, setDefaultProjectId, setSort,
     selectIssue, selectAndLoadIssue, openCreate, closeCreate,
