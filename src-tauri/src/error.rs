@@ -150,6 +150,21 @@ impl From<arbor_fs::prelude::FsError> for AppError {
     }
 }
 
+/// Bridge `corvus_git::prelude::GitError` into the host enum. Variant-for-variant
+/// so the frontend wire string is byte-identical to before the local-git logic
+/// moved into the `corvus-git` crate (`Io` → `Io`, `Other` → `Other`).
+impl From<corvus_git::prelude::GitError> for AppError {
+    fn from(e: corvus_git::prelude::GitError) -> Self {
+        use corvus_git::prelude::GitError as G;
+        match e {
+            G::Git(e)             => AppError::Git(e),
+            G::Io(e)              => AppError::Io(e),
+            G::StashNotFound(i)   => AppError::StashNotFound(i),
+            G::Other(s)           => AppError::Other(s),
+        }
+    }
+}
+
 /// Implements Serialize so AppError can be returned from Tauri commands directly.
 impl serde::Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

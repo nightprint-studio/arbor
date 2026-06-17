@@ -1,8 +1,11 @@
+//! `git bisect` — binary-search for a regression, in `--no-checkout` mode.
+
 use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, Result};
-use crate::process_ext::NoWindowExt;
+use crate::cli::GitCli;
+use crate::error::{GitError, Result};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,8 +59,8 @@ pub struct BisectState {
 ///   to physically check them out.
 /// - A "Checkout" button in the UI lets the user switch to `BISECT_HEAD`
 ///   when they actually want to run tests against it.
-pub fn bisect_start(repo_path: &str) -> Result<BisectState> {
-    run_git(repo_path, &["bisect", "start", "--no-checkout"])?;
+pub fn bisect_start(git: &GitCli, repo_path: &str) -> Result<BisectState> {
+    run_git(git, repo_path, &["bisect", "start", "--no-checkout"])?;
     get_bisect_state(repo_path)
 }
 
@@ -66,13 +69,13 @@ pub fn bisect_start(repo_path: &str) -> Result<BisectState> {
 /// Returns the updated bisect state, including:
 /// - `steps_remaining` if the session is still in progress.
 /// - `result_hash` + `result_message` if bisect has found the culprit.
-pub fn bisect_mark(repo_path: &str, hash: &str, mark: BisectMark) -> Result<BisectState> {
-    let output = crate::git_cli::command()
+pub fn bisect_mark(git: &GitCli, repo_path: &str, hash: &str, mark: BisectMark) -> Result<BisectState> {
+    let output = git
+        .command()
         .args(["bisect", mark.as_str(), hash])
         .current_dir(repo_path)
-        .no_window()
         .output()
-        .map_err(AppError::Io)?;
+        .map_err(GitError::Io)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -82,11 +85,11 @@ pub fn bisect_mark(repo_path: &str, hash: &str, mark: BisectMark) -> Result<Bise
         if stdout.contains("first bad commit") {
             // fall through — will be parsed below as a result
         } else if stdout.contains("only 'skip'ped commits") || stdout.contains("We cannot bisect more") {
-            return Err(AppError::Other(
+            return Err(GitError::Other(
                 "All remaining commits have been skipped — cannot determine the first bad commit.".into(),
             ));
         } else if !stderr.is_empty() {
-            return Err(AppError::Other(stderr.trim().to_string()));
+            return Err(GitError::Other(stderr.trim().to_string()));
         }
     }
 
@@ -108,8 +111,8 @@ pub fn bisect_mark(repo_path: &str, hash: &str, mark: BisectMark) -> Result<Bise
 }
 
 /// Abort the bisect session and restore the original HEAD.
-pub fn bisect_reset(repo_path: &str) -> Result<()> {
-    run_git(repo_path, &["bisect", "reset"])
+pub fn bisect_reset(git: &GitCli, repo_path: &str) -> Result<()> {
+    run_git(git, repo_path, &["bisect", "reset"])
 }
 
 /// Read the current bisect state from `.git/BISECT_HEAD` and `.git/BISECT_LOG`.
@@ -189,17 +192,17 @@ pub fn get_bisect_state(repo_path: &str) -> Result<BisectState> {
 /// Uses `git bisect log` → strips last mark line → `git bisect reset` →
 /// `git bisect replay <edited-log>`.  If the only mark was the initial "bad",
 /// resets fully and restarts from scratch (no marks left to replay).
-pub fn bisect_undo_last_mark(repo_path: &str) -> Result<BisectState> {
+pub fn bisect_undo_last_mark(git: &GitCli, repo_path: &str) -> Result<BisectState> {
     // 1. Capture the current session log.
-    let log_out = crate::git_cli::command()
+    let log_out = git
+        .command()
         .args(["bisect", "log"])
         .current_dir(repo_path)
-        .no_window()
         .output()
-        .map_err(AppError::Io)?;
+        .map_err(GitError::Io)?;
 
     if !log_out.status.success() {
-        return Err(AppError::Other("No active bisect session".into()));
+        return Err(GitError::Other("No active bisect session".into()));
     }
 
     let log = String::from_utf8_lossy(&log_out.stdout).to_string();
@@ -213,7 +216,7 @@ pub fn bisect_undo_last_mark(repo_path: &str) -> Result<BisectState> {
     });
 
     let Some(idx) = last_mark_idx else {
-        return Err(AppError::Other("No marks to undo".into()));
+        return Err(GitError::Other("No marks to undo".into()));
     };
 
     // 3. Rebuild log: drop the mark line and its immediately preceding comment.
@@ -230,7 +233,7 @@ pub fn bisect_undo_last_mark(repo_path: &str) -> Result<BisectState> {
     }
 
     // 4. Reset the current session.
-    run_git(repo_path, &["bisect", "reset"])?;
+    run_git(git, repo_path, &["bisect", "reset"])?;
 
     // 5. If there are remaining marks, replay; otherwise just re-start.
     let has_remaining_marks = new_lines.iter().any(|l| {
@@ -241,22 +244,22 @@ pub fn bisect_undo_last_mark(repo_path: &str) -> Result<BisectState> {
 
     if !has_remaining_marks {
         // Only "git bisect start" was left — restart a clean session.
-        run_git(repo_path, &["bisect", "start"])?;
+        run_git(git, repo_path, &["bisect", "start"])?;
         return get_bisect_state(repo_path);
     }
 
     let tmp_path = std::env::temp_dir().join("arbor_bisect_replay.log");
-    std::fs::write(&tmp_path, new_lines.join("\n") + "\n").map_err(AppError::Io)?;
+    std::fs::write(&tmp_path, new_lines.join("\n") + "\n").map_err(GitError::Io)?;
 
-    let replay_out = crate::git_cli::command()
+    let replay_out = git
+        .command()
         .args(["bisect", "replay", &tmp_path.to_string_lossy()])
         .current_dir(repo_path)
-        .no_window()
         .output()
-        .map_err(AppError::Io)?;
+        .map_err(GitError::Io)?;
 
     if !replay_out.status.success() {
-        return Err(AppError::Other(
+        return Err(GitError::Other(
             String::from_utf8_lossy(&replay_out.stderr).trim().to_string(),
         ));
     }
@@ -276,16 +279,16 @@ pub fn bisect_undo_last_mark(repo_path: &str) -> Result<BisectState> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn run_git(repo_path: &str, args: &[&str]) -> Result<()> {
-    let output = crate::git_cli::command()
+fn run_git(git: &GitCli, repo_path: &str, args: &[&str]) -> Result<()> {
+    let output = git
+        .command()
         .args(args)
         .current_dir(repo_path)
-        .no_window()
         .output()
-        .map_err(AppError::Io)?;
+        .map_err(GitError::Io)?;
 
     if !output.status.success() {
-        return Err(AppError::Other(
+        return Err(GitError::Other(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ));
     }
@@ -363,4 +366,25 @@ fn parse_result(output: &str) -> Option<(String, String)> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn steps_remaining_parsed() {
+        let out = "Bisecting: 5 revisions left to test after this (roughly 3 steps)\n";
+        assert_eq!(parse_steps_remaining(out), Some(5));
+        assert_eq!(parse_steps_remaining("nothing here"), None);
+    }
+
+    #[test]
+    fn first_bad_commit_parsed() {
+        let out = "abc123 is the first bad commit\ncommit abc123\nAuthor: x\n\n    Fix the thing\n";
+        let (hash, summary) = parse_result(out).expect("a result");
+        assert_eq!(hash, "abc123");
+        assert_eq!(summary, "Fix the thing");
+        assert!(parse_result("no result line").is_none());
+    }
 }

@@ -33,3 +33,4 @@ pub mod credential;
 pub mod error;
 pub mod event;
 pub mod prelude;
+pub mod transport;

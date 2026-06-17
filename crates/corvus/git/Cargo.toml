@@ -1,0 +1,19 @@
+[package]
+name         = "corvus-git"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Local-git logic for Corvus, Tauri-free so the shell and the headless `corvus-be` process share it. First domain: bisect (+ saved sessions). Git invocation is explicit via `GitCli` — no hidden global state to sync across processes."
+
+[dependencies]
+arbor-process-ext = { path = "../../arbor-process-ext" }
+# git2 / encoding_rs are declared directly (not workspace deps); versions match
+# src-tauri so Cargo unifies them (incl. git2's `vendored-libgit2`).
+git2        = { version = "0.20", features = ["vendored-libgit2"] }
+encoding_rs = "0.8"
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }

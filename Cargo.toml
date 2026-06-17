@@ -18,6 +18,8 @@ members = [
     "crates/foundation/rpc",
     "crates/foundation/rpc-macros",
     "crates/corvus/core",
+    "crates/corvus/be",
+    "crates/corvus/git",
     "crates/corvus/brp",
     "crates/corvus/issue-tracker/api",
     "crates/corvus/issue-tracker/linear",

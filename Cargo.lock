@@ -155,6 +155,7 @@ dependencies = [
  "chrono",
  "corvus-brp",
  "corvus-core",
+ "corvus-git",
  "corvus-git-provider-api",
  "corvus-git-provider-github",
  "corvus-git-provider-gitlab",
@@ -1247,6 +1248,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvus-be"
+version = "0.3.0"
+dependencies = [
+ "arbor-ipc",
+ "arbor-rpc",
+ "corvus-core",
+ "corvus-git",
+ "serde_json",
+]
+
+[[package]]
 name = "corvus-brp"
 version = "0.3.0"
 dependencies = [
@@ -1265,6 +1277,19 @@ version = "0.3.0"
 dependencies = [
  "arbor-ipc",
  "serde_json",
+]
+
+[[package]]
+name = "corvus-git"
+version = "0.3.0"
+dependencies = [
+ "arbor-process-ext",
+ "encoding_rs",
+ "git2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

@@ -1,8 +1,12 @@
+//! Paused / completed bisect sessions, persisted under `<repo>/.arbor/bisect`.
+
 use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, Result};
-use crate::process_ext::NoWindowExt;
+use crate::bisect::BisectState;
+use crate::cli::GitCli;
+use crate::error::{GitError, Result};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,7 +66,7 @@ pub fn list_sessions(repo_path: &str) -> Result<Vec<BisectSession>> {
         return Ok(Vec::new());
     }
     let mut sessions: Vec<BisectSession> = std::fs::read_dir(&root)
-        .map_err(AppError::Io)?
+        .map_err(GitError::Io)?
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
         .filter_map(|e| {
@@ -79,6 +83,7 @@ pub fn list_sessions(repo_path: &str) -> Result<Vec<BisectSession>> {
 /// Save the current bisect state as a paused session, then reset git bisect.
 /// Returns the saved session.
 pub fn save_and_pause(
+    git: &GitCli,
     repo_path: &str,
     bad_hashes: Vec<String>,
     good_hashes: Vec<String>,
@@ -103,10 +108,10 @@ pub fn save_and_pause(
     };
     write_session(repo_path, &session)?;
     // Reset git bisect so the user can do other work
-    let _ = crate::git_cli::command()
+    let _ = git
+        .command()
         .args(["bisect", "reset"])
         .current_dir(repo_path)
-        .no_window()
         .output();
     Ok(session)
 }
@@ -145,47 +150,44 @@ pub fn save_result(
 
 /// Resume a paused session by replaying its marks.
 /// Returns the resulting BisectState.
-pub fn resume_session(
-    repo_path: &str,
-    session_id: &str,
-) -> Result<super::bisect::BisectState> {
+pub fn resume_session(git: &GitCli, repo_path: &str, session_id: &str) -> Result<BisectState> {
     let f = session_file(repo_path, session_id);
-    let txt = std::fs::read_to_string(&f).map_err(AppError::Io)?;
+    let txt = std::fs::read_to_string(&f).map_err(GitError::Io)?;
     let session: BisectSession = serde_json::from_str(&txt)
-        .map_err(|e| AppError::Other(format!("bisect session parse error: {e}")))?;
+        .map_err(|e| GitError::Other(format!("bisect session parse error: {e}")))?;
 
     // Reset any existing bisect session first
-    let _ = crate::git_cli::command()
+    let _ = git
+        .command()
         .args(["bisect", "reset"])
         .current_dir(repo_path)
-        .no_window()
         .output();
 
     // Start a fresh session in no-checkout mode
-    run_git(repo_path, &["bisect", "start", "--no-checkout"])?;
+    run_git(git, repo_path, &["bisect", "start", "--no-checkout"])?;
 
     // Apply bad marks first, then good marks
     for hash in &session.bad_hashes {
-        run_git(repo_path, &["bisect", "bad", hash])?;
+        run_git(git, repo_path, &["bisect", "bad", hash])?;
     }
     for hash in &session.good_hashes {
         // Ignore errors — a good commit might no longer exist
-        let _ = crate::git_cli::command()
+        let _ = git
+            .command()
             .args(["bisect", "good", hash])
             .current_dir(repo_path)
-            .no_window()
             .output();
     }
 
-    super::bisect::get_bisect_state(repo_path)
+    crate::bisect::get_bisect_state(repo_path)
 }
 
 /// Rename a saved session.
 pub fn rename_session(repo_path: &str, session_id: &str, new_name: String) -> Result<BisectSession> {
     let f = session_file(repo_path, session_id);
-    let txt = std::fs::read_to_string(&f).map_err(AppError::Io)?;
+    let txt = std::fs::read_to_string(&f).map_err(GitError::Io)?;
     let mut session: BisectSession = serde_json::from_str(&txt)
-        .map_err(|e| AppError::Other(format!("bisect session parse error: {e}")))?;
+        .map_err(|e| GitError::Other(format!("bisect session parse error: {e}")))?;
     session.name = new_name;
     session.updated_at = now_ms();
     write_session(repo_path, &session)?;
@@ -196,7 +198,7 @@ pub fn rename_session(repo_path: &str, session_id: &str, new_name: String) -> Re
 pub fn delete_session(repo_path: &str, session_id: &str) -> Result<()> {
     let dir = session_dir(repo_path, session_id);
     if dir.exists() {
-        std::fs::remove_dir_all(&dir).map_err(AppError::Io)?;
+        std::fs::remove_dir_all(&dir).map_err(GitError::Io)?;
     }
     Ok(())
 }
@@ -205,22 +207,22 @@ pub fn delete_session(repo_path: &str, session_id: &str) -> Result<()> {
 
 fn write_session(repo_path: &str, session: &BisectSession) -> Result<()> {
     let dir = session_dir(repo_path, &session.id);
-    std::fs::create_dir_all(&dir).map_err(AppError::Io)?;
+    std::fs::create_dir_all(&dir).map_err(GitError::Io)?;
     let json = serde_json::to_string_pretty(session)
-        .map_err(|e| AppError::Other(format!("bisect session serialize: {e}")))?;
-    std::fs::write(session_file(repo_path, &session.id), json).map_err(AppError::Io)?;
+        .map_err(|e| GitError::Other(format!("bisect session serialize: {e}")))?;
+    std::fs::write(session_file(repo_path, &session.id), json).map_err(GitError::Io)?;
     Ok(())
 }
 
-fn run_git(repo_path: &str, args: &[&str]) -> Result<()> {
-    let out = crate::git_cli::command()
+fn run_git(git: &GitCli, repo_path: &str, args: &[&str]) -> Result<()> {
+    let out = git
+        .command()
         .args(args)
         .current_dir(repo_path)
-        .no_window()
         .output()
-        .map_err(AppError::Io)?;
+        .map_err(GitError::Io)?;
     if !out.status.success() {
-        return Err(AppError::Other(
+        return Err(GitError::Other(
             String::from_utf8_lossy(&out.stderr).trim().to_string(),
         ));
     }

@@ -28,6 +28,7 @@ pub fn open_repo(
         "on_repo_open",
         serde_json::json!({ "tab_id": &tab_id, "path": &info.path, "name": &info.name }),
     );
+    crate::ipc::sync_repo_open(&state, &tab_id, &info.path);
     Ok(info)
 }
 
@@ -45,6 +46,7 @@ pub fn close_repo(app: AppHandle, state: State<'_, AppState>, tab_id: String) ->
         "on_repo_close",
         serde_json::json!({ "tab_id": &tab_id, "path": &path, "name": &name }),
     );
+    crate::ipc::sync_repo_close(&state, &tab_id);
 
     // After the close, if the repo is now orphaned — no other tab open AND not a
     // member of any workspace — forget it: drop the registry entry + recent-list
@@ -268,6 +270,7 @@ pub async fn clone_repo(
         "on_repo_open",
         serde_json::json!({ "tab_id": &tab_id, "path": &info.path, "name": &info.name }),
     );
+    crate::ipc::sync_repo_open(&state, &tab_id, &info.path);
     Ok(info)
 }
 

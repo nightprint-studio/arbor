@@ -18,8 +18,6 @@ pub mod ticket_links;
 pub mod notes;
 pub mod worktree;
 pub mod reflog;
-pub mod bisect;
-pub mod bisect_sessions;
 pub mod stats;
 pub mod svg_export;
 pub mod stats_export;

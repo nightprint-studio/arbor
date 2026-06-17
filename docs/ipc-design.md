@@ -163,8 +163,9 @@ pub trait BrokerClient: Send + Sync {
 }
 ```
 
-- **In-process (oggi)**: `LoopbackBroker` — handler in-memory, zero serializzazione di rete. Sblocca lo spostamento dei 547 comandi dietro `arbor-ipc` **senza** un secondo processo (M3 incrementale).
-- **IPC (domani)**: `PipeBroker` — named pipe (Windows) / unix socket (`0600` + `SO_PEERCRED`), `tarpc` sopra. Stessa interfaccia → il router non cambia.
+- **In-process**: `LoopbackBroker` — handler in-memory, zero serializzazione di rete. Sblocca lo spostamento dei comandi dietro `arbor-ipc` **senza** un secondo processo (M3 incrementale).
+- **Out-of-process (atterrato, Stage 1)**: `ChildClient` (`arbor-ipc::transport`) — un **processo `corvus-be` reale**, frame JSON length-prefixed sullo **stdin/stdout** del figlio (zero dep nuove, inerentemente parent-private). Implementa lo stesso `BrokerClient` → il router non cambia. La shell registra **un** backend `"corvus"` = `SplitBroker` che instrada i metodi annunciati da corvus-be (nel suo `Hello`) al processo, il resto al loopback; spostare un handler in corvus-be ne **flippa l'instradamento da solo**. Vedi [`corvus-be-bringup.md`](corvus-be-bringup.md).
+- **Hardening (dopo)**: swap del byte-stream sotto `ChildClient` a named pipe (Windows) / unix socket (`0600` + `SO_PEERCRED`) + nonce/ACL; opzionale codec binario / `tarpc`. **Protocollo, router e handler invariati** — cambia solo il listener/connector.
 
 Il `BrokerClient` è il livello "stringly" che il router usa per mappare un FE
 `invoke` (nome comando + JSON) sul backend giusto; il **service tipato `tarpc`**
@@ -188,7 +189,11 @@ Finché il transport è in-process (loopback) l'handshake è un no-op (stesso pr
 | M1   | — (solo loopback + ping, scheletro) | `LoopbackBroker` (ping) | ✅ fatto |
 | M3 (a) pilota | in-process | `LoopbackBroker` reale — **dominio `stash` (11 cmd)** via comando generico `rpc(program,method,params)` + registry, un processo | ✅ **fatto** |
 | M3 (a) sweep | in-process | `LoopbackBroker` reale — **stash + bisect + notes + reset/tags + stats + reflog (33 cmd, 6 domini)**; restano gli altri domini | 🔄 in corso |
-| M3 (b) | named pipe / unix socket + tarpc | `PipeBroker` | flip a BE separato |
+| M3 (b) seam | **processo `corvus-be` reale**, frame JSON su stdio | `ChildClient` + `SplitBroker` — ping/echo/emit out-of-process provati end-to-end | ✅ **fatto (Stage 1)** |
+| M3 (b) bisect | stdio | **bisect (11 cmd) servito da corvus-be**: logica in `corvus-git`, repo path via registry `tab_id→path` su `CorvusState` (push shell on open/close), fallback in-process | ✅ **fatto (Stage 2a)** |
+| M3 (b) stash | — | **logica stash estratta in `corvus-git`** (in-process via wrapper; recovery via callback, encoding via shim) | ✅ estratto (2b); OOP dopo `recovery` |
+| M3 (b) reset / recovery | stdio | estrarre `recovery`, poi stash+reset serviti da corvus-be (+ hook shell-side) | ⏭️ prossimo |
+| M3 (b) hardening | named pipe / unix socket + nonce/ACL (+ tarpc/bincode opz.) | swap del byte-stream sotto `ChildClient` | dopo |
 
 ## Cosa c'è nello scheletro M1
 

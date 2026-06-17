@@ -1,6 +1,7 @@
 //! [`CorvusState`] — the headless backend's owned state.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use arbor_ipc::prelude::EventSink;
 use serde_json::Value;
@@ -9,22 +10,66 @@ use serde_json::Value;
 ///
 /// In-process today the shell constructs one and routes its `AppState`'s event
 /// egress through it. It deliberately holds **only transport-ready pieces**: the
-/// event sink for now, then the git registries (`RepoManager`, `JobRegistry`, …)
-/// as those are extracted from the shell. A handler reached through the IPC seam
-/// will eventually take `&CorvusState` instead of the shell's `AppState`; its git
-/// logic doesn't change, only the state type it is handed.
+/// event sink + a tab→repo registry for now, then the git registries
+/// (`JobRegistry`, …) as those are extracted from the shell. A handler reached
+/// through the IPC seam takes `&CorvusState` instead of the shell's `AppState`;
+/// its git logic doesn't change, only the state type it is handed.
 pub struct CorvusState {
     /// Backend → frontend event egress. In-process the shell backs this with
     /// `AppHandle::emit`; once `corvus-be` splits out it wraps the `arbor-ipc`
     /// event channel — call sites ([`emit`](Self::emit)) don't change.
     events: Arc<dyn EventSink>,
+    /// `tab_id` → repo path. The headless process has no `RepoManager`, so the
+    /// shell pushes the open repos here (on repo open/close) and handlers resolve
+    /// a tab to its path through [`repo_path`](Self::repo_path).
+    repos: Mutex<HashMap<String, String>>,
+    /// The git program the shell resolved (PATH / configured / portable). `None`
+    /// → fall back to `git` on `PATH`. Pushed by the shell so the backend shells
+    /// out to the same binary.
+    git_program: Mutex<Option<String>>,
 }
 
 impl CorvusState {
     /// Build the backend state from its event egress. As more pieces move in,
     /// this gains parameters (the git registries) rather than new constructors.
     pub fn new(events: Arc<dyn EventSink>) -> Self {
-        Self { events }
+        Self {
+            events,
+            repos: Mutex::new(HashMap::new()),
+            git_program: Mutex::new(None),
+        }
+    }
+
+    /// Register (or update) a tab's repo path. Pushed by the shell on repo open.
+    pub fn register_repo(&self, tab_id: String, path: String) {
+        if let Ok(mut repos) = self.repos.lock() {
+            repos.insert(tab_id, path);
+        }
+    }
+
+    /// Forget a tab's repo. Pushed by the shell on repo close.
+    pub fn deregister_repo(&self, tab_id: &str) {
+        if let Ok(mut repos) = self.repos.lock() {
+            repos.remove(tab_id);
+        }
+    }
+
+    /// Resolve a tab to its repo path, or `None` if the shell hasn't registered
+    /// it (a handler should surface a clear error in that case).
+    pub fn repo_path(&self, tab_id: &str) -> Option<String> {
+        self.repos.lock().ok().and_then(|r| r.get(tab_id).cloned())
+    }
+
+    /// Set the git program the backend should shell out to (pushed by the shell).
+    pub fn set_git_program(&self, program: Option<String>) {
+        if let Ok(mut g) = self.git_program.lock() {
+            *g = program;
+        }
+    }
+
+    /// The git program to shell out to, or `None` → `git` on `PATH`.
+    pub fn git_program(&self) -> Option<String> {
+        self.git_program.lock().ok().and_then(|g| g.clone())
     }
 
     /// Emit a frontend event. Model-D-safe: in-process it forwards to
