@@ -13,6 +13,10 @@
 //! this is a plain call; once `corvus-be` splits out the handlers move into that
 //! binary unchanged.
 
+pub mod bisect;
+pub mod notes;
+pub mod reflog;
+pub mod reset;
 pub mod stash;
 
 // Re-export so backend handlers annotate with `#[corvus::handler]` — the

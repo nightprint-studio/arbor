@@ -247,16 +247,16 @@ export const stashRename = async (tabId: string, index: number, newMessage: stri
 };
 
 export const resetToCommit = async (tabId: string, oid: string, mode: ResetMode): Promise<void> => {
-  await invoke<void>('reset_to_commit', { tabId, oid, mode });
+  await corvus<void>('reset_to_commit', { tab_id: tabId, oid, mode });
   invalidateTabCache(tabId);
 };
 
 export const createTag = async (tabId: string, name: string, oid: string, message?: string): Promise<void> => {
-  await invoke<void>('create_tag', { tabId, name, oid, message });
+  await corvus<void>('create_tag', { tab_id: tabId, name, oid, message });
   invalidateTabCache(tabId);
 };
 
 export const deleteTag = async (tabId: string, name: string): Promise<void> => {
-  await invoke<void>('delete_tag', { tabId, name });
+  await corvus<void>('delete_tag', { tab_id: tabId, name });
   invalidateTabCache(tabId);
 };

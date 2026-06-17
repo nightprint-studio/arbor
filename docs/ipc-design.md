@@ -1,8 +1,9 @@
 # `arbor-ipc` — IPC design for Model D (1 FE + N BE)
 
-Stato: **M3 Asse B — pilota in-process atterrato, in forma GENERICA**. Lo
-scheletro `arbor-ipc` (transport-agnostic + loopback) è ora *usato sul serio*: il
-**dominio `stash`** (11 comandi) instrada FE→shell→`Router`→`LoopbackBroker`→
+Stato: **M3 Asse B — pilota in-process atterrato, in forma GENERICA, sweep in
+corso**. Lo scheletro `arbor-ipc` (transport-agnostic + loopback) è ora *usato
+sul serio*: **5 domini** (`stash` 11, `bisect` 11, `notes` 5, `reset`/tags 3,
+`reflog` 1 = **31 comandi**) instradano FE→shell→`Router`→`LoopbackBroker`→
 registry→handler→JSON, tutto in-process, con la wire-string d'errore preservata.
 La shell **non ridichiara nessuna firma per-comando**: un solo comando generico
 `rpc(program, method, params)` inoltra; le firme vivono una volta sola sul
@@ -11,7 +12,7 @@ restano da fare al flip a BE separato. Riferimenti:
 [`docs/migration-roadmap.md`](migration-roadmap.md) (M1/M3),
 [`docs/crate-refactor-round2.md`](crate-refactor-round2.md) (§"Modello di processo", §D.5).
 
-## Pilota in-process (stash) — forma generica
+## Pilota in-process — forma generica (5 domini migrati)
 
 La shell è un **router puro** (redirect, non ridefinizione). Decisione di design
 (discussa con l'utente): meglio un seam stringly-typed generico che N firme
@@ -28,10 +29,12 @@ design generico non ha.
   `Router::call`→deserializza, mappa `IpcError::Backend(s)`→`AppError::Other(s)`.
 - **Registry, niente match, niente arg-struct**: il dispatch BE è il crate
   **`arbor-rpc`** (platform, `crates/foundation/rpc` + proc-macro
-  `crates/foundation/rpc-macros`). `ipc/corvus/stash.rs` = **11 funzioni
-  annotate `#[corvus::handler]`** e basta (il modulo `ipc/corvus` ri-esporta la
-  macro generica sotto il suo nome → `#[corvus::handler]`, `#[merula::handler]`,
-  …). **Nome metodo opzionale**: di default = **il nome della funzione**
+  `crates/foundation/rpc-macros`). Ogni dominio è un modulo `ipc/corvus/<dom>.rs`
+  = **funzioni annotate `#[corvus::handler]`** e basta (il modulo `ipc/corvus`
+  ri-esporta la macro generica sotto il suo nome → `#[corvus::handler]`,
+  `#[merula::handler]`, …). Migrare un comando = spostare il corpo del vecchio
+  `#[tauri::command]` in un handler e cancellare la registrazione in `lib.rs`.
+  **Nome metodo opzionale**: di default = **il nome della funzione**
   (`stash_save`, `list_stashes`, … = i vecchi nomi comando); `#[corvus::handler("x.y")]`
   per override. La macro legge la firma, genera decode-args + serializza +
   `inventory::submit!` → auto-registrazione, zero liste centrali.
@@ -145,7 +148,7 @@ Finché il transport è in-process (loopback) l'handshake è un no-op (stesso pr
 |------|-----------|----------------|--------|
 | M1   | — (solo loopback + ping, scheletro) | `LoopbackBroker` (ping) | ✅ fatto |
 | M3 (a) pilota | in-process | `LoopbackBroker` reale — **dominio `stash` (11 cmd)** via comando generico `rpc(program,method,params)` + registry, un processo | ✅ **fatto** |
-| M3 (a) sweep | in-process | `LoopbackBroker` reale — i restanti domini | da fare |
+| M3 (a) sweep | in-process | `LoopbackBroker` reale — **stash + bisect + notes + reset/tags + reflog (31 cmd, 5 domini)**; restano gli altri domini | 🔄 in corso |
 | M3 (b) | named pipe / unix socket + tarpc | `PipeBroker` | flip a BE separato |
 
 ## Cosa c'è nello scheletro M1

@@ -1,6 +1,16 @@
-use tauri::State;
+//! `reset` / `tags` domain — handlers routed through the in-process broker.
+//!
+//! Each handler is the body the matching `#[tauri::command]` ran inline;
+//! `#[corvus::handler]` self-registers it under its own function name. Behavior
+//! (subprocess shelling, recovery snapshot, hooks fired, errors) is
+//! byte-identical — only the call path changed.
+//!
+//! Reset and tag-create/delete were one command module historically; they ride
+//! together here for a faithful move. If this grows, splitting tags out is the
+//! natural next step.
 
 use crate::error::AppError;
+use crate::ipc::corvus;
 use crate::process_ext::NoWindowExt;
 use crate::AppState;
 
@@ -18,16 +28,10 @@ pub enum ResetMode {
 // current branch ref), which defeats the purpose of soft/mixed/hard resets.
 // The CLI path is what users expect and matches the pattern already used for
 // merge/rebase in this codebase.
-#[tauri::command]
-pub fn reset_to_commit(
-    state: State<'_, AppState>,
-    tab_id: String,
-    oid: String,
-    mode: ResetMode,
-) -> Result<(), AppError> {
+#[corvus::handler]
+fn reset_to_commit(state: &AppState, tab_id: String, oid: String, mode: ResetMode) -> Result<(), AppError> {
     // Validate the OID before spawning a subprocess.
-    let git_oid =
-        git2::Oid::from_str(&oid).map_err(|_| AppError::CommitNotFound(oid.clone()))?;
+    let git_oid = git2::Oid::from_str(&oid).map_err(|_| AppError::CommitNotFound(oid.clone()))?;
 
     // Extract workdir + run the hard-reset safety snapshot while we still
     // hold the repo, then release the lock before calling the CLI so libgit2
@@ -56,9 +60,9 @@ pub fn reset_to_commit(
     };
 
     let flag = match mode {
-        ResetMode::Soft  => "--soft",
+        ResetMode::Soft => "--soft",
         ResetMode::Mixed => "--mixed",
-        ResetMode::Hard  => "--hard",
+        ResetMode::Hard => "--hard",
     };
 
     tracing::info!("reset_to_commit: running `git reset {flag} {oid}` in {}", workdir.display());
@@ -85,9 +89,9 @@ pub fn reset_to_commit(
     Ok(())
 }
 
-#[tauri::command]
-pub fn create_tag(
-    state: State<'_, AppState>,
+#[corvus::handler]
+fn create_tag(
+    state: &AppState,
     tab_id: String,
     name: String,
     oid: String,
@@ -98,8 +102,7 @@ pub fn create_tag(
         let mut mgr = state.lock_repos()?;
         let repo = mgr.get(&tab_id)?;
         let r = repo.inner();
-        let git_oid =
-            git2::Oid::from_str(&oid).map_err(|_| AppError::CommitNotFound(oid.clone()))?;
+        let git_oid = git2::Oid::from_str(&oid).map_err(|_| AppError::CommitNotFound(oid.clone()))?;
         let obj = r.find_object(git_oid, Some(git2::ObjectType::Commit))?;
         if let Some(msg) = message {
             let sig = r.signature()?;
@@ -120,12 +123,8 @@ pub fn create_tag(
     Ok(())
 }
 
-#[tauri::command]
-pub fn delete_tag(
-    state: State<'_, AppState>,
-    tab_id: String,
-    name: String,
-) -> Result<(), AppError> {
+#[corvus::handler]
+fn delete_tag(state: &AppState, tab_id: String, name: String) -> Result<(), AppError> {
     {
         let mut mgr = state.lock_repos()?;
         let repo = mgr.get(&tab_id)?;

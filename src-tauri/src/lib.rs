@@ -991,15 +991,11 @@ pub fn run() {
             commands::remote_commands::pull_branch,
             // Generic Model-D IPC entry point — the FE forwards every product
             // command here as (program, method, params); the shell router
-            // dispatches to the right backend. The `stash` domain routes through
-            // here (handlers in crate::ipc::corvus::stash); the rest of the
-            // commands below are still inline #[tauri::command]s, migrating
-            // domain by domain. See crate::ipc.
+            // dispatches to the right backend. Migrated domains route through
+            // here (handlers in crate::ipc::corvus::*): stash, reset/tags,
+            // notes, reflog, bisect. The rest below are still inline
+            // #[tauri::command]s, migrating domain by domain. See crate::ipc.
             commands::rpc_commands::rpc,
-            // Reset / Tags
-            commands::reset_commands::reset_to_commit,
-            commands::reset_commands::create_tag,
-            commands::reset_commands::delete_tag,
             // Rebase
             commands::rebase_commands::get_rebase_todo,
             commands::rebase_commands::start_rebase,
@@ -1364,12 +1360,6 @@ pub fn run() {
             commands::ticket_commands::validate_ticket_regex,
             commands::ticket_commands::check_notes_push_config,
             commands::ticket_commands::find_commits_for_ticket,
-            // Git Notes
-            commands::notes_commands::list_commit_notes,
-            commands::notes_commands::save_commit_note,
-            commands::notes_commands::delete_commit_note,
-            commands::notes_commands::check_note_remote_status,
-            commands::notes_commands::push_note_namespace,
             // Worktrees
             commands::worktree_commands::list_worktrees,
             commands::worktree_commands::add_worktree,
@@ -1381,8 +1371,6 @@ pub fn run() {
             commands::worktree_commands::set_ide_config,
             commands::worktree_commands::get_repo_ide,
             commands::worktree_commands::set_repo_ide,
-            // Reflog
-            commands::reflog_commands::get_reflog,
             // Recovery journal (pre-destructive snapshots)
             commands::recovery_commands::list_recovery_entries,
             commands::recovery_commands::preview_recovery_restore,
@@ -1390,18 +1378,6 @@ pub fn run() {
             commands::recovery_commands::delete_recovery_entry,
             commands::config_commands::get_recovery_config,
             commands::config_commands::set_recovery_config,
-            // Bisect
-            commands::bisect_commands::bisect_start,
-            commands::bisect_commands::bisect_mark,
-            commands::bisect_commands::bisect_reset,
-            commands::bisect_commands::get_bisect_state,
-            commands::bisect_commands::bisect_undo_last_mark,
-            commands::bisect_commands::list_bisect_sessions,
-            commands::bisect_commands::save_bisect_session,
-            commands::bisect_commands::save_bisect_result,
-            commands::bisect_commands::resume_bisect_session,
-            commands::bisect_commands::rename_bisect_session,
-            commands::bisect_commands::delete_bisect_session,
             // Remote repository browser
             commands::repo_browser_commands::rb_list_accounts,
             commands::repo_browser_commands::rb_list_repos,

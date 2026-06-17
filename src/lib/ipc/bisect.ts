@@ -1,35 +1,35 @@
-import { invoke } from '@tauri-apps/api/core';
 import type { BisectState, BisectSession } from '../types/git';
+import { corvus } from './rpc';
 
 export const getBisectState = (tabId: string) =>
-  invoke<BisectState>('get_bisect_state', { tabId });
+  corvus<BisectState>('get_bisect_state', { tab_id: tabId });
 
 export const bisectStart = (tabId: string) =>
-  invoke<BisectState>('bisect_start', { tabId });
+  corvus<BisectState>('bisect_start', { tab_id: tabId });
 
 export const bisectMark = (tabId: string, hash: string, mark: 'good' | 'bad' | 'skip') =>
-  invoke<BisectState>('bisect_mark', { tabId, hash, mark });
+  corvus<BisectState>('bisect_mark', { tab_id: tabId, hash, mark });
 
 export const bisectReset = (tabId: string) =>
-  invoke<void>('bisect_reset', { tabId });
+  corvus<void>('bisect_reset', { tab_id: tabId });
 
 export const bisectUndoLastMark = (tabId: string) =>
-  invoke<BisectState>('bisect_undo_last_mark', { tabId });
+  corvus<BisectState>('bisect_undo_last_mark', { tab_id: tabId });
 
 export const listBisectSessions = (tabId: string) =>
-  invoke<BisectSession[]>('list_bisect_sessions', { tabId });
+  corvus<BisectSession[]>('list_bisect_sessions', { tab_id: tabId });
 
 export const saveBisectSession = (tabId: string, badHashes: string[], goodHashes: string[], name?: string) =>
-  invoke<BisectSession>('save_bisect_session', { tabId, badHashes, goodHashes, name });
+  corvus<BisectSession>('save_bisect_session', { tab_id: tabId, bad_hashes: badHashes, good_hashes: goodHashes, name });
 
 export const saveBisectResult = (tabId: string, badHashes: string[], goodHashes: string[], resultHash: string, resultMessage: string | null) =>
-  invoke<BisectSession>('save_bisect_result', { tabId, badHashes, goodHashes, resultHash, resultMessage });
+  corvus<BisectSession>('save_bisect_result', { tab_id: tabId, bad_hashes: badHashes, good_hashes: goodHashes, result_hash: resultHash, result_message: resultMessage });
 
 export const resumeBisectSession = (tabId: string, sessionId: string) =>
-  invoke<BisectState>('resume_bisect_session', { tabId, sessionId });
+  corvus<BisectState>('resume_bisect_session', { tab_id: tabId, session_id: sessionId });
 
 export const renameBisectSession = (tabId: string, sessionId: string, newName: string) =>
-  invoke<BisectSession>('rename_bisect_session', { tabId, sessionId, newName });
+  corvus<BisectSession>('rename_bisect_session', { tab_id: tabId, session_id: sessionId, new_name: newName });
 
 export const deleteBisectSession = (tabId: string, sessionId: string) =>
-  invoke<void>('delete_bisect_session', { tabId, sessionId });
+  corvus<void>('delete_bisect_session', { tab_id: tabId, session_id: sessionId });

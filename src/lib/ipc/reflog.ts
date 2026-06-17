@@ -1,6 +1,6 @@
-import { invoke } from '@tauri-apps/api/core';
 import type { ReflogEntry } from '$lib/types/git';
+import { corvus } from './rpc';
 
 export function getReflog(tabId: string, limit?: number): Promise<ReflogEntry[]> {
-  return invoke<ReflogEntry[]>('get_reflog', { tabId, limit });
+  return corvus<ReflogEntry[]>('get_reflog', { tab_id: tabId, limit });
 }
