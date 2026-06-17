@@ -1,14 +1,16 @@
 use tauri::State;
 
 use crate::AppState;
-use crate::error::{AppError, Result};
-use crate::terminal::{
-    self, BUILTIN_SHELLS, DetectedShell, TerminalInfo, TerminalManager,
-};
+use crate::error::Result;
+use crate::terminal::{self, BUILTIN_SHELLS, DetectedShell, TerminalInfo};
 
 // ---------------------------------------------------------------------------
 // terminal_create
 // ---------------------------------------------------------------------------
+//
+// DEFERRED from the `platform` broker migration: takes an `AppHandle` and
+// spawns a PTY that streams its output via the `arbor://terminal-*` events.
+// Handled by a later emit/seam pass.
 
 /// Spawn a new PTY process and return a TerminalInfo with its UUID.
 ///
@@ -73,130 +75,12 @@ fn display_name_for(
 }
 
 // ---------------------------------------------------------------------------
-// terminal_write / resize / close / list — unchanged
+// Shell detection
 // ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn terminal_write(
-    state: State<'_, AppState>,
-    id:    String,
-    data:  String,
-) -> Result<()> {
-    let mut mgr = state.lock_terminals()?;
-    mgr.write(&id, data.as_bytes())
-}
-
-#[tauri::command]
-pub async fn terminal_resize(
-    state: State<'_, AppState>,
-    id:    String,
-    cols:  u16,
-    rows:  u16,
-) -> Result<()> {
-    let mut mgr = state.lock_terminals()?;
-    mgr.resize(&id, cols, rows)
-}
-
-#[tauri::command]
-pub async fn terminal_close(
-    state: State<'_, AppState>,
-    id:    String,
-) -> Result<()> {
-    let mut mgr = state.lock_terminals()?;
-    mgr.close(&id)
-}
-
-#[tauri::command]
-pub async fn terminal_list(
-    state: State<'_, AppState>,
-) -> Result<Vec<TerminalInfo>> {
-    let mgr = state.lock_terminals()?;
-    Ok(mgr.list())
-}
-
-#[tauri::command]
-pub async fn terminal_default_shell() -> String {
-    terminal::platform_default().to_string()
-}
-
-// ---------------------------------------------------------------------------
-// terminal_exec  (plugin API + direct frontend use)
-// ---------------------------------------------------------------------------
-
-#[derive(serde::Serialize)]
-pub struct TerminalExecResult {
-    pub exit_code: i32,
-    pub stdout:    String,
-    pub stderr:    String,
-}
-
-#[tauri::command]
-pub async fn terminal_exec(
-    state:       State<'_, AppState>,
-    command:     String,
-    cwd:         Option<String>,
-    plugin_name: Option<String>,
-) -> Result<TerminalExecResult> {
-    if let Some(ref pname) = plugin_name {
-        use arbor_plugin_types::prelude::TerminalLevel;
-        let host = state.lock_plugin_host()?;
-
-        let plugin = host.plugins.iter().find(|p| p.manifest.name == *pname);
-        if let Some(p) = plugin {
-            match p.manifest.permissions.terminal {
-                TerminalLevel::None => {
-                    return Err(AppError::Other(format!(
-                        "plugin '{pname}' has no terminal permission (set terminal = \"any\" or terminal = \"commands\" in plugin.toml)"
-                    )));
-                }
-                TerminalLevel::Any => { /* full access */ }
-                TerminalLevel::Commands => {
-                    let first = command.split_whitespace().next().unwrap_or("");
-                    let allowed = &p.manifest.permissions.terminal_scope;
-                    if !allowed.iter().any(|a| first.eq_ignore_ascii_case(a.as_str())) {
-                        return Err(AppError::Other(format!(
-                            "plugin '{pname}' is not allowed to run '{first}' \
-                             (allowed commands: {allowed:?})"
-                        )));
-                    }
-                }
-            }
-        }
-    }
-
-    let (exit_code, stdout, stderr) =
-        TerminalManager::exec_command(&command, cwd.as_deref())?;
-
-    Ok(TerminalExecResult { exit_code, stdout, stderr })
-}
-
-// ---------------------------------------------------------------------------
-// Shell catalogue + detection
-// ---------------------------------------------------------------------------
-
-#[derive(serde::Serialize)]
-pub struct BuiltinShellInfo {
-    pub id:        String,
-    pub name:      String,
-    pub cmd:       String,
-    pub platforms: Vec<String>,
-}
-
-/// Return the static catalogue of built-in shells filtered to the host
-/// platform — used by the settings UI and the new-terminal dropdown.
-#[tauri::command]
-pub fn list_builtin_shells() -> Vec<BuiltinShellInfo> {
-    BUILTIN_SHELLS
-        .iter()
-        .filter(|s| terminal::registry::shell_supports_host(s.platforms))
-        .map(|s| BuiltinShellInfo {
-            id:        s.id.to_string(),
-            name:      s.name.to_string(),
-            cmd:       s.cmd.to_string(),
-            platforms: s.platforms.iter().map(|p| (*p).to_string()).collect(),
-        })
-        .collect()
-}
+//
+// DEFERRED from the `platform` broker migration: takes an `AppHandle` and emits
+// `arbor://job-*` / `arbor://shell-detection-done`. Handled by a later
+// emit/seam pass.
 
 /// Kick off shell detection as a non-cancellable background job — mirrors
 /// `start_ide_detection`.  Results arrive via `arbor://shell-detection-done`.
@@ -282,28 +166,4 @@ pub fn start_shell_detection(
         });
 
     Ok(job_id)
-}
-
-// ---------------------------------------------------------------------------
-// Terminals config get/set
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn get_terminals_config(
-    state: State<'_, AppState>,
-) -> Result<crate::config::app_config::TerminalsConfig> {
-    let cfg = state.lock_config()?;
-    Ok(cfg.terminals.clone())
-}
-
-#[tauri::command]
-pub fn set_terminals_config(
-    state:  State<'_, AppState>,
-    config: crate::config::app_config::TerminalsConfig,
-) -> Result<()> {
-    let mut cfg = state.lock_config()?;
-    cfg.terminals = config;
-    let snapshot = cfg.clone();
-    drop(cfg);
-    crate::config::app_config::save(&snapshot).map_err(|e| AppError::Other(e.to_string()))
 }

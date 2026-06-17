@@ -16,6 +16,18 @@
 //! out they move into that binary unchanged.
 
 pub mod app;
+pub mod config;
+pub mod fs;
+pub mod jobs;
+pub mod marketplace;
+pub mod plugin;
+pub mod plugin_logs;
+pub mod plugin_templates;
+pub mod scheduler;
+pub mod session;
+pub mod terminal;
+pub mod theme;
+pub mod workspace;
 
 // Re-export so backend handlers annotate with `#[platform::handler(...)]` — the
 // product's own namespace for the generic `arbor-rpc` attribute.

@@ -1,62 +1,70 @@
-// =============================================================================
-// Plugin import / export — bundle a plugin folder into a zip and back.
-//
-//   * `export_plugin_template(opts)` — generate a starter plugin from a form
-//     payload. Returns the zip bytes; the frontend writes them to the path the
-//     user picked via the Tauri save dialog. The bundle always contains:
-//
-//       <name>/
-//         plugin.toml      complete manifest derived from `opts`
-//         main.lua         skeleton + the toggled snippet recipes
-//         sdk.d.lua        EmmyLua type stubs (LuaLS autocomplete)
-//         .luarc.json      LuaLS config — points workspace.library at sdk.d.lua
-//
-//     The Lua recipe text is NOT inlined in this file: every snippet lives
-//     under `src-tauri/templates/plugin/` and is pulled in via `include_str!`,
-//     so authors can edit or grep the templates the same way they would any
-//     other plugin source.
-//
-//   * `import_plugin_zip(zip_bytes)` — extract a zip into the user's
-//     `plugins/` directory. The archive must be rooted at a single folder
-//     containing a `plugin.toml`. Existing folders with the same name are
-//     refused (the user must explicitly remove or rename first) so we never
-//     silently overwrite a customised plugin.
-// =============================================================================
+//! `plugin_templates` domain — bundle a plugin folder into a zip and back.
+//!
+//!   * `export_plugin_template_to_path(opts, target_path)` — generate a starter
+//!     plugin from a form payload and write the zip to the path the user picked
+//!     via Arbor's FileExplorerModal. The bundle always contains:
+//!
+//!       <name>/
+//!         plugin.toml      complete manifest derived from `opts`
+//!         main.lua         skeleton + the toggled snippet recipes
+//!         sdk.d.lua        EmmyLua type stubs (LuaLS autocomplete)
+//!         .luarc.json      LuaLS config — points workspace.library at sdk.d.lua
+//!
+//!     The Lua recipe text is NOT inlined in this file: every snippet lives
+//!     under `src-tauri/templates/plugin/` and is pulled in via `include_str!`,
+//!     so authors can edit or grep the templates the same way they would any
+//!     other plugin source.
+//!
+//!   * `import_plugin_zip(zip_bytes)` — extract a zip into the user's
+//!     `plugins/` directory. The archive must be rooted at a single folder
+//!     containing a `plugin.toml`. Existing folders with the same name are
+//!     refused (the user must explicitly remove or rename first) so we never
+//!     silently overwrite a customised plugin.
+//!
+//!   * `import_plugin_zip_from_path(path)` — read a previously-exported zip on
+//!     disk and forward to `import_plugin_zip`.
+//!
+//! Each handler is the body the matching `#[tauri::command]` ran inline, now
+//! self-registered under `program = "platform"`. Behavior (FS layout, zip
+//! contents, validation, errors) is byte-identical; commands that took no
+//! `AppState` use `_state: &AppState` to satisfy the handler macro's context
+//! arg. These are pure FS scaffolding — no AppHandle/Window/Channel, no event
+//! emit, no async, no Lua — so no hooks fire in this domain.
 
 use std::collections::HashSet;
 use std::io::{Cursor, Write};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 
 use crate::error::AppError;
+use crate::ipc::platform;
 use crate::AppState;
 
 // ── Static template files bundled into the binary ──────────────────────────
 //
 // `include_str!` paths are relative to *this* source file. Resolved targets:
-//   src-tauri/src/commands/plugin_template_commands.rs   ← here
+//   src-tauri/src/ipc/platform/plugin_templates.rs       ← here
 //   src-tauri/templates/plugin/...                       ← templates
 //   src-tauri/../plugins/sdk.d.lua                       ← workspace SDK
-const SDK_FILE_BYTES: &[u8] = include_bytes!("../../../plugins/sdk.d.lua");
-const LUARC_JSON:        &str = include_str!("../../templates/plugin/luarc.json");
-const MAIN_HEADER:       &str = include_str!("../../templates/plugin/main_header.lua");
-const MAIN_FOOTER:       &str = include_str!("../../templates/plugin/main_footer.lua");
-const HOOK_ON_LOAD:      &str = include_str!("../../templates/plugin/hook_on_plugin_load.lua");
-const FALLBACK_PRINT:    &str = include_str!("../../templates/plugin/fallback_print.lua");
-const RECIPE_COMMAND:        &str = include_str!("../../templates/plugin/recipes/command.lua");
-const RECIPE_KEYBINDING:     &str = include_str!("../../templates/plugin/recipes/keybinding.lua");
-const RECIPE_SETTINGS_PANEL: &str = include_str!("../../templates/plugin/recipes/settings_panel.lua");
-const RECIPE_MODAL:          &str = include_str!("../../templates/plugin/recipes/modal.lua");
-const RECIPE_ACTION_TOOLBAR: &str = include_str!("../../templates/plugin/recipes/action_toolbar.lua");
-const RECIPE_SIDEBAR:        &str = include_str!("../../templates/plugin/recipes/sidebar.lua");
-const RECIPE_NOTIFICATION:   &str = include_str!("../../templates/plugin/recipes/notification.lua");
-const RECIPE_JOB_SPAWN:      &str = include_str!("../../templates/plugin/recipes/job_spawn.lua");
-const RECIPE_SCHEDULER:      &str = include_str!("../../templates/plugin/recipes/scheduler.lua");
-const RECIPE_HTTP_GET:       &str = include_str!("../../templates/plugin/recipes/http_get.lua");
+const SDK_FILE_BYTES: &[u8] = include_bytes!("../../../../plugins/sdk.d.lua");
+const LUARC_JSON:        &str = include_str!("../../../templates/plugin/luarc.json");
+const MAIN_HEADER:       &str = include_str!("../../../templates/plugin/main_header.lua");
+const MAIN_FOOTER:       &str = include_str!("../../../templates/plugin/main_footer.lua");
+const HOOK_ON_LOAD:      &str = include_str!("../../../templates/plugin/hook_on_plugin_load.lua");
+const FALLBACK_PRINT:    &str = include_str!("../../../templates/plugin/fallback_print.lua");
+const RECIPE_COMMAND:        &str = include_str!("../../../templates/plugin/recipes/command.lua");
+const RECIPE_KEYBINDING:     &str = include_str!("../../../templates/plugin/recipes/keybinding.lua");
+const RECIPE_SETTINGS_PANEL: &str = include_str!("../../../templates/plugin/recipes/settings_panel.lua");
+const RECIPE_MODAL:          &str = include_str!("../../../templates/plugin/recipes/modal.lua");
+const RECIPE_ACTION_TOOLBAR: &str = include_str!("../../../templates/plugin/recipes/action_toolbar.lua");
+const RECIPE_SIDEBAR:        &str = include_str!("../../../templates/plugin/recipes/sidebar.lua");
+const RECIPE_NOTIFICATION:   &str = include_str!("../../../templates/plugin/recipes/notification.lua");
+const RECIPE_JOB_SPAWN:      &str = include_str!("../../../templates/plugin/recipes/job_spawn.lua");
+const RECIPE_SCHEDULER:      &str = include_str!("../../../templates/plugin/recipes/scheduler.lua");
+const RECIPE_HTTP_GET:       &str = include_str!("../../../templates/plugin/recipes/http_get.lua");
 
 /// Replace the `__SLUG__` placeholder used in every template file. We use a
 /// distinctive marker (rather than `{name}` or `$name`) so plugin authors who
@@ -323,10 +331,10 @@ fn build_main_lua(opts: &ExportPluginTemplateOpts, slug: &str) -> String {
     out
 }
 
-// ── Public commands ---------------------------------------------------------
+// ── Public handlers ---------------------------------------------------------
 
-/// Build the in-memory zip bundle. Shared by the two export entry points so
-/// the layout and contents stay in lock-step regardless of which one fires.
+/// Build the in-memory zip bundle. Shared by the export entry point and the
+/// import-round-trip tests so the layout and contents stay in lock-step.
 fn build_template_zip(opts: &ExportPluginTemplateOpts, slug: &str) -> Result<Vec<u8>, AppError> {
     let manifest = build_manifest(opts, slug);
     let main_lua = build_main_lua(opts, slug);
@@ -363,9 +371,9 @@ fn build_template_zip(opts: &ExportPluginTemplateOpts, slug: &str) -> Result<Vec
 /// Generate the plugin template and write it to `target_path`. The frontend
 /// passes the path it got back from Arbor's `FileExplorerModal` (mode='save').
 /// Returns the absolute path written to so the UI can show it in the toast.
-#[tauri::command]
-pub fn export_plugin_template_to_path(
-    _state: State<'_, AppState>,
+#[platform::handler(program = "platform")]
+fn export_plugin_template_to_path(
+    _state: &AppState,
     opts: ExportPluginTemplateOpts,
     target_path: String,
 ) -> Result<String, AppError> {
@@ -403,11 +411,15 @@ pub struct ImportPluginResult {
 /// `plugin.toml`. Subdirectories underneath that folder are extracted as-is.
 /// The folder name (= installed plugin name on disk) is taken from the zip
 /// itself so the user sees the same identifier the author shipped.
-#[tauri::command]
-pub fn import_plugin_zip(
-    _state: State<'_, AppState>,
-    zip_bytes: Vec<u8>,
-) -> Result<ImportPluginResult, AppError> {
+#[platform::handler(program = "platform")]
+fn import_plugin_zip(_state: &AppState, zip_bytes: Vec<u8>) -> Result<ImportPluginResult, AppError> {
+    extract_plugin_zip(zip_bytes)
+}
+
+/// Shared extraction logic. Kept as a plain fn (not a handler) so
+/// `import_plugin_zip_from_path` can reuse it without re-dispatching through
+/// the platform router.
+fn extract_plugin_zip(zip_bytes: Vec<u8>) -> Result<ImportPluginResult, AppError> {
     if zip_bytes.is_empty() {
         return Err(AppError::Other("empty plugin archive".into()));
     }
@@ -522,11 +534,8 @@ pub fn import_plugin_zip(
 /// Read a previously-exported zip on disk and forward to `import_plugin_zip`.
 /// Saves the frontend the trouble of pulling the bytes through the Tauri FS
 /// plugin when the user picks a path with the open dialog.
-#[tauri::command]
-pub fn import_plugin_zip_from_path(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<ImportPluginResult, AppError> {
+#[platform::handler(program = "platform")]
+fn import_plugin_zip_from_path(_state: &AppState, path: String) -> Result<ImportPluginResult, AppError> {
     let bytes = std::fs::read(&path)?;
-    import_plugin_zip(state, bytes)
+    extract_plugin_zip(bytes)
 }

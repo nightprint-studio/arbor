@@ -97,10 +97,10 @@
   async function onSaveAsPicked(p: string) {
     savePickerOpen = false;
     try {
-      // Save through the host's `fs_write_text_file` command.
+      // Save through the platform `fs_write_text_file` handler.
       // The codec output is already UTF-8 plain text.
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('fs_write_text_file', { path: p, content: convertedText });
+      const { fsWriteTextFile } = await import('$lib/ipc/fs');
+      await fsWriteTextFile(p, convertedText);
     } catch (e: any) {
       error = `Save failed: ${e?.message ?? e}`;
     }

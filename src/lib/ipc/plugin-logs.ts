@@ -1,11 +1,11 @@
-import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 import type { PluginLogEntry } from '$lib/types/plugin-logs';
 
 export const listPluginLogs = () =>
-  invoke<PluginLogEntry[]>('list_plugin_logs');
+  platform<PluginLogEntry[]>('list_plugin_logs');
 
 export const clearPluginLogs = () =>
-  invoke<void>('clear_plugin_logs');
+  platform<void>('clear_plugin_logs');
 
 export const clearPluginLogsByPipeline = (name: string) =>
-  invoke<void>('clear_plugin_logs_by_pipeline', { name });
+  platform<void>('clear_plugin_logs_by_pipeline', { name });

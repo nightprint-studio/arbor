@@ -1,15 +1,19 @@
-//! Tauri command layer over the pure `arbor-fs` crate.
+//! Tauri command layer for the OS / Tauri shell-integration FS commands that are
+//! *not* pure filesystem I/O.
 //!
-//! The filesystem logic (read/write/copy/move/delete/list/search/trash/zip,
-//! roots, sizes, path expansion) lives in `arbor-fs`; these commands are thin
-//! wrappers that map `FsError` → [`AppError`], drive the blocking calls on
-//! `spawn_blocking`, and supply the Tauri-specific glue the pure layer takes via
-//! traits: the progress [`EmitSink`] (emits `arbor://fs-op-progress`) and the
-//! op-id → [`CancelToken`] registry that backs [`fs_cancel_op`].
+//! The pure FS logic (read/write/list/search/trash/zip, roots, sizes, path
+//! expansion) has moved to the platform broker
+//! ([`crate::ipc::platform::fs`]) — it only needs the Tauri-free `arbor-fs`
+//! crate. What stays here either holds an `AppHandle` and streams progress
+//! events, or shells out to the OS for an integration the pure layer can't
+//! provide:
 //!
-//! What stays here is the OS / Tauri shell-integration that is *not* pure FS
-//! I/O: open-with-default, reveal-in-file-manager, open-terminal, the native
-//! Properties dialog, set-wallpaper, native icons, and the per-window watcher.
+//! - **Copy / move / duplicate / cancel** — emit `arbor://fs-op-progress` via
+//!   the [`EmitSink`] and own the op-id → [`CancelToken`] registry that backs
+//!   [`fs_cancel_op`]. Deferred to the later emit/seam pass.
+//! - **OS shell-integration** — open-with-default, reveal-in-file-manager,
+//!   open-terminal, the native Properties dialog, set-wallpaper, native icons,
+//!   and the per-window watcher.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -20,77 +24,7 @@ use serde::Serialize;
 use tauri::Emitter;
 
 use crate::error::AppError;
-use arbor_fs::prelude::{
-    copy, mutate, pathexpand, read, roots, size, trash, zip, CancelToken, DirSize, FsEntry, FsRoot,
-    NoopSink, OverviewStats, ProgressSink, RenamePair, TrashEntry,
-};
-
-// ---------------------------------------------------------------------------
-// Mutating filesystem operations
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn fs_create_dir(path: String) -> Result<(), AppError> {
-    Ok(mutate::create_dir(&path)?)
-}
-
-#[tauri::command]
-pub fn fs_create_file(path: String) -> Result<(), AppError> {
-    Ok(mutate::create_file(&path)?)
-}
-
-#[tauri::command]
-pub fn fs_rename(old_path: String, new_path: String) -> Result<(), AppError> {
-    Ok(mutate::rename(&old_path, &new_path)?)
-}
-
-#[tauri::command]
-pub fn fs_rename_many(pairs: Vec<RenamePair>) -> Result<Vec<String>, AppError> {
-    Ok(mutate::rename_many(&pairs)?)
-}
-
-#[tauri::command]
-pub fn fs_write_text_file(path: String, content: String) -> Result<(), AppError> {
-    Ok(mutate::write_text(&path, &content)?)
-}
-
-#[tauri::command]
-pub fn fs_read_text_file(path: String) -> Result<String, AppError> {
-    Ok(read::read_text(&path)?)
-}
-
-#[tauri::command]
-pub fn fs_delete(path: String) -> Result<(), AppError> {
-    Ok(mutate::delete(&path)?)
-}
-
-// ---------------------------------------------------------------------------
-// Listing + search (blocking pool — a slow drive can't stall the IPC runtime)
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn fs_read_dir(path: String, show_hidden: Option<bool>) -> Result<Vec<FsEntry>, AppError> {
-    let show_hidden = show_hidden.unwrap_or(false);
-    let entries = tokio::task::spawn_blocking(move || read::read_dir(&path, show_hidden))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_read_dir task panicked: {e}")))??;
-    Ok(entries)
-}
-
-#[tauri::command]
-pub async fn fs_search(
-    root: String,
-    query: String,
-    show_hidden: Option<bool>,
-    limit: Option<usize>,
-) -> Result<Vec<FsEntry>, AppError> {
-    let show_hidden = show_hidden.unwrap_or(false);
-    let cap = limit.unwrap_or(5000);
-    let out = tokio::task::spawn_blocking(move || read::search(&root, &query, show_hidden, cap))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_search task panicked: {e}")))??;
-    Ok(out)
-}
+use arbor_fs::prelude::{copy, CancelToken, NoopSink, ProgressSink};
 
 // ---------------------------------------------------------------------------
 // Copy / move / duplicate — progress + cooperative cancellation
@@ -301,142 +235,6 @@ pub async fn fs_duplicate(
     })
     .await
     .map_err(|e| AppError::Other(format!("fs_duplicate task panicked: {e}")))?
-}
-
-// ---------------------------------------------------------------------------
-// Delete — trash (default) vs permanent (Shift+Delete) + Recycle Bin view
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn fs_trash(paths: Vec<String>) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || trash::trash(&paths))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_trash task panicked: {e}")))??;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn fs_delete_many(paths: Vec<String>) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || mutate::delete_many(&paths))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_delete_many task panicked: {e}")))??;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn fs_untrash(paths: Vec<String>) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || trash::untrash(&paths))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_untrash task panicked: {e}")))??;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn fs_trash_list() -> Result<Vec<TrashEntry>, AppError> {
-    let out = tokio::task::spawn_blocking(trash::trash_list)
-        .await
-        .map_err(|e| AppError::Other(format!("fs_trash_list task panicked: {e}")))??;
-    Ok(out)
-}
-
-#[tauri::command]
-pub async fn fs_trash_restore(ids: Vec<String>) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || trash::trash_restore(&ids))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_trash_restore task panicked: {e}")))??;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn fs_trash_purge(ids: Vec<String>) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || trash::trash_purge(&ids))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_trash_purge task panicked: {e}")))??;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn fs_trash_empty() -> Result<(), AppError> {
-    tokio::task::spawn_blocking(trash::trash_empty)
-        .await
-        .map_err(|e| AppError::Other(format!("fs_trash_empty task panicked: {e}")))??;
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Compress / extract — ZIP archives
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn fs_zip(
-    sources: Vec<String>,
-    dest_dir: String,
-    archive_name: String,
-) -> Result<String, AppError> {
-    let out = tokio::task::spawn_blocking(move || zip::zip(&sources, &dest_dir, &archive_name))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_zip task panicked: {e}")))??;
-    Ok(out)
-}
-
-#[tauri::command]
-pub async fn fs_unzip(archive: String, dest_dir: Option<String>) -> Result<String, AppError> {
-    let out = tokio::task::spawn_blocking(move || zip::unzip(&archive, dest_dir))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_unzip task panicked: {e}")))??;
-    Ok(out)
-}
-
-// ---------------------------------------------------------------------------
-// Recursive sizes + quick-access roots + WSL + Overview stats
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn fs_dir_size(path: String) -> Result<DirSize, AppError> {
-    tokio::task::spawn_blocking(move || size::dir_size(&path))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_dir_size task panicked: {e}")))
-}
-
-#[tauri::command]
-pub async fn fs_paths_size(paths: Vec<String>) -> Result<DirSize, AppError> {
-    tokio::task::spawn_blocking(move || size::paths_size(&paths))
-        .await
-        .map_err(|e| AppError::Other(format!("fs_paths_size task panicked: {e}")))
-}
-
-/// Return filesystem quick-access roots (common user dirs + drives / `/`).
-/// Runs on the blocking pool because `dirs::*_dir()` + `Path::exists()` can
-/// touch the filesystem.
-#[tauri::command]
-pub async fn list_fs_roots() -> Vec<FsRoot> {
-    tokio::task::spawn_blocking(roots::list_roots)
-        .await
-        .unwrap_or_default()
-}
-
-/// List installed WSL distributions as navigable roots. Loaded once (not on the
-/// removable-media poll) since spawning `wsl.exe` repeatedly would be wasteful.
-#[tauri::command]
-pub async fn list_wsl_distros() -> Vec<FsRoot> {
-    tokio::task::spawn_blocking(roots::list_wsl_distros)
-        .await
-        .unwrap_or_default()
-}
-
-/// Real Overview dashboard stats: capacity / free space per drive.
-#[tauri::command]
-pub async fn fs_overview_stats() -> OverviewStats {
-    tokio::task::spawn_blocking(roots::overview_stats)
-        .await
-        .unwrap_or(OverviewStats { drives: Vec::new(), total_capacity: 0, total_free: 0 })
-}
-
-/// Expand environment-variable references and a leading `~` in a user-typed
-/// path (`%appdata%`, `$HOME`, `~/code`, …). Unknown variables are left intact.
-#[tauri::command]
-pub fn fs_expand_path(path: String) -> String {
-    pathexpand::expand_path(&path)
 }
 
 // ===========================================================================

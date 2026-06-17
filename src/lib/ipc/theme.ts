@@ -1,24 +1,25 @@
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 import type { Theme } from '$lib/types/theme';
 
 export function listCustomThemes(): Promise<Theme[]> {
-  return invoke('list_custom_themes');
+  return platform('list_custom_themes');
 }
 
 export function getActiveThemeId(): Promise<string> {
-  return invoke('get_active_theme_id');
+  return platform('get_active_theme_id');
 }
 
 export function setActiveThemeId(id: string): Promise<void> {
-  return invoke('set_active_theme_id', { id });
+  return platform('set_active_theme_id', { id });
 }
 
 export function saveCustomTheme(theme: Theme): Promise<void> {
-  return invoke('save_custom_theme', { theme });
+  return platform('save_custom_theme', { theme });
 }
 
 export function deleteCustomTheme(id: string): Promise<void> {
-  return invoke('delete_custom_theme', { id });
+  return platform('delete_custom_theme', { id });
 }
 
 /** Tell the backend that the active theme just changed (or that a plugin

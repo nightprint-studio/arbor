@@ -5,6 +5,7 @@
 // them in `src-tauri/src/marketplace/types.rs`.
 
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 import type {
   MarketplacePlugin,
   MarketplaceTheme,
@@ -26,7 +27,7 @@ export interface MarketplaceCatalog {
  * so the user sees something instantly even when the network is unreachable.
  */
 export function listInstalled(): Promise<MarketplaceCatalog> {
-  return invoke<MarketplaceCatalog>('marketplace_list_installed');
+  return platform<MarketplaceCatalog>('marketplace_list_installed');
 }
 
 /**
@@ -54,7 +55,7 @@ export function refreshRegistry(): Promise<MarketplaceCatalog> {
  * distinguishable.
  */
 export function listMarketplaceInstalledNames(): Promise<string[]> {
-  return invoke<string[]>('marketplace_installed_plugin_names');
+  return platform<string[]>('marketplace_installed_plugin_names');
 }
 
 /**
@@ -63,7 +64,7 @@ export function listMarketplaceInstalledNames(): Promise<string[]> {
  * button manually.
  */
 export function getMarketplaceRefreshHours(): Promise<number | null> {
-  return invoke<number | null>('marketplace_get_refresh_hours');
+  return platform<number | null>('marketplace_get_refresh_hours');
 }
 
 /**
@@ -132,5 +133,5 @@ export interface RemoveCustomSourceArgs {
  * source stay installed — the install ledger is independent.
  */
 export function removeCustomSource(args: RemoveCustomSourceArgs): Promise<boolean> {
-  return invoke<boolean>('marketplace_remove_custom_source', { args });
+  return platform<boolean>('marketplace_remove_custom_source', { args });
 }

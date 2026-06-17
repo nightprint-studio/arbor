@@ -1,12 +1,12 @@
-import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 import type {
   PluginContribution, ContributionPoint,
 } from '$lib/types/contribution';
 
 export async function listPluginContributions(point?: string): Promise<PluginContribution[]> {
-  return invoke<PluginContribution[]>('list_plugin_contributions', { point: point ?? null });
+  return platform<PluginContribution[]>('list_plugin_contributions', { point: point ?? null });
 }
 
 export async function listContributionPoints(): Promise<ContributionPoint[]> {
-  return invoke<ContributionPoint[]>('list_contribution_points');
+  return platform<ContributionPoint[]>('list_contribution_points');
 }

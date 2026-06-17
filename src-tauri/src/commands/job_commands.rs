@@ -1,27 +1,13 @@
 use tauri::State;
 use crate::AppState;
 use crate::error::AppError;
-use crate::jobs::JobInfo;
-
-/// List all registered jobs (most-recent first).  Also purges stale system jobs
-/// so internal short-lived tasks (diff parsing, graph loads) do not pile up.
-#[tauri::command]
-pub fn list_jobs(state: State<'_, AppState>) -> Result<Vec<JobInfo>, AppError> {
-    let mut jobs = state.lock_jobs()?;
-    Ok(jobs.list_and_purge())
-}
-
-/// Return the accumulated output lines for a specific job.
-#[tauri::command]
-pub fn get_job_output(
-    state: State<'_, AppState>,
-    job_id: String,
-) -> Result<Vec<String>, AppError> {
-    let jobs = state.lock_jobs()?;
-    Ok(jobs.get_output(&job_id))
-}
 
 /// Cancel a running job (kills the process if still alive, marks status = cancelled).
+///
+/// DEFERRED from the `platform` jobs migration: this signals a live child
+/// process (`JobRegistry::cancel` → `kill_process(pid)`) and races with the
+/// `arbor://job-done` emit from `spawn_job`'s monitor thread, so it stays a
+/// shell command until the emit/signal seam pass.
 #[tauri::command]
 pub fn cancel_job(
     state: State<'_, AppState>,
@@ -39,30 +25,4 @@ pub fn cancel_job(
     let mut jobs = state.lock_jobs()?;
     jobs.cancel(&job_id);
     Ok(())
-}
-
-/// Return the number of currently running jobs.
-#[tauri::command]
-pub fn running_job_count(state: State<'_, AppState>) -> Result<usize, AppError> {
-    let jobs = state.lock_jobs()?;
-    Ok(jobs.running_count())
-}
-
-/// Remove a finished job from the registry (no-op if it's still running).
-/// Returns true when the job was actually removed.
-#[tauri::command]
-pub fn dismiss_job(
-    state: State<'_, AppState>,
-    job_id: String,
-) -> Result<bool, AppError> {
-    let mut jobs = state.lock_jobs()?;
-    Ok(jobs.dismiss(&job_id))
-}
-
-/// Remove every finished job. Returns the IDs that were dropped so the
-/// frontend can prune its local mirror without a full re-list.
-#[tauri::command]
-pub fn clear_finished_jobs(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
-    let mut jobs = state.lock_jobs()?;
-    Ok(jobs.clear_finished())
 }

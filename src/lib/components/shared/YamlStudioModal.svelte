@@ -89,7 +89,7 @@
   import { useStudioUndoRedo }           from './studio/composables/useStudioUndoRedo.svelte';
   import { useStudioGlobalKeys }         from './studio/composables/useStudioGlobalKeys.svelte';
   import { useStudioOutsideEdit }        from './studio/composables/useStudioOutsideEdit.svelte';
-  import { invoke } from '@tauri-apps/api/core';
+  import { fsReadTextFile } from '$lib/ipc/fs';
   import { tooltip } from '$lib/actions/tooltip';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { yamlStudioStore, type YamlNodeKind } from '$lib/stores/yaml-studio.svelte';
@@ -730,7 +730,7 @@
   async function onImportPicked(p: string) {
     importPickerOpen = false;
     try {
-      const text = await invoke<string>('fs_read_text_file', { path: p });
+      const text = await fsReadTextFile(p);
       convertMode   = 'properties-to-yaml';
       convertSource = text;
       convertOpen   = true;

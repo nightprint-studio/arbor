@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { platform } from './rpc';
 
 export interface FsEntry {
   name:     string;
@@ -19,23 +20,23 @@ export interface FsRoot {
 /** Read a directory — returns entries with metadata. Dot-prefixed entries
  *  are skipped unless `showHidden` is set. */
 export const fsReadDir = (path: string, showHidden = false) =>
-  invoke<FsEntry[]>('fs_read_dir', { path, showHidden });
+  platform<FsEntry[]>('fs_read_dir', { path, show_hidden: showHidden });
 
 /** Return quick-access roots (common dirs + drives). */
 export const listFsRoots = () =>
-  invoke<FsRoot[]>('list_fs_roots');
+  platform<FsRoot[]>('list_fs_roots');
 
 /** Installed WSL distributions as `\\wsl.localhost\<distro>` roots (Windows;
  *  empty elsewhere or when WSL isn't installed). */
 export const listWslDistros = () =>
-  invoke<FsRoot[]>('list_wsl_distros');
+  platform<FsRoot[]>('list_wsl_distros');
 
-export const fsCreateDir      = (path: string)                      => invoke<void>('fs_create_dir',        { path });
-export const fsCreateFile     = (path: string)                      => invoke<void>('fs_create_file',       { path });
-export const fsWriteTextFile  = (path: string, content: string)     => invoke<void>('fs_write_text_file',   { path, content });
-export const fsReadTextFile   = (path: string)                      => invoke<string>('fs_read_text_file', { path });
-export const fsRename         = (oldPath: string, newPath: string)  => invoke<void>('fs_rename',            { oldPath, newPath });
-export const fsDelete         = (path: string)                      => invoke<void>('fs_delete',            { path });
+export const fsCreateDir      = (path: string)                      => platform<void>('fs_create_dir',        { path });
+export const fsCreateFile     = (path: string)                      => platform<void>('fs_create_file',       { path });
+export const fsWriteTextFile  = (path: string, content: string)     => platform<void>('fs_write_text_file',   { path, content });
+export const fsReadTextFile   = (path: string)                      => platform<string>('fs_read_text_file', { path });
+export const fsRename         = (oldPath: string, newPath: string)  => platform<void>('fs_rename',            { old_path: oldPath, new_path: newPath });
+export const fsDelete         = (path: string)                      => platform<void>('fs_delete',            { path });
 
 // ── File explorer: copy / move / delete / open / watch ─────────────────────
 /** Copy entries into `destDir`; returns the created destination paths. With
@@ -52,29 +53,29 @@ export const fsCancelOp    = (opId: string) => invoke<void>('fs_cancel_op', { op
 /** One old→new rename pair for a batch rename. */
 export interface RenamePair { from: string; to: string; }
 /** Batch-rename many entries atomically (two-phase, collision-safe). */
-export const fsRenameMany  = (pairs: RenamePair[]) => invoke<string[]>('fs_rename_many', { pairs });
+export const fsRenameMany  = (pairs: RenamePair[]) => platform<string[]>('fs_rename_many', { pairs });
 
 /** Recursive size of a folder (bytes + file/dir counts). */
 export interface DirSize { bytes: number; files: number; dirs: number; }
-export const fsDirSize     = (path: string) => invoke<DirSize>('fs_dir_size', { path });
+export const fsDirSize     = (path: string) => platform<DirSize>('fs_dir_size', { path });
 /** Combined recursive size of several paths (multi-selection footer). */
-export const fsPathsSize   = (paths: string[]) => invoke<DirSize>('fs_paths_size', { paths });
+export const fsPathsSize   = (paths: string[]) => platform<DirSize>('fs_paths_size', { paths });
 
 /** Per-drive storage usage for the Overview dashboard. */
 export interface DriveUsage { name: string; path: string; total: number | null; free: number | null; }
 export interface OverviewStats { drives: DriveUsage[]; total_capacity: number; total_free: number; }
-export const fsOverviewStats = () => invoke<OverviewStats>('fs_overview_stats');
+export const fsOverviewStats = () => platform<OverviewStats>('fs_overview_stats');
 
 /** One item in the Recycle Bin / trash. */
 export interface TrashEntry { id: string; name: string; original_path: string; deleted_at: number | null; }
 /** List trash items (newest first). Empty on macOS. */
-export const fsTrashList    = () => invoke<TrashEntry[]>('fs_trash_list');
+export const fsTrashList    = () => platform<TrashEntry[]>('fs_trash_list');
 /** Restore trashed items to their original location (Windows/Linux). */
-export const fsTrashRestore = (ids: string[]) => invoke<void>('fs_trash_restore', { ids });
+export const fsTrashRestore = (ids: string[]) => platform<void>('fs_trash_restore', { ids });
 /** Permanently delete trashed items (Windows/Linux). */
-export const fsTrashPurge   = (ids: string[]) => invoke<void>('fs_trash_purge', { ids });
+export const fsTrashPurge   = (ids: string[]) => platform<void>('fs_trash_purge', { ids });
 /** Empty the whole Recycle Bin (Windows/Linux). */
-export const fsTrashEmpty   = () => invoke<void>('fs_trash_empty');
+export const fsTrashEmpty   = () => platform<void>('fs_trash_empty');
 
 /** Progress event for a long-running file operation (copy/move/duplicate). */
 export interface FsOpProgress {
@@ -90,25 +91,25 @@ export interface FsOpProgress {
 export const onFsOpProgress = (cb: (p: FsOpProgress) => void): Promise<UnlistenFn> =>
   listen<FsOpProgress>('arbor://fs-op-progress', e => cb(e.payload));
 /** Move entries to the OS trash / Recycle Bin (recoverable). */
-export const fsTrash       = (paths: string[]) => invoke<void>('fs_trash', { paths });
+export const fsTrash       = (paths: string[]) => platform<void>('fs_trash', { paths });
 /** Restore previously-trashed entries to their original locations (undo of
  *  `fsTrash`). Windows / Linux only. */
-export const fsUntrash     = (paths: string[]) => invoke<void>('fs_untrash', { paths });
+export const fsUntrash     = (paths: string[]) => platform<void>('fs_untrash', { paths });
 /** Permanently delete entries from disk (Shift+Delete). */
-export const fsDeleteMany  = (paths: string[]) => invoke<void>('fs_delete_many', { paths });
+export const fsDeleteMany  = (paths: string[]) => platform<void>('fs_delete_many', { paths });
 /** Recursively search `root` for entries whose name matches `query` (glob when
  *  it contains `*`/`?`, else case-insensitive substring). Capped at `limit`
  *  (default 5000). Each result carries its full path. */
 export const fsSearch = (root: string, query: string, showHidden = false, limit?: number) =>
-  invoke<FsEntry[]>('fs_search', { root, query, showHidden, limit });
+  platform<FsEntry[]>('fs_search', { root, query, show_hidden: showHidden, limit });
 /** Compress `sources` into a new ZIP named `archiveName` inside `destDir`
  *  (collision-resolved). Returns the created archive path. */
 export const fsZip = (sources: string[], destDir: string, archiveName: string) =>
-  invoke<string>('fs_zip', { sources, destDir, archiveName });
+  platform<string>('fs_zip', { sources, dest_dir: destDir, archive_name: archiveName });
 /** Extract a ZIP `archive`, into `destDir` or — when omitted — a new sibling
  *  folder named after the archive. Returns the destination folder path. */
 export const fsUnzip = (archive: string, destDir?: string) =>
-  invoke<string>('fs_unzip', destDir ? { archive, destDir } : { archive });
+  platform<string>('fs_unzip', destDir ? { archive, dest_dir: destDir } : { archive });
 /** Set an image file as the desktop wallpaper (Windows / macOS / GNOME). */
 export const fsSetWallpaper = (path: string) => invoke<void>('fs_set_wallpaper', { path });
 /** Open a path with the OS default app (file) or file manager (dir). */
@@ -122,7 +123,7 @@ export const fsOpenTerminal = (path: string) => invoke<void>('fs_open_terminal',
 /** Expand `%VAR%` / `$VAR` / leading `~` in a typed path. The virtual names
  *  `appdata` / `localappdata` / `home` resolve cross-platform, so `%appdata%`
  *  works on every OS. Returns the input unchanged when there's nothing to expand. */
-export const fsExpandPath = (path: string) => invoke<string>('fs_expand_path', { path });
+export const fsExpandPath = (path: string) => platform<string>('fs_expand_path', { path });
 /** Open the built-in explorer window at a path (focusing/reusing it per the
  *  one-window setting). `reveal = true` selects the file inside its folder;
  *  `reveal = false` just opens the folder. Used when the user routes the app's

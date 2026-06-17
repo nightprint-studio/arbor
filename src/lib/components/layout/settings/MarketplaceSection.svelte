@@ -22,11 +22,14 @@
     refreshRegistry,
   } from '$lib/ipc/marketplace';
   import { invoke } from '@tauri-apps/api/core';
+  import { platform } from '$lib/ipc/rpc';
 
   // The poll-minutes get/set commands aren't part of the catalog helpers
   // so we call them inline. Keeps the IPC module focused on catalog ops.
+  // The getter routes through the platform backend; the setter re-arms the
+  // refresh scheduler (AppHandle-coupled) and stays a keep-shell command.
   function getPollMinutes(): Promise<number> {
-    return invoke<number>('marketplace_get_poll_minutes');
+    return platform<number>('marketplace_get_poll_minutes');
   }
   function setPollMinutes(minutes: number): Promise<void> {
     return invoke<void>('marketplace_set_poll_minutes', { minutes });

@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 
 
 // ── Credential store ─────────────────────────────────────────────────────────
@@ -49,10 +50,10 @@ export interface OAuthDefaults {
 }
 
 export const getOAuthOverrides = () =>
-  invoke<OAuthOverrides>('get_oauth_overrides');
+  platform<OAuthOverrides>('get_oauth_overrides');
 
 export const setOAuthOverrides = (overrides: OAuthOverrides) =>
-  invoke<void>('set_oauth_overrides', { overrides });
+  platform<void>('set_oauth_overrides', { overrides });
 
 export const getOAuthDefaults = () =>
-  invoke<OAuthDefaults>('get_oauth_defaults');
+  platform<OAuthDefaults>('get_oauth_defaults');

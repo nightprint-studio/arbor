@@ -19,7 +19,7 @@
   } from '$lib/ipc/plugin';
   import { listMarketplaceInstalledNames } from '$lib/ipc/marketplace';
   import { tooltip } from '$lib/actions/tooltip';
-  import { invoke } from '@tauri-apps/api/core';
+  import { platform } from '$lib/ipc/rpc';
   import { openFolder } from '$lib/utils/reveal';
   import { pluginStore } from '$lib/stores/plugin.svelte';
   import { containerStore } from '$lib/stores/container.svelte';
@@ -113,7 +113,7 @@
   // fresh install has none), so opening never fails with "not found".
   async function openPluginsDirectory() {
     try {
-      const dir = await invoke<string>('get_plugin_directory');
+      const dir = await platform<string>('get_plugin_directory');
       await openFolder(dir);
     } catch (err) {
       uiStore.showToast(`Impossibile aprire la cartella plugins: ${err}`, 'error');

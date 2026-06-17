@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 
 /** File kinds the Studio sidebar can index. Mirrors `StudioFileKind` in
  *  `src-tauri/src/studio/mod.rs` — keep in sync. Phase 5.a adds `yaml`
@@ -134,10 +135,10 @@ export interface StudioSettings {
 }
 
 export const getStudioSettings = (): Promise<StudioSettings> =>
-  invoke<StudioSettings>('get_studio_settings');
+  platform<StudioSettings>('get_studio_settings');
 
 export const setStudioSettings = (settings: StudioSettings): Promise<void> =>
-  invoke<void>('set_studio_settings', { settings });
+  platform<void>('set_studio_settings', { settings });
 
 /** Fire the background refresh job — IPC returns immediately, progress
  *  + completion arrive via Tauri events (see studio.svelte.ts listeners). */

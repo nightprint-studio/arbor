@@ -1,5 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
-import { corvus } from './rpc';
+import { corvus, platform } from './rpc';
 import type { RecoveryConfig, RecoveryEntry, RecoveryRestorePreview } from '$lib/types/git';
 
 /** List all recovery snapshots for the given tab (newest first). */
@@ -34,10 +33,10 @@ export function deleteRecoveryEntry(
 
 /** Load the persisted snapshot policy (size limit + extension deny-list). */
 export function getRecoveryConfig(): Promise<RecoveryConfig> {
-  return invoke<RecoveryConfig>('get_recovery_config');
+  return platform<RecoveryConfig>('get_recovery_config');
 }
 
 /** Persist a new snapshot policy to ~/.config/arbor/config.toml. */
 export function setRecoveryConfig(recovery: RecoveryConfig): Promise<void> {
-  return invoke<void>('set_recovery_config', { recovery });
+  return platform<void>('set_recovery_config', { recovery });
 }

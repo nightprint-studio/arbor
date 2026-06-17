@@ -1,11 +1,29 @@
+//! `theme` domain — custom-theme CRUD and the active-theme-id config field,
+//! routed through the in-process `platform` backend.
+//!
+//! Each handler is the body the matching `#[tauri::command]` ran inline;
+//! `#[platform::handler(program = "platform")]` self-registers it under its own
+//! function name. The on-disk theme directory + serde shapes are unchanged, so
+//! the FE decodes identically whether the call routes here or through a legacy
+//! command.
+//!
+//! `list_custom_themes` / `save_custom_theme` / `delete_custom_theme` never
+//! touched `AppState`, but the handler macro requires a context first arg, so
+//! they take `_state: &AppState` and ignore it.
+//!
+//! `notify_theme_changed` is **not** here: it broadcasts the `on_theme_changed`
+//! hook to every loaded plugin and lives in `branding_commands.rs`, so it stays
+//! inline for the later emit/hook seam pass. No hooks fire in this domain.
+
 use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use arbor_plugin_marketplace::prelude as mk;
 
-use crate::error::AppError;
 use crate::config::app_config;
+use crate::error::AppError;
+use crate::ipc::platform;
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -33,12 +51,12 @@ pub struct ThemeData {
 pub fn themes_dir() -> PathBuf { mk::themes_dir() }
 
 // ---------------------------------------------------------------------------
-// Commands
+// Handlers
 // ---------------------------------------------------------------------------
 
 /// List all user-created custom themes stored in ~/.config/arbor/themes/
-#[tauri::command]
-pub fn list_custom_themes() -> Result<Vec<ThemeData>, AppError> {
+#[platform::handler(program = "platform")]
+fn list_custom_themes(_state: &AppState) -> Result<Vec<ThemeData>, AppError> {
     let dir = themes_dir();
     if !dir.exists() {
         return Ok(Vec::new());
@@ -65,15 +83,15 @@ pub fn list_custom_themes() -> Result<Vec<ThemeData>, AppError> {
 }
 
 /// Return the currently active theme ID from the app config.
-#[tauri::command]
-pub fn get_active_theme_id(state: State<'_, AppState>) -> Result<String, AppError> {
+#[platform::handler(program = "platform")]
+fn get_active_theme_id(state: &AppState) -> Result<String, AppError> {
     let config = state.lock_config()?;
     Ok(config.theme.active.clone())
 }
 
 /// Persist the active theme ID to the app config.
-#[tauri::command]
-pub fn set_active_theme_id(state: State<'_, AppState>, id: String) -> Result<(), AppError> {
+#[platform::handler(program = "platform")]
+fn set_active_theme_id(state: &AppState, id: String) -> Result<(), AppError> {
     let mut cfg = state.lock_config()?;
     cfg.theme.active = id;
     let clone = cfg.clone();
@@ -82,8 +100,8 @@ pub fn set_active_theme_id(state: State<'_, AppState>, id: String) -> Result<(),
 }
 
 /// Save (create or update) a custom theme JSON file on disk.
-#[tauri::command]
-pub fn save_custom_theme(theme: ThemeData) -> Result<(), AppError> {
+#[platform::handler(program = "platform")]
+fn save_custom_theme(_state: &AppState, theme: ThemeData) -> Result<(), AppError> {
     if theme.built_in {
         return Err(AppError::Other("cannot overwrite a built-in theme".into()));
     }
@@ -101,8 +119,8 @@ pub fn save_custom_theme(theme: ThemeData) -> Result<(), AppError> {
 }
 
 /// Delete a custom theme JSON file from disk.
-#[tauri::command]
-pub fn delete_custom_theme(id: String) -> Result<(), AppError> {
+#[platform::handler(program = "platform")]
+fn delete_custom_theme(_state: &AppState, id: String) -> Result<(), AppError> {
     let path = themes_dir().join(format!("{id}.json"));
     if path.exists() {
         std::fs::remove_file(&path)

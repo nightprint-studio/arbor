@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, ExplorerConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, WhatsNewConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
@@ -27,18 +28,18 @@ export interface RepoConfig {
 }
 
 export const getRepoConfig = (tabId: string) =>
-  invoke<RepoConfig>('get_repo_config', { tabId });
+  platform<RepoConfig>('get_repo_config', { tab_id: tabId });
 
 export const setRepoConfig = (tabId: string, config: RepoConfig) =>
-  invoke<void>('set_repo_config', { tabId, config });
+  platform<void>('set_repo_config', { tab_id: tabId, config });
 
 // ── Graph config ──────────────────────────────────────────────────────────────
 
 export const getGraphConfig = () =>
-  invoke<GraphConfig>('get_graph_config');
+  platform<GraphConfig>('get_graph_config');
 
 export const setGraphConfig = (config: GraphConfig) =>
-  invoke<void>('set_graph_config', { config });
+  platform<void>('set_graph_config', { config });
 
 // ── Issues display config ────────────────────────────────────────────────────
 
@@ -48,121 +49,123 @@ export interface IssuesConfig {
 }
 
 export const getIssuesConfig = () =>
-  invoke<IssuesConfig>('get_issues_config');
+  platform<IssuesConfig>('get_issues_config');
 
 export const setIssuesConfig = (config: IssuesConfig) =>
-  invoke<void>('set_issues_config', { config });
+  platform<void>('set_issues_config', { config });
 
 // ── MR/PR Activity timeline defaults ─────────────────────────────────────────
 
 export const getMrConfig = () =>
-  invoke<MrConfig>('get_mr_config');
+  platform<MrConfig>('get_mr_config');
 
 export const setMrConfig = (config: MrConfig) =>
-  invoke<void>('set_mr_config', { config });
+  platform<void>('set_mr_config', { config });
 
 // ── Appearance preferences (window control style, …) ─────────────────────────
 
 export const getAppearanceConfig = () =>
-  invoke<AppearanceConfig>('get_appearance_config');
+  platform<AppearanceConfig>('get_appearance_config');
 
 export const setAppearanceConfig = (config: AppearanceConfig) =>
-  invoke<void>('set_appearance_config', { config });
+  platform<void>('set_appearance_config', { config });
 
 // ── File explorer preferences (git awareness, global shortcut, display) ──────
 
 export const getExplorerConfig = () =>
-  invoke<ExplorerConfig>('get_explorer_config');
+  platform<ExplorerConfig>('get_explorer_config');
 
+// set_explorer_config stays a Tauri command (keep-shell: reconciles an
+// OS-global shortcut via AppHandle), so it keeps using `invoke`.
 export const setExplorerConfig = (config: ExplorerConfig) =>
   invoke<void>('set_explorer_config', { config });
 
 // ── Recent repos (persisted in config.toml via backend) ──────────────────────
 
 export const getRecentRepos = () =>
-  invoke<string[]>('get_recent_repos');
+  platform<string[]>('get_recent_repos');
 
 export const addRecentRepo = (path: string) =>
-  invoke<void>('add_recent_repo', { path });
+  platform<void>('add_recent_repo', { path });
 
 // ── Cache config ──────────────────────────────────────────────────────────────
 
 export const getCacheConfig = () =>
-  invoke<CacheConfig>('get_cache_config');
+  platform<CacheConfig>('get_cache_config');
 
 export const setCacheConfig = (config: CacheConfig) =>
-  invoke<void>('set_cache_config', { config });
+  platform<void>('set_cache_config', { config });
 
 /** Evict all backend cache entries (stats, ticket links) for a specific tab. */
 export const evictTabCache = (tabId: string) =>
-  invoke<void>('evict_tab_cache', { tabId });
+  platform<void>('evict_tab_cache', { tab_id: tabId });
 
 // ── Pipelines orchestrator config (global concurrency cap) ────────────────────
 
 export const getPipelinesConfig = () =>
-  invoke<PipelinesConfig>('get_pipelines_config');
+  platform<PipelinesConfig>('get_pipelines_config');
 
 export const setPipelinesConfig = (config: PipelinesConfig) =>
-  invoke<void>('set_pipelines_config', { config });
+  platform<void>('set_pipelines_config', { config });
 
 // ── Activity bar config ────────────────────────────────────────────────────────
 
 export const getActivityBarConfig = () =>
-  invoke<ActivityBarConfig>('get_activity_bar_config');
+  platform<ActivityBarConfig>('get_activity_bar_config');
 
 export const setActivityBarConfig = (config: ActivityBarConfig) =>
-  invoke<void>('set_activity_bar_config', { config });
+  platform<void>('set_activity_bar_config', { config });
 
 // ── Diff config (algorithm, context, full-file, virtualization) ──────────────
 
 export const getDiffConfig = () =>
-  invoke<DiffConfig>('get_diff_config');
+  platform<DiffConfig>('get_diff_config');
 
 export const setDiffConfig = (config: DiffConfig) =>
-  invoke<void>('set_diff_config', { config });
+  platform<void>('set_diff_config', { config });
 
 // ── Animations config (enabled + speed multiplier) ────────────────────────────
 
 export const getAnimationsConfig = () =>
-  invoke<AnimationsConfig>('get_animations_config');
+  platform<AnimationsConfig>('get_animations_config');
 
 export const setAnimationsConfig = (config: AnimationsConfig) =>
-  invoke<void>('set_animations_config', { config });
+  platform<void>('set_animations_config', { config });
 
 // ── Commit config (global template fallback, …) ───────────────────────────────
 
 export const getCommitConfig = () =>
-  invoke<CommitConfig>('get_commit_config');
+  platform<CommitConfig>('get_commit_config');
 
 export const setCommitConfig = (config: CommitConfig) =>
-  invoke<void>('set_commit_config', { config });
+  platform<void>('set_commit_config', { config });
 
 // ── Onboarding tour state ─────────────────────────────────────────────────────
 
 export const getOnboardingConfig = () =>
-  invoke<OnboardingConfig>('get_onboarding_config');
+  platform<OnboardingConfig>('get_onboarding_config');
 
 export const setOnboardingConfig = (config: OnboardingConfig) =>
-  invoke<void>('set_onboarding_config', { config });
+  platform<void>('set_onboarding_config', { config });
 
 // ── What's New modal state (last-seen app version) ──────────────────────────
 
 export const getWhatsNewConfig = () =>
-  invoke<WhatsNewConfig>('get_whats_new_config');
+  platform<WhatsNewConfig>('get_whats_new_config');
 
 export const setWhatsNewConfig = (config: WhatsNewConfig) =>
-  invoke<void>('set_whats_new_config', { config });
+  platform<void>('set_whats_new_config', { config });
 
 // ── Branches sidebar (global recursive split + per-repo grouping state) ──────
 
 export const getBranchesConfig = () =>
-  invoke<BranchesConfig>('get_branches_config');
+  platform<BranchesConfig>('get_branches_config');
 
 export const setBranchesConfig = (config: BranchesConfig) =>
-  invoke<void>('set_branches_config', { config });
+  platform<void>('set_branches_config', { config });
 
 export const getBranchGrouping = (tabId: string) =>
-  invoke<BranchGroupingConfig>('get_branch_grouping', { tabId });
+  platform<BranchGroupingConfig>('get_branch_grouping', { tab_id: tabId });
 
 export const setBranchGrouping = (tabId: string, config: BranchGroupingConfig) =>
-  invoke<void>('set_branch_grouping', { tabId, config });
+  platform<void>('set_branch_grouping', { tab_id: tabId, config });

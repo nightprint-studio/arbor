@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 
 export type RepoPathStatus = 'ok' | 'missing' | 'unreachable' | 'not_a_repo';
 
@@ -40,7 +41,7 @@ export const cleanupMissingRecentRepos = (): Promise<string[]> =>
   invoke('cleanup_missing_recent_repos');
 
 export const getMissingProjectsConfig = (): Promise<MissingProjectsConfig> =>
-  invoke('get_missing_projects_config');
+  platform('get_missing_projects_config');
 
 export const setMissingProjectsConfig = (config: MissingProjectsConfig): Promise<void> =>
-  invoke('set_missing_projects_config', { config });
+  platform('set_missing_projects_config', { config });

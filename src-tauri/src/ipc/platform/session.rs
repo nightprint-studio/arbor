@@ -1,7 +1,22 @@
+//! `session` domain — persist/restore the list of open repo tabs and the
+//! active path, routed through the in-process `platform` backend.
+//!
+//! Each handler is the body the matching `#[tauri::command]` ran inline;
+//! `#[platform::handler(program = "platform")]` self-registers it under its own
+//! function name. The on-disk `session.json` location + serde shapes are
+//! unchanged.
+//!
+//! Neither command touched `AppState` — the session file path comes from
+//! `arbor_core` — but the handler macro requires a context first arg, so they
+//! take `_state: &AppState` and ignore it. No hooks fire in this domain.
+
 use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
+use crate::ipc::platform;
+use crate::AppState;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,13 +49,14 @@ fn session_path() -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Commands
+// Handlers
 // ---------------------------------------------------------------------------
 
 /// Persist the current list of open tabs and the active repo path.
 /// Called by the frontend on every tab mutation (add, remove, activate).
-#[tauri::command]
-pub fn save_session(
+#[platform::handler(program = "platform")]
+fn save_session(
+    _state: &AppState,
     tabs: Vec<PersistedTab>,
     active_path: Option<String>,
 ) -> Result<(), AppError> {
@@ -63,8 +79,8 @@ pub fn save_session(
 
 /// Load the persisted session from disk.
 /// Returns an empty session (no tabs, no active path) if the file doesn't exist.
-#[tauri::command]
-pub fn load_session() -> Result<SessionState, AppError> {
+#[platform::handler(program = "platform")]
+fn load_session(_state: &AppState) -> Result<SessionState, AppError> {
     let path = session_path();
 
     if !path.exists() {

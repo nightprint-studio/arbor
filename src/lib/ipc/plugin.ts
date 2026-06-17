@@ -1,15 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 import type { PluginManifest, PluginInfo } from '../types/plugin';
 
 export const listPlugins = () =>
-  invoke<PluginManifest[]>('list_plugins');
+  platform<PluginManifest[]>('list_plugins');
 
 export const reloadPlugins = () =>
   invoke<void>('reload_plugins');
 
 /** Master kill-switch — read whether the plugin system is enabled at all. */
 export const getPluginsEnabled = () =>
-  invoke<boolean>('get_plugins_enabled');
+  platform<boolean>('get_plugins_enabled');
 
 /**
  * Master kill-switch — turn the plugin system on/off.
@@ -74,11 +75,11 @@ export interface EnablePreview {
 
 /** Preview an enable cascade — used to drive the confirmation modal. */
 export const pluginEnablePreview = (name: string) =>
-  invoke<EnablePreview>('plugin_enable_preview', { name });
+  platform<EnablePreview>('plugin_enable_preview', { name });
 
 /** Preview a disable cascade — every transitively-required dependent. */
 export const pluginDisablePreview = (name: string) =>
-  invoke<string[]>('plugin_disable_preview', { name });
+  platform<string[]>('plugin_disable_preview', { name });
 
 /**
  * Permanently uninstall a plugin. Removes the plugin folder, its global
@@ -91,7 +92,7 @@ export const deletePlugin = (name: string) =>
 
 /** List all loaded plugins with their enabled state and scheduler info. */
 export const listPluginInfo = () =>
-  invoke<PluginInfo[]>('list_plugin_info');
+  platform<PluginInfo[]>('list_plugin_info');
 
 export interface DepGraphEdge {
   name:     string;
@@ -113,11 +114,11 @@ export interface DepGraphNode {
 
 /** Return the plugin dependency graph (each plugin with its deps + dependents). */
 export const pluginDepGraph = () =>
-  invoke<DepGraphNode[]>('plugin_dep_graph');
+  platform<DepGraphNode[]>('plugin_dep_graph');
 
 /** Return the names of currently-enabled plugins that directly depend on `name`. */
 export const pluginDependents = (name: string) =>
-  invoke<string[]>('plugin_dependents', { name });
+  platform<string[]>('plugin_dependents', { name });
 
 /** Start a specific scheduler action for a plugin. */
 export const startPluginScheduler = (name: string, action: string) =>
@@ -129,11 +130,11 @@ export const stopPluginScheduler = (name: string, action: string) =>
 
 /** Return all persisted settings for a plugin as a key→value map. */
 export const pluginSettingsGet = (name: string) =>
-  invoke<Record<string, unknown>>('plugin_settings_get', { name });
+  platform<Record<string, unknown>>('plugin_settings_get', { name });
 
 /** Overwrite all settings for a plugin with the provided key→value map. */
 export const pluginSettingsSetAll = (name: string, values: Record<string, unknown>) =>
-  invoke<void>('plugin_settings_set_all', { name, values });
+  platform<void>('plugin_settings_set_all', { name, values });
 
 /** Notify the backend whether the app window currently has focus.
  *  Focus-gated schedulers (only_when_focused = true) skip firing while this is false. */
@@ -220,15 +221,15 @@ export interface ImportPluginResult {
  * handed back a directory the backend appends `<slug>.zip`.
  */
 export const exportPluginTemplateToPath = (opts: ExportPluginTemplateOpts, targetPath: string) =>
-  invoke<string>('export_plugin_template_to_path', { opts, targetPath });
+  platform<string>('export_plugin_template_to_path', { opts, target_path: targetPath });
 
 /** Install a plugin zip (already in memory) into the user's plugins directory. */
 export const importPluginZip = (zipBytes: Uint8Array) =>
-  invoke<ImportPluginResult>('import_plugin_zip', { zipBytes: Array.from(zipBytes) });
+  platform<ImportPluginResult>('import_plugin_zip', { zip_bytes: Array.from(zipBytes) });
 
 /** Install a plugin zip by absolute path — backend reads the file itself. */
 export const importPluginZipFromPath = (path: string) =>
-  invoke<ImportPluginResult>('import_plugin_zip_from_path', { path });
+  platform<ImportPluginResult>('import_plugin_zip_from_path', { path });
 
 /**
  * Resolve the on-disk folder of a discovered plugin by name. Errors when no
@@ -237,4 +238,4 @@ export const importPluginZipFromPath = (path: string) =>
  * only reliable way to map name → path from the FE.
  */
 export const getInstalledPluginPath = (name: string) =>
-  invoke<string>('get_installed_plugin_path', { name });
+  platform<string>('get_installed_plugin_path', { name });

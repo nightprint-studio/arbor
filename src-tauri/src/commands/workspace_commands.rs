@@ -5,24 +5,10 @@ use crate::AppState;
 use crate::error::{AppError, Result};
 use crate::jobs::{JobInfo, JobStatus, JobRegistry};
 use crate::workspace::{
-    migration, registry as registry_io, snapshot as snapshot_io, store as store_io,
-    CrossWsTabRef, RepoRegistryEntry, TabMeta, TabSnapshot, WorkspaceDef, WorkspaceGroup,
+    registry as registry_io, snapshot as snapshot_io, store as store_io,
+    RepoRegistryEntry, WorkspaceDef, WorkspaceGroup,
     SCRATCH_ID,
 };
-
-// ---------------------------------------------------------------------------
-// Migration — reports the repos that were ingested from the legacy
-// session.json at startup.  The welcome screen reads this once; on the
-// first call we return the stored report and clear it so subsequent launches
-// see nothing.
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn take_migration_report(state: State<'_, AppState>) -> Result<Option<migration::MigrationReport>> {
-    let mut slot = state.migration_report.lock()
-        .map_err(|_| AppError::MutexPoisoned("migration_report".into()))?;
-    Ok(slot.take())
-}
 
 // ---------------------------------------------------------------------------
 // Hook helpers — workspace events reach plugins via the regular hook pipe.
@@ -142,28 +128,10 @@ pub struct WorkspacesSnapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Query commands
+// Query commands — `list_workspaces`, `list_registry_repos`,
+// `list_registry_with_roots`, `load_workspace_snapshot` migrated to
+// `crate::ipc::platform::workspace`.
 // ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn list_workspaces(state: State<'_, AppState>) -> Result<WorkspacesSnapshot> {
-    let store = state.lock_workspaces()?;
-    Ok(WorkspacesSnapshot {
-        workspaces:          store.ordered(),
-        groups:              {
-            let mut g = store.groups.clone();
-            g.sort_by_key(|g| (g.order, g.name.to_lowercase()));
-            g
-        },
-        active_workspace_id: store.active_workspace_id.clone(),
-    })
-}
-
-#[tauri::command]
-pub fn list_registry_repos(state: State<'_, AppState>) -> Result<Vec<RepoRegistryEntry>> {
-    let reg = state.lock_repo_registry()?;
-    Ok(reg.list())
-}
 
 /// Registry entry augmented with the canonical path of its `.git` common
 /// directory.  All worktrees of the same repository share that value, which
@@ -188,47 +156,9 @@ pub struct RepoRegistryEntryWithRoot {
     pub is_worktree:  bool,
 }
 
-#[tauri::command]
-pub fn list_registry_with_roots(state: State<'_, AppState>) -> Result<Vec<RepoRegistryEntryWithRoot>> {
-    let entries = {
-        let reg = state.lock_repo_registry()?;
-        reg.list()
-    };
-    let mut out = Vec::with_capacity(entries.len());
-    for e in entries {
-        let mut common_dir: Option<String> = None;
-        let mut current_branch: Option<String> = None;
-        let mut is_worktree = false;
-        if let Ok(repo) = git2::Repository::open(&e.path) {
-            common_dir = std::fs::canonicalize(repo.commondir()).ok().map(|p| {
-                let s = p.to_string_lossy().to_string();
-                let s = s.strip_prefix(r"\\?\").map(|x| x.to_string()).unwrap_or(s);
-                s.replace('\\', "/").trim_end_matches('/').to_string()
-            });
-            current_branch = repo.head().ok()
-                .and_then(|h| h.shorthand().map(|s| s.to_string()));
-            is_worktree = repo.is_worktree();
-        }
-        out.push(RepoRegistryEntryWithRoot {
-            id:             e.id,
-            path:           e.path,
-            remote_url:     e.remote_url,
-            display_name:   e.display_name,
-            common_dir,
-            current_branch,
-            is_worktree,
-        });
-    }
-    Ok(out)
-}
-
-#[tauri::command]
-pub fn load_workspace_snapshot(workspace_id: String) -> Result<TabSnapshot> {
-    Ok(snapshot_io::load(&workspace_id))
-}
-
 // ---------------------------------------------------------------------------
-// Mutation commands — workspaces
+// Mutation commands — workspaces (all DEFERRED: emit `arbor://registry-changed`
+// / `arbor://workspace-switched` FE events; left inline for the emit/seam pass).
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
@@ -368,20 +298,10 @@ pub fn set_active_workspace(
 }
 
 // ---------------------------------------------------------------------------
-// Mutation commands — groups
+// Mutation commands — groups. The handlers migrated to
+// `crate::ipc::platform::workspace`; `WorkspaceGroupPatch` stays here (shared
+// DTO imported by the migrated handler).
 // ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn create_workspace_group(
-    state: State<'_, AppState>,
-    name: String,
-    color_idx: u8,
-) -> Result<WorkspaceGroup> {
-    let mut store = state.lock_workspaces()?;
-    let g = store.create_group(name, color_idx);
-    store_io::save(&store)?;
-    Ok(g)
-}
 
 #[derive(Debug, Deserialize)]
 pub struct WorkspaceGroupPatch {
@@ -390,58 +310,9 @@ pub struct WorkspaceGroupPatch {
     pub collapsed: Option<bool>,
 }
 
-#[tauri::command]
-pub fn update_workspace_group(
-    state: State<'_, AppState>,
-    group_id: String,
-    patch: WorkspaceGroupPatch,
-) -> Result<WorkspaceGroup> {
-    let mut store = state.lock_workspaces()?;
-    {
-        let g = store.get_group_mut(&group_id)
-            .ok_or_else(|| AppError::Other(format!("group not found: {group_id}")))?;
-        if let Some(name)  = patch.name      { g.name = name; }
-        if let Some(color) = patch.color_idx { g.color_idx = color; }
-        if let Some(col)   = patch.collapsed { g.collapsed = col; }
-    }
-    store_io::save(&store)?;
-    store.get_group(&group_id).cloned()
-        .ok_or_else(|| AppError::Other(format!("group not found: {group_id}")))
-}
-
-#[tauri::command]
-pub fn delete_workspace_group(state: State<'_, AppState>, group_id: String) -> Result<()> {
-    let mut store = state.lock_workspaces()?;
-    store.remove_group(&group_id)?;
-    store_io::save(&store)?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn reorder_workspace_groups(
-    state: State<'_, AppState>,
-    ordered_ids: Vec<String>,
-) -> Result<()> {
-    let mut store = state.lock_workspaces()?;
-    store.set_group_order(&ordered_ids);
-    store_io::save(&store)?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn set_workspace_group(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    group_id: Option<String>,
-) -> Result<()> {
-    let mut store = state.lock_workspaces()?;
-    store.set_workspace_group(&workspace_id, group_id)?;
-    store_io::save(&store)?;
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
-// Mutation commands — repo membership
+// Mutation commands — repo membership (all DEFERRED: fire hooks + emit
+// `arbor://registry-changed`; left inline for the emit/seam pass).
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
@@ -662,23 +533,7 @@ pub fn delete_registry_repo(
 // pushes the complete snapshot whenever it changes; we just write it out.
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub fn save_workspace_snapshot(
-    workspace_id: String,
-    open_tab_ids: Vec<String>,
-    active_tab_id: Option<String>,
-    cross_ws_tabs: Vec<CrossWsTabRef>,
-    tab_meta: Option<Vec<TabMeta>>,
-) -> Result<()> {
-    let snap = TabSnapshot {
-        open_tab_ids,
-        active_tab_id,
-        cross_ws_tabs,
-        tab_meta: tab_meta.unwrap_or_default(),
-    };
-    snapshot_io::save(&workspace_id, &snap)?;
-    Ok(())
-}
+// `save_workspace_snapshot` migrated to `crate::ipc::platform::workspace`.
 
 // ---------------------------------------------------------------------------
 // Import / export — portable JSON so workspaces travel between machines.
@@ -698,29 +553,7 @@ pub struct ExportedWorkspace {
     pub repos:                   Vec<ExportedRepo>,
 }
 
-#[tauri::command]
-pub fn export_workspace(
-    state: State<'_, AppState>,
-    workspace_id: String,
-) -> Result<ExportedWorkspace> {
-    let store = state.lock_workspaces()?;
-    let reg   = state.lock_repo_registry()?;
-    let ws = store.get(&workspace_id)
-        .ok_or_else(|| AppError::Other(format!("workspace not found: {workspace_id}")))?;
-    let repos = ws.repo_ids.iter()
-        .filter_map(|id| reg.get(id))
-        .map(|e| ExportedRepo {
-            name:       e.display_name.clone(),
-            remote_url: e.remote_url.clone(),
-        })
-        .collect();
-    Ok(ExportedWorkspace {
-        arbor_workspace_version: 1,
-        name:                    ws.name.clone(),
-        color_idx:               ws.color_idx,
-        repos,
-    })
-}
+// `export_workspace` migrated to `crate::ipc::platform::workspace`.
 
 /// Parse an imported payload and preview each repo's local status:
 ///   - `existing_path`: we know this repo already (matched on remote URL or
@@ -746,31 +579,7 @@ pub struct ImportPreview {
     pub repos:     Vec<ImportPreviewRepo>,
 }
 
-#[tauri::command]
-pub fn import_workspace_preview(
-    state: State<'_, AppState>,
-    payload: ExportedWorkspace,
-) -> Result<ImportPreview> {
-    let store = state.lock_workspaces()?;
-    let reg   = state.lock_repo_registry()?;
-    let existing_workspace_id = store.find_by_name_in_group(&payload.name, None)
-        .map(|w| w.id.clone());
-    let repos = payload.repos.into_iter().map(|r| {
-        let matched = r.remote_url.as_deref().and_then(|u| reg.find_by_remote_url(u));
-        ImportPreviewRepo {
-            existing_id:   matched.map(|e| e.id.clone()),
-            existing_path: matched.map(|e| e.path.clone()),
-            name:          r.name,
-            remote_url:    r.remote_url,
-        }
-    }).collect();
-    Ok(ImportPreview {
-        name:      payload.name,
-        color_idx: payload.color_idx,
-        existing_workspace_id,
-        repos,
-    })
-}
+// `import_workspace_preview` migrated to `crate::ipc::platform::workspace`.
 
 /// Create a workspace from a list of already-resolved repo ids — or, when
 /// `merge_into` names an existing workspace, union the ids into it instead of
@@ -834,42 +643,7 @@ pub struct ExportedWorkspaceGroup {
     pub workspaces: Vec<ExportedGroupMember>,
 }
 
-#[tauri::command]
-pub fn export_workspace_group(
-    state: State<'_, AppState>,
-    group_id: String,
-) -> Result<ExportedWorkspaceGroup> {
-    let store = state.lock_workspaces()?;
-    let reg   = state.lock_repo_registry()?;
-    let group = store.get_group(&group_id)
-        .ok_or_else(|| AppError::Other(format!("group not found: {group_id}")))?;
-    // Child workspaces in dropdown order.  Scratch can never live in a group,
-    // so no explicit filter for it is needed.
-    let mut members: Vec<&WorkspaceDef> = store.workspaces.iter()
-        .filter(|w| w.group_id.as_deref() == Some(group_id.as_str()))
-        .collect();
-    members.sort_by_key(|w| (w.order, w.name.to_lowercase()));
-    let workspaces = members.into_iter().map(|ws| {
-        let repos = ws.repo_ids.iter()
-            .filter_map(|id| reg.get(id))
-            .map(|e| ExportedRepo {
-                name:       e.display_name.clone(),
-                remote_url: e.remote_url.clone(),
-            })
-            .collect();
-        ExportedGroupMember {
-            name:      ws.name.clone(),
-            color_idx: ws.color_idx,
-            repos,
-        }
-    }).collect();
-    Ok(ExportedWorkspaceGroup {
-        arbor_workspace_group_version: 1,
-        name:       group.name.clone(),
-        color_idx:  group.color_idx,
-        workspaces,
-    })
-}
+// `export_workspace_group` migrated to `crate::ipc::platform::workspace`.
 
 #[derive(Debug, Serialize)]
 pub struct ImportGroupPreviewWorkspace {
@@ -897,71 +671,7 @@ pub struct ImportGroupPreview {
     pub workspaces: Vec<ImportGroupPreviewWorkspace>,
 }
 
-#[tauri::command]
-pub fn import_workspace_group_preview(
-    state: State<'_, AppState>,
-    payload: ExportedWorkspaceGroup,
-) -> Result<ImportGroupPreview> {
-    let store = state.lock_workspaces()?;
-    let reg   = state.lock_repo_registry()?;
-
-    let existing_group_id = store.groups.iter()
-        .find(|g| g.name.eq_ignore_ascii_case(payload.name.trim()))
-        .map(|g| g.id.clone());
-
-    let dedup_key = |r: &ExportedRepo| -> String {
-        match r.remote_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-            Some(u) => format!("url:{}", u.to_lowercase()),
-            None    => format!("name:{}", r.name.trim().to_lowercase()),
-        }
-    };
-
-    let mut repos: Vec<ImportPreviewRepo> = Vec::new();
-    let mut key_to_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut workspaces = Vec::with_capacity(payload.workspaces.len());
-
-    for ws in &payload.workspaces {
-        let mut repo_indices: Vec<usize> = Vec::with_capacity(ws.repos.len());
-        for r in &ws.repos {
-            let key = dedup_key(r);
-            let idx = *key_to_idx.entry(key).or_insert_with(|| {
-                let matched = r.remote_url.as_deref()
-                    .map(str::trim)
-                    .filter(|u| !u.is_empty())
-                    .and_then(|u| reg.find_by_remote_url(u));
-                let i = repos.len();
-                repos.push(ImportPreviewRepo {
-                    existing_id:   matched.map(|e| e.id.clone()),
-                    existing_path: matched.map(|e| e.path.clone()),
-                    name:          r.name.clone(),
-                    remote_url:    r.remote_url.clone(),
-                });
-                i
-            });
-            // A workspace may list the same repo twice; keep its row once.
-            if !repo_indices.contains(&idx) { repo_indices.push(idx); }
-        }
-        // Only meaningful when we'd merge into an existing group: a same-named
-        // member already in it is updated rather than duplicated.
-        let existing_workspace_id = existing_group_id.as_deref()
-            .and_then(|gid| store.find_by_name_in_group(&ws.name, Some(gid)))
-            .map(|w| w.id.clone());
-        workspaces.push(ImportGroupPreviewWorkspace {
-            name:      ws.name.clone(),
-            color_idx: ws.color_idx,
-            repo_indices,
-            existing_workspace_id,
-        });
-    }
-
-    Ok(ImportGroupPreview {
-        name:      payload.name,
-        color_idx: payload.color_idx,
-        existing_group_id,
-        repos,
-        workspaces,
-    })
-}
+// `import_workspace_group_preview` migrated to `crate::ipc::platform::workspace`.
 
 #[derive(Debug, Deserialize)]
 pub struct ImportGroupWorkspaceCommit {
@@ -1041,44 +751,7 @@ pub struct ExportedBundle {
     pub workspaces: Vec<ExportedWorkspace>,
 }
 
-#[tauri::command]
-pub fn export_all_workspaces(state: State<'_, AppState>) -> Result<ExportedBundle> {
-    let store = state.lock_workspaces()?;
-    let reg   = state.lock_repo_registry()?;
-    let repos_of = |ws: &WorkspaceDef| -> Vec<ExportedRepo> {
-        ws.repo_ids.iter()
-            .filter_map(|id| reg.get(id))
-            .map(|e| ExportedRepo { name: e.display_name.clone(), remote_url: e.remote_url.clone() })
-            .collect()
-    };
-    // Groups (sorted) each carrying their member workspaces (sorted).
-    let mut sorted_groups = store.groups.clone();
-    sorted_groups.sort_by_key(|g| (g.order, g.name.to_lowercase()));
-    let groups = sorted_groups.iter().map(|g| {
-        let mut members: Vec<&WorkspaceDef> = store.workspaces.iter()
-            .filter(|w| w.group_id.as_deref() == Some(g.id.as_str()))
-            .collect();
-        members.sort_by_key(|w| (w.order, w.name.to_lowercase()));
-        ExportedWorkspaceGroup {
-            arbor_workspace_group_version: 1,
-            name:       g.name.clone(),
-            color_idx:  g.color_idx,
-            workspaces: members.into_iter().map(|ws| ExportedGroupMember {
-                name: ws.name.clone(), color_idx: ws.color_idx, repos: repos_of(ws),
-            }).collect(),
-        }
-    }).collect();
-    // Top-level (ungrouped) workspaces, excluding Scratch.
-    let mut top: Vec<&WorkspaceDef> = store.workspaces.iter()
-        .filter(|w| w.group_id.is_none() && w.id != SCRATCH_ID)
-        .collect();
-    top.sort_by_key(|w| (w.order, w.name.to_lowercase()));
-    let workspaces = top.into_iter().map(|ws| ExportedWorkspace {
-        arbor_workspace_version: 1,
-        name: ws.name.clone(), color_idx: ws.color_idx, repos: repos_of(ws),
-    }).collect();
-    Ok(ExportedBundle { arbor_workspace_bundle_version: 1, groups, workspaces })
-}
+// `export_all_workspaces` migrated to `crate::ipc::platform::workspace`.
 
 #[derive(Debug, Default, Serialize)]
 pub struct ImportBundleResult {
@@ -1238,7 +911,7 @@ pub struct RepoHealth {
     pub error:        Option<String>,
 }
 
-fn probe_one(entry: &RepoRegistryEntry) -> RepoHealth {
+pub(crate) fn probe_one(entry: &RepoRegistryEntry) -> RepoHealth {
     let mut out = RepoHealth {
         repo_id:      entry.id.clone(),
         path:         entry.path.clone(),
@@ -1326,24 +999,8 @@ fn probe_one(entry: &RepoRegistryEntry) -> RepoHealth {
     out
 }
 
-#[tauri::command]
-pub async fn workspace_health_scan(
-    state: State<'_, AppState>,
-    workspace_id: String,
-) -> Result<Vec<RepoHealth>> {
-    // Snapshot the list so we don't hold any locks while probing (each
-    // Repository::open can do significant I/O).
-    let entries: Vec<RepoRegistryEntry> = {
-        let store = state.lock_workspaces()?;
-        let reg   = state.lock_repo_registry()?;
-        let ws = store.get(&workspace_id)
-            .ok_or_else(|| AppError::Other(format!("workspace not found: {workspace_id}")))?;
-        ws.repo_ids.iter().filter_map(|id| reg.get(id).cloned()).collect()
-    };
-    let mut out = Vec::with_capacity(entries.len());
-    for e in entries { out.push(probe_one(&e)); }
-    Ok(out)
-}
+// `workspace_health_scan` migrated to `crate::ipc::platform::workspace`
+// (`probe_one` stays here as `pub(crate)` so the migrated handler can call it).
 
 // ---------------------------------------------------------------------------
 // Fetch-all — one aggregated Job for the whole workspace.

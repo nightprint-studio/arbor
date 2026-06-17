@@ -36,17 +36,11 @@ fn lock<'a>(state: &'a State<'a, AppState>) -> Result<MutexGuard<'a, Marketplace
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
-
-/// Synchronous slice rendered on modal open: only the entries actually
-/// installed *through the marketplace* (i.e. tracked in
-/// `marketplace_installed.json`). Dev / hand-copied plugins do NOT appear
-/// here.
-#[tauri::command]
-pub fn marketplace_list_installed(
-    state: State<'_, AppState>,
-) -> Result<MarketplaceCatalog> {
-    Ok(lock(&state)?.installed_only())
-}
+//
+// `marketplace_list_installed` and `marketplace_installed_plugin_names` moved
+// to the platform backend (`ipc/platform/marketplace.rs`) — they're leaf-clean
+// synchronous reads. The cache-backed registry fetches below stay here:
+// they're genuinely async (HTTP) and write through the disk cache.
 
 /// Full catalog. Uses the 1h disk cache when fresh; otherwise refreshes
 /// from the network and writes through to the cache.
@@ -72,23 +66,13 @@ pub async fn marketplace_refresh_registry(
     Ok(lock(&state)?.catalog())
 }
 
-/// Returns the set of plugin names installed via the marketplace. The
-/// Plugin Manager uses this to decorate matching rows with a "Marketplace"
-/// badge so dev plugins are visually distinguishable.
-#[tauri::command]
-pub fn marketplace_installed_plugin_names() -> Result<Vec<String>> {
-    Ok(mk::load_installs().plugins.keys().cloned().collect())
-}
-
 // ---------------------------------------------------------------------------
 // Auto-refresh interval
 // ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn marketplace_get_refresh_hours(state: State<'_, AppState>) -> Result<Option<u32>> {
-    let cfg = state.lock_config()?;
-    Ok(cfg.marketplace.refresh_hours)
-}
+//
+// The read-only getters (`marketplace_get_refresh_hours` /
+// `marketplace_get_poll_minutes`) moved to the platform backend. The setters
+// stay here: they take an `AppHandle` and re-arm the running scheduler.
 
 /// Set the auto-refresh interval in hours. `None` or `Some(0)` disables
 /// the scheduler. The change takes effect on the next poll cycle.
@@ -112,12 +96,6 @@ pub fn marketplace_set_refresh_hours(
     // Park / re-arm the running schedule without restarting it.
     marketplace::scheduler::apply_refresh_hours(&app, normalized);
     Ok(())
-}
-
-#[tauri::command]
-pub fn marketplace_get_poll_minutes(state: State<'_, AppState>) -> Result<u32> {
-    let cfg = state.lock_config()?;
-    Ok(cfg.marketplace.poll_minutes)
 }
 
 /// How often the background scheduler wakes up to check whether a refresh
@@ -348,23 +326,8 @@ pub async fn marketplace_add_custom_source(
     Ok(mk::add_custom_source(&state.marketplace, source).await?)
 }
 
-#[derive(Debug, Deserialize)]
-pub struct RemoveCustomSourceArgs {
-    pub repo:    String,
-    pub subpath: Option<String>,
-}
-
-/// Forget a user-added source. Composite key `(repo, subpath)` — the same
-/// repo can host multiple distinct entries pointing at different subpaths.
-/// Installed plugins from this source are NOT auto-uninstalled — the
-/// install registry remains the source-of-truth for installed state.
-#[tauri::command]
-pub fn marketplace_remove_custom_source(
-    state: State<'_, AppState>,
-    args:  RemoveCustomSourceArgs,
-) -> Result<bool> {
-    Ok(mk::remove_custom_source(&state.marketplace, &args.repo, args.subpath.as_deref())?)
-}
+// `marketplace_remove_custom_source` moved to the platform backend
+// (`ipc/platform/marketplace.rs`) — synchronous, state-only, no emit.
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { platform } from './rpc';
 
 /** Mirrors `arbor_scheduler::ScheduleKey` — namespace ("plugin", "marketplace", …) +
  *  consumer-local name. The two-part split lets the modal group rows by subsystem. */
@@ -26,5 +26,5 @@ export interface ScheduleSnapshot {
 /** Snapshot every schedule currently registered against the shared engine.
  *  Returns `[]` if the scheduler isn't installed yet (boot window). */
 export function listSchedules(): Promise<ScheduleSnapshot[]> {
-  return invoke('list_schedules');
+  return platform('list_schedules');
 }
