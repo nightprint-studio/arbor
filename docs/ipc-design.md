@@ -1,10 +1,54 @@
 # `arbor-ipc` — IPC design for Model D (1 FE + N BE)
 
-Stato: **design (M1b)**. Lo scheletro compilabile (`crates/foundation/ipc`) implementa
-oggi solo il livello transport-agnostic + un loopback in-process con ping; il
-transport reale (named pipe / unix socket) e la codegen `tarpc` atterrano al
-flip di M3 (in-process-first). Riferimenti: [`docs/migration-roadmap.md`](migration-roadmap.md)
-(M1), [`docs/crate-refactor-round2.md`](crate-refactor-round2.md) (§"Modello di processo", §D.5).
+Stato: **M3 Asse B — pilota in-process atterrato, in forma GENERICA**. Lo
+scheletro `arbor-ipc` (transport-agnostic + loopback) è ora *usato sul serio*: il
+**dominio `stash`** (11 comandi) instrada FE→shell→`Router`→`LoopbackBroker`→
+registry→handler→JSON, tutto in-process, con la wire-string d'errore preservata.
+La shell **non ridichiara nessuna firma per-comando**: un solo comando generico
+`rpc(program, method, params)` inoltra; le firme vivono una volta sola sul
+backend. Il transport reale (named pipe / unix socket) e la codegen `tarpc`
+restano da fare al flip a BE separato. Riferimenti:
+[`docs/migration-roadmap.md`](migration-roadmap.md) (M1/M3),
+[`docs/crate-refactor-round2.md`](crate-refactor-round2.md) (§"Modello di processo", §D.5).
+
+## Pilota in-process (stash) — forma generica
+
+La shell è un **router puro** (redirect, non ridefinizione). Decisione di design
+(discussa con l'utente): meglio un seam stringly-typed generico che N firme
+replicate — tanto il confine vero (FE TypeScript → BE) è validato a runtime
+comunque, `tarpc` darebbe check a compile-time solo su un hop Rust↔Rust che il
+design generico non ha.
+
+- **UN comando Tauri generico** `rpc(program, method, params)`
+  (`commands/rpc_commands.rs`) — `generate_handler!` passa da 11 voci stash a 1.
+  La FE: `invoke("rpc", { program:"corvus", method:"stash.save", params })`.
+- **`arbor-shell-common::Router`** in `AppState.router` (`OnceLock`, riempito in
+  `setup()` perché cattura l'`AppHandle`); backend `"corvus"` = `LoopbackBroker`.
+  `ipc/mod.rs::dispatch_rpc(state, program, method, json)` serializza→
+  `Router::call`→deserializza, mappa `IpcError::Backend(s)`→`AppError::Other(s)`.
+- **Registry, niente match, niente arg-struct**: il dispatch BE è il crate
+  **`arbor-rpc`** (platform, `crates/foundation/rpc` + proc-macro
+  `crates/foundation/rpc-macros`). `ipc/corvus/stash.rs` = **11 funzioni
+  annotate `#[corvus::handler]`** e basta (il modulo `ipc/corvus` ri-esporta la
+  macro generica sotto il suo nome → `#[corvus::handler]`, `#[merula::handler]`,
+  …). **Nome metodo opzionale**: di default = **il nome della funzione**
+  (`stash_save`, `list_stashes`, … = i vecchi nomi comando); `#[corvus::handler("x.y")]`
+  per override. La macro legge la firma, genera decode-args + serializza +
+  `inventory::submit!` → auto-registrazione, zero liste centrali.
+  `ipc/corvus/mod.rs::dispatch` prende `arbor_rpc::registry()` (cache `OnceLock`),
+  passa il contesto **type-erased** `&dyn Any` (downcast a `&AppState` dentro
+  l'handler) → `arbor-rpc` resta product-agnostic. Errori handler attraversano
+  come stringa `Display` (la wire-string). FE: `corvus("stash_save", {…})` (la
+  stringa = nome funzione = vecchio nome comando).
+- **FE**: helper generico `corvus(method, params)` (`src/lib/ipc/rpc.ts`); i
+  wrapper tipati in `ipc/branch.ts` restano (DX) ma instradano via `corvus(…)` con
+  chiavi **snake_case** nei `params`. Firme dei wrapper / comportamento invariati.
+- **Inter-programma** (Corvus→Sitta): stesso `rpc`, caller un BE invece della FE;
+  lo shell farà da tramite con `ensure_running` (spawn-if-absent + attesa ready
+  single-flight + timeout) — no-op in-process, reale al flip a processi separati.
+- **Boilerplate BE azzerata**: aggiungere un comando = scrivere **una funzione
+  annotata**. Niente arg-struct, niente match, niente lista centrale. (`arbor-rpc`
+  + `arbor-rpc-macros`, deps `inventory`/`syn`/`quote` — già nel lock.)
 
 ## Topologia
 
@@ -99,8 +143,9 @@ Finché il transport è in-process (loopback) l'handshake è un no-op (stesso pr
 
 | Fase | Transport | `BrokerClient` | Quando |
 |------|-----------|----------------|--------|
-| M1   | — (solo loopback + ping, scheletro) | `LoopbackBroker` (ping) | **ora** |
-| M3 (a) | in-process | `LoopbackBroker` reale (547 comandi dietro arbor-ipc, un processo) | M3 incrementale |
+| M1   | — (solo loopback + ping, scheletro) | `LoopbackBroker` (ping) | ✅ fatto |
+| M3 (a) pilota | in-process | `LoopbackBroker` reale — **dominio `stash` (11 cmd)** via comando generico `rpc(program,method,params)` + registry, un processo | ✅ **fatto** |
+| M3 (a) sweep | in-process | `LoopbackBroker` reale — i restanti domini | da fare |
 | M3 (b) | named pipe / unix socket + tarpc | `PipeBroker` | flip a BE separato |
 
 ## Cosa c'è nello scheletro M1

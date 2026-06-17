@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { BranchInfo, TagInfo, StashEntry, StashRef, StashApplyResult, StashBlockingContent, ResetMode, CheckoutResult } from '../types/git';
 import { invalidateTabCache } from './cache-invalidate';
+import { corvus } from './rpc';
 import { tabsStore } from '../stores/tabs.svelte';
 
 // ── Read-only ─────────────────────────────────────────────────────────────────
@@ -21,13 +22,13 @@ export const listMergedRemoteBranches = (tabId: string, target: string) =>
   invoke<BranchInfo[]>('list_merged_remote_branches', { tabId, target });
 
 export const listStashes = (tabId: string) =>
-  invoke<StashEntry[]>('list_stashes', { tabId });
+  corvus<StashEntry[]>('list_stashes', { tab_id: tabId });
 
 /** Same shape that `getGraph` embeds in `GraphData.stashes` — fetched
  *  standalone so post-stash refresh can repaint markers without
  *  re-running the lane assignment over the whole graph. */
 export const listGraphStashRefs = (tabId: string) =>
-  invoke<StashRef[]>('list_graph_stash_refs', { tabId });
+  corvus<StashRef[]>('list_graph_stash_refs', { tab_id: tabId });
 
 export const getNearestTag = (tabId: string) =>
   invoke<string | null>('get_nearest_tag', { tabId });
@@ -181,19 +182,19 @@ export const checkoutCommitSafe = async (tabId: string, oid: string): Promise<Ch
 };
 
 export const stashSave = async (tabId: string, message?: string, includeUntracked = true): Promise<StashEntry> => {
-  const r = await invoke<StashEntry>('stash_save', { tabId, message, includeUntracked });
+  const r = await corvus<StashEntry>('stash_save', { tab_id: tabId, message, include_untracked: includeUntracked });
   invalidateTabCache(tabId);
   return r;
 };
 
 export const stashApply = async (tabId: string, index: number): Promise<StashApplyResult> => {
-  const result = await invoke<StashApplyResult>('stash_apply', { tabId, index });
+  const result = await corvus<StashApplyResult>('stash_apply', { tab_id: tabId, index });
   invalidateTabCache(tabId);
   return result;
 };
 
 export const stashPop = async (tabId: string, index: number): Promise<StashApplyResult> => {
-  const result = await invoke<StashApplyResult>('stash_pop', { tabId, index });
+  const result = await corvus<StashApplyResult>('stash_pop', { tab_id: tabId, index });
   invalidateTabCache(tabId);
   return result;
 };
@@ -205,22 +206,22 @@ export const forceStashApply = async (
   filesToKeep: string[],
   dropOnSuccess: boolean,
 ): Promise<StashApplyResult> => {
-  const result = await invoke<StashApplyResult>('force_stash_apply', {
-    tabId, index, filesToDelete, filesToKeep, dropOnSuccess,
+  const result = await corvus<StashApplyResult>('force_stash_apply', {
+    tab_id: tabId, index, files_to_delete: filesToDelete, files_to_keep: filesToKeep, drop_on_success: dropOnSuccess,
   });
   invalidateTabCache(tabId);
   return result;
 };
 
 export const abortStashApply = async (tabId: string): Promise<void> => {
-  await invoke<void>('abort_stash_apply', { tabId });
+  await corvus<void>('abort_stash_apply', { tab_id: tabId });
   invalidateTabCache(tabId);
 };
 
 export const writeWorkdirFile = async (
   tabId: string, path: string, content: string, encoding?: string,
 ): Promise<void> => {
-  await invoke<void>('write_workdir_file', { tabId, path, content, encoding });
+  await corvus<void>('write_workdir_file', { tab_id: tabId, path, content, encoding });
 };
 
 export const getStashFileContent = async (
@@ -229,18 +230,18 @@ export const getStashFileContent = async (
   path: string,
   encodingOverride?: string,
 ): Promise<StashBlockingContent> => {
-  return await invoke<StashBlockingContent>('get_stash_file_content', {
-    tabId, index, path, encodingOverride,
+  return await corvus<StashBlockingContent>('get_stash_file_content', {
+    tab_id: tabId, index, path, encoding_override: encodingOverride,
   });
 };
 
 export const stashDrop = async (tabId: string, index: number): Promise<void> => {
-  await invoke<void>('stash_drop', { tabId, index });
+  await corvus<void>('stash_drop', { tab_id: tabId, index });
   invalidateTabCache(tabId);
 };
 
 export const stashRename = async (tabId: string, index: number, newMessage: string): Promise<StashEntry> => {
-  const entry = await invoke<StashEntry>('stash_rename', { tabId, index, newMessage });
+  const entry = await corvus<StashEntry>('stash_rename', { tab_id: tabId, index, new_message: newMessage });
   invalidateTabCache(tabId);
   return entry;
 };

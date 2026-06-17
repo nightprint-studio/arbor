@@ -147,7 +147,9 @@ dependencies = [
  "arbor-plugin-marketplace",
  "arbor-plugin-types",
  "arbor-process-ext",
+ "arbor-rpc",
  "arbor-scheduler",
+ "arbor-shell-common",
  "async-trait",
  "base64 0.22.1",
  "chrono",
@@ -438,6 +440,24 @@ dependencies = [
 [[package]]
 name = "arbor-process-ext"
 version = "0.3.0"
+
+[[package]]
+name = "arbor-rpc"
+version = "0.3.0"
+dependencies = [
+ "arbor-rpc-macros",
+ "inventory",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "arbor-rpc-macros"
+version = "0.3.0"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
+]
 
 [[package]]
 name = "arbor-scheduler"

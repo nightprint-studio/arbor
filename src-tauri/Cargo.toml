@@ -63,6 +63,8 @@ corvus-git-provider-gitlab = { path = "../crates/corvus/git-provider/gitlab" }
 corvus-pipeline-api = { path = "../crates/corvus/pipeline/api" }
 corvus-pipeline-core = { path = "../crates/corvus/pipeline/core" }
 arbor-ipc         = { path = "../crates/foundation/ipc" }
+arbor-shell-common = { path = "../crates/foundation/shell-common" }
+arbor-rpc         = { path = "../crates/foundation/rpc" }
 arbor-feedback    = { path = "../crates/arbor-feedback" }
 arbor-cloud       = { path = "../crates/arbor-cloud" }
 arbor-auth        = { path = "../crates/arbor-auth" }

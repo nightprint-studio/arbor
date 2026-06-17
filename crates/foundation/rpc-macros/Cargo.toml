@@ -1,0 +1,15 @@
+[package]
+name         = "arbor-rpc-macros"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Proc-macro for arbor-rpc: `#[handler(\"name\")]` reads a backend handler's signature and generates its JSON-arg decode + inventory registration. Re-exported through `arbor-rpc` — depend on that, not on this crate directly."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn   = { version = "2", features = ["full"] }
+quote = "1"

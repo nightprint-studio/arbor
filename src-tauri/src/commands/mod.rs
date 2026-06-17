@@ -4,7 +4,7 @@ pub mod diff_commands;
 pub mod stage_commands;
 pub mod branch_commands;
 pub mod remote_commands;
-pub mod stash_commands;
+pub mod rpc_commands;
 pub mod reset_commands;
 pub mod rebase_commands;
 pub mod search_commands;

@@ -40,6 +40,7 @@ mod properties_studio;
 mod studio;
 mod cloud;
 mod marketplace;
+mod ipc;
 
 use crate::error::{AppError, Result};
 use crate::git::repo::RepoManager;
@@ -62,6 +63,7 @@ use crate::cloud::{CloudCancellations, CloudPendingOps};
 // crate — see `cloud/mod.rs` for the layout / Phase A vs Phase B split.
 use corvus_brp::prelude::BrpRegistry;
 use arbor_plugin_marketplace::prelude::MarketplaceRegistry;
+use arbor_shell_common::prelude::Router;
 use std::sync::OnceLock;
 use arbor_scheduler::prelude::Scheduler;
 
@@ -209,6 +211,14 @@ pub struct AppState {
     /// because `AppState::new()` runs before the runtime is available).
     /// Read via [`AppState::scheduler`].
     pub scheduler: Arc<OnceLock<Arc<Scheduler>>>,
+    /// Model-D IPC router (M3 Asse B). Maps a FE `invoke` to the right product
+    /// backend over `arbor-ipc`. Today it fronts an in-process `LoopbackBroker`
+    /// (one process); the same router will front a pipe/socket-backed client
+    /// once the backends split out. Filled inside `setup()` (it captures the
+    /// `AppHandle` the loopback dispatch needs, which `AppState::new()` predates)
+    /// — an `OnceLock` like [`scheduler`](Self::scheduler). Read via
+    /// [`AppState::router`].
+    pub router: Arc<OnceLock<Arc<Router>>>,
 }
 
 impl AppState {
@@ -406,6 +416,7 @@ impl AppState {
             boot_progress:          Arc::new(Mutex::new(None)),
             frontend_ready:         Arc::new((Mutex::new(false), Condvar::new())),
             scheduler:              Arc::new(OnceLock::new()),
+            router:                 Arc::new(OnceLock::new()),
         }
     }
 
@@ -415,6 +426,14 @@ impl AppState {
     /// than panic.
     pub fn scheduler(&self) -> Option<Arc<Scheduler>> {
         self.scheduler.get().cloned()
+    }
+
+    /// The Model-D IPC router, once `setup()` has built it. Returns `None`
+    /// during the brief window between `AppState::new()` and the router being
+    /// wired in — commands only route after `setup()` returns, so in practice
+    /// every command sees `Some`.
+    pub fn router(&self) -> Option<Arc<Router>> {
+        self.router.get().cloned()
     }
 }
 
@@ -506,6 +525,17 @@ pub fn run() {
             // here because commands only route once `Builder::run()` enters
             // its event loop, which happens after `setup()` returns.
             crate::cloud::install(&app.handle());
+
+            // Build the Model-D IPC router (M3 Asse B) and publish it into
+            // AppState. Today it fronts an in-process `LoopbackBroker` capturing
+            // this `AppHandle`; the same router will front a pipe/socket client
+            // once the product backends split out. Must run before any command
+            // routes — safe here because commands only fire once `Builder::run()`
+            // enters its event loop, after `setup()` returns.
+            {
+                let router = crate::ipc::build_router(app.handle());
+                let _ = app.state::<AppState>().router.set(std::sync::Arc::new(router));
+            }
 
             // Register the configured OS-global File-Explorer shortcut (opt-in;
             // no-op when disabled or unset). The press handler is wired on the
@@ -959,18 +989,13 @@ pub fn run() {
             commands::remote_commands::fetch_remote,
             commands::remote_commands::push_branch,
             commands::remote_commands::pull_branch,
-            // Stash
-            commands::stash_commands::list_stashes,
-            commands::stash_commands::list_graph_stash_refs,
-            commands::stash_commands::stash_save,
-            commands::stash_commands::stash_apply,
-            commands::stash_commands::stash_pop,
-            commands::stash_commands::stash_drop,
-            commands::stash_commands::stash_rename,
-            commands::stash_commands::abort_stash_apply,
-            commands::stash_commands::force_stash_apply,
-            commands::stash_commands::get_stash_file_content,
-            commands::stash_commands::write_workdir_file,
+            // Generic Model-D IPC entry point — the FE forwards every product
+            // command here as (program, method, params); the shell router
+            // dispatches to the right backend. The `stash` domain routes through
+            // here (handlers in crate::ipc::corvus::stash); the rest of the
+            // commands below are still inline #[tauri::command]s, migrating
+            // domain by domain. See crate::ipc.
+            commands::rpc_commands::rpc,
             // Reset / Tags
             commands::reset_commands::reset_to_commit,
             commands::reset_commands::create_tag,

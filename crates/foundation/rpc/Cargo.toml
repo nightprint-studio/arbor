@@ -1,0 +1,14 @@
+[package]
+name         = "arbor-rpc"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Model-D backend dispatch: a self-registering handler registry. `#[handler(\"name\")]` (re-exported from arbor-rpc-macros) annotates a `fn(&Ctx, args…) -> Result` and it shows up in `registry()` with no central list — the product-agnostic core every `*-be` shares."
+
+[dependencies]
+arbor-rpc-macros = { path = "../rpc-macros" }
+inventory   = "0.3"
+serde       = { workspace = true }
+serde_json  = { workspace = true }
