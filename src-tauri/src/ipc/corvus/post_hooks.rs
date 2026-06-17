@@ -57,6 +57,50 @@ pub fn fire(state: &AppState, program: &str, method: &str, params: &Value, resul
                 json!({ "tab_id": params.get("tab_id"), "index": params.get("index"), "drop": true }),
             );
         }
+
+        // ── gitflow ── all fire-and-forget. *_start carry the resolved
+        // base_branch from the result; *_finish omit it (matches the original
+        // inline payloads). Both init methods fire on_flow_init with {tab_id}.
+        "gitflow_init" | "gitflow_init_create_main" => {
+            state.fire_hook("on_flow_init", json!({ "tab_id": params.get("tab_id") }));
+        }
+        "gitflow_feature_start" => {
+            state.fire_hook("on_flow_feature_start", json!({
+                "tab_id": params.get("tab_id"),
+                "name": params.get("name"),
+                "base_branch": result.get("base_branch"),
+            }));
+        }
+        "gitflow_feature_finish" => {
+            state.fire_hook("on_flow_feature_finish", json!({
+                "tab_id": params.get("tab_id"), "name": params.get("name"),
+            }));
+        }
+        "gitflow_release_start" => {
+            state.fire_hook("on_flow_release_start", json!({
+                "tab_id": params.get("tab_id"),
+                "version": params.get("version"),
+                "base_branch": result.get("base_branch"),
+            }));
+        }
+        "gitflow_release_finish" => {
+            state.fire_hook("on_flow_release_finish", json!({
+                "tab_id": params.get("tab_id"), "version": params.get("version"),
+            }));
+        }
+        "gitflow_hotfix_start" => {
+            state.fire_hook("on_flow_hotfix_start", json!({
+                "tab_id": params.get("tab_id"),
+                "name": params.get("name"),
+                "base_branch": result.get("base_branch"),
+            }));
+        }
+        "gitflow_hotfix_finish" => {
+            state.fire_hook("on_flow_hotfix_finish", json!({
+                "tab_id": params.get("tab_id"), "name": params.get("name"),
+            }));
+        }
+
         _ => {}
     }
 }
