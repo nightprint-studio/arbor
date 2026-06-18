@@ -59,8 +59,3 @@ export const getTerminalsConfig = () =>
 
 export const setTerminalsConfig = (config: TerminalsConfig) =>
   platform<void>('set_terminals_config', { config });
-
-/** Fire shell detection as a non-cancellable background job.
- *  Returns the job_id. Results arrive via `arbor://shell-detection-done`. */
-export const startShellDetection = () =>
-  platform<string>('start_shell_detection');

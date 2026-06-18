@@ -37,8 +37,11 @@ use crate::error::{AppError, Result};
 use crate::git::diff::BlameLine;
 use crate::git::encoding::decode_bytes;
 
-/// Progress tick streamed to the frontend over a Tauri `ipc::Channel` while the
-/// blame walk runs.  `done` counts final-file lines attributed so far out of
+/// Progress tick streamed to the frontend over the streaming seam (one
+/// `arbor://blame-stream-chunk` event per tick) while the blame walk runs.
+/// The producer here is agnostic to the egress: `run_incremental_blame` just
+/// invokes an `Fn(BlameProgress)` callback, which the handler backs with
+/// `Stream::chunk`.  `done` counts final-file lines attributed so far out of
 /// `total`; the `current_*` fields describe the commit the walk is on (so the
 /// spinner can show "risalendo la storia").
 #[derive(Debug, Clone, serde::Serialize)]

@@ -13,7 +13,10 @@ import { invoke } from '@tauri-apps/api/core';
  * camelCase→snake_case conversion only applies to a command's direct args, not
  * to a nested JSON payload).
  */
-export function rpc<R>(program: string, method: string, params: Record<string, unknown> = {}): Promise<R> {
+/** The backend product labels the router dispatches to. */
+export type Program = 'corvus' | 'platform' | 'studio';
+
+export function rpc<R>(program: Program, method: string, params: Record<string, unknown> = {}): Promise<R> {
   return invoke<R>('rpc', { program, method, params });
 }
 

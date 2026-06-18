@@ -29,6 +29,7 @@ pub mod plugin_templates;
 pub mod post_hooks;
 pub mod scheduler;
 pub mod session;
+pub mod stream;
 pub mod terminal;
 pub mod theme;
 pub mod workspace;

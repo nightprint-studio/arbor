@@ -1,12 +1,13 @@
 import { untrack } from 'svelte';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { DiffFile } from '../types/git';
 import type { DiffConfig, DiffMode, DiffAlgorithm, FileListView } from '../types/config';
 import { getDiffConfig, setDiffConfig } from '$lib/ipc/config';
-import { getCommitFileDiff, getCommitsRangeFileDiff } from '$lib/ipc/diff';
+import { getCommitFileDiff, getCommitsRangeFileDiff, workdirDiffStreamArgs } from '$lib/ipc/diff';
+import { startStream, type StreamHandle } from '$lib/ipc/stream';
 
+// Streaming-seam payloads (`docs/streaming-seam.md`). Every event also carries
+// the `{ stream_id, seq }` envelope; `stream_id` is the job_id of the request.
 type StreamStartedPayload = {
-  job_id: string;
   tab_id: string;
   staged: boolean;
   total_files: number;
@@ -14,15 +15,11 @@ type StreamStartedPayload = {
 };
 
 type StreamFilePayload = {
-  job_id: string;
   tab_id: string;
   index: number;
   total: number;
   file: DiffFile;
 };
-
-type StreamDonePayload = { job_id: string; tab_id: string };
-type StreamErrorPayload = { job_id: string; tab_id: string; error: string };
 
 const DEFAULT_CONFIG: DiffConfig = {
   algorithm:        'myers',
@@ -52,9 +49,13 @@ function createDiffStore() {
   let totalExpected = $state(0);
   /// Number of fully-parsed files received so far (for "parsed 12/34" spinner).
   let parsedCount = $state(0);
-  /// The job_id of the in-flight streaming request.  Used to ignore stale events
-  /// when the user triggers a new load before the previous one finishes.
+  /// The stream_id (== job_id) of the in-flight streaming request.  Used to
+  /// ignore stale events when the user triggers a new load before the previous
+  /// one finishes.
   let activeJobId = $state<string | null>(null);
+  /// The in-flight stream's listener handle, disposed before starting a new
+  /// load and on `clear()` so listeners don't leak across requests.
+  let activeStream: StreamHandle | null = null;
 
   // ── DiffConfig fields (all persisted via the backend config.toml) ────────
   // Defaults render immediately on first paint; disk values overwrite once
@@ -303,6 +304,8 @@ function createDiffStore() {
   }
 
   function clear() {
+    activeStream?.dispose();
+    activeStream = null;
     files = [];
     selectedFile = null;
     isLoading = false;
@@ -344,7 +347,7 @@ function createDiffStore() {
   }
 
   /// Record the path the caller wants selected once the next streaming load's
-  /// metadata arrives.  Safe to call before invoking `getWorkdirDiffStream`.
+  /// metadata arrives.  Safe to call before `loadWorkdirDiffStream`.
   function setPendingSelection(path: string | null) {
     pendingSelection = path;
   }
@@ -388,22 +391,29 @@ function createDiffStore() {
     pendingPaths = new Set();
   }
 
-  /// Register the Tauri event listeners.  Returns an unsubscribe function
-  /// bundling the three individual listeners so callers can clean up on destroy.
-  async function setupListeners(): Promise<UnlistenFn> {
-    const unsubStarted = await listen<StreamStartedPayload>('arbor://diff-stream-started', (ev) => {
-      beginStream(ev.payload.job_id, ev.payload.files);
-    });
-    const unsubFile = await listen<StreamFilePayload>('arbor://diff-stream-file', (ev) => {
-      applyStreamFile(ev.payload.job_id, ev.payload.file);
-    });
-    const unsubDone = await listen<StreamDonePayload>('arbor://diff-stream-done', (ev) => {
-      endStream(ev.payload.job_id);
-    });
-    const unsubErr = await listen<StreamErrorPayload>('arbor://diff-stream-error', (ev) => {
-      failStream(ev.payload.job_id, ev.payload.error);
-    });
-    return () => { unsubStarted(); unsubFile(); unsubDone(); unsubErr(); };
+  /// Start a streaming workdir-diff load via the standardized seam. Subscribes
+  /// to `arbor://diff-stream-*` (filtered by the minted stream_id) BEFORE the
+  /// command runs, so a fast synchronous `started` can't outrun the listeners.
+  /// Disposes any previous in-flight stream first so listeners never leak.
+  /// Resolves once the command returns the job_id (events keep arriving after).
+  async function loadWorkdirDiffStream(tabId: string, staged: boolean): Promise<void> {
+    activeStream?.dispose();
+    activeStream = null;
+    const handle = await startStream<StreamFilePayload>(
+      'corvus',
+      'arbor://diff-stream',
+      { cmd: 'get_workdir_diff_stream', args: workdirDiffStreamArgs(tabId, staged) },
+      {
+        onStarted: (p) => {
+          const s = p as StreamStartedPayload & { stream_id: string };
+          beginStream(s.stream_id, s.files);
+        },
+        onChunk:   (p) => applyStreamFile(p.stream_id, p.file),
+        onDone:    (p) => { endStream(p.stream_id); activeStream?.dispose(); activeStream = null; },
+        onError:   (e, p) => { failStream(p.stream_id, e); activeStream?.dispose(); activeStream = null; },
+      },
+    );
+    activeStream = handle;
   }
 
   return {
@@ -445,7 +455,7 @@ function createDiffStore() {
     endStream,
     failStream,
     setPendingSelection,
-    setupListeners,
+    loadWorkdirDiffStream,
   };
 }
 

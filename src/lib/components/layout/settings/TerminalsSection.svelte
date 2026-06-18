@@ -5,7 +5,7 @@
   } from 'lucide-svelte';
   import { terminalStore } from '$lib/stores/terminal.svelte';
   import {
-    getTerminalsConfig, setTerminalsConfig, startShellDetection,
+    getTerminalsConfig, setTerminalsConfig,
   } from '$lib/ipc/terminal';
   import { uiStore } from '$lib/stores/ui.svelte';
   import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
@@ -53,7 +53,7 @@
   async function runDetection() {
     detecting = true;
     try {
-      await startShellDetection();
+      await terminalStore.detectShells();
     } catch { /* ignore */ } finally {
       detecting = false;
     }
@@ -81,7 +81,7 @@
       terminalStore.setConfig(config);
       if (pathsChanged) {
         savedPathOverrides = { ...config.path_overrides };
-        await startShellDetection();
+        await terminalStore.detectShells();
       }
       uiStore.showToast('Terminal settings saved', 'success');
     } catch (e) {

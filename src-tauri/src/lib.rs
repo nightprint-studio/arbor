@@ -183,6 +183,10 @@ pub struct AppState {
     /// flag before falling through. Earmarked to be deleted alongside the
     /// rest of the cloud-storage host code when WASM lands.
     pub cloud_cancellations: Arc<CloudCancellations>,
+    /// Generic streaming-seam cancellation registry (stream_id → cancel token),
+    /// shared via `Arc` so a producer's spawned task can remove its entry on
+    /// completion. The generic `cancel_stream` handler flips a token here.
+    pub streams: Arc<crate::ipc::stream_registry::StreamRegistry>,
     /// stream_id — JobRegistry job_id for `download_many` calls with
     /// `keep_open=true` (chunk-merge flow). `cloud_report_done` reads +
     /// removes the entry to finalize the job once the merge phase ends.
@@ -481,6 +485,7 @@ impl AppState {
                 Arc::new(reg)
             },
             cloud_cancellations:    Arc::new(Mutex::new(HashMap::new())),
+            streams:                Arc::new(crate::ipc::stream_registry::StreamRegistry::default()),
             cloud_pending_ops:      Arc::new(Mutex::new(HashMap::new())),
             cloud_host:             Arc::new(std::sync::OnceLock::new()),
             brp:                    Mutex::new(BrpRegistry::default()),
@@ -1017,7 +1022,6 @@ pub fn run() {
             commands::repo_commands::clone_repo,
             // Graph (read ops migrated to corvus; streaming/job ones deferred)
             // Diff (read ops migrated to corvus; streaming ones deferred)
-            commands::diff_commands::get_file_blame_streaming,
             // Stage
             // Branches
             commands::branch_commands::delete_branch,

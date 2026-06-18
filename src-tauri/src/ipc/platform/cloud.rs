@@ -335,15 +335,20 @@ async fn cloud_list_stream(
         )?;
         map.insert(stream_id.clone(), cancel.clone());
     }
+    // Mirror the token into the generic stream registry so the seam's
+    // `cancel_stream` handler can cancel this stream by id too.
+    state.streams.insert(&stream_id, cancel.clone());
     let prefix          = prefix.unwrap_or_default();
     let sid             = stream_id.clone();
     let host            = get_host!(state);
     let state_cancel    = state.cloud_cancellations.clone();
+    let streams         = state.streams.clone();
     tauri::async_runtime::spawn(async move {
         let _ = cloud::ops::list_stream(host, conn, bucket, prefix, sid.clone(), cap, cancel).await;
         if let Ok(mut map) = state_cancel.lock() {
             map.remove(&sid);
         }
+        streams.remove(&sid);
     });
     Ok(stream_id)
 }
@@ -370,15 +375,19 @@ async fn cloud_search_stream(
         )?;
         map.insert(stream_id.clone(), cancel.clone());
     }
+    // Mirror the token into the generic stream registry (see cloud_list_stream).
+    state.streams.insert(&stream_id, cancel.clone());
     let root            = root_prefix.unwrap_or_default();
     let sid             = stream_id.clone();
     let host            = get_host!(state);
     let state_cancel    = state.cloud_cancellations.clone();
+    let streams         = state.streams.clone();
     tauri::async_runtime::spawn(async move {
         let _ = cloud::ops::search_stream(host, conn, bucket, root, pattern, sid.clone(), cancel).await;
         if let Ok(mut map) = state_cancel.lock() {
             map.remove(&sid);
         }
+        streams.remove(&sid);
     });
     Ok(stream_id)
 }

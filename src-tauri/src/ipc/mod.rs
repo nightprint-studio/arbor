@@ -35,6 +35,7 @@ pub mod corvus;
 pub mod event_sink;
 pub mod platform;
 pub mod split_broker;
+pub mod stream_registry;
 pub mod studio;
 
 use std::any::Any;

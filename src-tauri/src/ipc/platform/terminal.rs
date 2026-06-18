@@ -20,11 +20,14 @@
 //!
 //! No hooks fire in this domain.
 //!
-//! `start_shell_detection` spawns a background detection job that emits
-//! `arbor://job-*` and `arbor://shell-detection-done` from inside the thread.
-//! Reached through the generic broker it holds only `&AppState`, so the thread
-//! captures the **event sink** (`Arc<dyn EventSink>`) plus an `Arc` to the job
-//! registry instead of an `AppHandle` — byte-identical topics and payloads.
+//! `start_shell_detection` spawns a background detection job. It emits the
+//! standard `arbor://job-*` events for the Jobs overlay and delivers the
+//! detection result over the standardized [`Stream`] seam on base
+//! `arbor://shell-detection` (`stream_id == job_id`): the final shell list rides
+//! the `-done` event under `{ shells: [...] }` with the `{ stream_id, seq }`
+//! envelope. Reached through the generic broker it holds only `&AppState`, so
+//! the thread captures the **event sink** (`Arc<dyn EventSink>`) plus an `Arc`
+//! to the job registry instead of an `AppHandle`.
 //!
 //! NOT migrated (stays inline in `terminal_commands`, handled by a later
 //! emit/seam pass):
@@ -33,7 +36,7 @@
 
 use std::sync::Arc;
 
-use arbor_ipc::prelude::EventSink;
+use arbor_ipc::prelude::{EventSink, Stream};
 
 use crate::error::AppError;
 use crate::ipc::platform;
@@ -181,11 +184,13 @@ fn set_terminals_config(
 // ---------------------------------------------------------------------------
 
 /// Kick off shell detection as a non-cancellable background job — mirrors
-/// `start_ide_detection`.  Results arrive via `arbor://shell-detection-done`.
+/// `start_ide_detection`.  The detected shell list arrives via the streaming
+/// seam: `arbor://shell-detection-done` carries `{ shells: [...] }` under the
+/// `{ stream_id, seq }` envelope (`stream_id == job_id`).
 ///
 /// Returns the job-id immediately; the detection runs in a background thread
-/// which emits `arbor://job-output`, `arbor://job-done` and
-/// `arbor://shell-detection-done` through the captured event sink.
+/// which emits `arbor://job-output`, `arbor://job-done` and the
+/// `arbor://shell-detection-*` lifecycle through the captured event sink.
 #[platform::handler(program = "platform")]
 fn start_shell_detection(state: &AppState) -> Result<String, AppError> {
     use crate::jobs::{JobInfo, JobRegistry, JobStatus};
@@ -228,9 +233,14 @@ fn start_shell_detection(state: &AppState) -> Result<String, AppError> {
         "category":    "System",
     }));
 
-    let jid     = job_id.clone();
-    let sink_bg = Arc::clone(&sink);
-    let jobs_bg = Arc::clone(&jobs);
+    // `stream_id == job_id`: one identity for the Jobs entry and the stream.
+    let stream = Stream::new(Arc::clone(&sink), "arbor://shell-detection", job_id.clone());
+    stream.started(serde_json::json!({}));
+
+    let jid       = job_id.clone();
+    let sink_bg   = Arc::clone(&sink);
+    let jobs_bg   = Arc::clone(&jobs);
+    let stream_bg = stream.clone();
     let _thread = std::thread::Builder::new()
         .name("arbor-shell-detection".into())
         .spawn(move || {
@@ -261,7 +271,9 @@ fn start_shell_detection(state: &AppState) -> Result<String, AppError> {
                 "success":   true,
                 "exit_code": 0,
             }));
-            sink_bg.emit("arbor://shell-detection-done", serde_json::json!(&results));
+            // The detected shell list rides the standardized terminal `-done`
+            // event under `{ shells }` + the `{ stream_id, seq }` envelope.
+            stream_bg.done(serde_json::json!({ "shells": &results }));
         });
 
     Ok(job_id)

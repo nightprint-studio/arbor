@@ -20,7 +20,7 @@
   import { getStatus, stageFile, unstageFile, stageAll, unstageAll, discardFile, discardAll, stagePatch } from '$lib/ipc/stage';
   import { stashSave } from '$lib/ipc/branch';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
-  import { getWorkdirDiff, getWorkdirDiffStream } from '$lib/ipc/diff';
+  import { getWorkdirDiff } from '$lib/ipc/diff';
   import { tooltip } from '$lib/actions/tooltip';
 
   const tab    = $derived(tabsStore.activeTab);
@@ -307,10 +307,10 @@
     diffStore.setPendingSelection(path);
     diffStore.setLoading(true);
     try {
-      await getWorkdirDiffStream(tab.id, staged);
+      await diffStore.loadWorkdirDiffStream(tab.id, staged);
     } catch {
-      // On failure the backend emits diff-stream-error which clears loading.
-      // Set loading to false defensively in case the error never surfaced.
+      // On failure the backend emits arbor://diff-stream-error which clears
+      // loading. Set loading to false defensively in case it never surfaced.
       diffStore.setLoading(false);
     }
   }

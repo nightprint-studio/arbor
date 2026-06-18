@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { corvus } from '$lib/ipc/rpc';
+import { platform, rpc, type Program } from '$lib/ipc/rpc';
 
 /**
  * Frontend half of the streaming seam (`docs/streaming-seam.md`).
@@ -92,6 +92,7 @@ export function subscribeStream<Chunk>(
  * event is dropped even if `started` fires before `invoke` returns.
  */
 export async function startStream<Chunk>(
+  program:    Program,
   base:       string,
   invokeArgs: { cmd: string; args?: Record<string, unknown> },
   handlers:   StreamHandlers<Chunk>,
@@ -133,7 +134,7 @@ export async function startStream<Chunk>(
   attach('done');
   attach('error');
 
-  const id = await corvus<string>(invokeArgs.cmd, invokeArgs.args ?? {});
+  const id = await rpc<string>(program, invokeArgs.cmd, invokeArgs.args ?? {});
   streamId = id;
 
   // Replay anything that arrived for this id before we knew it.
@@ -150,7 +151,9 @@ export async function startStream<Chunk>(
 
   return {
     streamId: id,
-    cancel: () => corvus<void>('cancel_stream', { stream_id: id }),
+    // `cancel_stream` lives in the platform backend; its registry is global, so
+    // it cancels a stream from any producing program by id.
+    cancel: () => platform<void>('cancel_stream', { stream_id: id }),
     dispose,
   };
 }

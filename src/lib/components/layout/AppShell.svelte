@@ -162,7 +162,6 @@
   import { cacheStore } from '$lib/stores/cache.svelte';
   import { worktreeStore } from '$lib/stores/worktree.svelte';
   import { startIdeDetection } from '$lib/ipc/worktree';
-  import { startShellDetection } from '$lib/ipc/terminal';
   import { issuesStore, type IssueProvider } from '$lib/stores/issues.svelte';
   import { linearGetIssue, jiraGetIssue } from '$lib/ipc/issues';
   import { matchesBinding } from '$lib/utils/keybindings';
@@ -648,11 +647,11 @@
     startIdeDetection().catch(() => {/* ignore if backend unavailable during HMR */});
 
     // Same flow for the integrated terminal: load catalogue + config from
-    // disk, register the listener, then fire detection.
+    // disk, then fire detection over the streaming seam (subscribe-before-invoke
+    // is handled inside `detectShells`).
     terminalStore.loadCatalogue();
     terminalStore.loadConfig();
-    await terminalStore.setupDetectionListener();
-    startShellDetection().catch(() => {/* HMR */});
+    terminalStore.detectShells().catch(() => {/* HMR */});
   });
 
   // Keep cacheStore in sync with the active tab so the scheduler and
@@ -1599,8 +1598,9 @@
     // Stats events (result of background compute_repo_stats)
     const unlistenStats = statsStore.setupListeners();
 
-    // Diff streaming events (progressive workdir diff loader)
-    const unlistenDiffStreamPromise = diffStore.setupListeners();
+    // Diff streaming (progressive workdir diff loader) now drives its own
+    // per-request listeners through the streaming seam (`startStream`), so
+    // there are no global listeners to register here.
 
     // Activity bar config — load persisted order/visibility
     activityBarConfigStore.load();
@@ -1615,7 +1615,6 @@
       unlistenPipelines();
       unlistenLinks();
       unlistenStats();
-      unlistenDiffStreamPromise.then(fn => fn());
     };
   });
 

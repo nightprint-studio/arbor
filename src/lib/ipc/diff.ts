@@ -1,5 +1,5 @@
-import { invoke, Channel } from '@tauri-apps/api/core';
 import { corvus } from './rpc';
+import { subscribeStream } from './stream';
 import type { BlameLine, BlameProgress, DiffFile } from '../types/git';
 import { diffStore } from '$lib/stores/diff.svelte';
 import { tabsStore } from '$lib/stores/tabs.svelte';
@@ -85,17 +85,14 @@ export const getWorkdirDiff = (tabId: string, staged: boolean) =>
     encoding_overrides: overridesForTab(tabId),
   });
 
-/// Start a streaming workdir diff.  Returns a job_id.  The backend emits:
-///   arbor://diff-stream-started  { job_id, tab_id, staged, total_files, files }
-///   arbor://diff-stream-file     { job_id, tab_id, index, total, file }  (per file)
-///   arbor://diff-stream-done     { job_id, tab_id }
-///   arbor://diff-stream-error    { job_id, tab_id, error }
-export const getWorkdirDiffStream = (tabId: string, staged: boolean) =>
-  corvus<string>('get_workdir_diff_stream', {
-    tab_id: tabId, staged,
-    context_lines: getContextLines(), diff_algo: getDiffAlgo(),
-    encoding_overrides: overridesForTab(tabId),
-  });
+/// Build the argument object for the streaming workdir-diff command.  The diff
+/// store drives the stream itself via `startStream('corvus', 'arbor://diff-stream',
+/// { cmd: 'get_workdir_diff_stream', args: workdirDiffStreamArgs(...) }, ...)`.
+export const workdirDiffStreamArgs = (tabId: string, staged: boolean) => ({
+  tab_id: tabId, staged,
+  context_lines: getContextLines(), diff_algo: getDiffAlgo(),
+  encoding_overrides: overridesForTab(tabId),
+});
 
 export const getFileAtCommit = (tabId: string, oid: string, path: string) => {
   const tab = tabsStore.tabs.find(t => t.id === tabId);
@@ -111,15 +108,26 @@ export const getFileBlame = (tabId: string, path: string) =>
  * finishes; `onProgress` fires with a determinate `done/total` tick at each
  * step so the UI can show a real progress bar on large files. Falls back to a
  * single final result (no ticks) on machines without a `git` binary.
+ *
+ * Progress rides the streaming seam (`docs/streaming-seam.md`): we mint a
+ * `stream_id`, subscribe to `arbor://blame-stream-chunk` filtered by it BEFORE
+ * invoking, then await the command which still returns the assembled lines
+ * synchronously. There is no terminal `-done`/`-error` — the promise settling
+ * is the completion signal, so we detach the listeners in `finally`.
  */
 export const getFileBlameStreaming = (
   tabId: string,
   path: string,
   onProgress: (p: BlameProgress) => void,
-) => {
-  const onEvent = new Channel<BlameProgress>();
-  onEvent.onmessage = onProgress;
-  return invoke<BlameLine[]>('get_file_blame_streaming', { tabId, path, onEvent });
+): Promise<BlameLine[]> => {
+  const streamId = crypto.randomUUID();
+  // Subscribe-before-invoke so a fast first tick can't outrun the listener.
+  const sub = subscribeStream<BlameProgress>('arbor://blame-stream', streamId, {
+    onChunk: (p) => onProgress(p),
+  });
+  return corvus<BlameLine[]>('get_file_blame_streaming', {
+    tab_id: tabId, path, stream_id: streamId,
+  }).finally(() => sub.dispose());
 };
 
 export const getBranchDiff = (tabId: string, fromRef: string, toRef: string) =>

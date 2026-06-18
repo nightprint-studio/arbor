@@ -4,7 +4,7 @@ import type {
 import {
   listBuiltinShells, getTerminalsConfig,
 } from '$lib/ipc/terminal';
-import { listen } from '@tauri-apps/api/event';
+import { startStream } from '$lib/ipc/stream';
 
 // ---------------------------------------------------------------------------
 // Terminal store — open tabs + shell catalogue + detection state.
@@ -72,11 +72,40 @@ function createTerminalStore() {
     try { config = await getTerminalsConfig(); } catch { /* keep null */ }
   }
 
-  async function setupDetectionListener() {
-    return listen<DetectedShell[]>('arbor://shell-detection-done', (event) => {
-      detectedShells = event.payload;
-      detectionDone  = true;
-    });
+  /// Kick off shell detection over the streaming seam (`docs/streaming-seam.md`).
+  /// `startStream` subscribes to `arbor://shell-detection-*` (filtered by the
+  /// minted stream_id) BEFORE invoking `start_shell_detection`, so the `-done`
+  /// event carrying the result can't outrun the listener. The detected shell
+  /// list arrives under `{ shells }` on `-done`; per-shell progress lines still
+  /// ride the standard `arbor://job-*` events into the Jobs overlay.
+  /// The previous in-flight detection (if any) is disposed before starting a
+  /// new one, and listeners are detached once `-done` fires.
+  let activeDetection: { dispose: () => void } | null = null;
+
+  async function detectShells(): Promise<void> {
+    activeDetection?.dispose();
+    activeDetection = null;
+    // `finished` guards the replay-before-assign window: if `-done` fires
+    // synchronously inside `startStream` (before `handle` is assigned), we still
+    // tear the listeners down once the handle resolves below.
+    let finished = false;
+    const settle = () => { finished = true; activeDetection?.dispose(); activeDetection = null; };
+    const handle = await startStream<{ shells: DetectedShell[] }>(
+      'platform',
+      'arbor://shell-detection',
+      { cmd: 'start_shell_detection' },
+      {
+        onChunk: () => {},
+        onDone:  (p) => {
+          detectedShells = (p.shells as DetectedShell[] | undefined) ?? [];
+          detectionDone  = true;
+          settle();
+        },
+        onError: settle,
+      },
+    );
+    if (finished) handle.dispose();
+    else activeDetection = handle;
   }
 
   /**
@@ -111,7 +140,7 @@ function createTerminalStore() {
     get detectionDone()  { return detectionDone;  },
     get config()         { return config;         },
     addTab, removeTab, setActive, renameTab, clear,
-    loadCatalogue, loadConfig, setupDetectionListener, pickerOptions,
+    loadCatalogue, loadConfig, detectShells, pickerOptions,
     setConfig(c: TerminalsConfig)        { config = c; },
     setDetectedShells(d: DetectedShell[]) { detectedShells = d; detectionDone = true; },
   };
