@@ -8,10 +8,11 @@
 //!
 //! Two of the original commands fired fire-and-forget hooks around the git call
 //! (`start_rebase` → `on_rebase_start`, `rebase_abort` → `on_rebase_abort`).
-//! Those hooks are NOT fired here; the broker re-fires them post-dispatch (see
-//! the integration checklist / `post_hooks`).
+//! Those hooks fire inline here, after the repo-lock scope is dropped — Lua
+//! hooks call git ops, so firing under a held `lock_repos()` guard would deadlock.
 
 use corvus_git::rebase::{RebaseState, RebaseTodoEntry};
+use serde_json::json;
 
 use crate::error::AppError;
 use crate::ipc::corvus;
@@ -40,12 +41,19 @@ fn start_rebase(
     base: String,
     todo: Vec<RebaseTodoEntry>,
 ) -> Result<(), AppError> {
-    // NOTE: the original command fired `on_rebase_start` (with `action_count =
-    // todo.len()`) after this block; that hook is now re-fired by the broker
-    // post-dispatch, so it is intentionally omitted here.
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(corvus_git::rebase::start_interactive_rebase(&git(), &repo.path, &base, &todo)?)
+    // Brief-lock to clone the path, then drop the guard before firing the hook:
+    // Lua hooks call git ops, and firing while `lock_repos()` is held deadlocks.
+    {
+        let mut mgr = state.lock_repos()?;
+        let repo = mgr.get(&tab_id)?;
+        corvus_git::rebase::start_interactive_rebase(&git(), &repo.path, &base, &todo)?;
+    }
+    // Fire `on_rebase_start` inline with first-hand data (action_count = todo.len()).
+    state.fire_hook(
+        "on_rebase_start",
+        json!({ "tab_id": tab_id, "base": base, "action_count": todo.len() }),
+    );
+    Ok(())
 }
 
 #[corvus::handler]
@@ -57,11 +65,16 @@ fn rebase_continue(state: &AppState, tab_id: String) -> Result<(), AppError> {
 
 #[corvus::handler]
 fn rebase_abort(state: &AppState, tab_id: String) -> Result<(), AppError> {
-    // NOTE: the original command fired `on_rebase_abort` after this block; that
-    // hook is now re-fired by the broker post-dispatch, so it is omitted here.
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(corvus_git::rebase::rebase_abort(&git(), &repo.path)?)
+    // Brief-lock to clone the path, then drop the guard before firing the hook:
+    // Lua hooks call git ops, and firing while `lock_repos()` is held deadlocks.
+    {
+        let mut mgr = state.lock_repos()?;
+        let repo = mgr.get(&tab_id)?;
+        corvus_git::rebase::rebase_abort(&git(), &repo.path)?;
+    }
+    // Fire `on_rebase_abort` inline with first-hand data.
+    state.fire_hook("on_rebase_abort", json!({ "tab_id": tab_id }));
+    Ok(())
 }
 
 #[corvus::handler]

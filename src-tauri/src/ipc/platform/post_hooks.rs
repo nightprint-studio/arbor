@@ -1,10 +1,15 @@
 //! Routing-independent post-call plugin hooks for the `platform` backend.
 //!
-//! Mirror of [`crate::ipc::corvus::post_hooks`] for the platform program: a few
-//! platform commands owe a fire-and-forget plugin hook *after* they succeed.
-//! The hook fires here, in the shell's generic `rpc` path, so it runs exactly
-//! once whether the method was served in-process or (eventually) out-of-process
-//! by `platform-be` — the handlers fire none themselves.
+//! A few platform commands owe a fire-and-forget plugin hook *after* they
+//! succeed. The hook fires here, in the shell's generic `rpc` path, so it runs
+//! exactly once whether the method was served in-process or (eventually)
+//! out-of-process — the handlers fire none themselves.
+//!
+//! These are **launcher-level** hooks (`on_theme_changed`, `on_workspace_*`)
+//! whose payload is reconstructable from `(params, result)`. They are the
+//! interim home until they move to the launcher broadcast channel
+//! (`docs/plugin-relocation-inventory.md`, Wave 2). The corvus domain, by
+//! contrast, now fires its hooks inline from the handlers (host co-located).
 
 use serde_json::{json, Value};
 

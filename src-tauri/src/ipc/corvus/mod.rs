@@ -25,7 +25,6 @@ pub mod linked_worktree;
 pub mod merge;
 pub mod missing;
 pub mod notes;
-pub mod post_hooks;
 pub mod rebase;
 pub mod recovery;
 pub mod reflog;

@@ -31,6 +31,8 @@ use crate::commands::branch_commands::{
     repo_id_for_tab, safe_checkout_with_stash, CheckoutResult,
 };
 
+use serde_json::json;
+
 // ---------------------------------------------------------------------------
 // Read-only
 // ---------------------------------------------------------------------------
@@ -129,6 +131,12 @@ fn create_branch(
         let repo = mgr.get(&tab_id)?;
         crate::git::branch::create_branch(repo.inner(), &name, &from_oid)?
     };
+    // Fire inline, after the repos lock scope has dropped (Lua hooks may run git
+    // ops; firing under a held lock would deadlock).
+    state.fire_hook(
+        "on_branch_create",
+        json!({ "tab_id": tab_id, "name": name, "from_oid": from_oid }),
+    );
     Ok(info)
 }
 
@@ -146,6 +154,14 @@ fn delete_remote_branches(
         let failed = crate::git::branch::delete_remote_branches(repo.inner(), &names);
         names.iter().filter(|n| !failed.contains(n)).cloned().collect()
     };
+    // Fire inline, after the repos lock scope has dropped. The post_hooks arm
+    // computed `deleted = names − failed`; that is exactly `deleted_names` here.
+    if !deleted_names.is_empty() {
+        state.fire_hook(
+            "on_branch_delete",
+            json!({ "tab_id": tab_id, "names": deleted_names }),
+        );
+    }
     // Return the failed names (same convention as delete_branches)
     let failed: Vec<String> =
         names.into_iter().filter(|n| !deleted_names.contains(n)).collect();
@@ -170,7 +186,16 @@ fn rename_remote_branch(
             rename_local,
         )?
     };
-    // Fires `on_branch_rename` — now from `post_hooks.rs`, not here.
+    // Fire inline, after the repos lock scope has dropped.
+    state.fire_hook(
+        "on_branch_rename",
+        json!({
+            "tab_id": tab_id,
+            "old_name": old_full_name,
+            "new_name": result.new_full_name,
+            "local_renamed": result.local_renamed,
+        }),
+    );
     Ok(result)
 }
 
@@ -187,6 +212,14 @@ fn delete_branches(
         let repo = mgr.get(&tab_id)?;
         crate::git::branch::delete_branches(repo.inner(), &names)
     };
+    // Fire inline, after the repos lock scope has dropped. `deleted` is the list
+    // of branches actually removed — fire only when non-empty.
+    if !deleted.is_empty() {
+        state.fire_hook(
+            "on_branch_delete",
+            json!({ "tab_id": tab_id, "names": deleted }),
+        );
+    }
     Ok(deleted)
 }
 
@@ -200,9 +233,14 @@ fn delete_branches(
 /// Fires `on_checkout` — now from `post_hooks.rs`, not here.
 #[corvus::handler]
 fn checkout_commit(state: &AppState, tab_id: String, oid: String) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::checkout_commit_detached(repo.inner(), &oid)?;
+    // Scope the repos lock so the guard drops before we fire the hook — Lua
+    // hooks may run git ops and would deadlock under a held lock.
+    {
+        let mut mgr = state.lock_repos()?;
+        let repo = mgr.get(&tab_id)?;
+        crate::git::branch::checkout_commit_detached(repo.inner(), &oid)?;
+    }
+    state.fire_hook("on_checkout", json!({ "tab_id": tab_id, "oid": oid }));
     Ok(())
 }
 
@@ -222,7 +260,12 @@ fn checkout_commit_safe(
         crate::git::branch::checkout_commit_detached(r, &oid_for_checkout)?;
         Ok(None)
     })?;
-    // The `on_checkout` hook (gated on a clean result) now fires from
-    // `post_hooks.rs`, so nothing else to do here.
+    // Fire inline (lock already released inside `safe_checkout_with_stash`).
+    // Gate on a clean result: no stash re-apply error AND no stash conflicts —
+    // the typed equivalents of the post_hooks `clean_checkout(result)` predicate
+    // (`stash_apply_error` is null ⇔ `is_none()`).
+    if result.stash_apply_error.is_none() && result.stash_conflicts.is_empty() {
+        state.fire_hook("on_checkout", json!({ "tab_id": tab_id, "oid": oid }));
+    }
     Ok(result)
 }

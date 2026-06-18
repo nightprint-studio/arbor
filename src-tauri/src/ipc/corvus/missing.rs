@@ -27,6 +27,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::error::AppError;
 use crate::ipc::corvus;
@@ -144,9 +145,20 @@ fn report_repo_missing(
     path:    String,
     reason:  String,
 ) -> Result<Option<String>, AppError> {
-    let _ = (&path, &reason); // forwarded into the hook payload from params
+    // Resolve the display name; the registry guard is a temporary in this
+    // expression and drops at the `;`, so the lock is released before we fire.
     let name = state.lock_repo_registry().ok()
         .and_then(|reg| reg.get(&repo_id).map(|e| e.display_name.clone()));
+
+    // Fire inline with first-hand data (lock already dropped above). Always
+    // fires, matching the post-hook arm; `name` is the resolved Option<String>.
+    state.fire_hook("on_project_missing", json!({
+        "repo_id": repo_id,
+        "path":    path,
+        "name":    &name,
+        "reason":  reason,
+    }));
+
     Ok(name)
 }
 
@@ -243,6 +255,20 @@ fn relocate_repo(
                 "new_path": &new_path,
             }));
         }
+    }
+
+    // Fire inline with first-hand data; no repo lock is held here. Gated on an
+    // actual move — `name` is Some only when the registry entry resolved after
+    // `old_path != new_path` (the same-folder no-op returns early above), which
+    // mirrors the post-hook arm's `result.name.is_some()` gate.
+    if name.is_some() {
+        state.fire_hook("on_project_relocated", json!({
+            "repo_id":    &repo_id,
+            "old_path":   &old_path,
+            "new_path":   &new_path,
+            "name":       &name,
+            "remote_url": &remote_url,
+        }));
     }
 
     Ok(RelocateResult { repo_id, old_path, new_path, validation, name, remote_url })

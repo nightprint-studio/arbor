@@ -99,13 +99,12 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
     Ok(())
 }
 
-/// Forward a now-migrated git command through the generic `corvus` rpc path so
-/// its post-call fire-and-forget plugin hooks fire exactly as for a
-/// user-initiated invocation (the handler itself fires none). Commands that
-/// fire no hook (e.g. `stage_all`) simply get a no-op `post_hooks::fire`.
+/// Forward a now-migrated git command through the generic `corvus` rpc path.
+/// The corvus handler fires its own fire-and-forget plugin hooks **inline**
+/// (the plugin host is co-located with the handler), so nothing is owed here
+/// beyond dispatch — a plugin veto on `commit` surfaces as the dispatch `Err`.
 fn corvus_rpc(state: &AppState, method: &str, params: Value) -> Result<(), AppError> {
-    let result = crate::ipc::dispatch_rpc(state, "corvus", method, params.clone())?;
-    crate::ipc::corvus::post_hooks::fire(state, "corvus", method, &params, &result);
+    crate::ipc::dispatch_rpc(state, "corvus", method, params)?;
     Ok(())
 }
 

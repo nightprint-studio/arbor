@@ -11,14 +11,14 @@
 //! changed.
 //!
 //! The two member mutations (`add_worktree_link_member` /
-//! `remove_worktree_link_member`) used to fire `on_worktree_link_member_added` /
-//! `_removed` inline. Those fire-and-forget hooks now live in `post_hooks.rs`
-//! (the generic `rpc` path), reconstructed from the call params — the handlers
-//! fire no hooks themselves.
+//! `remove_worktree_link_member`) fire `on_worktree_link_member_added` /
+//! `_removed` inline, with first-hand args, **after** the registry lock is
+//! dropped (Lua hooks call git ops; firing under the guard would deadlock).
 
 use std::sync::Arc;
 
 use arbor_ipc::prelude::EventSink;
+use serde_json::json;
 
 use crate::error::AppError;
 use crate::ipc::corvus;
@@ -101,8 +101,8 @@ fn rename_worktree_link(state: &AppState, id: String, name: String) -> Result<()
     Ok(())
 }
 
-/// Fires `on_worktree_link_member_added` ({link_id, repo_id}) — now from
-/// `post_hooks.rs`, not inline.
+/// Fires `on_worktree_link_member_added` ({link_id, repo_id}) inline, after the
+/// registry lock is released.
 #[corvus::handler]
 fn add_worktree_link_member(
     state: &AppState,
@@ -118,11 +118,17 @@ fn add_worktree_link_member(
         linked_worktrees::save(&reg)?;
     }
     emit_changed(&sink);
+    // Lock dropped above; fire the hook with first-hand args so Lua git ops
+    // can't deadlock on the registry guard.
+    state.fire_hook(
+        "on_worktree_link_member_added",
+        json!({ "link_id": link_id, "repo_id": repo_id }),
+    );
     Ok(())
 }
 
-/// Fires `on_worktree_link_member_removed` ({link_id, repo_id}) — now from
-/// `post_hooks.rs`, not inline.
+/// Fires `on_worktree_link_member_removed` ({link_id, repo_id}) inline, after
+/// the registry lock is released.
 #[corvus::handler]
 fn remove_worktree_link_member(
     state: &AppState,
@@ -138,6 +144,12 @@ fn remove_worktree_link_member(
         linked_worktrees::save(&reg)?;
     }
     emit_changed(&sink);
+    // Lock dropped above; fire the hook with first-hand args so Lua git ops
+    // can't deadlock on the registry guard.
+    state.fire_hook(
+        "on_worktree_link_member_removed",
+        json!({ "link_id": link_id, "repo_id": repo_id }),
+    );
     Ok(())
 }
 

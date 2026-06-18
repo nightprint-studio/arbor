@@ -8,15 +8,17 @@
 //!
 //! The pure git work already lives in the reusable shell module
 //! [`crate::git::gitflow`], so handlers delegate to it directly (no crate
-//! extraction). The seven `on_flow_*` lifecycle hooks are fire-and-forget and
-//! are NOT fired here — `corvus::post_hooks` fires them after the call returns
-//! (so they also fire when a method runs out-of-process).
+//! extraction). The `on_flow_*` lifecycle hooks are fire-and-forget and are
+//! fired inline by each handler with first-hand typed data, after the repo
+//! lock scope has been dropped (firing while `lock_repos()` is held would
+//! deadlock, since Lua hooks may call back into git ops).
 
 use crate::config::{app_config, repo_config};
 use crate::error::AppError;
 use crate::git::gitflow::{FlowFinishResult, FlowStartResult, GitFlowConfig, GitFlowStatus};
 use crate::ipc::corvus;
 use crate::AppState;
+use serde_json::json;
 
 // ---------------------------------------------------------------------------
 // Helpers — resolve the effective Git Flow config / workdir for a tab
@@ -123,7 +125,8 @@ fn gitflow_init(state: &AppState, tab_id: String) -> Result<(), AppError> {
         let repo = mgr.get(&tab_id)?;
         crate::git::gitflow::gitflow_init(repo.inner(), &config)?;
     }
-    // `on_flow_init` is fired by `corvus::post_hooks` after the call returns.
+    // Fire inline now that the repo lock scope is dropped.
+    state.fire_hook("on_flow_init", json!({ "tab_id": tab_id }));
     Ok(())
 }
 
@@ -139,7 +142,8 @@ fn gitflow_init_create_main(
         let repo = mgr.get(&tab_id)?;
         crate::git::gitflow::gitflow_init_create_main(repo.inner(), &config, from_initial)?;
     }
-    // `on_flow_init` is fired by `corvus::post_hooks` after the call returns.
+    // Fire inline now that the repo lock scope is dropped.
+    state.fire_hook("on_flow_init", json!({ "tab_id": tab_id }));
     Ok(())
 }
 
@@ -159,8 +163,11 @@ fn gitflow_feature_start(
         let repo = mgr.get(&tab_id)?;
         crate::git::gitflow::feature_start(repo.inner(), &config, &name)?
     };
-    // `on_flow_feature_start` is fired by `corvus::post_hooks` after the call
-    // returns (base_branch comes from the result).
+    // Fire inline now that the repo lock scope is dropped (base_branch from result).
+    state.fire_hook(
+        "on_flow_feature_start",
+        json!({ "tab_id": tab_id, "name": name, "base_branch": result.base_branch }),
+    );
     Ok(result)
 }
 
@@ -177,8 +184,11 @@ fn gitflow_feature_finish(
         let repo = mgr.get(&tab_id)?;
         crate::git::gitflow::feature_finish_or_pr(repo.inner(), &config, &name, force_pr)?
     };
-    // `on_flow_feature_finish` is fired by `corvus::post_hooks` after the call
-    // returns.
+    // Fire inline now that the repo lock scope is dropped.
+    state.fire_hook(
+        "on_flow_feature_finish",
+        json!({ "tab_id": tab_id, "name": name }),
+    );
     Ok(result)
 }
 
@@ -198,8 +208,11 @@ fn gitflow_release_start(
         let repo = mgr.get(&tab_id)?;
         crate::git::gitflow::release_start(repo.inner(), &config, &version)?
     };
-    // `on_flow_release_start` is fired by `corvus::post_hooks` after the call
-    // returns (base_branch comes from the result).
+    // Fire inline now that the repo lock scope is dropped (base_branch from result).
+    state.fire_hook(
+        "on_flow_release_start",
+        json!({ "tab_id": tab_id, "version": version, "base_branch": result.base_branch }),
+    );
     Ok(result)
 }
 
@@ -217,8 +230,11 @@ fn gitflow_release_finish(
         let repo = mgr.get(&tab_id)?;
         crate::git::gitflow::release_finish_or_pr(repo.inner(), &config, &version, &tag_message, force_pr)?
     };
-    // `on_flow_release_finish` is fired by `corvus::post_hooks` after the call
-    // returns.
+    // Fire inline now that the repo lock scope is dropped.
+    state.fire_hook(
+        "on_flow_release_finish",
+        json!({ "tab_id": tab_id, "version": version }),
+    );
     Ok(result)
 }
 
@@ -238,8 +254,11 @@ fn gitflow_hotfix_start(
         let repo = mgr.get(&tab_id)?;
         crate::git::gitflow::hotfix_start(repo.inner(), &config, &name)?
     };
-    // `on_flow_hotfix_start` is fired by `corvus::post_hooks` after the call
-    // returns (base_branch comes from the result).
+    // Fire inline now that the repo lock scope is dropped (base_branch from result).
+    state.fire_hook(
+        "on_flow_hotfix_start",
+        json!({ "tab_id": tab_id, "name": name, "base_branch": result.base_branch }),
+    );
     Ok(result)
 }
 
@@ -257,8 +276,11 @@ fn gitflow_hotfix_finish(
         let repo = mgr.get(&tab_id)?;
         crate::git::gitflow::hotfix_finish_or_pr(repo.inner(), &config, &name, &tag_message, force_pr)?
     };
-    // `on_flow_hotfix_finish` is fired by `corvus::post_hooks` after the call
-    // returns.
+    // Fire inline now that the repo lock scope is dropped.
+    state.fire_hook(
+        "on_flow_hotfix_finish",
+        json!({ "tab_id": tab_id, "name": name }),
+    );
     Ok(result)
 }
 

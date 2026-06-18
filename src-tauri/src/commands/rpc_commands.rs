@@ -43,12 +43,11 @@ pub async fn rpc(
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let result = crate::ipc::dispatch_rpc(state.inner(), &program, &method, params.clone())?;
-        // Fire any fire-and-forget plugin hook owed by this call, here in the
-        // generic path so it runs once whether the method was served in-process
-        // or out-of-process (the handler itself fires none). Each backend has
-        // its own post-hooks table; the `program` guard inside makes the other
-        // a no-op.
-        crate::ipc::corvus::post_hooks::fire(state.inner(), &program, &method, &params, &result);
+        // The corvus handlers fire their own fire-and-forget plugin hooks inline
+        // (the plugin host is co-located with them). The platform backend's
+        // launcher-level hooks still fire from a post-hooks table here until they
+        // move to the launcher broadcast channel; its `program` guard makes this
+        // a no-op for non-platform calls.
         crate::ipc::platform::post_hooks::fire(state.inner(), &program, &method, &params, &result);
         Ok(result)
     })

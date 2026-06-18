@@ -19,14 +19,14 @@
 //! AppError>`, so the handlers wrap the same value in `Ok(...)` — the serde
 //! shape on the wire is identical (a JSON bool / 2-tuple).
 //!
-//! The `on_repo_open` hook is fire-and-forget and fires from the generic `rpc`
-//! post-hooks path (see `post_hooks.rs`), not inline here — the migrated
-//! handler fires no hook itself.
+//! The `on_repo_open` hook is fire-and-forget and fires inline from
+//! `open_repo`, after the repo lock is dropped, with first-hand data.
 
 use crate::error::AppError;
 use crate::git::repo::RepoInfo;
 use crate::ipc::corvus;
 use crate::AppState;
+use serde_json::json;
 
 /// Returns true when `path` is inside a git repository.
 #[corvus::handler]
@@ -63,7 +63,7 @@ fn get_repo_info(state: &AppState, tab_id: String) -> Result<RepoInfo, AppError>
 
 /// Open the repository at `path` under `tab_id` in the repo manager.
 ///
-/// Fires `on_repo_open` from the post-hooks path (not here). Calls
+/// Fires `on_repo_open` inline (after the repo lock is dropped) and calls
 /// `sync_repo_open` to mirror the open into `corvus-be`.
 #[corvus::handler]
 fn open_repo(state: &AppState, path: String, tab_id: String) -> Result<RepoInfo, AppError> {
@@ -72,5 +72,11 @@ fn open_repo(state: &AppState, path: String, tab_id: String) -> Result<RepoInfo,
         mgr.open(tab_id.clone(), &path)?
     };
     crate::ipc::sync_repo_open(state, &tab_id, &info.path);
+    // Fire inline with first-hand data; the repo lock is already dropped above
+    // so Lua git ops in the hook can't deadlock against our guard.
+    state.fire_hook(
+        "on_repo_open",
+        json!({ "tab_id": tab_id, "path": info.path, "name": info.name }),
+    );
     Ok(info)
 }

@@ -13,6 +13,7 @@ use crate::error::AppError;
 use crate::git::stash::{StashApplyResult, StashBlockingContent, StashEntry, StashRef};
 use crate::ipc::corvus;
 use crate::AppState;
+use serde_json::json;
 
 #[corvus::handler]
 fn list_stashes(state: &AppState, tab_id: String) -> Result<Vec<StashEntry>, AppError> {
@@ -44,8 +45,17 @@ fn stash_save(
             .to_path_buf()
     };
     let entry = crate::git::stash::stash_save(&workdir, message.as_deref(), include_untracked)?;
-    // `on_stash_push` is fired routing-independently by `corvus::post_hooks`
-    // after the call returns (so it also fires when this method runs OOP).
+    // Fire the hook inline now that the repo lock has been dropped (the brief
+    // lock scope above ended before this point), so Lua git ops can't deadlock.
+    state.fire_hook(
+        "on_stash_push",
+        json!({
+            "tab_id": tab_id,
+            "index": entry.index,
+            "message": entry.message,
+            "include_untracked": include_untracked,
+        }),
+    );
     Ok(entry)
 }
 
@@ -56,8 +66,14 @@ fn stash_apply(state: &AppState, tab_id: String, index: usize) -> Result<StashAp
         let repo = mgr.get_mut(&tab_id)?;
         crate::git::stash::stash_apply(repo.inner_mut(), index)?
     };
-    // `on_stash_pop` (drop:false, only when clean) is fired by
-    // `corvus::post_hooks` after the call returns — OOP-safe.
+    // Lock scope dropped above; fire inline (drop:false, only when clean) so
+    // Lua git ops can't deadlock against a held repo lock.
+    if !result.has_conflicts {
+        state.fire_hook(
+            "on_stash_pop",
+            json!({ "tab_id": tab_id, "index": index, "drop": false }),
+        );
+    }
     Ok(result)
 }
 
@@ -68,8 +84,14 @@ fn stash_pop(state: &AppState, tab_id: String, index: usize) -> Result<StashAppl
         let repo = mgr.get_mut(&tab_id)?;
         crate::git::stash::stash_pop(repo.inner_mut(), index)?
     };
-    // `on_stash_pop` (drop:true, only when clean) is fired by
-    // `corvus::post_hooks` after the call returns — OOP-safe.
+    // Lock scope dropped above; fire inline (drop:true, only when clean) so
+    // Lua git ops can't deadlock against a held repo lock.
+    if !result.has_conflicts {
+        state.fire_hook(
+            "on_stash_pop",
+            json!({ "tab_id": tab_id, "index": index, "drop": true }),
+        );
+    }
     Ok(result)
 }
 
