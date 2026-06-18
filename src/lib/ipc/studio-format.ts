@@ -12,7 +12,6 @@
 // (Sibling `$lib/ipc/studio.ts` is the Studio **sidebar/index** IPC —
 //  different surface area, unrelated.)
 
-import { invoke } from '@tauri-apps/api/core';
 import { studio } from './rpc';
 import type {
   BulkEditAction,
@@ -369,7 +368,13 @@ export const studioParse = (
   formatId: StudioFormat,
   args:     StudioParseArgs,
 ): Promise<StudioParseResult> =>
-  invoke<StudioParseResult>('studio_parse', { formatId, ...args });
+  studio<StudioParseResult>('studio_parse', {
+    format_id:     formatId,
+    text:          args.text,
+    path:          args.path,
+    tab_id:        args.tabId,
+    relative_path: args.relativePath,
+  });
 
 export const studioClose = (formatId: StudioFormat, docId: string): Promise<void> =>
   studio('studio_close', { format_id: formatId, doc_id: docId });
@@ -504,39 +509,39 @@ export interface StudioSaveArgs {
 }
 
 export const studioSave = (formatId: StudioFormat, args: StudioSaveArgs): Promise<void> =>
-  invoke('studio_save', {
-    formatId,
-    docId:      args.docId,
-    path:       args.path,
-    contents:   args.contents,
-    bindToDoc:  args.bindToDoc,
+  studio('studio_save', {
+    format_id:   formatId,
+    doc_id:      args.docId,
+    path:        args.path,
+    contents:    args.contents,
+    bind_to_doc: args.bindToDoc,
   });
 
 export const studioListFiles = (
   formatId: StudioFormat,
   folder:   string,
 ): Promise<StudioFileEntry[]> =>
-  invoke<StudioFileEntry[]>('studio_list_files', { formatId, folder });
+  studio<StudioFileEntry[]>('studio_list_files', { format_id: formatId, folder });
 
 export const studioSchemaProbe = (
   formatId: StudioFormat,
   source:   string,
 ): Promise<CrateProbe> =>
-  invoke<CrateProbe>('studio_schema_probe', { formatId, source });
+  studio<CrateProbe>('studio_schema_probe', { format_id: formatId, source });
 
 export const studioSchemaLoad = (
   formatId:       StudioFormat,
   source:         string,
   rootCanonical:  string,
 ): Promise<Schema> =>
-  invoke<Schema>('studio_schema_load', { formatId, source, rootCanonical });
+  studio<Schema>('studio_schema_load', { format_id: formatId, source, root_canonical: rootCanonical });
 
 export const studioSchemaViewSource = (
   formatId:       StudioFormat,
   source:         string,
   canonicalPath:  string,
 ): Promise<TypeSource> =>
-  invoke<TypeSource>('studio_schema_view_source', { formatId, source, canonicalPath });
+  studio<TypeSource>('studio_schema_view_source', { format_id: formatId, source, canonical_path: canonicalPath });
 
 // ── F12 — Cross-reference rename refactor ─────────────────────────────
 
@@ -555,12 +560,12 @@ export const studioRenamePreview = (
   formatId: StudioFormat,
   args:     StudioRenamePreviewArgs,
 ): Promise<RenamePreview> =>
-  invoke<RenamePreview>('studio_rename_preview', {
-    formatId,
-    tabId:        args.tabId,
-    oldValue:     args.oldValue,
-    newValueHint: args.newValueHint ?? null,
-    openDocs:     args.openDocs,
+  studio<RenamePreview>('studio_rename_preview', {
+    format_id:      formatId,
+    tab_id:         args.tabId,
+    old_value:      args.oldValue,
+    new_value_hint: args.newValueHint ?? null,
+    open_docs:      args.openDocs,
   });
 
 export interface StudioRenameApplyArgs {
@@ -577,13 +582,13 @@ export const studioRenameApply = (
   formatId: StudioFormat,
   args:     StudioRenameApplyArgs,
 ): Promise<RenameResult> =>
-  invoke<RenameResult>('studio_rename_apply', {
-    formatId,
-    tabId:    args.tabId,
-    oldValue: args.oldValue,
-    newValue: args.newValue,
-    sites:    args.sites,
-    openDocs: args.openDocs,
+  studio<RenameResult>('studio_rename_apply', {
+    format_id: formatId,
+    tab_id:    args.tabId,
+    old_value: args.oldValue,
+    new_value: args.newValue,
+    sites:     args.sites,
+    open_docs: args.openDocs,
   });
 
 // ── F13 — Query-driven bulk edit ──────────────────────────────────────
@@ -608,15 +613,15 @@ export const studioBulkEditPreview = (
   formatId: StudioFormat,
   args:     StudioBulkEditPreviewArgs,
 ): Promise<BulkEditPreview> =>
-  invoke<BulkEditPreview>('studio_bulk_edit_preview', {
-    formatId,
-    tabId:       args.tabId,
-    docId:       args.docId,
-    scope:       args.scope,
-    query:       args.query,
-    action:      args.action,
-    valueSource: args.valueSource,
-    openDocs:    args.openDocs,
+  studio<BulkEditPreview>('studio_bulk_edit_preview', {
+    format_id:    formatId,
+    tab_id:       args.tabId,
+    doc_id:       args.docId,
+    scope:        args.scope,
+    query:        args.query,
+    action:       args.action,
+    value_source: args.valueSource,
+    open_docs:    args.openDocs,
   });
 
 export interface StudioBulkEditApplyArgs {
@@ -635,15 +640,15 @@ export const studioBulkEditApply = (
   formatId: StudioFormat,
   args:     StudioBulkEditApplyArgs,
 ): Promise<BulkEditResult> =>
-  invoke<BulkEditResult>('studio_bulk_edit_apply', {
-    formatId,
-    tabId:       args.tabId,
-    docId:       args.docId,
-    scope:       args.scope,
-    action:      args.action,
-    valueSource: args.valueSource,
-    sites:       args.sites,
-    openDocs:    args.openDocs,
+  studio<BulkEditResult>('studio_bulk_edit_apply', {
+    format_id:    formatId,
+    tab_id:       args.tabId,
+    doc_id:       args.docId,
+    scope:        args.scope,
+    action:       args.action,
+    value_source: args.valueSource,
+    sites:        args.sites,
+    open_docs:    args.openDocs,
   });
 
 // ──────────────────────────────────────────────────────────────────────

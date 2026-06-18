@@ -1,18 +1,22 @@
-//! Cloud-storage domain — platform-backend handlers (Wave 1).
+//! Cloud-storage domain — platform-backend handlers (Wave 1 + Wave 3).
 //!
-//! Migrated from `crate::commands::cloud_commands`. These are the
+//! Migrated from `crate::commands::cloud_commands`. Wave 1 covered the
 //! **host-independent** commands: keyring secrets, stateless ops, cancellation
-//! flags, and progress/done reporters. The host-dependent transfer commands
-//! (`cloud_download`, `cloud_upload`, `cloud_sync`, `cloud_download_many`,
-//! `cloud_list_stream`, `cloud_search_stream`, `cloud_gcs_oauth_start`) are
-//! deferred to Wave 3 and remain in `cloud_commands.rs`.
+//! flags, and progress/done reporters. Wave 3 adds the **host-dependent**
+//! transfer commands that need an `Arc<dyn CloudHost>`, now reachable via
+//! `state.cloud_host()` (published in `cloud::install()`):
+//! `cloud_download`, `cloud_upload`, `cloud_sync`, `cloud_download_many`,
+//! `cloud_list_stream`, `cloud_search_stream`, `cloud_gcs_oauth_start`.
 //!
 //! Every handler here takes `state: &AppState` (no `AppHandle`, no Tauri State
 //! generics). Event emission (`cloud_report_progress`, `cloud_report_done`) goes
 //! through `state.emit(topic, payload)`.
 
+use std::path::PathBuf;
+
 use crate::cloud::{
     self,
+    transfer::SyncDir,
     types::{CloudConnection, CloudListPage, CloudObject, CloudTestReport},
 };
 use crate::error::{AppError, Result};
@@ -223,4 +227,172 @@ fn cloud_report_done(
         }
     }
     Ok(())
+}
+
+// ── Transfers (Wave 3 — host-dependent) ──────────────────────────────────────
+
+/// Helper: pull the cloud host from AppState, returning a clean error if it
+/// hasn't been installed yet (only possible in the brief window before
+/// `cloud::install()` runs at setup time).
+macro_rules! get_host {
+    ($state:expr) => {
+        $state.cloud_host().ok_or_else(|| AppError::Other("cloud host not ready".into()))?
+    };
+}
+
+#[platform::handler(program = "platform")]
+async fn cloud_download(
+    state:  &AppState,
+    conn:   CloudConnection,
+    bucket: String,
+    path:   String,
+    local:  String,
+) -> Result<String> {
+    let host = get_host!(state);
+    cloud::transfer::download(host, conn, bucket, path, PathBuf::from(local))
+        .await.map_err(Into::into)
+}
+
+#[platform::handler(program = "platform")]
+async fn cloud_upload(
+    state:     &AppState,
+    conn:      CloudConnection,
+    bucket:    String,
+    path:      String,
+    local:     String,
+    overwrite: Option<bool>,
+) -> Result<String> {
+    let host = get_host!(state);
+    cloud::transfer::upload(
+        host, conn, bucket, path, PathBuf::from(local), overwrite.unwrap_or(false),
+    ).await.map_err(Into::into)
+}
+
+#[platform::handler(program = "platform")]
+async fn cloud_sync(
+    state:         &AppState,
+    conn:          CloudConnection,
+    bucket:        String,
+    remote_prefix: String,
+    local:         String,
+    direction:     String, // "up" | "down"
+    delete:        Option<bool>,
+) -> Result<String> {
+    let dir = match direction.as_str() {
+        "up"   => SyncDir::Up,
+        "down" => SyncDir::Down,
+        other  => return Err(AppError::Other(format!(
+            "cloud_sync: direction must be \"up\" or \"down\", got {other:?}"
+        ))),
+    };
+    let host = get_host!(state);
+    cloud::transfer::sync(
+        host, conn, bucket, remote_prefix, PathBuf::from(local), dir, delete.unwrap_or(false),
+    ).await.map_err(Into::into)
+}
+
+#[platform::handler(program = "platform")]
+async fn cloud_download_many(
+    state:       &AppState,
+    conn:        CloudConnection,
+    bucket:      String,
+    paths:       Vec<String>,
+    local_dir:   String,
+    parallel:    Option<usize>,
+    op_label:    Option<String>,
+    stream_id:   String,
+    extra_steps: Option<Vec<(String, String)>>,
+    keep_open:   Option<bool>,
+) -> Result<String> {
+    let parallel = parallel.unwrap_or(4).clamp(1, 16);
+    let op_label = op_label.unwrap_or_else(|| format!("Downloading {} files", paths.len()));
+    let host = get_host!(state);
+    cloud::transfer::download_many(
+        host, conn, bucket, paths, PathBuf::from(local_dir),
+        parallel, op_label, stream_id,
+        extra_steps.unwrap_or_default(),
+        keep_open.unwrap_or(false),
+    ).await.map_err(Into::into)
+}
+
+/// Streaming variant of `cloud_list` — emits `arbor://cloud-list-chunk`
+/// events as opendal pages through the listing. Returns immediately with
+/// the stream_id so callers can cancel via `cloud_cancel`.
+#[platform::handler(program = "platform")]
+async fn cloud_list_stream(
+    state:     &AppState,
+    conn:      CloudConnection,
+    bucket:    String,
+    prefix:    Option<String>,
+    stream_id: String,
+    cap:       Option<usize>,
+) -> Result<String> {
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Drop the guard before the first .await point.
+    {
+        let mut map = state.cloud_cancellations.lock().map_err(|e|
+            AppError::MutexPoisoned(format!("cloud_cancellations: {e}"))
+        )?;
+        map.insert(stream_id.clone(), cancel.clone());
+    }
+    let prefix          = prefix.unwrap_or_default();
+    let sid             = stream_id.clone();
+    let host            = get_host!(state);
+    let state_cancel    = state.cloud_cancellations.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = cloud::ops::list_stream(host, conn, bucket, prefix, sid.clone(), cap, cancel).await;
+        if let Ok(mut map) = state_cancel.lock() {
+            map.remove(&sid);
+        }
+    });
+    Ok(stream_id)
+}
+
+/// Wildcard search — recursive list under `root_prefix` filtered by a glob
+/// pattern. Streams matches via `arbor://cloud-list-chunk` events so the
+/// plugin can reuse its accumulator. Pattern semantics: `*` = same-segment
+/// wildcard, `**` = cross-segment, `?` = one non-separator char. Capped at
+/// SEARCH_HARD_CAP results.
+#[platform::handler(program = "platform")]
+async fn cloud_search_stream(
+    state:       &AppState,
+    conn:        CloudConnection,
+    bucket:      String,
+    root_prefix: Option<String>,
+    pattern:     String,
+    stream_id:   String,
+) -> Result<String> {
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Drop the guard before the first .await point.
+    {
+        let mut map = state.cloud_cancellations.lock().map_err(|e|
+            AppError::MutexPoisoned(format!("cloud_cancellations: {e}"))
+        )?;
+        map.insert(stream_id.clone(), cancel.clone());
+    }
+    let root            = root_prefix.unwrap_or_default();
+    let sid             = stream_id.clone();
+    let host            = get_host!(state);
+    let state_cancel    = state.cloud_cancellations.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = cloud::ops::search_stream(host, conn, bucket, root, pattern, sid.clone(), cancel).await;
+        if let Ok(mut map) = state_cancel.lock() {
+            map.remove(&sid);
+        }
+    });
+    Ok(stream_id)
+}
+
+// ── OAuth (Google installed-app, loopback :7732) ──────────────────────────────
+
+#[platform::handler(program = "platform")]
+async fn cloud_gcs_oauth_start(
+    state:         &AppState,
+    secret_ref:    String,
+    client_id:     String,
+    client_secret: Option<String>,
+) -> Result<String> {
+    let host = get_host!(state);
+    cloud::oauth_google::start(host, secret_ref, client_id, client_secret)
+        .await.map_err(Into::into)
 }

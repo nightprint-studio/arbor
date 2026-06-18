@@ -2,15 +2,16 @@
 //! TOML / YAML / .properties) dispatched through `AppState.studio_registry`.
 //!
 //! Each handler is the body the matching `#[tauri::command] fn` ran, now a plain
-//! sync function self-registered under `program = "studio"`. Every call takes
+//! function self-registered under `program = "studio"`. Every call takes
 //! `format_id` as its first JSON argument and resolves the backend via the
 //! registry; `StudioError` is mapped to a wire string through `errors::to_ipc`.
 //!
-//! Only the **synchronous** slice of the old `studio::format::commands` lives
-//! here. The genuinely-async commands (`studio_parse`, `studio_save`,
-//! `studio_list_files`, the schema probes, and the F12/F13 rename / bulk-edit
-//! flows) `.await` a real backend future and stay inline as keep-shell Tauri
-//! commands — the `#[studio::handler]` macro is sync-only.
+//! **Synchronous** handlers (`fn`) run on `spawn_blocking` via the `rpc`
+//! command. **Async** handlers (`async fn`) are awaited on the runtime via
+//! `dispatch_async` — they register as `Kind::Async` in the `arbor-rpc`
+//! inventory and are served by `crate::ipc::is_async_method` /
+//! `crate::ipc::dispatch_async`. Both paths share the same
+//! `#[studio::handler(program = "studio")]` attribute.
 
 use crate::error::AppError;
 use crate::ipc::studio;
@@ -20,8 +21,11 @@ use crate::studio::format::properties_codec::{
     self, PropertiesToYamlOptions, PropertiesToYamlOutput, YamlToPropertiesOutput,
 };
 use crate::studio::format::types::{
-    DiffHunk, DiffTreeNode, DocSnapshot, EncodingInfo, MutateResult, NodeView, QueryHit,
-    StudioMutation, UpdateResult,
+    BulkEditAction, BulkEditOpenDoc, BulkEditPreview, BulkEditResult, BulkEditScope,
+    BulkEditSite, BulkEditValueSource, CrateProbe, DiffHunk, DiffTreeNode, DocSnapshot,
+    EncodingInfo, FileEntry, MutateResult, NodeView, ParseResult, QueryHit, RenameOpenDoc,
+    RenamePreview, RenameResult, RenameSite, Schema, SchemaHint, SchemaHintOrigin, StudioMutation,
+    TypeSource, UpdateResult,
 };
 use crate::AppState;
 
@@ -295,4 +299,247 @@ fn studio_properties_to_yaml(
         strings_only: strings_only.unwrap_or(false),
     };
     properties_codec::properties_to_yaml(&text, &opts).map_err(|e| e.to_string())
+}
+
+// ── Async handlers (awaited on the runtime, not spawn_blocking) ──────────────
+//
+// These were kept as `#[tauri::command] async fn`s in
+// `studio::format::commands` while the macro was sync-only. Now that
+// `#[studio::handler]` supports `async fn` (registers `Kind::Async`,
+// served via `crate::ipc::dispatch_async`), they move here.
+
+// ── Lifecycle ────────────────────────────────────────────────────────────────
+
+/// Parse a studio document. Reads from `path` when `text` is not
+/// provided, decoding raw bytes through `git::encoding::decode_bytes_full`
+/// so legacy files (windows-1252, UTF-16 BOM) survive a round-trip.
+/// A cfg-keyed `schema_hint` fallback fires when the inline detection
+/// found nothing and a `tab_id` + `relative_path` context is available.
+#[studio::handler(program = "studio")]
+async fn studio_parse(
+    state: &AppState,
+    format_id: String,
+    text: Option<String>,
+    path: Option<String>,
+    tab_id: Option<String>,
+    relative_path: Option<String>,
+) -> Result<ParseResult, String> {
+    // FROZEN F16: never use `read_to_string` here. Read raw bytes and
+    // pass through `git::encoding::decode_bytes_full` so legacy files
+    // (windows-1252, UTF-16 BOM) survive an edit/save round-trip. The
+    // sniffed encoding label propagates into the backend doc state and
+    // is replayed at save time via `encode_for_disk_with_bom`.
+    let (text, source_path, encoding) = match (text, path) {
+        (Some(t), p)    => (t, p, EncodingInfo::utf8()),
+        (None, Some(p)) => {
+            let bytes = std::fs::read(&p)
+                .map_err(|e| format!("Cannot read {p}: {e}"))?;
+            let (content, enc, had_bom) =
+                crate::git::encoding::decode_bytes_full(&bytes);
+            let info = EncodingInfo {
+                label:   enc.name().to_string(),
+                had_bom,
+            };
+            (content, Some(p), info)
+        }
+        (None, None) => return Err("studio_parse: provide `text` or `path`".into()),
+    };
+
+    // Resolve the repo path up-front so we can release the repo lock
+    // before dispatching to the backend.
+    let repo_path = match tab_id.as_deref() {
+        Some(t) => state
+            .lock_repos()
+            .ok()
+            .and_then(|mut m| m.get(t).ok().map(|r| r.path.clone())),
+        None => None,
+    };
+
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    let mut result = to_ipc(backend.parse(text, source_path, encoding).await)?;
+
+    // Format-agnostic cfg-keyed schema_hint fallback: when the
+    // backend's inline detection found nothing AND we have a
+    // tab + relative-path context, try the side-car binding. Covers
+    // external files whose disk path sits outside the repo tree.
+    if result.schema_hint.is_none() {
+        if let (Some(repo), Some(rel)) = (repo_path, relative_path) {
+            let cfg = crate::studio::config::load(&repo).unwrap_or_default();
+            if let Some((rs_file, root_type)) =
+                crate::studio::config::resolve_binding(&cfg, &repo, &rel)
+            {
+                result.schema_hint = Some(SchemaHint {
+                    rs_file,
+                    root_type,
+                    origin: SchemaHintOrigin::Sidecar,
+                });
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+// ── Snapshot & persistence ───────────────────────────────────────────────────
+
+#[studio::handler(program = "studio")]
+async fn studio_save(
+    state: &AppState,
+    format_id: String,
+    doc_id: String,
+    path: String,
+    contents: String,
+    bind_to_doc: bool,
+) -> Result<(), String> {
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    to_ipc(backend.save(&doc_id, path, contents, bind_to_doc).await)
+}
+
+// ── File listing ─────────────────────────────────────────────────────────────
+
+#[studio::handler(program = "studio")]
+async fn studio_list_files(
+    state: &AppState,
+    format_id: String,
+    folder: String,
+) -> Result<Vec<FileEntry>, String> {
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    to_ipc(backend.list_files(folder).await)
+}
+
+// ── Schema ───────────────────────────────────────────────────────────────────
+
+#[studio::handler(program = "studio")]
+async fn studio_schema_probe(
+    state: &AppState,
+    format_id: String,
+    source: String,
+) -> Result<CrateProbe, String> {
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    to_ipc(backend.schema_probe(source).await)
+}
+
+#[studio::handler(program = "studio")]
+async fn studio_schema_load(
+    state: &AppState,
+    format_id: String,
+    source: String,
+    root_canonical: String,
+) -> Result<Schema, String> {
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    to_ipc(backend.schema_load(source, root_canonical).await)
+}
+
+#[studio::handler(program = "studio")]
+async fn studio_schema_view_source(
+    state: &AppState,
+    format_id: String,
+    source: String,
+    canonical_path: String,
+) -> Result<TypeSource, String> {
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    to_ipc(backend.schema_view_source(source, canonical_path).await)
+}
+
+// ── F12 — Cross-reference rename refactor ────────────────────────────────────
+//
+// `tab_id` lets the FE pass an active-tab handle instead of resolving
+// the repo root client-side: the BE looks up the path via the same
+// `lock_repos()` registry every other studio command uses. Hard error
+// when the tab is unknown — refactoring against an unregistered tab
+// has no defined semantics (the `repo_root`-driven scan needs a real
+// project root).
+
+/// Preview the rename across the active tab's repo. Returns the full
+/// site list (defs + refs), any `new_value` collisions, and any open
+/// docs whose unsaved state would block the apply step.
+#[studio::handler(program = "studio")]
+async fn studio_rename_preview(
+    state: &AppState,
+    format_id: String,
+    tab_id: String,
+    old_value: String,
+    new_value_hint: Option<String>,
+    open_docs: Vec<RenameOpenDoc>,
+) -> Result<RenamePreview, String> {
+    let repo_path = {
+        let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
+        mgr.get(&tab_id).map_err(|e| e.to_string())?.path.clone()
+    };
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    to_ipc(backend.rename_preview(repo_path, old_value, new_value_hint, open_docs).await)
+}
+
+/// Apply the rename. The FE sends back the (possibly user-pruned)
+/// site list from the preview step. Best-effort sequential with
+/// rollback PRE-flush — see `StudioFormatBackend::rename_apply`.
+#[studio::handler(program = "studio")]
+async fn studio_rename_apply(
+    state: &AppState,
+    format_id: String,
+    tab_id: String,
+    old_value: String,
+    new_value: String,
+    sites: Vec<RenameSite>,
+    open_docs: Vec<RenameOpenDoc>,
+) -> Result<RenameResult, String> {
+    let repo_path = {
+        let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
+        mgr.get(&tab_id).map_err(|e| e.to_string())?.path.clone()
+    };
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    to_ipc(backend.rename_apply(repo_path, old_value, new_value, sites, open_docs).await)
+}
+
+// ── F13 — Query-driven bulk edit ─────────────────────────────────────
+//
+// `tab_id` resolves the repo root for the `ProjectWide` scope (same
+// pattern as the rename commands). `doc_id` identifies the active
+// doc — required for `ActiveDoc` scope, ignored for `ProjectWide`.
+// `value_source` is `None` for `Action::Delete` and `Some(...)` for
+// `Action::Set`. Compile errors in the mini-expression land in the
+// `expression_error` field of the preview, NOT in the result Err.
+
+#[studio::handler(program = "studio")]
+async fn studio_bulk_edit_preview(
+    state: &AppState,
+    format_id: String,
+    tab_id: String,
+    doc_id: String,
+    scope: BulkEditScope,
+    query: String,
+    action: BulkEditAction,
+    value_source: Option<BulkEditValueSource>,
+    open_docs: Vec<BulkEditOpenDoc>,
+) -> Result<BulkEditPreview, String> {
+    let repo_path = {
+        let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
+        mgr.get(&tab_id).map_err(|e| e.to_string())?.path.clone()
+    };
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    to_ipc(backend.bulk_edit_preview(
+        repo_path, doc_id, scope, query, action, value_source, open_docs,
+    ).await)
+}
+
+#[studio::handler(program = "studio")]
+async fn studio_bulk_edit_apply(
+    state: &AppState,
+    format_id: String,
+    tab_id: String,
+    doc_id: String,
+    scope: BulkEditScope,
+    action: BulkEditAction,
+    value_source: Option<BulkEditValueSource>,
+    sites: Vec<BulkEditSite>,
+    open_docs: Vec<BulkEditOpenDoc>,
+) -> Result<BulkEditResult, String> {
+    let repo_path = {
+        let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
+        mgr.get(&tab_id).map_err(|e| e.to_string())?.path.clone()
+    };
+    let backend = to_ipc(state.studio_registry.get(&format_id))?;
+    to_ipc(backend.bulk_edit_apply(
+        repo_path, doc_id, scope, action, value_source, sites, open_docs,
+    ).await)
 }

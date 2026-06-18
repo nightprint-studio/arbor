@@ -1122,10 +1122,8 @@ pub fn run() {
             commands::fs_git_commands::fs_git_checkout,
             commands::fs_git_commands::fs_open_in_arbor,
             // Avatar resolution via GitProvider (GitHub + GitLab)
-            // Merge Requests / Pull Requests — migrated to corvus handlers;
-            // the conflict-resolution streaming command stays inline (AppHandle).
-            commands::mr_commands::mr_start_conflict_resolution,
-            // Issues (Linear / Jira) migrated to corvus handlers.
+            // Merge Requests / Pull Requests + Issues (Linear/Jira) migrated to
+            // corvus handlers (conflict-resolution now streams via arbor-ipc Stream).
             // Inline image proxy (issue/MR/PR body & comment preview)
             commands::image_commands::fetch_remote_image,
             // Worktrees (migrated to corvus; IDE-detection streaming deferred)
@@ -1146,30 +1144,9 @@ pub fn run() {
             commands::deep_link_commands::deep_link_ready,
             commands::deep_link_commands::dispatch_deep_link,
             // Missing-repo tombstone + locate
-            // Studio Multi-Format backbone (FROZEN F17) — one set of
-            // commands dispatched via `AppState.studio_registry` to a
-            // per-format `StudioFormatBackend` impl. RON + JSON are
-            // registered today; TOML / YAML / .properties join later phases.
-            crate::studio::format::commands::studio_parse,
-            crate::studio::format::commands::studio_save,
-            crate::studio::format::commands::studio_list_files,
-            crate::studio::format::commands::studio_schema_probe,
-            crate::studio::format::commands::studio_schema_load,
-            crate::studio::format::commands::studio_schema_view_source,
-            crate::studio::format::commands::studio_rename_preview,
-            crate::studio::format::commands::studio_rename_apply,
-            crate::studio::format::commands::studio_bulk_edit_preview,
-            crate::studio::format::commands::studio_bulk_edit_apply,
+            // Studio Multi-Format backbone migrated to studio handlers.
             // studio sidebar — project-wide .ron/.json/.toml index.
-            // cloud-storage plugin — host-dependent transfer commands (Wave 3
-            // deferred; host-independent ops migrated to platform handlers).
-            commands::cloud_commands::cloud_list_stream,
-            commands::cloud_commands::cloud_search_stream,
-            commands::cloud_commands::cloud_download,
-            commands::cloud_commands::cloud_upload,
-            commands::cloud_commands::cloud_sync,
-            commands::cloud_commands::cloud_download_many,
-            commands::cloud_commands::cloud_gcs_oauth_start,
+            // cloud-storage plugin migrated to platform handlers.
             // Bevy Remote Protocol (Phase 1.0 — read-only HTTP)
             commands::brp_commands::brp_connect,
             commands::brp_commands::brp_call,

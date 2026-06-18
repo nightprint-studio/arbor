@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { corvus } from '$lib/ipc/rpc';
 import type { MergeRequest, MrDetail, CreateMrParams, MrFileDiff, MrCommit, MergedMrHint, MrCapabilities, MrFeatureStatus } from '$lib/types/mr';
 import { invalidateTabCache } from './cache-invalidate';
@@ -133,12 +132,14 @@ export interface MrConflictDone {
  *  `invalidateTabCache(tabId)` only AFTER the `mr-conflict-done` event arrives,
  *  since the working tree / branch state hasn't been touched yet at the time
  *  this promise resolves. */
-export async function mrStartConflictResolution(
+export function mrStartConflictResolution(
   tabId:        string,
   sourceBranch: string,
   targetBranch: string,
 ): Promise<string> {
-  return invoke<string>('mr_start_conflict_resolution', {
-    tabId, sourceBranch, targetBranch,
+  return corvus<string>('mr_start_conflict_resolution', {
+    tab_id:        tabId,
+    source_branch: sourceBranch,
+    target_branch: targetBranch,
   });
 }

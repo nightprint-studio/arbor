@@ -7,4 +7,5 @@ pub use crate::client::{Bytes, BrokerClient, LoopbackBroker};
 pub use crate::credential::{AuthSession, CredentialError, SessionProvider};
 pub use crate::error::{IpcError, Result};
 pub use crate::event::{Event, EventSink};
+pub use crate::stream::Stream;
 pub use crate::transport::{serve_stdio, ChildClient, FrameEventSink, SharedWriter};

@@ -9,8 +9,20 @@
 //!
 //! Notifications that previously went through an `AppHandle` now use
 //! `state.emit("plugin:notification", …)`; plugin hooks fire inline exactly as
-//! before. `mr_start_conflict_resolution` (sync, Channel/streaming-coupled)
-//! stays inline in `mr_commands` for a later seam pass.
+//! before.
+//!
+//! `mr_start_conflict_resolution` is the streaming-seam pilot
+//! (`docs/streaming-seam.md`): a sync handler that mints a `job_id`, emits a
+//! synchronous `started`, spawns a worker thread that captures the **event sink**
+//! (`Arc<dyn EventSink>`) + a cloned `Arc<…JobRegistry>` (never an `AppHandle`),
+//! and returns the id. The existing `arbor://mr-conflict-progress` /
+//! `arbor://mr-conflict-done` + `arbor://job-*` events are emitted **byte-identical**
+//! through the sink (the FE still listens to them verbatim). On top of that the
+//! `Stream` helper rides an **additive** `arbor://mr-conflict-stream-*` lifecycle
+//! (started/chunk/done/error with the `{ stream_id, seq }` envelope) so new
+//! consumers can use the standardized seam — `stream_id == job_id`.
+
+use std::sync::Arc;
 
 use crate::ipc::corvus;
 use crate::AppState;
@@ -485,4 +497,201 @@ fn fire_mr_hook_by_number(
 
 fn fire_hook(state: &AppState, hook: &str, ctx: serde_json::Value) {
     state.fire_hook(hook, ctx);
+}
+
+// ---------------------------------------------------------------------------
+// Start MR conflict resolution — streaming-seam pilot
+// ---------------------------------------------------------------------------
+
+/// Prepare the local workspace to resolve a pull/merge-request conflict.
+///
+/// Spawns a background job (visible in the JobsOverlay) that runs the multi-step
+/// prep flow without blocking the runtime, returning the `job_id` immediately.
+/// Progress is reported via two custom events (payloads byte-identical to the
+/// pre-migration command — the FE still listens to them verbatim):
+///
+/// - `arbor://mr-conflict-progress` — `{ job_id, phase, phase_index,
+///   phase_total, label, detail? }`.  Drives the ProgressStepper widget.
+/// - `arbor://mr-conflict-done`     — `{ job_id, status: "clean" |
+///   "conflicts" | "error", error? }`.  Triggers the success / open-resolver /
+///   error path on the frontend.
+///
+/// The job also emits the standard `arbor://job-started`, `arbor://job-output`
+/// and `arbor://job-done` events so per-line stdout/stderr appears in the
+/// Job Output panel.
+///
+/// Additively, the standardized [`Stream`] helper rides an
+/// `arbor://mr-conflict-stream-*` lifecycle (`started`/`chunk`/`done`/`error`
+/// with the `{ stream_id, seq }` envelope, `stream_id == job_id`) for new
+/// consumers of the streaming seam.
+#[corvus::handler]
+fn mr_start_conflict_resolution(
+    state:         &AppState,
+    tab_id:        String,
+    source_branch: String,
+    target_branch: String,
+) -> Result<String> {
+    use arbor_ipc::prelude::Stream;
+    use crate::jobs::{JobInfo, JobRegistry, JobStatus};
+    use crate::git::merge::{
+        prepare_mr_conflict_resolution, MrPrepEvent, MrPrepOutcome, MrPrepPhase,
+    };
+
+    // Capture the egress + job registry once — no `AppHandle`, no
+    // `handle.state::<AppState>()` round-trips inside the worker.
+    let sink = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+    let jobs = Arc::clone(&state.jobs);
+
+    let workdir = {
+        let mut mgr = state.lock_repos()?;
+        let repo = mgr.get(&tab_id)?;
+        repo.inner()
+            .workdir()
+            .ok_or_else(|| AppError::Other("bare repository has no working directory".into()))?
+            .to_path_buf()
+    };
+
+    let name    = format!("Resolve conflicts: {source_branch} ← {target_branch}");
+    let command = format!("git fetch + checkout {source_branch} + merge origin/{target_branch}");
+    let job_id = {
+        let mut jobs = jobs.lock().map_err(|_| AppError::Other("jobs mutex poisoned".into()))?;
+        let id = jobs.new_id();
+        jobs.register(JobInfo {
+            id:              id.clone(),
+            name:            name.clone(),
+            plugin_name:     "arbor".to_string(),
+            command:         command.clone(),
+            started_at:      JobRegistry::now_secs(),
+            status:          JobStatus::Running,
+            category:        Some("Merge".to_string()),
+            non_cancellable: true,
+            is_system:       false,
+            finished_at:     None,
+            hidden:          false,
+            target:          None,
+        });
+        id
+    };
+
+    // `stream_id == job_id`: one identity addresses the Jobs entry, the stream
+    // quartet, and (where applicable) cancellation.
+    let stream = Stream::new(Arc::clone(&sink), "arbor://mr-conflict-stream", job_id.clone());
+
+    // `job-started` — byte-identical to the pre-migration emit.
+    sink.emit("arbor://job-started", serde_json::json!({
+        "job_id":      &job_id,
+        "name":        &name,
+        "plugin_name": "arbor",
+        "command":     &command,
+        "category":    "Merge",
+    }));
+    // Additive standardized lifecycle.
+    stream.started(serde_json::json!({ "phase_total": MrPrepPhase::TOTAL }));
+
+    let jid      = job_id.clone();
+    let sink_bg  = Arc::clone(&sink);
+    let jobs_bg  = Arc::clone(&jobs);
+    let stream_bg = stream.clone();
+    let spawn_result = std::thread::Builder::new()
+        .name(format!("arbor-mr-conflict-{}", jid))
+        .spawn(move || {
+            let result = prepare_mr_conflict_resolution(
+                &workdir,
+                &source_branch,
+                &target_branch,
+                |evt| match evt {
+                    MrPrepEvent::PhaseStart { phase, detail } => {
+                        sink_bg.emit("arbor://mr-conflict-progress", serde_json::json!({
+                            "job_id":      &jid,
+                            "phase":       phase.key(),
+                            "phase_index": phase.index(),
+                            "phase_total": MrPrepPhase::TOTAL,
+                            "label":       phase.label(),
+                            "detail":      detail,
+                        }));
+                        let header = match &detail {
+                            Some(d) => format!("── {} ({})", phase.label(), d),
+                            None    => format!("── {}", phase.label()),
+                        };
+                        if let Ok(mut jobs) = jobs_bg.lock() {
+                            jobs.append_output(&jid, header.clone());
+                        }
+                        sink_bg.emit("arbor://job-output", serde_json::json!({
+                            "job_id": &jid, "text": header,
+                        }));
+                        // Additive standardized per-phase chunk.
+                        stream_bg.chunk(serde_json::json!({
+                            "phase":       phase.key(),
+                            "phase_index": phase.index(),
+                            "phase_total": MrPrepPhase::TOTAL,
+                            "label":       phase.label(),
+                            "detail":      detail,
+                        }));
+                    }
+                    MrPrepEvent::Output { phase: _, line } => {
+                        if let Ok(mut jobs) = jobs_bg.lock() {
+                            jobs.append_output(&jid, line.to_string());
+                        }
+                        sink_bg.emit("arbor://job-output", serde_json::json!({
+                            "job_id": &jid, "text": line,
+                        }));
+                    }
+                },
+            );
+
+            let (status_payload, outcome_label, error_msg) = match &result {
+                Ok(MrPrepOutcome::Clean)     => (Ok(0i32), "clean",     None),
+                Ok(MrPrepOutcome::Conflicts) => (Ok(0i32), "conflicts", None),
+                Err(e)                       => (Err(()), "error",      Some(e.to_string())),
+            };
+
+            if let Ok(mut jobs) = jobs_bg.lock() {
+                let s = match status_payload {
+                    Ok(c)  => JobStatus::Completed { exit_code: c },
+                    Err(_) => JobStatus::Failed { error: error_msg.clone().unwrap_or_default() },
+                };
+                jobs.set_status(&jid, s);
+            }
+
+            sink_bg.emit("arbor://job-done", serde_json::json!({
+                "job_id":    &jid,
+                "success":   matches!(status_payload, Ok(_)),
+                "exit_code": status_payload.unwrap_or(-1),
+            }));
+
+            sink_bg.emit("arbor://mr-conflict-done", serde_json::json!({
+                "job_id": &jid,
+                "status": outcome_label,
+                "error":  error_msg,
+            }));
+
+            // Additive standardized terminal event.
+            match status_payload {
+                Ok(_)  => stream_bg.done(serde_json::json!({ "status": outcome_label })),
+                Err(_) => stream_bg.error(error_msg.as_deref().unwrap_or("error")),
+            }
+        });
+
+    if let Err(e) = spawn_result {
+        let err = format!("failed to spawn mr-conflict thread: {e}");
+        if let Ok(mut jobs) = jobs.lock() {
+            jobs.set_status(&job_id, JobStatus::Failed { error: err.clone() });
+        }
+        sink.emit("arbor://job-done", serde_json::json!({
+            "job_id":    &job_id,
+            "success":   false,
+            "exit_code": -1,
+        }));
+        sink.emit("arbor://mr-conflict-done", serde_json::json!({
+            "job_id": &job_id,
+            "status": "error",
+            "error":  err.clone(),
+        }));
+        stream.error(&err);
+        return Err(AppError::Other(err));
+    }
+
+    Ok(job_id)
 }

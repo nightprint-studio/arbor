@@ -1,10 +1,9 @@
 // IPC wrappers for the cloud-storage commands.
 //
-// Wave 1 migrated commands route through the platform backend
-// (`platform('<method>', { snake_case })`).  The 7 host-dependent transfer
-// commands deferred to Wave 3 still use `invoke` directly.
+// All commands now route through the platform backend
+// (`platform('<method>', { snake_case })`).  Wave 1 covered the
+// host-independent commands; Wave 3 migrated the host-dependent transfers.
 
-import { invoke } from '@tauri-apps/api/core';
 import { platform } from '$lib/ipc/rpc';
 import type {
   CloudConnection,
@@ -81,14 +80,14 @@ export const cloudReportDone = (
   error?: string,
 ) => platform<void>('cloud_report_done', { stream_id: streamId, ok, summary, error });
 
-// ── Transfers (return job_id) — Wave 3 deferred, still on invoke ──────────
+// ── Transfers (return job_id) — Wave 3 ───────────────────────────────────
 
 export const cloudDownload = (
   conn: CloudConnection,
   bucket: string,
   path: string,
   local: string,
-) => invoke<string>('cloud_download', { conn, bucket, path, local });
+) => platform<string>('cloud_download', { conn, bucket, path, local });
 
 export const cloudUpload = (
   conn: CloudConnection,
@@ -96,7 +95,7 @@ export const cloudUpload = (
   path: string,
   local: string,
   overwrite = false,
-) => invoke<string>('cloud_upload', { conn, bucket, path, local, overwrite });
+) => platform<string>('cloud_upload', { conn, bucket, path, local, overwrite });
 
 export const cloudSync = (
   conn: CloudConnection,
@@ -105,8 +104,13 @@ export const cloudSync = (
   local: string,
   direction: 'up' | 'down',
   del = false,
-) => invoke<string>('cloud_sync', {
-  conn, bucket, remotePrefix, local, direction, delete: del,
+) => platform<string>('cloud_sync', {
+  conn,
+  bucket,
+  remote_prefix: remotePrefix,
+  local,
+  direction,
+  delete: del,
 });
 
 export const cloudDownloadMany = (
@@ -117,16 +121,56 @@ export const cloudDownloadMany = (
   streamId: string,
   parallel?: number,
   opLabel?: string,
-) => invoke<string>('cloud_download_many', {
-  conn, bucket, paths, localDir, parallel, opLabel, streamId,
+  extraSteps?: Array<[string, string]>,
+  keepOpen?: boolean,
+) => platform<string>('cloud_download_many', {
+  conn,
+  bucket,
+  paths,
+  local_dir: localDir,
+  stream_id: streamId,
+  parallel,
+  op_label: opLabel,
+  extra_steps: extraSteps,
+  keep_open: keepOpen,
 });
 
-// ── OAuth (Google installed-app, loopback :7732) — Wave 3 deferred ────────
+export const cloudListStream = (
+  conn: CloudConnection,
+  bucket: string,
+  streamId: string,
+  prefix?: string,
+  cap?: number,
+) => platform<string>('cloud_list_stream', {
+  conn,
+  bucket,
+  stream_id: streamId,
+  prefix,
+  cap,
+});
+
+export const cloudSearchStream = (
+  conn: CloudConnection,
+  bucket: string,
+  pattern: string,
+  streamId: string,
+  rootPrefix?: string,
+) => platform<string>('cloud_search_stream', {
+  conn,
+  bucket,
+  pattern,
+  stream_id: streamId,
+  root_prefix: rootPrefix,
+});
+
+// ── OAuth (Google installed-app, loopback :7732) — Wave 3 ────────────────
 
 export const cloudGcsOAuthStart = (
   secretRef: string,
   clientId: string,
   clientSecret?: string,
-) => invoke<string>('cloud_gcs_oauth_start', {
-  secretRef, clientId, clientSecret,
+) => platform<string>('cloud_gcs_oauth_start', {
+  secret_ref: secretRef,
+  client_id: clientId,
+  client_secret: clientSecret,
 });

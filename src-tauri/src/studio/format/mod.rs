@@ -9,7 +9,6 @@
 //! `FormatDescriptor` to decide which capabilities are available.
 
 pub mod backend;
-pub mod commands;
 pub mod descriptor;
 pub mod errors;
 pub mod properties_codec;
