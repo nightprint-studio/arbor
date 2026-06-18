@@ -141,8 +141,8 @@ fn cloud_to_jobs_status(s: CloudJobStatus) -> JobStatus {
 // ── Startup wiring ─────────────────────────────────────────────────────────
 
 /// Register the OAuth refresher AND publish the `Arc<dyn CloudHost>` into
-/// Tauri's managed state. Call once from `setup()` after `AppState` is
-/// managed and the event sink has been wired (`state.corvus` set).
+/// `AppState`. Call once from `setup()` after `AppState` is managed and the
+/// event sink has been wired (`state.corvus` set).
 pub fn install(app: &AppHandle) {
     // 1. OAuth refresher — let arbor-cloud wire its own internal
     //    `refresh_with` against the auth_gcs OnceLock.
@@ -162,12 +162,8 @@ pub fn install(app: &AppHandle) {
     let host = ArborCloudHost::from_state(&*state, sink);
     let host_arc: Arc<dyn CloudHost> = Arc::new(host);
 
-    // Keep the Tauri-managed shim so the un-migrated Lua `ns_shell/cloud.rs`
-    // path (which reads `State<Arc<dyn CloudHost>>`) continues to compile and
-    // work until Wave 3 migrates those remaining commands.
-    app.manage(host_arc.clone());
-
-    // Also publish into AppState's OnceLock so the platform handlers
-    // migrated in Wave 1 can reach the host without a Tauri State lookup.
+    // Publish into AppState's OnceLock — the single home of the cloud host.
+    // Both the platform command handlers and the Lua `ns_shell/cloud.rs` path
+    // reach it via `state.cloud_host()`; no Tauri-managed state is involved.
     let _ = state.cloud_host.set(host_arc);
 }

@@ -105,7 +105,7 @@ fn lookup_or_register(
                 return Ok(p);
             }
             let provider = Arc::new(GitlabProvider::new_self_hosted(
-                Arc::new(crate::git_provider::session::GitlabSessionProvider::new()),
+                Arc::new(crate::auth::vault::VaultSessionProvider::gitlab()),
                 base_url,
             ));
             registry.register(provider.clone());

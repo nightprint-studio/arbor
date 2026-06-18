@@ -44,4 +44,5 @@ derivation, ADF→Markdown, and issue-URL mapping — are unit-tested (`cargo te
 ## Consumed by
 
 `arbor` (the shell): registered in `src-tauri/src/integrations/registry.rs`, with
-the keyring/OAuth adapter in `token_source.rs` and the command shim in `jira.rs`.
+credentials supplied by the shared `auth::vault::VaultSessionProvider` and the
+command shim in `jira.rs`.

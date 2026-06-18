@@ -33,6 +33,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- The integrated terminal now batches high-rate output into a short coalescing window instead of emitting an event per read, so heavy output (build logs, `cat` of a large file) no longer floods the UI — smoother rendering with no perceptible added latency.
 - Keybindings are no longer a Settings section — viewing and customising shortcuts now live together in the dedicated Keyboard Shortcuts panel (**Shift+F1**).
 - Plugins can now route a notification, background job, or progress operation to a specific window via an optional `target` (`arbor.notify`, `arbor.job.spawn`, `arbor.ui.operation.start`); without it they go to the main window as before.
 - The title bar's **Recent repositories** and **Theme** menus are now keyboard-navigable inline groups (expand in place, arrow keys + Enter) instead of mouse-hover fly-outs.

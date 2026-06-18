@@ -1,6 +1,7 @@
 pub mod credential_store;
 pub mod oauth_jira;
 pub mod oauth_linear;
+pub mod vault;
 
 // `oauth_github` and `oauth_gitlab` were relocated to
 // `crate::git_provider::oauth::{github_flow, gitlab_flow}` in Phase 5 of the

@@ -5,7 +5,8 @@
 //! is re-exported here so existing `crate::git_provider::*` call sites keep
 //! resolving. This module owns only the shell glue: the host-keyed
 //! registration (via the keyring-free `corvus-git-provider-{github,gitlab}`
-//! crates + `SessionProvider`), the keyring/OAuth-coupled token lookups, and
+//! crates + the shared `auth::vault::VaultSessionProvider`), the
+//! keyring/OAuth-coupled token lookups, and
 //! the AppState resolution helpers. All MR/CI/security/repo-browser REST now
 //! flows through the `GitProvider` trait; the only shell-side REST left is the
 //! host-gated inline-image proxy (`image_proxy`, host-dynamic by design) plus
@@ -17,7 +18,6 @@ pub use corvus_git_provider_api::prelude::{GitProvider, GitProviderRegistry, Pro
 pub mod types;
 pub mod detect;
 pub mod oauth;
-pub mod session;
 pub mod helpers;
 
 // ── Shell-side helper modules ────────────────────────────────────────────────
@@ -35,7 +35,7 @@ pub mod security_export;
 pub mod avatar_lookup;
 
 // GitHub + GitLab are now the keyring-free `corvus-git-provider-{github,gitlab}`
-// crates; the shell injects credentials via `session::{Github,Gitlab}SessionProvider`.
+// crates; the shell injects credentials via `auth::vault::VaultSessionProvider`.
 pub use corvus_git_provider_github::prelude::GithubProvider;
 pub use corvus_git_provider_gitlab::prelude::GitlabProvider;
 pub use helpers::{provider_for_tab, provider_for_path, mr_id_from};

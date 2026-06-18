@@ -2,7 +2,6 @@ pub mod linear;
 pub mod jira;
 pub mod jira_types;
 pub mod registry;
-mod token_source;
 
 // Provider-agnostic DTOs (Issue, comments, filters, …) and pure helpers
 // (`branch_name_for_issue`) now live in the `corvus-issue-tracker-api` crate.

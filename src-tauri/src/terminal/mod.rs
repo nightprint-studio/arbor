@@ -105,8 +105,22 @@ impl TerminalManager {
             .try_clone_reader()
             .map_err(|e| AppError::Other(format!("clone_reader failed: {e}")))?;
 
-        // Spawn a background thread to relay PTY output → Tauri events.
-        let id_clone = id.clone();
+        // Coalescing window for PTY output. The reader thread does 4 KiB blocking
+        // reads and forwards raw bytes to a flusher thread over an mpsc channel.
+        // The flusher batches bursts (one-event-per-read would flood the Tauri
+        // event bus under heavy output) and emits a single base64 event when the
+        // stream goes idle for FLUSH_INTERVAL or the accumulator hits FLUSH_MAX.
+        // Both thresholds keep latency imperceptible while collapsing event-bus
+        // pressure; a single flusher thread preserves output ordering.
+        const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(12);
+        const FLUSH_MAX: usize = 64 * 1024;
+
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+
+        // Reader thread: blocking 4 KiB reads → forward raw bytes to the flusher.
+        // Owns `tx`; on EOF/err the loop breaks, `tx` drops, the channel
+        // disconnects and the flusher flushes its tail then exits.
+        let id_reader = id.clone();
         let app_handle_reader = app_handle.clone();
         std::thread::Builder::new()
             .name(format!("arbor-pty-reader-{id}"))
@@ -116,21 +130,62 @@ impl TerminalManager {
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
-                            let encoded = general_purpose::STANDARD.encode(&buf[..n]);
-                            let _ = app_handle_reader.emit(
-                                &format!("terminal:output:{}", id_clone),
-                                encoded,
-                            );
+                            if tx.send(buf[..n].to_vec()).is_err() {
+                                break;
+                            }
                         }
                     }
                 }
                 // Reader EOF also signals close (Unix / non-ConPTY paths).
                 let _ = app_handle_reader.emit(
-                    &format!("terminal:closed:{}", id_clone),
+                    &format!("terminal:closed:{}", id_reader),
                     (),
                 );
             })
             .map_err(|e| AppError::Other(format!("thread spawn failed: {e}")))?;
+
+        // Flusher thread: coalesce reader bursts into fewer, larger base64 events
+        // on the same `terminal:output:<id>` topic the frontend listens on.
+        let id_flush = id.clone();
+        let app_handle_flush = app_handle.clone();
+        std::thread::Builder::new()
+            .name(format!("arbor-pty-flush-{id}"))
+            .spawn(move || {
+                use std::sync::mpsc::RecvTimeoutError;
+                let emit = |bytes: &[u8]| {
+                    let encoded = general_purpose::STANDARD.encode(bytes);
+                    let _ = app_handle_flush.emit(
+                        &format!("terminal:output:{}", id_flush),
+                        encoded,
+                    );
+                };
+                let mut acc: Vec<u8> = Vec::with_capacity(64 * 1024);
+                loop {
+                    match rx.recv_timeout(FLUSH_INTERVAL) {
+                        Ok(chunk) => {
+                            acc.extend_from_slice(&chunk);
+                            if acc.len() >= FLUSH_MAX {
+                                emit(&acc);
+                                acc.clear();
+                            }
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            if !acc.is_empty() {
+                                emit(&acc);
+                                acc.clear();
+                            }
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            if !acc.is_empty() {
+                                emit(&acc);
+                                acc.clear();
+                            }
+                            break;
+                        }
+                    }
+                }
+            })
+            .map_err(|e| AppError::Other(format!("flush thread spawn failed: {e}")))?;
 
         // Spawn a child-watcher thread that blocks on wait() and emits
         // terminal:closed when the process actually exits.  This is the

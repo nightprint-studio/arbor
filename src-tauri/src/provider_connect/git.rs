@@ -2,7 +2,7 @@
 //!
 //! Each connector owns its own `Arc<dyn GitProvider>`, assembled exactly the
 //! way `lib.rs` seeds the `GitProviderRegistry` (a `GithubProvider` /
-//! `GitlabProvider` over the shell's `session::*SessionProvider`). That keeps
+//! `GitlabProvider` over the shared `auth::vault::VaultSessionProvider`). That keeps
 //! the connector constructible WITHOUT `AppState` — it only needs the provider
 //! for `descriptor()` + `auth_status()` (has_token + current_user). connect /
 //! OAuth / disconnect bridge the existing `git_provider::oauth::*` glue.
@@ -22,7 +22,7 @@ use corvus_git_provider_api::prelude::GitProvider;
 use corvus_provider_descriptor::prelude::{AuthStatus, OAuthStart, ProviderDescriptor};
 
 use crate::error::AppError;
-use crate::git_provider::session::{GithubSessionProvider, GitlabSessionProvider};
+use crate::auth::vault::VaultSessionProvider;
 use crate::git_provider::{GithubProvider, GitlabProvider};
 use crate::provider_connect::{compose_git_auth_status, ConnectorRegistry, ProviderConnector};
 
@@ -60,7 +60,7 @@ impl GithubConnector {
     fn new() -> Self {
         Self {
             provider: Arc::new(GithubProvider::new(
-                Arc::new(GithubSessionProvider::new()),
+                Arc::new(VaultSessionProvider::github()),
                 "github.com",
             )),
         }
@@ -134,7 +134,7 @@ pub struct GitlabConnector {
 impl GitlabConnector {
     fn new() -> Self {
         Self {
-            provider: Arc::new(GitlabProvider::new(Arc::new(GitlabSessionProvider::new()))),
+            provider: Arc::new(GitlabProvider::new(Arc::new(VaultSessionProvider::gitlab()))),
         }
     }
 }

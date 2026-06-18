@@ -10,12 +10,9 @@
 //! the host deserialises them via serde so the Lua surface stays close
 //! to the Rust types.
 
-use std::sync::Arc;
-
 use mlua::{Lua, LuaSerdeExt, Table};
 use tauri::Manager;
 
-use arbor_cloud::host::CloudHost;
 use crate::cloud::types::CloudConnection;
 use crate::error::{AppError, Result};
 use crate::plugin::ns_shell::ctx_ext::ApiCtxExt;
@@ -259,7 +256,10 @@ fn install_list_stream(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
             };
         }
 
-        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
+        let host = match h.state::<crate::AppState>().cloud_host() {
+            Some(host) => host,
+            None => return err2(_lua_ctx, format!("{op}: cloud host not ready")),
+        };
         let app    = h.clone();
         let sid    = stream_id.clone();
         let bk     = bucket.clone();
@@ -303,7 +303,10 @@ fn install_search_stream(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
             };
         }
 
-        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
+        let host = match h.state::<crate::AppState>().cloud_host() {
+            Some(host) => host,
+            None => return err2(_lua_ctx, format!("{op}: cloud host not ready")),
+        };
         let app = h.clone();
         let sid = stream_id.clone();
         // MUST be `tauri::async_runtime::spawn` — see install_list_stream
@@ -427,7 +430,10 @@ fn install_download(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
         let bucket = match req_str(&opts, "bucket", op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let path   = match req_str(&opts, "path",   op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let local  = match req_str(&opts, "local",  op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
-        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
+        let host = match h.state::<crate::AppState>().cloud_host() {
+            Some(host) => host,
+            None => return err2(_lua_ctx, format!("{op}: cloud host not ready")),
+        };
         let res = block_on!(crate::cloud::transfer::download(
             host, conn, bucket, path, std::path::PathBuf::from(local),
         ));
@@ -452,7 +458,10 @@ fn install_upload(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
         let path      = match req_str(&opts, "path",   op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let local     = match req_str(&opts, "local",  op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let overwrite = opt_bool(&opts, "overwrite").unwrap_or(false);
-        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
+        let host = match h.state::<crate::AppState>().cloud_host() {
+            Some(host) => host,
+            None => return err2(_lua_ctx, format!("{op}: cloud host not ready")),
+        };
         let res = block_on!(crate::cloud::transfer::upload(
             host, conn, bucket, path, std::path::PathBuf::from(local), overwrite,
         ));
@@ -483,7 +492,10 @@ fn install_sync(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
             "down" => crate::cloud::transfer::SyncDir::Down,
             other  => return err2(_lua_ctx, format!("{op}: direction must be \"up\" or \"down\", got {other:?}")),
         };
-        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
+        let host = match h.state::<crate::AppState>().cloud_host() {
+            Some(host) => host,
+            None => return err2(_lua_ctx, format!("{op}: cloud host not ready")),
+        };
         let res = block_on!(crate::cloud::transfer::sync(
             host, conn, bucket, remote_prefix,
             std::path::PathBuf::from(local), dir, delete,
@@ -542,7 +554,10 @@ fn install_download_many(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
         }
         let keep_open = opt_bool(&opts, "keep_open").unwrap_or(false);
 
-        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
+        let host = match h.state::<crate::AppState>().cloud_host() {
+            Some(host) => host,
+            None => return err2(_lua_ctx, format!("{op}: cloud host not ready")),
+        };
         let res = block_on!(crate::cloud::transfer::download_many(
             host, conn, bucket, paths, std::path::PathBuf::from(local_dir),
             parallel.unwrap_or(4).clamp(1, 16),
@@ -739,7 +754,10 @@ fn install_oauth_start(ctx: &ApiCtx, lua: &Lua, table: &Table) -> Result<()> {
         let secret_ref    = match req_str(&opts, "secret_ref", op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let client_id     = match req_str(&opts, "client_id",  op) { Ok(s) => s, Err(e) => return err2(_lua_ctx, e) };
         let client_secret = opt_str(&opts, "client_secret");
-        let host: Arc<dyn CloudHost> = h.state::<Arc<dyn CloudHost>>().inner().clone();
+        let host = match h.state::<crate::AppState>().cloud_host() {
+            Some(host) => host,
+            None => return err2(_lua_ctx, format!("{op}: cloud host not ready")),
+        };
         let res = block_on!(crate::cloud::oauth_google::start(
             host, secret_ref, client_id, client_secret,
         ));

@@ -62,15 +62,17 @@ own base URL. `{ base_url, auth_header, web_base }` covers them all with one
 abstraction, and keeps the trait free of `keyring`/HTTP types so the coupled
 domains can be extracted into `corvus-*` crates.
 
-Today the trait is implemented by **shell-side adapters** that read the keyring
-directly and work synchronously inside the process:
+The trait is implemented shell-side by a single, descriptor-driven
+**`VaultSessionProvider`** (`src-tauri/src/auth/vault.rs`) that reads the keyring
+directly and works synchronously inside the process. The four providers
+(GitHub, GitLab, Linear, Jira) are four `CredentialDescriptor` values — each a
+small bundle of labels plus the three functions that genuinely differ (token
+read, OAuth refresh, presence probe); the shared `session`/`refresh`/`has`
+control flow lives once in the provider. Each backend is constructed with its
+own instance (`VaultSessionProvider::{github,gitlab,linear,jira}()`), held as an
+`Arc<dyn SessionProvider>` exactly as before — only the impl is now shared.
 
-- `src-tauri/src/git_provider/session.rs` — `GithubSessionProvider`,
-  `GitlabSessionProvider`.
-- `src-tauri/src/integrations/token_source.rs` — `LinearSessionProvider`,
-  `JiraSessionProvider`.
-
-**The in-process migration runs entirely on these adapters — no new channel is
+**The in-process migration runs entirely on this provider — no new channel is
 needed.** A handler reached in-process holds an `Arc<dyn SessionProvider>` whose
 backing reads the keyring locally; `session()`/`refresh()` resolve synchronously
 without leaving the process.
@@ -247,23 +249,49 @@ The work decomposes into three increments, ordered so each lands independently
 and the channel comes last (it is the hardest piece, and the first two are
 useful on their own, in-process):
 
-1. **Collapse 4 adapters → 1 + the descriptor type.** Add
-   `ProviderCredentialDescriptor` (and `KeyringAccount` / `HeaderScheme` /
-   `BaseUrlRule` / `RefreshConfig`) to `corvus-provider-descriptor`. Write the
-   single generic `VaultSessionProvider` driven by a descriptor, and replace
-   `Github`/`Gitlab`/`Linear`/`Jira` `SessionProvider` impls with four
-   descriptor values. Pure in-process refactor — no behavior change, no channel.
-   This proves the descriptor model captures every provider's real shape.
+1. **Collapse 4 adapters → 1 + the descriptor type. — DONE.** The single
+   `VaultSessionProvider` (`src-tauri/src/auth/vault.rs`) replaces the four
+   hand-written `SessionProvider` impls; each provider is one
+   `CredentialDescriptor`. Pure in-process refactor, no behaviour change, no
+   channel. This increment's descriptor carries the genuinely-divergent steps
+   (token read with its priority rules, OAuth refresh with its single-use lock,
+   Jira's multi-mode `get_config`) as *function pointers*, not yet as pure
+   serializable data — those functions encapsulate logic that must not be
+   re-implemented in-process. Step 2 turns the descriptor into data: each
+   backend owns + ships its own, the launcher reads keyring/OAuth params from
+   the descriptor itself rather than calling shell functions.
 
-2. **Per-BE `__credential_descriptors` IPC.** Each backend exposes the method;
-   the launcher collects descriptors at registration and assembles its
-   `VaultSessionProvider` from them, over the existing forward channel. Still
-   in-process — the launcher just stops hard-coding the descriptor set and reads
-   it from the backends instead.
+2. **Per-BE `__credential_descriptors` IPC. — DEFERRED to ride with the first
+   `corvus-be` OOP split.** Investigation found this increment delivers little
+   *in-process*: turning the descriptor into genuine data (so the launcher reads
+   keyring/OAuth params from it instead of calling shell functions) does **not**
+   flatten cleanly while still in-process —
+   - **GitLab's read doesn't reduce to per-account data**: its gitlab.com keyring
+     keys (`gitlab.com/arbor`, `get_for_host("gitlab.com")`) are *hardcoded* and
+     not derived from the account (`https://gitlab.com`), and self-hosted uses a
+     different lookup (`get_for_host(account)`); expressing it as data needs a
+     scheme-normalization rule whose faithfulness to `get_for_host` can't be
+     runtime-verified here (a wrong guess silently breaks self-hosted auth).
+   - **Refresh can't be re-implemented in-process without a race**: GitHub/GitLab's
+     single-use-token `REFRESH_LOCK` is **shared** with `ci_impl`'s 401-retry path
+     (avatar / image proxy). A parallel generic refresh would use a different lock
+     and reintroduce the single-use-token race.
+
+   So a faithful in-process version would be a serializable *tag* layer that still
+   delegates to the existing shell functions — i.e. it would not actually move the
+   provider logic into the backend, only its name. The real data-move **and** the
+   lock-unification are genuinely forced (and end-to-end testable) only once the
+   launcher is a separate process. The descriptor-as-data work therefore lands
+   together with increment 3, driven by the OOP split. Until then, increment 1's
+   single `VaultSessionProvider` (function-pointer descriptors) is the in-process
+   end state — it already banked the real in-process win (4 impls → 1).
 
 3. **The reverse channel, with `SessionProvider` as its first consumer.** Build
    the backend→shell reentrant request/response channel (the missing transport
    direction). Wire `ChildSessionProvider` as its first client so an OOP backend
    resolves credentials over it. `arbor.ui.*` round-trips follow as the second
    consumer on the same channel. This is the increment that actually unblocks the
-   OOP split of MR/PR, security, issues, the git provider layer, and CI.
+   OOP split of MR/PR, security, issues, the git provider layer, and CI — and it
+   is where the descriptor-as-data move (increment 2) lands, because that is when
+   the launcher must own keyring + OAuth as a process and the work becomes
+   testable end-to-end.

@@ -36,5 +36,5 @@ corvus-issue-tracker-linear`). The network round-trips are not unit-tested
 ## Consumed by
 
 `arbor` (the shell): registered in `src-tauri/src/integrations/registry.rs`, with
-the keyring/OAuth adapter in `token_source.rs` and the command shim in
-`linear.rs`.
+credentials supplied by the shared `auth::vault::VaultSessionProvider` and the
+command shim in `linear.rs`.

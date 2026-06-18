@@ -191,10 +191,10 @@ pub struct AppState {
     /// `keep_open=true` (chunk-merge flow). `cloud_report_done` reads +
     /// removes the entry to finalize the job once the merge phase ends.
     pub cloud_pending_ops: Arc<CloudPendingOps>,
-    /// The cloud host singleton, published by `cloud::install()` so platform
-    /// handlers (Wave 1+) can reach it without a Tauri State lookup. The
-    /// same `Arc<dyn CloudHost>` is also managed as Tauri State for the
-    /// un-migrated Lua `ns_shell/cloud.rs` path (Wave 3 will remove that).
+    /// The cloud host singleton, published by `cloud::install()`. The single
+    /// home of the `Arc<dyn CloudHost>`: both the platform command handlers and
+    /// the Lua `ns_shell/cloud.rs` path reach it via `cloud_host()` — no
+    /// Tauri-managed state is involved.
     pub cloud_host: Arc<std::sync::OnceLock<Arc<dyn CloudHost>>>,
     /// Bevy Remote Protocol — singleton live session against one Bevy game
     /// at a time. Read-only HTTP for Phase 1; SSE watch + editing in later
@@ -431,11 +431,11 @@ impl AppState {
         // `git_provider::helpers::provider_for_tab`.
         let mut providers = GitProviderRegistry::new();
         providers.register(Arc::new(GithubProvider::new(
-            Arc::new(crate::git_provider::session::GithubSessionProvider::new()),
+            Arc::new(crate::auth::vault::VaultSessionProvider::github()),
             "github.com",
         )));
         providers.register(Arc::new(GitlabProvider::new(
-            Arc::new(crate::git_provider::session::GitlabSessionProvider::new()),
+            Arc::new(crate::auth::vault::VaultSessionProvider::gitlab()),
         )));
 
         // Hook broker — built here (rather than in `setup()`) so the field can
