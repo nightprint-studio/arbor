@@ -19,7 +19,7 @@ use std::any::Any;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-use arbor_ipc::prelude::{serve_stdio, EventSink, FrameEventSink, SharedWriter};
+use arbor_ipc::prelude::{serve_stdio, EventSink, FrameEventSink, FrameHostCaller, HostCaller, SharedWriter};
 use corvus_core::prelude::CorvusState;
 
 // Domain handler modules — their `#[arbor_rpc::handler]`s self-register via
@@ -67,7 +67,12 @@ fn main() {
     // (the mutex serializes the two). This is what `CorvusState` holds — handlers
     // emit through it exactly as in-process, but it crosses the process boundary.
     let sink: Arc<dyn EventSink> = Arc::new(FrameEventSink::new(Arc::clone(&stdout)));
-    let state = CorvusState::new(sink);
+
+    // Reverse channel (`docs/reverse-channel.md`): the backend's `HostCaller`,
+    // writing `HostRequest` frames on the same stdout the serve loop routes
+    // `HostResponse`s back through. Handlers reach it via `state.host_call(...)`.
+    let host = FrameHostCaller::new(Arc::clone(&stdout));
+    let state = CorvusState::new(sink).with_host_caller(Arc::clone(&host) as Arc<dyn HostCaller>);
 
     // The registry is collected from every `#[arbor_rpc::handler]` linked into
     // this binary (just the self-test set today; git handlers in Stage 2).
@@ -83,7 +88,7 @@ fn main() {
         }
     };
 
-    if let Err(e) = serve_stdio(stdout, methods, dispatch) {
+    if let Err(e) = serve_stdio(io::stdin().lock(), stdout, methods, host, dispatch) {
         eprintln!("corvus-be: serve loop ended with error: {e}");
         std::process::exit(1);
     }

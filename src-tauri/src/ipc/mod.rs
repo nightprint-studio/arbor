@@ -187,10 +187,19 @@ fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
 
     let app_for_events = app.clone();
-    match ChildClient::spawn(cmd, move |topic, payload| {
-        use tauri::Emitter;
-        let _ = app_for_events.emit(&topic, payload);
-    }) {
+    match ChildClient::spawn(
+        cmd,
+        move |topic, payload| {
+            use tauri::Emitter;
+            let _ = app_for_events.emit(&topic, payload);
+        },
+        // Reverse-channel host-handlers (`docs/reverse-channel.md`): the
+        // backend→shell request/response dispatch. `__session`/`__refresh` (over
+        // the shell's `VaultSessionProvider`) and the `arbor.ui.*` round-trips
+        // land in a later phase; until a credential domain moves OOP no backend
+        // calls back, so this is wired-but-dormant.
+        |method, _params| Err(format!("host method not implemented: {method}")),
+    ) {
         Ok(pair) => Some(pair),
         Err(e) => {
             tracing::warn!("failed to spawn corvus-be ({e}) — staying in-process");

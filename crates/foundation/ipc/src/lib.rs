@@ -32,6 +32,7 @@ pub mod client;
 pub mod credential;
 pub mod error;
 pub mod event;
+pub mod host;
 pub mod prelude;
 pub mod stream;
 pub mod transport;

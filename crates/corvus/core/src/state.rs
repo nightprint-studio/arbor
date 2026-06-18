@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use arbor_ipc::prelude::EventSink;
+use arbor_ipc::prelude::{EventSink, HostCaller};
 use serde_json::Value;
 
 /// The state the Corvus (git) backend owns — the seed of `corvus-be`.
@@ -27,6 +27,11 @@ pub struct CorvusState {
     /// → fall back to `git` on `PATH`. Pushed by the shell so the backend shells
     /// out to the same binary.
     git_program: Mutex<Option<String>>,
+    /// Reverse channel back to the shell (`docs/reverse-channel.md`): present
+    /// only when split into its own process (`corvus-be` wires a
+    /// `FrameHostCaller`). In-process it's `None` — those handlers reach the
+    /// shell's vault / plugin host directly and never call back.
+    host: Option<Arc<dyn HostCaller>>,
 }
 
 impl CorvusState {
@@ -37,6 +42,25 @@ impl CorvusState {
             events,
             repos: Mutex::new(HashMap::new()),
             git_program: Mutex::new(None),
+            host: None,
+        }
+    }
+
+    /// Attach the reverse channel back to the shell. Called by `corvus-be` once
+    /// it owns a [`FrameHostCaller`](arbor_ipc::prelude::FrameHostCaller); the
+    /// in-process shell leaves it unset.
+    pub fn with_host_caller(mut self, host: Arc<dyn HostCaller>) -> Self {
+        self.host = Some(host);
+        self
+    }
+
+    /// Call back into the shell (credential resolution, plugin-UI round-trips),
+    /// blocking on the reply. Errors with a clear message when no reverse channel
+    /// is wired (in-process, where it shouldn't be reached).
+    pub fn host_call(&self, method: &str, params: Value) -> Result<Value, String> {
+        match &self.host {
+            Some(h) => h.call(method, params),
+            None => Err(format!("host_call('{method}'): no reverse channel (in-process)")),
         }
     }
 
