@@ -37,16 +37,65 @@ pub mod platform;
 pub mod split_broker;
 pub mod studio;
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::any::Any;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock};
 
 use arbor_ipc::prelude::{BrokerClient, ChildClient, IpcError, LoopbackBroker};
+use arbor_rpc::AsyncCallFn;
 use arbor_shell_common::prelude::{Router, RouterError};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 use crate::ipc::split_broker::SplitBroker;
 use crate::AppState;
+
+/// The **async** handlers, grouped by program, collected once from the
+/// `arbor-rpc` inventory. These are network/credential handlers the host awaits
+/// directly on the runtime (no blocking-pool thread held for the round-trip) —
+/// the bifurcation partner of the sync `registry_for` path that each program's
+/// `dispatch` runs on `spawn_blocking`.
+fn async_handlers() -> &'static HashMap<&'static str, HashMap<&'static str, AsyncCallFn>> {
+    static REG: OnceLock<HashMap<&'static str, HashMap<&'static str, AsyncCallFn>>> = OnceLock::new();
+    REG.get_or_init(|| {
+        ["corvus", "platform", "studio"]
+            .into_iter()
+            .filter_map(|p| {
+                let sub = arbor_rpc::async_registry_for(p);
+                (!sub.is_empty()).then_some((p, sub))
+            })
+            .collect()
+    })
+}
+
+/// Whether `(program, method)` is served by an **async** handler (and so must be
+/// awaited on the runtime rather than dispatched on `spawn_blocking`).
+pub fn is_async_method(program: &str, method: &str) -> bool {
+    async_handlers()
+        .get(program)
+        .map(|m| m.contains_key(method))
+        .unwrap_or(false)
+}
+
+/// Await an async handler in-process against the live `AppState`. The future
+/// borrows the state for its lifetime; we hold the managed-state guard across
+/// the await (the state outlives every request). Errors arrive as the handler's
+/// `Display` string, re-wrapped as [`AppError::Other`] (same wire string the FE
+/// matches on as the sync path).
+pub async fn dispatch_async(
+    app: &AppHandle,
+    program: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let handler = *async_handlers()
+        .get(program)
+        .and_then(|m| m.get(method))
+        .ok_or_else(|| AppError::Other(format!("no async handler for {program}/{method}")))?;
+    let state = app.state::<AppState>();
+    let ctx: &(dyn Any + 'static) = &*state;
+    handler(ctx, params).await.map_err(AppError::Other)
+}
 
 /// Build the IPC router with the in-process `corvus` backend registered.
 ///

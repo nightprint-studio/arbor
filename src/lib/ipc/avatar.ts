@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { corvus } from './rpc';
 
 /** Ask the backend to resolve an avatar URL for `email` via the
  *  GitProvider bound to `tabId`'s repo. Returns null when no provider,
@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
  *  avatar. Never throws (errors collapse to null on the backend). */
 export async function resolveAvatarForEmail(tabId: string, email: string): Promise<string | null> {
   try {
-    const url = await invoke<string | null>('resolve_avatar_for_email', { tabId, email });
+    const url = await corvus<string | null>('resolve_avatar_for_email', { tab_id: tabId, email });
     return url ?? null;
   } catch {
     return null;

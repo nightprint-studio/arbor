@@ -38,6 +38,27 @@ while they await their out-of-process split, so each program's in-process
 dispatcher serves only its own methods (no cross-program leak, no same-name
 collision).
 
+### Sync vs async handlers
+
+A handler is **sync** (a plain `fn`) or **async** (an `async fn`) — the macro
+reads its `async`-ness and registers it as `Kind::Sync` / `Kind::Async`:
+
+```rust
+#[arbor_rpc::handler]                          // CPU-bound git — Kind::Sync
+fn get_status(state: &AppState, tab_id: String) -> Result<RepoStatus, AppError> { /* … */ }
+
+#[arbor_rpc::handler]                          // network/credential — Kind::Async
+async fn list_mrs(state: &AppState, tab_id: String) -> Result<Vec<Mr>, AppError> { /* … */ }
+```
+
+`registry_for(program)` returns only the **sync** handlers (the host runs them
+on `spawn_blocking`, off the runtime workers — right for libgit2). The
+disjoint `async_registry_for(program)` returns the **async** handlers (the host
+awaits them on the runtime — the network round-trip yields the thread instead
+of blocking a pool thread). An async handler's future borrows the context and
+must be `Send`, so it must not hold a `MutexGuard` across an `.await` (lock
+briefly, drop, then await).
+
 The macro reads the signature and generates:
 
 - the JSON-argument decode (one `decode_field` per parameter, by name);
@@ -66,7 +87,7 @@ pattern.
 
 ## Public API: use the prelude
 
-`arbor_rpc::prelude::{handler, registry, registry_for, decode_field, Entry, CallFn}`.
+`arbor_rpc::prelude::{handler, registry, registry_for, async_registry_for, decode_field, Entry, Kind, CallFn, AsyncCallFn}`.
 
 ## Tests
 

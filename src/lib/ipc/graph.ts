@@ -18,7 +18,7 @@ export const initRepo = (path: string, tabId: string, options: InitRepoOptions) 
   invoke<InitRepoResult>('init_repo', { path, tabId, options });
 
 export const closeRepo = (tabId: string) =>
-  invoke<void>('close_repo', { tabId });
+  corvus<void>('close_repo', { tab_id: tabId });
 
 /** List branch names available on a remote URL without cloning. */
 export const listRemoteBranchesForUrl = (url: string) =>

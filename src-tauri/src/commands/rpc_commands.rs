@@ -40,6 +40,16 @@ pub async fn rpc(
     params: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, AppError> {
     let params = params.unwrap_or(serde_json::Value::Null);
+
+    // Async handlers (network/credential) are awaited on the runtime — no
+    // blocking-pool thread is held for the round-trip. They fire their own
+    // fire-and-forget hooks inline (host co-located), so no post-hooks are owed.
+    if crate::ipc::is_async_method(&program, &method) {
+        return crate::ipc::dispatch_async(&app, &program, &method, params).await;
+    }
+
+    // Sync handlers (CPU-bound git via libgit2) run on `spawn_blocking`, off the
+    // runtime workers — the original path, unchanged.
     tokio::task::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let result = crate::ipc::dispatch_rpc(state.inner(), &program, &method, params.clone())?;

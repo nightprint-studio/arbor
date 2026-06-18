@@ -13,6 +13,7 @@
 //! this is a plain call; once `corvus-be` splits out the handlers move into that
 //! binary unchanged.
 
+pub mod avatar;
 pub mod bisect;
 pub mod branch;
 pub mod brp;

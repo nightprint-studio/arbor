@@ -1,55 +1,10 @@
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
 
 use crate::error::AppError;
 use crate::git::repo::{RepoInfo, CloneOptions};
 use crate::git::init::InitRepoOptions;
 use crate::AppState;
-
-/// Close the repository tab `tab_id` in the repo manager.
-///
-/// DEFERRED from the broker migration: the orphan-GC step calls
-/// `workspace_commands::forget_repo_if_orphaned`, whose signature takes
-/// `&State<'_, AppState>` (a Tauri managed-state handle), not the `&AppState`
-/// a broker handler holds — and it manages an `AppHandle` egress
-/// (`arbor://registry-changed`). Migrating it cleanly needs that helper's
-/// signature relaxed to `&AppState`, which is out of scope for the repo pass.
-#[tauri::command]
-pub fn close_repo(app: AppHandle, state: State<'_, AppState>, tab_id: String) -> Result<(), AppError> {
-    let (path, name) = {
-        let mut mgr = state.lock_repos()?;
-        let info = mgr.get(&tab_id)
-            .map(|r| (r.path.clone(), r.name.clone()))
-            .unwrap_or_default();
-        mgr.close(&tab_id);
-        info
-    };
-    state.fire_hook(
-        "on_repo_close",
-        serde_json::json!({ "tab_id": &tab_id, "path": &path, "name": &name }),
-    );
-    crate::ipc::sync_repo_close(&state, &tab_id);
-
-    // After the close, if the repo is now orphaned — no other tab open AND not a
-    // member of any workspace — forget it: drop the registry entry + recent-list
-    // pointer and fire `on_repo_deregistered`. This is the deferred half of the
-    // workspace GC: deleting a workspace (or removing a repo from its last one)
-    // keeps the entry while a tab is still open, and closing that tab finishes
-    // the job here. The shared helper re-checks both conditions itself.
-    if !path.is_empty() {
-        let repo_id = state.lock_repo_registry()
-            .ok()
-            .and_then(|reg| reg.find_by_path(&path).map(|e| e.id.clone()));
-        if let Some(id) = repo_id {
-            let forgotten = crate::commands::workspace_commands::forget_repo_if_orphaned(
-                &state, &id, "tab_closed_when_orphan",
-            ).unwrap_or(false);
-            // Dropping the registry entry changes the explorer's Projects view.
-            if forgotten { let _ = app.emit("arbor://registry-changed", ()); }
-        }
-    }
-    Ok(())
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitRepoResult {

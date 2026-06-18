@@ -50,7 +50,7 @@ fn norm_path(p: &str) -> String {
 /// Drop a path from the recent-repos list (best-effort, no-op when absent or
 /// when the repo has no on-disk path). Centralised so every "forget a repo"
 /// path cleans the same surface.
-fn forget_recent_repo(state: &State<'_, AppState>, path: &str) -> Result<()> {
+fn forget_recent_repo(state: &AppState, path: &str) -> Result<()> {
     if path.trim().is_empty() { return Ok(()); }
     let mut cfg = state.lock_config()?;
     let target = norm_path(path);
@@ -80,7 +80,7 @@ fn forget_recent_repo(state: &State<'_, AppState>, path: &str) -> Result<()> {
 /// `pub(crate)` so `repo_commands::close_repo` can run the same GC when an
 /// orphan's last tab closes — keeping "forget an orphan" in one place.
 pub(crate) fn forget_repo_if_orphaned(
-    state: &State<'_, AppState>,
+    state: &AppState,
     repo_id: &str,
     reason: &str,
 ) -> Result<bool> {

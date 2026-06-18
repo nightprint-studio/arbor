@@ -5,12 +5,11 @@
 //! `#[corvus::handler]` self-registers it under its own function name.
 //!
 //! The leaf-clean ops live here (path/identity probes and single-repo metadata
-//! reads) alongside the `open_repo` lifecycle flow. `open_repo` mutates the
-//! open-repo set and calls `sync_repo_open`, but emits nothing of its own and
-//! takes no `AppHandle`, so it migrates cleanly. The async provider/network
-//! flows (`init_repo`, `clone_repo`) and `close_repo` stay inline in
-//! `repo_commands` for a later pass — `close_repo`'s orphan-GC step calls a
-//! `workspace_commands` helper still typed against `&State<'_, AppState>`.
+//! reads) alongside the `open_repo` / `close_repo` lifecycle flow. Both mutate
+//! the open-repo set and mirror into `corvus-be` (`sync_repo_open/close`) but
+//! emit through the backend event sink (`state.emit`) and take no `AppHandle`,
+//! so they migrate cleanly. The async provider/network flows (`init_repo`,
+//! `clone_repo`) stay inline in `repo_commands` for the credential/async pass.
 //!
 //! `check_is_git_repo` / `get_git_identity` / `list_remote_branches_for_url`
 //! never touched `AppState`, but the handler macro requires a context first
@@ -19,8 +18,9 @@
 //! AppError>`, so the handlers wrap the same value in `Ok(...)` — the serde
 //! shape on the wire is identical (a JSON bool / 2-tuple).
 //!
-//! The `on_repo_open` hook is fire-and-forget and fires inline from
-//! `open_repo`, after the repo lock is dropped, with first-hand data.
+//! The `on_repo_open` / `on_repo_close` (and the orphan-GC `on_repo_deregistered`)
+//! hooks are fire-and-forget and fire inline after the repo lock is dropped,
+//! with first-hand data.
 
 use crate::error::AppError;
 use crate::git::repo::RepoInfo;
@@ -79,4 +79,48 @@ fn open_repo(state: &AppState, path: String, tab_id: String) -> Result<RepoInfo,
         json!({ "tab_id": tab_id, "path": info.path, "name": info.name }),
     );
     Ok(info)
+}
+
+/// Close the tab `tab_id` in the repo manager.
+///
+/// Fires `on_repo_close` inline (after the repo lock is dropped), mirrors the
+/// close into `corvus-be` via `sync_repo_close`, then runs the orphan GC: a
+/// repo with no open tab and no workspace membership is forgotten (registry
+/// entry + recent-repos pointer dropped, `on_repo_deregistered` fired), and
+/// `arbor://registry-changed` is emitted so the explorer's Projects view
+/// refreshes.
+#[corvus::handler]
+fn close_repo(state: &AppState, tab_id: String) -> Result<(), AppError> {
+    let (path, name) = {
+        let mut mgr = state.lock_repos()?;
+        let info = mgr.get(&tab_id)
+            .map(|r| (r.path.clone(), r.name.clone()))
+            .unwrap_or_default();
+        mgr.close(&tab_id);
+        info
+    };
+    state.fire_hook(
+        "on_repo_close",
+        json!({ "tab_id": &tab_id, "path": &path, "name": &name }),
+    );
+    crate::ipc::sync_repo_close(state, &tab_id);
+
+    // The shared GC helper re-checks both orphan conditions (no open tab AND no
+    // workspace membership) itself before dropping the registry entry.
+    if !path.is_empty() {
+        let repo_id = state.lock_repo_registry()
+            .ok()
+            .and_then(|reg| reg.find_by_path(&path).map(|e| e.id.clone()));
+        if let Some(id) = repo_id {
+            let forgotten = crate::commands::workspace_commands::forget_repo_if_orphaned(
+                state, &id, "tab_closed_when_orphan",
+            ).unwrap_or(false);
+            // Dropping the registry entry changes the explorer's Projects view.
+            // `()` serializes to JSON null — byte-identical to the old `app.emit`.
+            if forgotten {
+                state.emit("arbor://registry-changed", ());
+            }
+        }
+    }
+    Ok(())
 }

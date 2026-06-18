@@ -34,6 +34,12 @@ use syn::{
 /// `&AppState`), `R: Serialize`, and `E: Display`. Each remaining argument is
 /// decoded by name from the JSON params object. The context is recovered by
 /// downcasting the type-erased `&dyn Any` the dispatcher passes in.
+///
+/// A plain `fn` registers as `Kind::Sync`; an `async fn` registers as
+/// `Kind::Async` (the macro generates a thunk that downcasts the context
+/// **before** the `.await` — `&dyn Any` is not `Send` — and boxes a
+/// ctx-borrowing `Send` future). The host runs sync handlers on
+/// `spawn_blocking` and awaits async ones on the runtime.
 #[proc_macro_attribute]
 pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = parse_macro_input!(item as ItemFn);
@@ -125,14 +131,39 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
         call_args.push(ident);
     }
 
-    quote! {
-        #func
-
-        ::arbor_rpc::inventory::submit! {
-            ::arbor_rpc::Entry {
-                program: #program,
-                name: #name,
-                call: |__ctx: &(dyn ::core::any::Any + 'static), __params: ::serde_json::Value|
+    // An `async fn` registers as `Kind::Async` — a thunk returning a boxed,
+    // ctx-borrowing, `Send` future the host awaits on the runtime. A plain `fn`
+    // registers as `Kind::Sync` and runs on `spawn_blocking`.
+    let kind = if func.sig.asyncness.is_some() {
+        quote! {
+            ::arbor_rpc::Kind::Async(
+                |__ctx: &(dyn ::core::any::Any + 'static), __params: ::serde_json::Value|
+                    -> ::core::pin::Pin<::std::boxed::Box<dyn ::core::future::Future<
+                        Output = ::core::result::Result<::serde_json::Value, ::std::string::String>
+                    > + ::core::marker::Send + '_>>
+                {
+                    // Downcast BEFORE the async block: the `&dyn Any` is not `Send`
+                    // (`dyn Any` isn't `Sync`), so it must not be held across the
+                    // `.await`. Only the typed `&Ctx` (Send when `Ctx: Sync`) and the
+                    // owned params cross into the future.
+                    let __ctx_typed = __ctx.downcast_ref::<#ctx_ty>();
+                    ::std::boxed::Box::pin(async move {
+                        let #ctx_pat: &#ctx_ty = __ctx_typed
+                            .ok_or_else(|| ::std::string::String::from("rpc: wrong backend context type"))?;
+                        #(#decode_stmts)*
+                        let __out = #fn_name(#ctx_pat, #(#call_args),*)
+                            .await
+                            .map_err(|__e| ::std::string::ToString::to_string(&__e))?;
+                        ::serde_json::to_value(__out)
+                            .map_err(|__e| ::std::string::ToString::to_string(&__e))
+                    })
+                }
+            )
+        }
+    } else {
+        quote! {
+            ::arbor_rpc::Kind::Sync(
+                |__ctx: &(dyn ::core::any::Any + 'static), __params: ::serde_json::Value|
                     -> ::core::result::Result<::serde_json::Value, ::std::string::String>
                 {
                     let #ctx_pat: &#ctx_ty = __ctx
@@ -143,7 +174,19 @@ pub fn handler(attr: TokenStream, item: TokenStream) -> TokenStream {
                         .map_err(|__e| ::std::string::ToString::to_string(&__e))?;
                     ::serde_json::to_value(__out)
                         .map_err(|__e| ::std::string::ToString::to_string(&__e))
-                },
+                }
+            )
+        }
+    };
+
+    quote! {
+        #func
+
+        ::arbor_rpc::inventory::submit! {
+            ::arbor_rpc::Entry {
+                program: #program,
+                name: #name,
+                kind: #kind,
             }
         }
     }
