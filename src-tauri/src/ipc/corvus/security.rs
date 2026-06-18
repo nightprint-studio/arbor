@@ -1,24 +1,36 @@
-//! Security dashboard — Tauri command layer.
+//! `security` domain — code-scanning / security-findings handlers routed
+//! through the in-process broker.
 //!
-//! **Architecture rule (NON-NEGOZIABILE)**: every command in this file goes
-//! through the `GitProvider` trait via `provider_for_tab`. We never import
-//! `gitlab_*` / `github_*` impl modules directly; the trait is the single
-//! extension point so adding a third provider (Bitbucket, Gitea) is zero
-//! work at the command layer.
+//! Each handler is the body the matching `#[tauri::command]` ran inline;
+//! `#[corvus::handler]` self-registers it under its own function name. These are
+//! the credential/async cluster: every method goes through the `GitProvider`
+//! trait via `provider_for_tab` (a brief sync lock returning owned `Arc`s — no
+//! guard held across the `.await`), then `.await`s the provider's REST/GraphQL
+//! call. `crate::auth::maybe_refresh_for_provider` keeps the OAuth token fresh
+//! before each round-trip.
 //!
-//! The frontend talks to these commands; commands lock the repo registry
-//! through `provider_for_tab`, then dispatch to whichever provider matched
-//! the active tab's remote.
+//! Hooks: `fetch_security_summary` fires `on_security_summary_loaded`
+//! fire-and-forget inline (host co-located) — copied byte-identically from the
+//! old command. No other method in this domain fires a hook.
+//!
+//! `export_security_report` registers a background job and returns its id
+//! immediately; the network fetch + file write run in a detached `tokio::spawn`
+//! that captures the **event sink** (`Arc<dyn EventSink>` — [`AppState::event_sink`])
+//! plus the job registry `Arc` instead of an `AppHandle`. Behavior (job entries,
+//! topics + payloads, notification toast) is byte-identical to the old inline
+//! command.
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use std::sync::Arc;
 
-use crate::AppState;
+use arbor_ipc::prelude::EventSink;
+
 use crate::error::{AppError, Result};
 use crate::git_provider::provider_for_tab;
 use crate::git_provider::types::{
-    SecuritySummary, SecurityFinding, SecurityFilters,
-    error::ProviderError,
+    error::ProviderError, SecurityFilters, SecurityFinding, SecuritySummary,
 };
+use crate::ipc::corvus;
+use crate::AppState;
 
 fn pe(e: ProviderError) -> AppError {
     // Surface `Unsupported` as a plain string so the frontend can branch
@@ -34,18 +46,16 @@ fn pe(e: ProviderError) -> AppError {
 ///   - the tab has no GitHub/GitLab remote
 ///   - no token is stored for the matched host
 ///   - the provider responds with 401/403/404 to the probe
-#[tauri::command]
-pub async fn supports_security(
-    state:  State<'_, AppState>,
-    tab_id: String,
-) -> Result<bool> {
-    let resolved = match provider_for_tab(&state, &tab_id) {
-        Ok(r)  => r,
+#[corvus::handler]
+async fn supports_security(state: &AppState, tab_id: String) -> Result<bool> {
+    let resolved = match provider_for_tab(state, &tab_id) {
+        Ok(r) => r,
         // No remote / no provider registered → not supported, no error.
         Err(_) => return Ok(false),
     };
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
-    resolved.provider
+    resolved
+        .provider
         .supports_security(&resolved.repo)
         .await
         .map_err(pe)
@@ -58,15 +68,16 @@ pub async fn supports_security(
 ///
 /// Fires `on_security_summary_loaded` on success so plugins can react to
 /// posture changes (notifications, dashboards, external trackers).
-#[tauri::command]
-pub async fn fetch_security_summary(
-    state:      State<'_, AppState>,
-    tab_id:     String,
+#[corvus::handler]
+async fn fetch_security_summary(
+    state: &AppState,
+    tab_id: String,
     range_days: u32,
 ) -> Result<SecuritySummary> {
-    let resolved = provider_for_tab(&state, &tab_id)?;
+    let resolved = provider_for_tab(state, &tab_id)?;
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
-    let summary = resolved.provider
+    let summary = resolved
+        .provider
         .fetch_security_summary(&resolved.repo, range_days)
         .await
         .map_err(pe)?;
@@ -97,15 +108,16 @@ pub async fn fetch_security_summary(
 /// Fetch the detailed findings list for the active tab's repo.
 /// Server-side filters: severity / state / report_type. Host-side: the
 /// `search` substring is applied to title + file_path inside each provider.
-#[tauri::command]
-pub async fn fetch_security_findings(
-    state:   State<'_, AppState>,
-    tab_id:  String,
+#[corvus::handler]
+async fn fetch_security_findings(
+    state: &AppState,
+    tab_id: String,
     filters: SecurityFilters,
 ) -> Result<Vec<SecurityFinding>> {
-    let resolved = provider_for_tab(&state, &tab_id)?;
+    let resolved = provider_for_tab(state, &tab_id)?;
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
-    resolved.provider
+    resolved
+        .provider
         .fetch_security_findings(&resolved.repo, filters)
         .await
         .map_err(pe)
@@ -115,9 +127,17 @@ pub async fn fetch_security_findings(
 // Export
 // ---------------------------------------------------------------------------
 
-fn finish_export_job(app: &AppHandle, job_id: &str, success: bool, message: &str) {
-    let state = app.state::<crate::AppState>();
-    if let Ok(mut jobs) = state.jobs.lock() {
+/// Mark an export job done and emit the completion event + notification toast.
+/// Captures the **event sink** and the job registry `Arc` — Model-D-safe egress
+/// for a detached task (no `AppHandle`).
+fn finish_export_job(
+    sink: &Arc<dyn EventSink>,
+    jobs: &Arc<std::sync::Mutex<crate::jobs::JobRegistry>>,
+    job_id: &str,
+    success: bool,
+    message: &str,
+) {
+    if let Ok(mut jobs) = jobs.lock() {
         let status = if success {
             crate::jobs::JobStatus::Completed { exit_code: 0 }
         } else {
@@ -125,7 +145,7 @@ fn finish_export_job(app: &AppHandle, job_id: &str, success: bool, message: &str
         };
         jobs.set_status(job_id, status);
     }
-    let _ = app.emit("arbor://job-done", serde_json::json!({
+    sink.emit("arbor://job-done", serde_json::json!({
         "job_id":    job_id,
         "success":   success,
         "exit_code": if success { 0i32 } else { -1i32 },
@@ -136,7 +156,7 @@ fn finish_export_job(app: &AppHandle, job_id: &str, success: bool, message: &str
     } else {
         ("Security export failed", "error")
     };
-    let _ = app.emit("plugin:notification", serde_json::json!({
+    sink.emit("plugin:notification", serde_json::json!({
         "plugin":  "arbor",
         "title":   title,
         "message": message,
@@ -155,14 +175,13 @@ fn finish_export_job(app: &AppHandle, job_id: &str, success: bool, message: &str
 /// `format` is `"html"` or `"csv"`. The HTML report mirrors the in-app
 /// dashboard (counter grid + risk gauge + time-series chart + findings
 /// table); the CSV is raw rows only — no summary banner.
-#[tauri::command]
-pub async fn export_security_report(
-    state:       State<'_, AppState>,
-    app:         AppHandle,
-    tab_id:      String,
+#[corvus::handler]
+async fn export_security_report(
+    state: &AppState,
+    tab_id: String,
     output_path: String,
-    format:      String,
-    theme:       Option<crate::git_provider::security_export::ThemeTokens>,
+    format: String,
+    theme: Option<crate::git_provider::security_export::ThemeTokens>,
 ) -> Result<String> {
     use crate::jobs::{JobInfo, JobRegistry, JobStatus};
 
@@ -174,8 +193,15 @@ pub async fn export_security_report(
 
     // Resolve provider on the calling thread so we can return early on
     // "no remote / no token" without registering a job that would never run.
-    let resolved = provider_for_tab(&state, &tab_id)?;
+    let resolved = provider_for_tab(state, &tab_id)?;
     crate::auth::maybe_refresh_for_provider(&resolved.info.provider).await;
+
+    // Egress + job registry handles for the detached task (Model-D-safe — no
+    // `AppHandle` captured).
+    let sink = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+    let jobs = Arc::clone(&state.jobs);
 
     // Repo display name (workdir folder; falls back to tab_id).
     let repo_name = {
@@ -190,7 +216,7 @@ pub async fn export_security_report(
     };
 
     let job_id = {
-        let mut jobs = state.jobs.lock()
+        let mut jobs = jobs.lock()
             .map_err(|_| AppError::Other("mutex poisoned".into()))?;
         let id = jobs.new_id();
         jobs.register(JobInfo {
@@ -210,7 +236,7 @@ pub async fn export_security_report(
         id
     };
 
-    let _ = app.emit("arbor://job-started", serde_json::json!({
+    sink.emit("arbor://job-started", serde_json::json!({
         "job_id":      &job_id,
         "name":        format!("Export Security Report as {}", format.to_uppercase()),
         "plugin_name": "arbor",
@@ -223,17 +249,17 @@ pub async fn export_security_report(
     let provider = resolved.provider.clone();
     let repo_ref = resolved.repo.clone();
     let jid = job_id.clone();
-    let ah  = app.clone();
     let out = output_path.clone();
     let fmt = format.clone();
+    let sink_bg = Arc::clone(&sink);
+    let jobs_bg = Arc::clone(&jobs);
 
     tokio::spawn(async move {
         let emit_line = |line: &str| {
-            let s = ah.state::<crate::AppState>();
-            if let Ok(mut jobs) = s.jobs.lock() {
+            if let Ok(mut jobs) = jobs_bg.lock() {
                 jobs.append_output(&jid, line.to_string());
             }
-            let _ = ah.emit("arbor://job-output", serde_json::json!({
+            sink_bg.emit("arbor://job-output", serde_json::json!({
                 "job_id": &jid,
                 "text":   line,
             }));
@@ -245,7 +271,7 @@ pub async fn export_security_report(
             Err(e) => {
                 let err = format!("Failed to fetch summary: {e}");
                 emit_line(&format!("[error] {err}"));
-                finish_export_job(&ah, &jid, false, &err);
+                finish_export_job(&sink_bg, &jobs_bg, &jid, false, &err);
                 return;
             }
         };
@@ -259,7 +285,7 @@ pub async fn export_security_report(
             Err(e) => {
                 let err = format!("Failed to fetch findings: {e}");
                 emit_line(&format!("[error] {err}"));
-                finish_export_job(&ah, &jid, false, &err);
+                finish_export_job(&sink_bg, &jobs_bg, &jid, false, &err);
                 return;
             }
         };
@@ -278,11 +304,11 @@ pub async fn export_security_report(
             Ok(()) => {
                 let ok_msg = format!("Security report exported to '{out}'.");
                 emit_line(&ok_msg);
-                finish_export_job(&ah, &jid, true, &ok_msg);
+                finish_export_job(&sink_bg, &jobs_bg, &jid, true, &ok_msg);
             }
             Err(e) => {
                 emit_line(&format!("[error] {e}"));
-                finish_export_job(&ah, &jid, false, &e);
+                finish_export_job(&sink_bg, &jobs_bg, &jid, false, &e);
             }
         }
     });

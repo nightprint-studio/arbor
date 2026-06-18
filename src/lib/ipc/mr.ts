@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { corvus } from '$lib/ipc/rpc';
 import type { MergeRequest, MrDetail, CreateMrParams, MrFileDiff, MrCommit, MergedMrHint, MrCapabilities, MrFeatureStatus } from '$lib/types/mr';
 import { invalidateTabCache } from './cache-invalidate';
 
@@ -6,28 +7,28 @@ export function listMrs(
   tabId:       string,
   stateFilter: 'open' | 'closed' | 'merged' | 'all' = 'open',
 ): Promise<MergeRequest[]> {
-  return invoke('list_mrs', { tabId, stateFilter });
+  return corvus('list_mrs', { tab_id: tabId, state_filter: stateFilter });
 }
 
 export function getMrDetail(tabId: string, number: number): Promise<MrDetail> {
-  return invoke('get_mr_detail', { tabId, number });
+  return corvus('get_mr_detail', { tab_id: tabId, number });
 }
 
 /** Probe per-repo capabilities (currently only auto-merge support).
  *  Never rejects — falls back to permissive defaults on backend errors. */
 export function getMrCapabilities(tabId: string): Promise<MrCapabilities> {
-  return invoke('get_mr_capabilities', { tabId });
+  return corvus('get_mr_capabilities', { tab_id: tabId });
 }
 
 /** Probe whether the active repo accepts pull/merge requests at all.
  *  Permissive on failure (returns `{ enabled: true, reason: null }`) so
  *  the user can still try when the probe itself errors. */
 export function probeMrFeature(tabId: string): Promise<MrFeatureStatus> {
-  return invoke('probe_mr_feature', { tabId });
+  return corvus('probe_mr_feature', { tab_id: tabId });
 }
 
 export async function createMr(tabId: string, params: CreateMrParams): Promise<MergeRequest> {
-  const r = await invoke<MergeRequest>('create_mr', { tabId, params });
+  const r = await corvus<MergeRequest>('create_mr', { tab_id: tabId, params });
   invalidateTabCache(tabId);
   return r;
 }
@@ -42,60 +43,60 @@ export async function mergeMr(
     sourceBranch?: string;
   } = {},
 ): Promise<void> {
-  await invoke('merge_mr', {
-    tabId,
+  await corvus('merge_mr', {
+    tab_id:        tabId,
     number,
-    mergeMethod:  opts.mergeMethod,
-    squash:       opts.squash,
-    deleteBranch: opts.deleteBranch,
-    sourceBranch: opts.sourceBranch,
+    merge_method:  opts.mergeMethod,
+    squash:        opts.squash,
+    delete_branch: opts.deleteBranch,
+    source_branch: opts.sourceBranch,
   });
   invalidateTabCache(tabId);
 }
 
 export async function closeMr(tabId: string, number: number): Promise<void> {
-  await invoke('close_mr', { tabId, number });
+  await corvus('close_mr', { tab_id: tabId, number });
   invalidateTabCache(tabId);
 }
 
 export async function reopenMr(tabId: string, number: number): Promise<void> {
-  await invoke('reopen_mr', { tabId, number });
+  await corvus('reopen_mr', { tab_id: tabId, number });
   invalidateTabCache(tabId);
 }
 
 export async function markMrReady(tabId: string, number: number): Promise<void> {
-  await invoke('mark_mr_ready', { tabId, number });
+  await corvus('mark_mr_ready', { tab_id: tabId, number });
   invalidateTabCache(tabId);
 }
 
 /** Cancel an armed auto-merge / merge-when-pipeline-succeeds.
  *  Idempotent — resolves quietly when auto-merge wasn't actually armed. */
 export async function disableMrAutoMerge(tabId: string, number: number): Promise<void> {
-  await invoke('disable_mr_auto_merge', { tabId, number });
+  await corvus('disable_mr_auto_merge', { tab_id: tabId, number });
   invalidateTabCache(tabId);
 }
 
 export async function addMrComment(tabId: string, number: number, body: string): Promise<void> {
-  await invoke('add_mr_comment', { tabId, number, body });
+  await corvus('add_mr_comment', { tab_id: tabId, number, body });
   invalidateTabCache(tabId);
 }
 
 export function getMrFiles(tabId: string, number: number): Promise<MrFileDiff[]> {
-  return invoke('get_mr_files', { tabId, number });
+  return corvus('get_mr_files', { tab_id: tabId, number });
 }
 
 export function getMrCommits(tabId: string, number: number): Promise<MrCommit[]> {
-  return invoke('get_mr_commits', { tabId, number });
+  return corvus('get_mr_commits', { tab_id: tabId, number });
 }
 
 export function getCommitDiff(tabId: string, sha: string): Promise<MrFileDiff[]> {
-  return invoke('get_mr_commit_diff', { tabId, sha });
+  return corvus('get_mr_commit_diff', { tab_id: tabId, sha });
 }
 
 /** Returns merge-commit SHA hints for all merged PRs/MRs.
  *  Never rejects — returns [] if no provider / token is configured. */
 export function getMergedMrHints(tabId: string): Promise<MergedMrHint[]> {
-  return invoke('get_merged_mr_hints', { tabId });
+  return corvus('get_merged_mr_hints', { tab_id: tabId });
 }
 
 /** Phase identifiers emitted by `arbor://mr-conflict-progress`. */

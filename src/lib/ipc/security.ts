@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { corvus } from '$lib/ipc/rpc';
 import type {
   SecuritySummary, SecurityFinding, SecurityFilters,
 } from '$lib/types/security';
@@ -9,7 +9,7 @@ import type {
  * provider doesn't support the surface (GitHub today, until Phase 6).
  */
 export function supportsSecurity(tabId: string): Promise<boolean> {
-  return invoke('supports_security', { tabId });
+  return corvus('supports_security', { tab_id: tabId });
 }
 
 /**
@@ -21,7 +21,7 @@ export function fetchSecuritySummary(
   tabId:     string,
   rangeDays: number,
 ): Promise<SecuritySummary> {
-  return invoke('fetch_security_summary', { tabId, rangeDays });
+  return corvus('fetch_security_summary', { tab_id: tabId, range_days: rangeDays });
 }
 
 /**
@@ -34,7 +34,7 @@ export function fetchSecurityFindings(
   tabId:   string,
   filters: SecurityFilters,
 ): Promise<SecurityFinding[]> {
-  return invoke('fetch_security_findings', { tabId, filters });
+  return corvus('fetch_security_findings', { tab_id: tabId, filters });
 }
 
 /**
@@ -113,5 +113,5 @@ export function exportSecurityReport(
   format:     'html' | 'csv',
   theme?:     SecurityExportTheme,
 ): Promise<string> {
-  return invoke('export_security_report', { tabId, outputPath, format, theme });
+  return corvus('export_security_report', { tab_id: tabId, output_path: outputPath, format, theme });
 }

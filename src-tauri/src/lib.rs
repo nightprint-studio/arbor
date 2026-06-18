@@ -1077,19 +1077,7 @@ pub fn run() {
             commands::pipeline_commands::resume_pipeline_run,
             commands::pipeline_commands::discard_pipeline_run,
             commands::pipeline_commands::is_pipeline_locked,
-            // Pipelines (CI/CD — GitHub Actions + GitLab CI)
-            commands::pipeline_commands::get_ci_provider,
-            commands::pipeline_commands::fetch_ci_runs,
-            commands::pipeline_commands::fetch_mr_ci_runs,
-            commands::pipeline_commands::fetch_ci_jobs,
-            commands::pipeline_commands::list_ci_workflows,
-            commands::pipeline_commands::create_ci_pipeline,
-            commands::pipeline_commands::retrigger_ci_run,
-            // Security dashboard (GitLab Phase 1; GitHub Phase 6)
-            commands::security_commands::supports_security,
-            commands::security_commands::fetch_security_summary,
-            commands::security_commands::fetch_security_findings,
-            commands::security_commands::export_security_report,
+            // Pipelines (CI/CD) + Security dashboard migrated to corvus handlers.
             // Filesystem browser
             commands::fs_commands::fs_set_wallpaper,
             commands::fs_commands::fs_open_default,
@@ -1109,55 +1097,15 @@ pub fn run() {
             commands::fs_git_commands::fs_git_checkout,
             commands::fs_git_commands::fs_open_in_arbor,
             // Avatar resolution via GitProvider (GitHub + GitLab)
-            // Merge Requests / Pull Requests (GitHub + GitLab)
-            commands::mr_commands::list_mrs,
-            commands::mr_commands::get_mr_detail,
-            commands::mr_commands::create_mr,
-            commands::mr_commands::get_mr_capabilities,
-            commands::mr_commands::probe_mr_feature,
-            commands::mr_commands::disable_mr_auto_merge,
-            commands::mr_commands::merge_mr,
-            commands::mr_commands::close_mr,
-            commands::mr_commands::reopen_mr,
-            commands::mr_commands::mark_mr_ready,
-            commands::mr_commands::add_mr_comment,
-            commands::mr_commands::get_mr_files,
-            commands::mr_commands::get_mr_commits,
-            commands::mr_commands::get_mr_commit_diff,
-            commands::mr_commands::get_merged_mr_hints,
+            // Merge Requests / Pull Requests — migrated to corvus handlers;
+            // the conflict-resolution streaming command stays inline (AppHandle).
             commands::mr_commands::mr_start_conflict_resolution,
-            // Issues / Linear
-            commands::issues_commands::linear_get_auth_status,
-            commands::issues_commands::linear_search_issues,
-            commands::issues_commands::linear_get_issue,
-            commands::issues_commands::linear_get_filter_options,
-            commands::issues_commands::linear_transition_issue,
-            commands::issues_commands::linear_assign_issue,
-            commands::issues_commands::linear_add_comment,
-            commands::issues_commands::linear_create_issue,
-            // Issues / Jira
-            commands::issues_commands::jira_get_auth_status,
-            commands::issues_commands::jira_search_issues,
-            commands::issues_commands::jira_get_issue,
-            commands::issues_commands::jira_get_filter_options,
-            commands::issues_commands::jira_transition_issue,
-            commands::issues_commands::jira_assign_issue,
-            commands::issues_commands::jira_add_comment,
-            commands::issues_commands::jira_create_issue,
-            commands::issues_commands::jira_download_attachment,
-            // Issues / provider-agnostic
-            commands::issues_commands::branch_name_for_issue,
-            commands::issues_commands::list_issue_providers,
-            // Generic by-id provider connection (additive; per-provider commands stay)
-            commands::provider_commands::issue_provider_auth_status,
-            commands::provider_commands::issue_provider_connect_fields,
+            // Issues (Linear / Jira) migrated to corvus handlers.
+            // Provider auth/descriptors migrated to corvus handlers; the OAuth
+            // start commands stay inline (they need the AppHandle for the
+            // arbor://provider-oauth-done completion event).
             commands::provider_commands::issue_provider_start_oauth,
-            commands::provider_commands::issue_provider_disconnect,
-            commands::provider_commands::list_git_providers,
-            commands::provider_commands::git_provider_auth_status,
-            commands::provider_commands::git_provider_connect_fields,
             commands::provider_commands::git_provider_start_oauth,
-            commands::provider_commands::git_provider_disconnect,
             // Inline image proxy (issue/MR/PR body & comment preview)
             commands::image_commands::fetch_remote_image,
             // Worktrees (migrated to corvus; IDE-detection streaming deferred)

@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { corvus } from '$lib/ipc/rpc';
 import type { PipelineDef, PipelineRun, CiProviderInfo, CiRun, CiJob, CiWorkflow } from '$lib/types/pipeline';
 import { invalidateTabCache } from './cache-invalidate';
 
@@ -54,11 +55,11 @@ export function discardPipelineRun(runId: string): Promise<void> {
 
 // CI/CD integration
 export function getCiProvider(tabId: string): Promise<CiProviderInfo | null> {
-  return invoke('get_ci_provider', { tabId });
+  return corvus('get_ci_provider', { tab_id: tabId });
 }
 
 export function fetchCiRuns(tabId: string): Promise<CiRun[]> {
-  return invoke('fetch_ci_runs', { tabId });
+  return corvus('fetch_ci_runs', { tab_id: tabId });
 }
 
 /**
@@ -76,20 +77,20 @@ export function fetchMrCiRuns(
   sourceBranch: string,
   headSha?:     string,
 ): Promise<CiRun[]> {
-  return invoke('fetch_mr_ci_runs', { tabId, mrNumber, sourceBranch, headSha });
+  return corvus('fetch_mr_ci_runs', { tab_id: tabId, mr_number: mrNumber, source_branch: sourceBranch, head_sha: headSha });
 }
 
 export async function retrigerCiRun(tabId: string, runId: string): Promise<void> {
-  await invoke('retrigger_ci_run', { tabId, runId });
+  await corvus('retrigger_ci_run', { tab_id: tabId, run_id: runId });
   invalidateTabCache(tabId);
 }
 
 export function fetchCiJobs(tabId: string, runId: string): Promise<CiJob[]> {
-  return invoke('fetch_ci_jobs', { tabId, runId });
+  return corvus('fetch_ci_jobs', { tab_id: tabId, run_id: runId });
 }
 
 export function listCiWorkflows(tabId: string): Promise<CiWorkflow[]> {
-  return invoke('list_ci_workflows', { tabId });
+  return corvus('list_ci_workflows', { tab_id: tabId });
 }
 
 /** Returns the new pipeline ID (GitLab) or null (GitHub — no synchronous ID). */
@@ -99,7 +100,7 @@ export async function createCiPipeline(
   variables:  [string, string][],
   workflowId?: string,
 ): Promise<string | null> {
-  const r = await invoke<string | null>('create_ci_pipeline', { tabId, branch, variables, workflowId });
+  const r = await corvus<string | null>('create_ci_pipeline', { tab_id: tabId, branch, variables, workflow_id: workflowId });
   invalidateTabCache(tabId);
   return r;
 }

@@ -1,81 +1,83 @@
-use tauri::State;
+//! `issues` domain — Linear / Jira issue-tracker handlers routed through the
+//! in-process broker.
+//!
+//! These resolve **issue-tracker** providers (NOT git providers): each handler
+//! delegates to the corresponding `crate::integrations::{linear,jira}` function,
+//! which reads the connected tracker's credentials and performs a REST call.
+//! Network-bound handlers are `async` (registered `Kind::Async`, awaited on the
+//! runtime); the two pure helpers (`list_issue_providers`, `branch_name_for_issue`)
+//! are sync. No plugin hooks are fired in this domain.
 
-use crate::AppState;
 use crate::error::AppError;
+use crate::integrations::jira_types::JiraAuthStatus;
 use crate::integrations::{
     Issue, IssueComment, IssueFilterOptions, IssueFilters, LinearAuthStatus,
     ProviderDescriptor,
 };
-use crate::integrations::jira_types::JiraAuthStatus;
+use crate::ipc::corvus;
+use crate::AppState;
 
 /// List the registered issue-tracker providers with their self-describing
 /// connect forms (id, icon, description, auth methods + fields). Drives the
 /// generic settings UI.
-#[tauri::command]
-pub fn list_issue_providers() -> Result<Vec<ProviderDescriptor>, AppError> {
+#[corvus::handler]
+fn list_issue_providers(_state: &AppState) -> Result<Vec<ProviderDescriptor>, AppError> {
     Ok(crate::integrations::registry::registry().descriptors())
 }
 
-#[tauri::command]
-pub async fn linear_get_auth_status(
-    _state: State<'_, AppState>,
-) -> Result<LinearAuthStatus, AppError> {
+#[corvus::handler]
+async fn linear_get_auth_status(_state: &AppState) -> Result<LinearAuthStatus, AppError> {
     crate::integrations::linear::get_auth_status().await
 }
 
-#[tauri::command]
-pub async fn linear_search_issues(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn linear_search_issues(
+    _state: &AppState,
     filters: IssueFilters,
 ) -> Result<Vec<Issue>, AppError> {
     crate::integrations::linear::search_issues(filters).await
 }
 
-#[tauri::command]
-pub async fn linear_get_issue(
-    _state: State<'_, AppState>,
-    id: String,
-) -> Result<Issue, AppError> {
+#[corvus::handler]
+async fn linear_get_issue(_state: &AppState, id: String) -> Result<Issue, AppError> {
     crate::integrations::linear::get_issue(&id).await
 }
 
-#[tauri::command]
-pub async fn linear_get_filter_options(
-    _state: State<'_, AppState>,
-) -> Result<IssueFilterOptions, AppError> {
+#[corvus::handler]
+async fn linear_get_filter_options(_state: &AppState) -> Result<IssueFilterOptions, AppError> {
     crate::integrations::linear::get_filter_options().await
 }
 
-#[tauri::command]
-pub async fn linear_transition_issue(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn linear_transition_issue(
+    _state: &AppState,
     id: String,
     status_id: String,
 ) -> Result<Issue, AppError> {
     crate::integrations::linear::transition_issue(&id, &status_id).await
 }
 
-#[tauri::command]
-pub async fn linear_assign_issue(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn linear_assign_issue(
+    _state: &AppState,
     id: String,
     user_id: Option<String>,
 ) -> Result<Issue, AppError> {
     crate::integrations::linear::assign_issue(&id, user_id.as_deref()).await
 }
 
-#[tauri::command]
-pub async fn linear_add_comment(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn linear_add_comment(
+    _state: &AppState,
     issue_id: String,
     body: String,
 ) -> Result<IssueComment, AppError> {
     crate::integrations::linear::add_comment(&issue_id, &body).await
 }
 
-#[tauri::command]
-pub async fn linear_create_issue(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn linear_create_issue(
+    _state: &AppState,
     title: String,
     description: Option<String>,
     team_id: String,
@@ -100,81 +102,72 @@ pub async fn linear_create_issue(
         milestone_id.as_deref(),
         due_date.as_deref(),
         estimate,
-    ).await
+    )
+    .await
 }
 
 /// Suggest a git branch name for an issue. Provider-agnostic — the helper
 /// produces `{lower-identifier}-{slugified-title}` from any tracker's issue.
-#[tauri::command]
-pub fn branch_name_for_issue(
-    _state: State<'_, AppState>,
-    issue: Issue,
-) -> Result<String, AppError> {
+#[corvus::handler]
+fn branch_name_for_issue(_state: &AppState, issue: Issue) -> Result<String, AppError> {
     Ok(crate::integrations::branch_name_for_issue(&issue))
 }
 
 // ── Jira ─────────────────────────────────────────────────────────────────────
 
-#[tauri::command]
-pub async fn jira_get_auth_status(
-    _state: State<'_, AppState>,
-) -> Result<JiraAuthStatus, AppError> {
+#[corvus::handler]
+async fn jira_get_auth_status(_state: &AppState) -> Result<JiraAuthStatus, AppError> {
     crate::integrations::jira::get_auth_status().await
 }
 
-#[tauri::command]
-pub async fn jira_search_issues(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn jira_search_issues(
+    _state: &AppState,
     filters: IssueFilters,
 ) -> Result<Vec<Issue>, AppError> {
     crate::integrations::jira::search_issues(filters).await
 }
 
-#[tauri::command]
-pub async fn jira_get_issue(
-    _state: State<'_, AppState>,
-    id: String,
-) -> Result<Issue, AppError> {
+#[corvus::handler]
+async fn jira_get_issue(_state: &AppState, id: String) -> Result<Issue, AppError> {
     crate::integrations::jira::get_issue(&id).await
 }
 
-#[tauri::command]
-pub async fn jira_get_filter_options(
-    _state: State<'_, AppState>,
-) -> Result<IssueFilterOptions, AppError> {
+#[corvus::handler]
+async fn jira_get_filter_options(_state: &AppState) -> Result<IssueFilterOptions, AppError> {
     crate::integrations::jira::get_filter_options().await
 }
 
-#[tauri::command]
-pub async fn jira_transition_issue(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn jira_transition_issue(
+    _state: &AppState,
     id: String,
     status_id: String,
 ) -> Result<Issue, AppError> {
     crate::integrations::jira::transition_issue(&id, &status_id).await
 }
 
-#[tauri::command]
-pub async fn jira_assign_issue(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn jira_assign_issue(
+    _state: &AppState,
     id: String,
     user_id: Option<String>,
 ) -> Result<Issue, AppError> {
     crate::integrations::jira::assign_issue(&id, user_id.as_deref()).await
 }
 
-#[tauri::command]
-pub async fn jira_add_comment(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn jira_add_comment(
+    _state: &AppState,
     issue_id: String,
     body: String,
 ) -> Result<IssueComment, AppError> {
     crate::integrations::jira::add_comment(&issue_id, &body).await
 }
 
-#[tauri::command]
-pub async fn jira_create_issue(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn jira_create_issue(
+    _state: &AppState,
     title: String,
     description: Option<String>,
     team_id: String,
@@ -201,20 +194,22 @@ pub async fn jira_create_issue(
         due_date.as_deref(),
         estimate,
         issue_type.as_deref(),
-    ).await
+    )
+    .await
 }
 
 /// Download a Jira attachment to `dest_path` (chosen by the frontend via the
 /// save dialog). Returns the byte size written. The download URL must point at
 /// the configured Jira host — see `jira::download_attachment`.
-#[tauri::command]
-pub async fn jira_download_attachment(
-    _state: State<'_, AppState>,
+#[corvus::handler]
+async fn jira_download_attachment(
+    _state: &AppState,
     content_url: String,
     dest_path: String,
 ) -> Result<u64, AppError> {
     crate::integrations::jira::download_attachment(
         &content_url,
         std::path::Path::new(&dest_path),
-    ).await
+    )
+    .await
 }
