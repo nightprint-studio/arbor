@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import type { BranchInfo, TagInfo, StashEntry, StashRef, StashApplyResult, StashBlockingContent, ResetMode, CheckoutResult } from '../types/git';
 import { invalidateTabCache } from './cache-invalidate';
 import { corvus } from './rpc';
@@ -59,7 +58,7 @@ export const createBranch = async (tabId: string, name: string, fromOid: string)
 };
 
 export const deleteBranch = async (tabId: string, name: string): Promise<void> => {
-  await invoke<void>('delete_branch', { tabId, name });
+  await corvus<void>('delete_branch', { tab_id: tabId, name });
   invalidateTabCache(tabId);
 };
 
@@ -103,13 +102,13 @@ export const renameRemoteBranch = async (
 };
 
 export const renameBranch = async (tabId: string, oldName: string, newName: string): Promise<BranchInfo> => {
-  const r = await invoke<BranchInfo>('rename_branch', { tabId, oldName, newName });
+  const r = await corvus<BranchInfo>('rename_branch', { tab_id: tabId, old_name: oldName, new_name: newName });
   invalidateTabCache(tabId);
   return r;
 };
 
 export const checkoutBranch = async (tabId: string, name: string): Promise<void> => {
-  await invoke<void>('checkout_branch', { tabId, name });
+  await corvus<void>('checkout_branch', { tab_id: tabId, name });
   invalidateTabCache(tabId);
   // Keep the tab badge in sync — historic bug: the TabBar reads
   // `tab.currentBranch` which was set at open time and never updated after
@@ -119,7 +118,7 @@ export const checkoutBranch = async (tabId: string, name: string): Promise<void>
 
 /** Stash-safe checkout: stash → checkout → stash apply. Returns conflict info if re-apply had issues. */
 export const checkoutBranchSafe = async (tabId: string, name: string): Promise<CheckoutResult> => {
-  const result = await invoke<CheckoutResult>('checkout_branch_safe', { tabId, name });
+  const result = await corvus<CheckoutResult>('checkout_branch_safe', { tab_id: tabId, name });
   invalidateTabCache(tabId);
   // Only update the tab's branch chip when the checkout actually settled
   // cleanly — on a stash-conflict the workdir is on the new branch but the
@@ -138,7 +137,7 @@ export const checkoutBranchSafe = async (tabId: string, name: string): Promise<C
  * Non-safe variant — kept for backward compat. Prefer `checkoutRemoteAsLocalSafe`.
  */
 export const checkoutRemoteAsLocal = async (tabId: string, remoteName: string): Promise<string> => {
-  const localName = await invoke<string>('checkout_remote_as_local', { tabId, remoteName });
+  const localName = await corvus<string>('checkout_remote_as_local', { tab_id: tabId, remote_name: remoteName });
   invalidateTabCache(tabId);
   tabsStore.updateTab(tabId, { currentBranch: localName });
   return localName;
@@ -149,8 +148,8 @@ export const checkoutRemoteAsLocalSafe = async (
   tabId: string,
   remoteName: string,
 ): Promise<CheckoutResult> => {
-  const result = await invoke<CheckoutResult>('checkout_remote_as_local_safe', {
-    tabId, remoteName,
+  const result = await corvus<CheckoutResult>('checkout_remote_as_local_safe', {
+    tab_id: tabId, remote_name: remoteName,
   });
   invalidateTabCache(tabId);
   if (

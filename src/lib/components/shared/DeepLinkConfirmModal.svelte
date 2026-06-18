@@ -21,7 +21,7 @@
   import FileExplorerModal from './FileExplorerModal.svelte';
   import UrlBlock from './ui/UrlBlock.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import { cloneRepo, openRepo, closeRepo } from '$lib/ipc/graph';
+  import { cloneRepo, openRepo } from '$lib/ipc/graph';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
@@ -80,12 +80,9 @@
     cloning = true;
     error   = '';
     try {
-      const tempTabId = crypto.randomUUID();
-      const cloned    = await cloneRepo(
+      const cloned = await cloneRepo(
         { url, dest_path: fullPath, branch: undefined, shallow: false, recurse_submodules: false },
-        tempTabId,
       );
-      try { await closeRepo(tempTabId); } catch { /* best-effort cleanup */ }
 
       const repoId = await workspacesStore.ensureRepoRegistered(cloned.path);
       const info   = await openRepo(cloned.path, repoId);

@@ -156,12 +156,17 @@ pub struct AppState {
     /// first launch after upgrade, leaving `None` for subsequent launches.
     pub migration_report: Mutex<Option<crate::workspace::migration::MigrationReport>>,
     /// Linked Worktrees — cross-project sync.  Persisted to linked_worktrees.toml.
-    pub linked_worktrees: Mutex<WorktreeLinkRegistry>,
+    /// `Arc` so the checkout-sync orchestrator's background thread can hold a
+    /// clone and write the sync target after the triggering handler returns
+    /// (the handler only has `&AppState`, never an `AppHandle`).
+    pub linked_worktrees: Arc<Mutex<WorktreeLinkRegistry>>,
     /// Set of link ids currently being synced.  Read by the public checkout
     /// command to suppress recursive triggering of link sync from a
     /// propagated checkout (the orchestrator calls git ops directly, not the
-    /// public command, so this guard is mostly defensive).
-    pub link_sync_in_progress: Mutex<HashSet<String>>,
+    /// public command, so this guard is mostly defensive). `Arc` for the same
+    /// reason as `linked_worktrees`: the orchestrator thread releases the guard
+    /// when its work completes.
+    pub link_sync_in_progress: Arc<Mutex<HashSet<String>>>,
     /// Unified registry of remote git host clients (GitHub / GitLab / —).
     /// Populated at boot — see `git_provider/`.
     pub git_providers: Mutex<GitProviderRegistry>,
@@ -470,8 +475,8 @@ impl AppState {
             repo_registry:      Mutex::new(repo_registry),
             workspaces:         Mutex::new(workspaces),
             migration_report:   Mutex::new(stored_report),
-            linked_worktrees:       Mutex::new(crate::linked_worktrees::load()),
-            link_sync_in_progress:  Mutex::new(HashSet::new()),
+            linked_worktrees:       Arc::new(Mutex::new(crate::linked_worktrees::load())),
+            link_sync_in_progress:  Arc::new(Mutex::new(HashSet::new())),
             git_providers:          Mutex::new(providers),
             branding:               BrandingState::default(),
             deep_link_buffer:       Arc::new(DeepLinkBuffer::default()),
@@ -1017,19 +1022,14 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            // Repo
+            // Repo — clone_repo migrated to the corvus broker (pure clone-to-disk,
+            // no tab); init_repo stays (credential pass, M3 broker).
             commands::repo_commands::init_repo,
-            commands::repo_commands::clone_repo,
             // Graph (read ops migrated to corvus; streaming/job ones deferred)
             // Diff (read ops migrated to corvus; streaming ones deferred)
             // Stage
-            // Branches
-            commands::branch_commands::delete_branch,
-            commands::branch_commands::rename_branch,
-            commands::branch_commands::checkout_branch,
-            commands::branch_commands::checkout_branch_safe,
-            commands::branch_commands::checkout_remote_as_local,
-            commands::branch_commands::checkout_remote_as_local_safe,
+            // Branches — all migrated to the corvus broker (ipc::corvus::branch),
+            // including the worktree-link-aware checkout/delete/rename mutators.
             // Remote — fetch/push/pull migrated to the generic router
             // (ipc::corvus::remote); open_in_browser stays (OS opener glue).
             // Generic Model-D IPC entry point — the FE forwards every product
@@ -1100,13 +1100,9 @@ pub fn run() {
             commands::fs_commands::fs_watch_start,
             commands::fs_commands::fs_watch_stop,
             // File Explorer git awareness — status overlays, inline actions,
-            // and "Open in Arbor" delegation for the heavy git operations.
-            commands::fs_git_commands::fs_git_status,
-            commands::fs_git_commands::fs_git_stage,
-            commands::fs_git_commands::fs_git_unstage,
-            commands::fs_git_commands::fs_git_discard,
-            commands::fs_git_commands::fs_git_ignore,
-            commands::fs_git_commands::fs_git_checkout,
+            // branch list/switch and remote-url moved to the corvus broker
+            // (see ipc/corvus/fs_git.rs). Only the "Open in Arbor" delegation
+            // stays here (AppHandle window focus + targeted emit).
             commands::fs_git_commands::fs_open_in_arbor,
             // Avatar resolution via GitProvider (GitHub + GitLab)
             // Merge Requests / Pull Requests + Issues (Linear/Jira) migrated to
@@ -1121,9 +1117,9 @@ pub fn run() {
             // Studio Multi-Format backbone migrated to studio handlers.
             // studio sidebar — project-wide .ron/.json/.toml index.
             // cloud-storage plugin migrated to platform handlers.
-            // Bevy Remote Protocol (Phase 1.0 — read-only HTTP)
-            commands::brp_commands::brp_connect,
-            commands::brp_commands::brp_call,
+            // Bevy Remote Protocol — all four verbs migrated to the corvus
+            // broker (ipc::corvus::brp); connect/call return a discriminated
+            // outcome so the structured BrpCallError survives the seam.
             // Marketplace
             // Marketplace catalog fetch + install/uninstall/toggle + custom
             // source migrated to the generic router (ipc::platform::marketplace);

@@ -15,7 +15,7 @@
   import { repoBrowserStore } from '$lib/stores/repoBrowser.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { cloneRepo, openRepo, closeRepo } from '$lib/ipc/graph';
+  import { cloneRepo, openRepo } from '$lib/ipc/graph';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import FileExplorerModal from './FileExplorerModal.svelte';
   import type { RemoteRepo, RemoteTreeEntry, NamespaceTreeNode } from '$lib/types/repoBrowser';
@@ -93,13 +93,9 @@
     // Phase 1: the actual clone. Only failures here keep the spinner +
     // surface an inline error — once `cloneRepo` resolves the user-facing
     // operation is "done" as far as the modal is concerned.
-    const tempTabId = crypto.randomUUID();
     let cloned;
     try {
-      cloned = await cloneRepo(
-        { url: repo.clone_url_https, dest_path: destPath },
-        tempTabId,
-      );
+      cloned = await cloneRepo({ url: repo.clone_url_https, dest_path: destPath });
     } catch (err) {
       cloneError = String(err).replace(/^.*error:/i, '').trim();
       cloning    = false;
@@ -114,12 +110,10 @@
     uiStore.showToast(`Cloned ${repo.name}`, 'success');
     onClose();
 
-    // Phase 3: best-effort post-clone setup — swap the temp tab for one
-    // keyed by the canonical workspace-registry id so the new repo is a
-    // first-class member of the active workspace. If any step here fails,
-    // log it and surface a follow-up toast; the clone itself already
-    // succeeded so we don't undo anything.
-    try { await closeRepo(tempTabId); } catch { /* best effort */ }
+    // Phase 3: best-effort post-clone setup — open a tab keyed by the canonical
+    // workspace-registry id so the new repo is a first-class member of the
+    // active workspace. If any step here fails, log it and surface a follow-up
+    // toast; the clone itself already succeeded so we don't undo anything.
     try {
       const repoId = await workspacesStore.ensureRepoRegistered(cloned.path);
       const info   = await openRepo(cloned.path, repoId);

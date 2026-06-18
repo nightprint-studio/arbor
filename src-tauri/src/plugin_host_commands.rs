@@ -20,7 +20,6 @@
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::commands::branch_commands;
 use crate::error::AppError;
 use crate::AppState;
 
@@ -84,11 +83,15 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
         }
         "arbor:git.checkout" => {
             let name = req_str(&ctx, "name", id)?;
-            branch_commands::checkout_branch(app.clone(), state, tab_id, name)?;
+            // Migrated to the corvus broker: route through the generic rpc path
+            // so `on_checkout` + worktree-link sync fire as for a user invocation.
+            corvus_rpc(state.inner(), "checkout_branch",
+                serde_json::json!({ "tab_id": tab_id, "name": name }))?;
         }
         "arbor:git.branch_delete" => {
             let name = req_str(&ctx, "name", id)?;
-            branch_commands::delete_branch(app.clone(), state, tab_id, name)?;
+            corvus_rpc(state.inner(), "delete_branch",
+                serde_json::json!({ "tab_id": tab_id, "name": name }))?;
         }
         "arbor:git.stage_all" => {
             corvus_rpc(state.inner(), "stage_all", serde_json::json!({ "tab_id": tab_id }))?;

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
   import { FolderSearch, Download, RefreshCw } from 'lucide-svelte';
   import FileExplorerModal from '../shared/FileExplorerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
+  import { cloneRepo } from '$lib/ipc/graph';
   import { relocateRepo, validateRepoPath } from '$lib/ipc/missing';
   import type { RepoRegistryEntry } from '$lib/types/workspace';
 
@@ -65,14 +65,12 @@
     const dest = joinPath(parentDir.replace(/[\\/]+$/, ''), entry.display_name);
     busy = 'clone';
     try {
-      await invoke<string>('clone_repo', {
-        opts: {
-          url: entry.remote_url,
-          dest_path: dest,
-          branch: null,
-          shallow: false,
-          recurse_submodules: false,
-        },
+      await cloneRepo({
+        url: entry.remote_url,
+        dest_path: dest,
+        branch: undefined,
+        shallow: false,
+        recurse_submodules: false,
       });
       await relocateRepo(entry.id, dest);
       await workspacesStore.reloadRegistry();

@@ -24,9 +24,11 @@ export const closeRepo = (tabId: string) =>
 export const listRemoteBranchesForUrl = (url: string) =>
   corvus<string[]>('list_remote_branches_for_url', { url });
 
-/** Clone a remote repository and open it as a new tab. */
-export const cloneRepo = (opts: CloneOptions, tabId: string) =>
-  invoke<RepoInfo>('clone_repo', { opts, tabId });
+/** Clone a remote repository to disk and return the fresh repo's metadata.
+ *  Does not open a tab (the returned `tab_id` is empty) — the caller opens it
+ *  via {@link openRepo} keyed by the workspace-registry id. */
+export const cloneRepo = (opts: CloneOptions) =>
+  corvus<RepoInfo>('clone_repo', { opts });
 
 export const getRepoInfo = (tabId: string) =>
   corvus<RepoInfo>('get_repo_info', { tab_id: tabId });

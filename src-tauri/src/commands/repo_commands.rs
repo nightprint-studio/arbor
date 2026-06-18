@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::error::AppError;
-use crate::git::repo::{RepoInfo, CloneOptions};
+use crate::git::repo::RepoInfo;
 use crate::git::init::InitRepoOptions;
 use crate::AppState;
 
@@ -172,30 +172,7 @@ async fn resolve_gitlab_namespace_id(path: &str) -> Result<Option<u64>, AppError
     Ok(id)
 }
 
-/// Clone a remote repository and open it as a new tab.
-///
-/// The actual clone runs on tokio's blocking pool so the IPC thread stays free
-/// while git2 streams objects over the network.  Holding the `lock_repos` mutex
-/// across a multi-minute network operation would freeze every other tab.
-#[tauri::command]
-pub async fn clone_repo(
-    state:   State<'_, AppState>,
-    opts:    CloneOptions,
-    tab_id:  String,
-) -> Result<RepoInfo, AppError> {
-    let opts_task = opts.clone();
-    let dest = tokio::task::spawn_blocking(move || crate::git::repo::clone_repo(&opts_task))
-        .await
-        .map_err(|e| AppError::Other(format!("clone task panicked: {e}")))??;
-
-    let info = {
-        let mut mgr = state.lock_repos()?;
-        mgr.open(tab_id.clone(), &dest)?
-    };
-    state.fire_hook(
-        "on_repo_open",
-        serde_json::json!({ "tab_id": &tab_id, "path": &info.path, "name": &info.name }),
-    );
-    crate::ipc::sync_repo_open(&state, &tab_id, &info.path);
-    Ok(info)
-}
+// `clone_repo` migrated to the corvus broker (`ipc/corvus/repo.rs`) — it is a
+// pure clone-to-disk returning the fresh repo's metadata (no tab opened; the
+// frontend opens the tab afterwards via `open_repo`). `init_repo` stays here
+// for the credential pass.

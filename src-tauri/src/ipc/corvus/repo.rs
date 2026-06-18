@@ -8,8 +8,11 @@
 //! reads) alongside the `open_repo` / `close_repo` lifecycle flow. Both mutate
 //! the open-repo set and mirror into `corvus-be` (`sync_repo_open/close`) but
 //! emit through the backend event sink (`state.emit`) and take no `AppHandle`,
-//! so they migrate cleanly. The async provider/network flows (`init_repo`,
-//! `clone_repo`) stay inline in `repo_commands` for the credential/async pass.
+//! so they migrate cleanly. `clone_repo` lives here too — a pure clone-to-disk
+//! that returns the fresh repo's metadata (no tab opened; the frontend opens
+//! the tab afterwards via `open_repo`). `init_repo` stays inline in
+//! `repo_commands` for the credential pass (it creates a remote via the git
+//! provider + a host token, gated on the M3 credential broker).
 //!
 //! `check_is_git_repo` / `get_git_identity` / `list_remote_branches_for_url`
 //! never touched `AppState`, but the handler macro requires a context first
@@ -23,7 +26,7 @@
 //! with first-hand data.
 
 use crate::error::AppError;
-use crate::git::repo::RepoInfo;
+use crate::git::repo::{CloneOptions, RepoInfo};
 use crate::ipc::corvus;
 use crate::AppState;
 use serde_json::json;
@@ -59,6 +62,20 @@ fn get_repo_info(state: &AppState, tab_id: String) -> Result<RepoInfo, AppError>
         is_bare: repo.inner().is_bare(),
         is_empty: repo.inner().is_empty().unwrap_or(false),
     })
+}
+
+/// Clone a remote repository to disk and return the fresh repo's metadata.
+///
+/// Does **not** open a tab: the returned [`RepoInfo`] carries an empty `tab_id`,
+/// and no `on_repo_open` hook fires. Opening the clone as a tab is the
+/// frontend's job (via `open_repo`, keyed by the workspace-registry id) — every
+/// caller already reopens under a canonical id, so registering a throwaway tab
+/// here was pure waste. Runs the network clone on the broker's blocking thread
+/// (the handler is sync), so the IPC/UI thread never stalls on it.
+#[corvus::handler]
+fn clone_repo(_state: &AppState, opts: CloneOptions) -> Result<RepoInfo, AppError> {
+    let dest = crate::git::repo::clone_repo(&opts)?;
+    RepoInfo::for_path(&dest)
 }
 
 /// Open the repository at `path` under `tab_id` in the repo manager.

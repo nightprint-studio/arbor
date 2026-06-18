@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
   import {
     FileDown, Check, MapPin, Download, SkipForward, AlertCircle,
     ClipboardPaste, FolderOpen, FileJson, RefreshCw, ArrowLeft,
@@ -16,6 +15,7 @@
     importWorkspaceGroupPreview, importWorkspaceGroupCommit, importBundleCommit,
   } from '$lib/ipc/workspace';
   import { fsReadTextFile } from '$lib/ipc/fs';
+  import { cloneRepo } from '$lib/ipc/graph';
   import {
     type ExportedWorkspace, type ExportedWorkspaceGroup, type ExportedBundle,
     type ExportedRepo, workspaceColorVar,
@@ -301,14 +301,12 @@
     if (!row.cloneDest)  { uiStore.showToast('Pick a destination folder first', 'warning'); return; }
     const next = new Set(cloneInProgress); next.add(i); cloneInProgress = next;
     try {
-      await invoke<string>('clone_repo', {
-        opts: {
-          url: row.remote_url,
-          dest_path: row.cloneDest,
-          branch: null,
-          shallow: false,
-          recurse_submodules: false,
-        },
+      await cloneRepo({
+        url: row.remote_url,
+        dest_path: row.cloneDest,
+        branch: undefined,
+        shallow: false,
+        recurse_submodules: false,
       });
       const res = await registerRepoPath(row.cloneDest, row.remote_url, row.name);
       rows[i].locatedPath = row.cloneDest;

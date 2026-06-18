@@ -1,5 +1,5 @@
-//! `fs_git` domain — cache-free, read-only git queries for the built-in File
-//! Explorer, routed through the in-process broker.
+//! `fs_git` domain — git awareness for the built-in File Explorer, routed
+//! through the in-process broker.
 //!
 //! Each handler is the body the matching `#[tauri::command]` ran inline. The
 //! commands were `async fn` whose whole body was a single
@@ -8,24 +8,28 @@
 //! the blocking git work and its errors are byte-identical. `#[corvus::handler]`
 //! self-registers each under its own function name.
 //!
-//! These three queries never touch `AppState`, but the handler macro requires a
-//! context first arg, so they take `_state: &AppState` and ignore it.
+//! None of these queries/actions touch `AppState` (the explorer browses
+//! arbitrary filesystem paths, not tab-bound repos), but the handler macro
+//! requires a context first arg, so they take `_state: &AppState` and ignore it.
 //!
-//! NOT migrated (stay inline in `fs_git_commands`, handled by a later pass):
-//!  * `fs_git_status` — reads/populates a process-global status cache that the
-//!    inline mutating actions (`fs_git_stage`/`unstage`/`discard`/`ignore`/
-//!    `checkout`) invalidate via `invalidate_cache`. A single `OnceLock` cache
-//!    can't be split across modules without becoming two divergent caches, so
-//!    status moves only when its mutators do.
-//!  * The mutating light actions (`stage`/`unstage`/`discard`/`ignore`/
-//!    `checkout`) — they mutate the index/worktree, snapshot to Recovery, and
-//!    invalidate the shared cache; not leaf queries.
+//! The status query (`fs_git_status`) and the inline mutating actions
+//! (`stage`/`unstage`/`discard`/`ignore`/`checkout`) share a process-global
+//! per-repo status cache (the `OnceLock` below): the actions
+//! [`invalidate_cache`] after mutating so the next status recomputes. They live
+//! together here precisely because a single cache can't be split across modules
+//! without diverging.
+//!
+//! NOT migrated (stays inline in `fs_git_commands`):
 //!  * `fs_open_in_arbor` — takes an `AppHandle`, focuses the main window on the
 //!    UI thread, and emits `arbor://explorer-open-repo`.
 //!
 //! No hooks fire in this domain.
 
-use git2::{BranchType, Repository, Status, StatusOptions};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+
+use git2::{build::CheckoutBuilder, BranchType, IndexAddOption, Repository, Status, StatusOptions};
 use serde::Serialize;
 
 use crate::error::AppError;
@@ -47,6 +51,22 @@ pub enum GitBadge {
     Added,
     Untracked,
     Ignored,
+}
+
+impl GitBadge {
+    /// Higher = more important. Used when rolling several descendant states up
+    /// to a parent folder: the folder shows the strongest state beneath it.
+    fn rank(self) -> u8 {
+        match self {
+            GitBadge::Conflicted => 6,
+            GitBadge::Modified => 5,
+            GitBadge::Deleted => 4,
+            GitBadge::Renamed => 3,
+            GitBadge::Added => 2,
+            GitBadge::Untracked => 1,
+            GitBadge::Ignored => 0,
+        }
+    }
 }
 
 /// Current branch / detached flag / ahead-behind for a repo's HEAD.
@@ -233,4 +253,413 @@ fn fs_git_remote_url(_state: &AppState, path: String) -> Result<Option<String>, 
         .and_then(|r| r.url().map(str::to_string))
         .filter(|u| !u.trim().is_empty());
     Ok(url)
+}
+
+// ---------------------------------------------------------------------------
+// Status overlays (cached per repo-root) + inline light actions
+// ---------------------------------------------------------------------------
+//
+// The explorer renders overlay badges itself, so it isn't bounded by the OS
+// ~15-overlay-slot limit a shell extension hits. Results are cached per
+// repo-root and reused while navigating within the same repo; the mutating
+// actions below bust the cache so the next status recomputes.
+
+/// Canonical key for path matching: backslashes → slashes, trailing slashes
+/// stripped, lowercased. Mirrors `normPath()` in `FileExplorerModal.svelte`, so
+/// backend badge keys line up with `normPath(entry.path)` on the FE. Lowercasing
+/// is unconditional (the explorer already assumes case-insensitive matching).
+fn norm_key(p: &str) -> String {
+    p.replace('\\', "/").trim_end_matches('/').to_lowercase()
+}
+
+/// Marker for an immediate child folder that is itself a git repo root — used
+/// to flag projects when browsing a folder that *contains* repos (and isn't one
+/// itself), TortoiseGit-style. Deliberately lightweight (just HEAD, no status
+/// walk and no ahead/behind) so scanning a folder full of repos stays cheap.
+#[derive(Clone, Serialize)]
+pub struct RepoMarker {
+    pub branch: Option<String>,
+    pub detached: bool,
+}
+
+#[derive(Clone, Serialize)]
+pub struct FsGitStatus {
+    /// Whether `dir` is inside a git repo. When false the explorer hides every
+    /// git affordance for that directory.
+    pub in_repo: bool,
+    /// Repo working-directory root (native separators), if `in_repo`.
+    pub repo_root: Option<String>,
+    pub branch: Option<String>,
+    pub detached: bool,
+    pub ahead: usize,
+    pub behind: usize,
+    /// Map: normalized child path → overlay badge. Keys match the FE's
+    /// `normPath()` so a row looks up its badge with `badges[normPath(entry.path)]`.
+    /// Only non-clean entries are present; everything else renders with no overlay.
+    pub badges: HashMap<String, GitBadge>,
+    /// Map: normalized child folder path → marker, for immediate children of
+    /// `dir` that are themselves git repo roots. Populated regardless of
+    /// `in_repo`, so the explorer can flag sibling/nested projects.
+    pub repos: HashMap<String, RepoMarker>,
+}
+
+// — Per-repo status cache —
+
+struct RepoStatusCache {
+    /// (normalized absolute path, badge) for every non-clean entry in the repo.
+    files: Vec<(String, GitBadge)>,
+    branch: Option<String>,
+    detached: bool,
+    ahead: usize,
+    behind: usize,
+}
+
+fn cache() -> &'static Mutex<HashMap<String, RepoStatusCache>> {
+    static C: OnceLock<Mutex<HashMap<String, RepoStatusCache>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn badge_from(s: Status) -> Option<GitBadge> {
+    if s.contains(Status::CONFLICTED) {
+        return Some(GitBadge::Conflicted);
+    }
+    // New: staged add → Added; otherwise an untracked working-tree file.
+    if s.intersects(Status::WT_NEW | Status::INDEX_NEW) {
+        return Some(if s.contains(Status::INDEX_NEW) {
+            GitBadge::Added
+        } else {
+            GitBadge::Untracked
+        });
+    }
+    if s.intersects(Status::WT_MODIFIED | Status::INDEX_MODIFIED) {
+        return Some(GitBadge::Modified);
+    }
+    if s.intersects(Status::WT_DELETED | Status::INDEX_DELETED) {
+        return Some(GitBadge::Deleted);
+    }
+    if s.intersects(Status::WT_RENAMED | Status::INDEX_RENAMED) {
+        return Some(GitBadge::Renamed);
+    }
+    if s.contains(Status::IGNORED) {
+        return Some(GitBadge::Ignored);
+    }
+    None
+}
+
+/// Compute the full non-clean status of `repo`, keyed by normalized absolute
+/// path. Untracked and ignored directories are reported as single entries
+/// (`recurse_*_dirs(false)`) — so a `node_modules/` gets one folder badge
+/// instead of thousands of file entries, keeping huge repos cheap.
+fn compute_repo_status(repo: &Repository) -> RepoStatusCache {
+    let workdir = repo.workdir().map(|p| p.to_path_buf());
+    let mut files: Vec<(String, GitBadge)> = Vec::new();
+
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(false)
+        .include_ignored(true)
+        .recurse_ignored_dirs(false)
+        // Rename detection is O(n²) in libgit2 and not worth it for overlays —
+        // a renamed file simply shows as Added + Deleted, which is fine here.
+        .renames_head_to_index(false)
+        .renames_index_to_workdir(false);
+
+    if let (Some(wd), Ok(statuses)) = (workdir.as_ref(), repo.statuses(Some(&mut opts))) {
+        for entry in statuses.iter() {
+            let Some(rel) = entry.path() else { continue };
+            let Some(badge) = badge_from(entry.status()) else { continue };
+            let abs = wd.join(rel);
+            files.push((norm_key(&abs.to_string_lossy()), badge));
+        }
+    }
+
+    let (branch, detached, ahead, behind) = branch_info(repo);
+    RepoStatusCache { files, branch, detached, ahead, behind }
+}
+
+/// Slice the repo-wide status down to one directory's children: a file directly
+/// in `dir` carries its own badge; anything deeper rolls up to the immediate
+/// child folder with the strongest descendant state.
+fn slice_for_dir(c: &RepoStatusCache, dir_key: &str) -> HashMap<String, GitBadge> {
+    let prefix = format!("{dir_key}/");
+    let mut out: HashMap<String, GitBadge> = HashMap::new();
+    for (path_key, badge) in &c.files {
+        let Some(rest) = path_key.strip_prefix(&prefix) else { continue };
+        let Some(child_seg) = rest.split('/').next().filter(|s| !s.is_empty()) else { continue };
+        let child_key = format!("{dir_key}/{child_seg}");
+        out.entry(child_key)
+            .and_modify(|b| { if badge.rank() > b.rank() { *b = *badge; } })
+            .or_insert(*badge);
+    }
+    out
+}
+
+/// Read just the current branch / detached flag for a repo, skipping the
+/// (potentially expensive) ahead/behind revwalk and status scan. Used for the
+/// lightweight child-repo markers.
+fn light_head(repo: &Repository) -> (Option<String>, bool) {
+    match repo.head() {
+        Ok(h) => (h.shorthand().map(String::from), repo.head_detached().unwrap_or(false)),
+        Err(_) => (None, false),
+    }
+}
+
+/// Scan the *immediate* children of `dir` for folders that are themselves git
+/// repo roots (have a `.git` entry — directory for normal repos, file for
+/// linked worktrees / submodules). One readdir + a stat per subfolder; a repo
+/// is opened only for the actual hits, so a plain folder costs almost nothing.
+fn scan_child_repos(dir: &str) -> HashMap<String, RepoMarker> {
+    let mut out = HashMap::new();
+    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    for ent in rd.flatten() {
+        let p = ent.path();
+        if !p.is_dir() {
+            continue;
+        }
+        if !p.join(".git").exists() {
+            continue;
+        }
+        let (branch, detached) = match Repository::open(&p) {
+            Ok(repo) => light_head(&repo),
+            Err(_) => (None, false),
+        };
+        out.insert(norm_key(&p.to_string_lossy()), RepoMarker { branch, detached });
+    }
+    out
+}
+
+fn not_in_repo(repos: HashMap<String, RepoMarker>) -> FsGitStatus {
+    FsGitStatus {
+        in_repo: false,
+        repo_root: None,
+        branch: None,
+        detached: false,
+        ahead: 0,
+        behind: 0,
+        badges: HashMap::new(),
+        repos,
+    }
+}
+
+#[corvus::handler]
+fn fs_git_status(_state: &AppState, dir: String, refresh: Option<bool>) -> Result<FsGitStatus, AppError> {
+    let refresh = refresh.unwrap_or(false);
+    // Always flag child repos, even when `dir` itself isn't in a repo — that
+    // is exactly the "folder of projects" case the markers exist for.
+    let repos = scan_child_repos(&dir);
+
+    let repo = match Repository::discover(&dir) {
+        Ok(r) => r,
+        Err(_) => return Ok(not_in_repo(repos)),
+    };
+    let Some(root) = repo.workdir().map(|p| p.to_path_buf()) else {
+        return Ok(not_in_repo(repos)); // bare repo — nothing to overlay
+    };
+    let root_key = norm_key(&root.to_string_lossy());
+
+    // Reuse the cached status while navigating within the same repo; the FE
+    // passes refresh=true off the fs watcher to recompute after edits.
+    let mut guard = cache()
+        .lock()
+        .map_err(|_| AppError::Other("status cache poisoned".into()))?;
+    if refresh || !guard.contains_key(&root_key) {
+        guard.insert(root_key.clone(), compute_repo_status(&repo));
+    }
+    let c = guard.get(&root_key).expect("just inserted");
+    let dir_key = norm_key(&dir);
+    Ok(FsGitStatus {
+        in_repo: true,
+        repo_root: Some(root.to_string_lossy().trim_end_matches(|ch| ch == '/' || ch == '\\').to_string()),
+        branch: c.branch.clone(),
+        detached: c.detached,
+        ahead: c.ahead,
+        behind: c.behind,
+        badges: slice_for_dir(c, &dir_key),
+        repos,
+    })
+}
+
+/// Open the repo enclosing the first path and compute each path relative to its
+/// working directory. Returns `(repo, workdir, rel_paths)`. Errors if the paths
+/// aren't inside a repo.
+fn open_repo_and_rels(paths: &[String]) -> Result<(Repository, PathBuf, Vec<String>), AppError> {
+    let first = paths.first().ok_or_else(|| AppError::Other("no paths".into()))?;
+    let repo = Repository::discover(first)
+        .map_err(|_| AppError::Other("not inside a git repository".into()))?;
+    let wd = repo
+        .workdir()
+        .ok_or_else(|| AppError::Other("bare repository".into()))?
+        .to_path_buf();
+    let wd_key = norm_key(&wd.to_string_lossy());
+    let rels: Vec<String> = paths
+        .iter()
+        .filter_map(|p| {
+            norm_key(p)
+                .strip_prefix(&wd_key)
+                .map(|s| s.trim_start_matches('/').to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .collect();
+    Ok((repo, wd, rels))
+}
+
+/// Bust the cached status for the repo containing `path` (after a mutating
+/// action) so the next `fs_git_status` recomputes even without `refresh`.
+fn invalidate_cache(repo: &Repository) {
+    if let Some(wd) = repo.workdir() {
+        let key = norm_key(&wd.to_string_lossy());
+        if let Ok(mut guard) = cache().lock() {
+            guard.remove(&key);
+        }
+    }
+}
+
+#[corvus::handler]
+fn fs_git_stage(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> {
+    let (repo, _wd, rels) = open_repo_and_rels(&paths)?;
+    if rels.is_empty() {
+        return Ok(());
+    }
+    let mut index = repo.index()?;
+    // add_all with per-entry pathspecs handles files, whole folders, and
+    // deletions (it updates the index to match the worktree) in one pass.
+    index.add_all(rels.iter().map(|s| s.as_str()), IndexAddOption::DEFAULT, None)?;
+    index.write()?;
+    invalidate_cache(&repo);
+    Ok(())
+}
+
+#[corvus::handler]
+fn fs_git_unstage(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> {
+    let (repo, _wd, rels) = open_repo_and_rels(&paths)?;
+    if rels.is_empty() {
+        return Ok(());
+    }
+    // revparse_single avoids the peel_to_commit libgit2 bug (see unstage_file).
+    match repo.revparse_single("HEAD") {
+        Ok(head) => {
+            repo.reset_default(Some(&head), rels.iter().map(|s| s.as_str()))
+                .map_err(|e| AppError::Other(format!("unstage: {e}")))?;
+        }
+        Err(_) => {
+            // Pre-initial-commit: nothing committed yet → drop from the index.
+            let mut index = repo.index()?;
+            for rel in &rels {
+                let _ = index.remove_path(Path::new(rel));
+            }
+            index.write()?;
+        }
+    }
+    invalidate_cache(&repo);
+    Ok(())
+}
+
+#[corvus::handler]
+fn fs_git_discard(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> {
+    let (repo, wd, rels) = open_repo_and_rels(&paths)?;
+    if rels.is_empty() {
+        return Ok(());
+    }
+
+    // Safety net: snapshot the workdir so an over-eager discard from the
+    // explorer can be undone from Arbor's Recovery tab.
+    crate::git::recovery::try_snapshot(
+        &repo,
+        crate::git::recovery::RecoveryKind::Discard,
+        format!("discard {} item(s) from File Explorer", rels.len()),
+    );
+
+    let mut checkout = CheckoutBuilder::new();
+    let mut any_tracked = false;
+    for rel in &rels {
+        let status = repo.status_file(Path::new(rel)).unwrap_or(Status::empty());
+        if status.intersects(Status::WT_NEW) {
+            // Untracked — remove from disk.
+            let abs = wd.join(rel);
+            if abs.is_dir() {
+                let _ = std::fs::remove_dir_all(&abs);
+            } else if abs.exists() {
+                let _ = std::fs::remove_file(&abs);
+            }
+        } else {
+            checkout.path(rel);
+            any_tracked = true;
+        }
+    }
+    if any_tracked {
+        checkout.force();
+        repo.checkout_index(None, Some(&mut checkout))?;
+    }
+    invalidate_cache(&repo);
+    Ok(())
+}
+
+#[corvus::handler]
+fn fs_git_ignore(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> {
+    let (repo, wd, rels) = open_repo_and_rels(&paths)?;
+    if rels.is_empty() {
+        return Ok(());
+    }
+    let gitignore = wd.join(".gitignore");
+    let existing = std::fs::read_to_string(&gitignore).unwrap_or_default();
+    let already: std::collections::HashSet<&str> =
+        existing.lines().map(|l| l.trim()).collect();
+
+    let mut to_add: Vec<String> = Vec::new();
+    for rel in &rels {
+        // Anchor to the repo root with a leading slash; folders get a
+        // trailing slash so the pattern only matches directories.
+        let abs = wd.join(rel);
+        let pat = if abs.is_dir() {
+            format!("/{}/", rel.trim_end_matches('/'))
+        } else {
+            format!("/{rel}")
+        };
+        if !already.contains(pat.as_str()) && !to_add.contains(&pat) {
+            to_add.push(pat);
+        }
+    }
+    if to_add.is_empty() {
+        return Ok(());
+    }
+
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for pat in &to_add {
+        out.push_str(pat);
+        out.push('\n');
+    }
+    std::fs::write(&gitignore, out).map_err(|e| AppError::Other(e.to_string()))?;
+    invalidate_cache(&repo);
+    Ok(())
+}
+
+/// Switch the repo enclosing `path` to `branch` (a local branch name). Uses a
+/// SAFE checkout — refuses to overwrite uncommitted changes rather than
+/// clobbering them, surfacing a clear error the explorer turns into a toast.
+#[corvus::handler]
+fn fs_git_checkout(_state: &AppState, path: String, branch: String) -> Result<(), AppError> {
+    let repo = Repository::discover(&path)
+        .map_err(|_| AppError::Other("not inside a git repository".into()))?;
+    let (object, reference) = repo
+        .revparse_ext(&branch)
+        .map_err(|e| AppError::Other(format!("unknown branch '{branch}': {e}")))?;
+    repo.checkout_tree(&object, None).map_err(|e| {
+        AppError::Other(format!(
+            "checkout failed — commit or stash your changes first ({e})"
+        ))
+    })?;
+    match reference {
+        Some(r) => {
+            let name = r
+                .name()
+                .ok_or_else(|| AppError::Other("invalid ref name".into()))?;
+            repo.set_head(name)?;
+        }
+        None => repo.set_head_detached(object.id())?,
+    }
+    invalidate_cache(&repo);
+    Ok(())
 }

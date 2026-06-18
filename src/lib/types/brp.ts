@@ -39,6 +39,22 @@ export interface BrpCallError {
   data?: unknown;
 }
 
+/**
+ * `brp_connect` result. The generic `rpc` seam flattens an `Err` to a plain
+ * string, which would drop the structured {@link BrpCallError} fields — so a
+ * BRP-level failure rides home inside the success value as the `err` arm. A
+ * thrown rejection means a genuinely internal host failure (mutex poisoning),
+ * surfaced as a plain string the store normalises to `{ kind: 'internal' }`.
+ */
+export type BrpConnectOutcome =
+  | { outcome: 'ok';  status: BrpStatus }
+  | { outcome: 'err'; error: BrpCallError };
+
+/** `brp_call` result — same discriminated-outcome convention as connect. */
+export type BrpCallOutcome =
+  | { outcome: 'ok';  value: unknown }
+  | { outcome: 'err'; error: BrpCallError };
+
 /** Default BRP endpoint as configured by `bevy_remote::http::DEFAULT_*`. */
 export const BRP_DEFAULT_ENDPOINT = 'http://127.0.0.1:15702';
 

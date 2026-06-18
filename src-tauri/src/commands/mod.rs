@@ -1,5 +1,4 @@
 pub mod repo_commands;
-pub mod branch_commands;
 pub mod remote_commands;
 pub mod rpc_commands;
 pub mod plugin_commands;
@@ -12,5 +11,4 @@ pub mod workspace_commands;
 pub mod linked_worktree_commands;
 pub mod branding_commands;
 pub mod deep_link_commands;
-pub mod brp_commands;
 pub mod marketplace_commands;

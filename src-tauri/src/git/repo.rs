@@ -322,6 +322,25 @@ pub struct RepoInfo {
     pub is_empty: bool,
 }
 
+impl RepoInfo {
+    /// Build repo metadata for a path **without** registering an open tab — the
+    /// `tab_id` is left empty. `clone_repo` uses this: it clones to disk and
+    /// returns the fresh repo's metadata, leaving the "open it as a tab" step to
+    /// the frontend (which keys the tab by the workspace-registry id, not a
+    /// throwaway clone-time id).
+    pub fn for_path(path: &str) -> Result<Self> {
+        let git_repo = GitRepo::open(path)?;
+        Ok(Self {
+            tab_id: String::new(),
+            path: git_repo.path.clone(),
+            name: git_repo.name.clone(),
+            current_branch: git_repo.current_branch(),
+            is_bare: git_repo.inner().is_bare(),
+            is_empty: git_repo.inner().is_empty().unwrap_or(false),
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // RepoManager — owns all open repositories, keyed by tab_id
 // ---------------------------------------------------------------------------

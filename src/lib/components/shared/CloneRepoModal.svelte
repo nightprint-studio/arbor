@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Download, GitBranch, RefreshCw, AlertCircle, FolderOpen, ChevronDown } from 'lucide-svelte';
   import Button from './ui/Button.svelte';
-  import { listRemoteBranchesForUrl, cloneRepo, openRepo, closeRepo } from '$lib/ipc/graph';
+  import { listRemoteBranchesForUrl, cloneRepo, openRepo } from '$lib/ipc/graph';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tabsStore } from '$lib/stores/tabs.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
@@ -149,21 +149,16 @@
     cloning    = true;
     cloneError = '';
     try {
-      // Clone via a temp tab id — the backend opens the repo handle keyed by
-      // this id.  We then close it and reopen with the canonical workspace
-      // registry id, which also adds the repo to the active workspace.
-      const tempTabId = crypto.randomUUID();
-      const cloned    = await cloneRepo(
-        {
-          url:                urlTrimmed,
-          dest_path:          fullPath,
-          branch:             branch || undefined,
-          shallow,
-          recurse_submodules: recurse,
-        },
-        tempTabId,
-      );
-      try { await closeRepo(tempTabId); } catch { /* best effort */ }
+      // Clone to disk, then open under the canonical workspace registry id
+      // (which also adds the repo to the active workspace). The clone no longer
+      // opens a throwaway tab, so there's nothing to close first.
+      const cloned = await cloneRepo({
+        url:                urlTrimmed,
+        dest_path:          fullPath,
+        branch:             branch || undefined,
+        shallow,
+        recurse_submodules: recurse,
+      });
 
       const repoId = await workspacesStore.ensureRepoRegistered(cloned.path);
       const info   = await openRepo(cloned.path, repoId);

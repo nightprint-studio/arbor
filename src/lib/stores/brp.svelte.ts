@@ -35,9 +35,17 @@ function createBrpStore() {
     busy = true;
     lastError = null;
     try {
-      status = await brpConnect(params);
+      const r = await brpConnect(params);
+      if (r.outcome === 'err') {
+        lastError = r.error;
+        status = { connected: false };
+        return false;
+      }
+      status = r.status;
       return status.connected;
     } catch (e: unknown) {
+      // Only a host-internal failure (mutex poisoning) rejects — BRP-level
+      // errors arrive in the `err` arm above.
       lastError = normaliseError(e);
       status = { connected: false };
       return false;
@@ -66,7 +74,12 @@ function createBrpStore() {
       return null;
     }
     try {
-      return await brpCall<T>(method, params);
+      const r = await brpCall(method, params);
+      if (r.outcome === 'err') {
+        lastError = r.error;
+        return null;
+      }
+      return r.value as T;
     } catch (e: unknown) {
       lastError = normaliseError(e);
       return null;

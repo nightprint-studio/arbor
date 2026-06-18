@@ -212,15 +212,15 @@ export interface FsGitStatus {
 /** Git status for `dir`'s entries (badges + branch / ahead-behind). Cached per
  *  repo-root; pass `refresh = true` (off the fs watcher) to recompute. */
 export const fsGitStatus = (dir: string, refresh = false) =>
-  invoke<FsGitStatus>('fs_git_status', { dir, refresh });
+  corvus<FsGitStatus>('fs_git_status', { dir, refresh });
 /** Stage paths (files / folders / deletions) in their enclosing repo. */
-export const fsGitStage   = (paths: string[]) => invoke<void>('fs_git_stage',   { paths });
+export const fsGitStage   = (paths: string[]) => corvus<void>('fs_git_stage',   { paths });
 /** Unstage paths (reset to HEAD). */
-export const fsGitUnstage = (paths: string[]) => invoke<void>('fs_git_unstage', { paths });
+export const fsGitUnstage = (paths: string[]) => corvus<void>('fs_git_unstage', { paths });
 /** Discard working-tree changes for paths (snapshots to Recovery first). */
-export const fsGitDiscard = (paths: string[]) => invoke<void>('fs_git_discard', { paths });
+export const fsGitDiscard = (paths: string[]) => corvus<void>('fs_git_discard', { paths });
 /** Append paths to the repo's `.gitignore` (anchored, folders get a trailing slash). */
-export const fsGitIgnore  = (paths: string[]) => invoke<void>('fs_git_ignore',  { paths });
+export const fsGitIgnore  = (paths: string[]) => corvus<void>('fs_git_ignore',  { paths });
 /** Bring the main Arbor window forward and open the repo containing `path`
  *  (delegates the heavy git operations — diff / log / blame — to Arbor's UI). */
 export const fsOpenInArbor = (path: string) => invoke<void>('fs_open_in_arbor', { path });
@@ -250,7 +250,7 @@ export interface FsBranch { name: string; is_head: boolean; }
 export const fsGitBranches = (path: string) => corvus<FsBranch[]>('fs_git_branches', { path });
 /** Switch the repo enclosing `path` to `branch` (safe checkout — fails on
  *  conflicting uncommitted changes). */
-export const fsGitCheckout = (path: string, branch: string) => invoke<void>('fs_git_checkout', { path, branch });
+export const fsGitCheckout = (path: string, branch: string) => corvus<void>('fs_git_checkout', { path, branch });
 /** Remote URL (origin, else first remote) of the repo enclosing `path`, or
  *  `null` when there's no repo / no remote. Used to build "Copy project link". */
 export const fsGitRemoteUrl = (path: string) => corvus<string | null>('fs_git_remote_url', { path });
