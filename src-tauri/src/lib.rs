@@ -1054,16 +1054,8 @@ pub fn run() {
             commands::plugin_commands::stop_plugin_scheduler,
             // Session persistence
             // Workspaces
-            commands::workspace_commands::delete_workspace,
-            commands::workspace_commands::set_active_workspace,
-            commands::workspace_commands::remove_repo_from_workspace,
-            commands::workspace_commands::delete_registry_repo,
-            commands::workspace_commands::import_workspace_commit,
-            commands::workspace_commands::import_workspace_group_commit,
-            commands::workspace_commands::import_bundle_commit,
-            commands::workspace_commands::workspace_fetch_all,
-            commands::workspace_commands::workspace_pull_all,
-            commands::workspace_commands::workspace_tag_all,
+            // workspace mutations + import-commits + fetch/pull/tag runners
+            // migrated to the generic router (ipc::platform::workspace).
             // Per-repo config
             // Recent repos (app-level config)
             // Graph config

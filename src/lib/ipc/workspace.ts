@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { platform } from './rpc';
 import type {
   WorkspacesSnapshot, WorkspaceDef, WorkspaceGroup, WorkspacePatch, WorkspaceGroupPatch,
@@ -27,13 +26,13 @@ export const updateWorkspace = (workspaceId: string, patch: WorkspacePatch): Pro
   platform('update_workspace', { workspace_id: workspaceId, patch });
 
 export const deleteWorkspace = (workspaceId: string): Promise<void> =>
-  invoke('delete_workspace', { workspaceId });
+  platform('delete_workspace', { workspace_id: workspaceId });
 
 export const reorderWorkspaces = (orderedIds: string[]): Promise<void> =>
   platform('reorder_workspaces', { ordered_ids: orderedIds });
 
 export const setActiveWorkspace = (workspaceId: string): Promise<WorkspaceDef> =>
-  invoke('set_active_workspace', { workspaceId });
+  platform('set_active_workspace', { workspace_id: workspaceId });
 
 // ── Groups ──────────────────────────────────────────────────────────────────
 
@@ -58,7 +57,7 @@ export const addRepoToWorkspace = (workspaceId: string, repoId: string): Promise
   platform('add_repo_to_workspace', { workspace_id: workspaceId, repo_id: repoId });
 
 export const removeRepoFromWorkspace = (workspaceId: string, repoId: string): Promise<void> =>
-  invoke('remove_repo_from_workspace', { workspaceId, repoId });
+  platform('remove_repo_from_workspace', { workspace_id: workspaceId, repo_id: repoId });
 
 export const moveRepoBetweenWorkspaces = (
   fromWorkspaceId: string, toWorkspaceId: string, repoId: string,
@@ -96,7 +95,7 @@ export const updateRegistryRepo = (
   });
 
 export const deleteRegistryRepo = (repoId: string): Promise<void> =>
-  invoke('delete_registry_repo', { repoId });
+  platform('delete_registry_repo', { repo_id: repoId });
 
 // ── Tab snapshots ───────────────────────────────────────────────────────────
 
@@ -127,7 +126,9 @@ export const importWorkspaceCommit = (
   name: string, colorIdx: number, repoIds: string[], groupId: string | null,
   mergeInto: string | null = null,
 ): Promise<WorkspaceDef> =>
-  invoke('import_workspace_commit', { name, colorIdx, repoIds, groupId, mergeInto });
+  platform('import_workspace_commit', {
+    name, color_idx: colorIdx, repo_ids: repoIds, group_id: groupId, merge_into: mergeInto,
+  });
 
 export const exportWorkspaceGroup = (groupId: string): Promise<ExportedWorkspaceGroup> =>
   platform('export_workspace_group', { group_id: groupId });
@@ -139,7 +140,9 @@ export const importWorkspaceGroupCommit = (
   name: string, colorIdx: number, existingGroupId: string | null,
   workspaces: { name: string; color_idx: number; repo_ids: string[]; merge_into: string | null }[],
 ): Promise<void> =>
-  invoke('import_workspace_group_commit', { name, colorIdx, existingGroupId, workspaces });
+  platform('import_workspace_group_commit', {
+    name, color_idx: colorIdx, existing_group_id: existingGroupId, workspaces,
+  });
 
 /** Export every group + top-level workspace into one portable backup bundle. */
 export const exportAllWorkspaces = (): Promise<ExportedBundle> =>
@@ -147,7 +150,7 @@ export const exportAllWorkspaces = (): Promise<ExportedBundle> =>
 
 /** Restore a backup bundle (non-blocking: unknown repos land as "not cloned"). */
 export const importBundleCommit = (payload: ExportedBundle): Promise<ImportBundleResult> =>
-  invoke('import_bundle_commit', { payload });
+  platform('import_bundle_commit', { payload });
 
 // ── Health + fetch-all ──────────────────────────────────────────────────────
 
@@ -155,15 +158,17 @@ export const workspaceHealthScan = (workspaceId: string): Promise<RepoHealth[]> 
   platform('workspace_health_scan', { workspace_id: workspaceId });
 
 export const workspaceFetchAll = (workspaceId: string): Promise<WorkspaceFetchStartResult> =>
-  invoke('workspace_fetch_all', { workspaceId });
+  platform('workspace_fetch_all', { workspace_id: workspaceId });
 
 export const workspacePullAll = (workspaceId: string): Promise<WorkspaceFetchStartResult> =>
-  invoke('workspace_pull_all', { workspaceId });
+  platform('workspace_pull_all', { workspace_id: workspaceId });
 
 export const workspaceTagAll = (
   workspaceId: string, tagName: string, message: string | null, push: boolean,
 ): Promise<WorkspaceFetchStartResult> =>
-  invoke('workspace_tag_all', { workspaceId, tagName, message, push });
+  platform('workspace_tag_all', {
+    workspace_id: workspaceId, tag_name: tagName, message, push,
+  });
 
 // ── Migration ───────────────────────────────────────────────────────────────
 
