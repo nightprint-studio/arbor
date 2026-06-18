@@ -12,9 +12,14 @@ name = "corvus-be"
 path = "src/main.rs"
 
 [dependencies]
-arbor-ipc   = { path = "../../foundation/ipc" }
-arbor-rpc   = { path = "../../foundation/rpc" }
-corvus-core = { path = "../core" }
-corvus-git  = { path = "../git" }
-git2        = { version = "0.20", features = ["vendored-libgit2"] }
-serde_json  = { workspace = true }
+arbor-ipc     = { path = "../../foundation/ipc" }
+arbor-rpc     = { path = "../../foundation/rpc" }
+corvus-core   = { path = "../core" }
+corvus-git    = { path = "../git" }
+corvus-issues = { path = "../issues" }
+git2          = { version = "0.20", features = ["vendored-libgit2"] }
+serde_json    = { workspace = true }
+# Drives the async issue-tracker handlers: each backend request runs on its own
+# serve-loop worker thread, so a multi-thread runtime is required (concurrent
+# `block_on` from many threads). `enable_all` gives reqwest its IO driver.
+tokio         = { workspace = true }

@@ -7,11 +7,10 @@
 
 use std::sync::Arc;
 
-use corvus_issue_tracker_api::prelude::{
-    Issue, IssueComment, IssueFilterOptions, IssueFilters, IssueTracker, IssueUser, LinearAuthStatus,
-    NewIssue,
+use corvus_issues::prelude::{
+    linear_new_issue, validate_token, Issue, IssueComment, IssueFilterOptions, IssueFilters,
+    IssueTracker, IssueUser, LinearAuthStatus, LINEAR_GQL,
 };
-use corvus_issue_tracker_linear::prelude::{validate_token, LINEAR_GQL};
 
 use crate::auth::credential_store;
 use crate::error::Result;
@@ -88,19 +87,9 @@ pub async fn create_issue_req(
     due_date: Option<&str>,
     estimate: Option<f64>,
 ) -> Result<Issue> {
-    let req = NewIssue {
-        title:        title.to_string(),
-        description:  description.map(str::to_string),
-        team_id:      Some(team_id.to_string()),
-        status_id:    status_id.map(str::to_string),
-        assignee_id:  assignee_id.map(str::to_string),
-        label_ids,
-        priority,
-        project_id:   project_id.map(str::to_string),
-        milestone_id: milestone_id.map(str::to_string),
-        due_date:     due_date.map(str::to_string),
-        estimate,
-        issue_type:   None,
-    };
+    let req = linear_new_issue(
+        title, description, team_id, status_id, assignee_id, label_ids, priority, project_id,
+        milestone_id, due_date, estimate,
+    );
     tracker().create_issue(req).await.map_err(to_app_error)
 }

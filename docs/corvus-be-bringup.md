@@ -128,6 +128,29 @@ on a missing backend.
     (config-loading) and the `on_tag_create` / `on_tag_delete` firings — these stay
     shell-side. **Still in-process**; serving it OOP (a `reset` module in `corvus-be` +
     moving the tag hooks into `post_hooks`) is the next reset step.
+  - **2-issues — Linear / Jira served out-of-process ✅**: the first
+    **credential-coupled** domain to move, on the **reverse channel** rather than
+    a pushed repo path. Shared glue lives in the new keyring-free crate
+    **`corvus-issues`** (`build_registry(session_for)` → the `IssueTracker`
+    registry + the concrete `JiraTracker`; the `NewIssue` builders). The shell
+    injects a keyring-backed `VaultSessionProvider`; `corvus-be` injects a
+    **`ChildSessionProvider`** that marshals `session`/`refresh` back to the shell
+    (the sole keyring holder) over the reverse channel. `corvus-be` serves the
+    **16 async network handlers** (Linear ×8, Jira ×8) on a **multi-thread Tokio
+    runtime** (`block_on` in the dispatch loop — each request already runs on its
+    own serve-loop worker thread). Wire error strings are byte-identical to the
+    in-process path (`to_app_error(e).to_string()` replicated locally). **Stays
+    in-process**: `jira_get_auth_status` (reads the keyring config directly for
+    the domain/auth-method) and the two pure/metadata sync helpers
+    (`list_issue_providers`, `branch_name_for_issue`) — the `SplitBroker` routes
+    per-method, so the domain splits transparently. No hooks in this domain.
+    **P0 fix (dispatch semantics):** the generic `rpc` command short-circuited
+    *every* async method to the in-process `dispatch_async` *before* the router —
+    which would have pinned these OOP handlers in-process. The command now skips
+    that short-circuit when the method is advertised OOP (`is_async_method &&
+    !is_oop_method`), letting it flow through the `SplitBroker` to `corvus-be`;
+    when no backend is up the OOP set is empty, so async methods stay in-process
+    (the correct fallback).
   - **Repos**: Stage-2 decision — the shell resolves `tab_id → repo path` and
     forwards the path so `corvus-be` opens by path (stateless per call, like the
     diff commands already do), deferring repo-lifecycle replication.

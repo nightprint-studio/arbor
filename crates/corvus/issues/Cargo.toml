@@ -1,0 +1,15 @@
+[package]
+name                   = "corvus-issues"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Shared issue-tracker domain for Corvus: builds the SessionProvider-injected IssueTracker registry (Linear + Jira) that both the shell (VaultSessionProvider, in-process) and corvus-be (ChildSessionProvider, OOP) link. Keyring-free — credentials are injected, never read here."
+
+[dependencies]
+corvus-issue-tracker-api    = { path = "../issue-tracker/api" }
+corvus-issue-tracker-linear = { path = "../issue-tracker/linear" }
+corvus-issue-tracker-jira   = { path = "../issue-tracker/jira" }
+arbor-ipc                   = { path = "../../foundation/ipc" }
+serde                       = { workspace = true }

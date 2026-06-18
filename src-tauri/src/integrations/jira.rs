@@ -7,8 +7,8 @@
 
 use std::path::Path;
 
-use corvus_issue_tracker_api::prelude::{
-    Issue, IssueComment, IssueFilterOptions, IssueFilters, IssueTracker, IssueUser, NewIssue,
+use corvus_issues::prelude::{
+    jira_new_issue, Issue, IssueComment, IssueFilterOptions, IssueFilters, IssueTracker, IssueUser,
 };
 
 use crate::auth::oauth_jira;
@@ -95,19 +95,9 @@ pub async fn create_issue_req(
     estimate: Option<f64>,
     issue_type: Option<&str>,
 ) -> Result<Issue> {
-    let req = NewIssue {
-        title:        title.to_string(),
-        description:  description.map(str::to_string),
-        team_id:      Some(team_id.to_string()),
-        status_id:    status_id.map(str::to_string),
-        assignee_id:  assignee_id.map(str::to_string),
-        label_ids,
-        priority,
-        project_id:   None,
-        milestone_id: milestone_id.map(str::to_string),
-        due_date:     due_date.map(str::to_string),
-        estimate,
-        issue_type:   issue_type.map(str::to_string),
-    };
+    let req = jira_new_issue(
+        title, description, team_id, status_id, assignee_id, label_ids, priority, milestone_id,
+        due_date, estimate, issue_type,
+    );
     jira_tracker().create_issue(req).await.map_err(to_app_error)
 }

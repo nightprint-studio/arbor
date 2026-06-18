@@ -27,6 +27,7 @@ use corvus_core::prelude::CorvusState;
 // them. The shell pushes repo paths to `repo_registry`; `bisect` and `stash`
 // are the git domains served out-of-process so far.
 mod bisect;
+mod issues;
 mod repo_registry;
 mod stash;
 
@@ -91,18 +92,40 @@ fn main() {
     let host = FrameHostCaller::new(Arc::clone(&stdout));
     let state = CorvusState::new(sink).with_host_caller(Arc::clone(&host) as Arc<dyn HostCaller>);
 
-    // The registry is collected from every `#[arbor_rpc::handler]` linked into
-    // this binary (just the self-test set today; git handlers in Stage 2).
-    let registry = arbor_rpc::registry();
-    let mut methods: Vec<String> = registry.keys().map(|s| s.to_string()).collect();
+    // The issue-tracker registry resolves credentials over the reverse channel
+    // (the shell holds the keyring) — wire it before serving.
+    issues::init(Arc::clone(&host) as Arc<dyn HostCaller>);
+
+    // Async handlers (issue trackers — network I/O) run on a runtime; the serve
+    // loop dispatches each request on its own worker thread, so concurrent
+    // `block_on`s land here — a multi-thread runtime is required.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("corvus-be: failed to build tokio runtime");
+
+    // Two registries collected from every `#[arbor_rpc::handler]` linked into
+    // this binary: sync (git domains + self-test) and async (issue trackers).
+    // They are disjoint — a handler is one or the other.
+    let sync_reg = arbor_rpc::registry();
+    let async_reg = arbor_rpc::async_registry_for("");
+    let mut methods: Vec<String> = sync_reg
+        .keys()
+        .chain(async_reg.keys())
+        .map(|s| s.to_string())
+        .collect();
     methods.sort();
+    methods.dedup();
     eprintln!("corvus-be: ready, serving {} method(s): {:?}", methods.len(), methods);
 
     let dispatch = move |method: &str, params: serde_json::Value| -> Result<serde_json::Value, String> {
-        match registry.get(method) {
-            Some(call) => call(&state as &dyn Any, params),
-            None => Err(format!("unknown method: {method}")),
+        if let Some(call) = sync_reg.get(method) {
+            return call(&state as &dyn Any, params);
         }
+        if let Some(acall) = async_reg.get(method) {
+            return rt.block_on(acall(&state as &dyn Any, params));
+        }
+        Err(format!("unknown method: {method}"))
     };
 
     if let Err(e) = serve_stdio(io::stdin().lock(), stdout, methods, host, dispatch) {

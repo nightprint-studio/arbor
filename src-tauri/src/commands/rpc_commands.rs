@@ -44,7 +44,17 @@ pub async fn rpc(
     // Async handlers (network/credential) are awaited on the runtime — no
     // blocking-pool thread is held for the round-trip. They fire their own
     // fire-and-forget hooks inline (host co-located), so no post-hooks are owed.
-    if crate::ipc::is_async_method(&program, &method) {
+    //
+    // Exception: when a product backend advertises this method as served
+    // out-of-process, we must NOT short-circuit to the in-process path — the
+    // call has to flow through the router/`SplitBroker` to that process. The
+    // blocking-pool path below does exactly that (it waits on the child round-
+    // trip off the runtime workers). Without this guard, every async method —
+    // e.g. the issue-tracker handlers `corvus-be` now serves — would stay pinned
+    // in-process, defeating the split.
+    if crate::ipc::is_async_method(&program, &method)
+        && !crate::ipc::is_oop_method(&program, &method)
+    {
         return crate::ipc::dispatch_async(&app, &program, &method, params).await;
     }
 

@@ -18,6 +18,7 @@ now run here** (see
 | `__set_git_program` | shell pushes the resolved git binary |
 | `bisect_*` / `*_bisect_session` (11) | the bisect domain, via the shared `corvus-git` crate |
 | `stash_save` / `stash_apply` / `stash_pop` / `stash_drop` / `stash_rename` / `force_stash_apply` / `abort_stash_apply` / `list_stashes` / `list_graph_stash_refs` / `get_stash_file_content` / `write_workdir_file` (11) | the stash domain, via `corvus-git` (opens the repo by the pushed path) |
+| `linear_*` (8) / `jira_*` (8) | the issue-tracker domain (async, network), via the shared `corvus-issues` crate — credentials resolved over the **reverse channel** (`ChildSessionProvider` → shell keyring), never read here |
 
 The shell spawns this binary at startup, reads its `Hello` (the advertised method
 list), and routes exactly those methods to it out-of-process via a `SplitBroker`;
@@ -27,10 +28,20 @@ through the registry the shell pushes — no `RepoManager` here.
 **Hooks stay shell-side.** `stash_save`/`apply`/`pop` owe fire-and-forget plugin
 hooks (`on_stash_push` / `on_stash_pop`); this process fires none — the shell
 fires them after the call returns, routing-independently
-(`crate::ipc::corvus::post_hooks`). **Recovery policy gap (known):** the
+(`crate::ipc::corvus::post_hooks`). The issue-tracker domain fires no hooks at
+all, so it moves OOP cleanly. **Recovery policy gap (known):** the
 force-apply / abort recovery snapshots use `SnapshotPolicy::default()` because
 this process has no app config yet — closing it is the first item of the settings
 migration.
+
+**Async handlers need a runtime.** The issue-tracker handlers do real network
+I/O, so `main` builds a **multi-thread** Tokio runtime and the dispatch loop
+`block_on`s them (the serve loop runs each request on its own worker thread, so
+concurrent `block_on`s are expected). `jira_get_auth_status` stays in the shell
+(it reads the keyring config directly for the domain/auth-method), as do the two
+pure/metadata helpers `list_issue_providers` / `branch_name_for_issue` — the
+`SplitBroker` routes per-method, so the domain splitting across the two processes
+is invisible to the caller.
 
 If this binary isn't built, the shell falls back to a pure in-process loopback
 (it keeps in-process copies of these domains too) — the app still works.
@@ -57,5 +68,8 @@ auto-advertise via `Hello` and auto-route out-of-process — no shell router cha
 
 ## Depends on
 
-`arbor-ipc` (the framed transport + `EventSink`), `arbor-rpc` (the handler
-registry), `corvus-core` (`CorvusState`), `serde_json`. No Tauri.
+`arbor-ipc` (the framed transport + `EventSink` + the reverse-channel
+`HostCaller` / `ChildSessionProvider`), `arbor-rpc` (the handler registry),
+`corvus-core` (`CorvusState`), `corvus-git` (local-git domains), `corvus-issues`
+(the injected issue-tracker registry), `git2`, `serde_json`, and `tokio` (the
+runtime for the async issue handlers). No Tauri.

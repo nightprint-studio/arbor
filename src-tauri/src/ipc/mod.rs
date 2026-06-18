@@ -83,6 +83,25 @@ pub fn is_async_method(program: &str, method: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The methods a running product backend advertises as served **out-of-process**.
+/// Populated once in [`build_router`] from `corvus-be`'s `Hello` (today the only
+/// OOP backend); unset/empty when no backend is up.
+static CORVUS_OOP: OnceLock<HashSet<String>> = OnceLock::new();
+
+/// Whether `(program, method)` is served **out-of-process** by a running product
+/// backend. The `rpc` command consults this so it does **not** short-circuit an
+/// async method to the in-process [`dispatch_async`] when the backend advertises
+/// it — the call must instead flow through the router/`SplitBroker` to the OOP
+/// process (otherwise "advertise-and-route" would be a lie for async handlers,
+/// pinning every issue-tracker call in-process). When no backend is up the set
+/// is unset, so every async method stays in-process — the correct fallback.
+///
+/// Only `corvus` has an OOP backend today; generalise the key when
+/// `platform-be`/`merula-be` arrive.
+pub fn is_oop_method(program: &str, method: &str) -> bool {
+    program == "corvus" && CORVUS_OOP.get().map(|s| s.contains(method)).unwrap_or(false)
+}
+
 /// Await an async handler in-process against the live `AppState`. The future
 /// borrows the state for its lifetime; we hold the managed-state guard across
 /// the await (the state outlives every request). Errors arrive as the handler's
@@ -130,6 +149,10 @@ pub fn build_router(app: &AppHandle) -> Router {
                 methods.len()
             );
             let oop: HashSet<String> = methods.into_iter().collect();
+            // Publish the OOP set so the `rpc` command stops short-circuiting
+            // these methods' async variants to the in-process path (the P0:
+            // async methods bypassed the router otherwise — see `is_oop_method`).
+            let _ = CORVUS_OOP.set(oop.clone());
             router.register(
                 "corvus",
                 Arc::new(SplitBroker::new(oop, Arc::new(child), loopback)),

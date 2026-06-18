@@ -4,10 +4,11 @@ pub mod jira_types;
 pub mod registry;
 
 // Provider-agnostic DTOs (Issue, comments, filters, …) and pure helpers
-// (`branch_name_for_issue`) now live in the `corvus-issue-tracker-api` crate.
-// Re-exported here so existing `crate::integrations::Issue` /
-// `crate::integrations::branch_name_for_issue` call sites keep working unchanged.
-pub use corvus_issue_tracker_api::prelude::*;
+// (`branch_name_for_issue`) live in the `corvus-issue-tracker-*` crates, bundled
+// + re-exported by the shared `corvus-issues` crate. Re-exported here so existing
+// `crate::integrations::Issue` / `crate::integrations::branch_name_for_issue`
+// call sites keep working unchanged.
+pub use corvus_issues::prelude::*;
 
 // What stays here is host-coupled: it reads the repo config and dispatches to
 // the per-provider modules (which themselves use the OS keyring + AppError).

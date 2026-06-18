@@ -24,6 +24,7 @@ members = [
     "crates/corvus/issue-tracker/api",
     "crates/corvus/issue-tracker/linear",
     "crates/corvus/issue-tracker/jira",
+    "crates/corvus/issues",
     "crates/corvus/provider-descriptor",
     "crates/corvus/git-provider/api",
     "crates/corvus/git-provider/github",

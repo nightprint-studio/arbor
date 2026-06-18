@@ -1,15 +1,5 @@
-//! Jira-specific auth status type (extends the common IssueUser shape).
+//! Jira-specific auth status type — re-exported from the shared `corvus-issues`
+//! crate so every consumer keeps the
+//! `crate::integrations::jira_types::JiraAuthStatus` path.
 
-use serde::{Deserialize, Serialize};
-use crate::integrations::IssueUser;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct JiraAuthStatus {
-    pub authenticated: bool,
-    pub user:          Option<IssueUser>,
-    /// Human-readable Jira host, e.g. "mycompany.atlassian.net"
-    pub domain:        Option<String>,
-    /// "oauth" | "basic"
-    pub auth_method:   Option<String>,
-}
+pub use corvus_issues::prelude::JiraAuthStatus;
