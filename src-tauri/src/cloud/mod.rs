@@ -21,8 +21,9 @@ pub use arbor_cloud::{oauth_google, ops, secrets, transfer, types};
 
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
+use arbor_ipc::prelude::EventSink;
 use arbor_cloud::host::{CloudHost, CloudJobInfo, CloudJobStatus};
 use crate::AppState;
 use crate::jobs::{JobInfo, JobRegistry, JobStatus};
@@ -36,7 +37,7 @@ pub use arbor_cloud::host::{CloudCancellations, CloudPendingOps};
 // ── CloudHost impl ─────────────────────────────────────────────────────────
 
 /// Bridges `arbor_cloud::host::CloudHost` onto the host's `AppState` registries
-/// + the Tauri event bus. Constructed once at startup and managed as
+/// + the event sink. Constructed once at startup and managed as
 /// `Arc<dyn CloudHost>` so the command + plugin-namespace layers can pull
 /// it back out of Tauri State without knowing the concrete type.
 pub struct ArborCloudHost {
@@ -44,25 +45,25 @@ pub struct ArborCloudHost {
     pending_ops:   Arc<CloudPendingOps>,
     jobs:          Arc<Mutex<JobRegistry>>,
     plugin_host:   Arc<Mutex<PluginHost>>,
-    app:           AppHandle,
+    sink:          Arc<dyn EventSink>,
 }
 
 impl ArborCloudHost {
     pub fn new(
-        app:           AppHandle,
+        sink:          Arc<dyn EventSink>,
         cancellations: Arc<CloudCancellations>,
         pending_ops:   Arc<CloudPendingOps>,
         jobs:          Arc<Mutex<JobRegistry>>,
         plugin_host:   Arc<Mutex<PluginHost>>,
     ) -> Self {
-        Self { cancellations, pending_ops, jobs, plugin_host, app }
+        Self { cancellations, pending_ops, jobs, plugin_host, sink }
     }
 
-    /// Construct from a managed `AppState` + an `AppHandle` (typically
-    /// inside Tauri's `setup()`).
-    pub fn from_state(state: &AppState, app: AppHandle) -> Self {
+    /// Construct from a managed `AppState` + an event sink (typically
+    /// called from `install()` inside Tauri's `setup()`).
+    pub fn from_state(state: &AppState, sink: Arc<dyn EventSink>) -> Self {
         Self::new(
-            app,
+            sink,
             state.cloud_cancellations.clone(),
             state.cloud_pending_ops.clone(),
             state.jobs.clone(),
@@ -83,9 +84,7 @@ impl CloudHost for ArborCloudHost {
     }
 
     fn emit_event(&self, topic: &str, payload: serde_json::Value) {
-        if let Err(e) = self.app.emit(topic, payload) {
-            tracing::warn!("emit {topic} failed: {e}");
-        }
+        self.sink.emit(topic, payload);
     }
 
     fn job_new_id(&self) -> String {
@@ -143,7 +142,7 @@ fn cloud_to_jobs_status(s: CloudJobStatus) -> JobStatus {
 
 /// Register the OAuth refresher AND publish the `Arc<dyn CloudHost>` into
 /// Tauri's managed state. Call once from `setup()` after `AppState` is
-/// managed and the `AppHandle` is available.
+/// managed and the event sink has been wired (`state.corvus` set).
 pub fn install(app: &AppHandle) {
     // 1. OAuth refresher — let arbor-cloud wire its own internal
     //    `refresh_with` against the auth_gcs OnceLock.
@@ -152,7 +151,23 @@ pub fn install(app: &AppHandle) {
     // 2. CloudHost — built once, shared via Arc so spawned tokio tasks
     //    inside arbor-cloud can clone cheaply.
     let state: tauri::State<'_, AppState> = app.state();
-    let host = ArborCloudHost::from_state(&*state, app.clone());
+    // Cloud is a non-critical plugin feature: if the event sink isn't wired yet
+    // (corvus OnceLock not set — only possible on an out-of-order setup), skip
+    // installation rather than panic the boot. `cloud_host()` then stays `None`
+    // and the cloud handlers surface a clean "cloud host not ready" error.
+    let Some(sink) = state.event_sink() else {
+        tracing::warn!("cloud::install called before event sink was wired — cloud host not installed");
+        return;
+    };
+    let host = ArborCloudHost::from_state(&*state, sink);
     let host_arc: Arc<dyn CloudHost> = Arc::new(host);
-    app.manage(host_arc);
+
+    // Keep the Tauri-managed shim so the un-migrated Lua `ns_shell/cloud.rs`
+    // path (which reads `State<Arc<dyn CloudHost>>`) continues to compile and
+    // work until Wave 3 migrates those remaining commands.
+    app.manage(host_arc.clone());
+
+    // Also publish into AppState's OnceLock so the platform handlers
+    // migrated in Wave 1 can reach the host without a Tauri State lookup.
+    let _ = state.cloud_host.set(host_arc);
 }

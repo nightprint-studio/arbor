@@ -17,6 +17,7 @@
 
 pub mod app;
 pub mod branding;
+pub mod cloud;
 pub mod config;
 pub mod deep_link;
 pub mod fs;

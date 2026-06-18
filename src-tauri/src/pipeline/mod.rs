@@ -24,12 +24,14 @@ pub use corvus_pipeline_core::prelude::{
     split_chunk_lines, step_preview, PipelineRegistry, RUN_LOG_CAP,
 };
 
+mod engine;
+pub use engine::{PipelineEngine, PipelineRuntime};
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
-use tauri::{Emitter, Manager};
 use crate::process_ext::NoWindowExt;
 
 /// Type alias for the per-run variable context shared between every step
@@ -47,18 +49,20 @@ pub fn start_pipeline_run(
     run_id:     String,
     repo_path:  Option<String>,
     cancel:     Arc<AtomicBool>,
-    app_handle: tauri::AppHandle,
+    rt:         Arc<PipelineRuntime>,
 ) {
     if let Err(e) = std::thread::Builder::new()
         .name(format!("arbor-pipe-{run_id}"))
-        .spawn(move || orchestrate(def, run_id, repo_path, cancel, app_handle))
+        .spawn(move || orchestrate(def, run_id, repo_path, cancel, rt))
     {
         tracing::error!("failed to spawn pipeline orchestrator thread: {e}");
     }
 }
 
-fn emit(app_handle: &tauri::AppHandle, run: &PipelineRun) {
-    let _ = app_handle.emit("arbor://pipeline-update", run);
+fn emit(rt: &PipelineRuntime, run: &PipelineRun) {
+    if let Ok(value) = serde_json::to_value(run) {
+        rt.sink.emit("arbor://pipeline-update", value);
+    }
 }
 
 fn snapshot(pipelines: &Mutex<PipelineRegistry>, run_id: &str) -> Option<PipelineRun> {
@@ -68,8 +72,7 @@ fn snapshot(pipelines: &Mutex<PipelineRegistry>, run_id: &str) -> Option<Pipelin
 /// Push a log event on the given run (filtered by its `log_level`, capped at
 /// RUN_LOG_CAP entries) and broadcast it to the frontend for live streaming.
 fn log_event(
-    state:      &crate::AppState,
-    app_handle: &tauri::AppHandle,
+    rt:         &PipelineRuntime,
     run_id:     &str,
     level:      LogLevel,
     scope:      impl Into<String>,
@@ -81,7 +84,7 @@ fn log_event(
 
     // Mutate the run's log buffer (filtered by its configured min level).
     let should_emit = {
-        let Ok(mut reg) = state.pipelines.lock() else { return; };
+        let Ok(mut reg) = rt.engine.registry.lock() else { return; };
         let Some(run)   = reg.runs.iter_mut().find(|r| r.id == run_id) else { return; };
         if level.rank() < run.log_level.rank() { return; }
         run.log.push(LogEvent { ts, level, scope: scope_s.clone(), message: msg_s.clone() });
@@ -93,7 +96,7 @@ fn log_event(
     };
 
     if should_emit {
-        let _ = app_handle.emit("arbor://pipeline-log", serde_json::json!({
+        rt.sink.emit("arbor://pipeline-log", serde_json::json!({
             "run_id":  run_id,
             "ts":      ts,
             "level":   level.tag(),
@@ -103,8 +106,8 @@ fn log_event(
     }
 }
 
-fn fire_hook(state: &crate::AppState, hook: &str, ctx: &serde_json::Value) {
-    state.fire_hook(hook, ctx.clone());
+fn fire_hook(rt: &PipelineRuntime, hook: &str, ctx: &serde_json::Value) {
+    rt.fire_hook(hook, ctx.clone());
 }
 
 /// Execution result of a single step — used internally to merge parallel
@@ -130,7 +133,7 @@ fn execute_step(
     cwd:        &str,
     cancel:     &Arc<AtomicBool>,
     step_idx:   usize,
-    app_handle: &tauri::AppHandle,
+    rt:         &Arc<PipelineRuntime>,
     default_plugin: &str,
     pipeline_name:  &str,
     run_id:         &str,
@@ -149,7 +152,7 @@ fn execute_step(
         format!("{parent_path}{}", step_def.id)
     };
     let sink = StepLogSink::new(
-        app_handle, default_plugin, pipeline_name, run_id,
+        rt, default_plugin, pipeline_name, run_id,
         stage_id, &effective_id, &step_def.name,
     );
     if cancel.load(Ordering::Relaxed) {
@@ -182,7 +185,7 @@ fn execute_step(
     let (exit_code, output, return_value, branch) =
         if let Some(block) = &step_def.if_block {
             execute_if_block(
-                block, step_def, &cwd_resolved, cancel, app_handle,
+                block, step_def, &cwd_resolved, cancel, rt,
                 default_plugin, pipeline_name, run_id, stage_id, ctx,
                 &effective_id, &sink,
             )
@@ -225,7 +228,7 @@ fn execute_step(
                 params: resolved_params,
             };
             let (exit, lines) = run_lua_op(
-                &resolved_op, &cwd_resolved, app_handle, default_plugin, &sink,
+                &resolved_op, &cwd_resolved, rt, default_plugin, &sink,
             );
             let joined = lines.iter().filter(|l| !l.starts_with("[stderr]"))
                 .cloned().collect::<Vec<_>>().join("\n");
@@ -309,7 +312,7 @@ fn execute_if_block(
     parent:         &StepDef,
     cwd:            &str,
     cancel:         &Arc<AtomicBool>,
-    app_handle:     &tauri::AppHandle,
+    rt:             &Arc<PipelineRuntime>,
     default_plugin: &str,
     pipeline_name:  &str,
     run_id:         &str,
@@ -328,7 +331,6 @@ fn execute_if_block(
     sink.emit(&log[0]);
 
     let mut overall = RunStatus::Success;
-    let state = app_handle.state::<crate::AppState>();
 
     for (i, child) in steps.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
@@ -341,12 +343,12 @@ fn execute_if_block(
         // streaming finds it via `find_step_mut` while the step is in
         // flight.
         push_child_step_running(
-            &state, app_handle, run_id, stage_id, parent_id,
+            rt, run_id, stage_id, parent_id,
             &child_def_id, &child.name,
         );
 
         let child_outcome = execute_step(
-            child, cwd, cancel, i, app_handle,
+            child, cwd, cancel, i, rt,
             default_plugin, pipeline_name, run_id, stage_id, ctx,
             // Prefix used by execute_step to build effective_id for the
             // grandchild dispatch. Trailing `/` is intentional.
@@ -354,7 +356,7 @@ fn execute_if_block(
         );
 
         finalize_child_step(
-            &state, app_handle, run_id, stage_id, &child_def_id, &child_outcome,
+            rt, run_id, stage_id, &child_def_id, &child_outcome,
         );
 
         let line = format!(
@@ -387,8 +389,7 @@ fn execute_if_block(
 /// against re-entry (resume / nested if-block re-evaluation): if a child
 /// with that `def_id` already exists in the tree it's reset in place.
 fn push_child_step_running(
-    state:        &crate::AppState,
-    app_handle:   &tauri::AppHandle,
+    rt:           &PipelineRuntime,
     run_id:       &str,
     stage_id:     &str,
     parent_id:    &str,
@@ -396,7 +397,7 @@ fn push_child_step_running(
     child_name:   &str,
 ) {
     {
-        let Ok(mut reg) = state.pipelines.lock() else { return; };
+        let Ok(mut reg) = rt.engine.registry.lock() else { return; };
         if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
             if let Some(s) = r.stages.iter_mut().find(|s| s.def_id == stage_id) {
                 if let Some(parent) = find_step_mut(&mut s.steps, parent_id) {
@@ -428,23 +429,22 @@ fn push_child_step_running(
             }
         }
     }
-    if let Some(snap) = snapshot(&state.pipelines, run_id) {
-        emit(app_handle, &snap);
+    if let Some(snap) = snapshot(&rt.engine.registry, run_id) {
+        emit(rt, &snap);
     }
 }
 
 /// Write the final outcome of a child step (status, exit_code, output,
 /// timing, branch label) into its already-pushed `StepRun`.
 fn finalize_child_step(
-    state:        &crate::AppState,
-    app_handle:   &tauri::AppHandle,
+    rt:           &PipelineRuntime,
     run_id:       &str,
     stage_id:     &str,
     child_def_id: &str,
     outcome:      &StepOutcome,
 ) {
     {
-        let Ok(mut reg) = state.pipelines.lock() else { return; };
+        let Ok(mut reg) = rt.engine.registry.lock() else { return; };
         if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
             if let Some(s) = r.stages.iter_mut().find(|s| s.def_id == stage_id) {
                 if let Some(child) = find_step_mut(&mut s.steps, child_def_id) {
@@ -458,8 +458,8 @@ fn finalize_child_step(
             }
         }
     }
-    if let Some(snap) = snapshot(&state.pipelines, run_id) {
-        emit(app_handle, &snap);
+    if let Some(snap) = snapshot(&rt.engine.registry, run_id) {
+        emit(rt, &snap);
     }
 }
 
@@ -513,7 +513,7 @@ fn apply_capture(
 }
 
 /// Live sink for a single step's captured output. Cloning is cheap (all
-/// fields are owned strings + the `AppHandle` Arc) so the stderr reader
+/// fields are owned strings + the `PipelineRuntime` Arc) so the stderr reader
 /// thread can take its own copy. Each `emit` call streams the line both
 /// to the global Plugin Logs panel (via `arbor://plugin-log`) and to the
 /// run's own log buffer (via `log_event` → `arbor://pipeline-log`), so
@@ -522,7 +522,7 @@ fn apply_capture(
 /// `StepRun.output` Vec for persistence and post-mortem replay.
 #[derive(Clone)]
 struct StepLogSink {
-    app_handle:    tauri::AppHandle,
+    rt:            Arc<PipelineRuntime>,
     plugin:        String,
     pipeline_name: String,
     run_id:        String,
@@ -534,7 +534,7 @@ struct StepLogSink {
 
 impl StepLogSink {
     fn new(
-        app_handle:    &tauri::AppHandle,
+        rt:            &Arc<PipelineRuntime>,
         plugin:        &str,
         pipeline_name: &str,
         run_id:        &str,
@@ -543,7 +543,7 @@ impl StepLogSink {
         step_name:     &str,
     ) -> Self {
         Self {
-            app_handle:    app_handle.clone(),
+            rt:            rt.clone(),
             plugin:        plugin.to_string(),
             pipeline_name: pipeline_name.to_string(),
             run_id:        run_id.to_string(),
@@ -555,8 +555,8 @@ impl StepLogSink {
     }
 
     /// Per-line side effects: Plugin Logs ring buffer + run-log event.
-    /// CHEAP — local mutex on `state.plugin_logs` + short level check on
-    /// `state.pipelines` (returns early when below the run's `log_level`).
+    /// CHEAP — local mutex on `rt.plugin_logs` + short level check on
+    /// `rt.engine.registry` (returns early when below the run's `log_level`).
     /// Does **not** push to `StepRun.output` and does **not** emit
     /// `arbor://pipeline-step-output*`; both of those are batched by
     /// [`Self::emit_batch`] which the chunk reader calls once per drained
@@ -571,18 +571,18 @@ impl StepLogSink {
         } else {
             format!("[{}] {line}", self.step_name)
         };
-        crate::plugin_logs::record_with_pipeline(
-            &self.app_handle, level, &self.plugin, prefixed,
+        crate::plugin_logs::record_with_pipeline_via(
+            &self.rt.plugin_logs, &self.rt.sink,
+            level, &self.plugin, prefixed,
             &self.pipeline_name, &self.run_id,
         );
-        let state = self.app_handle.state::<crate::AppState>();
         log_event(
-            &state, &self.app_handle, &self.run_id,
+            &self.rt, &self.run_id,
             LogLevel::Debug, self.scope.clone(), line.to_string(),
         );
     }
 
-    /// Batch flush from the chunk reader. ONE `state.pipelines` lock for
+    /// Batch flush from the chunk reader. ONE `rt.engine.registry` lock for
     /// the whole batch + ONE `arbor://pipeline-step-output` IPC event
     /// carrying every line read in the latest pipe drain. This is the
     /// counterpart to the integrated terminal's `read(buf) → emit`
@@ -593,8 +593,7 @@ impl StepLogSink {
     /// No-op on empty batch.
     fn emit_batch(&self, lines: &[String]) {
         if lines.is_empty() { return; }
-        let state = self.app_handle.state::<crate::AppState>();
-        if let Ok(mut reg) = state.pipelines.lock() {
+        if let Ok(mut reg) = self.rt.engine.registry.lock() {
             if let Some(r) = reg.runs.iter_mut().find(|r| r.id == self.run_id) {
                 if let Some(s) = r.stages.iter_mut().find(|s| s.def_id == self.stage_id) {
                     // Recursive lookup: top-level step OR any nested child
@@ -605,7 +604,7 @@ impl StepLogSink {
                 }
             }
         }
-        let _ = self.app_handle.emit("arbor://pipeline-step-output", serde_json::json!({
+        self.rt.sink.emit("arbor://pipeline-step-output", serde_json::json!({
             "run_id":   self.run_id,
             "stage_id": self.stage_id,
             "step_id":  self.step_id,
@@ -634,32 +633,27 @@ enum SlotAcquire {
     Cancelled,
 }
 
-/// Read the configured global cap for concurrent pipeline runs.  `0` means
-/// unlimited.  Falls back to the default when the config mutex is poisoned.
-fn read_max_concurrent_runs(state: &crate::AppState) -> u32 {
-    state.config.lock().ok()
-        .map(|c| c.pipelines.max_concurrent_runs)
-        .unwrap_or(4)
-}
-
 /// Wait for a free concurrency slot, then increment `running_count`.
 /// While parked the run stays `Pending` with `queued = true` — the panel
 /// renders that as a "Queued" badge so the user can tell it apart from a
 /// run that's about to start. `cap == 0` short-circuits to "unlimited".
 ///
-/// Wakes on `pipeline_cv.notify_*` (terminal release) AND on a 250 ms
-/// poll timeout so a freshly-raised cap or a cancel signal land within a
-/// quarter second even if no other run is changing state.
+/// Wakes on `rt.engine.cv.notify_*` (terminal release) AND on a 250 ms
+/// poll timeout so a cancel signal lands within a quarter second even if no
+/// other run is changing state.
 fn acquire_run_slot(
-    state:      &crate::AppState,
-    app_handle: &tauri::AppHandle,
+    rt:         &PipelineRuntime,
     run_id:     &str,
     cancel:     &Arc<AtomicBool>,
 ) -> SlotAcquire {
-    // Fast path: read cap once, try without ever surfacing as "queued".
-    let cap = read_max_concurrent_runs(state);
+    // Cap snapshotted at run start (`rt.max_concurrent_runs`). BEHAVIOR DELTA:
+    // the wait loop no longer re-reads `config.pipelines.max_concurrent_runs`
+    // each iteration, so a mid-run config change to the cap no longer affects
+    // an already-queued run. Everything else is identical.
+    let cap = rt.max_concurrent_runs;
+    // Fast path: try without ever surfacing as "queued".
     {
-        let Ok(mut reg) = state.pipelines.lock() else { return SlotAcquire::Cancelled; };
+        let Ok(mut reg) = rt.engine.registry.lock() else { return SlotAcquire::Cancelled; };
         if cancel.load(Ordering::Relaxed) {
             return SlotAcquire::Cancelled;
         }
@@ -673,13 +667,11 @@ fn acquire_run_slot(
         }
     }
     // Emit queued snapshot outside the lock so listeners can update.
-    if let Some(snap) = snapshot(&state.pipelines, run_id) {
-        emit(app_handle, &snap);
+    if let Some(snap) = snapshot(&rt.engine.registry, run_id) {
+        emit(rt, &snap);
         persist_run(&snap);
     }
-    // Wait loop: re-read cap each iteration so cap bumps via config-set
-    // are picked up without restarting the run.
-    let mut guard = match state.pipelines.lock() {
+    let mut guard = match rt.engine.registry.lock() {
         Ok(g)  => g,
         Err(_) => return SlotAcquire::Cancelled,
     };
@@ -690,7 +682,6 @@ fn acquire_run_slot(
             }
             return SlotAcquire::Cancelled;
         }
-        let cap = read_max_concurrent_runs(state);
         if cap == 0 || guard.running_count < cap as usize {
             guard.running_count += 1;
             if let Some(r) = guard.runs.iter_mut().find(|r| r.id == run_id) {
@@ -698,7 +689,7 @@ fn acquire_run_slot(
             }
             return SlotAcquire::Acquired;
         }
-        let res = state.pipeline_cv
+        let res = rt.engine.cv
             .wait_timeout(guard, Duration::from_millis(250))
             .ok();
         match res {
@@ -712,11 +703,11 @@ fn acquire_run_slot(
 /// Idempotent against an already-zero counter (defensive — saturating
 /// arithmetic so a misuse cannot underflow into a near-`usize::MAX`
 /// queue-stall state).
-fn release_run_slot(state: &crate::AppState) {
-    if let Ok(mut reg) = state.pipelines.lock() {
+fn release_run_slot(rt: &PipelineRuntime) {
+    if let Ok(mut reg) = rt.engine.registry.lock() {
         reg.running_count = reg.running_count.saturating_sub(1);
     }
-    state.pipeline_cv.notify_one();
+    rt.engine.cv.notify_one();
 }
 
 fn orchestrate(
@@ -724,14 +715,12 @@ fn orchestrate(
     run_id:     String,
     repo_path:  Option<String>,
     cancel:     Arc<AtomicBool>,
-    app_handle: tauri::AppHandle,
+    rt:         Arc<PipelineRuntime>,
 ) {
-    let state = app_handle.state::<crate::AppState>();
-
     // ── Acquire the lock. Failure here aborts the run before it starts. ──
     let lock_key = def.effective_lock_key();
     {
-        let Ok(mut reg) = state.pipelines.lock() else {
+        let Ok(mut reg) = rt.engine.registry.lock() else {
             tracing::error!("pipeline mutex poisoned acquiring lock for run {run_id}");
             return;
         };
@@ -754,7 +743,7 @@ fn orchestrate(
             drop(reg);
             if let Some(s) = snap {
                 persist_run(&s);
-                emit(&app_handle, &s);
+                emit(&rt, &s);
             }
             return;
         }
@@ -764,12 +753,12 @@ fn orchestrate(
     //    The lock_key is already held above, so a queued run still blocks
     //    other runs of the same pipeline from starting in parallel — that
     //    keeps the lock_key collision semantics exactly as documented.
-    if let SlotAcquire::Cancelled = acquire_run_slot(&state, &app_handle, &run_id, &cancel) {
+    if let SlotAcquire::Cancelled = acquire_run_slot(&rt, &run_id, &cancel) {
         // The user cancelled while we were parked. Mark Cancelled, release
         // the lock_key, snapshot + emit, and bail without ever transitioning
         // through Running. No slot was reserved → no release_run_slot call.
         {
-            let Ok(mut reg) = state.pipelines.lock() else { return; };
+            let Ok(mut reg) = rt.engine.registry.lock() else { return; };
             if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
                 r.status      = RunStatus::Cancelled;
                 r.queued      = false;
@@ -785,36 +774,36 @@ fn orchestrate(
             }
             reg.release_lock_of(&run_id);
         }
-        if let Some(snap) = snapshot(&state.pipelines, &run_id) {
+        if let Some(snap) = snapshot(&rt.engine.registry, &run_id) {
             persist_run(&snap);
-            emit(&app_handle, &snap);
+            emit(&rt, &snap);
         }
         return;
     }
 
     // ── Mark pipeline Running + first snapshot ───────────────────────────
     {
-        let Ok(mut reg) = state.pipelines.lock() else { return; };
+        let Ok(mut reg) = rt.engine.registry.lock() else { return; };
         if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
             r.status     = RunStatus::Running;
             if r.started_at.is_none() { r.started_at = Some(now_ms()); }
         }
     }
     let resume_cursor_taken: Option<ResumeCursor> = {
-        let Ok(mut reg) = state.pipelines.lock() else { return; };
+        let Ok(mut reg) = rt.engine.registry.lock() else { return; };
         reg.runs.iter_mut()
             .find(|r| r.id == run_id)
             .and_then(|r| r.resume_cursor.take())
     };
-    if let Some(snap) = snapshot(&state.pipelines, &run_id) {
-        emit(&app_handle, &snap);
+    if let Some(snap) = snapshot(&rt.engine.registry, &run_id) {
+        emit(&rt, &snap);
         persist_run(&snap);
-        fire_hook(&state, "on_pipeline_started", &serde_json::json!({
+        fire_hook(&rt, "on_pipeline_started", &serde_json::json!({
             "run_id":      &run_id,
             "pipeline_id": &snap.pipeline_id,
             "plugin":      &snap.plugin,
         }));
-        log_event(&state, &app_handle, &run_id, LogLevel::Info, "pipeline",
+        log_event(&rt, &run_id, LogLevel::Info, "pipeline",
             if resume_cursor_taken.is_some() {
                 format!("pipeline '{}' resumed", def.name)
             } else {
@@ -847,22 +836,22 @@ fn orchestrate(
 
         // Cancel check (pre-stage).
         if cancel.load(Ordering::Relaxed) {
-            mark_remaining_cancelled(&state.pipelines, &run_id, si);
+            mark_remaining_cancelled(&rt.engine.registry, &run_id, si);
             break 'stages;
         }
 
         // Mark stage Running.
         {
-            let Ok(mut reg) = state.pipelines.lock() else { return; };
+            let Ok(mut reg) = rt.engine.registry.lock() else { return; };
             if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
                 if let Some(s) = r.stages.get_mut(si) { s.status = RunStatus::Running; }
             }
         }
-        if let Some(snap) = snapshot(&state.pipelines, &run_id) {
-            emit(&app_handle, &snap);
+        if let Some(snap) = snapshot(&rt.engine.registry, &run_id) {
+            emit(&rt, &snap);
             persist_run(&snap);
         }
-        log_event(&state, &app_handle, &run_id, LogLevel::Info,
+        log_event(&rt, &run_id, LogLevel::Info,
             format!("stage:{}", stage_def.id),
             format!("stage '{}' started (mode={:?}, steps={})",
                 stage_def.name, stage_def.mode, step_indices.len()));
@@ -871,11 +860,11 @@ fn orchestrate(
         let outcomes = match stage_def.mode {
             StageMode::Sequential => execute_stage_sequential(
                 &def, stage_def, si, &step_indices,
-                &repo_path, &cancel, &run_id, &state, &app_handle, &ctx,
+                &repo_path, &cancel, &run_id, &rt, &ctx,
             ),
             StageMode::Parallel => execute_stage_parallel(
                 &def, stage_def, si, &step_indices,
-                &repo_path, &cancel, &run_id, &state, &app_handle, &ctx,
+                &repo_path, &cancel, &run_id, &rt, &ctx,
             ),
         };
 
@@ -885,7 +874,7 @@ fn orchestrate(
         // with the (empty) outcome would erase that nested progress.
         let mut had_fatal_failure = false;
         {
-            let Ok(mut reg) = state.pipelines.lock() else { return; };
+            let Ok(mut reg) = rt.engine.registry.lock() else { return; };
             if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
                 if let Some(s) = r.stages.get_mut(si) {
                     for o in &outcomes {
@@ -918,16 +907,16 @@ fn orchestrate(
             RunStatus::Success
         };
         {
-            let Ok(mut reg) = state.pipelines.lock() else { return; };
+            let Ok(mut reg) = rt.engine.registry.lock() else { return; };
             if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
                 if let Some(s) = r.stages.get_mut(si) { s.status = stage_status.clone(); }
             }
         }
-        if let Some(snap) = snapshot(&state.pipelines, &run_id) {
-            emit(&app_handle, &snap);
+        if let Some(snap) = snapshot(&rt.engine.registry, &run_id) {
+            emit(&rt, &snap);
             persist_run(&snap);
         }
-        log_event(&state, &app_handle, &run_id,
+        log_event(&rt, &run_id,
             match stage_status {
                 RunStatus::Success  => LogLevel::Info,
                 RunStatus::Failed   => LogLevel::Error,
@@ -951,7 +940,7 @@ fn orchestrate(
         RunStatus::Success
     };
     {
-        let Ok(mut reg) = state.pipelines.lock() else { return; };
+        let Ok(mut reg) = rt.engine.registry.lock() else { return; };
         if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
             r.status      = final_status.clone();
             r.finished_at = Some(now_ms());
@@ -971,18 +960,18 @@ fn orchestrate(
     // Release the concurrency slot and wake the next queued orchestrator.
     // Done OUTSIDE the registry lock above so the wake-up doesn't race
     // against `wait_timeout` re-acquiring it.
-    release_run_slot(&state);
+    release_run_slot(&rt);
 
-    if let Some(snap) = snapshot(&state.pipelines, &run_id) {
-        emit(&app_handle, &snap);
+    if let Some(snap) = snapshot(&rt.engine.registry, &run_id) {
+        emit(&rt, &snap);
         persist_run(&snap);
-        fire_hook(&state, "on_pipeline_done", &serde_json::json!({
+        fire_hook(&rt, "on_pipeline_done", &serde_json::json!({
             "run_id":      &run_id,
             "pipeline_id": &snap.pipeline_id,
             "plugin":      &snap.plugin,
             "status":      &final_status,
         }));
-        log_event(&state, &app_handle, &run_id,
+        log_event(&rt, &run_id,
             if final_status == RunStatus::Success { LogLevel::Info } else { LogLevel::Error },
             "pipeline",
             format!("pipeline '{}' finished with status={:?}", def.name, final_status));
@@ -1002,8 +991,7 @@ fn execute_stage_sequential(
     repo_path:  &Option<String>,
     cancel:     &Arc<AtomicBool>,
     run_id:     &str,
-    state:      &crate::AppState,
-    app_handle: &tauri::AppHandle,
+    rt:         &Arc<PipelineRuntime>,
     ctx:        &RunCtx,
 ) -> Vec<StepOutcome> {
     let mut outcomes = Vec::with_capacity(indices.len());
@@ -1015,24 +1003,24 @@ fn execute_stage_sequential(
             .unwrap_or_else(|| ".".to_string());
 
         // Mark step Running.
-        set_step_running(state, run_id, stage_def.id.as_str(), step_def.id.as_str());
-        if let Some(snap) = snapshot(&state.pipelines, run_id) { emit(app_handle, &snap); }
+        set_step_running(rt, run_id, stage_def.id.as_str(), step_def.id.as_str());
+        if let Some(snap) = snapshot(&rt.engine.registry, run_id) { emit(rt, &snap); }
         // Log preview: prefer op name / builtin label / "if-block" when the
         // step isn't a shell command so the debug log carries something
         // meaningful.
         let preview = step_preview(step_def);
-        log_event(state, app_handle, run_id, LogLevel::Info,
+        log_event(rt, run_id, LogLevel::Info,
             format!("step:{}.{}", stage_def.id, step_def.id),
             format!("step '{}' started: {}", step_def.name, preview));
-        log_event(state, app_handle, run_id, LogLevel::Debug,
+        log_event(rt, run_id, LogLevel::Debug,
             format!("step:{}.{}", stage_def.id, step_def.id),
             format!("cwd={cwd}"));
 
         let outcome = execute_step(
-            step_def, &cwd, cancel, step_idx, app_handle,
+            step_def, &cwd, cancel, step_idx, rt,
             &def.plugin, &def.name, run_id, &stage_def.id, ctx, "",
         );
-        emit_step_done(state, app_handle, run_id, stage_def, step_def, &outcome);
+        emit_step_done(rt, run_id, stage_def, step_def, &outcome);
 
         let allow_failure = step_def.allow_failure;
         let broke_stage   = outcome.status == RunStatus::Failed && !allow_failure;
@@ -1051,8 +1039,7 @@ fn execute_stage_parallel(
     repo_path:  &Option<String>,
     cancel:     &Arc<AtomicBool>,
     run_id:     &str,
-    state:      &crate::AppState,
-    app_handle: &tauri::AppHandle,
+    rt:         &Arc<PipelineRuntime>,
     ctx:        &RunCtx,
 ) -> Vec<StepOutcome> {
     let total = indices.len();
@@ -1065,13 +1052,13 @@ fn execute_stage_parallel(
     // Mark all steps Running upfront so the UI shows them spinning.
     for &step_idx in indices {
         let step_def = &stage_def.steps[step_idx];
-        set_step_running(state, run_id, stage_def.id.as_str(), step_def.id.as_str());
+        set_step_running(rt, run_id, stage_def.id.as_str(), step_def.id.as_str());
         let preview = step_preview(step_def);
-        log_event(state, app_handle, run_id, LogLevel::Info,
+        log_event(rt, run_id, LogLevel::Info,
             format!("step:{}.{}", stage_def.id, step_def.id),
             format!("step '{}' started (parallel): {}", step_def.name, preview));
     }
-    if let Some(snap) = snapshot(&state.pipelines, run_id) { emit(app_handle, &snap); }
+    if let Some(snap) = snapshot(&rt.engine.registry, run_id) { emit(rt, &snap); }
 
     let mut spawned = 0usize;
     // Spawn up to `cap` workers, refill as they finish. Drop our own sender
@@ -1087,7 +1074,7 @@ fn execute_stage_parallel(
                 .unwrap_or_else(|| ".".to_string());
             let cancel_c = cancel.clone();
             let tx_c = tx.clone();
-            let app_c = app_handle.clone();
+            let rt_c = rt.clone();
             let plugin_c   = def.plugin.clone();
             let pipeline_c = def.name.clone();
             let run_id_c   = run_id.to_string();
@@ -1095,7 +1082,7 @@ fn execute_stage_parallel(
             let ctx_c      = ctx.clone();
             let h = std::thread::spawn(move || {
                 let outcome = execute_step(
-                    &step_def, &cwd, &cancel_c, step_idx, &app_c,
+                    &step_def, &cwd, &cancel_c, step_idx, &rt_c,
                     &plugin_c, &pipeline_c, &run_id_c, &stage_id_c,
                     &ctx_c, "",
                 );
@@ -1108,7 +1095,7 @@ fn execute_stage_parallel(
         match rx.recv() {
             Ok(outcome) => {
                 let step_def = &stage_def.steps[outcome.step_idx];
-                emit_step_done(state, app_handle, run_id, stage_def, step_def, &outcome);
+                emit_step_done(rt, run_id, stage_def, step_def, &outcome);
                 collected.push(outcome);
             }
             Err(_) => break, // all senders dropped — should only happen on worker panic
@@ -1120,12 +1107,12 @@ fn execute_stage_parallel(
 }
 
 fn set_step_running(
-    state:    &crate::AppState,
+    rt:       &PipelineRuntime,
     run_id:   &str,
     stage_id: &str,
     step_id:  &str,
 ) {
-    let Ok(mut reg) = state.pipelines.lock() else { return; };
+    let Ok(mut reg) = rt.engine.registry.lock() else { return; };
     if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
         if let Some(s) = r.stages.iter_mut().find(|s| s.def_id == stage_id) {
             if let Some(st) = find_step_mut(&mut s.steps, step_id) {
@@ -1145,8 +1132,7 @@ fn set_step_running(
 }
 
 fn emit_step_done(
-    state:      &crate::AppState,
-    app_handle: &tauri::AppHandle,
+    rt:         &PipelineRuntime,
     run_id:     &str,
     stage_def:  &StageDef,
     step_def:   &StepDef,
@@ -1159,7 +1145,7 @@ fn emit_step_done(
         RunStatus::Cancelled => LogLevel::Warn,
         _                    => LogLevel::Info,
     };
-    log_event(state, app_handle, run_id, level, scope,
+    log_event(rt, run_id, level, scope,
         format!("step '{}' finished: {:?} (exit={:?}, elapsed={}ms)",
             step_def.name,
             outcome.status,
@@ -1176,7 +1162,7 @@ fn emit_step_done(
     // we deliberately do NOT touch `st.children` here — overwriting it
     // would erase the nested progress the UI already received.
     {
-        let Ok(mut reg) = state.pipelines.lock() else { return; };
+        let Ok(mut reg) = rt.engine.registry.lock() else { return; };
         if let Some(r) = reg.runs.iter_mut().find(|r| r.id == run_id) {
             if let Some(s) = r.stages.iter_mut().find(|s| s.def_id == stage_def.id) {
                 if let Some(st) = find_step_mut(&mut s.steps, &step_def.id) {
@@ -1190,10 +1176,10 @@ fn emit_step_done(
             }
         }
     }
-    if let Some(snap) = snapshot(&state.pipelines, run_id) {
-        emit(app_handle, &snap);
+    if let Some(snap) = snapshot(&rt.engine.registry, run_id) {
+        emit(rt, &snap);
         persist_run(&snap);
-        fire_hook(state, "on_pipeline_step_done", &serde_json::json!({
+        fire_hook(rt, "on_pipeline_step_done", &serde_json::json!({
             "run_id":    run_id,
             "plugin":    &snap.plugin,
             "stage_id":  &stage_def.id,
@@ -1241,13 +1227,11 @@ fn mark_remaining_cancelled(
 /// - the lock is held by a different run (another run is active)
 pub fn resume_run(
     run_id:     &str,
-    app_handle: tauri::AppHandle,
+    rt:         Arc<PipelineRuntime>,
 ) -> std::result::Result<(), String> {
-    let state = app_handle.state::<crate::AppState>();
-
     // Validate + clone the data we need outside the mutex.
     let (def, repo_path) = {
-        let mut reg = state.pipelines.lock()
+        let mut reg = rt.engine.registry.lock()
             .map_err(|_| "pipeline mutex poisoned".to_string())?;
         let run = reg.runs.iter().find(|r| r.id == run_id)
             .ok_or_else(|| format!("run '{run_id}' not found"))?;
@@ -1286,20 +1270,19 @@ pub fn resume_run(
     // Fresh cancel token.
     let cancel = Arc::new(AtomicBool::new(false));
     {
-        let mut reg = state.pipelines.lock()
+        let mut reg = rt.engine.registry.lock()
             .map_err(|_| "pipeline mutex poisoned".to_string())?;
         reg.cancel_tokens.insert(run_id.to_string(), cancel.clone());
     }
 
-    start_pipeline_run(def, run_id.to_string(), repo_path, cancel, app_handle);
+    start_pipeline_run(def, run_id.to_string(), repo_path, cancel, rt);
     Ok(())
 }
 
 /// Drop a failed/cancelled run — removes the on-disk file and the in-memory
 /// entry. Refuses to discard a run that is currently Running.
-pub fn discard_run(run_id: &str, app_handle: tauri::AppHandle) -> std::result::Result<(), String> {
-    let state = app_handle.state::<crate::AppState>();
-    let mut reg = state.pipelines.lock()
+pub fn discard_run(run_id: &str, rt: Arc<PipelineRuntime>) -> std::result::Result<(), String> {
+    let mut reg = rt.engine.registry.lock()
         .map_err(|_| "pipeline mutex poisoned".to_string())?;
     let status = reg.runs.iter().find(|r| r.id == run_id).map(|r| r.status.clone());
     match status {
@@ -1308,7 +1291,7 @@ pub fn discard_run(run_id: &str, app_handle: tauri::AppHandle) -> std::result::R
         Some(_) => {
             reg.discard(run_id);
             drop(reg);
-            let _ = app_handle.emit("arbor://pipeline-discarded",
+            rt.sink.emit("arbor://pipeline-discarded",
                 serde_json::json!({ "run_id": run_id }));
             Ok(())
         }
@@ -1533,13 +1516,12 @@ fn run_command(
 fn run_lua_op(
     op:             &LuaOpSpec,
     cwd:            &str,
-    app_handle:     &tauri::AppHandle,
+    rt:             &PipelineRuntime,
     default_plugin: &str,
     sink:           &StepLogSink,
 ) -> (Option<i32>, Vec<String>) {
     let target_plugin = op.plugin.clone().unwrap_or_else(|| default_plugin.to_string());
-    let state = app_handle.state::<crate::AppState>();
-    let host = match state.plugin_host.lock() {
+    let host = match rt.plugin_host.lock() {
         Ok(h) => h,
         Err(_) => {
             let msg = "⚠ plugin host mutex poisoned".to_string();

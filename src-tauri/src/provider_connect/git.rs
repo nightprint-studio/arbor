@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
-use tauri::AppHandle;
 
+use arbor_ipc::prelude::EventSink;
 use corvus_git_provider_api::prelude::GitProvider;
 use corvus_provider_descriptor::prelude::{AuthStatus, OAuthStart, ProviderDescriptor};
 
@@ -99,10 +99,14 @@ impl ProviderConnector for GithubConnector {
         }
     }
 
-    async fn start_oauth(&self, method_id: &str, app: AppHandle) -> Result<OAuthStart, AppError> {
+    async fn start_oauth(
+        &self,
+        method_id: &str,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<OAuthStart, AppError> {
         match method_id {
             "oauth" => {
-                let info = crate::git_provider::oauth::github::start(app).await.map_err(pe)?;
+                let info = crate::git_provider::oauth::github::start(sink).await.map_err(pe)?;
                 Ok(OAuthStart::Device {
                     user_code:        info.user_code,
                     verification_uri: info.verification_uri,
@@ -171,10 +175,14 @@ impl ProviderConnector for GitlabConnector {
         }
     }
 
-    async fn start_oauth(&self, method_id: &str, app: AppHandle) -> Result<OAuthStart, AppError> {
+    async fn start_oauth(
+        &self,
+        method_id: &str,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<OAuthStart, AppError> {
         match method_id {
             "oauth" => {
-                let url = crate::git_provider::oauth::gitlab::start(app).await.map_err(pe)?;
+                let url = crate::git_provider::oauth::gitlab::start(sink).await.map_err(pe)?;
                 Ok(OAuthStart::Redirect { url })
             }
             other => Err(AppError::Other(format!("gitlab: unknown oauth method '{other}'"))),

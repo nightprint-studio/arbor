@@ -1,18 +1,18 @@
-//! GitHub OAuth helpers exposed to the command layer.
+//! GitHub OAuth helpers exposed to the connector layer.
 //!
-//! The Device Authorization Grant needs a `tauri::AppHandle` to emit the
-//! completion event, so the trait method on `GithubProvider` can't actually
-//! drive it.  These helpers are wired up by `commands::auth_commands`; the
-//! trait method itself returns `Unsupported` until the flow is reachable
-//! without an `AppHandle`.
+//! The Device Authorization Grant emits its completion event through an
+//! [`EventSink`] (the Model-D event egress), so it runs from the `&AppState`
+//! provider handler without a `tauri::AppHandle`.
+
+use arbor_ipc::prelude::EventSink;
 
 use crate::auth::DeviceFlowInfo;
 use crate::git_provider::types::error::ProviderError;
 
 /// Kicks off the Device Authorization Grant via the existing implementation.
 /// Returns the verification info (user code + URL) the UI should display.
-pub async fn start(app: tauri::AppHandle) -> Result<DeviceFlowInfo, ProviderError> {
-    crate::git_provider::oauth::github_flow::start_github_device_flow(app)
+pub async fn start(sink: std::sync::Arc<dyn EventSink>) -> Result<DeviceFlowInfo, ProviderError> {
+    crate::git_provider::oauth::github_flow::start_github_device_flow(sink)
         .await
         .map_err(|e| ProviderError::Internal(e.to_string()))
 }

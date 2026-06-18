@@ -2,37 +2,16 @@ use tauri::State;
 
 use crate::AppState;
 use crate::error::{AppError, Result};
-use crate::pipeline::{PipelineDef, PipelineRun};
-
-// ---------------------------------------------------------------------------
-// Query commands
-// ---------------------------------------------------------------------------
-
-/// List all pipeline definitions registered by plugins.
-#[tauri::command]
-pub fn list_pipeline_defs(state: State<AppState>) -> Result<Vec<PipelineDef>> {
-    let reg = state.lock_pipelines()?;
-    Ok(reg.defs.clone())
-}
-
-/// List all pipeline runs (most recent last).
-#[tauri::command]
-pub fn list_pipeline_runs(state: State<AppState>) -> Result<Vec<PipelineRun>> {
-    let reg = state.lock_pipelines()?;
-    Ok(reg.runs.iter().rev().cloned().collect())
-}
-
-/// Get a single pipeline run by ID.
-#[tauri::command]
-pub fn get_pipeline_run(state: State<AppState>, run_id: String) -> Result<PipelineRun> {
-    let reg = state.lock_pipelines()?;
-    reg.get_run(&run_id)
-        .cloned()
-        .ok_or_else(|| AppError::Other(format!("pipeline run '{run_id}' not found")))
-}
 
 // ---------------------------------------------------------------------------
 // Execution commands
+//
+// The query + cancel + lock-probe handlers (list_pipeline_defs,
+// list_pipeline_runs, get_pipeline_run, cancel_pipeline_run, is_pipeline_locked)
+// are sync `AppState`-only and migrated to `crate::ipc::corvus::pipeline`. The
+// commands below stay inline: they drive the orchestrator thread, which reaches
+// `AppState` through the `AppHandle` (`app.state::<AppState>()`) on the worker
+// thread — not just for emit — so they await the runtime-context refactor.
 // ---------------------------------------------------------------------------
 
 /// Start a pipeline run. Returns the run ID.
@@ -146,20 +125,6 @@ pub fn request_pipeline_run(
     }
 }
 
-/// Cancel a running pipeline (stops after the current step completes).
-/// Also wakes any orchestrator parked on the global concurrency condvar so
-/// a queued run's cancel takes effect within microseconds rather than
-/// waiting out the 250 ms poll timeout.
-#[tauri::command]
-pub fn cancel_pipeline_run(state: State<AppState>, run_id: String) -> Result<()> {
-    {
-        let mut reg = state.lock_pipelines()?;
-        reg.cancel(&run_id);
-    }
-    state.pipeline_cv.notify_all();
-    Ok(())
-}
-
 /// Resume a failed/paused pipeline run from the step(s) that halted it.
 #[tauri::command]
 pub fn resume_pipeline_run(app_handle: tauri::AppHandle, run_id: String) -> Result<()> {
@@ -170,12 +135,4 @@ pub fn resume_pipeline_run(app_handle: tauri::AppHandle, run_id: String) -> Resu
 #[tauri::command]
 pub fn discard_pipeline_run(app_handle: tauri::AppHandle, run_id: String) -> Result<()> {
     crate::pipeline::discard_run(&run_id, app_handle).map_err(AppError::Other)
-}
-
-/// Return the run_id currently holding `lock_key`, or `None` when the lock
-/// is free. Used by plugins/UI to pre-flight "can I start?" checks.
-#[tauri::command]
-pub fn is_pipeline_locked(state: State<AppState>, lock_key: String) -> Result<Option<String>> {
-    let reg = state.lock_pipelines()?;
-    Ok(reg.locked_by(&lock_key).map(String::from))
 }

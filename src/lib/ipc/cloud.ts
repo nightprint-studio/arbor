@@ -1,8 +1,11 @@
-// IPC wrappers for the cloud-storage Tauri commands.
+// IPC wrappers for the cloud-storage commands.
 //
-// All commands are 1:1 with `src-tauri/src/commands/cloud_commands.rs`.
+// Wave 1 migrated commands route through the platform backend
+// (`platform('<method>', { snake_case })`).  The 7 host-dependent transfer
+// commands deferred to Wave 3 still use `invoke` directly.
 
 import { invoke } from '@tauri-apps/api/core';
+import { platform } from '$lib/ipc/rpc';
 import type {
   CloudConnection,
   CloudListPage,
@@ -10,45 +13,75 @@ import type {
   CloudTestReport,
 } from '$lib/types/cloud';
 
-// ── Secrets (keyring) ─────────────────────────────────────────────────────
+// ── Secrets (keyring) — Wave 1 ────────────────────────────────────────────
 
 export const cloudSecretSet = (secretRef: string, value: string) =>
-  invoke<void>('cloud_secret_set', { secretRef, value });
+  platform<void>('cloud_secret_set', { secret_ref: secretRef, value });
 
 export const cloudSecretExists = (secretRef: string) =>
-  invoke<boolean>('cloud_secret_exists', { secretRef });
+  platform<boolean>('cloud_secret_exists', { secret_ref: secretRef });
 
 export const cloudSecretDelete = (secretRef: string) =>
-  invoke<void>('cloud_secret_delete', { secretRef });
+  platform<void>('cloud_secret_delete', { secret_ref: secretRef });
 
-// ── Connection probe ──────────────────────────────────────────────────────
+// ── Connection probe — Wave 1 ─────────────────────────────────────────────
 
 export const cloudTestConnection = (conn: CloudConnection, bucket?: string) =>
-  invoke<CloudTestReport>('cloud_test_connection', { conn, bucket });
+  platform<CloudTestReport>('cloud_test_connection', { conn, bucket });
 
-// ── Object operations ─────────────────────────────────────────────────────
+// ── Object operations — Wave 1 ────────────────────────────────────────────
 
 export const cloudList = (
   conn: CloudConnection,
   bucket: string,
   prefix?: string,
   limit?: number,
-) => invoke<CloudListPage>('cloud_list', { conn, bucket, prefix, limit });
+) => platform<CloudListPage>('cloud_list', { conn, bucket, prefix, limit });
 
 export const cloudStat = (conn: CloudConnection, bucket: string, path: string) =>
-  invoke<CloudObject>('cloud_stat', { conn, bucket, path });
+  platform<CloudObject>('cloud_stat', { conn, bucket, path });
 
 export const cloudDelete = (
   conn: CloudConnection,
   bucket: string,
   path: string,
   recursive = false,
-) => invoke<void>('cloud_delete', { conn, bucket, path, recursive });
+) => platform<void>('cloud_delete', { conn, bucket, path, recursive });
 
 export const cloudCopy = (conn: CloudConnection, bucket: string, src: string, dst: string) =>
-  invoke<void>('cloud_copy', { conn, bucket, src, dst });
+  platform<void>('cloud_copy', { conn, bucket, src, dst });
 
-// ── Transfers (return job_id) ─────────────────────────────────────────────
+export const cloudConcatFiles = (
+  inputs: string[],
+  output: string,
+  deleteInputs = false,
+) => platform<void>('cloud_concat_files', { inputs, output, delete_inputs: deleteInputs });
+
+// ── Cancellation — Wave 1 ─────────────────────────────────────────────────
+
+export const cloudCancel = (streamId: string) =>
+  platform<void>('cloud_cancel', { stream_id: streamId });
+
+export const cloudIsCancelled = (streamId: string) =>
+  platform<boolean>('cloud_is_cancelled', { stream_id: streamId });
+
+// ── Progress reporters — Wave 1 ───────────────────────────────────────────
+
+export const cloudReportProgress = (
+  streamId: string,
+  step: string,
+  status?: string,
+  detail?: string,
+) => platform<void>('cloud_report_progress', { stream_id: streamId, step, status, detail });
+
+export const cloudReportDone = (
+  streamId: string,
+  ok: boolean,
+  summary?: string,
+  error?: string,
+) => platform<void>('cloud_report_done', { stream_id: streamId, ok, summary, error });
+
+// ── Transfers (return job_id) — Wave 3 deferred, still on invoke ──────────
 
 export const cloudDownload = (
   conn: CloudConnection,
@@ -88,16 +121,7 @@ export const cloudDownloadMany = (
   conn, bucket, paths, localDir, parallel, opLabel, streamId,
 });
 
-export const cloudConcatFiles = (
-  inputs: string[],
-  output: string,
-  deleteInputs = false,
-) => invoke<void>('cloud_concat_files', { inputs, output, deleteInputs });
-
-export const cloudIsCancelled = (streamId: string) =>
-  invoke<boolean>('cloud_is_cancelled', { streamId });
-
-// ── OAuth (Google installed-app, loopback :7732) ─────────────────────────
+// ── OAuth (Google installed-app, loopback :7732) — Wave 3 deferred ────────
 
 export const cloudGcsOAuthStart = (
   secretRef: string,

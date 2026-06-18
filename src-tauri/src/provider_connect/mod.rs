@@ -21,10 +21,11 @@ pub mod issue;
 pub mod git;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use tauri::AppHandle;
 
+use arbor_ipc::prelude::EventSink;
 use corvus_provider_descriptor::prelude::{AuthStatus, OAuthStart, ProviderDescriptor};
 
 use crate::error::AppError;
@@ -61,7 +62,11 @@ pub trait ProviderConnector: Send + Sync {
     /// proceed (open a URL, or show a device code). Completion is signalled
     /// out-of-band by the unified event `arbor://provider-oauth-done`
     /// `{ id, ok, error }`.
-    async fn start_oauth(&self, method_id: &str, app: AppHandle) -> Result<OAuthStart, AppError>;
+    async fn start_oauth(
+        &self,
+        method_id: &str,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<OAuthStart, AppError>;
 
     /// Remove all stored credentials for this provider.
     async fn disconnect(&self) -> Result<(), AppError>;

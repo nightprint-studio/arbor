@@ -241,10 +241,11 @@ fn set_pipelines_config(state: &AppState, config: PipelinesConfig) -> Result<(),
         cfg.clone()
     };
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))?;
-    // Wake every queued orchestrator. The acquire loop re-reads the cap on
-    // each iteration so a higher value lets parked runs progress in the
-    // next tick rather than after the 250 ms poll timeout.
-    state.pipeline_cv.notify_all();
+    // Wake every queued orchestrator. Each run snapshots the cap at start, so
+    // the new value applies to runs started from here on; the notify just lets
+    // already-parked runs re-check their (snapshotted) cap without waiting out
+    // the 250 ms poll timeout.
+    state.pipeline_engine.cv.notify_all();
     Ok(())
 }
 

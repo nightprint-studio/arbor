@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { corvus } from '$lib/ipc/rpc';
 import type { ProviderDescriptor, AuthStatus, OAuthStart } from '$lib/types/providers';
 
@@ -22,7 +21,7 @@ export const issueProviders: ProviderConnectionService = {
   list:          () => corvus('list_issue_providers'),
   authStatus:    (id) => corvus('issue_provider_auth_status', { id }),
   connectFields: (id, methodId, fields) => corvus('issue_provider_connect_fields', { id, method_id: methodId, fields }),
-  startOauth:    (id, methodId) => invoke('issue_provider_start_oauth', { id, methodId }),
+  startOauth:    (id, methodId) => corvus('issue_provider_start_oauth', { id, method_id: methodId }),
   disconnect:    (id) => corvus('issue_provider_disconnect', { id }),
 };
 
@@ -31,7 +30,7 @@ export const gitProviders: ProviderConnectionService = {
   list:          () => corvus('list_git_providers'),
   authStatus:    (id) => corvus('git_provider_auth_status', { id }),
   connectFields: (id, methodId, fields) => corvus('git_provider_connect_fields', { id, method_id: methodId, fields }),
-  startOauth:    (id, methodId) => invoke('git_provider_start_oauth', { id, methodId }),
+  startOauth:    (id, methodId) => corvus('git_provider_start_oauth', { id, method_id: methodId }),
   disconnect:    (id) => corvus('git_provider_disconnect', { id }),
 };
 

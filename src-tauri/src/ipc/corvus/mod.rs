@@ -13,6 +13,7 @@
 //! this is a plain call; once `corvus-be` splits out the handlers move into that
 //! binary unchanged.
 
+pub mod auth;
 pub mod avatar;
 pub mod bisect;
 pub mod branch;
@@ -29,6 +30,7 @@ pub mod merge;
 pub mod missing;
 pub mod mr;
 pub mod notes;
+pub mod pipeline;
 pub mod provider;
 pub mod rebase;
 pub mod recovery;

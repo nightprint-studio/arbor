@@ -7,11 +7,11 @@
 //! legacy per-provider commands call. No new auth logic lives here.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
-use tauri::AppHandle;
 
+use arbor_ipc::prelude::EventSink;
 use corvus_provider_descriptor::prelude::{AuthStatus, OAuthStart, ProviderDescriptor};
 
 use crate::auth::{oauth_jira, oauth_linear};
@@ -74,10 +74,14 @@ impl ProviderConnector for LinearConnector {
         }
     }
 
-    async fn start_oauth(&self, method_id: &str, app: AppHandle) -> Result<OAuthStart, AppError> {
+    async fn start_oauth(
+        &self,
+        method_id: &str,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<OAuthStart, AppError> {
         match method_id {
             "oauth" => {
-                let url = oauth_linear::start_linear_oauth(app).await?;
+                let url = oauth_linear::start_linear_oauth(sink).await?;
                 Ok(OAuthStart::Redirect { url })
             }
             other => Err(AppError::Other(format!("linear: unknown oauth method '{other}'"))),
@@ -141,10 +145,14 @@ impl ProviderConnector for JiraConnector {
         }
     }
 
-    async fn start_oauth(&self, method_id: &str, app: AppHandle) -> Result<OAuthStart, AppError> {
+    async fn start_oauth(
+        &self,
+        method_id: &str,
+        sink: Arc<dyn EventSink>,
+    ) -> Result<OAuthStart, AppError> {
         match method_id {
             "oauth" => {
-                let url = oauth_jira::start_jira_oauth(app).await?;
+                let url = oauth_jira::start_jira_oauth(sink).await?;
                 Ok(OAuthStart::Redirect { url })
             }
             other => Err(AppError::Other(format!("jira: unknown oauth method '{other}'"))),

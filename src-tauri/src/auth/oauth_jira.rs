@@ -18,7 +18,7 @@
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Deserialize;
-use tauri::Emitter;
+use arbor_ipc::prelude::EventSink;
 
 use arbor_auth::oauth2::{InstalledAppFlow, refresh_token};
 use arbor_auth::prelude::BodyFormat;
@@ -179,7 +179,7 @@ struct CloudResource {
 /// Start Jira OAuth 2.0 (3LO) + PKCE flow.
 /// Returns the authorization URL. The background task emits
 /// `arbor://jira-oauth-done` (bool) when finished.
-pub async fn start_jira_oauth(app_handle: tauri::AppHandle) -> Result<String> {
+pub async fn start_jira_oauth(sink: std::sync::Arc<dyn EventSink>) -> Result<String> {
     let client_id = resolve_client_id();
 
     let flow = InstalledAppFlow {
@@ -204,7 +204,6 @@ pub async fn start_jira_oauth(app_handle: tauri::AppHandle) -> Result<String> {
     let (auth_url, pending) = flow.start().await
         .map_err(|e| AppError::Other(format!("Jira OAuth start: {e}")))?;
 
-    let app = app_handle.clone();
     tokio::spawn(async move {
         let outcome = pending.await_callback().await;
         let ok = match outcome {
@@ -226,7 +225,7 @@ pub async fn start_jira_oauth(app_handle: tauri::AppHandle) -> Result<String> {
         // one FE listener (in ProviderConnectionCard) routes by `id`. The flow
         // only carries a bool, so `error` is a generic message.
         let error = if ok { None } else { Some("Jira authorization failed") };
-        let _ = app.emit(
+        sink.emit(
             "arbor://provider-oauth-done",
             serde_json::json!({ "id": "jira", "ok": ok, "error": error }),
         );

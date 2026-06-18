@@ -82,7 +82,7 @@ fn install_define(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
         };
         let def_id_for_event = id.clone();
         let state = h.state::<crate::AppState>();
-        state.pipelines.lock()
+        state.pipeline_engine.registry.lock()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?
             .register_def(def);
         // Notify the frontend so caches / panels refresh without the
@@ -251,7 +251,7 @@ fn install_run(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
         let state = h.state::<crate::AppState>();
 
         let def = {
-            let reg = match state.pipelines.lock() {
+            let reg = match state.pipeline_engine.registry.lock() {
                 Ok(g)  => g,
                 Err(e) => return err2(lua_ctx, format!("pipeline.run lock: {e}")),
             };
@@ -272,7 +272,7 @@ fn install_run(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
                 })
         });
 
-        let run_id = match state.pipelines.lock() {
+        let run_id = match state.pipeline_engine.registry.lock() {
             Ok(mut reg) => reg.new_run_id(),
             Err(e)      => return err2(lua_ctx, format!("pipeline.run lock: {e}")),
         };
@@ -281,12 +281,16 @@ fn install_run(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
             run.silent = s;
         }
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        match state.pipelines.lock() {
+        match state.pipeline_engine.registry.lock() {
             Ok(mut reg) => reg.add_run(run, cancel.clone()),
             Err(e)      => return err2(lua_ctx, format!("pipeline.run add_run: {e}")),
         }
 
-        crate::pipeline::start_pipeline_run(def, run_id.clone(), repo_path, cancel, h.clone());
+        let rt = match state.pipeline_runtime() {
+            Some(rt) => std::sync::Arc::new(rt),
+            None     => return err2(lua_ctx, "pipeline.run: runtime unavailable".to_string()),
+        };
+        crate::pipeline::start_pipeline_run(def, run_id.clone(), repo_path, cancel, rt);
         ok2(lua_ctx, run_id)
     }).map_err(|e| AppError::Plugin(e.to_string()))?;
     t.set("run", fn_).map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -300,7 +304,11 @@ fn install_resume(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
         let Some(ref h) = handle else {
             return boolerr2(lua_ctx, false, Some("pipeline.resume: app handle unavailable".into()));
         };
-        match crate::pipeline::resume_run(&run_id, h.clone()) {
+        let state = h.state::<crate::AppState>();
+        let Some(rt) = state.pipeline_runtime() else {
+            return boolerr2(lua_ctx, false, Some("pipeline.resume: runtime unavailable".into()));
+        };
+        match crate::pipeline::resume_run(&run_id, std::sync::Arc::new(rt)) {
             Ok(_)  => boolerr2(lua_ctx, true, None),
             Err(e) => boolerr2(lua_ctx, false, Some(format!("pipeline.resume: {e}"))),
         }
@@ -316,7 +324,11 @@ fn install_discard(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
         let Some(ref h) = handle else {
             return boolerr2(lua_ctx, false, Some("pipeline.discard: app handle unavailable".into()));
         };
-        match crate::pipeline::discard_run(&run_id, h.clone()) {
+        let state = h.state::<crate::AppState>();
+        let Some(rt) = state.pipeline_runtime() else {
+            return boolerr2(lua_ctx, false, Some("pipeline.discard: runtime unavailable".into()));
+        };
+        match crate::pipeline::discard_run(&run_id, std::sync::Arc::new(rt)) {
             Ok(_)  => boolerr2(lua_ctx, true, None),
             Err(e) => boolerr2(lua_ctx, false, Some(format!("pipeline.discard: {e}"))),
         }
@@ -331,7 +343,7 @@ fn install_is_locked(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |lua_ctx, lock_key: String| {
         let Some(ref h) = handle else { return Ok(mlua::Value::Nil); };
         let state = h.state::<crate::AppState>();
-        let reg   = state.pipelines.lock()
+        let reg   = state.pipeline_engine.registry.lock()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         match reg.locked_by(&lock_key) {
             Some(id) => Ok(mlua::Value::String(lua_ctx.create_string(id.as_bytes())?)),
@@ -351,7 +363,7 @@ fn install_list(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
             return Ok(lua_ctx.create_table()? as Table);
         };
         let state = h.state::<crate::AppState>();
-        let reg   = state.pipelines.lock()
+        let reg   = state.pipeline_engine.registry.lock()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         let defs: Vec<_> = reg.defs.iter()
             .filter(|d| d.plugin == pname)
@@ -376,7 +388,7 @@ fn install_get(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |lua_ctx, id: String| {
         let Some(ref h) = handle else { return Ok(mlua::Value::Nil); };
         let state = h.state::<crate::AppState>();
-        let reg   = state.pipelines.lock()
+        let reg   = state.pipeline_engine.registry.lock()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         let Some(def) = reg.defs.iter().find(|d| d.id == id && d.plugin == pname)
         else { return Ok(mlua::Value::Nil); };
@@ -393,13 +405,13 @@ fn install_cancel(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |_, run_id: String| {
         if let Some(ref h) = handle {
             let state = h.state::<crate::AppState>();
-            if let Ok(mut reg) = state.pipelines.lock() {
+            if let Ok(mut reg) = state.pipeline_engine.registry.lock() {
                 reg.cancel(&run_id);
             };
             // Wake any orchestrator parked on the concurrency condvar so a
             // queued run's cancel lands instantly instead of after the
             // 250 ms poll tick.
-            state.pipeline_cv.notify_all();
+            state.pipeline_engine.cv.notify_all();
         }
         Ok(())
     }).map_err(|e| AppError::Plugin(e.to_string()))?;
@@ -419,7 +431,7 @@ fn install_list_runs(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
             return Ok(lua_ctx.create_table()? as Table);
         };
         let state = h.state::<crate::AppState>();
-        let reg   = state.pipelines.lock()
+        let reg   = state.pipeline_engine.registry.lock()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
 
         let filter_plugin:      Option<String> = opts.as_ref()
@@ -454,7 +466,7 @@ fn install_get_run(ctx: &ApiCtx, lua: &Lua, t: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |lua_ctx, run_id: String| {
         let Some(ref h) = handle else { return Ok(mlua::Value::Nil); };
         let state = h.state::<crate::AppState>();
-        let reg   = state.pipelines.lock()
+        let reg   = state.pipeline_engine.registry.lock()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         match reg.get_run(&run_id) {
             Some(r) => {

@@ -22,6 +22,7 @@
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { X, Download, Combine, CheckCircle, AlertCircle, Loader, FileText, Maximize2, Minimize2 } from 'lucide-svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { cloudIsCancelled, cloudCancel } from '$lib/ipc/cloud';
   import type { CloudManyFileState, CloudManyAggregate } from '$lib/types/cloud';
 
   type Phase = 'download' | 'merge';
@@ -124,11 +125,11 @@
 
   async function cancel() {
     if (!streamId) return;
-    try { await invoke('cloud_is_cancelled', { streamId }); } catch { /* nop */ }
+    try { await cloudIsCancelled(streamId); } catch { /* nop */ }
     try { await invoke('cancel_job', { jobId: streamId }); } catch { /* nop */ }
     // The aggregate's cancel flag is also registered under stream_id directly,
     // so flip via the cloud-specific helper as a safety net.
-    try { await invoke('cloud_cancel', { streamId }); } catch { /* nop */ }
+    try { await cloudCancel(streamId); } catch { /* nop */ }
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────────

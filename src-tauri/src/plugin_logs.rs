@@ -10,9 +10,11 @@
 //! their own files.
 
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use arbor_ipc::prelude::EventSink;
 use crate::AppState;
 
 /// Hard cap on the number of entries kept in memory.
@@ -94,23 +96,10 @@ impl PluginLogBuffer {
 }
 
 /// Append a log entry from a non-pipeline source (`arbor.log.*` direct
-/// call). Pipeline mirroring goes through `record_with_pipeline` so each
+/// call). Pipeline mirroring goes through `record_with_pipeline_via` so each
 /// entry is tagged for filtering.
 pub fn record(app: &AppHandle, level: &str, plugin: &str, message: String) {
     record_inner(app, level, plugin, message, None, None);
-}
-
-/// Same as `record` but tags the entry with the pipeline name and run id
-/// it originated from. Drives per-pipeline filter / clear in the panel.
-pub fn record_with_pipeline(
-    app:      &AppHandle,
-    level:    &str,
-    plugin:   &str,
-    message:  String,
-    pipeline: &str,
-    run_id:   &str,
-) {
-    record_inner(app, level, plugin, message, Some(pipeline.to_string()), Some(run_id.to_string()));
 }
 
 fn record_inner(
@@ -130,4 +119,36 @@ fn record_inner(
         }
     };
     let _ = app.emit("arbor://plugin-log", &entry);
+}
+
+/// AppHandle-free variant of `record_with_pipeline`: push the entry onto the
+/// given buffer and broadcast it through the given event sink. Used by the
+/// pipeline orchestrator, which carries both via its injected
+/// `PipelineRuntime` instead of reaching `AppState` through an `AppHandle`.
+///
+/// Behavior matches `record_inner` exactly — same buffer push, same
+/// `arbor://plugin-log` topic + payload — just routed through the sink rather
+/// than `AppHandle::emit`.
+pub fn record_with_pipeline_via(
+    buffer:   &Mutex<PluginLogBuffer>,
+    sink:     &Arc<dyn EventSink>,
+    level:    &str,
+    plugin:   &str,
+    message:  String,
+    pipeline: &str,
+    run_id:   &str,
+) {
+    let entry = match buffer.lock() {
+        Ok(mut b) => b.push(
+            level, plugin, message,
+            Some(pipeline.to_string()), Some(run_id.to_string()),
+        ),
+        Err(e) => {
+            tracing::error!("plugin_logs mutex poisoned: {e}");
+            return;
+        }
+    };
+    if let Ok(value) = serde_json::to_value(&entry) {
+        sink.emit("arbor://plugin-log", value);
+    }
 }

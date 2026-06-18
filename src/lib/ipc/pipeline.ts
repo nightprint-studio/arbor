@@ -1,22 +1,21 @@
-import { invoke } from '@tauri-apps/api/core';
 import { corvus } from '$lib/ipc/rpc';
 import type { PipelineDef, PipelineRun, CiProviderInfo, CiRun, CiJob, CiWorkflow } from '$lib/types/pipeline';
 import { invalidateTabCache } from './cache-invalidate';
 
 export function listPipelineDefs(): Promise<PipelineDef[]> {
-  return invoke('list_pipeline_defs');
+  return corvus('list_pipeline_defs');
 }
 
 export function listPipelineRuns(): Promise<PipelineRun[]> {
-  return invoke('list_pipeline_runs');
+  return corvus('list_pipeline_runs');
 }
 
 export function getPipelineRun(runId: string): Promise<PipelineRun> {
-  return invoke('get_pipeline_run', { runId });
+  return corvus('get_pipeline_run', { run_id: runId });
 }
 
 export function runPipeline(plugin: string, pipelineId: string, tabId?: string): Promise<string> {
-  return invoke('run_pipeline', { plugin, pipelineId, tabId });
+  return corvus('run_pipeline', { plugin, pipeline_id: pipelineId, tab_id: tabId });
 }
 
 /**
@@ -36,21 +35,21 @@ export function requestPipelineRun(
   pipelineId: string,
   tabId?:     string,
 ): Promise<string | null> {
-  return invoke('request_pipeline_run', { plugin, pipelineId, tabId });
+  return corvus('request_pipeline_run', { plugin, pipeline_id: pipelineId, tab_id: tabId });
 }
 
 export function cancelPipelineRun(runId: string): Promise<void> {
-  return invoke('cancel_pipeline_run', { runId });
+  return corvus('cancel_pipeline_run', { run_id: runId });
 }
 
 /** Resume a failed/paused pipeline run from the step(s) that halted it. */
 export function resumePipelineRun(runId: string): Promise<void> {
-  return invoke('resume_pipeline_run', { runId });
+  return corvus('resume_pipeline_run', { run_id: runId });
 }
 
 /** Drop a terminal run permanently (removes in-memory entry + on-disk file). */
 export function discardPipelineRun(runId: string): Promise<void> {
-  return invoke('discard_pipeline_run', { runId });
+  return corvus('discard_pipeline_run', { run_id: runId });
 }
 
 // CI/CD integration

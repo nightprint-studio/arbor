@@ -1,16 +1,17 @@
 //! GitLab OAuth flow — wraps the legacy `auth::oauth_gitlab` module.
 //!
-//! Mirrors `oauth/github.rs`: `start_oauth` requires a `tauri::AppHandle`
-//! that the trait surface can't carry, so the trait method on
-//! `GitlabProvider` returns `Unsupported`. The command layer (Phase 4)
-//! drives the flow via the helpers exposed here.
+//! Mirrors `oauth/github.rs`: the flow emits its completion event through an
+//! [`EventSink`], so it runs from the `&AppState` provider handler without a
+//! `tauri::AppHandle`.
+
+use arbor_ipc::prelude::EventSink;
 
 use crate::git_provider::types::error::ProviderError;
 
 /// Kicks off the OAuth flow via the existing implementation.
 /// Returns the auth URL the user must open in their browser.
-pub async fn start(app: tauri::AppHandle) -> Result<String, ProviderError> {
-    crate::git_provider::oauth::gitlab_flow::start_gitlab_oauth(app)
+pub async fn start(sink: std::sync::Arc<dyn EventSink>) -> Result<String, ProviderError> {
+    crate::git_provider::oauth::gitlab_flow::start_gitlab_oauth(sink)
         .await
         .map_err(|e| ProviderError::Internal(e.to_string()))
 }

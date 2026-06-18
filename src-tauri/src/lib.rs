@@ -62,6 +62,7 @@ use crate::branding::BrandingState;
 use crate::deep_link::DeepLinkBuffer;
 use crate::studio::format::StudioRegistry;
 use crate::cloud::{CloudCancellations, CloudPendingOps};
+use arbor_cloud::host::CloudHost;
 // `crate::cloud` is now a thin shim around the `arbor-cloud` workspace
 // crate — see `cloud/mod.rs` for the layout / Phase A vs Phase B split.
 use corvus_brp::prelude::BrpRegistry;
@@ -122,15 +123,15 @@ pub struct AppState {
     /// from its spawned tokio tasks.
     pub jobs:           Arc<Mutex<JobRegistry>>,
     /// Ring-buffer of recent `arbor.log.*` entries from every plugin —
-    /// powers the Plugin Logs bottom panel.
-    pub plugin_logs:    Mutex<PluginLogBuffer>,
-    pub pipelines:      Mutex<PipelineRegistry>,
-    /// Wakes orchestrator threads queued behind the global concurrency cap
-    /// (`config.pipelines.max_concurrent_runs`).  Notified whenever a run
-    /// transitions out of `Running` so the next queued run can take its
-    /// slot. Always paired with `pipelines` — wait-protocol requires
-    /// holding the registry lock around `wait_timeout`.
-    pub pipeline_cv:    Arc<std::sync::Condvar>,
+    /// powers the Plugin Logs bottom panel. Arc-wrapped so the pipeline
+    /// orchestrator's injected `PipelineRuntime` shares the same buffer
+    /// without reaching back through an `AppHandle`.
+    pub plugin_logs:    Arc<Mutex<PluginLogBuffer>>,
+    /// Self-contained pipeline-engine state (run/def registry + the
+    /// concurrency condvar). Lifted out of `AppState` as an `Arc` so the
+    /// orchestrator worker thread shares it via the injected `PipelineRuntime`
+    /// instead of reaching into `AppState` / `AppHandle`.
+    pub pipeline_engine: Arc<crate::pipeline::PipelineEngine>,
     /// Per-tab ticket-link cache (auto-parsed + manual links).
     pub ticket_caches:  Mutex<std::collections::HashMap<String, TicketLinkCache>>,
     /// True when the app window has focus; used by focus-gated schedulers.
@@ -186,6 +187,11 @@ pub struct AppState {
     /// `keep_open=true` (chunk-merge flow). `cloud_report_done` reads +
     /// removes the entry to finalize the job once the merge phase ends.
     pub cloud_pending_ops: Arc<CloudPendingOps>,
+    /// The cloud host singleton, published by `cloud::install()` so platform
+    /// handlers (Wave 1+) can reach it without a Tauri State lookup. The
+    /// same `Arc<dyn CloudHost>` is also managed as Tauri State for the
+    /// un-migrated Lua `ns_shell/cloud.rs` path (Wave 3 will remove that).
+    pub cloud_host: Arc<std::sync::OnceLock<Arc<dyn CloudHost>>>,
     /// Bevy Remote Protocol — singleton live session against one Bevy game
     /// at a time. Read-only HTTP for Phase 1; SSE watch + editing in later
     /// phases. See `project_bevy_brp_client.md` memory.
@@ -322,9 +328,32 @@ impl AppState {
     }
 
     pub fn lock_pipelines(&self) -> Result<MutexGuard<'_, PipelineRegistry>> {
-        self.pipelines.lock().map_err(|e| {
+        self.pipeline_engine.registry.lock().map_err(|e| {
             tracing::error!("pipelines mutex poisoned: {e}");
             AppError::MutexPoisoned("pipelines".into())
+        })
+    }
+
+    /// Shared handle to the pipeline engine (registry + concurrency condvar).
+    pub fn pipeline_engine(&self) -> Arc<crate::pipeline::PipelineEngine> {
+        self.pipeline_engine.clone()
+    }
+
+    /// Build the runtime the orchestrator needs from this state. Returns `None`
+    /// when the event sink isn't wired yet (only during early boot, before
+    /// `setup()`).
+    pub fn pipeline_runtime(&self) -> Option<crate::pipeline::PipelineRuntime> {
+        let sink = self.event_sink()?;
+        let max_concurrent_runs = self.config.lock().ok()
+            .map(|c| c.pipelines.max_concurrent_runs)
+            .unwrap_or(4);
+        Some(crate::pipeline::PipelineRuntime {
+            engine: self.pipeline_engine.clone(),
+            sink,
+            hooks: self.hook_dispatcher.clone(),
+            plugin_host: self.plugin_host.clone(),
+            plugin_logs: self.plugin_logs.clone(),
+            max_concurrent_runs,
         })
     }
 
@@ -419,12 +448,13 @@ impl AppState {
             config:         Mutex::new(config),
             terminals:      Mutex::new(TerminalManager::new()),
             jobs:           Arc::new(Mutex::new(JobRegistry::default())),
-            plugin_logs:    Mutex::new(PluginLogBuffer::default()),
+            plugin_logs:    Arc::new(Mutex::new(PluginLogBuffer::default())),
             // Seed the registry with runs persisted on disk (terminal/resumable
             // ones — Running/Pending get coerced to Failed by `load_persisted_runs`).
             // The internal counter is advanced past the highest recovered id.
-            pipelines:      Mutex::new(crate::pipeline::registry_from_disk()),
-            pipeline_cv:    Arc::new(std::sync::Condvar::new()),
+            pipeline_engine: Arc::new(crate::pipeline::PipelineEngine::new(
+                crate::pipeline::registry_from_disk(),
+            )),
             ticket_caches:  Mutex::new(std::collections::HashMap::new()),
             // Default to focused so schedulers fire normally until the
             // frontend sends the first focus update.
@@ -452,6 +482,7 @@ impl AppState {
             },
             cloud_cancellations:    Arc::new(Mutex::new(HashMap::new())),
             cloud_pending_ops:      Arc::new(Mutex::new(HashMap::new())),
+            cloud_host:             Arc::new(std::sync::OnceLock::new()),
             brp:                    Mutex::new(BrpRegistry::default()),
             marketplace:            Mutex::new(crate::marketplace::build_registry()),
             boot_done:              Arc::new(AtomicBool::new(false)),
@@ -477,6 +508,13 @@ impl AppState {
     /// every command sees `Some`.
     pub fn router(&self) -> Option<Arc<Router>> {
         self.router.get().cloned()
+    }
+
+    /// The cloud host, once `cloud::install()` has built it. Returns `None`
+    /// during the brief window between `AppState::new()` and `install()`
+    /// completing — in practice every cloud command sees `Some`.
+    pub fn cloud_host(&self) -> Option<Arc<dyn CloudHost>> {
+        self.cloud_host.get().cloned()
     }
 }
 
@@ -561,14 +599,6 @@ pub fn run() {
             // Cheap no-op once migrated; runs before the nemus window can open.
             crate::nemus::migrate_storage();
 
-            // Wire the `arbor-cloud` crate against AppState: registers the
-            // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
-            // into Tauri state so command + plugin-namespace layers can pull
-            // it back out. Must run before any cloud command can fire — safe
-            // here because commands only route once `Builder::run()` enters
-            // its event loop, which happens after `setup()` returns.
-            crate::cloud::install(&app.handle());
-
             // Build the Model-D IPC router (M3 Asse B) and publish it into
             // AppState. Today it fronts an in-process `LoopbackBroker` capturing
             // this `AppHandle`; the same router will front a pipe/socket client
@@ -588,6 +618,15 @@ pub fn run() {
                 let router = crate::ipc::build_router(app.handle());
                 let _ = state.router.set(std::sync::Arc::new(router));
             }
+
+            // Wire the `arbor-cloud` crate against AppState: registers the
+            // Google OAuth refresher and publishes the `Arc<dyn CloudHost>`
+            // into Tauri state so command + plugin-namespace layers can pull
+            // it back out. Must run after the event sink is wired above (the
+            // host stores the sink for `emit_event`). Safe before commands
+            // fire — commands only route once `Builder::run()` enters its
+            // event loop, which happens after `setup()` returns.
+            crate::cloud::install(&app.handle());
 
             // Register the configured OS-global File-Explorer shortcut (opt-in;
             // no-op when disabled or unset). The press handler is wired on the
@@ -998,15 +1037,8 @@ pub fn run() {
             // notes, reflog, bisect. The rest below are still inline
             // #[tauri::command]s, migrating domain by domain. See crate::ipc.
             commands::rpc_commands::rpc,
-            // Auth — credentials
-            commands::auth_commands::save_credential,
-            commands::auth_commands::get_credential,
-            commands::auth_commands::delete_credential,
-            commands::auth_commands::save_default_credential,
-            commands::auth_commands::has_default_credential,
-            commands::auth_commands::delete_default_credential,
-            // Auth — provider OAuth connect/status/disconnect/refresh flow through
-            // the generic {issue,git}_provider_* commands (see provider_commands).
+            // Auth + provider (credential store, OAuth start, descriptors)
+            // migrated to corvus handlers (see crate::ipc::corvus::{auth, provider}).
             // Plugins
             commands::plugin_commands::set_plugins_enabled,
             commands::plugin_commands::reload_plugins,
@@ -1067,16 +1099,9 @@ pub fn run() {
             // Container model (Phase 2 — ContributableModal)
             // Open in browser
             commands::remote_commands::open_in_browser,
-            // Pipelines (plugin-defined)
-            commands::pipeline_commands::list_pipeline_defs,
-            commands::pipeline_commands::list_pipeline_runs,
-            commands::pipeline_commands::get_pipeline_run,
-            commands::pipeline_commands::run_pipeline,
-            commands::pipeline_commands::request_pipeline_run,
-            commands::pipeline_commands::cancel_pipeline_run,
-            commands::pipeline_commands::resume_pipeline_run,
-            commands::pipeline_commands::discard_pipeline_run,
-            commands::pipeline_commands::is_pipeline_locked,
+            // Pipeline engine: all handlers (queries, cancel, run/request/
+            // resume/discard) migrated to corvus handlers — the orchestrator
+            // now takes an injected `PipelineRuntime` instead of an AppHandle.
             // Pipelines (CI/CD) + Security dashboard migrated to corvus handlers.
             // Filesystem browser
             commands::fs_commands::fs_set_wallpaper,
@@ -1101,11 +1126,6 @@ pub fn run() {
             // the conflict-resolution streaming command stays inline (AppHandle).
             commands::mr_commands::mr_start_conflict_resolution,
             // Issues (Linear / Jira) migrated to corvus handlers.
-            // Provider auth/descriptors migrated to corvus handlers; the OAuth
-            // start commands stay inline (they need the AppHandle for the
-            // arbor://provider-oauth-done completion event).
-            commands::provider_commands::issue_provider_start_oauth,
-            commands::provider_commands::git_provider_start_oauth,
             // Inline image proxy (issue/MR/PR body & comment preview)
             commands::image_commands::fetch_remote_image,
             // Worktrees (migrated to corvus; IDE-detection streaming deferred)
@@ -1141,26 +1161,14 @@ pub fn run() {
             crate::studio::format::commands::studio_bulk_edit_preview,
             crate::studio::format::commands::studio_bulk_edit_apply,
             // studio sidebar — project-wide .ron/.json/.toml index.
-            // cloud-storage plugin — opendal-backed GCS (S3/Azure ready in backend).
-            commands::cloud_commands::cloud_secret_set,
-            commands::cloud_commands::cloud_secret_exists,
-            commands::cloud_commands::cloud_secret_delete,
-            commands::cloud_commands::cloud_test_connection,
-            commands::cloud_commands::cloud_list,
+            // cloud-storage plugin — host-dependent transfer commands (Wave 3
+            // deferred; host-independent ops migrated to platform handlers).
             commands::cloud_commands::cloud_list_stream,
             commands::cloud_commands::cloud_search_stream,
-            commands::cloud_commands::cloud_stat,
-            commands::cloud_commands::cloud_delete,
-            commands::cloud_commands::cloud_copy,
             commands::cloud_commands::cloud_download,
             commands::cloud_commands::cloud_upload,
             commands::cloud_commands::cloud_sync,
             commands::cloud_commands::cloud_download_many,
-            commands::cloud_commands::cloud_concat_files,
-            commands::cloud_commands::cloud_is_cancelled,
-            commands::cloud_commands::cloud_cancel,
-            commands::cloud_commands::cloud_report_progress,
-            commands::cloud_commands::cloud_report_done,
             commands::cloud_commands::cloud_gcs_oauth_start,
             // Bevy Remote Protocol (Phase 1.0 — read-only HTTP)
             commands::brp_commands::brp_connect,

@@ -7,16 +7,15 @@
 //! disconnect for ANY provider through these. Behavior (errors, async-ness) is
 //! byte-identical to the former `#[tauri::command]`s.
 //!
-//! NOT migrated (stay inline in `provider_commands`): `issue_provider_start_oauth`
-//! and `git_provider_start_oauth`. Both take a `tauri::AppHandle` and pass it
-//! into `ProviderConnector::start_oauth`, which spawns the OAuth flow that emits
-//! the unified `arbor://provider-oauth-done` completion event through that
-//! handle. The handler context exposes only `&AppState` (no concrete
-//! `AppHandle`), so these stay inline until OAuth is reachable without one.
+//! The `*_start_oauth` handlers begin an OAuth method and return an `OAuthStart`
+//! telling the FE how to proceed; the spawned flow signals completion via the
+//! unified `arbor://provider-oauth-done` event, emitted through the backend
+//! [`EventSink`](arbor_ipc::prelude::EventSink) (`state.event_sink()`) — so they
+//! run from the `&AppState` handler context with no `AppHandle`.
 
 use std::collections::HashMap;
 
-use corvus_provider_descriptor::prelude::{AuthStatus, ProviderDescriptor};
+use corvus_provider_descriptor::prelude::{AuthStatus, OAuthStart, ProviderDescriptor};
 
 use crate::error::AppError;
 use crate::ipc::corvus;
@@ -58,6 +57,22 @@ async fn issue_provider_connect_fields(
         .await
 }
 
+/// Begin an OAuth method on an issue-tracker provider; the returned `OAuthStart`
+/// tells the FE how to proceed. Completion arrives via `arbor://provider-oauth-done`.
+#[corvus::handler]
+async fn issue_provider_start_oauth(
+    state: &AppState,
+    id: String,
+    method_id: String,
+) -> Result<OAuthStart, AppError> {
+    let sink = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+    connector(issue_connectors(), &id)?
+        .start_oauth(&method_id, sink)
+        .await
+}
+
 /// Remove all stored credentials for an issue-tracker provider.
 #[corvus::handler]
 async fn issue_provider_disconnect(_state: &AppState, id: String) -> Result<(), AppError> {
@@ -93,6 +108,23 @@ async fn git_provider_connect_fields(
 ) -> Result<(), AppError> {
     connector(git_connectors(), &id)?
         .connect_fields(&method_id, fields)
+        .await
+}
+
+/// Begin an OAuth method on a git-host provider; the returned `OAuthStart` tells
+/// the FE how to proceed (GitHub → Device, GitLab → Redirect). Completion
+/// arrives via `arbor://provider-oauth-done`.
+#[corvus::handler]
+async fn git_provider_start_oauth(
+    state: &AppState,
+    id: String,
+    method_id: String,
+) -> Result<OAuthStart, AppError> {
+    let sink = state
+        .event_sink()
+        .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
+    connector(git_connectors(), &id)?
+        .start_oauth(&method_id, sink)
         .await
 }
 

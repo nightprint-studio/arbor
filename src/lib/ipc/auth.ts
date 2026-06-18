@@ -1,31 +1,30 @@
-import { invoke } from '@tauri-apps/api/core';
-import { platform } from './rpc';
+import { corvus, platform } from './rpc';
 
 
 // ── Credential store ─────────────────────────────────────────────────────────
 
 export const saveCredential = (host: string, username: string, password: string) =>
-  invoke<void>('save_credential', { host, username, password });
+  corvus<void>('save_credential', { host, username, password });
 
 export const getCredential = (host: string, username: string) =>
-  invoke<string | null>('get_credential', { host, username });
+  corvus<string | null>('get_credential', { host, username });
 
 export const deleteCredential = (host: string, username: string) =>
-  invoke<void>('delete_credential', { host, username });
+  corvus<void>('delete_credential', { host, username });
 
 // ── Default (host-based) credentials — used by fetch/push automatically ──────
 
 /** Save the default credential for a host/URL. Used automatically during network ops. */
 export const saveDefaultCredential = (urlOrHost: string, username: string, password: string) =>
-  invoke<void>('save_default_credential', { urlOrHost, username, password });
+  corvus<void>('save_default_credential', { url_or_host: urlOrHost, username, password });
 
 /** Returns true if a default credential is stored for the given host/URL. */
 export const hasDefaultCredential = (urlOrHost: string) =>
-  invoke<boolean>('has_default_credential', { urlOrHost });
+  corvus<boolean>('has_default_credential', { url_or_host: urlOrHost });
 
 /** Delete the default credential for a host/URL. */
 export const deleteDefaultCredential = (urlOrHost: string) =>
-  invoke<void>('delete_default_credential', { urlOrHost });
+  corvus<void>('delete_default_credential', { url_or_host: urlOrHost });
 
 // ── OAuth client-id overrides ───────────────────────────────────────────────
 

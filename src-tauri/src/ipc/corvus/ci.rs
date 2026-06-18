@@ -8,8 +8,8 @@
 //! `MutexGuard` is held across the `.await` and the futures stay `Send`.
 //!
 //! The **local pipeline engine** (run/resume/cancel/discard, registry readers)
-//! stays inline in `commands/pipeline_commands.rs`: it is sync, drives the
-//! orchestrator via `AppHandle`/emit, and belongs to a separate seam.
+//! lives in [`crate::ipc::corvus::pipeline`]: it is the plugin-defined engine,
+//! driven by an injected `PipelineRuntime`, and belongs to a separate seam.
 
 use crate::error::{AppError, Result};
 use crate::git_provider::ci_impl::{CiJob, CiProviderInfo, CiRun, CiWorkflow};

@@ -24,7 +24,7 @@
 //!   - Scopes: `api`
 //!   - Confidential: No (public client — PKCE is used instead of a secret)
 
-use tauri::Emitter;
+use arbor_ipc::prelude::EventSink;
 
 use arbor_auth::oauth2::{InstalledAppFlow, refresh_token};
 use arbor_auth::prelude::BodyFormat;
@@ -76,7 +76,7 @@ fn resolve_overrides() -> (String, String) {
 /// error string on failure).
 ///
 /// Returns the authorization URL that the frontend should open in the default browser.
-pub async fn start_gitlab_oauth(app_handle: tauri::AppHandle) -> Result<String> {
+pub async fn start_gitlab_oauth(sink: std::sync::Arc<dyn EventSink>) -> Result<String> {
     let (client_id, base_host) = resolve_overrides();
 
     let flow = InstalledAppFlow {
@@ -96,7 +96,6 @@ pub async fn start_gitlab_oauth(app_handle: tauri::AppHandle) -> Result<String> 
     let (auth_url, pending) = flow.start().await
         .map_err(|e| AppError::Other(format!("GitLab OAuth start: {e}")))?;
 
-    let app = app_handle.clone();
     tokio::spawn(async move {
         let result: Option<String> = match pending.await_callback().await {
             Ok(token) => match persist(&token.access_token, token.refresh_token.as_deref()) {
@@ -113,7 +112,7 @@ pub async fn start_gitlab_oauth(app_handle: tauri::AppHandle) -> Result<String> 
         };
         // Unified, by-id completion event for the generic connection layer —
         // one FE listener routes by `id`.
-        let _ = app.emit(
+        sink.emit(
             "arbor://provider-oauth-done",
             serde_json::json!({ "id": "gitlab", "ok": result.is_none(), "error": result }),
         );

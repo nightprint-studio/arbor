@@ -22,7 +22,7 @@
 //! OAuth Apps.  Enable **Device Flow** in the application settings — no
 //! callback URL is needed.
 
-use tauri::Emitter;
+use arbor_ipc::prelude::EventSink;
 
 use arbor_auth::oauth2::{DeviceFlow, PollOutcome, refresh_token};
 use arbor_auth::prelude::{AuthError, BodyFormat};
@@ -73,7 +73,9 @@ fn make_flow() -> DeviceFlow {
 /// then emits `arbor://github-oauth-done`:
 ///   - payload `null`        → success, token persisted in the keychain
 ///   - payload `<string>`    → human-readable error message
-pub async fn start_github_device_flow(app_handle: tauri::AppHandle) -> Result<DeviceFlowInfo> {
+pub async fn start_github_device_flow(
+    sink: std::sync::Arc<dyn EventSink>,
+) -> Result<DeviceFlowInfo> {
     let flow = make_flow();
     let code = flow.request_code().await
         .map_err(|e| AppError::Other(format!("GitHub device-code request: {e}")))?;
@@ -86,7 +88,6 @@ pub async fn start_github_device_flow(app_handle: tauri::AppHandle) -> Result<De
         interval:         code.interval,
     };
 
-    let app = app_handle.clone();
     tokio::spawn(async move {
         let result: Option<String> = match flow.poll_until_done(&code).await {
             Ok(PollOutcome::Granted(token)) => match persist(&token.access_token, token.refresh_token.as_deref()) {
@@ -105,7 +106,7 @@ pub async fn start_github_device_flow(app_handle: tauri::AppHandle) -> Result<De
         };
         // Unified, by-id completion event for the generic connection layer —
         // one FE listener routes by `id` so concurrent logins update the right card.
-        let _ = app.emit(
+        sink.emit(
             "arbor://provider-oauth-done",
             serde_json::json!({ "id": "github", "ok": result.is_none(), "error": result }),
         );
