@@ -20,8 +20,13 @@
 //! types so the coupled domains — issue trackers, git providers — can be
 //! extracted into `corvus-*` crates that hold an `Arc<dyn SessionProvider>`.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::host::HostCaller;
 
 /// A credential-resolution failure, kept free of `keyring`/transport types so a
 /// backend crate can surface it without linking the broker.
@@ -43,7 +48,11 @@ pub type Result<T> = std::result::Result<T, CredentialError>;
 
 /// What a backend needs to make an authenticated request: the base URL to hit
 /// and the full `Authorization` header value to send (`"Bearer …"`, `"Basic …"`).
-#[derive(Debug, Clone)]
+///
+/// `Serialize`/`Deserialize` so it can cross the reverse channel: the shell's
+/// `VaultSessionProvider` resolves it and marshals it back to a
+/// [`ChildSessionProvider`] in the backend process.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthSession {
     /// API base URL (per-tenant for some providers, fixed for others).
     pub base_url: String,
@@ -86,10 +95,51 @@ pub trait SessionProvider: Send + Sync {
     }
 }
 
+/// The backend-side [`SessionProvider`] for an OOP process: it marshals
+/// `session`/`refresh` over the reverse channel ([`HostCaller`]) to the shell's
+/// `VaultSessionProvider` and awaits the resolved [`AuthSession`].
+///
+/// The backend holds an `Arc<dyn SessionProvider>` and **cannot tell** whether
+/// it's this (OOP) or `VaultSessionProvider` (in-process) — the call site never
+/// changes. `account` is the opaque provider key (`"linear"`, `"github.com"`, a
+/// GitLab instance URL); the shell maps it to the real keyring entry.
+pub struct ChildSessionProvider {
+    host: Arc<dyn HostCaller>,
+}
+
+impl ChildSessionProvider {
+    pub fn new(host: Arc<dyn HostCaller>) -> Self {
+        Self { host }
+    }
+
+    /// Shared marshalling for `session`/`refresh`: call the shell host-method,
+    /// then deserialize the `AuthSession` it returns.
+    fn resolve(&self, method: &str, account: &str, wrap: fn(String) -> CredentialError) -> Result<AuthSession> {
+        // `HostCaller::call` is synchronous (it blocks on the shell's reply); the
+        // `async` trait method does no further awaiting, so a runtime-less backend
+        // can drive it. The reply arrives via the serve loop's reader thread, so
+        // the block doesn't deadlock the call.
+        let value = self.host.call(method, serde_json::json!(account)).map_err(wrap)?;
+        serde_json::from_value(value).map_err(|e| wrap(e.to_string()))
+    }
+}
+
+#[async_trait]
+impl SessionProvider for ChildSessionProvider {
+    async fn session(&self, account: &str) -> Result<AuthSession> {
+        self.resolve("__session", account, CredentialError::Store)
+    }
+
+    async fn refresh(&self, account: &str) -> Result<AuthSession> {
+        self.resolve("__refresh", account, CredentialError::Refresh)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures_executor::block_on;
+    use serde_json::Value;
     use std::sync::Mutex;
 
     /// A trivial in-memory `SessionProvider`: `refresh` flips the account to a
@@ -130,5 +180,34 @@ mod tests {
     fn missing_account_is_not_found() {
         let p = FakeProvider { rotated: Mutex::new(false) };
         assert!(matches!(block_on(p.session("absent")), Err(CredentialError::NotFound(_))));
+    }
+
+    /// A `HostCaller` that answers `__session` with a per-account `AuthSession`,
+    /// standing in for the shell's `VaultSessionProvider` over the reverse channel.
+    struct FakeHost;
+    impl HostCaller for FakeHost {
+        fn call(&self, method: &str, params: Value) -> std::result::Result<Value, String> {
+            let account: String = serde_json::from_value(params).unwrap();
+            match method {
+                "__session" => Ok(serde_json::to_value(AuthSession {
+                    base_url: format!("https://api/{account}"),
+                    auth_header: "Bearer tok".into(),
+                    web_base: None,
+                })
+                .unwrap()),
+                "__refresh" => Err("nothing to refresh".into()),
+                other => Err(format!("unexpected host method: {other}")),
+            }
+        }
+    }
+
+    #[test]
+    fn child_session_marshals_over_the_host_caller() {
+        let p = ChildSessionProvider::new(Arc::new(FakeHost));
+        let s = block_on(p.session("linear")).unwrap();
+        assert_eq!(s.base_url, "https://api/linear");
+        assert_eq!(s.auth_header, "Bearer tok");
+        // A shell-side error crosses as a wire string wrapped in the right variant.
+        assert!(matches!(block_on(p.refresh("linear")), Err(CredentialError::Refresh(_))));
     }
 }

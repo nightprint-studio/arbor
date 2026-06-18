@@ -59,6 +59,23 @@ fn be_emit(ctx: &CorvusState, note: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// Reverse-channel proof (`docs/reverse-channel.md`): resolve a credential
+/// session for `account` by calling **back** to the shell — which holds the
+/// keyring + `VaultSessionProvider` — and return only the resolved `base_url`,
+/// never the token. Exercises the whole backend→shell→keyring chain end to end.
+/// e.g. `rpc("corvus", "be_session_probe", { "account": "linear" })` with a
+/// connected Linear account → `"https://api.linear.app/graphql"`.
+///
+/// Synchronous on purpose: `host_call` blocks on the shell's reply, delivered by
+/// the serve loop's reader thread while this handler is parked on its worker —
+/// the reentrancy the reverse channel is built for.
+#[arbor_rpc::handler]
+fn be_session_probe(ctx: &CorvusState, account: String) -> Result<String, String> {
+    let session = ctx.host_call("__session", serde_json::json!(account))?;
+    let base = session.get("base_url").and_then(|b| b.as_str()).unwrap_or_default();
+    Ok(base.to_string())
+}
+
 fn main() {
     // stdout carries frames; logs go to stderr.
     let stdout: SharedWriter = Arc::new(Mutex::new(io::stdout()));

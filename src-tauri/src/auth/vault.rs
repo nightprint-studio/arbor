@@ -180,6 +180,21 @@ impl VaultSessionProvider {
     pub fn gitlab() -> Self { Self { desc: &GITLAB } }
     pub fn linear() -> Self { Self { desc: &LINEAR } }
     pub fn jira()   -> Self { Self { desc: &JIRA } }
+
+    /// Route an opaque `account` to the right provider — the inverse of how each
+    /// in-process backend is constructed with its own provider. Used by the
+    /// reverse channel's `__session`/`__refresh` host-handlers, which receive
+    /// only the account string from an OOP backend. The fixed ids match what the
+    /// backends pass (`"github.com"` / `"linear"` / `"jira"`); anything else is a
+    /// GitLab instance host root (`https://gitlab.com` or self-hosted).
+    pub fn for_account(account: &str) -> Self {
+        match account {
+            "github.com" => Self::github(),
+            "linear"     => Self::linear(),
+            "jira"       => Self::jira(),
+            _            => Self::gitlab(),
+        }
+    }
 }
 
 #[async_trait]

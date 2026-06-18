@@ -168,20 +168,78 @@ pub fn build_router(app: &AppHandle) -> Router {
 /// Locate and spawn the `corvus-be` binary next to the shell executable, wiring
 /// its push events back to the FE. Returns the client + its advertised method
 /// set, or `None` (logged) if the binary is absent or the spawn fails.
+/// Shell-side host-handler dispatch for the reverse channel
+/// (`docs/reverse-channel.md`): answers backend-originated `HostRequest`s. Today
+/// that's credential resolution — `__session`/`__refresh` over the
+/// descriptor-driven `VaultSessionProvider` (the keyring stays shell-side); the
+/// `arbor.ui.*` plugin round-trips join here later. Runs on the `ChildClient`
+/// reader thread; `session` is a fast keyring read, a slow `refresh` (OAuth)
+/// briefly stalls demux — promote to a worker if that ever bites.
+fn host_dispatch(method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+    use crate::auth::vault::VaultSessionProvider;
+    use arbor_ipc::prelude::SessionProvider;
+
+    let account: String = match method {
+        "__session" | "__refresh" => serde_json::from_value(params)
+            .map_err(|e| format!("{method}: invalid account: {e}"))?,
+        other => return Err(format!("host method not implemented: {other}")),
+    };
+    let provider = VaultSessionProvider::for_account(&account);
+    let is_refresh = method == "__refresh";
+    let resolved = tauri::async_runtime::block_on(async move {
+        if is_refresh {
+            provider.refresh(&account).await
+        } else {
+            provider.session(&account).await
+        }
+    });
+    match resolved {
+        Ok(session) => serde_json::to_value(session).map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Resolve a backend binary (`corvus-be`, …) by its fixed name, env-agnostically:
+/// a **dev** build has them sitting **beside** the launcher exe, because cargo
+/// co-locates every workspace bin in `target/<profile>/` (so a plain
+/// `cargo build -p <name>` lands it there); an **installed** build keeps them in
+/// a dedicated `backends/` subfolder, bundled as resources.
+///
+/// The dev sibling is tried **first** on purpose: it ensures a fresh
+/// `cargo build` always wins over a stale release binary that a prior
+/// `tauri build` may have left staged in the resource path. Same code path in
+/// both environments — no dev/prod flag.
+fn backend_binary(app: &AppHandle, name: &str) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+
+    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    // Dev: beside the launcher exe.
+    if let Some(p) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join(&file)))
+    {
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    // Installed: the dedicated `backends/` subfolder under the resource dir.
+    let res = app.path().resource_dir().ok()?;
+    let p = res.join("backends").join(&file);
+    p.exists().then_some(p)
+}
+
 fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
     use crate::process_ext::NoWindowExt;
 
-    let exe = std::env::current_exe().ok()?;
-    let bin = exe
-        .parent()?
-        .join(format!("corvus-be{}", std::env::consts::EXE_SUFFIX));
-    if !bin.exists() {
-        tracing::info!(
-            "corvus-be binary not found at {} — staying in-process",
-            bin.display()
-        );
-        return None;
-    }
+    let bin = match backend_binary(app, "corvus-be") {
+        Some(b) => b,
+        None => {
+            tracing::info!(
+                "corvus-be binary not found (backends/ resource or beside the launcher) — staying in-process"
+            );
+            return None;
+        }
+    };
 
     let mut cmd = std::process::Command::new(&bin);
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
@@ -193,12 +251,7 @@ fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
             use tauri::Emitter;
             let _ = app_for_events.emit(&topic, payload);
         },
-        // Reverse-channel host-handlers (`docs/reverse-channel.md`): the
-        // backend→shell request/response dispatch. `__session`/`__refresh` (over
-        // the shell's `VaultSessionProvider`) and the `arbor.ui.*` round-trips
-        // land in a later phase; until a credential domain moves OOP no backend
-        // calls back, so this is wired-but-dormant.
-        |method, _params| Err(format!("host method not implemented: {method}")),
+        host_dispatch,
     ) {
         Ok(pair) => Some(pair),
         Err(e) => {

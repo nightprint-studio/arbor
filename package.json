@@ -15,7 +15,12 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "backends:dev": "cargo build -p corvus-be",
+    "backends:release": "cargo build --release -p corvus-be",
+    "backends:stage": "node scripts/stage-backends.mjs",
+    "tauri:dev": "npm run backends:dev && tauri dev",
+    "tauri:build": "npm run backends:release && npm run backends:stage && tauri build"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",

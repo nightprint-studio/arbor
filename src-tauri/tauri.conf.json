@@ -49,6 +49,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": ["backends/*"],
     "publisher": "Nightprint Studio",
     "copyright": "© 2026 Nightprint Studio",
     "category": "DeveloperTool",

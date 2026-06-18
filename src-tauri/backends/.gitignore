@@ -1,0 +1,6 @@
+# Staged backend binaries (copied here by scripts/stage-backends.mjs before
+# `tauri build`, so Tauri bundles them into the app's `backends/` subfolder).
+# The binaries are build artifacts — keep the folder, ignore the contents.
+*
+!.gitkeep
+!.gitignore
