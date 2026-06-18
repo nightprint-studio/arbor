@@ -382,3 +382,202 @@ fn get_container(
     let host = state.lock_plugin_host()?;
     Ok(host.contributions.get_container(&key))
 }
+
+// ===========================================================================
+// emit/seam pass — plugin-runtime mutations moved off `AppHandle`.
+//
+// These mutate the plugin runtime / fire hooks and used to take an `AppHandle`
+// solely to emit `arbor://plugins-reloaded`; that emit now goes through the
+// backend event sink (`state.emit`). They return `Result`, so the handler macro
+// accepts them — unlike the boot/focus handshake commands (`get_boot_state`,
+// `frontend_ready`, `set_app_focus`, `set_active_tab`), which return no `Result`
+// and stay inline in `commands::plugin_commands`.
+// ===========================================================================
+
+/// Shared reload: cancel plugin jobs, reload the host + restart its schedulers,
+/// re-fire `on_repo_open` for every open tab (plus `on_tab_switch` for the
+/// active one so plugins that derive `current_repo` from the last lifecycle
+/// event land on the right tab), then broadcast `arbor://plugins-reloaded`.
+/// Used by `reload_plugins` and the "enable" branch of `set_plugins_enabled`.
+fn reload_runtime(state: &AppState) -> Result<(), AppError> {
+    // Cancel all running plugin jobs before reloading so stale processes don't linger.
+    if let Ok(mut jobs) = state.jobs.lock() {
+        jobs.cancel_by_plugin(None);
+    }
+    {
+        let mut host = state.lock_plugin_host()?;
+        host.reload()?;
+        host.start_all_schedulers();
+    } // release lock before firing hooks / emitting
+
+    let opens: Vec<(String, String, String)> = match state.lock_repos() {
+        Ok(mgr) => mgr.list_open(),
+        Err(_)  => Vec::new(),
+    };
+    if !opens.is_empty() {
+        for (tab_id, path, name) in &opens {
+            state.fire_hook("on_repo_open", serde_json::json!({
+                "tab_id": tab_id, "path": path, "name": name,
+            }));
+        }
+        // `list_open()` order is non-deterministic; fire one final `on_tab_switch`
+        // for the active tab so plugins keyed on the last event land correctly.
+        let active_tab = state.active_tab_id.lock().ok().and_then(|g| g.clone());
+        if let Some(tid) = active_tab {
+            if let Some((tab_id, path, name)) = opens.iter().find(|(t, _, _)| t == &tid) {
+                state.fire_hook("on_tab_switch", serde_json::json!({
+                    "tab_id": tab_id, "path": path, "name": name,
+                }));
+            }
+        }
+    }
+
+    state.emit("arbor://plugins-reloaded", ());
+    Ok(())
+}
+
+/// Master plugin-system kill-switch. Persists the choice, then either reloads
+/// the runtime from disk (`enabled`) or tears it down (`!enabled`).
+#[platform::handler(program = "platform")]
+fn set_plugins_enabled(state: &AppState, enabled: bool) -> Result<(), AppError> {
+    // Persist the choice immediately so a crash between here and the runtime
+    // mutation can't leave the saved state out of sync with what was applied.
+    {
+        let mut cfg = state.lock_config()?;
+        if cfg.plugins_enabled == enabled {
+            return Ok(());
+        }
+        cfg.plugins_enabled = enabled;
+        if let Err(e) = crate::config::app_config::save(&cfg) {
+            tracing::warn!("failed to persist plugins_enabled: {e}");
+        }
+    }
+
+    if enabled {
+        reload_runtime(state)?;
+    } else {
+        // Cancel any running plugin job so background processes don't outlive
+        // the runtime that owns them.
+        if let Ok(mut jobs) = state.jobs.lock() {
+            jobs.cancel_by_plugin(None);
+        }
+        {
+            let mut host = state.lock_plugin_host()?;
+            host.unload_all();
+        }
+        state.emit("arbor://plugins-reloaded", ());
+    }
+    Ok(())
+}
+
+#[platform::handler(program = "platform")]
+fn reload_plugins(state: &AppState) -> Result<(), AppError> {
+    reload_runtime(state)
+}
+
+#[platform::handler(program = "platform")]
+fn exec_hook(state: &AppState, hook: String, context_json: String) -> Result<(), AppError> {
+    let ctx: serde_json::Value =
+        serde_json::from_str(&context_json).unwrap_or_else(|_| serde_json::json!({}));
+    state.fire_hook(&hook, ctx);
+    Ok(())
+}
+
+/// Fire a specific action on a specific plugin (declarative UI element click).
+#[platform::handler(program = "platform")]
+fn fire_plugin_action(
+    state: &AppState,
+    plugin_name: String,
+    action: String,
+    context_json: String,
+) -> Result<(), AppError> {
+    let host = state.lock_plugin_host()?;
+    arbor_plugin_core::prelude::fire_on(&host, &plugin_name, &action, &context_json);
+    Ok(())
+}
+
+/// Invoke a registered command on behalf of `caller_plugin` (the declarative
+/// `kind = "command"` dispatch path; capability gates live in the host).
+#[platform::handler(program = "platform")]
+fn fire_command(
+    state: &AppState,
+    caller_plugin: String,
+    id: String,
+    args: Option<serde_json::Value>,
+    context_json: String,
+) -> Result<(), AppError> {
+    let mut ctx: serde_json::Value =
+        serde_json::from_str(&context_json).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(a) = args {
+        if !a.is_null() {
+            if let Some(obj) = ctx.as_object_mut() {
+                obj.insert("args".to_string(), a);
+            }
+        }
+    }
+    let host = state.lock_plugin_host()?;
+    host.invoke_command(&caller_plugin, &id, &ctx)
+        .map_err(|e| AppError::Other(format!("{}: {}", e.kind(), e.message())))?;
+    Ok(())
+}
+
+/// Enable a plugin (transitive required deps + target, deps-first). Errors when
+/// a required dep is missing/unloadable — call `plugin_enable_preview` first.
+#[platform::handler(program = "platform")]
+fn enable_plugin(state: &AppState, name: String) -> Result<Vec<String>, AppError> {
+    let mut host = state.lock_plugin_host()?;
+    Ok(host.enable_plugin(&name)?)
+}
+
+/// Disable a plugin + every transitively-required dependent (leaves-first).
+#[platform::handler(program = "platform")]
+fn disable_plugin(state: &AppState, name: String) -> Result<Vec<String>, AppError> {
+    let mut host = state.lock_plugin_host()?;
+    Ok(host.disable_plugin(&name)?)
+}
+
+/// Uninstall a plugin: remove its folder, global data, persisted state, and
+/// per-repo `.arbor/plugins/<name>/` across open tabs + the registry. Returns
+/// non-fatal warnings (paths that couldn't be removed); in-memory state is
+/// always cleared.
+#[platform::handler(program = "platform")]
+fn delete_plugin(state: &AppState, name: String) -> Result<Vec<String>, AppError> {
+    // Cancel running jobs from this plugin before tearing it down.
+    if let Ok(mut jobs) = state.jobs.lock() {
+        jobs.cancel_by_plugin(Some(&name));
+    }
+
+    // Collect every repo path we should clean — open tabs + the workspace
+    // registry — before locking the plugin host (avoid holding two mutexes).
+    let mut repo_paths: Vec<String> = Vec::new();
+    if let Ok(mgr) = state.lock_repos() {
+        for (_, path, _) in mgr.list_open() { repo_paths.push(path); }
+    }
+    if let Ok(reg) = state.lock_repo_registry() {
+        for entry in reg.list() { repo_paths.push(entry.path); }
+    }
+    repo_paths.sort();
+    repo_paths.dedup();
+
+    let warnings = {
+        let mut host = state.lock_plugin_host()?;
+        host.delete_plugin(&name, &repo_paths)?
+    };
+
+    state.emit("arbor://plugins-reloaded", ());
+    Ok(warnings)
+}
+
+/// Start a specific scheduler action for a plugin.
+#[platform::handler(program = "platform")]
+fn start_plugin_scheduler(state: &AppState, name: String, action: String) -> Result<(), AppError> {
+    let mut host = state.lock_plugin_host()?;
+    Ok(host.start_plugin_scheduler(&name, &action)?)
+}
+
+/// Stop a specific scheduler action for a plugin.
+#[platform::handler(program = "platform")]
+fn stop_plugin_scheduler(state: &AppState, name: String, action: String) -> Result<(), AppError> {
+    let mut host = state.lock_plugin_host()?;
+    Ok(host.stop_plugin_scheduler(&name, &action)?)
+}

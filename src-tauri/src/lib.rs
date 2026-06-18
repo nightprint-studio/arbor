@@ -1042,16 +1042,9 @@ pub fn run() {
             // Auth + provider (credential store, OAuth start, descriptors)
             // migrated to corvus handlers (see crate::ipc::corvus::{auth, provider}).
             // Plugins
-            commands::plugin_commands::set_plugins_enabled,
-            commands::plugin_commands::reload_plugins,
-            commands::plugin_commands::exec_hook,
-            commands::plugin_commands::fire_plugin_action,
-            commands::plugin_commands::fire_command,
-            commands::plugin_commands::enable_plugin,
-            commands::plugin_commands::disable_plugin,
-            commands::plugin_commands::delete_plugin,
-            commands::plugin_commands::start_plugin_scheduler,
-            commands::plugin_commands::stop_plugin_scheduler,
+            // Plugin-runtime mutations (enable/disable/reload/delete/scheduler/
+            // hooks) migrated to the generic router (ipc::platform::plugin);
+            // the no-Result boot/focus handshake stays below.
             // Session persistence
             // Workspaces
             // workspace mutations + import-commits + fetch/pull/tag runners
@@ -1132,16 +1125,11 @@ pub fn run() {
             commands::brp_commands::brp_connect,
             commands::brp_commands::brp_call,
             // Marketplace
-            commands::marketplace_commands::marketplace_fetch_registry,
-            commands::marketplace_commands::marketplace_refresh_registry,
+            // Marketplace catalog fetch + install/uninstall/toggle + custom
+            // source migrated to the generic router (ipc::platform::marketplace);
+            // the two scheduler-rearm interval setters stay below.
             commands::marketplace_commands::marketplace_set_refresh_hours,
             commands::marketplace_commands::marketplace_set_poll_minutes,
-            commands::marketplace_commands::marketplace_install_plugin,
-            commands::marketplace_commands::marketplace_uninstall_plugin,
-            commands::marketplace_commands::marketplace_set_plugin_enabled,
-            commands::marketplace_commands::marketplace_install_theme,
-            commands::marketplace_commands::marketplace_uninstall_theme,
-            commands::marketplace_commands::marketplace_add_custom_source,
             // Dedicated File Explorer window
             explorer_window::open_explorer_window,
             explorer_window::reveal_in_explorer,

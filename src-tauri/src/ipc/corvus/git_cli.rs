@@ -25,7 +25,6 @@
 
 use std::path::PathBuf;
 
-use arbor_ipc::prelude::EventSink;
 use serde::{Deserialize, Serialize};
 
 use crate::config::app_config;

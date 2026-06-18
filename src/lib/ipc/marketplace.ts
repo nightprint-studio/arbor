@@ -36,7 +36,7 @@ export function listInstalled(): Promise<MarketplaceCatalog> {
  * network when stale. Pair with `refreshRegistry()` to force a fetch.
  */
 export function fetchRegistry(): Promise<MarketplaceCatalog> {
-  return invoke<MarketplaceCatalog>('marketplace_fetch_registry');
+  return platform<MarketplaceCatalog>('marketplace_fetch_registry');
 }
 
 /**
@@ -45,7 +45,7 @@ export function fetchRegistry(): Promise<MarketplaceCatalog> {
  * the TTL ticks over.
  */
 export function refreshRegistry(): Promise<MarketplaceCatalog> {
-  return invoke<MarketplaceCatalog>('marketplace_refresh_registry');
+  return platform<MarketplaceCatalog>('marketplace_refresh_registry');
 }
 
 /**
@@ -79,25 +79,25 @@ export function setMarketplaceRefreshHours(hours: number | null): Promise<void> 
 // ── Plugin mutations ────────────────────────────────────────────────────────
 
 export function installPlugin(name: string): Promise<MarketplacePlugin> {
-  return invoke<MarketplacePlugin>('marketplace_install_plugin', { name });
+  return platform<MarketplacePlugin>('marketplace_install_plugin', { name });
 }
 
 export function uninstallPlugin(name: string): Promise<MarketplacePlugin> {
-  return invoke<MarketplacePlugin>('marketplace_uninstall_plugin', { name });
+  return platform<MarketplacePlugin>('marketplace_uninstall_plugin', { name });
 }
 
 export function setPluginEnabled(name: string, enabled: boolean): Promise<MarketplacePlugin> {
-  return invoke<MarketplacePlugin>('marketplace_set_plugin_enabled', { name, enabled });
+  return platform<MarketplacePlugin>('marketplace_set_plugin_enabled', { name, enabled });
 }
 
 // ── Theme mutations ─────────────────────────────────────────────────────────
 
 export function installTheme(id: string): Promise<MarketplaceTheme> {
-  return invoke<MarketplaceTheme>('marketplace_install_theme', { id });
+  return platform<MarketplaceTheme>('marketplace_install_theme', { id });
 }
 
 export function uninstallTheme(id: string): Promise<MarketplaceTheme> {
-  return invoke<MarketplaceTheme>('marketplace_uninstall_theme', { id });
+  return platform<MarketplaceTheme>('marketplace_uninstall_theme', { id });
 }
 
 // ── Custom source ───────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ export interface AddCustomSourceArgs {
  * entry, index mode can return many.
  */
 export function addCustomSource(args: AddCustomSourceArgs): Promise<MarketplacePlugin[]> {
-  return invoke<MarketplacePlugin[]>('marketplace_add_custom_source', { args });
+  return platform<MarketplacePlugin[]>('marketplace_add_custom_source', { args });
 }
 
 export interface RemoveCustomSourceArgs {

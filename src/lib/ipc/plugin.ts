@@ -6,7 +6,7 @@ export const listPlugins = () =>
   platform<PluginManifest[]>('list_plugins');
 
 export const reloadPlugins = () =>
-  invoke<void>('reload_plugins');
+  platform<void>('reload_plugins');
 
 /** Master kill-switch — read whether the plugin system is enabled at all. */
 export const getPluginsEnabled = () =>
@@ -19,14 +19,14 @@ export const getPluginsEnabled = () =>
  * Both branches emit `arbor://plugins-reloaded` so listeners refresh.
  */
 export const setPluginsEnabled = (enabled: boolean) =>
-  invoke<void>('set_plugins_enabled', { enabled });
+  platform<void>('set_plugins_enabled', { enabled });
 
 export const execHook = (hook: string, contextJson: string) =>
-  invoke<void>('exec_hook', { hook, contextJson });
+  platform<void>('exec_hook', { hook, context_json: contextJson });
 
 /** Fire a specific action on a specific plugin (called by the frontend when user interacts with plugin-registered UI). */
 export const firePluginAction = (pluginName: string, action: string, contextJson: string) =>
-  invoke<void>('fire_plugin_action', { pluginName, action, contextJson });
+  platform<void>('fire_plugin_action', { plugin_name: pluginName, action, context_json: contextJson });
 
 /**
  * Invoke a registered command on behalf of `callerPlugin` (declarative
@@ -39,7 +39,7 @@ export const fireCommand = (
   id: string,
   args: unknown,
   contextJson: string,
-) => invoke<void>('fire_command', { callerPlugin, id, args, contextJson });
+) => platform<void>('fire_command', { caller_plugin: callerPlugin, id, args, context_json: contextJson });
 
 /**
  * Enable a plugin. Returns the ordered list of plugins that were actually
@@ -48,7 +48,7 @@ export const fireCommand = (
  * first to detect blockers and prompt the user when the cascade is non-trivial.
  */
 export const enablePlugin = (name: string) =>
-  invoke<string[]>('enable_plugin', { name });
+  platform<string[]>('enable_plugin', { name });
 
 /**
  * Disable a plugin. Returns the ordered list of plugins that were disabled
@@ -56,7 +56,7 @@ export const enablePlugin = (name: string) =>
  * Call `pluginDisablePreview` first when you need to show a confirmation.
  */
 export const disablePlugin = (name: string) =>
-  invoke<string[]>('disable_plugin', { name });
+  platform<string[]>('disable_plugin', { name });
 
 /** One blocker preventing a plugin's enable cascade from running. */
 export interface EnableBlocker {
@@ -88,7 +88,7 @@ export const pluginDisablePreview = (name: string) =>
  * Returns a list of non-fatal warnings (paths that couldn't be deleted).
  */
 export const deletePlugin = (name: string) =>
-  invoke<string[]>('delete_plugin', { name });
+  platform<string[]>('delete_plugin', { name });
 
 /** List all loaded plugins with their enabled state and scheduler info. */
 export const listPluginInfo = () =>
@@ -122,11 +122,11 @@ export const pluginDependents = (name: string) =>
 
 /** Start a specific scheduler action for a plugin. */
 export const startPluginScheduler = (name: string, action: string) =>
-  invoke<void>('start_plugin_scheduler', { name, action });
+  platform<void>('start_plugin_scheduler', { name, action });
 
 /** Stop a specific scheduler action for a plugin. */
 export const stopPluginScheduler = (name: string, action: string) =>
-  invoke<void>('stop_plugin_scheduler', { name, action });
+  platform<void>('stop_plugin_scheduler', { name, action });
 
 /** Return all persisted settings for a plugin as a key→value map. */
 export const pluginSettingsGet = (name: string) =>
