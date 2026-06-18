@@ -58,11 +58,16 @@ use crate::AppState;
 fn async_handlers() -> &'static HashMap<&'static str, HashMap<&'static str, AsyncCallFn>> {
     static REG: OnceLock<HashMap<&'static str, HashMap<&'static str, AsyncCallFn>>> = OnceLock::new();
     REG.get_or_init(|| {
-        ["corvus", "platform", "studio"]
+        // (wire label, inventory program). `corvus` handlers register under the
+        // default/legacy program `""` (a bare `#[corvus::handler]`), so the wire
+        // label `"corvus"` maps to the empty inventory program — exactly the
+        // remap the sync path does via `corvus::registry()` → `registry_for("")`.
+        // `platform`/`studio` register under their own name, so wire == inventory.
+        [("corvus", ""), ("platform", "platform"), ("studio", "studio")]
             .into_iter()
-            .filter_map(|p| {
-                let sub = arbor_rpc::async_registry_for(p);
-                (!sub.is_empty()).then_some((p, sub))
+            .filter_map(|(wire, inv)| {
+                let sub = arbor_rpc::async_registry_for(inv);
+                (!sub.is_empty()).then_some((wire, sub))
             })
             .collect()
     })
