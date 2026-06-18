@@ -1022,9 +1022,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            // Repo — clone_repo migrated to the corvus broker (pure clone-to-disk,
-            // no tab); init_repo stays (credential pass, M3 broker).
-            commands::repo_commands::init_repo,
+            // Repo — init_repo + clone_repo migrated to the corvus broker
+            // (ipc::corvus::repo). Provider/keyring access works in-process.
             // Graph (read ops migrated to corvus; streaming/job ones deferred)
             // Diff (read ops migrated to corvus; streaming ones deferred)
             // Stage

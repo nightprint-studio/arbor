@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { corvus } from './rpc';
 import type { GraphData, CommitDetail, RepoInfo, InitRepoOptions, InitRepoResult, CloneOptions, RepoFileEntry } from '../types/git';
 
@@ -15,7 +14,7 @@ export const getGitIdentity = () =>
 
 /** Initialise a new git repository with the given options. */
 export const initRepo = (path: string, tabId: string, options: InitRepoOptions) =>
-  invoke<InitRepoResult>('init_repo', { path, tabId, options });
+  corvus<InitRepoResult>('init_repo', { path, tab_id: tabId, options });
 
 export const closeRepo = (tabId: string) =>
   corvus<void>('close_repo', { tab_id: tabId });

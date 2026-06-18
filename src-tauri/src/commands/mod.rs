@@ -1,4 +1,3 @@
-pub mod repo_commands;
 pub mod remote_commands;
 pub mod rpc_commands;
 pub mod plugin_commands;
