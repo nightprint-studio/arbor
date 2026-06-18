@@ -1,16 +1,24 @@
-//! Inline image proxy for issue/MR/PR bodies.
+//! `image` domain — inline image proxy for issue/MR/PR bodies, routed through
+//! the in-process broker.
 //!
 //! Issue-tracker and code-review providers serve attached images behind their
 //! own auth (private Jira/Linear instances, private GitHub/GitLab repos). The
 //! WebView can't send those credentials, so it would render every private image
-//! as a broken box. This command fetches the bytes through the provider's
+//! as a broken box. This handler fetches the bytes through the provider's
 //! authenticated HTTP path and hands them back as a `data:` URL the WebView can
 //! display directly. The provider token is only ever attached to that provider's
 //! own host — see the per-provider `fetch_image_bytes` implementations.
+//!
+//! `#[corvus::handler]` self-registers it under its own function name; it is
+//! `async` (provider HTTP) so the generic `rpc` command awaits it on the runtime.
+//! It takes no `AppState` (provider modules read their own credentials), so the
+//! macro's required context arg is `_state`. No hooks fire in this domain.
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 use crate::error::AppError;
+use crate::ipc::corvus;
+use crate::AppState;
 
 /// 10 MB ceiling. Issue/PR screenshots are typically well under this; the cap
 /// keeps a pathological attachment from ballooning the base64 payload over IPC.
@@ -21,8 +29,9 @@ const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 /// `provider` is one of `linear` | `jira` | `github` | `gitlab`. `base_url` is
 /// only used by GitLab (the instance origin, derived from the MR web URL) to
 /// resolve relative `/uploads/...` paths and decide whether to attach the token.
-#[tauri::command]
-pub async fn fetch_remote_image(
+#[corvus::handler]
+async fn fetch_remote_image(
+    _state:   &AppState,
     url:      String,
     provider: String,
     base_url: Option<String>,

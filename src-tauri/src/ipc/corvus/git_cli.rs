@@ -15,14 +15,17 @@
 //! `_state: &AppState` and ignore it — same as the original parameter-less
 //! commands.
 //!
-//! `download_portable_git` is **not** here: it takes an `AppHandle` and streams
-//! progress via the `arbor://git-download-progress` event, so it stays inline in
-//! the old command module for the later emit/seam pass.
+//! `download_portable_git` streams progress via the `arbor://git-download-progress`
+//! event through the backend [`EventSink`] (`state.event_sink()`) instead of an
+//! `AppHandle` — Model-D-safe: in-process it forwards to the Tauri emitter,
+//! post-split it crosses the IPC event channel. It is `async` (network download)
+//! so the generic `rpc` command awaits it on the runtime.
 //!
 //! No hooks fire in this domain.
 
 use std::path::PathBuf;
 
+use arbor_ipc::prelude::EventSink;
 use serde::{Deserialize, Serialize};
 
 use crate::config::app_config;
@@ -116,4 +119,40 @@ fn set_git_path(state: &AppState, path: Option<String>) -> Result<GitCliStatus, 
 fn cancel_git_download(_state: &AppState) -> Result<(), AppError> {
     git_cli::request_download_cancel();
     Ok(())
+}
+
+/// Download + extract PortableGit (Windows only) and switch the active path to
+/// the bundled binary. Streams progress via the `arbor://git-download-progress`
+/// event so the modal can render a progress bar. Does **not** persist the path
+/// to config: the user can still install a system git later and detection should
+/// prefer it over the bundled copy (they pin the portable one via Settings →
+/// Browse if they want it to win).
+#[corvus::handler]
+async fn download_portable_git(state: &AppState) -> Result<GitCliStatus, AppError> {
+    let sink = state.event_sink();
+    let sink_for_progress = sink.clone();
+    let result = git_cli::download_portable(move |progress| {
+        if let Some(sink) = &sink_for_progress {
+            sink.emit(
+                "arbor://git-download-progress",
+                serde_json::to_value(&progress).unwrap_or(serde_json::Value::Null),
+            );
+        }
+    })
+    .await;
+
+    match result {
+        Ok(_path) => Ok(snapshot_to_status()),
+        Err(e) => {
+            if let Some(sink) = &sink {
+                sink.emit("arbor://git-download-progress", serde_json::json!({
+                    "stage":   "error",
+                    "message": e.to_string(),
+                    "bytes":   0u64,
+                    "total":   0u64,
+                }));
+            }
+            Err(e)
+        }
+    }
 }

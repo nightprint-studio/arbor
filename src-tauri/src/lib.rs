@@ -1030,10 +1030,8 @@ pub fn run() {
             commands::branch_commands::checkout_branch_safe,
             commands::branch_commands::checkout_remote_as_local,
             commands::branch_commands::checkout_remote_as_local_safe,
-            // Remote
-            commands::remote_commands::fetch_remote,
-            commands::remote_commands::push_branch,
-            commands::remote_commands::pull_branch,
+            // Remote — fetch/push/pull migrated to the generic router
+            // (ipc::corvus::remote); open_in_browser stays (OS opener glue).
             // Generic Model-D IPC entry point — the FE forwards every product
             // command here as (program, method, params); the shell router
             // dispatches to the right backend. Migrated domains route through
@@ -1128,22 +1126,9 @@ pub fn run() {
             // Avatar resolution via GitProvider (GitHub + GitLab)
             // Merge Requests / Pull Requests + Issues (Linear/Jira) migrated to
             // corvus handlers (conflict-resolution now streams via arbor-ipc Stream).
-            // Inline image proxy (issue/MR/PR body & comment preview)
-            commands::image_commands::fetch_remote_image,
-            // Worktrees (migrated to corvus; IDE-detection streaming deferred)
-            // Recovery journal — migrated to corvus (config stays here)
-            // Remote repository browser
-            commands::repo_browser_commands::rb_list_accounts,
-            commands::repo_browser_commands::rb_list_repos,
-            commands::repo_browser_commands::rb_browse_tree,
-            commands::repo_browser_commands::rb_get_file_content,
-            commands::repo_browser_commands::rb_download_file,
-            // Repository statistics (background computation, result via event)
-            // Theme
-            // Branding (in-memory, plugin-driven) + theme-changed hook bridge
-            // Linked Worktrees (cross-project sync)
-            // Git CLI detection/config (migrated to corvus; download deferred)
-            commands::git_cli_commands::download_portable_git,
+            // Inline image proxy + remote repository browser + portable-git
+            // download all migrated to corvus handlers (ipc::corvus::{image,
+            // repo_browser, git_cli}).
             // Deep-link router (arbor:// URLs)
             commands::deep_link_commands::deep_link_ready,
             commands::deep_link_commands::dispatch_deep_link,

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { corvus } from './rpc';
 
 /** Inline-image provider — issue trackers (`linear`/`jira`) and code-review
  *  hosts (`github`/`gitlab`). Drives which credentials the backend attaches. */
@@ -17,5 +17,5 @@ export function fetchRemoteImage(
   provider: ImageProvider,
   baseUrl?: string | null,
 ): Promise<string> {
-  return invoke('fetch_remote_image', { url, provider, base_url: baseUrl ?? null });
+  return corvus('fetch_remote_image', { url, provider, base_url: baseUrl ?? null });
 }

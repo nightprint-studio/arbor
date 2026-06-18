@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { corvus } from './rpc';
 
 export type GitCliSource = 'config' | 'path' | 'portable' | 'missing';
@@ -41,7 +40,7 @@ export const setGitPath = (path: string | null): Promise<GitCliStatus> =>
   corvus('set_git_path', { path });
 
 export const downloadPortableGit = (): Promise<GitCliStatus> =>
-  invoke('download_portable_git');
+  corvus('download_portable_git');
 
 /** Signal an in-flight portable-git download to abort.  Cooperative — the
  *  backend stops at the next chunk / 7z entry boundary. */

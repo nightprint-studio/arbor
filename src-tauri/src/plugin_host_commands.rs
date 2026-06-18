@@ -20,7 +20,7 @@
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::commands::{branch_commands, remote_commands};
+use crate::commands::branch_commands;
 use crate::error::AppError;
 use crate::AppState;
 
@@ -58,15 +58,21 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
             let remote = get_str(&ctx, "remote").unwrap_or_else(|| "origin".to_string());
             let refspec = req_str(&ctx, "refspec", id)?;
             let force = get_bool(&ctx, "force").unwrap_or(false);
-            remote_commands::push_branch(state, tab_id, remote, refspec, force).await?;
+            corvus_rpc_async(app, "push_branch", serde_json::json!({
+                "tab_id": tab_id, "remote": remote, "refspec": refspec, "force": force,
+            })).await?;
         }
         "arbor:git.fetch" => {
             let remote = get_str(&ctx, "remote").unwrap_or_else(|| "origin".to_string());
-            remote_commands::fetch_remote(state, tab_id, remote).await?;
+            corvus_rpc_async(app, "fetch_remote", serde_json::json!({
+                "tab_id": tab_id, "remote": remote,
+            })).await?;
         }
         "arbor:git.pull" => {
             let remote = get_str(&ctx, "remote").unwrap_or_else(|| "origin".to_string());
-            remote_commands::pull_branch(app.clone(), state, tab_id, remote, None).await?;
+            corvus_rpc_async(app, "pull_branch", serde_json::json!({
+                "tab_id": tab_id, "remote": remote, "op_id": serde_json::Value::Null,
+            })).await?;
         }
         "arbor:git.branch_create" => {
             let name = req_str(&ctx, "name", id)?;
@@ -105,6 +111,16 @@ pub async fn dispatch(app: &AppHandle, id: &str, ctx_json: &str) -> Result<(), A
 /// beyond dispatch — a plugin veto on `commit` surfaces as the dispatch `Err`.
 fn corvus_rpc(state: &AppState, method: &str, params: Value) -> Result<(), AppError> {
     crate::ipc::dispatch_rpc(state, "corvus", method, params)?;
+    Ok(())
+}
+
+/// Async sibling of [`corvus_rpc`] for the network-coupled corvus handlers
+/// (`fetch_remote` / `push_branch` / `pull_branch`), which register as `async`
+/// and are awaited on the runtime via [`crate::ipc::dispatch_async`] rather than
+/// the sync blocking-pool path. Same contract: the handler fires its own hooks
+/// inline, so nothing is owed here beyond dispatch.
+async fn corvus_rpc_async(app: &AppHandle, method: &str, params: Value) -> Result<(), AppError> {
+    crate::ipc::dispatch_async(app, "corvus", method, params).await?;
     Ok(())
 }
 

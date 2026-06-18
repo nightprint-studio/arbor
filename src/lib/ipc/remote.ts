@@ -26,11 +26,11 @@ export const fetchRemote = async (tabId: string, remote = 'origin'): Promise<Fet
   // Invalidating the cache first would drop snap.fingerprint, making
   // refreshIfChanged see an undefined baseline and skip the refresh even
   // when the fetch actually brought in new commits on non-current branches.
-  return invoke<FetchResult>('fetch_remote', { tabId, remote });
+  return corvus<FetchResult>('fetch_remote', { tab_id: tabId, remote });
 };
 
 export const pushBranch = async (tabId: string, remote: string, refspec: string, force = false): Promise<void> => {
-  await invoke<void>('push_branch', { tabId, remote, refspec, force });
+  await corvus<void>('push_branch', { tab_id: tabId, remote, refspec, force });
   invalidateTabCache(tabId);
 };
 
@@ -46,7 +46,7 @@ export const pullBranch = async (
   remote: string  = 'origin',
   opId?:  string,
 ): Promise<PullResult> => {
-  const result = await invoke<PullResult>('pull_branch', { tabId, remote, opId });
+  const result = await corvus<PullResult>('pull_branch', { tab_id: tabId, remote, op_id: opId ?? null });
   invalidateTabCache(tabId);
   return result;
 };

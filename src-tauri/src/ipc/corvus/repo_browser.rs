@@ -1,14 +1,24 @@
+//! `repo_browser` domain — remote-repository browser handlers routed through the
+//! in-process broker.
+//!
+//! Each handler is the body the matching `#[tauri::command]` used to run inline;
+//! `#[corvus::handler]` self-registers it under its own function name. They are
+//! `async` (provider HTTP) so the generic `rpc` command awaits them on the
+//! runtime. The git-provider trait work stays in `crate::git_provider`; these are
+//! the thin `AppState` shell that resolves the provider + maps `ProviderError`.
+//! No hooks fire in this domain.
+
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use tauri::State;
 
-use crate::AppState;
 use crate::error::{AppError, Result};
-use crate::git_provider::GitProvider;
 use crate::git_provider::repo_impl::{
     ListReposOpts, RemoteAccount, RemoteFileContent, RemoteRepo, RemoteTreeEntry, RepoRef,
 };
+use crate::git_provider::GitProvider;
+use crate::ipc::corvus;
+use crate::AppState;
 
 fn pe(e: crate::git_provider::types::error::ProviderError) -> AppError {
     AppError::Other(e.to_string())
@@ -46,8 +56,8 @@ fn repo_ref_for(provider: &str, full_name: &str) -> Result<RepoRef> {
 /// List all connected remote accounts (GitHub + GitLab) via each provider's
 /// `current_user`. Providers without a stored token are skipped; a failed
 /// lookup drops that account silently (the picker just shows fewer accounts).
-#[tauri::command]
-pub async fn rb_list_accounts(state: State<'_, AppState>) -> Result<Vec<RemoteAccount>> {
+#[corvus::handler]
+async fn rb_list_accounts(state: &AppState) -> Result<Vec<RemoteAccount>> {
     // `current_user` is async → pull the Arcs out from under the lock first.
     let providers: Vec<(String, Arc<dyn GitProvider>)> = match state.lock_git_providers() {
         Ok(reg) => [("github", "github.com"), ("gitlab", "gitlab.com")]
@@ -76,9 +86,9 @@ pub async fn rb_list_accounts(state: State<'_, AppState>) -> Result<Vec<RemoteAc
 
 /// Fetch all repositories accessible to the given provider account.
 /// `provider`: "github" | "gitlab"
-#[tauri::command]
-pub async fn rb_list_repos(state: State<'_, AppState>, provider: String) -> Result<Vec<RemoteRepo>> {
-    let p = provider_for(&state, &provider)?;
+#[corvus::handler]
+async fn rb_list_repos(state: &AppState, provider: String) -> Result<Vec<RemoteRepo>> {
+    let p = provider_for(state, &provider)?;
     crate::auth::maybe_refresh_for_provider(&provider).await;
     p.list_user_repos(ListReposOpts::default()).await.map_err(pe)
 }
@@ -86,46 +96,46 @@ pub async fn rb_list_repos(state: State<'_, AppState>, provider: String) -> Resu
 /// List files and directories at `path` within a remote repository.
 /// `path`: relative path inside the repo ("" for root).
 /// `branch`: branch/tag/sha to browse.
-#[tauri::command]
-pub async fn rb_browse_tree(
-    state:      State<'_, AppState>,
+#[corvus::handler]
+async fn rb_browse_tree(
+    state:      &AppState,
     provider:   String,
     full_name:  String,
     path:       String,
     branch:     String,
 ) -> Result<Vec<RemoteTreeEntry>> {
-    let p = provider_for(&state, &provider)?;
+    let p = provider_for(state, &provider)?;
     let repo = repo_ref_for(&provider, &full_name)?;
     crate::auth::maybe_refresh_for_provider(&provider).await;
     p.browse_tree(&repo, &path, &branch).await.map_err(pe)
 }
 
 /// Fetch the content of a single file for inline preview.
-#[tauri::command]
-pub async fn rb_get_file_content(
-    state:     State<'_, AppState>,
+#[corvus::handler]
+async fn rb_get_file_content(
+    state:     &AppState,
     provider:  String,
     full_name: String,
     path:      String,
     branch:    String,
 ) -> Result<RemoteFileContent> {
-    let p = provider_for(&state, &provider)?;
+    let p = provider_for(state, &provider)?;
     let repo = repo_ref_for(&provider, &full_name)?;
     crate::auth::maybe_refresh_for_provider(&provider).await;
     p.get_file_content(&repo, &path, &branch).await.map_err(pe)
 }
 
 /// Download a remote file to a local path.
-#[tauri::command]
-pub async fn rb_download_file(
-    state:     State<'_, AppState>,
+#[corvus::handler]
+async fn rb_download_file(
+    state:     &AppState,
     provider:  String,
     full_name: String,
     path:      String,
     branch:    String,
     dest_path: String,
 ) -> Result<()> {
-    let p = provider_for(&state, &provider)?;
+    let p = provider_for(state, &provider)?;
     let repo = repo_ref_for(&provider, &full_name)?;
     crate::auth::maybe_refresh_for_provider(&provider).await;
     let file = p.get_file_content(&repo, &path, &branch).await.map_err(pe)?;
