@@ -1,24 +1,19 @@
-//! `gitflow` domain — handlers routed through the in-process broker.
+//! `gitflow` domain — the **config-CRUD** slice, still served in-process.
 //!
-//! Each handler is the body the matching `#[tauri::command]` used to run
-//! inline; `#[corvus::handler]` self-registers it under its **own function
-//! name**, so the command is reached generically through the router. Behavior
-//! (locks held, errors, the effective-config resolution) is byte-identical —
-//! only the call path changed.
-//!
-//! The pure git work already lives in the reusable shell module
-//! [`crate::git::gitflow`], so handlers delegate to it directly (no crate
-//! extraction). The `on_flow_*` lifecycle hooks are fire-and-forget and are
-//! fired inline by each handler with first-hand typed data, after the repo
-//! lock scope has been dropped (firing while `lock_repos()` is held would
-//! deadlock, since Lua hooks may call back into git ops).
+//! The 9 operational Git Flow handlers (init / feature·release·hotfix
+//! start·finish / status) moved to `corvus-be`. What remains here are the 6
+//! config reads/writes (`get`/`set_gitflow_global_config`,
+//! `set`/`clear_gitflow_repo_config`, `get_gitflow_config`,
+//! `has_gitflow_repo_override`) that own the global + per-repo
+//! `.arbor/config.toml` files — they stay shell-side. The pure work lives in
+//! [`crate::git::gitflow`]; `effective_config` / `get_workdir` are the shared
+//! helpers the survivors use.
 
 use crate::config::{app_config, repo_config};
 use crate::error::AppError;
-use crate::git::gitflow::{FlowFinishResult, FlowStartResult, GitFlowConfig, GitFlowStatus};
+use crate::git::gitflow::GitFlowConfig;
 use crate::ipc::corvus;
 use crate::AppState;
-use serde_json::json;
 
 // ---------------------------------------------------------------------------
 // Helpers — resolve the effective Git Flow config / workdir for a tab
@@ -105,189 +100,6 @@ fn clear_gitflow_repo_config(state: &AppState, tab_id: String) -> Result<(), App
     let mut repo_cfg = repo_config::load(&workdir).unwrap_or_default();
     repo_cfg.gitflow = None;
     repo_config::save(&workdir, &repo_cfg)
-}
-
-// ---------------------------------------------------------------------------
-// Status
-// ---------------------------------------------------------------------------
-
-#[corvus::handler]
-fn gitflow_get_status(state: &AppState, tab_id: String) -> Result<GitFlowStatus, AppError> {
-    let config = effective_config(state, &tab_id)?;
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::gitflow::get_gitflow_status(repo.inner(), &config)
-}
-
-// ---------------------------------------------------------------------------
-// Init
-// ---------------------------------------------------------------------------
-
-#[corvus::handler]
-fn gitflow_init(state: &AppState, tab_id: String) -> Result<(), AppError> {
-    let config = effective_config(state, &tab_id)?;
-    {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::gitflow::gitflow_init(repo.inner(), &config)?;
-    }
-    // Fire inline now that the repo lock scope is dropped.
-    state.fire_hook("on_flow_init", json!({ "tab_id": tab_id }));
-    Ok(())
-}
-
-#[corvus::handler]
-fn gitflow_init_create_main(
-    state: &AppState,
-    tab_id: String,
-    from_initial: bool,
-) -> Result<(), AppError> {
-    let config = effective_config(state, &tab_id)?;
-    {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::gitflow::gitflow_init_create_main(repo.inner(), &config, from_initial)?;
-    }
-    // Fire inline now that the repo lock scope is dropped.
-    state.fire_hook("on_flow_init", json!({ "tab_id": tab_id }));
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Feature
-// ---------------------------------------------------------------------------
-
-#[corvus::handler]
-fn gitflow_feature_start(
-    state: &AppState,
-    tab_id: String,
-    name: String,
-) -> Result<FlowStartResult, AppError> {
-    let config = effective_config(state, &tab_id)?;
-    let result = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::gitflow::feature_start(repo.inner(), &config, &name)?
-    };
-    // Fire inline now that the repo lock scope is dropped (base_branch from result).
-    state.fire_hook(
-        "on_flow_feature_start",
-        json!({ "tab_id": tab_id, "name": name, "base_branch": result.base_branch }),
-    );
-    Ok(result)
-}
-
-#[corvus::handler]
-fn gitflow_feature_finish(
-    state: &AppState,
-    tab_id: String,
-    name: String,
-    force_pr: bool,
-) -> Result<FlowFinishResult, AppError> {
-    let config = effective_config(state, &tab_id)?;
-    let result = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::gitflow::feature_finish_or_pr(repo.inner(), &config, &name, force_pr)?
-    };
-    // Fire inline now that the repo lock scope is dropped.
-    state.fire_hook(
-        "on_flow_feature_finish",
-        json!({ "tab_id": tab_id, "name": name }),
-    );
-    Ok(result)
-}
-
-// ---------------------------------------------------------------------------
-// Release
-// ---------------------------------------------------------------------------
-
-#[corvus::handler]
-fn gitflow_release_start(
-    state: &AppState,
-    tab_id: String,
-    version: String,
-) -> Result<FlowStartResult, AppError> {
-    let config = effective_config(state, &tab_id)?;
-    let result = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::gitflow::release_start(repo.inner(), &config, &version)?
-    };
-    // Fire inline now that the repo lock scope is dropped (base_branch from result).
-    state.fire_hook(
-        "on_flow_release_start",
-        json!({ "tab_id": tab_id, "version": version, "base_branch": result.base_branch }),
-    );
-    Ok(result)
-}
-
-#[corvus::handler]
-fn gitflow_release_finish(
-    state: &AppState,
-    tab_id: String,
-    version: String,
-    tag_message: String,
-    force_pr: bool,
-) -> Result<FlowFinishResult, AppError> {
-    let config = effective_config(state, &tab_id)?;
-    let result = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::gitflow::release_finish_or_pr(repo.inner(), &config, &version, &tag_message, force_pr)?
-    };
-    // Fire inline now that the repo lock scope is dropped.
-    state.fire_hook(
-        "on_flow_release_finish",
-        json!({ "tab_id": tab_id, "version": version }),
-    );
-    Ok(result)
-}
-
-// ---------------------------------------------------------------------------
-// Hotfix
-// ---------------------------------------------------------------------------
-
-#[corvus::handler]
-fn gitflow_hotfix_start(
-    state: &AppState,
-    tab_id: String,
-    name: String,
-) -> Result<FlowStartResult, AppError> {
-    let config = effective_config(state, &tab_id)?;
-    let result = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::gitflow::hotfix_start(repo.inner(), &config, &name)?
-    };
-    // Fire inline now that the repo lock scope is dropped (base_branch from result).
-    state.fire_hook(
-        "on_flow_hotfix_start",
-        json!({ "tab_id": tab_id, "name": name, "base_branch": result.base_branch }),
-    );
-    Ok(result)
-}
-
-#[corvus::handler]
-fn gitflow_hotfix_finish(
-    state: &AppState,
-    tab_id: String,
-    name: String,
-    tag_message: String,
-    force_pr: bool,
-) -> Result<FlowFinishResult, AppError> {
-    let config = effective_config(state, &tab_id)?;
-    let result = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::gitflow::hotfix_finish_or_pr(repo.inner(), &config, &name, &tag_message, force_pr)?
-    };
-    // Fire inline now that the repo lock scope is dropped.
-    state.fire_hook(
-        "on_flow_hotfix_finish",
-        json!({ "tab_id": tab_id, "name": name }),
-    );
-    Ok(result)
 }
 
 #[corvus::handler]

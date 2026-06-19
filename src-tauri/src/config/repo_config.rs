@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
 use crate::git::gitflow::GitFlowConfig;
-use crate::git::ticket_links::StorageBackend;
+use corvus_git::prelude::StorageBackend;
 
 // ---------------------------------------------------------------------------
 // Types

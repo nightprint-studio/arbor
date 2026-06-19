@@ -48,7 +48,6 @@ mod ipc;
 
 use crate::error::{AppError, Result};
 use crate::git::repo::RepoManager;
-use crate::git::ticket_links::TicketLinkCache;
 use arbor_plugin_core::prelude::{PluginHost, ToolchainRegistry};
 use arbor_plugin_api::prelude::HookDispatcher;
 use crate::config::app_config::AppConfig;
@@ -111,8 +110,6 @@ pub struct AppState {
     /// orchestrator worker thread shares it via the injected `PipelineRuntime`
     /// instead of reaching into `AppState` / `AppHandle`.
     pub pipeline_engine: Arc<crate::pipeline::PipelineEngine>,
-    /// Per-tab ticket-link cache (auto-parsed + manual links).
-    pub ticket_caches:  Mutex<std::collections::HashMap<String, TicketLinkCache>>,
     /// True when the app window has focus; used by focus-gated schedulers.
     pub app_focused:    Arc<AtomicBool>,
     /// The currently active tab ID as reported by the frontend.
@@ -340,13 +337,6 @@ impl AppState {
         })
     }
 
-    pub fn lock_ticket_caches(&self) -> Result<MutexGuard<'_, std::collections::HashMap<String, TicketLinkCache>>> {
-        self.ticket_caches.lock().map_err(|e| {
-            tracing::error!("ticket_caches mutex poisoned: {e}");
-            AppError::MutexPoisoned("ticket_caches".into())
-        })
-    }
-
     pub fn lock_repo_registry(&self) -> Result<MutexGuard<'_, RepoRegistry>> {
         self.repo_registry.lock().map_err(|e| {
             tracing::error!("repo_registry mutex poisoned: {e}");
@@ -446,7 +436,6 @@ impl AppState {
             pipeline_engine: Arc::new(crate::pipeline::PipelineEngine::new(
                 crate::pipeline::registry_from_disk(),
             )),
-            ticket_caches:  Mutex::new(std::collections::HashMap::new()),
             // Default to focused so schedulers fire normally until the
             // frontend sends the first focus update.
             app_focused:    Arc::new(AtomicBool::new(true)),
@@ -506,7 +495,6 @@ impl AppState {
         if let Ok(mut g) = self.repos.lock()       { *g = RepoManager::new(); }
         if let Ok(mut g) = self.terminals.lock()   { *g = TerminalManager::new(); }
         if let Ok(mut g) = self.brp.lock()         { *g = BrpRegistry::default(); }
-        if let Ok(mut g) = self.ticket_caches.lock()   { g.clear(); }
         if let Ok(mut g) = self.active_tab_id.lock()   { *g = None; }
     }
 

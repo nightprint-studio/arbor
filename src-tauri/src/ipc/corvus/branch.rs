@@ -1,101 +1,27 @@
-//! `branch` domain — handlers routed through the in-process broker.
+//! `branch` domain — the **not-yet-migrated** slice, still served in-process.
 //!
-//! Each handler is the body the matching `#[tauri::command]` ran inline;
-//! `#[corvus::handler]` self-registers it under its own function name. The pure
-//! git work lives in [`crate::git::branch`] / [`crate::git::status`]; these
-//! handlers are the thin `AppState` shell around it. Behavior (locks held,
-//! errors) is byte-identical.
-//!
-//! Hooks: a few of these methods fired fire-and-forget plugin hooks inline
-//! (`on_branch_create`, `on_branch_delete`). Those inline fires are **removed**
-//! here — they now fire from `post_hooks.rs` in the generic `rpc` path so they
-//! run exactly once regardless of in/out-of-process dispatch. See `post_hooks`.
-//!
-//! The worktree-link-aware mutators (`delete_branch`, `rename_branch`,
-//! `checkout_branch`, `checkout_branch_safe`, `checkout_remote_as_local`,
-//! `checkout_remote_as_local_safe`) emit `arbor://worktree-links-changed`
-//! through [`AppState::emit`] and drive the checkout-sync orchestrator with
-//! `&AppState` (no `AppHandle`). The shared checkout infrastructure
-//! (`CheckoutResult`, `safe_checkout_with_stash`, `checkout_is_clean`,
-//! `repo_id_for_tab`) lives here too — these handlers are its only consumers.
+//! The read queries, the remote-push delete/rename, the detached
+//! `checkout_commit`, and `get_status` moved to `corvus-be`. What remains here
+//! are the **worktree-link-aware** mutators (`create_branch`, `delete_branch`,
+//! `rename_branch`, `checkout_branch`, `checkout_branch_safe`,
+//! `checkout_remote_as_local`, `checkout_remote_as_local_safe`): they consult the
+//! shell's `WorktreeLinkRegistry` (alias checks) and drive the cross-repo
+//! checkout-sync orchestrator with `&AppState`, so they stay until that registry
+//! moves to `CorvusState`. They emit `arbor://worktree-links-changed` and fire
+//! their fire-and-forget hooks (`on_branch_create`, …) inline. The shared
+//! checkout infrastructure (`CheckoutResult`, `safe_checkout_with_stash`,
+//! `checkout_is_clean`, `repo_id_for_tab`) lives here too — these handlers are
+//! its only consumers.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::error::AppError;
-use crate::git::branch::{BranchInfo, RemoteRenameResult, TagInfo};
+use crate::git::branch::BranchInfo;
 use crate::git::stash::StashEntry;
-use crate::git::status::RepoStatus;
 use crate::ipc::corvus;
 use crate::AppState;
 use crate::linked_worktrees;
-
-// ---------------------------------------------------------------------------
-// Read-only
-// ---------------------------------------------------------------------------
-
-#[corvus::handler]
-fn get_status(state: &AppState, tab_id: String) -> Result<RepoStatus, AppError> {
-    // Read the detect_renames flag from user config BEFORE taking the repos
-    // lock, so we don't nest the two mutexes.
-    let detect_renames = state
-        .lock_config()
-        .map(|c| c.status.detect_renames)
-        .unwrap_or(true);
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::status::get_status_with(repo.inner(), detect_renames)
-}
-
-#[corvus::handler]
-fn list_local_branches(state: &AppState, tab_id: String) -> Result<Vec<BranchInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_local_branches(repo.inner())
-}
-
-#[corvus::handler]
-fn list_remote_branches(state: &AppState, tab_id: String) -> Result<Vec<BranchInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_remote_branches(repo.inner())
-}
-
-#[corvus::handler]
-fn list_tags(state: &AppState, tab_id: String) -> Result<Vec<TagInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_tags(repo.inner())
-}
-
-#[corvus::handler]
-fn get_nearest_tag(state: &AppState, tab_id: String) -> Result<Option<String>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(crate::git::branch::get_nearest_tag(repo.inner()))
-}
-
-#[corvus::handler]
-fn list_merged_branches(
-    state: &AppState,
-    tab_id: String,
-    target: String,
-) -> Result<Vec<BranchInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_merged_branches(repo.inner(), &target)
-}
-
-#[corvus::handler]
-fn list_merged_remote_branches(
-    state: &AppState,
-    tab_id: String,
-    target: String,
-) -> Result<Vec<BranchInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    crate::git::branch::list_merged_remote_branches(repo.inner(), &target)
-}
 
 // ---------------------------------------------------------------------------
 // Create / delete / rename (local + remote, no AppHandle)
@@ -137,109 +63,9 @@ fn create_branch(
     Ok(info)
 }
 
-// Fires `on_branch_delete` — now from `post_hooks.rs`, not here. The deleted
-// names are returned so post_hooks can read them off the result.
-#[corvus::handler]
-fn delete_remote_branches(
-    state: &AppState,
-    tab_id: String,
-    names: Vec<String>,
-) -> Result<Vec<String>, AppError> {
-    let deleted_names: Vec<String> = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        let failed = crate::git::branch::delete_remote_branches(repo.inner(), &names);
-        names.iter().filter(|n| !failed.contains(n)).cloned().collect()
-    };
-    // Fire inline, after the repos lock scope has dropped. The post_hooks arm
-    // computed `deleted = names − failed`; that is exactly `deleted_names` here.
-    if !deleted_names.is_empty() {
-        state.fire_hook(
-            "on_branch_delete",
-            json!({ "tab_id": tab_id, "names": deleted_names }),
-        );
-    }
-    // Return the failed names (same convention as delete_branches)
-    let failed: Vec<String> =
-        names.into_iter().filter(|n| !deleted_names.contains(n)).collect();
-    Ok(failed)
-}
-
-#[corvus::handler]
-fn rename_remote_branch(
-    state: &AppState,
-    tab_id: String,
-    old_full_name: String,
-    new_short_name: String,
-    rename_local: bool,
-) -> Result<RemoteRenameResult, AppError> {
-    let result = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::branch::rename_remote_branch(
-            repo.inner(),
-            &old_full_name,
-            &new_short_name,
-            rename_local,
-        )?
-    };
-    // Fire inline, after the repos lock scope has dropped.
-    state.fire_hook(
-        "on_branch_rename",
-        json!({
-            "tab_id": tab_id,
-            "old_name": old_full_name,
-            "new_name": result.new_full_name,
-            "local_renamed": result.local_renamed,
-        }),
-    );
-    Ok(result)
-}
-
-// Fires `on_branch_delete` — now from `post_hooks.rs`, not here. The returned
-// vec is the list of branches actually deleted, which post_hooks reads.
-#[corvus::handler]
-fn delete_branches(
-    state: &AppState,
-    tab_id: String,
-    names: Vec<String>,
-) -> Result<Vec<String>, AppError> {
-    let deleted = {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::branch::delete_branches(repo.inner(), &names)
-    };
-    // Fire inline, after the repos lock scope has dropped. `deleted` is the list
-    // of branches actually removed — fire only when non-empty.
-    if !deleted.is_empty() {
-        state.fire_hook(
-            "on_branch_delete",
-            json!({ "tab_id": tab_id, "names": deleted }),
-        );
-    }
-    Ok(deleted)
-}
-
 // ---------------------------------------------------------------------------
 // Commit checkout (detached — no AppHandle, no worktree-link sync)
 // ---------------------------------------------------------------------------
-
-/// Non-safe commit checkout — kept for backward compat. Errors out on dirty
-/// workdir (libgit2 Conflict). New callers should use `checkout_commit_safe`.
-///
-/// Fires `on_checkout` — now from `post_hooks.rs`, not here.
-#[corvus::handler]
-fn checkout_commit(state: &AppState, tab_id: String, oid: String) -> Result<(), AppError> {
-    // Scope the repos lock so the guard drops before we fire the hook — Lua
-    // hooks may run git ops and would deadlock under a held lock.
-    {
-        let mut mgr = state.lock_repos()?;
-        let repo = mgr.get(&tab_id)?;
-        crate::git::branch::checkout_commit_detached(repo.inner(), &oid)?;
-    }
-    state.fire_hook("on_checkout", json!({ "tab_id": tab_id, "oid": oid }));
-    Ok(())
-}
 
 /// Stash-safe detached commit checkout: stash dirty workdir → detach HEAD →
 /// re-apply stash. Mirrors `checkout_branch_safe` for the detached-HEAD case.

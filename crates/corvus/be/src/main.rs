@@ -37,6 +37,7 @@ mod gitflow;
 mod graph;
 mod issues;
 mod jobs;
+mod linked_worktree;
 mod merge;
 mod mr;
 mod notes;
@@ -57,7 +58,9 @@ mod stash;
 mod stats;
 mod status;
 mod submodule;
+mod tickets;
 mod worktree;
+mod worktree_links;
 
 // ── Self-test handlers (Stage 1) ────────────────────────────────────────────
 // Plain `#[arbor_rpc::handler]`s, exactly like the shell-side ones — the context

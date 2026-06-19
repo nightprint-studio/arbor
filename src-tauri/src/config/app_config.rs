@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use arbor_core::prelude::{arbor_config_path, arbor_profile_path, product_path, PRODUCT_CORVUS};
 use crate::error::Result;
 use crate::git::gitflow::GitFlowConfig;
-use crate::git::ticket_links::StorageBackend;
+use corvus_git::prelude::StorageBackend;
 
 /// Top-level `AppConfig` keys that are product-agnostic and persist to the
 /// per-profile `profile.toml`. Everything not listed here (and not in

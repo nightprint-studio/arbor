@@ -466,6 +466,19 @@ pub fn sync_config(state: &AppState) {
     push_config_section(state, "gitflow", &cfg.gitflow);
     push_config_section(state, "diff", &cfg.diff);
     push_config_section(state, "status", &cfg.status);
+    push_config_section(state, "ticket_links", &cfg.ticket_links);
+    // Not an app-config slice: the absolute path of the profile's
+    // `linked_worktrees.toml`. corvus-be is a separate process and can't compute
+    // the profile-aware path itself, so the shell (which owns the active profile)
+    // hands it over; corvus-be (re)loads its worktree-link registry from it. A
+    // profile switch re-pushes a new path → corvus-be reloads on next access.
+    let lw_path = crate::linked_worktrees::links_file_path().to_string_lossy().to_string();
+    push_config_section(state, "worktree_links_path", &lw_path);
+    // repo_id → {path, display_name} for every known repo: the worktree-link
+    // checkout-sync orchestrator resolves member repo_ids to paths through this
+    // (`CorvusState` only tracks open tabs by `tab_id`, not the repo registry).
+    let repos = state.lock_repo_registry().map(|r| r.list()).unwrap_or_default();
+    push_config_section(state, "repo_registry", &repos);
 }
 
 /// Serialize one app-config slice and push it into `corvus-be`'s config bag.

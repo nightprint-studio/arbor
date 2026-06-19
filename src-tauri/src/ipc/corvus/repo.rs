@@ -4,8 +4,9 @@
 //! Each handler is the body the matching `#[tauri::command]` ran inline;
 //! `#[corvus::handler]` self-registers it under its own function name.
 //!
-//! The leaf-clean ops live here (path/identity probes and single-repo metadata
-//! reads) alongside the `open_repo` / `close_repo` lifecycle flow. Both mutate
+//! The repo-lifecycle flow lives here (`open_repo` / `close_repo`). The pure
+//! `git`-identity / metadata probes (`get_git_identity`, `get_repo_info`) moved
+//! to `corvus-be`; what stays is path validation + the lifecycle. Both mutate
 //! the open-repo set and mirror into `corvus-be` (`sync_repo_open/close`) but
 //! emit through the backend event sink (`state.emit`) and take no `AppHandle`,
 //! so they migrate cleanly. `clone_repo` lives here too — a pure clone-to-disk
@@ -18,12 +19,12 @@
 //! already-migrated `fetch`/`push`/`pull`. The M3 credential broker is only
 //! needed once `corvus-be` runs out-of-process — not for this in-process seam.
 //!
-//! `check_is_git_repo` / `get_git_identity` / `list_remote_branches_for_url`
-//! never touched `AppState`, but the handler macro requires a context first
-//! arg, so they take `_state: &AppState` and ignore it. The original commands
-//! returned bare `bool` / tuple values; the broker shape is `Result<R,
-//! AppError>`, so the handlers wrap the same value in `Ok(...)` — the serde
-//! shape on the wire is identical (a JSON bool / 2-tuple).
+//! `check_is_git_repo` / `list_remote_branches_for_url` never touched
+//! `AppState`, but the handler macro requires a context first arg, so they take
+//! `_state: &AppState` and ignore it. The original commands returned bare
+//! `bool` / `Vec` values; the broker shape is `Result<R, AppError>`, so the
+//! handlers wrap the same value in `Ok(...)` — the serde shape on the wire is
+//! identical.
 //!
 //! The `on_repo_open` / `on_repo_close` (and the orphan-GC `on_repo_deregistered`)
 //! hooks are fire-and-forget and fire inline after the repo lock is dropped,
@@ -44,31 +45,10 @@ fn check_is_git_repo(_state: &AppState, path: String) -> Result<bool, AppError> 
     Ok(crate::git::init::is_git_repo(&path))
 }
 
-/// Read user.name / user.email from the global git config.
-/// Returns ("", "") when the config is unavailable.
-#[corvus::handler]
-fn get_git_identity(_state: &AppState) -> Result<(String, String), AppError> {
-    Ok(crate::git::init::get_git_identity())
-}
-
 /// List branch names available on a remote URL (calls `git ls-remote --heads`).
 #[corvus::handler]
 fn list_remote_branches_for_url(_state: &AppState, url: String) -> Result<Vec<String>, AppError> {
     crate::git::repo::list_remote_branches(&url)
-}
-
-#[corvus::handler]
-fn get_repo_info(state: &AppState, tab_id: String) -> Result<RepoInfo, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(RepoInfo {
-        tab_id: tab_id.clone(),
-        path: repo.path.clone(),
-        name: repo.name.clone(),
-        current_branch: repo.current_branch(),
-        is_bare: repo.inner().is_bare(),
-        is_empty: repo.inner().is_empty().unwrap_or(false),
-    })
 }
 
 /// Clone a remote repository to disk and return the fresh repo's metadata.

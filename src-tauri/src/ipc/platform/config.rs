@@ -273,19 +273,16 @@ fn set_studio_settings(state: &AppState, settings: StudioSettings) -> Result<(),
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
 }
 
-/// Evict all backend cache entries for a specific tab.
+/// Drop the cached `git2::Repository` handle for a specific tab to free libgit2
+/// internal caches.
 ///
-/// Removes the tab from `ticket_caches` (the stats cache moved out with the
-/// `stats` domain — it lives in `corvus-be` now, HEAD-keyed so it self-heals).
-/// If `cache.close_repo_on_evict` is enabled and the tab is not currently
-/// active, also drops the `git2::Repository` handle to free libgit2 internal
-/// caches. The repo is transparently re-opened on next access.
+/// The per-tab backend caches (stats, ticket-links) moved out with their domains
+/// — they live in `corvus-be` now (stats HEAD-keyed → self-healing; ticket links
+/// re-fetched on demand). What remains here is the shell-owned `RepoManager`
+/// handle: if `cache.close_repo_on_evict` is enabled and the tab is not currently
+/// active, drop it (transparently re-opened on next access).
 #[platform::handler(program = "platform")]
 fn evict_tab_cache(state: &AppState, tab_id: String) -> Result<(), AppError> {
-    if let Ok(mut caches) = state.ticket_caches.lock() {
-        caches.remove(&tab_id);
-    }
-
     // Drop the git2::Repository handle if the feature flag is enabled and
     // this is not the currently active tab (evicting the active tab would
     // cause an immediate re-open on the very next command — pointless).

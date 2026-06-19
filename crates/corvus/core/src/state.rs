@@ -204,6 +204,23 @@ impl CorvusState {
     pub fn stats_computing(&self) -> Arc<Mutex<HashSet<String>>> {
         Arc::clone(&self.stats_computing)
     }
+
+    /// A cloneable handle to the hook broker, for a background task (e.g. the
+    /// worktree-link checkout-sync orchestrator) that fires fire-and-forget hooks
+    /// from a thread outliving the borrow of `&self`. Mirrors [`event_sink`](Self::event_sink).
+    pub fn hooks_handle(&self) -> Arc<HookDispatcher> {
+        Arc::clone(&self.hooks)
+    }
+
+    /// Snapshot of every open tab as `(tab_id, repo_path)` — the shell-pushed
+    /// open-repo set. Used by the orchestrator to target `arbor://graph-refresh`
+    /// at the tabs showing a synced member.
+    pub fn open_tabs(&self) -> Vec<(String, String)> {
+        self.repos
+            .lock()
+            .map(|r| r.iter().map(|(t, p)| (t.clone(), p.clone())).collect())
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]

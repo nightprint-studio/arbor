@@ -1267,10 +1267,12 @@ dependencies = [
  "corvus-plugin",
  "dirs",
  "git2",
+ "regex",
  "serde",
  "serde_json",
  "tokio",
  "toml 0.8.23",
+ "uuid",
 ]
 
 [[package]]

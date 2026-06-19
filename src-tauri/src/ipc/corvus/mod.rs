@@ -33,7 +33,6 @@ pub mod missing;
 pub mod pipeline;
 pub mod provider;
 pub mod repo;
-pub mod tickets;
 pub mod worktree;
 
 // Re-export so backend handlers annotate with `#[corvus::handler]` — the

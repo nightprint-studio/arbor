@@ -21,70 +21,10 @@ use std::sync::Arc;
 
 use crate::config::app_config;
 use crate::error::AppError;
-use crate::git::worktree::{self, ProjectType, WorktreeInfo, BUILTIN_IDES};
+use crate::git::worktree::{self, BUILTIN_IDES};
 use crate::ipc::corvus;
 use crate::process_ext::NoWindowExt;
 use crate::AppState;
-
-// ---------------------------------------------------------------------------
-// List / Add / Remove
-// ---------------------------------------------------------------------------
-
-#[corvus::handler]
-fn list_worktrees(state: &AppState, tab_id: String) -> Result<Vec<WorktreeInfo>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let repo_path = Path::new(&repo.path);
-    worktree::list_worktrees(repo_path, repo_path)
-}
-
-#[corvus::handler]
-fn add_worktree(
-    state: &AppState,
-    tab_id: String,
-    dest_path: String,
-    branch: String,
-    new_branch: Option<String>,
-) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let repo_path = Path::new(&repo.path);
-    worktree::add_worktree(
-        repo_path,
-        &dest_path,
-        &branch,
-        new_branch.as_deref(),
-    )
-}
-
-#[corvus::handler]
-fn remove_worktree(
-    state: &AppState,
-    tab_id: String,
-    worktree_path: String,
-) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let repo_path = Path::new(&repo.path);
-    worktree::remove_worktree(repo_path, &worktree_path)
-}
-
-// ---------------------------------------------------------------------------
-// Detect project type (standalone, no repo required)
-// ---------------------------------------------------------------------------
-
-// `detect_project_type` took no `State` as a Tauri command, but the broker's
-// handler macro requires a context first arg, so we accept `&AppState` and
-// ignore it — the decoded JSON args (`path`) are unchanged, so the FE call is
-// byte-identical.
-#[corvus::handler]
-fn detect_project_type(_state: &AppState, path: String) -> Result<ProjectType, AppError> {
-    let p = Path::new(&path);
-    if !p.exists() {
-        return Err(AppError::Other(format!("Path does not exist: {path}")));
-    }
-    Ok(worktree::detect_project_type(p))
-}
 
 // ---------------------------------------------------------------------------
 // Open in IDE

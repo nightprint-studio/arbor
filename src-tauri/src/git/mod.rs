@@ -13,7 +13,6 @@ pub mod gitflow;
 pub mod init;
 pub mod url;
 pub mod merge;
-pub mod ticket_links;
 pub mod notes;
 pub mod worktree;
 pub mod reflog;

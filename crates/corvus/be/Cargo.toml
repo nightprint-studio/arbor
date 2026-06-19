@@ -38,6 +38,13 @@ serde_json    = { workspace = true }
 # `~` home-dir expansion for the `commit.template` path in the stage domain's
 # `get_git_commit_template` (already a workspace dependency, used by `src-tauri`).
 dirs          = { workspace = true }
+# Custom ticket-ID pattern compilation/validation in the `tickets` domain. Same
+# workspace pin `corvus-git` uses, so the `regex::Regex` handed to
+# `corvus_git::tickets::parse_text` is the matching type.
+regex         = { workspace = true }
+# Mints link / alias-group ids (v4) in the worktree-link registry. Same workspace
+# pin `corvus-git` uses.
+uuid          = { workspace = true }
 # Decodes the base64 image data-URL when a repo-browser download writes an image
 # back to disk (already a workspace dependency via `corvus-git`).
 base64        = { workspace = true }
