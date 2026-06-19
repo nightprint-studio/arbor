@@ -1288,11 +1288,16 @@ name = "corvus-git"
 version = "0.3.0"
 dependencies = [
  "arbor-process-ext",
+ "base64 0.22.1",
+ "chrono",
  "encoding_rs",
  "git2",
+ "regex",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
+ "toml 0.8.23",
  "tracing",
 ]
 

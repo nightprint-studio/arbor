@@ -13,7 +13,17 @@ arbor-process-ext = { path = "../../arbor-process-ext" }
 # src-tauri so Cargo unifies them (incl. git2's `vendored-libgit2`).
 git2        = { version = "0.20", features = ["vendored-libgit2"] }
 encoding_rs = "0.8"
+# Year for the LICENSE template header — pinned to src-tauri's 0.4 so Cargo
+# unifies (no second copy in the tree).
+chrono      = { version = "0.4" }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 tracing     = { workspace = true }
+# diff: base64 image-blob encoding; graph_svg: sha2 gravatar hashing; tickets:
+# regex link parsing + toml link store. base64/sha2/regex are workspace deps;
+# toml is not (pin matches src-tauri's 0.8).
+base64      = { workspace = true }
+sha2        = { workspace = true }
+regex       = { workspace = true }
+toml        = "0.8"
