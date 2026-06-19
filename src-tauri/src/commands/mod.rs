@@ -8,7 +8,6 @@ pub mod job_commands;
 pub mod fs_commands;
 pub mod fs_git_commands;
 pub mod workspace_commands;
-pub mod linked_worktree_commands;
 pub mod branding_commands;
 pub mod deep_link_commands;
 pub mod marketplace_commands;

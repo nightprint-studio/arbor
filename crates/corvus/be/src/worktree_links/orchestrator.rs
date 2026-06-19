@@ -14,7 +14,6 @@
 //!
 //! The recursion guard is process-local module state ([`SYNC_IN_PROGRESS`]) — the
 //! OOP twin of the shell's `AppState::link_sync_in_progress`.
-#![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -82,7 +81,9 @@ fn repo_registry_maps(state: &CorvusState) -> (HashMap<String, PathBuf>, HashMap
     (path_map, name_map)
 }
 
-/// True if a link sync is currently running.
+/// True if a link sync is currently running. (Reserved diagnostic — mirrors the
+/// shell's `is_syncing`; no current caller.)
+#[allow(dead_code)]
 pub fn is_syncing(link_id: &str) -> bool {
     SYNC_IN_PROGRESS
         .lock()

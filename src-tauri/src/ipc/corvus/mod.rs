@@ -21,14 +21,12 @@
 // submodule, reflog, stats, remote, ci, mr, security, repo_browser, avatar) were
 // **deleted** — `corvus-be` is their sole owner now (no in-process fallback).
 pub mod auth;
-pub mod branch;
 pub mod brp;
 pub mod fs_git;
 pub mod git_cli;
 pub mod gitflow;
 pub mod image;
 pub mod issues;
-pub mod linked_worktree;
 pub mod missing;
 pub mod pipeline;
 pub mod provider;

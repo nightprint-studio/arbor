@@ -3,20 +3,19 @@
 //!
 //! Ported from the shell's `crate::linked_worktrees` (`AppError` → `String`; the
 //! `AppError::Other` wire shape is `#[error("{0}")]`, so the bare format string
-//! the `SplitBroker` re-wraps is byte-identical). The registry is **process-local
-//! module state** ([`REGISTRY`]), lazily (re)loaded from the
-//! `linked_worktrees.toml` path the shell pushes through the `worktree_links_path`
-//! config section: corvus-be is a separate process and cannot compute the
-//! profile-aware path itself, so the shell (which owns the active profile) hands
-//! it over. A path change (profile switch) triggers a reload on the next access.
-//! Writes go through [`mutate`], which saves under the registry lock — the same
-//! save-timing the shell used (`save(&reg)`).
+//! the `SplitBroker` re-wraps is byte-identical). The **`linked_worktrees.toml`
+//! file is the single source of truth** — every access reloads it (see the
+//! persistence section): the shell's `arbor.linked_worktrees` plugin namespace
+//! writes the same file from the other process, so an in-memory cache would let
+//! the two drift. corvus-be is a separate process and cannot compute the
+//! profile-aware path itself, so the shell (which owns the active profile) pushes
+//! it through the `worktree_links_path` config section. Writes go through
+//! [`mutate`] (reload → mutate → save, under the lock).
 //!
-//! NOTE: this lands Phase 1+2 of the full-move (the registry + the 13 CRUD
-//! handlers in `be/src/linked_worktree.rs`). The orchestrator (Phase 3) and the
-//! branch worktree-link handlers (Phase 4) consume the alias helpers, the
-//! sync-result types and `set_sync_target` — currently unused here — hence the
-//! scoped `allow(dead_code)` until those phases land.
+//! The registry exposes the **complete** mutation API ported from the shell; a
+//! couple of accessors (`get_mut`, `find_by_repo_mut`) and the future-op
+//! `LinkOperation` enum mirror that surface but have no OOP consumer yet — hence
+//! the scoped `allow(dead_code)`.
 #![allow(dead_code)]
 
 pub mod aliases;
@@ -308,17 +307,18 @@ impl WorktreeLinkRegistry {
             self.links.insert(l.id.clone(), l);
         }
     }
-
-    /// Snapshot every link (for the orchestrator's alias resolution, Phase 3).
-    pub fn all(&self) -> Vec<WorktreeLink> {
-        self.links.values().cloned().collect()
-    }
 }
 
-// ── Process-local registry + path-driven (re)load ─────────────────────────────
+// ── Registry persistence — the file is the single source of truth ─────────────
+//
+// Every access reloads from `linked_worktrees.toml` (the shell-pushed path),
+// because the shell's `arbor.linked_worktrees` plugin namespace writes the SAME
+// file from the other process: an in-memory cache would let the two drift and
+// clobber each other. The domain is low-frequency (user-driven), so a small TOML
+// read per op is free. The `REGISTRY` static is just a reusable buffer whose
+// mutex serializes corvus-be's own mutations.
 
 static REGISTRY: LazyLock<Mutex<WorktreeLinkRegistry>> = LazyLock::new(Default::default);
-static LOADED_PATH: Mutex<Option<String>> = Mutex::new(None);
 
 fn links_path(state: &CorvusState) -> Option<String> {
     state
@@ -336,45 +336,41 @@ fn load_from(path: &Path) -> WorktreeLinkRegistry {
     reg
 }
 
-/// Reload the registry when the shell-pushed path differs from the loaded one
-/// (first access loads; a profile switch re-pushes a new path → reload).
-fn ensure_loaded(state: &CorvusState) {
-    let want = links_path(state);
-    let mut loaded = LOADED_PATH.lock().unwrap_or_else(|p| p.into_inner());
-    if *loaded != want {
-        let reg = match want.as_deref() {
-            Some(p) => load_from(Path::new(p)),
-            None => WorktreeLinkRegistry::new(),
-        };
-        *REGISTRY.lock().unwrap_or_else(|p| p.into_inner()) = reg;
-        *loaded = want;
+fn load_path(path: &Option<String>) -> WorktreeLinkRegistry {
+    match path.as_deref() {
+        Some(p) => load_from(Path::new(p)),
+        None => WorktreeLinkRegistry::new(),
     }
 }
 
-/// Read-access to the (lazily loaded) registry.
+/// Read-access — the guard holds a snapshot freshly read from the file.
 pub fn registry(state: &CorvusState) -> MutexGuard<'static, WorktreeLinkRegistry> {
-    ensure_loaded(state);
-    REGISTRY.lock().unwrap_or_else(|p| p.into_inner())
+    let path = links_path(state);
+    let mut reg = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());
+    *reg = load_path(&path);
+    reg
 }
 
-/// Mutate the registry and persist under the lock — the same save-timing the
-/// shell used (`reg.op(); save(&reg)`). Returns the closure's value.
+/// Reload-fresh → mutate → persist, all under the lock (so corvus-be's own
+/// mutations serialize and each sees the latest file, incl. plugin writes).
 pub fn mutate<T>(
     state: &CorvusState,
     f: impl FnOnce(&mut WorktreeLinkRegistry) -> Result<T, String>,
 ) -> Result<T, String> {
-    ensure_loaded(state);
+    let path = links_path(state);
     let mut reg = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());
+    *reg = load_path(&path);
     let result = f(&mut reg)?;
-    save_to(&reg, &links_path(state))?;
+    save_to(&reg, &path)?;
     Ok(result)
 }
 
-/// Persist the link's `last_sync_target` after an orchestrator run — locks the
-/// live registry and saves to the captured path. Used by the orchestrator
-/// thread, which holds no `&CorvusState`.
+/// Persist the link's `last_sync_target` after an orchestrator run — reload →
+/// set → save under the lock. Used by the orchestrator thread, which holds no
+/// `&CorvusState` (the path was captured at trigger time).
 pub fn commit_sync_target(link_id: &str, target: SyncTarget, path: &Option<String>) {
     let mut reg = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());
+    *reg = load_path(path);
     let _ = reg.set_sync_target(link_id, target);
     let _ = save_to(&reg, path);
 }

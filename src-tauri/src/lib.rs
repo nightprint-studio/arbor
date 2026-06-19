@@ -1,6 +1,6 @@
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::sync::atomic::AtomicBool;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use tauri::Manager;
 
 use arbor_ipc::prelude::EventSink;
@@ -56,7 +56,6 @@ use crate::jobs::JobRegistry;
 use crate::plugin_logs::PluginLogBuffer;
 use crate::pipeline::PipelineRegistry;
 use crate::workspace::{RepoRegistry, WorkspaceStore};
-use crate::linked_worktrees::WorktreeLinkRegistry;
 use crate::git_provider::{GitProviderRegistry, GithubProvider, GitlabProvider};
 use crate::branding::BrandingState;
 use crate::deep_link::DeepLinkBuffer;
@@ -126,18 +125,6 @@ pub struct AppState {
     /// session.json.  `take()`-able: the welcome screen pulls it once on
     /// first launch after upgrade, leaving `None` for subsequent launches.
     pub migration_report: Mutex<Option<crate::workspace::migration::MigrationReport>>,
-    /// Linked Worktrees — cross-project sync.  Persisted to linked_worktrees.toml.
-    /// `Arc` so the checkout-sync orchestrator's background thread can hold a
-    /// clone and write the sync target after the triggering handler returns
-    /// (the handler only has `&AppState`, never an `AppHandle`).
-    pub linked_worktrees: Arc<Mutex<WorktreeLinkRegistry>>,
-    /// Set of link ids currently being synced.  Read by the public checkout
-    /// command to suppress recursive triggering of link sync from a
-    /// propagated checkout (the orchestrator calls git ops directly, not the
-    /// public command, so this guard is mostly defensive). `Arc` for the same
-    /// reason as `linked_worktrees`: the orchestrator thread releases the guard
-    /// when its work completes.
-    pub link_sync_in_progress: Arc<Mutex<HashSet<String>>>,
     /// Unified registry of remote git host clients (GitHub / GitLab / —).
     /// Populated at boot — see `git_provider/`.
     pub git_providers: Mutex<GitProviderRegistry>,
@@ -351,13 +338,6 @@ impl AppState {
         })
     }
 
-    pub fn lock_linked_worktrees(&self) -> Result<MutexGuard<'_, WorktreeLinkRegistry>> {
-        self.linked_worktrees.lock().map_err(|e| {
-            tracing::error!("linked_worktrees mutex poisoned: {e}");
-            AppError::MutexPoisoned("linked_worktrees".into())
-        })
-    }
-
     pub fn lock_git_providers(&self) -> Result<MutexGuard<'_, GitProviderRegistry>> {
         self.git_providers.lock().map_err(|e| {
             tracing::error!("git_providers mutex poisoned: {e}");
@@ -444,8 +424,6 @@ impl AppState {
             repo_registry:      Mutex::new(repo_registry),
             workspaces:         Mutex::new(workspaces),
             migration_report:   Mutex::new(stored_report),
-            linked_worktrees:       Arc::new(Mutex::new(crate::linked_worktrees::load())),
-            link_sync_in_progress:  Arc::new(Mutex::new(HashSet::new())),
             git_providers:          Mutex::new(providers),
             branding:               BrandingState::default(),
             deep_link_buffer:       Arc::new(DeepLinkBuffer::default()),
@@ -488,7 +466,6 @@ impl AppState {
         }
         if let Ok(mut g) = self.repo_registry.lock() { *g = crate::workspace::registry::load(); }
         if let Ok(mut g) = self.workspaces.lock()    { *g = crate::workspace::store::load(); }
-        if let Ok(mut g) = self.linked_worktrees.lock() { *g = crate::linked_worktrees::load(); }
         if let Ok(mut g) = self.marketplace.lock()   { *g = crate::marketplace::build_registry(); }
         // Drop state bound to the old profile's open repos — the frontend
         // re-opens tabs after it reloads, which re-populates these.

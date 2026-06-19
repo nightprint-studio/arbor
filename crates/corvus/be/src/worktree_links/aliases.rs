@@ -2,8 +2,8 @@
 //!
 //! Ported verbatim from the shell's `crate::linked_worktrees::aliases` (no error
 //! type — pure functions over the registry types). Consumed by the orchestrator
-//! (Phase 3) + the branch worktree-link handlers (Phase 4); unused until then.
-#![allow(dead_code)]
+//! (`resolve_target_branch`) + the branch worktree-link handlers
+//! (`alias_blocks_branch_name`, `on_branch_deleted`, `on_branch_renamed`).
 
 use super::{AliasGroup, WorktreeLink};
 
@@ -31,6 +31,8 @@ pub fn resolve_target_branch(
 }
 
 /// The *expected* branch for a member per the link's `last_sync_target`.
+/// (Reserved — mirrors the shell helper; no current caller.)
+#[allow(dead_code)]
 pub fn expected_branch_for_member(link: &WorktreeLink, repo_id: &str) -> Option<String> {
     let t = link.last_sync_target.as_ref()?;
     if t.initiator_repo_id == repo_id {
