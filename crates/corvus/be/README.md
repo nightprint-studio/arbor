@@ -26,10 +26,12 @@ now run here** (see
 | `list_worktrees` / `add_worktree` / `remove_worktree` / `detect_project_type` | the git-worktree domain (read + create/remove), via `corvus-git`. The IDE-launch / IDE-config / streaming-detection methods stay **in-process** (AppHandle / app config / job registry) |
 | `list_recovery_entries` / `preview_recovery_restore` / `restore_recovery_entry` / `delete_recovery_entry` | the recovery-journal domain (read + restore), via `corvus-git` |
 | `rb_list_accounts` / `rb_list_repos` / `rb_browse_tree` / `rb_get_file_content` / `rb_download_file` (5) | the remote repo-browser domain (async, network), via the shared `corvus-git-provider-{api,github,gitlab}` crates — host-keyed providers, credentials over the **reverse channel** (no hooks) |
+| `resolve_avatar_for_email` (1) | commit-email → avatar (tab-keyed); the REST is the shared `GitProvider::avatar_url_for_email` + the cached `resolve_avatar` wrapper (no hooks) |
 | `supports_security` / `fetch_security_summary` / `fetch_security_findings` (3) | the security-findings reads (tab-keyed via `provider_for_tab`); `fetch_security_summary` fires `on_security_summary_loaded`. `export_security_report` stays in-process (job registry + branding) |
 | `list_mrs` / `get_mr_detail` / `create_mr` / `get_mr_capabilities` / `probe_mr_feature` / `disable_mr_auto_merge` / `close_mr` / `reopen_mr` / `mark_mr_ready` / `add_mr_comment` / `get_mr_files` / `get_mr_commits` / `get_mr_commit_diff` / `get_merged_mr_hints` (14) | the MR/PR domain; fires `on_mr_opened` (create) and `on_mr_updated` (close/reopen/ready). `merge_mr` (fires `on_mr_merged`) + `mr_start_conflict_resolution` stay in-process (local-git branch cleanup / job registry) |
 | `fetch_ci_runs` / `fetch_ci_jobs` / `list_ci_workflows` / `create_ci_pipeline` / `fetch_mr_ci_runs` / `retrigger_ci_run` (6) | the CI domain (no hooks). `get_ci_provider` stays in-process (resolves through `RepoManager` with a different `Ok(None)` contract) |
 | `list_remotes` / `fetch_remote` / `push_branch` / `pull_branch` (4) | the network remote domain via `corvus-git`; git smart-HTTP credentials cross the reverse channel (`__git_credentials`); fires `on_fetch` / `on_push` / `on_pull`. `pull_branch` carries the full safe-pull flow (recovery snapshot → pre-pull stash → fetch/merge → re-apply) and streams `arbor://pull-progress` / `-done` |
+| `list_commit_notes` / `check_note_remote_status` / `save_commit_note` / `delete_commit_note` / `push_note_namespace` (5) | the git-notes domain via `corvus-git`; fires `on_note_saved` / `on_note_deleted`. `push_note_namespace` pushes `refs/notes/*` over the shared `__git_credentials` resolver |
 | `linear_*` (8) / `jira_*` (8) | the issue-tracker domain (async, network), via the shared `corvus-issues` crate — credentials resolved over the **reverse channel** (`ChildSessionProvider` → shell keyring), never read here |
 
 The shell spawns this binary at startup, reads its `Hello` (the advertised method
@@ -121,16 +123,24 @@ mechanism when those domains move). What's left, by gate:
   over the reverse channel. The trait-based REST cohort is **done** — repo-browser,
   security reads, MR/PR, CI all run OOP via the provider registry seam. What's
   left here:
-    - **`avatar` + `image` proxy:** token-sender based (`ci_impl::*_send_with_refresh`),
-      *not* the `GitProvider` trait — they need a small refactor onto a
-      `SessionProvider` before they can move.
+    - **`image` proxy:** stays in-process **by design** — it is host-dynamic (the
+      target host is an arbitrary URL in an MR body, possibly a self-hosted
+      instance or a public CDN), so its per-URL token decision doesn't fit the
+      provider registry. (`avatar` *did* move: its REST became the
+      `GitProvider::avatar_url_for_email` trait method, dropping its `ci_impl`
+      token-sender coupling.)
     - **Job-registry / local-git tails:** `export_security_report`, `merge_mr`'s
       branch cleanup, `mr_start_conflict_resolution`, `get_ci_provider` stay
       in-process until the job registry is proxied and `CorvusState` grows the
       pieces they need.
-    - **git-protocol surface:** the `remote` domain is **done** (fetch / push /
-      pull over `__git_credentials`). Still to move: `notes` push and `gitflow`
-      finish (same `__git_credentials` channel).
+    - **git-protocol surface:** the `remote` and `notes` domains are **done**
+      (incl. their pushes over `__git_credentials`). `gitflow` is **gated, not a
+      clean git-protocol move**: every operational handler resolves an effective
+      `GitFlowConfig` (global app config + the per-repo `.arbor/config.toml`) that
+      `CorvusState` doesn't hold yet, and `*_finish_or_pr` can open a provider PR.
+      It needs the gitflow config pushed (the W0b `__set_config` mechanism) +
+      per-repo config loading before it can move; the config-CRUD handlers
+      (`get`/`set_gitflow_*`) stay shell-side regardless.
 - **Per-registry state in `CorvusState`:** `branch` (the worktree-link sync
   registry), `stage`/`commit` (the `on_pre_commit` veto already works via
   `CorvusState::fire_pre_commit_veto`, but the handlers need the repo lock shape),

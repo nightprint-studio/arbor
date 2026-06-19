@@ -15,6 +15,7 @@
 //! `use corvus_git_provider_api::prelude::*;`.
 
 pub mod auth;
+pub mod avatar;
 pub mod branch;
 pub mod capability;
 pub mod ci;

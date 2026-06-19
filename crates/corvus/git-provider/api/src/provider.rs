@@ -56,6 +56,15 @@ pub trait GitProvider: Send + Sync {
     // ── Auth ─────────────────────────────────────────────────────────────
     fn has_token(&self) -> bool;
     async fn current_user(&self) -> Result<ProviderUser, ProviderError>;
+    /// Resolve a user's `avatar_url` from a commit `email`, or `None` when there
+    /// is no match. Used by the commit-graph avatar layer. Default: no lookup
+    /// (hosts without an email/user search return `None` so the caller falls
+    /// back to a generated initials avatar). See [`crate::avatar::resolve_avatar`]
+    /// for the cached, machine-email-skipping wrapper consumers should call.
+    async fn avatar_url_for_email(&self, email: &str) -> Result<Option<String>, ProviderError> {
+        let _ = email;
+        Ok(None)
+    }
     async fn start_oauth(&self) -> Result<OAuthHandle, ProviderError>;
     async fn complete_oauth(&self, handle: OAuthHandle, code: &str) -> Result<(), ProviderError>;
     async fn revoke_token(&self) -> Result<(), ProviderError>;

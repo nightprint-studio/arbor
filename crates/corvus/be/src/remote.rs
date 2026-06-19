@@ -41,8 +41,9 @@ use crate::repo::{git, open, repo_path, snapshot_policy};
 /// `(url) -> Option<(user, pass)>` by calling the shell's `__git_credentials`.
 /// On a transport error it returns `Err` (which `corvus_git::remote` logs and
 /// treats as "no stored credentials", falling through to git's own helper) —
-/// the same shape the shell's `resolve_credentials` binding has.
-fn credential_resolver(
+/// the same shape the shell's `resolve_credentials` binding has. Shared with the
+/// `notes` domain's namespace push.
+pub(crate) fn credential_resolver(
     host: Arc<dyn HostCaller>,
 ) -> impl Fn(&str) -> Result<Option<(String, String)>, String> + Send + Sync {
     move |url: &str| {

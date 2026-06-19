@@ -28,11 +28,13 @@ use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer, Cor
 // inventory, so `arbor_rpc::registry()` collects them and `Hello` advertises
 // them. The shell pushes repo paths to `repo_registry`; `bisect` and `stash`
 // are the git domains served out-of-process so far.
+mod avatar;
 mod bisect;
 mod ci;
 mod issues;
 mod merge;
 mod mr;
+mod notes;
 mod provider;
 mod rebase;
 mod recovery;

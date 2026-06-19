@@ -14,8 +14,10 @@
 //! Everything is best-effort: any failure (no remote, no token, no match)
 //! returns `None` and the frontend falls back to a generated initials avatar.
 
+use corvus_git_provider_api::prelude::resolve_avatar;
+
 use crate::error::AppError;
-use crate::git_provider::{avatar_lookup, helpers::provider_for_tab};
+use crate::git_provider::helpers::provider_for_tab;
 use crate::ipc::corvus;
 use crate::AppState;
 
@@ -31,5 +33,5 @@ async fn resolve_avatar_for_email(
         Ok(r) => r,
         Err(_) => return Ok(None),
     };
-    Ok(avatar_lookup::resolve_for(&resolved, &email).await)
+    Ok(resolve_avatar(resolved.provider.as_ref(), &resolved.info.remote_url, &email).await)
 }

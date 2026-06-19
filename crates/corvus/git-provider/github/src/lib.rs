@@ -16,6 +16,7 @@
 pub(crate) mod http;
 
 mod auth;
+mod avatar;
 mod branch;
 mod ci;
 mod issues;

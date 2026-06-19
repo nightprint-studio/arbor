@@ -19,7 +19,7 @@ use arbor_ipc::prelude::SessionProvider;
 use corvus_git_provider_api::prelude::*;
 
 use crate::http::GitlabHttp;
-use crate::{auth, branch, ci, issues, mr, releases, repo, security, webhooks};
+use crate::{auth, avatar, branch, ci, issues, mr, releases, repo, security, webhooks};
 
 /// A GitLab provider bound to one instance's injected credentials.
 pub struct GitlabProvider {
@@ -212,6 +212,10 @@ impl GitProvider for GitlabProvider {
     fn has_token(&self) -> bool { self.http.has_credentials() }
     async fn current_user(&self) -> Result<ProviderUser, ProviderError> {
         auth::current_user(&self.http).await
+    }
+
+    async fn avatar_url_for_email(&self, email: &str) -> Result<Option<String>, ProviderError> {
+        avatar::avatar_url_for_email(&self.http, email).await
     }
     async fn start_oauth(&self) -> Result<OAuthHandle, ProviderError> {
         // Legacy flow needs an AppHandle the trait can't carry — command layer

@@ -16,7 +16,7 @@ use arbor_ipc::prelude::SessionProvider;
 use corvus_git_provider_api::prelude::*;
 
 use crate::http::GithubHttp;
-use crate::{auth, branch, ci, issues, mr, releases, repo, security, webhooks};
+use crate::{auth, avatar, branch, ci, issues, mr, releases, repo, security, webhooks};
 
 /// A GitHub provider bound to one account's injected credentials.
 ///
@@ -132,6 +132,10 @@ impl GitProvider for GithubProvider {
 
     // ── Auth ─────────────────────────────────────────────────────────────
     fn has_token(&self) -> bool { self.http.has_credentials() }
+    async fn avatar_url_for_email(&self, email: &str) -> Result<Option<String>, ProviderError> {
+        avatar::avatar_url_for_email(&self.http, email).await
+    }
+
     async fn current_user(&self) -> Result<ProviderUser, ProviderError> {
         auth::current_user(&self.http).await
     }
