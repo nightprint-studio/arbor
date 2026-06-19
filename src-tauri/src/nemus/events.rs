@@ -15,7 +15,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::nemus_window::NEMUS_WINDOW_LABEL;
+use crate::window::nemus::NEMUS_WINDOW_LABEL;
 
 /// Diagnostics (errors with span) after a `nemus_eval`. Empty `errors` = success.
 pub const EVT_DIAGNOSTICS: &str = "nemus:diagnostics";

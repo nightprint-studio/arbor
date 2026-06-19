@@ -16,6 +16,8 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::Shortcut;
 
+use super::{show_and_focus, WEBVIEW_BROWSER_ARGS};
+
 /// A pending "reveal this path" request handed to a freshly-opened explorer
 /// window. The frontend pulls it on mount (via [`take_explorer_reveal`]) once
 /// its listeners are wired — avoiding the emit-before-listen race a new window
@@ -50,14 +52,6 @@ fn is_explorer_label(label: &str) -> bool {
     label == EXPLORER_WINDOW_LABEL || label.starts_with(&format!("{EXPLORER_WINDOW_LABEL}-"))
 }
 
-/// WebView2 additional browser args. **Must match the `main` window's
-/// `additionalBrowserArgs` in `tauri.conf.json`** — every WebView2 instance in
-/// the process shares one user-data-folder + environment, and creating a second
-/// webview with *different* env options fails with `HRESULT 0x8007139F`
-/// (ERROR_INVALID_STATE). Keep these two in sync.
-const WEBVIEW_BROWSER_ARGS: &str =
-    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,InterestFeedContentSuggestions,WebRTC,AutofillServerCommunication";
-
 /// Parse a Tauri accelerator string (e.g. `"Ctrl+Shift+E"`) into a `Shortcut`.
 /// Returns `None` for an empty or unparseable string.
 fn parse_accel(accel: &str) -> Option<Shortcut> {
@@ -81,14 +75,9 @@ pub fn current_explorer_shortcut() -> Option<Shortcut> {
 ///
 /// Both entry points (the global-shortcut handler and the `open_explorer_window`
 /// IPC command) run on **background** threads, but WebView2 window creation must
-/// happen on the **main/UI** thread — otherwise it fails with
-/// `HRESULT 0x8007139F` ("resource not in the correct state"). So we always hop
-/// to the main thread before touching windows.
+/// happen on the **main/UI** thread — see [`super::dispatch_to_main`].
 pub fn open_or_focus(app: &AppHandle) {
-    let handle = app.clone();
-    if let Err(e) = app.run_on_main_thread(move || create_or_focus(&handle)) {
-        tracing::error!("failed to dispatch explorer window to main thread: {e}");
-    }
+    super::dispatch_to_main(app, "explorer", create_or_focus);
 }
 
 /// Main-thread body of [`open_or_focus`]. Never call directly from a command or
@@ -104,9 +93,7 @@ fn create_or_focus(app: &AppHandle) {
 
     if !always_new {
         if let Some(w) = app.get_webview_window(EXPLORER_WINDOW_LABEL) {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
+            show_and_focus(&w);
             return;
         }
     }
@@ -143,10 +130,7 @@ fn build_explorer_window(app: &AppHandle, label: &str) {
 /// existing window when one-window mode is on. Mirrors [`open_or_focus`]'s
 /// thread hop (WebView2 window ops must run on the main thread).
 fn open_or_focus_reveal(app: &AppHandle, payload: RevealPayload) {
-    let handle = app.clone();
-    if let Err(e) = app.run_on_main_thread(move || create_or_focus_reveal(&handle, payload)) {
-        tracing::error!("failed to dispatch explorer reveal to main thread: {e}");
-    }
+    super::dispatch_to_main(app, "explorer reveal", move |a| create_or_focus_reveal(a, payload));
 }
 
 /// Main-thread body of [`open_or_focus_reveal`].
@@ -162,9 +146,7 @@ fn create_or_focus_reveal(app: &AppHandle, payload: RevealPayload) {
 
     if !always_new {
         if let Some(w) = app.get_webview_window(EXPLORER_WINDOW_LABEL) {
-            let _ = w.unminimize();
-            let _ = w.show();
-            let _ = w.set_focus();
+            show_and_focus(&w);
             let _ = w.emit("arbor://explorer-reveal", &payload);
             return;
         }

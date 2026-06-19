@@ -25,7 +25,7 @@ pub fn set_explorer_config(
     // Apply the global-shortcut change immediately; a registration conflict
     // (invalid / already-claimed combo) surfaces to the UI so it can revert.
     #[cfg(desktop)]
-    crate::explorer_window::reconcile_global_shortcut(&app, &old_explorer, &new_explorer)
+    crate::window::explorer::reconcile_global_shortcut(&app, &old_explorer, &new_explorer)
         .map_err(AppError::Other)?;
     Ok(())
 }
