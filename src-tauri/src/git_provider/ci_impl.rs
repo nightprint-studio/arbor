@@ -42,12 +42,20 @@ pub fn detect_from_remotes(
 /// `corvus-git-provider-api` detector and fills `has_token` from the keyring.
 pub fn detect_from_url(url: &str) -> Option<CiProviderInfo> {
     let mut info = CiProviderInfo::detect_from_url(url)?;
-    info.has_token = match info.provider.as_str() {
+    info.has_token = has_token_for(&info.provider, info.gitlab_base_url.as_deref());
+    Some(info)
+}
+
+/// Whether a credential is stored for the given provider (keyring-coupled).
+/// Single source for both [`detect_from_url`] and the `__has_token` reverse-channel
+/// host method that fills `has_token` for the OOP `get_ci_provider`.
+pub fn has_token_for(provider: &str, gitlab_base_url: Option<&str>) -> bool {
+    match provider {
         "github" => get_github_token().ok().flatten().is_some(),
         "gitlab" => {
             // For self-hosted GitLab we can't use the generic "gitlab.com/arbor"
             // token; fall back to host-based credential store.
-            let base = info.gitlab_base_url.as_deref().unwrap_or_default();
+            let base = gitlab_base_url.unwrap_or_default();
             if base.contains("gitlab.com") {
                 get_gitlab_token(base).ok().flatten().is_some()
             } else {
@@ -55,8 +63,7 @@ pub fn detect_from_url(url: &str) -> Option<CiProviderInfo> {
             }
         }
         _ => false,
-    };
-    Some(info)
+    }
 }
 
 // ---------------------------------------------------------------------------

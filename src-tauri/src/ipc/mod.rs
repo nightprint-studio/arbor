@@ -198,9 +198,88 @@ pub fn build_router(app: &AppHandle) -> Router {
 /// `arbor.ui.*` plugin round-trips join here later. Runs on the `ChildClient`
 /// reader thread; `session` is a fast keyring read, a slow `refresh` (OAuth)
 /// briefly stalls demux — promote to a worker if that ever bites.
-fn host_dispatch(method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+fn host_dispatch(
+    app: &AppHandle,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     use crate::auth::vault::VaultSessionProvider;
     use arbor_ipc::prelude::SessionProvider;
+    use tauri::Manager;
+
+    // Job-registry proxy (ADR-3): the shell's `JobRegistry` is the single source
+    // of job state + cancellation; an OOP backend drives it over these methods.
+    // The backend emits the `arbor://job-*` events itself through its event sink
+    // (re-emitted by the shell), so these only mutate the registry.
+    if method == "__job_register" {
+        let spec: crate::jobs::JobSpec = serde_json::from_value(params)
+            .map_err(|e| format!("__job_register: invalid spec: {e}"))?;
+        let state = app.state::<AppState>();
+        let mut jobs = state
+            .jobs
+            .lock()
+            .map_err(|_| "__job_register: jobs mutex poisoned".to_string())?;
+        let id = jobs.new_id();
+        jobs.register(spec.into_info(id.clone()));
+        return Ok(serde_json::json!(id));
+    }
+    if method == "__job_append" {
+        let job_id = params
+            .get("job_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "__job_append: missing job_id".to_string())?;
+        let line = params
+            .get("line")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if let Ok(mut jobs) = app.state::<AppState>().jobs.lock() {
+            jobs.append_output(job_id, line);
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__job_set_status" {
+        let job_id = params
+            .get("job_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "__job_set_status: missing job_id".to_string())?
+            .to_string();
+        let status: crate::jobs::JobStatus =
+            serde_json::from_value(params.get("status").cloned().unwrap_or(serde_json::Value::Null))
+                .map_err(|e| format!("__job_set_status: invalid status: {e}"))?;
+        if let Ok(mut jobs) = app.state::<AppState>().jobs.lock() {
+            jobs.set_status(&job_id, status);
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__job_is_cancelled" {
+        let job_id: String = serde_json::from_value(params)
+            .map_err(|e| format!("__job_is_cancelled: invalid job_id: {e}"))?;
+        let cancelled = app
+            .state::<AppState>()
+            .jobs
+            .lock()
+            .map(|j| j.is_cancelled(&job_id))
+            .unwrap_or(false);
+        return Ok(serde_json::json!(cancelled));
+    }
+
+    // Current plugin-applied logo override (branding is in-memory shell state):
+    // an OOP report/export embeds it. `None` when no plugin set one.
+    if method == "__branding_logo" {
+        let logo = app.state::<AppState>().branding.snapshot().logo_svg;
+        return Ok(serde_json::json!(logo));
+    }
+
+    // Keyring-coupled `has_token` probe for the OOP `get_ci_provider`: the pure
+    // URL detection runs in `corvus-be`, but whether a credential is stored for
+    // the detected provider/host is a keyring read that stays shell-side.
+    if method == "__has_token" {
+        let provider = params.get("provider").and_then(|v| v.as_str()).unwrap_or_default();
+        let base = params.get("gitlab_base_url").and_then(|v| v.as_str());
+        let has = crate::git_provider::ci_impl::has_token_for(provider, base);
+        return Ok(serde_json::json!(has));
+    }
 
     // Proactive provider-keyed refresh — the OOP twin of the in-process
     // `maybe_refresh_for_provider` pre-call an OOP REST handler can no longer
@@ -300,13 +379,14 @@ fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
     cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
 
     let app_for_events = app.clone();
+    let app_for_host = app.clone();
     match ChildClient::spawn(
         cmd,
         move |topic, payload| {
             use tauri::Emitter;
             let _ = app_for_events.emit(&topic, payload);
         },
-        host_dispatch,
+        move |method, params| host_dispatch(&app_for_host, method, params),
     ) {
         Ok(pair) => Some(pair),
         Err(e) => {
@@ -367,25 +447,35 @@ pub fn sync_repo_open(state: &AppState, tab_id: &str, path: &str) {
     );
 }
 
-/// Push the app-config slices `corvus-be`'s OOP handlers need (currently the
-/// `recovery` snapshot policy) so they stop falling back to built-in defaults.
-/// Called on repo open (alongside the git program) and whenever the user changes
-/// a relevant setting. **Best-effort** like [`sync_repo_open`]: when `corvus-be`
-/// isn't running the method routes to the in-process loopback, returns
-/// `UnknownMethod`, and is dropped — the in-process handlers read the config
-/// directly, so nothing is lost. The wire shape is `RecoveryConfig`, which is
-/// field-identical to the crate's `SnapshotPolicy`, so the backend deserializes
-/// it straight into the policy.
+/// Push the app-config slices `corvus-be`'s OOP handlers need (the `recovery`
+/// snapshot policy, the global `gitflow` config, the `diff` context-line default
+/// and the `status` rename-detection toggle) so they stop falling back to
+/// built-in defaults. Called on repo open (alongside the git program) and
+/// whenever the user changes a relevant setting. **Best-effort** like
+/// [`sync_repo_open`]: when `corvus-be` isn't running the method routes to the
+/// in-process loopback, returns `UnknownMethod`, and is dropped — the in-process
+/// handlers read the config directly, so nothing is lost. Each section's wire
+/// shape is the matching app-config struct (`RecoveryConfig` ≡ `SnapshotPolicy`,
+/// `GitFlowConfig` shared via `corvus-git`; `diff`/`status` read by field name on
+/// the backend), so the backend deserializes it straight. The per-repo
+/// `.arbor/config.toml` Git Flow override is NOT pushed — corvus-be reads it from
+/// the workdir it opens.
 pub fn sync_config(state: &AppState) {
-    let recovery = crate::config::app_config::load()
-        .map(|c| c.recovery)
-        .unwrap_or_default();
-    if let Ok(value) = serde_json::to_value(&recovery) {
+    let cfg = crate::config::app_config::load().unwrap_or_default();
+    push_config_section(state, "recovery", &cfg.recovery);
+    push_config_section(state, "gitflow", &cfg.gitflow);
+    push_config_section(state, "diff", &cfg.diff);
+    push_config_section(state, "status", &cfg.status);
+}
+
+/// Serialize one app-config slice and push it into `corvus-be`'s config bag.
+fn push_config_section<T: serde::Serialize>(state: &AppState, section: &str, value: &T) {
+    if let Ok(value) = serde_json::to_value(value) {
         let _ = dispatch_rpc(
             state,
             "corvus",
             "__set_config",
-            serde_json::json!({ "section": "recovery", "value": value }),
+            serde_json::json!({ "section": section, "value": value }),
         );
     }
 }

@@ -1,6 +1,6 @@
 //! [`CorvusState`] — the headless backend's owned state.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use arbor_ipc::prelude::{EventSink, HostCaller};
@@ -50,6 +50,18 @@ pub struct CorvusState {
     /// reads its `AppState` config directly and never touches this; it matters
     /// only on the OOP path, where there is no app config in this process.
     config: Mutex<Map<String, Value>>,
+    /// Per-tab memoised repository statistics: `tab_id → (cache_key, RepoStats-as-JSON)`.
+    /// Held as **JSON**, not the typed `RepoStats` (which lives in the git2-coupled
+    /// `corvus-git` crate), so this crate stays git2-free — the `stats` handler
+    /// serializes in/out, exactly like the config-bag above. `cache_key` fingerprints
+    /// HEAD + the stats-exclude config, so a HEAD move or an exclusion change
+    /// invalidates the entry. `Arc` so a background compute thread can hold the cache
+    /// past the handler's return (mirrors the shell's `AppState::stats_cache`). Used
+    /// only on the OOP path; in-process the shell keeps its own typed cache.
+    stats_cache: Arc<Mutex<HashMap<String, (String, Value)>>>,
+    /// Tabs with an in-flight stats computation — the dedup guard that makes a second
+    /// `compute_repo_stats` while one is already running a no-op (last finisher wins).
+    stats_computing: Arc<Mutex<HashSet<String>>>,
 }
 
 impl CorvusState {
@@ -63,6 +75,8 @@ impl CorvusState {
             host: None,
             hooks: Arc::new(HookDispatcher::new()),
             config: Mutex::new(Map::new()),
+            stats_cache: Arc::new(Mutex::new(HashMap::new())),
+            stats_computing: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -175,6 +189,20 @@ impl CorvusState {
     /// instead of an `AppHandle`.
     pub fn event_sink(&self) -> Arc<dyn EventSink> {
         Arc::clone(&self.events)
+    }
+
+    /// The memoised-stats cache handle (a cheap `Arc` clone), for a background
+    /// compute thread that outlives the borrow of `&self`. Keyed
+    /// `tab_id → (cache_key, RepoStats-as-JSON)`; the handler owns the typed
+    /// `RepoStats` and serializes it in / out (this crate stays git2-free).
+    pub fn stats_cache(&self) -> Arc<Mutex<HashMap<String, (String, Value)>>> {
+        Arc::clone(&self.stats_cache)
+    }
+
+    /// The in-flight-stats dedup-guard handle (a cheap `Arc` clone) — the set of
+    /// tabs currently computing, so a duplicate `compute_repo_stats` is a no-op.
+    pub fn stats_computing(&self) -> Arc<Mutex<HashSet<String>>> {
+        Arc::clone(&self.stats_computing)
     }
 }
 

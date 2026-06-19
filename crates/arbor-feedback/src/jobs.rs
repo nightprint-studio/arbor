@@ -60,6 +60,49 @@ pub struct JobInfo {
     pub target: Option<String>,
 }
 
+/// The fields a backend supplies when registering a job — the registry assigns
+/// the `id` and stamps `started_at`. The reverse-channel wire shape for
+/// `__job_register`: an out-of-process backend (e.g. `corvus-be`) sends a
+/// `JobSpec`, the shell builds the [`JobInfo`]. Unlike `JobInfo` this is
+/// `Deserialize` (the shell decodes it) — `JobInfo` stays serialize-only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobSpec {
+    pub name: String,
+    pub plugin_name: String,
+    pub command: String,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub non_cancellable: bool,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub is_system: bool,
+    #[serde(default)]
+    pub target: Option<String>,
+}
+
+impl JobSpec {
+    /// Build a `Running` [`JobInfo`] from this spec with the given id, stamping
+    /// `started_at` now.
+    pub fn into_info(self, id: String) -> JobInfo {
+        JobInfo {
+            id,
+            name: self.name,
+            plugin_name: self.plugin_name,
+            command: self.command,
+            started_at: JobRegistry::now_secs(),
+            status: JobStatus::Running,
+            category: self.category,
+            non_cancellable: self.non_cancellable,
+            hidden: self.hidden,
+            is_system: self.is_system,
+            finished_at: None,
+            target: self.target,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------

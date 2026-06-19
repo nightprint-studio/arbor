@@ -76,9 +76,15 @@ fn get_gitflow_global_config(state: &AppState) -> Result<GitFlowConfig, AppError
 
 #[corvus::handler]
 fn set_gitflow_global_config(state: &AppState, config: GitFlowConfig) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.gitflow = config;
-    app_config::save(&cfg)
+    {
+        let mut cfg = state.lock_config()?;
+        cfg.gitflow = config;
+        app_config::save(&cfg)?;
+    }
+    // Push the new global config to corvus-be so its OOP gitflow handlers see
+    // the live value (lock released first — sync_config re-reads from disk).
+    crate::ipc::sync_config(state);
+    Ok(())
 }
 
 #[corvus::handler]

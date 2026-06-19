@@ -16,23 +16,33 @@ now run here** (see
 | `be_ping` / `be_echo` / `be_emit` | self-tests: request/response, arg decode, event push |
 | `__repo_register` / `__repo_deregister` | shell pushes a tab's repo path on open/close |
 | `__set_git_program` | shell pushes the resolved git binary |
-| `__set_config` | shell pushes an app-config slice by section (e.g. the `recovery` snapshot policy) so OOP handlers stop falling back to built-in defaults |
+| `__set_config` | shell pushes an app-config slice by section (the `recovery` snapshot policy, the global `gitflow` config, the `diff` context-line default, the `status` rename-detection toggle) so OOP handlers stop falling back to built-in defaults |
 | `bisect_*` / `*_bisect_session` (11) | the bisect domain, via the shared `corvus-git` crate |
 | `stash_save` / `stash_apply` / `stash_pop` / `stash_drop` / `stash_rename` / `force_stash_apply` / `abort_stash_apply` / `list_stashes` / `list_graph_stash_refs` / `get_stash_file_content` / `write_workdir_file` (11) | the stash domain, via `corvus-git` (opens the repo by the pushed path); fires `on_stash_push` / `on_stash_pop` to the co-located host |
 | `reset_to_commit` / `create_tag` / `delete_tag` | the reset + tags domain, via `corvus-git`; fires `on_tag_create` / `on_tag_delete` to the co-located host |
 | `search_commits` | repo-wide commit search (read-only, no hooks), via `corvus-git` |
+| `list_local_branches` / `list_remote_branches` / `list_tags` / `get_nearest_tag` / `list_merged_branches` / `list_merged_remote_branches` / `delete_branches` / `delete_remote_branches` / `rename_remote_branch` / `checkout_commit` (10) | the **link-free** slice of the branch domain, via `corvus-git`. `delete_branches` fires `on_branch_delete`, `rename_remote_branch` fires `on_branch_rename`, `checkout_commit` fires `on_checkout` (inline, co-located host). The remote-push delete/rename bind their `push` closure to the `__git_credentials` resolver. `create_branch` (alias registry), `checkout_commit_safe`, and every worktree-link-aware checkout/delete/rename stay in-process (the `WorktreeLinkRegistry` + checkout-sync orchestrator live in the shell's `AppState`) |
 | `merge_branch` / `abort_merge` / `complete_merge` / `resolve_conflict` / `resolve_stash_conflict` / `remove_conflict_file` / `get_conflict_content` / `get_conflict_presence` / `get_merge_message` (9) | the merge / conflict-resolution domain, via `corvus-git` (no hooks) |
 | `start_rebase` / `rebase_continue` / `rebase_abort` / `rebase_skip` / `get_rebase_todo` / `get_rebase_state` (6) | the rebase domain, via `corvus-git`; fires `on_rebase_start` / `on_rebase_abort` to the co-located host |
+| `gitflow_get_status` / `gitflow_init` / `gitflow_init_create_main` / `gitflow_feature_start` / `gitflow_feature_finish` / `gitflow_release_start` / `gitflow_release_finish` / `gitflow_hotfix_start` / `gitflow_hotfix_finish` (9) | the Git Flow operational domain, via `corvus-git`; fires the `on_flow_*` hooks. Effective config = the pushed global `gitflow` section overlaid by the repo's own `.arbor/config.toml` (read straight from the workdir). The 6 config-CRUD reads/writes (`get`/`set_gitflow_*`, `has_gitflow_repo_override`) stay in-process (own the config files) |
 | `list_worktrees` / `add_worktree` / `remove_worktree` / `detect_project_type` | the git-worktree domain (read + create/remove), via `corvus-git`. The IDE-launch / IDE-config / streaming-detection methods stay **in-process** (AppHandle / app config / job registry) |
 | `list_recovery_entries` / `preview_recovery_restore` / `restore_recovery_entry` / `delete_recovery_entry` | the recovery-journal domain (read + restore), via `corvus-git` |
 | `rb_list_accounts` / `rb_list_repos` / `rb_browse_tree` / `rb_get_file_content` / `rb_download_file` (5) | the remote repo-browser domain (async, network), via the shared `corvus-git-provider-{api,github,gitlab}` crates — host-keyed providers, credentials over the **reverse channel** (no hooks) |
 | `resolve_avatar_for_email` (1) | commit-email → avatar (tab-keyed); the REST is the shared `GitProvider::avatar_url_for_email` + the cached `resolve_avatar` wrapper (no hooks) |
-| `supports_security` / `fetch_security_summary` / `fetch_security_findings` (3) | the security-findings reads (tab-keyed via `provider_for_tab`); `fetch_security_summary` fires `on_security_summary_loaded`. `export_security_report` stays in-process (job registry + branding) |
-| `list_mrs` / `get_mr_detail` / `create_mr` / `get_mr_capabilities` / `probe_mr_feature` / `disable_mr_auto_merge` / `close_mr` / `reopen_mr` / `mark_mr_ready` / `add_mr_comment` / `get_mr_files` / `get_mr_commits` / `get_mr_commit_diff` / `get_merged_mr_hints` (14) | the MR/PR domain; fires `on_mr_opened` (create) and `on_mr_updated` (close/reopen/ready). `merge_mr` (fires `on_mr_merged`) + `mr_start_conflict_resolution` stay in-process (local-git branch cleanup / job registry) |
-| `fetch_ci_runs` / `fetch_ci_jobs` / `list_ci_workflows` / `create_ci_pipeline` / `fetch_mr_ci_runs` / `retrigger_ci_run` (6) | the CI domain (no hooks). `get_ci_provider` stays in-process (resolves through `RepoManager` with a different `Ok(None)` contract) |
+| `supports_security` / `fetch_security_summary` / `fetch_security_findings` / `export_security_report` (4) | the security-findings reads (tab-keyed via `provider_for_tab`); `fetch_security_summary` fires `on_security_summary_loaded`. `export_security_report` mints its job in the shell registry over the reverse channel (`JobHandle`), renders via the extracted `corvus-git-provider-api::security_export`, reads the plugin logo via `__branding_logo`, and emits `arbor://job-*` itself |
+| `list_mrs` / `get_mr_detail` / `create_mr` / `get_mr_capabilities` / `probe_mr_feature` / `disable_mr_auto_merge` / `close_mr` / `reopen_mr` / `mark_mr_ready` / `add_mr_comment` / `get_mr_files` / `get_mr_commits` / `get_mr_commit_diff` / `get_merged_mr_hints` / `merge_mr` / `mr_start_conflict_resolution` (16) | the MR/PR domain; fires `on_mr_opened` (create), `on_mr_updated` (close/reopen/ready), `on_mr_merged` (merge). `merge_mr`'s GitHub branch-cleanup pushes `:refs/heads/<branch>` via the `__git_credentials` resolver; `mr_start_conflict_resolution` mints a job (`JobHandle`) + runs the extracted `corvus-git` merge-prep flow on a worker, streaming `arbor://mr-conflict-*` |
+| `fetch_ci_runs` / `fetch_ci_jobs` / `list_ci_workflows` / `create_ci_pipeline` / `fetch_mr_ci_runs` / `retrigger_ci_run` / `get_ci_provider` (7) | the CI domain (no hooks). `get_ci_provider` detects from remotes via the pure `CiProviderInfo::detect_from_remotes` (`Ok(None)` when none match); its keyring-coupled `has_token` is filled over the reverse channel (`__has_token`) |
 | `list_remotes` / `fetch_remote` / `push_branch` / `pull_branch` (4) | the network remote domain via `corvus-git`; git smart-HTTP credentials cross the reverse channel (`__git_credentials`); fires `on_fetch` / `on_push` / `on_pull`. `pull_branch` carries the full safe-pull flow (recovery snapshot → pre-pull stash → fetch/merge → re-apply) and streams `arbor://pull-progress` / `-done` |
 | `list_commit_notes` / `check_note_remote_status` / `save_commit_note` / `delete_commit_note` / `push_note_namespace` (5) | the git-notes domain via `corvus-git`; fires `on_note_saved` / `on_note_deleted`. `push_note_namespace` pushes `refs/notes/*` over the shared `__git_credentials` resolver |
 | `linear_*` (8) / `jira_*` (8) | the issue-tracker domain (async, network), via the shared `corvus-issues` crate — credentials resolved over the **reverse channel** (`ChildSessionProvider` → shell keyring), never read here |
+| `get_commit_diff` / `get_commit_diff_meta` / `get_commit_file_diff` / `get_commits_range_diff_meta` / `get_commits_range_file_diff` / `get_workdir_diff` / `get_file_at_commit` / `get_branch_diff` / `get_file_blame` / `get_file_blame_streaming` / `get_workdir_diff_stream` (11) | the diff + blame domain via `corvus-git` (no hooks); `context_lines` falls back to the pushed `diff.context_lines`. `get_file_blame_streaming` is pure egress (blocks, returns the lines, emits `arbor://blame-stream-chunk` ticks); `get_workdir_diff_stream` returns a `job_id`, parses each file on a worker thread, and streams `arbor://diff-stream-*` — its Jobs entry driven over the reverse channel (`JobHandle`), no `arbor://job-*` lifecycle events (matching in-process) |
+| `get_repo_files` / `get_files_last_commit` / `get_repo_fingerprint` / `get_graph` / `get_graph_for_file` / `get_repo_file_tree` / `get_commit_detail` / `start_file_meta_scan` / `export_graph_svg` (9) | the graph + repo-file domain via `corvus-git` (no hooks); `get_graph` is paginated (`offset`/`limit`), so single-shot reads cross as one `Response`. `start_file_meta_scan` streams `arbor://file-meta-batch` / `-done` (per-tab cancellation map is module-local); `export_graph_svg` returns a `job_id`, drives the Jobs entry via `JobHandle`, and emits `arbor://job-started` / `-output` / `-done` + `plugin:notification` |
+| `get_status` (1) | the workdir-status scan via `corvus-git` (no hooks); reads the pushed `status.detect_renames` toggle |
+| `commit` / `stage_file` / `unstage_file` / `stage_all` / `unstage_all` / `discard_file` / `discard_all` / `stage_patch` / `cherry_pick` / `revert_commit` / `get_git_commit_template` (11) | the stage/index + commit domain (direct libgit2). `commit` fires the **vetoable** `on_pre_commit` (non-empty plugin return aborts with `"Commit blocked by plugin:\n{reason}"`) before mutating + `on_commit` after the repo handle drops — inline at the co-located host. `discard_*` snapshot via the pushed recovery `SnapshotPolicy` (`RecoveryKind::Discard`). `get_git_commit_template` expands `~` via `dirs` |
+| `list_submodules` / `submodule_fetch` / `submodule_pull` / `submodule_push` / `submodule_checkout` / `submodule_list_branches` / `update_submodule` / `update_all_submodules` (8) | the submodule domain via `corvus-git` (no hooks); the network ops bind an `AuthArgsResolver` to the shared `__git_credentials` resolver + `http_auth_args_for_credentials` |
+| `get_reflog` (1) | the reflog read via `corvus-git` (no hooks) |
+| `compute_repo_stats` / `export_repo_stats` (2) | the repo-statistics domain via `corvus-git` (no hooks). Both spawn background work over the event sink; `compute_repo_stats` emits `arbor://repo-stats-ready` / `-error`, memoised by the `CorvusState` `stats_cache` (HEAD+exclude-keyed, JSON) + `stats_computing` dedup guard. `export_repo_stats` mints a job via `JobHandle`, reuses cached stats, reads the branding logo via `__branding_logo`, and emits `arbor://job-*` + `plugin:notification` |
+| `get_git_identity` / `get_repo_info` (2) | the two pure read-only repo probes via `corvus-git` (no hooks); the rest of the `repo` lifecycle (open/close/clone/init/provider-remote) stays shell-side (AppState repo manager, file dialogs, OAuth) |
 
 The shell spawns this binary at startup, reads its `Hello` (the advertised method
 list), and routes exactly those methods to it out-of-process via a `SplitBroker`;
@@ -55,7 +65,9 @@ need via `__set_config` (on repo open and on the matching settings change), and
 recovery) read the **user-tuned** recovery `SnapshotPolicy` through
 `crate::repo::snapshot_policy` — the built-in `::default()` is now only the
 fallback when no policy has been pushed, so OOP retention/size/extension limits
-match in-process.
+match in-process. The same push carries `diff` (read by `crate::repo::diff_context_lines`,
+the per-call `context_lines` fallback) and `status` (read by
+`crate::repo::status_detect_renames`).
 
 **Git-provider REST over the reverse channel.** The provider REST domains
 (repo-browser, security reads, MR/PR, CI) resolve credentials the same way
@@ -113,40 +125,43 @@ await __TAURI__.core.invoke('rpc', { program: 'corvus', method: 'be_emit', param
 
 ## Next
 
-The **non-credential, non-stateful** local-git domains now run here (bisect,
-stash, reset+tags, search, merge, rebase, worktree, recovery), reading their
-user-tuned config through the `__set_config` push (W0b done — the recovery
-`SnapshotPolicy` is live; `diff`-context / `gitflow` config ride the same
-mechanism when those domains move). What's left, by gate:
+The **non-credential, non-stateful** local-git domains run here (bisect, stash,
+reset+tags, search, merge, rebase, worktree, recovery), reading their user-tuned
+config through the `__set_config` push (the recovery `SnapshotPolicy` + the
+global `gitflow` config are live). The **`gitflow`** operational domain now runs
+here too — config gated no more. The **job-registry proxy (ADR-3)** has landed:
+the shell's `JobRegistry` is the single source, and OOP handlers drive it over
+the reverse channel (`__job_register` → id, `__job_append`, `__job_set_status`,
+`__job_is_cancelled`) via `crate::jobs::JobHandle`, emitting the `arbor://job-*`
+events themselves through the sink. `export_security_report` and
+`mr_start_conflict_resolution` migrated on it. What's left, by gate:
 
-- **M3 credential broker (in progress):** the credential-coupled domains resolve
-  over the reverse channel. The trait-based REST cohort is **done** — repo-browser,
-  security reads, MR/PR, CI all run OOP via the provider registry seam. What's
-  left here:
+- **M3 credential broker:** the credential-coupled domains resolve over the
+  reverse channel. The trait-based REST cohort is **done** — repo-browser,
+  security (incl. export), MR/PR (incl. merge + conflict-resolution), CI all run
+  OOP via the provider registry seam. What's left here:
     - **`image` proxy:** stays in-process **by design** — it is host-dynamic (the
       target host is an arbitrary URL in an MR body, possibly a self-hosted
       instance or a public CDN), so its per-URL token decision doesn't fit the
       provider registry. (`avatar` *did* move: its REST became the
-      `GitProvider::avatar_url_for_email` trait method, dropping its `ci_impl`
-      token-sender coupling.)
-    - **Job-registry / local-git tails:** `export_security_report`, `merge_mr`'s
-      branch cleanup, `mr_start_conflict_resolution`, `get_ci_provider` stay
-      in-process until the job registry is proxied and `CorvusState` grows the
-      pieces they need.
-    - **git-protocol surface:** the `remote` and `notes` domains are **done**
-      (incl. their pushes over `__git_credentials`). `gitflow` is **gated, not a
-      clean git-protocol move**: every operational handler resolves an effective
-      `GitFlowConfig` (global app config + the per-repo `.arbor/config.toml`) that
-      `CorvusState` doesn't hold yet, and `*_finish_or_pr` can open a provider PR.
-      It needs the gitflow config pushed (the W0b `__set_config` mechanism) +
-      per-repo config loading before it can move; the config-CRUD handlers
-      (`get`/`set_gitflow_*`) stay shell-side regardless.
-- **Per-registry state in `CorvusState`:** `branch` (the worktree-link sync
-  registry), `stage`/`commit` (the `on_pre_commit` veto already works via
-  `CorvusState::fire_pre_commit_veto`, but the handlers need the repo lock shape),
-  the ticket-link cache, the BRP registry.
-- **Payload/perf judgement:** the large-read domains (`diff`, `graph`) may want a
-  streaming transport before they cross the process boundary.
+      `GitProvider::avatar_url_for_email` trait method.) The whole REST cohort is
+      now OOP, including `get_ci_provider` (pure detection + a `__has_token`
+      reverse-channel probe for the keyring-coupled flag).
+- **Per-registry state in `CorvusState`:** still pending — `branch` (the
+  worktree-link sync registry + cross-repo checkout-sync orchestrator) and the
+  ticket-link cache. The `stage`/`commit` domain is **done** (the `on_pre_commit`
+  veto runs via `CorvusState::fire_pre_commit_veto`), and the stats memoisation
+  (`stats_cache` + `stats_computing`) now lives in `CorvusState` as JSON (git2-free).
+  `brp` stays shell-side (its watch/SSE + Lua-hook firing is bound to the shell's
+  AppHandle/plugin host — revisit when AppHandle retirement starts).
+
+The **`diff` / `graph` / `status`** read domains are now OOP. No new transport
+primitive was needed: the framed protocol already carries arbitrary-size single
+`Response`s (4-byte LE length prefix), and the streaming handlers ride the
+transport-agnostic `EventSink` (each emit is an `Event` frame the shell
+re-emits) — so the "payload/perf" gate was a non-issue. `diff`'s
+`get_workdir_diff_stream` and `graph`'s `export_graph_svg` reuse the `JobHandle`
+job-proxy; `get_file_blame_streaming` and `start_file_meta_scan` are pure egress.
 
 Everything here auto-advertises via `Hello` and auto-routes OOP per-method — no
 shell router change; the in-process copy stays as the no-spawn fallback.

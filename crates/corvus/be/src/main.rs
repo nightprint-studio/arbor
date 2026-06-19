@@ -30,22 +30,33 @@ use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer, Cor
 // are the git domains served out-of-process so far.
 mod avatar;
 mod bisect;
+mod branch;
 mod ci;
+mod diff;
+mod gitflow;
+mod graph;
 mod issues;
+mod jobs;
 mod merge;
 mod mr;
 mod notes;
 mod provider;
 mod rebase;
 mod recovery;
+mod reflog;
 mod remote;
 mod repo;
 mod repo_browser;
+mod repo_ops;
 mod repo_registry;
 mod reset;
 mod search;
 mod security;
+mod stage;
 mod stash;
+mod stats;
+mod status;
+mod submodule;
 mod worktree;
 
 // ── Self-test handlers (Stage 1) ────────────────────────────────────────────

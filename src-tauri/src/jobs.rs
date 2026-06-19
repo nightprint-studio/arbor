@@ -15,7 +15,7 @@ use crate::process_ext::NoWindowExt;
 
 // Re-export the window-agnostic job model from the shared crate. Call sites use
 // `crate::jobs::{JobInfo, JobRegistry, JobStatus}` exactly as before.
-pub use arbor_feedback::prelude::{kill_process, JobInfo, JobRegistry, JobStatus};
+pub use arbor_feedback::prelude::{kill_process, JobInfo, JobRegistry, JobSpec, JobStatus};
 
 // ---------------------------------------------------------------------------
 // Output line batching

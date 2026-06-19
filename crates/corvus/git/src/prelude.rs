@@ -24,8 +24,9 @@ pub use crate::recovery::{
 pub use crate::reset::{create_tag, delete_tag, run_reset, ResetMode};
 pub use crate::merge::{
     abort_merge, complete_merge, get_conflict_content, get_conflict_presence, get_merge_message,
-    merge_branch, remove_conflict_file, resolve_conflict, resolve_stash_conflict, ConflictContent,
-    ConflictPresence, MergeOutcome, MergeStrategy,
+    http_auth_args_for_credentials, merge_branch, prepare_mr_conflict_resolution,
+    remove_conflict_file, resolve_conflict, resolve_stash_conflict, ConflictContent,
+    ConflictPresence, MergeOutcome, MergeStrategy, MrPrepEvent, MrPrepOutcome, MrPrepPhase,
 };
 pub use crate::search::{search_commits, AuthorInfo, SearchQuery, SearchResult};
 pub use crate::rebase::{

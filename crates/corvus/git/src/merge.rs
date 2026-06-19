@@ -8,9 +8,15 @@
 //! becomes the crate's [`GitError`], and the encoding helpers come from this
 //! crate's [`crate::encoding`] module (byte-identical to the shell's).
 //!
-//! NOT moved (stays shell-side): the streaming MR-prep flow
-//! (`prepare_mr_conflict_resolution` & friends) — it is Tauri-coupled
-//! (progress callbacks, job events) and is consumed only by the shell.
+//! The streaming MR-prep flow ([`prepare_mr_conflict_resolution`] & friends)
+//! also lives here now: its git work is the same CLI-shelled fetch / checkout /
+//! merge, so the only couplings it needs are the same two the rest of this
+//! module injects — an explicit [`GitCli`] and a keyring-backed
+//! [`AuthArgsResolver`](crate::submodule::AuthArgsResolver) for the targeted
+//! `git fetch` (the shell binds it to its `http_auth_args_for_url`; corvus-be
+//! binds it to a closure built from the reverse-channel `__git_credentials`).
+//! The Tauri-coupled bits (job registry, stream/event emits) stay in the
+//! caller, which drives them off the `on_event` callback this fn invokes.
 
 use git2::Repository;
 use serde::{Deserialize, Serialize};
@@ -18,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::cli::GitCli;
 use crate::encoding::{decode_bytes, decode_with, encode_for_disk, encoding_for_label};
 use crate::error::{GitError, Result};
+use crate::submodule::AuthArgsResolver;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -752,6 +759,375 @@ fn merge_head_label(repo: &Repository) -> Result<String> {
     Ok(sha.chars().take(7).collect())
 }
 
+// ---------------------------------------------------------------------------
+// MR conflict-resolution prep — phased, streamable
+// ---------------------------------------------------------------------------
+
+/// Phases of the MR conflict-resolution prep flow.  Used by the orchestrator
+/// to label progress events that flow to the frontend ProgressStepper widget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MrPrepPhase {
+    Status,
+    Fetch,
+    Checkout,
+    Merge,
+}
+
+impl MrPrepPhase {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Status   => "status",
+            Self::Fetch    => "fetch",
+            Self::Checkout => "checkout",
+            Self::Merge    => "merge",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Status   => "Checking workdir",
+            Self::Fetch    => "Fetching from origin",
+            Self::Checkout => "Switching to source branch",
+            Self::Merge    => "Merging target",
+        }
+    }
+    pub fn index(self) -> u32 {
+        match self {
+            Self::Status => 0, Self::Fetch => 1, Self::Checkout => 2, Self::Merge => 3,
+        }
+    }
+    pub const TOTAL: u32 = 4;
+}
+
+/// Outcome of the prep flow.  `Conflicts` is the happy-path "user must resolve"
+/// signal; the caller opens the conflict-resolution modal.
+pub enum MrPrepOutcome {
+    Clean,
+    Conflicts,
+}
+
+/// Phase events emitted by [`prepare_mr_conflict_resolution`] via the
+/// `on_event` callback.  The orchestrator translates these into Tauri events
+/// for the JobsOverlay (text logs) and the ProgressStepper widget (typed).
+pub enum MrPrepEvent<'a> {
+    /// Phase began — frontend should advance the stepper.
+    /// `detail` is an optional sub-text (e.g. the refs being fetched).
+    PhaseStart { phase: MrPrepPhase, detail: Option<String> },
+    /// One line of stdout/stderr from the underlying git command.
+    Output    { #[allow(dead_code)] phase: MrPrepPhase, line: &'a str },
+}
+
+/// Prepare the local workspace for resolving a pull/merge-request conflict.
+///
+/// Flow:
+///   1. Require a clean workdir (no staged / unstaged / untracked changes) —
+///      merging into a dirty workdir would overwrite the user's work.
+///   2. `git fetch --no-tags origin <source> <target>` — refresh ONLY the two
+///      refs we care about (much faster than fetching the whole remote on
+///      repos with many branches).
+///   3. `git checkout <source>` — move to the MR source branch. When the
+///      branch only exists on the remote, `git` auto-creates a local tracking
+///      branch (DWIM behaviour), so this works for branches the user never
+///      checked out locally.
+///   4. `git merge --no-edit origin/<target>` — merge the MR target back into
+///      the source.  Returns [`MrPrepOutcome::Conflicts`] when conflicts are
+///      produced so the caller can open the resolver modal.
+///
+/// `git` is the explicit git invoker; `resolve_auth` maps the origin URL to the
+/// host-scoped `-c …` auth prefix (keyring-backed, hence injected by the
+/// caller). `on_event` is invoked synchronously on the calling thread for every
+/// phase transition and every stdout/stderr line — pass a no-op closure when
+/// progress reporting is not needed.
+pub fn prepare_mr_conflict_resolution(
+    git:           &GitCli,
+    workdir:       &std::path::Path,
+    source_branch: &str,
+    target_branch: &str,
+    resolve_auth:  AuthArgsResolver<'_>,
+    mut on_event:  impl FnMut(MrPrepEvent<'_>),
+) -> Result<MrPrepOutcome> {
+    // ── 1. Clean workdir check ──────────────────────────────────────────────
+    on_event(MrPrepEvent::PhaseStart { phase: MrPrepPhase::Status, detail: None });
+    let status = git
+        .command()
+        .args(["status", "--porcelain"])
+        .current_dir(workdir)
+        .output()
+        .map_err(|e| GitError::Other(format!("failed to spawn git: {e}")))?;
+    if !status.status.success() {
+        return Err(GitError::Other(
+            String::from_utf8_lossy(&status.stderr).trim().to_string(),
+        ));
+    }
+    if !status.stdout.is_empty() {
+        return Err(GitError::Other(
+            "Working tree has uncommitted changes — commit or stash them before \
+             resolving merge conflicts.".into(),
+        ));
+    }
+
+    // ── 2. Fetch only the two refs we need ──────────────────────────────────
+    let fetch_detail = format!("{source_branch}, {target_branch}");
+    on_event(MrPrepEvent::PhaseStart {
+        phase:  MrPrepPhase::Fetch,
+        detail: Some(fetch_detail),
+    });
+    let origin_url = git2::Repository::open(workdir)
+        .ok()
+        .and_then(|r| r.find_remote("origin").ok().and_then(|rem| rem.url().map(String::from)))
+        .unwrap_or_default();
+    let auth_args = resolve_auth(&origin_url);
+    run_git_streaming(
+        git,
+        workdir,
+        &auth_args,
+        // --no-tags + targeted refspecs avoids enumerating every branch on the
+        // remote (the original `git fetch origin` is the single biggest source
+        // of latency on repos with many branches).
+        &[
+            "fetch", "--no-tags", "--progress",
+            "origin", source_branch, target_branch,
+        ],
+        MrPrepPhase::Fetch,
+        &mut on_event,
+    )?;
+
+    // ── 3. Checkout source branch (DWIM creates tracking branch) ────────────
+    on_event(MrPrepEvent::PhaseStart {
+        phase:  MrPrepPhase::Checkout,
+        detail: Some(source_branch.to_string()),
+    });
+    run_git_streaming(
+        git,
+        workdir,
+        &[],
+        &["checkout", source_branch],
+        MrPrepPhase::Checkout,
+        &mut on_event,
+    )?;
+
+    // ── 4. Merge origin/<target> into the source branch ─────────────────────
+    let target_ref = format!("origin/{target_branch}");
+    on_event(MrPrepEvent::PhaseStart {
+        phase:  MrPrepPhase::Merge,
+        detail: Some(target_ref.clone()),
+    });
+    match merge_branch_streaming(git, workdir, &target_ref, &mut on_event) {
+        Ok(()) => Ok(MrPrepOutcome::Clean),
+        Err(GitError::Other(msg)) if msg.starts_with("CONFLICTS:") => Ok(MrPrepOutcome::Conflicts),
+        Err(e) => Err(e),
+    }
+}
+
+/// Build the host-scoped `-c http.<prefix>.extraHeader=…` + credential-helper
+/// reset argv that injects an `Authorization: Basic …` header for a single
+/// HTTPS remote `url`, given the `(username, secret)` pair resolved by the
+/// caller (keyring shell-side / reverse-channel `__git_credentials` for
+/// corvus-be). Byte-identical to the shell's `git_cli::http_auth_args_for_url`
+/// for the single-URL case.
+///
+/// Returns an empty vec when `url` is not HTTP(S) (SSH falls back to ssh-agent)
+/// or no host can be parsed. Lives here (not the shell) so the out-of-process
+/// fetch can reconstruct the same `-c` prefix from the credential pair the
+/// shell hands it over the reverse channel, without re-implementing the
+/// host-scoping rules.
+///
+/// IMPORTANT: the returned vector contains the secret in plaintext.
+pub fn http_auth_args_for_credentials(url: &str, username: &str, secret: &str) -> Vec<String> {
+    let scheme = if url.starts_with("https://") {
+        "https"
+    } else if url.starts_with("http://") {
+        "http"
+    } else {
+        return Vec::new();
+    };
+    let Some(host) = http_host_of(url) else { return Vec::new() };
+    let prefix = format!("{scheme}://{host}/");
+    let header = build_basic_auth_header(username, secret, &host);
+    vec![
+        "-c".into(),
+        format!("http.{prefix}.extraHeader={header}"),
+        // Clear the credential-helper chain (host-scoped AND globally) so GCM /
+        // other helpers don't ALSO inject an Authorization header (duplicate
+        // auth makes GitHub return 400) or pop a blocking UI prompt. The
+        // correct namespace is `credential.*`, NOT `http.*`.
+        "-c".into(),
+        format!("credential.{prefix}.helper="),
+        "-c".into(),
+        "credential.helper=".into(),
+    ]
+}
+
+/// HTTP Basic header with the host-specific sentinel username — mirrors the
+/// shell's `build_auth_header`: GitHub → `x-access-token`, GitLab → `oauth2`,
+/// PAT-style credentials keep their real username.
+fn build_basic_auth_header(username: &str, secret: &str, host: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+    let user = if username == "x-oauth-basic" {
+        if host == "gitlab.com" || host.starts_with("gitlab.") { "oauth2" } else { "x-access-token" }
+    } else {
+        username
+    };
+    let basic = B64.encode(format!("{user}:{secret}"));
+    format!("Authorization: Basic {basic}")
+}
+
+/// Bare hostname from an HTTP(S) URL (drops `user:pass@`, port, and path).
+fn http_host_of(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let after_at = rest.rfind('@').map(|i| &rest[i + 1..]).unwrap_or(rest);
+    let host = after_at.split('/').next()?.split(':').next()?;
+    if host.is_empty() { None } else { Some(host.to_string()) }
+}
+
+/// Run a git subcommand, streaming stdout+stderr lines through `on_event` as
+/// they arrive.  Returns Err on non-zero exit, with stderr as the message.
+fn run_git_streaming(
+    git:      &GitCli,
+    workdir:  &std::path::Path,
+    pre_args: &[String],
+    args:     &[&str],
+    phase:    MrPrepPhase,
+    on_event: &mut impl FnMut(MrPrepEvent<'_>),
+) -> Result<()> {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    let mut cmd = git.command();
+    cmd.args(pre_args)
+       .args(args)
+       .current_dir(workdir)
+       .stdout(Stdio::piped())
+       .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn()
+        .map_err(|e| GitError::Other(format!("failed to spawn git: {e}")))?;
+
+    // Drain stderr on a side thread; collect for error reporting on failure.
+    let stderr_pipe = child.stderr.take().expect("piped");
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let stderr_thread = std::thread::spawn(move || {
+        let mut all = String::new();
+        for line in BufReader::new(stderr_pipe).lines().flatten() {
+            all.push_str(&line);
+            all.push('\n');
+            let _ = tx.send(line);
+        }
+        all
+    });
+
+    // Stdout on the main loop, interleaved with stderr drained from rx.
+    let stdout_pipe = child.stdout.take().expect("piped");
+    for line in BufReader::new(stdout_pipe).lines().flatten() {
+        on_event(MrPrepEvent::Output { phase, line: &line });
+        // Pull any stderr lines that arrived in the meantime.
+        while let Ok(e) = rx.try_recv() {
+            on_event(MrPrepEvent::Output { phase, line: &e });
+        }
+    }
+    // Stdout closed — drain remaining stderr.
+    while let Ok(e) = rx.recv() {
+        on_event(MrPrepEvent::Output { phase, line: &e });
+    }
+    let stderr_full = stderr_thread.join().unwrap_or_default();
+
+    let exit = child.wait()
+        .map_err(|e| GitError::Other(format!("git wait failed: {e}")))?;
+    if !exit.success() {
+        return Err(GitError::Other(format!(
+            "git {} failed: {}",
+            args.first().copied().unwrap_or(""),
+            stderr_full.trim(),
+        )));
+    }
+    Ok(())
+}
+
+/// Streaming variant of [`merge_branch`].  Same conflict-vs-error contract.
+fn merge_branch_streaming(
+    git:        &GitCli,
+    workdir:    &std::path::Path,
+    branch_ref: &str,
+    on_event:   &mut impl FnMut(MrPrepEvent<'_>),
+) -> Result<()> {
+    // Capture all output into a buffer so we can scan for the conflict
+    // sentinel after the fact, while still streaming each line live.
+    let mut buf = String::new();
+    let res = run_git_streaming_capturing(
+        git,
+        workdir,
+        &[],
+        &["merge", "--no-edit", branch_ref],
+        MrPrepPhase::Merge,
+        on_event,
+        &mut buf,
+    );
+    match res {
+        Ok(()) => Ok(()),
+        Err(GitError::Other(_)) if
+            buf.contains("Automatic merge failed") || buf.contains("CONFLICT")
+        => Err(GitError::Other(format!("CONFLICTS:{}", buf.trim()))),
+        Err(e) => Err(e),
+    }
+}
+
+/// Same as `run_git_streaming` but also accumulates every emitted line into
+/// `buf` so the caller can post-process the combined output.
+fn run_git_streaming_capturing(
+    git:      &GitCli,
+    workdir:  &std::path::Path,
+    pre_args: &[String],
+    args:     &[&str],
+    phase:    MrPrepPhase,
+    on_event: &mut impl FnMut(MrPrepEvent<'_>),
+    buf:      &mut String,
+) -> Result<()> {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    let mut child = git.command()
+        .args(pre_args)
+        .args(args)
+        .current_dir(workdir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| GitError::Other(format!("failed to spawn git: {e}")))?;
+
+    let stderr_pipe = child.stderr.take().expect("piped");
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let stderr_thread = std::thread::spawn(move || {
+        let mut all = String::new();
+        for line in BufReader::new(stderr_pipe).lines().flatten() {
+            all.push_str(&line);
+            all.push('\n');
+            let _ = tx.send(line);
+        }
+        all
+    });
+
+    let stdout_pipe = child.stdout.take().expect("piped");
+    for line in BufReader::new(stdout_pipe).lines().flatten() {
+        buf.push_str(&line); buf.push('\n');
+        on_event(MrPrepEvent::Output { phase, line: &line });
+        while let Ok(e) = rx.try_recv() {
+            buf.push_str(&e); buf.push('\n');
+            on_event(MrPrepEvent::Output { phase, line: &e });
+        }
+    }
+    while let Ok(e) = rx.recv() {
+        buf.push_str(&e); buf.push('\n');
+        on_event(MrPrepEvent::Output { phase, line: &e });
+    }
+    let _ = stderr_thread.join();
+
+    let exit = child.wait()
+        .map_err(|e| GitError::Other(format!("git wait failed: {e}")))?;
+    if !exit.success() {
+        return Err(GitError::Other(buf.trim().to_string()));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -780,5 +1156,20 @@ mod tests {
             serde_json::to_string(&MergeStrategy::FfOnly).unwrap(),
             "\"ff_only\"",
         );
+    }
+
+    #[test]
+    fn mr_prep_phase_keys_and_indices_are_stable() {
+        // The frontend ProgressStepper keys + the 4-phase total are part of the
+        // wire contract — guard them against accidental drift.
+        assert_eq!(MrPrepPhase::TOTAL, 4);
+        assert_eq!(MrPrepPhase::Status.key(), "status");
+        assert_eq!(MrPrepPhase::Fetch.key(), "fetch");
+        assert_eq!(MrPrepPhase::Checkout.key(), "checkout");
+        assert_eq!(MrPrepPhase::Merge.key(), "merge");
+        assert_eq!(MrPrepPhase::Status.index(), 0);
+        assert_eq!(MrPrepPhase::Fetch.index(), 1);
+        assert_eq!(MrPrepPhase::Checkout.index(), 2);
+        assert_eq!(MrPrepPhase::Merge.index(), 3);
     }
 }

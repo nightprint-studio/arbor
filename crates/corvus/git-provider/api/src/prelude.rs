@@ -36,4 +36,5 @@ pub use crate::security::{
     SecuritySummary, Severity, SeverityCounts, SeverityMedians, TimePoint, VulnTimeSeries,
     MAX_FINDINGS_FETCH,
 };
+pub use crate::security_export::{build_csv, build_html, export_to_file, ThemeTokens, LOGO_SVG};
 pub use crate::webhook::{Webhook, WebhookCreateRequest};

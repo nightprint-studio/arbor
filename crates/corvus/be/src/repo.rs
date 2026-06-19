@@ -30,6 +30,28 @@ pub fn snapshot_policy(state: &CorvusState) -> SnapshotPolicy {
         .unwrap_or_default()
 }
 
+/// The diff context-line count to fall back on when the caller passes none: the
+/// shell-pushed `diff.context_lines`, else libgit2's default of `3`. Mirrors the
+/// in-process `state.lock_config().map(|c| c.diff.context_lines).unwrap_or(3)`.
+pub fn diff_context_lines(state: &CorvusState) -> u32 {
+    state
+        .config("diff")
+        .and_then(|v| v.get("context_lines").and_then(|n| n.as_u64()))
+        .map(|n| n as u32)
+        .unwrap_or(3)
+}
+
+/// Whether workdir status scans detect renames/copies — the shell-pushed
+/// `status.detect_renames`, else `true` (matches `StatusConfig::default`). The
+/// dominant cost on repos with thousands of changed files, so the user can turn
+/// it off; the OOP path reads the same toggle the in-process handler did.
+pub fn status_detect_renames(state: &CorvusState) -> bool {
+    state
+        .config("status")
+        .and_then(|v| v.get("detect_renames").and_then(|b| b.as_bool()))
+        .unwrap_or(true)
+}
+
 /// Resolve a tab to its repo path, or a clear error if the shell never
 /// registered it (should not happen for an open tab). Used by domains that
 /// shell out to the `git` CLI on a path (e.g. bisect) rather than open a handle.

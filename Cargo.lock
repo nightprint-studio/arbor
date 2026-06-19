@@ -1253,6 +1253,7 @@ dependencies = [
 name = "corvus-be"
 version = "0.3.0"
 dependencies = [
+ "arbor-feedback",
  "arbor-ipc",
  "arbor-plugin-core",
  "arbor-rpc",
@@ -1264,10 +1265,12 @@ dependencies = [
  "corvus-git-provider-gitlab",
  "corvus-issues",
  "corvus-plugin",
+ "dirs",
  "git2",
  "serde",
  "serde_json",
  "tokio",
+ "toml 0.8.23",
 ]
 
 [[package]]

@@ -19,6 +19,9 @@ arbor-rpc         = { path = "../../foundation/rpc" }
 # carries the shared host wiring; `arbor-plugin-core` is named directly for
 # `PluginHost`.
 arbor-plugin-core = { path = "../../plugin/core" }
+# The Tauri-free job model (`JobSpec`/`JobStatus`): OOP handlers drive jobs in the
+# shell's single-source `JobRegistry` over the reverse channel (`be/src/jobs.rs`).
+arbor-feedback    = { path = "../../arbor-feedback" }
 corvus-plugin     = { path = "../plugin" }
 corvus-core       = { path = "../core" }
 corvus-git        = { path = "../git" }
@@ -32,9 +35,16 @@ corvus-git-provider-gitlab = { path = "../git-provider/gitlab" }
 git2          = { version = "0.20", features = ["vendored-libgit2"] }
 serde         = { workspace = true }
 serde_json    = { workspace = true }
+# `~` home-dir expansion for the `commit.template` path in the stage domain's
+# `get_git_commit_template` (already a workspace dependency, used by `src-tauri`).
+dirs          = { workspace = true }
 # Decodes the base64 image data-URL when a repo-browser download writes an image
 # back to disk (already a workspace dependency via `corvus-git`).
 base64        = { workspace = true }
+# Reads the per-repo `.arbor/config.toml` Git Flow override directly from the
+# workdir corvus-be already opens. Not a workspace dep — the same `0.8` pin used
+# by `corvus-git` and `src-tauri`.
+toml          = "0.8"
 # Drives the async issue-tracker handlers: each backend request runs on its own
 # serve-loop worker thread, so a multi-thread runtime is required (concurrent
 # `block_on` from many threads). `enable_all` gives reqwest its IO driver.

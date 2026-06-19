@@ -28,6 +28,7 @@ pub mod registry;
 pub mod release;
 pub mod repo;
 pub mod security;
+pub mod security_export;
 pub mod webhook;
 
 pub mod prelude;

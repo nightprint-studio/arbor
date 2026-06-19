@@ -14,14 +14,13 @@
 //! belong to the plugin-defined local pipeline runner, not to these provider
 //! REST handlers.
 //!
+//! `get_ci_provider` runs here too: it opens the repo by the pushed path, lists
+//! remotes, and runs the **pure** `CiProviderInfo::detect_from_remotes` (origin
+//! preference + URL parsing, returning `Ok(None)` when no GitHub/GitLab remote
+//! exists — unlike `provider_for_tab`, which errors). The only keyring-coupled
+//! bit, `has_token`, is filled over the reverse channel (`__has_token`).
+//!
 //! **Left in-process** (not moved here):
-//! - `get_ci_provider` — it resolves the provider by going through the shell's
-//!   `state.lock_repos()` / `RepoManager` directly (open repo → list remotes →
-//!   `detect_from_remotes`, returning `Ok(None)` when no GitHub/GitLab remote
-//!   exists), rather than through `provider_for_tab` (which errors instead). That
-//!   raw `lock_repos()` use has no `CorvusState` equivalent, so it keeps running
-//!   in the shell. The `SplitBroker` routes per-method, so the split is
-//!   transparent to the caller.
 //! - The **local pipeline engine** (run/resume/cancel/discard, registry readers)
 //!   lives in the shell's `crate::ipc::corvus::pipeline`: it is the
 //!   plugin-defined engine driven by an injected `PipelineRuntime` and belongs to
@@ -29,10 +28,42 @@
 
 use corvus_core::prelude::CorvusState;
 use corvus_git_provider_api::prelude::{
-    CiFilter, CiJob, CiRun, CiWorkflow, PipelineCreateRequest, ProviderError,
+    CiFilter, CiJob, CiProviderInfo, CiRun, CiWorkflow, PipelineCreateRequest, ProviderError,
 };
+use serde_json::json;
 
 use crate::provider::{maybe_refresh, pe, provider_for_tab};
+use crate::repo::open;
+
+/// Detect the active repo's CI provider (GitHub Actions / GitLab CI) from its
+/// remotes, or `Ok(None)` when none match. The URL detection is pure
+/// (`CiProviderInfo::detect_from_remotes`); only `has_token` — a keyring read —
+/// crosses the reverse channel (`__has_token`), keeping the `Ok(None)` contract
+/// byte-identical to the in-process copy.
+#[arbor_rpc::handler]
+fn get_ci_provider(state: &CorvusState, tab_id: String) -> Result<Option<CiProviderInfo>, String> {
+    let repo = open(state, &tab_id)?;
+    let remotes: Vec<(String, String)> = corvus_git::remote::list_remotes(&repo)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|r| (r.name, r.url))
+        .collect();
+
+    let Some(mut info) = CiProviderInfo::detect_from_remotes(&remotes) else {
+        return Ok(None);
+    };
+    // `has_token` is keyring-coupled (shell-side); fill it over the reverse
+    // channel. A missing channel / probe failure leaves it false (no token).
+    if let Some(host) = state.host_caller() {
+        if let Ok(v) = host.call(
+            "__has_token",
+            json!({ "provider": info.provider, "gitlab_base_url": info.gitlab_base_url }),
+        ) {
+            info.has_token = serde_json::from_value(v).unwrap_or(false);
+        }
+    }
+    Ok(Some(info))
+}
 
 /// Fetch the most recent CI runs for the active repo tab.
 /// Calls the GitHub / GitLab REST API with the stored OAuth token.
