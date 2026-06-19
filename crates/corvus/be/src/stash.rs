@@ -15,20 +15,18 @@
 //! in-process copy, so plugins see identical events whether stash runs in- or
 //! out-of-process.
 //!
-//! **Recovery policy gap (known):** the force-apply / abort snapshots use
-//! `SnapshotPolicy::default()` because this process has no app config yet. When
-//! a user has customized the recovery size/extension limits, an OOP force-apply
-//! or abort snapshots with the defaults. Closing this is the first concrete item
-//! of the settings migration (push the configured policy to `CorvusState`, like
-//! the git program).
+//! The force-apply / abort safety snapshots use the shell-pushed recovery policy
+//! (`crate::repo::snapshot_policy`), falling back to the built-in default when
+//! none was pushed — so an OOP force-apply / abort honours the user's configured
+//! size / extension / retention limits, same as in-process (W0b).
 
 use corvus_core::prelude::CorvusState;
 use corvus_git::prelude::{
-    RecoveryKind, SnapshotPolicy, StashApplyResult, StashBlockingContent, StashEntry, StashRef,
+    RecoveryKind, StashApplyResult, StashBlockingContent, StashEntry, StashRef,
 };
 use git2::Repository;
 
-use crate::repo::{git, open};
+use crate::repo::{git, open, snapshot_policy};
 
 #[arbor_rpc::handler]
 fn list_stashes(state: &CorvusState, tab_id: String) -> Result<Vec<StashEntry>, String> {
@@ -114,13 +112,14 @@ fn force_stash_apply(
 ) -> Result<StashApplyResult, String> {
     let mut repo = open(state, &tab_id)?;
     let g = git(state);
+    let policy = snapshot_policy(state);
     let snapshot = |r: &Repository, summary: &str| {
         let _ = corvus_git::recovery::snapshot_with_policy(
             &g,
             r,
             RecoveryKind::StashForceApply,
             summary,
-            &SnapshotPolicy::default(),
+            &policy,
         );
     };
     corvus_git::stash::force_stash_apply(
@@ -143,13 +142,14 @@ fn abort_stash_apply(state: &CorvusState, tab_id: String) -> Result<(), String> 
         .ok_or_else(|| "bare repository has no working directory".to_string())?
         .to_path_buf();
     let g = git(state);
+    let policy = snapshot_policy(state);
     let snapshot = |r: &Repository, summary: &str| {
         let _ = corvus_git::recovery::snapshot_with_policy(
             &g,
             r,
             RecoveryKind::Other,
             summary,
-            &SnapshotPolicy::default(),
+            &policy,
         );
     };
     corvus_git::stash::abort_stash_apply_with_snapshot(&g, &workdir, Some(&repo), &snapshot)

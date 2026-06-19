@@ -8,12 +8,26 @@
 use std::path::PathBuf;
 
 use corvus_core::prelude::CorvusState;
-use corvus_git::prelude::GitCli;
+use corvus_git::prelude::{GitCli, SnapshotPolicy};
 use git2::Repository;
 
 /// The git invoker for this backend (the program the shell pushed, else `git`).
 pub fn git(state: &CorvusState) -> GitCli {
     GitCli::from_optional(state.git_program().map(PathBuf::from))
+}
+
+/// The recovery-snapshot policy the shell pushed (retention / size / extension
+/// limits), or the built-in [`SnapshotPolicy::default`] when no `"recovery"`
+/// config section has been pushed. Centralised so every snapshotting domain
+/// (stash, reset, recovery) reads the user-tuned policy from one place — closing
+/// the OOP "always-default" gap (W0b). The wire shape is the shell's
+/// `RecoveryConfig`, field-identical to `SnapshotPolicy`, so it deserializes
+/// directly; a malformed/partial section also falls back to the default.
+pub fn snapshot_policy(state: &CorvusState) -> SnapshotPolicy {
+    state
+        .config("recovery")
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
 }
 
 /// Resolve a tab to its repo path, or a clear error if the shell never

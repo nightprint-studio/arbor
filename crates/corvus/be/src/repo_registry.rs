@@ -22,3 +22,13 @@ fn __set_git_program(state: &CorvusState, program: Option<String>) -> Result<(),
     state.set_git_program(program);
     Ok(())
 }
+
+/// Push an app-config slice (keyed by `section`), so the OOP handlers read the
+/// user-tuned config instead of falling back to a built-in default. The shell
+/// sends `"recovery"` (the snapshot policy) on repo open and on config change;
+/// later config-dependent domains ride the same method with their own section.
+#[arbor_rpc::handler]
+fn __set_config(state: &CorvusState, section: String, value: serde_json::Value) -> Result<(), String> {
+    state.set_config(&section, value);
+    Ok(())
+}

@@ -23,8 +23,17 @@ corvus-plugin     = { path = "../plugin" }
 corvus-core       = { path = "../core" }
 corvus-git        = { path = "../git" }
 corvus-issues     = { path = "../issues" }
+# The keyring-free git-provider impls (REST domains served OOP): the registry +
+# trait live in `-api`, the GitHub/GitLab impls inject a reverse-channel
+# `SessionProvider` exactly like `corvus-issues` injects its tracker session.
+corvus-git-provider-api    = { path = "../git-provider/api" }
+corvus-git-provider-github = { path = "../git-provider/github" }
+corvus-git-provider-gitlab = { path = "../git-provider/gitlab" }
 git2          = { version = "0.20", features = ["vendored-libgit2"] }
 serde_json    = { workspace = true }
+# Decodes the base64 image data-URL when a repo-browser download writes an image
+# back to disk (already a workspace dependency via `corvus-git`).
+base64        = { workspace = true }
 # Drives the async issue-tracker handlers: each backend request runs on its own
 # serve-loop worker thread, so a multi-thread runtime is required (concurrent
 # `block_on` from many threads). `enable_all` gives reqwest its IO driver.

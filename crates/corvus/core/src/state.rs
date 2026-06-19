@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use arbor_ipc::prelude::{EventSink, HostCaller};
 use arbor_plugin_api::prelude::{HookDispatcher, PluginValue};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// The state the Corvus (git) backend owns — the seed of `corvus-be`.
 ///
@@ -41,6 +41,15 @@ pub struct CorvusState {
     /// an empty dispatcher (no listener) → fires are clean no-ops, which keeps
     /// this crate depending only on the Tauri-free `arbor-plugin-api`.
     hooks: Arc<HookDispatcher>,
+    /// App-config slices the shell pushes in, keyed by section name (`"recovery"`,
+    /// later `"diff"`, `"gitflow"`, …). Held as raw JSON on purpose: the typed
+    /// config structs live in `corvus-git` / the shell (they pull in `git2`),
+    /// and this crate stays config-type-free — the consuming handler in
+    /// `corvus-be` deserializes its own section into the real type (falling back
+    /// to that type's `Default` when a section is absent). In-process the shell
+    /// reads its `AppState` config directly and never touches this; it matters
+    /// only on the OOP path, where there is no app config in this process.
+    config: Mutex<Map<String, Value>>,
 }
 
 impl CorvusState {
@@ -53,6 +62,7 @@ impl CorvusState {
             git_program: Mutex::new(None),
             host: None,
             hooks: Arc::new(HookDispatcher::new()),
+            config: Mutex::new(Map::new()),
         }
     }
 
@@ -129,6 +139,22 @@ impl CorvusState {
     /// The git program to shell out to, or `None` → `git` on `PATH`.
     pub fn git_program(&self) -> Option<String> {
         self.git_program.lock().ok().and_then(|g| g.clone())
+    }
+
+    /// Push (or replace) a config section, keyed by name. The shell sends the
+    /// serialized app-config slice the OOP handlers need (e.g. `"recovery"`);
+    /// the handler deserializes it back into its own typed config. Generic by
+    /// design: a new config-dependent domain adds a section here, not a field.
+    pub fn set_config(&self, section: &str, value: Value) {
+        if let Ok(mut c) = self.config.lock() {
+            c.insert(section.to_string(), value);
+        }
+    }
+
+    /// Read a previously-pushed config section, or `None` if the shell hasn't
+    /// pushed it (the handler then falls back to its type's `Default`).
+    pub fn config(&self, section: &str) -> Option<Value> {
+        self.config.lock().ok().and_then(|c| c.get(section).cloned())
     }
 
     /// Emit a frontend event. Model-D-safe: in-process it forwards to
@@ -221,6 +247,21 @@ mod tests {
         // Default dispatcher (no listener) → the fire must not panic.
         let state = CorvusState::new(Arc::new(RecordingSink::default()));
         state.fire_hook("on_stash_push", json!({}));
+    }
+
+    #[test]
+    fn config_section_round_trips_and_defaults_to_none() {
+        let state = CorvusState::new(Arc::new(RecordingSink::default()));
+        // Absent section → None (handler falls back to its Default).
+        assert_eq!(state.config("recovery"), None);
+        // Push then read back the exact JSON the shell would send.
+        state.set_config("recovery", json!({ "retention_days": 7 }));
+        assert_eq!(state.config("recovery"), Some(json!({ "retention_days": 7 })));
+        // A second push replaces the section wholesale.
+        state.set_config("recovery", json!({ "retention_days": 30 }));
+        assert_eq!(state.config("recovery"), Some(json!({ "retention_days": 30 })));
+        // Sections are independent.
+        assert_eq!(state.config("diff"), None);
     }
 
     #[test]

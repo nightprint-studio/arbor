@@ -31,9 +31,11 @@ use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer, Cor
 mod bisect;
 mod issues;
 mod merge;
+mod provider;
 mod rebase;
 mod recovery;
 mod repo;
+mod repo_browser;
 mod repo_registry;
 mod reset;
 mod search;
@@ -140,6 +142,10 @@ fn main() {
     // The issue-tracker registry resolves credentials over the reverse channel
     // (the shell holds the keyring) — wire it before serving.
     issues::init(Arc::clone(&host) as Arc<dyn HostCaller>);
+
+    // The git-provider registry (repo-browser + the REST cohort) resolves
+    // credentials over the same reverse channel — seed it before serving.
+    provider::init(Arc::clone(&host) as Arc<dyn HostCaller>);
 
     // Two registries collected from every `#[arbor_rpc::handler]` linked into
     // this binary: sync (git domains + self-test) and async (issue trackers).

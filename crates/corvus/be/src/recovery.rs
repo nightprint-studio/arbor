@@ -12,28 +12,24 @@
 //! Read + restore + delete — this domain fires **no hooks** (the in-process copy
 //! fires none either).
 //!
-//! **Recovery policy gap (known):** the in-process copy loads the user-tuned
-//! retention/size policy from the app config (`crate::git::recovery` wrapper)
-//! and forwards it to the crate. This process has no app config yet, so every
-//! list/preview/restore here uses [`SnapshotPolicy::default()`] — i.e. the
-//! built-in 30-day retention. When a user has customized the recovery limits,
-//! an OOP list/prune applies the defaults instead. Closing this is the same
-//! settings-migration item as stash/reset (push the configured policy to
-//! `CorvusState`, like the git program); W0b will push the real policy.
+//! The user-tuned retention/size policy is the one the shell pushes into
+//! `CorvusState` (`crate::repo::snapshot_policy`); absent a push it falls back to
+//! [`SnapshotPolicy::default`]. So an OOP list/prune/restore honours the same
+//! configured limits as in-process (W0b).
 
 use corvus_core::prelude::CorvusState;
-use corvus_git::prelude::{RecoveryEntry, RestorePreview, SnapshotPolicy};
+use corvus_git::prelude::{RecoveryEntry, RestorePreview};
 
-use crate::repo::{git, open};
+use crate::repo::{git, open, snapshot_policy};
 
 /// List all recovery snapshots for a tab (newest first).
 ///
 /// Pruning of expired/over-cap entries happens inside the crate against the
-/// policy's `retention_days` — here the default 30-day window (see module gap).
+/// policy's `retention_days` — the shell-pushed value, else the default window.
 #[arbor_rpc::handler]
 fn list_recovery_entries(state: &CorvusState, tab_id: String) -> Result<Vec<RecoveryEntry>, String> {
     let repo = open(state, &tab_id)?;
-    corvus_git::recovery::list_entries(&git(state), &repo, SnapshotPolicy::default().retention_days)
+    corvus_git::recovery::list_entries(&git(state), &repo, snapshot_policy(state).retention_days)
         .map_err(|e| e.to_string())
 }
 
@@ -49,7 +45,7 @@ fn preview_recovery_restore(
         &git(state),
         &repo,
         entry_id,
-        SnapshotPolicy::default().retention_days,
+        snapshot_policy(state).retention_days,
     )
     .map_err(|e| e.to_string())
 }
@@ -64,7 +60,7 @@ fn restore_recovery_entry(
     entry_id: u64,
 ) -> Result<RecoveryEntry, String> {
     let repo = open(state, &tab_id)?;
-    corvus_git::recovery::restore(&git(state), &repo, entry_id, &SnapshotPolicy::default())
+    corvus_git::recovery::restore(&git(state), &repo, entry_id, &snapshot_policy(state))
         .map_err(|e| e.to_string())
 }
 

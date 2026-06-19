@@ -202,6 +202,17 @@ fn host_dispatch(method: &str, params: serde_json::Value) -> Result<serde_json::
     use crate::auth::vault::VaultSessionProvider;
     use arbor_ipc::prelude::SessionProvider;
 
+    // Proactive provider-keyed refresh — the OOP twin of the in-process
+    // `maybe_refresh_for_provider` pre-call an OOP REST handler can no longer
+    // make directly (the keyring is shell-side). Param is the provider string
+    // (`"github"` | `"gitlab"`); failures are swallowed exactly as in-process.
+    if method == "__maybe_refresh" {
+        let provider: String = serde_json::from_value(params)
+            .map_err(|e| format!("__maybe_refresh: invalid provider: {e}"))?;
+        tauri::async_runtime::block_on(crate::auth::maybe_refresh_for_provider(&provider));
+        return Ok(serde_json::Value::Null);
+    }
+
     let account: String = match method {
         "__session" | "__refresh" => serde_json::from_value(params)
             .map_err(|e| format!("{method}: invalid account: {e}"))?,
@@ -326,12 +337,36 @@ pub fn sync_repo_open(state: &AppState, tab_id: &str, path: &str) {
         "__set_git_program",
         serde_json::json!({ "program": program }),
     );
+    sync_config(state);
     let _ = dispatch_rpc(
         state,
         "corvus",
         "__repo_register",
         serde_json::json!({ "tab_id": tab_id, "path": path }),
     );
+}
+
+/// Push the app-config slices `corvus-be`'s OOP handlers need (currently the
+/// `recovery` snapshot policy) so they stop falling back to built-in defaults.
+/// Called on repo open (alongside the git program) and whenever the user changes
+/// a relevant setting. **Best-effort** like [`sync_repo_open`]: when `corvus-be`
+/// isn't running the method routes to the in-process loopback, returns
+/// `UnknownMethod`, and is dropped — the in-process handlers read the config
+/// directly, so nothing is lost. The wire shape is `RecoveryConfig`, which is
+/// field-identical to the crate's `SnapshotPolicy`, so the backend deserializes
+/// it straight into the policy.
+pub fn sync_config(state: &AppState) {
+    let recovery = crate::config::app_config::load()
+        .map(|c| c.recovery)
+        .unwrap_or_default();
+    if let Ok(value) = serde_json::to_value(&recovery) {
+        let _ = dispatch_rpc(
+            state,
+            "corvus",
+            "__set_config",
+            serde_json::json!({ "section": "recovery", "value": value }),
+        );
+    }
 }
 
 /// Forget a tab's repo in `corvus-be`. Best-effort (see [`sync_repo_open`]).

@@ -10,15 +10,15 @@
 //! `on_tag_delete` go to the co-located host after the repo handle is dropped —
 //! same payload as in-process, no longer dropped on the OOP path.
 //!
-//! **Recovery policy gap (known, shared with stash):** the hard-reset safety
-//! snapshot uses `SnapshotPolicy::default()` because this process has no app
-//! config yet. Closing it — push the configured policy to `CorvusState` — is W0b.
+//! The hard-reset safety snapshot uses the shell-pushed recovery policy
+//! (`crate::repo::snapshot_policy`), falling back to the built-in default when
+//! none was pushed — same configured limits as in-process (W0b).
 
 use corvus_core::prelude::CorvusState;
-use corvus_git::prelude::{RecoveryKind, ResetMode, SnapshotPolicy};
+use corvus_git::prelude::{RecoveryKind, ResetMode};
 use serde_json::json;
 
-use crate::repo::{git, open};
+use crate::repo::{git, open, snapshot_policy};
 
 #[arbor_rpc::handler]
 fn reset_to_commit(state: &CorvusState, tab_id: String, oid: String, mode: ResetMode) -> Result<(), String> {
@@ -46,7 +46,7 @@ fn reset_to_commit(state: &CorvusState, tab_id: String, oid: String, mode: Reset
                 &repo,
                 RecoveryKind::ResetHard,
                 &format!("reset --hard to {short}"),
-                &SnapshotPolicy::default(),
+                &snapshot_policy(state),
             );
         }
 

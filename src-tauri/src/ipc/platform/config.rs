@@ -49,9 +49,16 @@ fn get_recovery_config(state: &AppState) -> Result<RecoveryConfig, AppError> {
 /// Takes effect immediately for every subsequent snapshot.
 #[platform::handler(program = "platform")]
 fn set_recovery_config(state: &AppState, recovery: RecoveryConfig) -> Result<(), AppError> {
-    let mut config = state.lock_config()?;
-    config.recovery = recovery;
-    app_config::save(&config).map_err(|e| AppError::Other(e.to_string()))
+    {
+        let mut config = state.lock_config()?;
+        config.recovery = recovery;
+        app_config::save(&config).map_err(|e| AppError::Other(e.to_string()))?;
+    }
+    // Push the new policy to corvus-be so its OOP snapshots pick it up live
+    // (best-effort; a no-op when corvus-be isn't running). The config lock is
+    // released above before the round-trip.
+    crate::ipc::sync_config(state);
+    Ok(())
 }
 
 /// Prepend a path to the recent repos list (normalised to forward slashes),
