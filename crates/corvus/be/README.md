@@ -26,6 +26,9 @@ now run here** (see
 | `list_worktrees` / `add_worktree` / `remove_worktree` / `detect_project_type` | the git-worktree domain (read + create/remove), via `corvus-git`. The IDE-launch / IDE-config / streaming-detection methods stay **in-process** (AppHandle / app config / job registry) |
 | `list_recovery_entries` / `preview_recovery_restore` / `restore_recovery_entry` / `delete_recovery_entry` | the recovery-journal domain (read + restore), via `corvus-git` |
 | `rb_list_accounts` / `rb_list_repos` / `rb_browse_tree` / `rb_get_file_content` / `rb_download_file` (5) | the remote repo-browser domain (async, network), via the shared `corvus-git-provider-{api,github,gitlab}` crates — host-keyed providers, credentials over the **reverse channel** (no hooks) |
+| `supports_security` / `fetch_security_summary` / `fetch_security_findings` (3) | the security-findings reads (tab-keyed via `provider_for_tab`); `fetch_security_summary` fires `on_security_summary_loaded`. `export_security_report` stays in-process (job registry + branding) |
+| `list_mrs` / `get_mr_detail` / `create_mr` / `get_mr_capabilities` / `probe_mr_feature` / `disable_mr_auto_merge` / `close_mr` / `reopen_mr` / `mark_mr_ready` / `add_mr_comment` / `get_mr_files` / `get_mr_commits` / `get_mr_commit_diff` / `get_merged_mr_hints` (14) | the MR/PR domain; fires `on_mr_opened` (create) and `on_mr_updated` (close/reopen/ready). `merge_mr` (fires `on_mr_merged`) + `mr_start_conflict_resolution` stay in-process (local-git branch cleanup / job registry) |
+| `fetch_ci_runs` / `fetch_ci_jobs` / `list_ci_workflows` / `create_ci_pipeline` / `fetch_mr_ci_runs` / `retrigger_ci_run` (6) | the CI domain (no hooks). `get_ci_provider` stays in-process (resolves through `RepoManager` with a different `Ok(None)` contract) |
 | `linear_*` (8) / `jira_*` (8) | the issue-tracker domain (async, network), via the shared `corvus-issues` crate — credentials resolved over the **reverse channel** (`ChildSessionProvider` → shell keyring), never read here |
 
 The shell spawns this binary at startup, reads its `Hello` (the advertised method
@@ -51,17 +54,25 @@ recovery) read the **user-tuned** recovery `SnapshotPolicy` through
 fallback when no policy has been pushed, so OOP retention/size/extension limits
 match in-process.
 
-**Git-provider REST over the reverse channel.** The repo-browser (and the rest
-of the REST cohort as it lands) resolves credentials the same way `issues` does,
-one tier up: `main` seeds a `GitProviderRegistry` (`crate::provider`) with the
-keyring-free GitHub/GitLab providers, each injected a `ChildSessionProvider`, so
-`session`/`refresh` — including the on-401 refresh-and-retry baked into each
-provider's HTTP layer — marshal back to the shell's `VaultSessionProvider`. The
-shell's proactive `maybe_refresh_for_provider` pre-call is preserved as a
-`__maybe_refresh` host method (best-effort, swallowed on failure), so the OOP
-path behaves identically. Providers are resolved by **host string**
-(`"github"`/`"gitlab"`) — no tab / `RepoManager` — which is why the browser leads
-the cohort.
+**Git-provider REST over the reverse channel.** The provider REST domains
+(repo-browser, security reads, MR/PR, CI) resolve credentials the same way
+`issues` does, one tier up: `main` seeds a `GitProviderRegistry`
+(`crate::provider`) with the keyring-free GitHub/GitLab providers, each injected a
+`ChildSessionProvider`, so `session`/`refresh` — including the on-401
+refresh-and-retry baked into each provider's HTTP layer — marshal back to the
+shell's `VaultSessionProvider`. The shell's proactive `maybe_refresh_for_provider`
+pre-call is preserved as a `__maybe_refresh` host method (best-effort, swallowed
+on failure), so the OOP path behaves identically.
+
+Providers are resolved two ways, both in `crate::provider`: by **host string**
+(`"github"`/`"gitlab"`, e.g. the browser) via `for_host`, or **tab-keyed** via
+`provider_for_tab` — the OOP twin of the shell's resolver: it opens the repo by
+the pushed path, lists remotes, detects the provider with the **pure**
+`CiProviderInfo::detect_from_remotes` (now shared in `corvus-git-provider-api`),
+and looks it up, auto-registering a self-hosted GitLab instance on demand (the
+registry is a `Mutex` for that). Hooks (`on_security_summary_loaded`,
+`on_mr_opened`, `on_mr_updated`) fire inline to the co-located host with
+byte-identical payloads.
 
 **Async handlers need a runtime.** The issue-tracker handlers do real network
 I/O, so `main` builds a **multi-thread** Tokio runtime and the dispatch loop
@@ -95,14 +106,19 @@ user-tuned config through the `__set_config` push (W0b done — the recovery
 mechanism when those domains move). What's left, by gate:
 
 - **M3 credential broker (in progress):** the credential-coupled domains resolve
-  over the reverse channel. The REST cohort moves OOP by reusing the provider
-  registry seam — **repo-browser done**; `avatar`, `security` (summary/findings),
-  MR/PR, and CI are the same shape (the tab-keyed ones additionally resolve the
-  provider from the pushed repo path). Still gated: the git-protocol surface —
-  `remote` (fetch/push/pull) needs a `__git_credentials` host method (HTTP-Basic
-  `(user,pass)`, not the REST `AuthSession`); plus `notes` push and `gitflow`
-  finish. `security`'s `export_security_report` needs the job registry (proxied
-  to the shell) before it moves.
+  over the reverse channel. The trait-based REST cohort is **done** — repo-browser,
+  security reads, MR/PR, CI all run OOP via the provider registry seam. What's
+  left here:
+    - **`avatar` + `image` proxy:** token-sender based (`ci_impl::*_send_with_refresh`),
+      *not* the `GitProvider` trait — they need a small refactor onto a
+      `SessionProvider` before they can move.
+    - **Job-registry / local-git tails:** `export_security_report`, `merge_mr`'s
+      branch cleanup, `mr_start_conflict_resolution`, `get_ci_provider` stay
+      in-process until the job registry is proxied and `CorvusState` grows the
+      pieces they need.
+    - **git-protocol surface:** `remote` (fetch/push/pull) needs a
+      `__git_credentials` host method (HTTP-Basic `(user,pass)`, not the REST
+      `AuthSession`); plus `notes` push and `gitflow` finish.
 - **Per-registry state in `CorvusState`:** `branch` (the worktree-link sync
   registry), `stage`/`commit` (the `on_pre_commit` veto already works via
   `CorvusState::fire_pre_commit_veto`, but the handlers need the repo lock shape),

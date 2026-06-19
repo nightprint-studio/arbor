@@ -29,8 +29,10 @@ use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer, Cor
 // them. The shell pushes repo paths to `repo_registry`; `bisect` and `stash`
 // are the git domains served out-of-process so far.
 mod bisect;
+mod ci;
 mod issues;
 mod merge;
+mod mr;
 mod provider;
 mod rebase;
 mod recovery;
@@ -39,6 +41,7 @@ mod repo_browser;
 mod repo_registry;
 mod reset;
 mod search;
+mod security;
 mod stash;
 mod worktree;
 

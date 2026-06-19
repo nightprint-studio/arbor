@@ -20,11 +20,12 @@ pub use corvus_git_provider_api::ci::*;
 // ---------------------------------------------------------------------------
 
 /// Given a list of remote URLs, detect the first GitHub or GitLab remote.
-/// Prefers "origin"; otherwise returns the first match.
+/// Prefers "origin"; otherwise returns the first match. URL parsing is the pure
+/// `CiProviderInfo::detect_from_remotes` (shared with the OOP backend); this
+/// wrapper only fills the keyring-coupled `has_token` probe.
 pub fn detect_from_remotes(
     remotes: &[(String, String)], // (name, url)
 ) -> Option<CiProviderInfo> {
-    // Prefer "origin", then take the first matching remote.
     let ordered = remotes.iter()
         .filter(|(n, _)| n == "origin")
         .chain(remotes.iter().filter(|(n, _)| n != "origin"));
@@ -37,88 +38,25 @@ pub fn detect_from_remotes(
     None
 }
 
-/// Detect provider from a single remote URL.
+/// Detect provider from a single remote URL. Delegates the parsing to the pure
+/// `corvus-git-provider-api` detector and fills `has_token` from the keyring.
 pub fn detect_from_url(url: &str) -> Option<CiProviderInfo> {
-    if url.contains("github.com") {
-        let (owner, repo) = parse_github_url(url)?;
-        let has_token = get_github_token().ok().flatten().is_some();
-        return Some(CiProviderInfo {
-            provider:         "github".into(),
-            remote_url:       url.to_string(),
-            has_token,
-            owner:            Some(owner),
-            repo_name:        Some(repo),
-            project_path:     None,
-            gitlab_base_url:  None,
-        });
-    }
-    // Accept gitlab.com and any self-hosted GitLab (gitlab.*)
-    if url.contains("gitlab.com") || url.contains("gitlab.") {
-        let (base_url, path) = parse_gitlab_url(url)?;
-        // For self-hosted GitLab we can't use the generic "gitlab.com/arbor" token;
-        // fall back to host-based credential store.
-        let has_token = if base_url.contains("gitlab.com") {
-            get_gitlab_token(&base_url).ok().flatten().is_some()
-        } else {
-            crate::auth::credential_store::get_for_host(&base_url)
-                .ok()
-                .flatten()
-                .is_some()
-        };
-        return Some(CiProviderInfo {
-            provider:         "gitlab".into(),
-            remote_url:       url.to_string(),
-            has_token,
-            owner:            None,
-            repo_name:        None,
-            project_path:     Some(path),
-            gitlab_base_url:  Some(base_url),
-        });
-    }
-    None
-}
-
-// ---------------------------------------------------------------------------
-// URL parsers
-// ---------------------------------------------------------------------------
-
-fn parse_github_url(url: &str) -> Option<(String, String)> {
-    let path = if let Some(r) = url.strip_prefix("https://github.com/")
-        .or_else(|| url.strip_prefix("http://github.com/"))
-    {
-        r
-    } else if let Some(r) = url.strip_prefix("git@github.com:") {
-        r
-    } else {
-        return None;
+    let mut info = CiProviderInfo::detect_from_url(url)?;
+    info.has_token = match info.provider.as_str() {
+        "github" => get_github_token().ok().flatten().is_some(),
+        "gitlab" => {
+            // For self-hosted GitLab we can't use the generic "gitlab.com/arbor"
+            // token; fall back to host-based credential store.
+            let base = info.gitlab_base_url.as_deref().unwrap_or_default();
+            if base.contains("gitlab.com") {
+                get_gitlab_token(base).ok().flatten().is_some()
+            } else {
+                crate::auth::credential_store::get_for_host(base).ok().flatten().is_some()
+            }
+        }
+        _ => false,
     };
-    let path = path.trim_end_matches(".git");
-    let mut parts = path.splitn(2, '/');
-    let owner = parts.next()?.to_string();
-    let repo  = parts.next()?.to_string();
-    if owner.is_empty() || repo.is_empty() { return None; }
-    Some((owner, repo))
-}
-
-fn parse_gitlab_url(url: &str) -> Option<(String, String)> {
-    if let Some(rest) = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")) {
-        let without_git = rest.trim_end_matches(".git");
-        if let Some(slash) = without_git.find('/') {
-            let base = &without_git[..slash];
-            let path = &without_git[slash + 1..];
-            if path.is_empty() { return None; }
-            return Some((format!("https://{base}"), path.to_string()));
-        }
-    } else if let Some(rest) = url.strip_prefix("git@") {
-        let without_git = rest.trim_end_matches(".git");
-        if let Some(colon) = without_git.find(':') {
-            let base = &without_git[..colon];
-            let path = &without_git[colon + 1..];
-            if path.is_empty() { return None; }
-            return Some((format!("https://{base}"), path.to_string()));
-        }
-    }
-    None
+    Some(info)
 }
 
 // ---------------------------------------------------------------------------
