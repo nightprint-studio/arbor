@@ -6,6 +6,20 @@
 
 <p class="doc-lead">Open Settings with <Kbd action="settings" /> or via the gear icon in the Activity Bar. Settings are organised into groups in the left sidebar — <em>Interface</em>, <em>Git</em>, <em>Tools</em>, <em>Performance</em>, <em>Access</em>, and <em>Project</em>. Global, host-wide tooling (pipeline cap, IDE registry, terminal registry) lives under <em>Tools</em>; per-repository overrides for those tools sit under <em>Project</em>.</p>
 
+<h2>Profiles</h2>
+<p>
+  A <strong>profile</strong> is an isolated environment with its own settings, its own
+  installed plugins, and its own list of repositories and workspaces — for example a
+  personal setup and a work setup kept apart. Switch profiles from the title-bar <strong>gear menu → Profile</strong>:
+  the submenu lists every profile (the active one is checked) and switching reloads the
+  window onto it. Pick <strong>Manage profiles…</strong> to create, rename, or delete one.
+</p>
+<ul>
+  <li><strong>default</strong> is always present and can't be renamed or deleted.</li>
+  <li>The active profile and the last remaining profile can't be deleted.</li>
+  <li>Each profile's files live under <code>arbor/profiles/&lt;name&gt;/</code>; truly global state (the active-profile pointer, the portable Git binary) stays outside any profile.</li>
+</ul>
+
 <h2>Interface</h2>
 
 <h3>Appearance</h3>

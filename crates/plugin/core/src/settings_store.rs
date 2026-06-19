@@ -17,21 +17,24 @@ pub type SettingsMap = serde_json::Map<String, serde_json::Value>;
 // Path builders
 // ---------------------------------------------------------------------------
 
+/// Root directory for all per-plugin persistent data
+/// (`arbor/profiles/<profile>/plugins/plugin_data/`). Per-profile; debug/release
+/// isolation comes from the active profile (`dev` vs `default`), not a suffix.
+/// The single source for both [`global_settings_path`] and the uninstall
+/// cleanup in the host lifecycle.
+pub fn plugin_data_dir() -> PathBuf {
+    arbor_core::prelude::profile_plugins_dir().join("plugin_data")
+}
+
 /// Path to the global settings file for a plugin
-/// (`~/.config/arbor/plugin_data/<name>/global.json`).
+/// (`…/plugins/plugin_data/<name>/global.json`).
 ///
 /// All persistent plugin data lives here now. The legacy `settings.json`
 /// (owned by the old `[[setting]]` manifest schema) was removed when
 /// settings were converted to the contribution model; if such a file
 /// still exists from an old install it is simply ignored.
-///
-/// Dev builds use `plugin_data-dev/` so a debug session doesn't clobber a
-/// stable Arbor's per-plugin settings.
 pub fn global_settings_path(plugin_name: &str) -> PathBuf {
-    let data_subdir = if cfg!(debug_assertions) { "plugin_data-dev" } else { "plugin_data" };
-    arbor_core::prelude::arbor_config_path(data_subdir)
-        .join(plugin_name)
-        .join("global.json")
+    plugin_data_dir().join(plugin_name).join("global.json")
 }
 
 /// Path to the per-repo project settings file for a plugin

@@ -3,6 +3,8 @@
 //! Holds the cross-crate primitives that have no business depending on Tauri:
 //!
 //! - [`paths`]   — locations on disk Arbor owns (config / data / cache roots).
+//! - [`profile`] — the active-profile cell + profile/product-scoped path
+//!                 helpers (`arbor/profiles/<profile>/<product>/`).
 //! - [`http`]    — `reqwest` client with the Arbor user-agent + default timeout.
 //! - [`error`]   — [`CoreError`] for failures inside this crate; mapped to
 //!                 the host's `AppError` at the boundary.
@@ -27,3 +29,4 @@ pub mod error;
 pub mod http;
 pub mod paths;
 pub mod prelude;
+pub mod profile;

@@ -113,7 +113,7 @@ pub fn plugin_dir() -> PathBuf {
             }
         }
     }
-    arbor_core::prelude::arbor_config_path("plugins")
+    arbor_core::prelude::profile_plugins_dir().join("installed")
 }
 
 // ---------------------------------------------------------------------------
@@ -178,14 +178,9 @@ pub fn topo_sort_manifests(
 // ---------------------------------------------------------------------------
 
 fn plugin_states_path() -> PathBuf {
-    // In dev (debug) builds, use a separate filename so dev sessions don't
-    // overwrite the prod-installed Arbor's enable/disable state.
-    let filename = if cfg!(debug_assertions) {
-        "plugin_states-dev.json"
-    } else {
-        "plugin_states.json"
-    };
-    arbor_core::prelude::arbor_config_path(filename)
+    // Per-profile; debug/release isolation comes from the active profile
+    // (`dev` vs `default`), not a filename suffix.
+    arbor_core::prelude::profile_plugins_dir().join("plugin_states.json")
 }
 
 pub fn load_plugin_states() -> HashMap<String, bool> {

@@ -23,6 +23,7 @@ mod commands;
 mod auth;
 mod plugin;
 mod config;
+mod profile;
 mod terminal;
 mod jobs;
 mod plugin_host_commands;
@@ -380,6 +381,14 @@ impl AppState {
     }
 
     fn new() -> Self {
+        // Seed the active profile from the on-disk pointer before any
+        // profile-scoped path resolves — the split config files live under
+        // `arbor/profiles/<active>/` (docs/profiles-and-product-config.md).
+        arbor_core::prelude::init_active_profile();
+        // Relocate the pre-profiles flat satellite files (workspaces, repos,
+        // session, …) into the active profile's corvus bucket before anything
+        // reads them. One-shot + idempotent.
+        config::profile_migration::migrate_flat_satellites_to_active_profile();
         let config = match config::app_config::load() {
             Ok(c) => c,
             Err(e) => {
@@ -480,6 +489,34 @@ impl AppState {
             router:                 Arc::new(OnceLock::new()),
             corvus:                 Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Re-resolve every per-profile cache against the now-active profile, for a
+    /// **live** profile switch (`commands::profile_commands::switch_profile`).
+    /// The active-profile cell must already point at the target, so the same
+    /// loaders `new()` uses now read the new profile's files. Reloads the
+    /// persistent state and drops session/per-tab state tied to the old
+    /// profile's repos (the frontend reloads its stores, re-opening tabs from
+    /// the new profile's `session.json`). The plugin host is reloaded separately
+    /// by the caller via `reload_runtime`.
+    pub fn reload_for_active_profile(&self) {
+        match config::app_config::load() {
+            Ok(c) => { if let Ok(mut g) = self.config.lock() { *g = c; } }
+            Err(e) => tracing::warn!("profile switch: config reload failed: {e}"),
+        }
+        if let Ok(mut g) = self.repo_registry.lock() { *g = crate::workspace::registry::load(); }
+        if let Ok(mut g) = self.workspaces.lock()    { *g = crate::workspace::store::load(); }
+        if let Ok(mut g) = self.linked_worktrees.lock() { *g = crate::linked_worktrees::load(); }
+        if let Ok(mut g) = self.marketplace.lock()   { *g = crate::marketplace::build_registry(); }
+        // Drop state bound to the old profile's open repos — the frontend
+        // re-opens tabs after it reloads, which re-populates these.
+        if let Ok(mut g) = self.repos.lock()       { *g = RepoManager::new(); }
+        if let Ok(mut g) = self.terminals.lock()   { *g = TerminalManager::new(); }
+        if let Ok(mut g) = self.brp.lock()         { *g = BrpRegistry::default(); }
+        if let Ok(mut g) = self.stats_cache.lock()     { g.clear(); }
+        if let Ok(mut g) = self.stats_computing.lock() { g.clear(); }
+        if let Ok(mut g) = self.ticket_caches.lock()   { g.clear(); }
+        if let Ok(mut g) = self.active_tab_id.lock()   { *g = None; }
     }
 
     /// Shared trigger engine, once `setup()` has built it. Returns `None`
@@ -1039,6 +1076,13 @@ pub fn run() {
             // MR/PR Activity timeline defaults
             // Appearance preferences (window control style, font scale, —)
             commands::config_commands::set_explorer_config,
+            // Profile management (keep-shell): CRUD + switch (relaunch).
+            commands::profile_commands::list_profiles,
+            commands::profile_commands::get_active_profile,
+            commands::profile_commands::create_profile,
+            commands::profile_commands::rename_profile,
+            commands::profile_commands::delete_profile,
+            commands::profile_commands::switch_profile,
             // UI animations preferences (enabled, speed)
             // Commit preferences (host-wide template fallback, —)
             // First-run onboarding tour state

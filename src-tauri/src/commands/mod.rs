@@ -2,6 +2,7 @@ pub mod remote_commands;
 pub mod rpc_commands;
 pub mod plugin_commands;
 pub mod config_commands;
+pub mod profile_commands;
 pub mod terminal_commands;
 pub mod job_commands;
 pub mod fs_commands;

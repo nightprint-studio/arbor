@@ -14,3 +14,9 @@ pub use crate::paths::{
     arbor_cache_dir, arbor_config_dir, arbor_config_path, arbor_data_dir,
     nemus_config_dir, nemus_config_path, nemus_data_dir, try_arbor_config_path,
 };
+pub use crate::profile::{
+    active_profile, active_profile_pointer_path, arbor_profile_dir, arbor_profile_path,
+    init_active_profile, is_valid_profile_name, product_dir, product_dir_for, product_path,
+    profile_dir_for, profile_plugins_dir, profiles_root, set_active_profile, try_product_path,
+    DEFAULT_PROFILE, PRODUCT_CORVUS, PRODUCT_NEMUS,
+};

@@ -47,7 +47,7 @@ prelude.
 - `tree` — `TreeStore` + `IconRegistry` for `kind="tree"` plugin
   sidebars.
 - `toolchain` — host-side `ToolchainRegistry` (per-kind JSON store
-  under `arbor_config_path("toolchains")`).
+  under `profile_plugins_dir()/toolchains`).
 - `settings_store` — JSON read/write helpers for per-plugin global /
   project settings.
 - `lua_ctx` — per-VM `PluginLuaCtx` stashed in `lua.app_data`; the
@@ -68,7 +68,7 @@ prelude.
   `TimerCancels` / `TimerCounter`.
 - `runtime::manifest` — `plugin.toml` discovery + topological sort
   over `[[dependencies]]` + persisted enable/disable state
-  (`plugin_states[-dev].json`). Caller-supplied roots
+  (`profile_plugins_dir()/plugin_states.json`). Caller-supplied roots
   (`discover_in_roots`) so the marketplace overlay stays decoupled.
 - `runtime::scheduler` — bridge between `PluginHost` and the shared
   `arbor-scheduler` engine.

@@ -570,8 +570,7 @@ impl PluginHost {
         }
 
         // Step 3: remove the global plugin_data folder for this plugin.
-        let data_subdir = if cfg!(debug_assertions) { "plugin_data-dev" } else { "plugin_data" };
-        let data_root = arbor_core::prelude::arbor_config_path(data_subdir).join(name);
+        let data_root = crate::settings_store::plugin_data_dir().join(name);
         if data_root.exists() {
             if let Err(e) = std::fs::remove_dir_all(&data_root) {
                 warnings.push(format!("failed to remove {}: {e}", data_root.display()));

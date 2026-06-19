@@ -142,7 +142,7 @@ impl RepoRegistry {
 // ---------------------------------------------------------------------------
 
 pub fn registry_path() -> PathBuf {
-    arbor_core::prelude::arbor_config_path("repos.json")
+    arbor_core::prelude::product_path(arbor_core::prelude::PRODUCT_CORVUS, "repos.json")
 }
 
 pub fn load() -> RepoRegistry {

@@ -1,9 +1,26 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
+use arbor_core::prelude::{arbor_config_path, arbor_profile_path, product_path, PRODUCT_CORVUS};
 use crate::error::Result;
 use crate::git::gitflow::GitFlowConfig;
 use crate::git::ticket_links::StorageBackend;
+
+/// Top-level `AppConfig` keys that are product-agnostic and persist to the
+/// per-profile `profile.toml`. Everything not listed here (and not in
+/// [`GLOBAL_KEYS`]) persists to the corvus product file — so a new corvus
+/// section needs no change here, while a new *generic* section must be added.
+/// Single source of truth for the partition. See
+/// `docs/profiles-and-product-config.md`.
+const GENERIC_KEYS: &[&str] = &[
+    "theme", "keybindings", "appearance", "animations", "onboarding",
+    "whats_new", "explorer", "plugins_enabled", "marketplace", "deep_link",
+];
+
+/// Top-level `AppConfig` keys that are global (shared across every profile),
+/// kept at the `arbor/` root rather than inside a profile. OAuth `client_id`
+/// overrides are deployment identity, not a per-profile user pref.
+const GLOBAL_KEYS: &[&str] = &["oauth"];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -11,11 +28,16 @@ use crate::git::ticket_links::StorageBackend;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    #[serde(default)]
     pub theme: ThemeConfig,
+    #[serde(default)]
     pub diff: DiffConfig,
+    #[serde(default)]
     pub graph: GraphConfig,
+    #[serde(default)]
     pub keybindings: KeybindingsConfig,
     /// Paths of recently opened repositories.
+    #[serde(default)]
     pub recent_repos: Vec<String>,
     /// Global Git Flow configuration (can be overridden per-repo in .arbor/config.toml).
     #[serde(default)]
@@ -909,6 +931,12 @@ pub struct ThemeConfig {
     pub active: String,
 }
 
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self { active: "dark".into() }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffMode {
@@ -951,6 +979,22 @@ fn default_diff_mode_split() -> DiffMode { DiffMode::Split }
 fn default_true_diff() -> bool { true }
 fn default_tab_width() -> u32 { 4 }
 
+impl Default for DiffConfig {
+    fn default() -> Self {
+        Self {
+            algorithm:      DiffAlgorithm::Myers,
+            context_lines:  3,
+            word_wrap:      false,
+            full_file:      false,
+            virt_threshold: default_virt_threshold(),
+            mode:           default_diff_mode_split(),
+            file_list_view: FileListView::default(),
+            confirm_discard: default_true_diff(),
+            tab_width:      default_tab_width(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FileListView {
@@ -980,6 +1024,18 @@ pub struct GraphConfig {
     /// `false` the chips are hidden even if links are available.
     #[serde(default = "default_true")]
     pub ticket_links_enabled: bool,
+}
+
+impl Default for GraphConfig {
+    fn default() -> Self {
+        Self {
+            page_size:            500,
+            show_remote_branches: true,
+            show_tags:            true,
+            paginate:             true,
+            ticket_links_enabled: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1052,25 +1108,9 @@ impl Default for CacheConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            theme: ThemeConfig { active: "dark".into() },
-            diff: DiffConfig {
-                algorithm: DiffAlgorithm::Myers,
-                context_lines: 3,
-                word_wrap: false,
-                full_file: false,
-                virt_threshold: 200,
-                mode: DiffMode::Split,
-                file_list_view: FileListView::List,
-                confirm_discard: true,
-                tab_width: default_tab_width(),
-            },
-            graph: GraphConfig {
-                page_size: 500,
-                show_remote_branches: true,
-                show_tags: true,
-                paginate: true,
-                ticket_links_enabled: true,
-            },
+            theme: ThemeConfig::default(),
+            diff: DiffConfig::default(),
+            graph: GraphConfig::default(),
             keybindings: KeybindingsConfig::default(),
             recent_repos: Vec::new(),
             gitflow: GitFlowConfig::default(),
@@ -1106,26 +1146,153 @@ impl Default for AppConfig {
 // Persistence
 // ---------------------------------------------------------------------------
 
+// `AppConfig` stays one flat aggregate in memory — call sites read
+// `cfg.<field>` unchanged — but its on-disk form is split across the
+// profile × product layout (`docs/profiles-and-product-config.md`). Three
+// files, partitioned by top-level key:
+//   - generic (product-agnostic) → arbor/profiles/<active>/profile.toml
+//   - global (shared)            → arbor/oauth.toml
+//   - corvus (git product)       → arbor/profiles/<active>/corvus/config.toml
+// The partition has ONE source of truth: GENERIC_KEYS + GLOBAL_KEYS (everything
+// else is corvus). Path resolution honours the active profile cell in
+// `arbor-core`, seeded at boot.
+
+/// Legacy monolithic config path (`arbor/config.toml`). Still *read* for the
+/// one-shot migration into the split layout; never written anymore.
 pub fn config_path() -> PathBuf {
-    arbor_core::prelude::arbor_config_path("config.toml")
+    arbor_config_path("config.toml")
 }
 
+fn profile_file() -> PathBuf { arbor_profile_path("profile.toml") }
+fn corvus_file() -> PathBuf { product_path(PRODUCT_CORVUS, "config.toml") }
+fn oauth_file() -> PathBuf { arbor_config_path("oauth.toml") }
+
 pub fn load() -> Result<AppConfig> {
-    let path = config_path();
-    if !path.exists() {
-        return Ok(AppConfig::default());
+    let (profile_p, corvus_p, oauth_p) = (profile_file(), corvus_file(), oauth_file());
+
+    // Split layout present → merge the per-file tables back into one AppConfig.
+    // Per-field `#[serde(default)]` lets each file carry only its own keys.
+    if profile_p.exists() || corvus_p.exists() {
+        let mut merged = toml::Table::new();
+        for p in [&profile_p, &corvus_p, &oauth_p] {
+            if p.exists() {
+                let tbl: toml::Table = toml::from_str(&std::fs::read_to_string(p)?)?;
+                for (k, v) in tbl {
+                    merged.insert(k, v);
+                }
+            }
+        }
+        return Ok(toml::Value::Table(merged).try_into()?);
     }
-    let content = std::fs::read_to_string(&path)?;
-    let config: AppConfig = toml::from_str(&content)?;
-    Ok(config)
+
+    // One-shot migration: a pre-profiles install has a flat config.toml. Load it
+    // and persist into the split layout so later boots take the path above. The
+    // legacy file is left in place (a backup; nemus still reads its `[nemus]`).
+    // Gated to the DEFAULT profile: the flat config is conceptually the default
+    // profile's, so a freshly-created non-default profile must start from
+    // built-in defaults, not inherit the legacy monolith.
+    let legacy = config_path();
+    if arbor_core::prelude::active_profile() == arbor_core::prelude::DEFAULT_PROFILE
+        && legacy.exists()
+    {
+        let config: AppConfig = toml::from_str(&std::fs::read_to_string(&legacy)?)?;
+        let _ = save(&config);
+        return Ok(config);
+    }
+
+    Ok(AppConfig::default())
 }
 
 pub fn save(config: &AppConfig) -> Result<()> {
-    let path = config_path();
+    let table = match toml::Value::try_from(config)? {
+        toml::Value::Table(t) => t,
+        other => {
+            return Err(crate::error::AppError::Other(format!(
+                "config did not serialize to a TOML table: {other:?}"
+            )))
+        }
+    };
+    let (generic, global, corvus) = partition_table(table);
+    write_toml(&profile_file(), generic)?;
+    write_toml(&corvus_file(), corvus)?;
+    write_toml(&oauth_file(), global)?;
+    Ok(())
+}
+
+/// Split a flat config table into (generic, global, corvus) by top-level key.
+/// Pure — no disk — so the partition is unit-testable.
+fn partition_table(table: toml::Table) -> (toml::Table, toml::Table, toml::Table) {
+    let (mut generic, mut global, mut corvus) =
+        (toml::Table::new(), toml::Table::new(), toml::Table::new());
+    for (k, v) in table {
+        let bucket = if GENERIC_KEYS.contains(&k.as_str()) {
+            &mut generic
+        } else if GLOBAL_KEYS.contains(&k.as_str()) {
+            &mut global
+        } else {
+            &mut corvus
+        };
+        bucket.insert(k, v);
+    }
+    (generic, global, corvus)
+}
+
+/// Serialize one partitioned table to `path`, creating parent dirs. An empty
+/// table still writes (an empty file) so the layout materializes predictably.
+fn write_toml(path: &Path, table: toml::Table) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let content = toml::to_string_pretty(config)?;
-    std::fs::write(&path, content)?;
+    let content = toml::to_string_pretty(&toml::Value::Table(table))?;
+    std::fs::write(path, content)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_partitions_keys_then_merge_round_trips() {
+        let cfg = AppConfig::default();
+        let table = match toml::Value::try_from(&cfg).unwrap() {
+            toml::Value::Table(t) => t,
+            _ => panic!("AppConfig must serialize to a table"),
+        };
+
+        let (generic, global, corvus) = partition_table(table);
+        // Generic UI prefs land in the profile bucket…
+        assert!(generic.contains_key("theme"));
+        assert!(generic.contains_key("appearance"));
+        // …OAuth in the global bucket…
+        assert!(global.contains_key("oauth"));
+        // …and git-domain sections in the corvus bucket (never in generic).
+        assert!(corvus.contains_key("diff"));
+        assert!(corvus.contains_key("gitflow"));
+        assert!(!corvus.contains_key("theme"));
+        assert!(!generic.contains_key("diff"));
+
+        // Merge the three files back → deserialize → key fields survive.
+        let mut merged = toml::Table::new();
+        for t in [generic, global, corvus] {
+            for (k, v) in t {
+                merged.insert(k, v);
+            }
+        }
+        let restored: AppConfig = toml::Value::Table(merged).try_into().unwrap();
+        assert_eq!(restored.theme.active, cfg.theme.active);
+        assert_eq!(restored.diff.context_lines, cfg.diff.context_lines);
+        assert_eq!(restored.graph.page_size, cfg.graph.page_size);
+    }
+
+    #[test]
+    fn partial_files_deserialize_via_field_defaults() {
+        // A profile.toml that carries only `[theme]` must still load — the
+        // missing corvus/global sections fall back to their defaults.
+        let only_theme: toml::Table =
+            toml::from_str("[theme]\nactive = \"light\"\n").unwrap();
+        let cfg: AppConfig = toml::Value::Table(only_theme).try_into().unwrap();
+        assert_eq!(cfg.theme.active, "light");
+        assert_eq!(cfg.diff.context_lines, DiffConfig::default().context_lines);
+    }
 }

@@ -398,8 +398,10 @@ fn get_container(
 /// re-fire `on_repo_open` for every open tab (plus `on_tab_switch` for the
 /// active one so plugins that derive `current_repo` from the last lifecycle
 /// event land on the right tab), then broadcast `arbor://plugins-reloaded`.
-/// Used by `reload_plugins` and the "enable" branch of `set_plugins_enabled`.
-fn reload_runtime(state: &AppState) -> Result<(), AppError> {
+/// Used by `reload_plugins` and the "enable" branch of `set_plugins_enabled`,
+/// and by the live profile switch (`commands::profile_commands::switch_profile`)
+/// to pick up the new profile's plugin set.
+pub(crate) fn reload_runtime(state: &AppState) -> Result<(), AppError> {
     // Cancel all running plugin jobs before reloading so stale processes don't linger.
     if let Ok(mut jobs) = state.jobs.lock() {
         jobs.cancel_by_plugin(None);

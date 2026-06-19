@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **Profiles**: keep isolated environments — each with its own settings, installed plugins, and repositories/workspaces — and switch between them live from the title-bar **gear menu → Profile** (no app restart). *Manage profiles…* creates, renames, and deletes them; `default` is always present.
 - **Multi-commit diff**: select several commits in the graph — **Ctrl+click** to toggle, **Shift+click** or **Shift+↑/↓** for a range — and the Detail panel shows the *combined* changes across them (the cumulative diff from the oldest selection's parent to the newest), with per-file hunks loaded on demand just like a single commit.
 - **Keyboard Shortcuts panel**: a searchable, floating panel to look up *and* rebind every shortcut in one place — open with **Shift+F1**, the gear menu (*Keyboard Shortcuts…*), or the Command Palette. Filter by action, click a shortcut to record a new combination, reset one binding or all to defaults; plugin-registered shortcuts are listed read-only.
 - **Full backup / restore**: *Export all* in the Repository Management toolbar writes every group and workspace to one bundle file, and importing such a file restores the whole set in one shot — idempotent (merged by name) and non-blocking (unknown repos land as *not cloned*).

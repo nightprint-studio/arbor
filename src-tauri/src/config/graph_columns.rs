@@ -80,7 +80,7 @@ impl Default for GraphColumnsConfig {
 }
 
 pub fn config_path() -> PathBuf {
-    arbor_core::prelude::arbor_config_path("graph_columns.toml")
+    arbor_core::prelude::product_path(arbor_core::prelude::PRODUCT_CORVUS, "graph_columns.toml")
 }
 
 pub fn load() -> GraphColumnsConfig {

@@ -26,7 +26,7 @@ pub fn now_ms() -> i64 {
 }
 
 fn run_store_dir() -> Option<PathBuf> {
-    arbor_core::prelude::try_arbor_config_path("pipeline_runs")
+    arbor_core::prelude::try_product_path(arbor_core::prelude::PRODUCT_CORVUS, "pipeline_runs")
 }
 
 pub fn persist_run(run: &PipelineRun) {

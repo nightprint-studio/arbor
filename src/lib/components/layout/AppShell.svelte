@@ -88,6 +88,7 @@
   import ThemeEditorModal from '../theme/ThemeEditorModal.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { brandingStore } from '$lib/stores/branding.svelte';
+  import { profileStore } from '$lib/stores/profiles.svelte';
   import { jsonStudioStore } from '$lib/stores/json-studio.svelte';
   import { ronStudioStore } from '$lib/stores/ron-studio.svelte';
   import { tomlStudioStore } from '$lib/stores/toml-studio.svelte';
@@ -541,6 +542,10 @@
 
   // Initialise theme store — loads active theme from config and applies CSS vars.
   onMount(() => { themeStore.init(); });
+
+  // Load the profile list + active profile, and listen for `profile-switched`
+  // (reloads the window onto the new profile). Powers the title-bar gear menu.
+  onMount(() => { void profileStore.init(); });
 
   // Hydrate plugin-applied branding (logo) from the backend snapshot, then
   // keep it in sync via arbor://branding-changed events. Done up-front so

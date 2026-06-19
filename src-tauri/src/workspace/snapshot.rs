@@ -50,7 +50,7 @@ pub struct TabSnapshot {
 }
 
 fn snapshot_dir() -> PathBuf {
-    arbor_core::prelude::arbor_config_path("workspace-state")
+    arbor_core::prelude::product_path(arbor_core::prelude::PRODUCT_CORVUS, "workspace-state")
 }
 
 fn snapshot_path(ws_id: &str) -> PathBuf {

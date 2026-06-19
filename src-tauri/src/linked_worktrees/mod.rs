@@ -342,7 +342,7 @@ impl WorktreeLinkRegistry {
 // ---------------------------------------------------------------------------
 
 pub fn links_file_path() -> PathBuf {
-    arbor_core::prelude::arbor_config_path("linked_worktrees.toml")
+    arbor_core::prelude::product_path(arbor_core::prelude::PRODUCT_CORVUS, "linked_worktrees.toml")
 }
 
 pub fn load() -> WorktreeLinkRegistry {

@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 pub fn toolchains_dir() -> PathBuf {
-    arbor_core::prelude::arbor_config_path("toolchains")
+    arbor_core::prelude::profile_plugins_dir().join("toolchains")
 }
 
 // ---------------------------------------------------------------------------

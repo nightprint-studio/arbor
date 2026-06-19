@@ -304,7 +304,7 @@ impl WorkspaceStore {
 // ---------------------------------------------------------------------------
 
 pub fn store_path() -> PathBuf {
-    arbor_core::prelude::arbor_config_path("workspaces.json")
+    arbor_core::prelude::product_path(arbor_core::prelude::PRODUCT_CORVUS, "workspaces.json")
 }
 
 pub fn load() -> WorkspaceStore {

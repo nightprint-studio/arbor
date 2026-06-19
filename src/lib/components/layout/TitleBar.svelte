@@ -14,9 +14,11 @@
   import {
     Settings, Keyboard, LayoutDashboard, Palette,
     FolderOpen, Download, FolderPlus, Package, Clock, ScrollText, Info, LogOut, Zap,
+    UserCog, User, Plus,
   } from 'lucide-svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
+  import { profileStore } from '$lib/stores/profiles.svelte';
   import { contributionStore } from '$lib/stores/contribution.svelte';
   import { pluginStore } from '$lib/stores/plugin.svelte';
   import { firePluginAction } from '$lib/ipc/plugin';
@@ -28,6 +30,7 @@
   import WindowControls from './WindowControls.svelte';
   import WorkspaceDropdown from '../workspace/WorkspaceDropdown.svelte';
   import CustomizeActivityBarModal from './CustomizeActivityBarModal.svelte';
+  import ProfileManagerModal from '$lib/components/shared/ProfileManagerModal.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   // Title bar buttons sit at the very top — tooltips fly downward away from the
   // bar, never above (they'd be clipped by the window edge).
@@ -49,6 +52,7 @@
   }: Props = $props();
 
   let customizeActivityBarOpen = $state(false);
+  let profileManagerOpen = $state(false);
 
   /** Last path segment for a recent-repo label. */
   function basename(path: string): string {
@@ -132,6 +136,20 @@
     { kind: 'item' as const, id: 'edit-themes', label: 'Edit themes…', icon: Settings, onclick: onOpenThemeEditor },
   ]);
 
+  // ── Profiles submenu (quick-switch + manage) ─────────────────────────────────
+  const profileItems = $derived<DropdownItem[]>([
+    ...profileStore.list.map(name => ({
+      kind: 'item' as const, id: `profile:${name}`, label: name, icon: User,
+      active: profileStore.active === name,
+      onclick: () => void profileStore.switchTo(name),
+    })),
+    { kind: 'separator' as const },
+    { kind: 'item' as const, id: 'new-profile', label: 'New profile…', icon: Plus,
+      onclick: () => { profileManagerOpen = true; } },
+    { kind: 'item' as const, id: 'manage-profiles', label: 'Manage profiles…', icon: UserCog,
+      onclick: () => { profileManagerOpen = true; } },
+  ]);
+
   const settingsMenu = $derived<DropdownItem[]>([
     { kind: 'item', id: 'settings', label: 'Settings…', icon: Settings, action: 'settings',
       active: uiStore.activePanel === 'settings',
@@ -141,6 +159,7 @@
     { kind: 'item', id: 'customize-ab', label: 'Customize Activity Bar…', icon: LayoutDashboard,
       onclick: () => { customizeActivityBarOpen = true; } },
     { kind: 'separator' },
+    { kind: 'submenu', id: 'profiles', label: 'Profile', icon: UserCog, items: profileItems },
     { kind: 'submenu', id: 'theme', label: 'Theme', icon: Palette, items: themeItems },
   ]);
 </script>
@@ -200,6 +219,10 @@
 
 {#if customizeActivityBarOpen}
   <CustomizeActivityBarModal onClose={() => customizeActivityBarOpen = false} />
+{/if}
+
+{#if profileManagerOpen}
+  <ProfileManagerModal onClose={() => profileManagerOpen = false} />
 {/if}
 
 <!-- Plugin-contributed title-bar item (same pill shape on the left + right). -->

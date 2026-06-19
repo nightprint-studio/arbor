@@ -18,8 +18,8 @@ pub use crate::contribution::{
 };
 pub use crate::lua_ctx::{install as install_lua_ctx, record as record_lua, PluginLuaCtx};
 pub use crate::settings_store::{
-    SettingsMap, global_settings_path, load_settings_file, project_settings_path,
-    save_settings_file,
+    SettingsMap, global_settings_path, load_settings_file, plugin_data_dir,
+    project_settings_path, save_settings_file,
 };
 pub use crate::toolchain::{ToolchainEntry, ToolchainRegistry, toolchains_dir};
 pub use crate::tree::{

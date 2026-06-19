@@ -35,6 +35,22 @@ enough.
   `nemus_data_dir()`, and `nemus_config_path(sub)` resolve under
   `…/nemus` (not `…/arbor/nemus`), so its config + sample banks live apart.
 
+- **`profile`** — the **profile × product** layout
+  (`docs/profiles-and-product-config.md`). A profile is an isolated
+  environment (own settings, plugins, repos) under
+  `arbor/profiles/<name>/`, with one product-agnostic `profile.toml` plus a
+  bucket per product. A process-global active-profile cell — seeded at boot
+  by `init_active_profile()` from the `arbor/active-profile` pointer, flipped
+  by `set_active_profile(name)` — lets the profile-scoped helpers resolve
+  without threading state through every caller: `arbor_profile_dir()` /
+  `arbor_profile_path(sub)` (generic per-profile), `product_dir(product)` /
+  `product_path(product, sub)` (+ `try_product_path` propagating `None` like
+  `try_arbor_config_path`), `profile_plugins_dir()`, the product-name constants
+  `PRODUCT_CORVUS` / `PRODUCT_NEMUS`, plus `*_for(name, …)` explicit-profile
+  variants for migration / management. The
+  existing `arbor_config_*` helpers keep meaning "the global `arbor/` root"
+  (the pointer, the portable `git/`, OAuth client overrides).
+
 - **`http`** — `client()` returns a pre-built `reqwest::Client` with the
   Arbor user-agent (`USER_AGENT = "Arbor-Git-GUI/<crate-version>"`) and
   `DEFAULT_TIMEOUT` (30s). For callers that need extra config (e.g. Jira
