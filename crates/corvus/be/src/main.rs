@@ -20,7 +20,9 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use arbor_ipc::prelude::{serve_stdio, EventSink, FrameEventSink, FrameHostCaller, HostCaller, SharedWriter};
+use arbor_plugin_core::prelude::PluginHost;
 use corvus_core::prelude::CorvusState;
+use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer, CorvusBeAppCtx};
 
 // Domain handler modules — their `#[arbor_rpc::handler]`s self-register via
 // inventory, so `arbor_rpc::registry()` collects them and `Hello` advertises
@@ -28,8 +30,15 @@ use corvus_core::prelude::CorvusState;
 // are the git domains served out-of-process so far.
 mod bisect;
 mod issues;
+mod merge;
+mod rebase;
+mod recovery;
+mod repo;
 mod repo_registry;
+mod reset;
+mod search;
 mod stash;
+mod worktree;
 
 // ── Self-test handlers (Stage 1) ────────────────────────────────────────────
 // Plain `#[arbor_rpc::handler]`s, exactly like the shell-side ones — the context
@@ -90,19 +99,47 @@ fn main() {
     // writing `HostRequest` frames on the same stdout the serve loop routes
     // `HostResponse`s back through. Handlers reach it via `state.host_call(...)`.
     let host = FrameHostCaller::new(Arc::clone(&stdout));
-    let state = CorvusState::new(sink).with_host_caller(Arc::clone(&host) as Arc<dyn HostCaller>);
 
-    // The issue-tracker registry resolves credentials over the reverse channel
-    // (the shell holds the keyring) — wire it before serving.
-    issues::init(Arc::clone(&host) as Arc<dyn HostCaller>);
-
-    // Async handlers (issue trackers — network I/O) run on a runtime; the serve
-    // loop dispatches each request on its own worker thread, so concurrent
-    // `block_on`s land here — a multi-thread runtime is required.
+    // Async runtime, built first: the plugin host's `AppCtx` captures a handle to
+    // spawn background plugin work (the boot thread has no ambient reactor), and
+    // the async issue-tracker handlers `block_on` it. The serve loop dispatches
+    // each request on its own worker thread, so concurrent `block_on`s land here
+    // — a multi-thread runtime is required.
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("corvus-be: failed to build tokio runtime");
+
+    // Plugin host co-located with the git handlers (plugin-relocation Wave 0):
+    // the hooks the OOP handlers fire reach plugins *here*, in the process that
+    // runs the git logic, instead of being dropped. The headless installer
+    // publishes the host-pure `arbor.*` surface only — the git/product `ns_shell`
+    // namespaces arrive in Wave 1, so a hook that calls one gets a clear error,
+    // never a silent drop. Schedulers are not started here yet (Wave 1+).
+    let plugin_host = Arc::new(Mutex::new(PluginHost::new()));
+    {
+        let mut h = plugin_host.lock().expect("corvus-be: plugin host lock poisoned at boot");
+        h.set_app_ctx(Arc::new(CorvusBeAppCtx::new(Arc::clone(&sink), rt.handle().clone())));
+        h.set_api_installer(corvus_be_api_installer());
+    }
+    let hooks = Arc::new(build_hook_dispatcher(&plugin_host));
+    if let Err(e) = plugin_host
+        .lock()
+        .expect("corvus-be: plugin host lock poisoned at boot")
+        .reload()
+    {
+        eprintln!("corvus-be: plugin reload failed: {e}");
+    }
+
+    // The state handed to every handler: event egress + the hook broker bound to
+    // the host above + the reverse channel back to the shell.
+    let state = CorvusState::new(sink)
+        .with_hooks(hooks)
+        .with_host_caller(Arc::clone(&host) as Arc<dyn HostCaller>);
+
+    // The issue-tracker registry resolves credentials over the reverse channel
+    // (the shell holds the keyring) — wire it before serving.
+    issues::init(Arc::clone(&host) as Arc<dyn HostCaller>);
 
     // Two registries collected from every `#[arbor_rpc::handler]` linked into
     // this binary: sync (git domains + self-test) and async (issue trackers).

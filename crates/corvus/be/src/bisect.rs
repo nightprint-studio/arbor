@@ -8,23 +8,10 @@
 //! cross as their `Display` string (`GitError` → the same text the shell maps to
 //! `AppError`).
 
-use std::path::PathBuf;
-
 use corvus_core::prelude::CorvusState;
-use corvus_git::prelude::{BisectMark, BisectSession, BisectState, GitCli};
+use corvus_git::prelude::{BisectMark, BisectSession, BisectState};
 
-/// The git invoker for this backend (the program the shell pushed, else `git`).
-fn git(state: &CorvusState) -> GitCli {
-    GitCli::from_optional(state.git_program().map(PathBuf::from))
-}
-
-/// Resolve a tab to its repo path, or a clear error if the shell never
-/// registered it (should not happen for an open tab).
-fn repo_path(state: &CorvusState, tab_id: &str) -> Result<String, String> {
-    state
-        .repo_path(tab_id)
-        .ok_or_else(|| format!("repo not registered for tab '{tab_id}'"))
-}
+use crate::repo::{git, repo_path};
 
 #[arbor_rpc::handler]
 fn bisect_start(state: &CorvusState, tab_id: String) -> Result<BisectState, String> {

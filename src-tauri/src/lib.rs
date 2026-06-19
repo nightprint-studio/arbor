@@ -49,7 +49,7 @@ use crate::error::{AppError, Result};
 use crate::git::repo::RepoManager;
 use crate::git::ticket_links::TicketLinkCache;
 use arbor_plugin_core::prelude::{PluginHost, ToolchainRegistry};
-use arbor_plugin_api::prelude::{HookDef, HookDispatcher, HookKind};
+use arbor_plugin_api::prelude::HookDispatcher;
 use crate::config::app_config::AppConfig;
 use crate::terminal::TerminalManager;
 use crate::jobs::JobRegistry;
@@ -75,31 +75,9 @@ use arbor_scheduler::prelude::Scheduler;
 // Application state — shared across all Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Build the [`HookDispatcher`]: register every static `HOOK_CATALOG` entry
-/// (so introspection knows each hook's kind / ctx schema) and wire the single
-/// mlua [`LuaHookListener`](arbor_plugin_core::prelude::LuaHookListener) bound
-/// to `plugin_host`. `on_pre_commit` is the only vetoable hook today; the rest
-/// are fire-and-forget.
-fn build_hook_dispatcher(plugin_host: &Arc<Mutex<PluginHost>>) -> HookDispatcher {
-    let mut dispatcher = HookDispatcher::new();
-    for h in arbor_plugin_types::prelude::HOOK_CATALOG {
-        dispatcher.register_hook(HookDef {
-            name:        h.name,
-            category:    h.category,
-            description: h.description,
-            kind:        if h.name == "on_pre_commit" {
-                HookKind::Vetoable
-            } else {
-                HookKind::FireAndForget
-            },
-            ctx: h.ctx,
-        });
-    }
-    dispatcher.register_listener(Arc::new(
-        arbor_plugin_core::prelude::LuaHookListener::new(Arc::downgrade(plugin_host)),
-    ));
-    dispatcher
-}
+// The hook-dispatcher builder moved to `corvus_plugin::prelude::build_hook_dispatcher`
+// — one definition the shell (in-process host) and `corvus-be` (OOP host) both
+// build through, so a fire fans out identically wherever the handler runs.
 
 pub struct AppState {
     pub repos:          Mutex<RepoManager>,
@@ -448,7 +426,7 @@ impl AppState {
         // `LuaHookListener` (bound to the just-created `plugin_host`) are the
         // only inputs, and neither needs the Tauri `AppHandle`.
         let plugin_host = Arc::new(Mutex::new(PluginHost::new()));
-        let hook_dispatcher = Arc::new(build_hook_dispatcher(&plugin_host));
+        let hook_dispatcher = Arc::new(corvus_plugin::prelude::build_hook_dispatcher(&plugin_host));
 
         Self {
             repos:          Mutex::new(RepoManager::new()),
@@ -624,7 +602,10 @@ pub fn run() {
                 // routes through this `CorvusState`.
                 let sink: std::sync::Arc<dyn arbor_ipc::prelude::EventSink> =
                     std::sync::Arc::new(crate::ipc::event_sink::TauriEventSink::new(app.handle().clone()));
-                let _ = state.corvus.set(corvus_core::prelude::CorvusState::new(sink));
+                let _ = state.corvus.set(
+                    corvus_core::prelude::CorvusState::new(sink)
+                        .with_hooks(state.hook_dispatcher.clone()),
+                );
                 let router = crate::ipc::build_router(app.handle());
                 let _ = state.router.set(std::sync::Arc::new(router));
             }

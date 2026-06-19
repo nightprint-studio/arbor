@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use arbor_ipc::prelude::{EventSink, HostCaller};
+use arbor_plugin_api::prelude::{HookDispatcher, PluginValue};
 use serde_json::Value;
 
 /// The state the Corvus (git) backend owns — the seed of `corvus-be`.
@@ -32,6 +33,14 @@ pub struct CorvusState {
     /// `FrameHostCaller`). In-process it's `None` — those handlers reach the
     /// shell's vault / plugin host directly and never call back.
     host: Option<Arc<dyn HostCaller>>,
+    /// Runtime hook broker, so a handler fires its plugin hooks where it runs
+    /// (relocation Wave 0). In-process the shell shares its own dispatcher here
+    /// ([`with_hooks`](Self::with_hooks)), so a fire from a `&CorvusState`
+    /// handler and a `&AppState` handler hit the same host. In `corvus-be` the
+    /// process owns its host and wires a dispatcher bound to it. The default is
+    /// an empty dispatcher (no listener) → fires are clean no-ops, which keeps
+    /// this crate depending only on the Tauri-free `arbor-plugin-api`.
+    hooks: Arc<HookDispatcher>,
 }
 
 impl CorvusState {
@@ -43,6 +52,7 @@ impl CorvusState {
             repos: Mutex::new(HashMap::new()),
             git_program: Mutex::new(None),
             host: None,
+            hooks: Arc::new(HookDispatcher::new()),
         }
     }
 
@@ -52,6 +62,31 @@ impl CorvusState {
     pub fn with_host_caller(mut self, host: Arc<dyn HostCaller>) -> Self {
         self.host = Some(host);
         self
+    }
+
+    /// Attach the hook broker. In-process the shell passes a clone of its own
+    /// `Arc<HookDispatcher>` (so both states fire onto the same host); in
+    /// `corvus-be` the process builds one bound to its local plugin host.
+    pub fn with_hooks(mut self, hooks: Arc<HookDispatcher>) -> Self {
+        self.hooks = hooks;
+        self
+    }
+
+    /// Fire a fire-and-forget plugin hook to every subscriber, synchronously.
+    /// Thin bridge over the dispatcher (`serde_json::Value` → `PluginValue`),
+    /// mirroring the shell's `AppState::fire_hook` so handlers read the same.
+    /// A no-op when no listener is wired (the default empty dispatcher).
+    pub fn fire_hook(&self, hook: &str, ctx: Value) {
+        self.hooks.fire_blocking(hook, PluginValue::from_json(ctx));
+    }
+
+    /// Fire the vetoable `on_pre_commit` hook; `Some(reason)` aborts the commit
+    /// (the reason is surfaced to the user). Runs entirely inside this process's
+    /// host — no cross-process round-trip — so a co-located commit handler keeps
+    /// the veto's pre-mutation timing.
+    pub fn fire_pre_commit_veto(&self, ctx: Value) -> Option<String> {
+        self.hooks
+            .fire_vetoable_blocking("on_pre_commit", PluginValue::from_json(ctx))
     }
 
     /// Call back into the shell (credential resolution, plugin-UI round-trips),
@@ -147,5 +182,52 @@ mod tests {
         // A background-thread handle emits onto the very same sink.
         state.event_sink().emit("arbor://bg", Value::Null);
         assert_eq!(sink.events.lock().unwrap()[0].0, "arbor://bg");
+    }
+
+    /// A `HookListener` that records fired names and can pre-set a veto reason —
+    /// stands in for the real mlua listener so the seam is tested host-free.
+    #[derive(Default)]
+    struct RecordingListener {
+        fired: Mutex<Vec<String>>,
+        veto:  Option<String>,
+    }
+    #[async_trait::async_trait]
+    impl arbor_plugin_api::prelude::HookListener for RecordingListener {
+        async fn fire(&self, name: &str, _ctx: &PluginValue) {
+            self.fired.lock().unwrap().push(name.to_string());
+        }
+        async fn fire_vetoable(&self, _name: &str, _ctx: &PluginValue) -> Option<String> {
+            self.veto.clone()
+        }
+    }
+
+    fn dispatcher_with(listener: Arc<dyn arbor_plugin_api::prelude::HookListener>) -> Arc<HookDispatcher> {
+        let mut d = HookDispatcher::new();
+        d.register_listener(listener);
+        Arc::new(d)
+    }
+
+    #[test]
+    fn fire_hook_reaches_the_listener() {
+        let rec = Arc::new(RecordingListener::default());
+        let state = CorvusState::new(Arc::new(RecordingSink::default()))
+            .with_hooks(dispatcher_with(rec.clone()));
+        state.fire_hook("on_stash_push", json!({ "index": 0 }));
+        assert_eq!(rec.fired.lock().unwrap().as_slice(), &["on_stash_push".to_string()]);
+    }
+
+    #[test]
+    fn fire_hook_is_a_noop_without_a_listener() {
+        // Default dispatcher (no listener) → the fire must not panic.
+        let state = CorvusState::new(Arc::new(RecordingSink::default()));
+        state.fire_hook("on_stash_push", json!({}));
+    }
+
+    #[test]
+    fn pre_commit_veto_propagates() {
+        let rec = Arc::new(RecordingListener { veto: Some("nope".to_string()), ..Default::default() });
+        let state = CorvusState::new(Arc::new(RecordingSink::default()))
+            .with_hooks(dispatcher_with(rec));
+        assert_eq!(state.fire_pre_commit_veto(json!({})), Some("nope".to_string()));
     }
 }

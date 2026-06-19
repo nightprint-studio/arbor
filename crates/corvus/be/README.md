@@ -17,7 +17,13 @@ now run here** (see
 | `__repo_register` / `__repo_deregister` | shell pushes a tab's repo path on open/close |
 | `__set_git_program` | shell pushes the resolved git binary |
 | `bisect_*` / `*_bisect_session` (11) | the bisect domain, via the shared `corvus-git` crate |
-| `stash_save` / `stash_apply` / `stash_pop` / `stash_drop` / `stash_rename` / `force_stash_apply` / `abort_stash_apply` / `list_stashes` / `list_graph_stash_refs` / `get_stash_file_content` / `write_workdir_file` (11) | the stash domain, via `corvus-git` (opens the repo by the pushed path) |
+| `stash_save` / `stash_apply` / `stash_pop` / `stash_drop` / `stash_rename` / `force_stash_apply` / `abort_stash_apply` / `list_stashes` / `list_graph_stash_refs` / `get_stash_file_content` / `write_workdir_file` (11) | the stash domain, via `corvus-git` (opens the repo by the pushed path); fires `on_stash_push` / `on_stash_pop` to the co-located host |
+| `reset_to_commit` / `create_tag` / `delete_tag` | the reset + tags domain, via `corvus-git`; fires `on_tag_create` / `on_tag_delete` to the co-located host |
+| `search_commits` | repo-wide commit search (read-only, no hooks), via `corvus-git` |
+| `merge_branch` / `abort_merge` / `complete_merge` / `resolve_conflict` / `resolve_stash_conflict` / `remove_conflict_file` / `get_conflict_content` / `get_conflict_presence` / `get_merge_message` (9) | the merge / conflict-resolution domain, via `corvus-git` (no hooks) |
+| `start_rebase` / `rebase_continue` / `rebase_abort` / `rebase_skip` / `get_rebase_todo` / `get_rebase_state` (6) | the rebase domain, via `corvus-git`; fires `on_rebase_start` / `on_rebase_abort` to the co-located host |
+| `list_worktrees` / `add_worktree` / `remove_worktree` / `detect_project_type` | the git-worktree domain (read + create/remove), via `corvus-git`. The IDE-launch / IDE-config / streaming-detection methods stay **in-process** (AppHandle / app config / job registry) |
+| `list_recovery_entries` / `preview_recovery_restore` / `restore_recovery_entry` / `delete_recovery_entry` | the recovery-journal domain (read + restore), via `corvus-git` |
 | `linear_*` (8) / `jira_*` (8) | the issue-tracker domain (async, network), via the shared `corvus-issues` crate — credentials resolved over the **reverse channel** (`ChildSessionProvider` → shell keyring), never read here |
 
 The shell spawns this binary at startup, reads its `Hello` (the advertised method
@@ -25,14 +31,17 @@ list), and routes exactly those methods to it out-of-process via a `SplitBroker`
 everything else stays in-process. Handlers resolve a `tab_id` to a repo path
 through the registry the shell pushes — no `RepoManager` here.
 
-**Hooks stay shell-side.** `stash_save`/`apply`/`pop` owe fire-and-forget plugin
-hooks (`on_stash_push` / `on_stash_pop`); this process fires none — the shell
-fires them after the call returns, routing-independently
-(`crate::ipc::corvus::post_hooks`). The issue-tracker domain fires no hooks at
-all, so it moves OOP cleanly. **Recovery policy gap (known):** the
-force-apply / abort recovery snapshots use `SnapshotPolicy::default()` because
-this process has no app config yet — closing it is the first item of the settings
-migration.
+**Hooks fire here, co-located with the handlers** (plugin-relocation Wave 0).
+`main` builds an mlua plugin host (via `corvus-plugin`) and hands its
+`HookDispatcher` to `CorvusState`, so `stash_save`/`apply`/`pop` fire their
+fire-and-forget hooks (`on_stash_push` / `on_stash_pop`) directly to plugins
+running in this process — no longer dropped on the OOP path, no shell `post_hooks`
+re-derivation. The headless host publishes the **host-pure** `arbor.*` surface
+only for now; the git/product `ns_shell` namespaces (`arbor.repo`, …) arrive in
+Wave 1, and plugin schedulers are not started here yet. The issue-tracker domain
+fires no hooks. **Recovery policy gap (known):** the force-apply / abort recovery
+snapshots use `SnapshotPolicy::default()` because this process has no app config
+yet — closing it is the first item of the settings migration.
 
 **Async handlers need a runtime.** The issue-tracker handlers do real network
 I/O, so `main` builds a **multi-thread** Tokio runtime and the dispatch loop
@@ -59,17 +68,33 @@ await __TAURI__.core.invoke('rpc', { program: 'corvus', method: 'be_emit', param
 
 ## Next
 
-`reset` moves here next (Stage 2c): its git logic is already extracted into
-`corvus-git` (`run_reset` + `create_tag` / `delete_tag`); serving it OOP needs a
-`reset` module here (open the repo by path, take the hard-reset recovery snapshot
-with this process's policy, validate the OID) plus moving `on_tag_create` /
-`on_tag_delete` into `post_hooks` (as was done for the stash hooks). It will
-auto-advertise via `Hello` and auto-route out-of-process — no shell router change.
+The **non-credential, non-stateful** local-git domains now run here (bisect,
+stash, reset+tags, search, merge, rebase, worktree, recovery). What's left, by
+gate:
+
+- **W0b (config-push):** push the recovery `SnapshotPolicy` (+ diff-context,
+  gitflow config) into `CorvusState` so OOP handlers stop falling back to
+  `::default()` — the known recovery-policy gap now shared by stash / reset /
+  recovery. Unblocks moving the config-dependent reads (`gitflow`, `stats`).
+- **M3 credential broker:** the credential-coupled domains — `remote`
+  (fetch/push/pull), `notes` push, `gitflow` finish, and the provider / MR / CI /
+  security cohort.
+- **Per-registry state in `CorvusState`:** `branch` (the worktree-link sync
+  registry), `stage`/`commit` (the `on_pre_commit` veto already works via
+  `CorvusState::fire_pre_commit_veto`, but the handlers need the repo lock shape),
+  the ticket-link cache, the BRP registry.
+- **Payload/perf judgement:** the large-read domains (`diff`, `graph`) may want a
+  streaming transport before they cross the process boundary.
+
+Everything here auto-advertises via `Hello` and auto-routes OOP per-method — no
+shell router change; the in-process copy stays as the no-spawn fallback.
 
 ## Depends on
 
 `arbor-ipc` (the framed transport + `EventSink` + the reverse-channel
 `HostCaller` / `ChildSessionProvider`), `arbor-rpc` (the handler registry),
 `corvus-core` (`CorvusState`), `corvus-git` (local-git domains), `corvus-issues`
-(the injected issue-tracker registry), `git2`, `serde_json`, and `tokio` (the
-runtime for the async issue handlers). No Tauri.
+(the injected issue-tracker registry), `arbor-plugin-core` (`PluginHost`) +
+`corvus-plugin` (the shared host wiring: dispatcher builder, headless installer,
+`AppCtx`), `git2`, `serde_json`, and `tokio` (the runtime for the async issue
+handlers + the host's `AppCtx::spawn`). No Tauri.

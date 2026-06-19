@@ -1,6 +1,7 @@
 # W0a Execution Spec — Plugin-Host Relocation (in-process-first)
 
-> **Status:** execution spec (design, not yet implemented). Turns Wave 0 of
+> **Status: IMPLEMENTED** (build-green + unit tests pass). See
+> [§7 Implementation status](#7-implementation-status). Turns Wave 0 of
 > [`plugin-relocation-inventory.md`](plugin-relocation-inventory.md) into a
 > concrete, sequenced, build-greenable plan grounded in the current working
 > tree (post the `start plugin relocation` commit). Every file:line cite was
@@ -279,3 +280,34 @@ constructs the host and `.with_hooks(...)` the dispatcher (else step-5 fires are
 no-ops). Optional integration assertion: build a `CorvusState` with a recording
 listener, run the `stash_save` handler against a temp repo, assert `on_stash_push`
 recorded.
+
+---
+
+## 7. Implementation status
+
+Implemented 2026-06-19; full workspace builds green and `corvus-core`'s 5 unit
+tests pass (3 new: `fire_hook_reaches_the_listener`,
+`fire_hook_is_a_noop_without_a_listener`, `pre_commit_veto_propagates`).
+
+**What landed vs the plan:** the spec's "lift `build_hook_dispatcher` into
+`corvus-be/src/plugin/`" was adjusted because `corvus-be` is a **binary-only**
+crate — nothing can depend on it as a library, so the shell couldn't share its
+copy. Instead a small **lib crate `corvus-plugin`** (`crates/corvus/plugin/`)
+holds the shared wiring (`build_hook_dispatcher` + `CorvusBeApiInstaller` +
+`CorvusBeAppCtx`); both the shell and `corvus-be` link it. The shell's private
+`build_hook_dispatcher` was deleted and re-pointed at `corvus_plugin`. Steps 1
+(CorvusState seam), 2 (in-process share), 4 (corvus-be host + reload), 5 (stash
+fires) landed as written; the headless installer is `CorvusBeApiInstaller`
+(host-pure `arbor.*` via `register_lua_api(.., &[])`), not `NoopApiInstaller`
+(which publishes nothing → plugins can't load).
+
+**Deliberately deferred (declared limitations, not bugs):**
+- **ns_shell namespaces in corvus-be** — Wave 1. The OOP host publishes host-pure
+  `arbor.*` only; a hook that calls `arbor.repo`/`arbor.job`/… gets a clear
+  nil-field error (logged), never a silent drop.
+- **Plugin schedulers in corvus-be** — `start_all_schedulers` is not called there
+  (no `Scheduler` installed). Scheduled plugins don't tick OOP yet.
+- **Per-product plugin filtering / `plugin_dir` in the headless process** — D2 /
+  Wave 5. `corvus-be`'s `reload()` scans the global plugin root, so (until
+  filtering lands) every plugin loads in both the shell host and the corvus-be
+  host. Architecturally the per-product-host direction; messy mid-transition.

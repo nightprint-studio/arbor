@@ -165,6 +165,7 @@ dependencies = [
  "corvus-issues",
  "corvus-pipeline-api",
  "corvus-pipeline-core",
+ "corvus-plugin",
  "corvus-provider-descriptor",
  "cron",
  "dirs",
@@ -1253,10 +1254,12 @@ name = "corvus-be"
 version = "0.3.0"
 dependencies = [
  "arbor-ipc",
+ "arbor-plugin-core",
  "arbor-rpc",
  "corvus-core",
  "corvus-git",
  "corvus-issues",
+ "corvus-plugin",
  "git2",
  "serde_json",
  "tokio",
@@ -1280,6 +1283,8 @@ name = "corvus-core"
 version = "0.3.0"
 dependencies = [
  "arbor-ipc",
+ "arbor-plugin-api",
+ "async-trait",
  "serde_json",
 ]
 
@@ -1415,6 +1420,20 @@ dependencies = [
  "corvus-pipeline-api",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "corvus-plugin"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
+ "arbor-ipc",
+ "arbor-plugin-api",
+ "arbor-plugin-core",
+ "arbor-plugin-types",
+ "mlua",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

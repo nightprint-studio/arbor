@@ -8,10 +8,12 @@
 //! crate, so behavior — and error strings — are identical to in-process
 //! (`GitError`'s `Display` is the same text the shell maps to `AppError`).
 //!
-//! **Hooks are NOT fired here.** `on_stash_push` / `on_stash_pop` are
-//! fire-and-forget plugin hooks owned by the shell (it holds the Lua host); the
-//! shell fires them after the call returns, routing-independently, in
-//! `crate::ipc::corvus::post_hooks`. This backend does pure git only.
+//! **Hooks fire here, in-process to this backend.** `on_stash_push` /
+//! `on_stash_pop` go through [`CorvusState::fire_hook`] to the plugin host
+//! co-located in `corvus-be` (plugin-relocation Wave 0), after the repo handle
+//! is dropped — same lock-then-fire discipline and payload as the shell's
+//! in-process copy, so plugins see identical events whether stash runs in- or
+//! out-of-process.
 //!
 //! **Recovery policy gap (known):** the force-apply / abort snapshots use
 //! `SnapshotPolicy::default()` because this process has no app config yet. When
@@ -20,28 +22,13 @@
 //! of the settings migration (push the configured policy to `CorvusState`, like
 //! the git program).
 
-use std::path::PathBuf;
-
 use corvus_core::prelude::CorvusState;
 use corvus_git::prelude::{
-    GitCli, RecoveryKind, SnapshotPolicy, StashApplyResult, StashBlockingContent, StashEntry,
-    StashRef,
+    RecoveryKind, SnapshotPolicy, StashApplyResult, StashBlockingContent, StashEntry, StashRef,
 };
 use git2::Repository;
 
-/// The git invoker for this backend (the program the shell pushed, else `git`).
-fn git(state: &CorvusState) -> GitCli {
-    GitCli::from_optional(state.git_program().map(PathBuf::from))
-}
-
-/// Open the repo registered for `tab_id`, or a clear error if the shell never
-/// registered it (should not happen for an open tab).
-fn open(state: &CorvusState, tab_id: &str) -> Result<Repository, String> {
-    let path = state
-        .repo_path(tab_id)
-        .ok_or_else(|| format!("repo not registered for tab '{tab_id}'"))?;
-    Repository::open(&path).map_err(|e| e.to_string())
-}
+use crate::repo::{git, open};
 
 #[arbor_rpc::handler]
 fn list_stashes(state: &CorvusState, tab_id: String) -> Result<Vec<StashEntry>, String> {
@@ -62,25 +49,58 @@ fn stash_save(
     message: Option<String>,
     include_untracked: bool,
 ) -> Result<StashEntry, String> {
-    let repo = open(state, &tab_id)?;
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| "bare repository has no working directory".to_string())?
-        .to_path_buf();
-    corvus_git::stash::stash_save(&git(state), &workdir, message.as_deref(), include_untracked)
-        .map_err(|e| e.to_string())
+    let workdir = {
+        let repo = open(state, &tab_id)?;
+        repo.workdir()
+            .ok_or_else(|| "bare repository has no working directory".to_string())?
+            .to_path_buf()
+    };
+    let entry = corvus_git::stash::stash_save(&git(state), &workdir, message.as_deref(), include_untracked)
+        .map_err(|e| e.to_string())?;
+    // Repo handle dropped above; fire inline so a Lua git op in the hook can't
+    // deadlock. Payload mirrors the shell's in-process `stash_save`.
+    state.fire_hook(
+        "on_stash_push",
+        serde_json::json!({
+            "tab_id": tab_id,
+            "index": entry.index,
+            "message": entry.message,
+            "include_untracked": include_untracked,
+        }),
+    );
+    Ok(entry)
 }
 
 #[arbor_rpc::handler]
 fn stash_apply(state: &CorvusState, tab_id: String, index: usize) -> Result<StashApplyResult, String> {
-    let mut repo = open(state, &tab_id)?;
-    corvus_git::stash::stash_apply(&git(state), &mut repo, index).map_err(|e| e.to_string())
+    let result = {
+        let mut repo = open(state, &tab_id)?;
+        corvus_git::stash::stash_apply(&git(state), &mut repo, index).map_err(|e| e.to_string())?
+    };
+    // Repo dropped; fire inline (drop:false, only when clean) — same as in-process.
+    if !result.has_conflicts {
+        state.fire_hook(
+            "on_stash_pop",
+            serde_json::json!({ "tab_id": tab_id, "index": index, "drop": false }),
+        );
+    }
+    Ok(result)
 }
 
 #[arbor_rpc::handler]
 fn stash_pop(state: &CorvusState, tab_id: String, index: usize) -> Result<StashApplyResult, String> {
-    let mut repo = open(state, &tab_id)?;
-    corvus_git::stash::stash_pop(&git(state), &mut repo, index).map_err(|e| e.to_string())
+    let result = {
+        let mut repo = open(state, &tab_id)?;
+        corvus_git::stash::stash_pop(&git(state), &mut repo, index).map_err(|e| e.to_string())?
+    };
+    // Repo dropped; fire inline (drop:true, only when clean) — same as in-process.
+    if !result.has_conflicts {
+        state.fire_hook(
+            "on_stash_pop",
+            serde_json::json!({ "tab_id": tab_id, "index": index, "drop": true }),
+        );
+    }
+    Ok(result)
 }
 
 #[arbor_rpc::handler]

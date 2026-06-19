@@ -21,6 +21,16 @@ field-by-field as git domains are extracted from the shell.
   `AppHandle::emit`; once `corvus-be` splits out it wraps the `arbor-ipc` event
   channel and each `emit` becomes an `Event::Notify` the shell re-emits. **The
   call site (`state.emit(...)`) never changes — only the backing.**
+- **`repos` / `git_program`** — the tab→path map + the resolved git binary the
+  shell pushes, so handlers resolve a tab to its repo without a `RepoManager`.
+- **`host: Option<Arc<dyn HostCaller>>`** — reverse channel to the shell (vault /
+  plugin-UI round-trips); set only once split into `corvus-be`.
+- **`hooks: Arc<HookDispatcher>`** — the runtime hook broker, so a handler fires
+  its plugin hooks *where it runs* (`state.fire_hook(...)` /
+  `state.fire_pre_commit_veto(...)`). In-process the shell shares its own
+  dispatcher here (so a `&CorvusState` fire and a `&AppState` fire hit the same
+  host); `corvus-be` owns one bound to its co-located plugin host. The default is
+  an empty dispatcher → fires are clean no-ops.
 
 ## What moves in next (the gradual scaffold)
 
@@ -41,8 +51,9 @@ handlers move into `bins/corvus-be` and the shell talks to it over `arbor-ipc`.
 
 ## Depends on
 
-`arbor-ipc` (the `EventSink` contract), `serde_json`. No Tauri, no git, no
-product types yet — intentionally minimal.
+`arbor-ipc` (the `EventSink` contract), `arbor-plugin-api` (the `HookDispatcher`
+the fire seam bridges to — the Tauri-free api crate, no mlua), `serde_json`. No
+Tauri, no git, no product types yet — intentionally minimal.
 
 ## Consumed by
 

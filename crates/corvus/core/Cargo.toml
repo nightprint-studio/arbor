@@ -8,5 +8,14 @@ authors.workspace      = true
 description  = "Headless backend core for Corvus (the git product) — the Tauri-free state the future `corvus-be` process owns. Seeded with the event egress; grows field-by-field as git domains are extracted from the shell."
 
 [dependencies]
-arbor-ipc  = { path = "../../foundation/ipc" }
-serde_json = { workspace = true }
+arbor-ipc        = { path = "../../foundation/ipc" }
+# Hook firing: CorvusState holds the runtime `HookDispatcher` so handlers fire
+# plugin hooks where they run (in-process the shell shares its dispatcher; OOP
+# corvus-be owns one). Only the Tauri-free api crate — no mlua/host here.
+arbor-plugin-api = { path = "../../plugin/api" }
+serde_json       = { workspace = true }
+
+[dev-dependencies]
+# A recording `HookListener` in the unit tests asserts the fire seam fans out
+# (the trait is `#[async_trait]`).
+async-trait = { workspace = true }

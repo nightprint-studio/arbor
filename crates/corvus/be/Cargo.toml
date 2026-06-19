@@ -12,11 +12,17 @@ name = "corvus-be"
 path = "src/main.rs"
 
 [dependencies]
-arbor-ipc     = { path = "../../foundation/ipc" }
-arbor-rpc     = { path = "../../foundation/rpc" }
-corvus-core   = { path = "../core" }
-corvus-git    = { path = "../git" }
-corvus-issues = { path = "../issues" }
+arbor-ipc         = { path = "../../foundation/ipc" }
+arbor-rpc         = { path = "../../foundation/rpc" }
+# The plugin host (mlua) co-located with the git handlers: hooks the OOP
+# handlers fire reach plugins here instead of being dropped. `corvus-plugin`
+# carries the shared host wiring; `arbor-plugin-core` is named directly for
+# `PluginHost`.
+arbor-plugin-core = { path = "../../plugin/core" }
+corvus-plugin     = { path = "../plugin" }
+corvus-core       = { path = "../core" }
+corvus-git        = { path = "../git" }
+corvus-issues     = { path = "../issues" }
 git2          = { version = "0.20", features = ["vendored-libgit2"] }
 serde_json    = { workspace = true }
 # Drives the async issue-tracker handlers: each backend request runs on its own
