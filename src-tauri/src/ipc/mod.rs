@@ -213,6 +213,27 @@ fn host_dispatch(method: &str, params: serde_json::Value) -> Result<serde_json::
         return Ok(serde_json::Value::Null);
     }
 
+    // Git smart-HTTP credentials for an OOP `remote` op: the keyring stays
+    // shell-side, so an OOP fetch/push marshals `(url) -> Option<(user, pass)>`
+    // here. This is the HTTP-Basic pair (`credential_store::resolve_credentials`),
+    // distinct from the REST `AuthSession` of `__session`.
+    if method == "__git_credentials" {
+        let url: String = serde_json::from_value(params)
+            .map_err(|e| format!("__git_credentials: invalid url: {e}"))?;
+        let creds = crate::auth::credential_store::resolve_credentials(&url)
+            .map_err(|e| e.to_string())?;
+        return serde_json::to_value(creds).map_err(|e| e.to_string());
+    }
+
+    // Proactive URL-keyed token refresh — the OOP twin of the in-process
+    // `maybe_refresh_for_url` pre-call a fetch/push makes before resolving creds.
+    if method == "__maybe_refresh_url" {
+        let url: String = serde_json::from_value(params)
+            .map_err(|e| format!("__maybe_refresh_url: invalid url: {e}"))?;
+        tauri::async_runtime::block_on(crate::auth::maybe_refresh_for_url(&url));
+        return Ok(serde_json::Value::Null);
+    }
+
     let account: String = match method {
         "__session" | "__refresh" => serde_json::from_value(params)
             .map_err(|e| format!("{method}: invalid account: {e}"))?,

@@ -30,6 +30,7 @@ corvus-git-provider-api    = { path = "../git-provider/api" }
 corvus-git-provider-github = { path = "../git-provider/github" }
 corvus-git-provider-gitlab = { path = "../git-provider/gitlab" }
 git2          = { version = "0.20", features = ["vendored-libgit2"] }
+serde         = { workspace = true }
 serde_json    = { workspace = true }
 # Decodes the base64 image data-URL when a repo-browser download writes an image
 # back to disk (already a workspace dependency via `corvus-git`).

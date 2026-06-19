@@ -109,6 +109,13 @@ impl CorvusState {
         }
     }
 
+    /// A cloneable handle to the reverse channel, for a blocking task (e.g. a
+    /// `spawn_blocking` running libgit2 whose credential callback must call back
+    /// to the shell) that outlives the borrow of `&self`. `None` in-process.
+    pub fn host_caller(&self) -> Option<Arc<dyn HostCaller>> {
+        self.host.clone()
+    }
+
     /// Register (or update) a tab's repo path. Pushed by the shell on repo open.
     pub fn register_repo(&self, tab_id: String, path: String) {
         if let Ok(mut repos) = self.repos.lock() {

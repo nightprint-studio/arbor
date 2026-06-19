@@ -29,6 +29,7 @@ now run here** (see
 | `supports_security` / `fetch_security_summary` / `fetch_security_findings` (3) | the security-findings reads (tab-keyed via `provider_for_tab`); `fetch_security_summary` fires `on_security_summary_loaded`. `export_security_report` stays in-process (job registry + branding) |
 | `list_mrs` / `get_mr_detail` / `create_mr` / `get_mr_capabilities` / `probe_mr_feature` / `disable_mr_auto_merge` / `close_mr` / `reopen_mr` / `mark_mr_ready` / `add_mr_comment` / `get_mr_files` / `get_mr_commits` / `get_mr_commit_diff` / `get_merged_mr_hints` (14) | the MR/PR domain; fires `on_mr_opened` (create) and `on_mr_updated` (close/reopen/ready). `merge_mr` (fires `on_mr_merged`) + `mr_start_conflict_resolution` stay in-process (local-git branch cleanup / job registry) |
 | `fetch_ci_runs` / `fetch_ci_jobs` / `list_ci_workflows` / `create_ci_pipeline` / `fetch_mr_ci_runs` / `retrigger_ci_run` (6) | the CI domain (no hooks). `get_ci_provider` stays in-process (resolves through `RepoManager` with a different `Ok(None)` contract) |
+| `list_remotes` / `fetch_remote` / `push_branch` / `pull_branch` (4) | the network remote domain via `corvus-git`; git smart-HTTP credentials cross the reverse channel (`__git_credentials`); fires `on_fetch` / `on_push` / `on_pull`. `pull_branch` carries the full safe-pull flow (recovery snapshot → pre-pull stash → fetch/merge → re-apply) and streams `arbor://pull-progress` / `-done` |
 | `linear_*` (8) / `jira_*` (8) | the issue-tracker domain (async, network), via the shared `corvus-issues` crate — credentials resolved over the **reverse channel** (`ChildSessionProvider` → shell keyring), never read here |
 
 The shell spawns this binary at startup, reads its `Hello` (the advertised method
@@ -63,6 +64,17 @@ refresh-and-retry baked into each provider's HTTP layer — marshal back to the
 shell's `VaultSessionProvider`. The shell's proactive `maybe_refresh_for_provider`
 pre-call is preserved as a `__maybe_refresh` host method (best-effort, swallowed
 on failure), so the OOP path behaves identically.
+
+**Git smart-HTTP credentials over the reverse channel.** The network `remote`
+ops (fetch / push / pull) resolve their HTTP-Basic `(user, pass)` — a *different*
+credential surface from the REST `AuthSession` — through the `__git_credentials`
+host method (the keyring stays shell-side; `credential_store::resolve_credentials`
+runs there). The blocking libgit2 work runs on a `spawn_blocking` worker and its
+credential callback calls back to the shell from there — the reentrancy the
+reverse channel is built for. The proactive `maybe_refresh_for_url` pre-call is
+preserved as `__maybe_refresh_url`. `pull_branch` reuses the already-OOP stash +
+recovery domains and the shell-pushed `SnapshotPolicy`, and streams its phase
+progress through the `CorvusState` event sink.
 
 Providers are resolved two ways, both in `crate::provider`: by **host string**
 (`"github"`/`"gitlab"`, e.g. the browser) via `for_host`, or **tab-keyed** via
@@ -116,9 +128,9 @@ mechanism when those domains move). What's left, by gate:
       branch cleanup, `mr_start_conflict_resolution`, `get_ci_provider` stay
       in-process until the job registry is proxied and `CorvusState` grows the
       pieces they need.
-    - **git-protocol surface:** `remote` (fetch/push/pull) needs a
-      `__git_credentials` host method (HTTP-Basic `(user,pass)`, not the REST
-      `AuthSession`); plus `notes` push and `gitflow` finish.
+    - **git-protocol surface:** the `remote` domain is **done** (fetch / push /
+      pull over `__git_credentials`). Still to move: `notes` push and `gitflow`
+      finish (same `__git_credentials` channel).
 - **Per-registry state in `CorvusState`:** `branch` (the worktree-link sync
   registry), `stage`/`commit` (the `on_pre_commit` veto already works via
   `CorvusState::fire_pre_commit_veto`, but the handlers need the repo lock shape),

@@ -1265,6 +1265,7 @@ dependencies = [
  "corvus-issues",
  "corvus-plugin",
  "git2",
+ "serde",
  "serde_json",
  "tokio",
 ]

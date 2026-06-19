@@ -36,6 +36,7 @@ mod mr;
 mod provider;
 mod rebase;
 mod recovery;
+mod remote;
 mod repo;
 mod repo_browser;
 mod repo_registry;
