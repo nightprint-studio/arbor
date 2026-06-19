@@ -18,6 +18,5 @@ pub mod notes;
 pub mod worktree;
 pub mod reflog;
 pub mod stats;
-pub mod svg_export;
 pub mod stats_export;
 pub mod recovery;

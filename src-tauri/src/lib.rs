@@ -117,11 +117,6 @@ pub struct AppState {
     pub app_focused:    Arc<AtomicBool>,
     /// The currently active tab ID as reported by the frontend.
     pub active_tab_id:  Arc<Mutex<Option<String>>>,
-    /// Per-tab stats cache: tab_id — (head_sha, computed stats).
-    /// Arc so background threads can hold a reference after the command returns.
-    pub stats_cache: Arc<Mutex<HashMap<String, (String, crate::git::stats::RepoStats)>>>,
-    /// Set of tab IDs currently being computed to prevent duplicate runs.
-    pub stats_computing: Arc<Mutex<HashSet<String>>>,
     /// Installed toolchain registry (toolchains/<kind>.json).
     pub toolchain_registry: Arc<Mutex<ToolchainRegistry>>,
     /// Central registry of every repo Arbor has ever been shown.
@@ -456,8 +451,6 @@ impl AppState {
             // frontend sends the first focus update.
             app_focused:    Arc::new(AtomicBool::new(true)),
             active_tab_id:  Arc::new(Mutex::new(None)),
-            stats_cache:    Arc::new(Mutex::new(HashMap::new())),
-            stats_computing: Arc::new(Mutex::new(HashSet::new())),
             toolchain_registry: Arc::new(Mutex::new(ToolchainRegistry::new())),
             repo_registry:      Mutex::new(repo_registry),
             workspaces:         Mutex::new(workspaces),
@@ -513,8 +506,6 @@ impl AppState {
         if let Ok(mut g) = self.repos.lock()       { *g = RepoManager::new(); }
         if let Ok(mut g) = self.terminals.lock()   { *g = TerminalManager::new(); }
         if let Ok(mut g) = self.brp.lock()         { *g = BrpRegistry::default(); }
-        if let Ok(mut g) = self.stats_cache.lock()     { g.clear(); }
-        if let Ok(mut g) = self.stats_computing.lock() { g.clear(); }
         if let Ok(mut g) = self.ticket_caches.lock()   { g.clear(); }
         if let Ok(mut g) = self.active_tab_id.lock()   { *g = None; }
     }

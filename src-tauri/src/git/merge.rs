@@ -16,7 +16,7 @@
 
 // Re-export the crate types so existing call sites (`use crate::git::merge::{…}`)
 // keep compiling unchanged.
-pub use corvus_git::merge::{MrPrepEvent, MrPrepOutcome, MrPrepPhase};
+pub use corvus_git::merge::{MrPrepEvent, MrPrepOutcome};
 
 use crate::error::Result;
 

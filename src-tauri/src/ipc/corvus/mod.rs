@@ -13,39 +13,26 @@
 //! this is a plain call; once `corvus-be` splits out the handlers move into that
 //! binary unchanged.
 
+// In-process git handlers that have **not** moved to `corvus-be` yet (or stay
+// shell-side by design: credential store, git-CLI detection, fs-path git, image
+// proxy, repo lifecycle, recent-repo tracking, provider OAuth, BRP, the plugin
+// pipeline engine, linked-worktree registry). The fully-migrated domains (bisect,
+// stash, reset, search, merge, rebase, recovery, notes, diff, graph, stage,
+// submodule, reflog, stats, remote, ci, mr, security, repo_browser, avatar) were
+// **deleted** — `corvus-be` is their sole owner now (no in-process fallback).
 pub mod auth;
-pub mod avatar;
-pub mod bisect;
 pub mod branch;
 pub mod brp;
-pub mod ci;
-pub mod diff;
 pub mod fs_git;
 pub mod git_cli;
 pub mod gitflow;
-pub mod graph;
 pub mod image;
 pub mod issues;
 pub mod linked_worktree;
-pub mod merge;
 pub mod missing;
-pub mod mr;
-pub mod notes;
 pub mod pipeline;
 pub mod provider;
-pub mod rebase;
-pub mod recovery;
-pub mod reflog;
-pub mod remote;
 pub mod repo;
-pub mod repo_browser;
-pub mod reset;
-pub mod search;
-pub mod security;
-pub mod stage;
-pub mod stash;
-pub mod stats;
-pub mod submodule;
 pub mod tickets;
 pub mod worktree;
 

@@ -28,9 +28,7 @@ pub mod helpers;
 // `image_proxy` — the host-gated inline-image fetch (host-dynamic →
 // intentionally not a trait method). All MR/CI/repo-browser/avatar REST now
 // flows through the `GitProvider` trait.
-pub mod mr_impl;
 pub mod ci_impl;
-pub mod repo_impl;
 pub mod image_proxy;
 pub mod security_export;
 
@@ -38,4 +36,4 @@ pub mod security_export;
 // crates; the shell injects credentials via `auth::vault::VaultSessionProvider`.
 pub use corvus_git_provider_github::prelude::GithubProvider;
 pub use corvus_git_provider_gitlab::prelude::GitlabProvider;
-pub use helpers::{provider_for_tab, provider_for_path, mr_id_from};
+pub use helpers::{provider_for_tab, provider_for_path};
