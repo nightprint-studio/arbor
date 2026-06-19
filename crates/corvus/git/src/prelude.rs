@@ -74,3 +74,24 @@ pub use crate::graph::{
     RefType, RepoFileEntry,
 };
 pub use crate::graph_svg::{generate_svg_to_file, ThemeColors};
+pub use crate::status::{get_status, get_status_with, FileStatus, RepoStatus, StatusEntry};
+// NOTE: `list_remote_branches` is intentionally NOT re-exported flat here — two
+// distinct functions own the name (`branch::list_remote_branches(&Repository)
+// -> Vec<BranchInfo>` lists remote-tracking branches of an open repo;
+// `repo::list_remote_branches(&GitCli, url, auth) -> Vec<String>` lists heads of
+// a remote URL via the CLI). Both shell wrappers reach theirs by module path
+// (`corvus_git::branch::…` / `corvus_git::repo::…`), so neither needs the flat
+// prelude. Same precedent as `graph::AuthorInfo` above.
+pub use crate::branch::{
+    create_branch, checkout_branch, checkout_commit_detached, checkout_remote_as_local,
+    delete_branch, delete_branches, delete_remote_branches, get_nearest_tag, list_local_branches,
+    list_merged_branches, list_merged_remote_branches, list_tags, rename_branch,
+    rename_remote_branch, BranchInfo, RemoteRenameResult, TagInfo,
+};
+pub use crate::repo::{clone_repo, CloneOptions, GitRepo, RepoInfo, RepoManager};
+pub use crate::reflog::{get_reflog, ReflogEntry};
+pub use crate::remote::{fetch, list_remotes, pull, push, FetchResult, RemoteInfo};
+pub use crate::submodule::{
+    list_submodules, submodule_checkout, submodule_fetch, submodule_list_branches, submodule_pull,
+    submodule_push, update_submodule, update_submodules, AuthArgsResolver, SubmoduleInfo,
+};

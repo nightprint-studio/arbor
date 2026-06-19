@@ -20,8 +20,7 @@ use crate::error::Result;
 // Re-export the data types so existing `crate::git::gitflow::*` paths resolve
 // (the gitflow IPC handlers and the `GitFlowConfig` fields in app/repo config).
 pub use corvus_git::prelude::{
-    FlowFinishResult, FlowStartResult, GitFlowBranchType, GitFlowConfig, GitFlowFinishConfig,
-    GitFlowPrefixes, GitFlowStatus,
+    FlowFinishResult, FlowStartResult, GitFlowConfig, GitFlowStatus,
 };
 
 /// The shell's resolved git program as a `corvus-git` invoker.
@@ -61,10 +60,6 @@ pub fn feature_start(repo: &Repository, config: &GitFlowConfig, name: &str) -> R
     Ok(corvus_git::gitflow::feature_start(&git(), repo, config, name)?)
 }
 
-pub fn feature_finish(repo: &Repository, config: &GitFlowConfig, name: &str) -> Result<()> {
-    Ok(corvus_git::gitflow::feature_finish(&git(), repo, config, name)?)
-}
-
 pub fn feature_finish_or_pr(
     repo: &Repository,
     config: &GitFlowConfig,
@@ -80,15 +75,6 @@ pub fn feature_finish_or_pr(
 
 pub fn release_start(repo: &Repository, config: &GitFlowConfig, version: &str) -> Result<FlowStartResult> {
     Ok(corvus_git::gitflow::release_start(&git(), repo, config, version)?)
-}
-
-pub fn release_finish(
-    repo: &Repository,
-    config: &GitFlowConfig,
-    version: &str,
-    tag_message: &str,
-) -> Result<()> {
-    Ok(corvus_git::gitflow::release_finish(&git(), repo, config, version, tag_message)?)
 }
 
 pub fn release_finish_or_pr(
@@ -107,15 +93,6 @@ pub fn release_finish_or_pr(
 
 pub fn hotfix_start(repo: &Repository, config: &GitFlowConfig, name: &str) -> Result<FlowStartResult> {
     Ok(corvus_git::gitflow::hotfix_start(&git(), repo, config, name)?)
-}
-
-pub fn hotfix_finish(
-    repo: &Repository,
-    config: &GitFlowConfig,
-    name: &str,
-    tag_message: &str,
-) -> Result<()> {
-    Ok(corvus_git::gitflow::hotfix_finish(&git(), repo, config, name, tag_message)?)
 }
 
 pub fn hotfix_finish_or_pr(

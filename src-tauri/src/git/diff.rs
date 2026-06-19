@@ -16,9 +16,7 @@ use git2::Repository;
 // Re-export the data types so existing `crate::git::diff::Diff*` /
 // `crate::git::diff::BlameLine` / `crate::git::diff::EncodingOverrides` paths
 // resolve unchanged for every in-process caller.
-pub use corvus_git::diff::{
-    BlameLine, DiffFile, DiffHunk, DiffLine, DiffStats, DiffStatus, EncodingOverrides, LineKind,
-};
+pub use corvus_git::diff::{BlameLine, DiffFile, EncodingOverrides};
 
 use crate::error::Result;
 
@@ -33,14 +31,6 @@ pub fn parse_diff_one(
     overrides: Option<&EncodingOverrides>,
 ) -> Result<DiffFile> {
     Ok(corvus_git::diff::parse_diff_one(repo, diff, i, overrides)?)
-}
-
-pub fn parse_diff(
-    repo: &Repository,
-    diff: &git2::Diff,
-    overrides: Option<&EncodingOverrides>,
-) -> Result<Vec<DiffFile>> {
-    Ok(corvus_git::diff::parse_diff(repo, diff, overrides)?)
 }
 
 pub fn get_commit_diff_meta(

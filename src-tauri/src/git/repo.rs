@@ -1,91 +1,51 @@
-use std::collections::HashMap;
-use git2::Repository;
-use serde::{Deserialize, Serialize};
+//! `repo` — shell wrapper over the Tauri-free `corvus-git` crate.
+//!
+//! The repository handle, metadata DTOs, the in-memory open-repo registry
+//! (`RepoManager`), and the clone / remote-listing helpers moved into
+//! [`corvus_git::repo`] (so the headless `corvus-be` shares them). This module
+//! keeps the original shell-facing API — same `crate::git::repo::*` paths — so
+//! the in-process consumers (the repo IPC handlers, every `mgr.get(&tab_id)?`
+//! call across the corvus IPC layer, linked-worktree orchestration, clone flow)
+//! are untouched. It injects the shell's resolved git program (`GitCli`) and the
+//! keyring-backed HTTPS auth args (which stay shell-side, in
+//! `crate::git_cli::http_auth_args_for_url`).
+//!
+//! Re-exported types (`GitRepo`, `RepoInfo`, `RepoManager`, `CloneOptions`)
+//! return the crate's `GitError`; the existing call sites all `?`-propagate, and
+//! `impl From<GitError> for AppError` bridges them, so the wire string is
+//! unchanged.
+//!
+//! NOT moved (stays shell-side): [`spawn_clone_job`] + [`CloneJobRequest`] — the
+//! background clone *job* needs `AppHandle`/`AppState`/`JobStatus`/the plugin
+//! host to stream progress events and fire the synthetic done-hook. It calls
+//! [`corvus_git::repo::clone_repo`]-equivalent argv directly here because it must
+//! interleave per-line progress streaming with cancellation checks the crate
+//! has no notion of; the one-shot [`clone_repo`] wrapper below is what the
+//! synchronous callers use.
 
-use crate::error::{AppError, Result};
-use crate::process_ext::NoWindowExt;
+use crate::error::Result;
 
-// ---------------------------------------------------------------------------
-// Clone helpers
-// ---------------------------------------------------------------------------
+// Re-export the data types + the open-repo registry so existing
+// `crate::git::repo::*` paths resolve unchanged.
+pub use corvus_git::prelude::{CloneOptions, GitRepo, RepoInfo, RepoManager};
+
+/// The shell's resolved git program as a `corvus-git` invoker.
+fn git() -> corvus_git::prelude::GitCli {
+    corvus_git::prelude::GitCli::from_optional(crate::git_cli::snapshot().path)
+}
 
 /// List branch names available on a remote URL without cloning.
-/// Uses the system `git` binary so that SSH keys and credential helpers work,
-/// and prepends `git_cli::http_auth_args_for_url` so Arbor's stored OAuth/PAT
-/// is also honoured for HTTPS URLs.
 pub fn list_remote_branches(url: &str) -> Result<Vec<String>> {
-    let output = crate::git_cli::command()
-        .args(crate::git_cli::http_auth_args_for_url(url))
-        .args(["ls-remote", "--heads", url])
-        .no_window()
-        .output()
-        .map_err(|e| AppError::Other(format!("git not found: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(AppError::Other(stderr));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let branches = stdout
-        .lines()
-        .filter_map(|line| line.split('\t').nth(1))
-        .filter_map(|r| r.strip_prefix("refs/heads/"))
-        .map(String::from)
-        .collect();
-
-    Ok(branches)
+    // Keyring-backed HTTPS auth args stay shell-side; resolve them here and hand
+    // the crate the already-built argv prefix.
+    let auth = crate::git_cli::http_auth_args_for_url(url);
+    Ok(corvus_git::repo::list_remote_branches(&git(), url, &auth)?)
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct CloneOptions {
-    pub url:               String,
-    pub dest_path:         String,
-    #[serde(default)]
-    pub branch:            Option<String>,
-    #[serde(default)]
-    pub shallow:           bool,
-    #[serde(default)]
-    pub recurse_submodules: bool,
-}
-
-/// Clone a remote repository.  Uses the system `git` binary so SSH keys
-/// (`~/.ssh`, ssh-agent) work out of the box.  For HTTPS URLs Arbor injects
-/// its stored OAuth/PAT for the host as `http.<host>.extraHeader=…` when
-/// available, taking precedence over the OS credential helper for that
-/// specific host — when Arbor has no token for the host, the OS helper /
-/// GCM / netrc fall-through still applies.  Returns the path where the
-/// repository was cloned.
+/// Clone a remote repository. Returns the path where it was cloned.
 pub fn clone_repo(opts: &CloneOptions) -> Result<String> {
-    let mut cmd = crate::git_cli::command();
-    cmd.args(crate::git_cli::http_auth_args_for_url(&opts.url));
-    cmd.arg("clone");
-
-    if let Some(branch) = &opts.branch {
-        if !branch.is_empty() {
-            cmd.args(["--branch", branch]);
-        }
-    }
-
-    if opts.shallow {
-        cmd.args(["--depth", "1"]);
-    }
-
-    if opts.recurse_submodules {
-        cmd.arg("--recurse-submodules");
-    }
-
-    cmd.arg("--").arg(&opts.url).arg(&opts.dest_path);
-
-    let output = cmd.no_window().output()
-        .map_err(|e| AppError::Other(format!("git not found: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(AppError::Other(stderr));
-    }
-
-    Ok(opts.dest_path.clone())
+    let auth = crate::git_cli::http_auth_args_for_url(&opts.url);
+    Ok(corvus_git::repo::clone_repo(&git(), opts, &auth)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +53,9 @@ pub fn clone_repo(opts: &CloneOptions) -> Result<String> {
 // Streams progress lines as `arbor://job-output` events and registers the job
 // in the shared JobRegistry so it shows up in the Jobs overlay and can be
 // cancelled from the UI (or programmatically via `arbor.job.cancel`).
+//
+// Stays shell-side: it is welded to AppHandle / AppState / JobStatus / the
+// plugin host, none of which the Tauri-free crate may touch.
 // ---------------------------------------------------------------------------
 
 pub struct CloneJobRequest {
@@ -140,7 +103,6 @@ pub fn spawn_clone_job(req: CloneJobRequest, app_handle: tauri::AppHandle) {
             }
             cmd.arg("--").arg(&req.url).arg(&req.dest);
 
-            cmd.no_window();
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
             // Force git to emit progress even when stderr is a pipe.
@@ -258,203 +220,5 @@ pub fn spawn_clone_job(req: CloneJobRequest, app_handle: tauri::AppHandle) {
         })
     {
         tracing::error!("failed to spawn clone thread for '{}': {e}", job_id_for_err);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// GitRepo
-// ---------------------------------------------------------------------------
-
-/// Wraps `git2::Repository` with pre-computed metadata.
-pub struct GitRepo {
-    pub path: String,
-    pub name: String,
-    repo: Repository,
-}
-
-impl GitRepo {
-    pub fn open(path: &str) -> Result<Self> {
-        let repo = Repository::open(path)?;
-        let workdir = repo
-            .workdir()
-            .unwrap_or_else(|| repo.path())
-            .to_path_buf();
-
-        let path_str = workdir.to_string_lossy().trim_end_matches(['/', '\\']).to_string();
-        let name = workdir
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path_str.clone());
-
-        Ok(Self { path: path_str, name, repo })
-    }
-
-    #[inline]
-    pub fn inner(&self) -> &Repository {
-        &self.repo
-    }
-
-    #[inline]
-    pub fn inner_mut(&mut self) -> &mut Repository {
-        &mut self.repo
-    }
-
-    /// Resolved short name of HEAD (branch name or "(detached)").
-    pub fn current_branch(&self) -> Option<String> {
-        self.repo
-            .head()
-            .ok()
-            .and_then(|h| h.shorthand().map(String::from))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// DTO
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepoInfo {
-    pub tab_id: String,
-    pub path: String,
-    pub name: String,
-    pub current_branch: Option<String>,
-    pub is_bare: bool,
-    pub is_empty: bool,
-}
-
-impl RepoInfo {
-    /// Build repo metadata for a path **without** registering an open tab — the
-    /// `tab_id` is left empty. `clone_repo` uses this: it clones to disk and
-    /// returns the fresh repo's metadata, leaving the "open it as a tab" step to
-    /// the frontend (which keys the tab by the workspace-registry id, not a
-    /// throwaway clone-time id).
-    pub fn for_path(path: &str) -> Result<Self> {
-        let git_repo = GitRepo::open(path)?;
-        Ok(Self {
-            tab_id: String::new(),
-            path: git_repo.path.clone(),
-            name: git_repo.name.clone(),
-            current_branch: git_repo.current_branch(),
-            is_bare: git_repo.inner().is_bare(),
-            is_empty: git_repo.inner().is_empty().unwrap_or(false),
-        })
-    }
-}
-
-// ---------------------------------------------------------------------------
-// RepoManager — owns all open repositories, keyed by tab_id
-// ---------------------------------------------------------------------------
-
-pub struct RepoManager {
-    repos:     HashMap<String, GitRepo>,
-    /// Paths of repos that have been evicted from memory but can be re-opened
-    /// transparently on next access (tab still open in UI, git2 handle freed).
-    suspended: HashMap<String, String>,
-}
-
-impl RepoManager {
-    pub fn new() -> Self {
-        Self { repos: HashMap::new(), suspended: HashMap::new() }
-    }
-
-    /// Open a repository and register it for `tab_id`.
-    pub fn open(&mut self, tab_id: String, path: &str) -> Result<RepoInfo> {
-        self.suspended.remove(&tab_id); // clear any suspended entry for this tab
-        let git_repo = GitRepo::open(path)?;
-        let info = RepoInfo {
-            tab_id: tab_id.clone(),
-            path: git_repo.path.clone(),
-            name: git_repo.name.clone(),
-            current_branch: git_repo.current_branch(),
-            is_bare: git_repo.inner().is_bare(),
-            is_empty: git_repo.inner().is_empty().unwrap_or(false),
-        };
-        self.repos.insert(tab_id, git_repo);
-        Ok(info)
-    }
-
-    /// Remove a repository from memory (tab closed).
-    pub fn close(&mut self, tab_id: &str) {
-        self.repos.remove(tab_id);
-        self.suspended.remove(tab_id);
-    }
-
-    /// Drop the git2::Repository handle to free libgit2 internal caches while
-    /// keeping the path so the repo can be transparently re-opened on next access.
-    pub fn evict_repo(&mut self, tab_id: &str) {
-        if let Some(git_repo) = self.repos.remove(tab_id) {
-            self.suspended.insert(tab_id.to_string(), git_repo.path.clone());
-        }
-    }
-
-    /// Drop every open git2::Repository handle. Mainly called by plugins that
-    /// are about to mutate the filesystem of the active repo via the CLI (or
-    /// clone it): libgit2 can hold packfiles memory-mapped which blocks other
-    /// processes from renaming/deleting them on Windows, so releasing the
-    /// handles before handing the repo over avoids ERROR_SHARING_VIOLATION /
-    /// permission-denied failures. The repos are re-opened transparently on
-    /// the next `get()` / `get_mut()`.
-    pub fn evict_all(&mut self) {
-        let keys: Vec<String> = self.repos.keys().cloned().collect();
-        for k in keys { self.evict_repo(&k); }
-    }
-
-    pub fn get(&mut self, tab_id: &str) -> Result<&GitRepo> {
-        self._ensure_open(tab_id)?;
-        self.repos
-            .get(tab_id)
-            .ok_or_else(|| AppError::RepoNotOpen(tab_id.to_string()))
-    }
-
-    pub fn get_mut(&mut self, tab_id: &str) -> Result<&mut GitRepo> {
-        self._ensure_open(tab_id)?;
-        self.repos
-            .get_mut(tab_id)
-            .ok_or_else(|| AppError::RepoNotOpen(tab_id.to_string()))
-    }
-
-    /// Re-open a suspended repo if needed. No-op if already open.
-    fn _ensure_open(&mut self, tab_id: &str) -> Result<()> {
-        if self.repos.contains_key(tab_id) {
-            return Ok(());
-        }
-        if let Some(path) = self.suspended.remove(tab_id) {
-            match GitRepo::open(&path) {
-                Ok(git_repo) => {
-                    self.repos.insert(tab_id.to_string(), git_repo);
-                }
-                Err(e) => {
-                    // Put back so next attempt can retry
-                    self.suspended.insert(tab_id.to_string(), path);
-                    return Err(e);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Returns info for every open tab.
-    pub fn all_info(&self) -> Vec<RepoInfo> {
-        self.repos
-            .values()
-            .map(|r| RepoInfo {
-                tab_id: String::new(), // caller fills if needed
-                path: r.path.clone(),
-                name: r.name.clone(),
-                current_branch: r.current_branch(),
-                is_bare: r.inner().is_bare(),
-                is_empty: r.inner().is_empty().unwrap_or(false),
-            })
-            .collect()
-    }
-
-    /// Returns `(tab_id, path, name)` for every open (non-suspended) tab.
-    /// Used by plugin-reload to re-fire `on_repo_open` for all active tabs
-    /// without accidentally forcing a suspended repo back into memory.
-    pub fn list_open(&self) -> Vec<(String, String, String)> {
-        self.repos
-            .iter()
-            .map(|(tab_id, r)| (tab_id.clone(), r.path.clone(), r.name.clone()))
-            .collect()
     }
 }

@@ -82,7 +82,7 @@ fn get_repo_info(state: &AppState, tab_id: String) -> Result<RepoInfo, AppError>
 #[corvus::handler]
 fn clone_repo(_state: &AppState, opts: CloneOptions) -> Result<RepoInfo, AppError> {
     let dest = crate::git::repo::clone_repo(&opts)?;
-    RepoInfo::for_path(&dest)
+    Ok(RepoInfo::for_path(&dest)?)
 }
 
 /// Open the repository at `path` under `tab_id` in the repo manager.

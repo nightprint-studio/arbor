@@ -27,3 +27,6 @@ base64      = { workspace = true }
 sha2        = { workspace = true }
 regex       = { workspace = true }
 toml        = "0.8"
+# branch::rename_remote_branch mints a temp-branch name (uuid v4) during the
+# non-fast-forward rename dance. Workspace declares uuid v1 with feature v4.
+uuid        = { workspace = true }

@@ -18,6 +18,7 @@
 
 pub mod bisect;
 pub mod bisect_sessions;
+pub mod branch;
 pub mod cli;
 pub mod diff;
 pub mod encoding;
@@ -31,9 +32,14 @@ pub mod notes;
 pub mod prelude;
 pub mod rebase;
 pub mod recovery;
+pub mod reflog;
+pub mod remote;
+pub mod repo;
 pub mod reset;
 pub mod search;
 pub mod stats;
+pub mod status;
 pub mod stash;
+pub mod submodule;
 pub mod tickets;
 pub mod worktree;

@@ -19,13 +19,7 @@ use git2::Repository;
 use crate::error::Result;
 
 // Re-export the data types so existing `crate::git::graph::*` paths resolve.
-// `AuthorInfo` comes straight from the graph module (the prelude already binds
-// the name to `search::AuthorInfo`, a structurally-identical but distinct
-// type), the rest through the prelude per the workspace convention.
-pub use corvus_git::graph::AuthorInfo;
-pub use corvus_git::prelude::{
-    CommitDetail, CommitNode, EdgeType, GraphData, GraphEdge, RefLabel, RefType, RepoFileEntry,
-};
+pub use corvus_git::prelude::{CommitDetail, GraphData, RepoFileEntry};
 
 /// Load a paginated slice of the full commit graph.
 pub fn load_graph(repo: &Repository, offset: usize, limit: usize) -> Result<GraphData> {

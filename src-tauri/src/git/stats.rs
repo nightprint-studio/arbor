@@ -16,9 +16,7 @@ use crate::config::repo_config::StatsExcludeConfig;
 use crate::error::Result;
 
 // Re-export the data types so existing `crate::git::stats::*` paths resolve.
-pub use corvus_git::stats::{
-    AuthorLineStat, ContributorStat, FileChangeStat, RepoStats,
-};
+pub use corvus_git::stats::RepoStats;
 
 /// Adapt the shell's serde config into the crate's value-struct (no serde,
 /// no config coupling). Behaviour-preserving: same three field lists.

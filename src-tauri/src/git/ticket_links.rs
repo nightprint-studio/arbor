@@ -21,8 +21,7 @@ use crate::error::Result;
 // Re-export the data types / const so existing `crate::git::ticket_links::*`
 // paths (config structs, AppState cache field, IPC handlers) keep resolving.
 pub use corvus_git::prelude::{
-    default_true, LinkSource, StorageBackend, TicketLink, TicketLinkCache, TicketLinkConfig,
-    NOTES_REF,
+    LinkSource, StorageBackend, TicketLink, TicketLinkCache, TicketLinkConfig, NOTES_REF,
 };
 
 pub fn parse_text(text: &str, tracker: &str, source: LinkSource, custom_re: Option<&Regex>) -> Vec<TicketLink> {
@@ -39,10 +38,6 @@ pub fn write_git_notes(repo: &Repository, sha: &str, links: &[TicketLink]) -> Re
 
 pub fn check_notes_push_refspec(repo: &Repository) -> bool {
     corvus_git::tickets::check_notes_push_refspec(repo)
-}
-
-pub fn links_toml_path(workdir: &Path) -> std::path::PathBuf {
-    corvus_git::tickets::links_toml_path(workdir)
 }
 
 pub fn read_all_toml_links(workdir: &Path) -> Result<std::collections::HashMap<String, Vec<TicketLink>>> {

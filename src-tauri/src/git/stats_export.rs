@@ -6,4 +6,4 @@
 //! paths keep resolving: the stats broker handler calls [`export_to_file`], and
 //! `git_provider::security_export` reuses [`LOGO_SVG`] for its own report header.
 
-pub use corvus_git::stats::{export_to_file, generate_html, LOGO_SVG};
+pub use corvus_git::stats::{export_to_file, LOGO_SVG};
