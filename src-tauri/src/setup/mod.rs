@@ -115,6 +115,9 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // `emit_event`).
     crate::cloud::install(&app.handle());
 
+    // Park the launcher (main window) bottom-right, JetBrains-Toolbox-style.
+    crate::window::placement::place_launcher_bottom_right(app.handle());
+
     // Register the configured OS-global File-Explorer shortcut (opt-in; no-op
     // when disabled or unset). The press handler is wired on the plugin builder.
     #[cfg(desktop)]

@@ -36,6 +36,23 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
             #[cfg(debug_assertions)]
             let _ = api;
         }
+        WindowEvent::Destroyed => {
+            // When the last window of a product is gone, tell the launcher its
+            // node is no longer "In esecuzione". Count the OTHER windows of the
+            // same product (this one is being torn down) regardless of whether
+            // it's already left the manager's map.
+            let label = window.label();
+            if let Some(id) = super::product_id_for_label(label) {
+                let app = window.app_handle();
+                let still_running = app
+                    .webview_windows()
+                    .keys()
+                    .any(|l| l.as_str() != label && super::product_id_for_label(l) == Some(id));
+                if !still_running {
+                    super::emit_product_state(app, id, false);
+                }
+            }
+        }
         WindowEvent::Focused(focused) => {
             let focused = *focused;
             // Update the app-focused flag so focus-gated schedulers work correctly.

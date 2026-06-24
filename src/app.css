@@ -356,6 +356,16 @@ body {
 }
 .btn-danger:hover { background: var(--error-subtle); border-color: var(--error); }
 
+/* Tonal — soft accent-tinted fill (translucent bg + accent text/border). The
+   default uses the theme accent; pass `color` on <Button> to recolour it (see
+   .btn-tonal.has-color in Button.svelte). */
+.btn-tonal {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.btn-tonal:hover { filter: brightness(1.12); }
+
 /* ---- Mac-style close button (red dot) ────────────────────────────────
    Default look — small coloured circle in modal / panel headers. Behavior
    swaps to a flat IntelliJ-style X glyph when the user picks the Windows

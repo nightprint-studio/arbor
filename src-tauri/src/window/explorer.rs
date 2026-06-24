@@ -94,12 +94,14 @@ fn create_or_focus(app: &AppHandle) {
     if !always_new {
         if let Some(w) = app.get_webview_window(EXPLORER_WINDOW_LABEL) {
             show_and_focus(&w);
+            super::emit_product_state(app, "sitta", true);
             return;
         }
     }
 
     let label = next_explorer_label(app);
     build_explorer_window(app, &label);
+    super::emit_product_state(app, "sitta", true);
 }
 
 /// Build a frameless explorer window with the given label.
@@ -148,6 +150,7 @@ fn create_or_focus_reveal(app: &AppHandle, payload: RevealPayload) {
         if let Some(w) = app.get_webview_window(EXPLORER_WINDOW_LABEL) {
             show_and_focus(&w);
             let _ = w.emit("arbor://explorer-reveal", &payload);
+            super::emit_product_state(app, "sitta", true);
             return;
         }
     }
@@ -159,6 +162,7 @@ fn create_or_focus_reveal(app: &AppHandle, payload: RevealPayload) {
         }
     }
     build_explorer_window(app, &label);
+    super::emit_product_state(app, "sitta", true);
 }
 
 /// Resolve a raw path + `reveal` flag into a [`RevealPayload`]: when revealing a

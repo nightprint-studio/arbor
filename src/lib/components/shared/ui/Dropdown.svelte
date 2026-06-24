@@ -872,11 +872,11 @@
   class:dd-rel={position === 'absolute'}
   bind:this={anchorEl}
   onkeydown={(e) => {
-    // WAI-ARIA combobox pattern: ArrowDown (or Alt+ArrowDown) on the focused
-    // trigger opens the menu and lands on the first item. Enter / Space are
-    // already handled natively by the trigger <button>. Only react when the
-    // menu is closed — once open, the document-level key handler takes over.
-    if (!open && (e.key === 'ArrowDown' || (e.altKey && e.key === 'ArrowDown'))) {
+    // WAI-ARIA combobox pattern: ArrowDown/ArrowUp (or Alt+ArrowDown) on the
+    // focused trigger opens the menu and lands on the first/active item. Enter /
+    // Space are already handled natively by the trigger <button>. Only react
+    // when closed — once open, the document-level key handler takes over.
+    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || (e.altKey && e.key === 'ArrowDown'))) {
       e.preventDefault();
       toggle();
     }
@@ -950,6 +950,10 @@
   .dd-root.dd-rel { position: relative; }
 
   /* ── Menu panel ─────────────────────────────────────────────────────────── */
+  /* Surface colours fall back to the app theme but are overridable via the
+     `--dd-*` custom properties (set on any ancestor) so a consumer with its own
+     palette — e.g. the launcher's theme-independent sky/earth menus — can
+     recolour the menu without forking the widget. */
   .dd-menu {
     position: absolute;
     top: calc(100% + 4px);
@@ -959,10 +963,10 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
+    background: var(--dd-bg, var(--bg-elevated));
+    border: 1px solid var(--dd-border, var(--border));
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-popup);
+    box-shadow: var(--dd-shadow, var(--shadow-popup));
     font-family: var(--font-ui-sans);
   }
   .dd-menu.dd-fixed { position: fixed; top: auto; left: auto; }
@@ -1109,16 +1113,16 @@
     border: none;
     border-radius: var(--radius-sm);
     text-align: left;
-    color: var(--text-primary);
+    color: var(--dd-text, var(--text-primary));
     font-family: var(--font-ui-sans);
     font-size: var(--font-size-sm);
     cursor: pointer;
     transition: background var(--transition-fast);
   }
-  .dd-item:hover:not(:disabled)         { background: var(--bg-hover); }
-  .dd-item.dd-focused:not(:disabled)    { background: var(--bg-hover); }
+  .dd-item:hover:not(:disabled)         { background: var(--dd-hover-bg, var(--bg-hover)); }
+  .dd-item.dd-focused:not(:disabled)    { background: var(--dd-hover-bg, var(--bg-hover)); }
   .dd-item:disabled                      { opacity: 0.45; cursor: not-allowed; }
-  .dd-item.active                        { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .dd-item.active                        { background: var(--dd-active-bg, color-mix(in srgb, var(--accent) 8%, transparent)); }
   .dd-item.danger                        { color: var(--error); }
   .dd-item.danger:hover:not(:disabled)   { background: var(--error-subtle); }
 
@@ -1146,7 +1150,7 @@
     flex-shrink: 0;
   }
   :global(.dd-icon)  { flex-shrink: 0; color: var(--text-muted); }
-  :global(.dd-check) { color: var(--accent); flex-shrink: 0; }
+  :global(.dd-check) { color: var(--dd-check, var(--accent)); flex-shrink: 0; }
   /* Per-item icon tint (set via iconColor). The wrapping span owns the
      colour so we don't fight the `:global(.dd-icon)` muted default; the
      lucide glyph inside paints in currentColor. */
@@ -1181,7 +1185,7 @@
   }
   .dd-item-meta {
     font-size: 11px;
-    color: var(--text-muted);
+    color: var(--dd-text-muted, var(--text-muted));
     flex-shrink: 0;
     font-variant-numeric: tabular-nums;
   }

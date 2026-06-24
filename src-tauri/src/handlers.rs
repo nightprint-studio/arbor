@@ -77,6 +77,9 @@ macro_rules! invoke_handlers {
             $crate::window::corvus::open_corvus_window,
             // Launcher window (JetBrains-Toolbox-like home screen)
             $crate::window::launcher::open_launcher_window,
+            // Launcher ↔ product-window lifecycle (running-state + Stop)
+            $crate::window::list_running_products,
+            $crate::window::close_product_window,
             // ── nemus engine ─────────────────────────────────────────────────
             // eval / transport / render / sample packs / config
             $crate::nemus::nemus_eval,

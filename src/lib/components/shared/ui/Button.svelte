@@ -4,7 +4,7 @@
   import { tooltip as tooltipAction } from '$lib/actions/tooltip';
   import type { TooltipInput } from '$lib/stores/tooltip.svelte';
 
-  type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'icon';
+  type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'icon' | 'tonal';
   type Size    = 'xs' | 'sm' | 'md' | 'lg';
 
   interface Props {
@@ -129,6 +129,16 @@
 
   .btn-ghost.has-color,
   .btn-icon.has-color  { color: var(--btn-color); }
+
+  /* Tonal — soft translucent fill in the (overridable) accent colour, with
+     matching text + border. Used for low-emphasis-but-coloured actions (e.g.
+     the launcher's per-product Avvia / Apri / Stop). */
+  .btn-tonal.has-color {
+    background: color-mix(in srgb, var(--btn-color) 15%, transparent);
+    color: var(--btn-color);
+    border-color: color-mix(in srgb, var(--btn-color) 32%, transparent);
+  }
+  .btn-tonal.has-color:hover:not(:disabled) { filter: brightness(1.12); }
 
   .btn-danger.has-color { color: var(--btn-color); }
   .btn-danger.has-color:hover:not(:disabled) {

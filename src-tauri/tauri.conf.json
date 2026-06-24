@@ -13,12 +13,13 @@
     "windows": [
       {
         "title": "Arbor",
-        "width": 1400,
-        "height": 900,
-        "minWidth": 900,
-        "minHeight": 600,
+        "width": 400,
+        "height": 636,
+        "minWidth": 400,
+        "minHeight": 636,
+        "resizable": false,
         "decorations": false,
-        "maximized": true,
+        "maximized": false,
         "shadow": true,
         "transparent": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,InterestFeedContentSuggestions,WebRTC,AutofillServerCommunication"

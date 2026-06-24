@@ -32,9 +32,11 @@ pub fn open_or_focus(app: &AppHandle) {
 fn create_or_focus(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(CORVUS_WINDOW_LABEL) {
         show_and_focus(&w);
-        return;
+    } else {
+        build_corvus_window(app);
     }
-    build_corvus_window(app);
+    // Light up the launcher's Corvus node as "In esecuzione".
+    super::emit_product_state(app, "corvus", true);
 }
 
 /// Build the frameless Corvus window.

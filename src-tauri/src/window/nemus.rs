@@ -32,9 +32,11 @@ pub fn open_or_focus(app: &AppHandle) {
 fn create_or_focus(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(NEMUS_WINDOW_LABEL) {
         show_and_focus(&w);
-        return;
+    } else {
+        build_nemus_window(app);
     }
-    build_nemus_window(app);
+    // Light up the launcher's Merula node as "In esecuzione".
+    super::emit_product_state(app, "merula", true);
 }
 
 /// Build the frameless nemus window.

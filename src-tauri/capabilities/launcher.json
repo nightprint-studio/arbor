@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "launcher",
+  "description": "Capability for the standalone launcher window (the Canopy home screen, when summoned as its own 'launcher' window rather than 'main').",
+  "windows": ["launcher"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-is-maximized",
+    "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "**" }]
+    }
+  ]
+}
