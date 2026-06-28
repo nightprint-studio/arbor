@@ -97,8 +97,11 @@ export interface LauncherConfig {
 export const getLauncherConfig = () =>
   invoke<LauncherConfig>('get_launcher_config');
 
+// Direct Tauri command → args are camelCase (Tauri maps `closeToTray` to the
+// Rust `close_to_tray` param). The snake_case convention only applies to the
+// `platform`/rpc path, where params are serde-deserialized payload fields.
 export const setLauncherCloseToTray = (id: string, closeToTray: boolean) =>
-  invoke<void>('set_launcher_close_to_tray', { id, close_to_tray: closeToTray });
+  invoke<void>('set_launcher_close_to_tray', { id, closeToTray });
 
 // ── Recent repos (persisted in config.toml via backend) ──────────────────────
 

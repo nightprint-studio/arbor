@@ -114,8 +114,16 @@
   async function toggleCloseToTray(id: string) {
     const next = !(closeToTray[id] ?? false);
     closeToTray = { ...closeToTray, [id]: next };
-    try { await setLauncherCloseToTray(id, next); }
-    catch { closeToTray = { ...closeToTray, [id]: !next }; } // revert on failure
+    try {
+      await setLauncherCloseToTray(id, next);
+    } catch (e) {
+      // Revert the optimistic toggle and surface WHY (a silent revert just looks
+      // like the checkbox "refreshing" itself off). Most likely the backend
+      // command isn't in the running binary yet (needs a recompile).
+      closeToTray = { ...closeToTray, [id]: !next };
+      fire('Impostazione non salvata: ' + e, '#f0908c');
+      console.error('set_launcher_close_to_tray failed', e);
+    }
   }
   const settingsMenu = $derived<DropdownItem[]>([
     { kind: 'separator', label: 'Chiusura riduce a icona' },
