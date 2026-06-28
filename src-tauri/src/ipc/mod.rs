@@ -244,6 +244,256 @@ fn host_dispatch(
         return Ok(serde_json::json!(cancelled));
     }
 
+    // `arbor.job.*` PROXY ops not covered by the `__job_register`/`__job_append`/
+    // `__job_set_status`/`__job_is_cancelled` family above. `corvus-be`'s
+    // `arbor.job.*` namespace reserves the id via `__job_register` (above), then
+    // drives the real spawn + registry reads/mutations here. These mirror
+    // `ns_shell/job.rs` byte-for-byte. `__job_spawn` emits `arbor://job-started`
+    // and runs `crate::jobs::spawn_job` (the job is already registered).
+    if method == "__job_spawn" {
+        use tauri::Emitter;
+        let job_id = params.get("job_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("Job").to_string();
+        let plugin_name =
+            params.get("plugin_name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let command = params.get("command").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let cwd = params.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let category = params.get("category").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let hidden = params.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+        let target = params.get("target").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let on_done_action =
+            params.get("on_done_action").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let env: Vec<(String, String)> = params
+            .get("env")
+            .and_then(|v| v.as_object())
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let _ = app.emit(
+            "arbor://job-started",
+            serde_json::json!({
+                "job_id":      &job_id,
+                "name":        &name,
+                "plugin_name": &plugin_name,
+                "command":     &command,
+                "category":    &category,
+                "hidden":      hidden,
+                "target":      &target,
+            }),
+        );
+
+        crate::jobs::spawn_job(
+            crate::jobs::JobSpawnRequest {
+                job_id,
+                name,
+                plugin_name,
+                command,
+                cwd,
+                env,
+                on_done_action,
+                category,
+            },
+            app.clone(),
+        );
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__job_list" {
+        let list = match app.state::<AppState>().jobs.lock() {
+            Ok(g) => g.list(),
+            Err(e) => return Err(format!("job.list lock: {e}")),
+        };
+        return serde_json::to_value(&list).map_err(|e| format!("job.list encode: {e}"));
+    }
+    if method == "__job_cancel" {
+        let job_id = params.get("job_id").and_then(|v| v.as_str()).unwrap_or_default();
+        if let Ok(mut jobs) = app.state::<AppState>().jobs.lock() {
+            jobs.cancel(job_id);
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__job_dismiss" {
+        let job_id = params.get("job_id").and_then(|v| v.as_str()).unwrap_or_default();
+        let dismissed = if let Ok(mut jobs) = app.state::<AppState>().jobs.lock() {
+            jobs.dismiss(job_id)
+        } else {
+            false
+        };
+        return Ok(serde_json::json!(dismissed));
+    }
+    if method == "__job_clear_finished" {
+        let cleared: Vec<String> = if let Ok(mut jobs) = app.state::<AppState>().jobs.lock() {
+            jobs.clear_finished()
+        } else {
+            Vec::new()
+        };
+        return serde_json::to_value(&cleared).map_err(|e| format!("job.clear_finished encode: {e}"));
+    }
+
+    // Toolchain-registry proxy: the `ToolchainRegistry` lives in the shell's
+    // `AppState` (`toolchain_registry`), so `corvus-be`'s `arbor.toolchain.*`
+    // namespace (a PROXY installer) round-trips each op here. These mirror
+    // `ns_shell/toolchain.rs` byte-for-byte — same registry calls, same
+    // `toolchain.<op>[ lock| encode]: …` error strings, same return shapes (the
+    // installer surfaces this `String` verbatim to Lua as `(nil|false, err)`).
+    if method == "__toolchain_list" {
+        let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or_default();
+        let entries = match app.state::<AppState>().toolchain_registry.lock() {
+            Ok(mut g) => g.list(kind),
+            Err(e) => return Err(format!("toolchain.list lock: {e}")),
+        };
+        return serde_json::to_value(&entries).map_err(|e| format!("toolchain.list encode: {e}"));
+    }
+    if method == "__toolchain_active" {
+        let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or_default();
+        let entry = match app.state::<AppState>().toolchain_registry.lock() {
+            Ok(mut g) => g.active(kind),
+            Err(e) => return Err(format!("toolchain.active lock: {e}")),
+        };
+        return match entry {
+            None => Ok(serde_json::Value::Null),
+            Some(e) => serde_json::to_value(&e).map_err(|e| format!("toolchain.active encode: {e}")),
+        };
+    }
+    if method == "__toolchain_env" {
+        let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or_default();
+        let id = params.get("id").and_then(|v| v.as_str());
+        let env = match app.state::<AppState>().toolchain_registry.lock() {
+            Ok(mut g) => g.env_for(kind, id),
+            Err(e) => return Err(format!("toolchain.env lock: {e}")),
+        };
+        return serde_json::to_value(&env).map_err(|e| format!("toolchain.env encode: {e}"));
+    }
+    if method == "__toolchain_detect" {
+        let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or_default();
+        let entries = match app.state::<AppState>().toolchain_registry.lock() {
+            Ok(g) => g.detect(kind),
+            Err(e) => return Err(format!("toolchain.detect lock: {e}")),
+        };
+        return serde_json::to_value(&entries).map_err(|e| format!("toolchain.detect encode: {e}"));
+    }
+    if method == "__toolchain_add" {
+        let kind = params
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        // The entry shape was already validated installer-side; deserialize it back
+        // into the typed `ToolchainEntry` the registry stores.
+        let entry: arbor_plugin_core::prelude::ToolchainEntry =
+            serde_json::from_value(params.get("entry").cloned().unwrap_or(serde_json::Value::Null))
+                .map_err(|e| format!("toolchain.add: invalid entry: {e}"))?;
+        return match app.state::<AppState>().toolchain_registry.lock() {
+            Ok(mut g) => {
+                g.add(&kind, entry);
+                Ok(serde_json::Value::Null)
+            }
+            Err(e) => Err(format!("toolchain.add lock: {e}")),
+        };
+    }
+    if method == "__toolchain_remove" {
+        let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or_default();
+        let id = params.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        return match app.state::<AppState>().toolchain_registry.lock() {
+            Ok(mut g) => {
+                g.remove(kind, id);
+                Ok(serde_json::Value::Null)
+            }
+            Err(e) => Err(format!("toolchain.remove lock: {e}")),
+        };
+    }
+    if method == "__toolchain_set_active" {
+        let kind = params.get("kind").and_then(|v| v.as_str()).unwrap_or_default();
+        let id = params.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        return match app.state::<AppState>().toolchain_registry.lock() {
+            Ok(mut g) => {
+                g.set_active(kind, id);
+                Ok(serde_json::Value::Null)
+            }
+            Err(e) => Err(format!("toolchain.set_active lock: {e}")),
+        };
+    }
+
+    // `arbor.ui.set_branding` (PROXY). Mirrors `ns_shell/ui/branding.rs`: apply the
+    // OS window-icon BEFORE writing AppState.branding (so a Tauri error leaves the
+    // previous override intact), then emit `arbor://branding-changed`. The pure
+    // validation (svg/svg_path/icon-path checks, svg_path read) already ran
+    // installer-side; `svg` here is the resolved inline body. The error string
+    // matches the shell's nested `window_icon_path failed: {read icon|set_icon}: …`.
+    if method == "__set_branding" {
+        let svg = params.get("svg").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let icon_path =
+            params.get("window_icon_path").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let pname = params.get("plugin").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        // Apply the OS-level icon BEFORE writing the state — a Tauri error then
+        // still leaves the previous override intact.
+        if let Some(ref p) = icon_path {
+            let img = tauri::image::Image::from_path(p)
+                .map_err(|e| format!("arbor.ui.set_branding: window_icon_path failed: read icon: {e}"))?;
+            let win = app
+                .get_webview_window("main")
+                .ok_or_else(|| "arbor.ui.set_branding: window_icon_path failed: no 'main' window".to_string())?;
+            win.set_icon(img)
+                .map_err(|e| format!("arbor.ui.set_branding: window_icon_path failed: set_icon: {e}"))?;
+        }
+        let state = app.state::<AppState>();
+        state.branding.apply(svg, icon_path, pname);
+        crate::commands::branding_commands::emit_branding_changed(app, &state.branding.snapshot());
+        return Ok(serde_json::Value::Null);
+    }
+
+    // `arbor.ui.clear_branding` (PROXY). Only clears when this plugin owns the
+    // override; restores the bundled window icon when the cleared state carried one;
+    // emits `arbor://branding-changed`.
+    if method == "__clear_branding" {
+        let pname = params.get("plugin").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let state = app.state::<AppState>();
+        // Only clear if THIS plugin owns the override — protects against a noisy
+        // plugin nuking another plugin's branding when it unloads.
+        let Some(prev) = state.branding.clear(Some(&pname)) else {
+            return Ok(serde_json::Value::Null);
+        };
+        // If the previous state included a window icon, restore the bundled default
+        // so the taskbar doesn't keep showing stale art.
+        if prev.window_icon_path.is_some() {
+            if let Some(win) = app.get_webview_window("main") {
+                if let Some(default) = app.default_window_icon() {
+                    let _ = win.set_icon(default.clone());
+                }
+            }
+        }
+        crate::commands::branding_commands::emit_branding_changed(app, &state.branding.snapshot());
+        return Ok(serde_json::Value::Null);
+    }
+
+    // `arbor.ui.set_theme_tokens` (PROXY). Frontend-only: rebroadcast the overlay
+    // via `arbor://theme-overlay`. The `{ "--x": v, … }` vars object was built +
+    // validated installer-side.
+    if method == "__set_theme_overlay" {
+        let pname = params.get("plugin").and_then(|v| v.as_str()).unwrap_or_default();
+        let vars = params
+            .get("vars")
+            .cloned()
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+        crate::commands::branding_commands::emit_theme_overlay(app, pname, &vars);
+        return Ok(serde_json::Value::Null);
+    }
+
+    // `arbor.ui.clear_theme_tokens` (PROXY). Empty-vars payload is the agreed
+    // "release my overlay" signal — the frontend deletes the entry keyed by plugin.
+    if method == "__clear_theme_overlay" {
+        let pname = params.get("plugin").and_then(|v| v.as_str()).unwrap_or_default();
+        crate::commands::branding_commands::emit_theme_overlay(
+            app,
+            pname,
+            &serde_json::Value::Object(serde_json::Map::new()),
+        );
+        return Ok(serde_json::Value::Null);
+    }
+
     // Current plugin-applied logo override (branding is in-memory shell state):
     // an OOP report/export embeds it. `None` when no plugin set one.
     if method == "__branding_logo" {

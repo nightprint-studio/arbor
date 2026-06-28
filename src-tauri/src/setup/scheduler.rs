@@ -42,6 +42,12 @@ pub fn wire(app: &tauri::App) {
             .expect("plugin_host poisoned at AppCtx install");
         host.set_app_ctx(ctx.clone());
         host.set_api_installer(crate::plugin::api_installer::tauri_api_installer());
+        // The shell still hosts the Corvus git product's plugin runtime (the
+        // `ns_shell` namespaces live here until they relocate to corvus-be), so
+        // it loads `corvus`-targeted + universal plugins. When ns_shell moves to
+        // corvus-be this becomes the launcher's own product so the shell stops
+        // double-loading git plugins. See `Manifest::targets`.
+        host.set_product("corvus");
         // Marketplace install dir is scanned alongside the host's dev
         // `plugin_dir()` during reload. Passed as an extra root so
         // `arbor-plugin-core` itself stays free of any marketplace coupling.

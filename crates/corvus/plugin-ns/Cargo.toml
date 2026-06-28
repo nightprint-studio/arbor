@@ -1,0 +1,23 @@
+[package]
+name         = "corvus-plugin-ns"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Corvus git `ns_shell` namespaces (`arbor.repo`, `arbor.notes`, …) ported to run inside any host (Tauri shell or headless `corvus-be`) via a host-abstraction trait. Light by design: depends only on mlua + arbor-plugin-core + serde — never on corvus-be (a binary) or the heavy git/provider crates. The host implements `NsHost`; this crate marshals Lua <-> serde_json::Value and calls through it."
+
+[dependencies]
+arbor-plugin-core = { path = "../../plugin/core" }
+# `TerminalLevel` for the `arbor.terminal.exec` permission gate (the installer
+# matches on `ApiCtx.terminal_perm: TerminalLevel`, which lives here — it is NOT
+# re-exported by arbor-plugin-core's prelude).
+arbor-plugin-types = { path = "../../plugin/types" }
+
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# Same pin/features as arbor-plugin-core / corvus-plugin so Cargo unifies the
+# single mlua artifact — the namespace installers' `&Lua` must be the very same
+# type the host's `register_lua_api` builds.
+mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send"] }

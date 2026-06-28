@@ -7,27 +7,35 @@ use arbor_plugin_core::prelude::{
 };
 use mlua::Lua;
 
-/// Publishes only the **host-pure** `arbor.*` namespaces (log, events, json,
-/// text, fs, http, meta, settings, timer, scheduler, hooks, contribution,
-/// keybinding, command, notify, the `*_studio`s, …) that `register_lua_api`
-/// hardcodes — passing **no** extra namespace installers.
+/// Publishes the **host-pure** `arbor.*` namespaces (log, events, json, text, fs,
+/// http, meta, settings, timer, scheduler, hooks, contribution, keybinding,
+/// command, notify, the `*_studio`s, …) that `register_lua_api` hardcodes, plus
+/// any **git/product `ns_shell` namespaces** the backend hands in (`extra`).
 ///
-/// The git/product `ns_shell` namespaces (`arbor.repo`, `arbor.job`,
-/// `arbor.pipeline`, …) are not wired here yet: they move into the backend
-/// next to their domain logic in plugin-relocation Wave 1. Until then a plugin
-/// that calls one in a hook running OOP gets a clear nil-field error, logged by
-/// the host — never a silent drop.
-pub struct CorvusBeApiInstaller;
+/// The git namespaces (`arbor.notes`, `arbor.repo`, …) are ported into
+/// `corvus-plugin-ns` and built by `corvus-be` next to their `NsHost` impl, then
+/// passed here. Whatever the backend doesn't supply yet stays absent — a plugin
+/// that calls a not-yet-wired namespace in an OOP hook gets a clear nil-field
+/// error, logged by the host, never a silent drop.
+pub struct CorvusBeApiInstaller {
+    /// The backend-supplied git/product namespace installers, run (in order)
+    /// after the host-pure namespaces — exactly the slot the Tauri shell passes
+    /// its `ns_shell` wrappers into.
+    extra: Vec<Arc<dyn LuaNamespaceInstaller>>,
+}
 
 impl LuaApiInstaller for CorvusBeApiInstaller {
     fn install(&self, lua: &Lua, params: ApiInstallParams) -> PluginCoreResult<()> {
-        let extra: Vec<Arc<dyn LuaNamespaceInstaller>> = Vec::new();
-        register_lua_api(lua, params, &extra)
+        register_lua_api(lua, params, &self.extra)
     }
 }
 
 /// Convenience constructor so `corvus-be` wires the installer without naming
-/// `mlua` itself.
-pub fn corvus_be_api_installer() -> Arc<dyn LuaApiInstaller> {
-    Arc::new(CorvusBeApiInstaller)
+/// `mlua` itself. `extra` is the ordered list of git/product namespace installers
+/// (built in `corvus-be` over its `CorvusNsHost`); pass an empty `Vec` for a
+/// host-pure-only surface.
+pub fn corvus_be_api_installer(
+    extra: Vec<Arc<dyn LuaNamespaceInstaller>>,
+) -> Arc<dyn LuaApiInstaller> {
+    Arc::new(CorvusBeApiInstaller { extra })
 }

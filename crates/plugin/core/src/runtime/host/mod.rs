@@ -57,6 +57,11 @@ pub struct PluginHost {
     /// actions installed in the engine upgrade this to call back into
     /// `hook_router::fire_on`; using `Weak` avoids a self-strong-cycle.
     pub(crate) self_arc: Option<Weak<Mutex<PluginHost>>>,
+    /// The product whose backend this host serves (`"corvus"`, `"merula"`, …),
+    /// used to filter plugins by their manifest `targets`. `None` means
+    /// "load every plugin regardless of target" — the legacy / test default.
+    /// Set once at boot via [`set_product`].
+    pub(crate) product: Option<String>,
     /// Plugins that failed to load due to dependency errors (shown in Plugin Manager).
     pub load_failures: Vec<LoadFailure>,
     /// Cross-plugin contribution registry (arbor.ui.contribute).
@@ -77,6 +82,7 @@ impl PluginHost {
             extra_plugin_roots: Vec::new(),
             scheduler:          None,
             self_arc:           None,
+            product:            None,
             load_failures:      Vec::new(),
             contributions:      ContributionRegistry::new(),
             tree_store:         TreeStore::new(),
@@ -99,6 +105,15 @@ impl PluginHost {
     /// [`NoopApiInstaller`](crate::sandbox::NoopApiInstaller).
     pub fn set_api_installer(&mut self, installer: Arc<dyn LuaApiInstaller>) {
         self.api_installer = Some(installer);
+    }
+
+    /// Bind this host to a product (`"corvus"`, `"merula"`, …) so that
+    /// [`reload`](lifecycle) loads only the plugins whose manifest `targets`
+    /// include this product (universal plugins — empty `targets` — always load).
+    /// Called once at boot by the product backend / shell. Leaving it unset
+    /// loads every plugin regardless of target.
+    pub fn set_product(&mut self, product: impl Into<String>) {
+        self.product = Some(product.into());
     }
 
     /// Set extra plugin roots (e.g. the marketplace install dir) that should

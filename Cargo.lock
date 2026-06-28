@@ -1257,6 +1257,7 @@ dependencies = [
  "arbor-feedback",
  "arbor-ipc",
  "arbor-plugin-core",
+ "arbor-process-ext",
  "arbor-rpc",
  "base64 0.22.1",
  "corvus-core",
@@ -1267,6 +1268,7 @@ dependencies = [
  "corvus-git-provider-gitlab",
  "corvus-issues",
  "corvus-plugin",
+ "corvus-plugin-ns",
  "dirs",
  "git2",
  "regex",
@@ -1461,6 +1463,17 @@ dependencies = [
  "mlua",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "corvus-plugin-ns"
+version = "0.3.0"
+dependencies = [
+ "arbor-plugin-core",
+ "arbor-plugin-types",
+ "mlua",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

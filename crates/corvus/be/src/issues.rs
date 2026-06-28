@@ -47,8 +47,17 @@ fn issues() -> &'static (IssueTrackerRegistry, Arc<JiraTracker>) {
 }
 
 /// The registered Linear tracker (always present once the registry is built).
-fn linear() -> Arc<dyn IssueTracker> {
+/// `pub(crate)` so `CorvusNsHost`'s `arbor.issues.*` DIRECT methods (in `main.rs`)
+/// can drive the same tracker the OOP handlers do.
+pub(crate) fn linear() -> Arc<dyn IssueTracker> {
     issues().0.get("linear").expect("linear tracker is always registered")
+}
+
+/// The whole tracker registry — the `arbor.issues.lookup` path routes per-repo
+/// (resolving the repo's configured tracker name → its tracker), so it needs the
+/// full registry, not just the Linear handle. `pub(crate)` for `CorvusNsHost`.
+pub(crate) fn registry() -> &'static IssueTrackerRegistry {
+    &issues().0
 }
 
 /// The concrete Jira handle (its inherent methods aren't on the trait).
@@ -61,7 +70,7 @@ fn jira() -> Arc<JiraTracker> {
 /// to the in-process fallback: auth/connection failures gain the
 /// `"Authentication failed: "` prefix (`AppError::AuthFailed`'s `Display`),
 /// API/network failures pass through verbatim (`AppError::Other`'s `Display`).
-fn err(e: IssueTrackerError) -> String {
+pub(crate) fn err(e: IssueTrackerError) -> String {
     match e {
         IssueTrackerError::Auth(m) | IssueTrackerError::NotConnected(m) => {
             format!("Authentication failed: {m}")

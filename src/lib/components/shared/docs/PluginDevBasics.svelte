@@ -100,6 +100,7 @@ keywords          = ["git", "tool"]
 min_arbor_version = "0.1.0"  # optional; rejects plugin on older builds (semver)
 arbor_api         = 1        # minimum Arbor plugin API version required
 os                = []       # ["windows", "linux", "macos"] — empty = cross-platform
+targets           = []       # products this plugin runs on, e.g. ["corvus"]; empty = every product
 entry             = "main.lua" # default; can be changed
 doc_file          = "doc.html" # optional: HTML file shown in the Docs panel
 

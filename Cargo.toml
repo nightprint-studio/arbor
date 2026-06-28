@@ -19,6 +19,7 @@ members = [
     "crates/foundation/rpc-macros",
     "crates/corvus/core",
     "crates/corvus/plugin",
+    "crates/corvus/plugin-ns",
     "crates/corvus/be",
     "crates/corvus/git",
     "crates/corvus/git-cli",

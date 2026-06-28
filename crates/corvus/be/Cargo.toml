@@ -23,6 +23,10 @@ arbor-plugin-core = { path = "../../plugin/core" }
 # shell's single-source `JobRegistry` over the reverse channel (`be/src/jobs.rs`).
 arbor-feedback    = { path = "../../arbor-feedback" }
 corvus-plugin     = { path = "../plugin" }
+# The git `ns_shell` namespaces (`arbor.notes`, `arbor.repo`, …) ported to run on
+# any host: corvus-be implements its `NsHost` trait (`CorvusNsHost`) and hands the
+# installers to `corvus_be_api_installer`, so plugins/hooks running OOP can call them.
+corvus-plugin-ns  = { path = "../plugin-ns" }
 corvus-core       = { path = "../core" }
 corvus-git        = { path = "../git" }
 # System-git detection + PortableGit download: corvus-be self-detects its own git
@@ -37,6 +41,10 @@ corvus-issues     = { path = "../issues" }
 corvus-git-provider-api    = { path = "../git-provider/api" }
 corvus-git-provider-github = { path = "../git-provider/github" }
 corvus-git-provider-gitlab = { path = "../git-provider/gitlab" }
+# `NoWindowExt::no_window()` for the `arbor.terminal.exec` DIRECT namespace —
+# suppresses the console-window popup on Windows when spawning a child process.
+# Same relative-path shape sibling crates (corvus-git/corvus-git-cli) use.
+arbor-process-ext = { path = "../../arbor-process-ext" }
 git2          = { version = "0.20", features = ["vendored-libgit2"] }
 serde         = { workspace = true }
 serde_json    = { workspace = true }

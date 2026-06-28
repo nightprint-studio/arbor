@@ -101,7 +101,27 @@ pub fn hosted() -> Vec<(String, Arc<dyn GitProvider>)> {
 /// `lookup_or_register`.
 pub fn provider_for_tab(state: &CorvusState, tab_id: &str) -> Result<Resolved, String> {
     let repo = crate::repo::open(state, tab_id)?;
-    let remotes: Vec<(String, String)> = corvus_git::remote::list_remotes(&repo)
+    resolve_from_repo(&repo)
+}
+
+/// Resolve `(provider, repo_ref, info)` for a repo by **path** — the OOP twin of
+/// the shell's `git_provider::provider_for_path`. Opens the repo at `path` with
+/// libgit2 (error `open '{path}': {e}`, matching the shell), then runs the shared
+/// remotes→detect→`lookup_or_register`→`RepoRef` tail. Used by the ported
+/// `arbor.{mr,ci,security}` namespaces, which resolve the active repo by the
+/// `__arbor_current_repo__` path rather than a tab id.
+pub fn provider_for_path(path: &str) -> Result<Resolved, String> {
+    let repo = git2::Repository::open(path).map_err(|e| format!("open '{path}': {e}"))?;
+    resolve_from_repo(&repo)
+}
+
+/// The shared tail of [`provider_for_tab`] / [`provider_for_path`]: list remotes,
+/// detect the provider (pure URL parsing), look it up (auto-registering a
+/// self-hosted GitLab instance on demand), fill `has_token`, and build the
+/// `RepoRef`. Error wire strings match the shell's `provider_for_remotes` /
+/// `lookup_or_register`.
+fn resolve_from_repo(repo: &git2::Repository) -> Result<Resolved, String> {
+    let remotes: Vec<(String, String)> = corvus_git::remote::list_remotes(repo)
         .map_err(|e| e.to_string())?
         .into_iter()
         .map(|r| (r.name, r.url))

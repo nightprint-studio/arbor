@@ -154,6 +154,22 @@ impl PluginHost {
         for (idx, manifest) in sorted.into_iter().enumerate() {
             let name = manifest.name.clone();
 
+            // Per-product targeting (manifest `targets`): a plugin that names
+            // specific products loads only on those products' hosts. Universal
+            // plugins (empty `targets`) load everywhere; a host with no product
+            // bound (`set_product` never called — legacy / tests) loads all.
+            if !manifest.targets.is_empty() {
+                if let Some(product) = self.product.as_deref() {
+                    if !manifest.targets.iter().any(|t| t == product) {
+                        tracing::info!(
+                            "plugin '{name}' skipped: targets {:?}, this host serves '{product}'",
+                            manifest.targets
+                        );
+                        continue;
+                    }
+                }
+            }
+
             if let Some(ref ctx) = self.app_ctx {
                 let prev_note = match &last_timing {
                     Some((prev_name, ms)) => {

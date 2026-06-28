@@ -58,6 +58,14 @@ pub struct Manifest {
     /// non-listed OS are skipped at discovery time.
     #[serde(default)]
     pub os: Vec<String>,
+    /// Products whose backend hosts this plugin, e.g. `["corvus"]`. A plugin can
+    /// target more than one (`["corvus", "merula"]`). **Empty = universal**: the
+    /// plugin loads on every product. Each product's plugin host loads only the
+    /// plugins that target it (or are universal), so a `corvus`-only plugin never
+    /// runs in a future `merula` backend. Recognised values track the product
+    /// ids (`corvus`, `merula`, `sitta`, …).
+    #[serde(default)]
+    pub targets: Vec<String>,
     /// Plugin entry point. Defaults to "main.lua".
     #[serde(default = "default_entry")]
     pub entry: String,
