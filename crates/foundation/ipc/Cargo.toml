@@ -5,7 +5,7 @@ edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "Transport-agnostic IPC for Arbor's Model D (1 FE + N BE): typed tarpc request/response + a one-way push-event channel, in-process today and named-pipe/unix-socket tomorrow."
+description  = "Transport-agnostic IPC for Arbor's Model D (1 FE + N BE): method+JSON request/response + a one-way push-event channel, over an in-process loopback or framed JSON on a child's stdio."
 
 [dependencies]
 serde      = { workspace = true }
@@ -15,10 +15,6 @@ thiserror  = { workspace = true }
 # I/O (keyring read + OAuth refresh), and backend call sites are async. The trait
 # is object-safe via async-trait so providers hold `Arc<dyn SessionProvider>`.
 async-trait = { workspace = true }
-# tarpc + tokio are intentionally NOT wired yet — the M1 skeleton ships only the
-# transport-agnostic contract (BrokerClient, Event) plus an in-process loopback.
-# The named-pipe / unix-socket transport and the tarpc codegen land at the M3
-# in-process→IPC flip. See docs/ipc-design.md.
 
 [dev-dependencies]
 # Drive the async SessionProvider contract test without pulling a full runtime.

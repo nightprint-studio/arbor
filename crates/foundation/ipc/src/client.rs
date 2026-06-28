@@ -1,10 +1,10 @@
 //! [`BrokerClient`] — the transport-agnostic request/response client the shell
-//! router speaks to, plus the in-process [`LoopbackBroker`] used by M3's
-//! in-process-first step (and, here in M1, by the ping round-trip test).
+//! router speaks to, plus the in-process [`LoopbackBroker`] used for same-process
+//! dispatch (and by the ping round-trip test).
 //!
-//! The same trait fronts both transports: an in-memory loopback today and a
-//! `tarpc`-over-named-pipe/unix-socket client tomorrow. Swapping the transport
-//! is the "flip" of principle #6 — the router never changes.
+//! The same trait fronts both transports: the in-memory loopback and the
+//! out-of-process `ChildClient` (framed JSON over child stdio). Swapping the
+//! transport is the "flip" of principle #6 — the router never changes.
 
 use crate::error::{IpcError, Result};
 

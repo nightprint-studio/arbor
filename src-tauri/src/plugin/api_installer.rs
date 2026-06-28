@@ -1,18 +1,16 @@
-//! `LuaApiInstaller` adapter that bridges the runtime-side
-//! `arbor-plugin-core::sandbox` builder back into the shell-crate-resident
-//! `arbor.*` namespace surface.
+//! `LuaApiInstaller` adapter for the **launcher** host.
 //!
-//! After PR #4 Step 5, the orchestrator (`register(...)`) lives in
-//! `arbor_plugin_core::lua_api`. This adapter:
-//!   1. Builds the ordered list of [`LuaNamespaceInstaller`] wrappers for
-//!      each ns/* that still lives in `src-tauri/src/plugin/ns_shell/*`
-//!      (see [`crate::plugin::ns_shell::shell_installers`]).
-//!   2. Hands the parameter bag straight through to
-//!      [`arbor_plugin_core::prelude::register_lua_api`].
+//! The git `arbor.*` namespaces (`repo`, `workspace`, `mr`, `pipeline`, …)
+//! relocated to `corvus-be` (crate `corvus-plugin-ns`) with the plugin
+//! product-relocation flip — `corvus-be` is the sole loader of the git
+//! product's plugins. The launcher (this shell) loads only plugins that target
+//! `launcher`, so it publishes just the host-pure base surface that
+//! `arbor_plugin_core::lua_api::register` hardcodes (`log`, `events`, `json`,
+//! `fs`, `http`, `ui.*`, …) and **no** product-specific extras.
 //!
-//! Once every ns/* migrates into its own domain crate (PR #6+), the
-//! wrapper list shrinks to empty and this adapter (and the `LuaApiInstaller`
-//! trait it implements) can disappear.
+//! This adapter therefore hands an empty extras list straight through to
+//! [`arbor_plugin_core::prelude::register_lua_api`]. When a launcher-scoped
+//! namespace is ever needed, add its installer to the slice below.
 
 use std::sync::Arc;
 
@@ -33,8 +31,8 @@ impl Default for TauriApiInstaller {
 
 impl LuaApiInstaller for TauriApiInstaller {
     fn install(&self, lua: &Lua, params: ApiInstallParams) -> PluginCoreResult<()> {
-        let installers = crate::plugin::ns_shell::shell_installers();
-        register_lua_api(lua, params, &installers)
+        // Host-pure base only — no launcher-specific namespaces today.
+        register_lua_api(lua, params, &[])
     }
 }
 

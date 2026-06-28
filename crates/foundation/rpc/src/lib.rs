@@ -25,7 +25,10 @@
 // crate too (e.g. the tests below), not just in downstream consumers.
 extern crate self as arbor_rpc;
 
+pub mod builder;
 pub mod prelude;
+
+pub use builder::{Builder, HandlerEntry, RpcBundle};
 
 use std::any::Any;
 use std::collections::HashMap;

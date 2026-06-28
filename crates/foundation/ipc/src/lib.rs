@@ -3,25 +3,21 @@
 //! Two channels between the shell process and each headless product backend,
 //! LSP-style:
 //!
-//! - **Commands (request/response)** via `tarpc`: a `#[tarpc::service]` trait
-//!   generates the typed client + server, so one command ≈ one definition.
+//! - **Commands (request/response)**: a method name + JSON params, dispatched
+//!   over a single [`prelude::BrokerClient`] — one command ≈ one router entry.
 //! - **Events (push, BE → shell)** on a dedicated one-way channel: a single
 //!   length-prefixed [`prelude::Event`], with throttling/coalescing/backpressure.
-//!   `tarpc` does not stream by design, so events never ride the RPC channel.
+//!   Events never ride the request/response channel.
 //!
-//! Transport-agnostic via [`prelude::BrokerClient`]: an in-process loopback
-//! today, a named pipe (Windows) / unix socket (`0600` + `SO_PEERCRED`)
-//! tomorrow, with a spawn parent→child + nonce handshake. The same client runs
-//! on both by swapping only the transport.
-//!
-//! ## Scope of this milestone (M1b)
-//!
-//! This skeleton ships only the transport-agnostic contract
-//! ([`prelude::BrokerClient`], [`prelude::Event`], [`prelude::IpcError`]) plus
-//! the in-process [`prelude::LoopbackBroker`] with a ping round-trip. The
-//! `tarpc` codegen, the named-pipe/unix-socket transport and the nonce/ACL
-//! handshake land at the M3 in-process→IPC flip. Full design (service shape,
-//! handshake, the flip table): `docs/ipc-design.md`.
+//! Transport-agnostic via [`prelude::BrokerClient`]: the in-process
+//! [`prelude::LoopbackBroker`] for same-process dispatch, and
+//! [`prelude::ChildClient`] for an out-of-process backend over **framed JSON on
+//! the child's stdin/stdout** (parent spawns child, reads its `Hello`, demuxes
+//! responses / events / host-calls). The same router, handlers and frame
+//! protocol stay put when the byte-stream is later hardened to a named pipe
+//! (Windows) / unix socket (`0600` + `SO_PEERCRED`) + nonce/ACL — only the
+//! listener/connector under [`prelude::ChildClient`] changes. Full design (frame
+//! protocol, handshake, the flip table): `docs/ipc-design.md`.
 //!
 //! ## Public API: use the [`prelude`]
 //!

@@ -17,10 +17,12 @@
 //!
 //! The shell declares **no per-command signature** — it forwards `(program,
 //! method, params)` opaquely. The signatures live once, on the product backend
-//! (`corvus::stash`), reachable in-process today via a [`LoopbackBroker`] whose
-//! dispatch closure captures the live `AppHandle`. When the backend splits out,
-//! only the registered `BrokerClient` changes (to a pipe/socket `tarpc` client)
-//! — the router, this module and the `rpc` command don't move.
+//! (`corvus::stash`), reachable either out-of-process via a `ChildClient`
+//! (framed JSON over `corvus-be`'s stdio) or in-process via a [`LoopbackBroker`]
+//! whose dispatch closure captures the live `AppHandle`. A `SplitBroker` picks
+//! per method: the spawned backend when attached, else the loopback. Hardening
+//! the byte-stream to a pipe/socket changes only that client — the router, this
+//! module and the `rpc` command don't move.
 //!
 //! ## Programs
 //!

@@ -45,8 +45,12 @@ matching handler in `src-tauri/src/ipc/mod.rs` (`host_dispatch`) reads/mutates t
 real shell state. `ToolchainInstaller` is the reference PROXY namespace.
 
 The `corvus-be` binary implements `NsHost` (`CorvusNsHost`) over its `CorvusState`
-+ the shared `corvus-git` logic, builds the installer `Vec`, and hands it to
-`corvus_be_api_installer(...)`.
++ the shared `corvus-git` logic, then hands `installers(host)` (the ordered set
+below, owned by this crate) to `corvus_be_api_installer(...)`. The order — and the
+invariant that `UiBrandingInstaller` runs **after** the host-pure core namespaces
+(it attaches onto the `arbor.ui` table `arbor-plugin-core`'s `ns::ui` publishes) —
+is domain knowledge of these namespaces, so it lives in `installers()` rather than
+in each host's `main`.
 
 ## Light by design
 
@@ -64,7 +68,9 @@ strings as the shell's `ns_shell`. The active repo is read from the
 `__arbor_current_repo__` Lua global (the same value `arbor.repo.*` reads); the
 host opens that path with git2, so behaviour and error text match.
 
-This is **additive** — the shell keeps its own `ns_shell/*` for the in-process
-host. The double-load is removed in a later relocation step.
+`corvus-be` is now the **sole** loader of the Corvus product's plugins: with the
+product-relocation flip the shell became the launcher and its `ns_shell/*` copies
+were deleted, so these namespaces run only here (no more double-load).
 
-Public API is exposed through `corvus_plugin_ns::prelude`.
+Public API is exposed through `corvus_plugin_ns::prelude` — the per-namespace
+installers plus `installers(host)`, the ordered builder.

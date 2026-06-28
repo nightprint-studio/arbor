@@ -85,9 +85,28 @@ A proc-macro must live in its own `proc-macro = true` crate, so the macro is in
 `arbor-rpc` (the macro + `inventory` ride along) — the serde / serde_derive
 pattern.
 
+## Composing generic handlers — bundles (Bevy-like)
+
+`#[handler]` is ideal for a backend's **own** concrete handlers, but it can't
+register **generic** ones (the macro bakes a concrete context downcast, and
+`inventory` entries are non-generic and link-local). The `Builder` adds that:
+
+```rust
+let (sync, asyncs) = arbor_rpc::Builder::<MyCtx>::new()
+    .add_inventory("")                 // this binary's #[handler] set
+    .add(some_lib::SomeBundle)         // a reusable RpcBundle<MyCtx>, monomorphised here
+    .into_maps();
+```
+
+An `RpcBundle<C>` returns `HandlerEntry`s whose bodies are **non-capturing**
+closures referencing only the type `C` (to downcast `&dyn Any` back) — so they
+coerce to the same `CallFn` fn-pointers the macro emits, with no `inventory` and
+no per-handler glue in the product. This is the "hybrid" model: concrete handlers
+via the macro, reusable generic ones via bundles (see `arbor-plugin-rpc`).
+
 ## Public API: use the prelude
 
-`arbor_rpc::prelude::{handler, registry, registry_for, async_registry_for, decode_field, Entry, Kind, CallFn, AsyncCallFn}`.
+`arbor_rpc::prelude::{handler, registry, registry_for, async_registry_for, decode_field, Builder, RpcBundle, HandlerEntry, Entry, Kind, CallFn, AsyncCallFn}`.
 
 ## Tests
 

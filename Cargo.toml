@@ -37,6 +37,7 @@ members = [
     "crates/plugin/api",
     "crates/plugin/core",
     "crates/plugin/marketplace",
+    "crates/plugin/rpc",
     "crates/plugin/types",
     "crates/scheduler",
     "crates/nemus/arbor-nemus-pattern",
@@ -83,11 +84,6 @@ sha2    = "0.10"
 # Wipe in-memory secrets on drop (credential broker cache, round-2 Model D).
 # Defined here, used from M1 (arbor-shell-common); see docs/migration-roadmap.md.
 zeroize = { version = "1", features = ["derive"] }
-
-# IPC (Model D, round 2) — typed request/response between the shell process and
-# the headless product backends. Parked here unused; the service shape + feature
-# set is finalised in M1b (arbor-ipc). See docs/crate-refactor-round2.md.
-tarpc = "0.36"
 
 # Misc
 uuid   = { version = "1", features = ["v4"] }

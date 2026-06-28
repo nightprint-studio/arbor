@@ -65,6 +65,18 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                     .any(|l| l.as_str() != label && super::product_id_for_label(l) == Some(id));
                 if !still_running {
                     super::emit_product_state(app, id, false);
+                    // Tear down the product's headless backend along with its last
+                    // window. We only reach `Destroyed` on a REAL close — a
+                    // close-to-tray hide is intercepted in `CloseRequested` and
+                    // never gets here — so the backend is safe to kill: the user
+                    // actually closed (or the launcher force-stopped) the product.
+                    // `detach()` drops the `BrokerClient` Arc, whose `Drop` closes
+                    // the stdio pipe and reaps the child. The child's own
+                    // disconnect callback re-emits `…-down` to a now-gone window
+                    // (harmless); the next open re-spawns a fresh backend.
+                    if id == "corvus" {
+                        crate::ipc::split_broker::detach();
+                    }
                 }
             }
         }

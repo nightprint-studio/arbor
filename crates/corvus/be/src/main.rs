@@ -22,19 +22,14 @@ use std::sync::{Arc, Mutex};
 use arbor_ipc::prelude::{serve_stdio, EventSink, FrameEventSink, FrameHostCaller, HostCaller, SharedWriter};
 use arbor_feedback::prelude::{JobSpec, JobStatus};
 use arbor_scheduler::prelude::Scheduler;
-use arbor_plugin_core::prelude::{LuaNamespaceInstaller, PluginHost};
+use arbor_plugin_core::prelude::PluginHost;
 use corvus_core::prelude::CorvusState;
 use corvus_git::prelude::{http_auth_args_for_credentials, CloneOptions};
 use corvus_git_provider_api::prelude::{
     CiFilter, FindingState, MrFilter, ProviderError, SecurityFilters, Severity,
 };
 use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer, CorvusBeAppCtx};
-use corvus_plugin_ns::prelude::{
-    BrpInstaller, CiInstaller, CloudInstaller, IssuesInstaller, JobInstaller,
-    LinkedWorktreesInstaller, MrInstaller, NotesInstaller, NsHost, PipelineInstaller,
-    RepoInstaller, SecurityInstaller, TabsInstaller, TerminalInstaller, ToolchainInstaller,
-    UiBrandingInstaller, WorkspaceInstaller,
-};
+use corvus_plugin_ns::prelude::NsHost;
 use serde_json::json;
 
 // Domain handler modules — their `#[arbor_rpc::handler]`s self-register via
@@ -57,12 +52,9 @@ mod linked_worktree;
 mod merge;
 mod missing;
 mod mr;
+mod host_handle;
 mod notes;
-mod plugin_dispatch;
-mod plugin_introspect;
-mod plugin_lifecycle;
-mod plugin_reload;
-mod plugin_scheduler;
+mod plugin_rpc;
 mod provider;
 mod rebase;
 mod recovery;
@@ -1665,43 +1657,19 @@ fn main() {
     // through it — the same slot the Tauri shell passes its `ns_shell` wrappers
     // into. This is additive: the shell still loads its own copies in-process.
     let ns_host: Arc<dyn NsHost> = Arc::new(CorvusNsHost::new(Arc::clone(&state)));
-    let ns_installers: Vec<Arc<dyn LuaNamespaceInstaller>> = vec![
-        Arc::new(NotesInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(RepoInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(WorkspaceInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(LinkedWorktreesInstaller::new(Arc::clone(&ns_host)))
-            as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(MrInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(CiInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(SecurityInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(ToolchainInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        // ── STAY ns_shell namespaces ported additively (Phase 3 INTEGRATE) ──
-        // DIRECT (work runs in corvus-be):
-        Arc::new(TabsInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(IssuesInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(TerminalInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        // PROXY (state lives in the shell, reached over the reverse channel):
-        Arc::new(JobInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(PipelineInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(CloudInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        Arc::new(BrpInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-        // UiBrandingInstaller attaches onto the `arbor.ui` table created by
-        // plugin-core's `ns::ui` (installed earlier in the shared install path),
-        // so it must come AFTER the core install — `corvus_be_api_installer` runs
-        // the core namespaces before these crate installers, so the table exists.
-        Arc::new(UiBrandingInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
-    ];
+    // The ordered git/product namespace set (and the UiBranding-after-core
+    // invariant) is owned by `corvus-plugin-ns`, not spelled out here.
     plugin_host
         .lock()
         .expect("corvus-be: plugin host lock poisoned at boot")
-        .set_api_installer(corvus_be_api_installer(ns_installers));
+        .set_api_installer(corvus_be_api_installer(corvus_plugin_ns::installers(ns_host.clone())));
 
-    // Publish the plugin host to the introspection RPC handlers
-    // (`plugin_introspect.rs`): after the Phase-2 flip the shell stops loading
-    // Corvus plugins, so the Plugin Manager reads its list/reflection/dep-graph
-    // from THIS host. Handlers get only `&CorvusState` (host-free by design), so
-    // they reach the host through this module-static handle instead.
-    plugin_introspect::install(Arc::clone(&plugin_host));
+    // Publish the plugin host for the Plugin-Manager RPC adapter
+    // (`plugin_rpc::CorvusRpcCtx`): after the Phase-2 flip the shell stops loading
+    // Corvus plugins, so the Plugin Manager reads/mutates THIS host. The generic
+    // `PluginRpc` handlers reach it through the adapter, which reads this
+    // module-static handle (kept off `CorvusState`, which stays host-free).
+    host_handle::install(Arc::clone(&plugin_host));
 
     // Shared trigger-engine wiring (plugin-relocation Wave 1): without this the
     // schedules declared by `corvus`-targeted plugins never fire in corvus-be.
@@ -1733,14 +1701,19 @@ fn main() {
     // portable dir, re-detecting on arrival — see `repo_registry::__set_config`).
     corvus_git_cli::detect(None);
 
-    // Two registries collected from every `#[arbor_rpc::handler]` linked into
-    // this binary: sync (git domains + self-test) and async (issue trackers).
-    // They are disjoint — a handler is one or the other.
+    // Three method maps. Two are collected from every `#[arbor_rpc::handler]`
+    // linked into this binary: sync (git domains + self-test) and async (issue
+    // trackers) — disjoint, a handler is one or the other. The third is the
+    // generic Plugin-Manager surface (`arbor-plugin-rpc`'s `PluginRpc` bundle),
+    // monomorphised for the `CorvusRpcCtx` adapter and dispatched against it (all
+    // its handlers are sync).
     let sync_reg = arbor_rpc::registry();
     let async_reg = arbor_rpc::async_registry_for("");
+    let plugin_reg = plugin_rpc::methods();
     let mut methods: Vec<String> = sync_reg
         .keys()
         .chain(async_reg.keys())
+        .chain(plugin_reg.keys())
         .map(|s| s.to_string())
         .collect();
     methods.sort();
@@ -1756,6 +1729,14 @@ fn main() {
         }
         if let Some(acall) = async_reg.get(method) {
             return rt.block_on(acall(&*state as &dyn Any, params));
+        }
+        // Plugin-Manager methods run against the `CorvusRpcCtx` adapter (the
+        // orphan rule blocks `impl PluginRpcContext for CorvusState`, so the
+        // generic bundle downcasts to this local newtype instead). Cheap to build
+        // per call — just an `Arc` clone of the shared state.
+        if let Some(pcall) = plugin_reg.get(method) {
+            let ctx = plugin_rpc::CorvusRpcCtx::new(Arc::clone(&state));
+            return pcall(&ctx as &dyn Any, params);
         }
         Err(format!("unknown method: {method}"))
     };

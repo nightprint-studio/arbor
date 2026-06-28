@@ -6,24 +6,27 @@ Transport-agnostic IPC for Arbor's Model D (1 FE + N BE).
 
 In Model D the shell process owns the single WebView and talks to headless
 product backends (`corvus-be` / `merula-be` / `sitta-be`) over two channels
-(LSP-style): typed request/response via `tarpc`, and a one-way push-event
-channel. This crate is the contract for both, written so the same client runs
-in-process today and over a named pipe / unix socket tomorrow — swapping only
-the transport (principle #6).
+(LSP-style): method+JSON request/response, and a one-way push-event channel.
+This crate is the contract for both, written so the same client runs in-process
+(loopback) or out-of-process (`ChildClient`, framed JSON over child stdio), and
+so the byte-stream can later be hardened to a named pipe / unix socket without
+touching the router (principle #6).
 
 Full design: [`docs/ipc-design.md`](../../../docs/ipc-design.md).
 
 ## Public API: use the prelude
 
 Reach the surface through `arbor_ipc::prelude::...`:
-`BrokerClient`, `LoopbackBroker`, `Bytes`, `Event`, `IpcError`,
-`SessionProvider`, `AuthSession`, `CredentialError`.
+`BrokerClient`, `LoopbackBroker`, `ChildClient`, `serve_stdio`, `Bytes`,
+`Event`, `IpcError`, `SessionProvider`, `AuthSession`, `CredentialError`.
 
-## Contents (M1b skeleton)
+## Contents
 
 - **`client`** — `BrokerClient` (the transport-agnostic request/response trait
-  the shell router speaks to) + `LoopbackBroker` (in-process dispatch, used by
-  M3's in-process-first step and by the ping round-trip test here).
+  the shell router speaks to) + `LoopbackBroker` (in-process dispatch).
+- **`transport`** — `ChildClient` (shell side: spawns the backend, reads its
+  `Hello`, demuxes responses / events / host-calls over framed JSON on the
+  child's stdio) + `serve_stdio` (backend side of the same frame protocol).
 - **`credential`** — `SessionProvider`, the async keyring-free credential
   contract a backend depends on (`session` / `refresh`, yielding an
   `AuthSession { base_url, auth_header }`), so the coupled domains (issue
@@ -37,10 +40,10 @@ Reach the surface through `arbor_ipc::prelude::...`:
 
 ## Not here yet
 
-The `tarpc` codegen, the per-product service traits, the named-pipe /
-unix-socket transport, and the spawn + nonce + ACL handshake all land at the M3
-in-process→IPC flip. `tarpc` is parked in `[workspace.dependencies]` but not
-wired, so this crate has no `tarpc`/`tokio` dependency yet.
+Hardening the byte-stream under `ChildClient` from child stdio to a named pipe
+(Windows) / unix socket (`0600` + `SO_PEERCRED`) with a nonce/ACL handshake. The
+router, the handlers and the frame protocol stay put — only the
+listener/connector changes.
 
 ## Depends on
 

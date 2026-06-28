@@ -433,6 +433,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-plugin-rpc"
+version = "0.3.0"
+dependencies = [
+ "arbor-plugin-core",
+ "arbor-rpc",
+ "semver",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arbor-plugin-types"
 version = "0.3.0"
 dependencies = [
@@ -1257,6 +1268,7 @@ dependencies = [
  "arbor-feedback",
  "arbor-ipc",
  "arbor-plugin-core",
+ "arbor-plugin-rpc",
  "arbor-process-ext",
  "arbor-rpc",
  "arbor-scheduler",
@@ -1273,7 +1285,6 @@ dependencies = [
  "dirs",
  "git2",
  "regex",
- "semver",
  "serde",
  "serde_json",
  "tokio",
