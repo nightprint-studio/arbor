@@ -85,10 +85,6 @@ pub struct AppState {
     /// List of user-defined workspaces (plus the implicit Scratch one) and
     /// currently-active workspace id.  Tab snapshots live in separate files.
     pub workspaces:    Mutex<WorkspaceStore>,
-    /// Report produced by the one-shot startup migration from legacy
-    /// session.json.  `take()`-able: the welcome screen pulls it once on
-    /// first launch after upgrade, leaving `None` for subsequent launches.
-    pub migration_report: Mutex<Option<crate::workspace::migration::MigrationReport>>,
     /// Unified registry of remote git host clients (GitHub / GitLab / —).
     /// Populated at boot — see `git_provider/`.
     pub git_providers: Mutex<GitProviderRegistry>,
@@ -351,14 +347,8 @@ impl AppState {
                 _ => tracing::warn!("no git executable found — frontend will prompt"),
             }
         }
-        // Run the one-shot workspace migration before loading the current
-        // registry/store so we don't race with a partial write from a crash.
-        let migration_report = crate::workspace::migration::run_if_needed();
         let repo_registry = crate::workspace::registry::load();
         let workspaces    = crate::workspace::store::load();
-        // Only keep the report around if it actually represents work done.
-        // `already_migrated` means both files existed — nothing to surface.
-        let stored_report = if migration_report.already_migrated { None } else { Some(migration_report) };
         // Seed the GitProvider registry with the always-on hosts.  Self-hosted
         // GitLab instances are registered lazily on first use via
         // `git_provider::helpers::provider_for_tab`.
@@ -399,7 +389,6 @@ impl AppState {
             toolchain_registry: Arc::new(Mutex::new(ToolchainRegistry::new())),
             repo_registry:      Mutex::new(repo_registry),
             workspaces:         Mutex::new(workspaces),
-            migration_report:   Mutex::new(stored_report),
             git_providers:          Mutex::new(providers),
             branding:               BrandingState::default(),
             deep_link_buffer:       Arc::new(DeepLinkBuffer::default()),

@@ -1972,7 +1972,6 @@
         onOpen={handleOpenRepo}
         onOpenPath={(p) => handleOpenRepo(p)}
         onClone={() => cloneModalOpen = true}
-        onManageWorkspaces={() => workspaceManagerOpen = true}
       />
     {:else}
       <WorkspaceShell showLeftRail={showBuiltinBar} showRightRail={showPluginBar}>

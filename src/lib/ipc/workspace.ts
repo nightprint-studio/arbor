@@ -1,10 +1,10 @@
-import { corvus, platform } from './rpc';
+import { corvus } from './rpc';
 import type {
   WorkspacesSnapshot, WorkspaceDef, WorkspaceGroup, WorkspacePatch, WorkspaceGroupPatch,
   RepoRegistryEntry, RepoRegistryEntryWithRoot, RepoRegistrationResult, TabSnapshot,
   CrossWsTabRef, TabMeta, ExportedWorkspace, ImportPreview, RepoHealth,
   ExportedWorkspaceGroup, ImportGroupPreview, ExportedBundle, ImportBundleResult,
-  WorkspaceFetchStartResult, MigrationReport,
+  WorkspaceFetchStartResult,
 } from '../types/workspace';
 
 // ── Queries ─────────────────────────────────────────────────────────────────
@@ -169,8 +169,3 @@ export const workspaceTagAll = (
   corvus('workspace_tag_all', {
     workspace_id: workspaceId, tag_name: tagName, message, push,
   });
-
-// ── Migration ───────────────────────────────────────────────────────────────
-
-export const takeMigrationReport = (): Promise<MigrationReport | null> =>
-  platform('take_migration_report');

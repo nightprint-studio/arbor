@@ -29,8 +29,6 @@
 pub mod registry;
 pub mod store;
 pub mod snapshot;
-pub mod migration;
 
 pub use registry::{RepoRegistry, RepoRegistryEntry};
 pub use store::{WorkspaceDef, WorkspaceGroup, WorkspaceStore, SCRATCH_ID};
-pub use snapshot::{CrossWsTabRef, TabMeta, TabSnapshot};

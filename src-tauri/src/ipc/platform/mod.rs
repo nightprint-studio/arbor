@@ -32,7 +32,6 @@ pub mod session;
 pub mod stream;
 pub mod terminal;
 pub mod theme;
-pub mod workspace;
 
 // Re-export so backend handlers annotate with `#[platform::handler(...)]` — the
 // product's own namespace for the generic `arbor-rpc` attribute.

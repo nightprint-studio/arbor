@@ -30,7 +30,6 @@ pub mod helpers;
 // flows through the `GitProvider` trait.
 pub mod ci_impl;
 pub mod image_proxy;
-pub mod security_export;
 
 // GitHub + GitLab are now the keyring-free `corvus-git-provider-{github,gitlab}`
 // crates; the shell injects credentials via `auth::vault::VaultSessionProvider`.

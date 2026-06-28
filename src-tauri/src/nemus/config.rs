@@ -7,9 +7,7 @@
 //! ([`EvalConfig`], [`RenderConfig`]) at the call sites.
 //!
 //! Persistence lives here too ([`load`]/[`save`]): nemus reads/writes its own
-//! file under [`nemus_config_dir`](arbor_core::prelude::nemus_config_dir), and a
-//! one-time [`migrate_if_needed`] seeds it from Arbor's legacy `[nemus]` section
-//! the first time after the split.
+//! file under [`nemus_config_dir`](arbor_core::prelude::nemus_config_dir).
 
 use std::path::PathBuf;
 
@@ -162,8 +160,7 @@ pub fn config_path() -> PathBuf {
     arbor_core::prelude::nemus_config_path("config.toml")
 }
 
-/// Read the nemus config. A missing / unparseable file yields defaults (after a
-/// one-time migration attempt from Arbor's legacy `[nemus]` section), never an
+/// Read the nemus config. A missing / unparseable file yields defaults, never an
 /// error — nemus config is non-critical and self-heals to defaults.
 pub fn load() -> NemusConfig {
     if let Ok(text) = std::fs::read_to_string(config_path()) {
@@ -171,9 +168,7 @@ pub fn load() -> NemusConfig {
             return cfg;
         }
     }
-    // First read after the split (or a corrupt file): try to inherit the old
-    // settings, then fall back to defaults.
-    migrate_if_needed().unwrap_or_default()
+    NemusConfig::default()
 }
 
 /// Persist the nemus config to its own file, creating the dir if needed.
@@ -186,26 +181,3 @@ pub fn save(cfg: &NemusConfig) -> Result<(), String> {
     std::fs::write(&path, text).map_err(|e| e.to_string())
 }
 
-/// One-time migration: if nemus has no config file yet but Arbor's global
-/// `config.toml` still carries a `[nemus]` section (the pre-split location),
-/// lift it into nemus's own file and return it. Returns `None` when there's
-/// nothing to migrate (already split, or never configured). Idempotent: once
-/// nemus's file exists, [`load`] never reaches here.
-pub fn migrate_if_needed() -> Option<NemusConfig> {
-    if config_path().exists() {
-        return None;
-    }
-    /// Just enough of Arbor's config to pluck the legacy `[nemus]` table.
-    #[derive(Deserialize)]
-    struct LegacyArborConfig {
-        nemus: Option<NemusConfig>,
-    }
-    let arbor_cfg = arbor_core::prelude::arbor_config_path("config.toml");
-    let text = std::fs::read_to_string(arbor_cfg).ok()?;
-    let legacy: LegacyArborConfig = toml::from_str(&text).ok()?;
-    let nemus = legacy.nemus?;
-    // Best-effort: a write failure just means we'll retry the migration next
-    // launch (the legacy section stays put until Arbor rewrites its config).
-    let _ = save(&nemus);
-    Some(nemus)
-}

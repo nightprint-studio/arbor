@@ -1,10 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { FolderOpen, Clock, ChevronRight, Download, Layers, Sparkles, FolderGit2, Search, AlertTriangle, Trash2, FolderSearch } from 'lucide-svelte';
+  import { FolderOpen, Clock, ChevronRight, Download, FolderGit2, Search, AlertTriangle, Trash2, FolderSearch } from 'lucide-svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
-  import { takeMigrationReport } from '$lib/ipc/workspace';
-  import { type MigrationReport, workspaceColorVar } from '$lib/types/workspace';
+  import { workspaceColorVar } from '$lib/types/workspace';
   import Monogram from './ui/Monogram.svelte';
   import { openRepo as ipcOpenRepo } from '$lib/ipc/graph';
   import { tabsStore } from '$lib/stores/tabs.svelte';
@@ -24,12 +22,10 @@
     onOpen,
     onOpenPath,
     onClone,
-    onManageWorkspaces,
   }: {
     onOpen: () => void;
     onOpenPath: (path: string) => void;
     onClone: () => void;
-    onManageWorkspaces?: () => void;
   } = $props();
 
   const recentRepos  = $derived(uiStore.recentRepos.slice(0, 6));
@@ -158,25 +154,6 @@
     }
   }
 
-  // Post-migration banner: shown once on the first launch after upgrade when
-  // the backend ingested the old session.json.  `take` clears the slot so
-  // subsequent shows don't re-display it.
-  let migrationReport = $state<MigrationReport | null>(null);
-  let bannerDismissed = $state(false);
-
-  onMount(async () => {
-    try {
-      migrationReport = await takeMigrationReport();
-    } catch { /* non-critical */ }
-  });
-
-  const migrationCount = $derived(migrationReport
-    ? (migrationReport.added_repo_ids.length + migrationReport.existing_repo_ids.length)
-    : 0);
-  const showMigrationBanner = $derived(
-    !bannerDismissed && migrationReport !== null && !migrationReport.already_migrated && migrationCount > 0
-  );
-
   function repoName(path: string): string {
     return path.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? path;
   }
@@ -227,21 +204,6 @@
         </button>
       {/snippet}
     </Contribution>
-
-    {#if showMigrationBanner}
-      <div class="migration-banner">
-        <div class="migration-icon"><Sparkles size={18} /></div>
-        <div class="migration-body">
-          <div class="migration-title">Imported {migrationCount} repositor{migrationCount === 1 ? 'y' : 'ies'} from your previous session</div>
-          <div class="migration-sub">They're all in <strong>Scratch</strong> — organise them into workspaces whenever you like.</div>
-        </div>
-        <button class="migration-cta" onclick={() => onManageWorkspaces?.()}>
-          <Layers size={13} />
-          <span>Organise…</span>
-        </button>
-        <button class="migration-dismiss" onclick={() => bannerDismissed = true} aria-label="Dismiss">×</button>
-      </div>
-    {/if}
 
     {#if activeWs && wsReposFull.length > 0}
       <div class="recent-section">
@@ -453,66 +415,6 @@
   .welcome-plugin-text { display: flex; flex-direction: column; gap: 2px; }
   .welcome-plugin-title { font-size: 13px; font-weight: 500; }
   .welcome-plugin-desc  { font-size: 11px; color: var(--text-secondary); }
-
-  /* ── Migration banner ── */
-  .migration-banner {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    padding: 12px 14px;
-    margin-top: 16px;
-    background: var(--accent-subtle);
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-    border-radius: var(--radius-md);
-  }
-  .migration-icon {
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    background: var(--accent);
-    color: var(--text-on-accent);
-    flex-shrink: 0;
-  }
-  .migration-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .migration-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .migration-sub { font-size: 11px; color: var(--text-secondary); }
-
-  .migration-cta {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    background: var(--accent);
-    color: var(--text-on-accent);
-    border: none;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-family: var(--font-ui-sans);
-    font-size: 12px;
-    font-weight: 500;
-    transition: background var(--transition-fast);
-  }
-  .migration-cta:hover { background: var(--accent-hover); }
-
-  .migration-dismiss {
-    width: 22px;
-    height: 22px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    border-radius: 50%;
-    cursor: pointer;
-    color: var(--text-muted);
-    font-size: 18px;
-    line-height: 1;
-  }
-  .migration-dismiss:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   /* ── Recent section ── */
   .recent-section {

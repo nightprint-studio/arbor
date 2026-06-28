@@ -17,9 +17,6 @@
 //! Fire-and-forget workspace hooks fire **inline** here (the host is co-located —
 //! Wave 0), exactly as the shell's migrated handlers fired them through the
 //! platform `post_hooks` table.
-//!
-//! NOT served here: `take_migration_report` — the one-shot legacy migration runs
-//! in the shell's `AppState::new`, so its report stays a shell (platform) read.
 
 pub mod registry;
 pub mod snapshot;

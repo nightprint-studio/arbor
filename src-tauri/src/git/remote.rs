@@ -2,9 +2,8 @@
 //!
 //! The git logic moved into [`corvus_git::remote`] (so the headless `corvus-be`
 //! shares it). This module keeps the original shell-facing API — same
-//! signatures, `AppError` results — so the in-process consumers (the fetch/
-//! push/pull command flow, the init-repo initial push, branch publish/track,
-//! linked-worktree sync) are untouched.
+//! signatures, `AppError` results — so the in-process consumers (the init-repo
+//! initial push, notes sync, linked-worktree sync) are untouched.
 //!
 //! It injects the two couplings the crate refuses:
 //!   * the shell's resolved git program (`GitCli`) for `pull`'s CLI merge;
@@ -13,8 +12,8 @@
 //!     shell-side; the crate only ever receives the resolved `(user, pass)`.
 //!
 //! CONTRACT: `push` keeps the exact `(repo, remote_name, refspec, force)`
-//! signature and `Result<()>` return — `crate::git::init` and
-//! `crate::git::branch` bind their injected push closures to it.
+//! signature and `Result<()>` return — `crate::git::init` binds its injected
+//! push closure to it.
 
 use git2::Repository;
 

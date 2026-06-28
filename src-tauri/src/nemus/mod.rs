@@ -268,28 +268,6 @@ fn nemus_config() -> NemusConfig {
     config::load()
 }
 
-/// One-time storage migration, run once at app startup. Moves nemus's data out
-/// of the old `<arbor-data>/nemus` location into its own `<nemus-data>` root and
-/// seeds nemus's config file from Arbor's legacy `[nemus]` section. Cheap no-op
-/// once migrated.
-pub fn migrate_storage() {
-    // Data: move `%APPDATA%\arbor\nemus` → `%APPDATA%\nemus` (a same-volume
-    // rename, so the multi-GB sample banks aren't re-downloaded). Only when the
-    // old tree exists and the new one doesn't, so it runs exactly once.
-    let old = arbor_core::prelude::arbor_data_dir().join("nemus");
-    let new = arbor_core::prelude::nemus_data_dir();
-    if old.exists() && !new.exists() {
-        if let Some(parent) = new.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Err(e) = std::fs::rename(&old, &new) {
-            tracing::warn!("nemus: storage migration {old:?} → {new:?} failed: {e}");
-        }
-    }
-    // Config: seed nemus's own file from Arbor's legacy `[nemus]` section.
-    config::migrate_if_needed();
-}
-
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 /// Evaluate `.nemus` source and stage it as the live arrangement. Returns

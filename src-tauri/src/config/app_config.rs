@@ -1217,7 +1217,7 @@ pub fn load() -> Result<AppConfig> {
 
     // One-shot migration: a pre-profiles install has a flat config.toml. Load it
     // and persist into the split layout so later boots take the path above. The
-    // legacy file is left in place (a backup; nemus still reads its `[nemus]`).
+    // legacy file is left in place as a backup.
     // Gated to the DEFAULT profile: the flat config is conceptually the default
     // profile's, so a freshly-created non-default profile must start from
     // built-in defaults, not inherit the legacy monolith.

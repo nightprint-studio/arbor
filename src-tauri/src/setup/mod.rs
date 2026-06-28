@@ -96,12 +96,6 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
 /// The `setup` hook body — runs once, before the event loop starts (so before
 /// any command routes). Each concern is delegated to a submodule.
 fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    // One-time storage split: move nemus's data out of the old
-    // `<arbor-data>/nemus` tree into its own `<nemus-data>` root and seed
-    // nemus's standalone config from Arbor's legacy `[nemus]` section. Cheap
-    // no-op once migrated; runs before the nemus window can open.
-    crate::nemus::migrate_storage();
-
     // Seed the Corvus backend state (in-process `corvus-be`) + the Model-D IPC
     // router into AppState. Both need the `AppHandle` that `AppState::new()`
     // predates. Must run before any command routes — safe here because commands

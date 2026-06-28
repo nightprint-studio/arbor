@@ -248,13 +248,6 @@ export interface WorkspaceTagDoneEvent {
   skipped:      number;
 }
 
-export interface MigrationReport {
-  already_migrated:  boolean;
-  added_repo_ids:    string[];
-  existing_repo_ids: string[];
-  active_repo_id:    string | null;
-}
-
 // ---------------------------------------------------------------------------
 // Palette tokens — mirrored against the CSS variables defined in theme vars.
 // The index is 0..11; CSS vars are named --ws-color-0 .. --ws-color-11 with
