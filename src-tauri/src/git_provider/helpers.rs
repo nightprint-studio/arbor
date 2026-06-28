@@ -9,11 +9,13 @@
 
 use std::sync::Arc;
 
+use corvus_git_provider_api::repo::RepoRef;
+
 use crate::AppState;
 use crate::error::{AppError, Result};
 use crate::git_provider::ci_impl::CiProviderInfo;
 
-use super::{GitProvider, GitlabProvider, types::RepoRef};
+use super::{GitProvider, GitlabProvider};
 
 /// Tuple returned by `provider_for_tab` — caller chooses which fields it
 /// needs.  `repo_ref` is shaped for the provider's REST conventions
