@@ -1,6 +1,6 @@
 /**
  * Resizable-panel size persistence — shared by the main (Arbor) window and the
- * nemus window. Panel widths/heights are *ephemeral UI chrome* (per the Arbor
+ * merula window. Panel widths/heights are *ephemeral UI chrome* (per the Arbor
  * working agreement, the one localStorage exception alongside the active
  * sidebar section), so they live in localStorage rather than the typed config.
  *

@@ -1,0 +1,31 @@
+[package]
+name         = "merula"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "merula — facade crate: re-exports the public surface of the four merula crates (pattern + lang + audio + engine) through a single curated prelude, with one unified error type. Consumers (the Arbor shell) use `merula::prelude::*` and never reach into the individual crates."
+
+# Thin facade: no logic of its own beyond the unified `MerulaError`. It depends on
+# all four merula crates and stitches their preludes into one. The only genuine
+# name collision across the four preludes is the per-crate `Result` alias, which
+# the facade resolves by exposing a single `MerulaError`/`Result` (see error.rs);
+# every other symbol is either single-homed or an identical re-export.
+[features]
+default = []
+# Forward the ONNX transcription backends (basic-pitch / Demucs) — links
+# onnxruntime into the binary. The shell turns this on.
+onnx = ["merula-transcribe/onnx"]
+
+[dependencies]
+merula-pattern    = { path = "../merula-pattern" }
+merula-lang       = { path = "../merula-lang" }
+merula-audio      = { path = "../merula-audio" }
+merula-engine     = { path = "../merula-engine" }
+merula-import     = { path = "../merula-import" }
+merula-transcribe = { path = "../merula-transcribe" }
+thiserror.workspace    = true
+
+[lints.rust]
+missing_debug_implementations = "warn"

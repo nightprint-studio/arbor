@@ -110,8 +110,8 @@
     <div class="fc-desc">A built-in explorer for your real filesystem — drives, folders and files, with git overlays and previews — in its own window. It also powers every file/folder picker in the app. See the <em>File Explorer</em> section.</div>
   </div>
   <div class="feature-card">
-    <div class="fc-title">nemus (Music)</div>
-    <div class="fc-desc">A standalone music live-coding studio — code editor, arrangement, mixer and a live audio engine — in its own window. Open it from the Command Palette under <em>Open nemus (Music)</em>. See the <em>nemus (Music)</em> section.</div>
+    <div class="fc-title">merula (Music)</div>
+    <div class="fc-desc">A standalone music live-coding studio — code editor, arrangement, mixer and a live audio engine — in its own window. Open it from the Command Palette under <em>Open merula (Music)</em>. See the <em>merula (Music)</em> section.</div>
   </div>
 </div>
 

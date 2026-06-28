@@ -22,10 +22,10 @@ export function openExplorerWindow(): Promise<void> {
   return invoke('open_explorer_window');
 }
 
-/** Open (or focus, if already open) the dedicated nemus window — the standalone
+/** Open (or focus, if already open) the dedicated merula window — the standalone
  *  music live-coding DAW shell. */
-export function openNemusWindow(): Promise<void> {
-  return invoke('open_nemus_window');
+export function openMerulaWindow(): Promise<void> {
+  return invoke('open_merula_window');
 }
 
 /** Open (or focus, if already open) the dedicated Corvus window — the Git
@@ -58,7 +58,7 @@ export const restartApp = (): Promise<void> => invoke('restart_app');
 export const PRODUCT_WINDOW_OPENERS: Record<string, () => Promise<void>> = {
   corvus: openCorvusWindow,   // Git client
   sitta: openExplorerWindow,  // File explorer
-  merula: openNemusWindow,    // Music (nemus / Merula)
+  merula: openMerulaWindow,    // Music (merula / Merula)
 };
 
 // ── Product window running-state (launcher ↔ product windows) ────────────────

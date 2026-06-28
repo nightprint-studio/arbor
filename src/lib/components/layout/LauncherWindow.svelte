@@ -4,7 +4,7 @@
    * home, JetBrains-Toolbox-like). Mounts on the `main` (and `launcher`) window
    * instead of the Git AppShell, which now opens in its own `corvus` window.
    *
-   * Like NemusWindow/ExplorerWindow it is NOT the full Arbor app: it boots only
+   * Like MerulaWindow/ExplorerWindow it is NOT the full Arbor app: it boots only
    * the theme / appearance / animation config and the global Tooltip + feedback
    * host, then mounts LauncherShell. Because the launcher replaces BootSplash on
    * the main window, it also fires the `frontend_ready` handshake so the plugin

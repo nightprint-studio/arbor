@@ -15,7 +15,7 @@
 | **corvus** | ~190 | branch/stage/merge/rebase/diff/graph/gitflow/submodule/worktree/repo/recovery/git-cli + MR/security/provider/pipeline/issues/cloud/auth | → `corvus-be` (OOP, the main event) |
 | **platform** | ~135 | config (44), workspace/jobs (33), plugin/marketplace (60), terminal/fs (35) | → stateless `platform` product (most leaf-clean) |
 | **studio** | ~74 | ron-studio (25), studio-index (12), studio-format (36) + 12 explorer-window | → `studio-be` (zero cross-cutting deps) |
-| **nemus** | ~43 | audio/eval/transport/import/packs/state | **Stays shell-hosted** (no backend planned) |
+| **merula** | ~43 | audio/eval/transport/import/packs/state | **Stays shell-hosted** (no backend planned) |
 
 **By verdict** (across all buckets, approximate):
 
@@ -28,7 +28,7 @@
 | `needs-async-seam` | ~15 | real reqwest/await → needs backend Tokio runtime |
 | `keep-in-shell` | ~30 | irreducible Tauri/Win32 glue (window, opener, global-shortcut, PTY) |
 
-**Prose read.** The bulk is *leaf-clean and ready today* — roughly 230 commands have no seam dependency at all. The single dominant blocker is the **M3 credential broker**: it gates ~60 commands that are otherwise the most valuable cross-product surface (all of MR, security, provider-connect, issues Linear/Jira, cloud secrets, CI/CD fetch in pipeline, avatar/image proxies). Everything that calls `crate::auth::maybe_refresh_for_provider()` / `credential_store::*` is dark until the broker lands. The second blocker is the **vetoable `on_pre_commit` hook**, which strands exactly one high-traffic command (`commit`) and a couple of plugin-host dispatchers. The EventSink seam is **already production-proven** (`CorvusState` holds `Arc<dyn EventSink>`; ~241 emit call-sites already abstracted), so `needs-emit` is not really a blocker — it's a tag meaning "instantiate the sink, don't touch call-sites." Studio is the cleanest standalone product (zero credential/hook/plugin coupling); nemus is explicitly out of scope.
+**Prose read.** The bulk is *leaf-clean and ready today* — roughly 230 commands have no seam dependency at all. The single dominant blocker is the **M3 credential broker**: it gates ~60 commands that are otherwise the most valuable cross-product surface (all of MR, security, provider-connect, issues Linear/Jira, cloud secrets, CI/CD fetch in pipeline, avatar/image proxies). Everything that calls `crate::auth::maybe_refresh_for_provider()` / `credential_store::*` is dark until the broker lands. The second blocker is the **vetoable `on_pre_commit` hook**, which strands exactly one high-traffic command (`commit`) and a couple of plugin-host dispatchers. The EventSink seam is **already production-proven** (`CorvusState` holds `Arc<dyn EventSink>`; ~241 emit call-sites already abstracted), so `needs-emit` is not really a blocker — it's a tag meaning "instantiate the sink, don't touch call-sites." Studio is the cleanest standalone product (zero credential/hook/plugin coupling); merula is explicitly out of scope.
 
 ---
 
@@ -68,7 +68,7 @@ Reuse column references existing crates under `crates/corvus/`.
 | **pipeline-local** (`pipeline_commands.rs`) | 11 | appstate | none | no | pipeline_* (f&f) + on_pipeline_run_request | 5 leaf / 4 needs-emit / 1 needs-plugin-host / 1 needs-emit | `corvus/pipeline`, `corvus/pipeline-api` |
 | **pipeline-ci** (`pipeline_commands.rs`) | 6 | appstate | none | yes | — | 6 **needs-broker** | `corvus/pipeline` |
 
-**nemus (separate track, no backend).** All 43 commands run in-process on the shell; the audio thread is spawned *inside* the shell with no IPC seam, there is no `nemus-be` planned, and there is zero credential coupling. Only real-async commands are `nemus_download_model`, `nemus_sync_libraries`, `nemus_pack_download` (reqwest). `open_nemus_window` is irreducible Tauri glue. **Verdict: do not migrate to Model-D — classify-only for wave awareness.** The `crates/nemus/*` crates already hold the pure pattern/lang/audio engine; the shell commands are thin.
+**merula (separate track, no backend).** All 43 commands run in-process on the shell; the audio thread is spawned *inside* the shell with no IPC seam, there is no `merula-be` planned, and there is zero credential coupling. Only real-async commands are `merula_download_model`, `merula_sync_libraries`, `merula_pack_download` (reqwest). `open_merula_window` is irreducible Tauri glue. **Verdict: do not migrate to Model-D — classify-only for wave awareness.** The `crates/merula/*` crates already hold the pure pattern/lang/audio engine; the shell commands are thin.
 
 **studio (separate later product, clean).** 62 data-plane commands (`ron_studio_commands.rs` 25, `studio_commands.rs` 12, `studio/format/commands.rs` 36) are all `leaf-clean` except `studio_refresh_index` (`needs-emit`, already AppHandle-emit). Zero credentials, zero hooks, zero plugin-host, no async seam (format backends are in-process traits). The 12 `explorer_window.rs` commands are irreducible Tauri glue (window/global-shortcut/DPI drag overlay) and **stay in shell**. Studio can be the first *separate product* extracted after corvus with no unresolved cross-cutting dependency.
 
@@ -97,7 +97,7 @@ Reuse column references existing crates under `crates/corvus/`.
 - **Unblocks:** `commit` (the only true vetoable command) and the ~18 plugin-marketplace dispatchers that lock the host (`exec_hook`, `fire_command`, enable/disable cascades, contributions/containers). These are **last** (Wave 7) or stay in shell indefinitely.
 
 ### Async-real (backend Tokio runtime)
-- **Current status:** Most "async" git commands are spawn_blocking (async-by-convention) and need **no seam** — the `rpc` command already wraps dispatch in spawn_blocking. ~15 commands do real reqwest/await (marketplace network, cloud single-ops, nemus downloads).
+- **Current status:** Most "async" git commands are spawn_blocking (async-by-convention) and need **no seam** — the `rpc` command already wraps dispatch in spawn_blocking. ~15 commands do real reqwest/await (marketplace network, cloud single-ops, merula downloads).
 - **What must be built:** backend holds its own Tokio runtime (or the transport is async-capable — tarpc is). Trivial once the backend process exists.
 - **Unblocks:** marketplace network ops, cloud `list/stat/delete/copy/concat`. Independent of broker for the no-creds subset.
 

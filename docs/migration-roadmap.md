@@ -7,8 +7,8 @@ struttura target) e continua [`docs/crate-refactor.md`](crate-refactor.md)
 
 ## Da → A
 
-- **Da**: tutto `arbor-*` (ombrello + git client confusi); round 1 ~60% (PR #1-4 atterrati); nemus già scorporato in crate; esplora e git GUI dentro `src-tauri/`.
-- **A**: `Arbor` = piattaforma + launcher (l'albero). Prodotti = uccelli: **Corvus** (git), **Merula** (musica, ex nemus), **Sitta** (file). Plugin engine riusabile multi-app, runtime Lua + WASM, capability host generiche. Un solo binario `arbor` che monta le finestre dei prodotti (RAM condivisa).
+- **Da**: tutto `arbor-*` (ombrello + git client confusi); round 1 ~60% (PR #1-4 atterrati); merula già scorporato in crate; esplora e git GUI dentro `src-tauri/`.
+- **A**: `Arbor` = piattaforma + launcher (l'albero). Prodotti = uccelli: **Corvus** (git), **Merula** (musica, ex merula), **Sitta** (file). Plugin engine riusabile multi-app, runtime Lua + WASM, capability host generiche. Un solo binario `arbor` che monta le finestre dei prodotti (RAM condivisa).
 
 ## Principi guida (valgono per ogni milestone)
 
@@ -128,18 +128,18 @@ Le impl credential-coupled (jira/linear, git_provider) sono già state estratte 
 **Pre-flip (pulizia, FATTO)**: il **seam credenziali keyring-free** è in piedi — `arbor_ipc::prelude::SessionProvider` (contratto async `session`/`refresh` → `AuthSession { base_url, auth_header }`, niente `keyring`/HTTP). È ciò che sblocca l'estrazione **keyring-free** dei domini coupled (linear/jira, git_provider): tengono `Arc<dyn SessionProvider>` invece di chiamare `credential_store`+keyring. Una sola session-shape copre Bearer a endpoint fisso (Linear), base per-tenant Bearer/Basic (Jira), e basi self-hosted. Impl da adapter shell per-provider (keyring read + OAuth refresh). Linear estratto in `corvus-issue-tracker-linear` + registry `IssueTracker` con descriptor self-describing.
 **Sblocca**: pattern Modello D per M4/M5.
 
-## M4 — Merula: `merula-be` + `fe-merula` (+ rename nemus→merula)
+## M4 — Merula: `merula-be` + `fe-merula` (+ rename merula→merula)
 
 **Obiettivo**: portare il prodotto musica sul Modello D.
 **Dipende da**: M3 (pattern Modello D). Indipendente da M5.
 **Step**:
-1. Rinomina i 7 crate `arbor-nemus-*` → `merula-*` (+ facade). Aggiorna `use`, Cargo.toml, prelude. **DSL `.nemus` resta** come sotto-brand (file/skill non si toccano).
-2. **`bins/merula-be`** (headless): la logica nemus (oggi `src-tauri/src/nemus/`) come backend su `arbor-ipc`. **L'audio `cpal` resta DENTRO `merula-be`** (possiede lo stream RT); solo gli **eventi** (meter, active-haps — già throttlati) attraversano l'IPC, **mai campioni audio**. `JobSink`/feedback via eventi del broker.
+1. Rinomina i 7 crate `merula-*` → `merula-*` (+ facade). Aggiorna `use`, Cargo.toml, prelude. **DSL `.merula` resta** come sotto-brand (file/skill non si toccano).
+2. **`bins/merula-be`** (headless): la logica merula (oggi `src-tauri/src/merula/`) come backend su `arbor-ipc`. **L'audio `cpal` resta DENTRO `merula-be`** (possiede lo stream RT); solo gli **eventi** (meter, active-haps — già throttlati) attraversano l'IPC, **mai campioni audio**. `JobSink`/feedback via eventi del broker.
 3. **`fe-merula`** + **`merula-ipc`** (regola no-cross-import: importa solo `fe-shared` + `merula-ipc`).
 4. `bins/arbor` **spawna `merula-be`** e monta `fe-merula` come finestra `merula`.
 5. **🎨 Creazione logo**: **Merula** (il merlo) — app/window icon multi-size + SVG; `set_icon` sulla finestra `merula`.
 **Deliverable**: Merula gira come BE separato + finestra montata dallo shell; crate `merula-*`; logo Merula.
-**Gate**: feature nemus invariate; **audio fluido** (nessun campione sull'IPC, latenza RT preservata); `.nemus` apre.
+**Gate**: feature merula invariate; **audio fluido** (nessun campione sull'IPC, latenza RT preservata); `.merula` apre.
 **Rischio/Size**: medio-alto / **L** (rename meccanico + il taglio FE/BE su un dominio real-time è il caso più delicato per l'IPC).
 **Sblocca**: bin `merula` distribuibile a sé (FE+BE proprio); plugin in Merula (via M6).
 

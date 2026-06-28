@@ -138,7 +138,7 @@ pub fn build_router(app: &AppHandle) -> Router {
     }));
 
     // Out-of-process backend: `corvus-be` is NOT spawned here. The launcher and
-    // the other product windows (explorer, nemus) never touch git, so the git
+    // the other product windows (explorer, merula) never touch git, so the git
     // backend must not run until the user actually opens Corvus. It is spawned
     // lazily by [`ensure_corvus_be`] when the Corvus window first opens, which
     // splices the child into the shared OOP routing slot (and removes it on

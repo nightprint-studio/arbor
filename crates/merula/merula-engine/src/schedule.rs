@@ -1,0 +1,731 @@
+//! The look-ahead scheduling core — a **pure** function from patterns + clock to
+//! sample-accurate trigger events. Shared by the real-time transport
+//! ([`crate::transport`]) and the offline render driver ([`crate::render`]); the
+//! only thing that differs downstream is whether the events go to a live
+//! [`AudioSink`](merula_audio::prelude::AudioSink) or straight into a
+//! [`Renderer`](merula_audio::prelude::Renderer).
+//!
+//! No I/O, no audio, no real time → trivially unit-testable.
+//!
+//! ## Query window
+//!
+//! [`schedule_span`] is handed a half-open **frame** range `[frames.start,
+//! frames.end)`. It converts that to a cycle-time window via [`Epoch::cycle_of`],
+//! widens it by a guard cycle on each side (so an onset whose exact frame lands in
+//! the range is never missed because of the float `cycle_of` ↔ exact-rational
+//! mismatch), queries the patterns, then **re-filters** every emitted event back
+//! to `start_frame ∈ [frames.start, frames.end)`. This makes adjacent windows
+//! seamless: a hap on the seam is emitted by exactly one window, never both and
+//! never neither.
+//!
+//! ## Sustained dedup
+//!
+//! A [`VoiceSource::File`] with [`SourceKind::Sustained`] is produced by `pure`,
+//! so the pattern places it once **per cycle**. The audio engine plays it once and
+//! lets it ring, so the per-cycle repeats are spurious. [`schedule_span`] collapses
+//! them *within a single call* unconditionally. Suppressing them *across* calls
+//! (so a sustained stem started in window N is not retriggered in window N+1) needs
+//! cross-call state, which — because this function is pure — the caller threads in:
+//! [`Transport`](crate::transport::Transport) keeps a started-set and filters the
+//! returned events through it; [`render_offline`](crate::render::render_offline)
+//! does the same with a fresh set per render. The key is `(track, path)`.
+
+use std::collections::HashSet;
+use std::ops::Range;
+
+use merula_audio::prelude::{
+    AudioCommand, CompSettings, DelayConfig, EqBand, EqBandKind, VoiceEvent, VoiceParams,
+    VoiceSource,
+};
+use merula_pattern::prelude::{
+    CompSpec, ControlMap, EqBandSpec, EqShape, Hap, HoldSpec, SourceKind, Tracks,
+};
+
+use crate::clock::Epoch;
+
+/// Query `tracks` over the cycle window covered by the `frames` range and emit a
+/// [`VoiceEvent`] per onset, sample-accurately placed via `epoch`.
+///
+/// `next_id` is the running voice-id counter (advanced once per emitted event).
+/// Only haps with an onset whose `start_frame` lands in `[frames.start,
+/// frames.end)` become events; continuous signals and tail fragments are dropped.
+/// A `Sustained` file source emits only on its first onset *within this call*
+/// (see the module docs for cross-call dedup, which the caller owns).
+///
+/// Pure: no I/O, no audio, no real time.
+pub fn schedule_span(
+    tracks: &Tracks<ControlMap>,
+    epoch: &Epoch,
+    sample_rate: u32,
+    frames: Range<u64>,
+    next_id: &mut u64,
+) -> Vec<VoiceEvent> {
+    if frames.start >= frames.end || tracks.tracks.is_empty() {
+        return Vec::new();
+    }
+
+    let query = frame_range_to_query_span(epoch, sample_rate, &frames);
+    let mut out = Vec::new();
+    // Within-call dedup of per-cycle Sustained repeats: a stem starting at the
+    // first onset suppresses its own later cycles inside this same window.
+    let mut sustained_seen: HashSet<(u32, String)> = HashSet::new();
+
+    for (track_idx, t) in tracks.tracks.iter().enumerate() {
+        let track = track_idx as u32;
+        let mut haps = t.pattern.query(query);
+        // Stable order so id assignment is deterministic and seam-stable: by
+        // onset time first, then by source span if present.
+        haps.sort_by(|a, b| {
+            a.onset()
+                .cmp(&b.onset())
+                .then_with(|| hap_span_key(a).cmp(&hap_span_key(b)))
+        });
+
+        for hap in &haps {
+            // Seam re-filter on the UNCLAMPED onset frame: `frame_of` clamps
+            // negatives to 0, so the negative guard cycle would otherwise leak in
+            // at frame 0 (double-emitting every onset). Keep only onsets whose
+            // frame lands in this window, then build the event.
+            let onset_frame = epoch.frame_of_signed(hap.onset(), sample_rate);
+            if onset_frame < frames.start as i64 || onset_frame >= frames.end as i64 {
+                continue;
+            }
+            let Some(ev) = voice_event_from_hap(hap, track, epoch, sample_rate, *next_id) else {
+                continue;
+            };
+            // Collapse per-cycle Sustained repeats inside this call.
+            if let VoiceSource::File {
+                path,
+                kind: SourceKind::Sustained,
+            } = &ev.source
+            {
+                if !sustained_seen.insert((track, path.clone())) {
+                    continue;
+                }
+            }
+            *next_id += 1;
+            out.push(ev);
+        }
+    }
+
+    out
+}
+
+/// Sort key pulling a hap's source-span start out for a stable tiebreak; `u32::MAX`
+/// sorts span-less haps after spanned ones at the same onset.
+fn hap_span_key(hap: &Hap<ControlMap>) -> u32 {
+    hap.span.map_or(u32::MAX, |s| s.start)
+}
+
+/// Convert the look-ahead **frame** range into the exact-`Time` cycle window to
+/// query, widened by a guard cycle on each side.
+///
+/// `cycle_of` is a lossy `f64` view; an onset's exact frame is recovered by
+/// `frame_of`, and the caller re-filters by `start_frame`, so the only job here is
+/// to make the query window a strict superset of the cycles that can contain an
+/// in-range onset. The guard cycle absorbs the float slop at the seam.
+fn frame_range_to_query_span(
+    epoch: &Epoch,
+    sample_rate: u32,
+    frames: &Range<u64>,
+) -> merula_pattern::prelude::TimeSpan {
+    use merula_pattern::prelude::{Time, TimeSpan};
+
+    let begin_cycle = epoch.cycle_of(frames.start, sample_rate);
+    let end_cycle = epoch.cycle_of(frames.end, sample_rate);
+    // Floor/ceil to whole cycles and pad by one so no boundary onset is missed.
+    let begin = (begin_cycle.floor() as i64) - 1;
+    let end = (end_cycle.ceil() as i64) + 1;
+    TimeSpan::new(Time::int(begin), Time::int(end))
+}
+
+/// Map a single onset hap on `track` to a [`VoiceEvent`]: resolve the
+/// `ControlMap` into a [`VoiceSource`](merula_audio::prelude::VoiceSource) +
+/// [`VoiceParams`](merula_audio::prelude::VoiceParams), pitch, and the
+/// cycle→frame `start_frame`/`dur_frames`. `None` if the hap is not a playable
+/// onset. Exposed for focused unit tests of the mapping.
+pub fn voice_event_from_hap(
+    hap: &Hap<ControlMap>,
+    track: u32,
+    epoch: &Epoch,
+    sample_rate: u32,
+    id: u64,
+) -> Option<VoiceEvent> {
+    // Continuous signals (no `whole`) and tail fragments are not playable onsets.
+    if !hap.has_onset() {
+        return None;
+    }
+    let whole = hap.whole?;
+    let v = &hap.value;
+
+    let source = resolve_source(v);
+    let note = resolve_note(v);
+
+    let start_frame = epoch.frame_of(hap.onset(), sample_rate);
+
+    // Lifetime. A `.hold(...)` note overrides the slot: it suppresses the per-slot
+    // note-off and the engine realises the chosen policy (drone = ring forever,
+    // else release after N cycles / seconds). Otherwise the lifetime is the hap's
+    // `whole` × frames-per-cycle, and a sustained file source rings to its natural
+    // end (`None`).
+    let dur_frames = match v.hold {
+        Some(HoldSpec::Drone) => None,
+        Some(HoldSpec::Cycles(n)) => {
+            Some((n * epoch.frames_per_cycle(sample_rate)).round().max(0.0) as u64)
+        }
+        Some(HoldSpec::Seconds(s)) => Some((s * sample_rate as f64).round().max(0.0) as u64),
+        None => match &source {
+            VoiceSource::File {
+                kind: SourceKind::Sustained,
+                ..
+            } => None,
+            _ => {
+                let dur = (whole.end - whole.begin).to_f64() * epoch.frames_per_cycle(sample_rate);
+                Some(dur.round().max(0.0) as u64)
+            }
+        },
+    };
+
+    // Monophonic connected voicing: a held note, or an explicit `art("legato")`,
+    // makes the renderer re-pitch one voice per track rather than stack a fresh
+    // one. Computed here (where the full `ControlMap` is visible) so the renderer
+    // just reads the flag.
+    let legato = v.hold.is_some()
+        || v.art
+            .as_deref()
+            .map_or(false, |a| a.eq_ignore_ascii_case("legato"));
+
+    let params = resolve_params(v);
+
+    Some(VoiceEvent {
+        id: merula_audio::prelude::VoiceId(id),
+        start_frame,
+        dur_frames,
+        legato,
+        source,
+        note,
+        params,
+        track,
+        span: hap.span.map(|s| (s.start, s.end)),
+    })
+}
+
+/// Derive the per-track delay-bus configuration a voice event implies, if any.
+///
+/// The language carries `delay` (line time, **cycle fractions**) and `feedback`
+/// on the per-event [`VoiceParams`]; the renderer realises them as a per-track
+/// delay bus. This converts the cycle-fraction time to **frames** via `epoch` and
+/// returns the [`AudioCommand::SetTrackDelay`] to apply before the voice. Returns
+/// `None` when the event configures no delay line (no `delay` set, or zero time).
+///
+/// `delay_mix` (the per-event send) is *not* here — it rides on the voice itself.
+pub fn delay_config_for(ev: &VoiceEvent, epoch: &Epoch, sample_rate: u32) -> Option<AudioCommand> {
+    let time_cycles = ev.params.delay?;
+    if time_cycles <= 0.0 {
+        return None;
+    }
+    let time_frames = (time_cycles as f64 * epoch.frames_per_cycle(sample_rate)).round();
+    if time_frames < 1.0 {
+        return None;
+    }
+    let feedback = ev.params.feedback.unwrap_or(0.0).clamp(0.0, 0.999);
+    Some(AudioCommand::SetTrackDelay(
+        ev.track,
+        DelayConfig {
+            time_frames: time_frames.min(u32::MAX as f64) as u32,
+            feedback,
+        },
+    ))
+}
+
+/// How many opening cycles to probe for a track's EQ / compressor spec. EQ and
+/// compressor are strip-level and constant per track (their `.eq(...)`/`.comp(...)`
+/// args are literals), so a representative hap suffices — this window is wide
+/// enough to catch it even when a track rests for the first few cycles.
+const FX_PROBE_CYCLES: i64 = 16;
+
+/// The per-track FX-insert commands (parametric EQ + compressor) a track set
+/// implies. Unlike the per-onset delay bus, EQ/comp are strip-level and constant
+/// per track, so they are derived **once** when the track set is staged: query
+/// each track for the first hap carrying an `eq`/`comp` spec and convert it.
+///
+/// Every track gets **both** an [`AudioCommand::SetTrackEq`] and an
+/// [`AudioCommand::SetTrackComp`] — an empty band list / `None` when the source
+/// sets none. This keeps the strip authoritative to the source: a
+/// [`AudioCommand::ConfigureTracks`] re-config *preserves* existing inserts where
+/// indices line up, so a removed `.eq(...)` / `.comp(...)` must be cleared
+/// explicitly (the same "every eval re-baselines the strips" rule as gain/pan).
+/// Pure.
+pub fn track_fx_commands(tracks: &Tracks<ControlMap>) -> Vec<AudioCommand> {
+    use merula_pattern::prelude::{Time, TimeSpan};
+    let probe = TimeSpan::new(Time::ZERO, Time::int(FX_PROBE_CYCLES));
+    let mut cmds = Vec::with_capacity(tracks.tracks.len() * 2);
+    for (i, t) in tracks.tracks.iter().enumerate() {
+        let track = i as u32;
+        let haps = t.pattern.query(probe);
+        let bands = haps
+            .iter()
+            .find_map(|h| h.value.eq.as_ref())
+            .map(|eq| eq.iter().map(eq_band_to_audio).collect())
+            .unwrap_or_default();
+        cmds.push(AudioCommand::SetTrackEq(track, bands));
+        let comp = haps
+            .iter()
+            .find_map(|h| h.value.comp.as_ref())
+            .map(comp_to_audio);
+        cmds.push(AudioCommand::SetTrackComp(track, comp));
+    }
+    cmds
+}
+
+/// Map a language EQ band spec onto the audio crate's biquad band.
+fn eq_band_to_audio(b: &EqBandSpec) -> EqBand {
+    EqBand {
+        kind: match b.kind {
+            EqShape::Peak => EqBandKind::Peak,
+            EqShape::LowShelf => EqBandKind::LowShelf,
+            EqShape::HighShelf => EqBandKind::HighShelf,
+            EqShape::Hpf => EqBandKind::Hpf,
+            EqShape::Lpf => EqBandKind::Lpf,
+        },
+        freq: b.freq as f32,
+        gain_db: b.gain_db as f32,
+        q: b.q as f32,
+    }
+}
+
+/// Map a language compressor spec onto the audio crate's compressor settings.
+fn comp_to_audio(c: &CompSpec) -> CompSettings {
+    CompSettings {
+        threshold_db: c.threshold_db as f32,
+        ratio: c.ratio as f32,
+        attack: c.attack as f32,
+        release: c.release as f32,
+        makeup_db: c.makeup_db as f32,
+        knee_db: c.knee_db as f32,
+    }
+}
+
+/// Resolve the symbolic source. A `speech(...)` request wins (the shell renders
+/// it offline into a one-shot sample registered under its content-addressed
+/// key, so here it resolves like any named sound); then a user file marker; then
+/// a named sound/inst.
+fn resolve_source(v: &ControlMap) -> VoiceSource {
+    if let Some(spec) = &v.speech {
+        VoiceSource::Named {
+            sound: Some(spec.registry_key()),
+            variant: None,
+            inst: None,
+            art: None,
+        }
+    } else if let Some(path) = &v.source_file {
+        VoiceSource::File {
+            path: path.clone(),
+            kind: v.source_kind.unwrap_or(SourceKind::OneShot),
+        }
+    } else {
+        VoiceSource::Named {
+            sound: v.sound.clone(),
+            variant: v.variant,
+            inst: v.inst.clone(),
+            art: v.art.clone(),
+        }
+    }
+}
+
+/// Resolve pitch: an explicit `note` wins; else a raw `degree` (no `scale()`) is
+/// taken as a chromatic semitone above middle C — a best-effort fallback for what
+/// is technically a user error; else native pitch (`None`).
+fn resolve_note(v: &ControlMap) -> Option<f32> {
+    if let Some(n) = v.note {
+        Some(n as f32)
+    } else {
+        v.degree.map(|d| 60.0 + d as f32)
+    }
+}
+
+/// Overlay the `ControlMap` numeric controls onto [`VoiceParams::default`],
+/// narrowing `f64 → f32`. Optional effects (`lpf`/`hpf`/`crush`) stay `None`
+/// when unset.
+fn resolve_params(v: &ControlMap) -> VoiceParams {
+    let mut p = VoiceParams::default();
+    if let Some(x) = v.gain {
+        p.gain = x as f32;
+    }
+    if let Some(x) = v.pan {
+        p.pan = x as f32;
+    }
+    if let Some(x) = v.room {
+        p.room = x as f32;
+    }
+    if let Some(x) = v.lpf {
+        p.lpf = Some(x as f32);
+    }
+    if let Some(x) = v.hpf {
+        p.hpf = Some(x as f32);
+    }
+    if let Some(x) = v.shift {
+        p.shift = x as f32;
+    }
+    if let Some(x) = v.speed {
+        p.speed = x as f32;
+    }
+    if let Some(x) = v.crush {
+        p.crush = Some(x as f32);
+    }
+    if let Some(x) = v.shape {
+        p.shape = x as f32;
+    }
+    if let Some(x) = v.vel {
+        p.vel = x as f32;
+    }
+    // Delay-bus controls (Onda 2): carried per-event; the renderer realises them
+    // as a per-track delay bus (`delay`/`feedback` configure the line via the
+    // engine's `SetTrackDelay`, `delay_mix` is the per-voice send).
+    if let Some(x) = v.delay {
+        p.delay = Some(x as f32);
+    }
+    if let Some(x) = v.feedback {
+        p.feedback = Some(x as f32);
+    }
+    if let Some(x) = v.delay_mix {
+        p.delay_mix = Some(x as f32);
+    }
+    p
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use merula_pattern::prelude::{
+        audio, pure, seq, track, tracks, Hap, SourceSpan, Time, TimeSpan,
+    };
+
+    /// A single discrete hap covering `[begin, end)` of cycle 0, carrying `v`.
+    fn hap(v: ControlMap, begin: Time, end: Time) -> Hap<ControlMap> {
+        let w = TimeSpan::new(begin, end);
+        Hap::new(Some(w), w, v)
+    }
+
+    #[test]
+    fn maps_named_sound_with_default_params() {
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let h = hap(ControlMap::sound("bd"), Time::ZERO, Time::ONE);
+        let ev = voice_event_from_hap(&h, 0, &e, sr, 7).expect("playable onset");
+        assert_eq!(ev.id, merula_audio::prelude::VoiceId(7));
+        assert_eq!(ev.start_frame, 0);
+        assert_eq!(ev.dur_frames, Some(48_000));
+        assert_eq!(ev.track, 0);
+        assert_eq!(ev.note, None);
+        assert_eq!(
+            ev.source,
+            VoiceSource::Named {
+                sound: Some("bd".into()),
+                variant: None,
+                inst: None,
+                art: None,
+            }
+        );
+        assert_eq!(ev.params, VoiceParams::default());
+    }
+
+    #[test]
+    fn second_slot_lands_at_half_cycle_frame() {
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        // hap at [1/2, 1) of cycle 0 → starts at frame 24_000, lasts 24_000.
+        let h = hap(ControlMap::sound("sn"), Time::new(1, 2), Time::ONE);
+        let ev = voice_event_from_hap(&h, 1, &e, sr, 0).unwrap();
+        assert_eq!(ev.start_frame, 24_000);
+        assert_eq!(ev.dur_frames, Some(24_000));
+        assert_eq!(ev.track, 1);
+    }
+
+    #[test]
+    fn continuous_and_tail_haps_drop() {
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        // Continuous: no `whole`.
+        let cont = Hap::new(None, TimeSpan::new(Time::ZERO, Time::ONE), ControlMap::sound("x"));
+        assert!(voice_event_from_hap(&cont, 0, &e, sr, 0).is_none());
+        // Tail fragment: part begins after whole begins.
+        let w = TimeSpan::new(Time::ZERO, Time::ONE);
+        let tail = Hap::new(Some(w), TimeSpan::new(Time::new(1, 2), Time::ONE), ControlMap::sound("x"));
+        assert!(voice_event_from_hap(&tail, 0, &e, sr, 0).is_none());
+    }
+
+    #[test]
+    fn note_and_degree_pitch_resolution() {
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let n = hap(ControlMap::note(64.0), Time::ZERO, Time::ONE);
+        assert_eq!(voice_event_from_hap(&n, 0, &e, sr, 0).unwrap().note, Some(64.0));
+        let d = hap(ControlMap::degree(3), Time::ZERO, Time::ONE);
+        assert_eq!(voice_event_from_hap(&d, 0, &e, sr, 0).unwrap().note, Some(63.0));
+    }
+
+    #[test]
+    fn delay_params_carry_through_to_voice() {
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut cm = ControlMap::sound("bd");
+        cm.delay = Some(0.25);
+        cm.feedback = Some(0.5);
+        cm.delay_mix = Some(0.6);
+        let ev = voice_event_from_hap(&hap(cm, Time::ZERO, Time::ONE), 0, &e, sr, 0).unwrap();
+        assert_eq!(ev.params.delay, Some(0.25));
+        assert_eq!(ev.params.feedback, Some(0.5));
+        assert_eq!(ev.params.delay_mix, Some(0.6));
+    }
+
+    #[test]
+    fn delay_config_converts_cycle_fraction_to_frames() {
+        use merula_audio::prelude::{AudioCommand, DelayConfig};
+        let e = Epoch::start(1.0); // 48_000 frames/cycle
+        let sr = 48_000;
+        let mut cm = ControlMap::sound("bd");
+        cm.delay = Some(0.25); // a quarter cycle → 12_000 frames
+        cm.feedback = Some(0.4);
+        let ev = voice_event_from_hap(&hap(cm, Time::ZERO, Time::ONE), 3, &e, sr, 0).unwrap();
+        match delay_config_for(&ev, &e, sr) {
+            Some(AudioCommand::SetTrackDelay(track, DelayConfig { time_frames, feedback })) => {
+                assert_eq!(track, 3);
+                assert_eq!(time_frames, 12_000);
+                assert!((feedback - 0.4).abs() < 1e-6);
+            }
+            other => panic!("expected SetTrackDelay, got {other:?}"),
+        }
+        // No delay field → no config.
+        let plain = voice_event_from_hap(&hap(ControlMap::sound("bd"), Time::ZERO, Time::ONE), 0, &e, sr, 0).unwrap();
+        assert!(delay_config_for(&plain, &e, sr).is_none());
+    }
+
+    #[test]
+    fn track_fx_commands_sets_specs_and_clears_unset_tracks() {
+        let band = EqBandSpec { kind: EqShape::Hpf, freq: 80.0, gain_db: 0.0, q: 0.7 };
+        let comp = CompSpec {
+            threshold_db: -18.0, ratio: 4.0, attack: 0.005, release: 0.1, makeup_db: 0.0, knee_db: 6.0,
+        };
+        // Track 0 carries an EQ band + a compressor; track 1 carries neither.
+        let t0 = track("drums", seq(vec![pure(ControlMap::sound("bd"))]).add_eq(band).comp(comp));
+        let t1 = track("bass", seq(vec![pure(ControlMap::sound("sn"))]));
+        let cmds = track_fx_commands(&tracks(vec![t0, t1]));
+        // Track 0: the band + the compressor.
+        assert!(cmds.iter().any(|c| matches!(c, AudioCommand::SetTrackEq(0, b) if b.len() == 1)));
+        assert!(cmds.iter().any(|c| matches!(c, AudioCommand::SetTrackComp(0, Some(_)))));
+        // Track 1: an explicit clear (empty EQ + no compressor) so a removed
+        // `.eq(...)` / `.comp(...)` resets the preserved strip.
+        assert!(cmds.iter().any(|c| matches!(c, AudioCommand::SetTrackEq(1, b) if b.is_empty())));
+        assert!(cmds.iter().any(|c| matches!(c, AudioCommand::SetTrackComp(1, None))));
+    }
+
+    #[test]
+    fn params_overlay_narrows_f64_to_f32() {
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut cm = ControlMap::sound("bd");
+        cm.gain = Some(0.5);
+        cm.pan = Some(0.25);
+        cm.lpf = Some(800.0);
+        cm.vel = Some(1.0);
+        let ev = voice_event_from_hap(&hap(cm, Time::ZERO, Time::ONE), 0, &e, sr, 0).unwrap();
+        assert_eq!(ev.params.gain, 0.5);
+        assert_eq!(ev.params.pan, 0.25);
+        assert_eq!(ev.params.lpf, Some(800.0));
+        assert_eq!(ev.params.vel, 1.0);
+        assert_eq!(ev.params.hpf, None); // unset stays None
+    }
+
+    #[test]
+    fn file_source_one_shot_vs_sustained() {
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut one = ControlMap::source_file("kick.wav");
+        one.source_kind = Some(SourceKind::OneShot);
+        let ev = voice_event_from_hap(&hap(one, Time::ZERO, Time::ONE), 0, &e, sr, 0).unwrap();
+        assert_eq!(
+            ev.source,
+            VoiceSource::File { path: "kick.wav".into(), kind: SourceKind::OneShot }
+        );
+        assert_eq!(ev.dur_frames, Some(48_000));
+
+        let mut sus = ControlMap::source_file("pad.wav");
+        sus.source_kind = Some(SourceKind::Sustained);
+        let ev = voice_event_from_hap(&hap(sus, Time::ZERO, Time::ONE), 0, &e, sr, 0).unwrap();
+        assert_eq!(ev.dur_frames, None); // rings to natural end
+    }
+
+    #[test]
+    fn schedule_span_places_four_onsets_in_a_cycle() {
+        // s(bd bd bd bd) on one track over cycle 0.
+        let pat = seq(vec![
+            pure(ControlMap::sound("bd")),
+            pure(ControlMap::sound("bd")),
+            pure(ControlMap::sound("bd")),
+            pure(ControlMap::sound("bd")),
+        ]);
+        let t = tracks(vec![track("drums", pat)]);
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut id = 0;
+        let evs = schedule_span(&t, &e, sr, 0..48_000, &mut id);
+        assert_eq!(evs.len(), 4);
+        let starts: Vec<u64> = evs.iter().map(|v| v.start_frame).collect();
+        assert_eq!(starts, vec![0, 12_000, 24_000, 36_000]);
+        assert_eq!(id, 4);
+        assert!(evs.iter().all(|v| v.track == 0));
+    }
+
+    #[test]
+    fn schedule_span_reanchored_window_excludes_out_of_range_onsets() {
+        let pat = seq(vec![pure(ControlMap::sound("bd")), pure(ControlMap::sound("sn"))]);
+        let t = tracks(vec![track("d", pat)]);
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        // Only the first half of cycle 0: catches the "bd" at 0, not the "sn" at 24_000.
+        let mut id = 0;
+        let evs = schedule_span(&t, &e, sr, 0..24_000, &mut id);
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0].start_frame, 0);
+        assert_eq!(
+            evs[0].source,
+            VoiceSource::Named { sound: Some("bd".into()), variant: None, inst: None, art: None }
+        );
+    }
+
+    #[test]
+    fn schedule_span_no_double_emit_at_seam() {
+        let pat = seq(vec![pure(ControlMap::sound("bd")), pure(ControlMap::sound("sn"))]);
+        let t = tracks(vec![track("d", pat)]);
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut id = 0;
+        // Two adjacent windows covering the whole cycle, split at the "sn" onset.
+        let a = schedule_span(&t, &e, sr, 0..24_000, &mut id);
+        let b = schedule_span(&t, &e, sr, 24_000..48_000, &mut id);
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert_eq!(a[0].start_frame, 0);
+        assert_eq!(b[0].start_frame, 24_000);
+        assert_eq!(id, 2); // exactly two events total, no duplicate at the seam
+    }
+
+    #[test]
+    fn schedule_span_dedups_sustained_within_window() {
+        // `audio(...)` is a Sustained pure → one hap per cycle; over 3 cycles only
+        // the first onset survives.
+        let t = tracks(vec![track("stem", audio("pad.wav"))]);
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut id = 0;
+        let evs = schedule_span(&t, &e, sr, 0..(48_000 * 3), &mut id);
+        let sustained: Vec<&VoiceEvent> = evs
+            .iter()
+            .filter(|v| matches!(v.source, VoiceSource::File { kind: SourceKind::Sustained, .. }))
+            .collect();
+        assert_eq!(sustained.len(), 1, "per-cycle Sustained repeats collapse");
+        assert_eq!(sustained[0].start_frame, 0);
+    }
+
+    #[test]
+    fn schedule_span_carries_source_span() {
+        let pat = pure(ControlMap::sound("bd")).tag_span(SourceSpan::new(2, 4));
+        let t = tracks(vec![track("d", pat)]);
+        let e = Epoch::start(1.0);
+        let mut id = 0;
+        let evs = schedule_span(&t, &e, 48_000, 0..48_000, &mut id);
+        assert_eq!(evs[0].span, Some((2, 4)));
+    }
+
+    #[test]
+    fn schedule_span_window_in_later_cycle_has_no_leak() {
+        // 4 onsets/cycle; querying exactly cycle 1's frames must yield only cycle
+        // 1's four onsets — none leaking from the guard cycles 0 or 2 (regression
+        // for the negative-guard-cycle clamp-to-0 leak).
+        let pat = seq(vec![
+            pure(ControlMap::sound("bd")),
+            pure(ControlMap::sound("bd")),
+            pure(ControlMap::sound("bd")),
+            pure(ControlMap::sound("bd")),
+        ]);
+        let t = tracks(vec![track("drums", pat)]);
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut id = 0;
+        let evs = schedule_span(&t, &e, sr, 48_000..96_000, &mut id);
+        let starts: Vec<u64> = evs.iter().map(|v| v.start_frame).collect();
+        assert_eq!(starts, vec![48_000, 60_000, 72_000, 84_000]);
+        assert_eq!(id, 4);
+    }
+
+    #[test]
+    fn schedule_span_spans_multiple_cycles() {
+        // One onset per cycle over three cycles → three events at the cycle starts.
+        let t = tracks(vec![track("d", pure(ControlMap::sound("bd")))]);
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut id = 0;
+        let evs = schedule_span(&t, &e, sr, 0..144_000, &mut id);
+        let starts: Vec<u64> = evs.iter().map(|v| v.start_frame).collect();
+        assert_eq!(starts, vec![0, 48_000, 96_000]);
+        assert_eq!(id, 3);
+    }
+
+    #[test]
+    fn schedule_span_scales_frames_with_cps() {
+        // cps = 2 → 24_000 frames/cycle; the two onsets land at 0 and the half-cycle.
+        let pat = seq(vec![
+            pure(ControlMap::sound("bd")),
+            pure(ControlMap::sound("bd")),
+        ]);
+        let t = tracks(vec![track("d", pat)]);
+        let e = Epoch::start(2.0);
+        let sr = 48_000;
+        let mut id = 0;
+        let evs = schedule_span(&t, &e, sr, 0..24_000, &mut id);
+        let starts: Vec<u64> = evs.iter().map(|v| v.start_frame).collect();
+        assert_eq!(starts, vec![0, 12_000]);
+    }
+
+    #[test]
+    fn schedule_span_assigns_track_indices() {
+        // Two tracks, each one onset at frame 0 → track 0 then track 1 in order.
+        let t = tracks(vec![
+            track("a", pure(ControlMap::sound("bd"))),
+            track("b", pure(ControlMap::sound("sn"))),
+        ]);
+        let e = Epoch::start(1.0);
+        let mut id = 0;
+        let evs = schedule_span(&t, &e, 48_000, 0..48_000, &mut id);
+        assert_eq!(evs.len(), 2);
+        assert_eq!(evs[0].track, 0);
+        assert_eq!(evs[1].track, 1);
+    }
+
+    #[test]
+    fn schedule_span_alternates_cat_across_cycles() {
+        use merula_pattern::prelude::cat;
+        // `< a b >`: "a" on cycle 0, "b" on cycle 1.
+        let pat = cat(vec![
+            pure(ControlMap::sound("a")),
+            pure(ControlMap::sound("b")),
+        ]);
+        let t = tracks(vec![track("d", pat)]);
+        let e = Epoch::start(1.0);
+        let sr = 48_000;
+        let mut id = 0;
+        let evs = schedule_span(&t, &e, sr, 0..96_000, &mut id);
+        assert_eq!(evs.len(), 2);
+        assert_eq!(evs[0].start_frame, 0);
+        assert_eq!(evs[1].start_frame, 48_000);
+        let names: Vec<Option<&str>> = evs
+            .iter()
+            .map(|v| match &v.source {
+                VoiceSource::Named { sound, .. } => sound.as_deref(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec![Some("a"), Some("b")]);
+    }
+}

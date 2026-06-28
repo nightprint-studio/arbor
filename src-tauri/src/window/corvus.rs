@@ -3,13 +3,13 @@
 //! Corvus is Arbor's Git GUI (branches, commits, diff, MR/PR, …). Today it also
 //! loads in the `main` window, but the app is moving toward a launcher model
 //! (JetBrains-Toolbox-like): `main` becomes the launcher, and each product —
-//! Corvus, nemus, … — opens in its own window. This module is the seed of that
+//! Corvus, merula, … — opens in its own window. This module is the seed of that
 //! split: a frameless window that loads the same `index.html`, with the
 //! frontend root (`src/routes/+page.svelte`) branching on the window label
 //! ([`CORVUS_WINDOW_LABEL`]) to mount the Git `AppShell`.
 //!
 //! Single reusable window, re-summoned rather than duplicated — like
-//! [`super::nemus`]. The Git backend (`corvus-be`) is spawned **lazily** the
+//! [`super::merula`]. The Git backend (`corvus-be`) is spawned **lazily** the
 //! first time this window opens (see [`open_corvus_window`]) and then shared
 //! process-wide across Corvus tabs — the launcher and the non-git product
 //! windows never start it.
@@ -76,7 +76,7 @@ fn build_corvus_window(app: &AppHandle) {
 /// uninitialised webview — a blank window with no devtools. As an async command
 /// it runs on the async runtime (a background thread), so the
 /// `run_on_main_thread` hop in `open_or_focus` behaves correctly. Same reasoning
-/// as [`super::nemus::open_nemus_window`].
+/// as [`super::merula::open_merula_window`].
 #[tauri::command]
 #[allow(clippy::unused_async)] // async is load-bearing: it moves the handler off
 // the main thread (see doc comment) — there's nothing to await.

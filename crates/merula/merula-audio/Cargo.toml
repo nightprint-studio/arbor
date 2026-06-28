@@ -1,0 +1,43 @@
+[package]
+name         = "merula-audio"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "merula — real-time audio: cpal output stream, hand-written SFZ sampler (VSCO 2 subset), default synth, mixer + per-voice/bus effects, and the frozen engine↔audio contract (VoiceEvent / AudioSink / Renderer). Doubles as the offline render DSP core."
+
+# Real-time / DSP layer — the only merula crate that touches the audio hardware.
+# Depends on the pure pattern algebra for the `ControlMap` value (and `SourceKind`
+# carried on the seam). The DSP/codec stack is the set approved for Fase 2:
+#   cpal      output stream + device
+#   hound     WAV decode (samples) / encode is driven by the engine for render
+#   rubato    resampling (pitch `shift` / `speed`, sample-rate match)
+#   rtrb      lock-free SPSC ring for the engine→audio command transport
+#   fundsp    reverb / filters / effects building blocks
+#   symphonia mp3/ogg/flac decode for user `sample`/`audio` imports
+[dependencies]
+merula-pattern = { path = "../merula-pattern" }
+thiserror.workspace = true
+cpal      = "0.15"
+hound     = "3"
+rubato    = "0.16"
+rtrb      = "0.3"
+fundsp    = "0.20"
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "vorbis", "flac"] }
+
+# Windows-only: the OS text-to-speech engine (`speech(...).engine("system")`).
+# WinRT SpeechSynthesizer → a WAV stream we decode with `hound`. SAM (the default
+# engine) needs none of this, so non-Windows builds and synth-only patches are
+# unaffected.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Media_SpeechSynthesis",
+    "Storage_Streams",
+    "Win32_System_Com",
+] }
+
+[lints.rust]
+missing_debug_implementations = "warn"

@@ -7,7 +7,7 @@
 //!
 //! - [`explorer`] — the dedicated File Explorer (`explorer` / `explorer-N`),
 //!   plus its OS-global shortcut, cross-window clipboard and drag overlay.
-//! - [`nemus`] — the music live-coding DAW shell (`nemus`).
+//! - [`merula`] — the music live-coding DAW shell (`merula`).
 //! - [`corvus`] — the Git product window (`corvus`). Today the Git UI also
 //!   loads in `main`; this is the seed of the launcher split, where `main`
 //!   becomes the launcher and Corvus opens as a product window.
@@ -26,7 +26,7 @@ pub mod corvus;
 pub mod events;
 pub mod explorer;
 pub mod launcher;
-pub mod nemus;
+pub mod merula;
 pub mod placement;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
@@ -60,14 +60,14 @@ pub fn show_and_focus(w: &WebviewWindow) {
 // were already open before its listener was wired).
 
 /// Map a native window label to the Canopy product id it belongs to, if any.
-/// `corvus` → Corvus, `explorer`/`explorer-N` → Sitta, `nemus`/`nemus-N` →
+/// `corvus` → Corvus, `explorer`/`explorer-N` → Sitta, `merula`/`merula-N` →
 /// Merula. Anything else (launcher, drag-overlay, …) is not a product window.
 pub fn product_id_for_label(label: &str) -> Option<&'static str> {
     if label == corvus::CORVUS_WINDOW_LABEL || label.starts_with("corvus-") {
         Some("corvus")
     } else if label == explorer::EXPLORER_WINDOW_LABEL || label.starts_with("explorer-") {
         Some("sitta")
-    } else if label == nemus::NEMUS_WINDOW_LABEL || label.starts_with("nemus-") {
+    } else if label == merula::MERULA_WINDOW_LABEL || label.starts_with("merula-") {
         Some("merula")
     } else {
         None

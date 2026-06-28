@@ -9,7 +9,7 @@
 //! Most git/domain commands route through the single generic `rpc` entry point
 //! (`commands::rpc_commands::rpc`) to the Model-D backends; the handlers listed
 //! explicitly here are the ones that stay in the shell (window lifecycles,
-//! OS-glue, focus/boot handshake, nemus, …).
+//! OS-glue, focus/boot handshake, merula, …).
 
 #[macro_export]
 macro_rules! invoke_handlers {
@@ -74,8 +74,8 @@ macro_rules! invoke_handlers {
             $crate::window::explorer::drag_overlay_move,
             $crate::window::explorer::drag_overlay_hide,
             $crate::window::explorer::explorer_drop_dispatch,
-            // Dedicated nemus (music live-coding) window
-            $crate::window::nemus::open_nemus_window,
+            // Dedicated merula (music live-coding) window
+            $crate::window::merula::open_merula_window,
             // Dedicated Corvus (git) window
             $crate::window::corvus::open_corvus_window,
             // Launcher window (JetBrains-Toolbox-like home screen)
@@ -85,60 +85,60 @@ macro_rules! invoke_handlers {
             $crate::window::close_product_window,
             // Full app relaunch (fatal "git backend stopped" overlay recovery)
             $crate::window::restart_app,
-            // ── nemus engine ─────────────────────────────────────────────────
+            // ── merula engine ─────────────────────────────────────────────────
             // eval / transport / render / sample packs / config
-            $crate::nemus::nemus_eval,
-            $crate::nemus::nemus_transport,
-            $crate::nemus::nemus_render,
-            $crate::nemus::nemus_render_stems,
-            $crate::nemus::nemus_export_midi,
-            $crate::nemus::nemus_analyze_levels,
-            $crate::nemus::nemus_packs,
-            $crate::nemus::nemus_pack_download,
-            $crate::nemus::nemus_pack_reindex,
-            $crate::nemus::nemus_pack_delete,
-            $crate::nemus::get_nemus_config,
-            $crate::nemus::set_nemus_config,
-            $crate::nemus::nemus_audio_devices,
-            $crate::nemus::nemus_set_output_device,
+            $crate::merula::merula_eval,
+            $crate::merula::merula_transport,
+            $crate::merula::merula_render,
+            $crate::merula::merula_render_stems,
+            $crate::merula::merula_export_midi,
+            $crate::merula::merula_analyze_levels,
+            $crate::merula::merula_packs,
+            $crate::merula::merula_pack_download,
+            $crate::merula::merula_pack_reindex,
+            $crate::merula::merula_pack_delete,
+            $crate::merula::get_merula_config,
+            $crate::merula::set_merula_config,
+            $crate::merula::merula_audio_devices,
+            $crate::merula::merula_set_output_device,
             // Fase 4: arrangement query / sound bank / live mixer / window
             // state / project model (all additive)
-            $crate::nemus::query::nemus_query,
-            $crate::nemus::scenes::nemus_scenes,
-            $crate::nemus::scenes::nemus_launch,
-            $crate::nemus::sounds::nemus_sounds,
-            $crate::nemus::nemus_set_track,
-            $crate::nemus::nemus_audition_expr,
-            $crate::nemus::nemus_eval_snippet,
-            $crate::nemus::nemus_materialize,
-            $crate::nemus::nemus_play_snippet,
-            $crate::nemus::nemus_stop_snippet,
-            $crate::nemus::state::get_nemus_state,
-            $crate::nemus::state::set_nemus_state,
-            $crate::nemus::state::get_nemus_project_tabs,
-            $crate::nemus::state::set_nemus_project_tabs,
-            $crate::nemus::state::get_nemus_project_mix,
-            $crate::nemus::state::set_nemus_project_mix,
-            $crate::nemus::state::get_nemus_aliases,
-            $crate::nemus::state::set_nemus_aliases,
-            $crate::nemus::state::get_nemus_scratch_tabs,
-            $crate::nemus::state::set_nemus_scratch_tabs,
-            $crate::nemus::project::nemus_open_project,
-            $crate::nemus::project::nemus_create_project,
-            $crate::nemus::project::nemus_set_project_name,
-            $crate::nemus::reference::nemus_lang_reference,
-            $crate::nemus::format::nemus_format,
-            $crate::nemus::scales::nemus_scales,
-            $crate::nemus::libraries::nemus_libraries,
-            $crate::nemus::libraries::nemus_sync_libraries,
-            // nemus import: WAV → MIDI (transcription) / MIDI → .nemus
-            $crate::nemus::import::nemus_convert_wav_to_midi,
-            $crate::nemus::import::nemus_import_audio_as_nemus,
-            $crate::nemus::import::nemus_import_midi_as_nemus,
-            // nemus ONNX transcription models (download on-demand)
-            $crate::nemus::models::nemus_models,
-            $crate::nemus::models::nemus_download_model,
-            $crate::nemus::models::nemus_delete_model,
+            $crate::merula::query::merula_query,
+            $crate::merula::scenes::merula_scenes,
+            $crate::merula::scenes::merula_launch,
+            $crate::merula::sounds::merula_sounds,
+            $crate::merula::merula_set_track,
+            $crate::merula::merula_audition_expr,
+            $crate::merula::merula_eval_snippet,
+            $crate::merula::merula_materialize,
+            $crate::merula::merula_play_snippet,
+            $crate::merula::merula_stop_snippet,
+            $crate::merula::state::get_merula_state,
+            $crate::merula::state::set_merula_state,
+            $crate::merula::state::get_merula_project_tabs,
+            $crate::merula::state::set_merula_project_tabs,
+            $crate::merula::state::get_merula_project_mix,
+            $crate::merula::state::set_merula_project_mix,
+            $crate::merula::state::get_merula_aliases,
+            $crate::merula::state::set_merula_aliases,
+            $crate::merula::state::get_merula_scratch_tabs,
+            $crate::merula::state::set_merula_scratch_tabs,
+            $crate::merula::project::merula_open_project,
+            $crate::merula::project::merula_create_project,
+            $crate::merula::project::merula_set_project_name,
+            $crate::merula::reference::merula_lang_reference,
+            $crate::merula::format::merula_format,
+            $crate::merula::scales::merula_scales,
+            $crate::merula::libraries::merula_libraries,
+            $crate::merula::libraries::merula_sync_libraries,
+            // merula import: WAV → MIDI (transcription) / MIDI → .merula
+            $crate::merula::import::merula_convert_wav_to_midi,
+            $crate::merula::import::merula_import_audio_as_merula,
+            $crate::merula::import::merula_import_midi_as_merula,
+            // merula ONNX transcription models (download on-demand)
+            $crate::merula::models::merula_models,
+            $crate::merula::models::merula_download_model,
+            $crate::merula::models::merula_delete_model,
         ]
     };
 }

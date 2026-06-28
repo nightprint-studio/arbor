@@ -141,7 +141,7 @@ dependencies = [
  "arbor-feedback",
  "arbor-fs",
  "arbor-ipc",
- "arbor-nemus",
+ "merula",
  "arbor-plugin-api",
  "arbor-plugin-core",
  "arbor-plugin-marketplace",
@@ -317,23 +317,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbor-nemus"
+name = "merula"
 version = "0.3.0"
 dependencies = [
- "arbor-nemus-audio",
- "arbor-nemus-engine",
- "arbor-nemus-import",
- "arbor-nemus-lang",
- "arbor-nemus-pattern",
- "arbor-nemus-transcribe",
+ "merula-audio",
+ "merula-engine",
+ "merula-import",
+ "merula-lang",
+ "merula-pattern",
+ "merula-transcribe",
  "thiserror 2.0.18",
 ]
 
 [[package]]
-name = "arbor-nemus-audio"
+name = "merula-audio"
 version = "0.3.0"
 dependencies = [
- "arbor-nemus-pattern",
+ "merula-pattern",
  "cpal",
  "fundsp",
  "hound",
@@ -345,11 +345,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbor-nemus-engine"
+name = "merula-engine"
 version = "0.3.0"
 dependencies = [
- "arbor-nemus-audio",
- "arbor-nemus-pattern",
+ "merula-audio",
+ "merula-pattern",
  "ebur128",
  "hound",
  "midly",
@@ -358,33 +358,33 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbor-nemus-import"
+name = "merula-import"
 version = "0.3.0"
 dependencies = [
- "arbor-nemus-lang",
- "arbor-nemus-pattern",
+ "merula-lang",
+ "merula-pattern",
  "midly",
  "thiserror 2.0.18",
 ]
 
 [[package]]
-name = "arbor-nemus-lang"
+name = "merula-lang"
 version = "0.3.0"
 dependencies = [
- "arbor-nemus-pattern",
+ "merula-pattern",
  "cc",
  "tree-sitter",
 ]
 
 [[package]]
-name = "arbor-nemus-pattern"
+name = "merula-pattern"
 version = "0.3.0"
 
 [[package]]
-name = "arbor-nemus-transcribe"
+name = "merula-transcribe"
 version = "0.3.0"
 dependencies = [
- "arbor-nemus-audio",
+ "merula-audio",
  "midly",
  "ort",
  "thiserror 2.0.18",

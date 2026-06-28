@@ -4,7 +4,7 @@
 //! repos/workspaces) that the user switches between — dev vs demo vs client-X.
 //! On disk it is a folder under `arbor/profiles/<name>/`, holding one
 //! product-agnostic `profile.toml` plus a sub-folder per product (`corvus/`,
-//! `nemus/`, …) and a per-profile `plugins/` area. See
+//! `merula/`, …) and a per-profile `plugins/` area. See
 //! `docs/profiles-and-product-config.md`.
 //!
 //! Path helpers elsewhere ([`crate::paths`]) are pure functions; profiles add a
@@ -31,9 +31,9 @@ pub const DEFAULT_PROFILE: &str = "default";
 /// (`arbor/profiles/<profile>/<product>/`). Single source of truth so the shell
 /// and the product crates agree on the literal.
 pub const PRODUCT_CORVUS: &str = "corvus";
-/// See [`PRODUCT_CORVUS`]. nemus moves from a sibling namespace into a product
+/// See [`PRODUCT_CORVUS`]. merula moves from a sibling namespace into a product
 /// bucket under each profile.
-pub const PRODUCT_NEMUS: &str = "nemus";
+pub const PRODUCT_MERULA: &str = "merula";
 
 /// Process-global selected-profile name. Seeded to [`DEFAULT_PROFILE`] and
 /// overwritten at boot by [`init_active_profile`] (or a launch argument).

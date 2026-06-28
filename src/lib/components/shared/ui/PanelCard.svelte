@@ -7,7 +7,7 @@
   /**
    * PanelCard — a floating bg-base "card" wrapping a `ResizablePanel`, with the
    * IDE open/close slide built in. This is the docked-panel primitive shared by
-   * the main window and the nemus window: drop it inside an `{#if}` and it
+   * the main window and the merula window: drop it inside an `{#if}` and it
    * animates itself in/out (width for left/right, height for bottom) while the
    * neighbours reflow.
    *
@@ -80,7 +80,7 @@
   <div class="pc-card" class:pc-bottom={isBottom} data-panel={orientation}>{@render body()}</div>
 {:else if isBottom}
   <!-- `|global`: the `{#if}` that mounts/unmounts this card lives in the HOST
-       (AppShell / NemusShell), an ancestor block across the component boundary.
+       (AppShell / MerulaShell), an ancestor block across the component boundary.
        A local transition only fires for its own block's create/destroy, so it
        would never play here — global makes it react to the ancestor toggle. -->
   <div

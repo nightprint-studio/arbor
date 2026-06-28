@@ -88,7 +88,7 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
         .manage(crate::window::explorer::PendingReveals::default())
         .manage(crate::window::explorer::ExplorerClipboard::default())
         .manage(crate::window::explorer::DragOverlayText::default())
-        .manage(crate::nemus::NemusState::default())
+        .manage(crate::merula::MerulaState::default())
         .setup(run)
         .on_window_event(|window, event| crate::window::events::handle(window, event))
 }
@@ -96,6 +96,11 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
 /// The `setup` hook body — runs once, before the event loop starts (so before
 /// any command routes). Each concern is delegated to a submodule.
 fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    // One-shot: the music product was renamed nemus → merula. Move its legacy
+    // `<config>/nemus` + `<data>/nemus` dirs (settings + multi-GB sample banks)
+    // to the merula locations before anything reads them. No-op once migrated.
+    crate::merula::config::migrate_legacy_dirs();
+
     // Seed the Corvus backend state (in-process `corvus-be`) + the Model-D IPC
     // router into AppState. Both need the `AppHandle` that `AppState::new()`
     // predates. Must run before any command routes — safe here because commands

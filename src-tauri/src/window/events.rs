@@ -1,7 +1,7 @@
 //! Shared `on_window_event` handler for every Arbor window.
 //!
 //! Three concerns live here, keyed off the window label / event kind:
-//!  - the **nemus** window closing tears down its audio session;
+//!  - the **merula** window closing tears down its audio session;
 //!  - **close-to-tray** for the `main` window in release (auxiliary windows
 //!    close for real);
 //!  - **efficiency mode** (OS power-throttle) driven by focus + minimize.
@@ -48,10 +48,10 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
         }
         WindowEvent::Destroyed => {
             let label = window.label();
-            // nemus audio teardown happens on ACTUAL destroy — not on a
+            // merula audio teardown happens on ACTUAL destroy — not on a
             // close-to-tray hide (where the window lives on and may still play).
-            if label == super::nemus::NEMUS_WINDOW_LABEL {
-                crate::nemus::shutdown(window.app_handle());
+            if label == super::merula::MERULA_WINDOW_LABEL {
+                crate::merula::shutdown(window.app_handle());
             }
             // When the last window of a product is gone, tell the launcher its
             // node is no longer "In esecuzione". Count the OTHER windows of the

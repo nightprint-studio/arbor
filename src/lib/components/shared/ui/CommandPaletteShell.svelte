@@ -36,12 +36,12 @@
 <script lang="ts">
   /**
    * CommandPaletteShell — the agnostic two-phase command-palette engine shared
-   * by the main window and the nemus window.
+   * by the main window and the merula window.
    *
    * It owns the overlay, the input row (search icon + optional verb chip + ghost
    * autocomplete + close button), the sectioned listbox, the footer hints, and
    * the whole keyboard model (↑/↓ move, Enter run, Esc close, Tab complete/enter
-   * verb, Backspace clear verb). It knows nothing about git, nemus, stores or
+   * verb, Backspace clear verb). It knows nothing about git, merula, stores or
    * IPC: the host builds `sections` (already filtered + scored for the current
    * query/phase) and the shell renders + drives them.
    *

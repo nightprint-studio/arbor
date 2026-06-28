@@ -25,9 +25,17 @@ pub fn register(app: &tauri::App) {
             tracing::info!("deep-link received: {url}");
             buffer_for_runtime.push_or_emit(&handle_for_runtime, url.to_string());
         }
-        if let Some(w) = handle_for_runtime.get_webview_window("main") {
-            crate::window::show_and_focus(&w);
-        }
+        // Deep links are Git actions (commit/branch/MR jumps) → they belong to
+        // the Corvus window, not the launcher ("main"). Open/focus it and make
+        // sure corvus-be is up (the buffer above already emitted/queued the URL;
+        // once the Corvus AppShell mounts it calls `deep_link_ready`, flushing
+        // the buffer to its listener). Do it off this callback thread, matching
+        // `open_corvus_window`'s safe context (the `Hello` read blocks).
+        let h = handle_for_runtime.clone();
+        tauri::async_runtime::spawn(async move {
+            crate::ipc::ensure_corvus_be(&h);
+            crate::window::corvus::open_or_focus(&h);
+        });
     });
 
     // Cold-start URLs — when the OS launched Arbor by clicking a link, the URL

@@ -3,7 +3,7 @@ import type { TransitionConfig } from 'svelte/transition';
 
 /**
  * IDE-style panel open/close transitions, shared by the main window (AppShell)
- * and the nemus window (WorkspaceShell / PanelCard). They animate the box
+ * and the merula window (WorkspaceShell / PanelCard). They animate the box
  * *collapsing* rather than fading so docked panels behave like JetBrains tool
  * windows — the neighbours reflow smoothly as the panel grows/shrinks.
  *

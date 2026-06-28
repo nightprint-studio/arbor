@@ -7,7 +7,7 @@ ha disaccoppiato il backend in crate di dominio (PR #1-4 atterrati, #5+ in
 coda). Questo doc copre i tre obiettivi successivi:
 
 1. **Completare** il round 1 (domini ancora shell) — riassunto, dettagli in round 1.
-2. **Scorporare in app-standalone** sotto-sistemi coesi: **nemus** e l'**esplora risorse**.
+2. **Scorporare in app-standalone** sotto-sistemi coesi: **merula** e l'**esplora risorse**.
 3. **Layer plugin WebAssembly** — far girare plugin `.wasm` autocontenuti accanto a quelli Lua; candidati: gli **studio** (RON/JSON/TOML/YAML/.properties), **cloud-storage**, e in futuro **db-query**.
 
 > Il pattern WASM-app browser (compilare *tutta* Arbor a `wasm32`) **non** è
@@ -21,7 +21,7 @@ coda). Questo doc copre i tre obiettivi successivi:
 
 Stato dei crate (vedi [`crate-refactor.md`](crate-refactor.md) per il dettaglio):
 
-- ✅ **Attivi** (17): `arbor-core`, `arbor-scheduler`, `arbor-plugin-{types,api,core,marketplace}`, `arbor-auth`, `arbor-cloud`, `arbor-process-ext`, `arbor-feedback`, i 7 `arbor-nemus-*`.
+- ✅ **Attivi** (17): `arbor-core`, `arbor-scheduler`, `arbor-plugin-{types,api,core,marketplace}`, `arbor-auth`, `arbor-cloud`, `arbor-process-ext`, `arbor-feedback`, i 7 `merula-*`.
 - 🔲 **Shell** (Cargo.toml senza `src/lib.rs`, fuori dai members): `arbor-brp`, `arbor-git-provider-{api,github,gitlab}`, `arbor-issue-tracker-{api,github,gitlab,jira,linear}`, `arbor-pipeline-{api,core}`.
 
 Debito noto da saldare lungo la strada:
@@ -39,21 +39,21 @@ layer WASM.
 
 ### Principio: "app che condividono il binario → app che condividono solo il guscio"
 
-Sia nemus sia l'esplora risorse oggi sono **finestre Tauri separate** che vivono
+Sia merula sia l'esplora risorse oggi sono **finestre Tauri separate** che vivono
 nello stesso processo, già abbastanza isolate (route branch su `window.label`,
-storage proprio per nemus). L'obiettivo round 2 è promuoverle a **sotto-sistemi
+storage proprio per merula). L'obiettivo round 2 è promuoverle a **sotto-sistemi
 estraibili**: crate-core puri + un guscio Tauri sottile, così che domani siano
 `cargo new` + move, non un refactor.
 
 Le finestre già esistono:
-- `src-tauri/src/nemus_window.rs` → label `"nemus"`
+- `src-tauri/src/merula_window.rs` → label `"merula"`
 - `src-tauri/src/explorer_window.rs` → label `"explorer"` / `"explorer-N"` + overlay `"drag-overlay"`
 
 ### ⚠️ Costo memoria: scorporo crate ≠ processo separato
 
 **Distinzione da non perdere mai.** Sono due decisioni indipendenti:
 
-1. **Scorporo in crate** (`arbor-nemus-*`, `arbor-fs`, …) = organizzazione del
+1. **Scorporo in crate** (`merula-*`, `arbor-fs`, …) = organizzazione del
    **codice**. Zero impatto RAM: i crate si caricano nello stesso binario,
    stessa WebView2 Environment, stesse finestre. È l'obiettivo di questo refactor.
 2. **App separata** (eseguibile/processo a sé) = scelta di **deployment**. *Questa*
@@ -75,7 +75,7 @@ altrimenti `HRESULT 0x8007139F`), quindi browser/GPU/network sono condivisi.
 
 **Regola del piano**: scorporare i crate liberamente, ma **mantenere un solo
 binario + N finestre** (Environment condiviso). Estrarre un binario separato
-**solo** se l'obiettivo è la *distribuzione indipendente* (es. spedire nemus come
+**solo** se l'obiettivo è la *distribuzione indipendente* (es. spedire merula come
 prodotto a sé). Per un utente che usa tutte le finestre, un binario è strettamente
 meglio sulla RAM. Lo scorporo in crate preserva comunque la possibilità di
 estrarre un binario domani senza averlo già fatto ("free crate split").
@@ -118,32 +118,32 @@ valore *modesto* per un desktop solo-utente — trade accettato a fronte di cost
 circoscritti, non perenni. Altri costi minori: overhead per-call (stream throttlati,
 audio dentro `merula-be`), FE unificata a runtime (mitigata dai pacchetti).
 
-### B.1 — Nemus standalone
+### B.1 — Merula standalone
 
-**Readiness: alta.** I 7 crate `arbor-nemus-*` sono già **100% disaccoppiati**:
+**Readiness: alta.** I 7 crate `merula-*` sono già **100% disaccoppiati**:
 zero deps da `arbor-core`, `tauri`, `AppCtx`. Storage già separato
-(`%APPDATA%\nemus\`, sibling di `arbor\`). UI già isolata
-(`src/lib/components/nemus/`, 115 file, zero store globali Arbor). IPC congelato
-(`src/lib/ipc/nemus.ts`).
+(`%APPDATA%\merula\`, sibling di `arbor\`). UI già isolata
+(`src/lib/components/merula/`, 115 file, zero store globali Arbor). IPC congelato
+(`src/lib/ipc/merula.ts`).
 
-Tutta la colla vive nello **shell** `src-tauri/src/nemus/` (28 file). Blocker da
+Tutta la colla vive nello **shell** `src-tauri/src/merula/` (28 file). Blocker da
 sciogliere, in ordine di costo:
 
 | # | Coupling | Dove | Costo | Azione |
 |---|----------|------|-------|--------|
-| 1 | Path helper | `nemus/config.rs`, `libraries.rs`, `state.rs`, `models.rs`, `packs/`, `mod.rs` chiamano `arbor_core::prelude::{nemus_config_path, nemus_data_dir, arbor_data_dir, client}` | Banale (~30 LOC) | Spostare i path helper nemus in un crate proprio (es. `arbor-nemus-host` o dentro la facade), inline del `client()` HTTP |
-| 2 | JobRegistry globale | `nemus/render.rs`, `nemus/packs/download.rs` registrano job in `crate::jobs::JobRegistry` | Basso | Astrarre dietro un trait `JobSink` (render/download accumulano via trait, il guscio lo implementa col registry globale) |
-| 3 | Feedback system | UI nemus usa `FeedbackHost`/`FeedbackStatusButtons` da `$lib/feedback/`; job emessi con `target="nemus"` | Medio | `arbor-feedback` è già un crate: renderlo dipendenza opzionale/condivisa, o context-provider lato FE |
-| 4 | Window lifecycle | `lib.rs` fa `manage`/`migrate_storage`/`shutdown` di nemus | Basso | Spostare in un setup-module nemus invocato dal guscio |
+| 1 | Path helper | `merula/config.rs`, `libraries.rs`, `state.rs`, `models.rs`, `packs/`, `mod.rs` chiamano `arbor_core::prelude::{merula_config_path, merula_data_dir, arbor_data_dir, client}` | Banale (~30 LOC) | Spostare i path helper merula in un crate proprio (es. `merula-host` o dentro la facade), inline del `client()` HTTP |
+| 2 | JobRegistry globale | `merula/render.rs`, `merula/packs/download.rs` registrano job in `crate::jobs::JobRegistry` | Basso | Astrarre dietro un trait `JobSink` (render/download accumulano via trait, il guscio lo implementa col registry globale) |
+| 3 | Feedback system | UI merula usa `FeedbackHost`/`FeedbackStatusButtons` da `$lib/feedback/`; job emessi con `target="merula"` | Medio | `arbor-feedback` è già un crate: renderlo dipendenza opzionale/condivisa, o context-provider lato FE |
+| 4 | Window lifecycle | `lib.rs` fa `manage`/`migrate_storage`/`shutdown` di merula | Basso | Spostare in un setup-module merula invocato dal guscio |
 
-**Target**: lo shell `src-tauri/src/nemus/` diventa il guscio Tauri di un'app
-nemus che dipende solo dai crate `arbor-nemus-*` + `arbor-feedback`. Da lì,
+**Target**: lo shell `src-tauri/src/merula/` diventa il guscio Tauri di un'app
+merula che dipende solo dai crate `merula-*` + `arbor-feedback`. Da lì,
 estrarre in un repo/binario separato è meccanico. Le dipendenze native (cpal,
 ort/ONNX, symphonia, fundsp) non sono un problema per uno standalone desktop.
 
 ### B.2 — Esplora risorse standalone
 
-**Readiness: media.** Più accoppiata di nemus perché è **window-heavy** (cross-window
+**Readiness: media.** Più accoppiata di merula perché è **window-heavy** (cross-window
 clipboard, drag-overlay multi-finestra, global shortcut OS) e si appoggia ai
 comandi `fs` generici.
 
@@ -160,7 +160,7 @@ Coupling da sciogliere:
 | 2 | Window/overlay/clipboard tutto su `AppHandle` | Alto | È intrinsecamente legato a Tauri (multi-window, WebView2 env, global shortcut). Resta nel guscio; isolarlo in `explorer/` come modulo coeso |
 | 3 | System icons / native properties / OS clipboard | Medio | Capability OS-specific (`windows_sys` ecc.) — vanno dietro un trait platform, non WASM-able |
 
-**Target realistico**: l'esplora *non* diventa un crate-core puro come nemus —
+**Target realistico**: l'esplora *non* diventa un crate-core puro come merula —
 la sua natura è UI+OS. L'estrazione utile è (a) tirare fuori `arbor-fs` (utile a
 tutti), (b) raccogliere l'intero modulo finestra in `src-tauri/src/explorer/`
 coeso e documentato come "guscio dell'esplora", pronto a diventare un binario
@@ -200,12 +200,12 @@ C'è anche un **router di deep-link `arbor://`** completo (`DeepLinkBuffer`,
 parsing CLI.
 
 **Costo d'integrazione: basso.** Le funzioni di apertura finestra esistono già
-(`explorer_window::open_or_focus`, l'equivalente nemus). Serve solo:
-1. Routing di `argv` nel callback single-instance (~20-30 righe): `--window=nemus|explorer` → `open_or_focus` della finestra giusta.
+(`explorer_window::open_or_focus`, l'equivalente merula). Serve solo:
+1. Routing di `argv` nel callback single-instance (~20-30 righe): `--window=merula|explorer` → `open_or_focus` della finestra giusta.
 2. Stesso routing al **cold start** in `setup()` (leggi `std::env::args()`).
 3. Tre collegamenti a `arbor.exe --window=…`, ognuno con la sua icona (vedi B.4).
 
-In alternativa, riusare il deep-link: collegamenti che invocano `arbor://open/nemus`.
+In alternativa, riusare il deep-link: collegamenti che invocano `arbor://open/merula`.
 
 **Caveat** (già documentati nel codice):
 - Single-instance è **OFF in `cargo tauri dev`** (litiga col relaunch del dev runner): si testa in release o con la feature `deep-link-dev` ([lib.rs:452](../src-tauri/src/lib.rs)).
@@ -232,7 +232,7 @@ imposta l'icona di una singola finestra ed è già usata in tre punti:
 [taskbar_icon_refresh.rs:77](../src-tauri/src/taskbar_icon_refresh.rs) (refresh
 post-sleep), [lib.rs:799](../src-tauri/src/lib.rs) (tray) e perfino dai plugin via
 [ns_shell/ui/branding.rs:30](../src-tauri/src/plugin/ns_shell/ui/branding.rs)
-(`arbor.ui.set_branding{ window_icon_path }`). Quindi dare a `nemus`/`explorer`
+(`arbor.ui.set_branding{ window_icon_path }`). Quindi dare a `merula`/`explorer`
 un'icona propria nella titlebar/taskbar è **una `set_icon` alla creazione della
 finestra** — zero infrastruttura nuova.
 
@@ -240,7 +240,7 @@ finestra** — zero infrastruttura nuova.
 Windows i pulsanti in taskbar si raggruppano per **AppUserModelID (AUMID)**.
 Tutte le finestre di un processo condividono l'AUMID del processo → di default
 si raggruppano sotto **un solo pulsante** (quello di Arbor), anche con `set_icon`
-diversi. Per far comparire nemus/explorer come **voci taskbar separate** (icona +
+diversi. Per far comparire merula/explorer come **voci taskbar separate** (icona +
 jump-list proprie, come app distinte) serve assegnare un **AUMID per-finestra**
 sull'HWND (`IPropertyStore` / `System.AppUserModel.ID`, via `windows_sys` — già
 dipendenza, vedi `platform.rs`). Fattibile, non ancora fatto.
@@ -266,7 +266,7 @@ separata* è gratis solo coi processi separati, altrimenti è un pezzetto di Win
   (Tauri lo documenta). `NSApplication.setApplicationIconImage` cambia l'unica
   icona app-wide a runtime, non per-finestra. Conclusione: identità Dock separata
   per finestra nello stesso processo = **impossibile**. L'unico modo per avere
-  nemus/explorer con icone Dock proprie è **bundle `.app` separati**.
+  merula/explorer con icone Dock proprie è **bundle `.app` separati**.
 - **Linux** — il raggruppamento + icona in taskbar dipende da `WM_CLASS` (X11) o
   `app_id` (Wayland xdg-shell), con un file `.desktop` corrispondente che fornisce
   l'icona. Per-finestra: su **X11** puoi impostare `_NET_WM_ICON` per finestra
@@ -302,17 +302,17 @@ Meccanismo (il routing vero è frontend; il BE fa registrazione + buffering):
 
 **Rilevanza per lo scorporo**: il deep-link è già il **bus di routing
 inter-finestra/inter-app** di Arbor. Per il modello launcher (B.3) è la strada
-più pulita: un collegamento "Nemus" che invoca `arbor://open/nemus` riusa
+più pulita: un collegamento "Merula" che invoca `arbor://open/merula` riusa
 registrazione + funnel + buffer **già scritti e testati**, invece di aggiungere
-parsing CLI. Per app scorporate (nemus/esplora con schema proprio, es.
-`nemus://`) lo stesso pattern si replica con `DeepLinkBuffer` per-app. Caveat:
+parsing CLI. Per app scorporate (merula/esplora con schema proprio, es.
+`merula://`) lo stesso pattern si replica con `DeepLinkBuffer` per-app. Caveat:
 oggi `DeepLinkConfig` è arbor-specifica (azioni git) — un'app diversa porta il
 suo set di azioni.
 
 ### Ordine Parte B
 
 1. **`arbor-fs`** (FS puro, no Tauri) — sblocca sia esplora sia comandi generici, basso rischio.
-2. **Nemus standalone** — il candidato facile; ottimo banco di prova del pattern "app fuori da arbor".
+2. **Merula standalone** — il candidato facile; ottimo banco di prova del pattern "app fuori da arbor".
 3. **Esplora coesione** — raccogliere il modulo finestra; estrazione binaria solo se/quando serve.
 4. **Launcher + icone** (B.3/B.4) — incrementale e a basso costo; indipendente dai punti 1-3. Da fare solo se serve l'identità desktop separata senza pagare RAM.
 
@@ -427,17 +427,17 @@ Due strade:
 
 #### 3. DB-query (futuro) — **candidato #3, possibile app-standalone**
 
-L'utente lo vede potenzialmente "come nemus" (progetto a sé). Due inquadramenti:
+L'utente lo vede potenzialmente "come merula" (progetto a sé). Due inquadramenti:
 - **Plugin WASM**: un explorer/query di DB come plugin che usa `host_*` per I/O. Adatto se è una *feature dentro Arbor*.
-- **App-standalone** (pattern Parte B): se cresce in un IDE-da-DB con finestra propria, storage proprio, UI grande, allora è un sotto-sistema come nemus, non un plugin.
+- **App-standalone** (pattern Parte B): se cresce in un IDE-da-DB con finestra propria, storage proprio, UI grande, allora è un sotto-sistema come merula, non un plugin.
 
 **Decisione aperta** — dipende dall'ambizione della feature. Default suggerito:
 partire come plugin WASM (riusa tutta l'infra C), promuovere ad app-standalone
-solo se la UI/stato esplode come è successo a nemus.
+solo se la UI/stato esplode come è successo a merula.
 
-### C.6 — Plugin host come engine condiviso (arbor / nemus / esplora)
+### C.6 — Plugin host come engine condiviso (arbor / merula / esplora)
 
-Idea: **astrarre il plugin host** così che non solo Arbor, ma anche nemus e
+Idea: **astrarre il plugin host** così che non solo Arbor, ma anche merula e
 l'esplora (e domani un DB manager) possano avere i propri plugin, riusando lo
 stesso motore.
 
@@ -445,7 +445,7 @@ stesso motore.
 fatto l'80% del lavoro:
 
 - `arbor-plugin-core` **non dipende da `tauri`**: l'astrazione passa per `arbor-core::AppCtx` (decisione C3). Qualsiasi app che implementa `AppCtx` può ospitarlo.
-- I namespace sono **iniettabili**: `register(lua, params, extra_installers: &[Arc<dyn LuaNamespaceInstaller>])` ([lua_api/mod.rs:58](../crates/plugin/core/src/lua_api/mod.rs)) lascia all'host fornire i propri namespace di dominio. Arbor inietta i suoi 16 `ns_shell/*`; nemus inietterebbe `nemus.*` (transport, clip, render…), l'esplora `explorer.*`.
+- I namespace sono **iniettabili**: `register(lua, params, extra_installers: &[Arc<dyn LuaNamespaceInstaller>])` ([lua_api/mod.rs:58](../crates/plugin/core/src/lua_api/mod.rs)) lascia all'host fornire i propri namespace di dominio. Arbor inietta i suoi 16 `ns_shell/*`; merula inietterebbe `merula.*` (transport, clip, render…), l'esplora `explorer.*`.
 - Infra condivisa già crate-level e Tauri-free: scheduler (`arbor-scheduler`), contribution registry, settings store, hook dispatcher (`arbor-plugin-api`), marketplace (`arbor-plugin-marketplace`).
 - `HookDispatcher` name-agnostic: ogni app registra i **propri** hook + il proprio `HookListener`.
 
@@ -453,16 +453,16 @@ fatto l'80% del lavoro:
 
 | Gap | Oggi | Serve |
 |-----|------|-------|
-| Set di namespace host-pure | `register()` **hardcoda** 22 ns (inclusi gli studi e `ui` form) | Renderlo **selezionabile per host** (feature flags / lista installer), così nemus prende solo ciò che serve |
-| Marketplace mono-host | plugin roots + registry URL arbor-specifici | **Per-host plugin roots** + campo manifest `host`/`targets` (es. `targets = ["nemus"]`) per filtrare quali plugin valgono per quale app |
-| Hook catalog | `HOOK_CATALOG` arbor-centrico | Ogni app **contribuisce il suo catalogo** (nemus: `on_clip_launch`, `on_render_done`; esplora: `on_file_open`…) via il dispatcher |
-| Settings/storage plugin | sotto `~/.config/arbor` | Namespacing per-host (nemus ha già `%APPDATA%\nemus`) |
-| `AppCtx` capability | tagliate sui bisogni di Arbor | Ogni host estende `AppCtx` con le sue (nemus: `active_project`, …) |
+| Set di namespace host-pure | `register()` **hardcoda** 22 ns (inclusi gli studi e `ui` form) | Renderlo **selezionabile per host** (feature flags / lista installer), così merula prende solo ciò che serve |
+| Marketplace mono-host | plugin roots + registry URL arbor-specifici | **Per-host plugin roots** + campo manifest `host`/`targets` (es. `targets = ["merula"]`) per filtrare quali plugin valgono per quale app |
+| Hook catalog | `HOOK_CATALOG` arbor-centrico | Ogni app **contribuisce il suo catalogo** (merula: `on_clip_launch`, `on_render_done`; esplora: `on_file_open`…) via il dispatcher |
+| Settings/storage plugin | sotto `~/.config/arbor` | Namespacing per-host (merula ha già `%APPDATA%\merula`) |
+| `AppCtx` capability | tagliate sui bisogni di Arbor | Ogni host estende `AppCtx` con le sue (merula: `active_project`, …) |
 
 **Verdetto**: non è un riscrittura, è **promuovere `arbor-plugin-core` da "host
 di Arbor" a "engine di plugin riusabile"**. Le mosse: (a) parametrizzare la lista
 host-pure, (b) marketplace multi-host + `targets` nel manifest, (c) catalogo hook
-per-app. Con questo, nemus/esplora ottengono un sistema plugin "gratis"
+per-app. Con questo, merula/esplora ottengono un sistema plugin "gratis"
 condividendo motore, sandbox, scheduler, UI-contribution e — quando atterra la
 Parte C — anche il runtime WASM. È la stessa logica del "free crate split":
 il confine c'è già, va solo reso esplicito.
@@ -471,7 +471,7 @@ il confine c'è già, va solo reso esplicito.
 
 Un DB manager è il banco di prova più severo: stressa proprio i limiti attuali
 del sistema plugin. Analisi dei gap, prima **come plugin**, poi **promozione a
-standalone** (pattern nemus).
+standalone** (pattern merula).
 
 **Cosa manca lato plugin (in ordine di gravità):**
 
@@ -488,10 +488,10 @@ il punto 1 va comunque risolto host-side (capability `net`/`db`). E i punti 4-5
 (streaming, view ricca) sono ortogonali al runtime. Quindi il DB manager **come
 plugin puro** richiede estensioni host significative, non solo "compilarlo a wasm".
 
-**Promozione a standalone (come nemus).** Quando la UI/stato esplodono
+**Promozione a standalone (come merula).** Quando la UI/stato esplodono
 (multi-connessione, history, schema explorer, grid avanzata) vale la stessa
-traiettoria di nemus: **finestra propria + storage proprio + crate propri**, con
-i driver DB **native** (come nemus usa cpal/ort senza problemi in desktop), e —
+traiettoria di merula: **finestra propria + storage proprio + crate propri**, con
+i driver DB **native** (come merula usa cpal/ort senza problemi in desktop), e —
 se vuole estensioni proprie (driver per-dialetto, formatter SQL) — **incorpora il
 plugin host astratto** della C.6. In quel mondo i gap 1-2 spariscono (l'app native
 ha socket e keyring), e il gap 5 si risolve costruendo la UI nativamente, non come
@@ -501,7 +501,7 @@ contribution.
 che da plugin WASM puro**. Inquadramento a tre livelli:
 - *MVP dentro Arbor*: namespace host `arbor.db` (opzione 1b) + una view custom minimale → utile subito, gap 5 ridotto.
 - *Plugin serio*: richiede capability `net`+`secrets`+handle+stream+custom-view (estensioni host pesanti).
-- *Standalone*: quando cresce, esce come nemus, riusando il plugin engine C.6.
+- *Standalone*: quando cresce, esce come merula, riusando il plugin engine C.6.
 
 Le capability `net`, `secrets`, handle e stream sono **generiche** (non DB-specifiche):
 servirebbero anche ad altri plugin (client API stateful, watcher, ecc.) → vale la
@@ -581,24 +581,24 @@ widget `shared/ui/*` usati (Button, Card, Tree, ContextMenu, Dropdown, Tabs,
 WindowControls…). Natura del modulo: **UI + OS**, non un core puro. L'estrazione
 utile è (a) tirare fuori `arbor-fs`, (b) parametrizzare le 7 dipendenze FE.
 
-### D.3 — Nemus
+### D.3 — Merula
 
 **Estraibilità ~95%** (la più alta). Già progettato per uscire.
 
-- **Crate (`arbor-nemus-*`, 7): accoppiamento ZERO.** Nessuna dipendenza da `arbor-core`/`tauri`/`AppCtx`. Sotto-workspace autosufficiente.
-- **UI (115 file in `components/nemus/` + 33 store): ZERO store globali Arbor.** Importa solo da `components/nemus/` e `shared/ui/`. IPC congelato (`ipc/nemus.ts`).
-- **Storage: già separato** (`%APPDATA%\nemus\`, sibling di `arbor\`).
-- **Shell (`src-tauri/src/nemus/`, 28 file): unico punto di colla**, e minimale → `arbor_core` solo per **path helper** + `client()` HTTP, `crate::jobs::JobRegistry` per render/download, `arbor-feedback` per i toast (target `"nemus"`). Dettaglio e mitigazioni in [B.1](#b1--nemus-standalone).
+- **Crate (`merula-*`, 7): accoppiamento ZERO.** Nessuna dipendenza da `arbor-core`/`tauri`/`AppCtx`. Sotto-workspace autosufficiente.
+- **UI (115 file in `components/merula/` + 33 store): ZERO store globali Arbor.** Importa solo da `components/merula/` e `shared/ui/`. IPC congelato (`ipc/merula.ts`).
+- **Storage: già separato** (`%APPDATA%\merula\`, sibling di `arbor\`).
+- **Shell (`src-tauri/src/merula/`, 28 file): unico punto di colla**, e minimale → `arbor_core` solo per **path helper** + `client()` HTTP, `crate::jobs::JobRegistry` per render/download, `arbor-feedback` per i toast (target `"merula"`). Dettaglio e mitigazioni in [B.1](#b1--merula-standalone).
 
 ### Sintesi comparativa
 
 | Sottosistema | Coupling di codice | Coupling a runtime | Estraibilità | Lavoro residuo |
 |---|---|---|---|---|
 | **Plugin** | Zero (repo separato) | Solo contratto API `arbor.*` (host-pure vs shell) | n/a (già fuori) | Adapter WASM (Parte C) |
-| **Nemus** | Zero nei crate; shell → `arbor_core` paths + jobs + feedback | UI zero store globali | **~95%** | Path helper, JobSink trait, feedback opzionale |
+| **Merula** | Zero nei crate; shell → `arbor_core` paths + jobs + feedback | UI zero store globali | **~95%** | Path helper, JobSink trait, feedback opzionale |
 | **Esplora** | Backend basso (3 struct proprie); FE 7 dep hard | FS generico + git path-based opzionale | **~70%** | `arbor-fs`, parametrizzare 7 dep FE, theming standalone |
 
-Ordine di facilità decrescente: **plugin** (già fuori) → **nemus** → **esplora**.
+Ordine di facilità decrescente: **plugin** (già fuori) → **merula** → **esplora**.
 
 ### D.4 — Funzionalità Arbor dentro l'esplora: come integrarle
 
@@ -639,7 +639,7 @@ l'investimento C.6. Si scompone così:
 Arbor). Chi ha solo l'esplora ha un file manager; chi ha Arbor installato vede
 "accendersi" git + Projects perché il **plugin Arbor** li contribuisce. Esattamente
 il valore di C.6: le feature Arbor entrano nell'esplora **come plugin**, non come
-codice incollato. E lo stesso pattern vale al contrario (nemus che contribuisce
+codice incollato. E lo stesso pattern vale al contrario (merula che contribuisce
 una sezione "Tracks" all'esplora, ecc.).
 
 ### D.5 — Credenziali: il launcher come broker (+ caching)
@@ -677,7 +677,7 @@ mitigata da TTL corto + zeroize. Pratica standard (`ssh-agent`,
 | Obiettivo | Fattibilità | Stato | Sforzo residuo |
 |-----------|-------------|-------|----------------|
 | Crate split domini (round 1 #5+) | ✅ alta | ~60% | esecuzione meccanica di un piano scritto |
-| Scorporo **nemus** | ✅ alta | ~95% | basso (path helper, JobSink, feedback opzionale) |
+| Scorporo **merula** | ✅ alta | ~95% | basso (path helper, JobSink, feedback opzionale) |
 | Scorporo **esplora** | ✅ media | ~70% | medio (`arbor-fs`, parametrizzare 7 dep FE, contribution point propri) |
 | **Launcher** (1 processo, N identità) | ✅ alta | infra già cablata | basso (routing argv/deep-link) |
 | **Icone separate** cross-platform | ⚠️ parziale | per-finestra OK; identità solo Win/X11 | bundle separati per il caso macOS |
@@ -698,8 +698,8 @@ espliciti confini già esistenti (engine multi-app).
 
 1. **Finire round 1** (PR #5→finale): domini ancora shell + rinomina `src-tauri`→`arbor`. Sblocca tutto. *Nessuna nuova tecnologia.*
 2. **`arbor-fs`** + parametrizzare le 7 dep FE dell'esplora. Sblocca esplora e ripulisce i comandi FS.
-3. **Nemus standalone**: shell proprio, `JobSink` trait, feedback opzionale. Il banco di prova del pattern app-fuori-da-arbor.
-4. **Engine plugin multi-app (C.6)**: lista host-pure selezionabile, marketplace multi-host + `targets`, catalogo hook per-app. Abilita plugin in nemus/esplora.
+3. **Merula standalone**: shell proprio, `JobSink` trait, feedback opzionale. Il banco di prova del pattern app-fuori-da-arbor.
+4. **Engine plugin multi-app (C.6)**: lista host-pure selezionabile, marketplace multi-host + `targets`, catalogo hook per-app. Abilita plugin in merula/esplora.
 5. **Contribution point dell'esplora + plugin Arbor ad-hoc (D.4)**: chiude l'integrazione esplora↔arbor senza coupling.
 6. **Runtime WASM (Parte C)**: `arbor-plugin-wasm` (wasmtime + ABI su `PluginValue`) + `WasmHookListener` + adapter `WasmStudioBackend`. Primo candidato: gli studi.
 7. **Capability host generiche (C.7)**: `net`/`secrets`/handle/stream/custom-view — sbloccano DB manager e plugin stateful.
@@ -717,7 +717,7 @@ prodotti sono uccelli del bosco che vivono nell'albero:
 ```
 Arbor                       ← l'albero: piattaforma + launcher + plugin engine
  ├── Corvus   (git)         ← il corvo: memoria e storia (version control)
- ├── Merula   (musica)      ← il merlo: canto              (ex nemus)
+ ├── Merula   (musica)      ← il merlo: canto              (ex merula)
  └── Sitta    (file)        ← la sitta: esplora l'albero   (esplora risorse)
 ```
 
@@ -731,11 +731,11 @@ musica dipende dalla piattaforma Arbor".
 |----------|------|---------|
 | **`arbor-`** | piattaforma: core, process-ext, auth, feedback, scheduler, fs, shell-common, cloud · plugin-{types,api,core,wasm,marketplace,wasm-sdk} · studio-* | ✅ **restano** |
 | **`corvus-`** | git client: git, git-provider-*, issue-tracker-*, pipeline-*, brp, workspaces, linked-worktrees, terminal, shell | 🔁 rinomina da `arbor-*` |
-| **`merula-`** | musica: pattern, lang, audio, engine, import, transcribe, facade, shell | 🔁 rinomina da `arbor-nemus-*` |
+| **`merula-`** | musica: pattern, lang, audio, engine, import, transcribe, facade, shell | 🔁 rinomina da `merula-*` |
 | **`sitta-`** | file explorer: shell (usa `arbor-fs`) | ➕ nuovo |
 
-> Il DSL/estensione `.nemus` può restare come **sotto-brand** di Merula (prodotto
-> ≠ formato): rinomini crate/app, i tuoi file `.nemus` non si toccano.
+> Il DSL/estensione `.merula` può restare come **sotto-brand** di Merula (prodotto
+> ≠ formato): rinomini crate/app, i tuoi file `.merula` non si toccano.
 > Brand: oggi "Arbor" = il git client user-facing → rebranding del prodotto a
 > **Corvus** (decisione consapevole, vedi nota in fondo a E.3).
 
@@ -756,7 +756,7 @@ crates/
     git ➕  git-provider/{api,github,gitlab} 🔲  issue-tracker/{api,github,gitlab,jira,linear} 🔲
     pipeline/{api,core} 🔲  brp 🔲  workspaces ➕  linked-worktrees ➕  terminal ➕
     shell ➕ (window/UI + comandi + impl AppCtx)
-  merula/                        merula-*  (musica, ex nemus)
+  merula/                        merula-*  (musica, ex merula)
     pattern ✅ lang ✅ audio ✅ engine ✅ import ✅ transcribe ✅ facade ✅
     shell ➕
   sitta/                         sitta-*  (file explorer)
@@ -787,7 +787,7 @@ cresce con ogni nuovo crate.
 
 ### E.4 — Cosa NON fare
 
-- **Non** trasformare l'esplora in un crate-core puro come nemus: è UI+OS. Il deliverable è `arbor-fs` + contribution point, non un binario a sé (a meno di distribuzione).
+- **Non** trasformare l'esplora in un crate-core puro come merula: è UI+OS. Il deliverable è `arbor-fs` + contribution point, non un binario a sé (a meno di distribuzione).
 - **Non** compilare Arbor intero a WASM-browser: gated da git2/pty/cpal, fuori scope.
 - **Non** fare un namespace `db` una-tantum: le capability (net/secrets/handle/stream) vanno generiche.
 - **Non** introdurre processi separati per "risparmiare" o "isolare" senza un motivo di distribuzione: paghi RAM senza guadagno.
@@ -818,7 +818,7 @@ Restano aperte: A2-A8 (branding/loghi), B1-B4 (launcher/icone), C4-sede SDK già
 - **A4** Logo **Corvus**: eredita il vecchio logo Arbor o nuovo (corvo)? *(rec: nuovo corvo, coerente con la famiglia uccelli — M3)*
 - **A5** Loghi **Merula** (merlo, M4) e **Sitta** (sitta, M5): nuovi. *(step in roadmap)*
 - **A6** Linguaggio visivo della famiglia (stile uccelli, palette, griglia icona). *(rec: definire in M0)*
-- **A7** Estensione DSL musica `.nemus`: resta o → `.merula`? *(rec: resta come sotto-brand)*
+- **A7** Estensione DSL musica `.merula`: resta o → `.merula`? *(rec: resta come sotto-brand)*
 - **A8** Disponibilità su crates.io + trademark dei 4 nomi: **verificare** prima di committare.
 
 ### B. Architettura processo / distribuzione

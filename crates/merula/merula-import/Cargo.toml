@@ -1,0 +1,23 @@
+[package]
+name         = "merula-import"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "merula — deterministic MIDI → .merula conversion (the \"faithful\" path). No AI: L1 transcodes MIDI events to explicit notes, L2 applies heuristics (quantize, key/scale detection, chord grouping, loop detection) and emits idiomatic .merula source. Depends on pattern + lang, NOT on audio."
+
+# The deterministic import pipeline. Reads MIDI (`midly`), produces a neutral
+# note model in cycle-time (L1), refines it with musical heuristics (L2), and
+# prints idiomatic `.merula` by building `merula-lang` AST nodes and reusing
+# its canonical emitter — so formatting lives in exactly one place. It does NOT
+# touch audio: WAV→MIDI is `merula-transcribe`'s job; this crate starts at
+# MIDI. L1 and L2 modules are independently unit-tested.
+[dependencies]
+merula-pattern = { path = "../merula-pattern" }
+merula-lang    = { path = "../merula-lang" }
+midly.workspace     = true
+thiserror.workspace = true
+
+[lints.rust]
+missing_debug_implementations = "warn"

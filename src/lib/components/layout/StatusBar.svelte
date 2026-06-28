@@ -303,7 +303,7 @@
     {/snippet}
   </Contribution>
 
-  <!-- Jobs · minimized dialogs · notifications — shared with the Nemus footer. -->
+  <!-- Jobs · minimized dialogs · notifications — shared with the Merula footer. -->
   <div class="status-sep"></div>
   <FeedbackStatusButtons parked />
 </div>

@@ -1,7 +1,7 @@
 # arbor-feedback
 
 Window-agnostic core for Arbor's user-feedback systems. Holds the Tauri-free
-pieces that any window (main, nemus, …) can host, so progress/status surfaces
+pieces that any window (main, merula, …) can host, so progress/status surfaces
 are no longer locked to the main-window shell.
 
 ## What's here

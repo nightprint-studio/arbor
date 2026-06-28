@@ -41,11 +41,16 @@ pub fn deep_link_ready(app: AppHandle) -> Result<()> {
 /// not validated here — an unrecognised one surfaces the dispatcher's toast.
 #[tauri::command]
 pub fn dispatch_deep_link(app: AppHandle, url: String) -> Result<()> {
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.unminimize();
-        let _ = main.show();
-        let _ = main.set_focus();
-    }
+    // Route to the Corvus window (the Git product), not the launcher ("main").
+    // Open/focus it and ensure corvus-be is up off the command thread, then emit
+    // the trusted channel to its AppShell listener. (When the link was typed in
+    // an already-open Corvus/explorer the ensure is a no-op and the focus + emit
+    // land immediately.)
+    let h = app.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::ipc::ensure_corvus_be(&h);
+        crate::window::corvus::open_or_focus(&h);
+    });
     let _ = app.emit("arbor://deep-link-manual", url);
     Ok(())
 }

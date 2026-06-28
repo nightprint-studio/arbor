@@ -31,9 +31,9 @@ enough.
   and `try_arbor_config_path(sub)` (the `try_` variant propagates `None`
   when `dirs` is unavailable instead of falling back to `.`; use it when
   silently skipping persistence is preferable to writing under the cwd).
-  nemus gets its own sibling namespace: `nemus_config_dir()`,
-  `nemus_data_dir()`, and `nemus_config_path(sub)` resolve under
-  `…/nemus` (not `…/arbor/nemus`), so its config + sample banks live apart.
+  merula gets its own sibling namespace: `merula_config_dir()`,
+  `merula_data_dir()`, and `merula_config_path(sub)` resolve under
+  `…/merula` (not `…/arbor/merula`), so its config + sample banks live apart.
 
 - **`profile`** — the **profile × product** layout
   (`docs/profiles-and-product-config.md`). A profile is an isolated
@@ -46,7 +46,7 @@ enough.
   `arbor_profile_path(sub)` (generic per-profile), `product_dir(product)` /
   `product_path(product, sub)` (+ `try_product_path` propagating `None` like
   `try_arbor_config_path`), `profile_plugins_dir()`, the product-name constants
-  `PRODUCT_CORVUS` / `PRODUCT_NEMUS`, plus `*_for(name, …)` explicit-profile
+  `PRODUCT_CORVUS` / `PRODUCT_MERULA`, plus `*_for(name, …)` explicit-profile
   variants for migration / management. The
   existing `arbor_config_*` helpers keep meaning "the global `arbor/` root"
   (the pointer, the portable `git/`, OAuth client overrides).

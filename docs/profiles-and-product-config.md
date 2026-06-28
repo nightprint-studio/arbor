@@ -16,8 +16,8 @@ suffix scattered across call sites. That is the "structured badly" we are fixing
 Two things drive the new layout:
 
 1. **Multiple products share the binary.** Arbor is becoming a launcher over
-   several products: **corvus** (git, today's app), **nemus** (music, today a
-   sibling `nemus/` dir), and future **merula** (db), **sitta**, **grove**. Each
+   several products: **corvus** (git, today's app), **merula** (music, today a
+   sibling `merula/` dir), and future **merula** (db), **sitta**, **grove**. Each
    needs its own config bucket; generic UI prefs are shared across products.
 2. **Profiles.** A profile is an isolated environment — its own settings, its
    own installed plugins, its own repos/workspaces — that the user switches
@@ -46,7 +46,7 @@ arbor/
         graph_columns.toml
         linked_worktrees.toml
         pipeline_runs/
-      nemus/                      # music product
+      merula/                      # music product
         config.toml
         ...
       plugins/                    # per-profile plugin area
@@ -128,7 +128,7 @@ then verify), idempotent (guarded by the `profiles/` existence check).
      `linked_worktrees.toml`, `pipeline_runs/`) → `product_path(PRODUCT_CORVUS,
      …)`, with a one-shot idempotent **move** migration
      (`config::profile_migration`) so upgraded installs keep their data. Product
-     names centralized in `arbor-core` (`PRODUCT_CORVUS`/`PRODUCT_NEMUS`);
+     names centralized in `arbor-core` (`PRODUCT_CORVUS`/`PRODUCT_MERULA`);
      `try_product_path` added.
    - **3b** ✅ — plugin area → `profile_plugins_dir()`: installed plugins
      (`installed/`), `plugin_states.json`, `plugin_data/`, `toolchains/`,
@@ -165,5 +165,5 @@ then verify), idempotent (guarded by the `profiles/` existence check).
 Switching is live (no process restart): the backend swaps its in-memory caches,
 then each window reloads its webview to re-derive its stores. Remaining
 follow-ups: the explorer window isn't reloaded on switch (it doesn't init
-`profileStore`); no Command Palette entry for switching yet; nemus still lives in
-its sibling namespace rather than `profiles/<p>/nemus`.
+`profileStore`); no Command Palette entry for switching yet; merula still lives in
+its sibling namespace rather than `profiles/<p>/merula`.

@@ -1,8 +1,8 @@
 //! Dedicated **launcher** window — the JetBrains-Toolbox-like product launcher.
 //!
 //! The launcher is where Arbor is headed: `src-tauri` becomes a broker + UI
-//! container + launcher, and each product (Corvus/Git, nemus/Music, …) opens in
-//! its own window ([`super::corvus`], [`super::nemus`]). The launcher is the
+//! container + launcher, and each product (Corvus/Git, merula/Music, …) opens in
+//! its own window ([`super::corvus`], [`super::merula`]). The launcher is the
 //! home screen — recent repos/projects, product tiles, settings — from which
 //! those windows are summoned.
 //!
@@ -11,7 +11,7 @@
 //! the frontend can branch on [`LAUNCHER_WINDOW_LABEL`]. The actual
 //! `LauncherShell.svelte` does not exist yet — until it does, this window
 //! renders the default `index.html` route. Wire the frontend branch in
-//! `src/routes/+page.svelte` (alongside the `explorer` / `nemus` cases) when the
+//! `src/routes/+page.svelte` (alongside the `explorer` / `merula` cases) when the
 //! shell lands.
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};

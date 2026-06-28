@@ -1,7 +1,7 @@
 //! Arbor — Tauri shell entry point.
 //!
 //! Today `src-tauri` is the **broker + UI container** for the products
-//! (Corvus/Git, nemus/Music, the File Explorer, …) and is moving toward a
+//! (Corvus/Git, merula/Music, the File Explorer, …) and is moving toward a
 //! JetBrains-Toolbox-like **launcher** (see `window/launcher.rs`). The heavy
 //! lifting lives in submodules:
 //!
@@ -16,7 +16,7 @@ mod app_ctx;
 mod app_state;
 mod error;
 mod handlers;
-mod nemus;
+mod merula;
 mod process_ext;
 mod platform;
 mod efficiency;
