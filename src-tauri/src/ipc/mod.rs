@@ -594,7 +594,7 @@ fn host_dispatch(
                 cfg.recent_repos.insert(0, normalized);
                 cfg.recent_repos.truncate(10);
                 let _ = crate::config::app_config::save(&cfg);
-            }
+            };
         }
         return Ok(serde_json::Value::Null);
     }
@@ -760,18 +760,20 @@ fn host_dispatch(
     }
     if method == "__pipeline_is_locked" {
         let lock_key = params.get("lock_key").and_then(|v| v.as_str()).unwrap_or_default();
-        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+        let state = app.state::<AppState>();
+        let reg = match state.pipeline_engine.registry.lock() {
             Ok(g) => g,
             Err(e) => return Err(format!("pipeline.is_locked lock: {e}")),
         };
         return Ok(match reg.locked_by(lock_key) {
-            Some(id) => serde_json::Value::String(id),
+            Some(id) => serde_json::Value::String(id.to_string()),
             None => serde_json::Value::Null,
         });
     }
     if method == "__pipeline_list" {
         let plugin_name = params.get("plugin_name").and_then(|v| v.as_str()).unwrap_or_default();
-        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+        let state = app.state::<AppState>();
+        let reg = match state.pipeline_engine.registry.lock() {
             Ok(g) => g,
             Err(e) => return Err(format!("pipeline.list lock: {e}")),
         };
@@ -781,7 +783,8 @@ fn host_dispatch(
     if method == "__pipeline_get" {
         let plugin_name = params.get("plugin_name").and_then(|v| v.as_str()).unwrap_or_default();
         let id = params.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+        let state = app.state::<AppState>();
+        let reg = match state.pipeline_engine.registry.lock() {
             Ok(g) => g,
             Err(e) => return Err(format!("pipeline.get lock: {e}")),
         };
@@ -804,7 +807,8 @@ fn host_dispatch(
         let filter_plugin = params.get("plugin").and_then(|v| v.as_str());
         let filter_pipeline_id = params.get("pipeline_id").and_then(|v| v.as_str());
         let all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
-        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+        let state = app.state::<AppState>();
+        let reg = match state.pipeline_engine.registry.lock() {
             Ok(g) => g,
             Err(e) => return Err(format!("pipeline.list_runs lock: {e}")),
         };
@@ -824,7 +828,8 @@ fn host_dispatch(
     }
     if method == "__pipeline_get_run" {
         let run_id = params.get("run_id").and_then(|v| v.as_str()).unwrap_or_default();
-        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+        let state = app.state::<AppState>();
+        let reg = match state.pipeline_engine.registry.lock() {
             Ok(g) => g,
             Err(e) => return Err(format!("pipeline.get_run lock: {e}")),
         };

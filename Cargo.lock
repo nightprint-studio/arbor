@@ -141,7 +141,6 @@ dependencies = [
  "arbor-feedback",
  "arbor-fs",
  "arbor-ipc",
- "merula",
  "arbor-plugin-api",
  "arbor-plugin-core",
  "arbor-plugin-marketplace",
@@ -176,6 +175,7 @@ dependencies = [
  "jsonc-parser",
  "keyring",
  "libc",
+ "merula",
  "mlua",
  "notify",
  "openssl-sys",
@@ -313,80 +313,6 @@ dependencies = [
  "futures-executor",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "merula"
-version = "0.3.0"
-dependencies = [
- "merula-audio",
- "merula-engine",
- "merula-import",
- "merula-lang",
- "merula-pattern",
- "merula-transcribe",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "merula-audio"
-version = "0.3.0"
-dependencies = [
- "merula-pattern",
- "cpal",
- "fundsp",
- "hound",
- "rtrb",
- "rubato",
- "symphonia",
- "thiserror 2.0.18",
- "windows 0.58.0",
-]
-
-[[package]]
-name = "merula-engine"
-version = "0.3.0"
-dependencies = [
- "merula-audio",
- "merula-pattern",
- "ebur128",
- "hound",
- "midly",
- "thiserror 2.0.18",
- "vorbis_rs",
-]
-
-[[package]]
-name = "merula-import"
-version = "0.3.0"
-dependencies = [
- "merula-lang",
- "merula-pattern",
- "midly",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "merula-lang"
-version = "0.3.0"
-dependencies = [
- "merula-pattern",
- "cc",
- "tree-sitter",
-]
-
-[[package]]
-name = "merula-pattern"
-version = "0.3.0"
-
-[[package]]
-name = "merula-transcribe"
-version = "0.3.0"
-dependencies = [
- "merula-audio",
- "midly",
- "ort",
  "thiserror 2.0.18",
 ]
 
@@ -3954,6 +3880,80 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "merula"
+version = "0.3.0"
+dependencies = [
+ "merula-audio",
+ "merula-engine",
+ "merula-import",
+ "merula-lang",
+ "merula-pattern",
+ "merula-transcribe",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "merula-audio"
+version = "0.3.0"
+dependencies = [
+ "cpal",
+ "fundsp",
+ "hound",
+ "merula-pattern",
+ "rtrb",
+ "rubato",
+ "symphonia",
+ "thiserror 2.0.18",
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "merula-engine"
+version = "0.3.0"
+dependencies = [
+ "ebur128",
+ "hound",
+ "merula-audio",
+ "merula-pattern",
+ "midly",
+ "thiserror 2.0.18",
+ "vorbis_rs",
+]
+
+[[package]]
+name = "merula-import"
+version = "0.3.0"
+dependencies = [
+ "merula-lang",
+ "merula-pattern",
+ "midly",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "merula-lang"
+version = "0.3.0"
+dependencies = [
+ "cc",
+ "merula-pattern",
+ "tree-sitter",
+]
+
+[[package]]
+name = "merula-pattern"
+version = "0.3.0"
+
+[[package]]
+name = "merula-transcribe"
+version = "0.3.0"
+dependencies = [
+ "merula-audio",
+ "midly",
+ "ort",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
