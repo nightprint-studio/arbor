@@ -61,6 +61,10 @@ mod stats;
 mod status;
 mod submodule;
 mod tickets;
+mod workspace;
+mod workspace_mutation;
+mod workspace_query;
+mod workspace_runs;
 mod worktree;
 mod worktree_links;
 

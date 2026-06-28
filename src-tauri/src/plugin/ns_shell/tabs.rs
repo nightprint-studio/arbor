@@ -35,7 +35,7 @@ fn install_open_repo(ctx: &ApiCtx, lua: &Lua, tabs: &Table) -> Result<()> {
         };
         let state = h.state::<crate::AppState>();
         let entry = {
-            let reg = match state.repo_registry.lock() {
+            let reg = match state.lock_repo_registry() {
                 Ok(r)  => r,
                 Err(e) => return boolerr2(lua_ctx, false, Some(format!("registry lock: {e}"))),
             };

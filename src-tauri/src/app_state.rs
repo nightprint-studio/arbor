@@ -288,18 +288,30 @@ impl AppState {
         })
     }
 
+    /// Repo registry guard — **reload-on-access**. corvus-be owns `repos.json`
+    /// (ADR-1) and writes it from the other process; the shell still reads/writes
+    /// it for the consumers that stay shell-side (deep-link router, missing-repo
+    /// flow, `close_repo` orphan-GC, the `arbor.workspace` ns_shell namespace), so
+    /// every guard reloads the file first — an in-memory cache would let the two
+    /// processes drift and clobber each other. Writers mutate the guard and call
+    /// `registry::save`; the next access re-reads it. Low-frequency, user-driven.
     pub fn lock_repo_registry(&self) -> Result<MutexGuard<'_, RepoRegistry>> {
-        self.repo_registry.lock().map_err(|e| {
+        let mut g = self.repo_registry.lock().map_err(|e| {
             tracing::error!("repo_registry mutex poisoned: {e}");
             AppError::MutexPoisoned("repo_registry".into())
-        })
+        })?;
+        *g = crate::workspace::registry::load();
+        Ok(g)
     }
 
+    /// Workspace store guard — **reload-on-access** (see [`lock_repo_registry`]).
     pub fn lock_workspaces(&self) -> Result<MutexGuard<'_, WorkspaceStore>> {
-        self.workspaces.lock().map_err(|e| {
+        let mut g = self.workspaces.lock().map_err(|e| {
             tracing::error!("workspaces mutex poisoned: {e}");
             AppError::MutexPoisoned("workspaces".into())
-        })
+        })?;
+        *g = crate::workspace::store::load();
+        Ok(g)
     }
 
     pub fn lock_git_providers(&self) -> Result<MutexGuard<'_, GitProviderRegistry>> {

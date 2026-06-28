@@ -59,7 +59,7 @@ fn install_list(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |lua_ctx, ()| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
-        let store = state.workspaces.lock()
+        let store = state.lock_workspaces()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         let arr = lua_ctx.create_table()?;
         for (i, ws) in store.ordered().iter().enumerate() {
@@ -76,7 +76,7 @@ fn install_active(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |lua_ctx, ()| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
-        let store = state.workspaces.lock()
+        let store = state.lock_workspaces()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         match store.active() {
             Some(ws) => ws_to_lua(lua_ctx, ws),
@@ -92,7 +92,7 @@ fn install_get(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |lua_ctx, ws_id: String| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
-        let store = state.workspaces.lock()
+        let store = state.lock_workspaces()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         match store.get(&ws_id) {
             Some(ws) => ws_to_lua(lua_ctx, ws),
@@ -108,12 +108,12 @@ fn install_list_repos(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |lua_ctx, ws_id: Option<String>| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
-        let reg = state.repo_registry.lock()
+        let reg = state.lock_repo_registry()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         let arr = lua_ctx.create_table()?;
         match ws_id {
             Some(id) => {
-                let store = state.workspaces.lock()
+                let store = state.lock_workspaces()
                     .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
                 let ws = match store.get(&id) {
                     Some(w) => w,
@@ -144,7 +144,7 @@ fn install_repo(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
     let fn_ = lua.create_function(move |lua_ctx, repo_id: String| {
         let h = match handle { Some(ref h) => h.clone(), None => return Ok(mlua::Value::Nil) };
         let state = h.state::<crate::AppState>();
-        let reg = state.repo_registry.lock()
+        let reg = state.lock_repo_registry()
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         match reg.get(&repo_id) {
             Some(e) => entry_to_lua(lua_ctx, e),
@@ -167,7 +167,7 @@ fn install_switch(ctx: &ApiCtx, lua: &Lua, ws_table: &Table) -> Result<()> {
         };
         let state = h.state::<crate::AppState>();
         let ws_payload = {
-            let mut store = match state.workspaces.lock() {
+            let mut store = match state.lock_workspaces() {
                 Ok(s)  => s,
                 Err(e) => return boolerr2(lua_ctx, false, Some(format!("workspaces lock: {e}"))),
             };

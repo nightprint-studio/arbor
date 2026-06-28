@@ -49,7 +49,7 @@ pub struct TabSnapshot {
     pub tab_meta:     Vec<TabMeta>,
 }
 
-fn snapshot_dir() -> PathBuf {
+pub fn snapshot_dir() -> PathBuf {
     arbor_core::prelude::product_path(arbor_core::prelude::PRODUCT_CORVUS, "workspace-state")
 }
 

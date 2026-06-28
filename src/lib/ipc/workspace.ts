@@ -1,4 +1,4 @@
-import { platform } from './rpc';
+import { corvus, platform } from './rpc';
 import type {
   WorkspacesSnapshot, WorkspaceDef, WorkspaceGroup, WorkspacePatch, WorkspaceGroupPatch,
   RepoRegistryEntry, RepoRegistryEntryWithRoot, RepoRegistrationResult, TabSnapshot,
@@ -9,60 +9,60 @@ import type {
 
 // ── Queries ─────────────────────────────────────────────────────────────────
 
-export const listWorkspaces   = (): Promise<WorkspacesSnapshot>      => platform('list_workspaces');
-export const listRegistryRepos = (): Promise<RepoRegistryEntry[]>    => platform('list_registry_repos');
-export const listRegistryWithRoots = (): Promise<RepoRegistryEntryWithRoot[]> => platform('list_registry_with_roots');
+export const listWorkspaces   = (): Promise<WorkspacesSnapshot>      => corvus('list_workspaces');
+export const listRegistryRepos = (): Promise<RepoRegistryEntry[]>    => corvus('list_registry_repos');
+export const listRegistryWithRoots = (): Promise<RepoRegistryEntryWithRoot[]> => corvus('list_registry_with_roots');
 export const loadWorkspaceSnapshot = (workspaceId: string): Promise<TabSnapshot> =>
-  platform('load_workspace_snapshot', { workspace_id: workspaceId });
+  corvus('load_workspace_snapshot', { workspace_id: workspaceId });
 
 // ── Workspace lifecycle ─────────────────────────────────────────────────────
 
 export const createWorkspace = (
   name: string, colorIdx: number, repoIds: string[], groupId: string | null,
 ): Promise<WorkspaceDef> =>
-  platform('create_workspace', { name, color_idx: colorIdx, repo_ids: repoIds, group_id: groupId });
+  corvus('create_workspace', { name, color_idx: colorIdx, repo_ids: repoIds, group_id: groupId });
 
 export const updateWorkspace = (workspaceId: string, patch: WorkspacePatch): Promise<WorkspaceDef> =>
-  platform('update_workspace', { workspace_id: workspaceId, patch });
+  corvus('update_workspace', { workspace_id: workspaceId, patch });
 
 export const deleteWorkspace = (workspaceId: string): Promise<void> =>
-  platform('delete_workspace', { workspace_id: workspaceId });
+  corvus('delete_workspace', { workspace_id: workspaceId });
 
 export const reorderWorkspaces = (orderedIds: string[]): Promise<void> =>
-  platform('reorder_workspaces', { ordered_ids: orderedIds });
+  corvus('reorder_workspaces', { ordered_ids: orderedIds });
 
 export const setActiveWorkspace = (workspaceId: string): Promise<WorkspaceDef> =>
-  platform('set_active_workspace', { workspace_id: workspaceId });
+  corvus('set_active_workspace', { workspace_id: workspaceId });
 
 // ── Groups ──────────────────────────────────────────────────────────────────
 
 export const createWorkspaceGroup = (name: string, colorIdx: number): Promise<WorkspaceGroup> =>
-  platform('create_workspace_group', { name, color_idx: colorIdx });
+  corvus('create_workspace_group', { name, color_idx: colorIdx });
 
 export const updateWorkspaceGroup = (groupId: string, patch: WorkspaceGroupPatch): Promise<WorkspaceGroup> =>
-  platform('update_workspace_group', { group_id: groupId, patch });
+  corvus('update_workspace_group', { group_id: groupId, patch });
 
 export const deleteWorkspaceGroup = (groupId: string): Promise<void> =>
-  platform('delete_workspace_group', { group_id: groupId });
+  corvus('delete_workspace_group', { group_id: groupId });
 
 export const reorderWorkspaceGroups = (orderedIds: string[]): Promise<void> =>
-  platform('reorder_workspace_groups', { ordered_ids: orderedIds });
+  corvus('reorder_workspace_groups', { ordered_ids: orderedIds });
 
 export const setWorkspaceGroup = (workspaceId: string, groupId: string | null): Promise<void> =>
-  platform('set_workspace_group', { workspace_id: workspaceId, group_id: groupId });
+  corvus('set_workspace_group', { workspace_id: workspaceId, group_id: groupId });
 
 // ── Repo membership ─────────────────────────────────────────────────────────
 
 export const addRepoToWorkspace = (workspaceId: string, repoId: string): Promise<void> =>
-  platform('add_repo_to_workspace', { workspace_id: workspaceId, repo_id: repoId });
+  corvus('add_repo_to_workspace', { workspace_id: workspaceId, repo_id: repoId });
 
 export const removeRepoFromWorkspace = (workspaceId: string, repoId: string): Promise<void> =>
-  platform('remove_repo_from_workspace', { workspace_id: workspaceId, repo_id: repoId });
+  corvus('remove_repo_from_workspace', { workspace_id: workspaceId, repo_id: repoId });
 
 export const moveRepoBetweenWorkspaces = (
   fromWorkspaceId: string, toWorkspaceId: string, repoId: string,
 ): Promise<void> =>
-  platform('move_repo_between_workspaces', {
+  corvus('move_repo_between_workspaces', {
     from_workspace_id: fromWorkspaceId,
     to_workspace_id:   toWorkspaceId,
     repo_id:           repoId,
@@ -73,7 +73,7 @@ export const moveRepoBetweenWorkspaces = (
 export const registerRepoPath = (
   path: string, remoteUrl: string | null, displayName: string | null,
 ): Promise<RepoRegistrationResult> =>
-  platform('register_repo_path', { path, remote_url: remoteUrl, display_name: displayName });
+  corvus('register_repo_path', { path, remote_url: remoteUrl, display_name: displayName });
 
 /** Register a "pending" repo (declared via name + optional remote URL, not yet
  *  on disk). Returns the new registry id. Used by the non-blocking import so a
@@ -81,13 +81,13 @@ export const registerRepoPath = (
 export const registerPendingRepo = (
   name: string, remoteUrl: string | null,
 ): Promise<string> =>
-  platform('register_pending_repo', { name, remote_url: remoteUrl });
+  corvus('register_pending_repo', { name, remote_url: remoteUrl });
 
 export const updateRegistryRepo = (
   repoId: string,
   patch: { display_name?: string; remote_url?: string | null; path?: string },
 ): Promise<RepoRegistryEntry> =>
-  platform('update_registry_repo', {
+  corvus('update_registry_repo', {
     repo_id:      repoId,
     display_name: patch.display_name,
     remote_url:   patch.remote_url !== undefined ? patch.remote_url : undefined,
@@ -95,7 +95,7 @@ export const updateRegistryRepo = (
   });
 
 export const deleteRegistryRepo = (repoId: string): Promise<void> =>
-  platform('delete_registry_repo', { repo_id: repoId });
+  corvus('delete_registry_repo', { repo_id: repoId });
 
 // ── Tab snapshots ───────────────────────────────────────────────────────────
 
@@ -106,7 +106,7 @@ export const saveWorkspaceSnapshot = (
   crossWsTabs: CrossWsTabRef[],
   tabMeta: TabMeta[] = [],
 ): Promise<void> =>
-  platform('save_workspace_snapshot', {
+  corvus('save_workspace_snapshot', {
     workspace_id:  workspaceId,
     open_tab_ids:  openTabIds,
     active_tab_id: activeTabId,
@@ -117,56 +117,56 @@ export const saveWorkspaceSnapshot = (
 // ── Import / export ─────────────────────────────────────────────────────────
 
 export const exportWorkspace = (workspaceId: string): Promise<ExportedWorkspace> =>
-  platform('export_workspace', { workspace_id: workspaceId });
+  corvus('export_workspace', { workspace_id: workspaceId });
 
 export const importWorkspacePreview = (payload: ExportedWorkspace): Promise<ImportPreview> =>
-  platform('import_workspace_preview', { payload });
+  corvus('import_workspace_preview', { payload });
 
 export const importWorkspaceCommit = (
   name: string, colorIdx: number, repoIds: string[], groupId: string | null,
   mergeInto: string | null = null,
 ): Promise<WorkspaceDef> =>
-  platform('import_workspace_commit', {
+  corvus('import_workspace_commit', {
     name, color_idx: colorIdx, repo_ids: repoIds, group_id: groupId, merge_into: mergeInto,
   });
 
 export const exportWorkspaceGroup = (groupId: string): Promise<ExportedWorkspaceGroup> =>
-  platform('export_workspace_group', { group_id: groupId });
+  corvus('export_workspace_group', { group_id: groupId });
 
 export const importWorkspaceGroupPreview = (payload: ExportedWorkspaceGroup): Promise<ImportGroupPreview> =>
-  platform('import_workspace_group_preview', { payload });
+  corvus('import_workspace_group_preview', { payload });
 
 export const importWorkspaceGroupCommit = (
   name: string, colorIdx: number, existingGroupId: string | null,
   workspaces: { name: string; color_idx: number; repo_ids: string[]; merge_into: string | null }[],
 ): Promise<void> =>
-  platform('import_workspace_group_commit', {
+  corvus('import_workspace_group_commit', {
     name, color_idx: colorIdx, existing_group_id: existingGroupId, workspaces,
   });
 
 /** Export every group + top-level workspace into one portable backup bundle. */
 export const exportAllWorkspaces = (): Promise<ExportedBundle> =>
-  platform('export_all_workspaces');
+  corvus('export_all_workspaces');
 
 /** Restore a backup bundle (non-blocking: unknown repos land as "not cloned"). */
 export const importBundleCommit = (payload: ExportedBundle): Promise<ImportBundleResult> =>
-  platform('import_bundle_commit', { payload });
+  corvus('import_bundle_commit', { payload });
 
 // ── Health + fetch-all ──────────────────────────────────────────────────────
 
 export const workspaceHealthScan = (workspaceId: string): Promise<RepoHealth[]> =>
-  platform('workspace_health_scan', { workspace_id: workspaceId });
+  corvus('workspace_health_scan', { workspace_id: workspaceId });
 
 export const workspaceFetchAll = (workspaceId: string): Promise<WorkspaceFetchStartResult> =>
-  platform('workspace_fetch_all', { workspace_id: workspaceId });
+  corvus('workspace_fetch_all', { workspace_id: workspaceId });
 
 export const workspacePullAll = (workspaceId: string): Promise<WorkspaceFetchStartResult> =>
-  platform('workspace_pull_all', { workspace_id: workspaceId });
+  corvus('workspace_pull_all', { workspace_id: workspaceId });
 
 export const workspaceTagAll = (
   workspaceId: string, tagName: string, message: string | null, push: boolean,
 ): Promise<WorkspaceFetchStartResult> =>
-  platform('workspace_tag_all', {
+  corvus('workspace_tag_all', {
     workspace_id: workspaceId, tag_name: tagName, message, push,
   });
 

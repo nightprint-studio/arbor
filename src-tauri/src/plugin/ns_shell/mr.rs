@@ -61,7 +61,7 @@ pub(super) fn resolve_repo_path(
     //     calls don't need to plumb the id around
     let state = handle.state::<crate::AppState>();
     if let Some(id) = repo_id {
-        let reg = state.repo_registry.lock().map_err(|e| e.to_string())?;
+        let reg = state.lock_repo_registry().map_err(|e| e.to_string())?;
         let entry = reg.get(id).ok_or_else(|| format!("repo '{id}' not registered"))?;
         return Ok(entry.path.clone());
     }

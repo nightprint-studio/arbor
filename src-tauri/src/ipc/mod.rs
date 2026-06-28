@@ -329,6 +329,17 @@ fn host_dispatch(
         return Ok(serde_json::Value::Null);
     }
 
+    // Registry-orphan GC (ADR-1): corvus-be owns the repo registry + workspace
+    // store, but `recent_repos` is a shell `AppConfig` slice. When corvus-be
+    // forgets an orphaned repo it asks the shell to drop the matching recent-repos
+    // pointer too, so a later import no longer offers it as "use existing".
+    if method == "__forget_recent_repo" {
+        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        let st = app.state::<AppState>();
+        let _ = crate::commands::workspace_commands::forget_recent_repo(&st, path);
+        return Ok(serde_json::Value::Null);
+    }
+
     let account: String = match method {
         "__session" | "__refresh" => serde_json::from_value(params)
             .map_err(|e| format!("{method}: invalid account: {e}"))?,
@@ -501,6 +512,26 @@ pub fn sync_config(state: &AppState) {
     // profile switch re-pushes a new path → corvus-be reloads on next access.
     let lw_path = crate::linked_worktrees::links_file_path().to_string_lossy().to_string();
     push_config_section(state, "worktree_links_path", &lw_path);
+    // Profile-aware absolute paths of the workspace-subsystem files corvus-be
+    // owns (ADR-1: repo registry + workspace store + per-workspace tab snapshots).
+    // corvus-be is a separate process and can't resolve the active profile, so the
+    // shell hands over the paths; corvus-be (re)loads each on access. A profile
+    // switch re-pushes new paths → corvus-be reloads on next access.
+    push_config_section(
+        state,
+        "repo_registry_path",
+        &crate::workspace::registry::registry_path().to_string_lossy().to_string(),
+    );
+    push_config_section(
+        state,
+        "workspaces_path",
+        &crate::workspace::store::store_path().to_string_lossy().to_string(),
+    );
+    push_config_section(
+        state,
+        "workspace_state_dir",
+        &crate::workspace::snapshot::snapshot_dir().to_string_lossy().to_string(),
+    );
     // repo_id → {path, display_name} for every known repo: the worktree-link
     // checkout-sync orchestrator resolves member repo_ids to paths through this
     // (`CorvusState` only tracks open tabs by `tab_id`, not the repo registry).
