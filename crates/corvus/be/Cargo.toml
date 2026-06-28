@@ -22,6 +22,10 @@ arbor-plugin-core = { path = "../../plugin/core" }
 # The Tauri-free job model (`JobSpec`/`JobStatus`): OOP handlers drive jobs in the
 # shell's single-source `JobRegistry` over the reverse channel (`be/src/jobs.rs`).
 arbor-feedback    = { path = "../../arbor-feedback" }
+# Shared trigger engine: `Scheduler::new(Arc<dyn AppCtx>, tokio::runtime::Handle)`
+# drives the schedules `corvus`-targeted plugins declare (installed into the
+# co-located PluginHost, started after the post-`Hello` reload).
+arbor-scheduler   = { path = "../../scheduler" }
 corvus-plugin     = { path = "../plugin" }
 # The git `ns_shell` namespaces (`arbor.notes`, `arbor.repo`, …) ported to run on
 # any host: corvus-be implements its `NsHost` trait (`CorvusNsHost`) and hands the
@@ -69,3 +73,6 @@ toml          = "0.8"
 # serve-loop worker thread, so a multi-thread runtime is required (concurrent
 # `block_on` from many threads). `enable_all` gives reqwest its IO driver.
 tokio         = { workspace = true }
+# Plugin dependency-graph unmet-version check in `plugin_introspect.rs` (same pin
+# `arbor-plugin-core` uses). Used by `plugin_dep_graph`'s VersionReq match.
+semver        = "1"

@@ -167,7 +167,7 @@
   import { issuesStore, type IssueProvider } from '$lib/stores/issues.svelte';
   import { linearGetIssue, jiraGetIssue } from '$lib/ipc/issues';
   import { matchesBinding } from '$lib/utils/keybindings';
-  import { firePluginAction, listPluginInfo } from '$lib/ipc/plugin';
+  import { firePluginAction, listPluginInfo, setActiveTab } from '$lib/ipc/plugin';
   import type { PluginFormConfig } from '$lib/types/plugin';
   import type { MergeRequest } from '$lib/types/mr';
   import type { Issue } from '$lib/types/issues';
@@ -850,7 +850,7 @@
   // arbor.repo.fetch_active_tab() knows which repo to operate on.
   $effect(() => {
     const tabId = tabsStore.activeTabId;
-    invoke('set_active_tab', { tabId }).catch(() => {});
+    setActiveTab(tabId).catch(() => {});
   });
 
   // ── Security provider probe ───────────────────────────────────────────────────

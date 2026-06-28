@@ -32,13 +32,16 @@
 //!
 //! See `docs/plugin-relocation-inventory.md` for the relocation context.
 
+pub mod brp;
 pub mod ci;
+pub mod cloud;
 pub mod issues;
 pub mod job;
 pub mod linked_worktrees;
 pub mod mr;
 pub mod notes;
 pub mod nshost;
+pub mod pipeline;
 pub mod prelude;
 pub mod repo;
 pub mod security;

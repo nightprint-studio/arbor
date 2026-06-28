@@ -5,13 +5,16 @@
 //! `use corvus_plugin_ns::prelude::*;`). The submodules stay `pub` for rustdoc
 //! navigation, but the canonical path goes through here.
 
+pub use crate::brp::BrpInstaller;
 pub use crate::ci::CiInstaller;
+pub use crate::cloud::CloudInstaller;
 pub use crate::issues::IssuesInstaller;
 pub use crate::job::JobInstaller;
 pub use crate::linked_worktrees::LinkedWorktreesInstaller;
 pub use crate::mr::MrInstaller;
 pub use crate::notes::NotesInstaller;
 pub use crate::nshost::{NsHost, NsHostHandle};
+pub use crate::pipeline::PipelineInstaller;
 pub use crate::repo::RepoInstaller;
 pub use crate::security::SecurityInstaller;
 pub use crate::tabs::TabsInstaller;

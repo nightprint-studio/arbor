@@ -154,20 +154,28 @@ impl PluginHost {
         for (idx, manifest) in sorted.into_iter().enumerate() {
             let name = manifest.name.clone();
 
-            // Per-product targeting (manifest `targets`): a plugin that names
-            // specific products loads only on those products' hosts. Universal
-            // plugins (empty `targets`) load everywhere; a host with no product
-            // bound (`set_product` never called — legacy / tests) loads all.
-            if !manifest.targets.is_empty() {
-                if let Some(product) = self.product.as_deref() {
-                    if !manifest.targets.iter().any(|t| t == product) {
-                        tracing::info!(
-                            "plugin '{name}' skipped: targets {:?}, this host serves '{product}'",
-                            manifest.targets
-                        );
-                        continue;
-                    }
-                }
+            // Per-product targeting (manifest `targets`). Three host modes:
+            //   - no product bound (`set_product` never called — legacy / tests):
+            //     load everything.
+            //   - the `launcher` host: load ONLY plugins that explicitly target
+            //     `launcher` — universal plugins do NOT load on the launcher (they
+            //     belong to the product windows). This is what eliminates the
+            //     double-load: git plugins (universal or `corvus`-targeted) load in
+            //     corvus-be, never in the launcher shell.
+            //   - any product host (`corvus`, …): load universal plugins (empty
+            //     `targets`) + plugins that name this product.
+            let loads = match self.product.as_deref() {
+                None => true,
+                Some("launcher") => manifest.targets.iter().any(|t| t == "launcher"),
+                Some(p) => manifest.targets.is_empty()
+                    || manifest.targets.iter().any(|t| t == p),
+            };
+            if !loads {
+                tracing::info!(
+                    "plugin '{name}' skipped for host '{:?}': targets {:?}",
+                    self.product, manifest.targets
+                );
+                continue;
             }
 
             if let Some(ref ctx) = self.app_ctx {

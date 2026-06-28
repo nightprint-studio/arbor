@@ -570,6 +570,737 @@ fn host_dispatch(
         return Ok(serde_json::Value::Null);
     }
 
+    // corvus-be's missing-repo flow READS the shell's recent_repos list (a
+    // GENERIC_KEYS / profile.toml slice the launcher recents share — NOT corvus's
+    // to own) to find dead entries to prune.
+    if method == "__recent_repos_list" {
+        let st = app.state::<AppState>();
+        let list = st.lock_config().map(|c| c.recent_repos.clone()).unwrap_or_default();
+        return serde_json::to_value(list).map_err(|e| e.to_string());
+    }
+
+    // …and PREPENDS a path (used by relocate_repo's mirror). Replicates the
+    // platform add_recent_repo handler inline: normalise to forward slashes,
+    // dedup, prepend, cap at 10 (MAX_RECENT).
+    if method == "__recent_repos_add" {
+        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        if !path.trim().is_empty() {
+            let st = app.state::<AppState>();
+            if let Ok(mut cfg) = st.lock_config() {
+                let normalized = path.replace('\\', "/");
+                cfg.recent_repos.retain(|p| p.replace('\\', "/") != normalized);
+                cfg.recent_repos.insert(0, normalized);
+                cfg.recent_repos.truncate(10);
+                let _ = crate::config::app_config::save(&cfg);
+            }
+        }
+        return Ok(serde_json::Value::Null);
+    }
+
+    // Populate the shell's RepoManager for a tab corvus-be just init'd OOP, so the
+    // shell-side in-process consumers (studio, git_provider helpers, plugin
+    // ns_shell, remote_commands) resolve it. Mirrors `open_repo`'s `mgr.open`.
+    // corvus-be has already self-registered the tab in its own registry, so we do
+    // NOT re-call `sync_repo_open` here (that would round-trip `__repo_register`).
+    if method == "__shell_open_repo" {
+        let tab_id = params.get("tab_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let path   = params.get("path").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let state = app.state::<AppState>();
+        {
+            let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
+            mgr.open(tab_id, &path).map_err(|e| e.to_string())?;
+        };
+        return Ok(serde_json::Value::Null);
+    }
+
+    // GitLab namespace path -> numeric namespace_id (keyring read + REST stay
+    // shell-side). Lifted from the deleted shell `resolve_gitlab_namespace_id`.
+    // Best-effort: any failure / no-match -> JSON null, which corvus-be reads as
+    // `None` (falls through to the user's default namespace).
+    if method == "__gitlab_namespace_id" {
+        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let id: Option<u64> = tauri::async_runtime::block_on(async move {
+            let token = crate::auth::credential_store::get("gitlab.com/arbor", "oauth")
+                .ok()
+                .flatten()
+                .or_else(|| {
+                    crate::auth::credential_store::get_for_host("gitlab.com")
+                        .ok()
+                        .flatten()
+                        .map(|(_, tok)| tok)
+                });
+            let Some(token) = token else { return None };
+            let url = format!("https://gitlab.com/api/v4/namespaces?search={path}");
+            let resp = reqwest::Client::new()
+                .get(&url)
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+                .ok()?;
+            if !resp.status().is_success() { return None; }
+            let arr = resp.json::<serde_json::Value>().await.ok()?;
+            arr.as_array()
+                .and_then(|a| a.iter().find(|n| n["path"].as_str() == Some(path.as_str())).or_else(|| a.first()))
+                .and_then(|n| n["id"].as_u64())
+        });
+        return Ok(serde_json::json!(id));
+    }
+
+    // ── arbor.pipeline.* PROXY ops ──────────────────────────────────────────
+    //
+    // The `PipelineEngine` / `PipelineRuntime` live in the shell's `AppState`, so
+    // `corvus-be`'s `arbor.pipeline.*` namespace (a PROXY installer) round-trips
+    // each host-touching op here. These mirror `ns_shell/pipeline.rs` — same
+    // registry calls, same `pipeline.<op>: …` error strings, same return shapes.
+    if method == "__pipeline_define" {
+        use tauri::Emitter;
+        let plugin_name = params
+            .get("plugin_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let mut config = params.get("config").cloned().unwrap_or(serde_json::Value::Null);
+        if let Some(obj) = config.as_object_mut() {
+            obj.insert(
+                "plugin".to_string(),
+                serde_json::Value::String(plugin_name.clone()),
+            );
+        }
+        let def: crate::pipeline::PipelineDef = serde_json::from_value(config)
+            .map_err(|e| format!("arbor.pipeline.define: invalid config: {e}"))?;
+        let def_id = def.id.clone();
+        let state = app.state::<AppState>();
+        state
+            .pipeline_engine
+            .registry
+            .lock()
+            .map_err(|e| format!("pipeline.define lock: {e}"))?
+            .register_def(def);
+        let _ = app.emit(
+            "arbor://pipeline-def-registered",
+            serde_json::json!({ "pipeline_id": def_id, "plugin": plugin_name }),
+        );
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__pipeline_run" {
+        let plugin_name = params.get("plugin_name").and_then(|v| v.as_str()).unwrap_or_default();
+        let pipeline_id = params.get("pipeline_id").and_then(|v| v.as_str()).unwrap_or_default();
+        let override_cwd = params.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let silent_override = params.get("silent").and_then(|v| v.as_bool());
+        let state = app.state::<AppState>();
+
+        let def = {
+            let reg = state
+                .pipeline_engine
+                .registry
+                .lock()
+                .map_err(|e| format!("pipeline.run lock: {e}"))?;
+            match reg.defs.iter().find(|d| d.id == pipeline_id && d.plugin == plugin_name).cloned() {
+                Some(d) => d,
+                None => return Err(format!("pipeline.run: pipeline '{pipeline_id}' not found")),
+            }
+        };
+
+        let repo_path = override_cwd.or_else(|| {
+            state
+                .active_tab_id
+                .lock()
+                .ok()
+                .and_then(|tid| tid.clone())
+                .and_then(|tid| {
+                    state
+                        .repos
+                        .lock()
+                        .ok()
+                        .and_then(|mut mgr| mgr.get(&tid).ok().map(|r| r.path.clone()))
+                })
+        });
+
+        let run_id = match state.pipeline_engine.registry.lock() {
+            Ok(mut reg) => reg.new_run_id(),
+            Err(e) => return Err(format!("pipeline.run lock: {e}")),
+        };
+        let mut run = def.new_run(run_id.clone(), repo_path.clone());
+        if let Some(s) = silent_override {
+            run.silent = s;
+        }
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        match state.pipeline_engine.registry.lock() {
+            Ok(mut reg) => reg.add_run(run, cancel.clone()),
+            Err(e) => return Err(format!("pipeline.run add_run: {e}")),
+        }
+        let rt = match state.pipeline_runtime() {
+            Some(rt) => std::sync::Arc::new(rt),
+            None => return Err("pipeline.run: runtime unavailable".to_string()),
+        };
+        crate::pipeline::start_pipeline_run(def, run_id.clone(), repo_path, cancel, rt);
+        return Ok(serde_json::json!(run_id));
+    }
+    if method == "__pipeline_resume" {
+        let run_id = params.get("run_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let state = app.state::<AppState>();
+        let Some(rt) = state.pipeline_runtime() else {
+            return Err("pipeline.resume: runtime unavailable".to_string());
+        };
+        return crate::pipeline::resume_run(&run_id, std::sync::Arc::new(rt))
+            .map(|_| serde_json::Value::Null)
+            .map_err(|e| format!("pipeline.resume: {e}"));
+    }
+    if method == "__pipeline_discard" {
+        let run_id = params.get("run_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let state = app.state::<AppState>();
+        let Some(rt) = state.pipeline_runtime() else {
+            return Err("pipeline.discard: runtime unavailable".to_string());
+        };
+        return crate::pipeline::discard_run(&run_id, std::sync::Arc::new(rt))
+            .map(|_| serde_json::Value::Null)
+            .map_err(|e| format!("pipeline.discard: {e}"));
+    }
+    if method == "__pipeline_is_locked" {
+        let lock_key = params.get("lock_key").and_then(|v| v.as_str()).unwrap_or_default();
+        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(format!("pipeline.is_locked lock: {e}")),
+        };
+        return Ok(match reg.locked_by(lock_key) {
+            Some(id) => serde_json::Value::String(id),
+            None => serde_json::Value::Null,
+        });
+    }
+    if method == "__pipeline_list" {
+        let plugin_name = params.get("plugin_name").and_then(|v| v.as_str()).unwrap_or_default();
+        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(format!("pipeline.list lock: {e}")),
+        };
+        let defs: Vec<_> = reg.defs.iter().filter(|d| d.plugin == plugin_name).collect();
+        return serde_json::to_value(&defs).map_err(|e| format!("pipeline.list encode: {e}"));
+    }
+    if method == "__pipeline_get" {
+        let plugin_name = params.get("plugin_name").and_then(|v| v.as_str()).unwrap_or_default();
+        let id = params.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(format!("pipeline.get lock: {e}")),
+        };
+        return match reg.defs.iter().find(|d| d.id == id && d.plugin == plugin_name) {
+            Some(def) => serde_json::to_value(def).map_err(|e| format!("pipeline.get encode: {e}")),
+            None => Ok(serde_json::Value::Null),
+        };
+    }
+    if method == "__pipeline_cancel" {
+        let run_id = params.get("run_id").and_then(|v| v.as_str()).unwrap_or_default();
+        let state = app.state::<AppState>();
+        if let Ok(mut reg) = state.pipeline_engine.registry.lock() {
+            reg.cancel(run_id);
+        }
+        state.pipeline_engine.cv.notify_all();
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__pipeline_list_runs" {
+        let default_plugin = params.get("plugin_name").and_then(|v| v.as_str()).unwrap_or_default();
+        let filter_plugin = params.get("plugin").and_then(|v| v.as_str());
+        let filter_pipeline_id = params.get("pipeline_id").and_then(|v| v.as_str());
+        let all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(format!("pipeline.list_runs lock: {e}")),
+        };
+        let plugin_scope: Option<String> = if all {
+            None
+        } else {
+            Some(filter_plugin.unwrap_or(default_plugin).to_string())
+        };
+        let runs: Vec<_> = reg
+            .runs
+            .iter()
+            .filter(|r| plugin_scope.as_deref().map_or(true, |p| r.plugin == p))
+            .filter(|r| filter_pipeline_id.map_or(true, |id| r.pipeline_id == id))
+            .cloned()
+            .collect();
+        return serde_json::to_value(&runs).map_err(|e| format!("pipeline.list_runs encode: {e}"));
+    }
+    if method == "__pipeline_get_run" {
+        let run_id = params.get("run_id").and_then(|v| v.as_str()).unwrap_or_default();
+        let reg = match app.state::<AppState>().pipeline_engine.registry.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(format!("pipeline.get_run lock: {e}")),
+        };
+        return match reg.get_run(run_id) {
+            Some(r) => serde_json::to_value(r).map_err(|e| format!("pipeline.get_run encode: {e}")),
+            None => Ok(serde_json::Value::Null),
+        };
+    }
+    if method == "__pipeline_list_ops" {
+        let ops = match app.state::<AppState>().plugin_host.lock() {
+            Ok(host) => host.list_all_pipeline_ops(),
+            Err(_) => Vec::new(),
+        };
+        return serde_json::to_value(&ops).map_err(|e| format!("pipeline.list_ops encode: {e}"));
+    }
+
+    // `arbor.brp.*` PROXY: the `BrpRegistry` (live HTTP client + SSE
+    // subscriptions) lives in the shell's `AppState.brp`, so `corvus-be`'s
+    // `arbor.brp.*` namespace round-trips each op here. These mirror
+    // `ns_shell/brp.rs`. `host_dispatch` is sync, so the async probe / call are
+    // driven with `tauri::async_runtime::block_on`. ⚠️ `__brp_watch` registers
+    // the SSE stream with a NO-OP callback: the events fire here in the shell,
+    // but `corvus-be`'s watch callback lives in the backend VM with no inverse
+    // channel — the events are intentionally dropped; the subscription is parked
+    // so `__brp_unwatch` (and `disconnect`) can tear it down.
+    if method == "__brp_connect" {
+        use corvus_brp::prelude::{
+            probe_capabilities, BrpClient, BrpSession, BrpStatus, DEFAULT_ENDPOINT,
+        };
+        use std::time::Duration;
+        let endpoint = params
+            .get("endpoint")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(DEFAULT_ENDPOINT)
+            .to_string();
+        let timeout_ms = params.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(5_000);
+        let client = match BrpClient::new(endpoint.clone(), Duration::from_millis(timeout_ms)) {
+            Ok(c) => c,
+            Err(e) => return Ok(brp_error_envelope_value(e)),
+        };
+        let caps = match tauri::async_runtime::block_on(probe_capabilities(&client)) {
+            Ok(c) => c,
+            Err(e) => return Ok(brp_error_envelope_value(e)),
+        };
+        let session = BrpSession::new(endpoint, client).with_capabilities(caps);
+        let status = BrpStatus::from_session(Some(&session));
+        match app.state::<AppState>().brp.lock() {
+            Ok(mut reg) => reg.set(session),
+            Err(_) => return Ok(serde_json::json!({ "ok": false, "error": { "kind": "internal", "message": "brp registry mutex poisoned" } })),
+        }
+        return serde_json::to_value(&status)
+            .map(|s| serde_json::json!({ "ok": true, "result": s }))
+            .map_err(|e| format!("brp.connect encode: {e}"));
+    }
+    if method == "__brp_disconnect" {
+        use corvus_brp::prelude::BrpStatus;
+        if let Ok(mut reg) = app.state::<AppState>().brp.lock() {
+            reg.clear();
+        }
+        return serde_json::to_value(BrpStatus::from_session(None))
+            .map_err(|e| format!("brp.disconnect encode: {e}"));
+    }
+    if method == "__brp_status" {
+        use corvus_brp::prelude::BrpStatus;
+        let status = app
+            .state::<AppState>()
+            .brp
+            .lock()
+            .map(|reg| BrpStatus::from_session(reg.session()))
+            .unwrap_or_else(|_| BrpStatus::from_session(None));
+        return serde_json::to_value(&status).map_err(|e| format!("brp.status encode: {e}"));
+    }
+    if method == "__brp_call" {
+        let method_name = params.get("method").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let call_params = params.get("params").cloned().filter(|v| !v.is_null());
+        let client = match app.state::<AppState>().brp.lock() {
+            Ok(reg) => reg.session().map(|s| s.client.clone()),
+            Err(_) => return Ok(serde_json::json!({ "ok": false, "error": { "kind": "internal", "message": "brp registry mutex poisoned" } })),
+        };
+        let Some(client) = client else {
+            return Ok(serde_json::json!({ "ok": false, "error": { "kind": "not_connected", "message": "BRP not connected — call arbor.brp.connect first" } }));
+        };
+        return Ok(match tauri::async_runtime::block_on(client.call(&method_name, call_params)) {
+            Ok(value) => serde_json::json!({ "ok": true, "result": value }),
+            Err(e) => brp_error_envelope_value(e),
+        });
+    }
+    if method == "__brp_watch" {
+        use corvus_brp::prelude::{run_watch_stream, WatchSub};
+        let method_name = params.get("method").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let watch_params = params.get("params").cloned().filter(|v| !v.is_null());
+        let state = app.state::<AppState>();
+        let (endpoint, sub_id) = match state.brp.lock() {
+            Ok(mut reg) => match reg.session() {
+                Some(s) => {
+                    let ep = s.endpoint.clone();
+                    (ep, reg.next_watch_id())
+                }
+                None => return Err("BRP not connected — call arbor.brp.connect first".to_string()),
+            },
+            Err(e) => return Err(format!("brp.watch lock: {e}")),
+        };
+        let join = tokio::spawn(async move {
+            run_watch_stream(endpoint, method_name, watch_params, move |_event| {}).await;
+        });
+        if let Ok(mut reg) = state.brp.lock() {
+            reg.insert_watch(WatchSub {
+                id: sub_id,
+                plugin: "corvus-be".to_string(),
+                method: params.get("method").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+                hook_name: String::new(),
+                aborter: join.abort_handle(),
+            });
+        }
+        return Ok(serde_json::json!(sub_id));
+    }
+    if method == "__brp_unwatch" {
+        let sub_id = params.get("sub_id").and_then(|v| v.as_u64()).unwrap_or(0);
+        if sub_id == 0 {
+            return Ok(serde_json::json!(false));
+        }
+        let removed = match app.state::<AppState>().brp.lock() {
+            Ok(mut reg) => match reg.take_watch(sub_id) {
+                Some(sub) => {
+                    sub.aborter.abort();
+                    true
+                }
+                None => false,
+            },
+            Err(_) => false,
+        };
+        return Ok(serde_json::json!(removed));
+    }
+
+    // ── cloud (`arbor.cloud.*`) PROXY handlers ──────────────────────────────────
+    // corvus-be's `arbor.cloud.*` namespace round-trips here. Each block re-runs
+    // the body of the matching `ns_shell/cloud.rs` installer closure, reading args
+    // from the JSON `params` (= the serde of the Lua opts table) and using
+    // `tauri::async_runtime::block_on` in place of the `block_on!` macro. All field
+    // validation + error strings are byte-identical to `ns_shell/cloud.rs`.
+    // `arbor-cloud` paths reach the shared logic via `crate::cloud::{ops,transfer,
+    // oauth_google,secrets,types}`.
+    if method == "__cloud_secret_set" {
+        let r = params.get("secret_ref").and_then(|v| v.as_str()).unwrap_or_default();
+        let v = params.get("value").and_then(|v| v.as_str()).unwrap_or_default();
+        return crate::cloud::secrets::set(r, v).map(|_| serde_json::Value::Null).map_err(|e| e.to_string());
+    }
+    if method == "__cloud_secret_exists" {
+        let r = params.get("secret_ref").and_then(|v| v.as_str()).unwrap_or_default();
+        return crate::cloud::secrets::exists(r).map(serde_json::Value::Bool).map_err(|e| e.to_string());
+    }
+    if method == "__cloud_secret_delete" {
+        let r = params.get("secret_ref").and_then(|v| v.as_str()).unwrap_or_default();
+        return crate::cloud::secrets::delete(r).map(|_| serde_json::Value::Null).map_err(|e| e.to_string());
+    }
+    if method == "__cloud_test_connection" {
+        let op = "arbor.cloud.test_connection";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str());
+        let r = tauri::async_runtime::block_on(crate::cloud::ops::test_connection(&conn, bucket))
+            .map_err(|e| e.to_string())?;
+        return serde_json::to_value(&r).map_err(|e| format!("{op} encode: {e}"));
+    }
+    if method == "__cloud_test_connection_async" {
+        let op = "arbor.cloud.test_connection_async";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let on_done = params.get("on_done").and_then(|v| v.as_str())
+            .ok_or_else(|| format!("{op}: missing required field `on_done`"))?.to_string();
+        let request_id = params.get("request_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let app2 = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let res = crate::cloud::ops::test_connection(&conn, bucket.as_deref()).await;
+            let payload = match res {
+                Ok(r)  => serde_json::json!({ "request_id": request_id, "ok": true,  "reply": r }),
+                Err(e) => serde_json::json!({ "request_id": request_id, "ok": false, "error": e.to_string() }),
+            };
+            let payload_str = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+            std::thread::spawn(move || {
+                let state = app2.state::<AppState>();
+                if let Ok(host) = state.plugin_host.lock() {
+                    arbor_plugin_core::prelude::fire_broadcast(&host, &on_done, &payload_str);
+                };
+            });
+        });
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__cloud_list" {
+        let op = "arbor.cloud.list";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str())
+            .ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
+        let prefix = params.get("prefix").and_then(|v| v.as_str()).unwrap_or_default();
+        let limit = params.get("limit").and_then(|v| v.as_i64()).map(|n| n.max(0) as usize);
+        let page = tauri::async_runtime::block_on(crate::cloud::ops::list(&conn, bucket, prefix, limit))
+            .map_err(|e| e.to_string())?;
+        return serde_json::to_value(&page).map_err(|e| format!("{op} encode: {e}"));
+    }
+    if method == "__cloud_stat" {
+        let op = "arbor.cloud.stat";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
+        let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `path`"))?;
+        let o = tauri::async_runtime::block_on(crate::cloud::ops::stat(&conn, bucket, path)).map_err(|e| e.to_string())?;
+        return serde_json::to_value(&o).map_err(|e| format!("{op} encode: {e}"));
+    }
+    if method == "__cloud_delete" {
+        let op = "arbor.cloud.delete";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
+        let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `path`"))?;
+        let recursive = params.get("recursive").and_then(|v| v.as_bool()).unwrap_or(false);
+        tauri::async_runtime::block_on(crate::cloud::ops::delete(&conn, bucket, path, recursive)).map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__cloud_copy" {
+        let op = "arbor.cloud.copy";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?;
+        let src = params.get("src").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `src`"))?;
+        let dst = params.get("dst").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `dst`"))?;
+        tauri::async_runtime::block_on(crate::cloud::ops::copy(&conn, bucket, src, dst)).map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__cloud_list_stream" {
+        let op = "arbor.cloud.list_stream";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?.to_string();
+        let stream_id = params.get("stream_id").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `stream_id`"))?.to_string();
+        let prefix = params.get("prefix").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let cap = params.get("cap").and_then(|v| v.as_i64()).map(|n| n.max(0) as usize);
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let state = app.state::<AppState>();
+            if let Ok(mut map) = state.cloud_cancellations.lock() { map.insert(stream_id.clone(), cancel.clone()); };
+        }
+        let host = app.state::<AppState>().cloud_host().ok_or_else(|| format!("{op}: cloud host not ready"))?;
+        let app2 = app.clone();
+        let sid = stream_id.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = crate::cloud::ops::list_stream(host, conn, bucket, prefix, sid.clone(), cap, cancel).await;
+            let st = app2.state::<AppState>();
+            if let Ok(mut map) = st.cloud_cancellations.lock() { map.remove(&sid); };
+        });
+        return Ok(serde_json::Value::String(stream_id));
+    }
+    if method == "__cloud_search_stream" {
+        let op = "arbor.cloud.search_stream";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?.to_string();
+        let stream_id = params.get("stream_id").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `stream_id`"))?.to_string();
+        let pattern = params.get("pattern").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `pattern`"))?.to_string();
+        let root_prefix = params.get("root_prefix").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let state = app.state::<AppState>();
+            if let Ok(mut map) = state.cloud_cancellations.lock() { map.insert(stream_id.clone(), cancel.clone()); };
+        }
+        let host = app.state::<AppState>().cloud_host().ok_or_else(|| format!("{op}: cloud host not ready"))?;
+        let app2 = app.clone();
+        let sid = stream_id.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = crate::cloud::ops::search_stream(host, conn, bucket, root_prefix, pattern, sid.clone(), cancel).await;
+            let st = app2.state::<AppState>();
+            if let Ok(mut map) = st.cloud_cancellations.lock() { map.remove(&sid); };
+        });
+        return Ok(serde_json::Value::String(stream_id));
+    }
+    if method == "__cloud_cancel" {
+        let stream_id = params.get("stream_id").and_then(|v| v.as_str()).unwrap_or_default();
+        let state = app.state::<AppState>();
+        if let Ok(map) = state.cloud_cancellations.lock() {
+            if let Some(flag) = map.get(stream_id) { flag.store(true, std::sync::atomic::Ordering::Relaxed); }
+        };
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__cloud_is_cancelled" {
+        let stream_id = params.get("stream_id").and_then(|v| v.as_str()).unwrap_or_default();
+        let state = app.state::<AppState>();
+        let cancelled = if let Ok(map) = state.cloud_cancellations.lock() {
+            map.get(stream_id).map(|f| f.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false)
+        } else { false };
+        return Ok(serde_json::Value::Bool(cancelled));
+    }
+    if method == "__cloud_download" {
+        let op = "arbor.cloud.download";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?.to_string();
+        let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `path`"))?.to_string();
+        let local = params.get("local").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `local`"))?.to_string();
+        let host = app.state::<AppState>().cloud_host().ok_or_else(|| format!("{op}: cloud host not ready"))?;
+        let id = tauri::async_runtime::block_on(crate::cloud::transfer::download(host, conn, bucket, path, std::path::PathBuf::from(local))).map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::String(id));
+    }
+    if method == "__cloud_upload" {
+        let op = "arbor.cloud.upload";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?.to_string();
+        let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `path`"))?.to_string();
+        let local = params.get("local").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `local`"))?.to_string();
+        let overwrite = params.get("overwrite").and_then(|v| v.as_bool()).unwrap_or(false);
+        let host = app.state::<AppState>().cloud_host().ok_or_else(|| format!("{op}: cloud host not ready"))?;
+        let id = tauri::async_runtime::block_on(crate::cloud::transfer::upload(host, conn, bucket, path, std::path::PathBuf::from(local), overwrite)).map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::String(id));
+    }
+    if method == "__cloud_sync" {
+        let op = "arbor.cloud.sync";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?.to_string();
+        let remote_prefix = params.get("remote_prefix").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `remote_prefix`"))?.to_string();
+        let local = params.get("local").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `local`"))?.to_string();
+        let direction = params.get("direction").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `direction`"))?.to_string();
+        let delete = params.get("delete").and_then(|v| v.as_bool()).unwrap_or(false);
+        let dir = match direction.as_str() {
+            "up" => crate::cloud::transfer::SyncDir::Up,
+            "down" => crate::cloud::transfer::SyncDir::Down,
+            other => return Err(format!("{op}: direction must be \"up\" or \"down\", got {other:?}")),
+        };
+        let host = app.state::<AppState>().cloud_host().ok_or_else(|| format!("{op}: cloud host not ready"))?;
+        let id = tauri::async_runtime::block_on(crate::cloud::transfer::sync(host, conn, bucket, remote_prefix, std::path::PathBuf::from(local), dir, delete)).map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::String(id));
+    }
+    if method == "__cloud_download_many" {
+        let op = "arbor.cloud.download_many";
+        let conn: crate::cloud::types::CloudConnection = serde_json::from_value(
+            params.get("conn").cloned().ok_or_else(|| format!("{op}: missing required `conn` table"))?,
+        ).map_err(|e| format!("invalid conn: {e}"))?;
+        let bucket = params.get("bucket").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `bucket`"))?.to_string();
+        let local_dir = params.get("local_dir").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `local_dir`"))?.to_string();
+        let stream_id = params.get("stream_id").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `stream_id`"))?.to_string();
+        let parallel = params.get("parallel").and_then(|v| v.as_u64()).map(|n| n as usize);
+        let op_label = params.get("op_label").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let paths: Vec<String> = params.get("paths").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+        if paths.is_empty() { return Err(format!("{op}: `paths` must contain at least one entry")); }
+        let mut extra_steps: Vec<(String, String)> = Vec::new();
+        if let Some(arr) = params.get("extra_steps").and_then(|v| v.as_array()) {
+            for v in arr {
+                let k = v.get("key").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                let l = v.get("label").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                if !k.is_empty() { extra_steps.push((k, l)); }
+            }
+        }
+        let keep_open = params.get("keep_open").and_then(|v| v.as_bool()).unwrap_or(false);
+        let host = app.state::<AppState>().cloud_host().ok_or_else(|| format!("{op}: cloud host not ready"))?;
+        let job_id = tauri::async_runtime::block_on(crate::cloud::transfer::download_many(
+            host, conn, bucket, paths, std::path::PathBuf::from(local_dir),
+            parallel.unwrap_or(4).clamp(1, 16),
+            op_label.unwrap_or_else(|| "Downloading items".to_string()),
+            stream_id.clone(), extra_steps, keep_open,
+        )).map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::String(job_id));
+    }
+    if method == "__cloud_concat_files" {
+        let op = "arbor.cloud.concat_files";
+        let output = params.get("output").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `output`"))?.to_string();
+        let inputs: Vec<String> = params.get("inputs").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+        if inputs.is_empty() { return Err(format!("{op}: `inputs` must contain at least one entry")); }
+        let delete_inputs = params.get("delete_inputs").and_then(|v| v.as_bool()).unwrap_or(false);
+        tauri::async_runtime::block_on(crate::cloud::ops::concat_files(inputs, output, delete_inputs)).map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__cloud_report_progress" {
+        let op = "arbor.cloud.report_progress";
+        let stream_id = params.get("stream_id").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `stream_id`"))?;
+        let step = params.get("step").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `step`"))?;
+        let status = params.get("status").and_then(|v| v.as_str());
+        let detail = params.get("detail").and_then(|v| v.as_str());
+        let op_id = format!("cloud-storage:op:{stream_id}");
+        let kind = if status.is_some() { "update_step" } else { "set_current" };
+        use tauri::Emitter;
+        let _ = app.emit("arbor://plugin-operation-update", serde_json::json!({
+            "id": op_id, "plugin": "cloud-storage", "kind": kind,
+            "step": step, "status": status, "detail": detail,
+        }));
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__cloud_report_done" {
+        let op = "arbor.cloud.report_done";
+        let stream_id = params.get("stream_id").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `stream_id`"))?.to_string();
+        let ok = params.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        let summary = params.get("summary").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let error = params.get("error").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let op_id = format!("cloud-storage:op:{stream_id}");
+        use tauri::Emitter;
+        let _ = app.emit("arbor://plugin-operation-finish", serde_json::json!({
+            "id": op_id, "plugin": "cloud-storage", "summary": summary, "error": error,
+        }));
+        let state = app.state::<AppState>();
+        let job_id = state.cloud_pending_ops.lock().ok().and_then(|mut m| m.remove(&stream_id));
+        if let Some(job_id) = job_id {
+            let cancelled = state.cloud_cancellations.lock().ok()
+                .and_then(|m| m.get(&stream_id).cloned())
+                .map(|f| f.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
+            if let Ok(mut jobs) = state.lock_jobs() {
+                let status = if ok { crate::jobs::JobStatus::Completed { exit_code: 0 } }
+                    else if cancelled { crate::jobs::JobStatus::Cancelled }
+                    else { crate::jobs::JobStatus::Failed { error: error.clone().unwrap_or_else(|| "merge failed".into()) } };
+                jobs.set_status(&job_id, status);
+            }
+            let final_err = if ok { None } else if cancelled { Some("cancelled".to_string()) } else { error.clone().or_else(|| Some("merge failed".into())) };
+            let _ = app.emit("arbor://job-done", serde_json::json!({
+                "job_id": job_id, "success": ok, "exit_code": if ok { 0 } else { -1 },
+                "cancelled": cancelled, "error": final_err,
+            }));
+            if let Ok(mut map) = state.cloud_cancellations.lock() { map.remove(&job_id); map.remove(&stream_id); }
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__cloud_pick_chunk_order" {
+        let op = "arbor.cloud.pick_chunk_order";
+        let action = params.get("action").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `action`"))?.to_string();
+        let op_label = params.get("op_label").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let pname = params.get("plugin_name").and_then(|v| v.as_str()).unwrap_or("cloud-storage").to_string();
+        let items = params.get("items").cloned().unwrap_or(serde_json::Value::Array(Vec::new()));
+        let extra = params.get("extra").cloned().unwrap_or(serde_json::Value::Object(Default::default()));
+        use tauri::Emitter;
+        let _ = app.emit("arbor://cloud-chunk-order-open", serde_json::json!({
+            "plugin_name": pname, "op_label": op_label, "action": action, "items": items, "extra": extra,
+        }));
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__cloud_oauth_start" {
+        let op = "arbor.cloud.oauth_start";
+        let secret_ref = params.get("secret_ref").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `secret_ref`"))?.to_string();
+        let client_id = params.get("client_id").and_then(|v| v.as_str()).ok_or_else(|| format!("{op}: missing required field `client_id`"))?.to_string();
+        let client_secret = params.get("client_secret").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let host = app.state::<AppState>().cloud_host().ok_or_else(|| format!("{op}: cloud host not ready"))?;
+        let url = tauri::async_runtime::block_on(crate::cloud::oauth_google::start(host, secret_ref, client_id, client_secret)).map_err(|e| e.to_string())?;
+        return Ok(serde_json::Value::String(url));
+    }
+
+    // Master plugin kill-switch persistence (reverse method). After the Phase-2
+    // flip, corvus-be owns the live Corvus plugin host and serves the
+    // `set_plugins_enabled` RPC, but the typed `AppConfig.plugins_enabled` flag +
+    // its TOML writer live only in the shell. corvus-be round-trips the FLAG write
+    // here: idempotent compare-and-save, returning whether anything changed
+    // (`true` → corvus-be applies the runtime mutation; `false` → it short-circuits,
+    // mirroring the shell's old early `return Ok(())`). Mirrors
+    // `ipc/platform/plugin.rs::set_plugins_enabled`'s persistence block exactly.
+    if method == "__set_plugins_enabled" {
+        let enabled = params.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+        let st = app.state::<AppState>();
+        let mut cfg = st.lock_config().map_err(|e| e.to_string())?;
+        if cfg.plugins_enabled == enabled {
+            return Ok(serde_json::json!(false));
+        }
+        cfg.plugins_enabled = enabled;
+        if let Err(e) = crate::config::app_config::save(&cfg) {
+            tracing::warn!("failed to persist plugins_enabled: {e}");
+        }
+        return Ok(serde_json::json!(true));
+    }
+
     let account: String = match method {
         "__session" | "__refresh" => serde_json::from_value(params)
             .map_err(|e| format!("{method}: invalid account: {e}"))?,
@@ -588,6 +1319,24 @@ fn host_dispatch(
         Ok(session) => serde_json::to_value(session).map_err(|e| e.to_string()),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// Maps a `corvus_brp::prelude::BrpError` to the Lua single-shot error envelope,
+/// mirroring `ns_shell/brp.rs::error_from_brp`. Used by the `__brp_connect` /
+/// `__brp_call` proxy handlers in `host_dispatch`.
+fn brp_error_envelope_value(e: corvus_brp::prelude::BrpError) -> serde_json::Value {
+    use corvus_brp::prelude::BrpError;
+    let err = match e {
+        BrpError::Transport(m) => serde_json::json!({ "kind": "transport", "message": m }),
+        BrpError::Status { status, body } => serde_json::json!({ "kind": "status", "message": format!("HTTP {status}: {body}"), "code": status as i64 }),
+        BrpError::InvalidResponse(m) => serde_json::json!({ "kind": "invalid_response", "message": m }),
+        BrpError::Rpc { code, message, data } => {
+            let mut e = serde_json::json!({ "kind": "rpc", "message": message, "code": code });
+            if let Some(d) = data { e["data"] = d; }
+            e
+        }
+    };
+    serde_json::json!({ "ok": false, "error": err })
 }
 
 /// Resolve a backend binary (`corvus-be`, …) by its fixed name, env-agnostically:

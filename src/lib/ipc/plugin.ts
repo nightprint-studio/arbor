@@ -1,12 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
-import { platform } from './rpc';
+import { platform, corvus } from './rpc';
 import type { PluginManifest, PluginInfo } from '../types/plugin';
 
 export const listPlugins = () =>
   platform<PluginManifest[]>('list_plugins');
 
 export const reloadPlugins = () =>
-  platform<void>('reload_plugins');
+  corvus<void>('reload_plugins');
 
 /** Master kill-switch — read whether the plugin system is enabled at all. */
 export const getPluginsEnabled = () =>
@@ -19,14 +19,14 @@ export const getPluginsEnabled = () =>
  * Both branches emit `arbor://plugins-reloaded` so listeners refresh.
  */
 export const setPluginsEnabled = (enabled: boolean) =>
-  platform<void>('set_plugins_enabled', { enabled });
+  corvus<void>('set_plugins_enabled', { enabled });
 
 export const execHook = (hook: string, contextJson: string) =>
-  platform<void>('exec_hook', { hook, context_json: contextJson });
+  corvus<void>('exec_hook', { hook, context_json: contextJson });
 
 /** Fire a specific action on a specific plugin (called by the frontend when user interacts with plugin-registered UI). */
 export const firePluginAction = (pluginName: string, action: string, contextJson: string) =>
-  platform<void>('fire_plugin_action', { plugin_name: pluginName, action, context_json: contextJson });
+  corvus<void>('fire_plugin_action', { plugin_name: pluginName, action, context_json: contextJson });
 
 /**
  * Invoke a registered command on behalf of `callerPlugin` (declarative
@@ -39,7 +39,7 @@ export const fireCommand = (
   id: string,
   args: unknown,
   contextJson: string,
-) => platform<void>('fire_command', { caller_plugin: callerPlugin, id, args, context_json: contextJson });
+) => corvus<void>('fire_command', { caller_plugin: callerPlugin, id, args, context_json: contextJson });
 
 /**
  * Enable a plugin. Returns the ordered list of plugins that were actually
@@ -48,7 +48,7 @@ export const fireCommand = (
  * first to detect blockers and prompt the user when the cascade is non-trivial.
  */
 export const enablePlugin = (name: string) =>
-  platform<string[]>('enable_plugin', { name });
+  corvus<string[]>('enable_plugin', { name });
 
 /**
  * Disable a plugin. Returns the ordered list of plugins that were disabled
@@ -56,7 +56,7 @@ export const enablePlugin = (name: string) =>
  * Call `pluginDisablePreview` first when you need to show a confirmation.
  */
 export const disablePlugin = (name: string) =>
-  platform<string[]>('disable_plugin', { name });
+  corvus<string[]>('disable_plugin', { name });
 
 /** One blocker preventing a plugin's enable cascade from running. */
 export interface EnableBlocker {
@@ -75,11 +75,11 @@ export interface EnablePreview {
 
 /** Preview an enable cascade — used to drive the confirmation modal. */
 export const pluginEnablePreview = (name: string) =>
-  platform<EnablePreview>('plugin_enable_preview', { name });
+  corvus<EnablePreview>('plugin_enable_preview', { name });
 
 /** Preview a disable cascade — every transitively-required dependent. */
 export const pluginDisablePreview = (name: string) =>
-  platform<string[]>('plugin_disable_preview', { name });
+  corvus<string[]>('plugin_disable_preview', { name });
 
 /**
  * Permanently uninstall a plugin. Removes the plugin folder, its global
@@ -92,7 +92,7 @@ export const deletePlugin = (name: string) =>
 
 /** List all loaded plugins with their enabled state and scheduler info. */
 export const listPluginInfo = () =>
-  platform<PluginInfo[]>('list_plugin_info');
+  corvus<PluginInfo[]>('list_plugin_info');
 
 export interface DepGraphEdge {
   name:     string;
@@ -114,27 +114,27 @@ export interface DepGraphNode {
 
 /** Return the plugin dependency graph (each plugin with its deps + dependents). */
 export const pluginDepGraph = () =>
-  platform<DepGraphNode[]>('plugin_dep_graph');
+  corvus<DepGraphNode[]>('plugin_dep_graph');
 
 /** Return the names of currently-enabled plugins that directly depend on `name`. */
 export const pluginDependents = (name: string) =>
-  platform<string[]>('plugin_dependents', { name });
+  corvus<string[]>('plugin_dependents', { name });
 
 /** Start a specific scheduler action for a plugin. */
 export const startPluginScheduler = (name: string, action: string) =>
-  platform<void>('start_plugin_scheduler', { name, action });
+  corvus<void>('start_plugin_scheduler', { name, action });
 
 /** Stop a specific scheduler action for a plugin. */
 export const stopPluginScheduler = (name: string, action: string) =>
-  platform<void>('stop_plugin_scheduler', { name, action });
+  corvus<void>('stop_plugin_scheduler', { name, action });
 
 /** Return all persisted settings for a plugin as a key→value map. */
 export const pluginSettingsGet = (name: string) =>
-  platform<Record<string, unknown>>('plugin_settings_get', { name });
+  corvus<Record<string, unknown>>('plugin_settings_get', { name });
 
 /** Overwrite all settings for a plugin with the provided key→value map. */
 export const pluginSettingsSetAll = (name: string, values: Record<string, unknown>) =>
-  platform<void>('plugin_settings_set_all', { name, values });
+  corvus<void>('plugin_settings_set_all', { name, values });
 
 /** Notify the backend whether the app window currently has focus.
  *  Focus-gated schedulers (only_when_focused = true) skip firing while this is false. */
@@ -143,7 +143,7 @@ export const setAppFocus = (focused: boolean) =>
 
 /** Tell the backend which tab is currently active so arbor.repo.fetch_active_tab() works. */
 export const setActiveTab = (tabId: string | null) =>
-  invoke<void>('set_active_tab', { tabId });
+  corvus<void>('set_active_tab', { tab_id: tabId });
 
 // ── Plugin import / export (zip bundles) ───────────────────────────────────
 

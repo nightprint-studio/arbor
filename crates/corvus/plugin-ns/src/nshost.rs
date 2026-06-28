@@ -505,6 +505,175 @@ pub trait NsHost: Send + Sync {
     /// `arbor.ui.clear_theme_tokens()` — emit `arbor://theme-overlay` with an empty
     /// `vars` object (the agreed "release my overlay" signal). Always `Ok(())`.
     fn ui_clear_theme_overlay(&self, plugin_name: &str) -> Result<(), String>;
+
+    // ── pipeline (`arbor.pipeline.*`) ────────────────────────────────────────
+    //
+    // PROXY namespace: the `PipelineEngine` / `PipelineRuntime` (the registry of
+    // defs + runs and the orchestrator threads that drive the OS processes) lives
+    // in the SHELL's `AppState` (`pipeline_engine`), not in `corvus-be`. So every
+    // host-touching op is a reverse-channel round-trip — the `CorvusNsHost` impl
+    // calls `host_call("__pipeline_<op>", …)` and the matching shell handler in
+    // `src-tauri/src/ipc/mod.rs` reads/mutates the real engine + starts/resumes/
+    // discards runs exactly as `ns_shell/pipeline.rs` did, returning the same
+    // shapes / error strings (the installer surfaces this `String` verbatim).
+    // `register_op` / `unregister_op` are purely Lua-local (no host method).
+    //
+    // ⚠️ Callback gap (same as `arbor.job.on_done`): the shell can only dispatch
+    // `lua_op` step handlers + push per-run callbacks into the VM that owns the
+    // orchestrator. corvus-be VMs are a separate process with no shell→BE push
+    // channel, so a run started shell-side cannot call back into a BE-registered
+    // op handler. `run`/`resume` start the orchestration cleanly (progress is
+    // observable via the `arbor://pipeline-*` events + polling `list_runs`/
+    // `get_run`), but the async callback-into-BE delivery degrades.
+
+    /// `arbor.pipeline.define(config)` — register a pipeline definition. `config`
+    /// is the JSON the installer marshalled from the Lua table; the shell handler
+    /// deserializes it into the typed `PipelineDef` (injecting `plugin =
+    /// plugin_name`), registers it on the engine, and emits
+    /// `arbor://pipeline-def-registered`.
+    fn pipeline_define(
+        &self,
+        config: serde_json::Value,
+        plugin_name: &str,
+    ) -> Result<(), String>;
+
+    /// `arbor.pipeline.run{pipeline_id, cwd?, silent?}` — mint a run id, build the
+    /// run skeleton, register it, and start the orchestrator. Returns the
+    /// `run_id`. Scoped to `plugin_name`. Errors carry the shell's `pipeline.run:
+    /// …` text.
+    fn pipeline_run(
+        &self,
+        plugin_name: &str,
+        pipeline_id: &str,
+        cwd: Option<&str>,
+        silent: Option<bool>,
+    ) -> Result<String, String>;
+
+    /// `arbor.pipeline.resume(run_id)` — resume a resumable run. Errors carry the
+    /// shell's `pipeline.resume: …` text.
+    fn pipeline_resume(&self, run_id: &str) -> Result<(), String>;
+
+    /// `arbor.pipeline.discard(run_id)` — drop a failed/cancelled run. Errors carry
+    /// the shell's `pipeline.discard: …` text.
+    fn pipeline_discard(&self, run_id: &str) -> Result<(), String>;
+
+    /// `arbor.pipeline.is_locked(lock_key)` — the run id currently holding
+    /// `lock_key`, or `None` when free (→ Lua nil).
+    fn pipeline_is_locked(&self, lock_key: &str) -> Result<Option<String>, String>;
+
+    /// `arbor.pipeline.list()` — the serde-serialized `Vec<PipelineDef>` for
+    /// `plugin_name`, as a JSON array.
+    fn pipeline_list(&self, plugin_name: &str) -> Result<serde_json::Value, String>;
+
+    /// `arbor.pipeline.get(id)` — the def JSON for `plugin_name`+`id`, or `None`.
+    fn pipeline_get(
+        &self,
+        plugin_name: &str,
+        id: &str,
+    ) -> Result<Option<serde_json::Value>, String>;
+
+    /// `arbor.pipeline.cancel(run_id)` — best-effort cancel (never fails on the Lua
+    /// surface; the installer swallows any host-call error).
+    fn pipeline_cancel(&self, run_id: &str) -> Result<(), String>;
+
+    /// `arbor.pipeline.list_runs({plugin?, pipeline_id?, all?})` — the
+    /// serde-serialized `Vec<PipelineRun>` JSON array. `all=false` scopes to
+    /// `filter_plugin` (default `plugin_name`); `all=true` returns every plugin's
+    /// runs. `pipeline_id` additionally filters.
+    fn pipeline_list_runs(
+        &self,
+        plugin_name: &str,
+        filter_plugin: Option<&str>,
+        filter_pipeline_id: Option<&str>,
+        all: bool,
+    ) -> Result<serde_json::Value, String>;
+
+    /// `arbor.pipeline.get_run(run_id)` — the run JSON, or `None`.
+    fn pipeline_get_run(&self, run_id: &str) -> Result<Option<serde_json::Value>, String>;
+
+    /// `arbor.pipeline.list_ops()` — all registered pipeline ops across enabled
+    /// plugins as a JSON array of `"<plugin>.<op>"` strings.
+    fn pipeline_list_ops(&self) -> Result<serde_json::Value, String>;
+
+    // ── cloud (`arbor.cloud.*`) ──────────────────────────────────────────────
+    //
+    // PROXY namespace: the whole cloud stack (arbor-cloud operators, ArborCloudHost,
+    // OAuth refresher, AppState.cloud_* maps) lives in the SHELL. Every method is a
+    // reverse-channel round-trip to the matching `__cloud_<op>` handler in
+    // src-tauri/src/ipc/mod.rs, which runs exactly what ns_shell/cloud.rs ran. The
+    // error String carries the shell's full `arbor.cloud.<op>: …` text, surfaced
+    // verbatim to Lua. `opts` is the serde-JSON of the Lua opts table; all field
+    // validation (require_conn / req_str / direction / paths) runs shell-side so the
+    // error strings match byte-for-byte. ⚠️ Streaming/async-reply tail of
+    // list_stream/search_stream/test_connection_async/pick_chunk_order fires into the
+    // SHELL's plugin host, NOT corvus-be's — proxy forwards only the start.
+
+    fn cloud_secret_set(&self, secret_ref: &str, value: &str) -> Result<(), String>;
+    fn cloud_secret_exists(&self, secret_ref: &str) -> Result<bool, String>;
+    fn cloud_secret_delete(&self, secret_ref: &str) -> Result<(), String>;
+    fn cloud_test_connection(&self, opts: serde_json::Value) -> Result<serde_json::Value, String>;
+    fn cloud_test_connection_async(&self, opts: serde_json::Value) -> Result<(), String>;
+    fn cloud_list(&self, opts: serde_json::Value) -> Result<serde_json::Value, String>;
+    fn cloud_list_stream(&self, opts: serde_json::Value) -> Result<String, String>;
+    fn cloud_search_stream(&self, opts: serde_json::Value) -> Result<String, String>;
+    fn cloud_cancel(&self, stream_id: &str) -> Result<(), String>;
+    fn cloud_is_cancelled(&self, stream_id: &str) -> Result<bool, String>;
+    fn cloud_stat(&self, opts: serde_json::Value) -> Result<serde_json::Value, String>;
+    fn cloud_delete(&self, opts: serde_json::Value) -> Result<(), String>;
+    fn cloud_copy(&self, opts: serde_json::Value) -> Result<(), String>;
+    fn cloud_download(&self, opts: serde_json::Value) -> Result<String, String>;
+    fn cloud_upload(&self, opts: serde_json::Value) -> Result<String, String>;
+    fn cloud_sync(&self, opts: serde_json::Value) -> Result<String, String>;
+    fn cloud_download_many(&self, opts: serde_json::Value) -> Result<String, String>;
+    fn cloud_concat_files(&self, opts: serde_json::Value) -> Result<(), String>;
+    fn cloud_report_progress(&self, opts: serde_json::Value) -> Result<(), String>;
+    fn cloud_report_done(&self, opts: serde_json::Value) -> Result<(), String>;
+    fn cloud_pick_chunk_order(&self, opts: serde_json::Value) -> Result<(), String>;
+    fn cloud_oauth_start(&self, opts: serde_json::Value) -> Result<String, String>;
+
+    // ── brp (`arbor.brp.*`) ──────────────────────────────────────────────────
+    //
+    // PROXY namespace: the `BrpRegistry` (live HTTP client + SSE subscriptions)
+    // is tied to the SHELL's `AppState.brp` + plugin-host, not to `corvus-be`.
+    // So every op is a reverse-channel round-trip — the `CorvusNsHost` impl calls
+    // `host_call("__brp_<op>", …)` and the matching handler in
+    // `src-tauri/src/ipc/mod.rs` reads/mutates the real registry exactly as
+    // `ns_shell/brp.rs` did. `connect`/`disconnect`/`status`/`call` return the
+    // Lua-shaped envelope JSON (the installer delivers it to the single-shot
+    // callback IN-PROCESS, since `host_call` already blocked on the result).
+    //
+    // ⚠️ `watch`/`unwatch` are BEST-EFFORT: `watch` registers the SSE stream on
+    // the shell and returns the `sub_id`, but the stream's events fire on the
+    // SHELL process and there is no inverse event→callback channel to push them
+    // into `corvus-be` VMs — so the watch callback NEVER fires here. `unwatch`
+    // proxies through so the shell-side stream is still torn down.
+
+    /// `arbor.brp.connect{endpoint?, timeout_ms?}` — probe + stash the session in
+    /// the shell registry. Returns the full single-shot envelope JSON
+    /// (`{ ok=true, result=<BrpStatus> }` | `{ ok=false, error={kind,message,…} }`),
+    /// which the installer hands straight to the Lua callback.
+    fn brp_connect(&self, endpoint: &str, timeout_ms: u64) -> Result<serde_json::Value, String>;
+
+    /// `arbor.brp.disconnect()` — clear the shell session; returns the cleared
+    /// `BrpStatus` JSON.
+    fn brp_disconnect(&self) -> Result<serde_json::Value, String>;
+
+    /// `arbor.brp.status()` — the current `BrpStatus` JSON from the shell session.
+    fn brp_status(&self) -> Result<serde_json::Value, String>;
+
+    /// `arbor.brp.call(method, params?)` — JSON-RPC pass-through against the live
+    /// shell session. Returns the full single-shot envelope JSON.
+    fn brp_call(&self, method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value, String>;
+
+    /// `arbor.brp.watch(method, params?)` — best-effort: register an SSE stream on
+    /// the shell, returning the `sub_id` (`> 0`). The stream's events fire on the
+    /// shell and CANNOT be pushed into this process's Lua VM, so the watch callback
+    /// never fires here (see the namespace header).
+    fn brp_watch(&self, method: &str, params: Option<serde_json::Value>) -> Result<u64, String>;
+
+    /// `arbor.brp.unwatch(sub_id)` — tear down the shell-side SSE stream. `true`
+    /// when a matching subscription was removed.
+    fn brp_unwatch(&self, sub_id: u64) -> Result<bool, String>;
 }
 
 /// Shorthand for the captured handle every namespace installer holds.

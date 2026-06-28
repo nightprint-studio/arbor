@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 
 use arbor_ipc::prelude::{serve_stdio, EventSink, FrameEventSink, FrameHostCaller, HostCaller, SharedWriter};
 use arbor_feedback::prelude::{JobSpec, JobStatus};
+use arbor_scheduler::prelude::Scheduler;
 use arbor_plugin_core::prelude::{LuaNamespaceInstaller, PluginHost};
 use corvus_core::prelude::CorvusState;
 use corvus_git::prelude::{http_auth_args_for_credentials, CloneOptions};
@@ -29,9 +30,10 @@ use corvus_git_provider_api::prelude::{
 };
 use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer, CorvusBeAppCtx};
 use corvus_plugin_ns::prelude::{
-    CiInstaller, IssuesInstaller, JobInstaller, LinkedWorktreesInstaller, MrInstaller,
-    NotesInstaller, NsHost, RepoInstaller, SecurityInstaller, TabsInstaller, TerminalInstaller,
-    ToolchainInstaller, UiBrandingInstaller, WorkspaceInstaller,
+    BrpInstaller, CiInstaller, CloudInstaller, IssuesInstaller, JobInstaller,
+    LinkedWorktreesInstaller, MrInstaller, NotesInstaller, NsHost, PipelineInstaller,
+    RepoInstaller, SecurityInstaller, TabsInstaller, TerminalInstaller, ToolchainInstaller,
+    UiBrandingInstaller, WorkspaceInstaller,
 };
 use serde_json::json;
 
@@ -53,8 +55,14 @@ mod issues;
 mod jobs;
 mod linked_worktree;
 mod merge;
+mod missing;
 mod mr;
 mod notes;
+mod plugin_dispatch;
+mod plugin_introspect;
+mod plugin_lifecycle;
+mod plugin_reload;
+mod plugin_scheduler;
 mod provider;
 mod rebase;
 mod recovery;
@@ -63,6 +71,7 @@ mod remote;
 mod repo;
 mod repo_browser;
 mod repo_config;
+mod repo_lifecycle;
 mod repo_ops;
 mod repo_registry;
 mod reset;
@@ -1262,6 +1271,278 @@ impl NsHost for CorvusNsHost {
             .host_call("__clear_theme_overlay", json!({ "plugin": plugin_name }))
             .map(|_| ())
     }
+
+    // ── pipeline ──────────────────────────────────────────────────────────────
+    //
+    // PROXY: the pipeline engine + runtime live in the shell's `AppState`, so each
+    // op is a reverse-channel round-trip to the matching `__pipeline_<op>` handler
+    // in `src-tauri/src/ipc/mod.rs`, which reads/mutates the real engine and
+    // starts/resumes/discards runs exactly as `ns_shell/pipeline.rs` did and
+    // returns the same shapes / error strings. The shell handler carries the
+    // `pipeline.<op>: …` prefixes, so these surface the `host_call` error `String`
+    // verbatim. `register_op` / `unregister_op` are purely Lua-local (no method).
+
+    fn pipeline_define(
+        &self,
+        config: serde_json::Value,
+        plugin_name: &str,
+    ) -> Result<(), String> {
+        self.state
+            .host_call(
+                "__pipeline_define",
+                json!({ "config": config, "plugin_name": plugin_name }),
+            )
+            .map(|_| ())
+    }
+
+    fn pipeline_run(
+        &self,
+        plugin_name: &str,
+        pipeline_id: &str,
+        cwd: Option<&str>,
+        silent: Option<bool>,
+    ) -> Result<String, String> {
+        let v = self.state.host_call(
+            "__pipeline_run",
+            json!({
+                "plugin_name": plugin_name,
+                "pipeline_id": pipeline_id,
+                "cwd":         cwd,
+                "silent":      silent,
+            }),
+        )?;
+        v.as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "pipeline.run: malformed run_id reply".to_string())
+    }
+
+    fn pipeline_resume(&self, run_id: &str) -> Result<(), String> {
+        self.state
+            .host_call("__pipeline_resume", json!({ "run_id": run_id }))
+            .map(|_| ())
+    }
+
+    fn pipeline_discard(&self, run_id: &str) -> Result<(), String> {
+        self.state
+            .host_call("__pipeline_discard", json!({ "run_id": run_id }))
+            .map(|_| ())
+    }
+
+    fn pipeline_is_locked(&self, lock_key: &str) -> Result<Option<String>, String> {
+        // The shell handler returns the holding run id, or JSON `null` when free —
+        // map `null` to `None` (→ Lua nil).
+        let v = self
+            .state
+            .host_call("__pipeline_is_locked", json!({ "lock_key": lock_key }))?;
+        Ok(v.as_str().map(|s| s.to_string()))
+    }
+
+    fn pipeline_list(&self, plugin_name: &str) -> Result<serde_json::Value, String> {
+        self.state
+            .host_call("__pipeline_list", json!({ "plugin_name": plugin_name }))
+    }
+
+    fn pipeline_get(
+        &self,
+        plugin_name: &str,
+        id: &str,
+    ) -> Result<Option<serde_json::Value>, String> {
+        let v = self.state.host_call(
+            "__pipeline_get",
+            json!({ "plugin_name": plugin_name, "id": id }),
+        )?;
+        Ok(if v.is_null() { None } else { Some(v) })
+    }
+
+    fn pipeline_cancel(&self, run_id: &str) -> Result<(), String> {
+        self.state
+            .host_call("__pipeline_cancel", json!({ "run_id": run_id }))
+            .map(|_| ())
+    }
+
+    fn pipeline_list_runs(
+        &self,
+        plugin_name: &str,
+        filter_plugin: Option<&str>,
+        filter_pipeline_id: Option<&str>,
+        all: bool,
+    ) -> Result<serde_json::Value, String> {
+        self.state.host_call(
+            "__pipeline_list_runs",
+            json!({
+                "plugin_name":  plugin_name,
+                "plugin":       filter_plugin,
+                "pipeline_id":  filter_pipeline_id,
+                "all":          all,
+            }),
+        )
+    }
+
+    fn pipeline_get_run(&self, run_id: &str) -> Result<Option<serde_json::Value>, String> {
+        let v = self
+            .state
+            .host_call("__pipeline_get_run", json!({ "run_id": run_id }))?;
+        Ok(if v.is_null() { None } else { Some(v) })
+    }
+
+    fn pipeline_list_ops(&self) -> Result<serde_json::Value, String> {
+        self.state.host_call("__pipeline_list_ops", json!({}))
+    }
+
+    // ── cloud ─────────────────────────────────────────────────────────────────
+    // PROXY: every op round-trips to the `__cloud_<op>` handler in the shell
+    // (src-tauri/src/ipc/mod.rs). The host_call error String is surfaced verbatim.
+
+    fn cloud_secret_set(&self, secret_ref: &str, value: &str) -> Result<(), String> {
+        self.state.host_call("__cloud_secret_set", json!({ "secret_ref": secret_ref, "value": value })).map(|_| ())
+    }
+
+    fn cloud_secret_exists(&self, secret_ref: &str) -> Result<bool, String> {
+        let v = self.state.host_call("__cloud_secret_exists", json!({ "secret_ref": secret_ref }))?;
+        Ok(v.as_bool().unwrap_or(false))
+    }
+
+    fn cloud_secret_delete(&self, secret_ref: &str) -> Result<(), String> {
+        self.state.host_call("__cloud_secret_delete", json!({ "secret_ref": secret_ref })).map(|_| ())
+    }
+
+    fn cloud_test_connection(&self, opts: serde_json::Value) -> Result<serde_json::Value, String> {
+        self.state.host_call("__cloud_test_connection", opts)
+    }
+
+    fn cloud_test_connection_async(&self, opts: serde_json::Value) -> Result<(), String> {
+        self.state.host_call("__cloud_test_connection_async", opts).map(|_| ())
+    }
+
+    fn cloud_list(&self, opts: serde_json::Value) -> Result<serde_json::Value, String> {
+        self.state.host_call("__cloud_list", opts)
+    }
+
+    fn cloud_list_stream(&self, opts: serde_json::Value) -> Result<String, String> {
+        let v = self.state.host_call("__cloud_list_stream", opts)?;
+        Ok(v.as_str().unwrap_or_default().to_string())
+    }
+
+    fn cloud_search_stream(&self, opts: serde_json::Value) -> Result<String, String> {
+        let v = self.state.host_call("__cloud_search_stream", opts)?;
+        Ok(v.as_str().unwrap_or_default().to_string())
+    }
+
+    fn cloud_cancel(&self, stream_id: &str) -> Result<(), String> {
+        self.state.host_call("__cloud_cancel", json!({ "stream_id": stream_id })).map(|_| ())
+    }
+
+    fn cloud_is_cancelled(&self, stream_id: &str) -> Result<bool, String> {
+        let v = self.state.host_call("__cloud_is_cancelled", json!({ "stream_id": stream_id }))?;
+        Ok(v.as_bool().unwrap_or(false))
+    }
+
+    fn cloud_stat(&self, opts: serde_json::Value) -> Result<serde_json::Value, String> {
+        self.state.host_call("__cloud_stat", opts)
+    }
+
+    fn cloud_delete(&self, opts: serde_json::Value) -> Result<(), String> {
+        self.state.host_call("__cloud_delete", opts).map(|_| ())
+    }
+
+    fn cloud_copy(&self, opts: serde_json::Value) -> Result<(), String> {
+        self.state.host_call("__cloud_copy", opts).map(|_| ())
+    }
+
+    fn cloud_download(&self, opts: serde_json::Value) -> Result<String, String> {
+        let v = self.state.host_call("__cloud_download", opts)?;
+        Ok(v.as_str().unwrap_or_default().to_string())
+    }
+
+    fn cloud_upload(&self, opts: serde_json::Value) -> Result<String, String> {
+        let v = self.state.host_call("__cloud_upload", opts)?;
+        Ok(v.as_str().unwrap_or_default().to_string())
+    }
+
+    fn cloud_sync(&self, opts: serde_json::Value) -> Result<String, String> {
+        let v = self.state.host_call("__cloud_sync", opts)?;
+        Ok(v.as_str().unwrap_or_default().to_string())
+    }
+
+    fn cloud_download_many(&self, opts: serde_json::Value) -> Result<String, String> {
+        let v = self.state.host_call("__cloud_download_many", opts)?;
+        Ok(v.as_str().unwrap_or_default().to_string())
+    }
+
+    fn cloud_concat_files(&self, opts: serde_json::Value) -> Result<(), String> {
+        self.state.host_call("__cloud_concat_files", opts).map(|_| ())
+    }
+
+    fn cloud_report_progress(&self, opts: serde_json::Value) -> Result<(), String> {
+        self.state.host_call("__cloud_report_progress", opts).map(|_| ())
+    }
+
+    fn cloud_report_done(&self, opts: serde_json::Value) -> Result<(), String> {
+        self.state.host_call("__cloud_report_done", opts).map(|_| ())
+    }
+
+    fn cloud_pick_chunk_order(&self, opts: serde_json::Value) -> Result<(), String> {
+        self.state.host_call("__cloud_pick_chunk_order", opts).map(|_| ())
+    }
+
+    fn cloud_oauth_start(&self, opts: serde_json::Value) -> Result<String, String> {
+        let v = self.state.host_call("__cloud_oauth_start", opts)?;
+        Ok(v.as_str().unwrap_or_default().to_string())
+    }
+
+    // ── brp ────────────────────────────────────────────────────────────────────
+    //
+    // PROXY: the `BrpRegistry` lives in the shell's `AppState.brp`, so each op is
+    // a reverse-channel round-trip to the matching `__brp_<op>` handler in
+    // `src-tauri/src/ipc/mod.rs`, which mirrors `ns_shell/brp.rs`. The shell
+    // returns the Lua-shaped envelope (`{ ok, result|error }`) for connect/call,
+    // a `BrpStatus` JSON for disconnect/status, the `sub_id` for watch, and a bool
+    // for unwatch. Error `String`s surface verbatim.
+
+    fn brp_connect(&self, endpoint: &str, timeout_ms: u64) -> Result<serde_json::Value, String> {
+        self.state.host_call(
+            "__brp_connect",
+            json!({ "endpoint": endpoint, "timeout_ms": timeout_ms }),
+        )
+    }
+
+    fn brp_disconnect(&self) -> Result<serde_json::Value, String> {
+        self.state.host_call("__brp_disconnect", json!({}))
+    }
+
+    fn brp_status(&self) -> Result<serde_json::Value, String> {
+        self.state.host_call("__brp_status", json!({}))
+    }
+
+    fn brp_call(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        self.state
+            .host_call("__brp_call", json!({ "method": method, "params": params }))
+    }
+
+    fn brp_watch(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<u64, String> {
+        // Best-effort registration; the shell returns the new sub id. The SSE
+        // events fire shell-side and are dropped (no channel into this VM).
+        let v = self
+            .state
+            .host_call("__brp_watch", json!({ "method": method, "params": params }))?;
+        v.as_u64()
+            .ok_or_else(|| "arbor.brp.watch: __brp_watch returned non-integer sub id".to_string())
+    }
+
+    fn brp_unwatch(&self, sub_id: u64) -> Result<bool, String> {
+        let v = self
+            .state
+            .host_call("__brp_unwatch", json!({ "sub_id": sub_id }))?;
+        Ok(v.as_bool().unwrap_or(false))
+    }
 }
 
 // ── NsHost JSON marshalling helpers ──────────────────────────────────────────
@@ -1371,7 +1652,9 @@ fn main() {
     // `CorvusNsHost` (which the git `arbor.*` namespaces call through) can hold it
     // and fire hooks onto the very same broker the RPC handlers fire onto.
     let state = Arc::new(
-        CorvusState::new(sink)
+        // Clone (not move) so `sink` survives for the scheduler-AppCtx wiring below
+        // (`Scheduler::new` needs an `Arc<dyn AppCtx>` built over the same sink).
+        CorvusState::new(Arc::clone(&sink))
             .with_hooks(hooks)
             .with_host_caller(Arc::clone(&host) as Arc<dyn HostCaller>),
     );
@@ -1399,6 +1682,9 @@ fn main() {
         Arc::new(TerminalInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
         // PROXY (state lives in the shell, reached over the reverse channel):
         Arc::new(JobInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
+        Arc::new(PipelineInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
+        Arc::new(CloudInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
+        Arc::new(BrpInstaller::new(Arc::clone(&ns_host))) as Arc<dyn LuaNamespaceInstaller>,
         // UiBrandingInstaller attaches onto the `arbor.ui` table created by
         // plugin-core's `ns::ui` (installed earlier in the shared install path),
         // so it must come AFTER the core install — `corvus_be_api_installer` runs
@@ -1409,6 +1695,29 @@ fn main() {
         .lock()
         .expect("corvus-be: plugin host lock poisoned at boot")
         .set_api_installer(corvus_be_api_installer(ns_installers));
+
+    // Publish the plugin host to the introspection RPC handlers
+    // (`plugin_introspect.rs`): after the Phase-2 flip the shell stops loading
+    // Corvus plugins, so the Plugin Manager reads its list/reflection/dep-graph
+    // from THIS host. Handlers get only `&CorvusState` (host-free by design), so
+    // they reach the host through this module-static handle instead.
+    plugin_introspect::install(Arc::clone(&plugin_host));
+
+    // Shared trigger-engine wiring (plugin-relocation Wave 1): without this the
+    // schedules declared by `corvus`-targeted plugins never fire in corvus-be.
+    // `Scheduler::new` needs an `Arc<dyn AppCtx>` + a runtime handle — both already
+    // exist here (the backend's `CorvusBeAppCtx` + the multi-thread `rt`). The
+    // engine is installed BEFORE `serve_stdio` so it is present when
+    // `start_all_schedulers()` runs in the post-`Hello` `on_ready` reload below.
+    {
+        let ctx: Arc<dyn arbor_core::prelude::AppCtx> =
+            Arc::new(CorvusBeAppCtx::new(Arc::clone(&sink), rt.handle().clone()));
+        let scheduler = Arc::new(Scheduler::new(ctx, rt.handle().clone()));
+        let mut h = plugin_host
+            .lock()
+            .expect("corvus-be: plugin host lock poisoned at scheduler install");
+        h.install_scheduler(scheduler, Arc::downgrade(&plugin_host));
+    }
 
     // The issue-tracker registry resolves credentials over the reverse channel
     // (the shell holds the keyring) — wire it before serving.
@@ -1455,13 +1764,17 @@ fn main() {
     // events, and those `Event` frames must not precede the handshake `Hello`.
     let plugin_host_ready = Arc::clone(&plugin_host);
     let on_ready = move || {
-        if let Err(e) = plugin_host_ready
+        let mut host = plugin_host_ready
             .lock()
-            .expect("corvus-be: plugin host lock poisoned at boot")
-            .reload()
-        {
+            .expect("corvus-be: plugin host lock poisoned at boot");
+        if let Err(e) = host.reload() {
             eprintln!("corvus-be: plugin reload failed: {e}");
         }
+        // Register every loaded+enabled plugin's declared schedules against the
+        // shared engine (no-op if a plugin has no [scheduler] section). The shell
+        // does the same in `setup/boot.rs` after its boot-thread reload.
+        // MUST run after reload populates the loaded plugins.
+        host.start_all_schedulers();
     };
 
     if let Err(e) = serve_stdio(io::stdin().lock(), stdout, methods, host, dispatch, on_ready) {
