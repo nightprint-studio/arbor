@@ -23,6 +23,7 @@ mod efficiency;
 mod taskbar_icon_refresh;
 mod git;
 mod git_cli;
+mod ide;
 mod commands;
 mod auth;
 mod plugin;

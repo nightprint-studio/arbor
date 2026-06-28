@@ -6,7 +6,7 @@
 
 use arbor_ipc::prelude::EventSink;
 
-use crate::git_provider::types::error::ProviderError;
+use corvus_git_provider_api::prelude::ProviderError;
 
 /// Kicks off the OAuth flow via the existing implementation.
 /// Returns the auth URL the user must open in their browser.

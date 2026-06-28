@@ -28,7 +28,7 @@ macro_rules! block_on_provider {
         } else {
             match tokio::runtime::Runtime::new() {
                 Ok(r)  => r.block_on($fut),
-                Err(e) => Err(crate::git_provider::types::error::ProviderError::Internal(
+                Err(e) => Err(corvus_git_provider_api::prelude::ProviderError::Internal(
                     format!("runtime: {e}"),
                 )),
             }
@@ -74,7 +74,7 @@ fn install_runs(ctx: &ApiCtx, lua: &Lua, ci_table: &Table) -> Result<()> {
             Err(e) => return err2(lua_ctx, format!("arbor.ci.runs resolve: {e}")),
         };
 
-        let filter = crate::git_provider::types::CiFilter {
+        let filter = corvus_git_provider_api::prelude::CiFilter {
             branch,
             status,
             mr_number,

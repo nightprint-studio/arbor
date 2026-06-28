@@ -172,7 +172,7 @@ async fn create_remote_via_provider(
     opts:  &InitRepoOptions,
 ) -> Result<String, AppError> {
     use std::path::Path;
-    use crate::git_provider::types::{RepoCreateRequest, RepoVisibility};
+    use corvus_git_provider_api::prelude::{RepoCreateRequest, RepoVisibility};
 
     let host = match opts.provider.as_str() {
         "github" => "github.com",

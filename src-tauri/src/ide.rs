@@ -1,47 +1,14 @@
-use std::path::Path;
+//! Built-in IDE catalogue + detached launch.
+//!
+//! Pure shell concern (process-spawn + IDE config), independent of git: split
+//! out of `git/worktree.rs` once the worktree git operations migrated to
+//! `corvus-git` / corvus-be. The IDE-detection streaming + config round-trips
+//! live in the `ipc::corvus::ide` handlers; this module owns the catalogue and
+//! the detached spawn.
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
-use crate::process_ext::NoWindowExt;
-
-// The pure worktree git logic (enumeration, add/remove, project-type detection,
-// and the `WorktreeInfo` / `ProjectType` types) moved into the Tauri-free
-// `corvus-git` crate so the headless `corvus-be` shares it. Re-export the types
-// here so existing `crate::git::worktree::{WorktreeInfo, ProjectType}` paths and
-// the IDE machinery below keep resolving, and forward the three CLI functions
-// through the shell's resolved git program (preserving the original
-// no-`GitCli` signatures so existing callers compile unchanged).
-pub use corvus_git::worktree::{ProjectType, WorktreeInfo};
-
-/// The shell's resolved git program as a `corvus-git` invoker.
-fn git() -> corvus_git::prelude::GitCli {
-    corvus_git::prelude::GitCli::from_optional(crate::git_cli::snapshot().path)
-}
-
-/// List all worktrees for the repository that owns the given path.
-pub fn list_worktrees(repo_path: &Path, current_path: &Path) -> Result<Vec<WorktreeInfo>> {
-    Ok(corvus_git::worktree::list_worktrees(&git(), repo_path, current_path)?)
-}
-
-/// Detect the primary project type by checking for well-known build files.
-pub fn detect_project_type(path: &Path) -> ProjectType {
-    corvus_git::worktree::detect_project_type(path)
-}
-
-/// Add a new linked worktree.
-pub fn add_worktree(
-    repo_path: &Path,
-    dest_path: &str,
-    branch: &str,
-    new_branch: Option<&str>,
-) -> Result<()> {
-    Ok(corvus_git::worktree::add_worktree(&git(), repo_path, dest_path, branch, new_branch)?)
-}
-
-/// Remove a linked worktree.  Refuses if it is the main worktree.
-pub fn remove_worktree(repo_path: &Path, worktree_path: &str) -> Result<()> {
-    Ok(corvus_git::worktree::remove_worktree(&git(), repo_path, worktree_path)?)
-}
 
 // ---------------------------------------------------------------------------
 // Built-in IDE catalogue (shared between detection and launch)
@@ -81,54 +48,6 @@ pub struct DetectedIde {
     pub available:      bool,
     /// Resolved executable path (None when not found).
     pub detected_path:  Option<String>,
-}
-
-/// Probe all built-in IDEs and return their availability.
-/// `path_overrides` maps ide_id → custom executable path.
-#[allow(dead_code)]
-pub fn detect_available_ides(
-    path_overrides: &std::collections::HashMap<String, String>,
-) -> Vec<DetectedIde> {
-    BUILTIN_IDES.iter().map(|ide| {
-        // If the user supplied a custom path, use that first.
-        if let Some(ov) = path_overrides.get(ide.id) {
-            if !ov.is_empty() {
-                let exists = Path::new(ov).exists() || which_command(ov).is_some();
-                return DetectedIde {
-                    id:            ide.id.to_string(),
-                    name:          ide.name.to_string(),
-                    available:     exists,
-                    detected_path: if exists { Some(ov.clone()) } else { None },
-                };
-            }
-        }
-        // Otherwise probe the default command name.
-        let found = which_command(ide.cmd);
-        DetectedIde {
-            id:            ide.id.to_string(),
-            name:          ide.name.to_string(),
-            available:     found.is_some(),
-            detected_path: found,
-        }
-    }).collect()
-}
-
-/// Returns the resolved absolute path of `cmd` if it is found in PATH, else None.
-#[allow(dead_code)]
-fn which_command(cmd: &str) -> Option<String> {
-    #[cfg(windows)]
-    let output = std::process::Command::new("where").arg(cmd).no_window().output();
-    #[cfg(not(windows))]
-    let output = std::process::Command::new("which").arg(cmd).output();
-
-    match output {
-        Ok(o) if o.status.success() => {
-            // `where` / `which` may return multiple lines; take the first.
-            let s = String::from_utf8_lossy(&o.stdout);
-            s.lines().next().map(|l| l.trim().to_string())
-        }
-        _ => None,
-    }
 }
 
 // ---------------------------------------------------------------------------

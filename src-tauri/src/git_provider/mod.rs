@@ -16,7 +16,6 @@
 
 pub use corvus_git_provider_api::prelude::{GitProvider, GitProviderRegistry, ProviderKind};
 
-pub mod types;
 pub mod detect;
 pub mod oauth;
 pub mod helpers;

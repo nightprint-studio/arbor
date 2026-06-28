@@ -28,7 +28,7 @@ use crate::provider_connect::{compose_git_auth_status, ConnectorRegistry, Provid
 
 /// Map a `ProviderError` onto `AppError` the same way `commands::auth_commands::pe`
 /// does — preserving the message via `Display`.
-fn pe(e: crate::git_provider::types::error::ProviderError) -> AppError {
+fn pe(e: corvus_git_provider_api::prelude::ProviderError) -> AppError {
     AppError::Other(e.to_string())
 }
 

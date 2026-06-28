@@ -23,13 +23,13 @@
 pub mod auth;
 pub mod brp;
 pub mod gitflow;
+pub mod ide;
 pub mod image;
 pub mod issues;
 pub mod missing;
 pub mod pipeline;
 pub mod provider;
 pub mod repo;
-pub mod worktree;
 
 // Re-export so backend handlers annotate with `#[corvus::handler]` — the
 // product's own namespace for the generic `arbor-rpc` attribute.

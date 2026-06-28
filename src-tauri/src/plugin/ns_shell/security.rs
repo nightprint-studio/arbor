@@ -50,7 +50,7 @@ macro_rules! block_on_provider {
         } else {
             match tokio::runtime::Runtime::new() {
                 Ok(r)  => r.block_on($fut),
-                Err(e) => Err(crate::git_provider::types::error::ProviderError::Internal(
+                Err(e) => Err(corvus_git_provider_api::prelude::ProviderError::Internal(
                     format!("runtime: {e}"),
                 )),
             }
@@ -166,7 +166,7 @@ fn install_summary(ctx: &ApiCtx, lua: &Lua, sec: &Table) -> Result<()> {
 /// `severities` accepts the same lowercase tokens used by the host:
 /// `"critical" | "high" | "medium" | "low" | "info" | "unknown"`.
 fn install_findings(ctx: &ApiCtx, lua: &Lua, sec: &Table) -> Result<()> {
-    use crate::git_provider::types::{Severity, FindingState, SecurityFilters};
+    use corvus_git_provider_api::prelude::{Severity, FindingState, SecurityFilters};
 
     fn parse_severity(s: &str) -> Option<Severity> {
         match s.to_ascii_lowercase().as_str() {

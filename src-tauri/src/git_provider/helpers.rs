@@ -121,9 +121,9 @@ fn lookup_or_register(
 /// Build a `MrId` from a `ResolvedProvider` + numeric MR/PR id.  Branches
 /// on `info.provider` so GitHub gets `(owner, repo_name)` and GitLab gets
 /// `(project_path, None)`.
-pub fn mr_id_from(resolved: &ResolvedProvider, number: u64) -> super::types::MrId {
+pub fn mr_id_from(resolved: &ResolvedProvider, number: u64) -> corvus_git_provider_api::prelude::MrId {
     use super::ProviderKind;
-    use super::types::MrId;
+    use corvus_git_provider_api::prelude::MrId;
     match resolved.info.provider.as_str() {
         "github" => MrId {
             provider:      ProviderKind::GitHub,

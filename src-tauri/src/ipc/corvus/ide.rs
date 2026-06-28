@@ -1,12 +1,11 @@
-//! `worktree` domain — handlers routed through the in-process broker.
+//! `ide` domain — IDE launch + config handlers routed through the in-process broker.
 //!
 //! Each handler is the body the matching `#[tauri::command]` ran inline;
-//! `#[corvus::handler]` self-registers it under its own function name. The pure
-//! worktree git work (enumeration, add/remove, project-type detection) now
-//! lives in [`corvus_git::worktree`], reached through the shell wrapper
-//! `crate::git::worktree`; the IDE launch / per-repo + global IDE config logic
-//! stays shell-side (process-spawn / config concerns, not git). Behavior (locks
-//! held, subprocess shelling, config round-trips, errors) is byte-identical.
+//! `#[corvus::handler]` self-registers it under its own function name. The IDE
+//! catalogue + detached launch live in [`crate::ide`] (a pure shell concern:
+//! process-spawn / config, not git); these handlers own the IDE-detection
+//! streaming + per-repo / global IDE config round-trips. Behavior (locks held,
+//! subprocess shelling, config round-trips, errors) is byte-identical.
 //!
 //! No hooks fire in this domain.
 //!
@@ -21,7 +20,7 @@ use std::sync::Arc;
 
 use crate::config::app_config;
 use crate::error::AppError;
-use crate::git::worktree::{self, BUILTIN_IDES};
+use crate::ide::{self, BUILTIN_IDES};
 use crate::ipc::corvus;
 use crate::process_ext::NoWindowExt;
 use crate::AppState;
@@ -55,7 +54,7 @@ fn open_in_ide(
         .unwrap_or(&ide_cfg.default_ide)
         .to_owned();
     let (command, extra_args) = resolve_ide(&effective_id, &ide_cfg)?;
-    worktree::open_in_ide(&path, &command, &extra_args)
+    ide::open_in_ide(&path, &command, &extra_args)
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +173,7 @@ fn start_ide_detection(state: &AppState) -> Result<String, AppError> {
     let _thread = std::thread::Builder::new()
         .name("arbor-ide-detection".into())
         .spawn(move || {
-            use crate::git::worktree::DetectedIde;
+            use crate::ide::DetectedIde;
             let mut results: Vec<DetectedIde> = Vec::with_capacity(BUILTIN_IDES.len());
 
             for ide in BUILTIN_IDES {

@@ -7,7 +7,7 @@
 use arbor_ipc::prelude::EventSink;
 
 use crate::auth::DeviceFlowInfo;
-use crate::git_provider::types::error::ProviderError;
+use corvus_git_provider_api::prelude::ProviderError;
 
 /// Kicks off the Device Authorization Grant via the existing implementation.
 /// Returns the verification info (user code + URL) the UI should display.
