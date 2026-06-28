@@ -1,20 +1,30 @@
-//! `repo_ops` domain — the two **pure read-only** repo handlers that are safe to
-//! serve out-of-process by corvus-be.
+//! `repo_ops` domain — the pure + network repo handlers safe to serve
+//! out-of-process by corvus-be.
 //!
-//! Ported byte-faithfully from the shell's in-process `ipc::corvus::repo`
-//! (`get_git_identity`, `get_repo_info`). The rest of that file —
-//! `open_repo`/`close_repo`/`clone_repo`/`init_repo`/`check_is_git_repo`/
-//! `create_remote_via_provider`/`list_remote_branches_for_url` — stays shell-side
-//! because it touches the `AppState` repo manager, file dialogs, provider OAuth,
-//! and credentials, none of which live in this backend. These two read-only
-//! probes touch none of that, so they migrate cleanly.
+//! Ported byte-faithfully from the shell's in-process `ipc::corvus::repo`:
+//!  * the read-only identity / metadata probes (`get_git_identity`,
+//!    `get_repo_info`), and
+//!  * the path / network probes that never touch the shell's `RepoManager`
+//!    (`check_is_git_repo`, `clone_repo`, `list_remote_branches_for_url`).
 //!
-//! No hooks fire from either handler.
+//! The clone / ls-remote pair resolves HTTPS credentials over the **reverse
+//! channel** (`__git_credentials`; the keyring stays shell-side), rebuilding the
+//! `-c http.extraHeader` argv via [`http_auth_args_for_credentials`] — the same
+//! pattern as the `submodule` / `remote` domains. `clone_repo` does not open a
+//! tab: [`RepoInfo::for_path`] leaves `tab_id` empty and the frontend opens the
+//! tab afterwards via `open_repo`.
+//!
+//! What stays shell-side (touches `AppState` / file dialogs / provider OAuth /
+//! the streaming job registry): `open_repo` / `close_repo` / `init_repo` and the
+//! background `spawn_clone_job`.
+//!
+//! No hooks fire from any handler here.
 
 use corvus_core::prelude::CorvusState;
-use corvus_git::prelude::RepoInfo;
+use corvus_git::prelude::{http_auth_args_for_credentials, CloneOptions, RepoInfo};
 
-use crate::repo::repo_path;
+use crate::remote::credential_resolver;
+use crate::repo::{git, repo_path};
 
 /// Read user.name / user.email from the global git config.
 /// Returns ("", "") when the config is unavailable.
@@ -36,4 +46,46 @@ fn get_repo_info(state: &CorvusState, tab_id: String) -> Result<RepoInfo, String
     let mut info = RepoInfo::for_path(&path).map_err(|e| e.to_string())?;
     info.tab_id = tab_id;
     Ok(info)
+}
+
+/// Returns true when `path` is inside a git repository (`Repository::discover`).
+#[arbor_rpc::handler]
+fn check_is_git_repo(_state: &CorvusState, path: String) -> Result<bool, String> {
+    Ok(corvus_git::init::is_git_repo(&path))
+}
+
+/// List branch names available on a remote URL (`git ls-remote --heads`), with
+/// HTTPS auth resolved over the reverse channel for private remotes.
+#[arbor_rpc::handler]
+fn list_remote_branches_for_url(state: &CorvusState, url: String) -> Result<Vec<String>, String> {
+    let auth = auth_args(state, &url);
+    corvus_git::repo::list_remote_branches(&git(state), &url, &auth).map_err(|e| e.to_string())
+}
+
+/// Clone a remote repository to disk and return the fresh repo's metadata.
+///
+/// Does **not** open a tab: the returned [`RepoInfo`] carries an empty `tab_id`
+/// and no hook fires — the frontend opens the clone as a tab afterwards via
+/// `open_repo`. HTTPS auth is resolved over the reverse channel. Runs the
+/// network clone on the dispatch worker thread (the handler is sync), so the
+/// serve loop never stalls on it.
+#[arbor_rpc::handler]
+fn clone_repo(state: &CorvusState, opts: CloneOptions) -> Result<RepoInfo, String> {
+    let auth = auth_args(state, &opts.url);
+    let dest = corvus_git::repo::clone_repo(&git(state), &opts, &auth).map_err(|e| e.to_string())?;
+    RepoInfo::for_path(&dest).map_err(|e| e.to_string())
+}
+
+/// Resolve the HTTPS `-c http.extraHeader` auth argv for `url` over the reverse
+/// channel (`__git_credentials`; the keyring stays shell-side). Empty when no
+/// credential is stored or no channel is wired (public remotes need none) — the
+/// same best-effort shape the `submodule` domain uses.
+fn auth_args(state: &CorvusState, url: &str) -> Vec<String> {
+    let Some(host) = state.host_caller() else { return Vec::new() };
+    let resolve = credential_resolver(host);
+    resolve(url)
+        .ok()
+        .flatten()
+        .map(|(u, p)| http_auth_args_for_credentials(url, &u, &p))
+        .unwrap_or_default()
 }

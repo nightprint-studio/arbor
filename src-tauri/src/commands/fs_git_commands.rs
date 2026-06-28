@@ -2,8 +2,9 @@
 //!
 //! The status overlays, inline light actions (stage / unstage / discard /
 //! ignore), branch list/switch, and remote-url lookup all moved to the corvus
-//! broker — see [`crate::ipc::corvus::fs_git`], which carries the shared
-//! per-repo status cache with them. The only command left here is the
+//! broker, now served out-of-process by `corvus-be`
+//! (`crates/corvus/be/src/fs_git.rs`), which carries the shared per-repo status
+//! cache with them. The only command left here is the
 //! heavy-action delegation, which is genuine shell glue: it needs an
 //! `AppHandle` to bring the main window forward (a WebView2 main-thread
 //! operation) and emit a targeted event to it.

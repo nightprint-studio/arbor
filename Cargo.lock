@@ -156,6 +156,7 @@ dependencies = [
  "corvus-brp",
  "corvus-core",
  "corvus-git",
+ "corvus-git-cli",
  "corvus-git-provider-api",
  "corvus-git-provider-github",
  "corvus-git-provider-gitlab",
@@ -190,7 +191,6 @@ dependencies = [
  "serde_json",
  "serde_json_path",
  "serde_yaml_ng",
- "sevenz-rust2",
  "sha2",
  "simd-json",
  "similar",
@@ -1315,6 +1315,21 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "corvus-git-cli"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
+ "arbor-process-ext",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sevenz-rust2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

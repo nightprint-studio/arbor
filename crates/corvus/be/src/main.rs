@@ -33,6 +33,7 @@ mod bisect;
 mod branch;
 mod ci;
 mod diff;
+mod fs_git;
 mod gitflow;
 mod graph;
 mod issues;

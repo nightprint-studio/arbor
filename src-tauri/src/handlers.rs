@@ -83,6 +83,8 @@ macro_rules! invoke_handlers {
             // Launcher ↔ product-window lifecycle (running-state + Stop)
             $crate::window::list_running_products,
             $crate::window::close_product_window,
+            // Full app relaunch (fatal "git backend stopped" overlay recovery)
+            $crate::window::restart_app,
             // ── nemus engine ─────────────────────────────────────────────────
             // eval / transport / render / sample packs / config
             $crate::nemus::nemus_eval,

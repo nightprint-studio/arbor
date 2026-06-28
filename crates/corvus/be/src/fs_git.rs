@@ -1,27 +1,22 @@
-//! `fs_git` domain — git awareness for the built-in File Explorer, routed
-//! through the in-process broker.
+//! `fs_git` domain — git awareness for the built-in File Explorer, served
+//! **out-of-process** by corvus-be.
 //!
-//! Each handler is the body the matching `#[tauri::command]` ran inline. The
-//! commands were `async fn` whose whole body was a single
-//! `tokio::task::spawn_blocking(...)`; the broker runs handlers on a blocking
-//! thread already, so the wrapper is unwound here and the body runs directly —
-//! the blocking git work and its errors are byte-identical. `#[corvus::handler]`
-//! self-registers each under its own function name.
-//!
-//! None of these queries/actions touch `AppState` (the explorer browses
-//! arbitrary filesystem paths, not tab-bound repos), but the handler macro
-//! requires a context first arg, so they take `_state: &AppState` and ignore it.
+//! Ported byte-faithfully from the shell's in-process copy
+//! (`crate::ipc::corvus::fs_git`). The handler bodies are pure LOCAL git2
+//! operations (no network, no live `RepoManager`): the explorer browses
+//! arbitrary filesystem paths, not tab-bound repos, so none of these touch the
+//! repo registry on [`CorvusState`]. The macro requires a context first arg, so
+//! every handler takes `_state: &CorvusState` and ignores it — except `discard`,
+//! which uses `state` for the recovery-snapshot policy.
 //!
 //! The status query (`fs_git_status`) and the inline mutating actions
 //! (`stage`/`unstage`/`discard`/`ignore`/`checkout`) share a process-global
 //! per-repo status cache (the `OnceLock` below): the actions
-//! [`invalidate_cache`] after mutating so the next status recomputes. They live
-//! together here precisely because a single cache can't be split across modules
-//! without diverging.
+//! [`invalidate_cache`] after mutating so the next status recomputes. The cache
+//! is a module static here too (NOT on `CorvusState`).
 //!
-//! NOT migrated (stays inline in `fs_git_commands`):
-//!  * `fs_open_in_arbor` — takes an `AppHandle`, focuses the main window on the
-//!    UI thread, and emits `arbor://explorer-open-repo`.
+//! NOT migrated (stays shell-side): `fs_open_in_arbor` — it needs an
+//! `AppHandle` to focus the main window and emit `arbor://explorer-open-repo`.
 //!
 //! No hooks fire in this domain.
 
@@ -32,9 +27,7 @@ use std::sync::{Mutex, OnceLock};
 use git2::{build::CheckoutBuilder, BranchType, IndexAddOption, Repository, Status, StatusOptions};
 use serde::Serialize;
 
-use crate::error::AppError;
-use crate::ipc::corvus;
-use crate::AppState;
+use corvus_core::prelude::CorvusState;
 
 // ---------------------------------------------------------------------------
 // Shared status badge + branch info (pure; mirrors `fs_git_commands`)
@@ -149,8 +142,8 @@ fn worktree_badge(s: Status) -> Option<GitBadge> {
     }
 }
 
-#[corvus::handler]
-fn fs_git_changes(_state: &AppState, dir: String) -> Result<GitChanges, AppError> {
+#[arbor_rpc::handler]
+fn fs_git_changes(_state: &CorvusState, dir: String) -> Result<GitChanges, String> {
     let repo = match Repository::discover(&dir) {
         Ok(r) => r,
         Err(_) => return Ok(GitChanges::default()),
@@ -214,15 +207,15 @@ pub struct FsBranch {
 }
 
 /// Local branches of the repo enclosing `path`, sorted case-insensitively.
-#[corvus::handler]
-fn fs_git_branches(_state: &AppState, path: String) -> Result<Vec<FsBranch>, AppError> {
+#[arbor_rpc::handler]
+fn fs_git_branches(_state: &CorvusState, path: String) -> Result<Vec<FsBranch>, String> {
     let repo = Repository::discover(&path)
-        .map_err(|_| AppError::Other("not inside a git repository".into()))?;
+        .map_err(|_| "not inside a git repository".to_string())?;
     let mut out = Vec::new();
-    for b in repo.branches(Some(BranchType::Local))? {
-        let (branch, _) = b?;
+    for b in repo.branches(Some(BranchType::Local)).map_err(|e| format!("Git error: {e}"))? {
+        let (branch, _) = b.map_err(|e| format!("Git error: {e}"))?;
         let is_head = branch.is_head();
-        if let Some(name) = branch.name()?.map(String::from) {
+        if let Some(name) = branch.name().map_err(|e| format!("Git error: {e}"))?.map(String::from) {
             out.push(FsBranch { name, is_head });
         }
     }
@@ -240,10 +233,10 @@ fn fs_git_branches(_state: &AppState, path: String) -> Result<Vec<FsBranch>, App
 /// repo or the repo has no remote — the FE then toasts instead of copying a
 /// non-shareable link. `Repository::discover` walks up from any subpath, so the
 /// caller can pass the right-clicked entry directly.
-#[corvus::handler]
-fn fs_git_remote_url(_state: &AppState, path: String) -> Result<Option<String>, AppError> {
+#[arbor_rpc::handler]
+fn fs_git_remote_url(_state: &CorvusState, path: String) -> Result<Option<String>, String> {
     let Ok(repo) = Repository::discover(&path) else { return Ok(None) };
-    let remotes = repo.remotes()?;
+    let remotes = repo.remotes().map_err(|e| format!("Git error: {e}"))?;
     let pick = remotes.iter().flatten().find(|n| *n == "origin")
         .or_else(|| remotes.iter().flatten().next());
     let Some(name) = pick else { return Ok(None) };
@@ -441,8 +434,8 @@ fn not_in_repo(repos: HashMap<String, RepoMarker>) -> FsGitStatus {
     }
 }
 
-#[corvus::handler]
-fn fs_git_status(_state: &AppState, dir: String, refresh: Option<bool>) -> Result<FsGitStatus, AppError> {
+#[arbor_rpc::handler]
+fn fs_git_status(_state: &CorvusState, dir: String, refresh: Option<bool>) -> Result<FsGitStatus, String> {
     let refresh = refresh.unwrap_or(false);
     // Always flag child repos, even when `dir` itself isn't in a repo — that
     // is exactly the "folder of projects" case the markers exist for.
@@ -461,7 +454,7 @@ fn fs_git_status(_state: &AppState, dir: String, refresh: Option<bool>) -> Resul
     // passes refresh=true off the fs watcher to recompute after edits.
     let mut guard = cache()
         .lock()
-        .map_err(|_| AppError::Other("status cache poisoned".into()))?;
+        .map_err(|_| "status cache poisoned".to_string())?;
     if refresh || !guard.contains_key(&root_key) {
         guard.insert(root_key.clone(), compute_repo_status(&repo));
     }
@@ -482,13 +475,13 @@ fn fs_git_status(_state: &AppState, dir: String, refresh: Option<bool>) -> Resul
 /// Open the repo enclosing the first path and compute each path relative to its
 /// working directory. Returns `(repo, workdir, rel_paths)`. Errors if the paths
 /// aren't inside a repo.
-fn open_repo_and_rels(paths: &[String]) -> Result<(Repository, PathBuf, Vec<String>), AppError> {
-    let first = paths.first().ok_or_else(|| AppError::Other("no paths".into()))?;
+fn open_repo_and_rels(paths: &[String]) -> Result<(Repository, PathBuf, Vec<String>), String> {
+    let first = paths.first().ok_or_else(|| "no paths".to_string())?;
     let repo = Repository::discover(first)
-        .map_err(|_| AppError::Other("not inside a git repository".into()))?;
+        .map_err(|_| "not inside a git repository".to_string())?;
     let wd = repo
         .workdir()
-        .ok_or_else(|| AppError::Other("bare repository".into()))?
+        .ok_or_else(|| "bare repository".to_string())?
         .to_path_buf();
     let wd_key = norm_key(&wd.to_string_lossy());
     let rels: Vec<String> = paths
@@ -514,23 +507,24 @@ fn invalidate_cache(repo: &Repository) {
     }
 }
 
-#[corvus::handler]
-fn fs_git_stage(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> {
+#[arbor_rpc::handler]
+fn fs_git_stage(_state: &CorvusState, paths: Vec<String>) -> Result<(), String> {
     let (repo, _wd, rels) = open_repo_and_rels(&paths)?;
     if rels.is_empty() {
         return Ok(());
     }
-    let mut index = repo.index()?;
+    let mut index = repo.index().map_err(|e| format!("Git error: {e}"))?;
     // add_all with per-entry pathspecs handles files, whole folders, and
     // deletions (it updates the index to match the worktree) in one pass.
-    index.add_all(rels.iter().map(|s| s.as_str()), IndexAddOption::DEFAULT, None)?;
-    index.write()?;
+    index.add_all(rels.iter().map(|s| s.as_str()), IndexAddOption::DEFAULT, None)
+        .map_err(|e| format!("Git error: {e}"))?;
+    index.write().map_err(|e| format!("Git error: {e}"))?;
     invalidate_cache(&repo);
     Ok(())
 }
 
-#[corvus::handler]
-fn fs_git_unstage(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> {
+#[arbor_rpc::handler]
+fn fs_git_unstage(_state: &CorvusState, paths: Vec<String>) -> Result<(), String> {
     let (repo, _wd, rels) = open_repo_and_rels(&paths)?;
     if rels.is_empty() {
         return Ok(());
@@ -539,23 +533,23 @@ fn fs_git_unstage(_state: &AppState, paths: Vec<String>) -> Result<(), AppError>
     match repo.revparse_single("HEAD") {
         Ok(head) => {
             repo.reset_default(Some(&head), rels.iter().map(|s| s.as_str()))
-                .map_err(|e| AppError::Other(format!("unstage: {e}")))?;
+                .map_err(|e| format!("unstage: {e}"))?;
         }
         Err(_) => {
             // Pre-initial-commit: nothing committed yet → drop from the index.
-            let mut index = repo.index()?;
+            let mut index = repo.index().map_err(|e| format!("Git error: {e}"))?;
             for rel in &rels {
                 let _ = index.remove_path(Path::new(rel));
             }
-            index.write()?;
+            index.write().map_err(|e| format!("Git error: {e}"))?;
         }
     }
     invalidate_cache(&repo);
     Ok(())
 }
 
-#[corvus::handler]
-fn fs_git_discard(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> {
+#[arbor_rpc::handler]
+fn fs_git_discard(state: &CorvusState, paths: Vec<String>) -> Result<(), String> {
     let (repo, wd, rels) = open_repo_and_rels(&paths)?;
     if rels.is_empty() {
         return Ok(());
@@ -563,10 +557,12 @@ fn fs_git_discard(_state: &AppState, paths: Vec<String>) -> Result<(), AppError>
 
     // Safety net: snapshot the workdir so an over-eager discard from the
     // explorer can be undone from Arbor's Recovery tab.
-    crate::git::recovery::try_snapshot(
+    let _ = corvus_git::recovery::snapshot_with_policy(
+        &crate::repo::git(state),
         &repo,
-        crate::git::recovery::RecoveryKind::Discard,
+        corvus_git::prelude::RecoveryKind::Discard,
         format!("discard {} item(s) from File Explorer", rels.len()),
+        &crate::repo::snapshot_policy(state),
     );
 
     let mut checkout = CheckoutBuilder::new();
@@ -588,14 +584,14 @@ fn fs_git_discard(_state: &AppState, paths: Vec<String>) -> Result<(), AppError>
     }
     if any_tracked {
         checkout.force();
-        repo.checkout_index(None, Some(&mut checkout))?;
+        repo.checkout_index(None, Some(&mut checkout)).map_err(|e| format!("Git error: {e}"))?;
     }
     invalidate_cache(&repo);
     Ok(())
 }
 
-#[corvus::handler]
-fn fs_git_ignore(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> {
+#[arbor_rpc::handler]
+fn fs_git_ignore(_state: &CorvusState, paths: Vec<String>) -> Result<(), String> {
     let (repo, wd, rels) = open_repo_and_rels(&paths)?;
     if rels.is_empty() {
         return Ok(());
@@ -631,7 +627,7 @@ fn fs_git_ignore(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> 
         out.push_str(pat);
         out.push('\n');
     }
-    std::fs::write(&gitignore, out).map_err(|e| AppError::Other(e.to_string()))?;
+    std::fs::write(&gitignore, out).map_err(|e| e.to_string())?;
     invalidate_cache(&repo);
     Ok(())
 }
@@ -639,26 +635,24 @@ fn fs_git_ignore(_state: &AppState, paths: Vec<String>) -> Result<(), AppError> 
 /// Switch the repo enclosing `path` to `branch` (a local branch name). Uses a
 /// SAFE checkout — refuses to overwrite uncommitted changes rather than
 /// clobbering them, surfacing a clear error the explorer turns into a toast.
-#[corvus::handler]
-fn fs_git_checkout(_state: &AppState, path: String, branch: String) -> Result<(), AppError> {
+#[arbor_rpc::handler]
+fn fs_git_checkout(_state: &CorvusState, path: String, branch: String) -> Result<(), String> {
     let repo = Repository::discover(&path)
-        .map_err(|_| AppError::Other("not inside a git repository".into()))?;
+        .map_err(|_| "not inside a git repository".to_string())?;
     let (object, reference) = repo
         .revparse_ext(&branch)
-        .map_err(|e| AppError::Other(format!("unknown branch '{branch}': {e}")))?;
+        .map_err(|e| format!("unknown branch '{branch}': {e}"))?;
     repo.checkout_tree(&object, None).map_err(|e| {
-        AppError::Other(format!(
-            "checkout failed — commit or stash your changes first ({e})"
-        ))
+        format!("checkout failed — commit or stash your changes first ({e})")
     })?;
     match reference {
         Some(r) => {
             let name = r
                 .name()
-                .ok_or_else(|| AppError::Other("invalid ref name".into()))?;
-            repo.set_head(name)?;
+                .ok_or_else(|| "invalid ref name".to_string())?;
+            repo.set_head(name).map_err(|e| format!("Git error: {e}"))?;
         }
-        None => repo.set_head_detached(object.id())?,
+        None => repo.set_head_detached(object.id()).map_err(|e| format!("Git error: {e}"))?,
     }
     invalidate_cache(&repo);
     Ok(())

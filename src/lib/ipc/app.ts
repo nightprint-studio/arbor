@@ -39,6 +39,17 @@ export function openLauncherWindow(): Promise<void> {
   return invoke('open_launcher_window');
 }
 
+// ── Corvus git backend (corvus-be) liveness ─────────────────────────────────
+/** Fired once when the corvus-be git backend process dies (crash / kill). The
+ *  Corvus window shows a blocking fatal overlay asking the user to restart —
+ *  there is no live respawn yet, so a full app restart is the only recovery. */
+export const onCorvusBeDown = (cb: () => void): Promise<UnlistenFn> =>
+  listen('arbor://corvus-be-down', () => cb());
+
+/** Relaunch the whole app (replaces the running process). Never resolves on the
+ *  happy path — the webview is torn down with the process. */
+export const restartApp = (): Promise<void> => invoke('restart_app');
+
 /**
  * Map of Canopy product id → the command that opens its real Arbor window.
  * The launcher's primary action delegates here for products that have a real

@@ -277,16 +277,27 @@
       const spaceBelow = window.innerHeight - r.bottom - GAP - MARGIN;
       const spaceAbove = r.top - GAP - MARGIN;
       const flipUp     = direction === 'up' || (spaceBelow < 180 && spaceAbove > spaceBelow);
-      let top: number, maxH: number;
+      let top: number, maxH: number, hidden = false;
       if (flipUp) {
+        // Anchor the menu's BOTTOM just above the trigger — which needs the
+        // menu's REAL height. On the first (pre-DOM) pass it isn't mounted yet,
+        // so park + hide it until the post-`tick` pass can measure it. Without
+        // this, a short bottom-anchored menu (e.g. a 1-item version picker) was
+        // positioned as if it were full-height and floated near the window top.
         maxH = clampMaxH(Math.max(120, spaceAbove));
-        top  = Math.max(MARGIN, r.top - GAP - Math.min(spaceAbove, maxHeight ?? 420));
+        const menuH = menuEl?.offsetHeight;
+        if (menuH == null) {
+          top = MARGIN;
+          hidden = true;
+        } else {
+          top = Math.max(MARGIN, r.top - GAP - menuH);
+        }
       } else {
         top  = r.bottom + GAP;
         maxH = clampMaxH(Math.max(120, spaceBelow));
       }
       const left = Math.max(MARGIN, Math.min(r.left, window.innerWidth - menuW - MARGIN));
-      style = `left:${left}px;top:${top}px;max-height:${maxH}px;width:${menuW}px;`;
+      style = `left:${left}px;top:${top}px;max-height:${maxH}px;width:${menuW}px;${hidden ? 'visibility:hidden;' : ''}`;
     }
     if (matchTriggerWidth) style += `min-width:0;`;
     menuStyle = style;

@@ -166,6 +166,21 @@ impl From<corvus_git::prelude::GitError> for AppError {
     }
 }
 
+/// Bridge `corvus_git_cli::prelude::GitCliError` into the host enum. Variant-for-
+/// variant — and the crate's `Display` mirrors these three variants — so the wire
+/// string is byte-identical whether the git-CLI work runs in-process (mapped
+/// here) or, post-split, OOP (`e.to_string()` on the crate error directly).
+impl From<corvus_git_cli::prelude::GitCliError> for AppError {
+    fn from(e: corvus_git_cli::prelude::GitCliError) -> Self {
+        use corvus_git_cli::prelude::GitCliError as G;
+        match e {
+            G::Other(s)       => AppError::Other(s),
+            G::Cancelled      => AppError::Cancelled,
+            G::Unsupported(s) => AppError::Unsupported(s),
+        }
+    }
+}
+
 /// Implements Serialize so AppError can be returned from Tauri commands directly.
 impl serde::Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

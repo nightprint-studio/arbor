@@ -272,11 +272,16 @@ impl ChildClient {
     ///
     /// `on_event` is invoked for every push event the backend emits;
     /// `host_dispatch` answers every backend-originated `HostRequest` (the
-    /// reverse channel — credential resolution, plugin-UI round-trips).
-    pub fn spawn<E, H>(mut cmd: Command, on_event: E, host_dispatch: H) -> io::Result<(Self, Vec<String>)>
+    /// reverse channel — credential resolution, plugin-UI round-trips);
+    /// `on_disconnect` fires **once** when the backend's stream closes (the
+    /// process died or a framing error broke the channel), after every in-flight
+    /// call has been failed — the shell uses it to surface a fatal "backend
+    /// stopped" state rather than letting each later call fail piecemeal.
+    pub fn spawn<E, H, D>(mut cmd: Command, on_event: E, host_dispatch: H, on_disconnect: D) -> io::Result<(Self, Vec<String>)>
     where
         E: Fn(String, Value) + Send + 'static,
         H: Fn(&str, Value) -> Result<Value, String> + Send + 'static,
+        D: Fn() + Send + 'static,
     {
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
         let mut child = cmd.spawn()?;
@@ -344,6 +349,9 @@ impl ChildClient {
             for (_, tx) in pending.lock().expect("pending poisoned").drain() {
                 let _ = tx.send(Err("corvus-be disconnected".to_string()));
             }
+            // Signal the shell that the backend is gone (fired once, after the
+            // in-flight calls above are unwound).
+            on_disconnect();
         });
 
         Ok((Self { inner }, methods))

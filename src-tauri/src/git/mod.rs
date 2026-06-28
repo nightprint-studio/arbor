@@ -12,6 +12,7 @@ pub mod search;
 pub mod gitflow;
 pub mod init;
 pub mod url;
+pub mod auth_args;
 pub mod merge;
 pub mod notes;
 pub mod worktree;

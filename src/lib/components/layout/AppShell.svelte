@@ -22,6 +22,7 @@
   import StageArea from '../stage/StageArea.svelte';
   import WelcomeScreen from '../shared/WelcomeScreen.svelte';
   import BootSplash    from '../shared/BootSplash.svelte';
+  import CorvusBeDownOverlay from '../shared/CorvusBeDownOverlay.svelte';
   import MissingRepoState from '../shared/MissingRepoState.svelte';
   // SettingsPanel / DocsPanel / AboutModal / *StudioModal are loaded lazily
   // through <Lazy /> below — see the gate-keyed instances near the modal
@@ -2357,6 +2358,10 @@
   <!-- Singleton tooltip host: every `use:tooltip` action publishes through
        `tooltipState` and this renders the result. -->
   <Tooltip />
+
+  <!-- Fatal "git backend stopped" overlay: self-subscribes to
+       arbor://corvus-be-down and blocks the window until the user restarts. -->
+  <CorvusBeDownOverlay />
 
   <!-- Singleton image preview host: inline images in issue/MR/PR bodies open
        here via `imageLightbox`. -->

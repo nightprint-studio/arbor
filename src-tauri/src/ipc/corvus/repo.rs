@@ -4,27 +4,19 @@
 //! Each handler is the body the matching `#[tauri::command]` ran inline;
 //! `#[corvus::handler]` self-registers it under its own function name.
 //!
-//! The repo-lifecycle flow lives here (`open_repo` / `close_repo`). The pure
-//! `git`-identity / metadata probes (`get_git_identity`, `get_repo_info`) moved
-//! to `corvus-be`; what stays is path validation + the lifecycle. Both mutate
-//! the open-repo set and mirror into `corvus-be` (`sync_repo_open/close`) but
-//! emit through the backend event sink (`state.emit`) and take no `AppHandle`,
-//! so they migrate cleanly. `clone_repo` lives here too — a pure clone-to-disk
-//! that returns the fresh repo's metadata (no tab opened; the frontend opens
-//! the tab afterwards via `open_repo`).
+//! The repo-lifecycle flow lives here (`open_repo` / `close_repo`). What stays
+//! is path validation + the lifecycle: both mutate the open-repo set and mirror
+//! into `corvus-be` (`sync_repo_open/close`) but emit through the backend event
+//! sink (`state.emit`) and take no `AppHandle`. The pure `git`-identity /
+//! metadata probes (`get_git_identity`, `get_repo_info`) and the path / network
+//! probes (`check_is_git_repo`, `clone_repo`, `list_remote_branches_for_url`)
+//! moved to `corvus-be` (`crate::repo_ops` there).
 //!
 //! `init_repo` is here as well: it touches the git-provider registry + a host
 //! token from the keyring to create the remote, but that all works in-process
 //! (`state.lock_git_providers()` / `credential_store::get`), exactly like the
 //! already-migrated `fetch`/`push`/`pull`. The M3 credential broker is only
 //! needed once `corvus-be` runs out-of-process — not for this in-process seam.
-//!
-//! `check_is_git_repo` / `list_remote_branches_for_url` never touched
-//! `AppState`, but the handler macro requires a context first arg, so they take
-//! `_state: &AppState` and ignore it. The original commands returned bare
-//! `bool` / `Vec` values; the broker shape is `Result<R, AppError>`, so the
-//! handlers wrap the same value in `Ok(...)` — the serde shape on the wire is
-//! identical.
 //!
 //! The `on_repo_open` / `on_repo_close` (and the orphan-GC `on_repo_deregistered`)
 //! hooks are fire-and-forget and fire inline after the repo lock is dropped,
@@ -35,35 +27,9 @@ use serde_json::json;
 
 use crate::error::AppError;
 use crate::git::init::InitRepoOptions;
-use crate::git::repo::{CloneOptions, RepoInfo};
+use crate::git::repo::RepoInfo;
 use crate::ipc::corvus;
 use crate::AppState;
-
-/// Returns true when `path` is inside a git repository.
-#[corvus::handler]
-fn check_is_git_repo(_state: &AppState, path: String) -> Result<bool, AppError> {
-    Ok(crate::git::init::is_git_repo(&path))
-}
-
-/// List branch names available on a remote URL (calls `git ls-remote --heads`).
-#[corvus::handler]
-fn list_remote_branches_for_url(_state: &AppState, url: String) -> Result<Vec<String>, AppError> {
-    crate::git::repo::list_remote_branches(&url)
-}
-
-/// Clone a remote repository to disk and return the fresh repo's metadata.
-///
-/// Does **not** open a tab: the returned [`RepoInfo`] carries an empty `tab_id`,
-/// and no `on_repo_open` hook fires. Opening the clone as a tab is the
-/// frontend's job (via `open_repo`, keyed by the workspace-registry id) — every
-/// caller already reopens under a canonical id, so registering a throwaway tab
-/// here was pure waste. Runs the network clone on the broker's blocking thread
-/// (the handler is sync), so the IPC/UI thread never stalls on it.
-#[corvus::handler]
-fn clone_repo(_state: &AppState, opts: CloneOptions) -> Result<RepoInfo, AppError> {
-    let dest = crate::git::repo::clone_repo(&opts)?;
-    Ok(RepoInfo::for_path(&dest)?)
-}
 
 /// Open the repository at `path` under `tab_id` in the repo manager.
 ///

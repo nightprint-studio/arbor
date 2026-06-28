@@ -380,6 +380,7 @@ fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
 
     let app_for_events = app.clone();
     let app_for_host = app.clone();
+    let app_for_disc = app.clone();
     match ChildClient::spawn(
         cmd,
         move |topic, payload| {
@@ -387,6 +388,13 @@ fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
             let _ = app_for_events.emit(&topic, payload);
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
+        move || {
+            // The git backend process died (crash / kill). There is no live
+            // respawn yet, so surface a fatal state: the Corvus window shows a
+            // blocking overlay asking the user to restart Arbor.
+            use tauri::Emitter;
+            let _ = app_for_disc.emit("arbor://corvus-be-down", ());
+        },
     ) {
         Ok(pair) => Some(pair),
         Err(e) => {

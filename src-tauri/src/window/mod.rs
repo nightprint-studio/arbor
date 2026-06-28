@@ -124,6 +124,15 @@ pub fn close_product_window(app: AppHandle, id: String) {
     }
 }
 
+/// Relaunch the whole app. Used by the fatal "git backend stopped" overlay in
+/// the Corvus window: `corvus-be` is spawned once at startup with no live
+/// respawn yet, so the only recovery from its death is a full restart. Never
+/// returns (the running process is replaced).
+#[tauri::command]
+pub fn restart_app(app: AppHandle) {
+    app.restart();
+}
+
 /// Hop to the main/UI thread before touching WebView2 windows. Window creation
 /// off the main thread fails with `HRESULT 0x8007139F` ("resource not in the
 /// correct state"); every `open_or_focus` entry point may run on a background
