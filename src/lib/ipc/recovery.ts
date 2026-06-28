@@ -33,10 +33,10 @@ export function deleteRecoveryEntry(
 
 /** Load the persisted snapshot policy (size limit + extension deny-list). */
 export function getRecoveryConfig(): Promise<RecoveryConfig> {
-  return platform<RecoveryConfig>('get_recovery_config');
+  return corvus<RecoveryConfig>('get_recovery_config');
 }
 
 /** Persist a new snapshot policy to ~/.config/arbor/config.toml. */
 export function setRecoveryConfig(recovery: RecoveryConfig): Promise<void> {
-  return platform<void>('set_recovery_config', { recovery });
+  return corvus<void>('set_recovery_config', { recovery });
 }

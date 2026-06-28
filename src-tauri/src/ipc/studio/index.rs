@@ -27,6 +27,21 @@ use crate::studio::{
 };
 use crate::AppState;
 
+/// Whether the persistent Studio index is enabled. The `studio` config section
+/// is owned by corvus-be (`corvus/config.toml`); read it back with a thin
+/// partial-struct read. Defaults to `false` (index off) when the file/section
+/// is absent.
+fn studio_use_index() -> bool {
+    #[derive(serde::Deserialize)]
+    struct StudioProbe {
+        #[serde(default)]
+        use_index: bool,
+    }
+    crate::config::corvus_read::section::<StudioProbe>("studio")
+        .map(|s| s.use_index)
+        .unwrap_or(false)
+}
+
 /// Snapshot of the index state — emitted on every refresh tick + on
 /// completion so the sidebar can render a "Indexing N/M…" badge.
 #[derive(Debug, Clone, Serialize)]
@@ -144,10 +159,7 @@ fn studio_scan_cross_refs(
         let mut mgr = state.lock_repos()?;
         mgr.get(&tab_id)?.path.clone()
     };
-    let use_index = state
-        .lock_config()
-        .map(|c| c.studio.use_index)
-        .unwrap_or(false);
+    let use_index = studio_use_index();
     // Empty list = back-compat RON-only; explicit list = filter.
     let kinds = kinds.unwrap_or_else(|| vec![StudioFileKind::Ron]);
     if use_index {
@@ -173,10 +185,7 @@ fn studio_find_usages(
         let mut mgr = state.lock_repos()?;
         mgr.get(&tab_id)?.path.clone()
     };
-    let use_index = state
-        .lock_config()
-        .map(|c| c.studio.use_index)
-        .unwrap_or(false);
+    let use_index = studio_use_index();
     let kinds = kinds.unwrap_or_else(|| vec![StudioFileKind::Ron]);
     if use_index {
         let idx = index::load(&repo_path);
@@ -203,10 +212,7 @@ fn studio_scan_broken_refs(
         let mut mgr = state.lock_repos()?;
         mgr.get(&tab_id)?.path.clone()
     };
-    let use_index = state
-        .lock_config()
-        .map(|c| c.studio.use_index)
-        .unwrap_or(false);
+    let use_index = studio_use_index();
     let kinds = kinds.unwrap_or_else(|| vec![StudioFileKind::Ron]);
     if use_index {
         let idx = index::load(&repo_path);

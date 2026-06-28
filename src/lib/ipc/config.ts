@@ -36,10 +36,10 @@ export const setRepoConfig = (tabId: string, config: RepoConfig) =>
 // ── Graph config ──────────────────────────────────────────────────────────────
 
 export const getGraphConfig = () =>
-  platform<GraphConfig>('get_graph_config');
+  corvus<GraphConfig>('get_graph_config');
 
 export const setGraphConfig = (config: GraphConfig) =>
-  platform<void>('set_graph_config', { config });
+  corvus<void>('set_graph_config', { config });
 
 // ── Issues display config ────────────────────────────────────────────────────
 
@@ -49,18 +49,18 @@ export interface IssuesConfig {
 }
 
 export const getIssuesConfig = () =>
-  platform<IssuesConfig>('get_issues_config');
+  corvus<IssuesConfig>('get_issues_config');
 
 export const setIssuesConfig = (config: IssuesConfig) =>
-  platform<void>('set_issues_config', { config });
+  corvus<void>('set_issues_config', { config });
 
 // ── MR/PR Activity timeline defaults ─────────────────────────────────────────
 
 export const getMrConfig = () =>
-  platform<MrConfig>('get_mr_config');
+  corvus<MrConfig>('get_mr_config');
 
 export const setMrConfig = (config: MrConfig) =>
-  platform<void>('set_mr_config', { config });
+  corvus<void>('set_mr_config', { config });
 
 // ── Appearance preferences (window control style, …) ─────────────────────────
 
@@ -114,10 +114,10 @@ export const addRecentRepo = (path: string) =>
 // ── Cache config ──────────────────────────────────────────────────────────────
 
 export const getCacheConfig = () =>
-  platform<CacheConfig>('get_cache_config');
+  corvus<CacheConfig>('get_cache_config');
 
 export const setCacheConfig = (config: CacheConfig) =>
-  platform<void>('set_cache_config', { config });
+  corvus<void>('set_cache_config', { config });
 
 /** Evict all backend cache entries (stats, ticket links) for a specific tab. */
 export const evictTabCache = (tabId: string) =>
@@ -126,10 +126,10 @@ export const evictTabCache = (tabId: string) =>
 // ── Pipelines orchestrator config (global concurrency cap) ────────────────────
 
 export const getPipelinesConfig = () =>
-  platform<PipelinesConfig>('get_pipelines_config');
+  corvus<PipelinesConfig>('get_pipelines_config');
 
 export const setPipelinesConfig = (config: PipelinesConfig) =>
-  platform<void>('set_pipelines_config', { config });
+  corvus<void>('set_pipelines_config', { config });
 
 // ── Activity bar config ────────────────────────────────────────────────────────
 
@@ -142,10 +142,10 @@ export const setActivityBarConfig = (config: ActivityBarConfig) =>
 // ── Diff config (algorithm, context, full-file, virtualization) ──────────────
 
 export const getDiffConfig = () =>
-  platform<DiffConfig>('get_diff_config');
+  corvus<DiffConfig>('get_diff_config');
 
 export const setDiffConfig = (config: DiffConfig) =>
-  platform<void>('set_diff_config', { config });
+  corvus<void>('set_diff_config', { config });
 
 // ── Animations config (enabled + speed multiplier) ────────────────────────────
 
@@ -158,10 +158,10 @@ export const setAnimationsConfig = (config: AnimationsConfig) =>
 // ── Commit config (global template fallback, …) ───────────────────────────────
 
 export const getCommitConfig = () =>
-  platform<CommitConfig>('get_commit_config');
+  corvus<CommitConfig>('get_commit_config');
 
 export const setCommitConfig = (config: CommitConfig) =>
-  platform<void>('set_commit_config', { config });
+  corvus<void>('set_commit_config', { config });
 
 // ── Onboarding tour state ─────────────────────────────────────────────────────
 
@@ -182,10 +182,10 @@ export const setWhatsNewConfig = (config: WhatsNewConfig) =>
 // ── Branches sidebar (global recursive split + per-repo grouping state) ──────
 
 export const getBranchesConfig = () =>
-  platform<BranchesConfig>('get_branches_config');
+  corvus<BranchesConfig>('get_branches_config');
 
 export const setBranchesConfig = (config: BranchesConfig) =>
-  platform<void>('set_branches_config', { config });
+  corvus<void>('set_branches_config', { config });
 
 export const getBranchGrouping = (tabId: string) =>
   corvus<BranchGroupingConfig>('get_branch_grouping', { tab_id: tabId });

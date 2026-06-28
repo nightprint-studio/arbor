@@ -1,21 +1,23 @@
-//! `config` domain — app-level (`~/.config/arbor/config.toml`) and per-repo
-//! (`<repo>/.arbor/config.toml`) settings handlers routed through the platform
+//! `config` domain — app-level settings handlers routed through the platform
 //! backend.
 //!
-//! Each handler is the body the matching `#[tauri::command]` ran inline, now
-//! self-registered under `program = "platform"`. Behavior (locks held, config
-//! save, errors) is byte-identical; commands that took no `AppState` use
-//! `_state: &AppState` to satisfy the handler macro's context arg.
+//! The git-product config sections (diff, graph, gitflow, cache, ticket_links,
+//! issues, mr, status, recovery, missing_projects, pipelines, studio, commit,
+//! branches) are OWNED by `corvus-be` now (`corvus/config.toml`) — their get/set
+//! handlers live in `crates/corvus/be/src/corvus_config.rs`. What stays here are
+//! the **platform/global** sections that the shell still owns in `AppConfig`
+//! (`profile.toml` / `oauth.toml`): OAuth overrides, the standalone graph-columns
+//! layout, activity-bar, appearance, explorer (read), animations, onboarding,
+//! what's-new, and the recent-repos list. Plus `evict_tab_cache`, a shell-only
+//! cache op that *reads* the corvus-owned `cache` section via a thin read.
 //!
 //! `set_explorer_config` is **not** here: it takes an `AppHandle` and reconciles
 //! the OS-global shortcut, so it stays inline in the command module as a
 //! keep-shell Tauri command. No hooks fire in this domain.
 
 use crate::config::app_config::{
-    self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchesConfig, CacheConfig,
-    CommitConfig, DiffConfig, ExplorerConfig, GraphConfig, IssuesConfig, MissingProjectsConfig,
-    MrConfig, OAuthOverrides, OnboardingConfig, PipelinesConfig, RecoveryConfig, StudioSettings,
-    WhatsNewConfig,
+    self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, ExplorerConfig, OAuthOverrides,
+    OnboardingConfig, WhatsNewConfig,
 };
 use crate::config::graph_columns::{self, GraphColumnsConfig};
 use crate::error::AppError;
@@ -34,30 +36,6 @@ fn get_recent_repos(state: &AppState) -> Result<Vec<String>, AppError> {
     Ok(config.recent_repos.clone())
 }
 
-/// Read the recovery-snapshot policy.  Used by the Settings UI and by the
-/// journal module itself when computing per-file exclusions.
-#[platform::handler(program = "platform")]
-fn get_recovery_config(state: &AppState) -> Result<RecoveryConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.recovery.clone())
-}
-
-/// Persist a new recovery-snapshot policy to `~/.config/arbor/config.toml`.
-/// Takes effect immediately for every subsequent snapshot.
-#[platform::handler(program = "platform")]
-fn set_recovery_config(state: &AppState, recovery: RecoveryConfig) -> Result<(), AppError> {
-    {
-        let mut config = state.lock_config()?;
-        config.recovery = recovery;
-        app_config::save(&config).map_err(|e| AppError::Other(e.to_string()))?;
-    }
-    // Push the new policy to corvus-be so its OOP snapshots pick it up live
-    // (best-effort; a no-op when corvus-be isn't running). The config lock is
-    // released above before the round-trip.
-    crate::ipc::sync_config(state);
-    Ok(())
-}
-
 /// Prepend a path to the recent repos list (normalised to forward slashes),
 /// deduplicating any existing entry and capping the list at MAX_RECENT.
 #[platform::handler(program = "platform")]
@@ -73,7 +51,7 @@ fn add_recent_repo(state: &AppState, path: String) -> Result<(), AppError> {
 // ── OAuth overrides ───────────────────────────────────────────────────────
 //
 // Per-provider client_id (and host, for GitLab) overrides persisted in
-// `~/.config/arbor/config.toml` under `[oauth]`.  client_id is a public
+// `~/.config/arbor/oauth.toml` under `[oauth]`.  client_id is a public
 // OAuth identifier (RFC 6749 §2.2) and is intentionally stored in plain
 // TOML — only access/refresh tokens go to the OS keychain.
 
@@ -134,85 +112,6 @@ fn set_graph_columns(_state: &AppState, config: GraphColumnsConfig) -> Result<()
     graph_columns::save(&config).map_err(|e| AppError::Other(e.to_string()))
 }
 
-/// Return the current graph configuration.
-#[platform::handler(program = "platform")]
-fn get_graph_config(state: &AppState) -> Result<GraphConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.graph.clone())
-}
-
-/// Persist updated graph configuration to disk.
-#[platform::handler(program = "platform")]
-fn set_graph_config(state: &AppState, config: GraphConfig) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.graph = config;
-    let cfg_clone = cfg.clone();
-    drop(cfg);
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
-
-/// Return the current cache configuration.
-#[platform::handler(program = "platform")]
-fn get_cache_config(state: &AppState) -> Result<CacheConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.cache.clone())
-}
-
-/// Persist updated cache configuration to disk.
-#[platform::handler(program = "platform")]
-fn set_cache_config(state: &AppState, config: CacheConfig) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.cache = config;
-    let cfg_clone = cfg.clone();
-    drop(cfg);
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
-
-// ── Pipelines (global concurrency cap) ────────────────────────────────────────
-
-/// Read the pipelines orchestrator settings (global concurrency cap, …).
-#[platform::handler(program = "platform")]
-fn get_pipelines_config(state: &AppState) -> Result<PipelinesConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.pipelines.clone())
-}
-
-/// Persist updated pipelines settings to disk and wake any orchestrator
-/// thread parked on the concurrency condvar so a freshly-raised cap is
-/// picked up by queued runs immediately (no app restart needed).
-#[platform::handler(program = "platform")]
-fn set_pipelines_config(state: &AppState, config: PipelinesConfig) -> Result<(), AppError> {
-    let cfg_clone = {
-        let mut cfg = state.lock_config()?;
-        cfg.pipelines = config;
-        cfg.clone()
-    };
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))?;
-    // Wake every queued orchestrator. Each run snapshots the cap at start, so
-    // the new value applies to runs started from here on; the notify just lets
-    // already-parked runs re-check their (snapshotted) cap without waiting out
-    // the 250 ms poll timeout.
-    state.pipeline_engine.cv.notify_all();
-    Ok(())
-}
-
-// ── Studio (RON / JSON / TOML sidebar settings) ───────────────────────────────
-
-#[platform::handler(program = "platform")]
-fn get_studio_settings(state: &AppState) -> Result<StudioSettings, AppError> {
-    Ok(state.lock_config()?.studio.clone())
-}
-
-#[platform::handler(program = "platform")]
-fn set_studio_settings(state: &AppState, settings: StudioSettings) -> Result<(), AppError> {
-    let cfg_clone = {
-        let mut cfg = state.lock_config()?;
-        cfg.studio = settings;
-        cfg.clone()
-    };
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
-
 /// Drop the cached `git2::Repository` handle for a specific tab to free libgit2
 /// internal caches.
 ///
@@ -220,15 +119,23 @@ fn set_studio_settings(state: &AppState, settings: StudioSettings) -> Result<(),
 /// — they live in `corvus-be` now (stats HEAD-keyed → self-healing; ticket links
 /// re-fetched on demand). What remains here is the shell-owned `RepoManager`
 /// handle: if `cache.close_repo_on_evict` is enabled and the tab is not currently
-/// active, drop it (transparently re-opened on next access).
+/// active, drop it (transparently re-opened on next access). The `cache` section
+/// is owned by corvus-be, so its `close_repo_on_evict` flag is read back with a
+/// thin partial-struct read.
 #[platform::handler(program = "platform")]
 fn evict_tab_cache(state: &AppState, tab_id: String) -> Result<(), AppError> {
-    // Drop the git2::Repository handle if the feature flag is enabled and
-    // this is not the currently active tab (evicting the active tab would
-    // cause an immediate re-open on the very next command — pointless).
-    let should_close = state.lock_config()
-        .map(|cfg| cfg.cache.close_repo_on_evict)
-        .unwrap_or(true);
+    // Read the corvus-owned `cache.close_repo_on_evict` flag (defaults true).
+    let should_close = {
+        #[derive(serde::Deserialize)]
+        struct CacheProbe {
+            #[serde(default = "default_close_on_evict")]
+            close_repo_on_evict: bool,
+        }
+        fn default_close_on_evict() -> bool { true }
+        crate::config::corvus_read::section::<CacheProbe>("cache")
+            .map(|c| c.close_repo_on_evict)
+            .unwrap_or(true)
+    };
 
     if should_close {
         let active = state.active_tab_id.lock()
@@ -245,25 +152,7 @@ fn evict_tab_cache(state: &AppState, tab_id: String) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Return the current missing-projects (tombstone + locate) configuration.
-#[platform::handler(program = "platform")]
-fn get_missing_projects_config(state: &AppState) -> Result<MissingProjectsConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.missing_projects.clone())
-}
-
-/// Persist updated missing-projects configuration to disk.
-#[platform::handler(program = "platform")]
-fn set_missing_projects_config(
-    state: &AppState,
-    config: MissingProjectsConfig,
-) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.missing_projects = config;
-    let cfg_clone = cfg.clone();
-    drop(cfg);
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
+// ── Activity bar (platform UI — visibility + ordering) ──────────────────────
 
 /// Return the current activity-bar configuration.
 #[platform::handler(program = "platform")]
@@ -282,56 +171,7 @@ fn set_activity_bar_config(state: &AppState, config: ActivityBarConfig) -> Resul
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
 }
 
-/// Return the current issues display configuration.
-#[platform::handler(program = "platform")]
-fn get_issues_config(state: &AppState) -> Result<IssuesConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.issues.clone())
-}
-
-/// Persist updated issues display configuration to disk.
-#[platform::handler(program = "platform")]
-fn set_issues_config(state: &AppState, config: IssuesConfig) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.issues = config;
-    let cfg_clone = cfg.clone();
-    drop(cfg);
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
-
-/// Return the current diff configuration (algorithm, context, full-file, virt threshold).
-#[platform::handler(program = "platform")]
-fn get_diff_config(state: &AppState) -> Result<DiffConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.diff.clone())
-}
-
-/// Persist updated diff configuration to disk.
-#[platform::handler(program = "platform")]
-fn set_diff_config(state: &AppState, config: DiffConfig) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.diff = config;
-    let cfg_clone = cfg.clone();
-    drop(cfg);
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
-
-/// Return the current MR/PR Activity-timeline filter defaults.
-#[platform::handler(program = "platform")]
-fn get_mr_config(state: &AppState) -> Result<MrConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.mr.clone())
-}
-
-/// Persist updated MR/PR filter defaults to disk.
-#[platform::handler(program = "platform")]
-fn set_mr_config(state: &AppState, config: MrConfig) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.mr = config;
-    let cfg_clone = cfg.clone();
-    drop(cfg);
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
+// ── Appearance preferences (window control style, font scale, …) ────────────
 
 /// Return the current appearance preferences (window control style, …).
 #[platform::handler(program = "platform")]
@@ -405,41 +245,6 @@ fn get_whats_new_config(state: &AppState) -> Result<WhatsNewConfig, AppError> {
 fn set_whats_new_config(state: &AppState, config: WhatsNewConfig) -> Result<(), AppError> {
     let mut cfg = state.lock_config()?;
     cfg.whats_new = config;
-    let cfg_clone = cfg.clone();
-    drop(cfg);
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
-
-// ── Branches sidebar (global behaviour + per-repo grouping state) ───────────
-
-/// Read the global Branches-sidebar behaviour knobs (e.g. recursive path split).
-#[platform::handler(program = "platform")]
-fn get_branches_config(state: &AppState) -> Result<BranchesConfig, AppError> {
-    Ok(state.lock_config()?.branches.clone())
-}
-
-/// Persist updated Branches-sidebar behaviour knobs.
-#[platform::handler(program = "platform")]
-fn set_branches_config(state: &AppState, config: BranchesConfig) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.branches = config;
-    let cfg_clone = cfg.clone();
-    drop(cfg);
-    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
-
-/// Read host-wide commit preferences (global template fallback, …).
-#[platform::handler(program = "platform")]
-fn get_commit_config(state: &AppState) -> Result<CommitConfig, AppError> {
-    let config = state.lock_config()?;
-    Ok(config.commit.clone())
-}
-
-/// Persist updated commit preferences to disk.
-#[platform::handler(program = "platform")]
-fn set_commit_config(state: &AppState, config: CommitConfig) -> Result<(), AppError> {
-    let mut cfg = state.lock_config()?;
-    cfg.commit = config;
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))

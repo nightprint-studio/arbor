@@ -474,26 +474,32 @@ pub fn sync_repo_open(state: &AppState, tab_id: &str, path: &str) {
     );
 }
 
-/// Push the app-config slices `corvus-be`'s OOP handlers need (the `recovery`
-/// snapshot policy, the global `gitflow` config, the `diff` context-line default
-/// and the `status` rename-detection toggle) so they stop falling back to
-/// built-in defaults. Called on repo open (alongside the git program) and
-/// whenever the user changes a relevant setting. **Best-effort** like
-/// [`sync_repo_open`]: when `corvus-be` isn't running the method routes to the
-/// in-process loopback, returns `UnknownMethod`, and is dropped — the in-process
-/// handlers read the config directly, so nothing is lost. Each section's wire
-/// shape is the matching app-config struct (`RecoveryConfig` ≡ `SnapshotPolicy`,
-/// `GitFlowConfig` shared via `corvus-git`; `diff`/`status` read by field name on
-/// the backend), so the backend deserializes it straight. The per-repo
-/// `.arbor/config.toml` Git Flow override is NOT pushed — corvus-be reads it from
-/// the workdir it opens.
+/// Push the runtime values `corvus-be` can't resolve on its own: the absolute,
+/// profile-aware PATH of its owned `corvus/config.toml` (so it can load/save the
+/// git-product config sections it now owns — recovery, gitflow, diff, status,
+/// cache, …), the resolved `git` program + portable dir for self-detection, the
+/// repo registry, and the workspace/worktree-link file paths. Called on repo
+/// open (alongside the git program) and whenever the user changes a relevant
+/// setting. **Best-effort**: when `corvus-be` isn't running the `__set_config`
+/// method routes to the in-process loopback, returns `UnknownMethod`, and is
+/// dropped. corvus-be owns and reads the config-content sections from the file
+/// directly now, so only the path is handed over (not the values). The per-repo
+/// `.arbor/config.toml` overrides are NOT pushed — corvus-be reads those from the
+/// workdir it opens.
 pub fn sync_config(state: &AppState) {
     let cfg = crate::config::app_config::load().unwrap_or_default();
-    push_config_section(state, "recovery", &cfg.recovery);
-    push_config_section(state, "gitflow", &cfg.gitflow);
-    push_config_section(state, "diff", &cfg.diff);
-    push_config_section(state, "status", &cfg.status);
-    push_config_section(state, "ticket_links", &cfg.ticket_links);
+    // corvus-be OWNS its product config (`corvus/config.toml`: diff, graph,
+    // gitflow, cache, ticket_links, issues, mr, status, recovery,
+    // missing_projects, pipelines, studio, commit, branches) and reads those
+    // sections from the file directly, so they are no longer pushed. The shell
+    // only hands over the profile-resolved absolute PATH of that file — corvus-be
+    // is a separate process and can't resolve the active profile itself. A
+    // profile switch re-pushes a new path → corvus-be loads from it on next access.
+    push_config_section(
+        state,
+        "corvus_config_path",
+        &crate::config::corvus_read::corvus_config_path().to_string_lossy().to_string(),
+    );
     // Git CLI: the configured executable_path override + the absolute, profile-
     // resolved PortableGit dir. corvus-be self-detects from these — it can't
     // resolve the active profile to recompute the portable dir itself.

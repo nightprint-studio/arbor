@@ -9,8 +9,9 @@
 //! The per-tab parse/lookup cache (the in-process `AppState::ticket_caches`)
 //! lives here as a process-local [`TICKET_CACHES`] map — corvus-be is its sole
 //! owner now, so cache invalidation is local (no cross-process sync). The global
-//! `ticket_links` config is pushed by the shell (`state.config("ticket_links")`);
-//! the per-repo override is read straight from `<workdir>/.arbor/config.toml`
+//! `ticket_links` config is read from corvus-be's owned global config
+//! ([`crate::corvus_config`]); the per-repo override is read straight from
+//! `<workdir>/.arbor/config.toml`
 //! (the same direct-read precedent as the gitflow / stats domains). The one write
 //! handler (`set_ticket_link_repo_config`) merges the `ticket_links` table into
 //! that file, preserving every other section.
@@ -41,22 +42,6 @@ fn caches() -> std::sync::MutexGuard<'static, HashMap<String, TicketLinkCache>> 
 
 // ── Config shapes (wire twins of the shell's app/repo config slices) ──────────
 
-/// The global `ticket_links` app-config section the shell pushes (field-identical
-/// to its `TicketLinksConfig`); read via `state.config("ticket_links")`.
-#[derive(Deserialize, Default)]
-struct TicketLinksGlobal {
-    #[serde(default)]
-    enabled: bool,
-    #[serde(default)]
-    storage: StorageBackend,
-    #[serde(default = "default_true")]
-    auto_parse: bool,
-    #[serde(default = "default_true")]
-    warn_push: bool,
-}
-
-fn default_true() -> bool { true }
-
 /// The per-repo `[ticket_links]` override (wire twin of the shell's
 /// `TicketLinksRepoConfig`), serialized straight into `.arbor/config.toml`.
 #[derive(Deserialize, Serialize, Default)]
@@ -80,11 +65,10 @@ struct RepoTicketSlice {
     issue_tracker: Option<String>,
 }
 
-fn global_config(state: &CorvusState) -> TicketLinksGlobal {
-    state
-        .config("ticket_links")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default()
+/// The global `ticket_links` config, read from corvus-be's owned global config
+/// ([`crate::corvus_config`]) rather than the shell-pushed copy.
+fn global_config(state: &CorvusState) -> crate::corvus_config::TicketLinksGlobalConfig {
+    crate::corvus_config::load(state).ticket_links
 }
 
 fn repo_slice(workdir: &str) -> RepoTicketSlice {

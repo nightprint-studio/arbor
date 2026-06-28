@@ -15,7 +15,9 @@
 
 use std::path::Path;
 
-use arbor_core::prelude::{arbor_config_path, product_path, profile_plugins_dir, PRODUCT_CORVUS};
+use arbor_core::prelude::{
+    arbor_config_path, arbor_profile_path, product_path, profile_plugins_dir, PRODUCT_CORVUS,
+};
 
 /// Corvus product satellite entries (files and directories) that lived flat
 /// under `arbor/` before profiles. Same basename on both sides — only the
@@ -65,6 +67,66 @@ pub fn migrate_flat_satellites_to_active_profile() {
     for (flat, sub) in PLUGIN_AREA {
         move_if_absent(&arbor_config_path(flat), &plugins.join(sub));
     }
+}
+
+/// Keys that USED to persist to `corvus/config.toml` (everything-not-generic
+/// landed there) but are now **shell-owned** and belong in `profile.toml`: the
+/// `git` executable override, integrated-terminal prefs, activity-bar layout,
+/// IDE-launcher prefs, and the recent-repos list. corvus-be owns
+/// `corvus/config.toml` now, so on upgrade these must be lifted out of it.
+const RELOCATED_TO_PROFILE: &[&str] = &["git", "terminals", "activity_bar", "ide", "recent_repos"];
+
+/// One-shot: lift the now-shell-owned keys out of corvus-be's `corvus/config.toml`
+/// into the active profile's `profile.toml`. Without this an upgraded install
+/// would lose those settings (the shell stopped reading the corvus file) and the
+/// stale copies would shadow fresh writes if corvus-be (the file's sole owner)
+/// rewrote it. Idempotent: once the keys are gone from the corvus file it's a
+/// no-op. Best-effort — any parse/write failure is logged and skipped, never
+/// fatal to boot. Runs per active profile (each has its own corvus file).
+pub fn migrate_generic_keys_out_of_corvus_config() {
+    let corvus_p = product_path(PRODUCT_CORVUS, "config.toml");
+    let Ok(text) = std::fs::read_to_string(&corvus_p) else { return };
+    let Ok(mut corvus_tbl) = text.parse::<toml::Table>() else { return };
+
+    let mut lifted = toml::Table::new();
+    for key in RELOCATED_TO_PROFILE {
+        if let Some(v) = corvus_tbl.remove(*key) {
+            lifted.insert((*key).to_string(), v);
+        }
+    }
+    if lifted.is_empty() {
+        return; // already migrated, or a fresh install with no legacy keys
+    }
+
+    // Merge into profile.toml. On upgrade these keys never lived there, so the
+    // `or_insert` only guards against a (re-run) collision.
+    let profile_p = arbor_profile_path("profile.toml");
+    let mut profile_tbl = std::fs::read_to_string(&profile_p)
+        .ok()
+        .and_then(|s| s.parse::<toml::Table>().ok())
+        .unwrap_or_default();
+    for (k, v) in lifted {
+        profile_tbl.entry(k).or_insert(v);
+    }
+
+    // Preserve first (profile.toml), then strip from the corvus file — never the
+    // other way round, so a mid-migration crash can't lose the keys.
+    if let Err(e) = write_table(&profile_p, &profile_tbl) {
+        tracing::warn!("profile migration: write {profile_p:?} failed: {e}");
+        return;
+    }
+    if let Err(e) = write_table(&corvus_p, &corvus_tbl) {
+        tracing::warn!("profile migration: rewrite {corvus_p:?} failed: {e}");
+    }
+}
+
+fn write_table(path: &Path, tbl: &toml::Table) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = toml::to_string_pretty(tbl)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    std::fs::write(path, content)
 }
 
 /// Move `old` → `new` only when `old` exists and `new` does not. Within

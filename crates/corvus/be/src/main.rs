@@ -32,6 +32,7 @@ mod avatar;
 mod bisect;
 mod branch;
 mod ci;
+mod corvus_config;
 mod diff;
 mod fs_git;
 mod git_cli;
@@ -152,13 +153,11 @@ fn main() {
         h.set_api_installer(corvus_be_api_installer());
     }
     let hooks = Arc::new(build_hook_dispatcher(&plugin_host));
-    if let Err(e) = plugin_host
-        .lock()
-        .expect("corvus-be: plugin host lock poisoned at boot")
-        .reload()
-    {
-        eprintln!("corvus-be: plugin reload failed: {e}");
-    }
+    // NB: the plugin reload is DEFERRED to after the `Hello` frame — see the
+    // `on_ready` closure handed to `serve_stdio` below. Loading plugins fires
+    // on-load hooks that emit events; emitting anything before `Hello` would
+    // race ahead of the handshake frame on the pipe and break the connection
+    // ("backend did not open with Hello").
 
     // The state handed to every handler: event egress + the hook broker bound to
     // the host above + the reverse channel back to the shell.
@@ -204,7 +203,20 @@ fn main() {
         Err(format!("unknown method: {method}"))
     };
 
-    if let Err(e) = serve_stdio(io::stdin().lock(), stdout, methods, host, dispatch) {
+    // Reload plugins only once `Hello` is on the wire: plugin on-load hooks emit
+    // events, and those `Event` frames must not precede the handshake `Hello`.
+    let plugin_host_ready = Arc::clone(&plugin_host);
+    let on_ready = move || {
+        if let Err(e) = plugin_host_ready
+            .lock()
+            .expect("corvus-be: plugin host lock poisoned at boot")
+            .reload()
+        {
+            eprintln!("corvus-be: plugin reload failed: {e}");
+        }
+    };
+
+    if let Err(e) = serve_stdio(io::stdin().lock(), stdout, methods, host, dispatch, on_ready) {
         eprintln!("corvus-be: serve loop ended with error: {e}");
         std::process::exit(1);
     }

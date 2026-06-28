@@ -1,4 +1,4 @@
-import { platform, studio } from './rpc';
+import { corvus, platform, studio } from './rpc';
 
 /** File kinds the Studio sidebar can index. Mirrors `StudioFileKind` in
  *  `src-tauri/src/studio/mod.rs` — keep in sync. Phase 5.a adds `yaml`
@@ -138,10 +138,10 @@ export interface StudioSettings {
 }
 
 export const getStudioSettings = (): Promise<StudioSettings> =>
-  platform<StudioSettings>('get_studio_settings');
+  corvus<StudioSettings>('get_studio_settings');
 
 export const setStudioSettings = (settings: StudioSettings): Promise<void> =>
-  platform<void>('set_studio_settings', { settings });
+  corvus<void>('set_studio_settings', { settings });
 
 /** Fire the background refresh job — IPC returns immediately, progress
  *  + completion arrive via Tauri events (see studio.svelte.ts listeners). */

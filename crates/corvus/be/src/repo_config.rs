@@ -307,15 +307,13 @@ fn set_repo_ide(state: &CorvusState, tab_id: String, ide_id: Option<String>) -> 
 // `.arbor/config.toml`, plus the effective-config merge read.
 // ---------------------------------------------------------------------------
 
-/// The effective Git Flow config for a tab: the global config the shell pushed
-/// (section `"gitflow"`) overlaid by the repo's own `.arbor/config.toml` override
-/// when present. Resolution is byte-identical to the in-process `effective_config`.
+/// The effective Git Flow config for a tab: the corvus-owned global config
+/// ([`crate::corvus_config`]) overlaid by the repo's own `.arbor/config.toml`
+/// override when present. Resolution is byte-identical to the in-process
+/// `effective_config`.
 #[arbor_rpc::handler]
 fn get_gitflow_config(state: &CorvusState, tab_id: String) -> Result<GitFlowConfig, String> {
-    let global: GitFlowConfig = state
-        .config("gitflow")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+    let global: GitFlowConfig = crate::corvus_config::load(state).gitflow;
 
     let workdir = repo_path(state, &tab_id)?;
     let repo_cfg = load(&workdir).unwrap_or_default();

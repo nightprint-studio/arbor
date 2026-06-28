@@ -22,7 +22,6 @@
 // **deleted** — `corvus-be` is their sole owner now (no in-process fallback).
 pub mod auth;
 pub mod brp;
-pub mod gitflow;
 pub mod ide;
 pub mod image;
 pub mod issues;

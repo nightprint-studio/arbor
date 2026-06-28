@@ -31,13 +31,12 @@ fn git() -> GitCli {
     GitCli::from_optional(crate::git_cli::snapshot().path)
 }
 
-/// Load the user-tuned snapshot policy from the app config file.  Falls back
-/// to the built-in defaults if the config is unavailable or missing fields.
+/// Load the user-tuned snapshot policy. The `recovery` config section is OWNED
+/// by corvus-be now (`corvus/config.toml`); the in-process snapshotter reads it
+/// back with a thin partial-struct read. Falls back to the built-in defaults if
+/// the file/section is unavailable or malformed.
 fn load_policy_from_config() -> SnapshotPolicy {
-    match crate::config::app_config::load() {
-        Ok(cfg) => cfg.recovery.into(),
-        Err(_)  => SnapshotPolicy::default(),
-    }
+    crate::config::corvus_read::section::<SnapshotPolicy>("recovery").unwrap_or_default()
 }
 
 /// Capture a snapshot under an explicit [`SnapshotPolicy`].

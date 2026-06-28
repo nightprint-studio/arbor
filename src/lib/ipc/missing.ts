@@ -42,7 +42,7 @@ export const cleanupMissingRecentRepos = (): Promise<string[]> =>
   corvus('cleanup_missing_recent_repos');
 
 export const getMissingProjectsConfig = (): Promise<MissingProjectsConfig> =>
-  platform('get_missing_projects_config');
+  corvus('get_missing_projects_config');
 
 export const setMissingProjectsConfig = (config: MissingProjectsConfig): Promise<void> =>
-  platform('set_missing_projects_config', { config });
+  corvus('set_missing_projects_config', { config });

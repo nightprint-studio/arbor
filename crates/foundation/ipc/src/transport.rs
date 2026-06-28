@@ -174,7 +174,8 @@ impl HostCaller for FrameHostCaller {
     }
 }
 
-/// Run the backend serve loop: announce `methods` via `Hello`, then read frames
+/// Run the backend serve loop: announce `methods` via `Hello`, run `on_ready`
+/// (post-Hello startup work — see below), then read frames
 /// from `input` (the backend's stdin). Each `Request` is dispatched on its **own
 /// worker thread** (so the reader stays free to receive `HostResponse`s while a
 /// handler is mid-`HostRequest` — the reverse-channel reentrancy requirement);
@@ -188,21 +189,31 @@ impl HostCaller for FrameHostCaller {
 /// in-process `LoopbackBroker`, which is already called concurrently).
 ///
 /// Returns when the peer closes `input` (the shell exited).
-pub fn serve_stdio<R, F>(
+pub fn serve_stdio<R, F, I>(
     input: R,
     out: SharedWriter,
     methods: Vec<String>,
     host: Arc<FrameHostCaller>,
     dispatch: F,
+    on_ready: I,
 ) -> io::Result<()>
 where
     R: Read,
     F: Fn(&str, Value) -> Result<Value, String> + Send + Sync + 'static,
+    I: FnOnce(),
 {
     {
         let mut w = out.lock().expect("frame writer poisoned");
         write_frame(&mut *w, &Frame::Hello { methods })?;
     }
+
+    // Post-Hello startup hook. The shell's handshake reads the FIRST frame and
+    // requires it to be `Hello`; any `Event` frame emitted before this point
+    // (e.g. by plugin on-load hooks) would race ahead of `Hello` on the pipe and
+    // break the connection ("backend did not open with Hello"). Running such work
+    // here guarantees it happens strictly AFTER `Hello` is on the wire — the read
+    // loop below hasn't started yet, so no request can be dispatched mid-hook.
+    on_ready();
 
     let dispatch = Arc::new(dispatch);
     let pending = host.pending();
@@ -503,7 +514,7 @@ mod tests {
         let serve_out = Arc::clone(&out);
         let serve_host = Arc::clone(&host);
         let serve = thread::spawn(move || {
-            let _ = serve_stdio(serve_in, serve_out, vec!["trigger".to_string()], serve_host, dispatch);
+            let _ = serve_stdio(serve_in, serve_out, vec!["trigger".to_string()], serve_host, dispatch, || {});
         });
 
         // ── Shell side ──

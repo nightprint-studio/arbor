@@ -4,7 +4,7 @@
  * Git itself has no notion of "local-only" tags — once fetched with `--tags`
  * a remote tag lands in `refs/tags/*` indistinguishable from one the user
  * created locally. Arbor persists the list per-repo in `.arbor/config.toml`
- * (handled by the backend `config_commands` for `local_only_tags`).
+ * (owned by corvus-be's repo-config handlers for `local_only_tags`).
  *
  * This frontend store keeps a reactive in-memory cache keyed by tab id so
  * the Sidebar can render the "local" badge synchronously, plus async

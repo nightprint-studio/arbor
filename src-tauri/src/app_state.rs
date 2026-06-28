@@ -271,9 +271,19 @@ impl AppState {
     /// `setup()`).
     pub fn pipeline_runtime(&self) -> Option<crate::pipeline::PipelineRuntime> {
         let sink = self.event_sink()?;
-        let max_concurrent_runs = self.config.lock().ok()
-            .map(|c| c.pipelines.max_concurrent_runs)
-            .unwrap_or(4);
+        // `pipelines` config is owned by corvus-be (`corvus/config.toml`); read
+        // the concurrency cap back with a thin partial-struct read. Defaults to 4.
+        let max_concurrent_runs = {
+            #[derive(serde::Deserialize)]
+            struct PipelinesProbe {
+                #[serde(default = "default_max_runs")]
+                max_concurrent_runs: u32,
+            }
+            fn default_max_runs() -> u32 { 4 }
+            crate::config::corvus_read::section::<PipelinesProbe>("pipelines")
+                .map(|p| p.max_concurrent_runs)
+                .unwrap_or(4)
+        };
         Some(crate::pipeline::PipelineRuntime {
             engine: self.pipeline_engine.clone(),
             sink,
@@ -326,6 +336,10 @@ impl AppState {
         // session, …) into the active profile's corvus bucket before anything
         // reads them. One-shot + idempotent.
         crate::config::profile_migration::migrate_flat_satellites_to_active_profile();
+        // Lift the now-shell-owned keys (git/terminals/activity_bar/ide/recent_repos)
+        // out of corvus-be's `corvus/config.toml` into `profile.toml`, since those
+        // sections left AppConfig and the shell no longer reads the corvus file.
+        crate::config::profile_migration::migrate_generic_keys_out_of_corvus_config();
         let config = match crate::config::app_config::load() {
             Ok(c) => c,
             Err(e) => {
@@ -425,6 +439,10 @@ impl AppState {
     /// the new profile's `session.json`). The plugin host is reloaded separately
     /// by the caller via `reload_runtime`.
     pub fn reload_for_active_profile(&self) {
+        // The newly-active profile may not have booted since the upgrade, so its
+        // shell-owned keys could still sit in corvus-be's `corvus/config.toml`.
+        // Lift them into `profile.toml` before the reload below reads it.
+        crate::config::profile_migration::migrate_generic_keys_out_of_corvus_config();
         match crate::config::app_config::load() {
             Ok(c) => { if let Ok(mut g) = self.config.lock() { *g = c; } }
             Err(e) => tracing::warn!("profile switch: config reload failed: {e}"),

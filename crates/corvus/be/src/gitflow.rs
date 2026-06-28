@@ -38,10 +38,7 @@ struct RepoGitflow {
 /// by the repo's per-repo `.arbor/config.toml` override when present. Resolution
 /// is byte-identical to the in-process `effective_config`.
 fn effective_config(state: &CorvusState, repo: &Repository) -> GitFlowConfig {
-    let global: GitFlowConfig = state
-        .config("gitflow")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+    let global: GitFlowConfig = crate::corvus_config::load(state).gitflow;
 
     let workdir = repo
         .workdir()

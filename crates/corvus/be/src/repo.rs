@@ -16,40 +16,31 @@ pub fn git(_state: &CorvusState) -> GitCli {
     GitCli::from_optional(corvus_git_cli::snapshot().path)
 }
 
-/// The recovery-snapshot policy the shell pushed (retention / size / extension
-/// limits), or the built-in [`SnapshotPolicy::default`] when no `"recovery"`
-/// config section has been pushed. Centralised so every snapshotting domain
+/// The recovery-snapshot policy from the corvus-owned global config (retention /
+/// size / extension limits), or the built-in [`SnapshotPolicy::default`] when the
+/// config has not been written yet. Centralised so every snapshotting domain
 /// (stash, reset, recovery) reads the user-tuned policy from one place — closing
-/// the OOP "always-default" gap (W0b). The wire shape is the shell's
-/// `RecoveryConfig`, field-identical to `SnapshotPolicy`, so it deserializes
-/// directly; a malformed/partial section also falls back to the default.
+/// the OOP "always-default" gap (W0b). corvus-be owns `corvus/config.toml`, so
+/// this reads its own `recovery` section ([`crate::corvus_config`]) rather than
+/// the shell-pushed copy.
 pub fn snapshot_policy(state: &CorvusState) -> SnapshotPolicy {
-    state
-        .config("recovery")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default()
+    crate::corvus_config::load(state).recovery
 }
 
 /// The diff context-line count to fall back on when the caller passes none: the
-/// shell-pushed `diff.context_lines`, else libgit2's default of `3`. Mirrors the
-/// in-process `state.lock_config().map(|c| c.diff.context_lines).unwrap_or(3)`.
+/// corvus-owned `diff.context_lines`, else libgit2's default of `3` (the
+/// `DiffConfig::default`). Reads the corvus-owned global config rather than the
+/// shell-pushed copy.
 pub fn diff_context_lines(state: &CorvusState) -> u32 {
-    state
-        .config("diff")
-        .and_then(|v| v.get("context_lines").and_then(|n| n.as_u64()))
-        .map(|n| n as u32)
-        .unwrap_or(3)
+    crate::corvus_config::load(state).diff.context_lines
 }
 
-/// Whether workdir status scans detect renames/copies — the shell-pushed
+/// Whether workdir status scans detect renames/copies — the corvus-owned
 /// `status.detect_renames`, else `true` (matches `StatusConfig::default`). The
 /// dominant cost on repos with thousands of changed files, so the user can turn
-/// it off; the OOP path reads the same toggle the in-process handler did.
+/// it off; reads the corvus-owned global config rather than the shell-pushed copy.
 pub fn status_detect_renames(state: &CorvusState) -> bool {
-    state
-        .config("status")
-        .and_then(|v| v.get("detect_renames").and_then(|b| b.as_bool()))
-        .unwrap_or(true)
+    crate::corvus_config::load(state).status.detect_renames
 }
 
 /// Resolve a tab to its repo path, or a clear error if the shell never
