@@ -1,6 +1,6 @@
 use tauri::State;
 use crate::error::AppError;
-use crate::config::app_config::{self, ExplorerConfig};
+use crate::config::app_config::{self, ExplorerConfig, LauncherConfig};
 use crate::AppState;
 
 /// Persist updated file-explorer preferences. When the global-shortcut toggle
@@ -27,5 +27,28 @@ pub fn set_explorer_config(
     #[cfg(desktop)]
     crate::window::explorer::reconcile_global_shortcut(&app, &old_explorer, &new_explorer)
         .map_err(AppError::Other)?;
+    Ok(())
+}
+
+/// Read launcher (Canopy) preferences (the per-product map). Stays a keep-shell
+/// command: the launcher is a shell concern and the close-to-tray flags are read
+/// by the native window-event handler.
+#[tauri::command]
+pub fn get_launcher_config(state: State<'_, AppState>) -> Result<LauncherConfig, AppError> {
+    Ok(state.lock_config()?.launcher.clone())
+}
+
+/// Set a single product's tray-close preference (per-product, not global).
+#[tauri::command]
+pub fn set_launcher_close_to_tray(
+    state: State<'_, AppState>,
+    id: String,
+    close_to_tray: bool,
+) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    cfg.launcher.products.entry(id).or_default().close_to_tray = close_to_tray;
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(())
 }

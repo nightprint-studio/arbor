@@ -15,20 +15,30 @@ use crate::AppState;
 pub fn handle(window: &tauri::Window, event: &WindowEvent) {
     match event {
         WindowEvent::CloseRequested { api, .. } => {
-            // The nemus window closing for real tears down its audio session
-            // (drops the cpal stream on the audio thread, stops sound). Lazy
-            // ownership: nothing happens if it never played.
-            if window.label() == super::nemus::NEMUS_WINDOW_LABEL {
-                crate::nemus::shutdown(window.app_handle());
+            let label = window.label();
+            // Product windows (Corvus/Merula/Sitta) honour the launcher's
+            // close-to-tray setting: when ON, closing the window just HIDES it —
+            // the product stays running (still lit in the launcher) and is
+            // terminated only via the launcher's Stop, which force-destroys and
+            // bypasses this path. When OFF (default), the window closes for real
+            // (→ `Destroyed` → emit `running:false` + teardown). The launcher
+            // staying in control is what guarantees no un-killable zombie.
+            if let Some(id) = super::product_id_for_label(label) {
+                let keep = crate::config::app_config::load()
+                    .ok()
+                    .and_then(|c| c.launcher.products.get(id).map(|p| p.close_to_tray))
+                    .unwrap_or(false);
+                if keep {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    return;
+                }
             }
             #[cfg(not(debug_assertions))]
             {
-                // Close-to-tray applies ONLY to the main window. Auxiliary
-                // windows (the dedicated File Explorer, the drag-ghost overlay,
-                // product windows) close for real — otherwise a closed window is
-                // merely hidden and reopening re-summons the same stale window
-                // instead of a fresh one.
-                if window.label() == "main" {
+                // Close-to-tray for the main (launcher) window in release.
+                // Auxiliary windows (the drag-ghost overlay, …) close for real.
+                if label == "main" {
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -37,11 +47,16 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
             let _ = api;
         }
         WindowEvent::Destroyed => {
+            let label = window.label();
+            // nemus audio teardown happens on ACTUAL destroy — not on a
+            // close-to-tray hide (where the window lives on and may still play).
+            if label == super::nemus::NEMUS_WINDOW_LABEL {
+                crate::nemus::shutdown(window.app_handle());
+            }
             // When the last window of a product is gone, tell the launcher its
             // node is no longer "In esecuzione". Count the OTHER windows of the
             // same product (this one is being torn down) regardless of whether
             // it's already left the manager's map.
-            let label = window.label();
             if let Some(id) = super::product_id_for_label(label) {
                 let app = window.app_handle();
                 let still_running = app

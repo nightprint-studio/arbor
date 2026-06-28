@@ -151,6 +151,13 @@
               <text x={n.x + n.r * 0.72} y={n.y - n.r * 0.72 + 3.6} text-anchor="middle" font-size="10" font-weight="700"
                     fill="#08101a" style="font-family:var(--canopy-display)">↑</text>
             {/if}
+            {#if n.isRun}
+              <!-- "in esecuzione" LED badge (top-right): glow halo · dark ring · lit core -->
+              <circle cx={n.x + n.r * 0.72} cy={n.y - n.r * 0.72} r="8.5" fill={hexA(RUN, 0.32)} />
+              <circle cx={n.x + n.r * 0.72} cy={n.y - n.r * 0.72} r="6" fill="#0b1410" />
+              <circle cx={n.x + n.r * 0.72} cy={n.y - n.r * 0.72} r="4" fill={RUN}
+                      style="transform-box:fill-box;transform-origin:center;animation:arbTwinkle 2.4s ease-in-out infinite" />
+            {/if}
           </g>
           {#if n.showLabel}
             <text x={n.x} y={n.y + n.r + (n.sel ? 18 : 16)} text-anchor="middle"

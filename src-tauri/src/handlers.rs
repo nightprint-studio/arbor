@@ -21,6 +21,9 @@ macro_rules! invoke_handlers {
             $crate::commands::rpc_commands::rpc,
             // Appearance preferences (window control style, font scale, …)
             $crate::commands::config_commands::set_explorer_config,
+            // Launcher (Canopy) preferences — per-product window close behaviour
+            $crate::commands::config_commands::get_launcher_config,
+            $crate::commands::config_commands::set_launcher_close_to_tray,
             // Profile management (keep-shell): CRUD + switch (relaunch).
             $crate::commands::profile_commands::list_profiles,
             $crate::commands::profile_commands::get_active_profile,

@@ -15,6 +15,7 @@ use corvus_git::prelude::StorageBackend;
 const GENERIC_KEYS: &[&str] = &[
     "theme", "keybindings", "appearance", "animations", "onboarding",
     "whats_new", "explorer", "plugins_enabled", "marketplace", "deep_link",
+    "launcher",
 ];
 
 /// Top-level `AppConfig` keys that are global (shared across every profile),
@@ -143,6 +144,34 @@ pub struct AppConfig {
     /// SettingsPanel and in the explorer's own in-window settings page.
     #[serde(default)]
     pub explorer: ExplorerConfig,
+    /// Launcher (Canopy home screen) preferences.
+    #[serde(default)]
+    pub launcher: LauncherConfig,
+}
+
+/// Launcher (Canopy) preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LauncherConfig {
+    /// Per-product launcher preferences, keyed by Canopy product id
+    /// (`corvus` / `merula` / `sitta`). A product missing from the map uses the
+    /// defaults (terminate on close).
+    #[serde(default)]
+    pub products: std::collections::HashMap<String, ProductLauncherConfig>,
+}
+
+/// Per-product launcher preferences.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProductLauncherConfig {
+    /// How closing this product's window behaves:
+    /// - `false` (default) — closing the window **terminates** the product.
+    /// - `true` — tray-style: closing just **hides** the window; the product
+    ///   stays running (still lit in the launcher) and is terminated only via
+    ///   the launcher's Stop.
+    ///
+    /// The launcher's Stop always force-terminates regardless of this flag, so a
+    /// product can never become an un-killable background zombie.
+    #[serde(default)]
+    pub close_to_tray: bool,
 }
 
 /// Built-in File Explorer preferences.
@@ -1138,6 +1167,7 @@ impl Default for AppConfig {
             branches: BranchesConfig::default(),
             whats_new: WhatsNewConfig::default(),
             explorer: ExplorerConfig::default(),
+            launcher: LauncherConfig::default(),
         }
     }
 }

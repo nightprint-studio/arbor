@@ -104,9 +104,11 @@ pub fn list_running_products(app: AppHandle) -> Vec<String> {
     ids
 }
 
-/// Close every window belonging to a product — the launcher's "Stop" action.
-/// Each close triggers a `Destroyed` event, which emits `running: false` once
-/// the product's last window is gone (see [`events`]).
+/// Terminate a product — the launcher's "Stop" action. Uses `destroy()` (not
+/// `close()`) so it force-closes every window of the product, bypassing the
+/// close-to-tray interception in [`events`]: Stop ALWAYS terminates, so a
+/// product can never become an un-killable background window. `Destroyed` then
+/// emits `running: false` once the product's last window is gone.
 #[tauri::command]
 pub fn close_product_window(app: AppHandle, id: String) {
     let labels: Vec<String> = app
@@ -117,7 +119,7 @@ pub fn close_product_window(app: AppHandle, id: String) {
         .collect();
     for l in labels {
         if let Some(w) = app.get_webview_window(&l) {
-            let _ = w.close();
+            let _ = w.destroy();
         }
     }
 }

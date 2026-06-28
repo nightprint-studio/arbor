@@ -18,8 +18,10 @@
     type FilterKey, type DecoratedTool,
   } from './canopy';
   import { fetchInstalledVersions, fetchLatestVersions } from './versions';
+  import { getLauncherConfig, setLauncherCloseToTray } from '$lib/ipc/config';
   import { Settings as SettingsIcon } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import CanopyBackground from './CanopyBackground.svelte';
   import CanopyBrand from './CanopyBrand.svelte';
   import CanopyTree from './CanopyTree.svelte';
@@ -35,6 +37,8 @@
   let latest = $state<Record<string, string>>({});
   let toast = $state<{ msg: string; color: string } | null>(null);
   let hoverId = $state<string | null>(null);
+  // Per-product "close reduces to tray" flags, keyed by product id.
+  let closeToTray = $state<Record<string, boolean>>({});
 
   const ids = BASE.map(t => t.id);
   const starsShadow = starShadow(genStars(140));
@@ -62,6 +66,12 @@
     void fetchInstalledVersions(ids).then(v => { if (alive) installed = v; });
     void fetchLatestVersions(ids).then(v => { if (alive) latest = v; });
     void listRunningProducts().then(list => { if (alive) running = new Set(list); });
+    void getLauncherConfig().then(c => {
+      if (!alive) return;
+      const map: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(c.products ?? {})) map[k] = v.close_to_tray;
+      closeToTray = map;
+    });
 
     const unlisten = onProductState(({ id, running: r }) => {
       const next = new Set(running);
@@ -99,6 +109,22 @@
   // Single version per product today; selecting it is a no-op until a real
   // version-switch lands.
   function pickVer(_id: string, _v: string) {}
+
+  // ── Launcher settings (gear menu) — per-product tray-close toggles ───────────
+  async function toggleCloseToTray(id: string) {
+    const next = !(closeToTray[id] ?? false);
+    closeToTray = { ...closeToTray, [id]: next };
+    try { await setLauncherCloseToTray(id, next); }
+    catch { closeToTray = { ...closeToTray, [id]: !next }; } // revert on failure
+  }
+  const settingsMenu = $derived<DropdownItem[]>([
+    { kind: 'separator', label: 'Chiusura riduce a icona' },
+    ...tools.map(t => ({
+      kind: 'item' as const, id: `tray:${t.id}`, label: t.name,
+      active: closeToTray[t.id] ?? false,
+      onclick: () => toggleCloseToTray(t.id),
+    })),
+  ]);
 
   // ── Region focus navigation ─────────────────────────────────────────────────
   // F6 / Shift+F6 cycle focus across the three regions (titlebar → tree →
@@ -142,10 +168,15 @@
       <div class="spacer" data-tauri-drag-region></div>
       <div class="tb-right">
         <CanopyFilterMenu {chips} onpick={(k) => { filter = k; }} />
-        <Button variant="icon" title="Impostazioni" ariaLabel="Impostazioni"
-                onclick={() => { /* launcher settings — TBD */ }}>
-          <SettingsIcon size={16} />
-        </Button>
+        <div class="gear-dd">
+          <Dropdown items={settingsMenu} selectionMode="multiple" position="fixed" direction="down" width="270px">
+            {#snippet trigger({ toggle })}
+              <Button variant="icon" title="Impostazioni" ariaLabel="Impostazioni" onclick={toggle}>
+                <SettingsIcon size={16} />
+              </Button>
+            {/snippet}
+          </Dropdown>
+        </div>
       </div>
     </header>
 
@@ -195,6 +226,20 @@
   .topbar { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; flex: none; }
   .spacer { flex: 1; align-self: stretch; min-width: 12px; }
   .tb-right { display: flex; align-items: center; gap: 6px; flex: none; }
+
+  /* Theme-independent "sky" palette for the gear menu (see Dropdown's `--dd-*`
+     hooks) so it matches the filter dropdown on the dark titlebar. */
+  .gear-dd {
+    display: inline-flex;
+    --dd-bg: rgba(12, 16, 24, 0.96);
+    --dd-border: rgba(255, 255, 255, 0.12);
+    --dd-shadow: 0 18px 46px -16px rgba(0, 0, 0, 0.85);
+    --dd-text: #c2cad6;
+    --dd-text-muted: #9aa3b2;
+    --dd-hover-bg: rgba(255, 255, 255, 0.06);
+    --dd-active-bg: rgba(255, 255, 255, 0.09);
+    --dd-check: #8fce6a;
+  }
 
   .tree { flex: 1; min-height: 0; position: relative; }
 

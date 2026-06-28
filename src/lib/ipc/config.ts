@@ -80,6 +80,26 @@ export const getExplorerConfig = () =>
 export const setExplorerConfig = (config: ExplorerConfig) =>
   invoke<void>('set_explorer_config', { config });
 
+// ── Launcher (Canopy) preferences — per product ──────────────────────────────
+
+export interface ProductLauncherConfig {
+  /** When true, closing this product's window keeps it running (tray-style) and
+   *  it's terminated only via the launcher's Stop; when false closing it ends it. */
+  close_to_tray: boolean;
+}
+
+export interface LauncherConfig {
+  /** Per-product preferences, keyed by Canopy product id. */
+  products: Record<string, ProductLauncherConfig>;
+}
+
+// Keep-shell commands (read by the native window-event handler).
+export const getLauncherConfig = () =>
+  invoke<LauncherConfig>('get_launcher_config');
+
+export const setLauncherCloseToTray = (id: string, closeToTray: boolean) =>
+  invoke<void>('set_launcher_close_to_tray', { id, close_to_tray: closeToTray });
+
 // ── Recent repos (persisted in config.toml via backend) ──────────────────────
 
 export const getRecentRepos = () =>
