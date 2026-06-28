@@ -4,7 +4,7 @@
 //! in-process copy, but the context is [`CorvusState`] instead of the shell's
 //! `AppState`: the repo is opened by the shell-pushed path
 //! ([`CorvusState::repo_path`]) and the git program comes from
-//! [`CorvusState::git_program`]. The git logic is the shared [`corvus_git`]
+//! `corvus-git-cli` (self-detected). The git logic is the shared [`corvus_git`]
 //! crate, so behavior — and error strings — are identical to in-process
 //! (`GitError`'s `Display` is the same text the shell maps to `AppError`).
 //!

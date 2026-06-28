@@ -3,7 +3,7 @@
 //! Same handler set (function names → method names) as the shell's in-process
 //! copy (`crate::ipc::corvus::worktree`), but the context is [`CorvusState`]:
 //! the repo path comes from the shell-pushed registration and the git program
-//! from [`CorvusState::git_program`]. The pure worktree git work (enumeration,
+//! from `corvus-git-cli` (self-detected). The pure worktree git work (enumeration,
 //! add/remove, project-type detection) is the shared [`corvus_git::worktree`]
 //! crate, so the matched worktrees, the result shape, and the error strings are
 //! byte-identical to in-process.

@@ -21,8 +21,8 @@ field-by-field as git domains are extracted from the shell.
   `AppHandle::emit`; once `corvus-be` splits out it wraps the `arbor-ipc` event
   channel and each `emit` becomes an `Event::Notify` the shell re-emits. **The
   call site (`state.emit(...)`) never changes — only the backing.**
-- **`repos` / `git_program`** — the tab→path map + the resolved git binary the
-  shell pushes, so handlers resolve a tab to its repo without a `RepoManager`.
+- **`repos`** — the tab→path map the shell pushes, so handlers resolve a tab to
+  its repo path without a `RepoManager`.
 - **`host: Option<Arc<dyn HostCaller>>`** — reverse channel to the shell (vault /
   plugin-UI round-trips); set only once split into `corvus-be`.
 - **`hooks: Arc<HookDispatcher>`** — the runtime hook broker, so a handler fires

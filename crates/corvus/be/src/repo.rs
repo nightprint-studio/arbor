@@ -5,15 +5,15 @@
 //! and the git invoker (the program the shell pushed). Centralised so the error
 //! string and the "open by pushed path" shape live in one place.
 
-use std::path::PathBuf;
-
 use corvus_core::prelude::CorvusState;
 use corvus_git::prelude::{GitCli, SnapshotPolicy};
 use git2::Repository;
 
-/// The git invoker for this backend (the program the shell pushed, else `git`).
-pub fn git(state: &CorvusState) -> GitCli {
-    GitCli::from_optional(state.git_program().map(PathBuf::from))
+/// The git invoker for this backend. corvus-be self-detects its system `git`
+/// (PATH / configured override / portable) into the `corvus-git-cli` process
+/// global, so this reads that snapshot — `None` → `git` on `PATH`.
+pub fn git(_state: &CorvusState) -> GitCli {
+    GitCli::from_optional(corvus_git_cli::snapshot().path)
 }
 
 /// The recovery-snapshot policy the shell pushed (retention / size / extension

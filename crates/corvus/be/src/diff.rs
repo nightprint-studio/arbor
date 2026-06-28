@@ -196,9 +196,9 @@ fn get_file_blame_streaming(
 ) -> Result<Vec<BlameLine>, String> {
     let repo_path = repo_path(state, &tab_id)?;
 
-    // The shell pushes the resolved git program; its absence is the OOP analogue
-    // of the in-process `git_cli::snapshot().path.is_none()` (no git binary).
-    if state.git_program().is_none() {
+    // corvus-be self-detects its git program; its absence (no git binary found)
+    // falls back to the libgit2 blame path instead of the streaming CLI one.
+    if corvus_git_cli::snapshot().path.is_none() {
         let repo = Repository::open(&repo_path).map_err(|e| e.to_string())?;
         return corvus_git::diff::get_file_blame(&repo, &path).map_err(|e| e.to_string());
     }

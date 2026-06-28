@@ -3,7 +3,7 @@
 //! Same handler set (function names → method names) as the shell's in-process
 //! copy (`crate::ipc::corvus::rebase`), but the context is [`CorvusState`]: the
 //! repo path comes from the shell-pushed registration ([`crate::repo::repo_path`])
-//! and the git program from [`CorvusState::git_program`]. The pure git work is
+//! and the git program from `corvus-git-cli` (self-detected). The pure git work is
 //! the shared [`corvus_git::rebase`] crate, so behavior + error strings are
 //! identical to in-process.
 //!

@@ -3,7 +3,7 @@
 //! Same handler set (function names → method names) as the shell's in-process
 //! copy (`crate::ipc::corvus::reset`), but the context is [`CorvusState`]: the
 //! repo is opened by the shell-pushed path and the git program comes from
-//! [`CorvusState::git_program`]. The pure git work is the shared [`corvus_git`]
+//! `corvus-git-cli` (self-detected). The pure git work is the shared [`corvus_git`]
 //! crate, so behavior + error strings are identical to in-process.
 //!
 //! **Hooks fire here** (plugin-relocation Wave 0): `on_tag_create` /

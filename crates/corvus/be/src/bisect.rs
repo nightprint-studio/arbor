@@ -3,7 +3,7 @@
 //! Same handler set as the shell's in-process copy, but the context is
 //! [`CorvusState`] (not the shell's `AppState`): the repo path comes from the
 //! shell-pushed registry ([`CorvusState::repo_path`]) and the git program from
-//! [`CorvusState::git_program`]. The git logic is the shared [`corvus_git`]
+//! `corvus-git-cli` (self-detected). The git logic is the shared [`corvus_git`]
 //! crate, so behavior — and error strings — are identical to in-process. Errors
 //! cross as their `Display` string (`GitError` → the same text the shell maps to
 //! `AppError`).

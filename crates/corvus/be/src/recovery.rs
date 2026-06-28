@@ -4,7 +4,7 @@
 //! in-process copy (`crate::ipc::corvus::recovery`), but the context is
 //! [`CorvusState`] instead of the shell's `AppState`: the repo is opened by the
 //! shell-pushed path ([`CorvusState::repo_path`]) and the git program comes from
-//! [`CorvusState::git_program`]. The snapshot/journal logic is the shared
+//! `corvus-git-cli` (self-detected). The snapshot/journal logic is the shared
 //! [`corvus_git::recovery`] crate, so the listed entries, the restore preview,
 //! the restored state, and the error strings are identical to in-process
 //! (`GitError`'s `Display` is the text the shell maps to `AppError`).

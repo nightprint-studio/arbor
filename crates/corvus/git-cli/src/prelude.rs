@@ -4,5 +4,6 @@
 pub use crate::error::{GitCliError, Result};
 pub use crate::{
     clear_override, command, detect, download_portable, download_supported, portable_dir,
-    request_download_cancel, set_path, snapshot, verify, DownloadProgress, GitCliState,
+    request_download_cancel, set_path, set_portable_dir_override, snapshot, verify,
+    DownloadProgress, GitCliState,
 };

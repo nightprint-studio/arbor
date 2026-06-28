@@ -14,15 +14,14 @@
 //! binary unchanged.
 
 // In-process git handlers that have **not** moved to `corvus-be` yet (or stay
-// shell-side by design: credential store, git-CLI detection, image proxy, repo
-// lifecycle, recent-repo tracking, provider OAuth, BRP, the plugin pipeline
-// engine, linked-worktree registry). The fully-migrated domains (bisect, stash,
-// reset, search, merge, rebase, recovery, notes, diff, graph, stage, submodule,
-// reflog, stats, remote, ci, mr, security, repo_browser, avatar, fs_git) were
+// shell-side by design: credential store, image proxy, repo lifecycle,
+// recent-repo tracking, provider OAuth, BRP, the plugin pipeline engine,
+// linked-worktree registry). The fully-migrated domains (bisect, stash, reset,
+// search, merge, rebase, recovery, notes, diff, graph, stage, submodule, reflog,
+// stats, remote, ci, mr, security, repo_browser, avatar, fs_git, git_cli) were
 // **deleted** — `corvus-be` is their sole owner now (no in-process fallback).
 pub mod auth;
 pub mod brp;
-pub mod git_cli;
 pub mod gitflow;
 pub mod image;
 pub mod issues;

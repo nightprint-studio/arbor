@@ -313,6 +313,22 @@ fn host_dispatch(
         return Ok(serde_json::Value::Null);
     }
 
+    // corvus-be self-detects git but cannot write the profile-aware `config.toml`
+    // (the shell owns the active profile). On a Settings change it asks the shell
+    // to persist the `[git] executable_path` override (or clear it when null) and
+    // re-detect the shell's OWN in-process git so its direct shell-outs match.
+    if method == "__persist_git_path" {
+        let path = params.get("path").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let st = app.state::<AppState>();
+        {
+            let mut cfg = st.lock_config().map_err(|e| e.to_string())?;
+            cfg.git.executable_path = path.clone();
+            crate::config::app_config::save(&cfg).map_err(|e| e.to_string())?;
+        }
+        crate::git_cli::detect(path.as_deref().map(std::path::Path::new));
+        return Ok(serde_json::Value::Null);
+    }
+
     let account: String = match method {
         "__session" | "__refresh" => serde_json::from_value(params)
             .map_err(|e| format!("{method}: invalid account: {e}"))?,
@@ -429,23 +445,15 @@ pub fn dispatch_rpc(
     }
 }
 
-/// Push a tab's repo path (plus the currently-resolved git program) to
-/// `corvus-be`, so its out-of-process handlers can resolve the tab without the
-/// shell's `RepoManager`. Call on repo open.
+/// Push a tab's repo path (and the app-config slices) to `corvus-be`, so its
+/// out-of-process handlers can resolve the tab without the shell's `RepoManager`.
+/// Call on repo open. corvus-be self-detects its git binary now (it is no longer
+/// pushed the resolved program).
 ///
 /// **Best-effort**: when `corvus-be` isn't running the `__repo_register` method
 /// isn't advertised, so the call routes to the in-process loopback, comes back
 /// `UnknownMethod`, and is dropped here — exactly what we want (nothing to sync).
 pub fn sync_repo_open(state: &AppState, tab_id: &str, path: &str) {
-    let program = crate::git_cli::snapshot()
-        .path
-        .map(|p| p.to_string_lossy().into_owned());
-    let _ = dispatch_rpc(
-        state,
-        "corvus",
-        "__set_git_program",
-        serde_json::json!({ "program": program }),
-    );
     sync_config(state);
     let _ = dispatch_rpc(
         state,
@@ -475,6 +483,17 @@ pub fn sync_config(state: &AppState) {
     push_config_section(state, "diff", &cfg.diff);
     push_config_section(state, "status", &cfg.status);
     push_config_section(state, "ticket_links", &cfg.ticket_links);
+    // Git CLI: the configured executable_path override + the absolute, profile-
+    // resolved PortableGit dir. corvus-be self-detects from these — it can't
+    // resolve the active profile to recompute the portable dir itself.
+    push_config_section(
+        state,
+        "git",
+        &serde_json::json!({
+            "executable_path": cfg.git.executable_path,
+            "portable_dir": crate::git_cli::portable_dir().display().to_string(),
+        }),
+    );
     // Not an app-config slice: the absolute path of the profile's
     // `linked_worktrees.toml`. corvus-be is a separate process and can't compute
     // the profile-aware path itself, so the shell (which owns the active profile)

@@ -24,10 +24,6 @@ pub struct CorvusState {
     /// shell pushes the open repos here (on repo open/close) and handlers resolve
     /// a tab to its path through [`repo_path`](Self::repo_path).
     repos: Mutex<HashMap<String, String>>,
-    /// The git program the shell resolved (PATH / configured / portable). `None`
-    /// → fall back to `git` on `PATH`. Pushed by the shell so the backend shells
-    /// out to the same binary.
-    git_program: Mutex<Option<String>>,
     /// Reverse channel back to the shell (`docs/reverse-channel.md`): present
     /// only when split into its own process (`corvus-be` wires a
     /// `FrameHostCaller`). In-process it's `None` — those handlers reach the
@@ -71,7 +67,6 @@ impl CorvusState {
         Self {
             events,
             repos: Mutex::new(HashMap::new()),
-            git_program: Mutex::new(None),
             host: None,
             hooks: Arc::new(HookDispatcher::new()),
             config: Mutex::new(Map::new()),
@@ -148,18 +143,6 @@ impl CorvusState {
     /// it (a handler should surface a clear error in that case).
     pub fn repo_path(&self, tab_id: &str) -> Option<String> {
         self.repos.lock().ok().and_then(|r| r.get(tab_id).cloned())
-    }
-
-    /// Set the git program the backend should shell out to (pushed by the shell).
-    pub fn set_git_program(&self, program: Option<String>) {
-        if let Ok(mut g) = self.git_program.lock() {
-            *g = program;
-        }
-    }
-
-    /// The git program to shell out to, or `None` → `git` on `PATH`.
-    pub fn git_program(&self) -> Option<String> {
-        self.git_program.lock().ok().and_then(|g| g.clone())
     }
 
     /// Push (or replace) a config section, keyed by name. The shell sends the

@@ -134,9 +134,28 @@ fn find_on_path() -> Option<PathBuf> {
     None
 }
 
+/// Override for [`portable_dir`]. corvus-be — a separate process that never
+/// resolves the active profile — sets this to the absolute path the shell pushes,
+/// so its PortableGit detection + download target the shell's profile dir instead
+/// of recomputing a (wrong) default-profile path. `None` (the shell, in-process)
+/// → resolve via the active profile.
+static PORTABLE_DIR_OVERRIDE: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+/// Set the [`portable_dir`] override (corvus-be, from the shell-pushed absolute
+/// path). See [`PORTABLE_DIR_OVERRIDE`].
+pub fn set_portable_dir_override(dir: PathBuf) {
+    if let Ok(mut w) = PORTABLE_DIR_OVERRIDE.write() {
+        *w = Some(dir);
+    }
+}
+
 /// Path where [`download_portable`] extracts PortableGit and where we look for it
-/// on subsequent launches.
+/// on subsequent launches — the override when set (corvus-be), else the active
+/// profile's git config dir (the shell).
 pub fn portable_dir() -> PathBuf {
+    if let Some(d) = PORTABLE_DIR_OVERRIDE.read().ok().and_then(|g| g.clone()) {
+        return d;
+    }
     arbor_core::prelude::arbor_config_path("git")
 }
 

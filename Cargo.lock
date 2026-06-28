@@ -1253,6 +1253,7 @@ dependencies = [
 name = "corvus-be"
 version = "0.3.0"
 dependencies = [
+ "arbor-core",
  "arbor-feedback",
  "arbor-ipc",
  "arbor-plugin-core",
@@ -1260,6 +1261,7 @@ dependencies = [
  "base64 0.22.1",
  "corvus-core",
  "corvus-git",
+ "corvus-git-cli",
  "corvus-git-provider-api",
  "corvus-git-provider-github",
  "corvus-git-provider-gitlab",

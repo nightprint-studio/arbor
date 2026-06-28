@@ -139,7 +139,7 @@ pub fn maybe_trigger_checkout_sync(
         name_map,
         open_tabs: state.open_tabs(),
         links_path: super::links_path(state),
-        git_program: state.git_program(),
+        git_program: corvus_git_cli::snapshot().path.map(|p| p.to_string_lossy().into_owned()),
         policy: crate::repo::snapshot_policy(state),
     };
 

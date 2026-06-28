@@ -109,6 +109,13 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // returns.
     app.state::<AppState>().wire_backend(app.handle());
 
+    // Push the app-config slices to the freshly-spawned corvus-be once at startup
+    // (best-effort) so its self-detected git picks up the configured override +
+    // the profile-resolved portable dir before the first repo opens — otherwise
+    // the Git CLI settings panel would briefly show the PATH-resolved git. No-op
+    // when corvus-be isn't running (methods route to the loopback → UnknownMethod).
+    crate::ipc::sync_config(&app.state::<AppState>());
+
     // Wire the `arbor-cloud` crate against AppState: registers the Google OAuth
     // refresher and publishes the `Arc<dyn CloudHost>` into Tauri state. Must
     // run after the event sink is wired above (the host stores the sink for

@@ -25,6 +25,11 @@ arbor-feedback    = { path = "../../arbor-feedback" }
 corvus-plugin     = { path = "../plugin" }
 corvus-core       = { path = "../core" }
 corvus-git        = { path = "../git" }
+# System-git detection + PortableGit download: corvus-be self-detects its own git
+# (no longer fed the resolved program by the shell). `arbor-core` for the
+# profile-aware config-path resolver the detection reads.
+corvus-git-cli    = { path = "../git-cli" }
+arbor-core        = { path = "../../core" }
 corvus-issues     = { path = "../issues" }
 # The keyring-free git-provider impls (REST domains served OOP): the registry +
 # trait live in `-api`, the GitHub/GitLab impls inject a reverse-channel

@@ -34,6 +34,7 @@ mod branch;
 mod ci;
 mod diff;
 mod fs_git;
+mod git_cli;
 mod gitflow;
 mod graph;
 mod issues;
@@ -167,6 +168,12 @@ fn main() {
     // The git-provider registry (repo-browser + the REST cohort) resolves
     // credentials over the same reverse channel — seed it before serving.
     provider::init(Arc::clone(&host) as Arc<dyn HostCaller>);
+
+    // Self-detect the system git binary (PATH / portable) so `crate::repo::git`
+    // resolves a real program before the shell pushes the `"git"` config section
+    // (which refines it with the configured override + the profile-resolved
+    // portable dir, re-detecting on arrival — see `repo_registry::__set_config`).
+    corvus_git_cli::detect(None);
 
     // Two registries collected from every `#[arbor_rpc::handler]` linked into
     // this binary: sync (git domains + self-test) and async (issue trackers).

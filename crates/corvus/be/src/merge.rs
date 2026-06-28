@@ -3,7 +3,7 @@
 //! Same handler set (function names → method names) as the shell's in-process
 //! copy (`crate::ipc::corvus::merge`), but the context is [`CorvusState`]: the
 //! repo is opened by the shell-pushed path and the git program comes from
-//! [`CorvusState::git_program`]. The pure git work is the shared [`corvus_git`]
+//! `corvus-git-cli` (self-detected). The pure git work is the shared [`corvus_git`]
 //! crate, so behavior + error strings are identical to in-process — including
 //! the `CONFLICTS:` prefix `merge_branch` puts on conflict failures so the FE
 //! can redirect to the resolver.
