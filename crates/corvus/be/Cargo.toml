@@ -14,6 +14,9 @@ path = "src/main.rs"
 [dependencies]
 arbor-ipc         = { path = "../../foundation/ipc" }
 arbor-rpc         = { path = "../../foundation/rpc" }
+# The Model-D backend runtime scaffold: `BackendIo` (framed-stdio plumbing +
+# runtime) + the `App` builder (scheduler wiring, pre-serve inits, serve loop).
+arbor-be          = { path = "../../foundation/be" }
 # The plugin host (mlua) co-located with the git handlers: hooks the OOP
 # handlers fire reach plugins here instead of being dropped. `corvus-plugin`
 # carries the shared host wiring; `arbor-plugin-core` is named directly for
@@ -26,10 +29,6 @@ arbor-plugin-rpc  = { path = "../../plugin/rpc" }
 # The Tauri-free job model (`JobSpec`/`JobStatus`): OOP handlers drive jobs in the
 # shell's single-source `JobRegistry` over the reverse channel (`be/src/jobs.rs`).
 arbor-feedback    = { path = "../../arbor-feedback" }
-# Shared trigger engine: `Scheduler::new(Arc<dyn AppCtx>, tokio::runtime::Handle)`
-# drives the schedules `corvus`-targeted plugins declare (installed into the
-# co-located PluginHost, started after the post-`Hello` reload).
-arbor-scheduler   = { path = "../../scheduler" }
 corvus-plugin     = { path = "../plugin" }
 # The git `ns_shell` namespaces (`arbor.notes`, `arbor.repo`, …) ported to run on
 # any host: corvus-be implements its `NsHost` trait (`CorvusNsHost`) and hands the

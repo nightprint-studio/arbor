@@ -15,20 +15,16 @@
 //!
 //! **stdout is the protocol channel** — all logs go to stderr.
 
-use std::any::Any;
 use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use arbor_ipc::prelude::{serve_stdio, EventSink, FrameEventSink, FrameHostCaller, HostCaller, SharedWriter};
 use arbor_feedback::prelude::{JobSpec, JobStatus};
-use arbor_scheduler::prelude::Scheduler;
-use arbor_plugin_core::prelude::PluginHost;
 use corvus_core::prelude::CorvusState;
 use corvus_git::prelude::{http_auth_args_for_credentials, CloneOptions};
 use corvus_git_provider_api::prelude::{
     CiFilter, FindingState, MrFilter, ProviderError, SecurityFilters, Severity,
 };
-use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer, CorvusBeAppCtx};
+use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer};
 use corvus_plugin_ns::prelude::NsHost;
 use serde_json::json;
 
@@ -1592,173 +1588,71 @@ fn parse_state(s: &str) -> Option<FindingState> {
 }
 
 fn main() {
-    // stdout carries frames; logs go to stderr.
-    let stdout: SharedWriter = Arc::new(Mutex::new(io::stdout()));
+    // The framed-stdio plumbing + the whole plugin runtime, wired in two calls:
+    // `BackendIo` builds the writer/sink/reverse-channel/runtime; `App::plugin_host`
+    // builds the `PluginHost` (filtered to `corvus`), its headless `AppCtx`, the
+    // hook dispatcher (`corvus_plugin::build_hook_dispatcher`, shared with the
+    // shell's in-process host so a hook fans out identically), and the scheduler.
+    // The plugin reload is DEFERRED to after the `Hello` frame — `App::run`'s
+    // default post-`Hello` hook does it (on-load hooks emit events, which must not
+    // precede the handshake frame on the pipe).
+    let mut app = arbor_be::App::new(arbor_be::BackendIo::new());
+    app.plugin_host("corvus", build_hook_dispatcher);
 
-    // Event egress: a frame sink writing onto the same stdout the serve loop uses
-    // (the mutex serializes the two). This is what `CorvusState` holds — handlers
-    // emit through it exactly as in-process, but it crosses the process boundary.
-    let sink: Arc<dyn EventSink> = Arc::new(FrameEventSink::new(Arc::clone(&stdout)));
-
-    // Reverse channel (`docs/reverse-channel.md`): the backend's `HostCaller`,
-    // writing `HostRequest` frames on the same stdout the serve loop routes
-    // `HostResponse`s back through. Handlers reach it via `state.host_call(...)`.
-    let host = FrameHostCaller::new(Arc::clone(&stdout));
-
-    // Async runtime, built first: the plugin host's `AppCtx` captures a handle to
-    // spawn background plugin work (the boot thread has no ambient reactor), and
-    // the async issue-tracker handlers `block_on` it. The serve loop dispatches
-    // each request on its own worker thread, so concurrent `block_on`s land here
-    // — a multi-thread runtime is required.
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("corvus-be: failed to build tokio runtime");
-
-    // Plugin host co-located with the git handlers (plugin-relocation Wave 0):
-    // the hooks the OOP handlers fire reach plugins *here*, in the process that
-    // runs the git logic, instead of being dropped. The headless installer
-    // publishes the host-pure `arbor.*` surface only — the git/product `ns_shell`
-    // namespaces arrive in Wave 1, so a hook that calls one gets a clear error,
-    // never a silent drop. Schedulers are not started here yet (Wave 1+).
-    let plugin_host = Arc::new(Mutex::new(PluginHost::new()));
-    {
-        let mut h = plugin_host.lock().expect("corvus-be: plugin host lock poisoned at boot");
-        h.set_app_ctx(Arc::new(CorvusBeAppCtx::new(Arc::clone(&sink), rt.handle().clone())));
-        // This backend hosts the Corvus (git) product's plugins: load only the
-        // plugins that target `corvus` (or are universal). See `Manifest::targets`.
-        h.set_product("corvus");
-        // NB: `set_api_installer` is DEFERRED until after `CorvusNsHost` exists —
-        // the installer carries the git-namespace installers, and those need the
-        // `Arc<CorvusState>` the `NsHost` impl holds (built a few lines down).
-    }
-    let hooks = Arc::new(build_hook_dispatcher(&plugin_host));
-    // NB: the plugin reload is DEFERRED to after the `Hello` frame — see the
-    // `on_ready` closure handed to `serve_stdio` below. Loading plugins fires
-    // on-load hooks that emit events; emitting anything before `Hello` would
-    // race ahead of the handshake frame on the pipe and break the connection
-    // ("backend did not open with Hello").
-
-    // The state handed to every handler: event egress + the hook broker bound to
-    // the host above + the reverse channel back to the shell. `Arc`-shared so the
-    // `CorvusNsHost` (which the git `arbor.*` namespaces call through) can hold it
-    // and fire hooks onto the very same broker the RPC handlers fire onto.
+    // The state every handler gets: event egress + the hook broker + the reverse
+    // channel. `Arc`-shared so `CorvusNsHost` (which the git `arbor.*` namespaces
+    // call through) fires hooks onto the same broker the RPC handlers fire onto.
     let state = Arc::new(
-        // Clone (not move) so `sink` survives for the scheduler-AppCtx wiring below
-        // (`Scheduler::new` needs an `Arc<dyn AppCtx>` built over the same sink).
-        CorvusState::new(Arc::clone(&sink))
-            .with_hooks(hooks)
-            .with_host_caller(Arc::clone(&host) as Arc<dyn HostCaller>),
+        CorvusState::new(app.sink())
+            .with_hooks(app.hooks())
+            .with_host_caller(app.host_caller()),
     );
 
     // Build the git/product `arbor.*` namespace installers over the shared state,
     // then hand them to the plugin host's API installer. Each installer captures
     // an `Arc<dyn NsHost>` (the shared `CorvusNsHost`) and marshals Lua <-> JSON
-    // through it — the same slot the Tauri shell passes its `ns_shell` wrappers
-    // into. This is additive: the shell still loads its own copies in-process.
+    // through it. After the flip this backend is the sole loader of the Corvus
+    // product's plugins (the shell's `ns_shell` copies were deleted).
     let ns_host: Arc<dyn NsHost> = Arc::new(CorvusNsHost::new(Arc::clone(&state)));
     // The ordered git/product namespace set (and the UiBranding-after-core
     // invariant) is owned by `corvus-plugin-ns`, not spelled out here.
-    plugin_host
-        .lock()
-        .expect("corvus-be: plugin host lock poisoned at boot")
-        .set_api_installer(corvus_be_api_installer(corvus_plugin_ns::installers(ns_host.clone())));
+    app.api_installer(corvus_be_api_installer(corvus_plugin_ns::installers(ns_host.clone())));
 
     // Publish the plugin host for the Plugin-Manager RPC adapter
     // (`plugin_rpc::CorvusRpcCtx`): after the Phase-2 flip the shell stops loading
     // Corvus plugins, so the Plugin Manager reads/mutates THIS host. The generic
     // `PluginRpc` handlers reach it through the adapter, which reads this
     // module-static handle (kept off `CorvusState`, which stays host-free).
-    host_handle::install(Arc::clone(&plugin_host));
+    host_handle::install(app.plugin_host_handle());
 
-    // Shared trigger-engine wiring (plugin-relocation Wave 1): without this the
-    // schedules declared by `corvus`-targeted plugins never fire in corvus-be.
-    // `Scheduler::new` needs an `Arc<dyn AppCtx>` + a runtime handle — both already
-    // exist here (the backend's `CorvusBeAppCtx` + the multi-thread `rt`). The
-    // engine is installed BEFORE `serve_stdio` so it is present when
-    // `start_all_schedulers()` runs in the post-`Hello` `on_ready` reload below.
-    {
-        let ctx: Arc<dyn arbor_core::prelude::AppCtx> =
-            Arc::new(CorvusBeAppCtx::new(Arc::clone(&sink), rt.handle().clone()));
-        let scheduler = Arc::new(Scheduler::new(ctx, rt.handle().clone()));
-        let mut h = plugin_host
-            .lock()
-            .expect("corvus-be: plugin host lock poisoned at scheduler install");
-        h.install_scheduler(scheduler, Arc::downgrade(&plugin_host));
-    }
+    // The method routing, declared as handler groups (the `Dispatcher` assembles
+    // the maps, the advertised-name union, and the per-call context). The git +
+    // self-test `#[handler]`s dispatch with the primary `&CorvusState`; the
+    // Plugin-Manager `PluginRpc` bundle dispatches with a `CorvusRpcCtx` adapter
+    // built fresh per call (the orphan rule blocks `impl PluginRpcContext for
+    // CorvusState`, so the bundle can't share it). All of `inventory("")` covers
+    // the corvus program (this binary links only its own handlers).
+    let dispatcher = arbor_be::Dispatcher::new(Arc::clone(&state), app.runtime_handle())
+        .inventory("")
+        .group(plugin_rpc::methods(), {
+            let state = Arc::clone(&state);
+            move || plugin_rpc::CorvusRpcCtx::new(Arc::clone(&state))
+        });
 
-    // The issue-tracker registry resolves credentials over the reverse channel
-    // (the shell holds the keyring) — wire it before serving.
-    issues::init(Arc::clone(&host) as Arc<dyn HostCaller>);
+    // Pre-serve inits: the issue-tracker + git-provider registries resolve
+    // credentials over the reverse channel; git self-detect resolves the system
+    // binary before the shell pushes the `"git"` config section. `App::run` fires
+    // them in order, then serves with its default post-`Hello` reload +
+    // start-schedulers.
+    let issues_host = app.host_caller();
+    let provider_host = app.host_caller();
+    app.init(move || issues::init(issues_host));
+    app.init(move || provider::init(provider_host));
+    app.init(|| {
+        corvus_git_cli::detect(None);
+    });
 
-    // The git-provider registry (repo-browser + the REST cohort) resolves
-    // credentials over the same reverse channel — seed it before serving.
-    provider::init(Arc::clone(&host) as Arc<dyn HostCaller>);
-
-    // Self-detect the system git binary (PATH / portable) so `crate::repo::git`
-    // resolves a real program before the shell pushes the `"git"` config section
-    // (which refines it with the configured override + the profile-resolved
-    // portable dir, re-detecting on arrival — see `repo_registry::__set_config`).
-    corvus_git_cli::detect(None);
-
-    // Three method maps. Two are collected from every `#[arbor_rpc::handler]`
-    // linked into this binary: sync (git domains + self-test) and async (issue
-    // trackers) — disjoint, a handler is one or the other. The third is the
-    // generic Plugin-Manager surface (`arbor-plugin-rpc`'s `PluginRpc` bundle),
-    // monomorphised for the `CorvusRpcCtx` adapter and dispatched against it (all
-    // its handlers are sync).
-    let sync_reg = arbor_rpc::registry();
-    let async_reg = arbor_rpc::async_registry_for("");
-    let plugin_reg = plugin_rpc::methods();
-    let mut methods: Vec<String> = sync_reg
-        .keys()
-        .chain(async_reg.keys())
-        .chain(plugin_reg.keys())
-        .map(|s| s.to_string())
-        .collect();
-    methods.sort();
-    methods.dedup();
-    eprintln!("corvus-be: ready, serving {} method(s): {:?}", methods.len(), methods);
-
-    let dispatch = move |method: &str, params: serde_json::Value| -> Result<serde_json::Value, String> {
-        // `state` is `Arc<CorvusState>` now (the `CorvusNsHost` shares it), so
-        // deref before the `&dyn Any` coercion — the generated thunks downcast to
-        // `&CorvusState`, not `&Arc<CorvusState>`.
-        if let Some(call) = sync_reg.get(method) {
-            return call(&*state as &dyn Any, params);
-        }
-        if let Some(acall) = async_reg.get(method) {
-            return rt.block_on(acall(&*state as &dyn Any, params));
-        }
-        // Plugin-Manager methods run against the `CorvusRpcCtx` adapter (the
-        // orphan rule blocks `impl PluginRpcContext for CorvusState`, so the
-        // generic bundle downcasts to this local newtype instead). Cheap to build
-        // per call — just an `Arc` clone of the shared state.
-        if let Some(pcall) = plugin_reg.get(method) {
-            let ctx = plugin_rpc::CorvusRpcCtx::new(Arc::clone(&state));
-            return pcall(&ctx as &dyn Any, params);
-        }
-        Err(format!("unknown method: {method}"))
-    };
-
-    // Reload plugins only once `Hello` is on the wire: plugin on-load hooks emit
-    // events, and those `Event` frames must not precede the handshake `Hello`.
-    let plugin_host_ready = Arc::clone(&plugin_host);
-    let on_ready = move || {
-        let mut host = plugin_host_ready
-            .lock()
-            .expect("corvus-be: plugin host lock poisoned at boot");
-        if let Err(e) = host.reload() {
-            eprintln!("corvus-be: plugin reload failed: {e}");
-        }
-        // Register every loaded+enabled plugin's declared schedules against the
-        // shared engine (no-op if a plugin has no [scheduler] section). The shell
-        // does the same in `setup/boot.rs` after its boot-thread reload.
-        // MUST run after reload populates the loaded plugins.
-        host.start_all_schedulers();
-    };
-
-    if let Err(e) = serve_stdio(io::stdin().lock(), stdout, methods, host, dispatch, on_ready) {
+    if let Err(e) = app.run(dispatcher) {
         eprintln!("corvus-be: serve loop ended with error: {e}");
         std::process::exit(1);
     }

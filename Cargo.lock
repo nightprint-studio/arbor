@@ -232,6 +232,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbor-be"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
+ "arbor-ipc",
+ "arbor-plugin-api",
+ "arbor-plugin-core",
+ "arbor-rpc",
+ "arbor-scheduler",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "arbor-cloud"
 version = "0.3.0"
 dependencies = [
@@ -1264,6 +1278,7 @@ dependencies = [
 name = "corvus-be"
 version = "0.3.0"
 dependencies = [
+ "arbor-be",
  "arbor-core",
  "arbor-feedback",
  "arbor-ipc",
@@ -1271,7 +1286,6 @@ dependencies = [
  "arbor-plugin-rpc",
  "arbor-process-ext",
  "arbor-rpc",
- "arbor-scheduler",
  "base64 0.22.1",
  "corvus-core",
  "corvus-git",
@@ -1468,14 +1482,10 @@ dependencies = [
 name = "corvus-plugin"
 version = "0.3.0"
 dependencies = [
- "arbor-core",
- "arbor-ipc",
  "arbor-plugin-api",
  "arbor-plugin-core",
  "arbor-plugin-types",
  "mlua",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

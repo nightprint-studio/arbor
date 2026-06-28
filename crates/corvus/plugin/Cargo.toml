@@ -5,17 +5,12 @@ edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "Shared plugin-host wiring for the Corvus product: the hook-dispatcher builder, the headless `arbor.*` installer, and the EventSink-backed AppCtx. Linked by both the Tauri shell (in-process host) and the headless `corvus-be` process (OOP host), so the host is built one way in both."
+description  = "Shared plugin-host wiring for the Corvus product: the hook-dispatcher builder and the headless `arbor.*` installer. Linked by both the Tauri shell (in-process host) and the headless `corvus-be` process (OOP host), so the host is built one way in both. (The generic headless AppCtx lives in `arbor-be`.)"
 
 [dependencies]
-arbor-core         = { path = "../../core" }
-arbor-ipc          = { path = "../../foundation/ipc" }
 arbor-plugin-api   = { path = "../../plugin/api" }
 arbor-plugin-core  = { path = "../../plugin/core" }
 arbor-plugin-types = { path = "../../plugin/types" }
-
-serde_json = { workspace = true }
-tokio      = { workspace = true }
 
 # Same pin/features as arbor-plugin-core so Cargo unifies the single mlua
 # artifact — the headless installer's `&Lua` must be the very same type.

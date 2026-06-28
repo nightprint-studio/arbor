@@ -12,6 +12,7 @@ members = [
     "crates/arbor-process-ext",
     "crates/arbor-feedback",
     "crates/core",
+    "crates/foundation/be",
     "crates/foundation/fs",
     "crates/foundation/ipc",
     "crates/foundation/shell-common",

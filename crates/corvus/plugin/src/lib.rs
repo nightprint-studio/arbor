@@ -10,15 +10,14 @@
 //!
 //! - [`dispatcher::build_hook_dispatcher`] — register the hook catalog + bind a
 //!   `LuaHookListener` to a `PluginHost`. Identical in both processes.
-//! - [`installer::CorvusBeApiInstaller`] — publish the host-pure `arbor.*`
-//!   namespaces in a headless backend (the git/product `ns_shell` namespaces
-//!   move here in relocation Wave 1).
-//! - [`app_ctx::CorvusBeAppCtx`] — implement [`arbor_core::prelude::AppCtx`] over
-//!   the backend's `EventSink` + Tokio runtime instead of a `tauri::AppHandle`.
+//! - [`installer::CorvusBeApiInstaller`] — publish the `arbor.*` namespaces in a
+//!   headless backend (host-pure base + the git/product namespaces it's handed).
+//!
+//! The generic headless `AppCtx` is `arbor_be::BackendAppCtx` (it has no Corvus
+//! coupling — just an `EventSink` + Tokio runtime), so it lives in `arbor-be`.
 //!
 //! Public API: use the [`prelude`].
 
-pub mod app_ctx;
 pub mod dispatcher;
 pub mod installer;
 pub mod prelude;

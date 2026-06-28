@@ -1,4 +1,11 @@
-//! [`AppCtx`] for the headless `corvus-be` host.
+//! [`BackendAppCtx`] — the [`AppCtx`] every headless Model-D backend uses.
+//!
+//! Event egress goes through the process's [`EventSink`] (a frame the shell
+//! re-emits to the FE) instead of a `tauri::AppHandle`, and background futures
+//! spawn on the backend's Tokio runtime. The UI/global capabilities a headless
+//! backend can't satisfy — `is_focused`, the plugin-log buffer, OS `open_path`,
+//! host built-in commands — keep the trait's safe defaults until a launcher
+//! round-trip channel lands. Product-agnostic: any `*-be` builds one the same way.
 
 use std::any::Any;
 use std::future::Future;
@@ -9,24 +16,14 @@ use std::sync::Arc;
 use arbor_core::prelude::AppCtx;
 use arbor_ipc::prelude::EventSink;
 
-/// The plugin host's view of the process, for the headless `corvus-be` backend.
-///
-/// Event egress goes through the process's [`EventSink`] (a frame the shell
-/// re-emits to the FE) instead of a `tauri::AppHandle`, and background futures
-/// spawn on corvus-be's Tokio runtime. The UI/global capabilities a headless
-/// backend can't satisfy — `is_focused`, the plugin-log buffer, OS `open_path`,
-/// host built-in commands — keep the trait's safe defaults until the launcher
-/// round-trip channel lands (plugin-relocation Wave 2/3). The Tauri shell keeps
-/// using its own `AppCtx` for the in-process host; the two are selected at
-/// host-construction time and hook firing is identical either way (it flows
-/// through the `HookDispatcher`, not through `AppCtx`).
-pub struct CorvusBeAppCtx {
-    sink:    Arc<dyn EventSink>,
+/// The plugin host's view of the process, for a headless backend.
+pub struct BackendAppCtx {
+    sink: Arc<dyn EventSink>,
     runtime: tokio::runtime::Handle,
-    dir:     PathBuf,
+    dir: PathBuf,
 }
 
-impl CorvusBeAppCtx {
+impl BackendAppCtx {
     /// Build the context from the backend's event sink and runtime handle. The
     /// Arbor data root is resolved once here (same value the shell's `AppCtx`
     /// reports), so `arbor_dir` can hand out a borrow.
@@ -35,7 +32,7 @@ impl CorvusBeAppCtx {
     }
 }
 
-impl AppCtx for CorvusBeAppCtx {
+impl AppCtx for BackendAppCtx {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -57,7 +54,7 @@ impl AppCtx for CorvusBeAppCtx {
 
     fn is_focused(&self) -> bool {
         // No window in a headless backend; focus-gated loops back off safely on
-        // `false` (the launcher will broadcast real focus in relocation Wave 2).
+        // `false` (a launcher will broadcast real focus later).
         false
     }
 }

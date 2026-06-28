@@ -1,0 +1,20 @@
+[package]
+name         = "arbor-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Model-D backend runtime scaffold: `BackendIo` (the framed-stdio egress + reverse channel + tokio runtime every `*-be` builds) and the `App` builder that owns the generic boilerplate — scheduler wiring, pre-serve inits, the post-`Hello` reload, and the serve loop. Product-specific state/dispatch stay in the binary; everything replicable lives here."
+
+[dependencies]
+arbor-ipc         = { path = "../ipc" }
+arbor-rpc         = { path = "../rpc" }
+arbor-plugin-core = { path = "../../plugin/core" }
+# `HookDispatcher` — the type the product's catalog builder returns and the state
+# holds. Named in `App::plugin_host`'s signature; the builder fn is product-supplied.
+arbor-plugin-api  = { path = "../../plugin/api" }
+arbor-scheduler   = { path = "../../scheduler" }
+arbor-core        = { path = "../../core" }
+tokio      = { workspace = true }
+serde_json = { workspace = true }
