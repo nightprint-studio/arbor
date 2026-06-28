@@ -44,7 +44,7 @@ fn open_in_ide(
     // Best-effort: a missing/unreadable `.arbor/config.toml` just falls
     // through to the global default, the original behavior.
     let repo_ide_id: Option<String> = if ide_id.is_none() {
-        crate::config::repo_config::load(&path).ok().and_then(|c| c.ide_id)
+        read_repo_ide_id(&path)
     } else {
         None
     };
@@ -58,35 +58,27 @@ fn open_in_ide(
 }
 
 // ---------------------------------------------------------------------------
-// Per-repo IDE preference (`.arbor/config.toml` → `ide_id`)
+// Per-repo IDE preference — thin read for the (shell-side) IDE spawn
 // ---------------------------------------------------------------------------
 
-/// Read the project-bound IDE preference, or `None` when the repo defers
-/// to the global default. Convenience wrapper over `get_repo_config` so
-/// the Settings panel doesn't have to round-trip the whole RepoConfig.
-#[corvus::handler]
-fn get_repo_ide(
-    state:  &AppState,
-    tab_id: String,
-) -> Result<Option<String>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(crate::config::repo_config::load(&repo.path)?.ide_id)
-}
-
-/// Persist (or clear) the project-bound IDE preference. Pass `None` to
-/// remove the override and fall back to the global default.
-#[corvus::handler]
-fn set_repo_ide(
-    state:  &AppState,
-    tab_id: String,
-    ide_id: Option<String>,
-) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let mut cfg = crate::config::repo_config::load(&repo.path).unwrap_or_default();
-    cfg.ide_id = ide_id.filter(|s| !s.is_empty());
-    crate::config::repo_config::save(&repo.path, &cfg)
+/// Thin direct-read of just the per-repo `ide_id` from `<repo>/.arbor/config.toml`.
+///
+/// corvus-be owns `RepoConfig` (reads + writes live in its `repo_config` domain,
+/// incl. `get_repo_ide` / `set_repo_ide`); the shell keeps this one-field read
+/// because the IDE spawn itself is a shell concern. Reads the file directly off
+/// the workdir — the same partial-read precedent as the backend's
+/// `stats_exclude_for`.
+fn read_repo_ide_id(repo_path: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct RepoIdeProbe {
+        #[serde(default)]
+        ide_id: Option<String>,
+    }
+    let path = Path::new(repo_path).join(".arbor").join("config.toml");
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| toml::from_str::<RepoIdeProbe>(&s).ok())
+        .and_then(|c| c.ide_id)
 }
 
 // ---------------------------------------------------------------------------

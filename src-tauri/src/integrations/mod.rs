@@ -16,10 +16,26 @@ pub use corvus_issues::prelude::*;
 /// Resolve the active issue tracker for a repo: per-repo `issue_tracker`
 /// (with the legacy `ticket_links.tracker` override) — None if neither is set.
 fn tracker_for_repo(repo_path: &str) -> Option<String> {
-    let cfg = crate::config::repo_config::load(repo_path).ok()?;
-    cfg.ticket_links.as_ref()
-        .and_then(|c| c.tracker.clone())
-        .or(cfg.issue_tracker)
+    // corvus-be owns RepoConfig; the shell only needs these two fields here, so
+    // it reads them directly off the workdir (partial-read precedent — see
+    // corvus-be's `stats_exclude_for`).
+    #[derive(serde::Deserialize)]
+    struct TrackerProbe {
+        #[serde(default)]
+        issue_tracker: Option<String>,
+        #[serde(default)]
+        ticket_links: Option<TicketLinksProbe>,
+    }
+    #[derive(serde::Deserialize)]
+    struct TicketLinksProbe {
+        #[serde(default)]
+        tracker: Option<String>,
+    }
+    let path = std::path::Path::new(repo_path).join(".arbor").join("config.toml");
+    let cfg: TrackerProbe = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| toml::from_str(&s).ok())?;
+    cfg.ticket_links.and_then(|c| c.tracker).or(cfg.issue_tracker)
 }
 
 /// Look up a single issue by its human identifier (e.g. `"ENG-42"`,

@@ -18,9 +18,6 @@ use crate::config::app_config::{
     WhatsNewConfig,
 };
 use crate::config::graph_columns::{self, GraphColumnsConfig};
-use crate::config::repo_config::{
-    load as load_repo_config, save as save_repo_config, BranchGroupingConfig, RepoConfig,
-};
 use crate::error::AppError;
 use crate::ipc::platform;
 use crate::AppState;
@@ -115,63 +112,6 @@ pub struct OAuthDefaults {
     pub gitlab_base_host: String,
     pub linear_client_id: String,
     pub jira_client_id:   String,
-}
-
-/// Load per-repository configuration from `.arbor/config.toml` inside the repo.
-#[platform::handler(program = "platform")]
-fn get_repo_config(state: &AppState, tab_id: String) -> Result<RepoConfig, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    load_repo_config(&repo.path)
-}
-
-/// Persist per-repository configuration to `.arbor/config.toml`.
-#[platform::handler(program = "platform")]
-fn set_repo_config(state: &AppState, tab_id: String, config: RepoConfig) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    save_repo_config(&repo.path, &config)
-}
-
-// ── Local-only tag tracking ──────────────────────────────────────────────────
-//
-// Git has no built-in concept of "tag not yet pushed", so we persist a list
-// of locally-created tag names in `.arbor/config.toml`. Removed when the tag
-// is pushed (or deleted).
-
-/// Return the list of tag names flagged as local-only for this repo.
-#[platform::handler(program = "platform")]
-fn list_local_only_tags(state: &AppState, tab_id: String) -> Result<Vec<String>, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(load_repo_config(&repo.path)?.local_only_tags)
-}
-
-/// Mark a tag as locally-created and not-yet-pushed.
-#[platform::handler(program = "platform")]
-fn mark_tag_local(state: &AppState, tab_id: String, name: String) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let mut config = load_repo_config(&repo.path)?;
-    if !config.local_only_tags.iter().any(|n| n == &name) {
-        config.local_only_tags.push(name);
-        save_repo_config(&repo.path, &config)?;
-    }
-    Ok(())
-}
-
-/// Mark a tag as pushed (or deleted) — removes it from the local-only list.
-#[platform::handler(program = "platform")]
-fn mark_tag_pushed(state: &AppState, tab_id: String, name: String) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let mut config = load_repo_config(&repo.path)?;
-    let before = config.local_only_tags.len();
-    config.local_only_tags.retain(|n| n != &name);
-    if config.local_only_tags.len() != before {
-        save_repo_config(&repo.path, &config)?;
-    }
-    Ok(())
 }
 
 // ── Graph columns (separate TOML, not part of AppConfig) ────────────────────
@@ -486,30 +426,6 @@ fn set_branches_config(state: &AppState, config: BranchesConfig) -> Result<(), A
     let cfg_clone = cfg.clone();
     drop(cfg);
     app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))
-}
-
-/// Read the per-repo branch-grouping state (enabled flag + collapsed groups).
-/// Convenience wrapper over `RepoConfig.branch_grouping` so the frontend
-/// store doesn't have to round-trip the entire RepoConfig on every toggle.
-#[platform::handler(program = "platform")]
-fn get_branch_grouping(state: &AppState, tab_id: String) -> Result<BranchGroupingConfig, AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    Ok(load_repo_config(&repo.path)?.branch_grouping)
-}
-
-/// Persist per-repo branch-grouping state (enabled + collapsed groups).
-#[platform::handler(program = "platform")]
-fn set_branch_grouping(
-    state: &AppState,
-    tab_id: String,
-    config: BranchGroupingConfig,
-) -> Result<(), AppError> {
-    let mut mgr = state.lock_repos()?;
-    let repo = mgr.get(&tab_id)?;
-    let mut cfg = load_repo_config(&repo.path)?;
-    cfg.branch_grouping = config;
-    save_repo_config(&repo.path, &cfg)
 }
 
 /// Read host-wide commit preferences (global template fallback, …).

@@ -50,6 +50,7 @@ mod reflog;
 mod remote;
 mod repo;
 mod repo_browser;
+mod repo_config;
 mod repo_ops;
 mod repo_registry;
 mod reset;

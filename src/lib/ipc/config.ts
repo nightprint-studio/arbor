@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { platform } from './rpc';
+import { corvus, platform } from './rpc';
 import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, ExplorerConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, WhatsNewConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
@@ -28,10 +28,10 @@ export interface RepoConfig {
 }
 
 export const getRepoConfig = (tabId: string) =>
-  platform<RepoConfig>('get_repo_config', { tab_id: tabId });
+  corvus<RepoConfig>('get_repo_config', { tab_id: tabId });
 
 export const setRepoConfig = (tabId: string, config: RepoConfig) =>
-  platform<void>('set_repo_config', { tab_id: tabId, config });
+  corvus<void>('set_repo_config', { tab_id: tabId, config });
 
 // ── Graph config ──────────────────────────────────────────────────────────────
 
@@ -188,7 +188,7 @@ export const setBranchesConfig = (config: BranchesConfig) =>
   platform<void>('set_branches_config', { config });
 
 export const getBranchGrouping = (tabId: string) =>
-  platform<BranchGroupingConfig>('get_branch_grouping', { tab_id: tabId });
+  corvus<BranchGroupingConfig>('get_branch_grouping', { tab_id: tabId });
 
 export const setBranchGrouping = (tabId: string, config: BranchGroupingConfig) =>
-  platform<void>('set_branch_grouping', { tab_id: tabId, config });
+  corvus<void>('set_branch_grouping', { tab_id: tabId, config });

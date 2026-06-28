@@ -11,13 +11,13 @@
  * helpers that mutate the backing TOML file and refresh the cache.
  */
 
-import { platform } from '$lib/ipc/rpc';
+import { corvus } from '$lib/ipc/rpc';
 
 const _cache = $state<Record<string, Set<string>>>({});
 
 async function _refresh(tabId: string): Promise<Set<string>> {
   try {
-    const list = await platform<string[]>('list_local_only_tags', { tab_id: tabId });
+    const list = await corvus<string[]>('list_local_only_tags', { tab_id: tabId });
     const set = new Set(list);
     _cache[tabId] = set;
     return set;
@@ -47,7 +47,7 @@ export const localTagTracker = {
   /** Mark a tag as locally-created and not-yet-pushed. */
   async markLocal(tabId: string, name: string): Promise<void> {
     try {
-      await platform<void>('mark_tag_local', { tab_id: tabId, name });
+      await corvus<void>('mark_tag_local', { tab_id: tabId, name });
     } finally {
       await _refresh(tabId);
     }
@@ -56,7 +56,7 @@ export const localTagTracker = {
   /** Mark a tag as pushed (or removed) — drops the "local" badge. */
   async markPushed(tabId: string, name: string): Promise<void> {
     try {
-      await platform<void>('mark_tag_pushed', { tab_id: tabId, name });
+      await corvus<void>('mark_tag_pushed', { tab_id: tabId, name });
     } finally {
       await _refresh(tabId);
     }
