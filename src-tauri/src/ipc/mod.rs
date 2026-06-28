@@ -39,7 +39,7 @@ pub mod stream_registry;
 pub mod studio;
 
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use arbor_ipc::prelude::{BrokerClient, ChildClient, IpcError, LoopbackBroker};
@@ -83,23 +83,20 @@ pub fn is_async_method(program: &str, method: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// The methods a running product backend advertises as served **out-of-process**.
-/// Populated once in [`build_router`] from `corvus-be`'s `Hello` (today the only
-/// OOP backend); unset/empty when no backend is up.
-static CORVUS_OOP: OnceLock<HashSet<String>> = OnceLock::new();
-
-/// Whether `(program, method)` is served **out-of-process** by a running product
-/// backend. The `rpc` command consults this so it does **not** short-circuit an
-/// async method to the in-process [`dispatch_async`] when the backend advertises
-/// it — the call must instead flow through the router/`SplitBroker` to the OOP
-/// process (otherwise "advertise-and-route" would be a lie for async handlers,
-/// pinning every issue-tracker call in-process). When no backend is up the set
-/// is unset, so every async method stays in-process — the correct fallback.
+/// Whether `(program, method)` is served **out-of-process** by the running
+/// `corvus-be`. The `rpc` command consults this so it does **not** short-circuit
+/// an async method to the in-process [`dispatch_async`] when the backend
+/// advertises it — the call must instead flow through the router/`SplitBroker` to
+/// the OOP process (otherwise "advertise-and-route" would be a lie for async
+/// handlers, pinning every issue-tracker call in-process). The advertised set is
+/// owned by [`split_broker`], attached when `corvus-be` is spawned lazily
+/// ([`ensure_corvus_be`]) and detached when it dies — so this reads `false` both
+/// before the backend is up and after it disconnects, the correct fallback.
 ///
 /// Only `corvus` has an OOP backend today; generalise the key when
 /// `platform-be`/`merula-be` arrive.
 pub fn is_oop_method(program: &str, method: &str) -> bool {
-    program == "corvus" && CORVUS_OOP.get().map(|s| s.contains(method)).unwrap_or(false)
+    program == "corvus" && split_broker::serves(method)
 }
 
 /// Await an async handler in-process against the live `AppState`. The future
@@ -138,31 +135,14 @@ pub fn build_router(app: &AppHandle) -> Router {
         corvus::dispatch(&handle, method, params)
     }));
 
-    // Out-of-process backend: try to spawn the real `corvus-be`. Whatever it
-    // advertises routes to it; everything else stays in-process. If it can't be
-    // spawned (binary not built, spawn error) the shell runs pure in-process —
-    // the app must never break on a missing backend.
-    match spawn_corvus_be(app) {
-        Some((child, methods)) => {
-            tracing::info!(
-                "corvus-be up: {} method(s) served out-of-process",
-                methods.len()
-            );
-            let oop: HashSet<String> = methods.into_iter().collect();
-            // Publish the OOP set so the `rpc` command stops short-circuiting
-            // these methods' async variants to the in-process path (the P0:
-            // async methods bypassed the router otherwise — see `is_oop_method`).
-            let _ = CORVUS_OOP.set(oop.clone());
-            router.register(
-                "corvus",
-                Arc::new(SplitBroker::new(oop, Arc::new(child), loopback)),
-            );
-        }
-        None => {
-            tracing::info!("corvus-be not available — all corvus methods in-process");
-            router.register("corvus", loopback);
-        }
-    }
+    // Out-of-process backend: `corvus-be` is NOT spawned here. The launcher and
+    // the other product windows (explorer, nemus) never touch git, so the git
+    // backend must not run until the user actually opens Corvus. It is spawned
+    // lazily by [`ensure_corvus_be`] when the Corvus window first opens, which
+    // splices the child into the shared OOP routing slot (and removes it on
+    // disconnect). The broker is registered now but loopback-only; routing flips
+    // at attach/detach time without rebuilding the router.
+    router.register("corvus", Arc::new(SplitBroker::new(loopback)));
 
     // Platform backend: app-agnostic services (config/theme/session/workspace/
     // jobs/fs/terminal/app metadata). In-process only for now — there is no
@@ -389,6 +369,52 @@ fn backend_binary(app: &AppHandle, name: &str) -> Option<std::path::PathBuf> {
     p.exists().then_some(p)
 }
 
+/// Lazily spawn `corvus-be` and attach it to the router, **idempotently**.
+/// Called when the Corvus product window opens
+/// (`window::corvus::open_corvus_window`), off the main thread — the spawn blocks
+/// on the child's first `Hello` frame, which must not stall the UI thread.
+///
+/// First call spawns the binary, reads its advertised methods, splices the
+/// client into the shared OOP routing slot, then pushes the current config so the
+/// backend self-detects git + loads its owned product config before the
+/// AppShell's first BE-required `rpc` fires. Subsequent calls (the single Corvus
+/// window re-summoned) are a no-op while the backend is alive. If the binary is
+/// missing / the spawn fails, the backend stays detached and every corvus method
+/// routes in-process — the same BE-required-method semantics as before (the user
+/// builds `corvus-be`).
+pub fn ensure_corvus_be(app: &AppHandle) {
+    // Serialize concurrent triggers (launcher button + Command Palette can both
+    // fire `open_corvus_window`) so we never spawn two backends; re-check
+    // liveness inside the lock.
+    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match SPAWN_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if split_broker::is_attached() {
+        return; // backend already up — window is just being re-summoned
+    }
+    match spawn_corvus_be(app) {
+        Some((child, methods)) => {
+            tracing::info!(
+                "corvus-be up (lazy): {} method(s) served out-of-process",
+                methods.len()
+            );
+            split_broker::attach(
+                methods.into_iter().collect(),
+                Arc::new(child) as Arc<dyn BrokerClient>,
+            );
+            // Now that the backend is listening, hand it the runtime config it
+            // can't resolve itself (git path + portable dir, owned-config path,
+            // registry/workspace paths) so it's ready before the first repo opens.
+            sync_config(&app.state::<AppState>());
+        }
+        None => {
+            tracing::info!("corvus-be not available — Corvus running in-process");
+        }
+    }
+}
+
 fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
     use crate::process_ext::NoWindowExt;
 
@@ -416,10 +442,13 @@ fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
         move || {
-            // The git backend process died (crash / kill). There is no live
-            // respawn yet, so surface a fatal state: the Corvus window shows a
-            // blocking overlay asking the user to restart Arbor.
+            // The git backend process died (crash / kill). Detach it so the
+            // router stops routing to a dead pipe (corvus methods fall back to
+            // the in-process loopback → UnknownMethod for the BE-required ones),
+            // then surface a fatal state: there is no live respawn yet, so the
+            // Corvus window shows a blocking overlay asking the user to restart.
             use tauri::Emitter;
+            split_broker::detach();
             let _ = app_for_disc.emit("arbor://corvus-be-down", ());
         },
     ) {

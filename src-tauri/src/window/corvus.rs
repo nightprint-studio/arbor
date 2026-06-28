@@ -9,8 +9,10 @@
 //! ([`CORVUS_WINDOW_LABEL`]) to mount the Git `AppShell`.
 //!
 //! Single reusable window, re-summoned rather than duplicated — like
-//! [`super::nemus`]. The Git backend (`corvus-be`) is process-wide and shared;
-//! this is purely the window surface.
+//! [`super::nemus`]. The Git backend (`corvus-be`) is spawned **lazily** the
+//! first time this window opens (see [`open_corvus_window`]) and then shared
+//! process-wide across Corvus tabs — the launcher and the non-git product
+//! windows never start it.
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -79,5 +81,12 @@ fn build_corvus_window(app: &AppHandle) {
 #[allow(clippy::unused_async)] // async is load-bearing: it moves the handler off
 // the main thread (see doc comment) — there's nothing to await.
 pub async fn open_corvus_window(app: AppHandle) {
+    // Bring up the Git backend before the window's AppShell loads and fires its
+    // first BE-required `rpc` (e.g. `list_workspaces`). We're on the async
+    // runtime here (off the main thread), so the spawn's blocking `Hello` read
+    // is safe; the window-creation hop to the main thread happens after, giving
+    // the backend a head start while the webview boots. Idempotent — a no-op when
+    // Corvus is re-summoned and the backend is already up.
+    crate::ipc::ensure_corvus_be(&app);
     open_or_focus(&app);
 }
