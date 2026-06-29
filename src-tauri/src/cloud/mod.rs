@@ -46,6 +46,10 @@ pub struct ArborCloudHost {
     jobs:          Arc<Mutex<JobRegistry>>,
     plugin_host:   Arc<Mutex<PluginHost>>,
     sink:          Arc<dyn EventSink>,
+    /// Handle to forward plugin hooks to the product backends where the
+    /// cloud-storage plugin now actually runs (post-flip it loads in `corvus-be`,
+    /// not the shell's `plugin_host`). See [`fire_plugin_hook`](Self::fire_plugin_hook).
+    app:           AppHandle,
 }
 
 impl ArborCloudHost {
@@ -55,19 +59,21 @@ impl ArborCloudHost {
         pending_ops:   Arc<CloudPendingOps>,
         jobs:          Arc<Mutex<JobRegistry>>,
         plugin_host:   Arc<Mutex<PluginHost>>,
+        app:           AppHandle,
     ) -> Self {
-        Self { cancellations, pending_ops, jobs, plugin_host, sink }
+        Self { cancellations, pending_ops, jobs, plugin_host, sink, app }
     }
 
     /// Construct from a managed `AppState` + an event sink (typically
     /// called from `install()` inside Tauri's `setup()`).
-    pub fn from_state(state: &AppState, sink: Arc<dyn EventSink>) -> Self {
+    pub fn from_state(app: AppHandle, state: &AppState, sink: Arc<dyn EventSink>) -> Self {
         Self::new(
             sink,
             state.cloud_cancellations.clone(),
             state.cloud_pending_ops.clone(),
             state.jobs.clone(),
             state.plugin_host.clone(),
+            app,
         )
     }
 }
@@ -77,10 +83,17 @@ impl CloudHost for ArborCloudHost {
     fn pending_ops(&self)    -> &CloudPendingOps   { &self.pending_ops }
 
     fn fire_plugin_hook(&self, plugin: &str, hook: &str, payload_json: &str) {
+        // The cloud-storage plugin is universal, so after the plugin-relocation
+        // flip it loads in `corvus-be`, NOT the shell's `plugin_host`. Fire on the
+        // shell host (a no-op unless something still loads cloud here) AND forward
+        // to the product backends where the plugin actually runs — otherwise every
+        // async cloud result (list-chunk pages, oauth-done, transfer job-done /
+        // progress) fires into the void and the UI hangs (e.g. "Loading…").
         match self.plugin_host.lock() {
             Ok(host) => arbor_plugin_core::prelude::fire_on(&host, plugin, hook, payload_json),
             Err(e)   => tracing::warn!("plugin_host poisoned, dropping hook {plugin}:{hook}: {e}"),
         }
+        crate::ipc::fire_plugin_hook_on_backends(&self.app, plugin, hook, payload_json);
     }
 
     fn emit_event(&self, topic: &str, payload: serde_json::Value) {
@@ -159,7 +172,7 @@ pub fn install(app: &AppHandle) {
         tracing::warn!("cloud::install called before event sink was wired — cloud host not installed");
         return;
     };
-    let host = ArborCloudHost::from_state(&*state, sink);
+    let host = ArborCloudHost::from_state(app.clone(), &*state, sink);
     let host_arc: Arc<dyn CloudHost> = Arc::new(host);
 
     // Publish into AppState's OnceLock — the single home of the cloud host.

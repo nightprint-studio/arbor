@@ -1600,6 +1600,31 @@ pub fn reload_corvus_plugins(state: &AppState) {
     let _ = dispatch_rpc(state, "corvus", "reload_plugins", serde_json::json!({}));
 }
 
+/// Relay a plugin hook fired **shell-side** to the product backend where the
+/// target plugin now runs. After the plugin-relocation flip, universal plugins
+/// (e.g. `cloud-storage`) load in `corvus-be`, so a hook the shell raises for them
+/// — the cloud stream callbacks (`cloud-storage:list-chunk`), OAuth-done, transfer
+/// job-done / progress — must be forwarded there or the plugin never sees it and
+/// the UI hangs (the "Loading…" stall). This routes through `corvus-be`'s
+/// `fire_plugin_action` (the exact cross-process twin of the shell's plugin-
+/// targeted `fire_on`): same plugin, same callback name, same payload. Best-effort
+/// — the method is advertised only while `corvus-be` runs, so the call drops when
+/// it isn't. `payload_json` is the already-serialized hook payload, handed over
+/// verbatim as the context.
+pub fn fire_plugin_hook_on_backends(app: &AppHandle, plugin: &str, hook: &str, payload_json: &str) {
+    let state = app.state::<AppState>();
+    let _ = dispatch_rpc(
+        &state,
+        "corvus",
+        "fire_plugin_action",
+        serde_json::json!({
+            "plugin_name":  plugin,
+            "action":       hook,
+            "context_json": payload_json,
+        }),
+    );
+}
+
 /// Serialize one app-config slice and push it into `corvus-be`'s config bag.
 fn push_config_section<T: serde::Serialize>(state: &AppState, section: &str, value: &T) {
     if let Ok(value) = serde_json::to_value(value) {
