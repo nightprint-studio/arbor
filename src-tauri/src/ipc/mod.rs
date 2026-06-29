@@ -1580,6 +1580,26 @@ pub fn sync_config(state: &AppState) {
     push_config_section(state, "repo_registry", &repos);
 }
 
+/// On a live profile switch, push the new active profile to a running `corvus-be`
+/// and reload its plugin host, so the target profile's plugin set loads and
+/// re-emits its contributions to the Corvus window. Ordered + best-effort:
+/// `__set_plugin_profile` repoints the backend's profile cell + marketplace plugin
+/// root, then `reload_plugins` rescans and re-announces (emitting
+/// `arbor://plugins-reloaded` / contribution events the shell re-forwards to the
+/// FE). A no-op when `corvus-be` isn't running — the methods aren't advertised so
+/// the calls drop, and it adopts the new profile from the on-disk pointer the next
+/// time it spawns.
+pub fn reload_corvus_plugins(state: &AppState) {
+    let profile = arbor_core::prelude::active_profile();
+    let _ = dispatch_rpc(
+        state,
+        "corvus",
+        "__set_plugin_profile",
+        serde_json::json!({ "profile": profile }),
+    );
+    let _ = dispatch_rpc(state, "corvus", "reload_plugins", serde_json::json!({}));
+}
+
 /// Serialize one app-config slice and push it into `corvus-be`'s config bag.
 fn push_config_section<T: serde::Serialize>(state: &AppState, section: &str, value: &T) {
     if let Ok(value) = serde_json::to_value(value) {

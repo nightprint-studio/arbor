@@ -155,6 +155,15 @@ pub fn profile_plugins_dir() -> PathBuf {
     arbor_profile_dir().join("plugins")
 }
 
+/// `arbor/profiles/<active>/plugins/marketplace_plugins` — where the marketplace
+/// installs plugins. The single source of truth for this segment: both the
+/// marketplace crate and the product backends (corvus-be, …) resolve their plugin
+/// scan root through here, so the launcher host and a product host always agree on
+/// where installed plugins live.
+pub fn marketplace_plugins_dir() -> PathBuf {
+    profile_plugins_dir().join("marketplace_plugins")
+}
+
 // ── Explicit-profile variants ────────────────────────────────────────────────
 //
 // Used by the one-shot migration and by profile management (list/create/switch),

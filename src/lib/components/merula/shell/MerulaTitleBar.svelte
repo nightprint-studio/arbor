@@ -14,6 +14,7 @@
     PanelLeft, PanelRight, Minimize2, Check, AlertTriangle,
     FolderOpen, FolderPlus, FilePlus2, Save, Clock, LogOut, FolderPen,
     FileAudio, FileMusic, Layers, Crop, SlidersHorizontal, LayoutGrid,
+    User, Plus, UserCog,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
@@ -23,6 +24,10 @@
   import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
   import WindowControls from '$lib/components/layout/WindowControls.svelte';
   import RecentProjectsModal from './RecentProjectsModal.svelte';
+  // Profiles are a global Arbor concept (shared vault/settings across windows);
+  // both the store and the manager modal are window-agnostic and reused as-is.
+  import ProfileManagerModal from '$lib/components/shared/ProfileManagerModal.svelte';
+  import { profileStore } from '$lib/stores/profiles.svelte';
   // Titlebar lives at the very top — tooltips fly downward so they don't get
   // clipped by the window edge.
   import { tooltipBottom as tooltip } from '$lib/actions/tooltip';
@@ -37,6 +42,7 @@
   import { arrangementStore } from '../viz/arrangement.svelte';
 
   let recentOpen = $state(false);
+  let profileManagerOpen = $state(false);
 
   // Skip-to-end targets the last cycle of the evaluated arrangement (its content
   // end); disabled while the arrangement is empty (nothing to skip to).
@@ -97,6 +103,22 @@
     { kind: 'item', id: 'close', label: 'Close Window', icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },
   ]);
 
+  // ── Profiles submenu (quick-switch + manage) ─────────────────────────────────
+  // Profiles are global: switching here reloads every window. Mirrors the main
+  // Arbor titlebar so the two windows expose the same surface.
+  const profileItems = $derived<DropdownItem[]>([
+    ...profileStore.list.map(name => ({
+      kind: 'item' as const, id: `profile:${name}`, label: name, icon: User,
+      active: profileStore.active === name,
+      onclick: () => void profileStore.switchTo(name),
+    })),
+    { kind: 'separator' as const },
+    { kind: 'item' as const, id: 'new-profile', label: 'New profile…', icon: Plus,
+      onclick: () => { profileManagerOpen = true; } },
+    { kind: 'item' as const, id: 'manage-profiles', label: 'Manage profiles…', icon: UserCog,
+      onclick: () => { profileManagerOpen = true; } },
+  ]);
+
   // ── Settings (gear) ─────────────────────────────────────────────────────────
   // The command palette has its own dedicated titlebar button (next to the gear,
   // Arbor-style), so it's no longer duplicated here.
@@ -105,6 +127,8 @@
     { kind: 'separator' },
     { kind: 'item', id: 'settings',  label: 'Settings…',           icon: Settings,  shortcut: 'Ctrl+,', onclick: () => merulaStore.openSettings() },
     { kind: 'item', id: 'shortcuts', label: 'Keyboard Shortcuts…', icon: Keyboard,  shortcut: 'Shift+F1', onclick: () => merulaStore.openShortcuts() },
+    { kind: 'separator' },
+    { kind: 'submenu', id: 'profiles', label: 'Profile', icon: UserCog, items: profileItems },
   ]);
 
   // ── Project fast-swap (workspaces + their projects / recents + open) ──────────
@@ -293,6 +317,10 @@
 
 {#if recentOpen}
   <RecentProjectsModal onClose={() => recentOpen = false} />
+{/if}
+
+{#if profileManagerOpen}
+  <ProfileManagerModal onClose={() => profileManagerOpen = false} />
 {/if}
 
 <style>

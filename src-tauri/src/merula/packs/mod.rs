@@ -8,6 +8,7 @@
 //! code. The audio crate only ever sees `kind=sample` / `kind=sfz` entries, so
 //! its (frozen) dependency set is untouched.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -15,6 +16,7 @@ use tauri::AppHandle;
 
 use merula::prelude::{InstrumentInfo, Registry};
 
+use super::active_packs::{self, is_active};
 use super::config::MerulaConfig;
 
 mod download;
@@ -116,6 +118,11 @@ pub struct PackStatus {
     /// Rough download size for the pre-install estimate (from the descriptor).
     pub approx_bytes: u64,
     pub installed: bool,
+    /// Whether this pack is in the per-profile **active** allow-list (its
+    /// instruments are usable for playback / eval / the sound bank). Pack
+    /// management always lists every pack; this only gates *consumption*. When no
+    /// allow-list file exists yet, every pack reports `true` (all-active).
+    pub active: bool,
     pub path: String,
     pub size_bytes: u64,
     pub sha256: Option<String>,
@@ -125,6 +132,25 @@ pub struct PackStatus {
 /// Look up a pack descriptor by id.
 pub fn pack(id: &str) -> Option<&'static Pack> {
     PACKS.iter().find(|p| p.id == id)
+}
+
+/// Iterate only the packs that are **active** for the given allow-list (see
+/// [`active_packs`]). The single chokepoint every *consumption* path (playback,
+/// eval validation, sound-bank enumeration) funnels through, so an inactive pack
+/// is uniformly invisible to those paths while pack management still sees them
+/// all. `active` is the resolved [`active_packs::active_set`] (load it once).
+fn active_packs_iter(active: &Option<HashSet<String>>) -> impl Iterator<Item = &'static Pack> + '_ {
+    PACKS.iter().filter(move |p| is_active(active, p.id))
+}
+
+/// The ids of every currently-**installed** pack (used to seed / prune the
+/// active-pack allow-list).
+pub fn installed_ids(cfg: &MerulaConfig) -> Vec<String> {
+    PACKS
+        .iter()
+        .filter(|p| download::status(cfg, p, true).installed)
+        .map(|p| p.id.to_string())
+        .collect()
 }
 
 /// Install directory for a pack. VSCO lives at `<merula-data>/vsco` (or the
@@ -158,14 +184,21 @@ pub fn delete(cfg: &MerulaConfig, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The install status of every known pack (display order).
+/// The install status of every known pack (display order). Pack management lists
+/// **every** pack regardless of the active allow-list; the per-pack `active` flag
+/// reflects allow-list membership for the UI's active/inactive toggle.
 pub fn list(cfg: &MerulaConfig) -> Vec<PackStatus> {
-    PACKS.iter().map(|p| download::status(cfg, p)).collect()
+    let active = active_packs::active_set();
+    PACKS
+        .iter()
+        .map(|p| download::status(cfg, p, is_active(&active, p.id)))
+        .collect()
 }
 
 /// The install status of one pack by id (`None` for an unknown id).
 pub fn status(cfg: &MerulaConfig, id: &str) -> Option<PackStatus> {
-    pack(id).map(|p| download::status(cfg, p))
+    let active = active_packs::active_set();
+    pack(id).map(|p| download::status(cfg, p, is_active(&active, p.id)))
 }
 
 /// Re-index an already-installed pack: regenerate its `registry.toml` from the
@@ -182,8 +215,11 @@ pub fn reindex(cfg: &MerulaConfig, id: &str) -> Result<PackStatus, String> {
 /// The instrument names declared by every installed pack (union), for the eval
 /// validator. Cheap: header scan only, no sample decode.
 pub fn installed_instrument_names(cfg: &MerulaConfig) -> Vec<String> {
+    let active = active_packs::active_set();
     let mut names = Vec::new();
-    for p in PACKS {
+    // Only active packs count: a script referencing a voice from an inactive pack
+    // must fail the eval validator loudly, not render silently.
+    for p in active_packs_iter(&active) {
         names.extend(download::installed_names(cfg, p));
     }
     names
@@ -193,8 +229,9 @@ pub fn installed_instrument_names(cfg: &MerulaConfig) -> Vec<String> {
 /// the sound-bank's per-pack grouping. Cheap header scan (no sample decode). On
 /// a name claimed by two packs, the first in [`PACKS`] order wins.
 pub fn instrument_pack_map(cfg: &MerulaConfig) -> std::collections::HashMap<String, (String, String)> {
+    let active = active_packs::active_set();
     let mut map = std::collections::HashMap::new();
-    for p in PACKS {
+    for p in active_packs_iter(&active) {
         for name in download::installed_names(cfg, p) {
             map.entry(name)
                 .or_insert_with(|| (p.id.to_string(), p.name.to_string()));
@@ -208,7 +245,8 @@ pub fn instrument_pack_map(cfg: &MerulaConfig) -> std::collections::HashMap<Stri
 /// [`load_subset_into`], which decodes (for playback) only the referenced
 /// instruments (a pack like VSCO/Dirt is gigabytes, never loaded wholesale).
 pub fn list_instruments_into(cfg: &MerulaConfig, out: &mut Vec<InstrumentInfo>) {
-    for p in PACKS {
+    let active = active_packs::active_set();
+    for p in active_packs_iter(&active) {
         download::list_into(cfg, p, out);
     }
 }
@@ -221,7 +259,8 @@ pub fn load_subset_into(
     reg: &mut Registry,
     needed: &std::collections::HashSet<String>,
 ) {
-    for p in PACKS {
+    let active = active_packs::active_set();
+    for p in active_packs_iter(&active) {
         download::load_subset_into(cfg, p, reg, needed);
     }
 }

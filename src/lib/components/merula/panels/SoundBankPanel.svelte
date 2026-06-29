@@ -25,6 +25,7 @@
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import ProgressBar from '$lib/components/shared/ui/ProgressBar.svelte';
+  import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import SoundBankItem from './SoundBankItem.svelte';
@@ -115,6 +116,18 @@
     }
   }
 
+  // Per-profile active toggle: enable/disable an installed pack's voices for the
+  // active profile. Drops/re-adds them live (the store refreshes packs + sounds).
+  let activeError = $state<Record<string, string>>({});
+  async function setActive(pack: MerulaPack, on: boolean) {
+    activeError = { ...activeError, [pack.id]: '' };
+    try {
+      await packsStore.setActive(pack.id, on);
+    } catch (e) {
+      activeError = { ...activeError, [pack.id]: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   // Delete-pack confirmation (an installed pack's files are removed from disk).
   let confirmDelete = $state<MerulaPack | null>(null);
   let deleting      = $state(false);
@@ -182,6 +195,12 @@
           <HardDrive size={11} /> {formatBytes(pack.size_bytes)} on disk
         </span>
         <div class="pack-actions">
+          <Toggle size="sm" checked={packsStore.activeOf(pack.id)}
+                  ariaLabel={`${packsStore.activeOf(pack.id) ? 'Disable' : 'Enable'} ${pack.name} for this profile`}
+                  onchange={(v) => setActive(pack, v)} />
+          <span class="pack-active" class:on={packsStore.activeOf(pack.id)}>
+            {packsStore.activeOf(pack.id) ? 'Active' : 'Inactive'}
+          </span>
           <button class="pack-del" use:tooltip={'Rebuild this pack’s instruments from the files on disk'}
                   aria-label={`Re-index ${pack.name}`} disabled={packsStore.reindexingOf(pack.id)}
                   onclick={() => doReindex(pack)}>
@@ -193,6 +212,10 @@
           </button>
         </div>
       </div>
+      <p class="pack-hint">Enabling/disabling a pack for this profile applies on the next run.</p>
+      {#if activeError[pack.id]}
+        <p class="pack-err">{activeError[pack.id]}</p>
+      {/if}
       {#if pack.instrument_count === 0}
         <p class="pack-hint">No instruments indexed — try <strong>Re-index</strong> to rebuild from the downloaded files.</p>
       {/if}
@@ -391,11 +414,18 @@
   .pack-del:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--error); }
   .pack-del:disabled { opacity: 0.5; cursor: default; }
 
-  .pack-actions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+  .pack-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  /* Active/Inactive affordance next to the per-profile toggle. */
+  .pack-active {
+    font-size: var(--font-size-xs); color: var(--text-disabled);
+    font-variant-numeric: tabular-nums; min-width: 44px;
+    transition: color var(--transition-fast);
+  }
+  .pack-active.on { color: var(--accent); }
   /* The re-index button is the first `.pack-del` in `.pack-actions`; tint it
      accent on hover (it rebuilds, it doesn't destroy) rather than the delete red. */
-  .pack-actions .pack-del:first-child:hover:not(:disabled) { color: var(--accent); background: var(--accent-subtle); }
-  .pack-actions .pack-del:first-child:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+  .pack-actions .pack-del:nth-of-type(1):hover:not(:disabled) { color: var(--accent); background: var(--accent-subtle); }
+  .pack-actions .pack-del:nth-of-type(1):focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
 
   .pack-hint { margin: 2px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-muted); }
   .pack-hint strong { color: var(--text-secondary); font-weight: 600; }

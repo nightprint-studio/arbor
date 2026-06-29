@@ -467,6 +467,11 @@ impl AppState {
         // `sync_config` when it later spawns). Must run after the registry/repo
         // reloads above so the pushed `repo_registry` reflects the new profile.
         crate::ipc::sync_config(self);
+        // Repoint a live corvus-be at the new profile and reload its plugin host,
+        // so the target profile's plugin set loads and re-emits its contributions
+        // to the Corvus window (the FE reloads on `arbor://profile-switched`). The
+        // launcher's own host is reloaded separately by `switch_profile`.
+        crate::ipc::reload_corvus_plugins(self);
     }
 
     /// Shared trigger engine, once `setup()` has built it. Returns `None`

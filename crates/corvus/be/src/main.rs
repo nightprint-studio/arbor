@@ -50,6 +50,7 @@ mod missing;
 mod mr;
 mod host_handle;
 mod notes;
+mod plugin_profile;
 mod plugin_rpc;
 mod provider;
 mod rebase;
@@ -1596,8 +1597,26 @@ fn main() {
     // The plugin reload is DEFERRED to after the `Hello` frame — `App::run`'s
     // default post-`Hello` hook does it (on-load hooks emit events, which must not
     // precede the handshake frame on the pipe).
+    // Seed the active profile from the same build-specific pointer the shell
+    // reads (`active-profile` / `active-profile-dev`), so this process's
+    // profile-scoped plugin paths (`plugin_dir()` = `…/plugins/installed`, and the
+    // marketplace root below) resolve to the SAME profile the launcher is on.
+    // Without this, corvus-be stays on the `default` profile and a dev launcher
+    // would serve plugins from the wrong (or empty) profile.
+    arbor_core::prelude::init_active_profile();
+
     let mut app = arbor_be::App::new(arbor_be::BackendIo::new());
     app.plugin_host("corvus", build_hook_dispatcher);
+    // After the Flip (plugin-relocation Phase 2) this backend is the sole loader of
+    // the Corvus product's plugins, so it must scan the marketplace install dir
+    // just like the launcher host does (`setup/scheduler.rs`'s
+    // `set_extra_plugin_roots`). The host's built-in `plugin_dir()` only covers the
+    // `installed/` pool; without this, marketplace-installed plugins (the bulk)
+    // never load and no contributions reach the Corvus window.
+    app.plugin_host_handle()
+        .lock()
+        .expect("corvus-be: plugin host poisoned at extra-roots set")
+        .set_extra_plugin_roots(vec![arbor_core::prelude::marketplace_plugins_dir()]);
 
     // The state every handler gets: event egress + the hook broker + the reverse
     // channel. `Arc`-shared so `CorvusNsHost` (which the git `arbor.*` namespaces

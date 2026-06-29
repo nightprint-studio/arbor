@@ -1,8 +1,8 @@
 //! Persisted merula **window** state — recents, last project, panel layout,
 //! sound-bank favourites/recents, and open-tab snapshots.
 //!
-//! Global window state lives in `<merula-data>/state.json`; the **scratch** tabs
-//! are global too (`<merula-data>/scratch.json`); per-project **open editor tabs**
+//! Global window state lives in `<merula-config>/state.json`; the **scratch** tabs
+//! are global too (`<merula-config>/scratch.json`); per-project **open editor tabs**
 //! live next to the project in `<project>/.merula/tabs.json`, so a project carries
 //! its own session. Deliberately **not** the typed `[merula]` config (engine
 //! settings), **not** the per-project `merula.toml` (the project model), and
@@ -87,11 +87,12 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), AppError> {
     std::fs::write(path, text).map_err(|e| AppError::Other(e.to_string()))
 }
 
-// ── Global window state (`<merula-data>/state.json`) ──────────────────────────
+// ── Global window state (`<merula-config>/state.json`) ─────────────────────────
 
-/// `<merula-data>/state.json`.
+/// `<merula-config>/state.json`. Per-profile, NOT under the global data dir (which
+/// now holds the shared heavy assets), so each profile gets its own window state.
 fn state_path() -> PathBuf {
-    arbor_core::prelude::merula_data_dir().join("state.json")
+    arbor_core::prelude::merula_config_dir().join("state.json")
 }
 
 /// Read the persisted merula window state (defaults on a missing/corrupt file).
@@ -178,15 +179,15 @@ pub fn set_merula_project_mix(
     write_json(&project_mix_path(&project_path), &mix)
 }
 
-// ── Global sound aliases (`<merula-data>/aliases.json`) ───────────────────────
+// ── Global sound aliases (`<merula-config>/aliases.json`) ──────────────────────
 //
 // User-defined `alias → target` name map (e.g. `kick = "RolandTR808_bd"`),
 // resolved by the audio registry so `s("kick")` plays the target. Global (NOT
-// per-project / per-file), so it's a dedicated app-data file the engine reads
-// when building a session registry.
+// per-project / per-file) but per-profile, so it's a dedicated config file the
+// engine reads when building a session registry.
 
 fn aliases_path() -> PathBuf {
-    arbor_core::prelude::merula_data_dir().join("aliases.json")
+    arbor_core::prelude::merula_config_dir().join("aliases.json")
 }
 
 /// Read the global sound-alias map (defaults to empty on first run / corrupt file).
@@ -208,7 +209,7 @@ pub fn set_merula_aliases(aliases: HashMap<String, String>) -> Result<(), AppErr
     write_json(&aliases_path(), &aliases)
 }
 
-// ── Scratch tabs (global, `<merula-data>/scratch.json`) ───────────────────────
+// ── Scratch tabs (global, `<merula-config>/scratch.json`) ──────────────────────
 
 /// One persisted scratch tab (the transient eval result is **not** saved).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -228,7 +229,7 @@ pub struct MerulaScratchTabs {
 }
 
 fn scratch_tabs_path() -> PathBuf {
-    arbor_core::prelude::merula_data_dir().join("scratch.json")
+    arbor_core::prelude::merula_config_dir().join("scratch.json")
 }
 
 /// Read the persisted scratch tabs (defaults to none).
@@ -237,7 +238,7 @@ pub fn get_merula_scratch_tabs() -> Result<MerulaScratchTabs, AppError> {
     Ok(read_json(&scratch_tabs_path()))
 }
 
-/// Persist the scratch tabs (global, in the merula data dir).
+/// Persist the scratch tabs (global, in the per-profile merula config dir).
 #[tauri::command]
 pub fn set_merula_scratch_tabs(tabs: MerulaScratchTabs) -> Result<(), AppError> {
     write_json(&scratch_tabs_path(), &tabs)

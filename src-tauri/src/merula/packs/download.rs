@@ -34,7 +34,9 @@ struct InstallManifest {
 }
 
 /// The install status of one pack (installed marker, or a not-installed stub).
-pub fn status(cfg: &MerulaConfig, pack: &Pack) -> PackStatus {
+/// `active` is the per-profile allow-list membership (see `active_packs`); the
+/// caller resolves it once for the whole list.
+pub fn status(cfg: &MerulaConfig, pack: &Pack, active: bool) -> PackStatus {
     let dir = pack_dir(cfg, pack.id);
     let path = dir.display().to_string();
     match read_manifest(&dir) {
@@ -44,6 +46,7 @@ pub fn status(cfg: &MerulaConfig, pack: &Pack) -> PackStatus {
             description: pack.description.to_string(),
             approx_bytes: pack.approx_bytes,
             installed: true,
+            active,
             path,
             size_bytes: m.size_bytes,
             sha256: Some(m.sha256),
@@ -55,6 +58,7 @@ pub fn status(cfg: &MerulaConfig, pack: &Pack) -> PackStatus {
             description: pack.description.to_string(),
             approx_bytes: pack.approx_bytes,
             installed: false,
+            active,
             path,
             size_bytes: 0,
             sha256: None,
@@ -207,7 +211,11 @@ pub fn reindex(cfg: &MerulaConfig, pack: &Pack) -> Result<PackStatus, String> {
     let (toml, instrument_count) = super::layout::generate(&root, pack.layout);
     std::fs::write(&registry_path, toml).map_err(|e| format!("write registry: {e}"))?;
     write_manifest(&dir, &InstallManifest { instrument_count, ..manifest })?;
-    Ok(status(cfg, pack))
+    let active = crate::merula::active_packs::is_active(
+        &crate::merula::active_packs::active_set(),
+        pack.id,
+    );
+    Ok(status(cfg, pack, active))
 }
 
 // ── Internals ────────────────────────────────────────────────────────────────
@@ -281,6 +289,13 @@ async fn download_and_install(
         registry_rel,
     };
     write_manifest(dir, &manifest)?;
+
+    // Auto-activate the freshly-downloaded pack: if an allow-list already exists,
+    // append this id so the user never loses access to a pack they just installed
+    // (no-op when no allow-list exists — that state is already all-active).
+    let cfg = crate::merula::config::load();
+    let installed_ids = super::installed_ids(&cfg);
+    crate::merula::active_packs::on_pack_installed(pack.id, &installed_ids);
 
     finish_job(app, job_id, Ok(JobOutcome::Completed));
     Ok(())

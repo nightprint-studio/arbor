@@ -97,6 +97,7 @@ macro_rules! invoke_handlers {
             $crate::merula::merula_pack_download,
             $crate::merula::merula_pack_reindex,
             $crate::merula::merula_pack_delete,
+            $crate::merula::merula_pack_set_active,
             $crate::merula::get_merula_config,
             $crate::merula::set_merula_config,
             $crate::merula::merula_audio_devices,

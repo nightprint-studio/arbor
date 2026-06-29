@@ -150,18 +150,30 @@ impl App {
         eprintln!("arbor-be: ready, serving {} method(s): {:?}", methods.len(), methods);
         let dispatch = dispatcher.into_fn();
         // Default post-`Hello` hook: rebuild the plugin runtime + start its
-        // schedulers. Boxed so the override and default branches share the one
-        // `serve_stdio` instantiation.
+        // schedulers, on a BACKGROUND thread so the serve loop starts immediately.
+        //
+        // `serve_stdio` runs `on_ready` inline before it begins reading frames, so
+        // anything slow here stalls the read loop — and the shell blocks on this
+        // backend's first responses right after `Hello`: `ensure_corvus_be` calls
+        // `sync_config` (config push) the moment it attaches. A plugin load that is
+        // merely slow, or that re-enters the shell from an `on_load` host_call,
+        // would then deadlock the shell and, downstream, keep the product window
+        // from ever opening. Spawning keeps the read loop responsive; on-load
+        // events still follow `Hello` (already written before this spawn), and the
+        // plugin host is `Send` (mlua `send` feature) so the `Arc<Mutex<…>>` moves
+        // across the thread boundary. The frontend re-queries contributions when
+        // they land (`arbor://plugins-reloaded` / contribution events).
         let ph = self.plugin_host.clone();
         let on_ready: Box<dyn FnOnce()> = self.on_ready.unwrap_or_else(move || {
             Box::new(move || {
                 if let Some(ph) = ph {
-                    let mut host =
-                        ph.lock().expect("arbor-be: plugin host poisoned at on_ready");
-                    if let Err(e) = host.reload() {
-                        eprintln!("arbor-be: plugin reload failed: {e}");
-                    }
-                    host.start_all_schedulers();
+                    std::thread::spawn(move || {
+                        let mut host = ph.lock().unwrap_or_else(|p| p.into_inner());
+                        if let Err(e) = host.reload() {
+                            eprintln!("arbor-be: plugin reload failed: {e}");
+                        }
+                        host.start_all_schedulers();
+                    });
                 }
             })
         });

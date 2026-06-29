@@ -51,21 +51,39 @@ pub fn arbor_cache_dir() -> PathBuf {
         .join("arbor")
 }
 
+/// `arbor/data` — a **global** data root sibling to [`arbor_config_dir`], on the
+/// same volume as the per-profile `profiles/` tree (on Windows that is
+/// `%APPDATA%\arbor\data`). Holds heavy, profile-independent assets that must not
+/// be duplicated per profile. Deliberately rooted under the OS *config* root (not
+/// [`arbor_data_dir`]) so it always lives next to `profiles/`.
+pub fn arbor_global_data_dir() -> PathBuf {
+    arbor_config_dir().join("data")
+}
+
 // ── merula ───────────────────────────────────────────────────────────────────
 //
-// merula (the live-coding music workspace) is a **product bucket under the
-// active profile**, exactly like corvus: `arbor/profiles/<active>/merula/`. It
-// used to own a top-level sibling namespace (`%APPDATA%\merula`); that data is
-// relocated into the active profile on first boot by
-// `merula::config::migrate_legacy_dirs`.
+// merula (the live-coding music workspace) splits its state in two:
 //
-// Config and data share one dir here (the profile root lives under the OS
-// *config* root via [`arbor_config_dir`]). On Windows/macOS that already matched
-// the old sibling layout; on Linux the sample banks now live under `~/.config`
-// rather than `~/.local/share`, the deliberate trade-off of making everything
-// profile-scoped under one root.
+//   * **config = per-profile** ([`merula_config_dir`] →
+//     `arbor/profiles/<active>/merula/`): only small per-profile data —
+//     `config.toml`, `state.json`, `aliases.json`, `scratch.json`,
+//     `active_packs.toml`, `speech-cache/`.
+//   * **heavy data = global, shared across profiles** ([`merula_data_dir`] →
+//     `arbor/data/merula/`): the multi-GB assets (VSCO 2 bank, downloaded sample
+//     packs, models, libraries). Rooted under [`arbor_global_data_dir`] so it is
+//     stored **once** and reused by every profile.
+//
+// merula used to own a top-level sibling namespace (`%APPDATA%\merula`); that
+// data is relocated on first boot by `merula::config::migrate_legacy_dirs`.
+//
+// Linux nuance: [`arbor_global_data_dir`] hangs off the OS *config* root, so the
+// heavy assets land under `~/.config/arbor/data/merula` rather than
+// `~/.local/share`. That is a deliberate trade-off — it keeps the global data on
+// the same volume as `profiles/` and avoids splitting merula across two OS roots.
 
-/// `arbor/profiles/<active>/merula` — merula's per-profile config + data dir.
+/// `arbor/profiles/<active>/merula` — merula's **per-profile** config dir. Holds
+/// only small per-profile state (config, window state, aliases, scratch, active
+/// packs, speech cache); the heavy shared assets live in [`merula_data_dir`].
 pub fn merula_config_dir() -> PathBuf {
     crate::profile::product_dir(crate::profile::PRODUCT_MERULA)
 }
@@ -75,11 +93,13 @@ pub fn merula_config_path<P: AsRef<Path>>(sub: P) -> PathBuf {
     merula_config_dir().join(sub)
 }
 
-/// Home of the downloaded sample packs, the VSCO 2 bank, and the merula window
-/// state. Profile-scoped — the same dir as [`merula_config_dir`] (see the module
-/// note above); kept as a separate helper so call sites state intent.
+/// `arbor/data/merula` — the **global, shared** heavy-asset root for merula:
+/// the downloaded sample packs, the VSCO 2 bank, models, and libraries. Rooted
+/// under [`arbor_global_data_dir`] so these multi-GB assets are stored once and
+/// shared across every profile — **not** duplicated per profile (unlike
+/// [`merula_config_dir`]).
 pub fn merula_data_dir() -> PathBuf {
-    crate::profile::product_dir(crate::profile::PRODUCT_MERULA)
+    arbor_global_data_dir().join("merula")
 }
 
 /// The legacy top-level sibling roots merula used **before** it became a

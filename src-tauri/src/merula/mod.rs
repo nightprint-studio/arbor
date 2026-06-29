@@ -17,6 +17,7 @@
 //! - push throttled BE→FE events (`merula:diagnostics`/`active_haps`/`meters`/
 //!   `transport`/`log`, [`events`]).
 
+mod active_packs;
 mod audio_thread;
 pub mod config;
 mod control;
@@ -852,6 +853,18 @@ pub async fn merula_pack_delete(pack_id: String) -> Result<(), AppError> {
         .await
         .map_err(|e| AppError::Other(e.to_string()))?
         .map_err(AppError::Merula)
+}
+
+/// Toggle a pack's **active** state in the per-profile allow-list. Inactive packs
+/// stay installed (pack management still sees them) but their instruments are
+/// hidden from playback, the eval validator, and the sound bank. Seeds the
+/// allow-list from the currently-installed packs on the first toggle, so turning
+/// one pack off keeps every other installed pack on.
+#[tauri::command]
+pub async fn merula_pack_set_active(pack_id: String, active: bool) -> Result<(), AppError> {
+    let cfg = merula_config();
+    let installed_ids = packs::installed_ids(&cfg);
+    active_packs::set_active(&pack_id, active, &installed_ids).map_err(AppError::Merula)
 }
 
 /// Read the merula config (`%APPDATA%\merula\config.toml`).

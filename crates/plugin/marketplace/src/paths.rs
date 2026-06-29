@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use arbor_core::prelude::profile_plugins_dir;
+use arbor_core::prelude::{marketplace_plugins_dir, profile_plugins_dir};
 
 /// Cached snapshot of the last successful community catalog fetch.
 /// TTL-checked on read (see [`crate::cache::TTL_SECS`]).
@@ -36,9 +36,11 @@ pub fn user_registry_file() -> PathBuf {
 /// Directory marketplace-installed plugins land in. Kept distinct from the
 /// host's `installed/` plugin directory so the two pools never collide on disk —
 /// the host dir wins at load time, but the marketplace install still has its own
-/// home so an upgrade / reinstall can rewrite it atomically.
+/// home so an upgrade / reinstall can rewrite it atomically. The path segment is
+/// owned by `arbor-core` so product backends scan the same root (see
+/// [`marketplace_plugins_dir`](arbor_core::prelude::marketplace_plugins_dir)).
 pub fn plugins_dir() -> PathBuf {
-    profile_plugins_dir().join("marketplace_plugins")
+    marketplace_plugins_dir()
 }
 
 /// Directory holding both user-created custom themes (saved via the

@@ -134,6 +134,9 @@ export interface MerulaPack {
   /** Rough download size in bytes, for a pre-install estimate (`~N MB`). */
   approx_bytes: number;
   installed: boolean;
+  /** Whether the installed pack is enabled for the active profile (its voices are
+   *  resolvable / contribute to the live registry). Always `false` until installed. */
+  active: boolean;
   path: string;
   size_bytes: number;
   sha256: string | null;
@@ -308,6 +311,12 @@ export function merulaPacks(): Promise<MerulaPack[]> {
 /** Start downloading + installing a sample pack by id (job-tracked). Returns job id. */
 export function merulaPackDownload(packId: string): Promise<string> {
   return invoke('merula_pack_download', { packId });
+}
+
+/** Enable / disable an installed pack for the active profile. Persisted; takes
+ *  effect on the next eval / run. Re-read packs + sounds afterwards. */
+export function merulaPackSetActive(packId: string, active: boolean): Promise<void> {
+  return invoke('merula_pack_set_active', { packId, active });
 }
 
 /**

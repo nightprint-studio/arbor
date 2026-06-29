@@ -18,6 +18,7 @@
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { explorerStore } from '$lib/stores/explorer.svelte';
+  import { profileStore } from '$lib/stores/profiles.svelte';
   import MerulaShell from '$lib/components/merula/MerulaShell.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
@@ -31,6 +32,10 @@
     // So "Reveal in file explorer" on a finished transfer honours the user's
     // built-in-vs-OS choice (Settings → File Explorer) in this window too.
     void explorerStore.loadConfig();
+    // Profiles are global (shared across all windows): load the list/active and
+    // subscribe to `arbor://profile-switched` so this window reloads on a switch
+    // triggered here or from any other window.
+    void profileStore.init();
   });
 </script>
 

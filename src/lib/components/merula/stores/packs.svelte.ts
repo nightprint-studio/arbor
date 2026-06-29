@@ -14,11 +14,13 @@
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
-  merulaPacks, merulaPackDownload, merulaPackDelete, merulaPackReindex, onMerulaPackProgress,
+  merulaPacks, merulaPackDownload, merulaPackDelete, merulaPackReindex, merulaPackSetActive,
+  onMerulaPackProgress,
   type MerulaPack, type MerulaPackProgress,
 } from '$lib/ipc/merula';
 import { cancelJob } from '$lib/feedback/ipc/job';
 import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
+import { soundsStore } from './sounds.svelte';
 
 /** Terminal job result (mirrors the `arbor://job-done` payload). */
 interface JobDone {
@@ -77,6 +79,9 @@ function createPacksStore() {
     downloadingOf(id: string) { return jobIds[id] != null; },
     /** Whether a pack is being re-indexed right now. */
     reindexingOf(id: string) { return reindexing[id] === true; },
+    /** Whether an installed pack is enabled for the active profile (its voices
+     *  contribute to the live registry). Always false for an uninstalled pack. */
+    activeOf(id: string) { return packs.find((p) => p.id === id)?.active === true; },
 
     /** Re-read every pack's install status from disk. */
     refresh() { return refreshPacks(); },
@@ -112,6 +117,15 @@ function createPacksStore() {
       clearJob(id);
       progress = { ...progress, [id]: null };
       transfersStore.cancelled(id);
+    },
+
+    /** Enable / disable an installed pack for the active profile, then re-read
+     *  BOTH this store and the sound registry so the sound bank drops (or re-adds)
+     *  the pack's voices live. Throws on failure so the caller can surface it. */
+    async setActive(id: string, on: boolean) {
+      await merulaPackSetActive(id, on);
+      await refreshPacks();
+      await soundsStore.refresh();
     },
 
     /** Delete an installed pack from disk, then re-read the pack list (which

@@ -45,9 +45,10 @@ fn synthesize_cached(spec: &SpeechSpec) -> DecodedAudio {
     audio
 }
 
-/// `%APPDATA%\merula\speech-cache` — merula's own data root (sibling of arbor).
+/// `<merula-config>\speech-cache` — per-profile (the global data root now holds
+/// the shared heavy assets, so this small synth cache stays profile-scoped).
 fn cache_dir() -> PathBuf {
-    arbor_core::prelude::merula_data_dir().join("speech-cache")
+    arbor_core::prelude::merula_config_dir().join("speech-cache")
 }
 
 /// The cache file for a spec: the hex part of its `"speech:<hex>"` key.
