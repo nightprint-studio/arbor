@@ -53,21 +53,21 @@ pub fn arbor_cache_dir() -> PathBuf {
 
 // ── merula ───────────────────────────────────────────────────────────────────
 //
-// merula (the live-coding music workspace) owns its own top-level namespace,
-// sibling to `arbor` rather than nested under it: `%APPDATA%\merula` instead of
-// `%APPDATA%\arbor\merula`. It's effectively a separate app sharing the same
-// binary, so its config + the (potentially multi-GB) sample banks live apart.
-// A future "shared" segment can still be carved out under `arbor` for anything
-// the two genuinely co-own.
+// merula (the live-coding music workspace) is a **product bucket under the
+// active profile**, exactly like corvus: `arbor/profiles/<active>/merula/`. It
+// used to own a top-level sibling namespace (`%APPDATA%\merula`); that data is
+// relocated into the active profile on first boot by
+// `merula::config::migrate_legacy_dirs`.
+//
+// Config and data share one dir here (the profile root lives under the OS
+// *config* root via [`arbor_config_dir`]). On Windows/macOS that already matched
+// the old sibling layout; on Linux the sample banks now live under `~/.config`
+// rather than `~/.local/share`, the deliberate trade-off of making everything
+// profile-scoped under one root.
 
-/// `~/.config/merula` on Linux, `%APPDATA%\merula` on Windows,
-/// `~/Library/Application Support/merula` on macOS.
-///
-/// Falls back to `./merula` when `dirs::config_dir()` is unavailable.
+/// `arbor/profiles/<active>/merula` — merula's per-profile config + data dir.
 pub fn merula_config_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("merula")
+    crate::profile::product_dir(crate::profile::PRODUCT_MERULA)
 }
 
 /// Convenience: join a relative path under [`merula_config_dir`].
@@ -75,11 +75,26 @@ pub fn merula_config_path<P: AsRef<Path>>(sub: P) -> PathBuf {
     merula_config_dir().join(sub)
 }
 
-/// `~/.local/share/merula` on Linux, `%APPDATA%\merula` on Windows,
-/// `~/Library/Application Support/merula` on macOS. Home of the downloaded
-/// sample packs, the VSCO 2 bank, and the merula window state.
+/// Home of the downloaded sample packs, the VSCO 2 bank, and the merula window
+/// state. Profile-scoped — the same dir as [`merula_config_dir`] (see the module
+/// note above); kept as a separate helper so call sites state intent.
 pub fn merula_data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("merula")
+    crate::profile::product_dir(crate::profile::PRODUCT_MERULA)
+}
+
+/// The legacy top-level sibling roots merula used **before** it became a
+/// profile-scoped product (`%APPDATA%\merula`, and the even older `nemus` from
+/// before the rename). Used only by the one-shot boot migration to relocate that
+/// data into the active profile. Returned newest-first.
+pub fn merula_legacy_sibling_dirs() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for root in [dirs::config_dir(), dirs::data_dir()].into_iter().flatten() {
+        for name in ["merula", "nemus"] {
+            let p = root.join(name);
+            if !out.contains(&p) {
+                out.push(p);
+            }
+        }
+    }
+    out
 }

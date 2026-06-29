@@ -96,9 +96,11 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
 /// The `setup` hook body — runs once, before the event loop starts (so before
 /// any command routes). Each concern is delegated to a submodule.
 fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    // One-shot: the music product was renamed nemus → merula. Move its legacy
-    // `<config>/nemus` + `<data>/nemus` dirs (settings + multi-GB sample banks)
-    // to the merula locations before anything reads them. No-op once migrated.
+    // One-shot: merula became a profile-scoped product. Move its legacy
+    // top-level sibling dir (`%APPDATA%\merula`, or pre-rename `…\nemus`) —
+    // settings + multi-GB sample banks — into `profiles/<active>/merula` before
+    // anything reads it. No-op once the profile dir exists. Runs after the active
+    // profile is seeded (in `AppState::new`, built before this setup hook).
     crate::merula::config::migrate_legacy_dirs();
 
     // Seed the Corvus backend state (in-process `corvus-be`) + the Model-D IPC

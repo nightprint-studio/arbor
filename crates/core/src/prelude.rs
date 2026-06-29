@@ -11,8 +11,8 @@ pub use crate::app_ctx::AppCtx;
 pub use crate::error::{CoreError, Result};
 pub use crate::http::{client, client_builder, DEFAULT_TIMEOUT, USER_AGENT};
 pub use crate::paths::{
-    arbor_cache_dir, arbor_config_dir, arbor_config_path, arbor_data_dir,
-    merula_config_dir, merula_config_path, merula_data_dir, try_arbor_config_path,
+    arbor_cache_dir, arbor_config_dir, arbor_config_path, arbor_data_dir, merula_config_dir,
+    merula_config_path, merula_data_dir, merula_legacy_sibling_dirs, try_arbor_config_path,
 };
 pub use crate::profile::{
     active_profile, active_profile_pointer_path, arbor_profile_dir, arbor_profile_path,

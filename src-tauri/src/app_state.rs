@@ -456,6 +456,17 @@ impl AppState {
         if let Ok(mut g) = self.terminals.lock()   { *g = TerminalManager::new(); }
         if let Ok(mut g) = self.brp.lock()         { *g = BrpRegistry::default(); }
         if let Ok(mut g) = self.active_tab_id.lock()   { *g = None; }
+        // Re-push the now-active profile's resolved paths (corvus_config / git /
+        // worktree-links / repo-registry / workspaces / workspace-state) to a live
+        // corvus-be. It is a separate process that reads these files fresh on each
+        // access but can't resolve the active profile itself — without this re-push
+        // it stays pinned to the profile that was active when it spawned, so a live
+        // profile switch would reload the shell (theme, config) yet still serve the
+        // OLD profile's workspaces / repos. Best-effort: a no-op when corvus-be
+        // isn't running (it gets the current paths from `ensure_corvus_be`'s own
+        // `sync_config` when it later spawns). Must run after the registry/repo
+        // reloads above so the pushed `repo_registry` reflects the new profile.
+        crate::ipc::sync_config(self);
     }
 
     /// Shared trigger engine, once `setup()` has built it. Returns `None`

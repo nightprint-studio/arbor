@@ -47,6 +47,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ### Fixed
 
 - **Deep links** (`arbor://…`) now open and focus the Corvus window and run the action there, instead of bringing the launcher forward where nothing happened.
+- Switching **profiles** now correctly loads the new profile's repositories and workspaces, instead of reloading only the theme/settings while still showing the previous profile's (or an empty) repository list.
 - File Explorer: **Ctrl+C** no longer shows a duplicate "Copied" toast when the shortcut key auto-repeats; clicking empty space or pressing **Esc** clears the selection, so a folder picker reliably targets the current folder itself.
 - File Explorer: the **Projects** sidebar now updates immediately when a repository is deregistered or moved between workspaces (in the main window or another explorer) — no more stale entries until reopening.
 - File Explorer: the sort arrow in the details header now sits inline after the column label instead of stacking beneath it, and the Type column is a normal sortable header (no longer greyed out).

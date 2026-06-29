@@ -181,27 +181,38 @@ pub fn save(cfg: &MerulaConfig) -> Result<(), String> {
     std::fs::write(&path, text).map_err(|e| e.to_string())
 }
 
-// ── One-shot migration from the legacy "nemus" product name ──────────────────
+// ── One-shot migration from the legacy top-level sibling layout ──────────────
 
-/// Move the legacy `nemus` config + data dirs to their `merula` locations, once.
+/// Relocate merula's legacy top-level sibling dir into the active profile, once.
 ///
-/// The product was renamed from **nemus** to **merula**; its settings and the
-/// (potentially multi-GB) sample banks / VSCO bank lived under `<config>/nemus`
-/// and `<data>/nemus`. Rename those to the merula dirs so nothing is lost on the
-/// first run after the rename. A no-op once the merula dir exists; non-destructive
-/// on error (the legacy dir is left in place). The legacy path is derived from the
-/// merula dir's parent, so it tracks whatever OS root `dirs` resolves.
+/// merula used to live in its own sibling namespace next to `arbor`
+/// (`%APPDATA%\merula`, and the even older `%APPDATA%\nemus` from before the
+/// rename), holding its settings plus the (potentially multi-GB) sample banks /
+/// VSCO bank. It is now a profile-scoped product bucket
+/// ([`merula_config_dir`](arbor_core::prelude::merula_config_dir) →
+/// `arbor/profiles/<active>/merula`), so move the first legacy sibling we find
+/// into that location. A no-op once the profile dir exists; non-destructive on
+/// error (the legacy dir is left in place for a retry next boot). Within
+/// `%APPDATA%` this is a same-volume rename — atomic and instant even for the
+/// multi-GB banks.
 pub fn migrate_legacy_dirs() {
-    use arbor_core::prelude::{merula_config_dir, merula_data_dir};
-    for current in [merula_config_dir(), merula_data_dir()] {
-        let Some(legacy) = current.parent().map(|base| base.join("nemus")) else {
-            continue;
-        };
-        if legacy.is_dir() && !current.exists() {
-            if let Err(e) = std::fs::rename(&legacy, &current) {
-                eprintln!("merula: legacy dir migration {legacy:?} -> {current:?} failed: {e}");
-            }
+    use arbor_core::prelude::{merula_config_dir, merula_legacy_sibling_dirs};
+
+    let dest = merula_config_dir();
+    if dest.exists() {
+        return; // already a profile-scoped install, or a prior migration ran
+    }
+    let Some(legacy) = merula_legacy_sibling_dirs().into_iter().find(|p| p.is_dir()) else {
+        return; // fresh install — nothing to migrate
+    };
+    if let Some(parent) = dest.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("merula: legacy migration mkdir {parent:?} failed: {e}");
+            return;
         }
+    }
+    if let Err(e) = std::fs::rename(&legacy, &dest) {
+        eprintln!("merula: legacy dir migration {legacy:?} -> {dest:?} failed: {e}");
     }
 }
 
