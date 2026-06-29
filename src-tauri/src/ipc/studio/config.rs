@@ -19,10 +19,7 @@ use crate::AppState;
 /// without a separate "exists?" round-trip.
 #[studio::handler(program = "studio")]
 fn studio_get_config(state: &AppState, tab_id: String) -> Result<StudioConfig, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     studio_config::load(&repo_path)
 }
 
@@ -39,10 +36,7 @@ fn studio_add_external(
     path: String,
     label: Option<String>,
 ) -> Result<(), AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     studio_config::add_external(&mut cfg, &path, label.as_deref());
     studio_config::save(&repo_path, &cfg)?;
@@ -58,10 +52,7 @@ fn studio_remove_external(
     tab_id: String,
     path: String,
 ) -> Result<bool, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     let removed = studio_config::remove_external(&mut cfg, &path);
     if removed {
@@ -78,10 +69,7 @@ fn studio_toggle_exclude(
     tab_id: String,
     relative_path: String,
 ) -> Result<bool, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     let now = studio_config::toggle_exclude(&mut cfg, &relative_path);
     studio_config::save(&repo_path, &cfg)?;
@@ -103,10 +91,7 @@ fn studio_bind_schema(
     // via the UI doesn't wipe hand-curated patterns.
     reference_fields: Option<Vec<String>>,
 ) -> Result<(), AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     studio_config::set_binding(&mut cfg, &relative_path, &rs_file, &root_type, reference_fields);
     studio_config::save(&repo_path, &cfg)?;
@@ -127,10 +112,7 @@ fn studio_toggle_reference_field(
     relative_path: String,
     field: String,
 ) -> Result<bool, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     let (now, _scope) = studio_config::toggle_reference_field(&mut cfg, &relative_path, &field);
     studio_config::save(&repo_path, &cfg)?;
@@ -145,10 +127,7 @@ fn studio_unbind_schema(
     tab_id: String,
     relative_path: String,
 ) -> Result<bool, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     let removed = studio_config::clear_binding(&mut cfg, &relative_path);
     if removed {

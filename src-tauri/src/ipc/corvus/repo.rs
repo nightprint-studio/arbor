@@ -4,13 +4,15 @@
 //! Each handler is the body the matching `#[tauri::command]` ran inline;
 //! `#[corvus::handler]` self-registers it under its own function name.
 //!
-//! The repo-lifecycle flow lives here (`open_repo` / `close_repo`). What stays
-//! is path validation + the lifecycle: both mutate the open-repo set and mirror
-//! into `corvus-be` (`sync_repo_open/close`) but emit through the backend event
-//! sink (`state.emit`) and take no `AppHandle`. The pure `git`-identity /
+//! The repo-lifecycle flow lives here (`open_repo` / `close_repo`). What stays is
+//! the shell coordination: register/forget the tab with `corvus-be`
+//! (`sync_repo_open/close`), fire the launcher's plugin hooks, run the orphan GC
+//! and emit `arbor://registry-changed`. The git metadata itself (current branch,
+//! bare/empty flags) comes from `corvus-be`'s `get_repo_info` — the launcher
+//! opens no git2 handle and keeps no `RepoManager`. The pure `git`-identity /
 //! metadata probes (`get_git_identity`, `get_repo_info`), the path / network
 //! probes (`check_is_git_repo`, `clone_repo`, `list_remote_branches_for_url`)
-//! and repository initialisation (`init_repo`) moved to `corvus-be`
+//! and repository initialisation (`init_repo`) live in `corvus-be`
 //! (`crate::repo_ops` / `crate::repo_lifecycle` there) — that binary is their
 //! sole owner now.
 //!
@@ -25,19 +27,21 @@ use crate::git::repo::RepoInfo;
 use crate::ipc::corvus;
 use crate::AppState;
 
-/// Open the repository at `path` under `tab_id` in the repo manager.
+/// Open the repository at `path` under `tab_id`.
 ///
-/// Fires `on_repo_open` inline (after the repo lock is dropped) and calls
-/// `sync_repo_open` to mirror the open into `corvus-be`.
+/// Registers the path with `corvus-be` (the open-tab registry owner) via
+/// `sync_repo_open`, then asks it for the git metadata (`get_repo_info`) — the
+/// launcher opens no git2 handle. Fires `on_repo_open` inline with that data.
 #[corvus::handler]
 fn open_repo(state: &AppState, path: String, tab_id: String) -> Result<RepoInfo, AppError> {
-    let info = {
-        let mut mgr = state.lock_repos()?;
-        mgr.open(tab_id.clone(), &path)?
-    };
-    crate::ipc::sync_repo_open(state, &tab_id, &info.path);
-    // Fire inline with first-hand data; the repo lock is already dropped above
-    // so Lua git ops in the hook can't deadlock against our guard.
+    // Register first so corvus-be can resolve `tab_id` → path for `get_repo_info`.
+    crate::ipc::sync_repo_open(state, &tab_id, &path);
+    let info: RepoInfo = serde_json::from_value(crate::ipc::dispatch_rpc(
+        state,
+        "corvus",
+        "get_repo_info",
+        json!({ "tab_id": tab_id }),
+    )?)?;
     state.fire_hook(
         "on_repo_open",
         json!({ "tab_id": tab_id, "path": info.path, "name": info.name }),
@@ -55,14 +59,13 @@ fn open_repo(state: &AppState, path: String, tab_id: String) -> Result<RepoInfo,
 /// refreshes.
 #[corvus::handler]
 fn close_repo(state: &AppState, tab_id: String) -> Result<(), AppError> {
-    let (path, name) = {
-        let mut mgr = state.lock_repos()?;
-        let info = mgr.get(&tab_id)
-            .map(|r| (r.path.clone(), r.name.clone()))
-            .unwrap_or_default();
-        mgr.close(&tab_id);
-        info
-    };
+    // Resolve the path from corvus-be BEFORE deregistering it. `name` is the
+    // workdir basename — identical to the old `RepoInfo.name`.
+    let path = crate::ipc::resolve_tab_path(state, &tab_id).unwrap_or_default();
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     state.fire_hook(
         "on_repo_close",
         json!({ "tab_id": &tab_id, "path": &path, "name": &name }),

@@ -325,7 +325,7 @@ async fn studio_parse(
     relative_path: Option<String>,
 ) -> Result<ParseResult, String> {
     // FROZEN F16: never use `read_to_string` here. Read raw bytes and
-    // pass through `git::encoding::decode_bytes_full` so legacy files
+    // pass through `arbor_fs` encoding::decode_bytes_full so legacy files
     // (windows-1252, UTF-16 BOM) survive an edit/save round-trip. The
     // sniffed encoding label propagates into the backend doc state and
     // is replayed at save time via `encode_for_disk_with_bom`.
@@ -335,7 +335,7 @@ async fn studio_parse(
             let bytes = std::fs::read(&p)
                 .map_err(|e| format!("Cannot read {p}: {e}"))?;
             let (content, enc, had_bom) =
-                crate::git::encoding::decode_bytes_full(&bytes);
+                arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
             let info = EncodingInfo {
                 label:   enc.name().to_string(),
                 had_bom,
@@ -345,15 +345,12 @@ async fn studio_parse(
         (None, None) => return Err("studio_parse: provide `text` or `path`".into()),
     };
 
-    // Resolve the repo path up-front so we can release the repo lock
-    // before dispatching to the backend.
-    let repo_path = match tab_id.as_deref() {
-        Some(t) => state
-            .lock_repos()
-            .ok()
-            .and_then(|mut m| m.get(t).ok().map(|r| r.path.clone())),
-        None => None,
-    };
+    // Resolve the repo path up-front (best-effort: this is only used for the
+    // side-car schema-hint fallback below) by asking corvus-be — the launcher
+    // holds no repo registry of its own.
+    let repo_path = tab_id
+        .as_deref()
+        .and_then(|t| crate::ipc::resolve_tab_path(state, t).ok());
 
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
     let mut result = to_ipc(backend.parse(text, source_path, encoding).await)?;
@@ -444,11 +441,11 @@ async fn studio_schema_view_source(
 // ── F12 — Cross-reference rename refactor ────────────────────────────────────
 //
 // `tab_id` lets the FE pass an active-tab handle instead of resolving
-// the repo root client-side: the BE looks up the path via the same
-// `lock_repos()` registry every other studio command uses. Hard error
-// when the tab is unknown — refactoring against an unregistered tab
-// has no defined semantics (the `repo_root`-driven scan needs a real
-// project root).
+// the repo root client-side: the BE resolves the path via corvus-be (the
+// open-tab → path registry owner) the same way every other studio command
+// does. Hard error when the tab is unknown — refactoring against an
+// unregistered tab has no defined semantics (the `repo_root`-driven scan
+// needs a real project root).
 
 /// Preview the rename across the active tab's repo. Returns the full
 /// site list (defs + refs), any `new_value` collisions, and any open
@@ -462,10 +459,7 @@ async fn studio_rename_preview(
     new_value_hint: Option<String>,
     open_docs: Vec<RenameOpenDoc>,
 ) -> Result<RenamePreview, String> {
-    let repo_path = {
-        let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
-        mgr.get(&tab_id).map_err(|e| e.to_string())?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id).map_err(|e| e.to_string())?;
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
     to_ipc(backend.rename_preview(repo_path, old_value, new_value_hint, open_docs).await)
 }
@@ -483,10 +477,7 @@ async fn studio_rename_apply(
     sites: Vec<RenameSite>,
     open_docs: Vec<RenameOpenDoc>,
 ) -> Result<RenameResult, String> {
-    let repo_path = {
-        let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
-        mgr.get(&tab_id).map_err(|e| e.to_string())?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id).map_err(|e| e.to_string())?;
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
     to_ipc(backend.rename_apply(repo_path, old_value, new_value, sites, open_docs).await)
 }
@@ -514,10 +505,7 @@ async fn studio_bulk_edit_preview(
     value_source: Option<BulkEditValueSource>,
     open_docs: Vec<BulkEditOpenDoc>,
 ) -> Result<BulkEditPreview, String> {
-    let repo_path = {
-        let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
-        mgr.get(&tab_id).map_err(|e| e.to_string())?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id).map_err(|e| e.to_string())?;
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
     to_ipc(backend.bulk_edit_preview(
         repo_path, doc_id, scope, query, action, value_source, open_docs,
@@ -537,10 +525,7 @@ async fn studio_bulk_edit_apply(
     sites: Vec<BulkEditSite>,
     open_docs: Vec<BulkEditOpenDoc>,
 ) -> Result<BulkEditResult, String> {
-    let repo_path = {
-        let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
-        mgr.get(&tab_id).map_err(|e| e.to_string())?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id).map_err(|e| e.to_string())?;
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
     to_ipc(backend.bulk_edit_apply(
         repo_path, doc_id, scope, action, value_source, sites, open_docs,

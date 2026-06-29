@@ -59,10 +59,13 @@ impl AppCtx for TauriAppCtx {
     }
 
     fn active_repo_path(&self) -> Option<PathBuf> {
+        // Read the cached active-tab path (kept fresh by `set_active_tab`). The
+        // launcher holds no repo registry, and this can run inside a corvus-be
+        // reverse call (via a plugin hook), so we must NOT call back into
+        // corvus-be here.
         let state = self.handle.state::<crate::AppState>();
-        let tab_id = state.active_tab_id.lock().ok()?.clone()?;
-        let mut repos = state.repos.lock().ok()?;
-        repos.get(&tab_id).ok().map(|r| PathBuf::from(&r.path))
+        let path = state.active_repo_path.lock().ok()?.clone()?;
+        Some(PathBuf::from(path))
     }
 
     fn open_path(&self, path: &str) -> Result<(), String> {

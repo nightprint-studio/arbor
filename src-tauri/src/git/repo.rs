@@ -1,13 +1,21 @@
-//! `repo` — shell-side re-export of the `corvus-git` repo types.
+//! `repo` — shell-local repo metadata DTO.
 //!
-//! The repository handle, metadata DTOs, and the in-memory open-repo registry
-//! (`RepoManager`) live in [`corvus_git::repo`] (shared with the headless
-//! `corvus-be`); the types are re-exported here so existing `crate::git::repo::*`
-//! paths (`RepoInfo`, `RepoManager`) keep resolving — `app_state` and the corvus
-//! repo IPC handler still reach them through this module. The clone /
-//! remote-listing helpers and the background clone job moved fully into
-//! `corvus-be` (driven there by the per-product plugin host).
+//! The git2 `RepoManager` cache is gone from the launcher: `corvus-be` owns the
+//! open-tab → path registry and produces all git-derived metadata (current
+//! branch, bare/empty flags) through `get_repo_info`. The shell keeps only this
+//! small serde DTO so the in-process `open_repo` handler can return the same JSON
+//! shape the frontend expects — deserialized from `corvus-be`'s response. Field
+//! names/types mirror `corvus_git`'s `RepoInfo` exactly so the round-trip is
+//! byte-identical.
 
-// Re-export the open-repo registry + repo DTO so existing `crate::git::repo::*`
-// paths resolve unchanged.
-pub use corvus_git::prelude::{RepoInfo, RepoManager};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInfo {
+    pub tab_id: String,
+    pub path: String,
+    pub name: String,
+    pub current_branch: Option<String>,
+    pub is_bare: bool,
+    pub is_empty: bool,
+}

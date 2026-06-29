@@ -448,7 +448,7 @@ impl StudioFormatBackend for PropertiesBackend {
                     AppError::Other(format!("Read {abs_path}: {e}"))
                 })?;
                 let (text, enc, had_bom) =
-                    crate::git::encoding::decode_bytes_full(&bytes);
+                    arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
                 let props_sites: Vec<PropertiesRenameSite> = sites_for_file.into_iter().map(|s| {
                     PropertiesRenameSite {
                         field_path: s.field_path,
@@ -549,7 +549,7 @@ impl StudioFormatBackend for PropertiesBackend {
                         if f.excluded { continue; }
                         let Ok(bytes) = std::fs::read(&f.absolute_path) else { continue; };
                         let (text, _enc, _had_bom) =
-                            crate::git::encoding::decode_bytes_full(&bytes);
+                            arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
                         let Some(root) = legacy::parse_to_value(&text) else { continue; };
                         let pairs = match legacy::query_value_pairs_against(&root, &query) {
                             Ok(p)  => p,
@@ -673,7 +673,7 @@ impl StudioFormatBackend for PropertiesBackend {
                             AppError::Other(format!("Read {abs_path}: {e}"))
                         })?;
                         let (text, enc, had_bom) =
-                            crate::git::encoding::decode_bytes_full(&bytes);
+                            arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
                         let root_value = legacy::parse_to_value(&text)
                             .ok_or_else(|| AppError::Other(format!(
                                 "parse {abs_path}: invalid .properties",
@@ -1074,7 +1074,7 @@ fn resolve_value_path<'a>(
 
 fn read_file_to_string(abs_path: &str) -> String {
     let Ok(bytes) = std::fs::read(abs_path) else { return String::new(); };
-    let (text, _, _) = crate::git::encoding::decode_bytes_full(&bytes);
+    let (text, _, _) = arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
     text
 }
 

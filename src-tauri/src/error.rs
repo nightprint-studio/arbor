@@ -2,9 +2,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error("Git error: {0}")]
-    Git(#[from] git2::Error),
-
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -138,22 +135,6 @@ impl From<arbor_fs::prelude::FsError> for AppError {
             F::Io { context, source } => AppError::Other(format!("{context}: {source}")),
             F::Cancelled              => AppError::Cancelled,
             F::Invalid(s) | F::Trash(s) | F::Zip(s) | F::Unsupported(s) => AppError::Other(s),
-        }
-    }
-}
-
-/// Bridge `corvus_git::prelude::GitError` into the host enum. Variant-for-variant
-/// so the frontend wire string is byte-identical to before the local-git logic
-/// moved into the `corvus-git` crate (`Io` → `Io`, `Other` → `Other`).
-impl From<corvus_git::prelude::GitError> for AppError {
-    fn from(e: corvus_git::prelude::GitError) -> Self {
-        use corvus_git::prelude::GitError as G;
-        match e {
-            G::Git(e)             => AppError::Git(e),
-            G::Io(e)              => AppError::Io(e),
-            G::StashNotFound(i)   => AppError::StashNotFound(i),
-            G::CommitNotFound(s)  => AppError::CommitNotFound(s),
-            G::Other(s)           => AppError::Other(s),
         }
     }
 }

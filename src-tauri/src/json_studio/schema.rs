@@ -397,7 +397,7 @@ fn read_file_text(path: &std::path::Path) -> Result<String> {
     let bytes = std::fs::read(path).map_err(|e| {
         AppError::Other(format!("Read {}: {e}", path.display()))
     })?;
-    let (text, _, _) = crate::git::encoding::decode_bytes_full(&bytes);
+    let (text, _, _) = arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
     Ok(text)
 }
 

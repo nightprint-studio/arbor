@@ -516,7 +516,7 @@ impl StudioFormatBackend for RonBackend {
                         if f.excluded { continue; }
                         let Ok(bytes) = std::fs::read(&f.absolute_path) else { continue; };
                         let (text, _enc, _had_bom) =
-                            crate::git::encoding::decode_bytes_full(&bytes);
+                            arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
                         let Ok(root) = legacy::ast::parse(&text) else { continue; };
                         let hits = legacy::query_ast(&root, &query)?;
                         for h in hits {
@@ -666,7 +666,7 @@ impl StudioFormatBackend for RonBackend {
                             AppError::Other(format!("Read {abs_path}: {e}"))
                         })?;
                         let (text, enc, had_bom) =
-                            crate::git::encoding::decode_bytes_full(&bytes);
+                            arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
                         let root = legacy::ast::parse(&text)
                             .map_err(|e| AppError::Other(format!("parse {abs_path}: {e}")))?;
                         let (ops, a, s) = build_ops_from_sites(
@@ -790,7 +790,7 @@ impl StudioFormatBackend for RonBackend {
                     AppError::Other(format!("Read {abs_path}: {e}"))
                 })?;
                 let (text, enc, had_bom) =
-                    crate::git::encoding::decode_bytes_full(&bytes);
+                    arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
                 let new_text = crate::ron_studio::apply_string_rename(
                     &text, &paths, &new_value, "  ",
                 )
@@ -837,7 +837,7 @@ impl StudioFormatBackend for RonBackend {
 /// and any encoded byte that doesn't survive is replaced with U+FFFD.
 fn read_file_to_string(abs_path: &str) -> String {
     let Ok(bytes) = std::fs::read(abs_path) else { return String::new(); };
-    let (text, _, _) = crate::git::encoding::decode_bytes_full(&bytes);
+    let (text, _, _) = arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
     text
 }
 

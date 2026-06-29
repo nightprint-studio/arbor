@@ -6,6 +6,11 @@
 //! garbage (`from_utf8_lossy`). With the helpers here we sniff the file's
 //! actual encoding once, decode losslessly, and remember the label so that
 //! a later write back can re-encode to the original byte representation.
+//!
+//! Foundation home: encoding ↔ bytes is a pure filesystem-content concern, so
+//! it lives here in `arbor-fs`. The git-domain crate (`corvus-git`) and the
+//! shell's studio backends both reach it through this single implementation
+//! (`corvus_git::encoding` re-exports this module).
 
 use encoding_rs::Encoding;
 

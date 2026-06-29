@@ -73,10 +73,10 @@ pub(crate) fn forget_repo_if_orphaned(
         reg.get(repo_id).map(|e| (e.path.clone(), e.display_name.clone()))
     };
     let Some((path, name)) = entry else { return Ok(false); };
-    // Don't yank a repo out from under an open tab.
-    let in_open_tab = state.lock_repos()
-        .map(|mgr| mgr.all_info().iter().any(|i| i.path == path))
-        .unwrap_or(false);
+    // Don't yank a repo out from under an open tab. corvus-be owns the open-tab
+    // registry now, so ask it for the open paths (empty when it isn't running —
+    // then nothing is open to protect).
+    let in_open_tab = crate::ipc::open_repo_paths(state).iter().any(|p| p == &path);
     if in_open_tab { return Ok(false); }
     // Drop the registry entry.
     {

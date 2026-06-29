@@ -2,9 +2,10 @@
 //!
 //! [`AppState`] is the shell's process-wide state bag (managed by Tauri,
 //! reached via `State<'_, AppState>` in commands or `app.state::<AppState>()`
-//! in setup). It owns the in-process registries (repos, plugins, jobs,
-//! pipelines, workspaces, providers, …) plus the seams to the out-of-process
-//! products — most notably the [`CorvusState`] event egress.
+//! in setup). It owns the in-process registries (plugins, jobs, pipelines,
+//! workspaces, providers, …) plus the seams to the out-of-process products —
+//! most notably the [`CorvusState`] event egress. The open-tab → repo registry
+//! is **not** here: `corvus-be` owns it (the launcher keeps no `git2`/`RepoManager`).
 //!
 //! The hook-dispatcher builder lives in `corvus_plugin::prelude::build_hook_dispatcher`
 //! — one definition the shell (in-process host) and `corvus-be` (OOP host) both
@@ -29,7 +30,6 @@ use crate::cloud::{CloudCancellations, CloudPendingOps};
 use crate::config::app_config::AppConfig;
 use crate::deep_link::DeepLinkBuffer;
 use crate::error::{AppError, Result};
-use crate::git::repo::RepoManager;
 use crate::git_provider::{GitProviderRegistry, GithubProvider, GitlabProvider};
 use crate::jobs::JobRegistry;
 use crate::pipeline::PipelineRegistry;
@@ -43,7 +43,6 @@ use crate::workspace::{RepoRegistry, WorkspaceStore};
 // ---------------------------------------------------------------------------
 
 pub struct AppState {
-    pub repos:          Mutex<RepoManager>,
     /// Arc-wrapped because the `arbor-cloud` CloudHost impl holds a clone —
     /// both AppState's `lock_plugin_host()` helper and the cloud crate's
     /// `host.fire_plugin_hook()` need access. Arc<Mutex<—>> keeps both
@@ -77,6 +76,13 @@ pub struct AppState {
     pub app_focused:    Arc<AtomicBool>,
     /// The currently active tab ID as reported by the frontend.
     pub active_tab_id:  Arc<Mutex<Option<String>>>,
+    /// The active tab's repo path, cached on `set_active_tab`. The launcher keeps
+    /// no repo registry — `corvus-be` owns it — but the plugin host
+    /// (`arbor.settings.project`) and the reverse-channel `__pipeline_run` cwd
+    /// fallback need the active repo path *without* a re-entrant call back into
+    /// `corvus-be` (which, from inside a host-dispatch reverse call, could
+    /// deadlock). So we cache just this one path on every tab switch.
+    pub active_repo_path: Arc<Mutex<Option<String>>>,
     /// Installed toolchain registry (toolchains/<kind>.json).
     pub toolchain_registry: Arc<Mutex<ToolchainRegistry>>,
     /// Central registry of every repo Arbor has ever been shown.
@@ -173,13 +179,6 @@ impl AppState {
     // Each helper wraps the raw `.lock()` call, logs the poisoning context and
     // converts it to the typed `AppError::MutexPoisoned` variant so callers get
     // a meaningful error message instead of a silent panic.
-
-    pub fn lock_repos(&self) -> Result<MutexGuard<'_, RepoManager>> {
-        self.repos.lock().map_err(|e| {
-            tracing::error!("repos mutex poisoned: {e}");
-            AppError::MutexPoisoned("repos".into())
-        })
-    }
 
     pub fn lock_plugin_host(&self) -> Result<MutexGuard<'_, PluginHost>> {
         self.plugin_host.lock().map_err(|e| {
@@ -428,7 +427,6 @@ impl AppState {
         let hook_dispatcher = Arc::new(corvus_plugin::prelude::build_hook_dispatcher(&plugin_host));
 
         Self {
-            repos:          Mutex::new(RepoManager::new()),
             plugin_host,
             hook_dispatcher,
             config:         Mutex::new(config),
@@ -445,6 +443,7 @@ impl AppState {
             // frontend sends the first focus update.
             app_focused:    Arc::new(AtomicBool::new(true)),
             active_tab_id:  Arc::new(Mutex::new(None)),
+            active_repo_path: Arc::new(Mutex::new(None)),
             toolchain_registry: Arc::new(Mutex::new(ToolchainRegistry::new())),
             repo_registry:      Mutex::new(repo_registry),
             workspaces:         Mutex::new(workspaces),
@@ -496,11 +495,13 @@ impl AppState {
         if let Ok(mut g) = self.workspaces.lock()    { *g = crate::workspace::store::load(); }
         if let Ok(mut g) = self.marketplace.lock()   { *g = crate::marketplace::build_registry(); }
         // Drop state bound to the old profile's open repos — the frontend
-        // re-opens tabs after it reloads, which re-populates these.
-        if let Ok(mut g) = self.repos.lock()       { *g = RepoManager::new(); }
+        // re-opens tabs after it reloads, which re-populates these. (The open-tab
+        // → repo registry itself lives in corvus-be now, reset on its side via the
+        // re-pushed profile paths below.)
         if let Ok(mut g) = self.terminals.lock()   { *g = TerminalManager::new(); }
         if let Ok(mut g) = self.brp.lock()         { *g = BrpRegistry::default(); }
         if let Ok(mut g) = self.active_tab_id.lock()   { *g = None; }
+        if let Ok(mut g) = self.active_repo_path.lock() { *g = None; }
         // Re-push the now-active profile's resolved paths (corvus_config / git /
         // worktree-links / repo-registry / workspaces / workspace-state) to a live
         // corvus-be. It is a separate process that reads these files fresh on each

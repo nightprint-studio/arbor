@@ -20,12 +20,11 @@
 //!
 //! The `RepoInfo` returned carries the `tab_id` (the FE adds the tab from it
 //! directly — it does **not** issue a follow-up `open_repo`, unlike the clone
-//! flow). So the handler registers the tab in **both** registries: corvus-be's own
-//! (`state.register_repo`, so its later OOP handlers resolve the path) and the
-//! shell's `RepoManager` (over the new `__shell_open_repo` host method, so the
-//! shell-side in-process consumers — studio, git_provider helpers, plugin
-//! `ns_shell`, remote_commands — also resolve the tab). This matches what the
-//! shell's `open_repo`/`init_repo` did via `mgr.open` + `sync_repo_open`.
+//! flow). The handler registers the tab in corvus-be's own registry
+//! (`state.register_repo`, so its later OOP handlers resolve the path). The
+//! launcher keeps no repo registry of its own — its in-process consumers
+//! (studio, plugin host, open-in-browser) resolve the tab by asking corvus-be —
+//! so there is nothing to mirror shell-side.
 //!
 //! Hooks: `on_repo_init` fires here through the backend hook broker (the same one
 //! the OOP RPC handlers fire onto), with the identical payload shape.
@@ -94,20 +93,15 @@ async fn init_repo(
             .map_err(|e| e.to_string())?
     };
 
-    // Step 2 — build the opened-repo metadata (tab_id filled), then register the
-    // tab in BOTH registries: corvus-be's own (so later OOP handlers resolve the
-    // path) and the shell's RepoManager (so the shell-side in-process consumers
-    // resolve it too — the shell's `init_repo` did this via `mgr.open`).
+    // Step 2 — build the opened-repo metadata (tab_id filled) and register the tab
+    // in corvus-be's own registry, so its later OOP handlers resolve the path. The
+    // launcher keeps no repo registry of its own any more — its in-process
+    // consumers (studio, plugin host, open-in-browser) resolve the tab by asking
+    // corvus-be (`__repo_tab_path` / `__repo_open_tabs`), so there is no
+    // shell-side open to mirror here.
     let mut info = RepoInfo::for_path(&path).map_err(|e| e.to_string())?;
     info.tab_id = tab_id.clone();
     state.register_repo(tab_id.clone(), info.path.clone());
-    // Best-effort: an error here only means the shell-side RepoManager won't have
-    // the tab; the FE tab + corvus-be registry are already consistent. Surface it
-    // — the shell-side open is part of the init contract.
-    state.host_call(
-        "__shell_open_repo",
-        json!({ "tab_id": tab_id, "path": info.path }),
-    )?;
 
     // Step 3 — fire on_repo_init through the backend hook broker (same broker the
     // OOP RPC handlers fire onto). Payload shape is identical to the shell's.

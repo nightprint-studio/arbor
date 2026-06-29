@@ -412,10 +412,8 @@ pub(crate) fn reload_runtime(state: &AppState) -> Result<(), AppError> {
         host.start_all_schedulers();
     } // release lock before firing hooks / emitting
 
-    let opens: Vec<(String, String, String)> = match state.lock_repos() {
-        Ok(mgr) => mgr.list_open(),
-        Err(_)  => Vec::new(),
-    };
+    // corvus-be owns the open-tab registry; ask it for `(tab_id, path, name)`.
+    let opens: Vec<(String, String, String)> = crate::ipc::open_repo_tabs(state);
     if !opens.is_empty() {
         for (tab_id, path, name) in &opens {
             state.fire_hook("on_repo_open", serde_json::json!({
@@ -551,10 +549,7 @@ fn delete_plugin(state: &AppState, name: String) -> Result<Vec<String>, AppError
 
     // Collect every repo path we should clean — open tabs + the workspace
     // registry — before locking the plugin host (avoid holding two mutexes).
-    let mut repo_paths: Vec<String> = Vec::new();
-    if let Ok(mgr) = state.lock_repos() {
-        for (_, path, _) in mgr.list_open() { repo_paths.push(path); }
-    }
+    let mut repo_paths: Vec<String> = crate::ipc::open_repo_paths(state);
     if let Ok(reg) = state.lock_repo_registry() {
         for entry in reg.list() { repo_paths.push(entry.path); }
     }

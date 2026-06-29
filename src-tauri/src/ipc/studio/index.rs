@@ -75,10 +75,7 @@ fn studio_refresh_index(state: &AppState, tab_id: String) -> Result<(), AppError
         .event_sink()
         .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
 
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let sink_bg = Arc::clone(&sink);
     let tab_id_clone = tab_id.clone();
     // Fire-and-forget — the heavy walk runs on a background thread so the
@@ -136,10 +133,7 @@ fn studio_scan_repo(
     tab_id: String,
     kinds: Vec<StudioFileKind>,
 ) -> Result<Vec<StudioFileEntry>, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     scan_repo(&repo_path, &kinds)
 }
 
@@ -155,10 +149,7 @@ fn studio_scan_cross_refs(
     tab_id: String,
     kinds: Option<Vec<StudioFileKind>>,
 ) -> Result<Vec<CrossRefDef>, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let use_index = studio_use_index();
     // Empty list = back-compat RON-only; explicit list = filter.
     let kinds = kinds.unwrap_or_else(|| vec![StudioFileKind::Ron]);
@@ -181,10 +172,7 @@ fn studio_find_usages(
     target: String,
     kinds: Option<Vec<StudioFileKind>>,
 ) -> Result<Vec<UsageMatch>, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let use_index = studio_use_index();
     let kinds = kinds.unwrap_or_else(|| vec![StudioFileKind::Ron]);
     if use_index {
@@ -208,10 +196,7 @@ fn studio_scan_broken_refs(
     tab_id: String,
     kinds: Option<Vec<StudioFileKind>>,
 ) -> Result<Vec<BrokenRef>, AppError> {
-    let repo_path = {
-        let mut mgr = state.lock_repos()?;
-        mgr.get(&tab_id)?.path.clone()
-    };
+    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let use_index = studio_use_index();
     let kinds = kinds.unwrap_or_else(|| vec![StudioFileKind::Ron]);
     if use_index {

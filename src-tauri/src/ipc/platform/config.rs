@@ -97,43 +97,15 @@ pub struct OAuthDefaults {
 // moved to corvus-be — it's a git-graph concern. See `get/set_graph_columns` in
 // `crates/corvus/be/src/corvus_config.rs`.
 
-/// Drop the cached `git2::Repository` handle for a specific tab to free libgit2
-/// internal caches.
-///
-/// The per-tab backend caches (stats, ticket-links) moved out with their domains
-/// — they live in `corvus-be` now (stats HEAD-keyed → self-healing; ticket links
-/// re-fetched on demand). What remains here is the shell-owned `RepoManager`
-/// handle: if `cache.close_repo_on_evict` is enabled and the tab is not currently
-/// active, drop it (transparently re-opened on next access). The `cache` section
-/// is owned by corvus-be, so its `close_repo_on_evict` flag is read back with a
-/// thin partial-struct read.
+/// Historically dropped the shell's cached `git2::Repository` handle for an
+/// inactive tab to free libgit2 memory. The launcher no longer caches git
+/// handles — it keeps no `RepoManager`, and `corvus-be` (the sole git owner)
+/// opens a fresh handle per operation rather than caching one — so there is
+/// nothing to evict. Kept as a no-op so the frontend's tab-switch call still
+/// resolves. The `cache.close_repo_on_evict` setting is now meaningless and the
+/// per-tab backend caches (stats, ticket-links) live in `corvus-be`.
 #[platform::handler(program = "platform")]
-fn evict_tab_cache(state: &AppState, tab_id: String) -> Result<(), AppError> {
-    // Read the corvus-owned `cache.close_repo_on_evict` flag (defaults true).
-    let should_close = {
-        #[derive(serde::Deserialize)]
-        struct CacheProbe {
-            #[serde(default = "default_close_on_evict")]
-            close_repo_on_evict: bool,
-        }
-        fn default_close_on_evict() -> bool { true }
-        crate::config::corvus_read::section::<CacheProbe>("cache")
-            .map(|c| c.close_repo_on_evict)
-            .unwrap_or(true)
-    };
-
-    if should_close {
-        let active = state.active_tab_id.lock()
-            .ok()
-            .and_then(|g| g.clone());
-        let is_active = active.as_deref() == Some(tab_id.as_str());
-        if !is_active {
-            if let Ok(mut mgr) = state.lock_repos() {
-                mgr.evict_repo(&tab_id);
-            }
-        }
-    }
-
+fn evict_tab_cache(_state: &AppState, _tab_id: String) -> Result<(), AppError> {
     Ok(())
 }
 

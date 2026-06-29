@@ -613,22 +613,6 @@ fn host_dispatch(
         return Ok(serde_json::Value::Null);
     }
 
-    // Populate the shell's RepoManager for a tab corvus-be just init'd OOP, so the
-    // shell-side in-process consumers (studio, git_provider helpers, plugin
-    // ns_shell, remote_commands) resolve it. Mirrors `open_repo`'s `mgr.open`.
-    // corvus-be has already self-registered the tab in its own registry, so we do
-    // NOT re-call `sync_repo_open` here (that would round-trip `__repo_register`).
-    if method == "__shell_open_repo" {
-        let tab_id = params.get("tab_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let path   = params.get("path").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let state = app.state::<AppState>();
-        {
-            let mut mgr = state.lock_repos().map_err(|e| e.to_string())?;
-            mgr.open(tab_id, &path).map_err(|e| e.to_string())?;
-        };
-        return Ok(serde_json::Value::Null);
-    }
-
     // GitLab namespace path -> numeric namespace_id (keyring read + REST stay
     // shell-side). Lifted from the deleted shell `resolve_gitlab_namespace_id`.
     // Best-effort: any failure / no-match -> JSON null, which corvus-be reads as
@@ -717,19 +701,11 @@ fn host_dispatch(
             }
         };
 
+        // cwd fallback: the cached active-tab repo path. This runs inside a
+        // host-dispatch reverse call from corvus-be, so we must NOT call back into
+        // it (re-entrancy could deadlock) — read the shell-cached path instead.
         let repo_path = override_cwd.or_else(|| {
-            state
-                .active_tab_id
-                .lock()
-                .ok()
-                .and_then(|tid| tid.clone())
-                .and_then(|tid| {
-                    state
-                        .repos
-                        .lock()
-                        .ok()
-                        .and_then(|mut mgr| mgr.get(&tid).ok().map(|r| r.path.clone()))
-                })
+            state.active_repo_path.lock().ok().and_then(|g| g.clone())
         });
 
         let run_id = match state.pipeline_engine.registry.lock() {
@@ -1647,6 +1623,59 @@ pub fn dispatch_rpc(
     } else {
         Ok(serde_json::from_slice(&out)?)
     }
+}
+
+/// Resolve a tab's repo path by asking `corvus-be`, the sole owner of the
+/// open-tab → path registry now that the launcher keeps no `RepoManager`/git2
+/// repo cache. Errors when `corvus-be` isn't running (the `__repo_tab_path`
+/// method isn't advertised, so the call routes to the in-process loopback and
+/// comes back `UnknownMethod`) or the tab isn't registered — from the caller's
+/// view both mean "no open repo for this tab". In practice every consumer
+/// (studio file-tools, open-in-browser) is only reachable from inside an open
+/// Corvus repo tab, which implies `corvus-be` is up.
+pub fn resolve_tab_path(state: &AppState, tab_id: &str) -> Result<String, AppError> {
+    let v = dispatch_rpc(
+        state,
+        "corvus",
+        "__repo_tab_path",
+        serde_json::json!({ "tab_id": tab_id }),
+    )?;
+    serde_json::from_value::<Option<String>>(v)
+        .ok()
+        .flatten()
+        .ok_or_else(|| AppError::Other(format!("repo not open for tab '{tab_id}'")))
+}
+
+/// Every open tab as `(tab_id, path)`, via `corvus-be`. Empty when `corvus-be`
+/// isn't running. The base accessor the path/name helpers below derive from.
+fn open_repo_tabs_raw(state: &AppState) -> Vec<(String, String)> {
+    dispatch_rpc(state, "corvus", "__repo_open_tabs", serde_json::Value::Null)
+        .ok()
+        .and_then(|v| serde_json::from_value::<Vec<(String, String)>>(v).ok())
+        .unwrap_or_default()
+}
+
+/// Every open tab's repo path, via `corvus-be`. Used by the launcher's "is this
+/// path open in a tab?" checks now that it holds no repo registry of its own.
+pub fn open_repo_paths(state: &AppState) -> Vec<String> {
+    open_repo_tabs_raw(state).into_iter().map(|(_, path)| path).collect()
+}
+
+/// Every open tab as `(tab_id, path, name)`, mirroring the old
+/// `RepoManager::list_open()` shape. `name` is the workdir basename — byte-
+/// identical to what `RepoInfo.name` held (`workdir.file_name()`). Used by the
+/// plugin host to re-fire `on_repo_open` / resolve repo context.
+pub fn open_repo_tabs(state: &AppState) -> Vec<(String, String, String)> {
+    open_repo_tabs_raw(state)
+        .into_iter()
+        .map(|(tab_id, path)| {
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            (tab_id, path, name)
+        })
+        .collect()
 }
 
 /// Push a tab's repo path (and the app-config slices) to `corvus-be`, so its

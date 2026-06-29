@@ -25,7 +25,7 @@ Local-git logic for **Corvus**, extracted Tauri-free so the in-process shell
 | `stash` | save / apply / pop / drop / rename / force-apply / abort + stash-file content |
 | `recovery` | snapshot-based safety net for destructive ops (journal under `.git/arbor-recovery`, pin/restore/prune) |
 | `reset` | `git reset --soft/mixed/hard` via CLI + lightweight/annotated tag create/delete |
-| `encoding` | encoding-aware decode/encode (CP1252 ↔ UTF-8 ↔ UTF-16, BOM round-trip) |
+| `encoding` | re-export of `arbor_fs::prelude::encoding` (CP1252 ↔ UTF-8 ↔ UTF-16, BOM round-trip) — the canonical impl lives in the foundation crate |
 
 **Decoupling, not dependency.** Things these domains would otherwise drag in
 stay out of the crate, passed in by the caller instead:
@@ -58,6 +58,7 @@ rules (size cap, case-insensitive extension deny-list, ref-slug stability).
 
 ## Depends on
 
-`arbor-process-ext` (the `NoWindowExt` console-suppression), `git2`
-(vendored-libgit2), `encoding_rs`, `serde`, `serde_json`, `thiserror`,
-`tracing`. No Tauri, no shell types.
+`arbor-process-ext` (the `NoWindowExt` console-suppression), `arbor-fs`
+(re-exported `encoding`), `git2` (vendored-libgit2), `encoding_rs` (the
+diff/merge/stash domains reference `encoding_rs::Encoding` directly), `serde`,
+`serde_json`, `thiserror`, `tracing`. No Tauri, no shell types.

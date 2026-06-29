@@ -21,7 +21,11 @@ pub mod bisect_sessions;
 pub mod branch;
 pub mod cli;
 pub mod diff;
-pub mod encoding;
+// Encoding-aware decode/encode lives in the foundation crate `arbor-fs` (it is a
+// pure file-content concern, not git-specific). Re-exported here so this crate's
+// `crate::encoding::…` call sites and external `corvus_git::encoding::…` paths
+// keep resolving to the single canonical implementation.
+pub use arbor_fs::prelude::encoding;
 pub mod error;
 pub mod gitflow;
 pub mod graph;

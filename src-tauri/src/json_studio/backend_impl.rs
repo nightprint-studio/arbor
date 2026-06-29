@@ -518,7 +518,7 @@ impl StudioFormatBackend for JsonBackend {
                     AppError::Other(format!("Read {abs_path}: {e}"))
                 })?;
                 let (text, enc, had_bom) =
-                    crate::git::encoding::decode_bytes_full(&bytes);
+                    arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
                 let new_text = crate::json_studio::apply_string_rename(
                     &text, &paths, &new_value,
                 )
@@ -622,7 +622,7 @@ impl StudioFormatBackend for JsonBackend {
                         if f.excluded { continue; }
                         let Ok(bytes) = std::fs::read(&f.absolute_path) else { continue; };
                         let (text, _enc, _had_bom) =
-                            crate::git::encoding::decode_bytes_full(&bytes);
+                            arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
                         // Phase 3.d: lenient parse so `.jsonc` files
                         // participate in project-wide bulk-edit
                         // previews. Fallback through the byte-range
@@ -769,7 +769,7 @@ impl StudioFormatBackend for JsonBackend {
                             AppError::Other(format!("Read {abs_path}: {e}"))
                         })?;
                         let (text, enc, had_bom) =
-                            crate::git::encoding::decode_bytes_full(&bytes);
+                            arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
                         // Phase 3.d: lenient parse path so `.jsonc`
                         // files in the bulk-edit apply pass don't
                         // abort the whole batch on a comment.
@@ -1065,7 +1065,7 @@ fn resolve_value_path<'a>(
 
 fn read_file_to_string(abs_path: &str) -> String {
     let Ok(bytes) = std::fs::read(abs_path) else { return String::new(); };
-    let (text, _, _) = crate::git::encoding::decode_bytes_full(&bytes);
+    let (text, _, _) = arbor_fs::prelude::encoding::decode_bytes_full(&bytes);
     text
 }
 

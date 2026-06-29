@@ -78,15 +78,30 @@ pub fn set_active_tab(state: State<'_, AppState>, tab_id: Option<String>) {
         *id = tab_id.clone();
     }
     if let Some(ref tid) = tab_id {
-        // Look up the repo path so plugins can use arbor.settings.project correctly.
-        // Lock repos, copy what we need, then drop before locking plugin_host.
-        let repo_info: Option<(String, String)> = state.lock_repos().ok().and_then(|mut mgr| {
-            mgr.get(tid).ok().map(|r| (r.path.clone(), r.name.clone()))
-        });
+        // Look up the repo path (so plugins can use arbor.settings.project) by
+        // asking corvus-be — the launcher keeps no repo registry. The name is the
+        // workdir basename, identical to the old `RepoInfo.name`. This is a forward
+        // call (FE → shell), so resolving via corvus-be here is safe.
+        let repo_info: Option<(String, String)> =
+            crate::ipc::resolve_tab_path(state.inner(), tid).ok().map(|path| {
+                let name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                (path, name)
+            });
+        // Cache the active repo path so the plugin host + reverse-channel pipeline
+        // cwd fallback can read it without a re-entrant call into corvus-be.
+        if let Ok(mut p) = state.active_repo_path.lock() {
+            *p = repo_info.as_ref().map(|(path, _)| path.clone());
+        }
         state.fire_hook("on_tab_switch", serde_json::json!({
             "tab_id": tid,
             "path":   repo_info.as_ref().map(|(p, _)| p.as_str()).unwrap_or(""),
             "name":   repo_info.as_ref().map(|(_, n)| n.as_str()).unwrap_or(""),
         }));
+    } else if let Ok(mut p) = state.active_repo_path.lock() {
+        // No active tab → clear the cached path.
+        *p = None;
     }
 }

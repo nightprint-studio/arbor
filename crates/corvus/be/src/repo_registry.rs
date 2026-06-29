@@ -17,6 +17,24 @@ fn __repo_deregister(state: &CorvusState, tab_id: String) -> Result<(), String> 
     Ok(())
 }
 
+/// Resolve a `tab_id` to its registered repo path (the read side of
+/// `__repo_register`). The shell's own consumers (studio file-tools,
+/// open-in-browser, workspace check) call this so the launcher no longer keeps a
+/// `RepoManager`/git2 repo cache of its own — corvus-be is the sole owner of the
+/// open-tab → path registry. `None` when the tab isn't registered.
+#[arbor_rpc::handler]
+fn __repo_tab_path(state: &CorvusState, tab_id: String) -> Result<Option<String>, String> {
+    Ok(state.repo_path(&tab_id))
+}
+
+/// Every open tab as `(tab_id, path)`. The shell derives both its "is this path
+/// open?" checks and the plugin-host repo context (name = path basename) from
+/// this, now that it holds no repo registry of its own.
+#[arbor_rpc::handler]
+fn __repo_open_tabs(state: &CorvusState) -> Result<Vec<(String, String)>, String> {
+    Ok(state.open_tabs())
+}
+
 /// Push an app-config slice (keyed by `section`), so the OOP handlers read the
 /// user-tuned config instead of falling back to a built-in default. The shell
 /// sends `"recovery"` (the snapshot policy) on repo open and on config change;

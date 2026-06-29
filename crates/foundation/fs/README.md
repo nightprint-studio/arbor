@@ -36,6 +36,10 @@ single `use arbor_fs::prelude::*;`). Operations are grouped by verb-domain:
   per-drive storage usage (Overview dashboard).
 - **`size`** — recursive directory size + multi-selection totals.
 - **`pathexpand`** — address-bar `~` / `%VAR%` / `$VAR` / `${VAR}` expansion.
+- **`encoding`** — encoding-aware decode/encode for file content (BOM + legacy
+  `windows-1252` detection, lossless round-trip). The single canonical home for
+  this — `corvus-git` re-exports it, and the shell's studio backends decode/encode
+  through it. Backed by `encoding_rs`.
 - **`entry`** — the serializable DTOs (`FsEntry`, `FsRoot`, `TrashEntry`,
   `DirSize`, `DriveUsage`, `OverviewStats`).
 - **`error`** — `FsError`, shaped so the shell maps it back to `AppError` with
@@ -51,11 +55,12 @@ set-wallpaper, native icons, and the per-window watcher (it's
 
 ## Depends on
 
-`serde`, `thiserror`, `dirs`, `regex`, `trash`, `zip`; `arbor-process-ext` (for
-`no_window` on the WSL enumeration); `windows-sys` (drive enumeration + disk
-usage, Windows only). No Tauri, no Tokio — the blocking calls run on the shell's
-`spawn_blocking`.
+`serde`, `thiserror`, `dirs`, `regex`, `trash`, `zip`, `encoding_rs`;
+`arbor-process-ext` (for `no_window` on the WSL enumeration); `windows-sys`
+(drive enumeration + disk usage, Windows only). No Tauri, no Tokio — the blocking
+calls run on the shell's `spawn_blocking`.
 
 ## Consumed by
 
-`arbor` (the shell, via `fs_commands.rs`); future `sitta-be`.
+`arbor` (the shell, via `fs_commands.rs` + the studio backends' encoding);
+`corvus-git` (re-exports `encoding`); future `sitta-be`.

@@ -94,12 +94,11 @@ fn start_run(
             ))?
     };
 
-    // Resolve repo path for cwd fallback.
-    let repo_path = tab_id.as_deref().and_then(|tid| {
-        state.repos.lock().ok().and_then(|mut mgr| {
-            mgr.get(tid).ok().map(|r| r.path.clone())
-        })
-    });
+    // Resolve repo path for cwd fallback (forward handler — asking corvus-be is
+    // safe here; the launcher holds no repo registry).
+    let repo_path = tab_id
+        .as_deref()
+        .and_then(|tid| crate::ipc::resolve_tab_path(state, tid).ok());
 
     // Build initial run state (all steps Pending) seeded with lock_key + log_level.
     let run_id = {

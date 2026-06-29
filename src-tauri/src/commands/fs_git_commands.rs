@@ -4,12 +4,14 @@
 //! ignore), branch list/switch, and remote-url lookup all moved to the corvus
 //! broker, now served out-of-process by `corvus-be`
 //! (`crates/corvus/be/src/fs_git.rs`), which carries the shared per-repo status
-//! cache with them. The only command left here is the
-//! heavy-action delegation, which is genuine shell glue: it needs an
-//! `AppHandle` to bring the main window forward (a WebView2 main-thread
-//! operation) and emit a targeted event to it.
+//! cache with them. The only command left here is the heavy-action delegation,
+//! which is genuine shell glue: it needs an `AppHandle` to bring the main window
+//! forward (a WebView2 main-thread operation) and emit a targeted event to it.
+//!
+//! The repo-root lookup goes through the git CLI (`git -C <path> rev-parse
+//! --show-toplevel`) rather than a `git2` handle, so the launcher needs no
+//! libgit2 just to find the workdir a filesystem path belongs to.
 
-use git2::Repository;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::AppError;
@@ -19,14 +21,27 @@ use crate::error::AppError;
 /// main window's full git UI; the explorer just delegates to it.
 #[tauri::command]
 pub fn fs_open_in_arbor(app: AppHandle, path: String) -> Result<(), AppError> {
-    let repo = Repository::discover(&path)
-        .map_err(|_| AppError::Other("not inside a git repository".into()))?;
-    let root = repo
-        .workdir()
-        .ok_or_else(|| AppError::Other("bare repository".into()))?
-        .to_string_lossy()
+    use crate::process_ext::NoWindowExt;
+
+    let not_a_repo = || AppError::Other("not inside a git repository".into());
+    let out = crate::git_cli::command()
+        .args(["-C"])
+        .arg(&path)
+        .args(["rev-parse", "--show-toplevel"])
+        .no_window()
+        .output()
+        .map_err(|_| not_a_repo())?;
+    if !out.status.success() {
+        return Err(not_a_repo());
+    }
+    let root = String::from_utf8(out.stdout)
+        .map_err(|_| AppError::Other("git output is not valid UTF-8".into()))?
+        .trim()
         .trim_end_matches(['/', '\\'])
         .to_string();
+    if root.is_empty() {
+        return Err(not_a_repo());
+    }
 
     // Window focus must happen on the main/UI thread (WebView2 constraint).
     let handle = app.clone();

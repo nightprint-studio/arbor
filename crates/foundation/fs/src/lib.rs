@@ -22,6 +22,7 @@
 //! submodule paths.
 
 pub mod copy;
+pub mod encoding;
 pub mod entry;
 pub mod error;
 pub mod mutate;

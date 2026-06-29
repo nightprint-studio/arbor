@@ -1102,7 +1102,7 @@ pub fn write_to_disk(
                 .map_err(|e| AppError::Other(format!("mkdir {parent:?}: {e}")))?;
         }
     }
-    let bytes = crate::git::encoding::encode_for_disk_with_bom(
+    let bytes = arbor_fs::prelude::encoding::encode_for_disk_with_bom(
         contents,
         Some(encoding_label),
         had_bom,

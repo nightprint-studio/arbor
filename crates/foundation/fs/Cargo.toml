@@ -12,6 +12,10 @@ serde     = { workspace = true }
 thiserror = { workspace = true }
 dirs      = { workspace = true }
 regex     = { workspace = true }
+# Encoding detection + lossless decode/encode for legacy text files (CP1252 /
+# Latin-1 still common in older Java/PHP/.properties sources on Windows). Same
+# version the shell + corvus-git pin so Cargo unifies a single copy.
+encoding_rs = "0.8"
 # Console-window suppression for the `wsl.exe` enumeration. Same foundation dep
 # the shell uses; keeps WSL roots out of a popped CMD window.
 arbor-process-ext = { path = "../../arbor-process-ext" }

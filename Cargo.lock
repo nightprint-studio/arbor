@@ -154,7 +154,6 @@ dependencies = [
  "chrono",
  "corvus-brp",
  "corvus-core",
- "corvus-git",
  "corvus-git-cli",
  "corvus-git-provider-api",
  "corvus-git-provider-github",
@@ -171,7 +170,6 @@ dependencies = [
  "dirs",
  "encoding_rs",
  "futures-util",
- "git2",
  "jsonc-parser",
  "keyring",
  "libc",
@@ -295,6 +293,7 @@ version = "0.3.0"
 dependencies = [
  "arbor-process-ext",
  "dirs",
+ "encoding_rs",
  "regex",
  "serde",
  "thiserror 2.0.18",
@@ -1257,6 +1256,7 @@ dependencies = [
 name = "corvus-git"
 version = "0.3.0"
 dependencies = [
+ "arbor-fs",
  "arbor-process-ext",
  "base64 0.22.1",
  "chrono",

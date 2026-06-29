@@ -12,4 +12,4 @@ pub use crate::mutate::RenamePair;
 // Operations are also reachable as `arbor_fs::prelude::<module>::fn` so call
 // sites read as `arbor_fs::prelude::read::read_dir(...)`, keeping the verb
 // grouped with its domain.
-pub use crate::{copy, mutate, pathexpand, read, roots, size, trash, zip};
+pub use crate::{copy, encoding, mutate, pathexpand, read, roots, size, trash, zip};

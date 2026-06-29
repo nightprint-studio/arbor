@@ -9,8 +9,12 @@ description  = "Local-git logic for Corvus, Tauri-free so the shell and the head
 
 [dependencies]
 arbor-process-ext = { path = "../../arbor-process-ext" }
+# Encoding-aware decode/encode now lives in the foundation crate; this crate
+# re-exports `arbor_fs::prelude::encoding` (single canonical impl).
+arbor-fs    = { path = "../../foundation/fs" }
 # git2 / encoding_rs are declared directly (not workspace deps); versions match
-# src-tauri so Cargo unifies them (incl. git2's `vendored-libgit2`).
+# src-tauri so Cargo unifies them (incl. git2's `vendored-libgit2`). encoding_rs
+# stays because diff/merge/stash reference `encoding_rs::Encoding` types directly.
 git2        = { version = "0.20", features = ["vendored-libgit2"] }
 encoding_rs = "0.8"
 # Year for the LICENSE template header — pinned to src-tauri's 0.4 so Cargo
