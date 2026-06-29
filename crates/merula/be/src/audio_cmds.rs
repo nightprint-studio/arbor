@@ -11,7 +11,7 @@
 //!
 //! The audio device opens lazily on the first `play`/audition, never on eval; the
 //! session orchestration (lazy start / send / off-thread staging) lives in
-//! [`crate::session`].
+//! [`merula_core::session`].
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -19,12 +19,12 @@ use std::sync::{Arc, Mutex};
 
 use merula::prelude::{ControlMap, TempoMap, Tracks};
 
-use crate::config_cmds::{self, MerulaConfig};
-use crate::control::{self, MerulaControl};
+use merula_core::config::{self as config_cmds, MerulaConfig};
+use merula_core::control::{self, MerulaControl};
 use crate::eval::validate;
-use crate::events::{emit, MerulaDiagnostics, EVT_DIAGNOSTICS};
-use crate::session::{self, Latest};
-use crate::state::MerulaState;
+use merula_core::events::{emit, MerulaDiagnostics, EVT_DIAGNOSTICS};
+use merula_core::session::{self, Latest};
+use merula_core::prelude::MerulaState;
 
 /// Default preview tempo (cycles per second): one cycle of the snippet ≈ this many
 /// seconds. A single `n(c4)` note then rings ~1s before its release.
@@ -67,7 +67,7 @@ async fn stage_tracks(
 /// Play a preview arrangement on the audition bus for `cycles` cycles, decoding any
 /// referenced instrument **off the RT thread** first if the live registry doesn't
 /// resolve it yet (same path as [`stage_tracks`]). No-op when no session is live
-/// (the caller opens one via [`crate::session::ensure`] first).
+/// (the caller opens one via [`merula_core::session::ensure`] first).
 async fn audition(
     ctx: &MerulaState,
     cfg: &MerulaConfig,
@@ -114,7 +114,7 @@ async fn build_prepared(
     let names2 = names.clone();
     let specs2 = speech_specs;
     match tokio::task::spawn_blocking(move || {
-        crate::audio_thread::build_registry(&cfg2, &names2, &specs2)
+        merula_core::audio_thread::build_registry(&cfg2, &names2, &specs2)
     })
     .await
     {

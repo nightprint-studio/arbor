@@ -15,10 +15,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::config_cmds;
+use merula_core::config as config_cmds;
 use crate::jobs::{category, JobHandle};
 use crate::models;
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 

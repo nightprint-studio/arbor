@@ -25,8 +25,8 @@ use merula::prelude::{
     SourceLoader, Time, TimeSpan,
 };
 
-use crate::config_cmds;
-use crate::state::MerulaState;
+use merula_core::config as config_cmds;
+use merula_core::prelude::MerulaState;
 
 /// A filesystem [`SourceLoader`] for the standalone (silent) evaluation. A
 /// `$lib/<name>/<file>` import resolves against the synced external-library cache

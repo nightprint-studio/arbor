@@ -30,7 +30,7 @@ use merula::prelude::{
     Transport,
 };
 
-use crate::config_cmds::MerulaConfig;
+use crate::config::MerulaConfig;
 use crate::control::{MerulaControl, Prepared};
 use crate::events::{
     emit, ActiveHap, ActiveHaps, AudioErrorEvent, Meters, TransportState, EVT_ACTIVE_HAPS,
@@ -121,7 +121,7 @@ pub fn run(
 /// instruments, **decoded** from their installed packs (the slow part — seconds
 /// for a big pack). Called off the RT thread (the command's blocking worker) so
 /// the decode never stalls playback; the audio thread only consumes the result.
-pub(crate) fn build_registry(
+pub fn build_registry(
     cfg: &MerulaConfig,
     needed: &HashSet<String>,
     speech: &[SpeechSpec],
@@ -133,7 +133,7 @@ pub(crate) fn build_registry(
     // alias's TARGET — `needed` carries the source names (the alias), but the pack
     // manifest only has the target, so without this the target's samples never
     // decode and the alias falls back to the synth.
-    let aliases = crate::fstate::load_aliases();
+    let aliases = crate::aliases::load_aliases();
     let mut needed = needed.clone();
     for (alias, target) in &aliases {
         registry.add_alias(alias, target);

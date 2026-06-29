@@ -25,7 +25,7 @@ use merula::prelude::{
     evaluate, parse, EvalConfig, EvalOutput, LangError, LogLevel, LogSink, SourceLoader,
 };
 
-use crate::events::{emit, Diagnostic, LogLine, MerulaDiagnostics, EVT_LOG};
+use merula_core::events::{emit, Diagnostic, LogLine, MerulaDiagnostics, EVT_LOG};
 
 /// A filesystem [`SourceLoader`]. A `$lib/<name>/<file>` import resolves against
 /// the synced external-library cache (`libs`, name -> cache dir); every other path

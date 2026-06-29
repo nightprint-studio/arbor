@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use crate::jobs::{category, JobHandle};
 use crate::libraries::{self, LockEntry};
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 // ── Command ───────────────────────────────────────────────────────────────────
 

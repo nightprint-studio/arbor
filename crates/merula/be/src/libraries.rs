@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use arbor_core::prelude::merula_data_dir;
 
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 // ── Source spec ──────────────────────────────────────────────────────────────
 

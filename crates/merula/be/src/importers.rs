@@ -28,7 +28,7 @@ use merula::prelude::{
 use serde::Deserialize;
 
 use crate::jobs::{category, JobHandle};
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 /// Options accepted by every import command (all optional; sensible defaults).
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -80,7 +80,7 @@ fn default_split_stems(o: &ImportOpts) -> bool {
     }
     #[cfg(feature = "onnx")]
     {
-        let cfg = crate::config_cmds::load();
+        let cfg = merula_core::config::load();
         return crate::models::is_installed(&cfg, crate::models::DEMUCS_ID);
     }
     #[allow(unreachable_code)]
@@ -94,7 +94,7 @@ fn select_transcriber() -> Box<dyn Transcriber> {
     #[cfg(feature = "onnx")]
     {
         use crate::models;
-        let cfg = crate::config_cmds::load();
+        let cfg = merula_core::config::load();
         if let Some(bp) = models::model_path(&cfg, models::BASIC_PITCH_ID) {
             if bp.exists() {
                 let demucs = models::model_path(&cfg, models::DEMUCS_ID).filter(|p| p.exists());

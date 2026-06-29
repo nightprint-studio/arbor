@@ -14,9 +14,9 @@ use serde::Serialize;
 
 use merula::prelude::{InstrumentKind, Registry};
 
-use crate::config_cmds;
+use merula_core::config as config_cmds;
 use crate::packs;
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 /// One resolvable voice in the sound registry.
 #[derive(Debug, Clone, Serialize)]

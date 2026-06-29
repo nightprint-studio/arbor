@@ -16,7 +16,10 @@ mod app_ctx;
 mod app_state;
 mod error;
 mod handlers;
-mod merula;
+// merula is fully out-of-process (state + audio substrate in `merula-core`, served
+// by the `merula-be` child). The shell keeps only the facade-free launcher-boot
+// legacy-storage migration.
+mod merula_boot;
 mod process_ext;
 mod platform;
 mod efficiency;

@@ -175,7 +175,6 @@ dependencies = [
  "jsonc-parser",
  "keyring",
  "libc",
- "merula",
  "mlua",
  "notify",
  "openssl-sys",
@@ -185,7 +184,6 @@ dependencies = [
  "quote",
  "regex",
  "reqwest 0.12.28",
- "rustysynth",
  "semver",
  "serde",
  "serde_json",
@@ -3921,6 +3919,7 @@ dependencies = [
  "arbor-rpc",
  "futures-util",
  "merula",
+ "merula-core",
  "reqwest 0.12.28",
  "rustysynth",
  "serde",
@@ -3929,6 +3928,18 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "zip",
+]
+
+[[package]]
+name = "merula-core"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
+ "arbor-ipc",
+ "merula",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
 ]
 
 [[package]]

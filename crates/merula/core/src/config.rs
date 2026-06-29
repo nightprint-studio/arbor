@@ -1,13 +1,23 @@
-//! Typed merula configuration — merula's own `%APPDATA%\merula\config.toml`
-//! (separate from Arbor's `config.toml`; never `localStorage`, hard rule #11).
+//! `config` — the typed **global** merula configuration
+//! (`%APPDATA%\merula\config.toml`, per-profile) owned **out-of-process** by
+//! merula-be.
 //!
 //! Holds the knobs the engine reads at session start (octave, tempo, log gating)
 //! and offline-render defaults, plus optional overrides for where the sample
-//! banks are stored. Converted into the merula crates' own config types
-//! ([`EvalConfig`], [`RenderConfig`]) at the call sites.
+//! banks / models are stored. Converted into the merula crates' own config types
+//! ([`EvalConfig`], [`RenderConfig`]) at the call sites (eval / render / audio).
 //!
-//! Persistence lives here too ([`load`]/[`save`]): merula reads/writes its own
-//! file under [`merula_config_dir`](arbor_core::prelude::merula_config_dir).
+//! Unlike corvus-be's `corvus_config`, the path is **not** pushed by the shell:
+//! merula-be resolves [`merula_config_path`](arbor_core::prelude::merula_config_path)
+//! itself, since `init_active_profile()` ran in `main` before any handler is served.
+//! The legacy-dir migration stays a launcher-boot concern in the shell and is NOT
+//! ported here.
+//!
+//! [`load`] is infallible-by-design: a missing / unparseable file yields
+//! [`MerulaConfig::default`] so operational reads never break. [`load`] / [`save`]
+//! and the config type stay `pub` for merula-be's domain modules (eval / render /
+//! audio / packs / models / import) that read them. The `get/set_merula_config`
+//! handlers stay in merula-be and call back into [`load`] / [`save`] here.
 
 use std::path::PathBuf;
 
@@ -72,6 +82,23 @@ impl Default for MerulaConfig {
     }
 }
 
+// ── onboarding (per-product, not yet wired) ────────────────────────────────
+//
+// Onboarding is now per-product (corvus-be owns the git product's first-run tour
+// in its `corvus_config`). merula has no real first-run tour yet, so its
+// onboarding state is intentionally NOT implemented here. When merula grows one,
+// uncomment the section + handlers below (mirrors corvus-be's `corvus_config`)
+// and route the frontend's `get/set_onboarding_config` for the merula window to
+// the `merula` program instead of `corvus`. Keep it a NESTED table → declare the
+// field LAST in `MerulaConfig` (after `render`), or give it its own standalone
+// `onboarding.toml`, to respect TOML's "scalars before tables" rule.
+//
+// #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+// pub struct OnboardingConfig {
+//     #[serde(default)] pub completed: bool,
+//     #[serde(default)] pub version: u32,
+// }
+
 /// Offline-render defaults (mirrors the engine's `RenderConfig`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -116,11 +143,6 @@ impl MerulaConfig {
             log_threshold: parse_level(&self.log_threshold),
         }
     }
-
-    /// The log gate threshold as a [`LogLevel`].
-    pub fn log_level(&self) -> LogLevel {
-        parse_level(&self.log_threshold)
-    }
 }
 
 impl MerulaRenderConfig {
@@ -155,13 +177,15 @@ fn parse_level(s: &str) -> LogLevel {
 
 // ── Persistence ────────────────────────────────────────────────────────────────
 
-/// merula's own config file: `%APPDATA%\merula\config.toml`.
+/// merula's own config file: `%APPDATA%\merula\config.toml`. Resolved directly
+/// (not pushed by the shell) — `init_active_profile()` ran in `main`.
 pub fn config_path() -> PathBuf {
     arbor_core::prelude::merula_config_path("config.toml")
 }
 
 /// Read the merula config. A missing / unparseable file yields defaults, never an
-/// error — merula config is non-critical and self-heals to defaults.
+/// error — merula config is non-critical and self-heals to defaults. Also used by
+/// the sibling domain modules (eval / render / audio), not just the command.
 pub fn load() -> MerulaConfig {
     if let Ok(text) = std::fs::read_to_string(config_path()) {
         if let Ok(cfg) = toml::from_str::<MerulaConfig>(&text) {
@@ -180,126 +204,3 @@ pub fn save(cfg: &MerulaConfig) -> Result<(), String> {
     let text = toml::to_string_pretty(cfg).map_err(|e| e.to_string())?;
     std::fs::write(&path, text).map_err(|e| e.to_string())
 }
-
-// ── One-shot migration from the legacy top-level sibling layout ──────────────
-
-/// Heavy, profile-independent assets — relocated to the GLOBAL merula data dir
-/// ([`merula_data_dir`](arbor_core::prelude::merula_data_dir) →
-/// `arbor/data/merula`). These are the multi-GB sample banks / VSCO bank /
-/// download caches: sharing them across profiles avoids duplicating gigabytes
-/// per profile. Used by both migration directions below.
-const HEAVY_SUBDIRS: &[&str] = &["vsco", "packs", "models", "libraries"];
-
-/// Lightweight config / state entries — relocated to the PER-PROFILE merula
-/// config dir ([`merula_config_dir`](arbor_core::prelude::merula_config_dir) →
-/// `arbor/profiles/<active>/merula`). These are small and profile-specific.
-const CONFIG_ENTRIES: &[&str] = &[
-    "config.toml",
-    "state.json",
-    "aliases.json",
-    "scratch.json",
-    "speech-cache",
-];
-
-/// Relocate merula's legacy storage into the split profile/global layout, once.
-///
-/// merula used to live in its own top-level sibling namespace next to `arbor`
-/// (`%APPDATA%\merula`, and the even older `%APPDATA%\nemus` from before the
-/// rename), with settings and the multi-GB sample banks all under one roof.
-/// Storage is now SPLIT in two:
-///
-///   * **config/state → per-profile** ([`merula_config_dir`] →
-///     `arbor/profiles/<active>/merula`) — see [`CONFIG_ENTRIES`].
-///   * **heavy assets → global, shared across profiles** ([`merula_data_dir`] →
-///     `arbor/data/merula`) — see [`HEAVY_SUBDIRS`].
-///
-/// Dumping the heavy banks per-profile would waste gigabytes, so the migration
-/// fans the legacy sibling out into the two destinations. It is non-destructive,
-/// idempotent, and crash-safe: every move is guarded on source-existence +
-/// dest-absence, so partial runs converge on the next boot, and errors are
-/// reported (`eprintln!`) but never panic — the leftovers stay for a retry.
-/// Within `%APPDATA%` every move is a same-volume rename — atomic and instant
-/// even for the multi-GB banks.
-pub fn migrate_legacy_dirs() {
-    migrate_legacy_sibling();
-    migrate_profile_data_to_global();
-}
-
-/// Fan the legacy top-level sibling (`%APPDATA%\merula`, or pre-rename `…\nemus`)
-/// out into the split layout: heavy subdirs → global data dir, config/state →
-/// per-profile config dir. If the legacy dir is left empty afterwards, remove it
-/// (non-recursively — any unknown user files keep it alive and untouched).
-fn migrate_legacy_sibling() {
-    use arbor_core::prelude::{
-        merula_config_dir, merula_data_dir, merula_legacy_sibling_dirs,
-    };
-
-    let Some(legacy) = merula_legacy_sibling_dirs().into_iter().find(|p| p.is_dir()) else {
-        return; // fresh install — nothing to migrate
-    };
-
-    // Heavy assets → global data dir.
-    for sub in HEAVY_SUBDIRS {
-        let src = legacy.join(sub);
-        let dest = merula_data_dir().join(sub);
-        if src.is_dir() && !dest.exists() {
-            if let Err(e) = std::fs::create_dir_all(merula_data_dir()) {
-                eprintln!("merula: legacy migration mkdir data dir failed: {e}");
-                continue;
-            }
-            if let Err(e) = std::fs::rename(&src, &dest) {
-                eprintln!("merula: legacy heavy migration {src:?} -> {dest:?} failed: {e}");
-            }
-        }
-    }
-
-    // Config / state → per-profile config dir.
-    for entry in CONFIG_ENTRIES {
-        let src = legacy.join(entry);
-        let dest = merula_config_dir().join(entry);
-        if src.exists() && !dest.exists() {
-            if let Err(e) = std::fs::create_dir_all(merula_config_dir()) {
-                eprintln!("merula: legacy migration mkdir config dir failed: {e}");
-                continue;
-            }
-            if let Err(e) = std::fs::rename(&src, &dest) {
-                eprintln!("merula: legacy config migration {src:?} -> {dest:?} failed: {e}");
-            }
-        }
-    }
-
-    // Drop the legacy dir only if it is now empty — a non-recursive remove never
-    // touches files we did not move (e.g. user drops we don't recognise).
-    if let Ok(mut entries) = std::fs::read_dir(&legacy) {
-        if entries.next().is_none() {
-            if let Err(e) = std::fs::remove_dir(&legacy) {
-                eprintln!("merula: legacy dir cleanup {legacy:?} failed: {e}");
-            }
-        }
-    }
-}
-
-/// Defensive second pass for installs already migrated by the PRIOR version of
-/// this function, which renamed the whole legacy sibling into the per-profile
-/// config dir — leaving the heavy banks sitting under
-/// [`merula_config_dir`](arbor_core::prelude::merula_config_dir). Lift any heavy
-/// subdir found there into the global data dir, guarded the same way so it is a
-/// no-op once converged.
-fn migrate_profile_data_to_global() {
-    use arbor_core::prelude::{merula_config_dir, merula_data_dir};
-
-    for sub in HEAVY_SUBDIRS {
-        let src = merula_config_dir().join(sub);
-        let dest = merula_data_dir().join(sub);
-        if src.is_dir() && !dest.exists() {
-            if let Err(e) = std::fs::create_dir_all(merula_data_dir()) {
-                eprintln!("merula: profile->global mkdir data dir failed: {e}");
-                continue;
-            }
-            if let Err(e) = std::fs::rename(&src, &dest) {
-                eprintln!("merula: profile->global heavy migration {src:?} -> {dest:?} failed: {e}");
-            }
-        }
-    }
-}
-

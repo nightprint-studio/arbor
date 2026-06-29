@@ -22,7 +22,7 @@ use arbor_ipc::prelude::EventSink;
 use merula::prelude::{ControlMap, Scene, TempoMap, Tracks};
 
 use crate::audio_thread;
-use crate::config_cmds::MerulaConfig;
+use crate::config::MerulaConfig;
 use crate::control::MerulaControl;
 
 /// A live audio session: the thread driving the cpal stream + `Transport`, and the

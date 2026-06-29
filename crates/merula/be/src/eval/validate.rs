@@ -20,8 +20,8 @@ use merula::prelude::{
     Tracks,
 };
 
-use crate::config_cmds::MerulaConfig;
-use crate::events::Diagnostic;
+use merula_core::config::MerulaConfig;
+use merula_core::events::Diagnostic;
 use crate::packs;
 
 /// Cycles probed for instrument references. A handful catches leaves that only

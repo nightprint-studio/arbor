@@ -86,13 +86,13 @@ macro_rules! invoke_handlers {
             // Full app relaunch (fatal "git backend stopped" overlay recovery)
             $crate::window::restart_app,
             // ── merula engine ─────────────────────────────────────────────────
-            // The merula command surface moved out-of-process to `merula-be`
-            // (Model-D): the FE now reaches it through the generic `rpc` entry
-            // point above (program `"merula"`, see `crate::ipc` + `src/lib/ipc/
+            // The merula command surface lives out-of-process in `merula-be`
+            // (Model-D): the FE reaches it through the generic `rpc` entry point
+            // above (program `"merula"`, see `crate::ipc` + `src/lib/ipc/
             // merula.ts`), so NONE of the `merula_*` commands are invoke-routed
-            // here anymore. The `crate::merula::*` bodies remain compiled (dead)
-            // for the non-destructive cutover, and `open_merula_window`
-            // (window lifecycle, NOT a merula command) stays registered above.
+            // here. The in-process `crate::merula::*` bodies have been deleted; only
+            // `open_merula_window` (window lifecycle, NOT a merula command) stays
+            // registered above.
         ]
     };
 }

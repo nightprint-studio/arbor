@@ -38,9 +38,6 @@ pub enum AppError {
     #[error("Plugin error: {0}")]
     Plugin(String),
 
-    #[error("merula error: {0}")]
-    Merula(String),
-
     #[error("Operation cancelled")]
     Cancelled,
 
@@ -123,16 +120,11 @@ impl From<arbor_plugin_core::prelude::PluginCoreError> for AppError {
     }
 }
 
-/// Bridge the merula facade's unified error into the host enum. merula's own
-/// crates already preserve detail (and language errors carry a span surfaced
-/// separately as `merula:diagnostics`); at the IPC boundary a flattened string is
-/// enough — infra failures (no audio device, render IO) ride this, not user
-/// language errors.
-impl From<merula::prelude::MerulaError> for AppError {
-    fn from(e: merula::prelude::MerulaError) -> Self {
-        AppError::Merula(e.to_string())
-    }
-}
+// The merula facade `From<MerulaError>` bridge — and the `AppError::Merula(String)`
+// variant it produced — were removed with the shell's merula code: merula is fully
+// out-of-process now (state + audio substrate in `merula-core`, served by
+// `merula-be`), so the shell holds no merula error to map. merula-be surfaces its
+// own failures as strings over the reverse channel.
 
 /// Bridge `arbor_fs::FsError` into the host enum. Mapped so the wire string the
 /// explorer shows is byte-for-byte what it was before the FS logic moved into

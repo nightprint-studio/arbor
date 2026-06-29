@@ -37,6 +37,11 @@ arbor-feedback = { path = "../../arbor-feedback" }
 # crates (pattern + lang + audio + engine, plus import/transcribe) through one
 # curated prelude. The domain handlers call merula entirely through `merula::prelude::*`.
 merula         = { path = "../merula" }
+# The canonical merula state + audio substrate: `MerulaState`, the `Session` /
+# control / events / audio_thread substrate, the `MerulaConfig` type + load/save,
+# and the pack/alias read helpers. The domain `#[arbor_rpc::handler]`s stay here in
+# merula-be and drive against `merula_core::prelude::*`. Tauri-free by construction.
+merula-core    = { path = "../core" }
 serde          = { workspace = true }
 serde_json     = { workspace = true }
 # The typed global merula config (`config.toml`) is owned out-of-process by

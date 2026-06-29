@@ -48,11 +48,10 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
         }
         WindowEvent::Destroyed => {
             let label = window.label();
-            // merula audio teardown happens on ACTUAL destroy — not on a
-            // close-to-tray hide (where the window lives on and may still play).
-            if label == super::merula::MERULA_WINDOW_LABEL {
-                crate::merula::shutdown(window.app_handle());
-            }
+            // merula audio teardown is handled out-of-process: the real session
+            // lives in the `merula-be` child, torn down by the `split_broker`
+            // detach below on the last merula window's actual destroy (the shell
+            // holds no in-process merula state to shut down).
             // When the last window of a product is gone, tell the launcher its
             // node is no longer "In esecuzione". Count the OTHER windows of the
             // same product (this one is being torn down) regardless of whether

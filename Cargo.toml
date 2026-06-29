@@ -48,6 +48,7 @@ members = [
     "crates/merula/merula-import",
     "crates/merula/merula-transcribe",
     "crates/merula/merula",
+    "crates/merula/core",
     "crates/merula/be",
 ]
 

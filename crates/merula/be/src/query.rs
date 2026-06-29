@@ -18,9 +18,9 @@ use serde::Serialize;
 
 use merula::prelude::{ControlMap, Time, TimeSpan, Tracks};
 
-use crate::events::Diagnostic;
-use crate::session;
-use crate::state::MerulaState;
+use merula_core::events::Diagnostic;
+use merula_core::session;
+use merula_core::prelude::MerulaState;
 
 /// One hap of the queried arrangement. `start`/`end` are in cycles (absolute
 /// timeline); `has_onset` is false for continuous signals (no `whole`).
@@ -237,7 +237,7 @@ impl HapKey {
 }
 
 /// Query the last-evaluated arrangement over `[0, cycles)` and return every hap.
-/// Reads the process-global typed [`Latest`](crate::session::Latest) that
+/// Reads the process-global typed [`Latest`](merula_core::session::Latest) that
 /// `merula_eval` stages (a `Tracks<ControlMap>` is full of closures and cannot
 /// round-trip the JSON `MerulaState::latest` slot, so the typed store lives in
 /// `session`). Empty when nothing has been evaluated yet. Off the audio thread, so

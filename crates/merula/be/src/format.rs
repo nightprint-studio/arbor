@@ -13,7 +13,7 @@
 
 use merula::prelude::{emit, parse};
 
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 /// Reformat `.merula` source to canonical style. Returns the formatted text, or a
 /// language error (a syntax error the buffer currently has) which the caller

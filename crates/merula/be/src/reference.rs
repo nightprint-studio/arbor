@@ -14,7 +14,7 @@
 use merula::prelude::{reference, DslEntry, DslParam};
 use serde::Serialize;
 
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 /// IPC view of a [`DslParam`].
 #[derive(Serialize)]

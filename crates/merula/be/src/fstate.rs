@@ -2,7 +2,7 @@
 //! out-of-process by merula-be.
 //!
 //! Covers the JSON state files (deliberately **not** the typed `[merula]` config
-//! — that's [`crate::config_cmds`] — nor `localStorage`, hard rule #11):
+//! — that's [`crate::config_cmds`] (the get/set handlers) — nor `localStorage`, hard rule #11):
 //!
 //!   * **window state** — recents, last project, panel layout, sound-bank
 //!     favourites/recents, workspaces. Per-profile (`<merula-config>/state.json`).
@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 /// Persisted panel layout of the merula window.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -212,10 +212,11 @@ fn aliases_path() -> PathBuf {
 }
 
 /// Read the global sound-alias map (defaults to empty on first run / corrupt file).
-/// Also used by the registry builder, not just the command.
-pub fn load_aliases() -> HashMap<String, String> {
-    read_json(&aliases_path())
-}
+/// The canonical read helper lives in [`merula_core::aliases`] — the audio registry
+/// builder reads aliases when building a session registry, so it moved with the
+/// audio substrate. Re-exported here so the sibling validator keeps addressing it
+/// as `crate::fstate::load_aliases` while the two stay one implementation.
+pub use merula_core::aliases::load_aliases;
 
 /// Read the global sound-alias map (`alias → target`).
 #[arbor_rpc::handler]

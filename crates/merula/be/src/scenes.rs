@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 
 use merula::prelude::Scene;
 
-use crate::session;
-use crate::state::MerulaState;
+use merula_core::session;
+use merula_core::prelude::MerulaState;
 
 /// One clip in a scene: the base track it targets (by name) and the resolved
 /// column index — `None` when no base track carries that name (an inert clip the
@@ -70,7 +70,7 @@ pub(crate) fn scene_infos(track_names: &[String], scenes_src: &[Scene]) -> Vec<S
 }
 
 /// Return the launchable scenes of the last-evaluated arrangement. Reads the
-/// process-global typed [`Latest`](crate::session::Latest) that `merula_eval`
+/// process-global typed [`Latest`](merula_core::session::Latest) that `merula_eval`
 /// stages (base track names in mixer order + the declared scenes), resolving each
 /// scene's clips through the same [`scene_infos`] core. Off the audio thread; safe
 /// to call while playing. Empty until something has been evaluated.

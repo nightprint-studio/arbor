@@ -88,7 +88,6 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
         .manage(crate::window::explorer::PendingReveals::default())
         .manage(crate::window::explorer::ExplorerClipboard::default())
         .manage(crate::window::explorer::DragOverlayText::default())
-        .manage(crate::merula::MerulaState::default())
         .setup(run)
         .on_window_event(crate::window::events::handle)
 }
@@ -103,7 +102,7 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // destinations before anything reads it. Idempotent + non-destructive, so it
     // converges across re-runs. Runs after the active profile is seeded (in
     // `AppState::new`, built before this setup hook).
-    crate::merula::config::migrate_legacy_dirs();
+    crate::merula_boot::migrate_legacy_dirs();
 
     // Seed the Corvus backend state (in-process `corvus-be`) + the Model-D IPC
     // router into AppState. Both need the `AppHandle` that `AppState::new()`

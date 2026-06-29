@@ -5,7 +5,7 @@
 //! `inventory`, so `arbor_rpc::registry()` collects them and `Hello` advertises
 //! them by name. The git/audio domains land in the per-wave modules the same way.
 
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 /// Liveness round-trip: `rpc("merula", "be_ping", {})` → `"pong"`.
 #[arbor_rpc::handler]

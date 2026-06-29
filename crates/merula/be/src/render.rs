@@ -22,10 +22,10 @@ use merula::prelude::{
 };
 use serde::Deserialize;
 
-use crate::config_cmds::{self, MerulaConfig};
-use crate::events::EVT_DIAGNOSTICS;
+use merula_core::config::{self as config_cmds, MerulaConfig};
+use merula_core::events::EVT_DIAGNOSTICS;
 use crate::jobs::{category, JobHandle};
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 /// Front-end render options. `cycles` is required (a `Pattern` has no intrinsic
 /// length); format defaults come from `[render]` config unless overridden.
@@ -86,7 +86,7 @@ fn eval_for_render(
     match crate::eval::evaluate_source(ctx.event_sink(), source, base, cfg.eval_config()) {
         Ok(o) => Ok(o),
         Err(diags) => {
-            crate::events::emit(&*ctx.event_sink(), EVT_DIAGNOSTICS, &diags);
+            merula_core::events::emit(&*ctx.event_sink(), EVT_DIAGNOSTICS, &diags);
             let msg = diags
                 .errors
                 .first()

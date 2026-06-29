@@ -30,11 +30,11 @@ use std::sync::Arc;
 
 use arbor_ipc::prelude::EventSink;
 
-use crate::config_cmds::{self, MerulaConfig};
-use crate::events::{self, PackProgress, EVT_PACK_PROGRESS};
+use merula_core::config::{self as config_cmds, MerulaConfig};
+use merula_core::events::{self, PackProgress, EVT_PACK_PROGRESS};
 use crate::jobs::{category, JobHandle};
 use crate::packs::{self, Layout, Pack};
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 

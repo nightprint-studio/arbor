@@ -11,7 +11,7 @@
 use merula::prelude::mode_table;
 use serde::Serialize;
 
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 /// IPC view of a `ScaleMode`. The JSON field names are the contract the frontend
 /// `scalesStore` parses.

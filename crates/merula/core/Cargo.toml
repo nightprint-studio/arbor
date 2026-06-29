@@ -1,0 +1,27 @@
+[package]
+name         = "merula-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Tauri-free canonical state + audio substrate the merula-be process owns — the merula twin of corvus-core, but heavier: MerulaState's session field owns the (!Send) audio-thread substrate, so the whole state substrate (session/control/events/audio_thread + the MerulaConfig type) lives here, not just a thin holder."
+
+[dependencies]
+# EventSink / HostCaller: MerulaState's egress + reverse channel, and the audio
+# thread + events emit through the sink.
+arbor-ipc  = { path = "../../foundation/ipc" }
+# The merula facade: re-exports the four Tauri-free merula crates (pattern + lang
+# + audio + engine) through one prelude. The state substrate (session / control /
+# audio_thread / events) calls merula entirely through `merula::prelude::*`.
+# Tauri-free, so allowed by the north star.
+merula     = { path = "../merula" }
+# The profile-aware config/data-path resolver: `MerulaConfig::config_path` /
+# `load` / `save` and the pack read surface resolve `merula_config_path` /
+# `merula_data_dir` here. `init_active_profile()` ran in merula-be's `main`.
+arbor-core = { path = "../../core" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# The typed global merula config (`config.toml`) is round-tripped through `toml`,
+# exactly like merula-be did before the substrate split.
+toml       = "0.8"

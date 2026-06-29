@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
 /// Parsed `merula.toml`. Every field optional — a missing manifest is treated as
 /// an empty one.

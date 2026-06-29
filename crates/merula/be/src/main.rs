@@ -17,12 +17,12 @@
 use std::io::{self, Write};
 use std::sync::Arc;
 
-use crate::state::MerulaState;
+use merula_core::prelude::MerulaState;
 
-// Foundation modules: the state, the audio session + its control channel, and the
-// self-test handlers that prove the handshake.
-mod state;
-mod session;
+// Foundation: the canonical state + audio substrate (state / session / control /
+// events / audio_thread / config-type / pack+alias read helpers) lives in
+// merula-core now; this binary keeps only the self-test handlers that prove the
+// handshake plus the domain handler modules below.
 mod selftest;
 
 // Domain handler modules — each holds the `#[arbor_rpc::handler]`s for one merula
@@ -42,9 +42,6 @@ mod libraries;
 mod project;
 mod config_cmds;
 mod fstate;
-mod audio_thread;
-mod control;
-mod events;
 mod eval;
 mod audio_cmds;
 mod devices;

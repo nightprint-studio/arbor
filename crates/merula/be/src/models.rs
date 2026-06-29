@@ -17,8 +17,8 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use crate::config_cmds::{self, MerulaConfig};
-use crate::state::MerulaState;
+use merula_core::config::{self as config_cmds, MerulaConfig};
+use merula_core::prelude::MerulaState;
 
 /// Stable model ids (used in commands + filenames).
 pub const BASIC_PITCH_ID: &str = "basic-pitch";

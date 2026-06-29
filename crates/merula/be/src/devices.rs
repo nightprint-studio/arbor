@@ -10,10 +10,10 @@
 
 use serde::Serialize;
 
-use crate::config_cmds;
-use crate::control::MerulaControl;
-use crate::session;
-use crate::state::MerulaState;
+use merula_core::config as config_cmds;
+use merula_core::control::MerulaControl;
+use merula_core::session;
+use merula_core::prelude::MerulaState;
 
 /// One selectable audio output device, for the Settings picker.
 #[derive(Debug, Clone, Serialize)]
