@@ -50,11 +50,6 @@ pub struct MerulaDiagnostics {
 }
 
 impl MerulaDiagnostics {
-    /// A clean (no-errors) result.
-    pub fn ok() -> Self {
-        MerulaDiagnostics { errors: Vec::new() }
-    }
-
     /// A single-error result.
     pub fn one(d: Diagnostic) -> Self {
         MerulaDiagnostics { errors: vec![d] }

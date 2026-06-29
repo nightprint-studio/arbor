@@ -18,8 +18,9 @@ use crate::types::{MarketplacePlugin, MarketplaceSource};
 #[derive(Debug)]
 pub enum CustomSourceResolution {
     /// Single plugin — root mode (`plugin.toml` at repo root) or subpath
-    /// mode (`{subpath}/plugin.toml`).
-    Single(MarketplacePlugin),
+    /// mode (`{subpath}/plugin.toml`). Boxed so this variant doesn't bloat
+    /// the enum next to the small `Multi` (a `Vec`).
+    Single(Box<MarketplacePlugin>),
     /// Multi-plugin: the repo hosts an `index.json` listing several
     /// plugins (and possibly themes). The themes are dropped here — only
     /// plugins are surfaced for custom-source mode.
@@ -55,7 +56,7 @@ pub async fn resolve_custom_source(
             .map_err(|e| MarketplaceError::Other(format!(
                 "subpath mode failed for '{repo_url}' @ '{sp}': {e}"
             )))?;
-        return Ok(CustomSourceResolution::Single(plugin));
+        return Ok(CustomSourceResolution::Single(Box::new(plugin)));
     }
 
     // Mode 2 — single plugin at root.
@@ -63,7 +64,7 @@ pub async fn resolve_custom_source(
     if probe(http, &root_toml).await {
         let plugin = fetch_custom_plugin(http, &owner, &repo, ref_str, "").await
             .map_err(|e| MarketplaceError::Other(format!("root mode failed: {e}")))?;
-        return Ok(CustomSourceResolution::Single(plugin));
+        return Ok(CustomSourceResolution::Single(Box::new(plugin)));
     }
 
     // Mode 3 — multi-plugin index at root.

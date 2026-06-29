@@ -105,7 +105,7 @@
     {:else}
       {#each visible as p, i (i)}
         {@const sevClass = isError(p.severity) ? 'error' : 'warning'}
-        <button class="prob-line" onclick={() => jumpTo(p)} disabled={p.start == null} use:tooltip={p.start != null ? 'Jump to source' : undefined}>
+        <button class="prob-line" onclick={() => jumpTo(p)} disabled={p.start == null} use:tooltip={p.start != null ? 'Jump to source' : ''}>
           <span class="prob-icon sev-{sevClass}">
             {#if isError(p.severity)}<CircleAlert size={13} />{:else}<AlertTriangle size={13} />{/if}
           </span>

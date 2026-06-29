@@ -14,7 +14,7 @@ use crate::http::{classify, percent_encode_slash, GitlabHttp};
 // Delegate helpers (RepoRef destructuring)
 // ---------------------------------------------------------------------------
 
-fn project_path<'a>(repo: &'a RepoRef) -> &'a str {
+fn project_path(repo: &RepoRef) -> &str {
     repo.owner_or_path.as_str()
 }
 

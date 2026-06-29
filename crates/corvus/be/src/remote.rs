@@ -31,7 +31,9 @@ use std::sync::Arc;
 
 use arbor_ipc::prelude::{EventSink, HostCaller};
 use corvus_core::prelude::CorvusState;
-use corvus_git::prelude::{FetchResult, GitCli, RecoveryKind, RemoteInfo, SnapshotPolicy, StashEntry};
+use corvus_git::prelude::{
+    CredentialResolver, FetchResult, GitCli, RecoveryKind, RemoteInfo, SnapshotPolicy, StashEntry,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -312,7 +314,7 @@ fn pull_branch_inner(
     r: &mut git2::Repository,
     workdir: &Path,
     remote: &str,
-    resolver: &(dyn Fn(&str) -> Result<Option<(String, String)>, String> + Send + Sync),
+    resolver: CredentialResolver<'_>,
     policy: &SnapshotPolicy,
     progress: PullProgress<'_>,
 ) -> Result<PullResult, String> {

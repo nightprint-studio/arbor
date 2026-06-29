@@ -355,7 +355,7 @@ fn permission_gate(
         .split_once("://")
         .map(|(_, rest)| rest)
         .unwrap_or(endpoint)
-        .split(|c: char| c == '/' || c == ':' || c == '?' || c == '#')
+        .split(['/', ':', '?', '#'])
         .next()
         .unwrap_or("")
         .to_string();

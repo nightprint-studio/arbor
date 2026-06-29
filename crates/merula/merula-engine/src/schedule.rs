@@ -193,7 +193,7 @@ pub fn voice_event_from_hap(
     let legato = v.hold.is_some()
         || v.art
             .as_deref()
-            .map_or(false, |a| a.eq_ignore_ascii_case("legato"));
+            .is_some_and(|a| a.eq_ignore_ascii_case("legato"));
 
     let params = resolve_params(v);
 

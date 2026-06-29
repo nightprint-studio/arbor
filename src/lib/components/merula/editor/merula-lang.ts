@@ -580,15 +580,17 @@ export function stringArgCallAt(tree: Tree, offset: number): { from: number; to:
   while (str && str.type !== 'string') str = str.parent;
   if (!str || offset <= str.startIndex) return null; // not past the opening quote
   // The innermost call whose argument list contains this string decides the scope.
-  for (let cur: Node | null = str.parent; cur; cur = cur.parent) {
+  let cur: Node | null = str.parent;
+  while (cur) {
     const args = cur.childForFieldName('arguments');
-    if (!args) continue;
-    if (str.startIndex < args.startIndex || str.endIndex > args.endIndex) continue;
-    const callee = cur.childForFieldName('function') ?? cur.childForFieldName('method');
-    if (callee?.type !== 'identifier') return null;
-    // `from`/`to` bracket the string *content* (between the quotes), the range a
-    // value completion / quick-fix replaces.
-    return { from: str.startIndex + 1, to: str.endIndex - 1, fn: callee.text };
+    if (args && str.startIndex >= args.startIndex && str.endIndex <= args.endIndex) {
+      const callee = cur.childForFieldName('function') ?? cur.childForFieldName('method');
+      if (callee?.type !== 'identifier') return null;
+      // `from`/`to` bracket the string *content* (between the quotes), the range a
+      // value completion / quick-fix replaces.
+      return { from: str.startIndex + 1, to: str.endIndex - 1, fn: callee.text };
+    }
+    cur = cur.parent;
   }
   return null;
 }
@@ -604,13 +606,15 @@ export function instrumentNameAt(tree: Tree, offset: number): string | null {
   let str: Node | null = at;
   while (str && str.type !== 'string') str = str.parent;
   if (!str) return null;
-  for (let cur: Node | null = str.parent; cur; cur = cur.parent) {
+  let cur: Node | null = str.parent;
+  while (cur) {
     const args = cur.childForFieldName('arguments');
-    if (!args) continue;
-    if (str.startIndex < args.startIndex || str.endIndex > args.endIndex) continue;
-    const callee = cur.childForFieldName('function') ?? cur.childForFieldName('method');
-    if (callee?.type !== 'identifier') return null;
-    return callee.text === 'inst' || callee.text === 's' ? unquote(str.text) : null;
+    if (args && str.startIndex >= args.startIndex && str.endIndex <= args.endIndex) {
+      const callee = cur.childForFieldName('function') ?? cur.childForFieldName('method');
+      if (callee?.type !== 'identifier') return null;
+      return callee.text === 'inst' || callee.text === 's' ? unquote(str.text) : null;
+    }
+    cur = cur.parent;
   }
   return null;
 }

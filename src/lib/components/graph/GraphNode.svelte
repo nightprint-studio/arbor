@@ -20,7 +20,7 @@
     synced?: boolean;
     /** 'bad' | 'good' | 'next' — bisect mark indicator, null when not bisecting. */
     bisectMark?: 'bad' | 'good' | 'next' | 'result' | null;
-    onclick?: () => void;
+    onclick?: (e: MouseEvent) => void;
     oncontextmenu?: (e: MouseEvent) => void;
     onmouseenter?: () => void;
     onmouseleave?: () => void;

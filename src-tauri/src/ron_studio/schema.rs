@@ -349,10 +349,11 @@ pub fn load(rs_file_path: &str, root_canonical_path: &str) -> Result<Schema> {
         // yet, so we canonicalise here too.
         for referenced in collect_referenced_paths(&resolved) {
             let canon = index.canonicalize(&referenced).unwrap_or(referenced);
-            if !reachable.contains_key(&canon) && !queue.contains(&canon) {
-                if index.types.contains_key(&canon) {
-                    queue.push_back(canon);
-                }
+            if !reachable.contains_key(&canon)
+                && !queue.contains(&canon)
+                && index.types.contains_key(&canon)
+            {
+                queue.push_back(canon);
             }
         }
         stats.resolved += 1;
@@ -921,13 +922,13 @@ fn resolve_typedef(
 
 /// Construct a `FieldDef` from a syn-parsed named field, applying the
 /// serde rename/alias/rename_all rules:
-///   1. `name`     = `#[serde(rename = "x")]` if present, else
-///                   container `rename_all` applied to the Rust ident,
-///                   else the bare Rust ident.
-///   2. `aliases`  = `#[serde(alias = "...")]` entries (may repeat),
-///                   PLUS the Rust ident itself when the resolved
-///                   `name` differs from it (so a doc that hand-typed
-///                   the Rust name still resolves).
+/// 1. `name` = `#[serde(rename = "x")]` if present, else
+///    container `rename_all` applied to the Rust ident,
+///    else the bare Rust ident.
+/// 2. `aliases` = `#[serde(alias = "...")]` entries (may repeat),
+///    PLUS the Rust ident itself when the resolved
+///    `name` differs from it (so a doc that hand-typed
+///    the Rust name still resolves).
 fn build_named_field(
     f:                &syn::Field,
     module_path:      &str,
@@ -1329,8 +1330,8 @@ fn split_into_words(ident: &str) -> Vec<String> {
             prev_lower = false;
             continue;
         }
-        if c.is_uppercase() && prev_lower {
-            if !cur.is_empty() { out.push(std::mem::take(&mut cur)); }
+        if c.is_uppercase() && prev_lower && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
         }
         cur.push(c.to_ascii_lowercase());
         prev_lower = c.is_lowercase() || c.is_ascii_digit();

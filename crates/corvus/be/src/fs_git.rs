@@ -168,7 +168,7 @@ fn fs_git_changes(_state: &CorvusState, dir: String) -> Result<GitChanges, Strin
             let abs = wd.join(rel);
             let path = abs
                 .to_string_lossy()
-                .trim_end_matches(|c| c == '/' || c == '\\')
+                .trim_end_matches(['/', '\\'])
                 .to_string();
             let rel_disp = rel.replace('\\', "/").trim_end_matches('/').to_string();
             if let Some(badge) = index_badge(s) {
@@ -186,7 +186,7 @@ fn fs_git_changes(_state: &CorvusState, dir: String) -> Result<GitChanges, Strin
     Ok(GitChanges {
         repo_root: Some(
             wd.to_string_lossy()
-                .trim_end_matches(|c| c == '/' || c == '\\')
+                .trim_end_matches(['/', '\\'])
                 .to_string(),
         ),
         branch,
@@ -462,7 +462,7 @@ fn fs_git_status(_state: &CorvusState, dir: String, refresh: Option<bool>) -> Re
     let dir_key = norm_key(&dir);
     Ok(FsGitStatus {
         in_repo: true,
-        repo_root: Some(root.to_string_lossy().trim_end_matches(|ch| ch == '/' || ch == '\\').to_string()),
+        repo_root: Some(root.to_string_lossy().trim_end_matches(['/', '\\']).to_string()),
         branch: c.branch.clone(),
         detached: c.detached,
         ahead: c.ahead,

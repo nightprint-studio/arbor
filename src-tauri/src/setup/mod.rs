@@ -90,7 +90,7 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
         .manage(crate::window::explorer::DragOverlayText::default())
         .manage(crate::merula::MerulaState::default())
         .setup(run)
-        .on_window_event(|window, event| crate::window::events::handle(window, event))
+        .on_window_event(crate::window::events::handle)
 }
 
 /// The `setup` hook body — runs once, before the event loop starts (so before
@@ -122,7 +122,7 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // refresher and publishes the `Arc<dyn CloudHost>` into Tauri state. Must
     // run after the event sink is wired above (the host stores the sink for
     // `emit_event`).
-    crate::cloud::install(&app.handle());
+    crate::cloud::install(app.handle());
 
     // Park the launcher (main window) bottom-right, JetBrains-Toolbox-style.
     crate::window::placement::place_launcher_bottom_right(app.handle());

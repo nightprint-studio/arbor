@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 /// Distinct RNG stream for `choose` over patterns (the float `choose` uses the
 /// pattern crate's own seed).
-const SEED_CHOOSE_PATTERNS: u64 = 0xc4_05e_9a77e_5_u64;
+const SEED_CHOOSE_PATTERNS: u64 = 0x0c40_5e9a_77e5_u64;
 
 /// Is `name` a combinator / constructor / generator / log function (anything the
 /// evaluator dispatches through [`eval_builtin_call`])?
@@ -29,9 +29,9 @@ const SEED_CHOOSE_PATTERNS: u64 = 0xc4_05e_9a77e_5_u64;
 /// below maps the name to its closure, but no longer re-states the name list.
 pub fn is_combinator(name: &str) -> bool {
     use crate::reference::{combinator_names, generator_names, log_names};
-    combinator_names().iter().any(|n| *n == name)
-        || generator_names().iter().any(|n| *n == name)
-        || log_names().iter().any(|n| *n == name)
+    combinator_names().contains(&name)
+        || generator_names().contains(&name)
+        || log_names().contains(&name)
         || matches!(name, "cps" | "tempo")
 }
 

@@ -15,7 +15,7 @@ use crate::http::{classify, GithubHttp};
 // Delegate helpers (RepoRef destructuring / validation)
 // ---------------------------------------------------------------------------
 
-fn repo_parts<'a>(repo: &'a RepoRef) -> Result<(&'a str, &'a str), ProviderError> {
+fn repo_parts(repo: &RepoRef) -> Result<(&str, &str), ProviderError> {
     let owner = repo.owner_or_path.as_str();
     let name = repo.name.as_deref().ok_or_else(|| {
         ProviderError::BadRequest("GitHub RepoRef requires name".into())

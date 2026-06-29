@@ -5,24 +5,24 @@
 //! through the unified `StudioFormatBackend` trait.
 //!
 //! Doc model:
-//!   - `original`     — text the file was opened with, snapshot-immutable.
-//!   - `current`      — live edited buffer the FE sees through `raw_current`.
-//!   - `lines`        — `Vec<RawLine>` — exact byte-preserving line view
-//!                      (`Logical { key, value, leading_ws, separator,
-//!                      after_value }`, `Comment(raw)`, `Blank(raw)`).
-//!                      Continuation backslashes are joined into a single
-//!                      logical line so a mutation only touches the
-//!                      affected block; emit() walks the same vec.
-//!   - `value`        — `serde_json::Value` projection of the key/value
-//!                      pairs, built from dotted-key segments via the
-//!                      properties_codec assembly logic. Used by the
-//!                      tree pane + JSONPath query (FROZEN F6 — same
-//!                      JSONPath syntax as every other studio format).
-//!   - `history`      — text snapshots backing undo / redo. Same coalesce
-//!                      window as the YAML / TOML backends.
-//!   - encoding       — sniffed at parse time, round-tripped through save
-//!                      (FROZEN F16 — windows-1252 / UTF-16 BOM survive
-//!                      legacy Spring Boot configs on Windows).
+//! - `original` — text the file was opened with, snapshot-immutable.
+//! - `current` — live edited buffer the FE sees through `raw_current`.
+//! - `lines` — `Vec<RawLine>` — exact byte-preserving line view
+//!   (`Logical { key, value, leading_ws, separator,
+//!   after_value }`, `Comment(raw)`, `Blank(raw)`).
+//!   Continuation backslashes are joined into a single
+//!   logical line so a mutation only touches the
+//!   affected block; emit() walks the same vec.
+//! - `value` — `serde_json::Value` projection of the key/value
+//!   pairs, built from dotted-key segments via the
+//!   properties_codec assembly logic. Used by the
+//!   tree pane + JSONPath query (FROZEN F6 — same
+//!   JSONPath syntax as every other studio format).
+//! - `history` — text snapshots backing undo / redo. Same coalesce
+//!   window as the YAML / TOML backends.
+//! - encoding — sniffed at parse time, round-tripped through save
+//!   (FROZEN F16 — windows-1252 / UTF-16 BOM survive
+//!   legacy Spring Boot configs on Windows).
 //!
 //! FROZEN F4: lossless edit is `true`. `.properties` is intrinsically
 //! line-oriented + sequential, so a per-line view is the natural rowan
@@ -259,7 +259,7 @@ fn parse_lines(text: &str) -> Vec<RawLine> {
             value_raw.push_str(&format!("{next_body}{next_eol}"));
         }
 
-        let key      = decode_unicode(&unescape_key(&key_raw));
+        let key      = decode_unicode(&unescape_key(key_raw));
         let value    = decode_unicode(&unescape_value(&join_continuations(&value_raw)));
 
         out.push(RawLine::Logical {
@@ -611,8 +611,7 @@ fn insert_into_tree(
             // spirit as the Field case but for `foo=v` + `foo[1]=w`.
             if let TreeNode::Leaf(existing) = root {
                 let leaf_val = std::mem::take(existing);
-                let mut seq: Vec<Option<TreeNode>> = Vec::new();
-                seq.push(Some(TreeNode::Leaf(leaf_val)));
+                let seq: Vec<Option<TreeNode>> = vec![Some(TreeNode::Leaf(leaf_val))];
                 *root = TreeNode::Sequence(seq);
             }
             // Index-into-Mapping (`foo.bar=v` then `foo[0]=w`) keeps
@@ -1487,7 +1486,7 @@ fn duplicate_at_path(lines: &mut Vec<RawLine>, path: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn move_at_path(lines: &mut Vec<RawLine>, path: &[String], delta: i32) -> Result<()> {
+fn move_at_path(lines: &mut [RawLine], path: &[String], delta: i32) -> Result<()> {
     let target_key = path_to_flat_key(path);
     let idx = lines.iter().position(|l| matches!(l, RawLine::Logical { key, .. } if key == &target_key))
         .ok_or_else(|| AppError::Other(format!("Key not found: `{target_key}`")))?;

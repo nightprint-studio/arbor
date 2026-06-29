@@ -298,6 +298,7 @@
     {:else if item.children && item.children.length}
       <div
         class="submenu-wrap"
+        role="presentation"
         onmouseenter={() => openParent(item.id)}
         onmouseleave={() => leaveParent(item.id)}
       >

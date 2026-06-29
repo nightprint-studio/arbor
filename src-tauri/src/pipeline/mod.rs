@@ -13,7 +13,6 @@
 // resolving.
 pub use corvus_pipeline_api::{builtin, vars};
 pub use corvus_pipeline_api::prelude::{
-    parse_log_level, parse_stage_mode,
     BuiltinSpec, CaptureSource, CaptureSpec, IfBlock,
     LogEvent, LogLevel, LuaOpSpec, PipelineDef, PipelineRun, ResumeCursor, RunContext, RunStatus,
     StageDef, StageMode, StepDef, StepRun, VarValue,
@@ -128,6 +127,7 @@ struct StepOutcome {
     branch:     String,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_step(
     step_def:   &StepDef,
     cwd:        &str,
@@ -1287,7 +1287,7 @@ pub fn discard_run(run_id: &str, rt: Arc<PipelineRuntime>) -> std::result::Resul
     let status = reg.runs.iter().find(|r| r.id == run_id).map(|r| r.status.clone());
     match status {
         None => Err(format!("run '{run_id}' not found")),
-        Some(RunStatus::Running) => Err(format!("cannot discard a Running run — cancel it first")),
+        Some(RunStatus::Running) => Err("cannot discard a Running run — cancel it first".to_string()),
         Some(_) => {
             reg.discard(run_id);
             drop(reg);

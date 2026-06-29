@@ -1,6 +1,4 @@
 <script module lang="ts">
-  import type { Component } from 'svelte';
-
   /** A single selectable row. Domain data (branches, commands, …) is mapped to
    *  this shape by the host before handing sections to the shell. */
   export interface PaletteItem {
@@ -57,7 +55,8 @@
    *                            true to consume the event.
    *  - `emptyMessage` snippet → domain-specific "nothing here" copy.
    */
-  import type { Component, Snippet } from 'svelte';
+  import type { Snippet } from 'svelte';
+  import type { IconComponent } from '$lib/types/icon';
   import { tick } from 'svelte';
   import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
@@ -69,7 +68,7 @@
   interface Props {
     onClose: () => void;
     /** Resolve an icon key to a component. Unknown keys should fall back. */
-    iconResolver: (name: string) => Component;
+    iconResolver: (name: string) => IconComponent;
     /** Host-built sections, already filtered + scored for the current query. */
     sections: PaletteSection[];
     /** The live query — bound so the host can react with its own `$effect`. */
@@ -630,5 +629,4 @@
     color: var(--text-muted);
   }
   .cps-footer span { display: flex; align-items: center; gap: 4px; }
-  .cps-hint-muted kbd { opacity: 0.6; }
 </style>

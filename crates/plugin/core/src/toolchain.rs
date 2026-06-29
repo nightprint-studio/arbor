@@ -49,6 +49,12 @@ pub struct ToolchainRegistry {
     caches:     HashMap<String, Vec<ToolchainEntry>>,
 }
 
+impl Default for ToolchainRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolchainRegistry {
     pub fn new() -> Self {
         Self {

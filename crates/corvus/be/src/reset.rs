@@ -45,7 +45,7 @@ fn reset_to_commit(state: &CorvusState, tab_id: String, oid: String, mode: Reset
                 &g,
                 &repo,
                 RecoveryKind::ResetHard,
-                &format!("reset --hard to {short}"),
+                format!("reset --hard to {short}"),
                 &snapshot_policy(state),
             );
         }

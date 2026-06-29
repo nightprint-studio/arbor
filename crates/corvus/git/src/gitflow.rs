@@ -307,8 +307,8 @@ fn classify_branch(
         (config.prefixes.support.as_str(), GitFlowBranchType::Support),
     ];
     for (prefix, kind) in prefixed {
-        if branch_name.starts_with(prefix) {
-            return (kind, Some(branch_name[prefix.len()..].to_string()));
+        if let Some(stripped) = branch_name.strip_prefix(prefix) {
+            return (kind, Some(stripped.to_string()));
         }
     }
     (GitFlowBranchType::Other, None)
@@ -813,9 +813,11 @@ mod tests {
     fn classify_branch_honours_custom_branch_names() {
         // Edge: non-default main/develop names must classify correctly and not
         // be mistaken for "Other".
-        let mut cfg = GitFlowConfig::default();
-        cfg.main_branch = "master".into();
-        cfg.develop_branch = "dev".into();
+        let cfg = GitFlowConfig {
+            main_branch: "master".into(),
+            develop_branch: "dev".into(),
+            ..Default::default()
+        };
         assert_eq!(classify_branch("master", &cfg), (GitFlowBranchType::Main, None));
         assert_eq!(classify_branch("dev", &cfg), (GitFlowBranchType::Develop, None));
         // "main" is no longer special once main_branch is "master".

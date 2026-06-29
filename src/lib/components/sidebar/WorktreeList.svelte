@@ -353,21 +353,11 @@
   }
 </script>
 
-<SidebarSection
-  label="Worktrees"
-  iconColor="var(--accent)"
-  badge={worktrees.length || null}
-  badgeColor="var(--accent)"
-  bind:expanded
->
-  {#snippet icon()}<Layers size={13} />{/snippet}
-  {#snippet actions()}
-    <button class="add-btn" use:tooltip={'Add linked worktree'} onclick={() => addOpen = true}>
-      <Plus size={11} />
-    </button>
-  {/snippet}
-
-  {#snippet wtBody(wt: WorktreeInfo, leafLabel: string, withLeftPad: boolean)}
+<!-- Declared at template root (not as a `<SidebarSection>` child) so it stays a
+     local renderable snippet rather than being hoisted into SidebarSection's
+     props; it's still lexically in scope for the `{@render wtBody(...)}` calls
+     inside the section below. -->
+{#snippet wtBody(wt: WorktreeInfo, leafLabel: string, withLeftPad: boolean)}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
       class="wt-row"
@@ -432,6 +422,20 @@
         </span>
       {/if}
     </div>
+  {/snippet}
+
+<SidebarSection
+  label="Worktrees"
+  iconColor="var(--accent)"
+  badge={worktrees.length || null}
+  badgeColor="var(--accent)"
+  bind:expanded
+>
+  {#snippet icon()}<Layers size={13} />{/snippet}
+  {#snippet actions()}
+    <button class="add-btn" use:tooltip={'Add linked worktree'} onclick={() => addOpen = true}>
+      <Plus size={11} />
+    </button>
   {/snippet}
 
   {#if worktreeStore.loading}

@@ -74,7 +74,7 @@ fn install_open(ctx: &ApiCtx, lua: &Lua, container_table: &Table) -> Result<()> 
     let handle = ctx.app_ctx.clone();
     let fn_ = lua.create_function(move |_, key: String| {
         if let Some(ref h) = handle {
-            let _ = h.emit("arbor://container-open", serde_json::json!({
+            h.emit("arbor://container-open", serde_json::json!({
                 "container_id": key,
             }));
         }
@@ -88,7 +88,7 @@ fn install_close(ctx: &ApiCtx, lua: &Lua, container_table: &Table) -> Result<()>
     let handle = ctx.app_ctx.clone();
     let fn_ = lua.create_function(move |_, key: String| {
         if let Some(ref h) = handle {
-            let _ = h.emit("arbor://container-close", serde_json::json!({
+            h.emit("arbor://container-close", serde_json::json!({
                 "container_id": key,
             }));
         }

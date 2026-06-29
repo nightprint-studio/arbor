@@ -87,6 +87,10 @@ fn merula_scenes(_ctx: &MerulaState) -> Result<Scenes, String> {
 /// One entry of a launch selection: base track `track` should play the clip that
 /// scene `scene` declares for it (instead of its base pattern). Tracks absent from
 /// the selection keep their base pattern.
+// TODO(clippy): dead_code (fields never read) — `merula_launch` is a W3 stub that
+// discards its `selection`; these fields carry the wire payload the W3 impl will
+// read (substitute each scene's clip into its same-named base track). Flagged, not
+// deleted (removing them breaks the IPC contract the front end already sends).
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClipSelection {
     pub track: u32,

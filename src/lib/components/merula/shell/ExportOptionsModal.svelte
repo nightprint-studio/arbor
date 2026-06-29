@@ -108,7 +108,6 @@
       <div class="card">
         <FormRow label="Format">
           <Select
-            id="export-format"
             value={format}
             options={formatOptions}
             onchange={(v) => projectActions.setExportFormat(v as 'wav' | 'ogg')}

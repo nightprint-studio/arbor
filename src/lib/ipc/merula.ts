@@ -191,6 +191,9 @@ export interface MerulaRenderOpts {
   sample_rate?: number;
   /** `wav` | `ogg` — output container/codec. Defaults to WAV. */
   format?: string;
+  /** Target integrated loudness (LUFS) to normalize the bounce to, or omitted to
+   *  leave levels untouched (the default). A per-export choice, never persisted. */
+  normalize_lufs?: number;
 }
 
 /** Serialize {@link MerulaRenderOpts} to merula-be's snake_case `RenderOpts` wire
@@ -204,6 +207,7 @@ function renderOptsWire(opts: MerulaRenderOpts): Record<string, unknown> {
   if (opts.tail_max_secs !== undefined) wire.tail_max_secs = opts.tail_max_secs;
   if (opts.sample_rate !== undefined) wire.sample_rate = opts.sample_rate;
   if (opts.format !== undefined) wire.format = opts.format;
+  if (opts.normalize_lufs !== undefined) wire.normalize_lufs = opts.normalize_lufs;
   return wire;
 }
 

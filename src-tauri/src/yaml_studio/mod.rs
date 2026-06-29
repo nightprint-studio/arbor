@@ -4,28 +4,28 @@
 //! through the unified `StudioFormatBackend` trait.
 //!
 //! Doc model:
-//!   - `original`  — text the file was opened with, snapshot-immutable.
-//!   - `current`   — live edited buffer the FE sees through `raw_current`.
-//!   - `docs`      — `Vec<yaml_edit::Document>` parsed from `current`.
-//!                   `yaml_edit` is the rowan-based lossless YAML editor
-//!                   (mirror of `toml_edit` for TOML). Comments, quote
-//!                   style, blank lines and anchors survive round-trip.
-//!                   Multi-document streams (`---` separator) become a
-//!                   Vec of length N; single-doc files have a Vec of len
-//!                   1. None when the buffer is unparseable — mutations
-//!                   are rejected but the user can still fix raw text via
-//!                   `set_text`.
-//!   - `value`     — `serde_json::Value` mirror, used for children
-//!                   lookup + JSONPath queries (same trick as TOML/RON:
-//!                   project the format-native AST to JSON for the
-//!                   query engine). Multi-doc projects to an implicit
-//!                   `Value::Array` at the root; single-doc keeps its
-//!                   real root.
-//!   - `history`   — text snapshots backing undo / redo. Typing edits
-//!                   coalesce within ~500 ms; structural mutations
-//!                   never coalesce.
-//!   - encoding    — sniffed at parse time, round-tripped through save
-//!                   (FROZEN F16: windows-1252 / UTF-16 BOM survive).
+//! - `original` — text the file was opened with, snapshot-immutable.
+//! - `current` — live edited buffer the FE sees through `raw_current`.
+//! - `docs` — `Vec<yaml_edit::Document>` parsed from `current`.
+//!   `yaml_edit` is the rowan-based lossless YAML editor
+//!   (mirror of `toml_edit` for TOML). Comments, quote
+//!   style, blank lines and anchors survive round-trip.
+//!   Multi-document streams (`---` separator) become a
+//!   Vec of length N; single-doc files have a Vec of len
+//!   1. None when the buffer is unparseable — mutations
+//!   are rejected but the user can still fix raw text via
+//!   `set_text`.
+//! - `value` — `serde_json::Value` mirror, used for children
+//!   lookup + JSONPath queries (same trick as TOML/RON:
+//!   project the format-native AST to JSON for the
+//!   query engine). Multi-doc projects to an implicit
+//!   `Value::Array` at the root; single-doc keeps its
+//!   real root.
+//! - `history` — text snapshots backing undo / redo. Typing edits
+//!   coalesce within ~500 ms; structural mutations
+//!   never coalesce.
+//! - encoding — sniffed at parse time, round-tripped through save
+//!   (FROZEN F16: windows-1252 / UTF-16 BOM survive).
 //!
 //! FROZEN F9 update for 5.b: YAML save is now LOSSLESS via `yaml_edit`.
 //! Comments, anchor names, quote style, and indentation are preserved.
@@ -1062,7 +1062,7 @@ fn join_documents(docs: &[Document], multi: bool) -> String {
 /// Split a `Vec<String>` path into `(doc_idx, sub_path)` based on the
 /// multi-doc flag. For single-doc files the whole path is the sub-path
 /// and `doc_idx = 0`.
-fn split_doc_path<'a>(path: &'a [String], multi_doc: bool) -> Result<(usize, &'a [String])> {
+fn split_doc_path(path: &[String], multi_doc: bool) -> Result<(usize, &[String])> {
     if !multi_doc {
         return Ok((0, path));
     }

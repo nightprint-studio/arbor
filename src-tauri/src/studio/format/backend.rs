@@ -118,6 +118,8 @@ pub trait StudioFormatBackend: Send + Sync {
             "to_json",
         ))
     }
+    // `from_json`/`to_json` are a symmetric conversion pair, not a constructor.
+    #[allow(clippy::wrong_self_convention)]
     fn from_json(&self, doc_id: &str, json_text: String) -> StudioResult<String> {
         let _ = (doc_id, json_text);
         Err(StudioError::unsupported(
@@ -217,6 +219,8 @@ pub trait StudioFormatBackend: Send + Sync {
     // skip reasons (eval error, container hits, RON-null on non-
     // option, …) per-site. Returns dirty-doc blockers for the
     // project-wide flow (same shape as F12).
+    // Args mirror the bulk-edit IPC payload one-to-one across all backends.
+    #[allow(clippy::too_many_arguments)]
     async fn bulk_edit_preview(
         &self,
         repo_root:    String,
@@ -243,6 +247,7 @@ pub trait StudioFormatBackend: Send + Sync {
     /// globally) and `written_files`/`failed_files` reflect the disk
     /// flush. Per FROZEN F13 every site the FE marks as skipped is
     /// counted in `skipped_sites` but otherwise ignored.
+    #[allow(clippy::too_many_arguments)]
     async fn bulk_edit_apply(
         &self,
         repo_root:    String,

@@ -63,6 +63,7 @@ impl VarValue {
     /// Standard truthiness for conditions:
     /// - Null, Bool(false), Number(0), empty String, empty List → false
     /// - everything else → true
+    ///
     /// Plus the string literals "false" / "0" / "" / "no" / "off" → false
     /// so a captured `success` flag from a shell `echo` works intuitively.
     pub fn truthy(&self) -> bool {

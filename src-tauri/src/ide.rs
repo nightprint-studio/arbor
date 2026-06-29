@@ -65,7 +65,7 @@ pub struct DetectedIde {
 pub fn open_in_ide(path: &str, ide_command: &str, extra_args: &[String]) -> Result<()> {
     #[cfg(windows)]
     {
-        return spawn_ide_windows(path, ide_command, extra_args);
+        spawn_ide_windows(path, ide_command, extra_args)
     }
 
     #[cfg(not(windows))]

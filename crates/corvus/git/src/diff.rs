@@ -936,7 +936,7 @@ pub fn get_file_blame(repo: &Repository, path: &str) -> Result<Vec<BlameLine>> {
                 .trim_end_matches('\r')
                 .to_string();
 
-            let is_group_start = i == 0 && prev_oid.map_or(true, |p| p != oid);
+            let is_group_start = i == 0 && prev_oid != Some(oid);
 
             result.push(BlameLine {
                 line_no,
@@ -1202,8 +1202,8 @@ fn assemble(
     let mut prev_oid: Option<&str> = None;
     let empty = CommitMeta::default();
 
-    for i in 0..total {
-        let oid = owner[i].as_deref().unwrap_or("");
+    for (i, owner_oid) in owner.iter().enumerate().take(total) {
+        let oid = owner_oid.as_deref().unwrap_or("");
         let is_zero = oid.is_empty() || oid.chars().all(|c| c == '0');
         let meta = metas.get(oid).unwrap_or(&empty);
 

@@ -47,7 +47,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, arbor: &Table) -> Result<()> {
                 "path":   path,
                 "title":  title,
             });
-            let _ = h.emit("arbor://ron-studio-open", payload);
+            h.emit("arbor://ron-studio-open", payload);
         }
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;

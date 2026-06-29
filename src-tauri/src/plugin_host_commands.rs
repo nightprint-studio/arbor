@@ -4,7 +4,7 @@
 //! declaratively (`dispatch = { kind = "command", id = "arbor:git.commit" }`)
 //! or at runtime (`arbor.command.fire("arbor:git.commit", ctx)`). Resolution +
 //! both capability gates run in `arbor_plugin_core` (`PluginHost::invoke_command`
-//! + `host_command_required`); a gated invocation reaches this module through
+//! plus `host_command_required`); a gated invocation reaches this module through
 //! `TauriAppCtx::invoke_host_command`.
 //!
 //! Handlers reuse the existing `#[tauri::command]` functions verbatim — no git

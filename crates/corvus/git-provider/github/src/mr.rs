@@ -19,7 +19,7 @@ use crate::http::{classify, GithubHttp};
 // Delegate helpers (destructuring / validation)
 // ---------------------------------------------------------------------------
 
-fn repo_parts<'a>(repo: &'a RepoRef) -> Result<(&'a str, &'a str), ProviderError> {
+fn repo_parts(repo: &RepoRef) -> Result<(&str, &str), ProviderError> {
     let owner = repo.owner_or_path.as_str();
     let name = repo.name.as_deref().ok_or_else(|| {
         ProviderError::BadRequest("GitHub RepoRef requires name".into())
@@ -27,7 +27,7 @@ fn repo_parts<'a>(repo: &'a RepoRef) -> Result<(&'a str, &'a str), ProviderError
     Ok((owner, name))
 }
 
-fn id_parts<'a>(id: &'a MrId) -> Result<(&'a str, &'a str, u64), ProviderError> {
+fn id_parts(id: &MrId) -> Result<(&str, &str, u64), ProviderError> {
     if !matches!(id.provider, ProviderKind::GitHub) {
         return Err(ProviderError::BadRequest(
             "MrId provider mismatch (expected GitHub)".into(),
@@ -1212,7 +1212,7 @@ fn github_pr_to_mr(p: GhPr, _owner: &str, _repo: &str) -> MergeRequest {
         "closed" => MrState::Closed,
         _ => MrState::Open,
     };
-    let auto_merge_enabled = p.auto_merge.as_ref().map_or(false, |v| !v.is_null());
+    let auto_merge_enabled = p.auto_merge.as_ref().is_some_and(|v| !v.is_null());
     MergeRequest {
         number: p.number,
         title: p.title,
@@ -1251,7 +1251,7 @@ fn github_pr_detail_to_mr(p: GhPrDetail, _owner: &str, _repo: &str) -> MrDetail 
         ("closed", _) => MrState::Closed,
         _ => MrState::Open,
     };
-    let auto_merge_enabled = p.auto_merge.as_ref().map_or(false, |v| !v.is_null());
+    let auto_merge_enabled = p.auto_merge.as_ref().is_some_and(|v| !v.is_null());
     let mr = MergeRequest {
         number: p.number,
         title: p.title,

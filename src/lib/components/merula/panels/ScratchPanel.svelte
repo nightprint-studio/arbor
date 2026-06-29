@@ -162,6 +162,10 @@
   }
 </script>
 
+<!-- The keydown handler only catches a shortcut (Ctrl/Cmd+Enter) that bubbles up
+     from the CodeMirror editor — the container itself isn't a focus target, so the
+     noninteractive-listener rule is a false positive here. -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div class="scr" onkeydown={onKeydown} role="group">
   <BottomPanelHeader title="Scratch" onClose={() => merulaStore.toggleBottom('scratch')}>
     {#snippet icon()}<FlaskConical size={13} />{/snippet}

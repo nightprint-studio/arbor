@@ -24,18 +24,8 @@ pub struct Time {
     den: i64,
 }
 
-/// Greatest common divisor (Euclid), always non-negative.
-fn gcd(a: i64, b: i64) -> i64 {
-    let (mut a, mut b) = (a.unsigned_abs(), b.unsigned_abs());
-    while b != 0 {
-        let t = b;
-        b = a % b;
-        a = t;
-    }
-    a as i64
-}
-
-/// Same, over `i128`, used while a product is still wide.
+/// Greatest common divisor (Euclid) over `i128`, always non-negative; used while
+/// a product is still wide.
 fn gcd128(a: i128, b: i128) -> i128 {
     let (mut a, mut b) = (a.unsigned_abs(), b.unsigned_abs());
     while b != 0 {

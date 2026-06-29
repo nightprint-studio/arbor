@@ -344,7 +344,7 @@ impl<'a> Parser<'a> {
             let mut digits = String::new();
             while let Some(c) = self.peek_char() {
                 if c == '_' { self.advance(1); continue; }
-                if c.to_digit(radix).is_some() { digits.push(c); self.advance(c.len_utf8()); }
+                if c.is_digit(radix) { digits.push(c); self.advance(c.len_utf8()); }
                 else { break; }
             }
             // Strip optional integer-type suffix like `_i32`, `i32`, `u64` etc.

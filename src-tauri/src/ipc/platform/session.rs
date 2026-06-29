@@ -28,16 +28,10 @@ pub struct PersistedTab {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionState {
     pub tabs: Vec<PersistedTab>,
     pub active_path: Option<String>,
-}
-
-impl Default for SessionState {
-    fn default() -> Self {
-        Self { tabs: vec![], active_path: None }
-    }
 }
 
 // ---------------------------------------------------------------------------

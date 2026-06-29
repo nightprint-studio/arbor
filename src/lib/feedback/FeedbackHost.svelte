@@ -35,7 +35,7 @@
 
   let { id, main = false, children }: { id: string; main?: boolean; children?: Snippet } = $props();
 
-  const accepts = makeAccepts(id, main);
+  const accepts = $derived(makeAccepts(id, main));
 
   // Unified bottom-right feed: toasts + freshly-added notifications, oldest
   // first (new ones append just above the operations zone). Only transient

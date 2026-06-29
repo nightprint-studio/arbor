@@ -9,6 +9,7 @@
   to bring it back, or simply omit `dismissable` and drive visibility itself.
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { X, ChevronDown } from 'lucide-svelte';
   import Alert   from '$lib/components/shared/ui/Alert.svelte';
   import Callout from '$lib/components/shared/ui/Callout.svelte';
@@ -40,7 +41,7 @@
   }: Props = $props();
 
   let dismissed   = $state(false);
-  let isCollapsed = $state(collapsed);
+  let isCollapsed = $state(untrack(() => collapsed));
 
   const calloutVariant = $derived(
     variant === 'error'   ? 'danger' :

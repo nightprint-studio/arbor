@@ -5,16 +5,15 @@
 //!
 //!   * `consts`    — API contract version, app version, host OS string
 //!   * `manifest/` — `plugin.toml` discovery + topological sort + persisted
-//!                   enabled-state file. The pure-data manifest shapes
-//!                   (`Manifest`, `Permissions`, `Hooks`, …) live in the
-//!                   `arbor-plugin-types` crate; this module re-exports
-//!                   what the rest of the host historically reached for
-//!                   under `crate::plugin::runtime::manifest::*`.
+//!     enabled-state file. The pure-data manifest shapes (`Manifest`,
+//!     `Permissions`, `Hooks`, …) live in the `arbor-plugin-types` crate;
+//!     this module re-exports what the rest of the host historically reached
+//!     for under `crate::plugin::runtime::manifest::*`.
 //!   * `loaded`    — `LoadedPlugin` / `DormantPlugin` + per-plugin cancel maps
 //!   * `host/`     — `PluginHost` registry, lifecycle, hooks, services,
-//!                   pipeline-op invocation, frontend-facing introspection
+//!     pipeline-op invocation, frontend-facing introspection
 //!   * `scheduler/`— OS-thread scheduler engine (fixed_rate / fixed_delay /
-//!                   cron) with focus-gated firing
+//!     cron) with focus-gated firing
 //!
 //! Everything that was previously importable as `crate::plugin::runtime::*`
 //! is re-exported flat from this module so existing callers keep compiling.

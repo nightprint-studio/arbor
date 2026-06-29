@@ -25,7 +25,7 @@ pub fn fs_open_in_arbor(app: AppHandle, path: String) -> Result<(), AppError> {
         .workdir()
         .ok_or_else(|| AppError::Other("bare repository".into()))?
         .to_string_lossy()
-        .trim_end_matches(|c| c == '/' || c == '\\')
+        .trim_end_matches(['/', '\\'])
         .to_string();
 
     // Window focus must happen on the main/UI thread (WebView2 constraint).

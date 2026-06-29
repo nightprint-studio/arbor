@@ -764,7 +764,7 @@ pub fn get_stash_file_content(
     let enc = match encoding_override {
         Some(label) => encoding_for_label(label),
         None => current_bytes.as_deref()
-            .or_else(|| stash_bytes.as_deref())
+            .or(stash_bytes.as_deref())
             .map(detect)
             .unwrap_or(encoding_rs::UTF_8),
     };

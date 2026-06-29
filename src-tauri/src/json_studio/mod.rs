@@ -2,15 +2,15 @@
 //!
 //! Owned by `JsonBackend` (see `backend_impl.rs`) which exposes it
 //! through the unified `StudioFormatBackend` trait. The doc model:
-//!   - `original`  — text the file was opened with, snapshot-immutable.
-//!   - `current`   — live edited buffer the FE sees through `raw_current`.
-//!   - `ast`       — `jsonc-parser`-derived owned tree with byte ranges,
-//!                   used by every mutation (path resolution + byte
-//!                   splice). Refreshed after every successful edit.
-//!   - `history`   — text snapshots backing undo / redo. Typing edits
-//!                   coalesce within ~500 ms; structural mutations
-//!                   (`apply_mutation`) never coalesce.
-//!   - encoding    — sniffed at parse time, round-tripped through save.
+//! - `original` — text the file was opened with, snapshot-immutable.
+//! - `current` — live edited buffer the FE sees through `raw_current`.
+//! - `ast` — `jsonc-parser`-derived owned tree with byte ranges,
+//!   used by every mutation (path resolution + byte
+//!   splice). Refreshed after every successful edit.
+//! - `history` — text snapshots backing undo / redo. Typing edits
+//!   coalesce within ~500 ms; structural mutations
+//!   (`apply_mutation`) never coalesce.
+//! - encoding — sniffed at parse time, round-tripped through save.
 //!
 //! Mutations are *position-preserving*: editing a value at line 500
 //! splices bytes at line 500 only — everything else stays byte-for-byte

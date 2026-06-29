@@ -373,8 +373,10 @@ mod tests {
 
     #[test]
     fn has_method_is_exact_once_probed() {
-        let mut caps = BrpCapabilities::default();
-        caps.methods = vec!["world.query".into()];
+        let caps = BrpCapabilities {
+            methods: vec!["world.query".into()],
+            ..Default::default()
+        };
         assert!(caps.has_method("world.query"));
         assert!(!caps.has_method("world.spawn_entity"));
     }

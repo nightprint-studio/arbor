@@ -4,51 +4,21 @@ use crate::error::{AppError, Result};
 // `crate::git_provider::oauth::{gitlab_flow, github_flow}`. The
 // `try_refresh_if_stale` helpers there acquire the lock and coalesce
 // concurrent 401-driven refreshes for us — the senders below just call them.
+//
+// CI REST behavior + provider detection now live behind the `GitProvider` trait
+// (the github/gitlab crates) and the pure `CiProviderInfo` detector in the
+// backend; this module keeps only token retrieval, the keyring-coupled
+// `has_token` probe, and the shared 401-refresh senders still used by the
+// avatar/commit-graph lookups.
 
 // ---------------------------------------------------------------------------
-// Public types — defined in `corvus-git-provider-api`, re-exported here so the
-// detection helpers below and external `ci_impl::*` call sites keep resolving.
-// CI REST behavior now lives behind the `GitProvider` trait (the github/gitlab
-// crates); this module keeps only provider detection, token retrieval, and the
-// shared 401-refresh senders still used by the avatar/commit-graph lookups.
+// Token probe
 // ---------------------------------------------------------------------------
-
-pub use corvus_git_provider_api::ci::*;
-
-// ---------------------------------------------------------------------------
-// Provider detection
-// ---------------------------------------------------------------------------
-
-/// Given a list of remote URLs, detect the first GitHub or GitLab remote.
-/// Prefers "origin"; otherwise returns the first match. URL parsing is the pure
-/// `CiProviderInfo::detect_from_remotes` (shared with the OOP backend); this
-/// wrapper only fills the keyring-coupled `has_token` probe.
-pub fn detect_from_remotes(
-    remotes: &[(String, String)], // (name, url)
-) -> Option<CiProviderInfo> {
-    let ordered = remotes.iter()
-        .filter(|(n, _)| n == "origin")
-        .chain(remotes.iter().filter(|(n, _)| n != "origin"));
-
-    for (_, url) in ordered {
-        if let Some(info) = detect_from_url(url) {
-            return Some(info);
-        }
-    }
-    None
-}
-
-/// Detect provider from a single remote URL. Delegates the parsing to the pure
-/// `corvus-git-provider-api` detector and fills `has_token` from the keyring.
-pub fn detect_from_url(url: &str) -> Option<CiProviderInfo> {
-    let mut info = CiProviderInfo::detect_from_url(url)?;
-    info.has_token = has_token_for(&info.provider, info.gitlab_base_url.as_deref());
-    Some(info)
-}
 
 /// Whether a credential is stored for the given provider (keyring-coupled).
-/// Single source for both [`detect_from_url`] and the `__has_token` reverse-channel
-/// host method that fills `has_token` for the OOP `get_ci_provider`.
+/// Backs the `__has_token` reverse-channel host method that fills `has_token`
+/// for the OOP `get_ci_provider` (provider detection itself now runs in the
+/// backend off the pure `CiProviderInfo` detector).
 pub fn has_token_for(provider: &str, gitlab_base_url: Option<&str>) -> bool {
     match provider {
         "github" => get_github_token().ok().flatten().is_some(),

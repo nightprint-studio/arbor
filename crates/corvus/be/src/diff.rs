@@ -101,6 +101,10 @@ fn get_commits_range_diff_meta(
     .map_err(|e| e.to_string())
 }
 
+// IPC handler: each parameter is a wire field, so it can't collapse into a
+// params struct without changing the RPC contract (matches the convention in
+// `issues.rs` / `remote.rs`).
+#[allow(clippy::too_many_arguments)]
 #[arbor_rpc::handler]
 fn get_commits_range_file_diff(
     state: &CorvusState,

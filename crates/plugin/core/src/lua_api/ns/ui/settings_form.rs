@@ -83,7 +83,7 @@ fn install_open(ctx: &ApiCtx, lua: &Lua, settings_ui: &Table) -> Result<()> {
     let handle = ctx.app_ctx.clone();
     let fn_ = lua.create_function(move |_, (target_plugin, panel_id): (String, String)| {
         if let Some(ref h) = handle {
-            let _ = h.emit("arbor://container-open", serde_json::json!({
+            h.emit("arbor://container-open", serde_json::json!({
                 "container_id": format!("{}::{}", target_plugin, panel_id),
             }));
         }
@@ -99,7 +99,7 @@ fn install_close(ctx: &ApiCtx, lua: &Lua, settings_ui: &Table) -> Result<()> {
     let handle = ctx.app_ctx.clone();
     let fn_ = lua.create_function(move |_, ()| {
         if let Some(ref h) = handle {
-            let _ = h.emit("arbor://container-close", serde_json::json!({
+            h.emit("arbor://container-close", serde_json::json!({
                 "container_id": "",
             }));
         }

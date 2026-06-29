@@ -179,6 +179,9 @@ struct ParsedWav {
     /// Velocity-layer key (`v1`, `mf`, …); `None` when the name carries none.
     vel: Option<String>,
     /// Round-robin variant index (1-based) when the name carries one.
+    // TODO(clippy): dead_code (never read) — `parse_wav` already extracts this, but
+    // the SFZ emitter does not yet write `seq_position`/`seq_length` round-robin
+    // groups. Kept so the round-robin info survives parsing for that follow-up.
     rr: Option<u32>,
 }
 

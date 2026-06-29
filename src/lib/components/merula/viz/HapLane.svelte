@@ -249,6 +249,16 @@
     if (e.ctrlKey || e.metaKey) ongoto?.(h);
     else onpick?.(h);
   }
+
+  /** Keyboard twin of {@link pick}: Enter/Space activates the hap; Ctrl/Cmd
+   *  jumps to its source span (same modifier semantics as a click). */
+  function pickKey(h: MerulaQueryHap, e: KeyboardEvent) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.ctrlKey || e.metaKey) ongoto?.(h);
+    else onpick?.(h);
+  }
 </script>
 
 <div class="haplane" class:dimmed style="--c: {color}; width: {view * px}px;">
@@ -256,15 +266,17 @@
        carries no discrete blocks, so this is its only representation. -->
   {#if contBox}
     {@const h = lane.haps[0]}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
       class="region cont"
       class:active={contActive}
       class:selected={selectedKey === `${lane.track}:cont`}
       class:span-sel={inSelection?.(lane.haps[0])}
       style="left: {contBox.x}px; width: {contBox.w}px;"
+      role="button"
+      tabindex="0"
       use:tooltip={hapTip(h)}
       onclick={(e) => pick(h, e)}
+      onkeydown={(e) => pickKey(h, e)}
     >
       {#if wave}
         <svg class="wave" viewBox="0 0 100 {SVG_H}" preserveAspectRatio="none" aria-hidden="true">
@@ -290,7 +302,6 @@
   {#each blocks as b (b.key)}
     {@const active = playing && playCycle >= b.start && playCycle < b.end}
     {@const wide = b.w >= 26}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
       class="hap"
       class:drum={b.kind === 'audio'}
@@ -300,8 +311,11 @@
       class:muffled={showWave && b.kind === 'audio'}
       class:vel={showVelocity}
       style="left: {b.x}px; width: {b.w}px; top: {b.top}%; height: {b.h}%; --vel: {b.vel};"
+      role="button"
+      tabindex="0"
       use:tooltip={hapTip(b.hap)}
       onclick={(e) => pick(b.hap, e)}
+      onkeydown={(e) => pickKey(b.hap, e)}
     >
       {#if arrViewOptions.labels && wide && b.label}
         <span class="hap-label">{b.label}</span>

@@ -127,10 +127,8 @@ fn install_spawn(
                 .unwrap_or(None)
                 .map(|t| {
                     let mut pairs = Vec::new();
-                    for pair in t.pairs::<String, String>() {
-                        if let Ok((k, v)) = pair {
-                            pairs.push((k, v));
-                        }
+                    for (k, v) in t.pairs::<String, String>().flatten() {
+                        pairs.push((k, v));
                     }
                     pairs
                 })

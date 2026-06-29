@@ -7,8 +7,8 @@
    * this component supplies the live name filter, the header, and the per-symbol
    * row. One mount in the MerulaShell.
    */
-  import { ListTree, Music4, Braces, Variable, Import } from 'lucide-svelte';
-  import type { Component } from 'svelte';
+  import { ListTree, Music4, Braces, Variable, Import, MapPin } from 'lucide-svelte';
+  import type { IconComponent } from '$lib/types/icon';
   import FloatingPicker from './FloatingPicker.svelte';
   import { merulaStore } from '../merula-store.svelte';
   import { structureStore } from '../stores/structure.svelte';
@@ -32,11 +32,11 @@
     if (structureStore.open) filterText = '';
   });
 
-  const KIND_ICON: Record<MerulaSymbolKind, Component> = {
-    track: Music4, fn: Braces, let: Variable, import: Import,
+  const KIND_ICON: Record<MerulaSymbolKind, IconComponent> = {
+    track: Music4, fn: Braces, let: Variable, import: Import, section: MapPin,
   };
   const KIND_LABEL: Record<MerulaSymbolKind, string> = {
-    track: 'track', fn: 'fn', let: 'let', import: 'import',
+    track: 'track', fn: 'fn', let: 'let', import: 'import', section: 'section',
   };
 
   function jump(s: MerulaSymbol) {

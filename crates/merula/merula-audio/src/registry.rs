@@ -162,6 +162,27 @@ enum Entry {
     },
 }
 
+/// A per-onset voice resolution request — the inputs [`Registry::resolve`] reads
+/// to pick a concrete voice. Grouped into one struct so the RT call site passes a
+/// single named bundle instead of a long positional list. All fields are borrowed
+/// or `Copy`, so building one allocates nothing.
+///
+/// Field semantics: `inst` takes priority over `sound` (a melodic instrument over
+/// a drum leaf); `variant` is the `:n` sample-variant index (`None` → round-robin
+/// by `seed`); `note`/`vel` choose the SFZ region; `art` selects an articulation
+/// (keyswitch or alternate region set); `seed` is the deterministic onset seed
+/// driving round-robin variant choice.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct VoiceRequest<'a> {
+    pub sound: Option<&'a str>,
+    pub inst: Option<&'a str>,
+    pub variant: Option<u32>,
+    pub note: Option<f32>,
+    pub vel: f32,
+    pub art: Option<&'a str>,
+    pub seed: u64,
+}
+
 /// What [`Registry::resolve`] produces: a concrete voice description the renderer
 /// turns into runtime DSP state. RT-safe — built from resident data only.
 ///
@@ -545,42 +566,27 @@ impl Registry {
         Ok(arts)
     }
 
-    /// Resolve a named source to a concrete voice.
-    ///
-    /// `inst` takes priority over `sound` (a melodic instrument over a drum
-    /// leaf); `variant` is the `:n` sample-variant index (`None` → round-robin by
-    /// `seed`); `note`/`vel` choose the SFZ region; `art` selects an articulation
-    /// (keyswitch or alternate region set); `seed` is the deterministic onset seed
-    /// driving round-robin variant choice. Anything unresolved → the fallback
-    /// synth. **RT-safe**: reads resident state only.
+    /// Resolve a named source to a concrete voice. Anything unresolved → the
+    /// fallback synth. **RT-safe**: reads resident state only.
     ///
     /// Crate-internal: called by the renderer per voice trigger.
-    pub(crate) fn resolve(
-        &self,
-        sound: Option<&str>,
-        inst: Option<&str>,
-        variant: Option<u32>,
-        note: Option<f32>,
-        vel: f32,
-        art: Option<&str>,
-        seed: u64,
-    ) -> ResolvedVoice {
+    pub(crate) fn resolve(&self, req: VoiceRequest) -> ResolvedVoice {
         // Prefer an explicit instrument, then a sound leaf. Apply a name alias
         // (one hop) before the lookup so `s("kick")` resolves its target voice.
-        let name = inst.or(sound);
+        let name = req.inst.or(req.sound);
         let resolved = name.map(|n| self.aliases.get(n).map(String::as_str).unwrap_or(n));
         let entry = resolved.and_then(|n| self.entries.get(n));
 
         match entry {
             Some(Entry::Synth(preset)) => ResolvedVoice::Synth(*preset),
             Some(Entry::Sample { variants }) => self
-                .resolve_sample(variants, variant, seed)
+                .resolve_sample(variants, req.variant, req.seed)
                 .unwrap_or(ResolvedVoice::Synth(self.fallback)),
             Some(Entry::Sfz {
                 instrument,
                 articulations,
             }) => self
-                .resolve_sfz(*instrument, articulations, note, vel, art, seed)
+                .resolve_sfz(*instrument, articulations, req.note, req.vel, req.art, req.seed)
                 .unwrap_or(ResolvedVoice::Synth(self.fallback)),
             None => ResolvedVoice::Synth(self.fallback),
         }
@@ -671,11 +677,6 @@ impl Registry {
             .find(|k| k.replace('\\', "/").ends_with(&needle))
             .map(|k| k.to_string());
         matched.and_then(|k| self.bank.get(&k))
-    }
-
-    /// Direct access to the bank for tests / the renderer's offline path.
-    pub(crate) fn bank(&self) -> &SampleBank {
-        &self.bank
     }
 
     /// The fallback synth preset (used by the renderer for unresolved File
@@ -921,7 +922,12 @@ file = \"strings/violin.sfz\"
     #[test]
     fn unresolved_name_falls_back_to_synth() {
         let reg = Registry::new();
-        match reg.resolve(Some("nope"), None, None, Some(60.0), 0.8, None, 0) {
+        match reg.resolve(VoiceRequest {
+            sound: Some("nope"),
+            note: Some(60.0),
+            vel: 0.8,
+            ..Default::default()
+        }) {
             ResolvedVoice::Synth(_) => {}
             _ => panic!("expected synth fallback"),
         }
@@ -932,17 +938,32 @@ file = \"strings/violin.sfz\"
         let mut reg = Registry::new();
         reg.install_builtin_synths();
         for name in ["synth.bass", "synth.pad", "synth.pluck", "synth.lead"] {
-            match reg.resolve(None, Some(name), None, Some(60.0), 0.8, None, 0) {
+            match reg.resolve(VoiceRequest {
+                inst: Some(name),
+                note: Some(60.0),
+                vel: 0.8,
+                ..Default::default()
+            }) {
                 ResolvedVoice::Synth(_) => {}
                 other => panic!("`{name}` should resolve to a synth preset, got {other:?}"),
             }
         }
         // The pad is the soft triangle; the bass is the saw.
-        match reg.resolve(None, Some("synth.pad"), None, Some(60.0), 0.8, None, 0) {
+        match reg.resolve(VoiceRequest {
+            inst: Some("synth.pad"),
+            note: Some(60.0),
+            vel: 0.8,
+            ..Default::default()
+        }) {
             ResolvedVoice::Synth(p) => assert_eq!(p.shape, SynthShape::Wave(Waveform::Triangle)),
             _ => unreachable!(),
         }
-        match reg.resolve(None, Some("synth.bass"), None, Some(60.0), 0.8, None, 0) {
+        match reg.resolve(VoiceRequest {
+            inst: Some("synth.bass"),
+            note: Some(60.0),
+            vel: 0.8,
+            ..Default::default()
+        }) {
             ResolvedVoice::Synth(p) => assert_eq!(p.shape, SynthShape::Wave(Waveform::Saw)),
             _ => unreachable!(),
         }
@@ -964,7 +985,12 @@ file = \"strings/violin.sfz\"
             ("triangle", Waveform::Triangle),
             ("tri", Waveform::Triangle),
         ] {
-            match reg.resolve(Some(name), None, None, Some(60.0), 0.8, None, 0) {
+            match reg.resolve(VoiceRequest {
+                sound: Some(name),
+                note: Some(60.0),
+                vel: 0.8,
+                ..Default::default()
+            }) {
                 ResolvedVoice::Synth(p) => {
                     assert_eq!(p.shape, SynthShape::Wave(want), "`{name}` should be {want:?}");
                     // Gate envelope: full sustain so the note holds for its duration.
@@ -986,7 +1012,12 @@ file = \"strings/violin.sfz\"
             ("brown", SynthShape::Noise(NoiseColor::Brown)),
             ("crackle", SynthShape::Noise(NoiseColor::Crackle)),
         ] {
-            match reg.resolve(Some(name), None, None, Some(60.0), 0.8, None, 0) {
+            match reg.resolve(VoiceRequest {
+                sound: Some(name),
+                note: Some(60.0),
+                vel: 0.8,
+                ..Default::default()
+            }) {
                 ResolvedVoice::Synth(p) => assert_eq!(p.shape, want, "`{name}`"),
                 other => panic!("`{name}` should resolve to a synth, got {other:?}"),
             }
@@ -1003,7 +1034,12 @@ file = \"strings/violin.sfz\"
                 ..SynthPreset::default()
             },
         );
-        match reg.resolve(None, Some("synth.pad"), None, Some(60.0), 0.8, None, 0) {
+        match reg.resolve(VoiceRequest {
+            inst: Some("synth.pad"),
+            note: Some(60.0),
+            vel: 0.8,
+            ..Default::default()
+        }) {
             ResolvedVoice::Synth(p) => assert_eq!(p.shape, SynthShape::Wave(Waveform::Triangle)),
             _ => panic!("expected synth"),
         }
@@ -1023,7 +1059,13 @@ file = \"strings/violin.sfz\"
             "hh".to_string(),
             Entry::Sample { variants: vec!["a".into(), "b".into(), "c".into()] },
         );
-        let pick = |variant, seed| match reg.resolve(Some("hh"), None, variant, None, 0.8, None, seed) {
+        let pick = |variant, seed| match reg.resolve(VoiceRequest {
+            sound: Some("hh"),
+            variant,
+            vel: 0.8,
+            seed,
+            ..Default::default()
+        }) {
             ResolvedVoice::Sample { sample, .. } => sample.sample_rate,
             other => panic!("expected a sample, got {other:?}"),
         };

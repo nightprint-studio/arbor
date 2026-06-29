@@ -19,10 +19,10 @@ pub enum AccessLevel {
     Write,
 }
 
-/// Git permission with an extra `HistoryRewrite` tier. `HistoryRewrite >= Write
-/// >= Read >= None`. History-rewriting operations (rebase, reset --hard,
-/// force-push, amend, filter-branch) are granted separately because they can
-/// permanently destroy work.
+/// Git permission with an extra `HistoryRewrite` tier, ordered
+/// `HistoryRewrite >= Write >= Read >= None`. History-rewriting operations
+/// (rebase, reset --hard, force-push, amend, filter-branch) are granted
+/// separately because they can permanently destroy work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum GitLevel {

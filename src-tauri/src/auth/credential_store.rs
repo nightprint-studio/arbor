@@ -6,7 +6,7 @@ const SERVICE: &str = "arbor-git-client";
 
 /// Save (or update) a credential in the OS native store.
 pub fn save(host: &str, _username: &str, password: &str) -> Result<()> {
-    let entry = Entry::new(SERVICE, &format!("{host}"))
+    let entry = Entry::new(SERVICE, host)
         .map_err(|e| AppError::AuthFailed(e.to_string()))?;
     entry
         .set_password(password)
@@ -15,7 +15,7 @@ pub fn save(host: &str, _username: &str, password: &str) -> Result<()> {
 
 /// Retrieve a stored credential. Returns `None` if not found.
 pub fn get(host: &str, _username: &str) -> Result<Option<String>> {
-    let entry = Entry::new(SERVICE, &format!("{host}"))
+    let entry = Entry::new(SERVICE, host)
         .map_err(|e| AppError::AuthFailed(e.to_string()))?;
     match entry.get_password() {
         Ok(pw) => Ok(Some(pw)),
@@ -26,7 +26,7 @@ pub fn get(host: &str, _username: &str) -> Result<Option<String>> {
 
 /// Delete a stored credential.
 pub fn delete(host: &str, _username: &str) -> Result<()> {
-    let entry = Entry::new(SERVICE, &format!("{host}"))
+    let entry = Entry::new(SERVICE, host)
         .map_err(|e| AppError::AuthFailed(e.to_string()))?;
     match entry.delete_credential() {
         Ok(()) => Ok(()),
@@ -46,7 +46,7 @@ pub fn delete(host: &str, _username: &str) -> Result<()> {
 /// Save or replace the default credential for a host/URL.
 pub fn save_for_host(url_or_host: &str, username: &str, password: &str) -> Result<()> {
     let host = extract_host(url_or_host).unwrap_or_else(|| url_or_host.to_string());
-    let entry = Entry::new(SERVICE, &format!("{host}"))
+    let entry = Entry::new(SERVICE, &host)
         .map_err(|e| AppError::AuthFailed(e.to_string()))?;
     let combined = format!("{username}\t{password}");
     entry
@@ -57,7 +57,7 @@ pub fn save_for_host(url_or_host: &str, username: &str, password: &str) -> Resul
 /// Retrieve the default (username, password/token) for a host/URL.
 pub fn get_for_host(url_or_host: &str) -> Result<Option<(String, String)>> {
     let host = extract_host(url_or_host).unwrap_or_else(|| url_or_host.to_string());
-    let entry = Entry::new(SERVICE, &format!("{host}"))
+    let entry = Entry::new(SERVICE, &host)
         .map_err(|e| AppError::AuthFailed(e.to_string()))?;
     match entry.get_password() {
         Ok(s) => {
@@ -75,7 +75,7 @@ pub fn get_for_host(url_or_host: &str) -> Result<Option<(String, String)>> {
 /// Delete the default credential for a host/URL.
 pub fn delete_for_host(url_or_host: &str) -> Result<()> {
     let host = extract_host(url_or_host).unwrap_or_else(|| url_or_host.to_string());
-    let entry = Entry::new(SERVICE, &format!("{host}"))
+    let entry = Entry::new(SERVICE, &host)
         .map_err(|e| AppError::AuthFailed(e.to_string()))?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),

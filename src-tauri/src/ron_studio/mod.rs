@@ -962,6 +962,9 @@ impl RonStudioRegistry {
             .map_err(|e| AppError::Other(format!("JSON serialize: {e}")))
     }
 
+    // `from_json`/`to_json` are a symmetric conversion pair on the registry,
+    // not a constructor — it needs `&self` to resolve the doc's indent style.
+    #[allow(clippy::wrong_self_convention)]
     pub fn from_json(&self, doc_id: &str, json_text: &str) -> Result<String> {
         let indent = self.doc(doc_id).map(|d| d.indent.clone()).unwrap_or_else(|_| "  ".to_string());
         let j: serde_json::Value = serde_json::from_str(json_text)

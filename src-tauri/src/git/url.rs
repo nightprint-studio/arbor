@@ -1,8 +1,8 @@
-/// Git remote URL utilities shared by multiple modules.
-///
-/// Centralises the two URL-transformation functions that were previously
-/// duplicated between `auth/credential_store.rs` (`extract_host`) and
-/// `commands/remote_commands.rs` (`normalize_remote_to_https`).
+//! Git remote URL utilities shared by multiple modules.
+//!
+//! Centralises the two URL-transformation functions that were previously
+//! duplicated between `auth/credential_store.rs` (`extract_host`) and
+//! `commands/remote_commands.rs` (`normalize_remote_to_https`).
 
 // ---------------------------------------------------------------------------
 // Host extraction
@@ -104,9 +104,7 @@ pub fn canonical_key(input: &str) -> Option<String> {
         s.to_string()
     };
 
-    let mut split = host_path.splitn(2, '/');
-    let host_with_port = split.next()?;
-    let path           = split.next()?;
+    let (host_with_port, path) = host_path.split_once('/')?;
     // Drop ":port" if present.
     let host = host_with_port.split(':').next()?.trim().to_lowercase();
     if host.is_empty() { return None; }

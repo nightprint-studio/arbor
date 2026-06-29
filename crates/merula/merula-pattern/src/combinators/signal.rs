@@ -13,7 +13,6 @@
 use crate::hap::Hap;
 use crate::pattern::Pattern;
 use crate::span::TimeSpan;
-use crate::time::Time;
 
 /// Build a continuous `Pattern<f64>` from a phase→value waveform. `phase` is the
 /// cycle-relative position in `0..1`; `wave` returns the unipolar `0..1` sample.
@@ -62,6 +61,7 @@ impl Pattern<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::Time;
 
     fn at(p: &Pattern<f64>, pos: Time) -> f64 {
         p.value_at(pos).unwrap()

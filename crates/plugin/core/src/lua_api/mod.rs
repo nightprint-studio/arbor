@@ -6,7 +6,7 @@
 //!
 //! - [`ctx`]      — [`ApiCtx`], the per-`register()` capture bag.
 //! - [`helpers`]  — pure helpers shared by every namespace installer
-//!                  (`fs_perm`, `glob`, `convert`, `tuple`, …).
+//!   (`fs_perm`, `glob`, `convert`, `tuple`, …).
 //! - `ns/`        — *(PR #4 Step 6)* host-pure namespaces.
 //!
 //! ## How `register()` is wired

@@ -23,7 +23,7 @@ pub use crate::settings_store::{
 };
 pub use crate::toolchain::{ToolchainEntry, ToolchainRegistry, toolchains_dir};
 pub use crate::tree::{
-    BreadcrumbSegment, IconRegistry, TreeNode, TreeSnapshot, TreeStore,
+    BreadcrumbSegment, IconRegistry, TreeNode, TreeSnapshot, TreeStore, TreeUpdate,
 };
 
 // ── Errors (Step 4) ─────────────────────────────────────────────────────────

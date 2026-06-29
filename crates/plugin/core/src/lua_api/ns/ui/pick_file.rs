@@ -33,7 +33,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
             for (k, v) in obj { payload[k] = v.clone(); }
         }
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:pick-file", payload);
+            h.emit("plugin:pick-file", payload);
         }
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;

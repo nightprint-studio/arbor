@@ -95,11 +95,11 @@
           continue;
         }
         if (n.type === 'tabs') {
-          for (const t of arr((n as any).tabs)) walk(t.children);
+          for (const t of arr((n as any).tabs)) walk((t as any).children);
           continue;
         }
         if (n.type === 'wizard') {
-          for (const s of arr((n as any).steps)) walk(s.children);
+          for (const s of arr((n as any).steps)) walk((s as any).children);
           continue;
         }
         if ('children' in n) walk((n as any).children);
@@ -523,33 +523,33 @@
        "slides in" instead of "content squishes." Field values survive
        close/open because the renderer is never unmounted. `side` decides the
        border edge (left panes border-right, beside a left activity bar). -->
-  {#snippet sidecar(id: string, side: 'left' | 'right')}
-    {@const cfg = form.sidecars![id]}
-    {@const w   = sidecarWidth(cfg)}
-    {@const open = activeSidecar === id}
-    <aside class="pf-sidecar" class:pf-sidecar-open={open} class:pf-sidecar-left={side === 'left'}
-           style="--pf-sw:{w}px">
-      <div class="pf-sidecar-inner" style="width:{w}px">
-        {#if cfg.title}
-          <header class="pf-sidecar-title">{cfg.title}</header>
-        {/if}
-        <div class="pf-sidecar-body">
-          <FormNodeRenderer
-            bind:this={sidecarRefs[id]}
-            pluginName={form.plugin_name}
-            nodes={cfg.children}
-            region={`sidecar:${id}`}
-            {validationErrors}
-            disabled={submitting || isLoading}
-            {onValueChange}
-            {onClose}
-          />
-        </div>
-      </div>
-    </aside>
-  {/snippet}
-
   <div class="pf-modal">
+    {#snippet sidecar(id: string, side: 'left' | 'right')}
+      {@const cfg = form.sidecars![id]}
+      {@const w   = sidecarWidth(cfg)}
+      {@const open = activeSidecar === id}
+      <aside class="pf-sidecar" class:pf-sidecar-open={open} class:pf-sidecar-left={side === 'left'}
+             style="--pf-sw:{w}px">
+        <div class="pf-sidecar-inner" style="width:{w}px">
+          {#if cfg.title}
+            <header class="pf-sidecar-title">{cfg.title}</header>
+          {/if}
+          <div class="pf-sidecar-body">
+            <FormNodeRenderer
+              bind:this={sidecarRefs[id]}
+              pluginName={form.plugin_name}
+              nodes={cfg.children}
+              region={`sidecar:${id}`}
+              {validationErrors}
+              disabled={submitting || isLoading}
+              {onValueChange}
+              {onClose}
+            />
+          </div>
+        </div>
+      </aside>
+    {/snippet}
+
     <!-- The body-row + sidecars frame is rendered for EVERY state — loading
          / error / empty / populated. Without this, the activity bar (which
          lives outside the body via Modal's rightRail) stays clickable in

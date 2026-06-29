@@ -48,7 +48,7 @@ fn install_after(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
                 if let Ok(mut tc) = tc.lock() { tc.remove(&hook_id); }
             });
         }
-        Ok(lua_ctx.create_string(id.as_bytes())?)
+        lua_ctx.create_string(id.as_bytes())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     timer_table.set("after", after_fn).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     Ok(())
@@ -84,7 +84,7 @@ fn install_every(ctx: &ApiCtx, lua: &Lua, timer_table: &Table) -> Result<()> {
                 }
             });
         }
-        Ok(lua_ctx.create_string(id.as_bytes())?)
+        lua_ctx.create_string(id.as_bytes())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     timer_table.set("every", every_fn).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     Ok(())

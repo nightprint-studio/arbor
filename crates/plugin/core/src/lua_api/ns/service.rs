@@ -68,8 +68,8 @@ fn install_export(lua: &Lua, svc_table: &Table) -> Result<()> {
     let fn_ = lua.create_function(|lua_ctx, _: ()| {
         let reg: Table = lua_ctx.globals().get("__arbor_services__")?;
         let out = lua_ctx.create_table()?;
-        for pair in reg.pairs::<String, mlua::Function>() {
-            if let Ok((k, _)) = pair { out.push(k)?; }
+        for (k, _) in reg.pairs::<String, mlua::Function>().flatten() {
+            out.push(k)?;
         }
         Ok(out)
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;

@@ -35,7 +35,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
             let _ = lua_ctx;
         }
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:autocomplete-options", serde_json::json!({
+            h.emit("plugin:autocomplete-options", serde_json::json!({
                 "plugin_name": pname, "id": id, "options": options,
             }));
         }

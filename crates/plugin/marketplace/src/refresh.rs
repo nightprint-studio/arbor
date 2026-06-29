@@ -47,7 +47,7 @@ pub async fn refresh_custom(
     let mut resolved: Vec<MarketplacePlugin> = Vec::new();
     for src in sources {
         match resolve_custom_source(http, &src.repo, src.r#ref.as_deref(), src.subpath.as_deref()).await {
-            Ok(CustomSourceResolution::Single(p))      => resolved.push(p),
+            Ok(CustomSourceResolution::Single(p))      => resolved.push(*p),
             Ok(CustomSourceResolution::Multi(plugins)) => resolved.extend(plugins),
             Err(e) => tracing::warn!(
                 "custom source {} (subpath={:?}) failed to resolve: {e}",
@@ -74,7 +74,7 @@ pub async fn add_custom_source(
         source.subpath.as_deref(),
     ).await?;
     let plugins: Vec<MarketplacePlugin> = match res {
-        CustomSourceResolution::Single(p) => vec![p],
+        CustomSourceResolution::Single(p) => vec![*p],
         CustomSourceResolution::Multi(v)  => v,
     };
     // Persist the pointer first — if the resolver re-runs on Refresh

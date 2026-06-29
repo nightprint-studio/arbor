@@ -299,11 +299,11 @@ impl ChildClient {
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "child stdin missing"))?;
+            .ok_or_else(|| io::Error::other("child stdin missing"))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "child stdout missing"))?;
+            .ok_or_else(|| io::Error::other("child stdout missing"))?;
 
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let writer: SharedWriter = Arc::new(Mutex::new(stdin));

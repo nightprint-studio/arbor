@@ -51,7 +51,7 @@ pub enum RenderSink {
         writer: hound::WavWriter<BufWriter<File>>,
         bit_depth: BitDepth,
     },
-    Ogg(OggSink),
+    Ogg(Box<OggSink>),
 }
 
 impl std::fmt::Debug for RenderSink {
@@ -71,7 +71,10 @@ impl RenderSink {
                 writer: open_wav(cfg, out_path)?,
                 bit_depth: cfg.bit_depth,
             }),
-            Format::Ogg => Ok(RenderSink::Ogg(OggSink::open(cfg.sample_rate, out_path)?)),
+            Format::Ogg => Ok(RenderSink::Ogg(Box::new(OggSink::open(
+                cfg.sample_rate,
+                out_path,
+            )?))),
         }
     }
 

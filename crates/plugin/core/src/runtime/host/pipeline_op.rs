@@ -72,10 +72,8 @@ impl PluginHost {
             if !plugin.is_enabled() { continue; }
             let reg: mlua::Result<mlua::Table> = plugin.lua.globals().get("__arbor_pipeline_ops__");
             if let Ok(reg) = reg {
-                for pair in reg.pairs::<String, mlua::Function>() {
-                    if let Ok((k, _)) = pair {
-                        out.push(format!("{}.{}", plugin.manifest.name, k));
-                    }
+                for (k, _) in reg.pairs::<String, mlua::Function>().flatten() {
+                    out.push(format!("{}.{}", plugin.manifest.name, k));
                 }
             }
         }

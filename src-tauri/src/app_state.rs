@@ -557,3 +557,9 @@ impl AppState {
         let _ = self.router.set(Arc::new(router));
     }
 }
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}

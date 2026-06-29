@@ -33,8 +33,10 @@ pub fn audio(path: impl Into<String>) -> Pattern<ControlMap> {
 /// builder methods (`.engine`/`.pitch`/`.rate`/`.mouth`/`.throat`/`.voice`/
 /// `.lang`) refine the request before it is rendered.
 pub fn speech(text: impl Into<String>) -> Pattern<ControlMap> {
-    let mut c = ControlMap::default();
-    c.speech = Some(SpeechSpec::new(text));
+    let c = ControlMap {
+        speech: Some(SpeechSpec::new(text)),
+        ..Default::default()
+    };
     pure(c)
 }
 

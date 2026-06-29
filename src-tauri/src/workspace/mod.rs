@@ -30,5 +30,5 @@ pub mod registry;
 pub mod store;
 pub mod snapshot;
 
-pub use registry::{RepoRegistry, RepoRegistryEntry};
-pub use store::{WorkspaceDef, WorkspaceGroup, WorkspaceStore, SCRATCH_ID};
+pub use registry::RepoRegistry;
+pub use store::WorkspaceStore;

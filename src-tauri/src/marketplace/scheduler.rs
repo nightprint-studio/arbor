@@ -3,11 +3,11 @@
 //!
 //! Behaviour:
 //!
-//!   * `refresh_hours = None` / `Some(0)` → auto-refresh disabled.
-//!   * `refresh_hours = Some(n)`          → refresh whenever the on-disk
-//!                                          cache is older than `n` hours.
-//!   * `poll_minutes`  → how often the engine wakes up to re-evaluate
-//!                       the "is it time?" gate (clamped to [1, 60]).
+//! * `refresh_hours = None` / `Some(0)` → auto-refresh disabled.
+//! * `refresh_hours = Some(n)` → refresh whenever the on-disk
+//!   cache is older than `n` hours.
+//! * `poll_minutes` → how often the engine wakes up to re-evaluate
+//!   the "is it time?" gate (clamped to [1, 60]).
 //!
 //! Lives shell-side because reconfiguration touches `AppHandle` / `AppState`
 //! directly. The marketplace crate stays Tauri-agnostic.

@@ -3,6 +3,7 @@
    * Rename a ruler marker. Keyboard-first: the field auto-focuses, Enter / Ctrl+
    * Enter submits, Esc cancels (handled by Modal). Mirrors RenameProjectModal.
    */
+  import { untrack } from 'svelte';
   import { MapPin } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -13,7 +14,9 @@
 
   let { marker, onClose }: { marker: Marker; onClose: () => void } = $props();
 
-  let label = $state(marker.label);
+  // Seed the editable field once from the prop (a one-time snapshot, not a live
+  // mirror) — `untrack` makes that intent explicit and silences the warning.
+  let label = $state(untrack(() => marker.label));
   const canSave = $derived(label.trim().length > 0);
 
   function save() {

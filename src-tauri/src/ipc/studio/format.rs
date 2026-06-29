@@ -500,6 +500,8 @@ async fn studio_rename_apply(
 // `Action::Set`. Compile errors in the mini-expression land in the
 // `expression_error` field of the preview, NOT in the result Err.
 
+// Args mirror the IPC payload; the handler macro deserializes each field.
+#[allow(clippy::too_many_arguments)]
 #[studio::handler(program = "studio")]
 async fn studio_bulk_edit_preview(
     state: &AppState,
@@ -522,6 +524,7 @@ async fn studio_bulk_edit_preview(
     ).await)
 }
 
+#[allow(clippy::too_many_arguments)]
 #[studio::handler(program = "studio")]
 async fn studio_bulk_edit_apply(
     state: &AppState,

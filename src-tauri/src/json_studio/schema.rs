@@ -380,7 +380,7 @@ fn last_segment(canonical: &str) -> String {
         return "root".into();
     }
     let body = canonical.strip_prefix("#/").unwrap_or(canonical);
-    body.rsplit('/').next().map(|s| decode_pointer_token(s)).unwrap_or_else(|| canonical.to_string())
+    body.rsplit('/').next().map(decode_pointer_token).unwrap_or_else(|| canonical.to_string())
 }
 
 fn encode_pointer_token(s: &str) -> String {

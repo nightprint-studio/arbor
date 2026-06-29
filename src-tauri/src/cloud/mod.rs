@@ -37,7 +37,7 @@ pub use arbor_cloud::host::{CloudCancellations, CloudPendingOps};
 // ── CloudHost impl ─────────────────────────────────────────────────────────
 
 /// Bridges `arbor_cloud::host::CloudHost` onto the host's `AppState` registries
-/// + the event sink. Constructed once at startup and managed as
+/// plus the event sink. Constructed once at startup and managed as
 /// `Arc<dyn CloudHost>` so the command + plugin-namespace layers can pull
 /// it back out of Tauri State without knowing the concrete type.
 pub struct ArborCloudHost {
@@ -172,7 +172,7 @@ pub fn install(app: &AppHandle) {
         tracing::warn!("cloud::install called before event sink was wired — cloud host not installed");
         return;
     };
-    let host = ArborCloudHost::from_state(app.clone(), &*state, sink);
+    let host = ArborCloudHost::from_state(app.clone(), &state, sink);
     let host_arc: Arc<dyn CloudHost> = Arc::new(host);
 
     // Publish into AppState's OnceLock — the single home of the cloud host.

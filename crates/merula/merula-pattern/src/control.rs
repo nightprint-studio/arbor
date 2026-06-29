@@ -352,35 +352,32 @@ mod tests {
     #[test]
     fn combine_right_wins_and_gain_multiplies() {
         let base = ControlMap::sound("bd");
-        let mut overlay = ControlMap::default();
-        overlay.pan = Some(0.2);
+        let overlay = ControlMap { pan: Some(0.2), ..Default::default() };
         let merged = base.clone().combine(overlay);
         assert_eq!(merged.sound.as_deref(), Some("bd"));
         assert_eq!(merged.pan, Some(0.2));
 
-        let mut g1 = ControlMap::default();
-        g1.gain = Some(0.5);
-        let mut g2 = ControlMap::default();
-        g2.gain = Some(0.5);
+        let g1 = ControlMap { gain: Some(0.5), ..Default::default() };
+        let g2 = ControlMap { gain: Some(0.5), ..Default::default() };
         assert_eq!(g1.combine(g2).gain, Some(0.25));
     }
 
     #[test]
     fn gain_defaults_missing_side_to_unity() {
-        let mut only = ControlMap::default();
-        only.gain = Some(0.4);
+        let only = ControlMap { gain: Some(0.4), ..Default::default() };
         assert_eq!(ControlMap::default().combine(only).gain, Some(0.4));
     }
 
     #[test]
     fn delay_fields_override_and_carry_through() {
         // Right wins when set; left kept when right is unset (no multiply).
-        let mut base = ControlMap::default();
-        base.delay = Some(0.25);
-        base.feedback = Some(0.3);
-        base.delay_mix = Some(0.5);
-        let mut overlay = ControlMap::default();
-        overlay.feedback = Some(0.6); // only feedback overridden
+        let base = ControlMap {
+            delay: Some(0.25),
+            feedback: Some(0.3),
+            delay_mix: Some(0.5),
+            ..Default::default()
+        };
+        let overlay = ControlMap { feedback: Some(0.6), ..Default::default() }; // only feedback overridden
         let merged = base.combine(overlay);
         assert_eq!(merged.delay, Some(0.25));
         assert_eq!(merged.feedback, Some(0.6));

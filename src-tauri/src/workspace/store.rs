@@ -327,12 +327,3 @@ pub fn load() -> WorkspaceStore {
     }
     store
 }
-
-pub fn save(store: &WorkspaceStore) -> Result<()> {
-    let path = store_path();
-    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
-    let content = serde_json::to_string_pretty(store)
-        .map_err(|e| AppError::Other(format!("workspace store: serialize failed: {e}")))?;
-    std::fs::write(&path, content)?;
-    Ok(())
-}

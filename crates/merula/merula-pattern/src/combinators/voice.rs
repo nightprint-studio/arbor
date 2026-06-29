@@ -325,8 +325,10 @@ impl Pattern<ControlMap> {
                     let mut hh = shifted;
                     hh.part = part;
                     if vel_amt > 0.0 {
-                        let mut overlay = ControlMap::default();
-                        overlay.gain = Some(jitter_gain(onset, vel_amt));
+                        let overlay = ControlMap {
+                            gain: Some(jitter_gain(onset, vel_amt)),
+                            ..Default::default()
+                        };
                         hh.value = std::mem::take(&mut hh.value).combine(overlay);
                     }
                     out.push(hh);

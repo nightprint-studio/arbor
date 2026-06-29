@@ -3,14 +3,12 @@
 //!
 //! Two files under `~/.config/arbor/` (see [`crate::paths`]):
 //!
-//!   * `marketplace_cache.json`   — TTL-checked snapshot of the last
-//!                                  successful community catalog fetch.
-//!                                  TTL = 1h; the modal carries a Refresh
-//!                                  button for forcing an earlier hit.
-//!   * `marketplace_custom.json`  — resolved metadata for every custom
-//!                                  source the user added (pointers live
-//!                                  in `user_registry.toml`). No TTL —
-//!                                  refreshed every time the modal opens.
+//!   * `marketplace_cache.json` — TTL-checked snapshot of the last successful
+//!     community catalog fetch. TTL = 1h; the modal carries a Refresh button
+//!     for forcing an earlier hit.
+//!   * `marketplace_custom.json` — resolved metadata for every custom source the
+//!     user added (pointers live in `user_registry.toml`). No TTL — refreshed
+//!     every time the modal opens.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -125,7 +125,7 @@ fn write_table(path: &Path, tbl: &toml::Table) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let content = toml::to_string_pretty(tbl)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     std::fs::write(path, content)
 }
 

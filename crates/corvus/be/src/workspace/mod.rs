@@ -22,9 +22,9 @@ pub mod registry;
 pub mod snapshot;
 pub mod store;
 
-pub use registry::{RepoRegistry, RepoRegistryEntry};
+pub use registry::RepoRegistryEntry;
 pub use snapshot::{CrossWsTabRef, TabMeta, TabSnapshot};
-pub use store::{WorkspaceDef, WorkspaceGroup, WorkspaceStore, SCRATCH_ID};
+pub use store::{WorkspaceDef, WorkspaceGroup, SCRATCH_ID};
 
 use corvus_core::prelude::CorvusState;
 use serde::{Deserialize, Serialize};

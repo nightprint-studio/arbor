@@ -25,7 +25,7 @@ pub fn sound_for_key(key: i32) -> &'static str {
         55 => "cr",           // splash → crash-ish
         56 => "cb",           // cowbell
         70 | 69 => "sh",      // maracas / shaker
-        75 | 76 | 77 => "cl", // claves / woodblocks
+        75..=77 => "cl",      // claves / woodblocks
         _ => "perc",
     }
 }

@@ -96,8 +96,8 @@ function createTransfersStore() {
     start(t: Omit<Transfer, 'state' | 'startedAt' | 'endedAt'> & { state?: TransferState }) {
       clearTimer(t.id);
       const entry: Transfer = {
-        progress: null,
         ...t,
+        progress: t.progress ?? null,
         state: t.state ?? 'active',
         startedAt: Date.now(),
       };

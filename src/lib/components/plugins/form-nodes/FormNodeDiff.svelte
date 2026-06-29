@@ -21,6 +21,7 @@
   import TypePill      from '$lib/components/shared/internal/TypePill.svelte';
   import { syntheticPathForLang } from '$lib/utils/diff-formatter';
   import type { FormNode } from '$lib/types/plugin';
+  import { untrack } from 'svelte';
   import { normalizeDiffHunks, diffStats, totalLineCount } from './diff';
 
   interface Props {
@@ -49,7 +50,7 @@
 
   // Local layout toggle — defaults to the node's `mode`, then "unified".
   let mode = $state<'unified' | 'split'>(
-    (node as any).mode === 'split' ? 'split' : 'unified',
+    untrack(() => (node as any).mode === 'split' ? 'split' : 'unified'),
   );
   const showToggle = $derived(!n.hide_mode_toggle);
 

@@ -13,7 +13,7 @@ use crate::error::{PluginCoreError, Result};
 use crate::lua_api::ctx::ApiCtx;
 use crate::lua_api::helpers::contrib_write::dual_write_contribution;
 use crate::contribution::points;
-use crate::tree::{BreadcrumbSegment, TreeNode};
+use crate::tree::{BreadcrumbSegment, TreeNode, TreeUpdate};
 
 pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     let tree_table = lua.create_table().map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -136,12 +136,14 @@ fn install_set(ctx: &ApiCtx, lua: &Lua, tree_table: &Table) -> Result<()> {
             .unwrap_or(serde_json::Value::Array(Vec::new()));
         let breadcrumb_payload = serde_json::to_value(&breadcrumb)
             .unwrap_or(serde_json::Value::Array(Vec::new()));
-        let version = store.set(
-            &pname, &sidebar_id, title_opt.clone(),
-            breadcrumb, crumb_edit_action.clone(), crumb_edit_placeholder.clone(),
-            drop_action_opt.clone(),
+        let version = store.set(&pname, &sidebar_id, TreeUpdate {
+            title:                       title_opt.clone(),
+            breadcrumb,
+            breadcrumb_edit_action:      crumb_edit_action.clone(),
+            breadcrumb_edit_placeholder: crumb_edit_placeholder.clone(),
+            drop_action:                 drop_action_opt.clone(),
             nodes,
-        );
+        });
         // Dual-write: tree snapshot also goes into the unified
         // ContributionRegistry as a single replace-by-id item. The `version`
         // carries the monotonic ordering for late-arriving updates.

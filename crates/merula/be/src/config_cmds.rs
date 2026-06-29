@@ -127,11 +127,6 @@ impl MerulaConfig {
             log_threshold: parse_level(&self.log_threshold),
         }
     }
-
-    /// The log gate threshold as a [`LogLevel`].
-    pub fn log_level(&self) -> LogLevel {
-        parse_level(&self.log_threshold)
-    }
 }
 
 impl MerulaRenderConfig {

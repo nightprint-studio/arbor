@@ -135,8 +135,6 @@ impl RepoRegistry {
         Ok(())
     }
 
-    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
-
     /// Replace contents (used on reload).
     fn replace_all(&mut self, list: Vec<RepoRegistryEntry>) {
         self.entries.clear();

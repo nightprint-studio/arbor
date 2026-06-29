@@ -140,7 +140,9 @@ pub struct SfzInstrument {
 impl SfzInstrument {
     /// Select the best region for `(key, vel)`: the first region (file order)
     /// whose key + velocity ranges both contain the request. Returns `None` if
-    /// nothing matches (caller falls back to the synth).
+    /// nothing matches. Superseded in production by [`select_rr`](Self::select_rr)
+    /// (round-robin + keyswitch aware); retained as the basic-matching test probe.
+    #[cfg(test)]
     pub fn select(&self, key: u8, vel: u8) -> Option<&Region> {
         self.regions.iter().find(|r| r.matches(key, vel))
     }

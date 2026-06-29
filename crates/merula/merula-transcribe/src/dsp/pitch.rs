@@ -142,7 +142,7 @@ fn yin_frame(x: &[f32], rate: f64, tau_min: usize, tau_max: usize) -> Option<i32
     while t <= tau_max {
         if dp[t] < YIN_THRESHOLD {
             let mut k = t;
-            while k + 1 <= tau_max && dp[k + 1] < dp[k] {
+            while k < tau_max && dp[k + 1] < dp[k] {
                 k += 1;
             }
             tau = Some(k);
@@ -155,9 +155,9 @@ fn yin_frame(x: &[f32], rate: f64, tau_min: usize, tau_max: usize) -> Option<i32
     let tau = tau.or_else(|| {
         let mut best_t = tau_min;
         let mut best_v = dp[tau_min];
-        for t in tau_min..=tau_max {
-            if dp[t] < best_v {
-                best_v = dp[t];
+        for (t, &v) in dp.iter().enumerate().take(tau_max + 1).skip(tau_min) {
+            if v < best_v {
+                best_v = v;
                 best_t = t;
             }
         }

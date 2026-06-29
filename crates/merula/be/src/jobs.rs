@@ -87,9 +87,9 @@ impl JobHandle {
         Ok(JobHandle { host, sink, id })
     }
 
-    /// A second handle to the same already-registered job (shares the host channel
-    /// + event sink + shell id), so a spawned worker and its spawner can both drive
-    /// the job. Cheap: clones two `Arc`s + a `String`.
+    /// A second handle to the same already-registered job (shares the host
+    /// channel, event sink, and shell id), so a spawned worker and its spawner can
+    /// both drive the job. Cheap: clones two `Arc`s + a `String`.
     pub fn clone_handle(&self) -> JobHandle {
         JobHandle {
             host: Arc::clone(&self.host),

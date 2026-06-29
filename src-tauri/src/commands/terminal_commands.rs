@@ -45,7 +45,17 @@ pub async fn terminal_create(
     let rows = rows.unwrap_or(30);
 
     let mut mgr = state.lock_terminals()?;
-    mgr.create(exe, args, display_name, working_dir, cols, rows, app)
+    mgr.create(
+        crate::terminal::TerminalSpawnSpec {
+            shell: exe,
+            args,
+            display_name,
+            cwd: working_dir,
+            cols,
+            rows,
+        },
+        app,
+    )
 }
 
 /// Resolve a friendly display name for a shell id (built-in name, custom

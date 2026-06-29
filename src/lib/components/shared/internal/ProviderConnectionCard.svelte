@@ -35,7 +35,7 @@
 
   let { descriptor, service, onchange, variant = 'card' }: Props = $props();
 
-  let state        = $state<ConnState>('checking');
+  let connState    = $state<ConnState>('checking');
   let method       = $state<string | null>(null);
   let fieldValues  = $state<Record<string, string>>({});
   let showSecret   = $state<Record<string, boolean>>({});
@@ -69,18 +69,18 @@
   onDestroy(() => { oauthUnsub?.(); });
 
   async function refreshStatus() {
-    state = 'checking';
+    connState = 'checking';
     try {
       const s = await service.authStatus(descriptor.id);
       if (s.authenticated) {
-        state = 'connected';
+        connState = 'connected';
         user = s.user ?? null;
         accountLabel = s.accountLabel ?? null;
       } else {
-        state = 'disconnected'; user = null; accountLabel = null;
+        connState = 'disconnected'; user = null; accountLabel = null;
       }
     } catch {
-      state = 'disconnected'; user = null; accountLabel = null;
+      connState = 'disconnected'; user = null; accountLabel = null;
     }
   }
 
@@ -95,7 +95,7 @@
   // ── OAuth ──────────────────────────────────────────────────────────────────
   async function startOAuthFlow(methodId: string) {
     oauthWaiting = true; oauthError = ''; deviceInfo = null;
-    state = 'connecting';
+    connState = 'connecting';
     oauthUnsub?.();
     // One listener on the unified event, routed by provider id — so two
     // concurrent OAuth logins each settle their own card.
@@ -109,7 +109,7 @@
         onchange?.();
         uiStore.showToast(`${descriptor.displayName} connected`, 'success');
       } else {
-        state = 'disconnected';
+        connState = 'disconnected';
         oauthError = payload.error ?? 'OAuth failed — please try again.';
       }
     });
@@ -122,7 +122,7 @@
         try { await openUrl(start.verificationUri); } catch { /* user can open manually */ }
       }
     } catch (err) {
-      oauthWaiting = false; state = 'disconnected';
+      oauthWaiting = false; connState = 'disconnected';
       oauthError = String(err);
       oauthUnsub?.(); oauthUnsub = null;
     }
@@ -158,14 +158,14 @@
   async function disconnect() {
     oauthUnsub?.(); oauthUnsub = null; oauthWaiting = false; deviceInfo = null;
     await service.disconnect(descriptor.id).catch(() => {});
-    state = 'disconnected'; method = null; user = null; accountLabel = null;
+    connState = 'disconnected'; method = null; user = null; accountLabel = null;
     oauthError = ''; formError = '';
     onchange?.();
     uiStore.showToast(`${descriptor.displayName} disconnected`, 'info');
   }
 
   function cancelConnecting() {
-    oauthWaiting = false; deviceInfo = null; state = 'disconnected'; method = null;
+    oauthWaiting = false; deviceInfo = null; connState = 'disconnected'; method = null;
     oauthUnsub?.(); oauthUnsub = null;
   }
 </script>
@@ -173,7 +173,7 @@
 <!-- Connect/disconnect action row — identical across layouts. -->
 {#snippet statusRow()}
   <ProviderConnectionStatus
-    state={state}
+    state={connState}
     connectingLabel="Waiting…"
     onDisconnect={disconnect}
     onCancel={cancelConnecting}
@@ -196,7 +196,7 @@
 <!-- User badge (connected) + the active method's form + advanced panel —
      identical across layouts. -->
 {#snippet body()}
-  {#if state === 'connected' && user}
+  {#if connState === 'connected' && user}
     <ProviderUserBadge
       avatarUrl={user.avatarUrl ?? null}
       name={user.displayName}
@@ -286,7 +286,7 @@
 {/snippet}
 
 {#if variant === 'compact'}
-  <div class="provider-compact" class:flow-active={state === 'connecting'}>
+  <div class="provider-compact" class:flow-active={connState === 'connecting'}>
     <BrandTile brand={descriptor.icon as Brand} size={22} tileSize={42} />
     <span class="pc-name">{descriptor.displayName}</span>
     {#if descriptor.description}
@@ -296,7 +296,7 @@
     <div class="pc-body">{@render body()}</div>
   </div>
 {:else}
-  <div class="provider-card" class:flow-active={state === 'connecting'}>
+  <div class="provider-card" class:flow-active={connState === 'connecting'}>
     <BrandTile brand={descriptor.icon as Brand} />
     <div class="provider-main">
       <div class="provider-top">

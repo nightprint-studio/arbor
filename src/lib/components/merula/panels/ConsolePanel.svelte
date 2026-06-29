@@ -76,8 +76,15 @@
     {:else}
       {#each visible as l (l.id)}
         {@const clickable = l.level === 'warn' || l.level === 'error'}
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="con-line" class:clickable onclick={() => { /* TODO: jump to span */ }}>
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div
+          class="con-line"
+          class:clickable
+          role={clickable ? 'button' : undefined}
+          tabindex={clickable ? 0 : undefined}
+          onclick={() => { /* TODO: jump to span */ }}
+          onkeydown={(e) => { if (clickable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); /* TODO: jump to span */ } }}
+        >
           <span class="con-level lvl-{l.level}">{l.level}</span>
           <span class="con-text">{l.message}</span>
         </div>

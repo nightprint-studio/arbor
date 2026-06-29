@@ -142,22 +142,11 @@ fn load_symphonia(path: &Path) -> Result<DecodedAudio> {
         .map_err(|e| decode_err(path, e))?;
 
     let mut sample_rate = track.codec_params.sample_rate.unwrap_or(48_000);
-    let mut channels = track
-        .codec_params
-        .channels
-        .map(|c| c.count())
-        .unwrap_or(2)
-        .max(1);
 
     let mut mono: Vec<f32> = Vec::new();
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            // End of stream / recoverable boundary: stop reading.
-            Err(_) => break,
-        };
+    while let Ok(packet) = format.next_packet() {
         if packet.track_id() != track_id {
             continue;
         }
@@ -165,7 +154,8 @@ fn load_symphonia(path: &Path) -> Result<DecodedAudio> {
             Ok(decoded) => {
                 let spec = *decoded.spec();
                 sample_rate = spec.rate;
-                channels = spec.channels.count().max(1);
+                // Channel count is read off each decoded frame's own spec.
+                let channels = spec.channels.count().max(1);
                 if sample_buf.is_none() {
                     sample_buf =
                         Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));

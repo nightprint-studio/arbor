@@ -78,15 +78,13 @@ fn voice_starts_at_its_frame() {
 fn gain_scales_amplitude() {
     let loud = {
         let mut r = Renderer::new(SR, &tracks());
-        let mut p = VoiceParams::default();
-        p.gain = 1.0;
+        let p = VoiceParams { gain: 1.0, ..Default::default() };
         let out = render_block(&mut r, vec![AudioCommand::Voice(synth_event(1, 0, p))], 2048);
         peaks(&out).0
     };
     let quiet = {
         let mut r = Renderer::new(SR, &tracks());
-        let mut p = VoiceParams::default();
-        p.gain = 0.25;
+        let p = VoiceParams { gain: 0.25, ..Default::default() };
         let out = render_block(&mut r, vec![AudioCommand::Voice(synth_event(1, 0, p))], 2048);
         peaks(&out).0
     };
@@ -98,16 +96,14 @@ fn gain_scales_amplitude() {
 #[test]
 fn pan_distributes_left_right() {
     // Hard left.
-    let mut left_p = VoiceParams::default();
-    left_p.pan = 0.0;
+    let left_p = VoiceParams { pan: 0.0, ..Default::default() };
     let mut r = Renderer::new(SR, &tracks());
     let out = render_block(&mut r, vec![AudioCommand::Voice(synth_event(1, 0, left_p))], 1024);
     let (l, rr) = peaks(&out);
     assert!(l > rr * 4.0, "pan=0 should be mostly left: L={l} R={rr}");
 
     // Hard right.
-    let mut right_p = VoiceParams::default();
-    right_p.pan = 1.0;
+    let right_p = VoiceParams { pan: 1.0, ..Default::default() };
     let mut r2 = Renderer::new(SR, &tracks());
     let out2 = render_block(&mut r2, vec![AudioCommand::Voice(synth_event(2, 0, right_p))], 1024);
     let (l2, r2p) = peaks(&out2);
@@ -158,9 +154,7 @@ fn stop_all_flushes_effect_tails_to_silence() {
 
     // A loud voice with a heavy reverb send + a long-feedback per-track delay bus,
     // i.e. exactly the case whose tails outlive the voice.
-    let mut p = VoiceParams::default();
-    p.room = 1.0;
-    p.delay_mix = Some(1.0);
+    let p = VoiceParams { room: 1.0, delay_mix: Some(1.0), ..Default::default() };
     // Configure the track's delay line with strong feedback so, untreated, it would
     // ring for a very long time.
     let cmds = vec![
@@ -394,8 +388,7 @@ fn delay_bus_produces_an_echo_after_the_voice() {
     let mut r = Renderer::new(SR, &tracks());
     // ~10ms line, plenty of feedback, full send.
     let cfg = merula_audio::prelude::DelayConfig { time_frames: 480, feedback: 0.7 };
-    let mut p = VoiceParams::default();
-    p.delay_mix = Some(1.0);
+    let p = VoiceParams { delay_mix: Some(1.0), ..Default::default() };
     let mut ev = synth_event(1, 0, p);
     ev.dur_frames = Some(256); // short source
 
@@ -418,8 +411,7 @@ fn reverb_send_makes_a_wet_tail() {
     // A voice with room send into the convolution reverb should leave a wet tail
     // after the dry source has gone.
     let mut r = Renderer::new(SR, &tracks());
-    let mut p = VoiceParams::default();
-    p.room = 1.0;
+    let p = VoiceParams { room: 1.0, ..Default::default() };
     let mut ev = synth_event(1, 0, p);
     ev.dur_frames = Some(128);
     let _ = render_block(&mut r, vec![AudioCommand::Voice(ev)], 512);
@@ -438,8 +430,7 @@ fn set_reverb_ir_buffer_is_accepted() {
     // Installing an explicit IR must not panic and must still render.
     let mut r = Renderer::new(SR, &tracks());
     let ir: Vec<Frame> = (0..64).map(|i| { let g = 0.5f32.powi(i / 8); [g, g] }).collect();
-    let mut p = VoiceParams::default();
-    p.room = 0.8;
+    let p = VoiceParams { room: 0.8, ..Default::default() };
     let out = render_block(
         &mut r,
         vec![

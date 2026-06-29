@@ -8,7 +8,8 @@
 //!   * fires the `cloud-storage:progress` plugin hook via
 //!     [`CloudHost::fire_plugin_hook`] (Lua subscribers listen)
 //!   * appends a human-readable line via [`CloudHost::job_append_output`]
-//! and on completion fires `arbor://cloud-job-done` + sets the final
+//!
+//! On completion it fires `arbor://cloud-job-done` + sets the final
 //! `CloudJobStatus`.
 //!
 //! Cancellation is cooperative: every spawn registers an `Arc<AtomicBool>`
@@ -163,6 +164,10 @@ struct ManyFileState {
 /// phases. Each tuple is `(step_key, step_label)`.
 pub type ExtraSteps = Vec<(String, String)>;
 
+// Entry point threading host + connection + destination + tuning knobs; each
+// argument is a distinct primitive and the signature is part of the public API
+// called from corvus-be / plugin-ns, so it is not reshaped into a param struct.
+#[allow(clippy::too_many_arguments)]
 pub async fn download_many(
     host:       Arc<dyn CloudHost>,
     conn:       CloudConnection,
@@ -337,7 +342,7 @@ async fn run_download_many(
             "title":    &op_label,
             "subtitle": format!("{} file{}", n, if n == 1 { "" } else { "s" }),
             "steps":    steps,
-            "current":  if n > 0 { format!("f0") } else { String::new() },
+            "current":  if n > 0 { "f0".to_string() } else { String::new() },
         }));
     }
 
@@ -608,6 +613,7 @@ async fn run_download_many(
 
 /// Download one object, mutating the shared state's `bytes_done` / `bytes_total`
 /// so the aggregate emitter sees fresh values without a separate channel.
+#[allow(clippy::too_many_arguments)]
 async fn stream_one_file(
     host:       &dyn CloudHost,
     conn:       &CloudConnection,
@@ -721,6 +727,7 @@ async fn run_download(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_upload(
     host: &dyn CloudHost, job_id: &str,
     conn: &CloudConnection, bucket: &str, remote: &str, local: &Path,
@@ -770,6 +777,7 @@ async fn run_upload(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_sync(
     host: &dyn CloudHost, job_id: &str,
     conn: &CloudConnection, bucket: &str, remote_prefix: &str, local: &Path,
@@ -781,6 +789,7 @@ async fn run_sync(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sync_down(
     host: &dyn CloudHost, job_id: &str,
     conn: &CloudConnection, bucket: &str, remote_prefix: &str, local: &Path,
@@ -844,6 +853,7 @@ async fn sync_down(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sync_up(
     host: &dyn CloudHost, job_id: &str,
     conn: &CloudConnection, bucket: &str, remote_prefix: &str, local: &Path,
@@ -1099,6 +1109,7 @@ impl ProgressTicker {
         self.emit(host, job_id, config_id, kind, bucket, path, elapsed_ms);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit(&mut self, host: &dyn CloudHost, job_id: &str, config_id: &str,
             kind: &'static str, bucket: &str, path: &str, elapsed_ms: u128)
     {

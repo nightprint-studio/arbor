@@ -350,7 +350,7 @@
       if (position === 'fixed') computeFixed();
       // Focus the first selected item (or the first item if none) and scroll into view.
       const list = navigableItems;
-      const sel  = list.findIndex(it => it.active);
+      const sel  = list.findIndex(it => it.kind === 'item' && it.active);
       focusedIdx = sel >= 0 ? sel : (list.length > 0 ? 0 : -1);
       scrollFocusedIntoView();
     });
@@ -823,6 +823,7 @@
     data-dd-flyout
     style={flyoutStyle(entry.id)}
     role="menu"
+    tabindex="-1"
     use:registerFlyoutPanel={isDeepest}
     onmouseenter={cancelHoverClose}
     onmouseleave={() => hoverCloseSubmenu(pathDepth)}

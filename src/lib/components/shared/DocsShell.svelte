@@ -1,8 +1,9 @@
 <script module lang="ts">
   import type { Component } from 'svelte';
+  import type { IconComponent } from '$lib/types/icon';
 
-  export interface DocsNavItem { id: string; label: string; icon?: Component; }
-  export interface DocsNavGroup { id: string; label: string; icon?: Component; items: DocsNavItem[]; }
+  export interface DocsNavItem { id: string; label: string; icon?: IconComponent; }
+  export interface DocsNavGroup { id: string; label: string; icon?: IconComponent; items: DocsNavItem[]; }
 </script>
 
 <script lang="ts">
@@ -46,15 +47,17 @@
     sections: Record<string, Component>;
     onClose: () => void;
     title?: string;
-    headerIcon?: Component;
+    headerIcon?: IconComponent;
     initialSection?: string;
     width?: string;
     height?: string;
   } = $props();
 
-  let activeSection = $state(initialSection ?? topItems[0]?.id ?? navGroups[0]?.items[0]?.id ?? '');
+  let activeSection = $state(
+    untrack(() => initialSection ?? topItems[0]?.id ?? navGroups[0]?.items[0]?.id ?? ''),
+  );
   let groupOpen = $state<Record<string, boolean>>(
-    Object.fromEntries(navGroups.map((g, i) => [g.id, i === 0])),
+    untrack(() => Object.fromEntries(navGroups.map((g, i) => [g.id, i === 0]))),
   );
 
   const orderedSections = $derived([

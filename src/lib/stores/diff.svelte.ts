@@ -3,11 +3,11 @@ import type { DiffFile } from '../types/git';
 import type { DiffConfig, DiffMode, DiffAlgorithm, FileListView } from '../types/config';
 import { getDiffConfig, setDiffConfig } from '$lib/ipc/config';
 import { getCommitFileDiff, getCommitsRangeFileDiff, workdirDiffStreamArgs } from '$lib/ipc/diff';
-import { startStream, type StreamHandle } from '$lib/ipc/stream';
+import { startStream, type StreamHandle, type StreamEnvelope } from '$lib/ipc/stream';
 
 // Streaming-seam payloads (`docs/streaming-seam.md`). Every event also carries
 // the `{ stream_id, seq }` envelope; `stream_id` is the job_id of the request.
-type StreamStartedPayload = {
+type StreamStartedPayload = StreamEnvelope & {
   tab_id: string;
   staged: boolean;
   total_files: number;
@@ -405,7 +405,9 @@ function createDiffStore() {
       { cmd: 'get_workdir_diff_stream', args: workdirDiffStreamArgs(tabId, staged) },
       {
         onStarted: (p) => {
-          const s = p as StreamStartedPayload & { stream_id: string };
+          // `p` is the generic started envelope (`Record<string, unknown>` keys);
+          // narrow to the concrete workdir-diff `started` shape it carries.
+          const s = p as unknown as StreamStartedPayload;
           beginStream(s.stream_id, s.files);
         },
         onChunk:   (p) => applyStreamFile(p.stream_id, p.file),

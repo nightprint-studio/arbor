@@ -224,7 +224,7 @@ fn initials_color(email: &str) -> String {
         // Wrapping multiplication to mirror JS Math.imul.
         h = h.wrapping_mul(31).wrapping_add(c as i32);
     }
-    let hue = (h.unsigned_abs() % 360) as u32;
+    let hue = h.unsigned_abs() % 360;
     format!("hsl({hue},46%,36%)")
 }
 
@@ -536,8 +536,7 @@ pub fn generate_svg_to_file(
             let label     = format!("{}{}", prefix, rl.name);
             let label_esc = esc(&label);
             let badge_w   = (label.chars().count() as f64 * 6.1 + 12.0)
-                                .min(BADGE_COL_W - 4.0)
-                                .max(20.0);
+                                .clamp(20.0, BADGE_COL_W - 4.0);
             let badge_h   = 14.0_f64;
             let badge_y   = cy - 8.5;
 

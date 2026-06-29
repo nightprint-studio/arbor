@@ -50,7 +50,7 @@ pub struct SearchQuery {
 
 pub fn search_commits(repo: &Repository, query: &SearchQuery) -> Result<Vec<SearchResult>> {
     let needle = query.text.to_lowercase();
-    let limit = query.limit.max(1).min(500);
+    let limit = query.limit.clamp(1, 500);
 
     let mut revwalk = repo.revwalk()?;
     revwalk.push_glob("refs/heads/*")?;
@@ -101,13 +101,11 @@ pub fn search_commits(repo: &Repository, query: &SearchQuery) -> Result<Vec<Sear
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn limit_is_clamped_low_and_high() {
         // The clamp is pure arithmetic and the only non-libgit2 logic worth
         // pinning: limit 0 -> 1, limit 9999 -> 500, in-range passes through.
-        let clamp = |l: usize| l.max(1).min(500);
+        let clamp = |l: usize| l.clamp(1, 500);
         assert_eq!(clamp(0), 1);
         assert_eq!(clamp(9999), 500);
         assert_eq!(clamp(42), 42);

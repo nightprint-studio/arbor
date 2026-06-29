@@ -28,7 +28,7 @@ use std::collections::BinaryHeap;
 use std::path::Path;
 
 use crate::effects::{equal_power_pan, Compressor, DelayLine, EqChain, Limiter, Reverb};
-use crate::registry::{Registry, ResolvedVoice, SampleParams};
+use crate::registry::{Registry, ResolvedVoice, SampleParams, VoiceRequest};
 use crate::sampler::{Sample, SampleBank};
 use crate::seam::{AudioCommand, Frame, ReverbIr, TrackConfig, VoiceEvent, VoiceId, VoiceSource};
 use crate::voice::{Voice, VoicePool};
@@ -581,15 +581,15 @@ impl Renderer {
                 // voice id (the engine assigns ids stably per onset, so a given
                 // onset picks the same variant every loop).
                 let seed = onset_seed(ev.id.0);
-                self.registry.resolve(
-                    sound.as_deref(),
-                    inst.as_deref(),
-                    *variant,
-                    ev.note,
-                    ev.params.vel,
-                    art.as_deref(),
+                self.registry.resolve(VoiceRequest {
+                    sound: sound.as_deref(),
+                    inst: inst.as_deref(),
+                    variant: *variant,
+                    note: ev.note,
+                    vel: ev.params.vel,
+                    art: art.as_deref(),
                     seed,
-                )
+                })
             }
             VoiceSource::File { path, kind } => self.resolve_file(path, *kind),
         }

@@ -15,7 +15,7 @@
 //! module (`lua_api`, atterrato in sessione 4 di PR #4) or, until that
 //! module migrates, in the host shell crate via a shim installer.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::sync::atomic::AtomicBool;
 
@@ -272,8 +272,8 @@ fn harden_os_table(lua: &Lua, manifest: &Manifest) -> Result<()> {
 // require() sandbox — restrict to the plugin's own directory
 // ---------------------------------------------------------------------------
 
-fn setup_require_sandbox(lua: &Lua, plugin_dir: &PathBuf) -> Result<()> {
-    let dir = plugin_dir.clone();
+fn setup_require_sandbox(lua: &Lua, plugin_dir: &Path) -> Result<()> {
+    let dir = plugin_dir.to_path_buf();
 
     // Build the custom searcher as a Rust function.
     let sandbox_searcher = lua

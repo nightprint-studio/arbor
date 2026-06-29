@@ -504,7 +504,6 @@ impl StudioFormatBackend for RonBackend {
             }
             BulkEditScope::ProjectWide => {
                 let query    = query.clone();
-                let action   = action;
                 let value    = value_source.clone();
                 let compiled = compiled.clone();
                 tokio::task::spawn_blocking(move || -> StudioResult<BulkEditPreview> {
@@ -640,7 +639,6 @@ impl StudioFormatBackend for RonBackend {
                 }
                 let _ = repo_root;
 
-                let action    = action;
                 let value_src = value_source.clone();
                 let compiled  = compiled.clone();
 
@@ -909,6 +907,7 @@ fn synth_active_doc_paths(source_path: &Option<String>) -> (String, String, Stri
 /// Build one preview row from a `(path, ast_value)` pair + the chosen
 /// action / value source. Surfaces the site even when it will be
 /// skipped so the user sees what got dropped and why.
+#[allow(clippy::too_many_arguments)]
 fn build_site_for_preview(
     abs_path:     &str,
     rel_path:     &str,
@@ -1114,14 +1113,17 @@ fn ast_to_eval_value(v: &legacy::ast::RonAst) -> Option<ExprValue> {
 /// Skipped sites (eval errors, container hits on `set`, type
 /// mismatches, …) are counted but not enqueued. Returns
 /// `(ops, applied_count, skipped_count)`.
+/// A path-targeted bulk-edit op: the field path plus the op to apply there.
+type PathOp = (Vec<String>, legacy::BulkEditOp);
+
 fn build_ops_from_sites(
     root:         &legacy::ast::RonAst,
     sites:        &[BulkEditSite],
     action:       &BulkEditAction,
     value_source: &Option<BulkEditValueSource>,
     compiled:     Option<&edit_expr::CompiledExpr>,
-) -> StudioResult<(Vec<(Vec<String>, legacy::BulkEditOp)>, usize, usize)> {
-    let mut ops:     Vec<(Vec<String>, legacy::BulkEditOp)> = Vec::with_capacity(sites.len());
+) -> StudioResult<(Vec<PathOp>, usize, usize)> {
+    let mut ops:     Vec<PathOp> = Vec::with_capacity(sites.len());
     let mut applied: usize = 0;
     let mut skipped: usize = 0;
     for site in sites {

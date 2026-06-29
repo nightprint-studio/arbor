@@ -41,6 +41,7 @@ const CHANNELS: usize = 2;
 const OUTPUT_NAME: &str = "stems";
 
 /// The two signals separation gives us, mono, at [`SR`].
+#[derive(Debug)]
 pub struct Stems {
     /// Isolated drums (the specialist's target row).
     pub drums: Vec<f32>,
@@ -148,9 +149,9 @@ fn run(sess: &mut Session, input_name: &str, window: &[f32]) -> Result<Vec<f32>>
     let (_, data) = outputs[OUTPUT_NAME].try_extract_tensor::<f32>().map_err(oerr)?;
 
     // Output layout [1, NUM_SOURCES, CHANNELS, SEGMENT_SAMPLES]; keep the drums row.
-    debug_assert!(IDX_DRUMS < NUM_SOURCES);
+    const _: () = assert!(IDX_DRUMS < NUM_SOURCES);
     let mut drums = vec![0.0f32; SEGMENT_SAMPLES];
-    for i in 0..SEGMENT_SAMPLES {
+    for (i, drum) in drums.iter_mut().enumerate().take(SEGMENT_SAMPLES) {
         let mut sum = 0.0f32;
         for c in 0..CHANNELS {
             let idx = (IDX_DRUMS * CHANNELS + c) * SEGMENT_SAMPLES + i;
@@ -158,7 +159,7 @@ fn run(sess: &mut Session, input_name: &str, window: &[f32]) -> Result<Vec<f32>>
                 sum += data[idx];
             }
         }
-        drums[i] = sum / CHANNELS as f32;
+        *drum = sum / CHANNELS as f32;
     }
     Ok(drums)
 }

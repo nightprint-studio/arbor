@@ -41,6 +41,7 @@
     openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
     scrollToOffset: (offset: number, select?: boolean) => void;
+    insertAtCursor: (text: string) => void;
     gotoSymbol: (name: string) => boolean;
     findUsages: () => { name: string | null; items: UsageItem[]; anchor: UsageAnchor | null } | null;
     getStructure: () => MerulaSymbol[];

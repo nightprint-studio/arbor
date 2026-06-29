@@ -47,9 +47,7 @@ impl TimeSpan {
     pub fn sect(self, other: TimeSpan) -> Option<TimeSpan> {
         let begin = self.begin.max(other.begin);
         let end = self.end.min(other.end);
-        if begin < end {
-            Some(TimeSpan::new(begin, end))
-        } else if begin == end && (self.is_zero_width() || other.is_zero_width()) {
+        if begin < end || (begin == end && (self.is_zero_width() || other.is_zero_width())) {
             Some(TimeSpan::new(begin, end))
         } else {
             None

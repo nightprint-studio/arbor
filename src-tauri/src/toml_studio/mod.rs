@@ -2,22 +2,22 @@
 //!
 //! Owned by `TomlBackend` (see `backend_impl.rs`) which exposes it
 //! through the unified `StudioFormatBackend` trait. The doc model:
-//!   - `original`  — text the file was opened with, snapshot-immutable.
-//!   - `current`   — live edited buffer the FE sees through `raw_current`.
-//!   - `doc`       — `toml_edit::DocumentMut` parsed from `current`. The
-//!                   key win over JSON's hand-rolled byte-splice machinery
-//!                   is that `toml_edit` already preserves comments,
-//!                   whitespace, ordering, and inline-vs-table formatting
-//!                   natively — mutations re-emit through the document and
-//!                   only the touched span changes.
-//!   - `value`     — `serde_json::Value` mirror of the document, used for
-//!                   children lookup and JSONPath queries (same trick RON
-//!                   uses: project the format-native AST to JSON for the
-//!                   query engine).
-//!   - `history`   — text snapshots backing undo / redo. Typing edits
-//!                   coalesce within ~500 ms; structural mutations
-//!                   (`apply_mutation`) never coalesce.
-//!   - encoding    — sniffed at parse time, round-tripped through save.
+//! - `original` — text the file was opened with, snapshot-immutable.
+//! - `current` — live edited buffer the FE sees through `raw_current`.
+//! - `doc` — `toml_edit::DocumentMut` parsed from `current`. The
+//!   key win over JSON's hand-rolled byte-splice machinery
+//!   is that `toml_edit` already preserves comments,
+//!   whitespace, ordering, and inline-vs-table formatting
+//!   natively — mutations re-emit through the document and
+//!   only the touched span changes.
+//! - `value` — `serde_json::Value` mirror of the document, used for
+//!   children lookup and JSONPath queries (same trick RON
+//!   uses: project the format-native AST to JSON for the
+//!   query engine).
+//! - `history` — text snapshots backing undo / redo. Typing edits
+//!   coalesce within ~500 ms; structural mutations
+//!   (`apply_mutation`) never coalesce.
+//! - encoding — sniffed at parse time, round-tripped through save.
 //!
 //! TOML has no native null; per FROZEN F13 the descriptor declares
 //! `null_handling = AsDelete` so the FE bulk-edit modal can warn the user
@@ -828,11 +828,10 @@ pub fn apply_string_rename(
             .ok_or_else(|| AppError::Other(format!(
                 "Rename site path not found: {}", path.join("/"),
             )))?;
-        let is_string = match cur {
-            Cursor::Item(Item::Value(TomlValue::String(_))) => true,
-            Cursor::Value(TomlValue::String(_))             => true,
-            _ => false,
-        };
+        let is_string = matches!(
+            cur,
+            Cursor::Item(Item::Value(TomlValue::String(_))) | Cursor::Value(TomlValue::String(_))
+        );
         if !is_string {
             return Err(AppError::Other(format!(
                 "Rename site at {path:?} is not a string leaf",
@@ -1301,10 +1300,8 @@ fn json_value_to_toml_value(v: &Value) -> Option<TomlValue> {
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Some(TomlValue::from(i))
-            } else if let Some(f) = n.as_f64() {
-                Some(TomlValue::from(f))
             } else {
-                None
+                n.as_f64().map(TomlValue::from)
             }
         }
         // TOML has no null. `null_handling = AsDelete` lives at the

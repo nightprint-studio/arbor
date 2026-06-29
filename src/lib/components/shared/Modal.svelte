@@ -29,7 +29,8 @@
    *     and fill the slots with `<ModalHeader>` / `<ModalFooter>` helpers (or
    *     custom content) so visual rhythm stays consistent across the app.
    */
-  import { onMount, setContext, type Component, type Snippet } from 'svelte';
+  import { onMount, setContext, type Snippet } from 'svelte';
+  import type { IconComponent } from '$lib/types/icon';
   import { fade, fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { animStore } from '$lib/stores/animations.svelte';
@@ -124,7 +125,7 @@
      *  aria-label, then to a generic "Parked dialog" fallback. */
     parkTitle?:       string;
     /** Optional Lucide icon component rendered on the chip. */
-    parkIcon?:        Component<{ size?: number; class?: string }>;
+    parkIcon?:        IconComponent;
     /** Required for `minimizable`. Re-opens the modal from scratch when
      *  the chip is clicked: typically `() => switchToTab(srcTab) then
      *  openDetail(payload)`. May be async; the chip shows a spinner
@@ -145,7 +146,8 @@
   // unsaved input) is intentionally lost: chasing self-contained state
   // preservation across remounts is much more complex than the workflow
   // continuity that the action-based approach already gives us.
-  const resolvedParkId = parkId ?? `modal-${crypto.randomUUID()}`;
+  const _fallbackParkId = `modal-${crypto.randomUUID()}`;
+  const resolvedParkId = $derived(parkId ?? _fallbackParkId);
 
   function doMinimize() {
     if (!minimizable || !onRestoreFromScratch) return;
@@ -170,7 +172,9 @@
   // consumer providing `onRestoreFromScratch` — without the latter we'd
   // park a dead action.
   setContext('arbor-modal', {
-    minimize: (minimizable && onRestoreFromScratch) ? doMinimize : undefined,
+    get minimize() {
+      return (minimizable && onRestoreFromScratch) ? doMinimize : undefined;
+    },
   });
 
   // Backdrop dismiss must require BOTH mousedown AND mouseup on the backdrop.

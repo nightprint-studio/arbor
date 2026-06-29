@@ -9,7 +9,7 @@
    * list to sections and supplies an icon resolver. Type to filter, ↑/↓ to move,
    * Enter to run, Esc to close.
    */
-  import type { Component } from 'svelte';
+  import type { IconComponent } from '$lib/types/icon';
   import {
     Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
@@ -44,7 +44,7 @@
 
   // Icon keys resolved by the shell. Local map keeps merula self-contained — no
   // dependency on Arbor's PLUGIN_ICONS registry.
-  const ICONS: Record<string, Component> = {
+  const ICONS: Record<string, IconComponent> = {
     Play, Square, SkipBack, SkipForward, FolderPlus, FolderOpen, FilePlus2, Save, Download,
     Files, ListTree, Music4, SlidersHorizontal, Terminal, AlertTriangle,
     Crosshair, BookOpen, Minimize2, Maximize2, PanelLeft, PanelRight, Search, Settings, Piano,
@@ -53,7 +53,7 @@
     Repeat, PlayCircle, MapPin, Timer, Hourglass, Gauge, Plus, Minus, RotateCcw, ZoomIn, ZoomOut, Map: MapIcon, StretchVertical,
     FileMusic, Layers, Crop, Snowflake, Grid3x3, LayoutGrid, FilePen, Trash2, Rewind, FastForward,
   };
-  const iconResolver = (name: string): Component => ICONS[name] ?? Command;
+  const iconResolver = (name: string): IconComponent => ICONS[name] ?? Command;
 
   interface Cmd {
     id: string;

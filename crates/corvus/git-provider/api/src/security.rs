@@ -407,8 +407,10 @@ mod tests {
 
     #[test]
     fn local_risk_scales_with_critical() {
-        let mut c = SeverityCounts::default();
-        c.critical = 1;
+        let mut c = SeverityCounts {
+            critical: 1,
+            ..Default::default()
+        };
         let s1 = compute_local_risk_score(&c);
         c.critical = 10;
         let s10 = compute_local_risk_score(&c);

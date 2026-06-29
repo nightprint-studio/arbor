@@ -27,7 +27,7 @@ use crate::value::{Transform, Value};
 /// membership list lives in exactly one place. `make_transform` below still maps
 /// each name to its closure, but no longer re-states the set of names.
 pub fn is_transform(name: &str) -> bool {
-    crate::reference::transform_names().iter().any(|n| *n == name)
+    crate::reference::transform_names().contains(&name)
 }
 
 /// The transform value of a bare nullary transform (`rev`, `degrade`,

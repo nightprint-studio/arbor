@@ -694,11 +694,14 @@
           {/each}
         </div>
       {/if}
-  </div>
 
   <!-- A single editable repo row, shared by the single-workspace list and the
        group tree.  Keyed by index into `rows` so a repo deduped across several
-       member workspaces stays one row resolved once. -->
+       member workspaces stays one row resolved once.
+       These snippets stay nested inside `.iw-body` (rather than as direct
+       `<Modal>` children) so they remain local renderable snippets instead of
+       being hoisted into Modal's props; they're still in scope for the
+       `{@render repoRow(...)}` calls in the list above. -->
   {#snippet repoRow(i: number)}
     {@const row = rows[i]}
     {@const cloning = cloneInProgress.has(i)}
@@ -829,6 +832,7 @@
       <span class="shared-hint">set in “{groupWorkspaces[ownerWi]?.name ?? '—'}”</span>
     </div>
   {/snippet}
+  </div>
 
   {#snippet footer()}
     <Button variant="secondary" onclick={onClose}>Cancel</Button>

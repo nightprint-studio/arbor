@@ -51,14 +51,19 @@ pub struct FetchResult {
 // Boxed `dyn Fn` (not generic) keeps the public fn signatures monomorphic and
 // matches the `init.rs` injected-seam style; these calls are not hot.
 
+/// Injected keyring lookup: maps a remote URL to an optional stored
+/// `(username, password)`, or `Err(String)` for a lookup failure (logged and
+/// treated as "no credentials"). The shell binds this to
+/// `crate::auth::credential_store::resolve_credentials`.
+pub type CredentialResolver<'a> =
+    &'a (dyn Fn(&str) -> std::result::Result<Option<(String, String)>, String> + Send + Sync);
+
 /// Resolve stored credentials for `url`, logging (and swallowing) lookup
 /// failures so a transient keyring error never aborts the network op — the
 /// credentials callback will still fall through to git's own helper / SSH agent.
 fn resolve_stored(
     url: &str,
-    credential_resolver: &(dyn Fn(&str) -> std::result::Result<Option<(String, String)>, String>
-              + Send
-              + Sync),
+    credential_resolver: CredentialResolver,
 ) -> Option<(String, String)> {
     match credential_resolver(url) {
         Ok(creds) => creds,
@@ -165,9 +170,7 @@ fn make_credentials_cb(
 pub fn fetch(
     repo: &Repository,
     remote_name: &str,
-    credential_resolver: &(dyn Fn(&str) -> std::result::Result<Option<(String, String)>, String>
-              + Send
-              + Sync),
+    credential_resolver: CredentialResolver,
 ) -> Result<FetchResult> {
     let mut remote = repo.find_remote(remote_name)?;
     let url = remote.url().unwrap_or("").to_string();
@@ -209,9 +212,7 @@ pub fn push(
     remote_name: &str,
     refspec: &str,
     force: bool,
-    credential_resolver: &(dyn Fn(&str) -> std::result::Result<Option<(String, String)>, String>
-              + Send
-              + Sync),
+    credential_resolver: CredentialResolver,
 ) -> Result<()> {
     let mut remote = repo.find_remote(remote_name)?;
     let url = remote.url().unwrap_or("").to_string();
@@ -276,9 +277,7 @@ pub fn pull(
     git: &GitCli,
     repo: &Repository,
     remote_name: &str,
-    credential_resolver: &(dyn Fn(&str) -> std::result::Result<Option<(String, String)>, String>
-              + Send
-              + Sync),
+    credential_resolver: CredentialResolver,
 ) -> Result<()> {
     fetch(repo, remote_name, credential_resolver)?;
 

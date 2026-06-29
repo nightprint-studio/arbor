@@ -155,7 +155,7 @@ pub const BUILTIN_SHELLS: &[BuiltinShell] = &[
 
 /// Returns true when the shell entry should be visible on the host platform.
 pub fn shell_supports_host(platforms: &[&str]) -> bool {
-    if platforms.iter().any(|p| *p == "any") {
+    if platforms.contains(&"any") {
         return true;
     }
     #[cfg(target_os = "windows")]
@@ -163,7 +163,7 @@ pub fn shell_supports_host(platforms: &[&str]) -> bool {
     #[cfg(not(target_os = "windows"))]
     let host = "unix";
 
-    platforms.iter().any(|p| *p == host)
+    platforms.contains(&host)
 }
 
 /// Result of probing a single shell on the current system.

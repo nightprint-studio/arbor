@@ -13,6 +13,9 @@ use crate::error::{IpcError, Result};
 /// only used in dev loopback call sites.
 pub type Bytes = Vec<u8>;
 
+/// The dispatch closure a [`LoopbackBroker`] wraps: `(method, params) -> result`.
+type DispatchFn = Box<dyn Fn(&str, Bytes) -> Result<Bytes> + Send + Sync>;
+
 /// The request/response client the router uses, regardless of transport.
 pub trait BrokerClient: Send + Sync {
     /// Invoke `method` on the backend with a parameter blob, returning the
@@ -26,7 +29,7 @@ pub trait BrokerClient: Send + Sync {
 /// M3 uses to move the 547 commands behind `arbor-ipc` while everything still
 /// runs in one process; later the same call sites talk to a pipe-backed client.
 pub struct LoopbackBroker {
-    dispatch: Box<dyn Fn(&str, Bytes) -> Result<Bytes> + Send + Sync>,
+    dispatch: DispatchFn,
 }
 
 impl LoopbackBroker {

@@ -180,6 +180,10 @@
   bind:this={stripEl}
 >
   {#each visibleCols as col, i (col.id)}
+    <!-- Column reorder/resize is mouse-drag only (WebView2 has no native DnD);
+         the onclick merely suppresses the synthetic post-drag click, so there
+         is no meaningful keyboard equivalent to add here. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
       class="header-cell"
       class:cell-graph={col.id === 'graph'}
@@ -189,6 +193,7 @@
       data-col={col.id}
       data-col-idx={i}
       role="columnheader"
+      tabindex="-1"
       onmousedown={(e) => startReorder(e, i)}
       onclick={suppressClickIfNeeded}
       oncontextmenu={(e) => onHeaderContextMenu(e, col.id)}
@@ -207,6 +212,10 @@
         <!-- Resize grip omitted on `subject` (pure flex) and `hash`
              (auto-sized to content): neither has a stored width that
              would have a visible effect when changed. -->
+        <!-- Resize grip: a draggable separator. Resizing is pointer-drag only
+             (no keyboard sizing), so the drag listeners on the separator role
+             are intentional. -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <div
           class="resize-grip"
           role="separator"

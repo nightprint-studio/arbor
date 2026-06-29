@@ -72,7 +72,7 @@ pub fn host_from_url(url: &str) -> Option<String> {
         return Some(host.to_string());
     }
     if let Some(rest) = url.strip_prefix("ssh://git@") {
-        let end = rest.find(|c: char| c == '/' || c == ':').unwrap_or(rest.len());
+        let end = rest.find(['/', ':']).unwrap_or(rest.len());
         let host = &rest[..end];
         if host.is_empty() { return None; }
         return Some(host.to_string());

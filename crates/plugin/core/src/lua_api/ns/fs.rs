@@ -522,7 +522,7 @@ fn install_join(lua: &Lua, fs_table: &Table) -> Result<()> {
         if cfg!(target_os = "windows") {
             s = s.replace('/', "\\");
         }
-        Ok(lua_ctx.create_string(s.as_bytes())?)
+        lua_ctx.create_string(s.as_bytes())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     fs_table.set("join", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     Ok(())

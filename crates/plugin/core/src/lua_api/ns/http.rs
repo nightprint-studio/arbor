@@ -136,7 +136,7 @@ fn permission_gate(pname: &str, net_perm: &[String], url: &str) -> mlua::Result<
     let host = url.split_once("://")
         .map(|(_, rest)| rest)
         .unwrap_or(url)
-        .split(|c: char| c == '/' || c == ':' || c == '?' || c == '#')
+        .split(['/', ':', '?', '#'])
         .next()
         .unwrap_or("")
         .to_string();
@@ -162,8 +162,8 @@ fn parse_opts(opts: Option<mlua::Table>) -> (Vec<(String, String)>, u64) {
     let mut timeout_ms: u64 = 10_000;
     if let Some(opts_t) = opts {
         if let Ok(htbl) = opts_t.get::<mlua::Table>("headers") {
-            for pair in htbl.pairs::<String, String>() {
-                if let Ok((k, v)) = pair { headers_vec.push((k, v)); }
+            for (k, v) in htbl.pairs::<String, String>().flatten() {
+                headers_vec.push((k, v));
             }
         }
         if let Ok(t) = opts_t.get::<u64>("timeout_ms") { timeout_ms = t; }

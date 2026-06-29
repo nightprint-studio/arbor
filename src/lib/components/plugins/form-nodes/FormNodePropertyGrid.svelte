@@ -81,6 +81,12 @@
     {@const isGroup  = children.length > 0}
     {@const editing  = editingId === key}
     {@const folded   = isGroup && !!row.collapsible && isCollapsed(row, key)}
+    <!-- `role`, `tabindex`, `onclick` and `onkeydown` are all gated on the same
+         `isGroup && row.collapsible` condition: when the row is interactive it is
+         a `button` with `tabindex=0` + keyboard handler; otherwise all four are
+         omitted. The analyzer can't correlate the parallel ternaries, so the
+         non-interactive-tabindex warning here is a false positive. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="pf-pg-row"
       class:pf-pg-row-group={isGroup}

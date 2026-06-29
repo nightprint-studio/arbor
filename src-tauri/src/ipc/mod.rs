@@ -645,7 +645,7 @@ fn host_dispatch(
                         .flatten()
                         .map(|(_, tok)| tok)
                 });
-            let Some(token) = token else { return None };
+            let token = token?;
             let url = format!("https://gitlab.com/api/v4/namespaces?search={path}");
             let resp = reqwest::Client::new()
                 .get(&url)

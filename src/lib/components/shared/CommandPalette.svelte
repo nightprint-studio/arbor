@@ -5,6 +5,7 @@
   // action / plugin icons are string keys resolved through PLUGIN_ICONS — no
   // duplicate per-component map allowed, PLUGIN_ICONS is the single source).
   import { Zap } from 'lucide-svelte';
+  import type { IconComponent } from '$lib/types/icon';
   import { laneColor } from '$lib/utils/graph-renderer';
   import { PLUGIN_ICONS } from '$lib/utils/plugin-icons';
   import { copyToClipboard } from '$lib/utils/clipboard';
@@ -2498,8 +2499,8 @@
 
   // Icon resolver handed to the shell — verb/action/plugin icons are string
   // keys, resolved through the shared PLUGIN_ICONS registry (Zap fallback).
-  function getIcon(name: string) {
-    return (PLUGIN_ICONS[name] ?? Zap) as typeof Zap;
+  function getIcon(name: string): IconComponent {
+    return (PLUGIN_ICONS[name] ?? Zap) as IconComponent;
   }
 
   // Placeholder flips between Phase 1 and Phase 2 so the user always knows

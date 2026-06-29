@@ -98,6 +98,9 @@ impl<C: 'static> Builder<C> {
     /// Add a reusable [`RpcBundle`], monomorphised for `C`. A later add of the
     /// same method name overrides the earlier one (last-wins), so a product can
     /// shadow a bundled handler with its own.
+    // Builder method intentionally named `add` (reads `builder.add(bundle)`); it
+    // is not an arithmetic `+` and does not warrant implementing `std::ops::Add`.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, bundle: impl RpcBundle<C>) -> Self {
         for e in bundle.handlers() {
             match e.kind {

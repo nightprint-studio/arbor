@@ -21,24 +21,21 @@ pub fn fire(state: &AppState, program: &str, method: &str, params: &Value, _resu
     if program != "platform" {
         return;
     }
-    match method {
-        // The theme switch broadcasts to plugins. Payload mirrors the original
-        // inline `notify_theme_changed` fire (all fields from params).
-        "notify_theme_changed" => {
-            state.fire_hook(
-                "on_theme_changed",
-                json!({
-                    "theme_id":   params.get("theme_id"),
-                    "theme_name": params.get("theme_name"),
-                    "vars":       params.get("vars"),
-                    "source":     params.get("source"),
-                }),
-            );
-        }
-
-        // The workspace hooks (`on_workspace_created`/`_updated`/`_repo_added`/
-        // `_repo_removed`) moved with the handlers to corvus-be (ADR-1), where the
-        // co-located plugin host fires them inline. They are no longer owed here.
-        _ => {}
+    // The theme switch broadcasts to plugins. Payload mirrors the original
+    // inline `notify_theme_changed` fire (all fields from params).
+    //
+    // The workspace hooks (`on_workspace_created`/`_updated`/`_repo_added`/
+    // `_repo_removed`) moved with the handlers to corvus-be (ADR-1), where the
+    // co-located plugin host fires them inline. They are no longer owed here.
+    if method == "notify_theme_changed" {
+        state.fire_hook(
+            "on_theme_changed",
+            json!({
+                "theme_id":   params.get("theme_id"),
+                "theme_name": params.get("theme_name"),
+                "vars":       params.get("vars"),
+                "source":     params.get("source"),
+            }),
+        );
     }
 }

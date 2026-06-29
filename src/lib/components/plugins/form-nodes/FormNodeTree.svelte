@@ -775,6 +775,7 @@
           class:pf-tree-drop-inside={isDropTarget && dropZone === 'inside'}
           style="padding-left:{row.depth * 14 + 4}px; height:{rowH}px"
           role="treeitem"
+          tabindex={idx === activeIdx ? 0 : -1}
           aria-level={row.depth + 1}
           aria-expanded={row.expandable ? row.expanded : undefined}
           aria-selected={selected}

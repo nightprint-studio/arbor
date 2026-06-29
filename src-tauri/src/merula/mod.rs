@@ -4,7 +4,7 @@
 //!
 //! Responsibilities (Onda 3, backend only — no Svelte):
 //! - own the per-window audio session: a dedicated thread holding the cpal stream
-//!   + the `Transport` look-ahead driver ([`audio_thread`]). Started lazily on
+//!   plus the `Transport` look-ahead driver ([`audio_thread`]). Started lazily on
 //!   first **play**, torn down on window close. Never the job system, never the
 //!   async runtime — the real-time path is sacred.
 //! - orchestrate re-eval: `lang(source)` → `Tracks` → `Transport::set_tracks`
@@ -16,6 +16,16 @@
 //! - offline render to WAV via a background job ([`render`]).
 //! - push throttled BE→FE events (`merula:diagnostics`/`active_haps`/`meters`/
 //!   `transport`/`log`, [`events`]).
+
+// The merula command surface moved out-of-process to `merula-be` (Model-D): the
+// FE reaches it through the generic `rpc` entry point, so none of the
+// `merula_*` command bodies (and their helpers) are invoke-routed from the shell
+// anymore. They stay compiled here, dead, as a non-destructive cutover buffer
+// until `merula-be` is fully validated and this subtree is deleted wholesale —
+// see `crate::handlers` (the `invoke_handlers!` macro) for the rationale. The
+// still-live bits (`MerulaState`, `migrate_legacy_dirs`, `shutdown`,
+// `open_merula_window`) are unaffected by this allow.
+#![allow(dead_code)]
 
 mod active_packs;
 mod audio_thread;

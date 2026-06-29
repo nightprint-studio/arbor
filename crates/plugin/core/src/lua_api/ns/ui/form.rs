@@ -23,6 +23,7 @@
 //!   - `{ name = "…", <payload_key> = … }` — explicit cfg form, NAME-keyed.
 //!   - `{ id = "…",   <payload_key> = … }` — explicit cfg form, NODE-ID-keyed
 //!     (the renderer resolves id → field name by walking the node tree).
+//!
 //! `<payload_key>` is `value` / `options` / `disabled` respectively. Picking
 //! `id` over `name` is the recommended pattern when the calling code already
 //! tracks the node id (the same key it uses for `patch`), removing the need
@@ -117,7 +118,7 @@ fn build_open_fn(ctx: &ApiCtx, lua: &Lua) -> Result<mlua::Function> {
         if let serde_json::Value::Object(ref obj) = json_val {
             for (k, v) in obj { payload[k] = v.clone(); }
         }
-        if let Some(ref h) = handle { let _ = h.emit("plugin:form", payload); }
+        if let Some(ref h) = handle { h.emit("plugin:form", payload); }
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))
 }
@@ -129,7 +130,7 @@ fn install_set_options(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()
         let parsed = parse_set_args(lua_ctx, args, "options")
             .map_err(|e| mlua::Error::RuntimeError(format!("arbor.ui.form.set_options: {}", e)))?;
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", serde_json::json!({
+            h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "set_options",
                 "name":        parsed.name,
@@ -150,7 +151,7 @@ fn install_set_disabled(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<(
         let parsed = parse_set_args(lua_ctx, args, "disabled")
             .map_err(|e| mlua::Error::RuntimeError(format!("arbor.ui.form.set_disabled: {}", e)))?;
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", serde_json::json!({
+            h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "set_disabled",
                 "name":        parsed.name,
@@ -171,7 +172,7 @@ fn install_set_value(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> 
         let parsed = parse_set_args(lua_ctx, args, "value")
             .map_err(|e| mlua::Error::RuntimeError(format!("arbor.ui.form.set_value: {}", e)))?;
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", serde_json::json!({
+            h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "set_value",
                 "name":        parsed.name,
@@ -198,7 +199,7 @@ fn install_replace(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
             .from_value(mlua::Value::Table(cfg))
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", serde_json::json!({
+            h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "replace",
                 "payload":     payload_json,
@@ -227,7 +228,7 @@ fn install_patch(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
             .from_value(mlua::Value::Table(ops))
             .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", serde_json::json!({
+            h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "patch",
                 "patches":     patches,
@@ -265,7 +266,7 @@ fn install_set_state_path(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result
                 .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
         }
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", payload);
+            h.emit("plugin:form-update", payload);
         }
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
@@ -301,7 +302,7 @@ fn install_set_loading(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()
         };
         let _ = lua_ctx;  // unused; the helper closes over the host handle only
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", serde_json::json!({
+            h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "set_loading",
                 "loading":     loading,
@@ -333,7 +334,7 @@ fn install_set_sidecar(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()
             )),
         };
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", serde_json::json!({
+            h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "set_sidecar",
                 "id":          id,
@@ -374,7 +375,7 @@ fn install_set_state_block(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Resul
             )),
         };
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", serde_json::json!({
+            h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "set_state_block",
                 "name":        name,
@@ -402,7 +403,7 @@ fn install_close(ctx: &ApiCtx, lua: &Lua, form_table: &Table) -> Result<()> {
     let pname  = ctx.plugin_name.clone();
     let fn_ = lua.create_function(move |_, ()| {
         if let Some(ref h) = handle {
-            let _ = h.emit("plugin:form-update", serde_json::json!({
+            h.emit("plugin:form-update", serde_json::json!({
                 "plugin_name": pname,
                 "op":          "close",
             }));

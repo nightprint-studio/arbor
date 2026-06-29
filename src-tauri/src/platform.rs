@@ -1,11 +1,11 @@
-/// Platform-specific process management helpers.
-///
-/// Public entry point: [`set_efficiency_mode`] — enables/disables OS-level
-/// power-throttling when Arbor moves to the background.
-///
-/// On Windows the function sets EcoQoS on **both** the main process and all
-/// its direct/indirect child processes (WebView2 renderers) so that Task
-/// Manager shows the green leaf icon at the app-group level.
+//! Platform-specific process management helpers.
+//!
+//! Public entry point: [`set_efficiency_mode`] — enables/disables OS-level
+//! power-throttling when Arbor moves to the background.
+//!
+//! On Windows the function sets EcoQoS on **both** the main process and all
+//! its direct/indirect child processes (WebView2 renderers) so that Task
+//! Manager shows the green leaf icon at the app-group level.
 
 // ---------------------------------------------------------------------------
 // Windows
@@ -67,7 +67,7 @@ mod imp {
     unsafe fn exe_name_from_entry(entry: &PROCESSENTRY32) -> String {
         let bytes: Vec<u8> = entry.szExeFile.iter()
             .take_while(|&&c| c != 0)
-            .map(|&c| c as u8)
+            .copied()
             .collect();
         String::from_utf8_lossy(&bytes).into_owned()
     }

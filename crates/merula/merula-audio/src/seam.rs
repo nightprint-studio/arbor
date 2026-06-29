@@ -315,9 +315,9 @@ pub enum ReverbIr {
 /// (`crate::testing::RecordingSink`).
 pub trait AudioSink {
     /// Enqueue a command. **Non-blocking.** On a full queue the command is
-    /// handed back so the caller can decide to drop or retry — never blocks the
-    /// scheduler.
-    fn send(&mut self, cmd: AudioCommand) -> std::result::Result<(), AudioCommand>;
+    /// handed back (boxed, since it is a large enum) so the caller can decide to
+    /// drop or retry — never blocks the scheduler.
+    fn send(&mut self, cmd: AudioCommand) -> std::result::Result<(), Box<AudioCommand>>;
 
     /// The backend's current output frame — its sample-clock "now". Lock-free.
     fn now_frame(&self) -> u64;

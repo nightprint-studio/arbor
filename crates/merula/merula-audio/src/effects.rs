@@ -29,14 +29,6 @@ pub struct Biquad {
 }
 
 impl Biquad {
-    /// An identity (pass-through) biquad.
-    pub fn identity() -> Self {
-        Biquad {
-            b0: 1.0,
-            ..Default::default()
-        }
-    }
-
     /// Configure as a 2nd-order low-pass (RBJ cookbook), Q = 0.707.
     pub fn lowpass(cutoff: f32, sample_rate: f32) -> Self {
         let mut q = Self::default();
@@ -455,6 +447,11 @@ const MAX_IR_FRAMES: usize = 8192;
 /// Target L2 energy the procedural reverb IR is normalised to, so the `room` wet
 /// send is a controlled, gentle level **independent of the tail length**. Picked
 /// for a subtle-but-present room; raise for a wetter default.
+///
+/// Only the procedural-IR generator (a `#[cfg(test)]` reference algorithm) reads
+/// this; the live `room` reverb is the O(1) [`Freeverb`], and explicit IRs arrive
+/// via [`ConvReverb::from_buffer`].
+#[cfg(test)]
 const TARGET_IR_ENERGY: f32 = 0.3;
 
 /// A stereo convolution reverb over a (typically procedural) impulse response.
@@ -462,8 +459,7 @@ const TARGET_IR_ENERGY: f32 = 0.3;
 /// Time-domain FIR convolution per channel via a ring-buffered history. This is
 /// O(IR length) per sample — fine for the short, decimated procedural IRs merula
 /// uses as the `room` send target (capped at [`MAX_IR_FRAMES`]). The IR is
-/// generated/installed off the RT path ([`ConvReverb::procedural`] /
-/// [`ConvReverb::from_buffer`]); `process` only reads it.
+/// installed off the RT path ([`ConvReverb::from_buffer`]); `process` only reads it.
 pub struct ConvReverb {
     /// Impulse response, one `[l, r]` tap per frame.
     ir: Vec<Frame>,
@@ -507,14 +503,9 @@ impl ConvReverb {
         }
     }
 
-    /// Synthesise a default procedural IR: an exponentially-decaying, slightly
-    /// decorrelated stereo noise tail of `seconds` length, with a few early
-    /// reflections. Deterministic (a fixed LCG seed) so renders are reproducible.
-    pub fn procedural(seconds: f32, sample_rate: f32) -> Self {
-        ConvReverb::from_buffer(procedural_ir(seconds, sample_rate))
-    }
-
-    /// Number of IR taps.
+    /// Number of IR taps. Test-only probe (the silence-gate test walks the ring a
+    /// few IR lengths); production reads the tail through `process` directly.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.ir.len()
     }
@@ -529,11 +520,6 @@ impl ConvReverb {
         }
         self.pos = 0;
         self.silent_for = self.ir.len();
-    }
-
-    /// Whether the IR is empty (never, after construction).
-    pub fn is_empty(&self) -> bool {
-        self.ir.is_empty()
     }
 
     /// Convolve one stereo input frame against the IR, returning the wet output.
@@ -574,16 +560,19 @@ impl ConvReverb {
 /// Build a procedural reverb IR: a handful of early reflections plus an
 /// exponentially-decaying, channel-decorrelated noise tail. `seconds` caps the
 /// tail; the result is normalised to a gentle send level.
+///
+/// Kept as a `#[cfg(test)]` reference algorithm: the live `room` reverb is the
+/// O(1) [`Freeverb`], so nothing in production synthesises an IR — but the energy
+/// normalisation here is worth keeping under test for an explicit-IR fallback.
+#[cfg(test)]
 fn procedural_ir(seconds: f32, sample_rate: f32) -> Vec<Frame> {
-    let len = ((seconds.max(0.05) * sample_rate) as usize)
-        .max(1)
-        .min(MAX_IR_FRAMES);
+    let len = ((seconds.max(0.05) * sample_rate) as usize).clamp(1, MAX_IR_FRAMES);
     let mut ir = vec![[0.0f32; 2]; len];
 
     // Deterministic LCG for the diffuse tail (reproducible renders).
     let mut state_l: u32 = 0x1234_5678;
     let mut state_r: u32 = 0x9E37_79B9;
-    let mut next = |s: &mut u32| -> f32 {
+    let next = |s: &mut u32| -> f32 {
         *s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         (*s >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
     };
@@ -847,7 +836,9 @@ impl DelayLine {
         self.feedback = feedback.clamp(0.0, 0.999);
     }
 
-    /// Whether this line currently produces echoes.
+    /// Whether this line currently produces echoes. Test-only probe (the renderer
+    /// drives `process` unconditionally and reads the wet output directly).
+    #[cfg(test)]
     pub fn is_active(&self) -> bool {
         self.time_frames > 0
     }

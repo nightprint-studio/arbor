@@ -65,7 +65,7 @@ struct GlNamespace {
 fn map_gl_project(r: GlProject) -> RemoteRepoInfo {
     let name = r
         .path_with_namespace
-        .rsplitn(2, '/')
+        .rsplit('/')
         .next()
         .unwrap_or(&r.name)
         .to_string();

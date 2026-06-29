@@ -28,7 +28,7 @@ const GLOBAL_KEYS: &[&str] = &["oauth"];
 // Types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub theme: ThemeConfig,
@@ -426,7 +426,7 @@ pub enum AnimSpeed {
 /// frontend, and the modal re-opens automatically for users whose stored
 /// `version` is lower (showing only the new steps, not the whole tour
 /// again).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OnboardingConfig {
     /// User has finished or skipped the tour at least once.
     #[serde(default)]
@@ -434,12 +434,6 @@ pub struct OnboardingConfig {
     /// Onboarding schema the user has been through. `0` means never seen.
     #[serde(default)]
     pub version: u32,
-}
-
-impl Default for OnboardingConfig {
-    fn default() -> Self {
-        Self { completed: false, version: 0 }
-    }
 }
 
 /// Marketplace catalog auto-refresh settings.
@@ -675,30 +669,6 @@ pub struct KeybindingsConfig {
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            theme: ThemeConfig::default(),
-            keybindings: KeybindingsConfig::default(),
-            recent_repos: Vec::new(),
-            ide: IdeConfig::default(),
-            terminals: TerminalsConfig::default(),
-            activity_bar: ActivityBarConfig::default(),
-            git: GitCliConfig::default(),
-            plugins_enabled: false,
-            oauth: OAuthOverrides::default(),
-            deep_link: crate::deep_link::DeepLinkConfig::default(),
-            marketplace: MarketplaceConfig::default(),
-            appearance: AppearanceConfig::default(),
-            animations: AnimationsConfig::default(),
-            onboarding: OnboardingConfig::default(),
-            whats_new: WhatsNewConfig::default(),
-            explorer: ExplorerConfig::default(),
-            launcher: LauncherConfig::default(),
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Persistence

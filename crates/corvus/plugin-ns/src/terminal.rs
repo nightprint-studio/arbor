@@ -118,7 +118,7 @@ fn install_exec(
                 TerminalLevel::Commands => {
                     let first = command.split_whitespace().next().unwrap_or("");
                     let basename = first
-                        .rsplit(|c| c == '/' || c == '\\')
+                        .rsplit(['/', '\\'])
                         .next()
                         .unwrap_or(first);
                     let basename = basename.strip_suffix(".exe").unwrap_or(basename);

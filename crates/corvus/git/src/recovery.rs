@@ -237,7 +237,7 @@ fn read_all_entries(git_dir: &Path) -> Vec<RecoveryEntry> {
     };
     BufReader::new(file)
         .lines()
-        .filter_map(|line| line.ok())
+        .map_while(std::result::Result::ok)
         .filter(|line| !line.trim().is_empty())
         .filter_map(|line| serde_json::from_str::<RecoveryEntry>(&line).ok())
         .collect()
@@ -485,7 +485,7 @@ pub fn list_entries(git: &GitCli, repo: &Repository, retention_days: u32) -> Res
     let mut kept: Vec<RecoveryEntry> = Vec::with_capacity(entries.len());
     let mut to_unref: Vec<String> = Vec::new();
     for (i, e) in entries.into_iter().enumerate() {
-        let expired = ttl_secs.map_or(false, |ttl| (now - e.created_at) > ttl);
+        let expired = ttl_secs.is_some_and(|ttl| (now - e.created_at) > ttl);
         let over    = i >= MAX_ENTRIES;
         if expired || over {
             to_unref.push(e.ref_name.clone());

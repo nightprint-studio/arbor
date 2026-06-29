@@ -36,7 +36,7 @@ use crate::build::{
     call, island, leaf, let_item, method, mini, num, program, string, var,
 };
 use crate::key::{degree_of, DetectedKey};
-use crate::model::{ImportOptions, Note, NoteTrack, Song};
+use crate::model::{ImportOptions, NoteTrack, Song};
 use crate::{chords, gm_drum};
 
 /// Maximum number of distinct bars grouped into one phrase. Four is the classic
@@ -565,6 +565,7 @@ fn round4(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Note;
     use merula_lang::prelude::parse;
 
     fn note(start: Time, dur: Time, pitch: i32) -> Note {

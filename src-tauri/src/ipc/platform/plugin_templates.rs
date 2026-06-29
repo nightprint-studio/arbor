@@ -1,16 +1,18 @@
 //! `plugin_templates` domain — bundle a plugin folder into a zip and back.
 //!
-//!   * `export_plugin_template_to_path(opts, target_path)` — generate a starter
-//!     plugin from a form payload and write the zip to the path the user picked
-//!     via Arbor's FileExplorerModal. The bundle always contains:
+//! * `export_plugin_template_to_path(opts, target_path)` — generate a starter
+//!   plugin from a form payload and write the zip to the path the user picked
+//!   via Arbor's FileExplorerModal. The bundle always contains:
 //!
-//!       <name>/
-//!         plugin.toml      complete manifest derived from `opts`
-//!         main.lua         skeleton + the toggled snippet recipes
-//!         sdk.d.lua        EmmyLua type stubs (LuaLS autocomplete)
-//!         .luarc.json      LuaLS config — points workspace.library at sdk.d.lua
+//!   ```text
+//!   <name>/
+//!     plugin.toml      complete manifest derived from `opts`
+//!     main.lua         skeleton + the toggled snippet recipes
+//!     sdk.d.lua        EmmyLua type stubs (LuaLS autocomplete)
+//!     .luarc.json      LuaLS config — points workspace.library at sdk.d.lua
+//!   ```
 //!
-//!     The Lua recipe text is NOT inlined in this file: every snippet lives
+//!   The Lua recipe text is NOT inlined in this file: every snippet lives
 //!     under `src-tauri/templates/plugin/` and is pulled in via `include_str!`,
 //!     so authors can edit or grep the templates the same way they would any
 //!     other plugin source.

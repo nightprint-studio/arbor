@@ -19,6 +19,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{GitError, Result};
 
+/// The credential-coupled push step injected by the caller (the shell binds it
+/// to `crate::git::remote::push`). Args: `(repo, remote, refspec, force)`;
+/// returns `Err(String)` carrying the failure message. `Send + Sync` so a
+/// caller holding it across an `.await` stays `Send`.
+pub type PushFn<'a> =
+    &'a (dyn Fn(&Repository, &str, &str, bool) -> std::result::Result<(), String> + Send + Sync);
+
 // ---------------------------------------------------------------------------
 // Options DTO
 // ---------------------------------------------------------------------------
@@ -126,7 +133,7 @@ pub async fn init(
     options: &InitRepoOptions,
     // `Send + Sync` so the caller's future stays `Send` when it holds this across
     // an `.await` (the in-process `init_repo` is an async corvus handler).
-    push: &(dyn Fn(&Repository, &str, &str, bool) -> std::result::Result<(), String> + Send + Sync),
+    push: PushFn<'_>,
 ) -> Result<InitOutcome> {
     let p = Path::new(path);
 

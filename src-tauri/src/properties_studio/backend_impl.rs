@@ -537,7 +537,6 @@ impl StudioFormatBackend for PropertiesBackend {
             }
             BulkEditScope::ProjectWide => {
                 let query     = query.clone();
-                let action    = action;
                 let value_src = value_source.clone();
                 let compiled  = compiled.clone();
                 tokio::task::spawn_blocking(move || -> StudioResult<BulkEditPreview> {
@@ -651,7 +650,6 @@ impl StudioFormatBackend for PropertiesBackend {
                 }
                 let _ = repo_root;
 
-                let action    = action;
                 let value_src = value_source.clone();
                 let compiled  = compiled.clone();
 
@@ -905,6 +903,7 @@ fn synth_active_doc_paths(source_path: &Option<String>) -> (String, String, Stri
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_site_for_preview(
     abs_path:     &str,
     rel_path:     &str,

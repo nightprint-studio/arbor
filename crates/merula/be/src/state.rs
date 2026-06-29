@@ -63,6 +63,8 @@ impl MerulaState {
 
     /// Emit a frontend event (mirrors `CorvusState::emit`). The shell re-emits the
     /// topic to the merula window.
+    // TODO(clippy): dead_code — deliberate state API mirroring corvus-be; domain
+    // handlers will route their events through this once wired. Flagged, not deleted.
     pub fn emit(&self, topic: &str, payload: Value) {
         self.sink.emit(topic, payload);
     }
@@ -89,6 +91,8 @@ impl MerulaState {
 
     /// Call back into the shell (e.g. the job registry), blocking on the reply.
     /// Errors with a clear message when no reverse channel is wired.
+    // TODO(clippy): dead_code — deliberate state API mirroring corvus-be; handlers
+    // call back into the shell through this once wired. Flagged, not deleted.
     pub fn host_call(&self, method: &str, params: Value) -> Result<Value, String> {
         match &self.host {
             Some(h) => h.call(method, params),

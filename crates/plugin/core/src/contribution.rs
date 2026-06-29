@@ -466,6 +466,7 @@ pub struct WhenClause {
     ///   - `Some(true)`  → only shown when the user multi-selected rows
     ///   - `Some(false)` → only shown for single-row context menus
     ///   - `None`        → shown in both (default, backward compat)
+    ///
     /// Read by the frontend matcher in `src/lib/contributions/when.ts`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi:      Option<bool>,

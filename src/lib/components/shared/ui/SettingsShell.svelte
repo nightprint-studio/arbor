@@ -1,12 +1,12 @@
 <script module lang="ts">
-  import type { Component } from 'svelte';
+  import type { IconComponent } from '$lib/types/icon';
 
   /** One entry in the settings sidebar nav. */
   export interface SettingsNavItem {
     id: string;
     label: string;
     /** Optional lucide (or any) icon component. */
-    icon?: Component;
+    icon?: IconComponent;
   }
   /** A labelled group of nav entries (the uppercase category headers). */
   export interface SettingsNavGroup {

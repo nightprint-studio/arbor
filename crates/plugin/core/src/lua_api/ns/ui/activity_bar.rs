@@ -110,23 +110,21 @@ fn install_set_combo_options(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> 
             mlua::Error::RuntimeError("arbor.ui.set_combo_options: 'options' is required".into()))?;
         let selected_value: Option<String> = cfg.get::<Option<String>>("selected").unwrap_or(None);
         let mut options: Vec<serde_json::Value> = Vec::new();
-        for pair in opts_table.sequence_values::<mlua::Table>() {
-            if let Ok(row) = pair {
-                let value    = row.get::<String>("value").unwrap_or_default();
-                let label    = row.get::<String>("label").unwrap_or_default();
-                let group    = row.get::<Option<String>>("group").unwrap_or(None);
-                let color    = row.get::<Option<String>>("color").unwrap_or(None);
-                let action   = row.get::<Option<bool>>("action").unwrap_or(None).unwrap_or(false);
-                let icon     = row.get::<Option<String>>("icon").unwrap_or(None);
-                let subtitle = row.get::<Option<String>>("subtitle").unwrap_or(None);
-                let meta     = row.get::<Option<String>>("meta").unwrap_or(None);
-                let disabled = row.get::<Option<bool>>("disabled").unwrap_or(None).unwrap_or(false);
-                options.push(serde_json::json!({
-                    "value": value, "label": label, "group": group, "color": color,
-                    "action": action, "icon": icon, "subtitle": subtitle, "meta": meta,
-                    "disabled": disabled,
-                }));
-            }
+        for row in opts_table.sequence_values::<mlua::Table>().flatten() {
+            let value    = row.get::<String>("value").unwrap_or_default();
+            let label    = row.get::<String>("label").unwrap_or_default();
+            let group    = row.get::<Option<String>>("group").unwrap_or(None);
+            let color    = row.get::<Option<String>>("color").unwrap_or(None);
+            let action   = row.get::<Option<bool>>("action").unwrap_or(None).unwrap_or(false);
+            let icon     = row.get::<Option<String>>("icon").unwrap_or(None);
+            let subtitle = row.get::<Option<String>>("subtitle").unwrap_or(None);
+            let meta     = row.get::<Option<String>>("meta").unwrap_or(None);
+            let disabled = row.get::<Option<bool>>("disabled").unwrap_or(None).unwrap_or(false);
+            options.push(serde_json::json!({
+                "value": value, "label": label, "group": group, "color": color,
+                "action": action, "icon": icon, "subtitle": subtitle, "meta": meta,
+                "disabled": disabled,
+            }));
         }
         let partial = serde_json::json!({ "options": options.clone() });
         contribute_patch_payload(
@@ -135,7 +133,7 @@ fn install_set_combo_options(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> 
         );
         if let (Some(sv), Some(ref h)) = (selected_value.as_ref(), &handle) {
             if options.iter().any(|o| o.get("value").and_then(|v| v.as_str()) == Some(sv.as_str())) {
-                let _ = h.emit("plugin:combo-select", serde_json::json!({
+                h.emit("plugin:combo-select", serde_json::json!({
                     "plugin_name": pname, "combo_id": id, "value": sv,
                 }));
             }

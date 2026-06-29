@@ -15,7 +15,7 @@
 //!     `/{id}.json` (the same dir the host's theme loader scans).
 
 use std::io::Cursor;
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::error::{MarketplaceError, Result};
 use crate::github_api::{
@@ -101,7 +101,7 @@ pub async fn install_plugin(
 fn extract_subpath_into(
     bytes:   &[u8],
     subpath: &str,
-    target:  &PathBuf,
+    target:  &Path,
     label:   &str,
 ) -> Result<usize> {
     let reader = Cursor::new(bytes);
@@ -167,7 +167,7 @@ fn extract_subpath_into(
         let Some(rel) = name.strip_prefix(&extract_prefix) else { continue; };
         if rel.is_empty() { continue; }
 
-        let mut out_path = target.clone();
+        let mut out_path = target.to_path_buf();
         for part in rel.split('/').filter(|p| !p.is_empty()) {
             out_path.push(part);
         }

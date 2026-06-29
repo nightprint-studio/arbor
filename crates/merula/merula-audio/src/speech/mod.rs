@@ -16,6 +16,22 @@
 //!   `SpeechSynthesizer` on Windows; other platforms fall back to SAM for now).
 //!   Higher intelligibility + multilingual via `voice`/`lang`.
 
+// SAM is a faithful, vendored port of `discordier/sam-js`: its phoneme/flag
+// tables are kept in the original columnar `0x.. | 0x.. | 0x..` form (one bitfield
+// per column) for line-by-line fidelity with the source, even where a row's columns
+// are all zero. That trips `eq_op`/`identity_op`/`unusual_byte_groupings`, and the
+// table-driven renderer trips `needless_range_loop`/`type_complexity` — all benign
+// for a port we deliberately don't idiomatize. The full flag-bit constant set is
+// kept for table fidelity even where some bits are never read (`dead_code`). Scope
+// the allow to the port subtree.
+#[allow(
+    clippy::eq_op,
+    clippy::identity_op,
+    clippy::unusual_byte_groupings,
+    clippy::needless_range_loop,
+    clippy::type_complexity,
+    dead_code
+)]
 pub mod sam;
 mod system;
 

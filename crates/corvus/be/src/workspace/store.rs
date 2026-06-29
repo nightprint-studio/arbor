@@ -58,10 +58,6 @@ pub struct WorkspaceDef {
     pub git_identity:      Option<GitIdentity>,
 }
 
-impl WorkspaceDef {
-    pub fn is_scratch(&self) -> bool { self.id == SCRATCH_ID }
-}
-
 /// On-disk shape of `workspaces.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceStore {

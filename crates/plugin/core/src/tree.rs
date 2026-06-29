@@ -194,6 +194,18 @@ struct StoreInner {
     next_version: u64,
 }
 
+/// Writeable content of a tree snapshot — everything `TreeStore::set` needs
+/// except the (plugin, sidebar) identity and the store-assigned `version`.
+#[derive(Debug, Default)]
+pub struct TreeUpdate {
+    pub title:                       Option<String>,
+    pub breadcrumb:                  Vec<BreadcrumbSegment>,
+    pub breadcrumb_edit_action:      Option<String>,
+    pub breadcrumb_edit_placeholder: Option<String>,
+    pub drop_action:                 Option<String>,
+    pub nodes:                       Vec<TreeNode>,
+}
+
 impl TreeStore {
     pub fn new() -> Self { Self::default() }
 
@@ -201,29 +213,19 @@ impl TreeStore {
 
     /// Replace the snapshot for the given (plugin, sidebar). Returns the new
     /// version number.
-    pub fn set(
-        &self,
-        plugin:     &str,
-        sidebar:    &str,
-        title:      Option<String>,
-        breadcrumb: Vec<BreadcrumbSegment>,
-        breadcrumb_edit_action:      Option<String>,
-        breadcrumb_edit_placeholder: Option<String>,
-        drop_action: Option<String>,
-        nodes:      Vec<TreeNode>,
-    ) -> u64 {
+    pub fn set(&self, plugin: &str, sidebar: &str, update: TreeUpdate) -> u64 {
         let mut inner = match self.inner.lock() { Ok(g) => g, Err(_) => return 0 };
         inner.next_version = inner.next_version.wrapping_add(1);
         let version = inner.next_version;
         let snap = TreeSnapshot {
             plugin_name: plugin.to_string(),
             sidebar_id:  sidebar.to_string(),
-            title,
-            breadcrumb,
-            breadcrumb_edit_action,
-            breadcrumb_edit_placeholder,
-            drop_action,
-            nodes,
+            title:                       update.title,
+            breadcrumb:                  update.breadcrumb,
+            breadcrumb_edit_action:      update.breadcrumb_edit_action,
+            breadcrumb_edit_placeholder: update.breadcrumb_edit_placeholder,
+            drop_action:                 update.drop_action,
+            nodes:                       update.nodes,
             version,
         };
         inner.snapshots.insert(Self::key(plugin, sidebar), snap);

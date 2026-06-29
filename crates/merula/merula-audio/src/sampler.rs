@@ -45,11 +45,6 @@ impl Sample {
         }
     }
 
-    /// Number of sample frames.
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
     /// Whether the buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
@@ -93,11 +88,6 @@ impl SampleBank {
     /// A resident sample by key, or `None` (caller falls back to the synth).
     pub fn get(&self, key: &str) -> Option<Sample> {
         self.resident.get(key).cloned()
-    }
-
-    /// Whether `key` is resident.
-    pub fn contains(&self, key: &str) -> bool {
-        self.resident.contains_key(key)
     }
 
     /// All resident keys (for the registry's suffix-match SFZ sample resolution).

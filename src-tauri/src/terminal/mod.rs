@@ -28,6 +28,17 @@ pub struct TerminalInfo {
     pub rows: u16,
 }
 
+/// Everything needed to spawn a PTY-backed shell, grouped so `create` takes a
+/// single spec instead of a long positional argument list.
+pub struct TerminalSpawnSpec {
+    pub shell:        String,
+    pub args:         Vec<String>,
+    pub display_name: String,
+    pub cwd:          String,
+    pub cols:         u16,
+    pub rows:         u16,
+}
+
 // ---------------------------------------------------------------------------
 // Internal instance
 // ---------------------------------------------------------------------------
@@ -54,13 +65,14 @@ unsafe impl Send for TerminalInstance {}
 // Manager
 // ---------------------------------------------------------------------------
 
+#[derive(Default)]
 pub struct TerminalManager {
     terminals: HashMap<String, TerminalInstance>,
 }
 
 impl TerminalManager {
     pub fn new() -> Self {
-        Self { terminals: HashMap::new() }
+        Self::default()
     }
 
     /// Spawn a new PTY process and return its unique ID.
@@ -68,14 +80,10 @@ impl TerminalManager {
     /// A `terminal:closed:<id>` event is emitted when the process exits.
     pub fn create(
         &mut self,
-        shell: String,
-        args: Vec<String>,
-        display_name: String,
-        cwd: String,
-        cols: u16,
-        rows: u16,
+        spec: TerminalSpawnSpec,
         app_handle: tauri::AppHandle,
     ) -> Result<TerminalInfo> {
+        let TerminalSpawnSpec { shell, args, display_name, cwd, cols, rows } = spec;
         let id = uuid::Uuid::new_v4().to_string();
 
         let pty_system = native_pty_system();

@@ -148,7 +148,11 @@
 
 <svelte:window onpointerup={stopDrag} />
 
+<!-- A playable instrument: the root captures keydown/keyup to sound notes, so it
+     must be focusable (tabindex=0) and role="application" hands keyboard control to
+     the widget. Both a11y rules below are false positives for this interactive case. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
   bind:this={rootEl}
   class="kbd"

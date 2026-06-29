@@ -14,7 +14,7 @@
 //!   different runtimes than a generic type parameter.
 //! - [`PluginRegistry`](registry::PluginRegistry) is the namespace + permission
 //!   + hook collector. Each domain crate ships a [`NamespaceContributor`] that
-//!   pours its surface into the registry at boot.
+//!     pours its surface into the registry at boot.
 //! - [`HookDispatcher`](dispatcher::HookDispatcher) is the runtime broker that
 //!   fans a fired hook out to every registered [`HookListener`]
 //!   (one per scripting runtime).

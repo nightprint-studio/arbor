@@ -591,12 +591,12 @@ enum KeySegment {
 }
 
 /// Split a properties key into segments. Recognises:
-///   - `foo.bar` → [Field("foo"), Field("bar")]
-///   - `foo[0]` → [Field("foo"), Index(0)]
-///   - `foo[0].bar` → [Field("foo"), Index(0), Field("bar")]
-///   - `foo.0.bar` → [Field("foo"), Index(0), Field("bar")] (dotted-
-///                    index tolerance — bracket form is the canonical
-///                    output side)
+/// - `foo.bar` → [Field("foo"), Field("bar")]
+/// - `foo[0]` → [Field("foo"), Index(0)]
+/// - `foo[0].bar` → [Field("foo"), Index(0), Field("bar")]
+/// - `foo.0.bar` → [Field("foo"), Index(0), Field("bar")] (dotted-
+///   index tolerance — bracket form is the canonical
+///   output side)
 fn parse_key_segments(key: &str) -> Vec<KeySegment> {
     let mut out: Vec<KeySegment> = Vec::new();
     let mut cur = String::new();
@@ -648,6 +648,10 @@ fn push_segment(out: &mut Vec<KeySegment>, seg: String) {
     out.push(KeySegment::Field(seg));
 }
 
+// `opts` is currently only forwarded through recursion; it is reserved for the
+// planned `opts.strings_only` path (see `tree_to_yml_value_strings_only`), so it
+// stays in the signature instead of being dropped.
+#[allow(clippy::only_used_in_recursion)]
 fn insert_into_tree(
     root: &mut TreeNode,
     segments: &[KeySegment],
@@ -810,7 +814,7 @@ fn splice_comments_above_yaml_keys(yaml_body: &str, entries: &[PropertyEntry]) -
         return yaml_body.to_string();
     }
     let mut out = String::new();
-    let mut inserted: BTreeMap<String, bool> = BTreeMap::new();
+    let mut inserted: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for line in yaml_body.lines() {
         // Top-level key heuristic: starts at column 0, contains `:`.
         let trimmed = line.trim_start();
@@ -820,7 +824,7 @@ fn splice_comments_above_yaml_keys(yaml_body: &str, entries: &[PropertyEntry]) -
                 let key = trimmed[..colon].trim().to_string();
                 let bare = strip_brackets_for_match(&key);
                 if let Some(cs) = comments_by_root.get(&bare) {
-                    if !inserted.contains_key(&bare) {
+                    if inserted.insert(bare) {
                         for c in cs {
                             // Ensure each comment starts with `#`.
                             if c.starts_with('#') || c.starts_with('!') {
@@ -831,7 +835,6 @@ fn splice_comments_above_yaml_keys(yaml_body: &str, entries: &[PropertyEntry]) -
                             }
                             out.push('\n');
                         }
-                        inserted.insert(bare, true);
                     }
                 }
             }

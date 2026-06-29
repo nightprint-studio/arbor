@@ -52,8 +52,6 @@ impl MarketplaceRegistry {
 
     pub fn community_repo(&self) -> &str { &self.community_repo }
 
-    pub(crate) fn host(&self) -> Arc<dyn MarketplaceHost> { self.host.clone() }
-
     /// True when we have a non-stale cache for the current community repo —
     /// lets the command layer skip a network hit on modal open.
     pub fn has_fresh_cache(&self) -> bool {

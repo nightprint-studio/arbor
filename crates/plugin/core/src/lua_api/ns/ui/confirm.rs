@@ -24,7 +24,7 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
             "cancel_action":   config_json.get("cancel_action").cloned(),
             "state":           config_json.get("state").cloned(),
         });
-        if let Some(ref h) = handle { let _ = h.emit("plugin:confirm", payload); }
+        if let Some(ref h) = handle { h.emit("plugin:confirm", payload); }
         Ok(())
     }).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;
     ui.set("confirm", fn_).map_err(|e| PluginCoreError::Plugin(e.to_string()))?;

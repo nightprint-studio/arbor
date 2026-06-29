@@ -1,15 +1,15 @@
 //! Jira issue tracker — thin shell shim over `corvus-issue-tracker-jira`.
 //!
 //! The REST/ADF logic lives in the crate (keyring-free, credentials injected via
-//! `SessionProvider`). Here we keep the keyring glue (`oauth_jira`) and adapt the
-//! crate's `IssueTracker` (+ its Jira-specific inherent methods) to the existing
-//! command surface, mapping `IssueTrackerError` → `AppError` byte-identically.
+//! `SessionProvider`). What stays shell-side is the keyring glue (`oauth_jira`):
+//! credential validation/storage, the auth-status read, and the host-gated
+//! inline-image fetch. The issue *operations* (search/get/transition/assign/
+//! comment/create/attachment) now flow through the `GitProvider`-style trait in
+//! `corvus-be`, so their shell wrappers are gone.
 
-use std::path::Path;
-
-use corvus_issues::prelude::{
-    jira_new_issue, Issue, IssueComment, IssueFilterOptions, IssueFilters, IssueTracker, IssueUser,
-};
+// `IssueTracker` is the trait that brings `current_user` / `auth_status` /
+// `fetch_image_bytes` into scope on the concrete `jira_tracker()` handle.
+use corvus_issues::prelude::{IssueTracker, IssueUser};
 
 use crate::auth::oauth_jira;
 use crate::error::{AppError, Result};
@@ -46,58 +46,8 @@ pub async fn get_auth_status() -> Result<JiraAuthStatus> {
     }
 }
 
-// ── Operations (delegate to the crate) ────────────────────────────────────────
-
-pub async fn search_issues(filters: IssueFilters) -> Result<Vec<Issue>> {
-    jira_tracker().search_issues(filters).await.map_err(to_app_error)
-}
-
-pub async fn get_issue(key: &str) -> Result<Issue> {
-    jira_tracker().get_issue(key).await.map_err(to_app_error)
-}
-
-pub async fn get_filter_options() -> Result<IssueFilterOptions> {
-    jira_tracker().get_filter_options().await.map_err(to_app_error)
-}
-
-pub async fn transition_issue(key: &str, status_id: &str) -> Result<Issue> {
-    jira_tracker().transition_issue(key, status_id).await.map_err(to_app_error)
-}
-
-pub async fn assign_issue(key: &str, account_id: Option<&str>) -> Result<Issue> {
-    jira_tracker().assign_issue(key, account_id).await.map_err(to_app_error)
-}
-
-pub async fn add_comment(key: &str, body: &str) -> Result<IssueComment> {
-    jira_tracker().add_comment(key, body).await.map_err(to_app_error)
-}
-
-pub async fn download_attachment(content_url: &str, dest_path: &Path) -> Result<u64> {
-    jira_tracker().download_attachment(content_url, dest_path).await.map_err(to_app_error)
-}
+// ── Inline-image proxy (host-gated, stays shell-side) ─────────────────────────
 
 pub async fn fetch_image_bytes(url: &str) -> Result<(Vec<u8>, Option<String>)> {
     jira_tracker().fetch_image_bytes(url).await.map_err(to_app_error)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn create_issue_req(
-    title: &str,
-    description: Option<&str>,
-    team_id: &str,
-    status_id: Option<&str>,
-    assignee_id: Option<&str>,
-    label_ids: Vec<String>,
-    priority: Option<u32>,
-    _project_id: Option<&str>, // unused in Jira (mapped to team/project)
-    milestone_id: Option<&str>,
-    due_date: Option<&str>,
-    estimate: Option<f64>,
-    issue_type: Option<&str>,
-) -> Result<Issue> {
-    let req = jira_new_issue(
-        title, description, team_id, status_id, assignee_id, label_ids, priority, milestone_id,
-        due_date, estimate, issue_type,
-    );
-    jira_tracker().create_issue(req).await.map_err(to_app_error)
 }

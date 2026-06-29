@@ -19,12 +19,12 @@ use crate::http::{classify, percent_encode_slash, GitlabHttp};
 // Delegate helpers (destructuring / validation)
 // ---------------------------------------------------------------------------
 
-fn project_path<'a>(repo: &'a RepoRef) -> &'a str {
+fn project_path(repo: &RepoRef) -> &str {
     // GitLab convention: full project path is in `owner_or_path`; `name` unset.
     repo.owner_or_path.as_str()
 }
 
-fn id_parts<'a>(id: &'a MrId) -> Result<(&'a str, u64), ProviderError> {
+fn id_parts(id: &MrId) -> Result<(&str, u64), ProviderError> {
     if !matches!(id.provider, ProviderKind::GitLab) {
         return Err(ProviderError::BadRequest(
             "MrId provider mismatch (expected GitLab)".into(),
@@ -1153,8 +1153,7 @@ fn gl_note_to_comment(n: GlNote) -> MrComment {
 fn gl_system_note_to_event(n: GlNote) -> MrEvent {
     let lower = n.body.to_ascii_lowercase();
     let kind = if lower.contains("approved") {
-        "review"
-    } else if lower.contains("unapproved") {
+        // Also catches "unapproved" — it contains the "approved" substring.
         "review"
     } else if lower.contains("assigned") {
         "assign"

@@ -174,7 +174,16 @@
         <div class="job-list">
           {#each visibleJobs as job (job.id)}
             {@const running = job.status.type === 'running'}
-            <button class="job-row" class:inactive={!running} onclick={() => openOutput(job)}>
+            <!-- Row is a clickable container for inner action buttons, so it can't
+                 be a <button> itself (no nested buttons) — role="button" + keydown. -->
+            <div
+              class="job-row"
+              class:inactive={!running}
+              role="button"
+              tabindex="0"
+              onclick={() => openOutput(job)}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOutput(job); } }}
+            >
               <span class="job-icon">
                 {#if running}
                   <Loader size={14} class="spin-icon job-accent" />
@@ -213,7 +222,7 @@
                 {/if}
                 <span class="ps-btn open-hint" use:tooltip={'View output'}><ExternalLink size={13} /></span>
               </span>
-            </button>
+            </div>
           {/each}
         </div>
       {/if}

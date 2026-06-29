@@ -43,6 +43,10 @@ pub struct Session {
     pub loaded: Arc<Mutex<HashSet<String>>>,
 }
 
+/// A snapshot of a live session's control channel + shared `loaded` instrument
+/// set, taken so the caller can drop the session lock before `.await`-ing.
+pub type LiveHandles = (Sender<MerulaControl>, Arc<Mutex<HashSet<String>>>);
+
 /// Return a sender to the audio thread, starting it if needed. Opening the session
 /// opens the audio device — done lazily here (on play), not on eval. Drives the
 /// session **slot** (`MerulaState::session()`), so the caller holds the guard.
@@ -88,9 +92,7 @@ pub fn send_if_live(slot: &Option<Session>, msg: MerulaControl) {
 /// when no (still-running) session exists. Used by the off-thread staging path
 /// (`stage` / `audition` in `audio_cmds`) to release the session lock before any
 /// `.await` — the `MutexGuard` is not `Send`.
-pub fn live_handles(
-    slot: &Option<Session>,
-) -> Option<(Sender<MerulaControl>, Arc<Mutex<HashSet<String>>>)> {
+pub fn live_handles(slot: &Option<Session>) -> Option<LiveHandles> {
     match slot.as_ref() {
         Some(s) if !s.handle.is_finished() => Some((s.tx.clone(), Arc::clone(&s.loaded))),
         _ => None,
@@ -100,6 +102,9 @@ pub fn live_handles(
 /// Tear the session down (drop the cpal stream on its thread) and join. Takes the
 /// session out of the slot so a subsequent play opens a fresh one. Called on
 /// merula-window close.
+// TODO(clippy): dead_code — the audio thread already handles `MerulaControl::Shutdown`
+// (audio_thread.rs); this producer side is wired once the shell signals window close.
+// Flagged, not deleted (removing it would also orphan the handled control variant).
 pub fn shutdown(slot: &mut Option<Session>) {
     if let Some(s) = slot.take() {
         let _ = s.tx.send(MerulaControl::Shutdown);

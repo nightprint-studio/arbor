@@ -467,12 +467,11 @@ fn render_time_series(ts: &VulnTimeSeries) -> String {
         .collect();
 
     if visible.is_empty() {
-        return format!(
-            r#"<div class="dash-cell chart-cell">
+        return r#"<div class="dash-cell chart-cell">
               <h3>Vulnerabilities over time</h3>
               <div class="chart-empty">No findings recorded in the selected window.</div>
             </div>"#
-        );
+            .to_string();
     }
 
     let n = ts.points.len();

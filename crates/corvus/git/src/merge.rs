@@ -1007,7 +1007,7 @@ fn run_git_streaming(
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     let stderr_thread = std::thread::spawn(move || {
         let mut all = String::new();
-        for line in BufReader::new(stderr_pipe).lines().flatten() {
+        for line in BufReader::new(stderr_pipe).lines().map_while(std::result::Result::ok) {
             all.push_str(&line);
             all.push('\n');
             let _ = tx.send(line);
@@ -1017,7 +1017,7 @@ fn run_git_streaming(
 
     // Stdout on the main loop, interleaved with stderr drained from rx.
     let stdout_pipe = child.stdout.take().expect("piped");
-    for line in BufReader::new(stdout_pipe).lines().flatten() {
+    for line in BufReader::new(stdout_pipe).lines().map_while(std::result::Result::ok) {
         on_event(MrPrepEvent::Output { phase, line: &line });
         // Pull any stderr lines that arrived in the meantime.
         while let Ok(e) = rx.try_recv() {
@@ -1097,7 +1097,7 @@ fn run_git_streaming_capturing(
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     let stderr_thread = std::thread::spawn(move || {
         let mut all = String::new();
-        for line in BufReader::new(stderr_pipe).lines().flatten() {
+        for line in BufReader::new(stderr_pipe).lines().map_while(std::result::Result::ok) {
             all.push_str(&line);
             all.push('\n');
             let _ = tx.send(line);
@@ -1106,7 +1106,7 @@ fn run_git_streaming_capturing(
     });
 
     let stdout_pipe = child.stdout.take().expect("piped");
-    for line in BufReader::new(stdout_pipe).lines().flatten() {
+    for line in BufReader::new(stdout_pipe).lines().map_while(std::result::Result::ok) {
         buf.push_str(&line); buf.push('\n');
         on_event(MrPrepEvent::Output { phase, line: &line });
         while let Ok(e) = rx.try_recv() {

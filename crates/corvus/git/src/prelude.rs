@@ -38,7 +38,7 @@ pub use crate::worktree::{
 };
 pub use crate::init::{
     get_git_identity, gitignore_content, init, is_git_repo, license_content, InitOutcome,
-    InitRepoOptions,
+    InitRepoOptions, PushFn,
 };
 pub use crate::notes::{
     check_remote_status, delete_note, list_notes, set_note, CommitNote, NoteRemoteStatus,
@@ -91,7 +91,9 @@ pub use crate::branch::{
 };
 pub use crate::repo::{clone_repo, CloneOptions, GitRepo, RepoInfo, RepoManager};
 pub use crate::reflog::{get_reflog, ReflogEntry};
-pub use crate::remote::{fetch, list_remotes, pull, push, FetchResult, RemoteInfo};
+pub use crate::remote::{
+    fetch, list_remotes, pull, push, CredentialResolver, FetchResult, RemoteInfo,
+};
 pub use crate::submodule::{
     list_submodules, submodule_checkout, submodule_fetch, submodule_list_branches, submodule_pull,
     submodule_push, update_submodule, update_submodules, AuthArgsResolver, SubmoduleInfo,

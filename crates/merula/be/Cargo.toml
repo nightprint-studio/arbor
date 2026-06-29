@@ -11,6 +11,13 @@ description  = "Merula backend — the headless audio/live-coding process for Mo
 name = "merula-be"
 path = "src/main.rs"
 
+[features]
+# Pull in the ONNX transcription backend (basic-pitch + Demucs stem separation),
+# forwarding to the merula facade's `onnx` feature. Off by default: the always-
+# available DSP backend ships unconditionally and the `onnx`-gated branches in
+# `importers.rs` fall back to it. The shell turns this on.
+onnx = ["merula/onnx"]
+
 [dependencies]
 arbor-ipc      = { path = "../../foundation/ipc" }
 arbor-rpc      = { path = "../../foundation/rpc" }

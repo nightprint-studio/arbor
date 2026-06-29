@@ -171,6 +171,10 @@
   let tabs        = $state<ExpTab[]>([initialTab]);
   let activeTabId = $state(initialTab.id);
   const activeTab = $derived(tabs.find(t => t.id === activeTabId) ?? tabs[0]);
+  // Active-tab projections — declared early because several derives below
+  // (preview sizing, per-folder view memory) read them.
+  const view        = $derived(activeTab.view);
+  const currentPath = $derived(activeTab.path);
 
   // ── State ────────────────────────────────────────────────────────────────
   let rawEntries  = $state<FsEntry[]>([]);
@@ -389,8 +393,7 @@
   }
 
   // ── Active-tab projections ────────────────────────────────────────────────
-  const view        = $derived(activeTab.view);
-  const currentPath = $derived(activeTab.path);
+  // (`view` / `currentPath` are declared up near `activeTab` — earlier derives need them.)
   const favourites  = $derived(roots.filter(r => r.kind !== 'drive'));
   // User-pinned folders shown in the Favourites section alongside the OS roots.
   const pinnedFavs  = $derived(
@@ -2444,7 +2447,7 @@
     return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
   }
   function rootIcon(kind: FsRoot['kind']) {
-    return { home: Home, desktop: Monitor, documents: FileText, downloads: Download, drive: HardDrive }[kind] ?? Folder;
+    return { home: Home, desktop: Monitor, documents: FileText, downloads: Download, drive: HardDrive, wsl: SquareTerminal }[kind] ?? Folder;
   }
   const SEARCH_CAP = 5000;
   const footerInfo = $derived.by(() => {
@@ -2972,7 +2975,8 @@
             <div class="fx-state">The Recycle Bin is empty.</div>
           {:else}
             {#each trashItems as it (it.id)}
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div class="fx-trash-row" class:selected={trashSel.has(it.id)} onclick={(e) => clickTrashRow(it.id, e)}>
                 <input type="checkbox" class="fx-trash-check" checked={trashSel.has(it.id)} tabindex="-1" aria-hidden="true" />
                 <span class="fx-entry-ico"><Icon icon={entryIcon(it.name, false)} width={16} height={16} /></span>
@@ -3042,7 +3046,7 @@
 
         {#if !isGrid}
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-          <div class="fx-col-head" bind:this={colHeadEl} oncontextmenu={openColumnMenu}>
+          <div class="fx-col-head" role="presentation" bind:this={colHeadEl} oncontextmenu={openColumnMenu}>
             {#each listColumns as col, i (col.id)}
               <div class="fx-col {col.id === 'name' ? 'fx-col-name' : ''}"
                    class:fx-col-right={col.align === 'right'}
@@ -3161,7 +3165,8 @@
     {#if rightPanel && view === 'browse'}
       <aside class="fx-preview" class:fx-expanded={previewExpanded} style={previewExpanded ? '' : `width: ${previewWidth}px`}>
         {#if !previewExpanded}
-          <!-- svelte-ignore a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
           <div class="fx-pv-resize" onmousedown={startPreviewResize} role="separator" aria-orientation="vertical" aria-label="Resize preview"></div>
         {/if}
         <div class="fx-pv-head">
@@ -3756,7 +3761,7 @@
   .fx-gi-img { display: flex; align-items: center; justify-content: center; flex-shrink: 0; position: relative; overflow: visible; }
   .fx-gi-img.thumb { background: var(--bg-base); border-radius: var(--radius-sm); overflow: hidden; }
   .fx-gi-thumb { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-sm); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28); -webkit-user-drag: none; user-select: none; }
-  .fx-gi-label { font-size: 11.5px; color: var(--text-primary); font-family: var(--font-ui-sans); text-align: center; line-height: 1.25; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+  .fx-gi-label { font-size: 11.5px; color: var(--text-primary); font-family: var(--font-ui-sans); text-align: center; line-height: 1.25; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
   .fx-inline-grid { width: 92%; text-align: center; }
 
   .fx-entry-name { font-size: 12px; color: var(--text-primary); font-family: var(--font-ui-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }

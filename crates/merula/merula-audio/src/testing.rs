@@ -57,7 +57,7 @@ impl RecordingSink {
 }
 
 impl AudioSink for RecordingSink {
-    fn send(&mut self, cmd: AudioCommand) -> Result<(), AudioCommand> {
+    fn send(&mut self, cmd: AudioCommand) -> Result<(), Box<AudioCommand>> {
         self.sent.push(cmd);
         Ok(())
     }

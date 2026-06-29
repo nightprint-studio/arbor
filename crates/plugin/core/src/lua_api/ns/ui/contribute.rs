@@ -65,7 +65,7 @@ fn install_contribute(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
         let mut group    = group_top;
 
         lift_legacy_payload_fields(
-            &pname, &point, &item_id,
+            &LiftTarget { pname: &pname, point: &point, item_id: &item_id },
             &mut payload, &mut when, &mut disabled, &mut group,
             disabled_top.is_some(),
         );
@@ -100,18 +100,25 @@ fn install_contribute(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
     Ok(())
 }
 
+/// Identity of the contribution being lifted — used only to build the
+/// deprecation warning messages.
+struct LiftTarget<'a> {
+    pname: &'a str,
+    point: &'a str,
+    item_id: &'a str,
+}
+
 /// Migrate legacy `payload.when` / `payload.disabled` / `payload.group`
 /// to top-level fields. Logs a deprecation warning at most once per call.
 fn lift_legacy_payload_fields(
-    pname: &str,
-    point: &str,
-    item_id: &str,
+    target: &LiftTarget<'_>,
     payload: &mut serde_json::Value,
     when: &mut Option<WhenClause>,
     disabled: &mut bool,
     group: &mut Option<String>,
     disabled_top_set: bool,
 ) {
+    let LiftTarget { pname, point, item_id } = *target;
     let group_top_set = group.is_some();
     if let Some(obj) = payload.as_object_mut() {
         if let Some(legacy) = obj.remove("when") {

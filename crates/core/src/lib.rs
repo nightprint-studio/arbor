@@ -4,13 +4,13 @@
 //!
 //! - [`paths`]   — locations on disk Arbor owns (config / data / cache roots).
 //! - [`profile`] — the active-profile cell + profile/product-scoped path
-//!                 helpers (`arbor/profiles/<profile>/<product>/`).
+//!   helpers (`arbor/profiles/<profile>/<product>/`).
 //! - [`http`]    — `reqwest` client with the Arbor user-agent + default timeout.
 //! - [`error`]   — [`CoreError`] for failures inside this crate; mapped to
-//!                 the host's `AppError` at the boundary.
+//!   the host's `AppError` at the boundary.
 //! - [`app_ctx`] — [`AppCtx`] trait, the Tauri-agnostic handle domain crates
-//!                 use to emit events / read user-focus state / locate the
-//!                 Arbor data root. The Tauri shell crate implements it.
+//!   use to emit events / read user-focus state / locate the
+//!   Arbor data root. The Tauri shell crate implements it.
 //!
 //! ## Public API: use the [`prelude`]
 //!

@@ -13,16 +13,16 @@
 //! every other column.
 //!
 //! Width semantics depend on the id (mirrored in the frontend renderer):
-//!   * `graph`   — the value is treated as the *maximum* width the SVG
-//!                 track is allowed to occupy. The track auto-sizes to
-//!                 `svgW + 12` (the natural width of the lane diagram plus
-//!                 a small gutter) and caps at this value. When the lane
-//!                 count would make the natural width exceed the cap, the
-//!                 cap softens so no lanes get clipped.
-//!   * `subject` — the value is the *minimum*; the frontend renders the
-//!                 track as `minmax(width, 1fr)`, so the column flex-grows
-//!                 past the minimum to absorb whatever space is left.
-//!   * everything else — fixed track width.
+//! * `graph` — the value is treated as the *maximum* width the SVG
+//!   track is allowed to occupy. The track auto-sizes to
+//!   `svgW + 12` (the natural width of the lane diagram plus
+//!   a small gutter) and caps at this value. When the lane
+//!   count would make the natural width exceed the cap, the
+//!   cap softens so no lanes get clipped.
+//! * `subject` — the value is the *minimum*; the frontend renders the
+//!   track as `minmax(width, 1fr)`, so the column flex-grows
+//!   past the minimum to absorb whatever space is left.
+//! * everything else — fixed track width.
 
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};

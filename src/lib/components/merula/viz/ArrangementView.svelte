@@ -142,6 +142,10 @@
   const endX    = $derived(headW + arrangementStore.contentEnd * PX);
 
   // ── Minimap geometry (cycle-space; the component maps cycle→percent itself) ──
+  // Reactive mirror of the scroll geometry (driven by `syncView`), for the minimap
+  // viewport box. `viewportW` also tracks panel resizes via a ResizeObserver.
+  let scrollLeftPx = $state(0);
+  let viewportW = $state(0);
   const mapCycles = $derived(Math.max(arrangementStore.contentEnd, loopCycles, 4));
   const viewStartCycle = $derived(PX > 0 ? scrollLeftPx / PX : 0);
   const viewEndCycle   = $derived(PX > 0 ? (scrollLeftPx + viewportW - headW) / PX : 0);
@@ -280,10 +284,6 @@
   // ── Auto-follow: keep the playhead in view while playing (re-armed on each
   // play start; ANY manual horizontal scroll pins it until the next start). ──────
   let scrollEl = $state<HTMLElement | null>(null);
-  // Reactive mirror of the scroll geometry (driven by `syncView`), for the minimap
-  // viewport box. `viewportW` also tracks panel resizes via a ResizeObserver.
-  let scrollLeftPx = $state(0);
-  let viewportW = $state(0);
   let userPinned = $state(false);
   let prevPlaying = false;
   // Keep the geometry mirror fresh when the scroll element mounts / resizes.
@@ -488,7 +488,12 @@
   }
 </script>
 
+<!-- Focusable keyboard-nav region: arrows move the selected track / scrub the
+     cursor, Ctrl+arrows jump markers (see `onKeydown`). It's a grouping container,
+     not a single widget, so role="group" + a roving tabindex is the right shape —
+     the noninteractive-listener / tabindex rules are false positives here. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div class="arr" tabindex="0" role="group" aria-label="Arrangement" onkeydown={onKeydown}>
   <div class="arr-scroll" class:hide-hbar={lanes.length && arrViewOptions.minimap} bind:this={scrollEl} onscroll={onScroll} onwheel={onArrWheel}>
     <div class="arr-inner" style="--head-w: {headW}px; --tl-w: {timelineW}px;">
@@ -518,8 +523,11 @@
             {#if collapsed}<PanelRightClose size={14} />{:else}<PanelLeftClose size={14} />{/if}
           </button>
         </div>
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="arr-ruler" bind:this={rulerEl} onmousedown={startScrub} oncontextmenu={addMarkerAt} onwheel={wheelToHorizontal} use:tooltip={'Drag to scrub · Alt-drag to set a loop · right-click to add a marker · wheel to scroll'}>
+        <!-- Scrub strip: drag seeks the cursor (keyboard scrubbing is handled by
+             the container's arrow-key nav). role="slider" reflects that to AT. -->
+        <div class="arr-ruler" bind:this={rulerEl} onmousedown={startScrub} oncontextmenu={addMarkerAt} onwheel={wheelToHorizontal}
+             role="slider" aria-label="Playback cursor" aria-valuemin={0} aria-valuemax={VIEW} aria-valuenow={cursorCycle} tabindex="-1"
+             use:tooltip={'Drag to scrub · Alt-drag to set a loop · right-click to add a marker · wheel to scroll'}>
           {#if loop}
             <div class="ruler-loop" class:off={!loopActive} style="left: {loop.start * PX}px; width: {loopW}px;"></div>
           {/if}
@@ -552,8 +560,11 @@
           {@const soloed = merulaStore.isSoloed(laneKey(lane.track))}
           {@const dimmed = muted || (soloActive && !soloed)}
           <div class="arr-row" class:selected={selectedTrack === lane.track} class:sym-hl={symbolHighlightStore.has(lane.track)} style="--c: {color}; height: {laneSizes.height(lane.track)}px">
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <div class="arr-head" class:collapsed onclick={() => selectTrack(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)} use:tooltip={laneInfo(lane)}>
+            <div class="arr-head" class:collapsed
+                 role="button" tabindex="0"
+                 onclick={() => selectTrack(lane.track)}
+                 onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectTrack(lane.track); } }}
+                 oncontextmenu={(e) => openMenu(e, lane.track)} use:tooltip={laneInfo(lane)}>
               <span class="arr-colorbar"></span>
               {#if !collapsed}
                 <div class="arr-head-info">
@@ -572,7 +583,12 @@
                    ondblclick={(e) => { e.stopPropagation(); laneSizes.reset(lane.track); }}
                    use:tooltip={'Drag to resize the lane · double-click to reset'}></div>
             </div>
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+            <!-- The lane body is a backdrop whose click is a convenience track-select
+                 (also on the head button + container arrows). Its real interactive
+                 targets are the hap blocks inside (HapLane), so it must NOT take a
+                 button role itself — that would nest interactive roles. -->
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="arr-lane" onclick={() => selectTrack(lane.track)} oncontextmenu={(e) => openMenu(e, lane.track)}>
               {#each lane.sections as s (s.name + '@' + s.start)}
                 <div class="lane-band" style="left: {s.start * PX}px; width: {(s.end - s.start) * PX}px; --sc: {sectionColor(s.name)}"></div>

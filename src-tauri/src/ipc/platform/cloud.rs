@@ -291,6 +291,9 @@ async fn cloud_sync(
     ).await.map_err(Into::into)
 }
 
+// Args mirror the IPC payload (the handler macro deserializes each into a
+// named field); grouping them would change the wire contract.
+#[allow(clippy::too_many_arguments)]
 #[platform::handler(program = "platform")]
 async fn cloud_download_many(
     state:       &AppState,

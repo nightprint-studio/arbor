@@ -84,15 +84,23 @@
     {/if}
 
     <div class="lb-stage" class:zoomed onclick={onBackdropClick}>
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <img
-        src={current.src}
-        alt={current.alt}
-        class="lb-img"
-        class:zoomed
+      <!-- Button wrapper (display:contents — transparent to the flex layout) so the
+           zoom toggle is a real interactive element; an <img> can't carry an
+           interactive role. -->
+      <button
+        type="button"
+        class="lb-img-btn"
+        aria-label={zoomed ? 'Zoom out' : 'Zoom in'}
         onclick={(e) => { e.stopPropagation(); zoomed = !zoomed; }}
-        transition:scale={{ start: 0.94, duration: animStore.dPanel, easing: cubicOut }}
-      />
+      >
+        <img
+          src={current.src}
+          alt={current.alt}
+          class="lb-img"
+          class:zoomed
+          transition:scale={{ start: 0.94, duration: animStore.dPanel, easing: cubicOut }}
+        />
+      </button>
     </div>
 
     {#if current.alt}
@@ -182,6 +190,11 @@
     padding: 56px;
   }
 
+  /* Transparent to the flex layout: the <img> centers in .lb-stage exactly as
+     before; the button only adds the interactive semantics + keyboard handling. */
+  .lb-img-btn {
+    display: contents;
+  }
   .lb-img {
     max-width: 100%;
     max-height: 100%;

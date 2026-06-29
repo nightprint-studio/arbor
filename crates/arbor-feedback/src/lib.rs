@@ -6,9 +6,9 @@
 //! Tauri-agnostic pieces so any window (main, merula, …) can host them:
 //!
 //! - [`jobs`]       — [`jobs::JobRegistry`] + [`jobs::JobInfo`] / [`jobs::JobStatus`],
-//!                    the pure in-memory job model. The process-spawning glue
-//!                    (which needs `AppHandle` + the plugin host) stays in the
-//!                    shell; only the data lives here.
+//!   the pure in-memory job model. The process-spawning glue
+//!   (which needs `AppHandle` + the plugin host) stays in the
+//!   shell; only the data lives here.
 //! - [`notify`]     — the `plugin:notification` payload + emit helper.
 //! - [`operations`] — the `arbor://plugin-operation-*` event-name contract.
 //!

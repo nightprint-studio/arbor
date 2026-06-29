@@ -172,7 +172,7 @@ pub fn submodule_list_branches(repo: &Repository, sub_path: &str) -> Result<Vec<
         let (b, _) = b.map_err(GitError::Git)?;
         if let Ok(Some(name)) = b.name() {
             if name.ends_with("/HEAD") { continue; }
-            let short = name.splitn(2, '/').nth(1).unwrap_or(name);
+            let short = name.split_once('/').map(|x| x.1).unwrap_or(name);
             set.insert(short.to_string());
         }
     }

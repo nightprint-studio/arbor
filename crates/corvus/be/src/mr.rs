@@ -673,7 +673,7 @@ fn mr_start_conflict_resolution(
 
             sink_bg.emit("arbor://job-done", json!({
                 "job_id":    &jid,
-                "success":   matches!(status_payload, Ok(_)),
+                "success":   status_payload.is_ok(),
                 "exit_code": status_payload.unwrap_or(-1),
             }));
 

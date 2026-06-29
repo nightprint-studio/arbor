@@ -325,8 +325,10 @@ impl<S: AudioSink> Transport<S> {
     fn click_event(&mut self, start_frame: u64, dur: u64, accent: bool) -> VoiceEvent {
         let id = self.next_id;
         self.next_id += 1;
-        let mut params = VoiceParams::default();
-        params.gain = if accent { 1.0 } else { 0.45 };
+        let params = VoiceParams {
+            gain: if accent { 1.0 } else { 0.45 },
+            ..Default::default()
+        };
         VoiceEvent {
             id: VoiceId(id),
             start_frame,
@@ -465,7 +467,7 @@ impl<S: AudioSink> Transport<S> {
     }
 
     /// Tell the mixer about the current strips. Called on `play` and on a swap.
-    fn send_track_config(&mut self) -> Result<(), AudioCommand> {
+    fn send_track_config(&mut self) -> Result<(), Box<AudioCommand>> {
         let cfg = self
             .tracks
             .tracks
@@ -747,10 +749,10 @@ mod tests {
     }
 
     impl AudioSink for CappedSink {
-        fn send(&mut self, cmd: AudioCommand) -> Result<(), AudioCommand> {
+        fn send(&mut self, cmd: AudioCommand) -> Result<(), Box<AudioCommand>> {
             if matches!(cmd, AudioCommand::Voice(_)) {
                 if self.voices_sent >= self.voice_cap {
-                    return Err(cmd);
+                    return Err(Box::new(cmd));
                 }
                 self.voices_sent += 1;
             }

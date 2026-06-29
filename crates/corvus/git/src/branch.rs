@@ -23,6 +23,7 @@ use git2::{BranchType, Repository};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{GitError, Result};
+use crate::init::PushFn;
 
 /// Build the `"Branch not found: {name}"` error.  The crate's [`GitError`] has
 /// no dedicated `BranchNotFound` variant (the shell's `AppError` did), so we
@@ -355,7 +356,7 @@ pub fn list_merged_remote_branches(repo: &Repository, target: &str) -> Result<Ve
         if name.ends_with("/HEAD") { continue; }
 
         // Skip the remote counterpart of the target (e.g. if target="main", skip "origin/main")
-        let short = name.splitn(2, '/').nth(1).unwrap_or(&name);
+        let short = name.split_once('/').map(|x| x.1).unwrap_or(&name);
         if short == target_short { continue; }
 
         let head_commit = branch.get().peel_to_commit().map_err(GitError::Git)?;
@@ -389,7 +390,7 @@ pub fn list_merged_remote_branches(repo: &Repository, target: &str) -> Result<Ve
 pub fn delete_remote_branches(
     repo: &Repository,
     names: &[String],
-    push: &(dyn Fn(&Repository, &str, &str, bool) -> std::result::Result<(), String> + Send + Sync),
+    push: PushFn<'_>,
 ) -> Vec<String> {
     let mut failed = Vec::new();
     for name in names {
@@ -457,7 +458,7 @@ pub fn rename_remote_branch(
     full_remote_old_name: &str,
     new_short_name: &str,
     rename_local: bool,
-    push: &(dyn Fn(&Repository, &str, &str, bool) -> std::result::Result<(), String> + Send + Sync),
+    push: PushFn<'_>,
 ) -> Result<RemoteRenameResult> {
     // ── Resolve old remote tip ────────────────────────────────────────────
     let remote_branch = repo

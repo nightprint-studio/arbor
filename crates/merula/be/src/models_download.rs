@@ -15,8 +15,6 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::json;
-
 use crate::config_cmds;
 use crate::jobs::{category, JobHandle};
 use crate::models;

@@ -1,6 +1,7 @@
 <script module lang="ts">
   import type { Snippet } from 'svelte';
   import type { DropdownItem } from './Dropdown.svelte';
+  import type { TooltipInput } from '$lib/stores/tooltip.svelte';
 
   /**
    * One configurable button in the title bar's right cluster.
@@ -14,8 +15,8 @@
     active?: boolean;
     /** Click handler (plain mode — ignored when `menu` is set). */
     onclick?: () => void;
-    /** Tooltip text (defaults to the slot's canonical label). */
-    tooltip?: string;
+    /** Tooltip text (or full tooltip options); defaults to the slot's canonical label. */
+    tooltip?: TooltipInput;
     /** Lucide component override; falls back to the slot's canonical icon. */
     icon?: any;
     /** When set, the button opens a dropdown built from these items. */

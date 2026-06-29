@@ -526,6 +526,11 @@
   }
 </script>
 
+<!-- CodeMirror mount host: the editable surface and all keyboard interaction live
+     in CM inside this node. The contextmenu handler only adds a right-click menu
+     (an enhancement; the same actions are reachable via bindings / palette), so the
+     static-interaction rule is a false positive on this non-semantic host. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="grv-editor" bind:this={hostEl} oncontextmenu={onContextMenu}></div>
 
 {#if ctx}

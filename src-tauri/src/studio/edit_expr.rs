@@ -438,7 +438,7 @@ impl<'a> Lexer<'a> {
             if b.is_ascii_digit() || b == b'_' {
                 self.pos += 1;
             } else if b == b'.' && !saw_dot && !saw_exp
-                && self.peek(1).map_or(false, |c| c.is_ascii_digit())
+                && self.peek(1).is_some_and(|c| c.is_ascii_digit())
             {
                 saw_dot = true;
                 self.pos += 1;
@@ -1184,6 +1184,9 @@ mod tests {
     }
 
     #[test]
+    // Literals here are rounding fixtures (3.14159 -> 3.14), not the PI constant;
+    // substituting std::f64::consts::PI would change what the test verifies.
+    #[allow(clippy::approx_constant)]
     fn round_decimals() {
         let r = compile("old.round(2)").unwrap().eval(&Value::Number(3.14159)).unwrap();
         assert_eq!(r, Value::Number(3.14));

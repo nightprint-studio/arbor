@@ -84,10 +84,10 @@ impl StreamSink {
 }
 
 impl AudioSink for StreamSink {
-    fn send(&mut self, cmd: AudioCommand) -> Result<(), AudioCommand> {
+    fn send(&mut self, cmd: AudioCommand) -> Result<(), Box<AudioCommand>> {
         match self.tx.push(cmd) {
             Ok(()) => Ok(()),
-            Err(rtrb::PushError::Full(cmd)) => Err(cmd),
+            Err(rtrb::PushError::Full(cmd)) => Err(Box::new(cmd)),
         }
     }
 
@@ -201,7 +201,6 @@ pub fn open_output_stream(
 
     let config = choose_output_config(&device)?;
     let sample_rate = config.sample_rate().0;
-    let channels = config.channels() as usize;
     let sample_format = config.sample_format();
 
     // A stream config with our advisory buffer size.
@@ -220,8 +219,6 @@ pub fn open_output_stream(
         &device,
         &stream_config,
         sample_format,
-        channels,
-        sample_rate,
         rx,
         renderer,
         Arc::clone(&playhead),
@@ -272,7 +269,7 @@ fn choose_output_config(
     match pick {
         Some(range) => {
             let clamped = clamp_rate(range, target);
-            Ok(range.clone().with_sample_rate(clamped))
+            Ok((*range).with_sample_rate(clamped))
         }
         None => device
             .default_output_config()
@@ -316,13 +313,15 @@ fn build_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     sample_format: cpal::SampleFormat,
-    channels: usize,
-    sample_rate: u32,
     rx: rtrb::Consumer<AudioCommand>,
     renderer: Renderer,
     playhead: Arc<AtomicU64>,
     tap: Arc<MeterTap>,
 ) -> Result<cpal::Stream, AudioError> {
+    // Channel count and rate ride on the stream config itself.
+    let channels = config.channels as usize;
+    let sample_rate = config.sample_rate.0;
+
     fn err_fn(e: cpal::StreamError) {
         eprintln!("merula audio stream error: {e}");
     }

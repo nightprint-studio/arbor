@@ -236,7 +236,7 @@ fn pull_one<R>(invoker: &GitCli, path: &str, resolver: &R) -> PullOutcome
 where
     R: Fn(&str) -> Result<Option<(String, String)>, String> + Send + Sync,
 {
-    let mut repo = match git2::Repository::open(path) {
+    let repo = match git2::Repository::open(path) {
         Ok(r) => r,
         Err(e) => return PullOutcome::Err(e.to_string()),
     };
@@ -265,7 +265,7 @@ where
         Some(n) => n.to_string(),
         None => return PullOutcome::Err("no remotes configured".into()),
     };
-    match corvus_git::remote::pull(invoker, &mut repo, &remote_name, resolver) {
+    match corvus_git::remote::pull(invoker, &repo, &remote_name, resolver) {
         Ok(()) => PullOutcome::Ok(format!("pulled from '{remote_name}'")),
         Err(e) => {
             if has_merge(&gitdir) {

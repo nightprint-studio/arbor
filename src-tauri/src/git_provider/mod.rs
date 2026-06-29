@@ -14,11 +14,10 @@
 //! design) plus provider detection + token + 401-refresh senders (`ci_impl`,
 //! used by `image_proxy`).
 
-pub use corvus_git_provider_api::prelude::{GitProvider, GitProviderRegistry, ProviderKind};
+pub use corvus_git_provider_api::prelude::{GitProviderRegistry, ProviderKind};
 
 pub mod detect;
 pub mod oauth;
-pub mod helpers;
 
 // ── Shell-side helper modules ────────────────────────────────────────────────
 // `mr_impl` / `repo_impl` are now just DTO aliases (`pub use ...api::{mr,repo}::*`)
@@ -34,4 +33,3 @@ pub mod image_proxy;
 // crates; the shell injects credentials via `auth::vault::VaultSessionProvider`.
 pub use corvus_git_provider_github::prelude::GithubProvider;
 pub use corvus_git_provider_gitlab::prelude::GitlabProvider;
-pub use helpers::{provider_for_tab, provider_for_path};

@@ -5,6 +5,7 @@
    * cancels (handled by Modal). The `.merula` extension is optional in the input —
    * the store appends it when missing.
    */
+  import { untrack } from 'svelte';
   import { FilePen } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -16,7 +17,9 @@
   let { path, currentName, onClose }: { path: string; currentName: string; onClose: () => void } =
     $props();
 
-  let name = $state(currentName);
+  // Seed the editable field once from the prop (a one-time snapshot, not a live
+  // mirror) — `untrack` makes that intent explicit and silences the warning.
+  let name = $state(untrack(() => currentName));
   let busy = $state(false);
 
   const canSave = $derived(name.trim().length > 0 && !/[\\/]/.test(name) && name.trim() !== currentName);

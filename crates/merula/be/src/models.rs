@@ -84,7 +84,10 @@ pub fn model_path(cfg: &MerulaConfig, id: &str) -> Option<PathBuf> {
     desc(id).map(|m| models_dir(cfg).join(m.filename))
 }
 
-/// Whether a model has been downloaded.
+/// Whether a model has been downloaded. Only the `onnx` feature's transcriber
+/// path reads this (to default stem-splitting on), so it is gated to match its
+/// sole caller and avoid a dead-code warning in the default (DSP-only) build.
+#[cfg(feature = "onnx")]
 pub fn is_installed(cfg: &MerulaConfig, id: &str) -> bool {
     model_path(cfg, id).map(|p| p.exists()).unwrap_or(false)
 }

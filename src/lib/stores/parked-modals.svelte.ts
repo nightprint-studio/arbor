@@ -1,4 +1,4 @@
-import type { Component } from 'svelte';
+import type { IconComponent } from '$lib/types/icon';
 import { appearanceStore } from '$lib/stores/appearance.svelte';
 
 /**
@@ -19,7 +19,7 @@ export interface ParkedModalEntry {
   id:       string;
   title:    string;
   /** Optional Lucide icon component shown to the left of the title. */
-  icon?:    Component<{ size?: number; class?: string }>;
+  icon?:    IconComponent;
   /** Re-open the modal from scratch. May switch tabs / open closed
    *  projects from the registry; returns a Promise so the chip can show
    *  a spinner while async work runs. May throw — the dock catches and

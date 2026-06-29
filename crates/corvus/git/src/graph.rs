@@ -134,7 +134,7 @@ fn dedupe_refs(refs: &mut Vec<RefLabel>) {
     }
     refs.retain(|r| {
         if r.ref_type == RefType::RemoteBranch {
-            let branch = r.name.splitn(2, '/').nth(1).unwrap_or(r.name.as_str());
+            let branch = r.name.split_once('/').map(|x| x.1).unwrap_or(r.name.as_str());
             !local_names.contains(branch)
         } else {
             true

@@ -31,6 +31,10 @@ use crate::state::MerulaState;
 #[derive(Debug, Clone, Copy)]
 pub enum Layout {
     /// A tree of `.sfz` instruments (VSCO 2).
+    // TODO(clippy): dead_code (never constructed) — no shipped pack declares this
+    // layout yet (VSCO 2 ships via `VersilianWavTree`), but `layout::generate`
+    // wires `generate_sfz_tree` for a future `.sfz`-shipping pack. Flagged, not
+    // deleted (deleting it would orphan the supporting tree-walker).
     SfzTree,
     /// Folders of `.wav` variants (Dirt-Samples, drum machines).
     ///
@@ -482,9 +486,11 @@ mod tests {
     /// honouring the config overrides.
     #[test]
     fn pack_dir_routing() {
-        let mut cfg = MerulaConfig::default();
-        cfg.vsco_dir = Some("/custom/vsco".into());
-        cfg.packs_dir = Some("/custom/packs".into());
+        let cfg = MerulaConfig {
+            vsco_dir: Some("/custom/vsco".into()),
+            packs_dir: Some("/custom/packs".into()),
+            ..Default::default()
+        };
         assert_eq!(pack_dir(&cfg, "vsco"), PathBuf::from("/custom/vsco"));
         assert_eq!(pack_dir(&cfg, "dirt-samples"), PathBuf::from("/custom/packs").join("dirt-samples"));
     }

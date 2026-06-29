@@ -69,7 +69,7 @@ impl LineBatcher {
                 g.first_at = Some(Instant::now());
             }
             let trigger = g.buf.len() >= BATCH_MAX_LINES
-                || g.first_at.map_or(false, |t| t.elapsed() >= BATCH_MAX_DURATION);
+                || g.first_at.is_some_and(|t| t.elapsed() >= BATCH_MAX_DURATION);
             if trigger {
                 g.first_at = None;
                 Some(std::mem::take(&mut g.buf))
@@ -226,7 +226,7 @@ pub fn spawn_job(req: JobSpawnRequest, app_handle: tauri::AppHandle) {
             let handle_err = app_handle.clone();
             let batcher_err = batcher.clone();
             let stderr_thread = std::thread::spawn(move || {
-                for line in std::io::BufReader::new(stderr).lines().flatten() {
+                for line in std::io::BufReader::new(stderr).lines().map_while(std::result::Result::ok) {
                     let annotated = format!("[stderr] {}", line);
                     {
                         let state = handle_err.state::<crate::AppState>();
@@ -239,7 +239,7 @@ pub fn spawn_job(req: JobSpawnRequest, app_handle: tauri::AppHandle) {
             });
 
             // ── Stdout reader (main job thread) ─────────────────────────────
-            for line in std::io::BufReader::new(stdout).lines().flatten() {
+            for line in std::io::BufReader::new(stdout).lines().map_while(std::result::Result::ok) {
                 {
                     let state = app_handle.state::<crate::AppState>();
                     if let Ok(mut jobs) = state.jobs.lock() {

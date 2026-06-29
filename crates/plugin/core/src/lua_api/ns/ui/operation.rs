@@ -97,7 +97,7 @@ fn install_start(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
 
         let _ = lua_ctx; // unused — kept for symmetry with other installers
         if let Some(ref h) = handle {
-            let _ = h.emit(EVENT_OP_START, serde_json::json!({
+            h.emit(EVENT_OP_START, serde_json::json!({
                 "id":       scoped_id(&pname, &raw_id),
                 "plugin":   &pname,
                 "title":    title,
@@ -134,7 +134,7 @@ fn install_set_current(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> 
             _ => None,
         };
         if let Some(ref h) = handle {
-            let _ = h.emit(EVENT_OP_UPDATE, serde_json::json!({
+            h.emit(EVENT_OP_UPDATE, serde_json::json!({
                 "id":      scoped_id(&pname, &id),
                 "plugin":  &pname,
                 "kind":    "set_current",
@@ -155,7 +155,7 @@ fn install_update_step(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> 
         let status: Option<String> = patch.get::<Option<String>>("status").ok().flatten();
         let detail: Option<String> = patch.get::<Option<String>>("detail").ok().flatten();
         if let Some(ref h) = handle {
-            let _ = h.emit(EVENT_OP_UPDATE, serde_json::json!({
+            h.emit(EVENT_OP_UPDATE, serde_json::json!({
                 "id":     scoped_id(&pname, &id),
                 "plugin": &pname,
                 "kind":   "update_step",
@@ -182,7 +182,7 @@ fn install_finish(ctx: &ApiCtx, lua: &Lua, op_table: &Table) -> Result<()> {
             None => (None, None),
         };
         if let Some(ref h) = handle {
-            let _ = h.emit(EVENT_OP_FINISH, serde_json::json!({
+            h.emit(EVENT_OP_FINISH, serde_json::json!({
                 "id":      scoped_id(&pname, &id),
                 "plugin":  &pname,
                 "summary": summary,

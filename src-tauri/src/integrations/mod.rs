@@ -13,8 +13,14 @@ pub use corvus_issues::prelude::*;
 // What stays here is host-coupled: it reads the repo config and dispatches to
 // the per-provider modules (which themselves use the OS keyring + AppError).
 
+// `lookup_by_identifier` (+ its `tracker_for_repo` helper) is a host-coupled
+// public lookup API — resolve an issue by its human key, routing to the live
+// trait registry. Currently unwired (the deep-link / command-palette "go to
+// issue ENG-42" entry point that drives it has not been reconnected post-OOP),
+// so it is kept behind `#[allow(dead_code)]` rather than deleted.
 /// Resolve the active issue tracker for a repo: per-repo `issue_tracker`
 /// (with the legacy `ticket_links.tracker` override) — None if neither is set.
+#[allow(dead_code)]
 fn tracker_for_repo(repo_path: &str) -> Option<String> {
     // corvus-be owns RepoConfig; the shell only needs these two fields here, so
     // it reads them directly off the workdir (partial-read precedent — see
@@ -52,6 +58,7 @@ fn tracker_for_repo(repo_path: &str) -> Option<String> {
 /// row wins.
 /// Jira: hands the key straight to `get_issue` — Jira's REST resolves
 /// keys natively.
+#[allow(dead_code)]
 pub async fn lookup_by_identifier(
     repo_path:  &str,
     identifier: &str,

@@ -7,8 +7,8 @@
 //! scopes, feature disabled): we surface those as empty lists rather than hard
 //! failures so partial coverage still produces a useful summary.
 //!
-//! Folds together the old delegate (`github/security.rs`: RepoRef destructuring
-//! + token gating + host-side `apply_filters`) and the REST bodies from
+//! Folds together the old delegate (`github/security.rs`: RepoRef destructuring,
+//! token gating, host-side `apply_filters`) and the REST bodies from
 //! `security_impl.rs` (GitHub functions only). Error strings are preserved
 //! verbatim and wrapped via `classify`; auth uses the injected session.
 
