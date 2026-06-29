@@ -3,8 +3,8 @@
 //!
 //! Phase 2 split the monolithic `config.toml`; this handles the *satellite*
 //! files that were never inside it — `workspaces.json`, `repos.json`,
-//! `session.json`, `workspace-state/`, `graph_columns.toml`,
-//! `linked_worktrees.toml`, `pipeline_runs/`. Their readers/writers now resolve
+//! `session.json`, `workspace-state/`, `linked_worktrees.toml`,
+//! `pipeline_runs/`. Their readers/writers now resolve
 //! under `arbor/profiles/<active>/corvus/`, so without this move an upgraded
 //! install would silently come up with empty workspaces / repos / tabs.
 //!
@@ -27,7 +27,6 @@ const CORVUS_SATELLITES: &[&str] = &[
     "repos.json",
     "session.json",
     "workspace-state",
-    "graph_columns.toml",
     "linked_worktrees.toml",
     "pipeline_runs",
 ];

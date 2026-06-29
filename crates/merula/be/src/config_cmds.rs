@@ -83,6 +83,34 @@ impl Default for MerulaConfig {
     }
 }
 
+// ── onboarding (per-product, not yet wired) ────────────────────────────────
+//
+// Onboarding is now per-product (corvus-be owns the git product's first-run tour
+// in its `corvus_config`). merula has no real first-run tour yet, so its
+// onboarding state is intentionally NOT implemented here. When merula grows one,
+// uncomment the section + handlers below (mirrors corvus-be's `corvus_config`)
+// and route the frontend's `get/set_onboarding_config` for the merula window to
+// the `merula` program instead of `corvus`. Keep it a NESTED table → declare the
+// field LAST in `MerulaConfig` (after `render`), or give it its own standalone
+// `onboarding.toml`, to respect TOML's "scalars before tables" rule.
+//
+// #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+// pub struct OnboardingConfig {
+//     #[serde(default)] pub completed: bool,
+//     #[serde(default)] pub version: u32,
+// }
+//
+// #[arbor_rpc::handler]
+// fn get_onboarding_config(state: &MerulaState) -> Result<OnboardingConfig, String> {
+//     Ok(load(state).onboarding)
+// }
+// #[arbor_rpc::handler]
+// fn set_onboarding_config(state: &MerulaState, config: OnboardingConfig) -> Result<(), String> {
+//     let mut c = load(state);
+//     c.onboarding = config;
+//     save(state, &c)
+// }
+
 /// Offline-render defaults (mirrors the engine's `RenderConfig`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]

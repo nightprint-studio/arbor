@@ -14,7 +14,7 @@ use crate::error::Result;
 /// entry. Single source of truth for the partition. See
 /// `docs/profiles-and-product-config.md`.
 const GENERIC_KEYS: &[&str] = &[
-    "theme", "keybindings", "appearance", "animations", "onboarding",
+    "theme", "keybindings", "appearance", "animations",
     "whats_new", "explorer", "plugins_enabled", "marketplace", "deep_link",
     "launcher", "terminals", "activity_bar", "ide", "git", "recent_repos",
 ];
@@ -78,11 +78,10 @@ pub struct AppConfig {
     /// UI animation preferences (enable/disable, speed multiplier).
     #[serde(default)]
     pub animations: AnimationsConfig,
-    /// First-run onboarding tour state. Tracks whether the welcome wizard
-    /// has been completed/dismissed and the schema version so future
-    /// additions can re-prompt only for new steps.
-    #[serde(default)]
-    pub onboarding: OnboardingConfig,
+    // First-run onboarding tour state is **per-product** now: corvus-be owns the
+    // git product's onboarding in `corvus/config.toml`. It is no longer a global
+    // shell setting (see `crates/corvus/be/src/corvus_config.rs`). A launcher-level
+    // onboarding, if ever needed, would be re-added here as its own section.
     /// "What's New" modal state. Tracks the last app version the user has
     /// already seen the release notes for, so the modal only auto-opens
     /// the first time after an upgrade.
@@ -416,24 +415,6 @@ pub enum AnimSpeed {
     #[default]
     Normal,
     Slow,
-}
-
-/// First-run onboarding tour state. Persisted in `~/.config/arbor/config.toml`
-/// under `[onboarding]` so the welcome modal only auto-pops once.
-///
-/// `version` is a schema bump knob: when we add meaningful new steps in a
-/// future release we increment `CURRENT_ONBOARDING_VERSION` on the
-/// frontend, and the modal re-opens automatically for users whose stored
-/// `version` is lower (showing only the new steps, not the whole tour
-/// again).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct OnboardingConfig {
-    /// User has finished or skipped the tour at least once.
-    #[serde(default)]
-    pub completed: bool,
-    /// Onboarding schema the user has been through. `0` means never seen.
-    #[serde(default)]
-    pub version: u32,
 }
 
 /// Marketplace catalog auto-refresh settings.

@@ -51,6 +51,8 @@ pub struct CorvusConfig {
     #[serde(default)] pub branches: BranchesConfig,
     #[serde(default)] pub gitflow: corvus_git::prelude::GitFlowConfig,
     #[serde(default)] pub studio: StudioSettings,
+    #[serde(default)] pub graph_columns: GraphColumnsConfig,
+    #[serde(default)] pub onboarding: OnboardingConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +219,54 @@ impl Default for BranchesConfig { fn default() -> Self { Self { grouping_recursi
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StudioSettings {
     #[serde(default)] pub use_index: bool,
+}
+
+// ── graph_columns ──
+// Commit-graph column layout (order, width, visibility). Migrated from the
+// shell's standalone `graph_columns.toml` into the corvus product config: it's a
+// git-graph concern, so corvus-be owns it like every other corvus setting. The
+// special `graph` entry is the SVG lane renderer and reorders like any column.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphColumnsConfig {
+    #[serde(default = "default_graph_columns")] pub columns: Vec<GraphColumn>,
+}
+impl Default for GraphColumnsConfig {
+    fn default() -> Self { Self { columns: default_graph_columns() } }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphColumn {
+    /// Stable id: `graph`, `refs`, `subject`, `author`, `date`, `hash`.
+    pub id: String,
+    /// Track width in px. For `graph` it's a *max* (SVG auto-sizes + caps); for
+    /// `subject` a *min* (`minmax(width, 1fr)` flex-grow); else fixed.
+    pub width: u32,
+    #[serde(default = "default_true")] pub visible: bool,
+}
+fn default_graph_columns() -> Vec<GraphColumn> {
+    vec![
+        GraphColumn { id: "graph".into(),   width: 480, visible: true },
+        GraphColumn { id: "refs".into(),    width: 220, visible: true },
+        GraphColumn { id: "subject".into(), width: 280, visible: true },
+        GraphColumn { id: "author".into(),  width: 160, visible: true },
+        GraphColumn { id: "date".into(),    width: 150, visible: true },
+        GraphColumn { id: "hash".into(),    width:  80, visible: true },
+    ]
+}
+
+// ── onboarding ──
+// First-run onboarding tour state, now **per-product**: corvus owns its own
+// onboarding (the welcome wizard for the git product) instead of the launcher
+// shell owning a single global flag. `version` is a schema-bump knob — the
+// frontend re-opens the modal when its `CURRENT_ONBOARDING_VERSION` exceeds the
+// stored one. Other products (merula, …) get their own onboarding section in
+// their own backend config when they grow a real first-run tour.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OnboardingConfig {
+    /// User has finished or skipped the tour at least once.
+    #[serde(default)] pub completed: bool,
+    /// Onboarding schema version the user has been through. `0` = never seen.
+    #[serde(default)] pub version: u32,
 }
 
 fn default_true() -> bool { true }
@@ -423,5 +473,33 @@ fn get_gitflow_global_config(state: &CorvusState) -> Result<GitFlowConfig, Strin
 fn set_gitflow_global_config(state: &CorvusState, config: GitFlowConfig) -> Result<(), String> {
     let mut c = load(state);
     c.gitflow = config;
+    save(state, &c)
+}
+
+// ── graph_columns ──
+
+#[arbor_rpc::handler]
+fn get_graph_columns(state: &CorvusState) -> Result<GraphColumnsConfig, String> {
+    Ok(load(state).graph_columns)
+}
+
+#[arbor_rpc::handler]
+fn set_graph_columns(state: &CorvusState, config: GraphColumnsConfig) -> Result<(), String> {
+    let mut c = load(state);
+    c.graph_columns = config;
+    save(state, &c)
+}
+
+// ── onboarding ──
+
+#[arbor_rpc::handler]
+fn get_onboarding_config(state: &CorvusState) -> Result<OnboardingConfig, String> {
+    Ok(load(state).onboarding)
+}
+
+#[arbor_rpc::handler]
+fn set_onboarding_config(state: &CorvusState, config: OnboardingConfig) -> Result<(), String> {
+    let mut c = load(state);
+    c.onboarding = config;
     save(state, &c)
 }

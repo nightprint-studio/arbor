@@ -165,11 +165,13 @@ export const setCommitConfig = (config: CommitConfig) =>
 
 // ── Onboarding tour state ─────────────────────────────────────────────────────
 
+// Onboarding is per-product now: the git product's first-run tour is owned by
+// corvus-be (corvus/config.toml). Other products route to their own backend.
 export const getOnboardingConfig = () =>
-  platform<OnboardingConfig>('get_onboarding_config');
+  corvus<OnboardingConfig>('get_onboarding_config');
 
 export const setOnboardingConfig = (config: OnboardingConfig) =>
-  platform<void>('set_onboarding_config', { config });
+  corvus<void>('set_onboarding_config', { config });
 
 // ── What's New modal state (last-seen app version) ──────────────────────────
 
