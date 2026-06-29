@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! Clip-launcher scene metadata for the front end.
 //!
 //! `scene(...)` declarations are collected during evaluation (the lang crate's

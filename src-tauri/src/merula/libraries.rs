@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! merula **external libraries**: GitHub-hosted `.merula` modules a project depends
 //! on, declared in `merula.toml`'s `[libraries]` table, fetched (pinned to a commit
 //! SHA) into a shared content-addressed cache, and imported via

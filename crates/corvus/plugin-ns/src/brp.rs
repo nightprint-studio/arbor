@@ -25,16 +25,17 @@
 //! so a direct call is both simpler and faithful — the plugin still sees exactly
 //! one `{ ok = … }` envelope.
 //!
-//! ⚠️ **`watch` / `unwatch` are best-effort only — the SSE callback-delivery gap.**
-//! `watch` registers an SSE subscription on the shell and returns the real
-//! `sub_id`, but the stream's `open` / `data` / `close` / `error` events fire on
-//! the **shell** process and there is **no inverse event→callback channel** that
-//! can push them into this process's Lua VMs. So a plugin loaded in `corvus-be`
-//! that calls `arbor.brp.watch` gets a valid `sub_id` and a clean `unwatch`, but
-//! **its watch callback never fires**. Plugins needing live BRP streams must run
-//! in the shell host until the reverse event channel lands (Model D credential
-//! broker / event-push work). `unwatch` proxies through so the shell-side stream
-//! is still torn down.
+//! **`watch` / `unwatch` deliver end to end.** `watch` registers an SSE
+//! subscription on the shell and returns the real `sub_id`. The stream's `open` /
+//! `data` / `close` / `error` events fire on the **shell** process, but each is
+//! pushed back into this VM through the inverse `invoke_plugin_callback` RPC:
+//! `watch` mints a BE callback id, parks the Lua closure under it in this VM's
+//! `__arbor_hooks__` registry (the same mechanism `arbor.job.spawn` uses for
+//! `on_done`), and forwards `{ plugin, callback_id }` to the shell so it can route
+//! every `watch_event_to_payload` envelope back here. `unwatch` (and stream-end)
+//! drives `remove_plugin_callback` so the parked closure is dropped.
+
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use mlua::{Lua, LuaSerdeExt, Table};
 
@@ -43,6 +44,14 @@ use arbor_plugin_core::prelude::{
 };
 
 use crate::nshost::NsHostHandle;
+
+/// Monotonic counter for the synthetic BE-side `watch` callback ids. Each
+/// `arbor.brp.watch` mints one — the parked Lua closure lives under
+/// `__arbor_hooks__[<callback_id>]` and the shell stores the same id on its
+/// `WatchSub` so it can route every SSE event back here (and drop the closure on
+/// teardown). Process-wide is fine: the id only has to be unique within this VM's
+/// hook registry.
+static WATCH_CALLBACK_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// `arbor.brp.*` installer. Holds the host handle the closures call through.
 pub struct BrpInstaller {
@@ -65,7 +74,7 @@ impl LuaNamespaceInstaller for BrpInstaller {
         install_disconnect(self.host.clone(), lua, &t)?;
         install_status(self.host.clone(), lua, &t)?;
         install_call(self.host.clone(), lua, &t)?;
-        install_watch(self.host.clone(), lua, &t)?;
+        install_watch(self.host.clone(), ctx, lua, &t)?;
         install_unwatch(self.host.clone(), lua, &t)?;
 
         arbor
@@ -181,23 +190,56 @@ fn install_call(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()
 
 // ─── watch ─────────────────────────────────────────────────────────────────────
 
-fn install_watch(host: NsHostHandle, lua: &Lua, t: &Table) -> PluginCoreResult<()> {
+fn install_watch(
+    host: NsHostHandle,
+    ctx: &ApiCtx,
+    lua: &Lua,
+    t: &Table,
+) -> PluginCoreResult<()> {
+    let pname = ctx.plugin_name.clone();
     let fn_ = lua
         .create_function(move |lua_ctx, args: mlua::MultiValue| {
-            // We still consume the callback so the call shape matches the shell
-            // (`(method, callback)` / `(method, params, callback)`), but ⚠️ the
-            // SSE events fire on the shell process and cannot be pushed into this
-            // VM — so this callback NEVER fires here. See the module header.
-            let (method, params_value, _callback) = parse_call_args(lua_ctx, args)?;
-            // Register the subscription on the shell (best-effort). On success
-            // the shell returns the real `sub_id`; we return it so a later
-            // `unwatch(sub_id)` can tear the shell-side stream down.
-            match host.brp_watch(&method, params_value) {
+            let (method, params_value, callback) = parse_call_args(lua_ctx, args)?;
+
+            // Mint a BE-side callback id and PARK the Lua closure under it in this
+            // VM's `__arbor_hooks__` registry — same mechanism `arbor.job.spawn`
+            // uses for its `on_done` closure (see `job.rs::install_spawn`). The
+            // shell stores this id on its `WatchSub` and routes every SSE event
+            // back to `invoke_plugin_callback{ plugin_name, callback_id }`, which
+            // fires the parked closure here. Teardown (`unwatch` / stream-end)
+            // drives `remove_plugin_callback` so the closure is dropped.
+            let n = WATCH_CALLBACK_SEQ.fetch_add(1, Ordering::Relaxed);
+            let callback_id = format!("__brp_watch_{n}__");
+            {
+                let registry: Table = lua_ctx.globals().get("__arbor_hooks__")?;
+                let list = lua_ctx.create_table()?;
+                list.push(callback)?;
+                registry.set(callback_id.clone(), list)?;
+            }
+
+            // Forward the real watch params alongside the routing metadata the
+            // shell needs (real plugin name + callback id). The shell's
+            // `__brp_watch` arm pops `__watch_meta` off and uses the inner
+            // `params` as the actual BRP request body, so the metadata never
+            // leaks into the SSE call.
+            let wrapped = serde_json::json!({
+                "__watch_meta": { "plugin": pname.clone(), "callback_id": callback_id.clone() },
+                "params": params_value,
+            });
+
+            match host.brp_watch(&method, Some(wrapped)) {
                 Ok(sub_id) => Ok(mlua::Value::Integer(sub_id as mlua::Integer)),
                 // A failed registration is reported as `0` (no valid sub id) —
                 // the shell's `watch` returned nil on the not-connected path; in
                 // this best-effort port a falsy `0` keeps the Lua side simple.
-                Err(_) => Ok(mlua::Value::Integer(0)),
+                // Drop the now-orphaned parked closure so the registry doesn't
+                // leak it (no SSE events will ever route to it).
+                Err(_) => {
+                    if let Ok(registry) = lua_ctx.globals().get::<Table>("__arbor_hooks__") {
+                        let _ = registry.set(callback_id.clone(), mlua::Value::Nil);
+                    }
+                    Ok(mlua::Value::Integer(0))
+                }
             }
         })
         .map_err(|e| PluginCoreError::Plugin(e.to_string()))?;

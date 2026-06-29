@@ -14,7 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
  * to a nested JSON payload).
  */
 /** The backend product labels the router dispatches to. */
-export type Program = 'corvus' | 'platform' | 'studio';
+export type Program = 'corvus' | 'platform' | 'studio' | 'merula';
 
 export function rpc<R>(program: Program, method: string, params: Record<string, unknown> = {}): Promise<R> {
   return invoke<R>('rpc', { program, method, params });
@@ -33,3 +33,10 @@ export const platform = <R>(method: string, params: Record<string, unknown> = {}
  *  YAML convert/format/validate, schema reflection). */
 export const studio = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('studio', method, params);
+
+/** Bound helper for the Merula (music live-coding) backend — served
+ *  out-of-process by `merula-be`: eval/transport/render, sample packs, project
+ *  model, config, audio devices. Push events (`merula:*`) still arrive over
+ *  `listen`, scoped to the merula window — they don't go through this helper. */
+export const merula = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
+  rpc<R>('merula', method, params);

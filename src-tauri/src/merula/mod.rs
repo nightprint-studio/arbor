@@ -270,6 +270,12 @@ fn merula_config() -> MerulaConfig {
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
+//
+// TODO(prune): merula moved to merula-be. These `#[tauri::command]` bodies are
+// no longer registered in `handlers.rs` (the FE reaches merula through the `rpc`
+// router → `merula-be`); they're kept dead-but-compiling for the non-destructive
+// W6 cutover and can be deleted once merula-be has soaked. `MerulaState` and
+// `config::migrate_legacy_dirs()` (launcher-boot) intentionally stay live.
 
 /// Evaluate `.merula` source and stage it as the live arrangement. Returns
 /// diagnostics (errors with span); language errors are diagnostics, not command

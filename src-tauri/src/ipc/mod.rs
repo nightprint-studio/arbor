@@ -95,10 +95,10 @@ pub fn is_async_method(program: &str, method: &str) -> bool {
 /// ([`ensure_corvus_be`]) and detached when it dies — so this reads `false` both
 /// before the backend is up and after it disconnects, the correct fallback.
 ///
-/// Only `corvus` has an OOP backend today; generalise the key when
-/// `platform-be`/`merula-be` arrive.
+/// `corvus` and `merula` each have an OOP backend; `platform`/`studio` are
+/// in-process only (no `*-be` yet), so they never advertise OOP methods.
 pub fn is_oop_method(program: &str, method: &str) -> bool {
-    program == "corvus" && split_broker::serves(method)
+    matches!(program, "corvus" | "merula") && split_broker::serves(program, method)
 }
 
 /// Await an async handler in-process against the live `AppState`. The future
@@ -144,7 +144,21 @@ pub fn build_router(app: &AppHandle) -> Router {
     // splices the child into the shared OOP routing slot (and removes it on
     // disconnect). The broker is registered now but loopback-only; routing flips
     // at attach/detach time without rebuilding the router.
-    router.register("corvus", Arc::new(SplitBroker::new(loopback)));
+    router.register("corvus", Arc::new(SplitBroker::new("corvus", loopback)));
+
+    // Merula backend: the music live-coding product. Like `corvus`, served
+    // out-of-process by `merula-be` — spawned lazily by [`ensure_merula_be`] when
+    // the Merula window first opens (the launcher and the other product windows
+    // never touch audio). Unlike `corvus`, merula has NO in-process handlers in
+    // this shell (the FE invokes the legacy `merula_*` commands directly today),
+    // so its loopback is a pure UnknownMethod sink: when `merula-be` is detached
+    // every `merula` rpc method falls through to it and the FE shows the down
+    // overlay — the intended behaviour. Routing flips at attach/detach time.
+    let merula_loopback: Arc<dyn BrokerClient> =
+        Arc::new(LoopbackBroker::new(|method, _params| {
+            Err(IpcError::UnknownMethod(method.to_string()))
+        }));
+    router.register("merula", Arc::new(SplitBroker::new("merula", merula_loopback)));
 
     // Platform backend: app-agnostic services (config/theme/session/workspace/
     // jobs/fs/terminal/app metadata). In-process only for now — there is no
@@ -850,11 +864,12 @@ fn host_dispatch(
     // subscriptions) lives in the shell's `AppState.brp`, so `corvus-be`'s
     // `arbor.brp.*` namespace round-trips each op here. These mirror
     // `ns_shell/brp.rs`. `host_dispatch` is sync, so the async probe / call are
-    // driven with `tauri::async_runtime::block_on`. ⚠️ `__brp_watch` registers
-    // the SSE stream with a NO-OP callback: the events fire here in the shell,
-    // but `corvus-be`'s watch callback lives in the backend VM with no inverse
-    // channel — the events are intentionally dropped; the subscription is parked
-    // so `__brp_unwatch` (and `disconnect`) can tear it down.
+    // driven with `tauri::async_runtime::block_on`. `__brp_watch` runs the SSE
+    // stream here in the shell, but each event is pushed back to `corvus-be`'s
+    // parked watch callback over the inverse `invoke_plugin_callback` RPC (keyed
+    // by the `{ plugin, callback_id }` the BE forwards in `__watch_meta`); the
+    // subscription is parked on the `BrpRegistry` so `__brp_unwatch` (and the
+    // stream-end teardown) can drop both the stream and the parked closure.
     if method == "__brp_connect" {
         use corvus_brp::prelude::{
             probe_capabilities, BrpClient, BrpSession, BrpStatus, DEFAULT_ENDPOINT,
@@ -921,6 +936,21 @@ fn host_dispatch(
     if method == "__brp_watch" {
         use corvus_brp::prelude::{run_watch_stream, WatchSub};
         let method_name = params.get("method").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        // corvus-be wraps the real BRP params alongside the routing metadata it
+        // needs to deliver SSE events back to its parked Lua closure:
+        // `params = { __watch_meta: { plugin, callback_id }, params: <real> }`.
+        // Pop the metadata; the inner `params` is the actual BRP request body.
+        let meta = params.get("__watch_meta");
+        let plugin = meta
+            .and_then(|m| m.get("plugin"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("corvus-be")
+            .to_string();
+        let callback_id = meta
+            .and_then(|m| m.get("callback_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         let watch_params = params.get("params").cloned().filter(|v| !v.is_null());
         let state = app.state::<AppState>();
         let (endpoint, sub_id) = match state.brp.lock() {
@@ -933,15 +963,36 @@ fn host_dispatch(
             },
             Err(e) => return Err(format!("brp.watch lock: {e}")),
         };
+        // Each SSE event is shaped into the Lua watch envelope and pushed back to
+        // corvus-be's parked callback over `invoke_plugin_callback`. On stream-end
+        // the parked closure is dropped via `remove_plugin_callback`. On abort
+        // (the `__brp_unwatch` path) the task drops mid-poll before stream-end, so
+        // teardown there drives `remove_plugin_callback` itself.
+        let app_for_task = app.clone();
+        let plugin_for_task = plugin.clone();
+        let callback_for_task = callback_id.clone();
         let join = tokio::spawn(async move {
-            run_watch_stream(endpoint, method_name, watch_params, move |_event| {}).await;
+            let app_ev = app_for_task.clone();
+            let plugin_ev = plugin_for_task.clone();
+            let callback_ev = callback_for_task.clone();
+            run_watch_stream(endpoint, method_name, watch_params, move |event| {
+                let payload = watch_event_to_payload(&event);
+                let payload_json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+                invoke_plugin_callback_on_backend(&app_ev, &plugin_ev, &callback_ev, &payload_json);
+            })
+            .await;
+            // Stream closed on its own (not aborted) → free the parked closure.
+            let state = app_for_task.state::<AppState>();
+            remove_plugin_callback_on_backend(&state, &plugin_for_task, &callback_for_task);
         });
         if let Ok(mut reg) = state.brp.lock() {
             reg.insert_watch(WatchSub {
                 id: sub_id,
-                plugin: "corvus-be".to_string(),
+                plugin,
                 method: params.get("method").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-                hook_name: String::new(),
+                // Store the BE callback id so `__brp_unwatch` can drop the parked
+                // closure in the backend VM when the user tears the stream down.
+                hook_name: callback_id,
                 aborter: join.abort_handle(),
             });
         }
@@ -952,15 +1003,24 @@ fn host_dispatch(
         if sub_id == 0 {
             return Ok(serde_json::json!(false));
         }
-        let removed = match app.state::<AppState>().brp.lock() {
-            Ok(mut reg) => match reg.take_watch(sub_id) {
-                Some(sub) => {
-                    sub.aborter.abort();
-                    true
+        let state = app.state::<AppState>();
+        // Take the sub out and release the brp lock BEFORE the teardown RPC — the
+        // `remove_plugin_callback` round-trip must not run under `state.brp`.
+        let taken = match state.brp.lock() {
+            Ok(mut reg) => reg.take_watch(sub_id),
+            Err(_) => None,
+        };
+        let removed = match taken {
+            Some(sub) => {
+                sub.aborter.abort();
+                // Abort drops the stream task mid-poll, so its stream-end teardown
+                // never runs — drop the parked closure in the backend VM here.
+                if !sub.hook_name.is_empty() {
+                    remove_plugin_callback_on_backend(&state, &sub.plugin, &sub.hook_name);
                 }
-                None => false,
-            },
-            Err(_) => false,
+                true
+            }
+            None => false,
         };
         return Ok(serde_json::json!(removed));
     }
@@ -1397,7 +1457,7 @@ pub fn ensure_corvus_be(app: &AppHandle) {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if split_broker::is_attached() {
+    if split_broker::is_attached("corvus") {
         return; // backend already up — window is just being re-summoned
     }
     match spawn_corvus_be(app) {
@@ -1407,6 +1467,7 @@ pub fn ensure_corvus_be(app: &AppHandle) {
                 methods.len()
             );
             split_broker::attach(
+                "corvus",
                 methods.into_iter().collect(),
                 Arc::new(child) as Arc<dyn BrokerClient>,
             );
@@ -1454,13 +1515,110 @@ fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
             // then surface a fatal state: there is no live respawn yet, so the
             // Corvus window shows a blocking overlay asking the user to restart.
             use tauri::Emitter;
-            split_broker::detach();
+            split_broker::detach("corvus");
             let _ = app_for_disc.emit("arbor://corvus-be-down", ());
         },
     ) {
         Ok(pair) => Some(pair),
         Err(e) => {
             tracing::warn!("failed to spawn corvus-be ({e}) — staying in-process");
+            None
+        }
+    }
+}
+
+/// Lazily spawn `merula-be` and attach it to the router, **idempotently** — the
+/// merula twin of [`ensure_corvus_be`]. Called when the Merula product window
+/// opens (`window::merula::open_merula_window`), off the main thread — the spawn
+/// blocks on the child's first `Hello` frame, which must not stall the UI thread.
+///
+/// First call spawns the binary, reads its advertised methods, and splices the
+/// client into the `merula` slot of the shared OOP routing map. Subsequent calls
+/// (the single Merula window re-summoned) are a no-op while the backend is alive.
+/// **No `sync_config`**: `merula-be` resolves its own `merula_config_dir()` /
+/// `merula_data_dir()` itself once `init_active_profile()` has run (it owns no
+/// shell-pushed config). If the binary is missing / the spawn fails, the backend
+/// stays detached and every `merula` rpc method routes to the loopback →
+/// `UnknownMethod` (the FE shows the down overlay).
+pub fn ensure_merula_be(app: &AppHandle) {
+    // Serialize concurrent triggers (launcher button + Command Palette can both
+    // fire `open_merula_window`) so we never spawn two backends; re-check liveness
+    // inside the lock. A SEPARATE lock from corvus's so the two backends' spawns
+    // never contend.
+    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match SPAWN_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if split_broker::is_attached("merula") {
+        return; // backend already up — window is just being re-summoned
+    }
+    match spawn_merula_be(app) {
+        Some((child, methods)) => {
+            tracing::info!(
+                "merula-be up (lazy): {} method(s) served out-of-process",
+                methods.len()
+            );
+            split_broker::attach(
+                "merula",
+                methods.into_iter().collect(),
+                Arc::new(child) as Arc<dyn BrokerClient>,
+            );
+            // No config push: merula-be owns and resolves its own config/data dirs.
+        }
+        None => {
+            tracing::info!("merula-be not available — Merula running in-process");
+        }
+    }
+}
+
+fn spawn_merula_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
+    use crate::process_ext::NoWindowExt;
+    use crate::window::merula::MERULA_WINDOW_LABEL;
+
+    let bin = match backend_binary(app, "merula-be") {
+        Some(b) => b,
+        None => {
+            tracing::info!(
+                "merula-be binary not found (backends/ resource or beside the launcher) — staying in-process"
+            );
+            return None;
+        }
+    };
+
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+
+    let app_for_events = app.clone();
+    let app_for_host = app.clone();
+    let app_for_disc = app.clone();
+    match ChildClient::spawn(
+        cmd,
+        move |topic, payload| {
+            // CRITICAL: re-emit merula-be's push events SCOPED TO THE MERULA
+            // WINDOW only — never the global `app.emit` corvus-be uses. merula's
+            // `merula:*` topics (meters / transport / active_haps / diagnostics)
+            // tick at audio rate; broadcasting them app-wide would flood the
+            // launcher + Corvus windows with another product's telemetry. This
+            // mirrors the in-process `merula::events::emit` (`emit_to`).
+            use tauri::Emitter;
+            let _ = app_for_events.emit_to(MERULA_WINDOW_LABEL, &topic, payload);
+        },
+        move |method, params| host_dispatch(&app_for_host, method, params),
+        move || {
+            // The audio backend process died (crash / kill). Detach it so the
+            // router stops routing to a dead pipe (merula methods fall back to the
+            // loopback → UnknownMethod), then surface a fatal state: there is no
+            // live respawn yet, so the Merula window shows a blocking overlay
+            // asking the user to restart.
+            split_broker::detach("merula");
+            use tauri::Emitter;
+            let _ = app_for_disc.emit_to(MERULA_WINDOW_LABEL, "arbor://merula-be-down", ());
+        },
+    ) {
+        Ok(pair) => Some(pair),
+        Err(e) => {
+            tracing::warn!("failed to spawn merula-be ({e}) — staying in-process");
             None
         }
     }
@@ -1623,6 +1781,79 @@ pub fn fire_plugin_hook_on_backends(app: &AppHandle, plugin: &str, hook: &str, p
             "context_json": payload_json,
         }),
     );
+}
+
+/// Route one BRP watch SSE event back to the `corvus-be` plugin that owns the
+/// parked `arbor.brp.watch` callback. The SSE stream runs shell-side (the
+/// `BrpRegistry` lives in `AppState.brp`), but the watch closure lives in the
+/// backend VM under `__arbor_hooks__[<callback_id>]`, so each event must be pushed
+/// across via `corvus-be`'s `invoke_plugin_callback` RPC — the cross-process twin
+/// of firing the parked closure in-process. Fire-and-forget; best-effort (the
+/// method is advertised only while `corvus-be` runs, so the call drops when it
+/// isn't). `payload_json` is the already-serialized `watch_event_to_payload`
+/// envelope, handed over verbatim as the callback context.
+pub fn invoke_plugin_callback_on_backend(
+    app: &AppHandle,
+    plugin: &str,
+    callback_id: &str,
+    payload_json: &str,
+) {
+    let state = app.state::<AppState>();
+    let _ = dispatch_rpc(
+        &state,
+        "corvus",
+        "invoke_plugin_callback",
+        serde_json::json!({
+            "plugin_name": plugin,
+            "callback_id": callback_id,
+            "context_json": payload_json,
+        }),
+    );
+}
+
+/// Drop a parked `corvus-be` plugin callback once its `arbor.brp.watch`
+/// subscription is torn down (explicit `unwatch` or stream-end). Mirrors
+/// [`invoke_plugin_callback_on_backend`] but drives the teardown RPC so the
+/// backend VM frees the closure from `__arbor_hooks__`. Fire-and-forget;
+/// best-effort.
+fn remove_plugin_callback_on_backend(state: &AppState, plugin: &str, callback_id: &str) {
+    let _ = dispatch_rpc(
+        state,
+        "corvus",
+        "remove_plugin_callback",
+        serde_json::json!({
+            "plugin_name": plugin,
+            "callback_id": callback_id,
+        }),
+    );
+}
+
+/// Build the Lua-shaped watch envelope for one SSE event — byte-for-byte the
+/// shell's old `ns_shell/brp.rs::watch_event_to_payload`. Each variant maps to a
+/// single `{ ok, event, … }` table the plugin's watch callback receives.
+fn watch_event_to_payload(event: &corvus_brp::prelude::WatchEvent) -> serde_json::Value {
+    use corvus_brp::prelude::WatchEvent;
+    match event {
+        WatchEvent::Open => serde_json::json!({ "ok": true, "event": "open" }),
+        WatchEvent::Data(v) => serde_json::json!({ "ok": true, "event": "data", "result": v }),
+        WatchEvent::Close => serde_json::json!({ "ok": true, "event": "close" }),
+        WatchEvent::Error(msg) => serde_json::json!({
+            "ok": false,
+            "event": "error",
+            "error": { "kind": "transport", "message": msg },
+        }),
+        WatchEvent::RpcError { code, message, data } => {
+            let mut err = serde_json::json!({
+                "kind": "rpc",
+                "message": message,
+                "code": code,
+            });
+            if let Some(d) = data {
+                err["data"] = d.clone();
+            }
+            serde_json::json!({ "ok": false, "event": "error", "error": err })
+        }
+    }
 }
 
 /// Serialize one app-config slice and push it into `corvus-be`'s config bag.

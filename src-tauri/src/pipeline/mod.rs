@@ -25,7 +25,7 @@ pub use corvus_pipeline_core::prelude::{
 };
 
 mod engine;
-pub use engine::{PipelineEngine, PipelineRuntime};
+pub use engine::{BeLuaOpDispatch, PipelineEngine, PipelineRuntime};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -1521,40 +1521,77 @@ fn run_lua_op(
     sink:           &StepLogSink,
 ) -> (Option<i32>, Vec<String>) {
     let target_plugin = op.plugin.clone().unwrap_or_else(|| default_plugin.to_string());
-    let host = match rt.plugin_host.lock() {
-        Ok(h) => h,
-        Err(_) => {
-            let msg = "⚠ plugin host mutex poisoned".to_string();
-            sink.emit(&msg);
-            return (Some(1), vec![msg]);
-        }
+
+    // Try the in-process shell host first. After the per-product plugin flip
+    // the op is usually registered in the corvus-be VM instead, so the shell
+    // host comes back "not registered / not loaded" — in that case we fall
+    // through to the backend dispatch closure (`rt.be_lua_op`).
+    let shell_result = {
+        let host = match rt.plugin_host.lock() {
+            Ok(h) => h,
+            Err(_) => {
+                let msg = "⚠ plugin host mutex poisoned".to_string();
+                sink.emit(&msg);
+                return (Some(1), vec![msg]);
+            }
+        };
+        host.invoke_pipeline_op(&target_plugin, &op.op, &op.params, cwd)
     };
-    // Lua handlers return stdout/stderr as opaque blobs — the live stream is
-    // therefore "burst" rather than truly per-line, but feeding each parsed
-    // line through `sink` keeps the UX uniform with shell steps and ensures
-    // every line lands in plugin-log + run.log as it does for `run_command`.
-    match host.invoke_pipeline_op(&target_plugin, &op.op, &op.params, cwd) {
-        Ok(result) => {
-            let mut lines = Vec::new();
-            if !result.stdout.is_empty() {
-                for l in result.stdout.lines().take(500) {
-                    sink.emit(l);
-                    lines.push(l.to_string());
+
+    let result = match shell_result {
+        Ok(result) => result,
+        Err(e) if op_not_available(&e) => {
+            // Shell host doesn't know this op — try the backend VM.
+            match &rt.be_lua_op {
+                Some(dispatch) => match dispatch(&target_plugin, &op.op, op.params.clone(), cwd) {
+                    Ok(result) => result,
+                    Err(be_err) => {
+                        let msg = format!("⚠ lua_op '{}.{}' error: {be_err}", target_plugin, op.op);
+                        sink.emit(&msg);
+                        return (Some(1), vec![msg]);
+                    }
+                },
+                None => {
+                    let msg = format!("⚠ lua_op '{}.{}' error: {e}", target_plugin, op.op);
+                    sink.emit(&msg);
+                    return (Some(1), vec![msg]);
                 }
             }
-            if !result.stderr.is_empty() {
-                for l in result.stderr.lines().take(500) {
-                    let line = format!("[stderr] {l}");
-                    sink.emit(&line);
-                    lines.push(line);
-                }
-            }
-            (Some(result.exit_code), lines)
         }
         Err(e) => {
             let msg = format!("⚠ lua_op '{}.{}' error: {e}", target_plugin, op.op);
             sink.emit(&msg);
-            (Some(1), vec![msg])
+            return (Some(1), vec![msg]);
+        }
+    };
+
+    // Lua handlers return stdout/stderr as opaque blobs — the live stream is
+    // therefore "burst" rather than truly per-line, but feeding each parsed
+    // line through `sink` keeps the UX uniform with shell steps and ensures
+    // every line lands in plugin-log + run.log as it does for `run_command`.
+    let mut lines = Vec::new();
+    if !result.stdout.is_empty() {
+        for l in result.stdout.lines().take(500) {
+            sink.emit(l);
+            lines.push(l.to_string());
         }
     }
+    if !result.stderr.is_empty() {
+        for l in result.stderr.lines().take(500) {
+            let line = format!("[stderr] {l}");
+            sink.emit(&line);
+            lines.push(line);
+        }
+    }
+    (Some(result.exit_code), lines)
+}
+
+/// True when the shell `PluginHost` reported it can't serve this op (plugin not
+/// loaded here / no ops registered / op missing) — the signal to fall back to
+/// the backend VM. Mirrors the error strings in
+/// `arbor_plugin_core::runtime::host::pipeline_op::invoke_pipeline_op`.
+fn op_not_available(err: &str) -> bool {
+    err.contains("is not registered")
+        || err.contains("registered no pipeline ops")
+        || err.contains("is not loaded")
 }

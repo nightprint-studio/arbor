@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! Persisted merula **window** state — recents, last project, panel layout,
 //! sound-bank favourites/recents, and open-tab snapshots.
 //!

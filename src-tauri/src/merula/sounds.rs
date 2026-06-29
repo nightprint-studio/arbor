@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! Registry introspection for the sound-bank UI.
 //!
 //! Builds the same sound registry the audio thread would (built-in synths plus

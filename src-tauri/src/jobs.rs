@@ -289,6 +289,13 @@ pub fn spawn_job(req: JobSpawnRequest, app_handle: tauri::AppHandle) {
                             if let Ok(host) = state.plugin_host.lock() {
                                 arbor_plugin_core::prelude::fire_on(&host, &req.plugin_name, action, &ctx);
                             };
+                            // The `on_done` closure may live in a product backend's
+                            // VM (e.g. `corvus-be`): a BE-spawned job registers it
+                            // under the synthetic `__job_done_<id>__` action name in
+                            // that BE's `__arbor_hooks__` and forwards that name as
+                            // `on_done_action`. Replay it there by name too, or a
+                            // BE plugin's cancel cleanup never runs.
+                            crate::ipc::fire_plugin_hook_on_backends(&app_handle, &req.plugin_name, action, &ctx);
                         }
                         return;
                     }
@@ -319,6 +326,12 @@ pub fn spawn_job(req: JobSpawnRequest, app_handle: tauri::AppHandle) {
                 if let Ok(host) = state.plugin_host.lock() {
                     arbor_plugin_core::prelude::fire_on(&host, &req.plugin_name, action, &ctx);
                 };
+                // The `on_done` closure may live in a product backend's VM (e.g.
+                // `corvus-be`): a BE-spawned job registers it under the synthetic
+                // `__job_done_<id>__` action name in that BE's `__arbor_hooks__`
+                // and forwards that name as `on_done_action`. Replay it there by
+                // name too, or a BE plugin's job-completion callback never runs.
+                crate::ipc::fire_plugin_hook_on_backends(&app_handle, &req.plugin_name, action, &ctx);
             }
         })
     {

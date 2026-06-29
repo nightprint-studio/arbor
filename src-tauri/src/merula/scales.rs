@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! The scale catalogue, exposed to the frontend.
 //!
 //! `merula_scales` returns every mode `.scale("root:mode")` accepts (canonical

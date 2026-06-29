@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! Audio / MIDI import commands: WAV → MIDI (transcription) and MIDI → `.merula`
 //! (deterministic), wired to the `merula-transcribe` + `merula-import`
 //! crates.

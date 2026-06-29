@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! Format a `.merula` document — the explicit "reformat code" command.
 //!
 //! Parses the source to the AST and prints it back through the canonical

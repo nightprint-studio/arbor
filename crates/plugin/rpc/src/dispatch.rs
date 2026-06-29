@@ -10,6 +10,66 @@ use arbor_plugin_core::prelude::fire_on;
 
 use crate::context::{with_host, PluginRpcContext};
 
+/// Re-invoke a per-call anonymous Lua closure parked in a plugin VM's
+/// `__arbor_hooks__` under a backend-minted synthetic name. The product
+/// backend's namespace stores the closure (identical mechanism to `job.on_done`'s
+/// `__job_done_<id>__`) and re-enters it through this targeted fire whenever the
+/// pushed event fires — the per-call twin of [`fire_plugin_action`].
+///
+/// Fire-and-forget: a missing/disabled plugin or a missing closure is a silent
+/// no-op (`fire_on`'s own contract).
+pub fn invoke_plugin_callback<C: PluginRpcContext>(
+    ctx: &C,
+    plugin_name: String,
+    callback_id: String,
+    context_json: String,
+) -> Result<(), String> {
+    with_host(ctx, |host| {
+        fire_on(host, &plugin_name, &callback_id, &context_json);
+        Ok(())
+    })
+}
+
+/// Drop a parked per-call closure from a plugin VM's `__arbor_hooks__` so it does
+/// not leak when its stream ends or is unwatched. Teardown twin of
+/// [`invoke_plugin_callback`]. A missing plugin/closure simply returns (the
+/// host's `remove_hook` reports `false`, which we treat as a no-op).
+pub fn remove_plugin_callback<C: PluginRpcContext>(
+    ctx: &C,
+    plugin_name: String,
+    callback_id: String,
+) -> Result<(), String> {
+    with_host(ctx, |host| {
+        host.remove_hook(&plugin_name, &callback_id);
+        Ok(())
+    })
+}
+
+/// Invoke a registered pipeline op (`arbor.pipeline.register_op`) on a plugin VM
+/// and return its normalised `PipelineOpResult` as JSON. Unlike the fire-and-forget
+/// callbacks above this is **request/reply**: the pipeline orchestrator blocks on
+/// the structured `{ exit_code, stdout, stderr }` result, so it must travel back.
+/// `params_json` is parsed into the value handed to the Lua handler; a malformed
+/// payload degrades to an empty object.
+pub fn invoke_pipeline_op<C: PluginRpcContext>(
+    ctx: &C,
+    plugin_name: String,
+    op: String,
+    params_json: String,
+    cwd: String,
+) -> Result<serde_json::Value, String> {
+    let params: serde_json::Value =
+        serde_json::from_str(&params_json).unwrap_or_else(|_| serde_json::json!({}));
+    with_host(ctx, |host| {
+        let result = host.invoke_pipeline_op(&plugin_name, &op, &params, &cwd)?;
+        Ok(serde_json::json!({
+            "exit_code": result.exit_code,
+            "stdout":    result.stdout,
+            "stderr":    result.stderr,
+        }))
+    })
+}
+
 /// Manually fire a named hook with a JSON-string payload onto every subscriber.
 /// A malformed `context_json` degrades to an empty object; the fire is a no-op
 /// when nothing subscribes.

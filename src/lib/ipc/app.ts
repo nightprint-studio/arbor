@@ -46,6 +46,14 @@ export function openLauncherWindow(): Promise<void> {
 export const onCorvusBeDown = (cb: () => void): Promise<UnlistenFn> =>
   listen('arbor://corvus-be-down', () => cb());
 
+// ── Merula audio backend (merula-be) liveness ───────────────────────────────
+/** Fired once when the `merula-be` audio backend process dies (crash / kill),
+ *  scoped to the Merula window. The Merula window shows a blocking fatal overlay
+ *  asking the user to restart — there is no live respawn yet, so a full app
+ *  restart is the only recovery (mirrors {@link onCorvusBeDown}). */
+export const onMerulaBeDown = (cb: () => void): Promise<UnlistenFn> =>
+  listen('arbor://merula-be-down', () => cb());
+
 /** Relaunch the whole app (replaces the running process). Never resolves on the
  *  happy path — the webview is torn down with the process. */
 export const restartApp = (): Promise<void> => invoke('restart_app');

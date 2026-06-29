@@ -152,6 +152,34 @@ impl<C: PluginRpcContext> RpcBundle<C> for PluginRpc {
                 let c = cast::<C>(any)?;
                 jv(dispatch::set_active_tab(c, decode_field(&p, "tab_id")?)?)
             }),
+            // ── Reverse closure-id dispatch (Model-D event push) ───────────
+            HandlerEntry::sync("invoke_plugin_callback", |any, p| {
+                let c = cast::<C>(any)?;
+                jv(dispatch::invoke_plugin_callback(
+                    c,
+                    decode_field(&p, "plugin_name")?,
+                    decode_field(&p, "callback_id")?,
+                    decode_field(&p, "context_json")?,
+                )?)
+            }),
+            HandlerEntry::sync("remove_plugin_callback", |any, p| {
+                let c = cast::<C>(any)?;
+                jv(dispatch::remove_plugin_callback(
+                    c,
+                    decode_field(&p, "plugin_name")?,
+                    decode_field(&p, "callback_id")?,
+                )?)
+            }),
+            HandlerEntry::sync("invoke_pipeline_op", |any, p| {
+                let c = cast::<C>(any)?;
+                jv(dispatch::invoke_pipeline_op(
+                    c,
+                    decode_field(&p, "plugin_name")?,
+                    decode_field(&p, "op")?,
+                    decode_field(&p, "params_json")?,
+                    decode_field(&p, "cwd")?,
+                )?)
+            }),
         ]
     }
 }

@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! The canonical DSL reference, exposed to the frontend.
 //!
 //! `merula_lang_reference` returns the whole `.merula` language catalogue (every

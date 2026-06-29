@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! Downloadable ONNX **transcription models** (basic-pitch, Demucs), fetched
 //! on-demand so the base bundle stays light (only onnxruntime is linked in).
 //!

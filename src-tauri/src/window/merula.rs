@@ -81,5 +81,12 @@ fn build_merula_window(app: &AppHandle) {
 #[allow(clippy::unused_async)] // async is load-bearing: it moves the handler off
 // the main thread (see doc comment) — there's nothing to await.
 pub async fn open_merula_window(app: AppHandle) {
+    // Bring up the audio backend before the window's shell loads and fires its
+    // first BE-required `rpc`. We're on the async runtime here (off the main
+    // thread), so the spawn's blocking `Hello` read is safe; the window-creation
+    // hop to the main thread happens after, giving the backend a head start while
+    // the webview boots. Idempotent — a no-op when Merula is re-summoned and the
+    // backend is already up. Identical to `corvus::open_corvus_window`.
+    crate::ipc::ensure_merula_be(&app);
     open_or_focus(&app);
 }

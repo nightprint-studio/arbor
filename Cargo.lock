@@ -3911,6 +3911,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "merula-be"
+version = "0.3.0"
+dependencies = [
+ "arbor-be",
+ "arbor-core",
+ "arbor-feedback",
+ "arbor-ipc",
+ "arbor-rpc",
+ "futures-util",
+ "merula",
+ "reqwest 0.12.28",
+ "rustysynth",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "toml 0.8.23",
+ "zip",
+]
+
+[[package]]
 name = "merula-engine"
 version = "0.3.0"
 dependencies = [

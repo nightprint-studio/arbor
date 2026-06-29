@@ -21,6 +21,7 @@
   import { profileStore } from '$lib/stores/profiles.svelte';
   import MerulaShell from '$lib/components/merula/MerulaShell.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
+  import MerulaBeDownOverlay from '$lib/components/shared/MerulaBeDownOverlay.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
   import FeedbackStatusButtons from '$lib/feedback/FeedbackStatusButtons.svelte';
 
@@ -50,6 +51,11 @@
 </MerulaShell>
 
 <Tooltip />
+
+<!-- Fatal "audio backend stopped" overlay: self-subscribes to
+     arbor://merula-be-down (scoped to this window) and blocks it until the user
+     restarts. Mirrors the Corvus window's CorvusBeDownOverlay. -->
+<MerulaBeDownOverlay />
 
 <!-- Full feedback surface for the merula window: toasts (the file/folder + save
      pickers still surface errors via uiStore.showToast → this window's toast

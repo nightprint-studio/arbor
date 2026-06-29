@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! Off-thread arrangement query for the timeline view.
 //!
 //! `active_haps` (the live editor highlight) only reports what sounds *now*; the

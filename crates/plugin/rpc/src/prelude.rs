@@ -10,7 +10,10 @@ pub use crate::introspect::{DepGraphEdge, DepGraphNode};
 
 // The generic handler logic, for backends (or tests) that want to call a single
 // operation directly instead of going through the `PluginRpc` bundle.
-pub use crate::dispatch::{exec_hook, fire_command, fire_plugin_action, set_active_tab};
+pub use crate::dispatch::{
+    exec_hook, fire_command, fire_plugin_action, invoke_pipeline_op, invoke_plugin_callback,
+    remove_plugin_callback, set_active_tab,
+};
 pub use crate::introspect::{
     get_container, list_containers, list_contribution_points, list_plugin_contributions,
     list_plugin_info, plugin_dep_graph, plugin_dependents, plugin_disable_preview,

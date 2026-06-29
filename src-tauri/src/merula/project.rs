@@ -1,3 +1,4 @@
+// TODO(prune): merula moved to merula-be — these commands are no longer registered.
 //! The merula **project model**: a folder + a `merula.toml` manifest + its
 //! `.merula` files.
 //!

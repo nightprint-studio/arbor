@@ -74,8 +74,8 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                     // the stdio pipe and reaps the child. The child's own
                     // disconnect callback re-emits `…-down` to a now-gone window
                     // (harmless); the next open re-spawns a fresh backend.
-                    if id == "corvus" {
-                        crate::ipc::split_broker::detach();
+                    if id == "corvus" || id == "merula" {
+                        crate::ipc::split_broker::detach(id);
                     }
                 }
             }

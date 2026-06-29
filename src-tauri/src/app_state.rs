@@ -289,9 +289,54 @@ impl AppState {
             sink,
             hooks: self.hook_dispatcher.clone(),
             plugin_host: self.plugin_host.clone(),
+            be_lua_op: self.build_be_lua_op_dispatch(),
             plugin_logs: self.plugin_logs.clone(),
             max_concurrent_runs,
         })
+    }
+
+    /// Build the worker-thread fallback closure that dispatches a `lua_op` step
+    /// into the corvus-be plugin VM (where per-product plugins now register
+    /// their ops) via the `invoke_pipeline_op` RPC. Returns `None` until the IPC
+    /// router is wired (early boot). The closure captures the `Arc<Router>` —
+    /// never the `AppHandle` — so it is `Send + Sync` and safe to run on the
+    /// orchestrator worker thread; it mirrors `dispatch_rpc`'s call/parse body
+    /// (serialize params → `router.call` → parse reply) without `&AppState`.
+    fn build_be_lua_op_dispatch(&self) -> Option<crate::pipeline::BeLuaOpDispatch> {
+        let router = self.router()?;
+        let closure = move |plugin_name: &str,
+                            op: &str,
+                            params: serde_json::Value,
+                            cwd: &str|
+              -> std::result::Result<arbor_plugin_core::prelude::PipelineOpResult, String> {
+            // The BE method wants the step params as a JSON *string*.
+            let params_json = serde_json::to_string(&params)
+                .map_err(|e| format!("lua_op params serialize: {e}"))?;
+            let rpc_params = serde_json::json!({
+                "plugin_name": plugin_name,
+                "op": op,
+                "params_json": params_json,
+                "cwd": cwd,
+            });
+            let bytes = serde_json::to_vec(&rpc_params)
+                .map_err(|e| format!("lua_op rpc encode: {e}"))?;
+            let out = router
+                .call("corvus", "invoke_pipeline_op", bytes)
+                .map_err(|e| format!("lua_op rpc dispatch: {e:?}"))?;
+            // Reply is `{ exit_code: i32, stdout: String, stderr: String }`.
+            let v: serde_json::Value = if out.is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::from_slice(&out)
+                    .map_err(|e| format!("lua_op rpc decode: {e}"))?
+            };
+            Ok(arbor_plugin_core::prelude::PipelineOpResult {
+                exit_code: v.get("exit_code").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
+                stdout: v.get("stdout").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                stderr: v.get("stderr").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            })
+        };
+        Some(std::sync::Arc::new(closure))
     }
 
     /// Repo registry guard — **reload-on-access**. corvus-be owns `repos.json`
