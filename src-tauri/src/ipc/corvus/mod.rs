@@ -14,19 +14,18 @@
 //! binary unchanged.
 
 // In-process git handlers that have **not** moved to `corvus-be` yet (or stay
-// shell-side by design: credential store, image proxy, repo lifecycle, provider
-// OAuth, BRP, the plugin pipeline engine, linked-worktree registry). The
-// fully-migrated domains (bisect, stash, reset, search, merge, rebase, recovery,
-// notes, diff, graph, stage, submodule, reflog, stats, remote, ci, mr, security,
-// repo_browser, avatar, fs_git, git_cli, missing, repo-init) were **deleted** —
-// `corvus-be` is their sole owner now (no in-process fallback).
+// shell-side by design: credential store, image proxy, provider OAuth, BRP, the
+// plugin pipeline engine). The fully-migrated domains (bisect, stash, reset,
+// search, merge, rebase, recovery, notes, diff, graph, stage, submodule, reflog,
+// stats, remote, ci, mr, security, repo_browser, avatar, fs_git, git_cli, missing,
+// repo lifecycle incl. open/close/init, linked-worktree registry) were **deleted**
+// — `corvus-be` is their sole owner now (no in-process fallback).
 pub mod auth;
 pub mod brp;
 pub mod ide;
 pub mod image;
 pub mod pipeline;
 pub mod provider;
-pub mod repo;
 
 // Re-export so backend handlers annotate with `#[corvus::handler]` — the
 // product's own namespace for the generic `arbor-rpc` attribute.

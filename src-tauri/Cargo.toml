@@ -66,10 +66,6 @@ corvus-git-provider-gitlab = { path = "../crates/corvus/git-provider/gitlab" }
 corvus-pipeline-api = { path = "../crates/corvus/pipeline/api" }
 corvus-pipeline-core = { path = "../crates/corvus/pipeline/core" }
 corvus-core       = { path = "../crates/corvus/core" }
-corvus-plugin     = { path = "../crates/corvus/plugin" }
-# Tauri-free system-git detection + PortableGit download (the shell facade in
-# `src/git_cli/mod.rs` re-exports this; corvus-be self-detects via the same crate).
-corvus-git-cli    = { path = "../crates/corvus/git-cli" }
 arbor-ipc         = { path = "../crates/foundation/ipc" }
 arbor-shell-common = { path = "../crates/foundation/shell-common" }
 arbor-rpc         = { path = "../crates/foundation/rpc" }
@@ -100,10 +96,11 @@ tauri-plugin-single-instance  = { version = "2", features = ["deep-link"] }
 tauri-plugin-global-shortcut  = "2"
 
 # --- Git ---
-# The launcher no longer links libgit2: all local-git work (and the `git2` /
-# `corvus-git` deps) moved out of process into `corvus-be`. The shell keeps only
-# `corvus-git-cli` (above) for the handful of plumbing `git` CLI invocations
-# (repo-root / origin-URL lookups). `similar` stays for in-shell text diffing.
+# The launcher runs NO git and links NO git crate: no libgit2 (the `git2` /
+# `corvus-git` deps live in corvus-be), no `git` shell-outs (repo-root / origin-URL
+# lookups moved to corvus-be `repo_origin_url` + sitta-be `fs_repo_root`), and no
+# PortableGit path resolver (corvus-be self-computes the fixed global path).
+# `similar` stays for in-shell text diffing.
 similar = { version = "2",    features = ["text", "unicode", "bytes", "inline"] }
 
 # --- Plugin system ---

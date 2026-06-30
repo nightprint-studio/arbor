@@ -201,28 +201,14 @@ fn checkout_commit(state: &CorvusState, tab_id: String, oid: String) -> Result<(
 
 // ── Worktree-link-aware mutators ──────────────────────────────────────────────
 
-/// Normalize a repo path for comparison — the OOP twin of the shell registry's
-/// `normalize_path_for_compare` (separator + Windows case-insensitive).
-fn norm_path(p: &str) -> String {
-    let s: String = p.replace('\\', "/").trim_end_matches('/').to_string();
-    if cfg!(windows) { s.to_lowercase() } else { s }
-}
-
-#[derive(Deserialize)]
-struct RepoIdEntry {
-    id: String,
-    path: String,
-}
-
-/// Resolve a tab to its RepoRegistry UUID via the shell-pushed `repo_registry`,
-/// path-matched the same way the shell's `find_by_path` does. `None` if the tab
-/// isn't registered → the worktree-link side effects simply don't fire.
+/// Resolve a tab to its RepoRegistry UUID via corvus-be's own repo registry
+/// (`find_by_path` applies the same separator + Windows-case normalisation).
+/// `None` if the tab isn't registered → the worktree-link side effects don't fire.
 fn repo_id_for_tab(state: &CorvusState, tab_id: &str) -> Option<String> {
     let path = repo_path(state, tab_id).ok()?;
-    let target = norm_path(&path);
-    let entries: Vec<RepoIdEntry> =
-        state.config("repo_registry").and_then(|v| serde_json::from_value(v).ok())?;
-    entries.into_iter().find(|e| norm_path(&e.path) == target).map(|e| e.id)
+    crate::workspace::registry::registry(state)
+        .find_by_path(&path)
+        .map(|e| e.id.clone())
 }
 
 /// Run `f` with the recovery-snapshot closure the checkout helpers inject — the

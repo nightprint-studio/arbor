@@ -24,7 +24,8 @@ use corvus_git::prelude::{http_auth_args_for_credentials, CloneOptions};
 use corvus_git_provider_api::prelude::{
     CiFilter, FindingState, MrFilter, ProviderError, SecurityFilters, Severity,
 };
-use corvus_plugin::prelude::{build_hook_dispatcher, corvus_be_api_installer};
+use arbor_plugin_core::prelude::build_hook_dispatcher;
+use corvus_plugin::prelude::corvus_be_api_installer;
 use corvus_plugin_ns::prelude::NsHost;
 use serde_json::json;
 
@@ -37,6 +38,7 @@ mod bisect;
 mod branch;
 mod ci;
 mod corvus_config;
+mod deep_link;
 mod diff;
 mod git_cli;
 mod gitflow;

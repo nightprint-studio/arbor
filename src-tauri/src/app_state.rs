@@ -7,9 +7,10 @@
 //! most notably the [`CorvusState`] event egress. The open-tab → repo registry
 //! is **not** here: `corvus-be` owns it (the launcher keeps no `git2`/`RepoManager`).
 //!
-//! The hook-dispatcher builder lives in `corvus_plugin::prelude::build_hook_dispatcher`
-//! — one definition the shell (in-process host) and `corvus-be` (OOP host) both
-//! build through, so a fire fans out identically wherever the handler runs.
+//! The hook-dispatcher builder lives in `arbor_plugin_core::prelude::build_hook_dispatcher`
+//! (a plugin foundation) — one definition the shell (in-process host) and the
+//! `corvus-be` / `sitta-be` (OOP) hosts all build through, so a fire fans out
+//! identically wherever the handler runs.
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -36,7 +37,6 @@ use crate::pipeline::PipelineRegistry;
 use crate::plugin_logs::PluginLogBuffer;
 use crate::studio::format::StudioRegistry;
 use crate::terminal::TerminalManager;
-use crate::workspace::{RepoRegistry, WorkspaceStore};
 
 // ---------------------------------------------------------------------------
 // Application state — shared across all Tauri commands
@@ -85,12 +85,6 @@ pub struct AppState {
     pub active_repo_path: Arc<Mutex<Option<String>>>,
     /// Installed toolchain registry (toolchains/<kind>.json).
     pub toolchain_registry: Arc<Mutex<ToolchainRegistry>>,
-    /// Central registry of every repo Arbor has ever been shown.
-    /// Referenced by workspaces by UUID — path edits flow from here.
-    pub repo_registry: Mutex<RepoRegistry>,
-    /// List of user-defined workspaces (plus the implicit Scratch one) and
-    /// currently-active workspace id.  Tab snapshots live in separate files.
-    pub workspaces:    Mutex<WorkspaceStore>,
     /// Unified registry of remote git host clients (GitHub / GitLab / —).
     /// Populated at boot — see `git_provider/`.
     pub git_providers: Mutex<GitProviderRegistry>,
@@ -338,32 +332,6 @@ impl AppState {
         Some(std::sync::Arc::new(closure))
     }
 
-    /// Repo registry guard — **reload-on-access**. corvus-be owns `repos.json`
-    /// (ADR-1) and writes it from the other process; the shell still reads/writes
-    /// it for the consumers that stay shell-side (deep-link router, missing-repo
-    /// flow, `close_repo` orphan-GC, the `arbor.workspace` ns_shell namespace), so
-    /// every guard reloads the file first — an in-memory cache would let the two
-    /// processes drift and clobber each other. Writers mutate the guard and call
-    /// `registry::save`; the next access re-reads it. Low-frequency, user-driven.
-    pub fn lock_repo_registry(&self) -> Result<MutexGuard<'_, RepoRegistry>> {
-        let mut g = self.repo_registry.lock().map_err(|e| {
-            tracing::error!("repo_registry mutex poisoned: {e}");
-            AppError::MutexPoisoned("repo_registry".into())
-        })?;
-        *g = crate::workspace::registry::load();
-        Ok(g)
-    }
-
-    /// Workspace store guard — **reload-on-access** (see [`lock_repo_registry`]).
-    pub fn lock_workspaces(&self) -> Result<MutexGuard<'_, WorkspaceStore>> {
-        let mut g = self.workspaces.lock().map_err(|e| {
-            tracing::error!("workspaces mutex poisoned: {e}");
-            AppError::MutexPoisoned("workspaces".into())
-        })?;
-        *g = crate::workspace::store::load();
-        Ok(g)
-    }
-
     pub fn lock_git_providers(&self) -> Result<MutexGuard<'_, GitProviderRegistry>> {
         self.git_providers.lock().map_err(|e| {
             tracing::error!("git_providers mutex poisoned: {e}");
@@ -391,22 +359,9 @@ impl AppState {
                 AppConfig::default()
             }
         };
-        // Resolve the git executable up-front so the very first git2/CLI call
-        // sees the user's chosen binary, not a stale "git" placeholder.  When
-        // nothing is found the GitSetupModal on the frontend prompts the user.
-        {
-            let configured = config.git.executable_path
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .map(std::path::PathBuf::from);
-            let snap = crate::git_cli::detect(configured.as_deref());
-            match (&snap.path, snap.source) {
-                (Some(p), Some(src)) => tracing::info!("git executable: {} ({src})", p.display()),
-                _ => tracing::warn!("no git executable found — frontend will prompt"),
-            }
-        }
-        let repo_registry = crate::workspace::registry::load();
-        let workspaces    = crate::workspace::store::load();
+        // The shell runs no git itself — corvus-be self-detects its `git` from the
+        // config the shell pushes (executable_path override + portable dir); sitta-be
+        // uses libgit2. The frontend's GitSetupModal drives detection through corvus-be.
         // Seed the GitProvider registry with the always-on hosts.  Self-hosted
         // GitLab instances are registered lazily on first use via
         // `git_provider::helpers::provider_for_tab`.
@@ -424,7 +379,7 @@ impl AppState {
         // `LuaHookListener` (bound to the just-created `plugin_host`) are the
         // only inputs, and neither needs the Tauri `AppHandle`.
         let plugin_host = Arc::new(Mutex::new(PluginHost::new()));
-        let hook_dispatcher = Arc::new(corvus_plugin::prelude::build_hook_dispatcher(&plugin_host));
+        let hook_dispatcher = Arc::new(arbor_plugin_core::prelude::build_hook_dispatcher(&plugin_host));
 
         Self {
             plugin_host,
@@ -445,8 +400,6 @@ impl AppState {
             active_tab_id:  Arc::new(Mutex::new(None)),
             active_repo_path: Arc::new(Mutex::new(None)),
             toolchain_registry: Arc::new(Mutex::new(ToolchainRegistry::new())),
-            repo_registry:      Mutex::new(repo_registry),
-            workspaces:         Mutex::new(workspaces),
             git_providers:          Mutex::new(providers),
             branding:               BrandingState::default(),
             deep_link_buffer:       Arc::new(DeepLinkBuffer::default()),
@@ -491,8 +444,6 @@ impl AppState {
             Ok(c) => { if let Ok(mut g) = self.config.lock() { *g = c; } }
             Err(e) => tracing::warn!("profile switch: config reload failed: {e}"),
         }
-        if let Ok(mut g) = self.repo_registry.lock() { *g = crate::workspace::registry::load(); }
-        if let Ok(mut g) = self.workspaces.lock()    { *g = crate::workspace::store::load(); }
         if let Ok(mut g) = self.marketplace.lock()   { *g = crate::marketplace::build_registry(); }
         // Drop state bound to the old profile's open repos — the frontend
         // re-opens tabs after it reloads, which re-populates these. (The open-tab
@@ -502,16 +453,14 @@ impl AppState {
         if let Ok(mut g) = self.brp.lock()         { *g = BrpRegistry::default(); }
         if let Ok(mut g) = self.active_tab_id.lock()   { *g = None; }
         if let Ok(mut g) = self.active_repo_path.lock() { *g = None; }
-        // Re-push the now-active profile's resolved paths (corvus_config / git /
-        // worktree-links / repo-registry / workspaces / workspace-state) to a live
-        // corvus-be. It is a separate process that reads these files fresh on each
-        // access but can't resolve the active profile itself — without this re-push
-        // it stays pinned to the profile that was active when it spawned, so a live
-        // profile switch would reload the shell (theme, config) yet still serve the
-        // OLD profile's workspaces / repos. Best-effort: a no-op when corvus-be
-        // isn't running (it gets the current paths from `ensure_corvus_be`'s own
-        // `sync_config` when it later spawns). Must run after the registry/repo
-        // reloads above so the pushed `repo_registry` reflects the new profile.
+        // Re-push the now-active profile's corvus product dir + git config to a
+        // live corvus-be. It is a separate process that reads its files fresh on
+        // each access but can't resolve the active profile itself — without this
+        // re-push it stays pinned to the profile that was active when it spawned,
+        // so a live profile switch would reload the shell (theme, config) yet still
+        // serve the OLD profile's workspaces / repos. Best-effort: a no-op when
+        // corvus-be isn't running (it gets the current dir from `ensure_corvus_be`'s
+        // own `sync_config` when it later spawns).
         crate::ipc::sync_config(self);
         // Repoint a live corvus-be at the new profile and reload its plugin host,
         // so the target profile's plugin set loads and re-emits its contributions

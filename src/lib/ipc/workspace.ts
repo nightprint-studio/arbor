@@ -1,4 +1,4 @@
-import { corvus, platform } from './rpc';
+import { corvus, sitta } from './rpc';
 import type {
   WorkspacesSnapshot, WorkspaceDef, WorkspaceGroup, WorkspacePatch, WorkspaceGroupPatch,
   RepoRegistryEntry, RepoRegistryEntryWithRoot, RepoRegistrationResult, TabSnapshot,
@@ -12,13 +12,13 @@ import type {
 export const listWorkspaces   = (): Promise<WorkspacesSnapshot>      => corvus('list_workspaces');
 export const listRegistryRepos = (): Promise<RepoRegistryEntry[]>    => corvus('list_registry_repos');
 
-// Read-only twins served by the always-on `platform` backend (it reads the same
-// repos.json / workspaces.json). For OPTIONAL consumers that must list projects
-// without the git product running — e.g. the File Explorer's Projects sidebar —
-// so they never poke (or depend on) corvus-be. Mutations still go through the
-// corvus functions above (a git-product action).
-export const listWorkspacesLocal   = (): Promise<WorkspacesSnapshot>   => platform('list_workspaces');
-export const listRegistryReposLocal = (): Promise<RepoRegistryEntry[]> => platform('list_registry_repos');
+// Read-only twins served by sitta-be (the File Explorer's own backend), which
+// reads the same repos.json / workspaces.json directly. For OPTIONAL consumers
+// that must list projects without the git product running — e.g. the File
+// Explorer's Projects sidebar — so they never poke (or depend on) corvus-be.
+// Mutations still go through the corvus functions above (a git-product action).
+export const listWorkspacesLocal   = (): Promise<WorkspacesSnapshot>   => sitta('list_workspaces');
+export const listRegistryReposLocal = (): Promise<RepoRegistryEntry[]> => sitta('list_registry_repos');
 export const listRegistryWithRoots = (): Promise<RepoRegistryEntryWithRoot[]> => corvus('list_registry_with_roots');
 export const loadWorkspaceSnapshot = (workspaceId: string): Promise<TabSnapshot> =>
   corvus('load_workspace_snapshot', { workspace_id: workspaceId });

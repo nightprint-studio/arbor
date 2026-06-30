@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { platform } from './rpc';
+import { corvus, platform } from './rpc';
 import type { DeepLinkConfig, DeepLinkLookup } from '../types/deep-link';
 
 /**
@@ -8,7 +8,7 @@ import type { DeepLinkConfig, DeepLinkLookup } from '../types/deep-link';
  * switch / open-here / clone-prompt.
  */
 export const findRepoByRemoteUrl = (url: string) =>
-  platform<DeepLinkLookup>('find_repo_by_remote_url', { url });
+  corvus<DeepLinkLookup>('find_repo_by_remote_url', { url });
 
 /**
  * Tell the backend its `arbor://deep-link` listener is mounted — drains the

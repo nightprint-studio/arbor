@@ -21,14 +21,6 @@ use crate::workspace::{
     WorkspaceGroup, WorkspaceGroupPatch, WorkspacePatch, SCRATCH_ID,
 };
 
-/// Probe `origin` URL from disk. Inlined from the shell's
-/// `crate::git::url::probe_origin_url` (not available in corvus-be).
-fn probe_origin_url(path: &std::path::Path) -> Option<String> {
-    git2::Repository::open(path)
-        .ok()
-        .and_then(|r| r.find_remote("origin").ok().and_then(|rm| rm.url().map(|s| s.to_string())))
-}
-
 // ---------------------------------------------------------------------------
 // Mutation commands — workspaces.
 // ---------------------------------------------------------------------------
@@ -163,7 +155,7 @@ fn register_repo_path(
     // the registry entry has `remote_url = None` and the deep-link router
     // can't match `arbor://…?url=…` to this clone — it would fall through to
     // the "needs clone" prompt every time.
-    let remote_url = remote_url.or_else(|| probe_origin_url(std::path::Path::new(&path)));
+    let remote_url = remote_url.or_else(|| crate::repo::origin_url(&path));
     let (id, existed) = registry::mutate(state, |reg| {
         let existed = reg.find_by_path(&path).is_some();
         let id = reg.upsert_by_path(&path, remote_url, &fallback_name);

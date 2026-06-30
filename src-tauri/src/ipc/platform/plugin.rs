@@ -547,12 +547,11 @@ fn delete_plugin(state: &AppState, name: String) -> Result<Vec<String>, AppError
         jobs.cancel_by_plugin(Some(&name));
     }
 
-    // Collect every repo path we should clean — open tabs + the workspace
-    // registry — before locking the plugin host (avoid holding two mutexes).
+    // Collect every repo path we should clean — open tabs + every registered repo
+    // (both resolved from corvus-be, the registry owner) — before locking the
+    // plugin host (avoid holding two mutexes).
     let mut repo_paths: Vec<String> = crate::ipc::open_repo_paths(state);
-    if let Ok(reg) = state.lock_repo_registry() {
-        for entry in reg.list() { repo_paths.push(entry.path); }
-    }
+    repo_paths.extend(crate::ipc::registry_repo_paths(state));
     repo_paths.sort();
     repo_paths.dedup();
 

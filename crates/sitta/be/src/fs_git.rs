@@ -12,8 +12,10 @@
 //! retention config, so the default policy is used — the snapshot still lands in
 //! the repo's recovery journal, so Corvus's Recovery tab sees it regardless.
 //!
-//! NOT here (stays shell-side): `fs_open_in_arbor` — it needs an `AppHandle` to
-//! focus the main window and emit `arbor://explorer-open-repo`. No hooks fire here.
+//! `fs_repo_root` resolves the workdir a clicked path belongs to (libgit2
+//! `discover`), so the shell's `fs_open_in_arbor` stays pure window-glue (focus
+//! the main window + emit `arbor://explorer-open-repo`) with no git. No hooks fire
+//! here.
 
 use corvus_git::explorer;
 use corvus_git::prelude::{FsBranch, FsGitStatus, GitChanges, GitCli, SnapshotPolicy};
@@ -42,6 +44,11 @@ fn fs_git_branches(_state: &SittaState, path: String) -> Result<Vec<FsBranch>, S
 #[arbor_rpc::handler]
 fn fs_git_remote_url(_state: &SittaState, path: String) -> Result<Option<String>, String> {
     explorer::remote_url(&path)
+}
+
+#[arbor_rpc::handler]
+fn fs_repo_root(_state: &SittaState, path: String) -> Result<Option<String>, String> {
+    Ok(explorer::repo_root(&path))
 }
 
 #[arbor_rpc::handler]

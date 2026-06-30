@@ -5,8 +5,8 @@
 //! worktree-link handler (Phase 4) calls [`maybe_trigger_checkout_sync`] after a
 //! successful checkout on the initiator tab; it snapshots the link, claims the
 //! per-link recursion guard, resolves everything the worker needs while it still
-//! holds `&CorvusState` (event sink + hook handle, the repo_id→path/name maps
-//! pushed by the shell as `repo_registry`, the open-tab set, the persistence path,
+//! holds `&CorvusState` (event sink + hook handle, the repo_id→path/name maps from
+//! corvus-be's own repo registry, the open-tab set, the persistence path,
 //! the git program + recovery policy) and moves it into a background thread. The
 //! thread iterates the other members, checks each out stash-safe, persists
 //! `last_sync_target`, and emits the aggregated `arbor://worktree-link-sync-*`
@@ -22,7 +22,6 @@ use std::sync::{Arc, LazyLock, Mutex};
 use arbor_ipc::prelude::EventSink;
 use corvus_core::prelude::{CorvusState, HookDispatcher, PluginValue};
 use corvus_git::prelude::{GitCli, SnapshotPolicy};
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{aliases, MemberResult, MemberStatus, SyncSummary, SyncTarget, WorktreeLink};
@@ -57,25 +56,13 @@ impl SyncCtx {
     }
 }
 
-/// `repo_registry` wire entry the shell pushes (id → path/name); `remote_url` and
-/// any other fields are ignored.
-#[derive(Deserialize)]
-struct RepoRegEntry {
-    id: String,
-    path: String,
-    #[serde(default)]
-    display_name: String,
-}
-
+/// repo_id → (path, display_name) maps, read from corvus-be's own canonical repo
+/// registry (`repos.json`, reload-on-access) — no longer a shell-pushed snapshot.
 fn repo_registry_maps(state: &CorvusState) -> (HashMap<String, PathBuf>, HashMap<String, String>) {
-    let entries: Vec<RepoRegEntry> = state
-        .config("repo_registry")
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
     let mut path_map = HashMap::new();
     let mut name_map = HashMap::new();
-    for e in entries {
-        path_map.insert(e.id.clone(), PathBuf::from(e.path));
+    for e in crate::workspace::registry::registry(state).list() {
+        path_map.insert(e.id.clone(), PathBuf::from(&e.path));
         name_map.insert(e.id, e.display_name);
     }
     (path_map, name_map)

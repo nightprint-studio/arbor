@@ -14,9 +14,9 @@
 //! tab: [`RepoInfo::for_path`] leaves `tab_id` empty and the frontend opens the
 //! tab afterwards via `open_repo`.
 //!
-//! What stays shell-side (touches `AppState` / file dialogs / provider OAuth /
-//! the streaming job registry): `open_repo` / `close_repo` / `init_repo` and the
-//! background `spawn_clone_job`.
+//! The repo lifecycle (`open_repo` / `close_repo` / `init_repo`) now lives in
+//! [`crate::repo_lifecycle`]; what stays shell-side (file dialogs / the streaming
+//! job registry) is the background `spawn_clone_job`.
 //!
 //! No hooks fire from any handler here.
 
@@ -24,7 +24,7 @@ use corvus_core::prelude::CorvusState;
 use corvus_git::prelude::{http_auth_args_for_credentials, CloneOptions, RepoInfo};
 
 use crate::remote::credential_resolver;
-use crate::repo::{git, repo_path};
+use crate::repo::{git, origin_url, repo_path};
 
 /// Read user.name / user.email from the global git config.
 /// Returns ("", "") when the config is unavailable.
@@ -46,6 +46,14 @@ fn get_repo_info(state: &CorvusState, tab_id: String) -> Result<RepoInfo, String
     let mut info = RepoInfo::for_path(&path).map_err(|e| e.to_string())?;
     info.tab_id = tab_id;
     Ok(info)
+}
+
+/// The `origin` remote URL of the repo open for `tab_id` (libgit2), or `None` when
+/// it has none. Used by the launcher's `open_in_browser` (the shell builds the
+/// forge URL + opens the system browser, but runs no git of its own).
+#[arbor_rpc::handler]
+fn repo_origin_url(state: &CorvusState, tab_id: String) -> Result<Option<String>, String> {
+    Ok(origin_url(&repo_path(state, &tab_id)?))
 }
 
 /// Returns true when `path` is inside a git repository (`Repository::discover`).

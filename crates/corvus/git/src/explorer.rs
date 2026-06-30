@@ -245,6 +245,18 @@ pub fn remote_url(path: &str) -> Result<Option<String>, String> {
     Ok(url)
 }
 
+/// Working-directory root of the repo enclosing `path` — the git2 equivalent of
+/// `git rev-parse --show-toplevel`, as an absolute path with no trailing
+/// separator. `None` when `path` isn't inside a repo or the repo is bare (no
+/// working tree). `Repository::discover` walks up from any subpath, so the caller
+/// can pass any entry inside the repo. Used by the File Explorer's "Open in Arbor"
+/// to resolve the workdir a clicked path belongs to, in-process via libgit2.
+pub fn repo_root(path: &str) -> Option<String> {
+    let repo = Repository::discover(path).ok()?;
+    let wd = repo.workdir()?;
+    Some(wd.to_string_lossy().trim_end_matches(['/', '\\']).to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Status overlays (cached per repo-root) + inline light actions
 // ---------------------------------------------------------------------------

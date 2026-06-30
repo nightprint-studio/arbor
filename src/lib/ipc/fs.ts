@@ -221,9 +221,18 @@ export const fsGitUnstage = (paths: string[]) => sitta<void>('fs_git_unstage', {
 export const fsGitDiscard = (paths: string[]) => sitta<void>('fs_git_discard', { paths });
 /** Append paths to the repo's `.gitignore` (anchored, folders get a trailing slash). */
 export const fsGitIgnore  = (paths: string[]) => sitta<void>('fs_git_ignore',  { paths });
-/** Bring the main Arbor window forward and open the repo containing `path`
- *  (delegates the heavy git operations — diff / log / blame — to Arbor's UI). */
-export const fsOpenInArbor = (path: string) => invoke<void>('fs_open_in_arbor', { path });
+/** Resolve the repo root enclosing `path` (libgit2, via sitta-be). `null` when
+ *  `path` isn't inside a git repository. */
+export const fsRepoRoot = (path: string) => sitta<string | null>('fs_repo_root', { path });
+
+/** Resolve the repo containing `path` (via sitta-be), then bring the main Arbor
+ *  window forward to open it (delegating the heavy git operations — diff / log /
+ *  blame — to Arbor's UI). Rejects when `path` isn't inside a git repository. */
+export async function fsOpenInArbor(path: string): Promise<void> {
+  const root = await fsRepoRoot(path);
+  if (!root) throw new Error('not inside a git repository');
+  return invoke<void>('fs_open_in_arbor', { repoRoot: root });
+}
 
 /** One changed file in the staged or unstaged list. */
 export interface GitChange {

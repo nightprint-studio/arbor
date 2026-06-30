@@ -3,8 +3,8 @@
 //! Ported from the shell's `crate::workspace::store` (`AppError` → `String`). The
 //! **file is the single source of truth** (see [`registry`](super::registry) for
 //! the dual-writer rationale): every access reloads it; writes go through
-//! [`mutate`]. The shell pushes the profile-aware path via the `workspaces_path`
-//! config section.
+//! [`mutate`]. corvus-be composes `workspaces.json` under the shell-pushed corvus
+//! product dir (`corvus_config_dir`); it can't resolve the active profile itself.
 
 use std::path::Path;
 use std::sync::{LazyLock, Mutex, MutexGuard};
@@ -272,9 +272,9 @@ impl WorkspaceStore {
 static STORE: LazyLock<Mutex<WorkspaceStore>> = LazyLock::new(|| Mutex::new(WorkspaceStore::default()));
 
 fn store_file_path(state: &CorvusState) -> Option<String> {
-    state
-        .config("workspaces_path")
-        .and_then(|v| v.as_str().map(String::from))
+    crate::corvus_config::corvus_config_dir(state)
+        .ok()
+        .map(|dir| std::path::Path::new(&dir).join("workspaces.json").to_string_lossy().into_owned())
 }
 
 /// Load + normalise (ensure scratch, valid active id) — mirrors the shell's

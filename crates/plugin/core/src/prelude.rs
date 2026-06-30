@@ -49,6 +49,7 @@ pub use crate::hook_router::{
     fire, fire_broadcast, fire_collecting, fire_on, fire_vetoable, matches_pattern,
     LuaHookListener,
 };
+pub use crate::dispatcher::build_hook_dispatcher;
 
 // ── Lua API surface (Step 5) ────────────────────────────────────────────────
 pub use crate::lua_api::{

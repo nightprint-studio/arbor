@@ -5,12 +5,12 @@
 //! `AppError::Other` wire shape is `#[error("{0}")]`, so the bare format string
 //! the `SplitBroker` re-wraps is byte-identical). The **`linked_worktrees.toml`
 //! file is the single source of truth** — every access reloads it (see the
-//! persistence section): the shell's `arbor.linked_worktrees` plugin namespace
-//! writes the same file from the other process, so an in-memory cache would let
-//! the two drift. corvus-be is a separate process and cannot compute the
-//! profile-aware path itself, so the shell (which owns the active profile) pushes
-//! it through the `worktree_links_path` config section. Writes go through
-//! [`mutate`] (reload → mutate → save, under the lock).
+//! persistence section): corvus-be's `arbor.linked_worktrees` plugin namespace
+//! writes the same file through a different code path, so an in-memory cache would
+//! let the two drift. corvus-be is a separate process and cannot compute the
+//! profile-aware path itself, so the shell pushes only the corvus product
+//! directory (`corvus_config_dir`); corvus-be composes `linked_worktrees.toml`
+//! under it. Writes go through [`mutate`] (reload → mutate → save, under the lock).
 //!
 //! The registry exposes the **complete** mutation API ported from the shell; a
 //! couple of accessors (`get_mut`, `find_by_repo_mut`) and the future-op
@@ -311,19 +311,19 @@ impl WorktreeLinkRegistry {
 
 // ── Registry persistence — the file is the single source of truth ─────────────
 //
-// Every access reloads from `linked_worktrees.toml` (the shell-pushed path),
-// because the shell's `arbor.linked_worktrees` plugin namespace writes the SAME
-// file from the other process: an in-memory cache would let the two drift and
-// clobber each other. The domain is low-frequency (user-driven), so a small TOML
-// read per op is free. The `REGISTRY` static is just a reusable buffer whose
-// mutex serializes corvus-be's own mutations.
+// Every access reloads from `linked_worktrees.toml` (composed under the shell-
+// pushed `corvus_config_dir`), because corvus-be's `arbor.linked_worktrees` plugin
+// namespace writes the SAME file through a different code path: an in-memory cache
+// would let the two drift and clobber each other. The domain is low-frequency
+// (user-driven), so a small TOML read per op is free. The `REGISTRY` static is
+// just a reusable buffer whose mutex serializes corvus-be's own mutations.
 
 static REGISTRY: LazyLock<Mutex<WorktreeLinkRegistry>> = LazyLock::new(Default::default);
 
 fn links_path(state: &CorvusState) -> Option<String> {
-    state
-        .config("worktree_links_path")
-        .and_then(|v| v.as_str().map(String::from))
+    crate::corvus_config::corvus_config_dir(state)
+        .ok()
+        .map(|dir| Path::new(&dir).join("linked_worktrees.toml").to_string_lossy().into_owned())
 }
 
 fn load_from(path: &Path) -> WorktreeLinkRegistry {

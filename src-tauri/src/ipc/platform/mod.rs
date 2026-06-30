@@ -28,11 +28,9 @@ pub mod plugin_logs;
 pub mod plugin_templates;
 pub mod post_hooks;
 pub mod scheduler;
-pub mod session;
 pub mod stream;
 pub mod terminal;
 pub mod theme;
-pub mod workspace;
 
 // Re-export so backend handlers annotate with `#[platform::handler(...)]` — the
 // product's own namespace for the generic `arbor-rpc` attribute.

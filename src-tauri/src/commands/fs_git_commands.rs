@@ -8,40 +8,24 @@
 //! which is genuine shell glue: it needs an `AppHandle` to bring the main window
 //! forward (a WebView2 main-thread operation) and emit a targeted event to it.
 //!
-//! The repo-root lookup goes through the git CLI (`git -C <path> rev-parse
-//! --show-toplevel`) rather than a `git2` handle, so the launcher needs no
-//! libgit2 just to find the workdir a filesystem path belongs to.
+//! The repo-root is resolved by sitta-be (libgit2 `explorer::repo_root`) before
+//! this command runs, so the launcher executes no git at all — it only does the
+//! window-glue (focus the main window + emit the open-repo event).
 
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::AppError;
 
-/// Bring the main Arbor window forward and ask it to open the repo containing
-/// `path`. The heavy git operations (diff / log / blame / commit) live in the
-/// main window's full git UI; the explorer just delegates to it.
+/// Bring the main Arbor window forward and ask it to open the repo at `repo_root`.
+/// The caller (the File Explorer) resolves the workdir via sitta-be first, so this
+/// is pure window-glue — no git here. The heavy git operations (diff / log / blame
+/// / commit) live in the main window's full git UI; the explorer just delegates.
 #[tauri::command]
-pub fn fs_open_in_arbor(app: AppHandle, path: String) -> Result<(), AppError> {
-    use crate::process_ext::NoWindowExt;
-
-    let not_a_repo = || AppError::Other("not inside a git repository".into());
-    let out = crate::git_cli::command()
-        .args(["-C"])
-        .arg(&path)
-        .args(["rev-parse", "--show-toplevel"])
-        .no_window()
-        .output()
-        .map_err(|_| not_a_repo())?;
-    if !out.status.success() {
-        return Err(not_a_repo());
+pub fn fs_open_in_arbor(app: AppHandle, repo_root: String) -> Result<(), AppError> {
+    if repo_root.trim().is_empty() {
+        return Err(AppError::Other("not inside a git repository".into()));
     }
-    let root = String::from_utf8(out.stdout)
-        .map_err(|_| AppError::Other("git output is not valid UTF-8".into()))?
-        .trim()
-        .trim_end_matches(['/', '\\'])
-        .to_string();
-    if root.is_empty() {
-        return Err(not_a_repo());
-    }
+    let root = repo_root.trim_end_matches(['/', '\\']).to_string();
 
     // Window focus must happen on the main/UI thread (WebView2 constraint).
     let handle = app.clone();

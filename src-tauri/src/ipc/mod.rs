@@ -567,17 +567,16 @@ fn host_dispatch(
 
     // corvus-be self-detects git but cannot write the profile-aware `config.toml`
     // (the shell owns the active profile). On a Settings change it asks the shell
-    // to persist the `[git] executable_path` override (or clear it when null) and
-    // re-detect the shell's OWN in-process git so its direct shell-outs match.
+    // to persist the `[git] executable_path` override (or clear it when null); the
+    // shell runs no git itself, so there is nothing to re-detect here.
     if method == "__persist_git_path" {
         let path = params.get("path").and_then(|v| v.as_str()).map(|s| s.to_string());
         let st = app.state::<AppState>();
         {
             let mut cfg = st.lock_config().map_err(|e| e.to_string())?;
-            cfg.git.executable_path = path.clone();
+            cfg.git.executable_path = path;
             crate::config::app_config::save(&cfg).map_err(|e| e.to_string())?;
         }
-        crate::git_cli::detect(path.as_deref().map(std::path::Path::new));
         return Ok(serde_json::Value::Null);
     }
 
@@ -1851,6 +1850,20 @@ pub fn open_repo_paths(state: &AppState) -> Vec<String> {
     open_repo_tabs_raw(state).into_iter().map(|(_, path)| path).collect()
 }
 
+/// Every registered repo's path, via `corvus-be` (the repo-registry owner). Empty
+/// when `corvus-be` isn't running. Best-effort — used by plugin teardown to clean
+/// per-repo plugin dirs across all known repos (a down backend just means only the
+/// open tabs get cleaned). Parsed as raw JSON so the launcher needs no registry type.
+pub fn registry_repo_paths(state: &AppState) -> Vec<String> {
+    dispatch_rpc(state, "corvus", "list_registry_repos", serde_json::Value::Null)
+        .ok()
+        .and_then(|v| serde_json::from_value::<Vec<serde_json::Value>>(v).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|e| e.get("path").and_then(|p| p.as_str()).map(str::to_string))
+        .collect()
+}
+
 /// Every open tab as `(tab_id, path, name)`, mirroring the old
 /// `RepoManager::list_open()` shape. `name` is the workdir basename — byte-
 /// identical to what `RepoInfo.name` held (`workdir.file_name()`). Used by the
@@ -1868,24 +1881,6 @@ pub fn open_repo_tabs(state: &AppState) -> Vec<(String, String, String)> {
         .collect()
 }
 
-/// Push a tab's repo path (and the app-config slices) to `corvus-be`, so its
-/// out-of-process handlers can resolve the tab without the shell's `RepoManager`.
-/// Call on repo open. corvus-be self-detects its git binary now (it is no longer
-/// pushed the resolved program).
-///
-/// **Best-effort**: when `corvus-be` isn't running the `__repo_register` method
-/// isn't advertised, so the call routes to the in-process loopback, comes back
-/// `UnknownMethod`, and is dropped here — exactly what we want (nothing to sync).
-pub fn sync_repo_open(state: &AppState, tab_id: &str, path: &str) {
-    sync_config(state);
-    let _ = dispatch_rpc(
-        state,
-        "corvus",
-        "__repo_register",
-        serde_json::json!({ "tab_id": tab_id, "path": path }),
-    );
-}
-
 /// Push the runtime values `corvus-be` can't resolve on its own: the absolute,
 /// profile-aware PATH of its owned `corvus/config.toml` (so it can load/save the
 /// git-product config sections it now owns — recovery, gitflow, diff, status,
@@ -1900,61 +1895,30 @@ pub fn sync_repo_open(state: &AppState, tab_id: &str, path: &str) {
 /// workdir it opens.
 pub fn sync_config(state: &AppState) {
     let cfg = crate::config::app_config::load().unwrap_or_default();
-    // corvus-be OWNS its product config (`corvus/config.toml`: diff, graph,
-    // gitflow, cache, ticket_links, issues, mr, status, recovery,
-    // missing_projects, pipelines, studio, commit, branches) and reads those
-    // sections from the file directly, so they are no longer pushed. The shell
-    // only hands over the profile-resolved absolute PATH of that file — corvus-be
-    // is a separate process and can't resolve the active profile itself. A
-    // profile switch re-pushes a new path → corvus-be loads from it on next access.
+    // corvus-be OWNS everything under its product dir — `config.toml`,
+    // `linked_worktrees.toml`, and the workspace subsystem (`repos.json`,
+    // `workspaces.json`, `workspace-state/`) — reading/writing each file directly.
+    // The shell hands over only the profile-resolved corvus product DIRECTORY;
+    // corvus-be can't resolve the active profile itself, but it composes its own
+    // filenames under that dir. A profile switch re-pushes a new dir → corvus-be
+    // reloads from it on next access.
     push_config_section(
         state,
-        "corvus_config_path",
-        &crate::config::corvus_read::corvus_config_path().to_string_lossy().to_string(),
+        "corvus_config_dir",
+        &arbor_core::prelude::product_dir(arbor_core::prelude::PRODUCT_CORVUS)
+            .to_string_lossy()
+            .to_string(),
     );
-    // Git CLI: the configured executable_path override + the absolute, profile-
-    // resolved PortableGit dir. corvus-be self-detects from these — it can't
-    // resolve the active profile to recompute the portable dir itself.
+    // Git config: the user's `executable_path` override (a launcher-owned setting).
+    // corvus-be self-detects from it — the PortableGit dir is a fixed global path
+    // (`~/.config/arbor/git`) corvus-be resolves itself, so it isn't pushed.
     push_config_section(
         state,
         "git",
         &serde_json::json!({
             "executable_path": cfg.git.executable_path,
-            "portable_dir": crate::git_cli::portable_dir().display().to_string(),
         }),
     );
-    // Not an app-config slice: the absolute path of the profile's
-    // `linked_worktrees.toml`. corvus-be is a separate process and can't compute
-    // the profile-aware path itself, so the shell (which owns the active profile)
-    // hands it over; corvus-be (re)loads its worktree-link registry from it. A
-    // profile switch re-pushes a new path → corvus-be reloads on next access.
-    let lw_path = crate::linked_worktrees::links_file_path().to_string_lossy().to_string();
-    push_config_section(state, "worktree_links_path", &lw_path);
-    // Profile-aware absolute paths of the workspace-subsystem files corvus-be
-    // owns (ADR-1: repo registry + workspace store + per-workspace tab snapshots).
-    // corvus-be is a separate process and can't resolve the active profile, so the
-    // shell hands over the paths; corvus-be (re)loads each on access. A profile
-    // switch re-pushes new paths → corvus-be reloads on next access.
-    push_config_section(
-        state,
-        "repo_registry_path",
-        &crate::workspace::registry::registry_path().to_string_lossy().to_string(),
-    );
-    push_config_section(
-        state,
-        "workspaces_path",
-        &crate::workspace::store::store_path().to_string_lossy().to_string(),
-    );
-    push_config_section(
-        state,
-        "workspace_state_dir",
-        &crate::workspace::snapshot::snapshot_dir().to_string_lossy().to_string(),
-    );
-    // repo_id → {path, display_name} for every known repo: the worktree-link
-    // checkout-sync orchestrator resolves member repo_ids to paths through this
-    // (`CorvusState` only tracks open tabs by `tab_id`, not the repo registry).
-    let repos = state.lock_repo_registry().map(|r| r.list()).unwrap_or_default();
-    push_config_section(state, "repo_registry", &repos);
 }
 
 /// On a live profile switch, push the new active profile to a running `corvus-be`
@@ -2085,16 +2049,6 @@ fn push_config_section<T: serde::Serialize>(state: &AppState, section: &str, val
             serde_json::json!({ "section": section, "value": value }),
         );
     }
-}
-
-/// Forget a tab's repo in `corvus-be`. Best-effort (see [`sync_repo_open`]).
-pub fn sync_repo_close(state: &AppState, tab_id: &str) {
-    let _ = dispatch_rpc(
-        state,
-        "corvus",
-        "__repo_deregister",
-        serde_json::json!({ "tab_id": tab_id }),
-    );
 }
 
 /// Map a router/transport failure onto the host error enum, preserving the

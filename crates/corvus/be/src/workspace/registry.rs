@@ -6,8 +6,8 @@
 //! of truth**: every access reloads it (the shell keeps a reload-on-access copy
 //! for its own consumers — deep-link router, missing-repo flow, ns_shell — and
 //! writes it from the other process), so an in-memory cache would let the two
-//! drift. corvus-be can't compute the profile-aware path itself, so the shell
-//! pushes it through the `repo_registry_path` config section. Writes go through
+//! drift. corvus-be composes `repos.json` under the shell-pushed corvus product dir
+//! (`corvus_config_dir`); it can't resolve the active profile itself. Writes go through
 //! [`mutate`] (reload → mutate → save, under the lock).
 
 use std::collections::HashMap;
@@ -149,9 +149,9 @@ impl RepoRegistry {
 static REGISTRY: LazyLock<Mutex<RepoRegistry>> = LazyLock::new(Default::default);
 
 fn registry_path(state: &CorvusState) -> Option<String> {
-    state
-        .config("repo_registry_path")
-        .and_then(|v| v.as_str().map(String::from))
+    crate::corvus_config::corvus_config_dir(state)
+        .ok()
+        .map(|dir| Path::new(&dir).join("repos.json").to_string_lossy().into_owned())
 }
 
 fn load_from(path: &Path) -> RepoRegistry {

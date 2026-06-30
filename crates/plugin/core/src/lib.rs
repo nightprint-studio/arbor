@@ -28,6 +28,7 @@
 //! See `docs/plugin-core-architecture.md` for the full PR #4 plan.
 
 pub mod contribution;
+pub mod dispatcher;
 pub mod error;
 pub mod hook_router;
 pub mod lua_api;

@@ -57,3 +57,13 @@ pub fn repo_path(state: &CorvusState, tab_id: &str) -> Result<String, String> {
 pub fn open(state: &CorvusState, tab_id: &str) -> Result<Repository, String> {
     Repository::open(repo_path(state, tab_id)?).map_err(|e| e.to_string())
 }
+
+/// Best-effort `origin` remote URL of the repo at `path` (libgit2). `None` when
+/// the path isn't a repo, has no `origin`, or the URL is empty. Shared by the
+/// deep-link lookup, the open-in-browser command, and the registry backfill.
+pub fn origin_url(path: &str) -> Option<String> {
+    Repository::open(path)
+        .ok()
+        .and_then(|r| r.find_remote("origin").ok().and_then(|rm| rm.url().map(str::to_string)))
+        .filter(|u| !u.trim().is_empty())
+}

@@ -5,12 +5,10 @@ edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "Shared plugin-host wiring for the Corvus product: the hook-dispatcher builder and the headless `arbor.*` installer. Linked by both the Tauri shell (in-process host) and the headless `corvus-be` process (OOP host), so the host is built one way in both. (The generic headless AppCtx lives in `arbor-be`.)"
+description  = "The Corvus product's headless `arbor.*` API installer (publishes the git/product namespaces in `corvus-be`). The product-agnostic hook-dispatcher builder moved to `arbor-plugin-core`; the generic headless AppCtx lives in `arbor-be`."
 
 [dependencies]
-arbor-plugin-api   = { path = "../../plugin/api" }
 arbor-plugin-core  = { path = "../../plugin/core" }
-arbor-plugin-types = { path = "../../plugin/types" }
 
 # Workspace-pinned (see root) so the installer's `&Lua` is the very same type as
 # arbor-plugin-core's — one shared mlua artifact.

@@ -2,9 +2,9 @@
 //!
 //! Ported from the shell's `crate::workspace::snapshot` (`AppError` → `String`).
 //! The frontend owns tab state and pushes the full snapshot; one file per
-//! workspace keeps a corrupted snapshot from blowing up the whole app. The
-//! shell pushes the absolute snapshot directory via the `workspace_state_dir`
-//! config section (corvus-be can't compute the profile-aware path itself).
+//! workspace keeps a corrupted snapshot from blowing up the whole app. corvus-be
+//! composes the `workspace-state/` directory under the shell-pushed corvus product
+//! dir (`corvus_config_dir`); it can't resolve the active profile itself.
 
 use std::path::PathBuf;
 
@@ -42,11 +42,12 @@ pub struct TabSnapshot {
     pub tab_meta:      Vec<TabMeta>,
 }
 
-/// The shell-pushed absolute snapshot directory, or `None` if not yet synced.
+/// The snapshot directory, composed as `<corvus_config_dir>/workspace-state`, or
+/// `None` if the shell hasn't pushed the corvus product dir yet.
 fn snapshot_dir(state: &CorvusState) -> Option<PathBuf> {
-    state
-        .config("workspace_state_dir")
-        .and_then(|v| v.as_str().map(PathBuf::from))
+    crate::corvus_config::corvus_config_dir(state)
+        .ok()
+        .map(|dir| PathBuf::from(dir).join("workspace-state"))
 }
 
 fn snapshot_path(state: &CorvusState, ws_id: &str) -> Option<PathBuf> {

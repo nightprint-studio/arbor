@@ -7,10 +7,10 @@
 //! reload-on-access copy for the consumers that stay shell-side for now
 //! (deep-link router, missing-repo flow, the `arbor.workspace` ns_shell
 //! namespace) and writes the same files from the other process. corvus-be can't
-//! compute the profile-aware paths itself, so the shell pushes them via the
-//! `repo_registry_path` / `workspaces_path` / `workspace_state_dir` config
-//! sections (the `recent_repos` trim is a shell-only `AppConfig` write, reached
-//! via the `__forget_recent_repo` host method).
+//! compute the profile-aware paths itself, so it composes `repos.json` /
+//! `workspaces.json` / `workspace-state/` under the shell-pushed corvus product dir
+//! (`corvus_config_dir`) (the `recent_repos` trim is a shell-only `AppConfig`
+//! write, reached via the `__forget_recent_repo` host method).
 //!
 //! Handlers live in the sibling modules (`workspace_query`, `workspace_mutation`,
 //! `workspace_runs`); this module carries the shared DTOs + helpers they all use.

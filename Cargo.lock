@@ -152,13 +152,11 @@ dependencies = [
  "base64 0.22.1",
  "corvus-brp",
  "corvus-core",
- "corvus-git-cli",
  "corvus-git-provider-api",
  "corvus-git-provider-github",
  "corvus-git-provider-gitlab",
  "corvus-pipeline-api",
  "corvus-pipeline-core",
- "corvus-plugin",
  "corvus-provider-descriptor",
  "dirs",
  "jsonc-parser",
@@ -1395,9 +1393,7 @@ dependencies = [
 name = "corvus-plugin"
 version = "0.3.0"
 dependencies = [
- "arbor-plugin-api",
  "arbor-plugin-core",
- "arbor-plugin-types",
  "mlua",
 ]
 

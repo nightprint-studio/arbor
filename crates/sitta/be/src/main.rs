@@ -9,9 +9,10 @@
 //! A file manager keeps almost no backend domain state of its own: filesystem I/O
 //! lives in `arbor-fs` (served by the shell's `platform` broker) and git-awareness
 //! in `corvus-git`. The domains served here are the explorer git-awareness
-//! ([`fs_git`]) and the typed config ([`config_cmds`]); each is an
-//! `#[arbor_rpc::handler]` module, auto-advertised via `Hello` and auto-routed by
-//! the shell's broker.
+//! ([`fs_git`]), the typed config ([`config_cmds`]) and the read-only workspace
+//! queries ([`workspace`], a thin reader of corvus's `repos.json` / `workspaces.json`
+//! for the Projects sidebar); each is an `#[arbor_rpc::handler]` module,
+//! auto-advertised via `Hello` and auto-routed by the shell's broker.
 //!
 //! **stdout is the protocol channel** — all logs go to stderr.
 
@@ -32,6 +33,10 @@ mod fs_git;
 // preferences, owned out-of-process here (the 4 window/OS-integration settings stay
 // in the launcher config).
 mod config_cmds;
+// Read-only twin of corvus-be's workspace/registry queries (`list_workspaces` /
+// `list_registry_repos`), parsing the same JSON directly so the Projects sidebar
+// lists projects without spawning the git client.
+mod workspace;
 // Host-pure plugin-host wiring (hook dispatcher + `arbor.*` base installer).
 mod plugin;
 

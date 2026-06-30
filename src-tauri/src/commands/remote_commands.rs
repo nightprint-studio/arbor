@@ -4,15 +4,14 @@
 //! `pull_branch`) and `list_remotes` moved to the generic router — see
 //! [`crate::ipc::corvus::remote`].
 //!
-//! The repo path and `origin` URL come from the launcher's git-free path —
-//! `corvus-be` resolves the `tab_id` (it owns the open-tab registry) and the
-//! `origin` URL is read through the git CLI ([`crate::git::url::probe_origin_url`]),
-//! so this command needs neither `git2` nor the shell's old `RepoManager`.
+//! The `origin` URL comes from `corvus-be` (`repo_origin_url` — it owns the repo),
+//! so this command runs no git at all: it just builds the forge URL and opens the
+//! system browser.
 
 use tauri::State;
 
 use crate::error::AppError;
-use crate::git::url::{forge_url, normalize_to_https, probe_origin_url};
+use crate::git::url::{forge_url, normalize_to_https};
 use crate::AppState;
 
 // ── Open-in-browser helpers ────────────────────────────────────────────────────
@@ -28,8 +27,15 @@ pub fn open_in_browser(
 ) -> Result<(), AppError> {
     use tauri_plugin_opener::OpenerExt;
     let url = {
-        let path = crate::ipc::resolve_tab_path(state.inner(), &tab_id)?;
-        let remote_url = probe_origin_url(std::path::Path::new(&path)).ok_or_else(|| {
+        let v = crate::ipc::dispatch_rpc(
+            state.inner(),
+            "corvus",
+            "repo_origin_url",
+            serde_json::json!({ "tab_id": tab_id }),
+        )?;
+        let remote_url: Option<String> =
+            serde_json::from_value(v).map_err(|e| AppError::Other(e.to_string()))?;
+        let remote_url = remote_url.ok_or_else(|| {
             AppError::Other("No 'origin' remote configured for this repository".into())
         })?;
         let base = normalize_to_https(&remote_url).ok_or_else(|| {

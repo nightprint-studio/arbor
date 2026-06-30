@@ -11,11 +11,11 @@
 //! rather than the shell's re-exports — they are the *same* underlying types, so the
 //! wire format is identical.
 //!
-//! The absolute, profile-resolved path of `corvus/config.toml` is **pushed by the
-//! shell** into the config bag under the key `"corvus_config_path"` (a JSON string),
-//! exactly like the existing pushed `"workspaces_path"`. corvus-be is a separate
-//! process and cannot resolve the active profile itself, so it reads the path the
-//! shell pushed.
+//! The shell pushes only the profile-resolved corvus product DIRECTORY into the
+//! config bag under the key `"corvus_config_dir"` (a JSON string); corvus-be
+//! composes its own filenames under it (`config.toml`, `linked_worktrees.toml`).
+//! corvus-be is a separate process and cannot resolve the active profile itself,
+//! so it composes the file path from the dir the shell pushed.
 //!
 //! [`load`] is infallible-by-design: any error (path not pushed yet, file missing,
 //! parse error) yields [`CorvusConfig::default`] so operational reads
@@ -272,15 +272,24 @@ pub struct OnboardingConfig {
 fn default_true() -> bool { true }
 
 // ---------------------------------------------------------------------------
-// Persistence — the file path is PUSHED by the shell into the config bag under
-// `"corvus_config_path"` (a JSON string), profile-resolved. corvus-be is a
-// separate process and cannot resolve the active profile itself.
+// Persistence — the shell pushes only the profile-resolved corvus product
+// DIRECTORY (config bag key `"corvus_config_dir"`); corvus-be composes its own
+// filenames under it. corvus-be is a separate process and cannot resolve the
+// active profile itself, but it owns its filenames.
 // ---------------------------------------------------------------------------
 
-fn config_file_path(state: &CorvusState) -> Result<String, String> {
-    state.config("corvus_config_path")
+/// The profile-resolved corvus product directory, pushed by the shell under the
+/// config bag key `"corvus_config_dir"`. corvus-be composes its own filenames
+/// under it (`config.toml`, `linked_worktrees.toml` — see [`crate::worktree_links`]).
+pub(crate) fn corvus_config_dir(state: &CorvusState) -> Result<String, String> {
+    state.config("corvus_config_dir")
         .and_then(|v| v.as_str().map(str::to_string))
-        .ok_or_else(|| "corvus config path not set (shell has not pushed it yet)".to_string())
+        .ok_or_else(|| "corvus config dir not set (shell has not pushed it yet)".to_string())
+}
+
+fn config_file_path(state: &CorvusState) -> Result<String, String> {
+    corvus_config_dir(state)
+        .map(|dir| Path::new(&dir).join("config.toml").to_string_lossy().into_owned())
 }
 
 /// Load the owned corvus config. Infallible: any error (path not pushed yet,
