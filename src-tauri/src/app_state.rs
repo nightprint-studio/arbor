@@ -23,7 +23,7 @@ use arbor_plugin_core::prelude::{PluginHost, ToolchainRegistry};
 use arbor_plugin_marketplace::prelude::MarketplaceRegistry;
 use arbor_scheduler::prelude::Scheduler;
 use arbor_shell_common::prelude::Router;
-use corvus_brp::prelude::BrpRegistry;
+use arbor_brp::prelude::BrpRegistry;
 use corvus_core::prelude::CorvusState;
 
 use crate::branding::BrandingState;

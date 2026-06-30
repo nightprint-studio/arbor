@@ -16,7 +16,7 @@
 //! ## Public API: use the [`prelude`]
 //!
 //! Workspace convention — reach this crate's surface through
-//! `corvus_brp::prelude::...`.
+//! `arbor_brp::prelude::...`.
 
 pub mod client;
 pub mod prelude;

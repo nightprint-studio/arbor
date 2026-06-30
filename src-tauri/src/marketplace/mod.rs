@@ -1,7 +1,7 @@
 //! Tauri-side glue for the plugin & theme marketplace.
 //!
 //! The catalog, cache, installer, and registry now live in
-//! `arbor-plugin-marketplace` (see `crates/plugin/marketplace`). This module
+//! `arbor-plugin-marketplace` (see `crates/platform/plugin/marketplace`). This module
 //! only carries the shell-coupled bits that crate can't host:
 //!
 //!   * [`scheduler`] — wires the auto-refresh into `arbor-scheduler` using

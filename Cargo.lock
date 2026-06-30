@@ -135,6 +135,7 @@ name = "arbor"
 version = "0.3.0"
 dependencies = [
  "arbor-auth",
+ "arbor-brp",
  "arbor-cloud",
  "arbor-core",
  "arbor-feedback",
@@ -150,7 +151,6 @@ dependencies = [
  "arbor-shell-common",
  "async-trait",
  "base64 0.22.1",
- "corvus-brp",
  "corvus-core",
  "corvus-git-provider-api",
  "corvus-git-provider-github",
@@ -225,6 +225,19 @@ dependencies = [
  "arbor-scheduler",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "arbor-brp"
+version = "0.3.0"
+dependencies = [
+ "futures-util",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1214,19 +1227,6 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "uuid",
-]
-
-[[package]]
-name = "corvus-brp"
-version = "0.3.0"
-dependencies = [
- "futures-util",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
 ]
 
 [[package]]

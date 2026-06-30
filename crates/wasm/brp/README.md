@@ -1,22 +1,25 @@
-# corvus-brp
+# arbor-brp
 
-Bevy Remote Protocol client for Corvus — JSON-RPC over HTTP + SSE watch streams.
+Bevy Remote Protocol client — JSON-RPC over HTTP + SSE watch streams.
+**Generic Bevy tooling, not git/Corvus-specific** (the old `corvus-` prefix was
+organizational only); now lives under `crates/wasm/`.
 
 ## Purpose
 
 Talks to a running Bevy game's `RemoteHttpPlugin` endpoint (BRP 0.18): a
 read-only JSON-RPC client, a connect-time capability probe
 (`rpc.discover` + `registry.schema`), and long-lived `*+watch` SSE
-subscriptions. Extracted from `src-tauri/src/brp/` (round-2 M2) as the first
-self-contained `corvus-*` domain crate; the Tauri command + plugin-namespace
-layers consume it.
+subscriptions. The Tauri command + plugin-namespace layers consume it.
 
-Earmarked to become a Lua plugin once the runtime supports it — isolating it as
-a crate keeps that future cut clean.
+Earmarked to become a **WASM plugin**: its long-lived SSE streaming and tokio
+task lifecycle (`AbortHandle` cancellation) need native async that a Lua plugin
+can't provide, so it sits under `crates/wasm/` alongside `arbor-cloud`. Until the
+WASM plugin runtime lands it's used in-process by the launcher; isolating it as a
+crate keeps that future cut clean.
 
 ## Public API: use the prelude
 
-Reach the surface through `corvus_brp::prelude::...`: `BrpClient`, `BrpError`,
+Reach the surface through `arbor_brp::prelude::...`: `BrpClient`, `BrpError`,
 `BrpSession`, `BrpRegistry`, `BrpStatus`, `BrpCapabilities`, `WatchSub`,
 `WatchEvent`, `run_watch_stream`, `probe_capabilities`, `DEFAULT_ENDPOINT`,
 `methods`.
@@ -35,7 +38,7 @@ Reach the surface through `corvus_brp::prelude::...`: `BrpClient`, `BrpError`,
 
 ## Tests
 
-Pure logic is unit-tested (`cargo test -p corvus-brp`): capability ingestion
+Pure logic is unit-tested (`cargo test -p arbor-brp`): capability ingestion
 (`rpc.discover` shapes, `registry.schema` short-name classification + one-level
 recursion), SSE `data:` frame parsing, status-from-no-session, truncation. The
 HTTP/SSE transport itself needs a live BRP endpoint and isn't unit-tested.

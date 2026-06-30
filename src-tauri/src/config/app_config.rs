@@ -80,7 +80,7 @@ pub struct AppConfig {
     pub animations: AnimationsConfig,
     // First-run onboarding tour state is **per-product** now: corvus-be owns the
     // git product's onboarding in `corvus/config.toml`. It is no longer a global
-    // shell setting (see `crates/corvus/be/src/corvus_config.rs`). A launcher-level
+    // shell setting (see `crates/products/corvus/be/src/corvus_config.rs`). A launcher-level
     // onboarding, if ever needed, would be re-added here as its own section.
     /// "What's New" modal state. Tracks the last app version the user has
     /// already seen the release notes for, so the modal only auto-opens

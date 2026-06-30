@@ -4,7 +4,7 @@
 //! The git-product config sections (diff, graph, graph_columns, gitflow, cache,
 //! ticket_links, issues, mr, status, recovery, missing_projects, pipelines, studio,
 //! commit, branches, onboarding) are OWNED by `corvus-be` now (`corvus/config.toml`)
-//! — their get/set handlers live in `crates/corvus/be/src/corvus_config.rs`.
+//! — their get/set handlers live in `crates/products/corvus/be/src/corvus_config.rs`.
 //! Onboarding is per-product there (the git product's first-run tour); a
 //! launcher-level onboarding, if ever needed, would live in the shell separately.
 //! What stays here are the **platform/global** sections that the shell still owns in
@@ -95,7 +95,7 @@ pub struct OAuthDefaults {
 
 // Graph-column layout (commit-graph header: column order, width, visibility)
 // moved to corvus-be — it's a git-graph concern. See `get/set_graph_columns` in
-// `crates/corvus/be/src/corvus_config.rs`.
+// `crates/products/corvus/be/src/corvus_config.rs`.
 
 /// Historically dropped the shell's cached `git2::Repository` handle for an
 /// inactive tab to free libgit2 memory. The launcher no longer caches git
@@ -173,7 +173,7 @@ fn set_animations_config(state: &AppState, config: AnimationsConfig) -> Result<(
 }
 
 // Onboarding moved to corvus-be (per-product first-run tour). See
-// `get/set_onboarding_config` in `crates/corvus/be/src/corvus_config.rs`.
+// `get/set_onboarding_config` in `crates/products/corvus/be/src/corvus_config.rs`.
 
 /// Return the "What's New" state (last app version the user has been
 /// shown the release notes for).

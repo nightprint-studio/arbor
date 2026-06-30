@@ -1,6 +1,6 @@
 //! Host-side wiring for the `arbor-cloud` crate.
 //!
-//! All cloud logic now lives in `crates/arbor-cloud`. This module:
+//! All cloud logic now lives in `crates/wasm/cloud`. This module:
 //!   * re-exports the cloud crate's modules so existing call sites
 //!     (`crate::cloud::types::CloudConnection`, etc.) keep compiling;
 //!   * defines [`ArborCloudHost`], the `arbor_cloud::host::CloudHost` impl that
@@ -12,7 +12,7 @@
 //!     out of Tauri State.
 //!
 //! Earmarked for deletion when the cloud-storage plugin moves to a
-//! subprocess runtime. See `crates/arbor-cloud/src/lib.rs` for the broader
+//! subprocess runtime. See `crates/wasm/cloud/src/lib.rs` for the broader
 //! note on the migration path.
 
 // Re-export migrated modules so external paths keep working without

@@ -24,7 +24,7 @@ members = [
     "crates/products/corvus/be",
     "crates/products/corvus/git",
     "crates/products/corvus/git-cli",
-    "crates/products/corvus/brp",
+    "crates/wasm/brp",
     "crates/products/corvus/issue-tracker/api",
     "crates/products/corvus/issue-tracker/linear",
     "crates/products/corvus/issue-tracker/jira",

@@ -2,7 +2,7 @@
 //!
 //! corvus-be is the **sole writer** of the corvus product config (the diff /
 //! status / recovery / cache / pipelines / … sections — see
-//! `crates/corvus/be/src/corvus_config.rs`). A handful of *shell* code paths
+//! `crates/products/corvus/be/src/corvus_config.rs`). A handful of *shell* code paths
 //! still need to read one of those values in-process:
 //! - the in-process recovery snapshotter (`crate::git::recovery`) needs the
 //!   snapshot policy;

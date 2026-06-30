@@ -1,11 +1,11 @@
 [package]
-name         = "corvus-brp"
+name         = "arbor-brp"
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "Bevy Remote Protocol client (JSON-RPC + SSE watch) for Corvus. Earmarked to become a Lua plugin once the runtime supports it; isolated as a crate to keep the cut clean."
+description  = "Bevy Remote Protocol client (JSON-RPC + SSE watch). Generic Bevy tooling — not git/Corvus-specific. Earmarked to become a WASM plugin (its long-lived SSE streaming + tokio task lifecycle need native async that Lua can't provide); lives under crates/wasm/ and is used in-process by the launcher until the WASM runtime lands."
 
 [dependencies]
 serde        = { workspace = true }

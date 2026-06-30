@@ -4,7 +4,7 @@
 //! Each handler is the body the matching `#[tauri::command]` used to run
 //! inline; `#[corvus::handler]` self-registers it under its **own function
 //! name**, so the command is reached generically through the router. The pure
-//! BRP logic already lives in the Tauri-free [`corvus_brp`] crate
+//! BRP logic already lives in the Tauri-free [`arbor_brp`] crate
 //! (`BrpRegistry`, `BrpStatus`, `BrpSession`); these handlers only hold the
 //! `AppState` mutex and delegate, so there is **no crate extraction to do**.
 //!
@@ -27,7 +27,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use corvus_brp::prelude::{
+use arbor_brp::prelude::{
     probe_capabilities, BrpClient, BrpError, BrpRegistry, BrpSession, BrpStatus, DEFAULT_ENDPOINT,
 };
 

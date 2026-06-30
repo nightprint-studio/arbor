@@ -852,7 +852,7 @@ fn host_dispatch(
     // subscription is parked on the `BrpRegistry` so `__brp_unwatch` (and the
     // stream-end teardown) can drop both the stream and the parked closure.
     if method == "__brp_connect" {
-        use corvus_brp::prelude::{
+        use arbor_brp::prelude::{
             probe_capabilities, BrpClient, BrpSession, BrpStatus, DEFAULT_ENDPOINT,
         };
         use std::time::Duration;
@@ -882,7 +882,7 @@ fn host_dispatch(
             .map_err(|e| format!("brp.connect encode: {e}"));
     }
     if method == "__brp_disconnect" {
-        use corvus_brp::prelude::BrpStatus;
+        use arbor_brp::prelude::BrpStatus;
         if let Ok(mut reg) = app.state::<AppState>().brp.lock() {
             reg.clear();
         }
@@ -890,7 +890,7 @@ fn host_dispatch(
             .map_err(|e| format!("brp.disconnect encode: {e}"));
     }
     if method == "__brp_status" {
-        use corvus_brp::prelude::BrpStatus;
+        use arbor_brp::prelude::BrpStatus;
         let status = app
             .state::<AppState>()
             .brp
@@ -915,7 +915,7 @@ fn host_dispatch(
         });
     }
     if method == "__brp_watch" {
-        use corvus_brp::prelude::{run_watch_stream, WatchSub};
+        use arbor_brp::prelude::{run_watch_stream, WatchSub};
         let method_name = params.get("method").and_then(|v| v.as_str()).unwrap_or_default().to_string();
         // corvus-be wraps the real BRP params alongside the routing metadata it
         // needs to deliver SSE events back to its parked Lua closure:
@@ -1422,11 +1422,11 @@ fn host_dispatch(
     }
 }
 
-/// Maps a `corvus_brp::prelude::BrpError` to the Lua single-shot error envelope,
+/// Maps a `arbor_brp::prelude::BrpError` to the Lua single-shot error envelope,
 /// mirroring `ns_shell/brp.rs::error_from_brp`. Used by the `__brp_connect` /
 /// `__brp_call` proxy handlers in `host_dispatch`.
-fn brp_error_envelope_value(e: corvus_brp::prelude::BrpError) -> serde_json::Value {
-    use corvus_brp::prelude::BrpError;
+fn brp_error_envelope_value(e: arbor_brp::prelude::BrpError) -> serde_json::Value {
+    use arbor_brp::prelude::BrpError;
     let err = match e {
         BrpError::Transport(m) => serde_json::json!({ "kind": "transport", "message": m }),
         BrpError::Status { status, body } => serde_json::json!({ "kind": "status", "message": format!("HTTP {status}: {body}"), "code": status as i64 }),
@@ -2014,8 +2014,8 @@ fn remove_plugin_callback_on_backend(state: &AppState, plugin: &str, callback_id
 /// Build the Lua-shaped watch envelope for one SSE event — byte-for-byte the
 /// shell's old `ns_shell/brp.rs::watch_event_to_payload`. Each variant maps to a
 /// single `{ ok, event, … }` table the plugin's watch callback receives.
-fn watch_event_to_payload(event: &corvus_brp::prelude::WatchEvent) -> serde_json::Value {
-    use corvus_brp::prelude::WatchEvent;
+fn watch_event_to_payload(event: &arbor_brp::prelude::WatchEvent) -> serde_json::Value {
+    use arbor_brp::prelude::WatchEvent;
     match event {
         WatchEvent::Open => serde_json::json!({ "ok": true, "event": "open" }),
         WatchEvent::Data(v) => serde_json::json!({ "ok": true, "event": "data", "result": v }),

@@ -1,7 +1,7 @@
 //! Canonical entry point for `corvus-brp`'s public API.
 //!
 //! Workspace convention: call sites reach this crate's surface through
-//! `corvus_brp::prelude::...` (or a single `use corvus_brp::prelude::*;`). The
+//! `arbor_brp::prelude::...` (or a single `use arbor_brp::prelude::*;`). The
 //! submodules stay `pub` for rustdoc navigation but are not the canonical
 //! call-site path.
 

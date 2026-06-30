@@ -52,7 +52,7 @@ tauri-build = { version = "2.6.1", features = [] }
 # --- Arbor crates (split out of this crate, see ../Cargo.toml workspace) ---
 arbor-process-ext = { path = "../crates/platform/process-ext" }
 arbor-fs          = { path = "../crates/foundation/fs" }
-corvus-brp        = { path = "../crates/products/corvus/brp" }
+arbor-brp         = { path = "../crates/wasm/brp" }
 # Shared provider-descriptor types (the FE-facing connect-form metadata) — still
 # used by the git-host connectors below. The issue-tracker crates
 # (`corvus-issues`, `corvus-issue-tracker-{api,linear,jira}`) are gone: that whole
