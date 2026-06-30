@@ -24,7 +24,6 @@ pub mod auth;
 pub mod brp;
 pub mod ide;
 pub mod image;
-pub mod issues;
 pub mod pipeline;
 pub mod provider;
 pub mod repo;

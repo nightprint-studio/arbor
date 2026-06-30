@@ -37,7 +37,6 @@ mod jobs;
 mod plugin_host_commands;
 mod plugin_logs;
 mod pipeline;
-mod integrations;
 mod workspace;
 mod linked_worktrees;
 mod git_provider;

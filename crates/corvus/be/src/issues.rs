@@ -9,23 +9,32 @@
 //! shell's `VaultSessionProvider` (the sole keyring holder). The handler logic
 //! is otherwise identical, down to the error wire string (see [`err`]).
 //!
-//! What does **not** move here: `jira_get_auth_status` (it reads the keyring
-//! config directly for domain/auth-method — keyring-coupled, stays in the
-//! shell) and the two pure/metadata sync helpers (`list_issue_providers`,
-//! `branch_name_for_issue`) — those keep being served in-process. The shell's
-//! `SplitBroker` routes per-method, so the domain splitting across the two
-//! processes is transparent to the caller.
+//! The whole issue-tracker domain now lives here, including the connect surface
+//! relocated from the shell (descriptors, provider auth-status, field
+//! validation, disconnect, `jira_get_auth_status`, the inline-image proxy) — see
+//! the "Provider connect" section below. The launcher keeps only the OAuth engine
+//! and the keyring vault: keyring WRITES (save / clear) and the Jira
+//! keyring-derived metadata (domain + auth method) cross back over the reverse
+//! channel (`__save_credential` / `__delete_credential` / `__jira_auth_meta`).
+//! The shell's `SplitBroker` routes per-method, so this is transparent to the FE.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use arbor_ipc::prelude::{ChildSessionProvider, HostCaller, SessionProvider};
 use corvus_core::prelude::CorvusState;
 use corvus_issues::prelude::{
-    build_registry, jira_new_issue, linear_new_issue, Issue, IssueComment, IssueFilterOptions,
-    IssueFilters, IssueTracker, IssueTrackerError, IssueTrackerRegistry, JiraTracker,
-    LinearAuthStatus,
+    build_registry, jira_new_issue, linear_new_issue, validate_token, AuthStatus, Issue,
+    IssueComment, IssueFilterOptions, IssueFilters, IssueTracker, IssueTrackerError,
+    IssueTrackerRegistry, JiraAuthStatus, JiraTracker, LinearAuthStatus, LINEAR_GQL,
 };
+// FE-facing provider-connect types (distinct from the tracker's `AuthStatus`
+// above): the shared shape the generic settings UI renders.
+use corvus_provider_descriptor::prelude::{
+    AuthStatus as ProviderAuthStatus, ProviderDescriptor, ProviderUserInfo,
+};
+use serde_json::{json, Value};
 
 /// The reverse-channel-backed tracker registry, built once from the shell's
 /// `HostCaller`. Both trackers share a single `ChildSessionProvider` factory —
@@ -255,4 +264,141 @@ async fn jira_download_attachment(
         .download_attachment(&content_url, Path::new(&dest_path))
         .await
         .map_err(err)
+}
+
+// ── Provider connect / metadata (relocated from the shell) ───────────────────────
+//
+// These used to live in the shell (`integrations/*` + `provider_connect/issue.rs`),
+// keyring-coupled. They now run here over the reverse channel: validation/auth
+// resolve credentials through the `ChildSessionProvider`, and the keyring WRITES
+// (save / delete) plus the Jira keyring-derived metadata (domain + auth method)
+// cross back to the shell's vault via `host_call("__save_credential" / …)`. Only
+// the OAuth engine (`*_start_oauth`) stays shell-side.
+
+/// Map the issue-tracker-domain [`AuthStatus`] onto the shared FE-facing
+/// [`ProviderAuthStatus`] (byte-identical to the shell's old `map_issue_auth_status`).
+fn map_issue_auth_status(s: AuthStatus) -> ProviderAuthStatus {
+    ProviderAuthStatus {
+        authenticated: s.authenticated,
+        user: s.user.map(|u| ProviderUserInfo {
+            display_name: u.display_name,
+            email:        u.email,
+            avatar_url:   u.avatar_url,
+        }),
+        account_label: s.domain,
+        method:        s.auth_method,
+    }
+}
+
+/// List the registered issue-tracker providers with their self-describing connect
+/// forms (id, icon, auth methods + fields). Drives the generic settings UI.
+#[arbor_rpc::handler]
+fn list_issue_providers(_ctx: &CorvusState) -> Result<Vec<ProviderDescriptor>, String> {
+    Ok(registry().descriptors())
+}
+
+/// Suggest a git branch name for an issue (`{lower-identifier}-{slugified-title}`).
+#[arbor_rpc::handler]
+fn branch_name_for_issue(_ctx: &CorvusState, issue: Issue) -> Result<String, String> {
+    Ok(corvus_issues::prelude::branch_name_for_issue(&issue))
+}
+
+/// Current auth state of an issue-tracker provider, mapped onto the shared shape.
+#[arbor_rpc::handler]
+async fn issue_provider_auth_status(_ctx: &CorvusState, id: String) -> Result<ProviderAuthStatus, String> {
+    let unauth = || ProviderAuthStatus {
+        authenticated: false,
+        user:          None,
+        account_label: None,
+        method:        None,
+    };
+    let Some(tracker) = registry().get(&id) else { return Ok(unauth()) };
+    match tracker.auth_status().await {
+        Ok(s) => Ok(map_issue_auth_status(s)),
+        Err(_) => Ok(unauth()),
+    }
+}
+
+/// Save `Fields`-method credentials for an issue-tracker provider. Validates the
+/// supplied credentials, then asks the shell's vault to persist them
+/// (`__save_credential`). Linear validates the raw token first; Jira's tracker
+/// validates by reading the just-saved keyring config, so the save precedes the
+/// `/myself` probe (identical ordering to the former in-process path).
+#[arbor_rpc::handler]
+async fn issue_provider_connect_fields(
+    ctx: &CorvusState,
+    id: String,
+    method_id: String,
+    fields: HashMap<String, String>,
+) -> Result<(), String> {
+    let f = |k: &str| fields.get(k).map(|s| s.as_str()).unwrap_or("");
+    match (id.as_str(), method_id.as_str()) {
+        ("linear", "pat") => {
+            let token = f("token");
+            validate_token(token, LINEAR_GQL).await.map_err(err)?;
+            ctx.host_call(
+                "__save_credential",
+                json!({ "provider": "linear", "fields": { "token": token } }),
+            )?;
+            Ok(())
+        }
+        ("jira", "basic") => {
+            ctx.host_call(
+                "__save_credential",
+                json!({ "provider": "jira", "fields": {
+                    "email": f("email"), "api_token": f("api_token"), "domain": f("domain"),
+                } }),
+            )?;
+            jira()
+                .current_user()
+                .await
+                .map_err(|e| format!("Authentication failed: Jira /myself failed: {}", err(e)))?;
+            Ok(())
+        }
+        (p, "pat") | (p, "basic") => Err(format!("{p}: unsupported fields method")),
+        (p, m) => Err(format!("{p}: unknown fields method '{m}'")),
+    }
+}
+
+/// Remove all stored credentials for an issue-tracker provider (via the vault).
+#[arbor_rpc::handler]
+async fn issue_provider_disconnect(ctx: &CorvusState, id: String) -> Result<(), String> {
+    ctx.host_call("__delete_credential", json!({ "provider": id }))?;
+    Ok(())
+}
+
+/// Jira auth status (authenticated flag + user + domain + method). The domain +
+/// auth method are keyring-derived, so they cross from the shell's vault
+/// (`__jira_auth_meta`); the user comes from a `/myself` probe.
+#[arbor_rpc::handler]
+async fn jira_get_auth_status(ctx: &CorvusState) -> Result<JiraAuthStatus, String> {
+    let unauth = || JiraAuthStatus { authenticated: false, user: None, domain: None, auth_method: None };
+    let meta = ctx.host_call("__jira_auth_meta", Value::Null)?;
+    if meta.is_null() {
+        return Ok(unauth());
+    }
+    let status = jira().auth_status().await.map_err(err)?;
+    if status.authenticated {
+        Ok(JiraAuthStatus {
+            authenticated: true,
+            user:          status.user,
+            domain:        meta.get("domain").and_then(|v| v.as_str()).map(String::from),
+            auth_method:   meta.get("auth_method").and_then(|v| v.as_str()).map(String::from),
+        })
+    } else {
+        Ok(unauth())
+    }
+}
+
+/// Authenticated inline-image proxy for an issue-tracker provider (Jira / Linear).
+#[arbor_rpc::handler]
+async fn issue_fetch_image(
+    _ctx: &CorvusState,
+    provider: String,
+    url: String,
+) -> Result<(Vec<u8>, Option<String>), String> {
+    let tracker = registry()
+        .get(&provider)
+        .ok_or_else(|| format!("unknown issue provider '{provider}'"))?;
+    tracker.fetch_image_bytes(&url).await.map_err(err)
 }

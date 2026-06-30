@@ -53,11 +53,13 @@ tauri-build = { version = "2.6.1", features = [] }
 arbor-process-ext = { path = "../crates/arbor-process-ext" }
 arbor-fs          = { path = "../crates/foundation/fs" }
 corvus-brp        = { path = "../crates/corvus/brp" }
+# Shared provider-descriptor types (the FE-facing connect-form metadata) — still
+# used by the git-host connectors below. The issue-tracker crates
+# (`corvus-issues`, `corvus-issue-tracker-{api,linear,jira}`) are gone: that whole
+# domain (connect / validate / auth-status / image proxy) moved out of process
+# into `corvus-be`; the launcher keeps only the OAuth engine + the keyring vault,
+# which corvus-be reaches over the reverse channel.
 corvus-provider-descriptor = { path = "../crates/corvus/provider-descriptor" }
-corvus-issue-tracker-api = { path = "../crates/corvus/issue-tracker/api" }
-corvus-issue-tracker-linear = { path = "../crates/corvus/issue-tracker/linear" }
-corvus-issue-tracker-jira = { path = "../crates/corvus/issue-tracker/jira" }
-corvus-issues = { path = "../crates/corvus/issues" }
 corvus-git-provider-api = { path = "../crates/corvus/git-provider/api" }
 corvus-git-provider-github = { path = "../crates/corvus/git-provider/github" }
 corvus-git-provider-gitlab = { path = "../crates/corvus/git-provider/gitlab" }
@@ -109,8 +111,6 @@ mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send
 
 # --- Async ---
 tokio        = { workspace = true }
-# Used for `StreamExt::next()` when streaming HTTP bodies (e.g. attachment downloads).
-futures-util = { workspace = true }
 # Required by `git_provider::GitProvider` trait — async fns in traits via macro.
 async-trait  = { workspace = true }
 
@@ -158,12 +158,8 @@ syn = { version = "2", features = ["full", "extra-traits", "parsing"] }
 # of a struct/enum referenced anywhere in their RON file.
 prettyplease = "0.2"
 quote = "1"
-# Encoding-aware decode/encode for legacy text files in conflict resolution
-# (windows-1252 / Latin-1 sources still common in older Java codebases on
-# Windows). Round-trips bytes ↔ String preserving the original encoding.
-encoding_rs = "0.8"
-# Structured file edits exposed as `arbor.fs.json_set / yaml_set / toml_set /
-# xml_set` for plugins that need reliable cross-platform config editing
+# Structured file edits exposed as `arbor.fs.json_set / yaml_set / toml_set`
+# for plugins that need reliable cross-platform config editing
 # inside a LuaOp pipeline step (see src/plugin/api.rs + src/pipeline).
 # Also used by `yaml_studio` for the JSON projection (tree / JSONPath
 # query): multi-doc streams parse via `serde_yaml_ng::Deserializer` and
@@ -180,9 +176,7 @@ serde_yaml_ng = "0.10"
 # wrappers, and re-emit through `Display`. Comments, whitespace,
 # quote style, anchors, and tags survive the round-trip.
 yaml-edit = "0.2"
-quick-xml  = { version = "0.36", features = ["serialize"] }
 base64     = { workspace = true }
-sha2       = { workspace = true }
 
 # --- Config / paths ---
 dirs   = { workspace = true }
@@ -194,11 +188,6 @@ toml   = "0.8"
 # in `Cargo.lock`.
 toml_edit = "0.22"
 semver = "1"
-
-# --- Scheduling ---
-# 6-field Spring-style cron expressions (sec min hour day month day-of-week)
-# parsed by `arbor.scheduler.register` triggers in plugin Lua.
-cron = "0.13"
 
 # --- File watch ---
 notify = "6"
@@ -237,11 +226,7 @@ zip          = "2"
 # (The PortableGit 7z download/extract — and its `sevenz-rust2` dependency —
 # moved into the `corvus-git-cli` crate, which both the shell and corvus-be use.)
 uuid     = { workspace = true }
-chrono   = { version = "0.4", features = ["serde"] }
 libc     = "0.2"
-regex    = { workspace = true }
-# HTML sanitizer for issue tracker rendered descriptions/comments (Jira renderedFields).
-ammonia  = "4"
 
 # --- Cloud storage (cloud-storage plugin) ---
 # opendal + the aws-lc-sys NASM-prebuilt pin live in `crates/arbor-cloud` as

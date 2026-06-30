@@ -5,8 +5,9 @@
 //! self-hosted GitLab or a public CDN), and the token-attachment decision is
 //! per-URL, not per-provider-instance. Routing it through the registry's
 //! gitlab.com provider would attach the wrong token (or none) for self-hosted
-//! instances. So it stays shell-side — mirroring how the issue-tracker image
-//! fetch lives in `integrations::{linear,jira}::fetch_image_bytes`.
+//! instances. So it stays shell-side. (The issue-tracker image proxy — Jira /
+//! Linear — moved the other way, into `corvus-be`'s `issue_fetch_image`, since
+//! those trackers' credentials now live behind its reverse channel.)
 //!
 //! The provider token is attached ONLY when the target host belongs to the
 //! provider (github.com / the configured GitLab host). Public CDN assets — e.g.

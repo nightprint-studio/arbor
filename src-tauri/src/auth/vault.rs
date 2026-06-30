@@ -27,12 +27,17 @@ use std::pin::Pin;
 use async_trait::async_trait;
 
 use arbor_ipc::prelude::{AuthSession, CredentialError, SessionProvider};
-use corvus_issue_tracker_linear::LINEAR_GQL;
 
 use crate::auth::{credential_store, oauth_jira, oauth_linear};
 use crate::error::Result;
 use crate::git_provider::ci_impl;
 use crate::git_provider::oauth::{github_flow, gitlab_flow};
+
+/// Linear's GraphQL endpoint — the `base_url` of a Linear session. Owned here
+/// now that the launcher no longer depends on the `corvus-issue-tracker-*`
+/// crates (the issue-tracker logic moved out of process into `corvus-be`); this
+/// is the one constant the shell-side vault still needs to shape a session.
+const LINEAR_GQL: &str = "https://api.linear.app/graphql";
 
 /// Linear's single keyring slot — the access token, shared between the OAuth and
 /// PAT flows (see `oauth_linear`).

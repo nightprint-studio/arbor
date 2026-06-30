@@ -1,12 +1,12 @@
 //! Shell-side generic provider-connection layer.
 //!
-//! A single `ProviderConnector` trait abstracts "connect any provider"
-//! (issue tracker OR git host) behind a by-id surface, so the frontend can
-//! drive every provider's connect / disconnect / OAuth flow through generic
-//! IPC without a line of per-provider code. Each connector wraps the existing
-//! per-provider functions (the keyring/OAuth glue that already lives in
-//! `integrations/*` and `git_provider/oauth/*`); this layer adds NO new auth
-//! logic, only a uniform shape.
+//! A single `ProviderConnector` trait abstracts "connect a git host" behind a
+//! by-id surface, so the frontend can drive every provider's connect /
+//! disconnect / OAuth flow through generic IPC without a line of per-provider
+//! code. Each connector wraps the existing per-provider functions (the
+//! keyring/OAuth glue in `git_provider/oauth/*`); this layer adds NO new auth
+//! logic, only a uniform shape. (The issue-tracker domain used the same trait
+//! before it moved out of process to `corvus-be`.)
 //!
 //! The provider's *self-description* — what the FE renders to list and connect
 //! it — is the shared
@@ -14,10 +14,13 @@
 //! already returned by each domain trait's `descriptor()`. Connectors forward
 //! it verbatim.
 //!
-//! - Issue-tracker connectors live in [`issue`]; build via [`issue::issue_connectors`].
 //! - Git-host connectors live in [`git`]; build via [`git::git_connectors`].
+//!
+//! Issue-tracker connect (descriptors / auth-status / validate / disconnect)
+//! moved out of process into `corvus-be`; only the shell-side OAuth engine
+//! remains, driven directly from `ipc/corvus/provider.rs`. So there is no issue
+//! connector module here any more.
 
-pub mod issue;
 pub mod git;
 
 use std::collections::HashMap;
@@ -72,9 +75,9 @@ pub trait ProviderConnector: Send + Sync {
     async fn disconnect(&self) -> Result<(), AppError>;
 }
 
-/// A registry of [`ProviderConnector`]s keyed by id. Built once per domain
-/// (see [`issue::issue_connectors`] / [`git::git_connectors`]) and consumed by
-/// the (next-phase) generic Tauri commands.
+/// A registry of [`ProviderConnector`]s keyed by id. Built once for the git-host
+/// domain (see [`git::git_connectors`]) and consumed by the generic provider
+/// handlers. (The issue-tracker domain moved out of process to `corvus-be`.)
 #[derive(Default)]
 pub struct ConnectorRegistry {
     connectors: HashMap<&'static str, Box<dyn ProviderConnector>>,
@@ -103,26 +106,6 @@ impl ConnectorRegistry {
 }
 
 // ── AuthStatus mapping helpers ────────────────────────────────────────────────
-
-/// Map the issue-tracker-domain [`AuthStatus`](corvus_issue_tracker_api::prelude::AuthStatus)
-/// onto the shared FE-facing [`AuthStatus`].
-///
-/// `account_label` ← `domain` (Jira tenant host / `None` for single-tenant),
-/// `method` ← `auth_method`, and the user shape is narrowed to the shared
-/// [`ProviderUserInfo`](corvus_provider_descriptor::prelude::ProviderUserInfo).
-pub fn map_issue_auth_status(s: corvus_issue_tracker_api::prelude::AuthStatus) -> AuthStatus {
-    use corvus_provider_descriptor::prelude::ProviderUserInfo;
-    AuthStatus {
-        authenticated: s.authenticated,
-        user: s.user.map(|u| ProviderUserInfo {
-            display_name: u.display_name,
-            email:        u.email,
-            avatar_url:   u.avatar_url,
-        }),
-        account_label: s.domain,
-        method:        s.auth_method,
-    }
-}
 
 /// Compose a git-host [`AuthStatus`] from a provider's sync `has_token()` plus
 /// (when authenticated) its async `current_user()`.

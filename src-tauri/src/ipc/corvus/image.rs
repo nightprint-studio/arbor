@@ -11,8 +11,9 @@
 //!
 //! `#[corvus::handler]` self-registers it under its own function name; it is
 //! `async` (provider HTTP) so the generic `rpc` command awaits it on the runtime.
-//! It takes no `AppState` (provider modules read their own credentials), so the
-//! macro's required context arg is `_state`. No hooks fire in this domain.
+//! The git-host case (GitHub/GitLab) fetches in-process (host-dynamic proxy); the
+//! issue-tracker case (Jira/Linear) forwards to `corvus-be`, which owns those
+//! trackers' credentials — hence the `AppState` context. No hooks fire here.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
@@ -31,14 +32,24 @@ const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 /// resolve relative `/uploads/...` paths and decide whether to attach the token.
 #[corvus::handler]
 async fn fetch_remote_image(
-    _state:   &AppState,
+    state:    &AppState,
     url:      String,
     provider: String,
     base_url: Option<String>,
 ) -> Result<String, AppError> {
     let (bytes, ctype) = match provider.as_str() {
-        "linear" => crate::integrations::linear::fetch_image_bytes(&url).await?,
-        "jira"   => crate::integrations::jira::fetch_image_bytes(&url).await?,
+        "linear" | "jira" => {
+            // Issue-tracker image proxy lives in corvus-be (it holds the tracker
+            // credentials over the reverse channel). Forward + decode the
+            // `(bytes, content_type)` tuple.
+            let v = crate::ipc::dispatch_rpc(
+                state,
+                "corvus",
+                "issue_fetch_image",
+                serde_json::json!({ "provider": provider, "url": url }),
+            )?;
+            serde_json::from_value::<(Vec<u8>, Option<String>)>(v)?
+        }
         "github" | "gitlab" => {
             crate::git_provider::image_proxy::fetch_image_bytes(&provider, base_url.as_deref(), &url).await?
         }

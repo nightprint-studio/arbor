@@ -20,7 +20,6 @@ use corvus_provider_descriptor::prelude::{AuthStatus, OAuthStart, ProviderDescri
 use crate::error::AppError;
 use crate::ipc::corvus;
 use crate::provider_connect::git::git_connectors;
-use crate::provider_connect::issue::issue_connectors;
 use crate::provider_connect::ConnectorRegistry;
 use crate::AppState;
 
@@ -35,27 +34,14 @@ fn connector<'a>(
 }
 
 // ── Issue-tracker domain ──────────────────────────────────────────────────────
-
-/// Current auth state of an issue-tracker provider, mapped onto the shared shape.
-#[corvus::handler]
-async fn issue_provider_auth_status(_state: &AppState, id: String) -> Result<AuthStatus, AppError> {
-    Ok(connector(issue_connectors(), &id)?.auth_status().await)
-}
-
-/// Save `Fields`-method credentials for an issue-tracker provider. `fields` keys
-/// match the descriptor's `AuthField.key` (e.g. Linear `{ token }`, Jira
-/// `{ domain, email?, api_token }`).
-#[corvus::handler]
-async fn issue_provider_connect_fields(
-    _state: &AppState,
-    id: String,
-    method_id: String,
-    fields: HashMap<String, String>,
-) -> Result<(), AppError> {
-    connector(issue_connectors(), &id)?
-        .connect_fields(&method_id, fields)
-        .await
-}
+//
+// `list_issue_providers`, `issue_provider_auth_status` / `_connect_fields` /
+// `_disconnect` (and `jira_get_auth_status`, `branch_name_for_issue`, the
+// inline-image proxy) moved out of process to `corvus-be` — it owns the
+// issue-tracker registry + credential validation, persisting/clearing the keyring
+// back over the reverse channel (`__save_credential` / `__delete_credential`).
+// Only the OAuth engine stays shell-side: it drives the system browser + the
+// redirect listener, which live with the launcher's vault.
 
 /// Begin an OAuth method on an issue-tracker provider; the returned `OAuthStart`
 /// tells the FE how to proceed. Completion arrives via `arbor://provider-oauth-done`.
@@ -68,15 +54,15 @@ async fn issue_provider_start_oauth(
     let sink = state
         .event_sink()
         .ok_or_else(|| AppError::Other("event sink unavailable".into()))?;
-    connector(issue_connectors(), &id)?
-        .start_oauth(&method_id, sink)
-        .await
-}
-
-/// Remove all stored credentials for an issue-tracker provider.
-#[corvus::handler]
-async fn issue_provider_disconnect(_state: &AppState, id: String) -> Result<(), AppError> {
-    connector(issue_connectors(), &id)?.disconnect().await
+    match (id.as_str(), method_id.as_str()) {
+        ("linear", "oauth") => Ok(OAuthStart::Redirect {
+            url: crate::auth::oauth_linear::start_linear_oauth(sink).await?,
+        }),
+        ("jira", "oauth") => Ok(OAuthStart::Redirect {
+            url: crate::auth::oauth_jira::start_jira_oauth(sink).await?,
+        }),
+        (p, m) => Err(AppError::Other(format!("{p}: unknown oauth method '{m}'"))),
+    }
 }
 
 // ── Git-host domain ───────────────────────────────────────────────────────────

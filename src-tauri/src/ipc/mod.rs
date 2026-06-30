@@ -1344,6 +1344,44 @@ fn host_dispatch(
         return Ok(serde_json::json!(true));
     }
 
+    // Credential WRITE reverse channels — the keyring (the launcher's vault)
+    // stays shell-side, so an OOP backend that just validated a new issue-tracker
+    // credential asks the shell to persist / clear it, and reads the Jira
+    // keyring-derived metadata (domain + auth method) it can't see itself. The
+    // read-side mirror is `__session`/`__refresh` below.
+    if method == "__save_credential" {
+        let provider = params.get("provider").and_then(|v| v.as_str()).unwrap_or_default();
+        let fields = params.get("fields").cloned().unwrap_or(serde_json::Value::Null);
+        let f = |k: &str| fields.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        match provider {
+            "linear" => crate::auth::credential_store::save("linear.app", "api-key", &f("token"))
+                .map_err(|e| e.to_string())?,
+            "jira" => crate::auth::oauth_jira::save_basic_auth(&f("email"), &f("api_token"), &f("domain"))
+                .map_err(|e| e.to_string())?,
+            other => return Err(format!("__save_credential: unknown provider '{other}'")),
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__delete_credential" {
+        let provider = params.get("provider").and_then(|v| v.as_str()).unwrap_or_default();
+        match provider {
+            "linear" => crate::auth::oauth_linear::disconnect().map_err(|e| e.to_string())?,
+            "jira"   => crate::auth::oauth_jira::disconnect().map_err(|e| e.to_string())?,
+            other => return Err(format!("__delete_credential: unknown provider '{other}'")),
+        }
+        return Ok(serde_json::Value::Null);
+    }
+    if method == "__jira_auth_meta" {
+        // `{ domain, auth_method }` from the keyring config, or null when Jira
+        // isn't connected. corvus-be folds this into its `jira_get_auth_status`.
+        let meta = crate::auth::oauth_jira::get_config()
+            .ok()
+            .flatten()
+            .map(|cfg| serde_json::json!({ "domain": cfg.domain, "auth_method": cfg.auth_method }))
+            .unwrap_or(serde_json::Value::Null);
+        return Ok(meta);
+    }
+
     let account: String = match method {
         "__session" | "__refresh" => serde_json::from_value(params)
             .map_err(|e| format!("{method}: invalid account: {e}"))?,

@@ -36,6 +36,7 @@ now run here** (see
 | `list_remotes` / `fetch_remote` / `push_branch` / `pull_branch` (4) | the network remote domain via `corvus-git`; git smart-HTTP credentials cross the reverse channel (`__git_credentials`); fires `on_fetch` / `on_push` / `on_pull`. `pull_branch` carries the full safe-pull flow (recovery snapshot → pre-pull stash → fetch/merge → re-apply) and streams `arbor://pull-progress` / `-done` |
 | `list_commit_notes` / `check_note_remote_status` / `save_commit_note` / `delete_commit_note` / `push_note_namespace` (5) | the git-notes domain via `corvus-git`; fires `on_note_saved` / `on_note_deleted`. `push_note_namespace` pushes `refs/notes/*` over the shared `__git_credentials` resolver |
 | `linear_*` (8) / `jira_*` (8) | the issue-tracker domain (async, network), via the shared `corvus-issues` crate — credentials resolved over the **reverse channel** (`ChildSessionProvider` → shell keyring), never read here |
+| issue-provider connect (7) | `list_issue_providers` / `branch_name_for_issue` / `issue_provider_auth_status` / `issue_provider_connect_fields` / `issue_provider_disconnect` / `jira_get_auth_status` / `issue_fetch_image` — the connect surface relocated from the shell. Validation resolves creds over the reverse channel; keyring WRITES + Jira metadata cross back via `__save_credential` / `__delete_credential` / `__jira_auth_meta`. Only the OAuth engine stays shell-side |
 | `get_commit_diff` / `get_commit_diff_meta` / `get_commit_file_diff` / `get_commits_range_diff_meta` / `get_commits_range_file_diff` / `get_workdir_diff` / `get_file_at_commit` / `get_branch_diff` / `get_file_blame` / `get_file_blame_streaming` / `get_workdir_diff_stream` (11) | the diff + blame domain via `corvus-git` (no hooks); `context_lines` falls back to the pushed `diff.context_lines`. `get_file_blame_streaming` is pure egress (blocks, returns the lines, emits `arbor://blame-stream-chunk` ticks); `get_workdir_diff_stream` returns a `job_id`, parses each file on a worker thread, and streams `arbor://diff-stream-*` — its Jobs entry driven over the reverse channel (`JobHandle`), no `arbor://job-*` lifecycle events (matching in-process) |
 | `get_repo_files` / `get_files_last_commit` / `get_repo_fingerprint` / `get_graph` / `get_graph_for_file` / `get_repo_file_tree` / `get_commit_detail` / `start_file_meta_scan` / `export_graph_svg` (9) | the graph + repo-file domain via `corvus-git` (no hooks); `get_graph` is paginated (`offset`/`limit`), so single-shot reads cross as one `Response`. `start_file_meta_scan` streams `arbor://file-meta-batch` / `-done` (per-tab cancellation map is module-local); `export_graph_svg` returns a `job_id`, drives the Jobs entry via `JobHandle`, and emits `arbor://job-started` / `-output` / `-done` + `plugin:notification` |
 | `get_status` (1) | the workdir-status scan via `corvus-git` (no hooks); reads the pushed `status.detect_renames` toggle |
@@ -107,11 +108,14 @@ byte-identical payloads.
 **Async handlers need a runtime.** The issue-tracker handlers do real network
 I/O, so `main` builds a **multi-thread** Tokio runtime and the dispatch loop
 `block_on`s them (the serve loop runs each request on its own worker thread, so
-concurrent `block_on`s are expected). `jira_get_auth_status` stays in the shell
-(it reads the keyring config directly for the domain/auth-method), as do the two
-pure/metadata helpers `list_issue_providers` / `branch_name_for_issue` — the
-`SplitBroker` routes per-method, so the domain splitting across the two processes
-is invisible to the caller.
+concurrent `block_on`s are expected). The **whole** issue-tracker domain lives
+here now, including the connect surface relocated from the shell
+(`list_issue_providers`, `branch_name_for_issue`, `issue_provider_auth_status` /
+`_connect_fields` / `_disconnect`, `jira_get_auth_status`, `issue_fetch_image`).
+The launcher keeps only the OAuth engine; keyring WRITES and the Jira
+keyring-derived metadata cross back over the reverse channel
+(`__save_credential` / `__delete_credential` / `__jira_auth_meta`). The
+`SplitBroker` routes per-method, so this is invisible to the caller.
 
 If this binary isn't built, the shell falls back to a pure in-process loopback
 (it keeps in-process copies of these domains too) — the app still works.

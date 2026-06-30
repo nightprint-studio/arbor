@@ -42,6 +42,10 @@ corvus-git        = { path = "../git" }
 corvus-git-cli    = { path = "../git-cli" }
 arbor-core        = { path = "../../core" }
 corvus-issues     = { path = "../issues" }
+# Pure provider-descriptor types (the FE-facing `AuthStatus` / `ProviderUserInfo`
+# / `ProviderDescriptor`) the relocated issue-provider connect handlers return.
+# Already in the tree transitively via `corvus-issues`; named directly here.
+corvus-provider-descriptor = { path = "../provider-descriptor" }
 # The keyring-free git-provider impls (REST domains served OOP): the registry +
 # trait live in `-api`, the GitHub/GitLab impls inject a reverse-channel
 # `SessionProvider` exactly like `corvus-issues` injects its tracker session.
