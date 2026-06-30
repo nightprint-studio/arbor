@@ -50,34 +50,34 @@ tauri-build = { version = "2.6.1", features = [] }
 
 [dependencies]
 # --- Arbor crates (split out of this crate, see ../Cargo.toml workspace) ---
-arbor-process-ext = { path = "../crates/arbor-process-ext" }
+arbor-process-ext = { path = "../crates/platform/process-ext" }
 arbor-fs          = { path = "../crates/foundation/fs" }
-corvus-brp        = { path = "../crates/corvus/brp" }
+corvus-brp        = { path = "../crates/products/corvus/brp" }
 # Shared provider-descriptor types (the FE-facing connect-form metadata) — still
 # used by the git-host connectors below. The issue-tracker crates
 # (`corvus-issues`, `corvus-issue-tracker-{api,linear,jira}`) are gone: that whole
 # domain (connect / validate / auth-status / image proxy) moved out of process
 # into `corvus-be`; the launcher keeps only the OAuth engine + the keyring vault,
 # which corvus-be reaches over the reverse channel.
-corvus-provider-descriptor = { path = "../crates/corvus/provider-descriptor" }
-corvus-git-provider-api = { path = "../crates/corvus/git-provider/api" }
-corvus-git-provider-github = { path = "../crates/corvus/git-provider/github" }
-corvus-git-provider-gitlab = { path = "../crates/corvus/git-provider/gitlab" }
-corvus-pipeline-api = { path = "../crates/corvus/pipeline/api" }
-corvus-pipeline-core = { path = "../crates/corvus/pipeline/core" }
-corvus-core       = { path = "../crates/corvus/core" }
+corvus-provider-descriptor = { path = "../crates/products/corvus/provider-descriptor" }
+corvus-git-provider-api = { path = "../crates/products/corvus/git-provider/api" }
+corvus-git-provider-github = { path = "../crates/products/corvus/git-provider/github" }
+corvus-git-provider-gitlab = { path = "../crates/products/corvus/git-provider/gitlab" }
+corvus-pipeline-api = { path = "../crates/products/corvus/pipeline/api" }
+corvus-pipeline-core = { path = "../crates/products/corvus/pipeline/core" }
+corvus-core       = { path = "../crates/products/corvus/core" }
 arbor-ipc         = { path = "../crates/foundation/ipc" }
 arbor-shell-common = { path = "../crates/foundation/shell-common" }
 arbor-rpc         = { path = "../crates/foundation/rpc" }
-arbor-feedback    = { path = "../crates/arbor-feedback" }
-arbor-cloud       = { path = "../crates/arbor-cloud" }
-arbor-auth        = { path = "../crates/arbor-auth" }
-arbor-core        = { path = "../crates/core" }
-arbor-plugin-api  = { path = "../crates/plugin/api" }
-arbor-plugin-core = { path = "../crates/plugin/core" }
-arbor-plugin-marketplace = { path = "../crates/plugin/marketplace" }
-arbor-plugin-types = { path = "../crates/plugin/types" }
-arbor-scheduler   = { path = "../crates/scheduler" }
+arbor-feedback    = { path = "../crates/platform/feedback" }
+arbor-cloud       = { path = "../crates/wasm/cloud" }
+arbor-auth        = { path = "../crates/platform/auth" }
+arbor-core        = { path = "../crates/foundation/core" }
+arbor-plugin-api  = { path = "../crates/platform/plugin/api" }
+arbor-plugin-core = { path = "../crates/platform/plugin/core" }
+arbor-plugin-marketplace = { path = "../crates/platform/plugin/marketplace" }
+arbor-plugin-types = { path = "../crates/platform/plugin/types" }
+arbor-scheduler   = { path = "../crates/platform/scheduler" }
 
 # --- Tauri ---
 tauri             = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name         = "corvus-plugin"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "The Corvus product's headless `arbor.*` API installer (publishes the git/product namespaces in `corvus-be`). The product-agnostic hook-dispatcher builder moved to `arbor-plugin-core`; the generic headless AppCtx lives in `arbor-be`."
+
+[dependencies]
+arbor-plugin-core  = { path = "../../../platform/plugin/core" }
+
+# Workspace-pinned (see root) so the installer's `&Lua` is the very same type as
+# arbor-plugin-core's — one shared mlua artifact.
+mlua = { workspace = true }

@@ -1,0 +1,42 @@
+[package]
+name         = "arbor-plugin-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Plugin runtime host: mlua VM management, lifecycle (load/unload/reload), sandbox, builtin Lua API surface (arbor.* namespace)."
+
+[dependencies]
+arbor-core         = { path = "../../../foundation/core" }
+arbor-feedback     = { path = "../../feedback" }
+arbor-scheduler    = { path = "../../scheduler" }
+arbor-plugin-types = { path = "../types" }
+arbor-plugin-api   = { path = "../api" }
+
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+regex       = { workspace = true }
+reqwest     = { workspace = true }
+dirs        = { workspace = true }
+
+# YAML round-trip for `arbor.fs.yaml_set` (lua_api::ns::fs). Same version as
+# src-tauri so both shells link the same artifact.
+serde_yaml_ng = "0.10"
+
+# Lua 5.4 VM — workspace-pinned (see root) so every plugin-host crate shares one
+# mlua artifact.
+mlua = { workspace = true }
+
+# Manifest format + semver dependency resolution (re-used here for the
+# topo-sort during plugin load).
+toml   = "0.8"
+semver = "1"
+
+# Used by `lua_api::helpers::xml_patch` (arbor.fs.xml_set). Same version
+# as src-tauri so both shells link against the same artifact.
+quick-xml = { version = "0.36", features = ["serialize"] }

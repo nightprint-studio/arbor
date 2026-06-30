@@ -18,7 +18,7 @@ regex     = { workspace = true }
 encoding_rs = "0.8"
 # Console-window suppression for the `wsl.exe` enumeration. Same foundation dep
 # the shell uses; keeps WSL roots out of a popped CMD window.
-arbor-process-ext = { path = "../../arbor-process-ext" }
+arbor-process-ext = { path = "../../platform/process-ext" }
 # Cross-platform move-to-trash + Recycle Bin listing/restore/purge (Windows /
 # macOS / freedesktop). Same version the shell pinned pre-split.
 trash = "5"

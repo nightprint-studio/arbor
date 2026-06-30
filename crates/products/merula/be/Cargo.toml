@@ -1,0 +1,65 @@
+[package]
+name         = "merula-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Merula backend — the headless audio/live-coding process for Model D. Serves the merula domains (eval/transport/render/packs/sounds/…) over framed-stdio IPC; owns its own audio session thread, has no plugin host, no credentials, and resolves its own config/data dirs."
+
+[[bin]]
+name = "merula-be"
+path = "src/main.rs"
+
+[features]
+# Pull in the ONNX transcription backend (basic-pitch + Demucs stem separation),
+# forwarding to the merula facade's `onnx` feature. Off by default: the always-
+# available DSP backend ships unconditionally and the `onnx`-gated branches in
+# `importers.rs` fall back to it. The shell turns this on.
+onnx = ["merula/onnx"]
+
+[dependencies]
+arbor-ipc      = { path = "../../../foundation/ipc" }
+arbor-rpc      = { path = "../../../foundation/rpc" }
+# The Model-D backend runtime scaffold: `BackendIo` (framed-stdio plumbing +
+# runtime) + the `App` builder (pre-serve inits, serve loop). merula-be uses the
+# slim path — no plugin host, no API installer, no scheduler.
+arbor-be       = { path = "../../../foundation/be" }
+# The profile-aware config/data-path resolver: `init_active_profile()` seeds the
+# active profile FIRST in `main`, so `merula_config_dir()` / `merula_data_dir()`
+# (which the domain modules read) resolve under the launcher's profile.
+arbor-core     = { path = "../../../foundation/core" }
+# The Tauri-free job model (`JobSpec`/`JobStatus`): the render / pack-download
+# domains drive jobs in the shell's single-source `JobRegistry` over the reverse
+# channel (`be/src/jobs.rs`), exactly like corvus-be.
+arbor-feedback = { path = "../../../platform/feedback" }
+# The merula facade: re-exports the public surface of the four Tauri-free merula
+# crates (pattern + lang + audio + engine, plus import/transcribe) through one
+# curated prelude. The domain handlers call merula entirely through `merula::prelude::*`.
+merula         = { path = "../merula" }
+# The canonical merula state + audio substrate: `MerulaState`, the `Session` /
+# control / events / audio_thread substrate, the `MerulaConfig` type + load/save,
+# and the pack/alias read helpers. The domain `#[arbor_rpc::handler]`s stay here in
+# merula-be and drive against `merula_core::prelude::*`. Tauri-free by construction.
+merula-core    = { path = "../core" }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+# The typed global merula config (`config.toml`) is owned out-of-process by
+# config_cmds.rs — round-tripped through `toml`, exactly like corvus-be.
+toml           = "0.8"
+# Drives the async domain handlers: each backend request runs on its own
+# serve-loop worker thread, so a multi-thread runtime is required (concurrent
+# `block_on` from many threads). `enable_all` gives the IO/timer drivers.
+tokio          = { workspace = true }
+# Unauthenticated HTTPS for the job-tracked downloads (sample packs, ONNX models,
+# GitHub library zipballs). The streaming worker drives `reqwest`'s byte stream on
+# a per-job current-thread runtime; `futures-util` provides `StreamExt`; `sha2`
+# hashes the streamed pack archive; `zip` extracts the flattened library trees.
+reqwest        = { workspace = true }
+futures-util   = { workspace = true }
+sha2           = { workspace = true }
+zip            = "2"
+# Read-only SoundFont (`.sf2`) parser, used ONLY at install time by the General MIDI
+# pack converter (`packs_download/gm.rs`) to slice samples + emit SFZ — never on the
+# audio RT path (the engine stays sample/SFZ-based).
+rustysynth     = "1.3"

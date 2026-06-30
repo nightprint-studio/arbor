@@ -1,0 +1,16 @@
+[package]
+name         = "arbor-plugin-rpc"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Generic Plugin-Manager RPC surface for Model-D backends: the enable/disable/reload/scheduler/dispatch/introspection logic, written once over a `PluginRpcContext` and exposed as the `PluginRpc` bundle. A product `*-be` adds it to its `arbor_rpc::Builder` (Bevy-like) — no per-handler glue. Product-agnostic: depends only on arbor-rpc + arbor-plugin-core."
+
+[dependencies]
+arbor-rpc         = { path = "../../../foundation/rpc" }
+arbor-plugin-core = { path = "../core" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Plugin dependency-graph unmet-version check (same pin `arbor-plugin-core` uses).
+semver     = "1"

@@ -1,0 +1,82 @@
+[package]
+name         = "corvus-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Corvus backend — the headless git process for Model D. Stage 1: serves a self-test method set over framed-stdio IPC; the git domains move in next."
+
+[[bin]]
+name = "corvus-be"
+path = "src/main.rs"
+
+[dependencies]
+arbor-ipc         = { path = "../../../foundation/ipc" }
+arbor-rpc         = { path = "../../../foundation/rpc" }
+# The Model-D backend runtime scaffold: `BackendIo` (framed-stdio plumbing +
+# runtime) + the `App` builder (scheduler wiring, pre-serve inits, serve loop).
+arbor-be          = { path = "../../../foundation/be" }
+# The plugin host (mlua) co-located with the git handlers: hooks the OOP
+# handlers fire reach plugins here instead of being dropped. `corvus-plugin`
+# carries the shared host wiring; `arbor-plugin-core` is named directly for
+# `PluginHost`.
+arbor-plugin-core = { path = "../../../platform/plugin/core" }
+# The generic Plugin-Manager RPC surface (enable/disable/reload/scheduler/
+# dispatch/introspection), added to the dispatch builder as the `PluginRpc`
+# bundle and run against the local `CorvusRpcCtx` adapter (`plugin_rpc.rs`).
+arbor-plugin-rpc  = { path = "../../../platform/plugin/rpc" }
+# The Tauri-free job model (`JobSpec`/`JobStatus`): OOP handlers drive jobs in the
+# shell's single-source `JobRegistry` over the reverse channel (`be/src/jobs.rs`).
+arbor-feedback    = { path = "../../../platform/feedback" }
+corvus-plugin     = { path = "../plugin" }
+# The git `ns_shell` namespaces (`arbor.notes`, `arbor.repo`, …) ported to run on
+# any host: corvus-be implements its `NsHost` trait (`CorvusNsHost`) and hands the
+# installers to `corvus_be_api_installer`, so plugins/hooks running OOP can call them.
+corvus-plugin-ns  = { path = "../plugin-ns" }
+corvus-core       = { path = "../core" }
+corvus-git        = { path = "../git" }
+# System-git detection + PortableGit download: corvus-be self-detects its own git
+# (no longer fed the resolved program by the shell). `arbor-core` for the
+# profile-aware config-path resolver the detection reads.
+corvus-git-cli    = { path = "../git-cli" }
+arbor-core        = { path = "../../../foundation/core" }
+corvus-issues     = { path = "../issues" }
+# Pure provider-descriptor types (the FE-facing `AuthStatus` / `ProviderUserInfo`
+# / `ProviderDescriptor`) the relocated issue-provider connect handlers return.
+# Already in the tree transitively via `corvus-issues`; named directly here.
+corvus-provider-descriptor = { path = "../provider-descriptor" }
+# The keyring-free git-provider impls (REST domains served OOP): the registry +
+# trait live in `-api`, the GitHub/GitLab impls inject a reverse-channel
+# `SessionProvider` exactly like `corvus-issues` injects its tracker session.
+corvus-git-provider-api    = { path = "../git-provider/api" }
+corvus-git-provider-github = { path = "../git-provider/github" }
+corvus-git-provider-gitlab = { path = "../git-provider/gitlab" }
+# `NoWindowExt::no_window()` for the `arbor.terminal.exec` DIRECT namespace —
+# suppresses the console-window popup on Windows when spawning a child process.
+# Same relative-path shape sibling crates (corvus-git/corvus-git-cli) use.
+arbor-process-ext = { path = "../../../platform/process-ext" }
+git2          = { version = "0.20", features = ["vendored-libgit2"] }
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+# `~` home-dir expansion for the `commit.template` path in the stage domain's
+# `get_git_commit_template` (already a workspace dependency, used by `src-tauri`).
+dirs          = { workspace = true }
+# Custom ticket-ID pattern compilation/validation in the `tickets` domain. Same
+# workspace pin `corvus-git` uses, so the `regex::Regex` handed to
+# `corvus_git::tickets::parse_text` is the matching type.
+regex         = { workspace = true }
+# Mints link / alias-group ids (v4) in the worktree-link registry. Same workspace
+# pin `corvus-git` uses.
+uuid          = { workspace = true }
+# Decodes the base64 image data-URL when a repo-browser download writes an image
+# back to disk (already a workspace dependency via `corvus-git`).
+base64        = { workspace = true }
+# Reads the per-repo `.arbor/config.toml` Git Flow override directly from the
+# workdir corvus-be already opens. Not a workspace dep — the same `0.8` pin used
+# by `corvus-git` and `src-tauri`.
+toml          = "0.8"
+# Drives the async issue-tracker handlers: each backend request runs on its own
+# serve-loop worker thread, so a multi-thread runtime is required (concurrent
+# `block_on` from many threads). `enable_all` gives reqwest its IO driver.
+tokio         = { workspace = true }

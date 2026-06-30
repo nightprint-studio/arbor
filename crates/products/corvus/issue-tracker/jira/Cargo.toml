@@ -1,0 +1,22 @@
+[package]
+name         = "corvus-issue-tracker-jira"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Jira Cloud / Server / Data Center implementation of the Corvus `IssueTracker` trait — keyring-free (credentials via an injected `arbor_ipc::SessionProvider`)."
+
+[dependencies]
+corvus-issue-tracker-api = { path = "../api" }
+# Credentials (base URL + auth header + web base) arrive injected — no keyring.
+arbor-ipc    = { path = "../../../../foundation/ipc" }
+arbor-core   = { path = "../../../../foundation/core" }
+async-trait  = { workspace = true }
+serde_json   = { workspace = true }
+reqwest      = { workspace = true }
+tokio        = { workspace = true }
+futures-util = { workspace = true }
+tracing      = { workspace = true }
+# Sanitize Jira's pre-rendered `renderedFields` HTML.
+ammonia      = "4"

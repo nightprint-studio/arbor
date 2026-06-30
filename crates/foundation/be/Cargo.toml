@@ -10,11 +10,11 @@ description  = "Model-D backend runtime scaffold: `BackendIo` (the framed-stdio 
 [dependencies]
 arbor-ipc         = { path = "../ipc" }
 arbor-rpc         = { path = "../rpc" }
-arbor-plugin-core = { path = "../../plugin/core" }
+arbor-plugin-core = { path = "../../platform/plugin/core" }
 # `HookDispatcher` — the type the product's catalog builder returns and the state
 # holds. Named in `App::plugin_host`'s signature; the builder fn is product-supplied.
-arbor-plugin-api  = { path = "../../plugin/api" }
-arbor-scheduler   = { path = "../../scheduler" }
-arbor-core        = { path = "../../core" }
+arbor-plugin-api  = { path = "../../platform/plugin/api" }
+arbor-scheduler   = { path = "../../platform/scheduler" }
+arbor-core        = { path = "../core" }
 tokio      = { workspace = true }
 serde_json = { workspace = true }

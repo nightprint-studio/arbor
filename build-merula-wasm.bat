@@ -17,7 +17,7 @@ rem  (tree-sitter generate) and then rebuilds the wasm.
 rem ===========================================================================
 
 set "ROOT=%~dp0"
-set "CRATE=%ROOT%crates\merula\merula-lang"
+set "CRATE=%ROOT%crates\products\merula\merula-lang"
 set "DEST=%ROOT%static\merula"
 set "CORE=%ROOT%node_modules\web-tree-sitter\tree-sitter.wasm"
 set "CORE_MAP=%ROOT%node_modules\web-tree-sitter\tree-sitter.wasm.map"
@@ -81,8 +81,8 @@ goto :end
 echo.
 echo ERROR: tree-sitter generate failed (exit %RC%).
 echo   - Is the tree-sitter CLI on PATH?         tree-sitter --version
-echo   - Does crates\merula\merula-lang\grammar.js parse?
-echo   - Does crates\merula\merula-lang\tree-sitter.json exist?
+echo   - Does crates\products\merula\merula-lang\grammar.js parse?
+echo   - Does crates\products\merula\merula-lang\tree-sitter.json exist?
 goto :end
 
 :build_failed
@@ -90,7 +90,7 @@ echo.
 echo ERROR: grammar wasm build failed (exit %RC%).
 echo   - Is the tree-sitter CLI on PATH?         tree-sitter --version
 echo   - Is Emscripten (emcc) on PATH OR is Docker Desktop running?
-echo   - Does crates\merula\merula-lang\tree-sitter.json exist?
+echo   - Does crates\products\merula\merula-lang\tree-sitter.json exist?
 goto :end
 
 :no_core
