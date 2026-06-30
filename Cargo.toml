@@ -50,6 +50,8 @@ members = [
     "crates/merula/merula",
     "crates/merula/core",
     "crates/merula/be",
+    "crates/sitta/core",
+    "crates/sitta/be",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────
@@ -78,6 +80,13 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # are synchronous Lua work, so this never blocks a worker).
 futures-executor = { version = "0.3", default-features = false, features = ["std"] }
 async-trait  = "0.1"
+
+# Plugin runtime (Lua). ONE pin shared by every plugin-host crate (arbor-plugin-
+# core, corvus-plugin, corvus-plugin-ns, the product BEs sitta/corvus, the shell)
+# so Cargo builds a SINGLE mlua artifact — the installers' `&Lua` must be the very
+# same type the host's `register_lua_api` builds. lua54 + vendored (no system Lua);
+# `serialize` = serde<->Lua; `send` because plugin code may run on async tasks.
+mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send"] }
 
 # HTTP / auth / crypto
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "stream"] }

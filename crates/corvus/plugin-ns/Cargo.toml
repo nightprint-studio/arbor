@@ -17,7 +17,6 @@ arbor-plugin-types = { path = "../../plugin/types" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 
-# Same pin/features as arbor-plugin-core / corvus-plugin so Cargo unifies the
-# single mlua artifact — the namespace installers' `&Lua` must be the very same
-# type the host's `register_lua_api` builds.
-mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send"] }
+# Workspace-pinned (see root) so the namespace installers' `&Lua` is the very same
+# type the host's `register_lua_api` builds — one shared mlua artifact.
+mlua = { workspace = true }

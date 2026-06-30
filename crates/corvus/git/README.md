@@ -24,6 +24,7 @@ Local-git logic for **Corvus**, extracted Tauri-free so the in-process shell
 | `bisect_sessions` | paused & completed sessions persisted under `<repo>/.arbor/bisect` |
 | `stash` | save / apply / pop / drop / rename / force-apply / abort + stash-file content |
 | `recovery` | snapshot-based safety net for destructive ops (journal under `.git/arbor-recovery`, pin/restore/prune) |
+| `explorer` | File-Explorer git awareness (overlay badges + branch info + light inline actions: status/changes/branches/remote-url/stage/unstage/discard/ignore/checkout) on arbitrary paths. Pure git2; `discard` takes an injected `(GitCli, SnapshotPolicy)` for an optional recovery snapshot. Consumed by `sitta-be`. |
 | `reset` | `git reset --soft/mixed/hard` via CLI + lightweight/annotated tag create/delete |
 | `encoding` | re-export of `arbor_fs::prelude::encoding` (CP1252 ↔ UTF-8 ↔ UTF-16, BOM round-trip) — the canonical impl lives in the foundation crate |
 

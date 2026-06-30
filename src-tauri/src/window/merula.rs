@@ -78,15 +78,17 @@ fn build_merula_window(app: &AppHandle) {
 /// it runs on the async runtime (a background thread), so the
 /// `run_on_main_thread` hop in `open_or_focus` behaves correctly.
 #[tauri::command]
-#[allow(clippy::unused_async)] // async is load-bearing: it moves the handler off
-// the main thread (see doc comment) — there's nothing to await.
 pub async fn open_merula_window(app: AppHandle) {
     // Bring up the audio backend before the window's shell loads and fires its
-    // first BE-required `rpc`. We're on the async runtime here (off the main
-    // thread), so the spawn's blocking `Hello` read is safe; the window-creation
-    // hop to the main thread happens after, giving the backend a head start while
-    // the webview boots. Idempotent — a no-op when Merula is re-summoned and the
-    // backend is already up. Identical to `corvus::open_corvus_window`.
-    crate::ipc::ensure_merula_be(&app);
+    // first BE-required `rpc`. Run `ensure_merula_be` on the BLOCKING POOL, never
+    // on a runtime worker: it parks on synchronous framed-IPC (`rx.recv()`) and
+    // can trigger reverse-channel host round-trips that need free runtime workers
+    // (`block_on`). Blocking a worker here starves that path → blank-window
+    // deadlock that also freezes the launcher. `spawn_blocking` keeps the workers
+    // free while we await the backend coming up. Idempotent — a no-op when Merula
+    // is re-summoned and the backend is already up. Same shape as
+    // `corvus::open_corvus_window`.
+    let app_be = app.clone();
+    let _ = tokio::task::spawn_blocking(move || crate::ipc::ensure_merula_be(&app_be)).await;
     open_or_focus(&app);
 }

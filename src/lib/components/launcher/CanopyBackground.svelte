@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * The Canopy's backdrop — a fixed starry night ("stellata"), no
+   * The Canopy's backdrop — a fixed starry night, no
    * `backdrop-filter` (WebView2 compositor). `starShadow` is the precomputed
    * `box-shadow` starfield; `arbTwinkle` keyframes live globally in
    * `LauncherShell`.

@@ -6,6 +6,12 @@
 pub use crate::cli::GitCli;
 pub use crate::error::GitError;
 
+// File-Explorer git-awareness TYPES re-exported flat (unique names). The module's
+// FUNCTIONS have generic names (`status` / `changes` / `stage` / `checkout` / …)
+// that read better qualified, so call sites reach them by module path
+// (`corvus_git::explorer::status`) — same precedent as `list_remote_branches`.
+pub use crate::explorer::{FsBranch, FsGitStatus, GitBadge, GitChange, GitChanges, RepoMarker};
+
 pub use crate::bisect::{
     bisect_mark, bisect_reset, bisect_start, bisect_undo_last_mark, get_bisect_state, BisectMark,
     BisectState,

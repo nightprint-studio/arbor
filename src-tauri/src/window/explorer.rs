@@ -77,7 +77,19 @@ pub fn current_explorer_shortcut() -> Option<Shortcut> {
 /// IPC command) run on **background** threads, but WebView2 window creation must
 /// happen on the **main/UI** thread — see [`super::dispatch_to_main`].
 pub fn open_or_focus(app: &AppHandle) {
+    ensure_backend(app);
     super::dispatch_to_main(app, "explorer", create_or_focus);
+}
+
+/// Bring up `sitta-be` (the file-explorer backend) off the main thread, so the
+/// spawn's blocking first-`Hello` read never stalls the UI thread. Idempotent — a
+/// no-op once the backend is attached. Called from every explorer entry point
+/// (command, global shortcut, tray, reveal) so the backend is coming up while the
+/// window boots. Nothing routes to `sitta` yet (Onda 1), so a missing/slow backend
+/// is harmless; the window opens regardless.
+fn ensure_backend(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || crate::ipc::ensure_sitta_be(&app));
 }
 
 /// Main-thread body of [`open_or_focus`]. Never call directly from a command or
@@ -132,6 +144,7 @@ fn build_explorer_window(app: &AppHandle, label: &str) {
 /// existing window when one-window mode is on. Mirrors [`open_or_focus`]'s
 /// thread hop (WebView2 window ops must run on the main thread).
 fn open_or_focus_reveal(app: &AppHandle, payload: RevealPayload) {
+    ensure_backend(app);
     super::dispatch_to_main(app, "explorer reveal", move |a| create_or_focus_reveal(a, payload));
 }
 

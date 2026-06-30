@@ -12,6 +12,7 @@
    * minimal local bootstrap below.
    */
   import { onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
@@ -26,7 +27,16 @@
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
+    // This is the only window that owns the sitta-be config — opt in before loading
+    // so the launcher window never reads/writes the (legitimately down) sitta backend.
+    explorerStore.enableSitta();
     void explorerStore.loadConfig();
+
+    // `sitta-be` spawns off-thread, racing this window's first `loadConfig()`:
+    // if it attaches after we already read, the 14 sitta-owned settings stayed on
+    // defaults. Re-read once the backend signals it's routable so they take.
+    const unlisten = listen('arbor://sitta-be-up', () => { void explorerStore.loadConfig(); });
+    return () => { void unlisten.then((off) => off()); };
   });
 </script>
 
@@ -45,9 +55,16 @@
 </div>
 
 <style>
+  /* Viewport-anchored flex root. `100vh` (not `height: 100%`): the page mounts
+     through app.html's `display: contents` wrapper, and a percentage height
+     resolving across a `display:contents` ancestor is unreliable on WebView2 —
+     it left the descendants collapsed. `100vh` measures the viewport directly,
+     and everything below fills with `flex: 1` (no percentage-height chain, no
+     `position: fixed`). */
   .explorer-window {
-    position: fixed;
-    inset: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
     background: var(--bg-elevated);
     overflow: hidden;
   }

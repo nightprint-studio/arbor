@@ -152,7 +152,7 @@
                     fill="#08101a" style="font-family:var(--canopy-display)">↑</text>
             {/if}
             {#if n.isRun}
-              <!-- "in esecuzione" LED badge (top-right): glow halo · dark ring · lit core -->
+              <!-- "running" LED badge (top-right): glow halo · dark ring · lit core -->
               <circle cx={n.x + n.r * 0.72} cy={n.y - n.r * 0.72} r="8.5" fill={hexA(RUN, 0.32)} />
               <circle cx={n.x + n.r * 0.72} cy={n.y - n.r * 0.72} r="6" fill="#0b1410" />
               <circle cx={n.x + n.r * 0.72} cy={n.y - n.r * 0.72} r="4" fill={RUN}

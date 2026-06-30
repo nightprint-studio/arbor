@@ -62,6 +62,9 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                     .webview_windows()
                     .keys()
                     .any(|l| l.as_str() != label && super::product_id_for_label(l) == Some(id));
+                tracing::info!(
+                    "window Destroyed: label={label} product={id} still_running={still_running}"
+                );
                 if !still_running {
                     super::emit_product_state(app, id, false);
                     // Tear down the product's headless backend along with its last
@@ -73,8 +76,21 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                     // the stdio pipe and reaps the child. The child's own
                     // disconnect callback re-emits `…-down` to a now-gone window
                     // (harmless); the next open re-spawns a fresh backend.
-                    if id == "corvus" || id == "merula" {
-                        crate::ipc::split_broker::detach(id);
+                    //
+                    // Every product with a lazy OOP backend tears down here so the
+                    // headless child never lingers windowless (corvus/merula/sitta).
+                    // Sitta included: without it the explorer's `sitta-be` would
+                    // survive its last window and a re-open would silently reuse the
+                    // stale process (no respawn, no `…-up` reload) instead of a fresh
+                    // one — diverging from corvus/merula.
+                    //
+                    // Safe to call inline on the UI thread: `detach` removes the
+                    // routing entry under a brief lock and offloads the blocking
+                    // child `kill()`+`wait()` to its own thread (it used to run that
+                    // teardown under the routing lock on this very thread, freezing
+                    // the launcher and every other product's IPC mid-close).
+                    if matches!(id, "corvus" | "merula" | "sitta") {
+                        crate::ipc::split_broker::detach(id, "window-closed");
                     }
                 }
             }

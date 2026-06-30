@@ -55,9 +55,9 @@
   const card = $derived(tools.find(t => t.id === sel) ?? tools[0]);
 
   const chips = $derived.by(() => [
-    { key: 'all' as FilterKey, label: 'Tutti', count: tools.length, color: GREEN, active: filter === 'all' },
-    { key: 'running' as FilterKey, label: 'In esecuzione', count: tools.filter(t => t.isRun).length, color: RUN, active: filter === 'running' },
-    { key: 'update' as FilterKey, label: 'Da aggiornare', count: tools.filter(t => t.isUpd).length, color: '#e8a857', active: filter === 'update' },
+    { key: 'all' as FilterKey, label: 'All', count: tools.length, color: GREEN, active: filter === 'all' },
+    { key: 'running' as FilterKey, label: 'Running', count: tools.filter(t => t.isRun).length, color: RUN, active: filter === 'running' },
+    { key: 'update' as FilterKey, label: 'Updates', count: tools.filter(t => t.isUpd).length, color: '#e8a857', active: filter === 'update' },
   ]);
 
   // ── Version + running-state wiring ───────────────────────────────────────────
@@ -93,18 +93,18 @@
     const opener = PRODUCT_WINDOW_OPENERS[t.id];
     if (opener) {
       void opener();
-      fire((t.isRun ? 'Apertura di ' : 'Avvio di ') + t.name + '…', t.accent);
+      fire((t.isRun ? 'Opening ' : 'Launching ') + t.name + '…', t.accent);
     }
   }
   async function doUpdate(t: DecoratedTool) {
     // No update channel yet — re-check latest and report. Wired so that when a
     // release feed exists, a newer version here flips the node to "update".
     latest = await fetchLatestVersions(ids);
-    fire('Nessun aggiornamento per ' + t.name, '#9aa3b2');
+    fire('No updates for ' + t.name, '#9aa3b2');
   }
   function doStop(t: { id: string; name: string }) {
     void closeProductWindow(t.id);
-    fire(t.name + ' arrestato', '#9aa3b2');
+    fire(t.name + ' stopped', '#9aa3b2');
   }
   // Single version per product today; selecting it is a no-op until a real
   // version-switch lands.
@@ -121,12 +121,12 @@
       // like the checkbox "refreshing" itself off). Most likely the backend
       // command isn't in the running binary yet (needs a recompile).
       closeToTray = { ...closeToTray, [id]: !next };
-      fire('Impostazione non salvata: ' + e, '#f0908c');
+      fire('Setting not saved: ' + e, '#f0908c');
       console.error('set_launcher_close_to_tray failed', e);
     }
   }
   const settingsMenu = $derived<DropdownItem[]>([
-    { kind: 'separator', label: 'Chiusura riduce a icona' },
+    { kind: 'separator', label: 'Close minimizes to tray' },
     ...tools.map(t => ({
       kind: 'item' as const, id: `tray:${t.id}`, label: t.name,
       active: closeToTray[t.id] ?? false,
@@ -179,7 +179,7 @@
         <div class="gear-dd">
           <Dropdown items={settingsMenu} selectionMode="multiple" position="fixed" direction="down" width="270px">
             {#snippet trigger({ toggle })}
-              <Button variant="icon" title="Impostazioni" ariaLabel="Impostazioni" onclick={toggle}>
+              <Button variant="icon" title="Settings" ariaLabel="Settings" onclick={toggle}>
                 <SettingsIcon size={16} />
               </Button>
             {/snippet}

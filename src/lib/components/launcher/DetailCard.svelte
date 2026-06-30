@@ -23,7 +23,7 @@
 
   const A = $derived(tool.accent);
   // Map the Canopy action kind → shared Button variant + colour.
-  // primary (Avvia) / run (Apri) → soft tonal; update (Aggiorna) → solid accent.
+  // primary (Launch) / run (Open) → soft tonal; update (Update) → solid accent.
   const actionVariant = $derived(tool.kind === 'update' ? 'primary' : 'tonal');
   const actionColor = $derived(tool.kind === 'run' ? RUN : A);
   const tileStyle = $derived(

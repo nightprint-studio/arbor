@@ -107,7 +107,7 @@ tauri-plugin-global-shortcut  = "2"
 similar = { version = "2",    features = ["text", "unicode", "bytes", "inline"] }
 
 # --- Plugin system ---
-mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send"] }
+mlua = { workspace = true }
 
 # --- Async ---
 tokio        = { workspace = true }

@@ -33,9 +33,13 @@ pub fn open_or_focus(app: &AppHandle) {
 /// shortcut handler — go through `open_or_focus` so the thread hop happens.
 fn create_or_focus(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(CORVUS_WINDOW_LABEL) {
+        tracing::info!("corvus create_or_focus: existing window found — show_and_focus");
         show_and_focus(&w);
+        tracing::info!("corvus create_or_focus: show_and_focus returned");
     } else {
+        tracing::info!("corvus create_or_focus: no window — building a fresh one");
         build_corvus_window(app);
+        tracing::info!("corvus create_or_focus: build returned");
     }
     // Light up the launcher's Corvus node as "In esecuzione".
     super::emit_product_state(app, "corvus", true);
@@ -49,6 +53,7 @@ fn create_or_focus(app: &AppHandle) {
 /// paints its own titlebar + window controls. Opens maximised: a full IDE-style
 /// Git workspace wants the screen.
 fn build_corvus_window(app: &AppHandle) {
+    tracing::info!("build_corvus_window: calling WebviewWindowBuilder::build() (UI thread)");
     let res = WebviewWindowBuilder::new(app, CORVUS_WINDOW_LABEL, WebviewUrl::default())
         .title("Corvus — Arbor")
         .inner_size(1320.0, 860.0)
@@ -62,8 +67,9 @@ fn build_corvus_window(app: &AppHandle) {
         .additional_browser_args(WEBVIEW_BROWSER_ARGS)
         .build();
 
-    if let Err(e) = res {
-        tracing::error!("failed to open corvus window: {e}");
+    match res {
+        Ok(_) => tracing::info!("build_corvus_window: build() OK"),
+        Err(e) => tracing::error!("failed to open corvus window: {e}"),
     }
 }
 
@@ -78,15 +84,25 @@ fn build_corvus_window(app: &AppHandle) {
 /// `run_on_main_thread` hop in `open_or_focus` behaves correctly. Same reasoning
 /// as [`super::merula::open_merula_window`].
 #[tauri::command]
-#[allow(clippy::unused_async)] // async is load-bearing: it moves the handler off
-// the main thread (see doc comment) — there's nothing to await.
 pub async fn open_corvus_window(app: AppHandle) {
     // Bring up the Git backend before the window's AppShell loads and fires its
-    // first BE-required `rpc` (e.g. `list_workspaces`). We're on the async
-    // runtime here (off the main thread), so the spawn's blocking `Hello` read
-    // is safe; the window-creation hop to the main thread happens after, giving
-    // the backend a head start while the webview boots. Idempotent — a no-op when
-    // Corvus is re-summoned and the backend is already up.
-    crate::ipc::ensure_corvus_be(&app);
+    // first BE-required `rpc` (e.g. `list_workspaces`).
+    //
+    // CRITICAL: run `ensure_corvus_be` on the BLOCKING POOL, never on a runtime
+    // worker. It does synchronous framed-IPC (`ChildClient::call` parks on a
+    // std `rx.recv()`), and corvus-be can fire a reverse-channel credential
+    // request during startup (`__session`/`__maybe_refresh`/`__git_credentials`)
+    // that the shell answers with `block_on` over OAuth/keyring — which needs
+    // FREE runtime workers. Blocking a worker here (the old inline call did)
+    // starves that path: the credential round-trip can't progress, corvus-be
+    // never replies, `rx.recv()` never returns, and because the launcher's own
+    // IPC shares those workers, every window goes blank — a deadlock that also
+    // freezes the launcher. `spawn_blocking` keeps all workers free while we
+    // await the backend coming up. Idempotent — a no-op when Corvus is
+    // re-summoned and the backend is already attached.
+    tracing::info!("open_corvus_window: ensuring corvus-be (on blocking pool)");
+    let app_be = app.clone();
+    let _ = tokio::task::spawn_blocking(move || crate::ipc::ensure_corvus_be(&app_be)).await;
+    tracing::info!("open_corvus_window: ensure returned — creating/focusing window");
     open_or_focus(&app);
 }

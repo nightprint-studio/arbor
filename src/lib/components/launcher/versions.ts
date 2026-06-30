@@ -24,7 +24,7 @@ export async function fetchInstalledVersions(ids: string[]): Promise<Record<stri
  * Latest available version per product id. No release feed exists yet, so this
  * equals the installed version (everything up-to-date). When a per-product
  * update channel lands, query it here and return the newer version to light up
- * the "Da aggiornare" state — the rest of the launcher already reacts to it.
+ * the "Updates" state — the rest of the launcher already reacts to it.
  */
 export async function fetchLatestVersions(ids: string[]): Promise<Record<string, string>> {
   return fetchInstalledVersions(ids);

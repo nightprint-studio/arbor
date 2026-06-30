@@ -10,7 +10,7 @@
 import { mkdirSync, copyFileSync, existsSync } from 'node:fs';
 
 const EXE = process.platform === 'win32' ? '.exe' : '';
-const BACKENDS = ['corvus-be', 'merula-be'];
+const BACKENDS = ['corvus-be', 'merula-be', 'sitta-be'];
 const destDir = 'src-tauri/backends';
 
 mkdirSync(destDir, { recursive: true });

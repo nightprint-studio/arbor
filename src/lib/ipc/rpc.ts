@@ -14,7 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
  * to a nested JSON payload).
  */
 /** The backend product labels the router dispatches to. */
-export type Program = 'corvus' | 'platform' | 'studio' | 'merula';
+export type Program = 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta';
 
 export function rpc<R>(program: Program, method: string, params: Record<string, unknown> = {}): Promise<R> {
   return invoke<R>('rpc', { program, method, params });
@@ -40,3 +40,10 @@ export const studio = <R>(method: string, params: Record<string, unknown> = {}):
  *  `listen`, scoped to the merula window — they don't go through this helper. */
 export const merula = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('merula', method, params);
+
+/** Bound helper for the Sitta (file explorer) backend — served out-of-process by
+ *  `sitta-be`, spawned lazily when an explorer window opens. Today it serves the
+ *  explorer's git awareness (`fs_git_*`); the rest of the explorer's FS still goes
+ *  through `platform`. Routes to a down overlay when `sitta-be` isn't running. */
+export const sitta = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
+  rpc<R>('sitta', method, params);

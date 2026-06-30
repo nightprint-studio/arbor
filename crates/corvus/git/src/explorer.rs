@@ -1,24 +1,21 @@
-//! `fs_git` domain — git awareness for the built-in File Explorer, served
-//! **out-of-process** by corvus-be.
+//! `explorer` — git awareness for the built-in File Explorer (overlay badges,
+//! branch info, light inline actions), as **pure local git2 logic**.
 //!
-//! Ported byte-faithfully from the shell's in-process copy
-//! (`crate::ipc::corvus::fs_git`). The handler bodies are pure LOCAL git2
-//! operations (no network, no live `RepoManager`): the explorer browses
-//! arbitrary filesystem paths, not tab-bound repos, so none of these touch the
-//! repo registry on [`CorvusState`]. The macro requires a context first arg, so
-//! every handler takes `_state: &CorvusState` and ignores it — except `discard`,
-//! which uses `state` for the recovery-snapshot policy.
+//! Extracted from the shell/`corvus-be` `fs_git` handlers so the file-explorer
+//! product (`sitta-be`) and any other consumer run the exact same code without
+//! duplicating it. Every function takes plain paths — the explorer browses
+//! arbitrary on-disk paths, NOT tab-bound repos, so nothing here touches a repo
+//! registry or any product state. Operations are LOCAL git2 only (no network).
 //!
-//! The status query (`fs_git_status`) and the inline mutating actions
-//! (`stage`/`unstage`/`discard`/`ignore`/`checkout`) share a process-global
-//! per-repo status cache (the `OnceLock` below): the actions
-//! [`invalidate_cache`] after mutating so the next status recomputes. The cache
-//! is a module static here too (NOT on `CorvusState`).
+//! The status query ([`status`]) and the inline mutating actions
+//! ([`stage`]/[`unstage`]/[`discard`]/[`ignore`]/[`checkout`]) share a
+//! process-global per-repo status cache (the [`cache`] `OnceLock`): the actions
+//! invalidate it after mutating so the next [`status`] recomputes.
 //!
-//! NOT migrated (stays shell-side): `fs_open_in_arbor` — it needs an
-//! `AppHandle` to focus the main window and emit `arbor://explorer-open-repo`.
-//!
-//! No hooks fire in this domain.
+//! [`discard`] optionally takes a `(GitCli, SnapshotPolicy)` so the caller can opt
+//! into a recovery snapshot (the safety net behind Arbor's Recovery tab) before
+//! the working-tree changes are thrown away — the policy/git invoker are injected
+//! because they are product config, not an explorer concern.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -27,10 +24,11 @@ use std::sync::{Mutex, OnceLock};
 use git2::{build::CheckoutBuilder, BranchType, IndexAddOption, Repository, Status, StatusOptions};
 use serde::Serialize;
 
-use corvus_core::prelude::CorvusState;
+use crate::cli::GitCli;
+use crate::recovery::{RecoveryKind, SnapshotPolicy};
 
 // ---------------------------------------------------------------------------
-// Shared status badge + branch info (pure; mirrors `fs_git_commands`)
+// Shared status badge + branch info (pure)
 // ---------------------------------------------------------------------------
 
 /// A single overlay badge for a file or (rolled-up) folder.
@@ -142,14 +140,15 @@ fn worktree_badge(s: Status) -> Option<GitBadge> {
     }
 }
 
-#[arbor_rpc::handler]
-fn fs_git_changes(_state: &CorvusState, dir: String) -> Result<GitChanges, String> {
-    let repo = match Repository::discover(&dir) {
+/// Full staged/unstaged change list for the repo enclosing `dir`. Returns an
+/// empty list (not an error) when `dir` isn't inside a repo or the repo is bare.
+pub fn changes(dir: &str) -> GitChanges {
+    let repo = match Repository::discover(dir) {
         Ok(r) => r,
-        Err(_) => return Ok(GitChanges::default()),
+        Err(_) => return GitChanges::default(),
     };
     let Some(wd) = repo.workdir().map(|p| p.to_path_buf()) else {
-        return Ok(GitChanges::default());
+        return GitChanges::default();
     };
 
     let mut opts = StatusOptions::new();
@@ -183,7 +182,7 @@ fn fs_git_changes(_state: &CorvusState, dir: String) -> Result<GitChanges, Strin
     unstaged.sort_by(|a, b| a.rel.cmp(&b.rel));
 
     let (branch, ..) = branch_info(&repo);
-    Ok(GitChanges {
+    GitChanges {
         repo_root: Some(
             wd.to_string_lossy()
                 .trim_end_matches(['/', '\\'])
@@ -192,7 +191,7 @@ fn fs_git_changes(_state: &CorvusState, dir: String) -> Result<GitChanges, Strin
         branch,
         staged,
         unstaged,
-    })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -207,9 +206,8 @@ pub struct FsBranch {
 }
 
 /// Local branches of the repo enclosing `path`, sorted case-insensitively.
-#[arbor_rpc::handler]
-fn fs_git_branches(_state: &CorvusState, path: String) -> Result<Vec<FsBranch>, String> {
-    let repo = Repository::discover(&path)
+pub fn branches(path: &str) -> Result<Vec<FsBranch>, String> {
+    let repo = Repository::discover(path)
         .map_err(|_| "not inside a git repository".to_string())?;
     let mut out = Vec::new();
     for b in repo.branches(Some(BranchType::Local)).map_err(|e| format!("Git error: {e}"))? {
@@ -233,9 +231,8 @@ fn fs_git_branches(_state: &CorvusState, path: String) -> Result<Vec<FsBranch>, 
 /// repo or the repo has no remote — the FE then toasts instead of copying a
 /// non-shareable link. `Repository::discover` walks up from any subpath, so the
 /// caller can pass the right-clicked entry directly.
-#[arbor_rpc::handler]
-fn fs_git_remote_url(_state: &CorvusState, path: String) -> Result<Option<String>, String> {
-    let Ok(repo) = Repository::discover(&path) else { return Ok(None) };
+pub fn remote_url(path: &str) -> Result<Option<String>, String> {
+    let Ok(repo) = Repository::discover(path) else { return Ok(None) };
     let remotes = repo.remotes().map_err(|e| format!("Git error: {e}"))?;
     let pick = remotes.iter().flatten().find(|n| *n == "origin")
         .or_else(|| remotes.iter().flatten().next());
@@ -434,14 +431,14 @@ fn not_in_repo(repos: HashMap<String, RepoMarker>) -> FsGitStatus {
     }
 }
 
-#[arbor_rpc::handler]
-fn fs_git_status(_state: &CorvusState, dir: String, refresh: Option<bool>) -> Result<FsGitStatus, String> {
-    let refresh = refresh.unwrap_or(false);
+/// Overlay-badge status for `dir`'s entries (+ child-repo markers). Cached per
+/// repo-root; pass `refresh = true` (off the fs watcher) to recompute.
+pub fn status(dir: &str, refresh: bool) -> Result<FsGitStatus, String> {
     // Always flag child repos, even when `dir` itself isn't in a repo — that
     // is exactly the "folder of projects" case the markers exist for.
-    let repos = scan_child_repos(&dir);
+    let repos = scan_child_repos(dir);
 
-    let repo = match Repository::discover(&dir) {
+    let repo = match Repository::discover(dir) {
         Ok(r) => r,
         Err(_) => return Ok(not_in_repo(repos)),
     };
@@ -459,7 +456,7 @@ fn fs_git_status(_state: &CorvusState, dir: String, refresh: Option<bool>) -> Re
         guard.insert(root_key.clone(), compute_repo_status(&repo));
     }
     let c = guard.get(&root_key).expect("just inserted");
-    let dir_key = norm_key(&dir);
+    let dir_key = norm_key(dir);
     Ok(FsGitStatus {
         in_repo: true,
         repo_root: Some(root.to_string_lossy().trim_end_matches(['/', '\\']).to_string()),
@@ -497,7 +494,7 @@ fn open_repo_and_rels(paths: &[String]) -> Result<(Repository, PathBuf, Vec<Stri
 }
 
 /// Bust the cached status for the repo containing `path` (after a mutating
-/// action) so the next `fs_git_status` recomputes even without `refresh`.
+/// action) so the next [`status`] recomputes even without `refresh`.
 fn invalidate_cache(repo: &Repository) {
     if let Some(wd) = repo.workdir() {
         let key = norm_key(&wd.to_string_lossy());
@@ -507,9 +504,9 @@ fn invalidate_cache(repo: &Repository) {
     }
 }
 
-#[arbor_rpc::handler]
-fn fs_git_stage(_state: &CorvusState, paths: Vec<String>) -> Result<(), String> {
-    let (repo, _wd, rels) = open_repo_and_rels(&paths)?;
+/// Stage paths (files / folders / deletions) in their enclosing repo.
+pub fn stage(paths: &[String]) -> Result<(), String> {
+    let (repo, _wd, rels) = open_repo_and_rels(paths)?;
     if rels.is_empty() {
         return Ok(());
     }
@@ -523,9 +520,9 @@ fn fs_git_stage(_state: &CorvusState, paths: Vec<String>) -> Result<(), String> 
     Ok(())
 }
 
-#[arbor_rpc::handler]
-fn fs_git_unstage(_state: &CorvusState, paths: Vec<String>) -> Result<(), String> {
-    let (repo, _wd, rels) = open_repo_and_rels(&paths)?;
+/// Unstage paths (reset to HEAD; pre-initial-commit drops them from the index).
+pub fn unstage(paths: &[String]) -> Result<(), String> {
+    let (repo, _wd, rels) = open_repo_and_rels(paths)?;
     if rels.is_empty() {
         return Ok(());
     }
@@ -548,22 +545,31 @@ fn fs_git_unstage(_state: &CorvusState, paths: Vec<String>) -> Result<(), String
     Ok(())
 }
 
-#[arbor_rpc::handler]
-fn fs_git_discard(state: &CorvusState, paths: Vec<String>) -> Result<(), String> {
-    let (repo, wd, rels) = open_repo_and_rels(&paths)?;
+/// Discard working-tree changes for `paths`. When `snapshot` is `Some`, takes a
+/// recovery snapshot (the Recovery-tab safety net) BEFORE discarding, using the
+/// caller-injected git invoker + retention policy. Untracked entries are removed
+/// from disk; tracked ones are checked out from the index (force).
+pub fn discard(
+    paths: &[String],
+    snapshot: Option<(&GitCli, &SnapshotPolicy)>,
+) -> Result<(), String> {
+    let (repo, wd, rels) = open_repo_and_rels(paths)?;
     if rels.is_empty() {
         return Ok(());
     }
 
     // Safety net: snapshot the workdir so an over-eager discard from the
-    // explorer can be undone from Arbor's Recovery tab.
-    let _ = corvus_git::recovery::snapshot_with_policy(
-        &crate::repo::git(state),
-        &repo,
-        corvus_git::prelude::RecoveryKind::Discard,
-        format!("discard {} item(s) from File Explorer", rels.len()),
-        &crate::repo::snapshot_policy(state),
-    );
+    // explorer can be undone from Arbor's Recovery tab. Best-effort — a failed
+    // snapshot must never block the discard.
+    if let Some((git, policy)) = snapshot {
+        let _ = crate::recovery::snapshot_with_policy(
+            git,
+            &repo,
+            RecoveryKind::Discard,
+            format!("discard {} item(s) from File Explorer", rels.len()),
+            policy,
+        );
+    }
 
     let mut checkout = CheckoutBuilder::new();
     let mut any_tracked = false;
@@ -590,9 +596,10 @@ fn fs_git_discard(state: &CorvusState, paths: Vec<String>) -> Result<(), String>
     Ok(())
 }
 
-#[arbor_rpc::handler]
-fn fs_git_ignore(_state: &CorvusState, paths: Vec<String>) -> Result<(), String> {
-    let (repo, wd, rels) = open_repo_and_rels(&paths)?;
+/// Append `paths` to the repo's `.gitignore` (anchored to the repo root; folders
+/// get a trailing slash so the pattern only matches directories).
+pub fn ignore(paths: &[String]) -> Result<(), String> {
+    let (repo, wd, rels) = open_repo_and_rels(paths)?;
     if rels.is_empty() {
         return Ok(());
     }
@@ -635,12 +642,11 @@ fn fs_git_ignore(_state: &CorvusState, paths: Vec<String>) -> Result<(), String>
 /// Switch the repo enclosing `path` to `branch` (a local branch name). Uses a
 /// SAFE checkout — refuses to overwrite uncommitted changes rather than
 /// clobbering them, surfacing a clear error the explorer turns into a toast.
-#[arbor_rpc::handler]
-fn fs_git_checkout(_state: &CorvusState, path: String, branch: String) -> Result<(), String> {
-    let repo = Repository::discover(&path)
+pub fn checkout(path: &str, branch: &str) -> Result<(), String> {
+    let repo = Repository::discover(path)
         .map_err(|_| "not inside a git repository".to_string())?;
     let (object, reference) = repo
-        .revparse_ext(&branch)
+        .revparse_ext(branch)
         .map_err(|e| format!("unknown branch '{branch}': {e}"))?;
     repo.checkout_tree(&object, None).map_err(|e| {
         format!("checkout failed — commit or stash your changes first ({e})")

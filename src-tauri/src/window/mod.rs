@@ -117,6 +117,7 @@ pub fn close_product_window(app: AppHandle, id: String) {
         .filter(|l| product_id_for_label(l) == Some(id.as_str()))
         .cloned()
         .collect();
+    tracing::info!("close_product_window({id}): destroying {} window(s): {labels:?}", labels.len());
     for l in labels {
         if let Some(w) = app.get_webview_window(&l) {
             let _ = w.destroy();
@@ -144,7 +145,12 @@ pub fn dispatch_to_main(
     f: impl FnOnce(&AppHandle) + Send + 'static,
 ) {
     let handle = app.clone();
-    if let Err(e) = app.run_on_main_thread(move || f(&handle)) {
+    tracing::info!("dispatch_to_main({what}): posting closure to UI thread");
+    if let Err(e) = app.run_on_main_thread(move || {
+        tracing::info!("dispatch_to_main({what}): now ON the UI thread — running closure");
+        f(&handle);
+        tracing::info!("dispatch_to_main({what}): closure returned on UI thread");
+    }) {
         tracing::error!("failed to dispatch {what} window to main thread: {e}");
     }
 }

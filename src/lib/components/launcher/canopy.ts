@@ -38,9 +38,9 @@ export const CANOPY_H = 600;
 // window (`PRODUCT_WINDOW_OPENERS` in `ipc/app.ts`). Identity only — version and
 // running state are resolved at runtime (see `versions.ts` + `decorate`).
 export const BASE: Product[] = [
-  { id: 'corvus', name: 'Corvus', bird: 'corvo',      role: 'Client Git & CI',          accent: '#7c9cf5' },
-  { id: 'merula', name: 'Merula', bird: 'merlo',      role: 'Sintetizzatore musicale',  accent: '#e8a857' },
-  { id: 'sitta',  name: 'Sitta',  bird: 'rampichino', role: 'Esplora risorse / file',   accent: '#b58cf0' },
+  { id: 'corvus', name: 'Corvus', bird: 'crow',        role: 'Git & CI client',     accent: '#7c9cf5' },
+  { id: 'merula', name: 'Merula', bird: 'blackbird',   role: 'Music synthesizer',   accent: '#e8a857' },
+  { id: 'sitta',  name: 'Sitta',  bird: 'treecreeper', role: 'File explorer',       accent: '#b58cf0' },
 ];
 
 // ── Colour helpers ───────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ function makeRng(seed: number): () => number {
   return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
 }
 
-// ── Starfield (the "stellata" atmosphere) ────────────────────────────────────
+// ── Starfield (the starry-night atmosphere) ──────────────────────────────────
 export interface Star { x: number; y: number; c: string; big: boolean; }
 export function genStars(count: number): Star[] {
   const arr: Star[] = []; let seed = 8123;
@@ -125,14 +125,14 @@ export function decorate(t: Product, rt: ToolRuntime, green = GREEN): DecoratedT
   const status: ToolStatus = rt.running ? 'running' : (hasUpdate ? 'update' : 'installed');
 
   let actionLabel: string, kind: ActionKind;
-  if (status === 'running') { actionLabel = 'Apri'; kind = 'run'; }
-  else if (status === 'update') { actionLabel = 'Aggiorna'; kind = 'update'; }
-  else { actionLabel = 'Avvia'; kind = 'primary'; }
+  if (status === 'running') { actionLabel = 'Open'; kind = 'run'; }
+  else if (status === 'update') { actionLabel = 'Update'; kind = 'update'; }
+  else { actionLabel = 'Launch'; kind = 'primary'; }
 
   const scMap: Record<ToolStatus, [string, string]> = {
-    installed: ['Aggiornato', green],
-    running: ['In esecuzione', RUN],
-    update: ['Aggiornamento ' + rt.latest, A],
+    installed: ['Up to date', green],
+    running: ['Running', RUN],
+    update: ['Update ' + rt.latest, A],
   };
   const sc = scMap[status];
 

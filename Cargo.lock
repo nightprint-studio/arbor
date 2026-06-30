@@ -6659,6 +6659,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
+name = "sitta-be"
+version = "0.3.0"
+dependencies = [
+ "arbor-be",
+ "arbor-core",
+ "arbor-ipc",
+ "arbor-plugin-api",
+ "arbor-plugin-core",
+ "arbor-plugin-types",
+ "arbor-rpc",
+ "corvus-git",
+ "mlua",
+ "serde",
+ "serde_json",
+ "sitta-core",
+ "tokio",
+]
+
+[[package]]
+name = "sitta-core"
+version = "0.3.0"
+dependencies = [
+ "arbor-core",
+ "arbor-ipc",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -33,7 +33,13 @@ pub fn register(app: &tauri::App) {
         // `open_corvus_window`'s safe context (the `Hello` read blocks).
         let h = handle_for_runtime.clone();
         tauri::async_runtime::spawn(async move {
-            crate::ipc::ensure_corvus_be(&h);
+            // Run `ensure_corvus_be` on the BLOCKING POOL, not inline on this
+            // runtime worker: it parks on synchronous framed-IPC and can trigger
+            // the reverse-channel credential round-trip whose `block_on` needs
+            // free runtime workers. Blocking a worker here starves it → blank-
+            // window deadlock (see `window::corvus::open_corvus_window`).
+            let h_be = h.clone();
+            let _ = tokio::task::spawn_blocking(move || crate::ipc::ensure_corvus_be(&h_be)).await;
             crate::window::corvus::open_or_focus(&h);
         });
     });

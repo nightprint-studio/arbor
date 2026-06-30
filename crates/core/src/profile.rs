@@ -34,6 +34,9 @@ pub const PRODUCT_CORVUS: &str = "corvus";
 /// See [`PRODUCT_CORVUS`]. merula moves from a sibling namespace into a product
 /// bucket under each profile.
 pub const PRODUCT_MERULA: &str = "merula";
+/// See [`PRODUCT_CORVUS`]. sitta (the file explorer) owns its own per-profile
+/// bucket for its settings/data, served out-of-process by `sitta-be`.
+pub const PRODUCT_SITTA: &str = "sitta";
 
 /// Process-global selected-profile name. Seeded to [`DEFAULT_PROFILE`] and
 /// overwritten at boot by [`init_active_profile`] (or a launch argument).

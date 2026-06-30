@@ -1,7 +1,11 @@
-import { getExplorerConfig, setExplorerConfig } from '$lib/ipc/config';
-import type { ExplorerConfig, ExplorerView, ExplorerSort, ExplorerStartup, ExplorerSectionConfig, ExplorerColumnConfig, ExplorerSavedSearch } from '$lib/types/config';
+import { getExplorerConfig, setExplorerConfig, getSittaConfig, setSittaConfig } from '$lib/ipc/config';
+import type { ExplorerConfig, SittaConfig, ExplorerView, ExplorerSort, ExplorerStartup, ExplorerSectionConfig, ExplorerColumnConfig, ExplorerSavedSearch } from '$lib/types/config';
 
-const DEFAULT: ExplorerConfig = {
+// The 18 settings split across two backends: the 4 launcher-consumed ones
+// (`ExplorerConfig`, shell config) and the 14 explorer-UX ones (`SittaConfig`,
+// owned by sitta-be). This store keeps a single flat reactive surface; only
+// `loadConfig` + `persist` know about the split.
+const DEFAULT: ExplorerConfig & SittaConfig = {
   git_awareness:         false,
   global_shortcut:       false,
   default_view:          'details',
@@ -136,64 +140,108 @@ function createExplorerStore() {
   let savedSearches       = $state<ExplorerSavedSearch[]>([]);
   let loaded              = $state(false);
 
+  // Window-scoped: the 14 sitta-owned settings live in `sitta-be`, which only
+  // runs once an explorer window opens. The standalone explorer window calls
+  // `enableSitta()` so ONLY it reads/writes the sitta config; the launcher window
+  // (AppShell) never touches it — it has no sitta UI and `sitta-be` is legitimately
+  // down there, so poking it would just spam dropped-rpc warnings. Default off.
+  let sittaEnabled = false;
+
+  /** Opt this store instance into reading/writing the sitta-owned settings.
+   *  Called by `ExplorerWindow` before its first `loadConfig()`. */
+  function enableSitta() { sittaEnabled = true; }
+
   async function loadConfig() {
+    // The launcher config (4 window/OS-integration settings) is always served
+    // in-process — load it in both windows.
     try {
-      const cfg = await getExplorerConfig();
-      gitAwareness        = !!cfg.git_awareness;
-      globalShortcut      = !!cfg.global_shortcut;
-      defaultView         = normView(cfg.default_view);
-      showHidden          = !!cfg.show_hidden;
-      recursiveSearch     = !!cfg.recursive_search;
-      globalShortcutAccel = (cfg.global_shortcut_accel || DEFAULT.global_shortcut_accel).trim();
-      defaultSort         = normSort(cfg.default_sort);
-      sortAscending       = !!cfg.sort_ascending;
-      startup             = normStartup(cfg.startup);
-      alwaysNewWindow     = !!cfg.always_new_window;
-      maxRecents          = clampRecents(cfg.max_recents);
-      sidebarSections     = Array.isArray(cfg.sidebar_sections) ? cfg.sidebar_sections : [];
-      columns             = Array.isArray(cfg.columns) ? cfg.columns : [];
-      pinnedFavourites    = Array.isArray(cfg.pinned_favourites) ? cfg.pinned_favourites.filter((s): s is string => typeof s === 'string') : [];
-      savedSearches       = Array.isArray(cfg.saved_searches) ? cfg.saved_searches : [];
-      openExternalLinks   = !!cfg.open_external_links;
-      openWebLinks        = !!cfg.open_web_links;
-      revealInBuiltin     = !!cfg.reveal_in_builtin;
-      rememberedSchemes   = Array.isArray(cfg.remembered_external_schemes)
-        ? cfg.remembered_external_schemes.filter((s): s is string => typeof s === 'string').map(s => s.toLowerCase())
-        : [];
-      loaded = true;
-    } catch {
-      // First-run / backend not ready — keep defaults; next call retries.
+      const launcher = await getExplorerConfig();
+      globalShortcut      = !!launcher.global_shortcut;
+      globalShortcutAccel = (launcher.global_shortcut_accel || DEFAULT.global_shortcut_accel).trim();
+      alwaysNewWindow     = !!launcher.always_new_window;
+      revealInBuiltin     = !!launcher.reveal_in_builtin;
+    } catch (e) {
+      console.warn('explorer: launcher config load failed', e);
     }
+
+    // The explorer-UX settings route to `sitta-be`. Only the explorer window
+    // reads them; a failure there means the backend is still mid-spawn (the spawn
+    // races this load) — the `arbor://sitta-be-up` event re-runs `loadConfig`.
+    if (sittaEnabled) {
+      try {
+        const sittaCfg = await getSittaConfig();
+        gitAwareness        = !!sittaCfg.git_awareness;
+        defaultView         = normView(sittaCfg.default_view);
+        showHidden          = !!sittaCfg.show_hidden;
+        recursiveSearch     = !!sittaCfg.recursive_search;
+        defaultSort         = normSort(sittaCfg.default_sort);
+        sortAscending       = !!sittaCfg.sort_ascending;
+        startup             = normStartup(sittaCfg.startup);
+        maxRecents          = clampRecents(sittaCfg.max_recents);
+        sidebarSections     = Array.isArray(sittaCfg.sidebar_sections) ? sittaCfg.sidebar_sections : [];
+        columns             = Array.isArray(sittaCfg.columns) ? sittaCfg.columns : [];
+        pinnedFavourites    = Array.isArray(sittaCfg.pinned_favourites) ? sittaCfg.pinned_favourites.filter((s): s is string => typeof s === 'string') : [];
+        savedSearches       = Array.isArray(sittaCfg.saved_searches) ? sittaCfg.saved_searches : [];
+        openExternalLinks   = !!sittaCfg.open_external_links;
+        openWebLinks        = !!sittaCfg.open_web_links;
+        rememberedSchemes   = Array.isArray(sittaCfg.remembered_external_schemes)
+          ? sittaCfg.remembered_external_schemes.filter((s): s is string => typeof s === 'string').map(s => s.toLowerCase())
+          : [];
+      } catch (e) {
+        console.warn('explorer: sitta config load failed (sitta-be not ready yet?)', e);
+      }
+    }
+
+    loaded = true;
   }
 
-  function snapshot(): ExplorerConfig {
+  /** The 4 launcher-consumed settings (shell config). */
+  function launcherSnapshot(): ExplorerConfig {
     return {
-      git_awareness:         gitAwareness,
       global_shortcut:       globalShortcut,
-      default_view:          defaultView,
-      show_hidden:           showHidden,
-      recursive_search:      recursiveSearch,
       global_shortcut_accel: globalShortcutAccel,
-      default_sort:          defaultSort,
-      sort_ascending:        sortAscending,
-      startup,
       always_new_window:     alwaysNewWindow,
-      max_recents:           maxRecents,
-      sidebar_sections:      sidebarSections,
-      columns,
-      pinned_favourites:     pinnedFavourites,
-      saved_searches:        savedSearches,
-      open_external_links:   openExternalLinks,
-      open_web_links:        openWebLinks,
-      remembered_external_schemes: rememberedSchemes,
       reveal_in_builtin:     revealInBuiltin,
     };
   }
 
-  function persist() { void setExplorerConfig(snapshot()).catch(() => {}); }
-  /** Persist and rethrow — used by the global-shortcut path so the caller can
-   *  show a toast and revert when the backend can't register the combo. */
-  function persistThrow() { return setExplorerConfig(snapshot()); }
+  /** The 14 explorer-UX settings (sitta-be config). */
+  function sittaSnapshot(): SittaConfig {
+    return {
+      git_awareness:         gitAwareness,
+      default_view:          defaultView,
+      show_hidden:           showHidden,
+      recursive_search:      recursiveSearch,
+      default_sort:          defaultSort,
+      sort_ascending:        sortAscending,
+      startup,
+      max_recents:           maxRecents,
+      open_external_links:   openExternalLinks,
+      open_web_links:        openWebLinks,
+      remembered_external_schemes: rememberedSchemes,
+      pinned_favourites:     pinnedFavourites,
+      sidebar_sections:      sidebarSections,
+      columns,
+      saved_searches:        savedSearches,
+    };
+  }
+
+  // Persist fire-and-forget. The launcher write (always in-process) also
+  // reconciles the OS shortcut backend-side — a no-op when the shortcut fields are
+  // unchanged. The sitta write happens ONLY in the explorer window (`sittaEnabled`):
+  // the launcher window has no sitta UI, and writing to a down `sitta-be` from there
+  // would just drop. Failures are logged (not silently swallowed) so a genuinely
+  // unreachable backend is visible in the console alongside the shell's warn.
+  function persist() {
+    void setExplorerConfig(launcherSnapshot()).catch((e) => console.warn('explorer: launcher config persist failed', e));
+    if (sittaEnabled) {
+      void setSittaConfig(sittaSnapshot()).catch((e) => console.warn('explorer: sitta config persist failed', e));
+    }
+  }
+  /** Persist the LAUNCHER config and rethrow — used by the global-shortcut path
+   *  so the caller can show a toast and revert when the backend can't register
+   *  the combo (the reconcile runs inside `set_explorer_config`). */
+  function persistThrow() { return setExplorerConfig(launcherSnapshot()); }
 
   function setGitAwareness(on: boolean)    { if (gitAwareness === on) return;    gitAwareness = on;    persist(); }
   function setDefaultView(v: ExplorerView) { const n = normView(v); if (defaultView === n) return; defaultView = n; persist(); }
@@ -308,6 +356,7 @@ function createExplorerStore() {
     get rememberedSchemes()   { return rememberedSchemes; },
     get revealInBuiltin()     { return revealInBuiltin; },
     get loaded()              { return loaded; },
+    enableSitta,
     loadConfig,
     setGitAwareness,
     setDefaultView,

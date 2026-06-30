@@ -122,81 +122,35 @@ pub struct ProductLauncherConfig {
     pub close_to_tray: bool,
 }
 
-/// Built-in File Explorer preferences.
+/// Launcher-side File Explorer integration settings.
 ///
-/// `git_awareness` and `global_shortcut` are "host-level" switches — also
-/// editable from the SettingsPanel. The display defaults (`default_view`,
-/// `show_hidden`, `recursive_search`) used to live in `localStorage`; they are
-/// persisted here so the in-explorer settings page can edit them coherently.
-/// Purely ephemeral per-path state (e.g. the per-folder view-mode memory) stays
-/// in `localStorage`.
+/// Only the four settings the **shell/launcher** consumes live here — the
+/// OS-global shortcut (+ accelerator), whether opening always spawns a new
+/// window, and whether app-wide "Reveal in File Explorer" actions route into the
+/// built-in explorer. The launcher reads these even when `sitta-be` isn't running
+/// (it registers the OS hotkey at boot, decides window create-vs-focus, and routes
+/// reveals app-wide), so they stay here rather than in sitta's own config.
+///
+/// The explorer's content/UX preferences (view/sort/startup, sidebar + column
+/// layout, favourites, saved searches, external-link policy, the git-awareness
+/// switch) moved to `sitta-core`'s `SittaConfig`, owned out-of-process by
+/// `sitta-be` (`get/set_sitta_config`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExplorerConfig {
-    /// Master switch for TortoiseGit-style git awareness in the file explorer
-    /// (status overlays, repo-root markers, the Changes panel, branch switch).
-    /// Off by default — when off the explorer issues no git IPC at all, so a
-    /// plain file browse never pays a per-navigation status walk.
-    #[serde(default)]
-    pub git_awareness: bool,
     /// Register the OS-global `Ctrl+Shift+E` shortcut that opens the dedicated
     /// explorer window. Off by default (opt-in, so Arbor doesn't claim a
     /// system-wide hotkey unprompted); toggling re-registers at runtime.
     #[serde(default)]
     pub global_shortcut: bool,
-    /// Default view mode applied to not-yet-visited folders:
-    /// `details` | `medium` | `large` | `xlarge`.
-    #[serde(default = "default_explorer_view")]
-    pub default_view: String,
-    /// Show dot-prefixed (hidden) entries by default.
-    #[serde(default)]
-    pub show_hidden: bool,
-    /// Default state of recursive (subfolder) search.
-    #[serde(default)]
-    pub recursive_search: bool,
     /// Accelerator string for the global shortcut (Tauri format, e.g.
     /// `"Ctrl+Shift+E"`). Only consulted when `global_shortcut` is true.
     #[serde(default = "default_shortcut_accel")]
     pub global_shortcut_accel: String,
-    /// Default column the listing sorts by: `name` | `modified` | `size`.
-    #[serde(default = "default_explorer_sort")]
-    pub default_sort: String,
-    /// Default sort direction (ascending when true).
-    #[serde(default = "default_true_sort")]
-    pub sort_ascending: bool,
-    /// What a freshly-opened explorer tab shows: `overview` (the dashboard) or
-    /// `last` (re-open the most recent folder, if any).
-    #[serde(default = "default_explorer_startup")]
-    pub startup: String,
     /// When true, opening the explorer (shortcut / Command Palette) always
     /// spawns a NEW window; when false (default) a single window is reused and
     /// re-summoning just focuses it.
     #[serde(default)]
     pub always_new_window: bool,
-    /// Maximum number of recent folders kept in the sidebar (clamped 1–50).
-    #[serde(default = "default_max_recents")]
-    pub max_recents: u32,
-    /// Sidebar section order + visibility. Empty → built-in order, all shown.
-    /// Unknown ids are ignored; sections missing from the list are appended in
-    /// their built-in position and shown.
-    #[serde(default)]
-    pub sidebar_sections: Vec<ExplorerSectionConfig>,
-    /// Allow opening generic external links typed in the explorer address bar
-    /// (custom schemes like `vscode://`, `mailto:`, `slack://`) via the OS
-    /// default handler. Off by default — each open still prompts unless the
-    /// scheme was remembered. `arbor://` deep links are handled separately.
-    #[serde(default)]
-    pub open_external_links: bool,
-    /// Additionally allow plain web links (`http://`, `https://`) from the
-    /// address bar to open in the default browser. Gated behind
-    /// `open_external_links` AND off by default (web links are the broadest
-    /// surface, so they're opt-in on top of the master switch).
-    #[serde(default)]
-    pub open_web_links: bool,
-    /// Schemes the user chose "remember" for in the external-link confirm
-    /// prompt (lower-cased, e.g. `["vscode", "https"]`). Future links of a
-    /// remembered scheme open without prompting.
-    #[serde(default)]
-    pub remembered_external_schemes: Vec<String>,
     /// Route the app's "Open / Reveal in File Explorer" actions (worktree info,
     /// plugin folders, notification reveals, …) into Arbor's built-in explorer
     /// window instead of the OS file manager. Off by default — when off, those
@@ -204,101 +158,17 @@ pub struct ExplorerConfig {
     /// own "Reveal in File Explorer" item always uses the OS (escape hatch).
     #[serde(default)]
     pub reveal_in_builtin: bool,
-    /// Details-view column order + visibility. Empty → built-in order with the
-    /// default-on set shown. Unknown ids are ignored; columns missing from the
-    /// list are appended in their built-in position with their default state.
-    /// `name` is always shown first regardless of what's stored.
-    #[serde(default)]
-    pub columns: Vec<ExplorerColumnConfig>,
-    /// User-pinned favourite folders shown in the sidebar's Favourites section,
-    /// in addition to the OS standard locations. Absolute paths.
-    #[serde(default)]
-    pub pinned_favourites: Vec<String>,
-    /// Saved searches surfaced as their own sidebar section. Each captures a
-    /// query + filters + (optional) root folder and re-runs on click.
-    #[serde(default)]
-    pub saved_searches: Vec<ExplorerSavedSearch>,
 }
 
-/// One sidebar section's persisted order + visibility. Mirrors
-/// [`ActivityBarItemConfig`] for the explorer's own sidebar.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExplorerSectionConfig {
-    /// Section id: `library` | `recents` | `favourites` | `devices` | `projects`.
-    pub id: String,
-    /// Whether the section is shown.
-    pub visible: bool,
-}
-
-/// One details-view column's persisted order + visibility.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExplorerColumnConfig {
-    /// Column id: `name` | `modified` | `type` | `size` | `created` |
-    /// `extension` | `gitstatus`.
-    pub id: String,
-    /// Whether the column is shown.
-    pub visible: bool,
-}
-
-/// A saved search: a query plus the advanced filters and (optional) root it was
-/// captured with. The frontend owns filter semantics; this is opaque storage.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExplorerSavedSearch {
-    pub id:    String,
-    pub name:  String,
-    #[serde(default)]
-    pub query: String,
-    /// Folder the search runs in. Empty → the current folder at run time.
-    #[serde(default)]
-    pub root:  String,
-    /// Recurse into subfolders.
-    #[serde(default)]
-    pub recursive: bool,
-    /// Kind ids to keep (`image`/`document`/`video`/`audio`/`code`/`archive`/
-    /// `folder`/`other`). Empty → all kinds.
-    #[serde(default)]
-    pub kinds: Vec<String>,
-    /// Minimum / maximum size in bytes (`None` → unbounded).
-    #[serde(default)]
-    pub min_bytes: Option<u64>,
-    #[serde(default)]
-    pub max_bytes: Option<u64>,
-    /// Keep items modified at/after — or at/before — these Unix-ms timestamps.
-    #[serde(default)]
-    pub modified_after:  Option<i64>,
-    #[serde(default)]
-    pub modified_before: Option<i64>,
-}
-
-fn default_explorer_view() -> String { "details".into() }
 fn default_shortcut_accel() -> String { "Ctrl+Shift+E".into() }
-fn default_explorer_sort() -> String { "name".into() }
-fn default_true_sort() -> bool { true }
-fn default_explorer_startup() -> String { "overview".into() }
-fn default_max_recents() -> u32 { 10 }
 
 impl Default for ExplorerConfig {
     fn default() -> Self {
         Self {
-            git_awareness:        false,
-            global_shortcut:      false,
-            default_view:         default_explorer_view(),
-            show_hidden:          false,
-            recursive_search:     false,
+            global_shortcut:       false,
             global_shortcut_accel: default_shortcut_accel(),
-            default_sort:         default_explorer_sort(),
-            sort_ascending:       true,
-            startup:              default_explorer_startup(),
-            always_new_window:    false,
-            max_recents:          default_max_recents(),
-            sidebar_sections:     Vec::new(),
-            open_external_links:  false,
-            open_web_links:       false,
-            remembered_external_schemes: Vec::new(),
-            reveal_in_builtin:    false,
-            columns:              Vec::new(),
-            pinned_favourites:    Vec::new(),
-            saved_searches:       Vec::new(),
+            always_new_window:     false,
+            reveal_in_builtin:     false,
         }
     }
 }

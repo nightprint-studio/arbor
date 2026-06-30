@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * Titlebar filter dropdown — shows the active filter (dot · label · count) and
-   * opens a compact menu to pick Tutti / In esecuzione / Da aggiornare. Built on
+   * opens a compact menu to pick All / Running / Updates. Built on
    * the shared `Dropdown` (open/close, positioning, full keyboard nav); the
    * `--dd-*` overrides give it the launcher's theme-independent "sky" palette.
    */
@@ -23,7 +23,7 @@
   <Dropdown {items} position="fixed" direction="down" width="190px">
     {#snippet trigger({ open, toggle })}
       <button class="trigger" class:open onclick={toggle}
-              aria-haspopup="menu" aria-expanded={open} title="Filtra">
+              aria-haspopup="menu" aria-expanded={open} title="Filter">
         <span class="dot" style="background:{current.color};box-shadow:0 0 6px {current.color}"></span>
         <span class="label">{current.label}</span>
         <span class="count">{current.count}</span>

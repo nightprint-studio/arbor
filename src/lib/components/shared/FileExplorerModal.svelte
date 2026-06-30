@@ -58,7 +58,7 @@
     type FsEntry, type FsRoot, type FsGitStatus, type GitBadge, type GitRepoMarker, type GitChange, type GitChanges, type FsBranch,
     type ExplorerRevealPayload, type ClipData, type FsOpProgress, type DirSize, type OverviewStats, type TrashEntry,
   } from '$lib/ipc/fs';
-  import { listRegistryRepos, listWorkspaces } from '$lib/ipc/workspace';
+  import { listRegistryReposLocal, listWorkspacesLocal } from '$lib/ipc/workspace';
   import { openInIde, getIdeConfig, startIdeDetection } from '$lib/ipc/worktree';
   import type { IdeConfig, DetectedIde } from '$lib/types/git';
   import { workspaceColorVar, type RepoRegistryEntry, type WorkspaceDef } from '$lib/types/workspace';
@@ -346,6 +346,32 @@
 
   let listEl = $state<HTMLElement | null>(null);
   let sidebarEl = $state<HTMLElement | null>(null);
+  let fxRootEl = $state<HTMLElement | null>(null);
+
+  // WebView2 layout-stale workaround. The settings page lives in this deeply
+  // nested flex subtree; on Windows/WebView2 the computed layout is sometimes NOT
+  // re-applied after the settings view renders or a toggle re-renders it, so the
+  // body paints collapsed until *any* reflow recomputes it (the user confirmed
+  // toggling a style in DevTools fixes it — a pure paint/relayout desync, not a
+  // data bug). Force that reflow ourselves: when the settings view is shown or one
+  // of its values changes, detach+reattach `.fx-root` from layout for one frame so
+  // WebView2 recomputes from scratch. No visual flash (no paint between the two
+  // writes), no effect on data.
+  $effect(() => {
+    if (view !== 'settings') return;
+    // Touch the in-settings values so a toggle/radio change re-runs this effect.
+    void [explorerStore.gitAwareness, explorerStore.defaultView, explorerStore.showHidden,
+      explorerStore.recursiveSearch, explorerStore.defaultSort, explorerStore.sortAscending,
+      explorerStore.startup, explorerStore.maxRecents, explorerStore.alwaysNewWindow,
+      explorerStore.openExternalLinks, explorerStore.openWebLinks, explorerStore.globalShortcut];
+    const el = fxRootEl;
+    untrack(() => requestAnimationFrame(() => {
+      if (!el) return;
+      el.style.display = 'none';
+      void el.offsetHeight; // flush layout with it removed…
+      el.style.display = '';  // …then recompute from scratch
+    }));
+  });
 
   // ── Sidebar collapse + per-section collapse (persisted) ───────────────────
   let sidebarCollapsed = $state<boolean>(lsGet('arbor:explorer-sidebar-collapsed', false));
@@ -2481,12 +2507,14 @@
   let rootsTimer: ReturnType<typeof setInterval> | null = null;
 
   /** (Re)load the Projects sidebar source — registry repos + workspace groups.
-   *  Called on mount and whenever the backend broadcasts `registry-changed`
-   *  (deregister, move-between-workspaces, add/remove, rename, …), so the
-   *  sidebar stays live even in the standalone window. */
+   *  Reads `repos.json` / `workspaces.json` through the always-on `platform`
+   *  backend (NOT corvus): "projects" is app-level data the explorer shows even
+   *  when the git product isn't running, so it never touches the optional corvus
+   *  backend. Called on mount and on `registry-changed` (a git-product mutation,
+   *  broadcast so the sidebar stays live even in the standalone window). */
   async function loadRegistry() {
     try {
-      const [repos, snap] = await Promise.all([listRegistryRepos(), listWorkspaces()]);
+      const [repos, snap] = await Promise.all([listRegistryReposLocal(), listWorkspacesLocal()]);
       projects = repos; workspaces = snap.workspaces; activeWorkspaceId = snap.active_workspace_id;
     } catch { /* ignore */ }
   }
@@ -2876,7 +2904,7 @@
 {/snippet}
 
 {#snippet bodyContent()}
-  <div class="fx-root">
+  <div class="fx-root" bind:this={fxRootEl}>
   <div class="fx-body">
     <!-- ══ Sidebar ══ -->
     <aside class="fx-sidebar" class:collapsed={sidebarCollapsed} bind:this={sidebarEl} use:sidebarNav aria-label="Locations">
@@ -3514,12 +3542,12 @@
   /* ══ Standalone window shell (dedicated explorer window) ══ */
   /* Mirrors the modal's chrome rhythm: bg-elevated frame, body floats as a
      bg-base card with the same 4px insets that expose the rounded corners. */
-  /* NO `overflow: hidden` here. On WebView2/Chromium a `position:fixed` flex
-     column with `overflow:hidden` collapses its flex children (header + body)
-     to ~0 height on some relayouts — e.g. the re-render after a settings
-     toggle. It isn't needed at this level: the inner panels (.fx-win-mid /
-     .fx-win-body) clip their own overflow and the page never scrolls. */
-  .fx-win { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg-elevated); }
+  /* Fills `.explorer-window` (a `100vh` flex column) via `flex: 1` — NOT
+     `height: 100%` (no percentage-height chain) and NOT `position: fixed` (sizing
+     via `inset` left the flex children stale on WebView2 relayouts → the settings
+     page collapsed). `min-height: 0` lets it shrink so the inner scroll panes size
+     correctly. No `overflow: hidden` needed — the inner panels clip their own. */
+  .fx-win { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-elevated); }
   .fx-win-bar { display: flex; align-items: center; gap: 8px; height: 38px; flex-shrink: 0; padding-left: 10px; }
   /* Interactive islands opt out of the titlebar drag region. */
   .fx-win-island { display: flex; align-items: center; gap: 8px; flex-shrink: 0; -webkit-app-region: no-drag; }
@@ -3529,7 +3557,12 @@
   .fx-win-center { flex: 1 1 auto; min-width: 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
   .fx-win-addr { width: 70%; min-width: 0; max-width: 100%; display: flex; -webkit-app-region: no-drag; }
   .fx-win-mid { flex: 1; min-height: 0; display: flex; flex-direction: row; align-items: stretch; overflow: hidden; }
-  .fx-win-body { flex: 1; min-width: 0; min-height: 0; margin: 0 4px 4px; overflow: hidden; }
+  /* Flex column so `.fx-root` fills it via `flex: 1` (NOT a percentage height):
+     a `height: 100%` child of a *stretched flex item* is the WebView2 relayout
+     trap — Chromium leaves its height stale after a DOM patch (a settings toggle),
+     collapsing the body to ~0. Driving the height through the flex algorithm is
+     recomputed reliably. */
+  .fx-win-body { flex: 1; min-width: 0; min-height: 0; margin: 0 4px 4px; overflow: hidden; display: flex; flex-direction: column; }
   .fx-win-foot { display: flex; align-items: center; padding: var(--modal-footer-padding); background: var(--modal-chrome-bg); flex-shrink: 0; }
 
   /* ══ Header chrome ══ */
@@ -3557,8 +3590,17 @@
   .fx-addr-tab { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 9.5px; line-height: 1; padding: 2px 5px; background: var(--bg-overlay); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-muted); pointer-events: none; font-family: var(--font-ui-sans); }
 
   /* ══ Body ══ */
-  .fx-root { height: 100%; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-  .fx-body { flex: 1; display: flex; overflow: hidden; background: var(--bg-elevated); gap: 6px; }
+  /* `flex: 1; min-height: 0` drives the height when the parent is a flex column
+     (the standalone `.fx-win-body`); `height: 100%` is the fallback for the picker,
+     whose `.modal-body` parent is a block flex-item where `flex` is inert. Both
+     coexist safely — in a flex column, `flex: 1` (basis 0%) wins over `height`. */
+  .fx-root { flex: 1; min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+  /* `min-height: 0` is load-bearing alongside `overflow: hidden`: on WebView2 a
+     flex child of an `overflow:hidden` flex container collapses to ~0 on some
+     relayouts (e.g. the re-render after a settings toggle) UNLESS it can shrink.
+     The window chrome (.fx-win-mid / .fx-win-body) already pairs the two; these
+     two inner levels must too, or the settings page collapses mid-height. */
+  .fx-body { flex: 1; min-height: 0; display: flex; overflow: hidden; background: var(--bg-elevated); gap: 6px; }
 
   /* ── Long-operation progress card (copy / move / duplicate) ─────────────── */
   .fx-op { position: absolute; right: 12px; bottom: 12px; width: 320px; max-width: calc(100% - 24px); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg, 0 6px 24px rgba(0,0,0,0.35)); padding: 10px 12px; z-index: 20; display: flex; flex-direction: column; gap: 7px; }
@@ -3665,7 +3707,7 @@
   .fx-ws-list { padding-left: 14px; }
 
   /* ── Main ── */
-  .fx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-base); border-radius: var(--radius-lg); }
+  .fx-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-base); border-radius: var(--radius-lg); }
   /* Expanded preview: the list narrows (Date/Type columns drop) and the
      preview takes the rest of the body. */
   .fx-main.fx-narrow { flex: 0 0 300px; }

@@ -28,9 +28,9 @@ dirs        = { workspace = true }
 # src-tauri so both shells link the same artifact.
 serde_yaml_ng = "0.10"
 
-# Lua 5.4 VM (vendored — no system lua dep). `send` is required because plugin
-# code may run on async tasks; `serialize` enables serde<->lua conversion.
-mlua = { version = "0.11.6", features = ["lua54", "vendored", "serialize", "send"] }
+# Lua 5.4 VM — workspace-pinned (see root) so every plugin-host crate shares one
+# mlua artifact.
+mlua = { workspace = true }
 
 # Manifest format + semver dependency resolution (re-used here for the
 # topo-sort during plugin load).

@@ -150,15 +150,11 @@ pub fn build_router(app: &AppHandle) -> Router {
     // out-of-process by `merula-be` — spawned lazily by [`ensure_merula_be`] when
     // the Merula window first opens (the launcher and the other product windows
     // never touch audio). Unlike `corvus`, merula has NO in-process handlers in
-    // this shell (the FE invokes the legacy `merula_*` commands directly today),
-    // so its loopback is a pure UnknownMethod sink: when `merula-be` is detached
-    // every `merula` rpc method falls through to it and the FE shows the down
-    // overlay — the intended behaviour. Routing flips at attach/detach time.
-    let merula_loopback: Arc<dyn BrokerClient> =
-        Arc::new(LoopbackBroker::new(|method, _params| {
-            Err(IpcError::UnknownMethod(method.to_string()))
-        }));
-    router.register("merula", Arc::new(SplitBroker::new("merula", merula_loopback)));
+    // this shell, so it is `pure_oop`: when `merula-be` is detached a `merula` call
+    // reports `BackendNotRunning` (the window's down overlay is driven by the
+    // `merula-be-down` event, not by this error), and an unadvertised method
+    // reports `UnknownMethod` — no catch-all sink. Routing flips at attach/detach.
+    router.register("merula", Arc::new(SplitBroker::pure_oop("merula")));
 
     // Platform backend: app-agnostic services (config/theme/session/workspace/
     // jobs/fs/terminal/app metadata). In-process only for now — there is no
@@ -180,6 +176,16 @@ pub fn build_router(app: &AppHandle) -> Router {
             studio::dispatch(&studio_handle, method, params)
         }));
     router.register("studio", studio_loopback);
+
+    // Sitta backend: the file-explorer product. Like `merula`, served
+    // out-of-process by `sitta-be` — spawned lazily by [`ensure_sitta_be`] when an
+    // explorer window first opens (the launcher and the other product windows never
+    // touch the explorer backend). Like `merula`, sitta has NO in-process handlers
+    // in this shell (the explorer still drives `platform` FS + `corvus` git
+    // directly today), so it is `pure_oop`: a `sitta` call with `sitta-be` detached
+    // reports `BackendNotRunning`, an unadvertised method reports `UnknownMethod` —
+    // no catch-all sink. Routing flips at attach/detach time.
+    router.register("sitta", Arc::new(SplitBroker::pure_oop("sitta")));
 
     router
 }
@@ -991,8 +997,23 @@ fn host_dispatch(
                 sub.aborter.abort();
                 // Abort drops the stream task mid-poll, so its stream-end teardown
                 // never runs — drop the parked closure in the backend VM here.
+                //
+                // CRITICAL: this teardown is a forward RPC into corvus-be
+                // (`remove_plugin_callback` is served out-of-process). `host_dispatch`
+                // runs on the `ChildClient` reader thread — the ONLY thread that
+                // demuxes responses — so calling it inline would block on a reply that
+                // only this thread can read → deadlock the whole corvus channel.
+                // Offload it: the reader thread returns immediately and a throwaway
+                // thread does the round-trip. Fire-and-forget — dropping a parked Lua
+                // closure has no result the caller needs.
                 if !sub.hook_name.is_empty() {
-                    remove_plugin_callback_on_backend(&state, &sub.plugin, &sub.hook_name);
+                    let app_td = app.clone();
+                    let plugin = sub.plugin.clone();
+                    let callback_id = sub.hook_name.clone();
+                    std::thread::spawn(move || {
+                        let state = app_td.state::<AppState>();
+                        remove_plugin_callback_on_backend(&state, &plugin, &callback_id);
+                    });
                 }
                 true
             }
@@ -1472,23 +1493,29 @@ pub fn ensure_corvus_be(app: &AppHandle) {
         Err(poisoned) => poisoned.into_inner(),
     };
     if split_broker::is_attached("corvus") {
+        tracing::debug!("ensure_corvus_be: already attached — no-op (window re-summoned)");
         return; // backend already up — window is just being re-summoned
     }
-    match spawn_corvus_be(app) {
+    let gen = split_broker::next_gen();
+    tracing::info!("ensure_corvus_be: spawning corvus-be (gen={gen})");
+    match spawn_corvus_be(app, gen) {
         Some((child, methods)) => {
             tracing::info!(
-                "corvus-be up (lazy): {} method(s) served out-of-process",
+                "corvus-be up (lazy, gen={gen}): {} method(s) served out-of-process",
                 methods.len()
             );
             split_broker::attach(
                 "corvus",
+                gen,
                 methods.into_iter().collect(),
                 Arc::new(child) as Arc<dyn BrokerClient>,
             );
             // Now that the backend is listening, hand it the runtime config it
             // can't resolve itself (git path + portable dir, owned-config path,
             // registry/workspace paths) so it's ready before the first repo opens.
+            tracing::debug!("ensure_corvus_be(gen={gen}): pushing config to corvus-be");
             sync_config(&app.state::<AppState>());
+            tracing::debug!("ensure_corvus_be(gen={gen}): config pushed — ready");
         }
         None => {
             tracing::info!("corvus-be not available — Corvus running in-process");
@@ -1496,7 +1523,7 @@ pub fn ensure_corvus_be(app: &AppHandle) {
     }
 }
 
-fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
+fn spawn_corvus_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
     use crate::process_ext::NoWindowExt;
 
     let bin = match backend_binary(app, "corvus-be") {
@@ -1515,7 +1542,8 @@ fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
     let app_for_events = app.clone();
     let app_for_host = app.clone();
     let app_for_disc = app.clone();
-    match ChildClient::spawn(
+    tracing::debug!("spawn_corvus_be(gen={gen}): launching {} and awaiting Hello", bin.display());
+    let res = ChildClient::spawn(
         cmd,
         move |topic, payload| {
             use tauri::Emitter;
@@ -1523,19 +1551,24 @@ fn spawn_corvus_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
         move || {
-            // The git backend process died (crash / kill). Detach it so the
-            // router stops routing to a dead pipe (corvus methods fall back to
-            // the in-process loopback → UnknownMethod for the BE-required ones),
-            // then surface a fatal state: there is no live respawn yet, so the
-            // Corvus window shows a blocking overlay asking the user to restart.
+            // The git backend process closed its stream. This fires for BOTH a
+            // genuine crash AND the intentional teardown of an OLD child after a
+            // stop+respawn. `detach_if_current` removes it only if gen={gen} is
+            // still the attached one: a genuine crash of the live backend → detach
+            // + fatal "down" overlay (no live respawn yet); a stale disconnect of
+            // an already-replaced child → logged no-op, leaving the NEW child and
+            // raising no false overlay.
             use tauri::Emitter;
-            split_broker::detach("corvus");
-            let _ = app_for_disc.emit("arbor://corvus-be-down", ());
+            tracing::warn!("corvus-be disconnect callback fired (gen={gen})");
+            if split_broker::detach_if_current("corvus", gen, "disconnect") {
+                let _ = app_for_disc.emit("arbor://corvus-be-down", ());
+            }
         },
-    ) {
+    );
+    match res {
         Ok(pair) => Some(pair),
         Err(e) => {
-            tracing::warn!("failed to spawn corvus-be ({e}) — staying in-process");
+            tracing::warn!("failed to spawn corvus-be gen={gen} ({e}) — staying in-process");
             None
         }
     }
@@ -1565,16 +1598,20 @@ pub fn ensure_merula_be(app: &AppHandle) {
         Err(poisoned) => poisoned.into_inner(),
     };
     if split_broker::is_attached("merula") {
+        tracing::debug!("ensure_merula_be: already attached — no-op (window re-summoned)");
         return; // backend already up — window is just being re-summoned
     }
-    match spawn_merula_be(app) {
+    let gen = split_broker::next_gen();
+    tracing::info!("ensure_merula_be: spawning merula-be (gen={gen})");
+    match spawn_merula_be(app, gen) {
         Some((child, methods)) => {
             tracing::info!(
-                "merula-be up (lazy): {} method(s) served out-of-process",
+                "merula-be up (lazy, gen={gen}): {} method(s) served out-of-process",
                 methods.len()
             );
             split_broker::attach(
                 "merula",
+                gen,
                 methods.into_iter().collect(),
                 Arc::new(child) as Arc<dyn BrokerClient>,
             );
@@ -1586,7 +1623,7 @@ pub fn ensure_merula_be(app: &AppHandle) {
     }
 }
 
-fn spawn_merula_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
+fn spawn_merula_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
     use crate::process_ext::NoWindowExt;
     use crate::window::merula::MERULA_WINDOW_LABEL;
 
@@ -1620,19 +1657,129 @@ fn spawn_merula_be(app: &AppHandle) -> Option<(ChildClient, Vec<String>)> {
         },
         move |method, params| host_dispatch(&app_for_host, method, params),
         move || {
-            // The audio backend process died (crash / kill). Detach it so the
-            // router stops routing to a dead pipe (merula methods fall back to the
-            // loopback → UnknownMethod), then surface a fatal state: there is no
-            // live respawn yet, so the Merula window shows a blocking overlay
-            // asking the user to restart.
-            split_broker::detach("merula");
+            // Fires for a genuine crash AND the intentional teardown of an OLD
+            // child after stop+respawn. `detach_if_current` acts only when gen={gen}
+            // is still attached: genuine crash → detach + fatal "down" overlay;
+            // stale disconnect of an already-replaced child → logged no-op (the NEW
+            // child stays routed, no false overlay).
             use tauri::Emitter;
-            let _ = app_for_disc.emit_to(MERULA_WINDOW_LABEL, "arbor://merula-be-down", ());
+            tracing::warn!("merula-be disconnect callback fired (gen={gen})");
+            if split_broker::detach_if_current("merula", gen, "disconnect") {
+                let _ = app_for_disc.emit_to(MERULA_WINDOW_LABEL, "arbor://merula-be-down", ());
+            }
         },
     ) {
         Ok(pair) => Some(pair),
         Err(e) => {
-            tracing::warn!("failed to spawn merula-be ({e}) — staying in-process");
+            tracing::warn!("failed to spawn merula-be gen={gen} ({e}) — staying in-process");
+            None
+        }
+    }
+}
+
+/// Lazily spawn `sitta-be` and attach it to the router, **idempotently** — the
+/// sitta twin of [`ensure_merula_be`]. Called when an explorer window opens
+/// (`window::explorer::open_or_focus`), off the main thread — the spawn blocks on
+/// the child's first `Hello` frame, which must not stall the UI thread.
+///
+/// First call spawns the binary, reads its advertised methods, and splices the
+/// client into the `sitta` slot of the shared OOP routing map. Subsequent calls
+/// (another explorer window, or the single one re-summoned) are a no-op while the
+/// backend is alive. **No `sync_config`**: `sitta-be` resolves its own config /
+/// data dirs once `init_active_profile()` has run. If the binary is missing / the
+/// spawn fails, the backend stays detached and every `sitta` rpc method routes to
+/// the loopback → `UnknownMethod` (today nothing routes there yet — the explorer
+/// still drives `platform` FS + `corvus` git directly).
+pub fn ensure_sitta_be(app: &AppHandle) {
+    // Serialize concurrent triggers (a second explorer window, the global shortcut,
+    // the tray entry can all fire) so we never spawn two backends; re-check liveness
+    // inside the lock. A SEPARATE lock from corvus's / merula's so the backends'
+    // spawns never contend.
+    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match SPAWN_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if split_broker::is_attached("sitta") {
+        tracing::debug!("ensure_sitta_be: already attached — no-op (window re-summoned / sibling)");
+        return; // backend already up — window is just being re-summoned / a sibling
+    }
+    let gen = split_broker::next_gen();
+    tracing::info!("ensure_sitta_be: spawning sitta-be (gen={gen})");
+    match spawn_sitta_be(app, gen) {
+        Some((child, methods)) => {
+            tracing::info!(
+                "sitta-be up (lazy, gen={gen}): {} method(s) served out-of-process",
+                methods.len()
+            );
+            split_broker::attach(
+                "sitta",
+                gen,
+                methods.into_iter().collect(),
+                Arc::new(child) as Arc<dyn BrokerClient>,
+            );
+            // The backend attaches AFTER the explorer window may already have run
+            // its one-shot `loadConfig()` (the spawn is off-thread, racing window
+            // creation). Signal "now routable" so the explorer re-reads its sitta
+            // config + re-runs git-awareness instead of being stuck on defaults.
+            use tauri::Emitter;
+            let _ = app.emit("arbor://sitta-be-up", ());
+        }
+        None => {
+            tracing::info!(
+                "sitta-be not available — explorer FS/git stays on platform/corvus"
+            );
+        }
+    }
+}
+
+fn spawn_sitta_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
+    use crate::process_ext::NoWindowExt;
+
+    let bin = match backend_binary(app, "sitta-be") {
+        Some(b) => b,
+        None => {
+            tracing::info!(
+                "sitta-be binary not found (backends/ resource or beside the launcher) — explorer stays on platform/corvus"
+            );
+            return None;
+        }
+    };
+
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+
+    let app_for_events = app.clone();
+    let app_for_host = app.clone();
+    let app_for_disc = app.clone();
+    match ChildClient::spawn(
+        cmd,
+        move |topic, payload| {
+            use tauri::Emitter;
+            // Sitta has no push events yet (Onda 1). When the git-awareness wave
+            // lands (fs_git status/branch events), scope these to the explorer
+            // windows (`window::explorer::is_explorer_label`) instead of the global
+            // app bus — there can be several `explorer-N` windows, and the launcher
+            // / Corvus windows don't want the explorer's telemetry.
+            let _ = app_for_events.emit(&topic, payload);
+        },
+        move |method, params| host_dispatch(&app_for_host, method, params),
+        move || {
+            // Fires for a genuine crash AND the intentional teardown of an OLD
+            // child after stop+respawn. `detach_if_current` acts only when gen={gen}
+            // is still attached: genuine crash → detach + down event; stale
+            // disconnect of an already-replaced child → logged no-op (NEW child
+            // stays routed, no false down event).
+            use tauri::Emitter;
+            tracing::warn!("sitta-be disconnect callback fired (gen={gen})");
+            if split_broker::detach_if_current("sitta", gen, "disconnect") {
+                let _ = app_for_disc.emit("arbor://sitta-be-down", ());
+            }
+        },
+    ) {
+        Ok(pair) => Some(pair),
+        Err(e) => {
+            tracing::warn!("failed to spawn sitta-be ({e}) — explorer stays on platform/corvus");
             None
         }
     }
@@ -1655,7 +1802,12 @@ pub fn dispatch_rpc(
         .router()
         .ok_or_else(|| AppError::Other("ipc router not initialised".into()))?;
     let bytes = serde_json::to_vec(&params)?;
-    let out = router.call(program, method, bytes).map_err(router_err_to_app)?;
+    let out = router
+        .call(program, method, bytes)
+        .map_err(|e| {
+            log_route_failure(program, method, &e);
+            router_err_to_app(e)
+        })?;
     if out.is_empty() {
         Ok(serde_json::Value::Null)
     } else {
@@ -1947,6 +2099,45 @@ pub fn sync_repo_close(state: &AppState, tab_id: &str) {
 
 /// Map a router/transport failure onto the host error enum, preserving the
 /// backend wire string the FE matches on.
+/// Log a routing/transport failure so a detached backend or an unknown method
+/// isn't silently swallowed. The FE routinely tolerates these (`.catch(()=>{})`,
+/// `Promise.allSettled`, `.ok()` probes), which is what made a never-spawned
+/// `sitta-be` invisible: every `sitta` call fell to the loopback → `UnknownMethod`
+/// with no trace anywhere.
+///
+/// Domain errors the backend *deliberately* returned ([`IpcError::Backend`]) are
+/// NOT logged here — they're normal results the caller handles (e.g. "branch
+/// already exists"). Internal reverse-channel probes (`__*`) fire by design while
+/// a backend is down, so they stay at `debug`; real FE methods `warn`.
+fn log_route_failure(program: &str, method: &str, e: &RouterError) {
+    let reason = match e {
+        // The three explicit routing outcomes the split router now distinguishes.
+        RouterError::UnknownProduct(p) => format!("product '{p}' is not a registered backend"),
+        RouterError::Ipc(IpcError::BackendNotRunning(p)) => {
+            format!("backend '{p}' is not running (window not open, or it died)")
+        }
+        RouterError::Ipc(IpcError::UnknownMethod(m)) => {
+            // A hybrid product (corvus) can surface UnknownMethod from its
+            // in-process loopback while its backend is detached — distinguish so
+            // the message doesn't claim "running" when it isn't.
+            if split_broker::is_attached(program) {
+                format!("backend '{program}' is running but exposes no method '{m}'")
+            } else {
+                format!("no in-process handler for '{m}' and backend '{program}' is not running")
+            }
+        }
+        RouterError::Ipc(IpcError::Transport(s)) => format!("transport error: {s}"),
+        RouterError::Ipc(IpcError::Codec(s)) => format!("codec error: {s}"),
+        // A domain error the backend chose to return — normal, not a routing fault.
+        RouterError::Ipc(IpcError::Backend(_)) => return,
+    };
+    if method.starts_with("__") {
+        tracing::debug!("rpc {program}::{method} dropped: {reason}");
+    } else {
+        tracing::warn!("rpc {program}::{method} dropped: {reason}");
+    }
+}
+
 fn router_err_to_app(e: RouterError) -> AppError {
     match e {
         RouterError::UnknownProduct(p) => AppError::Other(format!("no backend for product '{p}'")),
@@ -1954,6 +2145,9 @@ fn router_err_to_app(e: RouterError) -> AppError {
             // Already a formatted backend message → pass through verbatim.
             IpcError::Backend(s) => AppError::Other(s),
             IpcError::UnknownMethod(m) => AppError::Other(format!("unknown command: {m}")),
+            IpcError::BackendNotRunning(p) => {
+                AppError::Other(format!("backend for '{p}' is not running"))
+            }
             IpcError::Codec(s) => AppError::Other(format!("ipc codec: {s}")),
             IpcError::Transport(s) => AppError::Other(format!("ipc transport: {s}")),
         },

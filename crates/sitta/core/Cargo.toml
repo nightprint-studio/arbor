@@ -1,0 +1,18 @@
+[package]
+name         = "sitta-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Sitta backend core — the canonical headless state (`SittaState`) the `sitta-be` file-explorer process owns. Tauri-free by construction; the explorer domain handlers live in sitta-be and drive against this state."
+
+[dependencies]
+arbor-ipc  = { path = "../../foundation/ipc" }
+# Resolves sitta's own per-profile config dir (`sitta_config_path`) for the typed
+# `SittaConfig` persistence — exactly as merula-core uses `merula_config_path`.
+arbor-core = { path = "../../core" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# The typed global sitta config (`config.toml`) is round-tripped through `toml`.
+toml       = "0.8"

@@ -38,7 +38,6 @@ mod branch;
 mod ci;
 mod corvus_config;
 mod diff;
-mod fs_git;
 mod git_cli;
 mod gitflow;
 mod graph;

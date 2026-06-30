@@ -1,10 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import AppShell from '$lib/components/layout/AppShell.svelte';
-  import ExplorerWindow from '$lib/components/layout/ExplorerWindow.svelte';
-  import MerulaWindow from '$lib/components/layout/MerulaWindow.svelte';
-  import LauncherWindow from '$lib/components/layout/LauncherWindow.svelte';
-  import DragOverlay from '$lib/components/layout/DragOverlay.svelte';
+  import type { Component } from 'svelte';
 
   // Every window loads this same index.html; we branch on the window label to
   // mount the right shell:
@@ -14,31 +10,29 @@
   //  • merula[-N]         → the music live-coding DAW shell.
   //  • drag-overlay      → only the cross-window drag ghost.
   // Unknown labels fall back to the Git AppShell.
-  let isExplorer = false;
-  let isMerula = false;
-  let isDragOverlay = false;
-  let isCorvus = false;
-  let isLauncher = false;
-  try {
-    const label = getCurrentWindow().label;
-    isExplorer = label === 'explorer' || label.startsWith('explorer-');
-    isMerula = label === 'merula' || label.startsWith('merula-');
-    isDragOverlay = label === 'drag-overlay';
-    isCorvus = label === 'corvus' || label.startsWith('corvus-');
-    isLauncher = label === 'main' || label === 'launcher';
-  } catch { /* non-Tauri / SSR */ }
+  //
+  // The shell is loaded with a DYNAMIC import, not a static one, so each window
+  // pulls only its own chunk. A static `import AppShell` here would execute
+  // AppShell's whole module graph in EVERY window — including stores that fire an
+  // IPC load at import time (e.g. the git graph/issues config) — so the explorer
+  // / launcher / merula windows would all hit the corvus backend they never use.
+  // Per-window code-splitting keeps each product's side effects in its own window.
+  let label = '';
+  try { label = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
+
+  const loadShell = (): Promise<{ default: Component }> => {
+    if (label === 'drag-overlay') return import('$lib/components/layout/DragOverlay.svelte');
+    if (label === 'explorer' || label.startsWith('explorer-')) return import('$lib/components/layout/ExplorerWindow.svelte');
+    if (label === 'merula' || label.startsWith('merula-')) return import('$lib/components/layout/MerulaWindow.svelte');
+    if (label === 'main' || label === 'launcher') return import('$lib/components/layout/LauncherWindow.svelte');
+    // corvus + any unknown label → the Git AppShell.
+    return import('$lib/components/layout/AppShell.svelte');
+  };
+
+  let Shell = $state<Component | null>(null);
+  loadShell().then((m) => { Shell = m.default; });
 </script>
 
-{#if isDragOverlay}
-  <DragOverlay />
-{:else if isExplorer}
-  <ExplorerWindow />
-{:else if isMerula}
-  <MerulaWindow />
-{:else if isCorvus}
-  <AppShell />
-{:else if isLauncher}
-  <LauncherWindow />
-{:else}
-  <AppShell />
+{#if Shell}
+  <Shell />
 {/if}

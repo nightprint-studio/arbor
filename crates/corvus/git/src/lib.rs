@@ -11,8 +11,9 @@
 //!
 //! Domains extracted so far: **bisect** ([`bisect`]) + saved sessions
 //! ([`bisect_sessions`]), **stash** ([`stash`]), **reset** + tags ([`reset`]),
-//! encoding-aware decode ([`encoding`]) and the **recovery** snapshot journal
-//! ([`recovery`]).
+//! encoding-aware decode ([`encoding`]), the **recovery** snapshot journal
+//! ([`recovery`]), and the File-Explorer git awareness ([`explorer`] — overlay
+//! badges + light inline actions, shared with `sitta-be`).
 //!
 //! ## Public API: use the [`prelude`]
 
@@ -27,6 +28,7 @@ pub mod diff;
 // keep resolving to the single canonical implementation.
 pub use arbor_fs::prelude::encoding;
 pub mod error;
+pub mod explorer;
 pub mod gitflow;
 pub mod graph;
 pub mod graph_svg;

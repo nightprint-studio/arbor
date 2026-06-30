@@ -7,14 +7,15 @@
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import GlobalShortcutCapture from '$lib/components/shared/internal/GlobalShortcutCapture.svelte';
 
-  // Git awareness is a plain local toggle (setter is a no-op when unchanged).
-  let gitAwareness = $state(explorerStore.gitAwareness);
-  $effect(() => { explorerStore.setGitAwareness(gitAwareness); });
-
   // Route the app's "Open / Reveal in File Explorer" actions into the built-in
   // explorer window instead of the OS file manager.
   let revealInBuiltin = $state(explorerStore.revealInBuiltin);
   $effect(() => { explorerStore.setRevealInBuiltin(revealInBuiltin); });
+
+  // NB: only the LAUNCHER-owned switches live here (global shortcut, reveal
+  // routing). Git awareness + the display preferences are owned by `sitta-be`
+  // (out-of-process) and edited inside the explorer's own settings — sitta-be
+  // isn't running in this launcher window, so it can't persist them here.
 
   // The global shortcut goes through async setters (the backend register can
   // fail on a taken combo); read straight from the store and toast on error.
@@ -30,15 +31,9 @@
 
 <SectionHeader
   title="File Explorer"
-  description="Host-level switches for the built-in file explorer. Display preferences live inside the explorer itself — open its address bar and type arbor://settings, or press Ctrl+, while it's focused." />
+  description="Launcher-level switches for the built-in file explorer. Git awareness and display preferences are configured inside the explorer itself — open its address bar and type arbor://settings, or press Ctrl+, while it's focused." />
 
 <div class="card">
-  <FormRow
-    label="Git awareness"
-    description="Show git status overlays, repo-root markers, the Changes panel and branch switching while browsing. Off by default — when off, the explorer issues no git checks, so plain file browsing stays fast.">
-    <Toggle bind:checked={gitAwareness} />
-  </FormRow>
-
   <FormRow
     label="Global shortcut"
     description="Register a system-wide hotkey that opens the dedicated explorer window even when Arbor isn't focused. Off by default. Click the chord to rebind it.">
@@ -55,7 +50,7 @@
 
 <div class="ex-note">
   <GitCompare size={13} />
-  <span>Tip: with git awareness on, right-click a folder for stage / discard / switch-branch, and use the Changes panel to review staged and unstaged files.</span>
+  <span>Tip: enable git awareness from the explorer's own settings (Ctrl+, while it's focused), then right-click a folder for stage / discard / switch-branch and use the Changes panel to review staged and unstaged files.</span>
 </div>
 
 <style>

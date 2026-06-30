@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { corvus, platform } from './rpc';
-import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, ExplorerConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, WhatsNewConfig } from '$lib/types/config';
+import { corvus, platform, sitta } from './rpc';
+import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, ExplorerConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, SittaConfig, WhatsNewConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/git';
 
 export type { TicketLinksRepoConfig };
@@ -70,7 +70,10 @@ export const getAppearanceConfig = () =>
 export const setAppearanceConfig = (config: AppearanceConfig) =>
   platform<void>('set_appearance_config', { config });
 
-// ── File explorer preferences (git awareness, global shortcut, display) ──────
+// ── File explorer: launcher-side integration settings ───────────────────────
+// The 4 settings the shell consumes (OS-global shortcut + accel, always-new-
+// window, reveal-in-builtin). The explorer's own UX prefs live in the sitta
+// config below.
 
 export const getExplorerConfig = () =>
   platform<ExplorerConfig>('get_explorer_config');
@@ -79,6 +82,16 @@ export const getExplorerConfig = () =>
 // OS-global shortcut via AppHandle), so it keeps using `invoke`.
 export const setExplorerConfig = (config: ExplorerConfig) =>
   invoke<void>('set_explorer_config', { config });
+
+// ── File explorer: sitta's own UX preferences (out-of-process) ───────────────
+// View/sort/startup, sidebar + column layout, favourites, saved searches,
+// external-link policy, and the git-awareness switch — owned by `sitta-be`.
+
+export const getSittaConfig = () =>
+  sitta<SittaConfig>('get_sitta_config');
+
+export const setSittaConfig = (config: SittaConfig) =>
+  sitta<void>('set_sitta_config', { config });
 
 // ── Launcher (Canopy) preferences — per product ──────────────────────────────
 

@@ -48,7 +48,13 @@ pub fn dispatch_deep_link(app: AppHandle, url: String) -> Result<()> {
     // land immediately.)
     let h = app.clone();
     tauri::async_runtime::spawn(async move {
-        crate::ipc::ensure_corvus_be(&h);
+        // `ensure_corvus_be` parks on synchronous framed-IPC and can trigger the
+        // reverse-channel credential round-trip (which needs free runtime workers
+        // for its `block_on`), so it must run on the BLOCKING POOL — never inline
+        // on this runtime worker, or it starves that path into the blank-window
+        // deadlock (see `window::corvus::open_corvus_window`).
+        let h_be = h.clone();
+        let _ = tokio::task::spawn_blocking(move || crate::ipc::ensure_corvus_be(&h_be)).await;
         crate::window::corvus::open_or_focus(&h);
     });
     let _ = app.emit("arbor://deep-link-manual", url);

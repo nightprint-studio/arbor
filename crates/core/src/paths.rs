@@ -102,6 +102,26 @@ pub fn merula_data_dir() -> PathBuf {
     arbor_global_data_dir().join("merula")
 }
 
+/// `arbor/profiles/<active>/sitta` — sitta's **per-profile** config dir. Holds the
+/// file-explorer's own settings (`config.toml`) and any small per-profile state.
+/// Resolved by `sitta-be` itself after `init_active_profile()` — not pushed by the
+/// shell — mirroring [`merula_config_dir`].
+pub fn sitta_config_dir() -> PathBuf {
+    crate::profile::product_dir(crate::profile::PRODUCT_SITTA)
+}
+
+/// Convenience: join a relative path under [`sitta_config_dir`].
+pub fn sitta_config_path<P: AsRef<Path>>(sub: P) -> PathBuf {
+    sitta_config_dir().join(sub)
+}
+
+/// `arbor/data/sitta` — the **global, shared** heavy-asset root for sitta (e.g. a
+/// thumbnail / icon cache). Rooted under [`arbor_global_data_dir`] so caches are
+/// shared across profiles, not duplicated. Sibling of [`merula_data_dir`].
+pub fn sitta_data_dir() -> PathBuf {
+    arbor_global_data_dir().join("sitta")
+}
+
 /// The legacy top-level sibling roots merula used **before** it became a
 /// profile-scoped product (`%APPDATA%\merula`, and the even older `nemus` from
 /// before the rename). Used only by the one-shot boot migration to relocate that

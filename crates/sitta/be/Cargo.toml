@@ -1,0 +1,47 @@
+[package]
+name         = "sitta-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Sitta backend — the headless file-explorer process for Model D. Serves the sitta domains over framed-stdio IPC; has no plugin host and no credentials, and resolves its own config/data dirs once init_active_profile() has run."
+
+[[bin]]
+name = "sitta-be"
+path = "src/main.rs"
+
+[dependencies]
+arbor-ipc  = { path = "../../foundation/ipc" }
+arbor-rpc  = { path = "../../foundation/rpc" }
+# The Model-D backend runtime scaffold: `BackendIo` (framed-stdio plumbing +
+# runtime) + the `App` builder (pre-serve inits, serve loop). Like merula-be,
+# sitta-be uses the slim path — no plugin host, no API installer, no scheduler.
+arbor-be   = { path = "../../foundation/be" }
+# The profile-aware config/data-path resolver: `init_active_profile()` seeds the
+# active profile FIRST in `main`, so any future `sitta_*` config/data dir resolves
+# under the launcher's profile (sitta will own its own settings/data over time).
+arbor-core = { path = "../../core" }
+# The canonical sitta state: `SittaState` (event egress + reverse channel). The
+# domain `#[arbor_rpc::handler]`s stay here in sitta-be and drive against
+# `sitta_core::prelude::*`. Tauri-free by construction.
+sitta-core = { path = "../core" }
+# The shared local-git library. sitta-be drives the File Explorer's git awareness
+# (overlay badges + light inline actions) through `corvus_git::explorer` — the pure
+# git2 logic shared with `corvus-be`, so the explorer's git works even when the git
+# client isn't running. Pulls in vendored libgit2 (the accepted standalone cost;
+# a future gix-backed plugin would swap this out behind the same boundary).
+corvus-git = { path = "../../corvus/git" }
+# Host-pure plugin host: the hook dispatcher + the base `arbor.*` installer wired in
+# `src/plugin.rs` build on these. sitta-be loads host-pure Lua plugins (no product
+# namespaces). mlua is workspace-pinned (see root) so the installer's `&Lua` is the
+# very same type as arbor-plugin-core's — one shared mlua artifact.
+arbor-plugin-api   = { path = "../../plugin/api" }
+arbor-plugin-core  = { path = "../../plugin/core" }
+arbor-plugin-types = { path = "../../plugin/types" }
+mlua = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Drives the async domain handlers: each backend request runs on its own
+# serve-loop worker thread, so a multi-thread runtime is required.
+tokio      = { workspace = true }

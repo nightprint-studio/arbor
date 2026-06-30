@@ -180,37 +180,45 @@ export interface ExplorerSavedSearch {
   modified_before: number | null;
 }
 
-/** Built-in file explorer preferences. `git_awareness` + `global_shortcut`
- *  are host-level switches (also editable from the SettingsPanel); the display
- *  defaults are edited from the explorer's own in-window settings page. */
+/** Launcher-side File Explorer integration settings — the subset the **shell**
+ *  consumes (OS-global shortcut, window create-vs-focus, app-wide reveal
+ *  routing), read even when `sitta-be` isn't running. The explorer's own UX
+ *  preferences live in {@link SittaConfig}. */
 export interface ExplorerConfig {
-  /** Master switch for git awareness (status overlays, repo markers, Changes
-   *  panel, branch switch). Off by default — when off, no git IPC is issued. */
-  git_awareness: boolean;
   /** Register the OS-global shortcut that opens the explorer window. Off by
    *  default; toggling re-registers/unregisters at runtime. */
   global_shortcut: boolean;
+  /** Accelerator for the global shortcut (Tauri format, e.g. "Ctrl+Shift+E"). */
+  global_shortcut_accel: string;
+  /** When true, opening the explorer always spawns a new window instead of
+   *  focusing the existing one. */
+  always_new_window: boolean;
+  /** Route the app's "Open / Reveal in File Explorer" actions into the built-in
+   *  explorer window instead of the OS file manager. Off by default. */
+  reveal_in_builtin: boolean;
+}
+
+/** The file-explorer's own UX preferences, owned out-of-process by `sitta-be`
+ *  (`get/set_sitta_config`, the `sitta` program). The four launcher-consumed
+ *  settings live in {@link ExplorerConfig} instead. */
+export interface SittaConfig {
+  /** Master switch for git awareness (status overlays, repo markers, Changes
+   *  panel, branch switch). Off by default — when off, no git IPC is issued. */
+  git_awareness: boolean;
   /** Default view mode for not-yet-visited folders. */
   default_view: ExplorerView;
   /** Show dot-prefixed (hidden) entries by default. */
   show_hidden: boolean;
   /** Default state of recursive (subfolder) search. */
   recursive_search: boolean;
-  /** Accelerator for the global shortcut (Tauri format, e.g. "Ctrl+Shift+E"). */
-  global_shortcut_accel: string;
   /** Default sort column for the listing. */
   default_sort: ExplorerSort;
   /** Default sort direction (ascending when true). */
   sort_ascending: boolean;
   /** What a freshly-opened explorer tab shows. */
   startup: ExplorerStartup;
-  /** When true, opening the explorer always spawns a new window instead of
-   *  focusing the existing one. */
-  always_new_window: boolean;
   /** Maximum number of recent folders kept in the sidebar (1–50). */
   max_recents: number;
-  /** Sidebar section order + visibility. Empty → built-in order, all shown. */
-  sidebar_sections: ExplorerSectionConfig[];
   /** Allow opening generic external links (custom schemes) typed in the
    *  address bar via the OS handler. Off by default; each open still prompts
    *  unless the scheme was remembered. */
@@ -221,15 +229,14 @@ export interface ExplorerConfig {
   /** Schemes (lower-cased) the user chose to remember, so they open without
    *  prompting (e.g. ["vscode", "https"]). */
   remembered_external_schemes: string[];
-  /** Route the app's "Open / Reveal in File Explorer" actions into the built-in
-   *  explorer window instead of the OS file manager. Off by default. */
-  reveal_in_builtin: boolean;
-  /** Details-view column order + visibility. Empty → built-in order with the
-   *  default-on set shown. `name` is always shown first. */
-  columns: ExplorerColumnConfig[];
   /** User-pinned favourite folders (absolute paths), shown alongside the OS
    *  standard locations in the sidebar. */
   pinned_favourites: string[];
+  /** Sidebar section order + visibility. Empty → built-in order, all shown. */
+  sidebar_sections: ExplorerSectionConfig[];
+  /** Details-view column order + visibility. Empty → built-in order with the
+   *  default-on set shown. `name` is always shown first. */
+  columns: ExplorerColumnConfig[];
   /** Saved searches surfaced as their own sidebar section. */
   saved_searches: ExplorerSavedSearch[];
 }

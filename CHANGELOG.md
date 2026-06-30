@@ -46,6 +46,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Fixed a hang that could freeze the Git window when a plugin using the Bevy Remote Protocol stopped watching a query.
+- Opening or closing a product window (Corvus, the File Explorer, the music window) could freeze the whole app — the window stayed blank and the launcher stopped responding, and afterwards no other product would open. Backends now start and stop without ever blocking the app. Closing the File Explorer window also fully stops its backend, so the next open starts it fresh like the other products.
 - **Deep links** (`arbor://…`) now open and focus the Corvus window and run the action there, instead of bringing the launcher forward where nothing happened.
 - Switching **profiles** now correctly loads the new profile's repositories, workspaces, and plugins, instead of reloading only the theme/settings while still showing the previous profile's (or an empty) lists.
 - File Explorer: **Ctrl+C** no longer shows a duplicate "Copied" toast when the shortcut key auto-repeats; clicking empty space or pressing **Esc** clears the selection, so a folder picker reliably targets the current folder itself.
