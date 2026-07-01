@@ -107,6 +107,19 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
             // Win32 WM_SETFOCUS / WM_KILLFOCUS messages. The actual (expensive)
             // process scan runs off-thread in the efficiency worker.
             crate::efficiency::request(!focused);
+
+            // JetBrains-Toolbox-style auto-hide: when the launcher loses focus
+            // it slips back to the tray. Launching a product, an Alt-Tab, or a
+            // click on any other window all surface here as `Focused(false)`, so
+            // the launcher gets out of the way exactly like the Toolbox does —
+            // summon it again from the tray icon. Release only: dev builds have
+            // no tray, and a stray focus loss (DevTools, editor) must not make
+            // the window vanish — the shell shows a dev-only close button
+            // instead. Product windows are untouched (only launcher labels).
+            #[cfg(not(debug_assertions))]
+            if !focused && super::is_launcher_label(window.label()) {
+                let _ = window.hide();
+            }
         }
         WindowEvent::Resized(size) => {
             // Windows reports minimize as a Resized event with width=0, height=0.

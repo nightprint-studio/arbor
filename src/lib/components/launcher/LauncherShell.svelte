@@ -19,7 +19,8 @@
   } from './canopy';
   import { fetchInstalledVersions, fetchLatestVersions } from './versions';
   import { getLauncherConfig, setLauncherCloseToTray } from '$lib/ipc/config';
-  import { Settings as SettingsIcon } from 'lucide-svelte';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { Settings as SettingsIcon, X as CloseIcon } from 'lucide-svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import CanopyBackground from './CanopyBackground.svelte';
@@ -185,6 +186,19 @@
             {/snippet}
           </Dropdown>
         </div>
+        <!-- Dev-only close button. In release the launcher is frameless and
+             reduces to the tray (on blur or via close-to-tray), so it needs no
+             chrome; but `tauri dev` has no tray and no auto-hide, leaving the
+             frameless window with no way to close it. This gives dev a single
+             close affordance in the drag-region titlebar. -->
+        {#if import.meta.env.DEV}
+          <div class="dev-close">
+            <Button variant="icon" title="Close (dev)" ariaLabel="Close window"
+                    onclick={() => void getCurrentWindow().close()}>
+              <CloseIcon size={16} />
+            </Button>
+          </div>
+        {/if}
       </div>
     </header>
 
@@ -248,6 +262,11 @@
     --dd-active-bg: rgba(255, 255, 255, 0.09);
     --dd-check: #8fce6a;
   }
+
+  /* Dev-only close button: neutral by default, conventional red flash on hover
+     so it reads as "close" against the dark titlebar. */
+  .dev-close { display: inline-flex; }
+  .dev-close :global(button:hover) { background: #e81123; color: #fff; }
 
   .tree { flex: 1; min-height: 0; position: relative; }
 

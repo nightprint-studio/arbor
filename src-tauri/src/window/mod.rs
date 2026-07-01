@@ -74,6 +74,14 @@ pub fn product_id_for_label(label: &str) -> Option<&'static str> {
     }
 }
 
+/// True for the labels that render the Canopy **launcher** shell — the `main`
+/// window today and the future dedicated [`launcher`] window. These are the
+/// windows that reduce to the tray when they lose focus (release only, see
+/// [`events`]) and that paint their own chrome instead of native decorations.
+pub fn is_launcher_label(label: &str) -> bool {
+    label == "main" || label == launcher::LAUNCHER_WINDOW_LABEL
+}
+
 #[derive(Clone, serde::Serialize)]
 struct ProductState<'a> {
     id: &'a str,

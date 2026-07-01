@@ -34,6 +34,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- The launcher now reduces to the system tray when it loses focus (JetBrains-Toolbox style) — launch a product or click away and it steps aside; bring it back from the tray icon.
 - The Git backend process now starts the first time you open Corvus rather than at app launch, so sitting on the launcher (or using only the File Explorer / music windows) no longer keeps a git backend running in the background.
 - The integrated terminal now batches high-rate output into a short coalescing window instead of emitting an event per read, so heavy output (build logs, `cat` of a large file) no longer floods the UI — smoother rendering with no perceptible added latency.
 - Keybindings are no longer a Settings section — viewing and customising shortcuts now live together in the dedicated Keyboard Shortcuts panel (**Shift+F1**).
