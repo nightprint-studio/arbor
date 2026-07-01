@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, setContext } from 'svelte';
   import { setupTauriListeners } from '$lib/utils/tauri-listeners';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { coalesceLatestByKey } from '$lib/utils/coalesce';
@@ -127,6 +127,7 @@
 
   import { animStore } from '$lib/stores/animations.svelte';
   import { tabsStore, setTabsPersistHook } from '$lib/stores/tabs.svelte';
+  import { explorerProjects, EXPLORER_PROJECTS_KEY } from '$lib/stores/explorerProjects.svelte';
   import { workspacesStore } from '$lib/stores/workspaces.svelte';
   import WorkspaceManagementModal from '../workspace/WorkspaceManagementModal.svelte';
   import WorktreeLinkManagerModal from '../linked-worktrees/WorktreeLinkManagerModal.svelte';
@@ -544,6 +545,14 @@
   // Initialise theme store — loads active theme from config and applies CSS vars.
   onMount(() => { themeStore.init(); });
 
+  // Every in-app file/folder picker inherits the git Projects source from here
+  // (the explorer widget is product-agnostic; it reads this context). Provide it
+  // once for the whole Corvus window, load the registry, and keep the active-repo
+  // highlight in sync with the current tab. No per-picker wiring needed.
+  setContext(EXPLORER_PROJECTS_KEY, explorerProjects);
+  onMount(() => { void explorerProjects.load(); });
+  $effect(() => { explorerProjects.setActiveRepoPath(tabsStore.activeTab?.path ?? null); });
+
   // Load the profile list + active profile, and listen for `profile-switched`
   // (reloads the window onto the new profile). Powers the title-bar gear menu.
   onMount(() => { void profileStore.init(); });
@@ -758,6 +767,12 @@
       });
 
       workspacesStore.setupListeners();
+
+      // The bootstrap above proves corvus-be is routable — backfill the picker
+      // Projects source in case its own onMount load() raced the backend and
+      // came back empty. No-op if it already populated. (registry-changed keeps
+      // it live thereafter.)
+      void explorerProjects.refresh();
     } finally {
       tabsStore.endInit();
     }

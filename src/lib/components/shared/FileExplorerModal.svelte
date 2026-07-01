@@ -17,7 +17,7 @@
    * Performance: the dir is read once (incl. hidden) and filtered on the FE;
    * the list is virtualised; the watcher is debounced; sort/filter memoised.
    */
-  import { tick, untrack, onMount, onDestroy } from 'svelte';
+  import { tick, untrack, onMount, onDestroy, getContext } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -38,7 +38,6 @@
   import Icon from '@iconify/svelte';
   import { getFileIcon, getFolderIcon } from '$lib/utils/file-icons';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { tabsStore } from '$lib/stores/tabs.svelte';
   import { keybindingsStore } from '$lib/stores/keybindings.svelte';
   import { matchesBinding } from '$lib/utils/keybindings';
   import { tooltip } from '$lib/actions/tooltip';
@@ -58,10 +57,10 @@
     type FsEntry, type FsRoot, type FsGitStatus, type GitBadge, type GitRepoMarker, type GitChange, type GitChanges, type FsBranch,
     type ExplorerRevealPayload, type ClipData, type FsOpProgress, type DirSize, type OverviewStats, type TrashEntry,
   } from '$lib/ipc/fs';
-  import { listRegistryReposLocal, listWorkspacesLocal } from '$lib/ipc/workspace';
   import { openInIde, getIdeConfig, startIdeDetection } from '$lib/ipc/worktree';
   import type { IdeConfig, DetectedIde } from '$lib/types/git';
   import { workspaceColorVar, type RepoRegistryEntry, type WorkspaceDef } from '$lib/types/workspace';
+  import { EXPLORER_PROJECTS_KEY, type ExplorerProjectsSource } from '$lib/stores/explorerProjects.svelte';
   import { explorerStore, mergeSidebarSections, EXPLORER_SECTIONS, mergeColumns } from '$lib/stores/explorer.svelte';
   import type { ExplorerSavedSearch } from '$lib/types/config';
   import { openUrl } from '@tauri-apps/plugin-opener';
@@ -111,6 +110,7 @@
     onConfirm,
     onConfirmMulti,
     onCancel,
+    source,
   }: {
     onClose?:         () => void;
     standalone?:      boolean;
@@ -123,6 +123,11 @@
     onConfirm?:       (path: string) => void;
     onConfirmMulti?:  (paths: string[]) => void;
     onCancel?:        () => void;
+    /** Projects/workspaces data source (caller-supplied). The explorer is
+     *  product-agnostic: it renders the Projects sidebar only when given a
+     *  source. The git product passes `explorerProjects`; products without
+     *  projects pass nothing (no Projects section) or their own source. */
+    source?:          ExplorerProjectsSource;
   } = $props();
 
   // Picker flags are static for the component's life (the mode/multiple props
@@ -272,9 +277,15 @@
 
   let roots       = $state<FsRoot[]>([]);
   let wslDistros  = $state<FsRoot[]>([]);
-  let projects    = $state<RepoRegistryEntry[]>([]);
-  let workspaces  = $state<WorkspaceDef[]>([]);
-  let activeWorkspaceId = $state<string | null>(null);
+  // Projects/workspaces are caller-supplied — the explorer renders them but never
+  // fetches them (the registry is a product concept). The source comes from the
+  // `source` prop if given, else the product-root context (`EXPLORER_PROJECTS_KEY`),
+  // else nothing (empty Projects section — e.g. Merula, which sets no source).
+  const ctxSource = getContext<ExplorerProjectsSource | undefined>(EXPLORER_PROJECTS_KEY);
+  const src               = $derived<ExplorerProjectsSource | undefined>(source ?? ctxSource);
+  const projects          = $derived<RepoRegistryEntry[]>(src?.projects ?? []);
+  const workspaces        = $derived<WorkspaceDef[]>(src?.workspaces ?? []);
+  const activeWorkspaceId = $derived<string | null>(src?.activeWorkspaceId ?? null);
 
   // IDE awareness for the "Open in editor" context action. Loaded + probed on
   // mount; the detection result fills `detectedIdes` (see onMount).
@@ -394,6 +405,16 @@
     lsSet('arbor:explorer-ws-expanded', [...next]);
   }
   const isWsExpanded = (id: string) => wsExpanded.has(id);
+  // First ever run: expand all workspace groups by default. Runs once the
+  // caller-supplied `source` populates (it loads async, so `workspaces` can
+  // arrive after mount), then the persisted one-shot flag keeps it from redoing.
+  $effect(() => {
+    if (lsGet('arbor:explorer-ws-init', false) || !workspaces.length) return;
+    lsSet('arbor:explorer-ws-init', true);
+    const all = new Set<string>(['__unassigned__', ...workspaces.map(w => w.id)]);
+    wsExpanded = all;
+    lsSet('arbor:explorer-ws-expanded', [...all]);
+  });
 
   // ── Recents ────────────────────────────────────────────────────────────────
   const RECENTS_KEY = 'arbor:explorer-recents';
@@ -462,7 +483,7 @@
     return `${n} selected${selSize ? ` · ${formatSize(selSize.bytes)}` : ''}`;
   });
   const drives      = $derived(roots.filter(r => r.kind === 'drive'));
-  const activeRepoPath = $derived(tabsStore.activeTab?.path ?? null);
+  const activeRepoPath = $derived(src?.activeRepoPath ?? null);
   const defaultBrowsePath = $derived(favourites[0]?.path ?? drives[0]?.path ?? '');
 
   function normPath(p: string): string { return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase(); }
@@ -2500,24 +2521,10 @@
   let clipUnlisten: UnlistenFn | null = null;
   let dropUnlisten: UnlistenFn | null = null;
   let focusUnlisten: UnlistenFn | null = null;
-  let registryUnlisten: UnlistenFn | null = null;
   let ideUnlisten: UnlistenFn | null = null;
   let fsOpUnlisten: UnlistenFn | null = null;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let rootsTimer: ReturnType<typeof setInterval> | null = null;
-
-  /** (Re)load the Projects sidebar source — registry repos + workspace groups.
-   *  Reads `repos.json` / `workspaces.json` through the always-on `platform`
-   *  backend (NOT corvus): "projects" is app-level data the explorer shows even
-   *  when the git product isn't running, so it never touches the optional corvus
-   *  backend. Called on mount and on `registry-changed` (a git-product mutation,
-   *  broadcast so the sidebar stays live even in the standalone window). */
-  async function loadRegistry() {
-    try {
-      const [repos, snap] = await Promise.all([listRegistryReposLocal(), listWorkspacesLocal()]);
-      projects = repos; workspaces = snap.workspaces; activeWorkspaceId = snap.active_workspace_id;
-    } catch { /* ignore */ }
-  }
 
   // Quick-access roots (favourites + drives) are static except for removable
   // media: a plugged/unplugged USB doesn't fire any event we listen to, so we
@@ -2544,17 +2551,6 @@
       const fb = defaultBrowsePath;
       if (fb) await navigate(fb);
     }
-    await loadRegistry();
-    // First ever run: expand all workspace groups by default (persisted via a
-    // one-shot flag so collapsing them all later isn't undone on reopen).
-    if (!lsGet('arbor:explorer-ws-init', false)) {
-      lsSet('arbor:explorer-ws-init', true);
-      const all = new Set<string>(['__unassigned__', ...workspaces.map(w => w.id)]);
-      wsExpanded = all; lsSet('arbor:explorer-ws-expanded', [...all]);
-    }
-    // Keep the Projects sidebar live: deregistering a repo or moving it between
-    // workspaces (from the main window or another explorer) broadcasts this.
-    try { registryUnlisten = await listen('arbor://registry-changed', () => { void loadRegistry(); }); } catch { /* ignore */ }
     // IDE awareness for "Open in editor": load the configured IDEs and run a
     // detection probe (results arrive via the event). Each window is its own JS
     // context, so the standalone explorer detects independently of the main app.
@@ -2611,7 +2607,7 @@
       else if (view === 'browse') listEl?.focus();
     });
   });
-  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); registryUnlisten?.(); ideUnlisten?.(); fsOpUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); });
+  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); ideUnlisten?.(); fsOpUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); });
 </script>
 
 {#snippet sbLabel(id: string, Ico: typeof Folder, text: string)}

@@ -11,16 +11,21 @@
    * the main window's — AppShell's onMount never runs in this window, hence the
    * minimal local bootstrap below.
    */
-  import { onMount } from 'svelte';
+  import { onMount, setContext } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { explorerStore } from '$lib/stores/explorer.svelte';
+  import { explorerProjects, EXPLORER_PROJECTS_KEY } from '$lib/stores/explorerProjects.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
   import ToastItem from '$lib/components/shared/Toast.svelte';
+
+  // Provide the git Projects source to the explorer below (and any picker it
+  // opens) — the standalone window surfaces projects just like the Corvus window.
+  setContext(EXPLORER_PROJECTS_KEY, explorerProjects);
 
   onMount(() => {
     // Repaint with the active theme + apply persisted user config locally.
@@ -31,11 +36,18 @@
     // so the launcher window never reads/writes the (legitimately down) sitta backend.
     explorerStore.enableSitta();
     void explorerStore.loadConfig();
+    // This window surfaces the git projects sidebar — load the registry source
+    // through sitta-be (no corvus-be here), kept live on registry-changed.
+    void explorerProjects.load({ local: true });
 
-    // `sitta-be` spawns off-thread, racing this window's first `loadConfig()`:
-    // if it attaches after we already read, the 14 sitta-owned settings stayed on
-    // defaults. Re-read once the backend signals it's routable so they take.
-    const unlisten = listen('arbor://sitta-be-up', () => { void explorerStore.loadConfig(); });
+    // `sitta-be` spawns off-thread, racing this window's first reads: if it
+    // attaches after we already read, the 14 sitta-owned settings stayed on
+    // defaults AND the Projects sidebar came back empty. Re-read both once the
+    // backend signals it's routable so they take.
+    const unlisten = listen('arbor://sitta-be-up', () => {
+      void explorerStore.loadConfig();
+      void explorerProjects.refresh();
+    });
     return () => { void unlisten.then((off) => off()); };
   });
 </script>
