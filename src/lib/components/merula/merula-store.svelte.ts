@@ -15,7 +15,7 @@
 
 import { LOG_LEVELS, type MerulaLogThreshold } from './stores/config.svelte';
 import { transportStore } from './stores/engine.svelte';
-import type { MerulaLayoutState } from '$lib/ipc/merula';
+import type { MerulaLayoutState } from '$lib/ipc/merula/merula';
 import type { ControlEdit } from './editor/merula-edit';
 
 /** Left-rail panels (top group = side panels, bottom group = bottom panel). */

@@ -10,7 +10,7 @@
  * the free chain without touching the IPC.
  */
 
-import type { MerulaInstrument } from '$lib/ipc/merula';
+import type { MerulaInstrument } from '$lib/ipc/merula/merula';
 
 /** Per-preview control values (the panel's knobs + selectors). */
 export interface PreviewControls {

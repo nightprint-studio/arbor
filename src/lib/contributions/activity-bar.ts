@@ -6,7 +6,7 @@
  * filter out items from disabled plugins, then run each entry through
  * `parseActivityBarEntry` to get a typed shape.
  */
-import type { PluginContribution } from '$lib/types/contribution';
+import type { PluginContribution } from '$lib/types/corvus/contribution';
 import type { ActivityBarEntry, ComboOption } from '$lib/types/plugin';
 
 export const ACTIVITY_BAR_POINT = 'arbor:activitybar';

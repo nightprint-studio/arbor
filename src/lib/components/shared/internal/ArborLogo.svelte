@@ -13,7 +13,7 @@
    * helper (`AppState.branding`) ensures HTML stats exports stay branded
    * with the same logo without a second round-trip through the plugin.
    */
-  import { brandingStore } from '$lib/stores/branding.svelte';
+  import { brandingStore } from '$lib/stores/corvus/branding.svelte';
 
   interface Props {
     size?: number;

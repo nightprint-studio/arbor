@@ -9,7 +9,7 @@
    * Merula-local presentational widget shared by the mixer strips + master + the
    * Inspector (a candidate for `shared/ui/` if it gets reused outside merula).
    */
-  import type { MerulaStereoPeak } from '$lib/ipc/merula';
+  import type { MerulaStereoPeak } from '$lib/ipc/merula/merula';
 
   let {
     peak,

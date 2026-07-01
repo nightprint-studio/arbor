@@ -5,7 +5,7 @@
    * the waveform toolbar AND the command palette launch the same flow without
    * duplicating modal markup.
    */
-  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';

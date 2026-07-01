@@ -15,7 +15,7 @@
 import {
   getMerulaScratchTabs, setMerulaScratchTabs,
   type MerulaSnippetEval,
-} from '$lib/ipc/merula';
+} from '$lib/ipc/merula/merula';
 
 export interface ScratchTab {
   id: string;

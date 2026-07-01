@@ -13,7 +13,7 @@
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { modelsStore } from '../stores/models.svelte';
-  import type { MerulaModelStatus } from '$lib/ipc/merula';
+  import type { MerulaModelStatus } from '$lib/ipc/merula/merula';
 
   let confirmDelete = $state<MerulaModelStatus | null>(null);
   let deleteError   = $state<string | null>(null);

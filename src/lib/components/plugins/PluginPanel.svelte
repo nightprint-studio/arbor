@@ -22,7 +22,7 @@
   import { platform } from '$lib/ipc/rpc';
   import { openFolder } from '$lib/utils/reveal';
   import { pluginStore } from '$lib/stores/plugin.svelte';
-  import { containerStore } from '$lib/stores/container.svelte';
+  import { containerStore } from '$lib/stores/corvus/container.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { setupTauriListeners } from '$lib/utils/tauri-listeners';
   import Modal from '$lib/components/shared/Modal.svelte';

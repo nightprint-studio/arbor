@@ -15,7 +15,7 @@
  * the song so the clip is audible right away (Ableton-style).
  */
 
-import { merulaScenes, merulaLaunch, type MerulaScene, type MerulaClipSelection } from '$lib/ipc/merula';
+import { merulaScenes, merulaLaunch, type MerulaScene, type MerulaClipSelection } from '$lib/ipc/merula/merula';
 import { transportStore, merulaEngine } from './engine.svelte';
 
 /** Allowed launch grids, in cycles. */

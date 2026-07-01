@@ -24,14 +24,14 @@
 import { openRepoFromUrl } from './openRepoFromUrl';
 import { runPipeline, step } from './action-pipeline';
 import { applyPostCheckout } from './applyPostCheckout';
-import { graphStore } from '$lib/stores/graph.svelte';
-import { tabsStore } from '$lib/stores/tabs.svelte';
+import { graphStore } from '$lib/stores/corvus/graph.svelte';
+import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
 import { uiStore } from '$lib/stores/ui.svelte';
-import { diffStore } from '$lib/stores/diff.svelte';
+import { diffStore } from '$lib/stores/corvus/diff.svelte';
 import { cacheStore } from '$lib/stores/cache.svelte';
-import { checkoutBranchSafe } from '$lib/ipc/branch';
+import { checkoutBranchSafe } from '$lib/ipc/corvus/branch';
 import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
-import { getCommitDiff } from '$lib/ipc/diff';
+import { getCommitDiff } from '$lib/ipc/corvus/diff';
 import { getDeepLinkConfig } from '$lib/ipc/deep-link';
 import type { ConfirmConfig, EnableConfig } from '$lib/types/deep-link';
 

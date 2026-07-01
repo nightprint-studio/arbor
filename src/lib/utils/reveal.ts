@@ -14,7 +14,7 @@
 
 import { openPath } from '@tauri-apps/plugin-opener';
 import { fsRevealInDir, revealInExplorerWindow } from '$lib/ipc/fs';
-import { explorerStore } from '$lib/stores/explorer.svelte';
+import { explorerStore } from '$lib/stores/sitta/explorer.svelte';
 
 /** Open a folder in the file explorer (built-in window when opted in, else the
  *  OS file manager). No selection — the folder is shown as the listing. */

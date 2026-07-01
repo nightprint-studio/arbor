@@ -24,7 +24,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import type { VizLane } from './arrangement.svelte';
   import { noteName } from './arrangement.svelte';
-  import type { MerulaQueryHap } from '$lib/ipc/merula';
+  import type { MerulaQueryHap } from '$lib/ipc/merula/merula';
   import { arrViewOptions } from './arr-view-options.svelte';
 
   let {

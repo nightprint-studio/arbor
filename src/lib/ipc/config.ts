@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { corvus, platform, sitta } from './rpc';
 import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, ExplorerConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, SittaConfig, WhatsNewConfig } from '$lib/types/config';
-import type { TicketLinksRepoConfig } from '$lib/types/git';
+import type { TicketLinksRepoConfig } from '$lib/types/corvus/git';
 
 export type { TicketLinksRepoConfig };
 

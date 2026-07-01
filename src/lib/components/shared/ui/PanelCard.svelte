@@ -25,7 +25,7 @@
    * dock from outside (e.g. AppShell's F6 focus-zone cycling).
    */
   import type { Snippet } from 'svelte';
-  import ResizablePanel from '$lib/components/layout/ResizablePanel.svelte';
+  import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
   import { sidebarSlide, bottomSlide } from '$lib/utils/panel-transitions';
   import { animStore } from '$lib/stores/animations.svelte';
 

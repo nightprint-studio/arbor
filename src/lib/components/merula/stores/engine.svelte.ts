@@ -23,7 +23,7 @@ import {
   onMerulaTransport, onMerulaMeters, onMerulaDiagnostics, onMerulaActiveHaps, onMerulaLog,
   onMerulaAudioError,
   type MerulaDiagnostic, type MerulaActiveHap, type MerulaStereoPeak,
-} from '$lib/ipc/merula';
+} from '$lib/ipc/merula/merula';
 
 // ── Transport ─────────────────────────────────────────────────────────────────
 

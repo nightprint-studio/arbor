@@ -6,7 +6,7 @@
  * `contributionStore.forPoint('arbor:panel-content')` and resolve the
  * matching `(plugin_name, panel_id)` entry through `findPanelContent`.
  */
-import type { PluginContribution } from '$lib/types/contribution';
+import type { PluginContribution } from '$lib/types/corvus/contribution';
 import type { PluginPanelContent } from '$lib/types/plugin';
 
 export const PANEL_CONTENT_POINT = 'arbor:panel-content';

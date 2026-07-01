@@ -9,7 +9,7 @@
 import {
   getMerulaConfig, setMerulaConfig, merulaSetOutputDevice,
   type MerulaConfig, type MerulaRenderConfig,
-} from '$lib/ipc/merula';
+} from '$lib/ipc/merula/merula';
 
 export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const;
 export type MerulaLogThreshold = (typeof LOG_LEVELS)[number];

@@ -8,7 +8,7 @@
  * (so a save then Run is enough — no live registry mutation needed).
  */
 
-import { getMerulaAliases, setMerulaAliases } from '$lib/ipc/merula';
+import { getMerulaAliases, setMerulaAliases } from '$lib/ipc/merula/merula';
 
 /** One alias row, for list rendering. */
 export interface AliasEntry { name: string; target: string; }

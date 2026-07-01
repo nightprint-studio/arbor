@@ -15,7 +15,7 @@
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import { referenceStore } from '../stores/reference.svelte';
-  import type { MerulaDslEntry, MerulaDslKind } from '$lib/ipc/merula';
+  import type { MerulaDslEntry, MerulaDslKind } from '$lib/ipc/merula/merula';
   import DocsEntryRow from './DocsEntryRow.svelte';
 
   // Idempotent: MerulaShell loads this on mount, but a standalone mount still works.

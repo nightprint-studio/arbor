@@ -6,7 +6,7 @@
   import { animStore }      from '$lib/stores/animations.svelte';
   import { fsWriteTextFile } from '$lib/ipc/fs';
   import { notificationsStore } from '$lib/feedback/stores/notifications.svelte';
-  import FileExplorerModal     from './FileExplorerModal.svelte';
+  import FileExplorerModal     from '../sitta/FileExplorerModal.svelte';
   import Modal               from './Modal.svelte';
   import ModalHeader         from './ModalHeader.svelte';
   import SearchBar           from './ui/SearchBar.svelte';

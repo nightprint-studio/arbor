@@ -17,7 +17,7 @@
  * between scales centred on different roots.
  */
 
-import type { MerulaQueryHap, MerulaScaleMode } from '$lib/ipc/merula';
+import type { MerulaQueryHap, MerulaScaleMode } from '$lib/ipc/merula/merula';
 import { arrangementStore } from '../viz/arrangement.svelte';
 import { scalesStore } from './scales.svelte';
 

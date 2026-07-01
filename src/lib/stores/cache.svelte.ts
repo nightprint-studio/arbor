@@ -20,19 +20,19 @@
  * read goes back to the backend.
  */
 
-import type { GraphData, CommitDetail, BranchInfo, TagInfo, StashEntry, SubmoduleInfo } from '$lib/types/git';
-import type { CiProviderInfo, CiRun, PipelineDef, PipelineRun } from '$lib/types/pipeline';
-import type { MergeRequest, MergedMrHint, MrFeatureStatus } from '$lib/types/mr';
+import type { GraphData, CommitDetail, BranchInfo, TagInfo, StashEntry, SubmoduleInfo } from '$lib/types/corvus/git';
+import type { CiProviderInfo, CiRun, PipelineDef, PipelineRun } from '$lib/types/corvus/pipeline';
+import type { MergeRequest, MergedMrHint, MrFeatureStatus } from '$lib/types/corvus/mr';
 import type { CacheConfig } from '$lib/types/config';
 
-import { getGraph, getGraphForFile, getCommitDetail, getRepoFingerprint } from '$lib/ipc/graph';
-import { listLocalBranches, listRemoteBranches, listStashes, listTags, getNearestTag } from '$lib/ipc/branch';
-import { listSubmodules } from '$lib/ipc/submodule';
-import { getMergedMrHints } from '$lib/ipc/mr';
-import { getCiProvider, fetchCiRuns, listPipelineDefs, listPipelineRuns } from '$lib/ipc/pipeline';
-import { listMrs, probeMrFeature } from '$lib/ipc/mr';
+import { getGraph, getGraphForFile, getCommitDetail, getRepoFingerprint } from '$lib/ipc/corvus/graph';
+import { listLocalBranches, listRemoteBranches, listStashes, listTags, getNearestTag } from '$lib/ipc/corvus/branch';
+import { listSubmodules } from '$lib/ipc/corvus/submodule';
+import { getMergedMrHints } from '$lib/ipc/corvus/mr';
+import { getCiProvider, fetchCiRuns, listPipelineDefs, listPipelineRuns } from '$lib/ipc/corvus/pipeline';
+import { listMrs, probeMrFeature } from '$lib/ipc/corvus/mr';
 import { getCacheConfig, setCacheConfig, evictTabCache } from '$lib/ipc/config';
-import { registerInvalidateHandler } from '$lib/ipc/cache-invalidate';
+import { registerInvalidateHandler } from '$lib/ipc/corvus/cache-invalidate';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -188,10 +188,10 @@ function createCacheStore() {
     // the CI panel stayed frozen on a remote-mutating push until the next
     // poll. Dynamic imports keep this module decoupled from feature stores at
     // startup.
-    import('./mr.svelte')
+    import('./corvus/mr.svelte')
       .then(m => m.mrStore.onCacheInvalidated(tabId))
       .catch(() => { /* feature store not loaded yet — nothing to refresh */ });
-    import('./pipelines.svelte')
+    import('./corvus/pipelines.svelte')
       .then(m => m.pipelinesStore.onCacheInvalidated(tabId))
       .catch(() => { /* feature store not loaded yet — nothing to refresh */ });
   }
@@ -432,7 +432,7 @@ function createCacheStore() {
         // Changes detected: invalidate this tab and trigger a reload.
         invalidate(tabId);
         // Import graphStore dynamically to avoid circular imports at module level.
-        const { graphStore } = await import('./graph.svelte');
+        const { graphStore } = await import('./corvus/graph.svelte');
         graphStore.refresh();
       } catch {
         // Silently ignore — network errors, tab closed, etc.
@@ -529,8 +529,8 @@ function createCacheStore() {
    *  graph data, so it can run on every fetch tick without a spinner flash. */
   async function refreshStatusOnly(tabId: string): Promise<void> {
     try {
-      const { getStatus } = await import('$lib/ipc/stage');
-      const { repoStore } = await import('./repo.svelte');
+      const { getStatus } = await import('$lib/ipc/corvus/stage');
+      const { repoStore } = await import('./corvus/repo.svelte');
       const s = await getStatus(tabId);
       repoStore.setStatus(s);
     } catch {
@@ -584,11 +584,11 @@ function createCacheStore() {
       // Refs changed: invalidate cache + reload graph (loadGraph will
       // refresh status as part of its Promise.all, no need to do it here).
       invalidate(tabId);
-      const { graphStore } = await import('./graph.svelte');
+      const { graphStore } = await import('./corvus/graph.svelte');
       graphStore.refresh();
     } catch {
       // On error fall back to an unconditional refresh.
-      const { graphStore } = await import('./graph.svelte');
+      const { graphStore } = await import('./corvus/graph.svelte');
       graphStore.refresh();
     }
   }

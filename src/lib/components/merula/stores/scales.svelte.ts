@@ -5,7 +5,7 @@
  * scale). Static; a single load on window mount. Rune-store pattern.
  */
 
-import { merulaScales, type MerulaScaleMode } from '$lib/ipc/merula';
+import { merulaScales, type MerulaScaleMode } from '$lib/ipc/merula/merula';
 
 function createScalesStore() {
   let modes = $state<MerulaScaleMode[]>([]);

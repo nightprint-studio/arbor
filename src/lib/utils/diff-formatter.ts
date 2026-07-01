@@ -1,5 +1,5 @@
 import Prism from 'prismjs';
-import type { DiffFile } from '../types/git';
+import type { DiffFile } from '../types/corvus/git';
 import { CUSTOM_HIGHLIGHTERS } from './prism-languages';
 // Centralised Prism language registrations (also imported by `highlight.ts`
 // for the read-only code blocks in plugin forms / JSON Studio modal). Add

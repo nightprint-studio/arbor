@@ -18,7 +18,7 @@
 
   import { createMerulaExtensions, setActiveHaps, toActiveHapMarks, setOutOfScale, setClipRisk, toWarnMarks, toCmDiagnostics, getMerulaTree }
     from './merula-cm';
-  import { merulaFormat } from '$lib/ipc/merula';
+  import { merulaFormat } from '$lib/ipc/merula/merula';
   import type { MerulaIntelSource } from './merula-intel';
   import { extractSymbols, identifierAt, identifierUsages, tracksReferencing, stringArgCallAt, declBodyRangeForSelection, withFileDeps, type MerulaSymbol } from './merula-lang';
   import { symbolHighlightStore } from '../stores/symbol-highlight.svelte';

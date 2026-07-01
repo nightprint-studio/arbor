@@ -15,7 +15,7 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   merulaModels, merulaDownloadModel, merulaDeleteModel, type MerulaModelStatus,
-} from '$lib/ipc/merula';
+} from '$lib/ipc/merula/merula';
 import { cancelJob } from '$lib/feedback/ipc/job';
 import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
 

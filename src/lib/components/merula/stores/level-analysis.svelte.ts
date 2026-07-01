@@ -14,7 +14,7 @@
  * offending notes underline without the backend having to attribute spans.
  */
 
-import { merulaAnalyzeLevels, type MerulaClipWindow } from '$lib/ipc/merula';
+import { merulaAnalyzeLevels, type MerulaClipWindow } from '$lib/ipc/merula/merula';
 import { arrangementStore } from '../viz/arrangement.svelte';
 
 /** A clip-risk editor mark: a source byte-range + a hover message. */

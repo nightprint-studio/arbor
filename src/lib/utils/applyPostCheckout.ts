@@ -24,13 +24,13 @@
  * nodes' `refs`) prefer a full `graphStore.refresh()` instead.
  */
 
-import { getStatus } from '$lib/ipc/stage';
+import { getStatus } from '$lib/ipc/corvus/stage';
 import { cacheStore } from '$lib/stores/cache.svelte';
-import { graphStore } from '$lib/stores/graph.svelte';
-import { repoStore } from '$lib/stores/repo.svelte';
-import { tabsStore } from '$lib/stores/tabs.svelte';
-import { worktreeStore } from '$lib/stores/worktree.svelte';
-import { localTagTracker } from '$lib/stores/local-tags.svelte';
+import { graphStore } from '$lib/stores/corvus/graph.svelte';
+import { repoStore } from '$lib/stores/corvus/repo.svelte';
+import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
+import { worktreeStore } from '$lib/stores/corvus/worktree.svelte';
+import { localTagTracker } from '$lib/stores/corvus/local-tags.svelte';
 
 export async function applyPostCheckout(tabId: string): Promise<void> {
   // Drop the stale snapshot so the next loadSidebarData() hits the backend.

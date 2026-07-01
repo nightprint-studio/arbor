@@ -1,4 +1,4 @@
-import type { DiffFile } from '$lib/types/git';
+import type { DiffFile } from '$lib/types/corvus/git';
 import { lineKey } from './patch-builder';
 
 export interface ChunkAnchor {

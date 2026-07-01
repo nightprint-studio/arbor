@@ -10,7 +10,7 @@
  * pushed via `arbor.ui.set_panel_content(<view_id>, …)` (the same channel
  * sidebar panels use) and rendered by the full `FormNodeRenderer`.
  */
-import type { PluginContribution } from '$lib/types/contribution';
+import type { PluginContribution } from '$lib/types/corvus/contribution';
 import type { PluginViewSection, ViewPlacement } from '$lib/types/plugin';
 
 export const VIEW_POINT = 'arbor:view';

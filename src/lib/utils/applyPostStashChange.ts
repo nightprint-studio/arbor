@@ -20,11 +20,11 @@
  * from.  No `graphStore.refresh()`, no `loadGraph` round-trip.
  */
 
-import { listStashes, listGraphStashRefs } from '$lib/ipc/branch';
-import { getStatus } from '$lib/ipc/stage';
-import { graphStore } from '$lib/stores/graph.svelte';
-import { repoStore } from '$lib/stores/repo.svelte';
-import { tabsStore } from '$lib/stores/tabs.svelte';
+import { listStashes, listGraphStashRefs } from '$lib/ipc/corvus/branch';
+import { getStatus } from '$lib/ipc/corvus/stage';
+import { graphStore } from '$lib/stores/corvus/graph.svelte';
+import { repoStore } from '$lib/stores/corvus/repo.svelte';
+import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
 import { cacheStore } from '$lib/stores/cache.svelte';
 
 export async function applyPostStashChange(tabId: string): Promise<void> {

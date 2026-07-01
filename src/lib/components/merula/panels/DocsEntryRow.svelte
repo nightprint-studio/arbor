@@ -5,7 +5,7 @@
    * presentation over a {@link MerulaDslEntry} — the data comes from the catalogue.
    */
   import { ChevronRight } from 'lucide-svelte';
-  import type { MerulaDslEntry } from '$lib/ipc/merula';
+  import type { MerulaDslEntry } from '$lib/ipc/merula/merula';
 
   let {
     entry,

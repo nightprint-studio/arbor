@@ -11,22 +11,22 @@
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { invoke } from '@tauri-apps/api/core';
   import { corvus } from '$lib/ipc/rpc';
-  import { tabsStore } from '$lib/stores/tabs.svelte';
-  import { contributionStore } from '$lib/stores/contribution.svelte';
+  import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
+  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { VIEW_POINT, parseViewSection } from '$lib/contributions/view';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { graphStore } from '$lib/stores/graph.svelte';
+  import { graphStore } from '$lib/stores/corvus/graph.svelte';
   import { cacheStore } from '$lib/stores/cache.svelte';
-  import { worktreeStore } from '$lib/stores/worktree.svelte';
-  import { mrStore } from '$lib/stores/mr.svelte';
+  import { worktreeStore } from '$lib/stores/corvus/worktree.svelte';
+  import { mrStore } from '$lib/stores/corvus/mr.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import { appearanceStore } from '$lib/stores/appearance.svelte';
-  import { branchGroupingStore } from '$lib/stores/branch-grouping.svelte';
-  import { workspacesStore } from '$lib/stores/workspaces.svelte';
-  import { linkedWorktreesStore } from '$lib/stores/linkedWorktrees.svelte';
-  import { setWorktreeLinkSyncEnabled, removeWorktreeLinkMember } from '$lib/ipc/linkedWorktree';
-  import type { WorkspaceDef, RepoRegistryEntry } from '$lib/types/workspace';
-  import { activityBarConfigStore } from '$lib/stores/activityBarConfig.svelte';
+  import { branchGroupingStore } from '$lib/stores/corvus/branch-grouping.svelte';
+  import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
+  import { linkedWorktreesStore } from '$lib/stores/corvus/linkedWorktrees.svelte';
+  import { setWorktreeLinkSyncEnabled, removeWorktreeLinkMember } from '$lib/ipc/corvus/linkedWorktree';
+  import type { WorkspaceDef, RepoRegistryEntry } from '$lib/types/corvus/workspace';
+  import { activityBarConfigStore } from '$lib/stores/corvus/activityBarConfig.svelte';
   import { firePluginAction, reloadPlugins } from '$lib/ipc/plugin';
   import { openExplorerWindow, openMerulaWindow } from '$lib/ipc/app';
   import { openFolder } from '$lib/utils/reveal';
@@ -34,36 +34,36 @@
     checkoutBranch, checkoutBranchSafe, mergeBranch, deleteBranch, createBranch,
     stashApply, stashPop, stashDrop, resetToCommit,
     listStashes,
-  } from '$lib/ipc/branch';
+  } from '$lib/ipc/corvus/branch';
   import { handleCheckoutResult } from '$lib/utils/checkoutResultHandler';
-  import type { MergeStrategy } from '$lib/ipc/branch';
-  import { pushBranch, fetchRemote, pullBranch, listRemotes } from '$lib/ipc/remote';
+  import type { MergeStrategy } from '$lib/ipc/corvus/branch';
+  import { pushBranch, fetchRemote, pullBranch, listRemotes } from '$lib/ipc/corvus/remote';
   import { handlePullResult, handlePullThrown } from '$lib/utils/pullResultHandler';
   import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
   import { applyPostCheckout } from '$lib/utils/applyPostCheckout';
   import { startPullOperation } from '$lib/feedback/bridge/operations-bridge';
-  import { cherryPick, revertCommit, stageAll, unstageAll, discardAll } from '$lib/ipc/stage';
-  import { updateAllSubmodules } from '$lib/ipc/submodule';
-  import { getCommitDetail, openRepo as ipcOpenRepo, getGraph, getRepoFiles } from '$lib/ipc/graph';
-  import { getStatus } from '$lib/ipc/stage';
-  import { repoStore } from '$lib/stores/repo.svelte';
-  import { openInIde, listWorktrees } from '$lib/ipc/worktree';
+  import { cherryPick, revertCommit, stageAll, unstageAll, discardAll } from '$lib/ipc/corvus/stage';
+  import { updateAllSubmodules } from '$lib/ipc/corvus/submodule';
+  import { getCommitDetail, openRepo as ipcOpenRepo, getGraph, getRepoFiles } from '$lib/ipc/corvus/graph';
+  import { getStatus } from '$lib/ipc/corvus/stage';
+  import { repoStore } from '$lib/stores/corvus/repo.svelte';
+  import { openInIde, listWorktrees } from '$lib/ipc/corvus/worktree';
   import { switchToWorktree } from '$lib/utils/worktree-switch';
   import { copyDeepLink } from '$lib/utils/deep-link-builder';
   import type {
     BranchInfo, SearchResult, RepoStatus, TagInfo, StashEntry, RemoteInfo,
     WorktreeInfo,
-  } from '$lib/types/git';
+  } from '$lib/types/corvus/git';
   import type { PluginCommand } from '$lib/types/plugin';
-  import type { RepoTab } from '$lib/stores/tabs.svelte';
-  import type { MergeRequest } from '$lib/types/mr';
+  import type { RepoTab } from '$lib/stores/corvus/tabs.svelte';
+  import type { MergeRequest } from '$lib/types/corvus/mr';
   import type { Theme } from '$lib/types/theme';
-  import type { Issue } from '$lib/types/issues';
-  import { issuesStore } from '$lib/stores/issues.svelte';
+  import type { Issue } from '$lib/types/corvus/issues';
+  import { issuesStore } from '$lib/stores/corvus/issues.svelte';
   import {
     linearGetAuthStatus, jiraGetAuthStatus,
     linearSearchIssues, jiraSearchIssues,
-  } from '$lib/ipc/issues';
+  } from '$lib/ipc/corvus/issues';
   import { getBranchPolicy, assertBranchNameAllowed, type BranchPolicy } from '$lib/utils/branch-policy';
   import ConfirmModal from '$lib/components/shared/ConfirmModal.svelte';
   import { shortcutFor } from '$lib/utils/shortcut';

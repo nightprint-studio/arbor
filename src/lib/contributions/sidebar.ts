@@ -7,7 +7,7 @@
  * disabled plugins, then run each entry through `parseSidebarSection` to
  * get a typed shape.
  */
-import type { PluginContribution } from '$lib/types/contribution';
+import type { PluginContribution } from '$lib/types/corvus/contribution';
 import type { PluginSidebarSection, PluginSidebarSearch } from '$lib/types/plugin';
 
 export const SIDEBAR_POINT = 'arbor:sidebar';

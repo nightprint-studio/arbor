@@ -30,7 +30,7 @@
   import NotificationItem from '$lib/components/shared/NotificationItem.svelte';
   import NotificationsOverlay from '$lib/components/shared/NotificationsOverlay.svelte';
   import OperationsOverlay from '$lib/components/shared/OperationsOverlay.svelte';
-  import JobsOverlay from '$lib/components/jobs/JobsOverlay.svelte';
+  import JobsOverlay from '$lib/components/corvus/jobs/JobsOverlay.svelte';
   import TransfersOverlay from '$lib/components/shared/TransfersOverlay.svelte';
 
   let { id, main = false, children }: { id: string; main?: boolean; children?: Snippet } = $props();

@@ -9,9 +9,9 @@
  * Arbor's full UI instead of being reimplemented in the explorer.
  */
 
-import { openRepo } from '$lib/ipc/graph';
-import { tabsStore } from '$lib/stores/tabs.svelte';
-import { workspacesStore } from '$lib/stores/workspaces.svelte';
+import { openRepo } from '$lib/ipc/corvus/graph';
+import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
+import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
 
 function norm(p: string): string {
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();

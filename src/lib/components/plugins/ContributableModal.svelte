@@ -39,8 +39,8 @@
   import { Send }    from 'lucide-svelte';
   import PluginIcon         from '$lib/components/plugins/PluginIcon.svelte';
   import FormNodeRenderer   from './FormNodeRenderer.svelte';
-  import { containerStore }    from '$lib/stores/container.svelte';
-  import { contributionStore } from '$lib/stores/contribution.svelte';
+  import { containerStore }    from '$lib/stores/corvus/container.svelte';
+  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { pluginStore }       from '$lib/stores/plugin.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { firePluginAction }  from '$lib/ipc/plugin';

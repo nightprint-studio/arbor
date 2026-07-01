@@ -19,7 +19,7 @@ import {
 } from './merula-lang';
 import { extractTarget, inlinePlan } from './merula-refactor';
 import type { EditChange } from './merula-edit';
-import type { MerulaScaleMode } from '$lib/ipc/merula';
+import type { MerulaScaleMode } from '$lib/ipc/merula/merula';
 
 /** One context action offered in the Alt+Enter popup. */
 export interface IntentionItem {

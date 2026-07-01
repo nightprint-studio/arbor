@@ -15,7 +15,7 @@
   import { animStore } from '$lib/stores/animations.svelte';
   import { previewStore } from '../stores/preview.svelte';
   import { workspaceStore } from '../stores/workspace.svelte';
-  import type { MerulaInstrument } from '$lib/ipc/merula';
+  import type { MerulaInstrument } from '$lib/ipc/merula/merula';
 
   let { inst }: { inst: MerulaInstrument } = $props();
 

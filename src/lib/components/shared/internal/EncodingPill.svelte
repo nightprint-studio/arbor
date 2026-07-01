@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronDown } from 'lucide-svelte';
   import Dropdown, { type DropdownItem } from '../ui/Dropdown.svelte';
-  import { ENCODING_CHOICES } from '$lib/stores/encodingOverrides.svelte';
+  import { ENCODING_CHOICES } from '$lib/stores/corvus/encodingOverrides.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {

@@ -21,12 +21,12 @@
   try { label = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
 
   const loadShell = (): Promise<{ default: Component }> => {
-    if (label === 'drag-overlay') return import('$lib/components/layout/DragOverlay.svelte');
-    if (label === 'explorer' || label.startsWith('explorer-')) return import('$lib/components/layout/ExplorerWindow.svelte');
-    if (label === 'merula' || label.startsWith('merula-')) return import('$lib/components/layout/MerulaWindow.svelte');
-    if (label === 'main' || label === 'launcher') return import('$lib/components/layout/LauncherWindow.svelte');
+    if (label === 'drag-overlay') return import('$lib/components/shared/DragOverlay.svelte');
+    if (label === 'explorer' || label.startsWith('explorer-')) return import('$lib/components/sitta/ExplorerWindow.svelte');
+    if (label === 'merula' || label.startsWith('merula-')) return import('$lib/components/merula/MerulaWindow.svelte');
+    if (label === 'main' || label === 'launcher') return import('$lib/components/launcher/LauncherWindow.svelte');
     // corvus + any unknown label → the Git AppShell.
-    return import('$lib/components/layout/AppShell.svelte');
+    return import('$lib/components/corvus/AppShell.svelte');
   };
 
   let Shell = $state<Component | null>(null);

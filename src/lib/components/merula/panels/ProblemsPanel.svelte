@@ -14,7 +14,7 @@
   import { clipLintStore } from '../stores/clip-lint.svelte';
   import { levelAnalysisStore } from '../stores/level-analysis.svelte';
   import { makeByteToU16 } from '../editor/merula-lang';
-  import type { MerulaDiagnostic } from '$lib/ipc/merula';
+  import type { MerulaDiagnostic } from '$lib/ipc/merula/merula';
 
   let query = $state('');
   let searchEl = $state<HTMLInputElement | null>(null);

@@ -28,7 +28,7 @@
   import { tooltip } from '$lib/actions/tooltip';
   import { uiStore }           from '$lib/stores/ui.svelte';
   import { keybindingsStore }  from '$lib/stores/keybindings.svelte';
-  import { contributionStore } from '$lib/stores/contribution.svelte';
+  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { pluginStore }       from '$lib/stores/plugin.svelte';
   import {
     DEFAULT_KEYBINDINGS, GROUP_ORDER, formatBinding, type Keybinding,

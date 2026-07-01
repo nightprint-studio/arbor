@@ -1,4 +1,4 @@
-import { fetchRemoteImage, type ImageProvider } from '$lib/ipc/images';
+import { fetchRemoteImage, type ImageProvider } from '$lib/ipc/corvus/images';
 import { imageLightbox, type LightboxItem } from '$lib/stores/imageLightbox.svelte';
 
 export interface PreviewImagesOptions {

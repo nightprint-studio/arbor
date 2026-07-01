@@ -14,7 +14,7 @@ import { renderStore, DEFAULT_RENDER_LOOPS } from './render.svelte';
 import { configStore } from './config.svelte';
 import { transportUiStore } from './transport-ui.svelte';
 import { arrangementStore } from '../viz/arrangement.svelte';
-import { merulaRender, merulaRenderStems, merulaExportMidi } from '$lib/ipc/merula';
+import { merulaRender, merulaRenderStems, merulaExportMidi } from '$lib/ipc/merula/merula';
 import { fsWriteTextFile } from '$lib/ipc/fs';
 import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';

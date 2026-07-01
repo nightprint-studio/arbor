@@ -22,7 +22,7 @@
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import type { DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import ArborLogo from '$lib/components/shared/internal/ArborLogo.svelte';
-  import WindowControls from '$lib/components/layout/WindowControls.svelte';
+  import WindowControls from '$lib/components/shared/WindowControls.svelte';
   import RecentProjectsModal from './RecentProjectsModal.svelte';
   // Profiles are a global Arbor concept (shared vault/settings across windows);
   // both the store and the manager modal are window-agnostic and reused as-is.

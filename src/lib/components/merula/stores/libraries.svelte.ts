@@ -9,7 +9,7 @@
  */
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { merulaLibraries, merulaSyncLibraries, type MerulaLibraryStatus } from '$lib/ipc/merula';
+import { merulaLibraries, merulaSyncLibraries, type MerulaLibraryStatus } from '$lib/ipc/merula/merula';
 import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
 import { cancelJob } from '$lib/feedback/ipc/job';
 

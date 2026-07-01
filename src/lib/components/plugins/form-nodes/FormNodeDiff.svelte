@@ -16,8 +16,8 @@
   position survive the update.
 -->
 <script lang="ts">
-  import DiffHunkView from '$lib/components/diff/DiffHunk.svelte';
-  import VirtualHunk   from '$lib/components/diff/VirtualHunk.svelte';
+  import DiffHunkView from '$lib/components/corvus/diff/DiffHunk.svelte';
+  import VirtualHunk   from '$lib/components/corvus/diff/VirtualHunk.svelte';
   import TypePill      from '$lib/components/shared/internal/TypePill.svelte';
   import { syntheticPathForLang } from '$lib/utils/diff-formatter';
   import type { FormNode } from '$lib/types/plugin';

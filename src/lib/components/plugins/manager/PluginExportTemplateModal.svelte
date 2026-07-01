@@ -24,7 +24,7 @@
   import Modal            from '$lib/components/shared/Modal.svelte';
   import ModalHeader      from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter      from '$lib/components/shared/ModalFooter.svelte';
-  import FileExplorerModal  from '$lib/components/shared/FileExplorerModal.svelte';
+  import FileExplorerModal  from '$lib/components/sitta/FileExplorerModal.svelte';
   import Tabs             from '$lib/components/shared/ui/Tabs.svelte';
   import Toggle           from '$lib/components/shared/ui/Toggle.svelte';
   import Input            from '$lib/components/shared/ui/Input.svelte';

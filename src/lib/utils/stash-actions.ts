@@ -5,14 +5,14 @@
 // graph refresh) consolidated so consumers don't all reimplement it.
 // Used by StashList (sidebar), CommitGraph (hover actions on the bubble)
 // and CommitDetailPanel (toolbar in the stash header).
-import { stashApply, stashPop, stashDrop } from '$lib/ipc/branch';
-import { getStatus }   from '$lib/ipc/stage';
+import { stashApply, stashPop, stashDrop } from '$lib/ipc/corvus/branch';
+import { getStatus }   from '$lib/ipc/corvus/stage';
 import { uiStore }     from '$lib/stores/ui.svelte';
-import { graphStore }  from '$lib/stores/graph.svelte';
-import { diffStore }   from '$lib/stores/diff.svelte';
-import { repoStore }   from '$lib/stores/repo.svelte';
+import { graphStore }  from '$lib/stores/corvus/graph.svelte';
+import { diffStore }   from '$lib/stores/corvus/diff.svelte';
+import { repoStore }   from '$lib/stores/corvus/repo.svelte';
 import { applyPostStashChange } from '$lib/utils/applyPostStashChange';
-import type { StashEntry, StashApplyResult } from '$lib/types/git';
+import type { StashEntry, StashApplyResult } from '$lib/types/corvus/git';
 
 async function handleApplyResult(
   tabId: string,

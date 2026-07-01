@@ -1,4 +1,4 @@
-import type { WhenClause } from '$lib/types/contribution';
+import type { WhenClause } from '$lib/types/corvus/contribution';
 
 /**
  * when-clause matcher for contribution points.

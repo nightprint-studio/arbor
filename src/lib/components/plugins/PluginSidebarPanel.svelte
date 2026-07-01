@@ -32,7 +32,7 @@
    * once below); sub-renderers don't ship styles of their own.
    */
   import { untrack, onMount } from 'svelte';
-  import { contributionStore } from '$lib/stores/contribution.svelte';
+  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { firePluginAction } from '$lib/ipc/plugin';
   import { PANEL_CONTENT_POINT, findPanelContent } from '$lib/contributions/panel-content';
   import { setupTauriListeners } from '$lib/utils/tauri-listeners';

@@ -22,7 +22,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { X as XIcon } from 'lucide-svelte';
-  import { contributionStore } from '$lib/stores/contribution.svelte';
+  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { uiStore }           from '$lib/stores/ui.svelte';
   import { firePluginAction }  from '$lib/ipc/plugin';
   import { PANEL_CONTENT_POINT, findPanelContent } from '$lib/contributions/panel-content';

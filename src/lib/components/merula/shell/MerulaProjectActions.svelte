@@ -5,7 +5,7 @@
    * titlebar, AND the keyboard shortcuts can launch the same flows without any
    * of them duplicating `FileExplorerModal` markup.
    */
-  import FileExplorerModal from '$lib/components/shared/FileExplorerModal.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import ExportOptionsModal from './ExportOptionsModal.svelte';
   import { projectActions } from '../stores/project-actions.svelte';
   import { projectStore } from '../stores/project.svelte';

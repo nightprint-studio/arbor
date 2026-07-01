@@ -23,7 +23,7 @@
   import { buildSnippet, type PreviewControls } from './snippet';
   import { merulaStore } from '../merula-store.svelte';
   import { previewStore } from '../stores/preview.svelte';
-  import { merulaAuditionExpr } from '$lib/ipc/merula';
+  import { merulaAuditionExpr } from '$lib/ipc/merula/merula';
 
   const inst = $derived(previewStore.inst);
   const pitched = $derived(!!inst && inst.kind !== 'sample');

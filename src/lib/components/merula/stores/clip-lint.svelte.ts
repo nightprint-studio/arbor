@@ -15,7 +15,7 @@
  * with no extra cost.
  */
 
-import type { MerulaQueryHap } from '$lib/ipc/merula';
+import type { MerulaQueryHap } from '$lib/ipc/merula/merula';
 import { arrangementStore } from '../viz/arrangement.svelte';
 
 /** Authored gain at/above this (≈ +3.5 dB over unity) is flagged as clip-risk. */

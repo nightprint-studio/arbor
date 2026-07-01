@@ -10,7 +10,7 @@
  * getters); window-local UI state.
  */
 
-import type { MerulaInstrument } from '$lib/ipc/merula';
+import type { MerulaInstrument } from '$lib/ipc/merula/merula';
 import { soundsStore } from './sounds.svelte';
 import { merulaStore } from '../merula-store.svelte';
 

@@ -15,7 +15,7 @@
   import { projectActions } from '../stores/project-actions.svelte';
   import { fileMetaStore, type MerulaFileMeta } from '../stores/file-meta.svelte';
   import { fsRevealInDir } from '$lib/ipc/fs';
-  import type { MerulaProjectFile } from '$lib/ipc/merula';
+  import type { MerulaProjectFile } from '$lib/ipc/merula/merula';
 
   const files = $derived(projectStore.files);
   const rootFiles = $derived(files.filter(f => !f.rel.includes('/')));

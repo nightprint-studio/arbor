@@ -52,7 +52,7 @@
   import { applyPatchOps } from './form-nodes/patch';
   import { uiStore }          from '$lib/stores/ui.svelte';
   import { tooltip }          from '$lib/actions/tooltip';
-  import FileExplorerModal      from '$lib/components/shared/FileExplorerModal.svelte';
+  import FileExplorerModal      from '$lib/components/sitta/FileExplorerModal.svelte';
 
   import type { FormNodeCtx } from './form-nodes/ctx';
   import {

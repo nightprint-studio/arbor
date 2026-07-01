@@ -28,7 +28,7 @@
    */
   import { untrack } from 'svelte';
   import { Search, Filter, Globe } from 'lucide-svelte';
-  import { contributionStore } from '$lib/stores/contribution.svelte';
+  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import { pluginStore } from '$lib/stores/plugin.svelte';
   import { firePluginAction }  from '$lib/ipc/plugin';
   import { whenMatches }       from '$lib/contributions/when';
@@ -40,8 +40,8 @@
   import Tree            from '$lib/components/shared/ui/Tree.svelte';
   import Breadcrumb, { type BreadcrumbSegment as BCSeg } from '$lib/components/shared/ui/Breadcrumb.svelte';
   import ContextMenu, { type MenuItem } from '$lib/components/shared/ContextMenu.svelte';
-  import DependencyTreeModal from '$lib/components/shared/DependencyTreeModal.svelte';
-  import type { TreeNode, PluginContribution } from '$lib/types/contribution';
+  import DependencyTreeModal from '$lib/components/corvus/DependencyTreeModal.svelte';
+  import type { TreeNode, PluginContribution } from '$lib/types/corvus/contribution';
   import { tooltip } from '$lib/actions/tooltip';
 
   import PluginTreeToolbar from './tree-sidebar/PluginTreeToolbar.svelte';

@@ -12,7 +12,7 @@
    */
   import { ChevronRight, ChevronDown } from 'lucide-svelte';
   import PluginIcon from '$lib/components/plugins/PluginIcon.svelte';
-  import type { TreeNode } from '$lib/types/contribution';
+  import type { TreeNode } from '$lib/types/corvus/contribution';
   import { tooltip } from '$lib/actions/tooltip';
 
   interface Props {

@@ -44,7 +44,7 @@
   import { editorSelectionStore } from '../stores/editor-selection.svelte';
   import { laneColor, sectionColor } from '../palette';
   import { makeByteToU16 } from '../editor/merula-lang';
-  import type { MerulaQueryHap } from '$lib/ipc/merula';
+  import type { MerulaQueryHap } from '$lib/ipc/merula/merula';
 
   // Pixels-per-cycle = a fixed base scaled by the live horizontal zoom. Reactive,
   // so every `* PX` position (ruler, lanes, overlays, HapLane) re-lays-out on zoom.

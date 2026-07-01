@@ -9,13 +9,13 @@
 import { setupTauriListeners } from '$lib/utils/tauri-listeners';
 import { operationsStore, type OperationStep } from '$lib/feedback/stores/operations.svelte';
 import { acceptAll, type TargetAccepts } from '$lib/feedback/routing';
-import { workspacesStore } from '$lib/stores/workspaces.svelte';
+import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
 import type { StepStatus } from '$lib/components/shared/ui/ProgressStepper.svelte';
 import type {
   WorkspaceFetchProgressEvent,
   WorkspacePullProgressEvent,
   WorkspacePullDoneEvent,
-} from '$lib/types/workspace';
+} from '$lib/types/corvus/workspace';
 
 // ---------------------------------------------------------------------------
 // Pull (single repo) — events emitted from `pull_branch` backend command.

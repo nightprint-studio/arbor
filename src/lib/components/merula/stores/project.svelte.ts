@@ -14,7 +14,7 @@ import {
   merulaOpenProject, merulaCreateProject, merulaSetProjectName,
   getMerulaProjectTabs, setMerulaProjectTabs,
   type MerulaProjectInfo, type MerulaProjectFile,
-} from '$lib/ipc/merula';
+} from '$lib/ipc/merula/merula';
 import { fsReadTextFile, fsWriteTextFile, fsRename, fsTrash } from '$lib/ipc/fs';
 import { workspaceStore } from './workspace.svelte';
 

@@ -6,8 +6,8 @@
 // enforcement is active only when BOTH `gitflow.require_ticket_branch` is on
 // AND a ticket tracker is configured.
 
-import { getGitFlowConfig } from '$lib/ipc/gitflow';
-import { getTicketLinkConfig } from '$lib/ipc/ticket_links';
+import { getGitFlowConfig } from '$lib/ipc/corvus/gitflow';
+import { getTicketLinkConfig } from '$lib/ipc/corvus/ticket_links';
 
 export interface BranchPolicy {
   /** `gitflow.require_ticket_branch`. */

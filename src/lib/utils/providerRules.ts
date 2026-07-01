@@ -2,7 +2,7 @@
 // behavior (required-when, dynamic hints) is backend-authored data in the
 // descriptor; this is the generic evaluator the UI runs — no provider logic.
 
-import type { AuthField, AuthMethod, FieldHint, FieldRule } from '$lib/types/providers';
+import type { AuthField, AuthMethod, FieldHint, FieldRule } from '$lib/types/corvus/providers';
 
 type Values = Record<string, string>;
 

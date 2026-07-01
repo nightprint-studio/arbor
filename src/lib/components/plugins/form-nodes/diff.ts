@@ -7,7 +7,7 @@
 // Lua-side diff stays terse.
 
 import type { FormDiffHunk } from '$lib/types/plugin';
-import type { DiffHunk, DiffLine } from '$lib/types/git';
+import type { DiffHunk, DiffLine } from '$lib/types/corvus/git';
 
 export function normalizeDiffHunks(hunks: FormDiffHunk[] | undefined): DiffHunk[] {
   if (!Array.isArray(hunks)) return [];

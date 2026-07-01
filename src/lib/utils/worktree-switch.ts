@@ -6,12 +6,12 @@
  * here so the logic lives in one place.
  */
 
-import type { WorktreeInfo } from '$lib/types/git';
-import { tabsStore } from '$lib/stores/tabs.svelte';
-import { workspacesStore } from '$lib/stores/workspaces.svelte';
-import { worktreeStore } from '$lib/stores/worktree.svelte';
+import type { WorktreeInfo } from '$lib/types/corvus/git';
+import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
+import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
+import { worktreeStore } from '$lib/stores/corvus/worktree.svelte';
 import { uiStore } from '$lib/stores/ui.svelte';
-import { openRepo, closeRepo } from '$lib/ipc/graph';
+import { openRepo, closeRepo } from '$lib/ipc/corvus/graph';
 
 /**
  * Activate (or, when applicable, swap the current tab's context to) `wt`.

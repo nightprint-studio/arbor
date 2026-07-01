@@ -17,7 +17,7 @@
  *     <Icon icon={pt.iconify} width="14" height="14" />
  */
 import type { IconifyIcon } from '@iconify/svelte';
-import type { ProjectType, IdeEntry } from '$lib/types/git';
+import type { ProjectType, IdeEntry } from '$lib/types/corvus/git';
 import { IDE_ICON, PROJECT_ICON } from '$lib/utils/brand-icons';
 
 /** A built-in IDE entry — mirrors the Rust BUILTIN_IDES table. */

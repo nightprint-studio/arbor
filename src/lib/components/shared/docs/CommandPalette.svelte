@@ -1,6 +1,6 @@
 <script lang="ts">
   import { highlight }          from '$lib/utils/diff-formatter';
-  import { contributionStore }  from '$lib/stores/contribution.svelte';
+  import { contributionStore }  from '$lib/stores/corvus/contribution.svelte';
   import { pluginStore }        from '$lib/stores/plugin.svelte';
   import Kbd                    from '$lib/components/shared/internal/Kbd.svelte';
 

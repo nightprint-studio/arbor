@@ -159,8 +159,8 @@ export async function dispatchNotificationAction(action: NotificationAction): Pr
       // Best-effort: find an open tab for this repo and activate it.  If no
       // tab is currently open we don't auto-spawn one (paths can move and
       // this is a passive action).
-      const { tabsStore }       = await import('$lib/stores/tabs.svelte');
-      const { workspacesStore } = await import('$lib/stores/workspaces.svelte');
+      const { tabsStore }       = await import('$lib/stores/corvus/tabs.svelte');
+      const { workspacesStore } = await import('$lib/stores/corvus/workspaces.svelte');
       const entry = workspacesStore.registry.find(r => r.id === action.repo_id);
       if (!entry) return;
       const tab = tabsStore.tabs.find(t => t.path === entry.path);
@@ -195,7 +195,7 @@ export async function dispatchNotificationAction(action: NotificationAction): Pr
       return;
     }
     case 'open-pipeline-run': {
-      const { pipelinesStore } = await import('$lib/stores/pipelines.svelte');
+      const { pipelinesStore } = await import('$lib/stores/corvus/pipelines.svelte');
       pipelinesStore.setActiveRun(action.run_id);
       return;
     }

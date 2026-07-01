@@ -12,7 +12,7 @@
  * query); the arrangement is static between evals, so the playhead never re-queries.
  */
 
-import { merulaQuery, type MerulaQueryHap, type MerulaQuerySection } from '$lib/ipc/merula';
+import { merulaQuery, type MerulaQueryHap, type MerulaQuerySection } from '$lib/ipc/merula/merula';
 
 /** Cycle window queried + drawn (matches the arrangement grid width). */
 export const VIEW_CYCLES = 96;

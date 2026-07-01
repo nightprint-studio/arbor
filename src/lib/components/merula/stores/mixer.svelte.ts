@@ -35,7 +35,7 @@
  * representation, so it stays live-only — never written to the source.
  */
 
-import { merulaSetTrack, merulaSetReverb, getMerulaProjectMix, setMerulaProjectMix } from '$lib/ipc/merula';
+import { merulaSetTrack, merulaSetReverb, getMerulaProjectMix, setMerulaProjectMix } from '$lib/ipc/merula/merula';
 import { arrangementStore, noteName, type VizLane } from '../viz/arrangement.svelte';
 import { projectStore } from './project.svelte';
 import { merulaStore } from '../merula-store.svelte';

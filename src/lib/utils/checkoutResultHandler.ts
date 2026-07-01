@@ -9,7 +9,7 @@
 //
 // Mirrors the shape and intent of `pullResultHandler.ts`.
 
-import type { CheckoutResult, StashEntry } from '$lib/types/git';
+import type { CheckoutResult, StashEntry } from '$lib/types/corvus/git';
 import { uiStore } from '$lib/stores/ui.svelte';
 
 export interface CheckoutResultContext {

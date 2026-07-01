@@ -31,7 +31,7 @@
   import { intentionsStore } from '../stores/intentions.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { withFileDeps } from './merula-lang';
-  import { merulaMaterialize } from '$lib/ipc/merula';
+  import { merulaMaterialize } from '$lib/ipc/merula/merula';
   import type { MerulaSymbol } from './merula-lang';
   import type { IntentionItem } from './merula-intentions';
   import type { EditChange } from './merula-edit';

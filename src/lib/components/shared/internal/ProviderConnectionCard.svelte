@@ -3,8 +3,8 @@
   import { listen } from '@tauri-apps/api/event';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { onDestroy } from 'svelte';
-  import type { ProviderDescriptor, AuthMethod, ProviderUserInfo, ProviderOAuthDone } from '$lib/types/providers';
-  import { type ProviderConnectionService, PROVIDER_OAUTH_DONE_EVENT } from '$lib/ipc/providers';
+  import type { ProviderDescriptor, AuthMethod, ProviderUserInfo, ProviderOAuthDone } from '$lib/types/corvus/providers';
+  import { type ProviderConnectionService, PROVIDER_OAUTH_DONE_EVENT } from '$lib/ipc/corvus/providers';
   import { fieldsOf, isFieldRequired, resolveHint, canSubmitFields } from '$lib/utils/providerRules';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';

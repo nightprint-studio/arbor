@@ -8,7 +8,7 @@
  * completing). Imports only the IPC seam — merula stays extractable.
  */
 
-import { merulaSounds, type MerulaInstrument } from '$lib/ipc/merula';
+import { merulaSounds, type MerulaInstrument } from '$lib/ipc/merula/merula';
 
 function createSoundsStore() {
   let instruments = $state<MerulaInstrument[]>([]);

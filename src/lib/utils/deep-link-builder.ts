@@ -17,11 +17,11 @@
  * per-tab so the copy buttons don't pay an IPC round-trip on every click.
  */
 
-import { listRemotes } from '$lib/ipc/remote';
+import { listRemotes } from '$lib/ipc/corvus/remote';
 import { getDeepLinkConfig } from '$lib/ipc/deep-link';
 import { uiStore } from '$lib/stores/ui.svelte';
 import { copyToClipboard } from '$lib/utils/clipboard';
-import type { RemoteInfo } from '$lib/types/git';
+import type { RemoteInfo } from '$lib/types/corvus/git';
 
 // ---------------------------------------------------------------------------
 // Origin URL resolver — cached per tab id

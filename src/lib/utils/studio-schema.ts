@@ -26,7 +26,7 @@
 
 import type {
   Schema, TypeDef, ResolvedType, FieldDef,
-} from '$lib/ipc/studio-format';
+} from '$lib/ipc/studio/studio-format';
 
 export function typeAtPath(schema: Schema | null, path: string[]): ResolvedType | null {
   if (!schema) return null;

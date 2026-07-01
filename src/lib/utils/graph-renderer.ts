@@ -1,4 +1,4 @@
-import type { CommitNode, GraphEdge } from '../types/git';
+import type { CommitNode, GraphEdge } from '../types/corvus/git';
 
 export const ROW_HEIGHT      = 28;
 export const LANE_WIDTH      = 26;

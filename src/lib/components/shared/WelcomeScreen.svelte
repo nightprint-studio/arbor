@@ -1,17 +1,17 @@
 <script lang="ts">
   import { FolderOpen, Clock, ChevronRight, Download, FolderGit2, Search, AlertTriangle, Trash2, FolderSearch } from 'lucide-svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
-  import { workspacesStore } from '$lib/stores/workspaces.svelte';
-  import { workspaceColorVar } from '$lib/types/workspace';
+  import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
+  import { workspaceColorVar } from '$lib/types/corvus/workspace';
   import Monogram from './ui/Monogram.svelte';
-  import { openRepo as ipcOpenRepo } from '$lib/ipc/graph';
-  import { tabsStore } from '$lib/stores/tabs.svelte';
+  import { openRepo as ipcOpenRepo } from '$lib/ipc/corvus/graph';
+  import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import {
     validateRepoPaths, validateRepoPath, removeRecentRepo, relocateRepo,
     type RepoPathStatus,
-  } from '$lib/ipc/missing';
-  import FileExplorerModal from './FileExplorerModal.svelte';
-  import Contribution    from './Contribution.svelte';
+  } from '$lib/ipc/corvus/missing';
+  import FileExplorerModal from '../sitta/FileExplorerModal.svelte';
+  import Contribution    from '../corvus/Contribution.svelte';
   import PluginIcon      from '$lib/components/plugins/PluginIcon.svelte';
   import ArborLogo       from './internal/ArborLogo.svelte';
   import Kbd             from './internal/Kbd.svelte';

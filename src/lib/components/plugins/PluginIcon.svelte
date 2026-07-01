@@ -27,7 +27,7 @@
 </script>
 
 <script lang="ts">
-  import { contributionStore } from '$lib/stores/contribution.svelte';
+  import { contributionStore } from '$lib/stores/corvus/contribution.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import IconifySvg from '@iconify/svelte';
   import { CLOUD_PROVIDER_ICON } from '$lib/utils/brand-icons';

@@ -24,7 +24,7 @@ import { hoverTooltip, keymap, type Tooltip } from '@codemirror/view';
 import type { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 
-import type { MerulaDslEntry, MerulaDslKind, MerulaInstrument } from '$lib/ipc/merula';
+import type { MerulaDslEntry, MerulaDslKind, MerulaInstrument } from '$lib/ipc/merula/merula';
 import { aliasesStore } from '../stores/aliases.svelte';
 import { getMerulaTree } from './merula-cm';
 import {

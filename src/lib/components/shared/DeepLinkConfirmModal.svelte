@@ -18,12 +18,12 @@
   import Modal from './Modal.svelte';
   import ModalHeader from './ModalHeader.svelte';
   import FormField from './ui/FormField.svelte';
-  import FileExplorerModal from './FileExplorerModal.svelte';
+  import FileExplorerModal from '../sitta/FileExplorerModal.svelte';
   import UrlBlock from './ui/UrlBlock.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import { cloneRepo, openRepo } from '$lib/ipc/graph';
-  import { workspacesStore } from '$lib/stores/workspaces.svelte';
-  import { tabsStore } from '$lib/stores/tabs.svelte';
+  import { cloneRepo, openRepo } from '$lib/ipc/corvus/graph';
+  import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
+  import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { defaultRepoNameFromUrl } from '$lib/utils/git-url';
 

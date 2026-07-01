@@ -14,7 +14,7 @@
 import {
   getMerulaState, setMerulaState,
   type MerulaLayoutState, type MerulaWorkspaceState, type MerulaProjectWorkspace,
-} from '$lib/ipc/merula';
+} from '$lib/ipc/merula/merula';
 
 const RECENTS_CAP = 10;
 const RECENT_SOUNDS_CAP = 16;

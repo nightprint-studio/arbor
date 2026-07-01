@@ -1,7 +1,7 @@
 import { untrack } from 'svelte';
 import { matchesBinding } from '$lib/utils/keybindings';
 import { keybindingsStore } from './keybindings.svelte';
-import { contributionStore } from './contribution.svelte';
+import { contributionStore } from './corvus/contribution.svelte';
 import { pluginStore } from './plugin.svelte';
 
 /**

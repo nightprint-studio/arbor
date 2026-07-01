@@ -13,7 +13,7 @@ import type {
   StudioDocSnapshot,
   StudioNodeView,
   StudioQueryHit,
-} from '$lib/ipc/studio-format';
+} from '$lib/ipc/studio/studio-format';
 
 export type RonNodeKind =
   | 'struct' | 'named_struct'

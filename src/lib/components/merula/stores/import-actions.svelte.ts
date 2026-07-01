@@ -26,7 +26,7 @@ import { projectStore } from './project.svelte';
 import { transfersStore } from '$lib/feedback/stores/transfers.svelte';
 import {
   merulaImportAudioAsMerula, merulaImportMidiAsMerula, merulaConvertWavToMidi,
-} from '$lib/ipc/merula';
+} from '$lib/ipc/merula/merula';
 
 /** Extensions the input picker accepts. */
 export const AUDIO_EXTS = ['wav', 'wave', 'mp3', 'ogg', 'flac', 'aiff', 'aif'];

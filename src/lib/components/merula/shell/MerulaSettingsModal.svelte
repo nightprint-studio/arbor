@@ -17,7 +17,7 @@
   import RenderFormatFields from './RenderFormatFields.svelte';
   import TranscriptionModels from './TranscriptionModels.svelte';
   import { configStore, LOG_LEVELS, type MerulaLogThreshold } from '../stores/config.svelte';
-  import { merulaAudioDevices, type MerulaAudioDevice } from '$lib/ipc/merula';
+  import { merulaAudioDevices, type MerulaAudioDevice } from '$lib/ipc/merula/merula';
 
   let { onClose }: { onClose: () => void } = $props();
 

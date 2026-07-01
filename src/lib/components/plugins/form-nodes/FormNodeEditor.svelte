@@ -17,7 +17,7 @@
 -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import StudioTextPane from '$lib/components/shared/studio/StudioTextPane.svelte';
+  import StudioTextPane from '$lib/components/studio/StudioTextPane.svelte';
   import type {
     StudioLanguage,
     StudioDiagnostic,

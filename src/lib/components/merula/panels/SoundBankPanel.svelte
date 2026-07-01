@@ -33,7 +33,7 @@
   import { packsStore } from '../stores/packs.svelte';
   import { workspaceStore } from '../stores/workspace.svelte';
   import { aliasesStore } from '../stores/aliases.svelte';
-  import type { MerulaInstrument, MerulaPack } from '$lib/ipc/merula';
+  import type { MerulaInstrument, MerulaPack } from '$lib/ipc/merula/merula';
 
   let query = $state('');
   const q = $derived(query.trim().toLowerCase());

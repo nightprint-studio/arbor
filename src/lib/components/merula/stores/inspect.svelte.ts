@@ -11,7 +11,7 @@
  * the track selection moves elsewhere.
  */
 
-import type { MerulaQueryHap } from '$lib/ipc/merula';
+import type { MerulaQueryHap } from '$lib/ipc/merula/merula';
 
 /** The fields the Inspector needs to describe a picked event. A snapshot, not a
  *  live ref — the underlying query array is replaced wholesale on each eval. */

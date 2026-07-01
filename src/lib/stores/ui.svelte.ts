@@ -1,5 +1,5 @@
 import { getRecentRepos, addRecentRepo as addRecentRepoIpc } from '$lib/ipc/config';
-import type { StashEntry } from '$lib/types/git';
+import type { StashEntry } from '$lib/types/corvus/git';
 import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 import { loadPixels, saveRatio } from '$lib/utils/panel-ratio';
 
@@ -203,13 +203,13 @@ function createUiStore() {
    * Imported lazily to avoid a top-level circular dep with the config store.
    */
   async function toggleSidebarSectionIfVisible(section: string): Promise<void> {
-    const { activityBarConfigStore } = await import('./activityBarConfig.svelte');
+    const { activityBarConfigStore } = await import('./corvus/activityBarConfig.svelte');
     if (!activityBarConfigStore.isVisible(section)) return;
     toggleSidebarSection(section);
   }
 
   async function toggleBottomSectionIfVisible(section: BottomSection): Promise<void> {
-    const { activityBarConfigStore } = await import('./activityBarConfig.svelte');
+    const { activityBarConfigStore } = await import('./corvus/activityBarConfig.svelte');
     if (!activityBarConfigStore.isVisible(section)) return;
     toggleBottomSection(section);
   }
@@ -254,7 +254,7 @@ function createUiStore() {
     // any.  Imported lazily to avoid a top-level circular dep with the
     // contribution store.
     Promise.all([
-      import('./contribution.svelte'),
+      import('./corvus/contribution.svelte'),
       import('$lib/contributions/sidebar'),
     ]).then(([{ contributionStore }, { SIDEBAR_POINT, parseSidebarSection }]) => {
       const first = contributionStore.forPoint(SIDEBAR_POINT)

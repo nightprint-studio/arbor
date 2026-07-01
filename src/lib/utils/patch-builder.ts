@@ -1,4 +1,4 @@
-import type { DiffFile, DiffHunk } from '$lib/types/git';
+import type { DiffFile, DiffHunk } from '$lib/types/corvus/git';
 
 // Key format used throughout: `${hunkIdx}:${lineIdx}`
 export type LineKey = string;

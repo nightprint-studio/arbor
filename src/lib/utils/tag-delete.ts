@@ -1,7 +1,7 @@
-import { deleteTag } from '$lib/ipc/branch';
-import { pushBranch } from '$lib/ipc/remote';
-import { localTagTracker } from '$lib/stores/local-tags.svelte';
-import { graphStore } from '$lib/stores/graph.svelte';
+import { deleteTag } from '$lib/ipc/corvus/branch';
+import { pushBranch } from '$lib/ipc/corvus/remote';
+import { localTagTracker } from '$lib/stores/corvus/local-tags.svelte';
+import { graphStore } from '$lib/stores/corvus/graph.svelte';
 import { uiStore } from '$lib/stores/ui.svelte';
 
 export type TagDeleteScope = 'local' | 'remote';

@@ -10,10 +10,10 @@
  */
 
 import { findRepoByRemoteUrl, getDeepLinkConfig } from '$lib/ipc/deep-link';
-import { validateRepoPath } from '$lib/ipc/missing';
-import { openRepo } from '$lib/ipc/graph';
-import { tabsStore } from '$lib/stores/tabs.svelte';
-import { workspacesStore } from '$lib/stores/workspaces.svelte';
+import { validateRepoPath } from '$lib/ipc/corvus/missing';
+import { openRepo } from '$lib/ipc/corvus/graph';
+import { tabsStore } from '$lib/stores/corvus/tabs.svelte';
+import { workspacesStore } from '$lib/stores/corvus/workspaces.svelte';
 
 export type OpenRepoOutcome =
   /** A tab for this repo is now open AND active. `repoId` == tab id. */

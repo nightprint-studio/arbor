@@ -14,7 +14,7 @@
  */
 
 import { merulaEngine, transportStore } from './engine.svelte';
-import { merulaSetMetronome, merulaSetCountIn } from '$lib/ipc/merula';
+import { merulaSetMetronome, merulaSetCountIn } from '$lib/ipc/merula/merula';
 
 /** Count-in cycles when stepping the toolbar control: off → 1 → 2 bars → off. */
 export const COUNT_IN_MAX = 2;

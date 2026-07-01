@@ -21,7 +21,7 @@
   import { createMerulaExtensions } from '../editor/merula-cm';
   import { withFileDeps } from '../editor/merula-lang';
   import type { MerulaIntelSource } from '../editor/merula-intel';
-  import { merulaEvalSnippet, type MerulaQueryHap } from '$lib/ipc/merula';
+  import { merulaEvalSnippet, type MerulaQueryHap } from '$lib/ipc/merula/merula';
   import { merulaStore } from '../merula-store.svelte';
   import { merulaEngine } from '../stores/engine.svelte';
   import { scratchStore } from '../stores/scratch.svelte';

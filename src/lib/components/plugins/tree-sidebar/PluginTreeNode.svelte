@@ -8,10 +8,10 @@
   Phase 4 god-object refactor.
 -->
 <script lang="ts">
-  import Contribution from '$lib/components/shared/Contribution.svelte';
+  import Contribution from '$lib/components/corvus/Contribution.svelte';
   import PluginIcon from '../PluginIcon.svelte';
   import { tooltip } from '$lib/actions/tooltip';
-  import type { TreeNode } from '$lib/types/contribution';
+  import type { TreeNode } from '$lib/types/corvus/contribution';
 
   interface Props {
     ns:   string;

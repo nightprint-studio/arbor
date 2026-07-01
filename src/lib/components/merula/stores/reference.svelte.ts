@@ -8,7 +8,7 @@
  * evaluator. Imports only the IPC seam; merula stays extractable.
  */
 
-import { merulaLangReference, type MerulaDslEntry } from '$lib/ipc/merula';
+import { merulaLangReference, type MerulaDslEntry } from '$lib/ipc/merula/merula';
 
 function createReferenceStore() {
   let entries = $state<MerulaDslEntry[]>([]);

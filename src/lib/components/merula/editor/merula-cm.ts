@@ -30,7 +30,7 @@ import { lintGutter, lintKeymap, type Diagnostic as CmDiagnostic } from '@codemi
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 
 import { laneColor } from '../palette';
-import type { MerulaDiagnostic } from '$lib/ipc/merula';
+import type { MerulaDiagnostic } from '$lib/ipc/merula/merula';
 import {
   classifyToken, makeByteToU16, identifierAt, identifierUsages, instrumentNameAt,
   extractSymbols, createMerulaParser,

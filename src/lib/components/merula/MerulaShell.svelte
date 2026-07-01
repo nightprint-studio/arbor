@@ -17,7 +17,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { tooltip } from '$lib/actions/tooltip';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
-  import ResizablePanel from '$lib/components/layout/ResizablePanel.svelte';
+  import ResizablePanel from '$lib/components/shared/ui/ResizablePanel.svelte';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
 
