@@ -1,5 +1,16 @@
 # Roadmap di migrazione — Arbor platform + Corvus / Merula / Sitta
 
+> **✅ MIGRAZIONE MARCATA COMPLETATA (2026-07-01).** Lo split Modello D
+> (1 FE + N BE) è considerato concluso: Corvus git è OOP end-to-end
+> (`corvus-be` serve ~313 handler su ~40 domini, incluso `commit`/`on_pre_commit`),
+> Sitta e Merula hanno i loro BE headless, il launcher Canopy esiste, e lo shell
+> `src-tauri` è ridotto alla sola glue OS (~33 comandi by-design: fs/terminal/
+> profile/plugin-lifecycle/deep-link/job-proxy). Il lavoro residuo NON è
+> "migrare domini" ma feature/robustezza a sé stanti, tracciate come milestone
+> future indipendenti: irrobustimento transport (respawn/lazy-spawn, W0c),
+> `targets` nel manifest plugin (M6), runtime WASM (M8/M9), capability host +
+> cloud/DB (M10/M11). I dettagli sotto restano come storico dell'esecuzione.
+
 Roadmap operativa e dettagliata. Materializza l'analisi di
 [`docs/crate-refactor-round2.md`](crate-refactor-round2.md) (analisi + naming +
 struttura target) e continua [`docs/crate-refactor.md`](crate-refactor.md)

@@ -4,14 +4,26 @@
 > (branch `feature/launcher`). This is a status-and-plan document, not a changelog: it describes
 > what exists today and the concrete remaining work, with file/line citations.
 
-## 1. Executive summary — honest current state
+## 1. Executive summary — ✅ COMPLETE (marked 2026-07-01)
 
-**corvus-be is a real second OS process, but it serves almost nothing yet.** The transport,
-the advertise-and-route mechanism, the reverse credential channel, and the leaf-domain template
-are all genuinely built and working. What is *not* built is the bulk of the migration: 4 of ~30
-domains are served out-of-process, the credential broker is half-built (function pointers, not
-data), config is never pushed to the backend, and the hook-firing model is mid-refactor and
-currently **silently drops hooks on the OOP path**.
+**The OOP migration is done.** `corvus-be` is a real second OS process serving the whole git
+surface out-of-process — verified at **~313 `#[arbor_rpc::handler]` across ~40 domains**
+(branch, issues, mr, diff, graph, gitflow, security, ci, remote, notes, stash, bisect, rebase,
+merge, worktree, recovery, repo-browser, and `stage` incl. the vetoable `commit`/`on_pre_commit`).
+The transport, advertise-and-route (Hello + `SplitBroker` + `CORVUS_OOP`), reverse credential
+channel (`SessionProvider` via `__session`/`__refresh`/`__git_credentials`), config-push to
+`CorvusState`, and the co-located plugin host (hooks fire in-process to corvus-be's own host) are
+all built and working. The shell `src-tauri` retains only OS glue (~33 commands: fs/terminal/
+profile/plugin-lifecycle/deep-link/job-proxy) — by design, not migration debt.
+
+The per-domain tables below are preserved as the **execution history** of how the migration was
+carried out; they no longer describe "remaining work". Genuinely-remaining items are independent
+future features, not domain migration: transport hardening (respawn/lazy-spawn, W0c), plugin
+manifest `targets` (M6), the WASM runtime (M8/M9), and host capabilities + cloud/DB (M10/M11).
+
+> Historical note: an earlier version of this summary read "4 of ~30 domains are served
+> out-of-process". That was accurate mid-migration; it is now superseded by the completed state
+> above.
 
 Verified facts (working tree, branch `feature/launcher`):
 
