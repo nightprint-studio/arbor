@@ -12,13 +12,62 @@
    * closed). A per-entry `pending` flag drives the chip spinner so
    * async dispatch (IPC, tab open) is visible to the user.
    */
-  import { X, Minimize2, Loader } from 'lucide-svelte';
-  import { parkedModalsStore } from '$lib/stores/parked-modals.svelte';
+  import { X, Minimize2, Loader, AppWindow } from 'lucide-svelte';
+  import {
+    parkedModalsStore,
+    resolveParkedAccent,
+    type ParkedModalEntry,
+  } from '$lib/stores/parked-modals.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
   import { tooltip } from '$lib/actions/tooltip';
 
   // Ids currently mid-dispatch — drives the spinner + disables click.
   let pendingIds = $state<Set<string>>(new Set());
+
+  // Roving keyboard focus across the entry rows (↑/↓ move, Enter restores via
+  // the button itself). Index is clamped whenever the list changes.
+  let focusIdx = $state(0);
+  let listEl = $state<HTMLUListElement | null>(null);
+
+  const entries = $derived(parkedModalsStore.entries);
+
+  // Keep the roving-focus index in range as entries are dismissed/added, so a
+  // row is always tabbable (tabindex=0) and Tab never skips the whole list.
+  $effect(() => {
+    if (entries.length === 0) return;
+    if (focusIdx > entries.length - 1) focusIdx = entries.length - 1;
+    else if (focusIdx < 0) focusIdx = 0;
+  });
+
+  function accentVarFor(entry: ParkedModalEntry): string {
+    const accent = resolveParkedAccent(entry);
+    // `danger` maps to the `--error` token; the others match 1:1.
+    return accent === 'danger' ? 'error' : accent;
+  }
+
+  function focusRow(idx: number) {
+    if (!listEl || entries.length === 0) return;
+    const clamped = Math.max(0, Math.min(idx, entries.length - 1));
+    focusIdx = clamped;
+    const rows = listEl.querySelectorAll<HTMLButtonElement>('.entry-main');
+    rows[clamped]?.focus();
+  }
+
+  function onListKeydown(e: KeyboardEvent) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      focusRow(focusIdx + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      focusRow(focusIdx - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      focusRow(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      focusRow(entries.length - 1);
+    }
+  }
 
   async function restore(id: string) {
     if (pendingIds.has(id)) return;
@@ -79,35 +128,48 @@
       <p class="empty-hint">Use the <span class="kbd-hint">−</span> button in a dialog header to park it here.</p>
     </div>
   {:else}
-    <ul class="entry-list">
-      {#each parkedModalsStore.entries as entry (entry.id)}
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <ul class="entry-list" bind:this={listEl} onkeydown={onListKeydown}>
+      {#each entries as entry, i (entry.id)}
         {@const isPending = pendingIds.has(entry.id)}
-        <li class="entry" class:entry-pending={isPending}>
+        {@const IconCmp = entry.icon ?? AppWindow}
+        <li
+          class="entry"
+          class:entry-pending={isPending}
+          style="--chip-accent: var(--{accentVarFor(entry)});"
+        >
           <button
             type="button"
             class="entry-main"
             disabled={isPending}
+            tabindex={i === focusIdx ? 0 : -1}
+            onfocus={() => (focusIdx = i)}
             onclick={() => restore(entry.id)}
             use:tooltip={'Restore dialog'}
           >
-            {#if isPending}
-              <Loader size={13} class="spin" />
-            {:else if entry.icon}
-              {@const IconCmp = entry.icon}
-              <IconCmp size={13} />
-            {/if}
-            <span class="entry-title">{entry.title}</span>
+            <span class="entry-chip" class:pending={isPending}>
+              {#if isPending}
+                <Loader size={14} class="spin" />
+              {:else}
+                <IconCmp size={14} />
+              {/if}
+            </span>
+            <span class="entry-text">
+              <span class="entry-title">{entry.title}</span>
+              {#if entry.subtitle}
+                <span class="entry-subtitle">{entry.subtitle}</span>
+              {/if}
+            </span>
           </button>
           <button
             type="button"
-            class="entry-close"
+            class="mac-close-btn entry-close"
             disabled={isPending}
+            tabindex={i === focusIdx ? 0 : -1}
             onclick={() => dismiss(entry.id)}
-            aria-label="Close dialog"
-            use:tooltip={'Close'}
-          >
-            <X size={12} />
-          </button>
+            aria-label="Discard minimized dialog"
+            use:tooltip={'Discard'}
+          ></button>
         </li>
       {/each}
     </ul>
@@ -172,56 +234,84 @@
   .entry {
     display: flex;
     align-items: stretch;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
+    gap: 2px;
+    min-height: 40px;
+    padding-right: 6px;
+    border-radius: var(--radius-md);
+    /* Accent-tinted left strip + faint fill so each type reads as its own
+       colour band; the accent is resolved per-entry via --chip-accent. */
+    border-left: 2px solid color-mix(in srgb, var(--chip-accent) 65%, transparent);
+    background: color-mix(in srgb, var(--chip-accent) 7%, transparent);
     transition: background var(--transition-fast);
   }
-  .entry:hover { background: var(--bg-elevated); }
-  .entry-pending { opacity: 0.7; }
+  .entry:hover {
+    background: color-mix(in srgb, var(--chip-accent) 14%, transparent);
+  }
+  .entry-pending { opacity: 0.75; }
 
   .entry-main {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    padding: 0 8px;
+    gap: 10px;
+    padding: 0 6px 0 8px;
     flex: 1;
     min-width: 0;
     background: transparent;
     border: none;
-    color: var(--text-secondary);
-    font-family: var(--font-ui-sans);
-    font-size: 12px;
     text-align: left;
     cursor: pointer;
-    transition: color var(--transition-fast);
+    border-radius: var(--radius-md);
   }
-  .entry-main:hover:not(:disabled) { color: var(--text-primary); }
   .entry-main:disabled { cursor: progress; }
-
-  .entry-title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .entry-main:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
-  .entry-close {
+  /* Prominent, accent-tinted icon chip. */
+  .entry-chip {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 26px;
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
+    height: 26px;
     flex-shrink: 0;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--chip-accent) 20%, transparent);
+    color: var(--chip-accent);
   }
-  .entry-close:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.06);
+  .entry-chip.pending { color: var(--text-muted); }
+
+  .entry-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+  }
+  .entry-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-primary);
+    font-family: var(--font-ui-sans);
+    font-size: 12px;
+    line-height: 1.3;
   }
-  .entry-close:disabled { cursor: progress; }
+  .entry-subtitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 10.5px;
+    line-height: 1.2;
+  }
+
+  /* Discard button — reuses the shared .mac-close-btn (mac dot / windows X
+     via [data-window-controls]); align it to the row and never let it grow. */
+  .entry-close {
+    align-self: center;
+  }
+  .entry-close:disabled { cursor: progress; opacity: 0.5; }
 
   :global(.spin) { animation: spin 1s linear infinite; }
 </style>

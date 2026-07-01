@@ -179,6 +179,19 @@ export const fsWatchStart  = (path: string, recursive = false) =>
   invoke<void>('fs_watch_start', { path, recursive });
 /** Stop the active filesystem watch. */
 export const fsWatchStop   = () => invoke<void>('fs_watch_stop');
+/** Start watching a single FILE for changes (preview live-tail). Replaces any
+ *  prior file watch. Emits the `arbor://fs-file-changed` Tauri event (no
+ *  payload) whenever the file is modified — re-read it and append / tail. This
+ *  is independent of the directory watch (`fs_watch_start`), so a folder listing
+ *  and a live-tailed log can be watched at the same time. */
+export const fsWatchFileStart = (path: string) =>
+  invoke<void>('fs_watch_file_start', { path });
+/** Stop the active single-file watch. */
+export const fsWatchFileStop  = () => invoke<void>('fs_watch_file_stop');
+/** Subscribe to this window's `arbor://fs-file-changed` signal (the live-tailed
+ *  preview file changed; carries no payload — re-read the file). */
+export const onFsFileChanged  = (cb: () => void): Promise<UnlistenFn> =>
+  listen('arbor://fs-file-changed', () => cb());
 /** Subscribe to this window's `arbor://fs-changed` signal (fired when the watched
  *  directory changes; carries no payload — re-read what you care about). */
 export const onFsChanged   = (cb: () => void): Promise<UnlistenFn> =>

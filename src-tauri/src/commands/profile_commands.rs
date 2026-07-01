@@ -25,6 +25,13 @@ pub fn create_profile(name: String) -> Result<(), AppError> {
     profile::create(&name)
 }
 
+/// Clone a profile: recursively copy `src`'s folder (settings, plugins, repos)
+/// into a fresh profile named `new`. The clone starts inactive.
+#[tauri::command]
+pub fn clone_profile(src: String, new: String) -> Result<(), AppError> {
+    profile::clone(&src, &new)
+}
+
 /// Rename a profile; if it was active, the pointer follows it.
 #[tauri::command]
 pub fn rename_profile(old: String, new: String) -> Result<(), AppError> {

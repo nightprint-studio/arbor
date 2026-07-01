@@ -3,6 +3,7 @@ import {
   getActiveProfile,
   switchProfile,
   createProfile,
+  cloneProfile,
   renameProfile,
   deleteProfile,
 } from '$lib/ipc/profiles';
@@ -58,6 +59,11 @@ async function create(name: string) {
   await refresh();
 }
 
+async function clone(src: string, newName: string) {
+  await cloneProfile(src, newName);
+  await refresh();
+}
+
 async function rename(oldName: string, newName: string) {
   await renameProfile(oldName, newName);
   await refresh();
@@ -77,6 +83,7 @@ export const profileStore = {
   refresh,
   switchTo,
   create,
+  clone,
   rename,
   remove,
 };

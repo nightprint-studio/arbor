@@ -69,9 +69,13 @@ pub trait AppCtx: Any + Send + Sync {
     /// satisfy the contract.
     fn active_repo_path(&self) -> Option<PathBuf> { None }
 
-    /// Hand a file/folder path to the OS' default handler (Explorer / Finder
-    /// / xdg-open). Backs `arbor.ui.open_path`. Default errors out so headless
-    /// hosts surface a clear "unsupported" rather than silently succeeding.
+    /// Reveal a file/folder path in the user's chosen file manager. Backs
+    /// `arbor.ui.open_path`. A FILE is revealed inside its containing folder
+    /// (selected); a FOLDER is opened as the listing. The host applies the
+    /// user's OS-vs-built-in explorer preference — either the OS file manager
+    /// (Explorer / Finder / xdg-open) or Arbor's built-in explorer window.
+    /// Default errors out so headless hosts surface a clear "unsupported"
+    /// rather than silently succeeding.
     fn open_path(&self, _path: &str) -> Result<(), String> {
         Err("open_path: not supported by this host".to_string())
     }

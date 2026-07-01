@@ -1,9 +1,9 @@
 <script lang="ts">
   import { slide } from 'svelte/transition';
   import {
-    CheckCircle, XCircle, Loader, X, StopCircle, ExternalLink,
-    Trash2, ChevronDown, ChevronRight, Server, Hammer, Tag,
+    Loader, Trash2, ChevronDown, ChevronRight, Server, Hammer, Tag,
   } from 'lucide-svelte';
+  import JobRow from './JobRow.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import { jobsStore } from '$lib/feedback/stores/jobs.svelte';
   import { uiStore }   from '$lib/stores/ui.svelte';
@@ -81,15 +81,6 @@
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  function statusIcon(job: JobInfo): 'running' | 'ok' | 'err' | 'cancelled' {
-    switch (job.status.type) {
-      case 'running':   return 'running';
-      case 'completed': return job.status.exit_code === 0 ? 'ok' : 'err';
-      case 'failed':    return 'err';
-      case 'cancelled': return 'cancelled';
-    }
-  }
-
   function elapsed(job: JobInfo): string {
     void tick; // re-evaluate every second while jobs are running
     const secs = Math.floor(Date.now() / 1000) - job.started_at;
@@ -118,9 +109,8 @@
         onchange={(v) => jobsStore.setShowHidden(v)}
       />
       {#if jobsStore.finishedCount > 0}
-        <button class="clear-btn" onclick={() => jobsStore.clearFinished()} use:tooltip={'Clear finished jobs'}>
+        <button class="clear-btn" onclick={() => jobsStore.clearFinished()} use:tooltip={'Clear finished jobs'} aria-label="Clear finished jobs">
           <Trash2 size={13} />
-          <span>Clear finished</span>
         </button>
       {/if}
       <button class="mac-close-btn" onclick={() => uiStore.setJobsOverlayOpen(false)} use:tooltip={'Close'} aria-label="Close"></button>
@@ -180,64 +170,7 @@
                 transition:slide={{ duration: animStore.dBase }}
               >
                 {#each group.jobs as job (job.id)}
-                  {@const icon = statusIcon(job)}
-                  <div class="job-row" class:inactive={job.status.type !== 'running'}>
-                    <div class="job-left">
-                      <div class="job-icon">
-                        {#if icon === 'running'}
-                          <Loader size={13} class="spin-icon accent" />
-                        {:else if icon === 'ok'}
-                          <CheckCircle size={13} class="icon-ok" />
-                        {:else if icon === 'cancelled'}
-                          <StopCircle size={13} class="icon-muted" />
-                        {:else}
-                          <XCircle size={13} class="icon-err" />
-                        {/if}
-                      </div>
-                      <div class="job-progress">
-                        {#if job.status.type === 'running'}
-                          <span class="job-time">{elapsed(job)}</span>
-                        {:else if job.status.type === 'completed'}
-                          <span class="exit-code" class:exit-ok={job.status.exit_code === 0} class:exit-err={job.status.exit_code !== 0}>
-                            exit {job.status.exit_code}
-                          </span>
-                        {:else if job.status.type === 'cancelled'}
-                          <span class="exit-cancelled">cancelled</span>
-                        {:else}
-                          <span class="exit-code exit-err">failed</span>
-                        {/if}
-                      </div>
-                    </div>
-
-                    <div class="job-info">
-                      <div class="job-name">
-                        {job.name}
-                        {#if job.status.type === 'running'}
-                          <span class="live-badge">LIVE</span>
-                        {/if}
-                      </div>
-                      <div class="job-meta">
-                        <span class="job-plugin">{job.plugin_name}</span>
-                      </div>
-                    </div>
-
-                    <div class="job-actions">
-                      {#if job.status.type === 'running'}
-                        {#if !job.non_cancellable}
-                          <button class="btn-icon danger" use:tooltip={'Stop'} onclick={() => jobsStore.cancel(job.id)}>
-                            <StopCircle size={12} />
-                          </button>
-                        {/if}
-                      {:else}
-                        <button class="btn-icon" use:tooltip={'Dismiss'} onclick={() => jobsStore.dismiss(job.id)}>
-                          <X size={12} />
-                        </button>
-                      {/if}
-                      <button class="btn-icon" use:tooltip={'View output'} onclick={() => openOutput(job)}>
-                        <ExternalLink size={12} />
-                      </button>
-                    </div>
-                  </div>
+                  <JobRow {job} elapsed={elapsed(job)} indent onOpenOutput={openOutput} />
                 {/each}
               </div>
             {/if}
@@ -245,60 +178,7 @@
 
         {:else}
           {#each group.jobs as job (job.id)}
-            {@const icon = statusIcon(job)}
-            <div class="job-row" class:inactive={job.status.type !== 'running'}>
-              <div class="job-left">
-                <div class="job-icon">
-                  {#if icon === 'running'}
-                    <Loader size={13} class="spin-icon accent" />
-                  {:else if icon === 'ok'}
-                    <CheckCircle size={13} class="icon-ok" />
-                  {:else if icon === 'cancelled'}
-                    <StopCircle size={13} class="icon-muted" />
-                  {:else}
-                    <XCircle size={13} class="icon-err" />
-                  {/if}
-                </div>
-                <div class="job-progress">
-                  {#if job.status.type === 'running'}
-                    <span class="job-time">{elapsed(job)}</span>
-                  {:else if job.status.type === 'completed'}
-                    <span class="exit-code" class:exit-ok={job.status.exit_code === 0} class:exit-err={job.status.exit_code !== 0}>
-                      exit {job.status.exit_code}
-                    </span>
-                  {:else if job.status.type === 'cancelled'}
-                    <span class="exit-cancelled">cancelled</span>
-                  {:else}
-                    <span class="exit-code exit-err">failed</span>
-                  {/if}
-                </div>
-              </div>
-              <div class="job-info">
-                <div class="job-name">
-                  {job.name}
-                  {#if job.status.type === 'running'}<span class="live-badge">LIVE</span>{/if}
-                </div>
-                <div class="job-meta">
-                  <span class="job-plugin">{job.plugin_name}</span>
-                </div>
-              </div>
-              <div class="job-actions">
-                {#if job.status.type === 'running'}
-                  {#if !job.non_cancellable}
-                    <button class="btn-icon danger" use:tooltip={'Stop'} onclick={() => jobsStore.cancel(job.id)}>
-                      <StopCircle size={12} />
-                    </button>
-                  {/if}
-                {:else}
-                  <button class="btn-icon" use:tooltip={'Dismiss'} onclick={() => jobsStore.dismiss(job.id)}>
-                    <X size={12} />
-                  </button>
-                {/if}
-                <button class="btn-icon" use:tooltip={'View output'} onclick={() => openOutput(job)}>
-                  <ExternalLink size={12} />
-                </button>
-              </div>
-            </div>
+            <JobRow {job} elapsed={elapsed(job)} onOpenOutput={openOutput} />
           {/each}
         {/if}
       {/each}
@@ -310,10 +190,20 @@
   .jobs-overlay {
     width: 320px;
     max-height: 460px;
+    /* The overlay itself must be the flex+overflow container that caps the
+       list: without display:flex/column + overflow:hidden here the panel
+       just grows to fit its content and .job-list's flex:1/min-height:0
+       never has a bounded parent to scroll inside. */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     background: var(--bg-base);
     border-color: var(--border);
     box-shadow: 0 8px 32px rgba(0,0,0,0.7);
   }
+
+  /* Header stays fixed; only the list scrolls. */
+  .overlay-header { flex-shrink: 0; }
 
   .header-actions {
     display: flex;
@@ -324,16 +214,15 @@
   .clear-btn {
     display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
+    width: 22px;
     height: 22px;
-    padding: 0 6px;
+    padding: 0;
     border: none;
     background: transparent;
     color: var(--text-muted);
     border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 11px;
-    font-family: var(--font-ui-sans);
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .clear-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
@@ -341,9 +230,9 @@
   .job-list {
     overflow-y: auto;
     flex: 1 1 auto;
-    /* Without min-height:0 the flex child sizes to its content and the parent
-       max-height never kicks in — the overlay grows past 460px and nothing
-       scrolls. min-height:0 unlocks the standard flex+overflow recipe. */
+    /* min-height:0 is the flex-child half of the recipe: it lets this child
+       shrink below its content height so the scrollbar appears instead of the
+       list pushing the (now flex, capped) .jobs-overlay past its max-height. */
     min-height: 0;
     padding: 4px 4px 6px;
     display: flex;
@@ -417,99 +306,13 @@
     border-top: 1px solid var(--border);
   }
 
-  /* ── Job rows ──────────────────────────────────────────────────────────── */
-
-  .job-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px 6px 26px;
-    border-radius: var(--radius-sm);
-    transition: background var(--transition-fast), opacity var(--transition-base);
-  }
-  .job-row:hover { background: var(--bg-elevated); }
-
-  .job-row.inactive { opacity: 0.45; }
-  .job-row.inactive:hover { opacity: 0.8; }
-
-  /* Uncategorized rows have less left padding */
-  .job-list > .job-row { padding-left: 8px; }
-
-  /* Left column: icon + progress info */
-  .job-left {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    flex-shrink: 0;
-    min-width: 44px;
-  }
-
-  .job-icon { display: flex; align-items: center; flex-shrink: 0; color: var(--text-muted); }
-
-  .job-progress { display: flex; align-items: center; }
-
-  .job-time { font-size: 10px; color: var(--accent); font-variant-numeric: tabular-nums; }
-
-  .exit-code {
-    font-size: 9px;
-    font-family: var(--font-code);
-    font-weight: 600;
-    border-radius: var(--radius-sm);
-    padding: 1px 4px;
-  }
-  .exit-code.exit-ok  { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
-  .exit-code.exit-err { color: var(--error);   background: color-mix(in srgb, var(--error)   12%, transparent); }
-
-  .exit-cancelled {
-    font-size: 9px;
-    font-family: var(--font-code);
-    font-weight: 600;
-    border-radius: var(--radius-sm);
-    padding: 1px 4px;
-    color: var(--text-secondary);
-    background: color-mix(in srgb, var(--text-muted) 14%, transparent);
-  }
+  /* ── Job rows: markup + row styles live in JobRow.svelte ───────────────────
+     The icon colour/spin globals below stay here because the category
+     run-badge (Loader) also uses `.spin-icon`. */
 
   :global(.icon-ok)   { color: var(--success); }
   :global(.icon-err)  { color: var(--error);   }
   :global(.icon-muted){ color: var(--text-muted); }
   :global(.accent)    { color: var(--accent);  }
   :global(.spin-icon) { animation: spin 1s linear infinite; }
-
-  .job-info { flex: 1; min-width: 0; }
-
-  .job-name {
-    font-size: var(--font-size-sm);
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .live-badge {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 15%, transparent);
-    border-radius: var(--radius-sm);
-    padding: 1px 5px;
-    flex-shrink: 0;
-  }
-
-  .job-meta { display: flex; gap: 5px; margin-top: 1px; }
-
-  .job-plugin {
-    font-size: 10px;
-    color: var(--text-muted);
-    background: var(--bg-overlay);
-    border-radius: var(--radius-sm);
-    padding: 0 4px;
-  }
-
-  .job-actions { display: flex; gap: 2px; flex-shrink: 0; }
 </style>

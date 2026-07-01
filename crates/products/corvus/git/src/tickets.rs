@@ -135,6 +135,11 @@ fn github_re() -> &'static Regex {
 ///
 /// `custom_re` — when `Some`, takes full precedence over the tracker default.
 /// It must contain exactly one capture group (the ticket ID).
+///
+/// Multi + dedup: every distinct ID that matches is returned (order preserved,
+/// first occurrence wins). This matters for branch names that pack several
+/// tickets with an underscore separator (`feature/ABC-1_DEF-2` → `ABC-1`,
+/// `DEF-2`) — see the `_`→space normalization below.
 pub fn parse_text(text: &str, tracker: &str, source: LinkSource, custom_re: Option<&Regex>) -> Vec<TicketLink> {
     let mut seen: HashSet<String> = HashSet::new();
 
@@ -151,7 +156,21 @@ pub fn parse_text(text: &str, tracker: &str, source: LinkSource, custom_re: Opti
     // For github/gitlab the ID is prefixed with "#"; for everything else use raw capture.
     let needs_hash = custom_re.is_none() && matches!(tracker, "github" | "gitlab");
 
-    re.captures_iter(text)
+    // Underscore is a *word* char to the regex engine, so the trailing/leading
+    // `\b` in the built-in patterns never fires next to it: `ABC-1_DEF-2` yields
+    // ZERO matches because there's no boundary between `1` and `_`, nor between
+    // `_` and `D`. Underscore is the most common ticket separator in branch
+    // names, which is why the user saw only a single (or no) ticket. Normalize
+    // `_` to a space so each ID gets real boundaries — safe because `_` can
+    // never be part of a valid built-in ticket id (`[A-Z][A-Z0-9]*-\d+` / `#\d+`).
+    //
+    // Custom patterns are left untouched: the author owns their regex and may
+    // legitimately rely on `_`.
+    let normalized: Option<String> =
+        if custom_re.is_none() && text.contains('_') { Some(text.replace('_', " ")) } else { None };
+    let scan: &str = normalized.as_deref().unwrap_or(text);
+
+    re.captures_iter(scan)
         .filter_map(|cap| {
             let raw = cap.get(1)?.as_str().to_string();
             let id  = if needs_hash { format!("#{raw}") } else { raw };
@@ -303,6 +322,39 @@ mod tests {
         assert_eq!(ids, vec!["ENG-123", "PROJ-7"]);
         assert!(links.iter().all(|l| l.tracker == "linear"));
         assert!(links.iter().all(|l| l.source == LinkSource::AutoMessage));
+    }
+
+    #[test]
+    fn parse_text_branch_underscore_separator_yields_all_ids() {
+        // Branch names commonly pack several tickets with an underscore
+        // separator. The underscore is a word char, so the built-in `\b`
+        // anchors otherwise swallow the whole thing — this asserts we still
+        // extract every distinct id (multi + dedup), matching tag/stash lists.
+        let links = parse_text(
+            "feature/ABC-1_DEF-2",
+            "linear",
+            LinkSource::AutoBranch,
+            None,
+        );
+        let ids: Vec<&str> = links.iter().map(|l| l.ticket_id.as_str()).collect();
+        assert_eq!(ids, vec!["ABC-1", "DEF-2"]);
+        assert!(links.iter().all(|l| l.source == LinkSource::AutoBranch));
+    }
+
+    #[test]
+    fn parse_text_branch_underscore_dedupes_repeats() {
+        // Same id repeated across underscore-separated segments collapses.
+        let links = parse_text("ENG-7_ENG-7_ENG-8", "jira", LinkSource::AutoBranch, None);
+        let ids: Vec<&str> = links.iter().map(|l| l.ticket_id.as_str()).collect();
+        assert_eq!(ids, vec!["ENG-7", "ENG-8"]);
+    }
+
+    #[test]
+    fn parse_text_github_underscore_separator_yields_all_ids() {
+        // github/gitlab: `#123_#456` in a branch name → both, hash-prefixed.
+        let links = parse_text("fix/#12_#34", "github", LinkSource::AutoBranch, None);
+        let ids: Vec<&str> = links.iter().map(|l| l.ticket_id.as_str()).collect();
+        assert_eq!(ids, vec!["#12", "#34"]);
     }
 
     #[test]

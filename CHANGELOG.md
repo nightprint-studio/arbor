@@ -31,6 +31,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - File Explorer: **Saved searches** — pin a query + filters + folder to the sidebar and re-run it with one click.
 - File Explorer: **advanced filters** by kind, size and modified date, and a **selection summary** (item count + total size) in the footer.
 - File Explorer: a folder's Info panel can **calculate its size** (and contained file/folder counts) recursively on demand.
+- **Profiles**: duplicate an existing profile into a new named copy — its settings, installed plugins and repositories come along.
+- File Explorer: **middle-click** a folder or a sidebar location to open it in a new tab.
+- File Explorer preview: a **Refresh** button and a **Live** toggle that tails a file as it changes (handy for logs).
+- Marketplace: **Reinstall** a plugin that's already on the latest version (redownload + re-extract), not just update to a newer one.
+- File Explorer: **F5** refreshes the file preview and **Ctrl+Shift+T** toggles live tail (follow) while a file preview is open.
 
 ### Changed
 
@@ -39,11 +44,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - The integrated terminal now batches high-rate output into a short coalescing window instead of emitting an event per read, so heavy output (build logs, `cat` of a large file) no longer floods the UI — smoother rendering with no perceptible added latency.
 - Keybindings are no longer a Settings section — viewing and customising shortcuts now live together in the dedicated Keyboard Shortcuts panel (**Shift+F1**).
 - Plugins can now route a notification, background job, or progress operation to a specific window via an optional `target` (`arbor.notify`, `arbor.job.spawn`, `arbor.ui.operation.start`); without it they go to the main window as before.
-- The title bar's **Recent repositories** and **Theme** menus are now keyboard-navigable inline groups (expand in place, arrow keys + Enter) instead of mouse-hover fly-outs.
+- **Recent repositories** now open in a dedicated, filterable, keyboard-navigable dialog (title-bar hamburger → *Recent Repositories…*) instead of an inline menu group.
+- The title bar's **Theme** menu is keyboard-navigable and now caps its height with an internal scroll when you have many themes, instead of running off the screen.
+- The Command Palette's search field shows the palette (Command) icon, matching the title-bar button that opens it.
+- Minimized dialogs in the dock now carry a type-based accent colour and icon so you can tell them apart at a glance, are keyboard-navigable (↑/↓, Enter to restore), and their discard button follows your mac/Windows window-control style.
+- A plugin's *open in file manager* (`arbor.ui.open_path`) now honours the File Explorer *Open in the built-in explorer* setting and reveals a file inside its folder instead of opening it with the OS default app.
+- File Explorer preview now renders the whole text file (virtualised by line) instead of stopping at the first 50 KB.
 - When several branches sit on the same commit, the extra ones now collapse into a compact **"N branches"** chip (the current branch stays visible) — click it to list them — mirroring how multiple tags already collapse, instead of overflowing the graph's refs column.
 - A plugin's run-style toolbar button (run + chevron) now shows the keyboard shortcut for its run action in the tooltip when the plugin registered one for the same action (e.g. **Shift+F10** on the Run button).
 - File Explorer: deleting now confirms in a **dialog** instead of an easy-to-miss inline footer prompt; and pasting an item whose name already exists asks to **Replace** (merge folders / overwrite files), **Keep both** (a “ (2)” copy), or Cancel — instead of silently creating a “ (2)” copy.
 - File Explorer: the Undo / Redo toolbar buttons now sit right after the **Up** arrow (with Back / Forward), instead of next to the view switcher.
+- **Profiles**: the manager's close control now lives in the header (X) instead of a footer button.
+- Log viewers (job / pipeline / plugin output) are now line-virtualised, staying fluid on very large logs; long lines scroll horizontally instead of wrapping.
 
 ### Fixed
 
@@ -58,6 +70,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Pulling a **local-only** branch now reports a clear error ("Branch 'X' is local-only — there's nothing to pull… Push it first") instead of a misleading suggestion to set upstream tracking to a ref that doesn't exist.
 - Switching to a tab whose folder went missing while Arbor was running now shows the recoverable "missing repository" state (Locate / Retry / Remove) instead of a raw "failed to load graph" error. Relocating a repository from the workspace manager refreshes its open tab in place — no more switching workspace or restarting to pick up the new path.
 - File Explorer: open the built-in explorer in its own dedicated window — a standalone, frameless explorer rather than the whole app — from the Command Palette ("Open File Explorer"), the system-tray menu ("Open File Explorer"), or via an opt-in system-wide **Ctrl+Shift+E** shortcut (enable it in Settings → File Explorer) that fires even when Arbor isn't focused. Re-summoning focuses the existing window instead of opening a second one.
+- On Windows, the taskbar icon no longer goes blank after Explorer restarts — the app re-applies it on the shell's `TaskbarCreated` broadcast.
+- Jobs overlay: the job list now scrolls when there are more jobs than fit the panel; *Clear finished* is now a compact trash icon with a tooltip.
+- Repository Browser: namespace tree nodes can be collapsed again, including while a search filter is active.
+- Ticket links: a branch name packing several ticket ids separated by underscores (e.g. `feature/ABC-1_DEF-2`) now surfaces every ticket, deduplicated, instead of none.
+- File Explorer: a folder is no longer dimmed as *ignored* just because it contains an ignored file — only genuinely ignored entries are dimmed.
+- File Explorer: **Ctrl+C** with text selected in the preview now copies that text instead of copying the file.
+- Branch-name ticket enforcement no longer rejects a valid name where the ticket id is followed by an underscore (e.g. `feature/ABC-1_description`).
 - File Explorer: TortoiseGit-style git awareness — files and folders inside a repo now show a status overlay badge (modified, staged, untracked, deleted, renamed, conflicted; ignored items are dimmed), with folders rolling up to their strongest descendant state, and the footer shows the current branch with ahead/behind counts. Right-click shows a single **Git** entry that expands into a **Project** section (Checkout branch…, Open in Arbor, **Copy project link** — a shareable `arbor://` link built from the repo's remote) and an **Element** section scoped to the right-clicked file(s) (Stage, Unstage, Discard changes — behind a confirmation — and Add to .gitignore). Open in Arbor brings the main window forward and opens the repo so the heavy operations (diff, log, blame, commit) happen in Arbor's full git UI.
 - File Explorer: a folder that is itself a git repository is now flagged when browsing its parent — a branch chip in details view (corner badge in icon views) shows the repo and its current branch even when the folder you're in isn't a repo. Repos already registered in Arbor are highlighted, with coloured workspace dots; the Info panel adds a Repository section listing the branch, whether it's registered in Arbor, which workspaces hold it, and an Open in Arbor action.
 - File Explorer: a **Changes** panel in the right rail lists the repo's staged and unstaged files at a glance, each with its status; clicking a file jumps to it in the list, and Open in Arbor hands off to the full git UI.

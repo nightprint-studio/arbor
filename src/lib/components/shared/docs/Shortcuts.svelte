@@ -236,6 +236,20 @@
   </tbody>
 </table>
 
+<h2>File Explorer preview</h2>
+<p class="hint">
+  Available while a file preview is showing in the Explorer's right panel. Both are
+  rebindable in the Keyboard Shortcuts panel.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><Kbd action="explorer_refresh_preview" size="sm" /></td><td>Re-read the previewed file (Refresh)</td></tr>
+    <tr><td><Kbd action="explorer_toggle_live" size="sm" /></td><td>Toggle live tail — follow the file as it changes (text preview)</td></tr>
+    <tr><td><kbd>PageUp</kbd> / <kbd>PageDown</kbd> / <kbd>Home</kbd> / <kbd>End</kbd></td><td>Scroll the preview viewport when it has focus</td></tr>
+  </tbody>
+</table>
+
 <h2>Context menus</h2>
 <table class="shortcuts-table">
   <thead><tr><th>Target</th><th>How to open</th></tr></thead>

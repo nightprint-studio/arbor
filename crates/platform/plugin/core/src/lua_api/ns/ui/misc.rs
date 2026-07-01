@@ -20,11 +20,13 @@ pub(crate) fn install(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
 }
 
 fn install_open_path(ctx: &ApiCtx, lua: &Lua, ui: &Table) -> Result<()> {
-    // open_path(path) — hand a file/folder to the OS' default handler.
-    // On Windows this reveals a folder in Explorer or opens a file with
-    // its registered application; equivalent xdg-open / open behavior on
-    // Linux / macOS. Useful for plugins that produce artefact folders
-    // and want to expose a one-click "Open in file manager" affordance.
+    // open_path(path) — reveal a file/folder in the user's file manager.
+    // A file is revealed inside its containing folder (selected); a folder
+    // is opened as the listing. The host honours the user's OS-vs-built-in
+    // explorer preference (Settings → File Explorer): either the OS file
+    // manager (Explorer / Finder / xdg-open) or Arbor's built-in explorer
+    // window. Useful for plugins that produce artefact folders and want to
+    // expose a one-click "Open in file manager" affordance.
     let app_ctx = ctx.app_ctx.clone();
     let fn_ = lua.create_function(move |_, path: String| {
         let Some(ref c) = app_ctx else {

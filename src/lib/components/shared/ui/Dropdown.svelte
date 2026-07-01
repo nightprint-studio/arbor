@@ -319,7 +319,14 @@
     // Align the flyout's top to the row's top, but keep it on screen and leave
     // room for a minimally-tall panel.
     const top  = Math.max(MARGIN, Math.min(rowRect.top - 4, window.innerHeight - 120 - MARGIN));
-    const maxH = Math.max(120, window.innerHeight - top - MARGIN);
+    // Cap the flyout height like the top-level menu does: never taller than the
+    // viewport space below `top`, and clamped further to the caller's
+    // `maxHeight` (falling back to a sensible ~60vh / 360px tether) so a long
+    // list (e.g. the Theme submenu with many custom themes) doesn't grow to
+    // fill the screen. The inner `.dd-list` scrolls once the cap bites.
+    const available = Math.max(120, window.innerHeight - top - MARGIN);
+    const ceiling   = maxHeight ?? Math.min(Math.round(window.innerHeight * 0.6), 360);
+    const maxH      = Math.min(available, ceiling);
     return `left:${left}px;top:${top}px;max-height:${maxH}px;width:${panelW}px;`;
   }
 

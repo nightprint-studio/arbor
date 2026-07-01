@@ -7,9 +7,9 @@
    *
    * The hamburger and settings menus are driven declaratively through the shared
    * widget's `DropdownItem[]` API. Theme is a `submenu` flyout (hover-intent +
-   * keyboard, opens to the side); Recent stays an inline collapsible group. Only
-   * the workspace dropdown and the plugin-contributed pills are authored here as
-   * snippets.
+   * keyboard, opens to the side); Recent is a single menu entry that opens the
+   * dedicated `RecentReposModal`. Only the workspace dropdown and the
+   * plugin-contributed pills are authored here as snippets.
    */
   import {
     Settings, Keyboard, LayoutDashboard, Palette,
@@ -31,6 +31,7 @@
   import WorkspaceDropdown from '../corvus/workspace/WorkspaceDropdown.svelte';
   import CustomizeActivityBarModal from '../corvus/CustomizeActivityBarModal.svelte';
   import ProfileManagerModal from '$lib/components/shared/ProfileManagerModal.svelte';
+  import RecentReposModal from '$lib/components/shared/RecentReposModal.svelte';
   import { tooltipForAction } from '$lib/utils/shortcut';
   // Title bar buttons sit at the very top — tooltips fly downward away from the
   // bar, never above (they'd be clipped by the window edge).
@@ -53,27 +54,9 @@
 
   let customizeActivityBarOpen = $state(false);
   let profileManagerOpen = $state(false);
-
-  /** Last path segment for a recent-repo label. */
-  function basename(path: string): string {
-    return path.split(/[/\\]/).filter(Boolean).pop() ?? path;
-  }
-
-  function openRecent(path: string) {
-    // Routed through AppShell, which owns the open-repo flow.
-    document.dispatchEvent(new CustomEvent('open-recent', { detail: path, bubbles: true }));
-  }
+  let recentReposOpen = $state(false);
 
   // ── Hamburger menu (absorbed from the old MenuBar) ─────────────────────────
-  const recentItems = $derived<DropdownItem[]>(
-    uiStore.recentRepos.length
-      ? uiStore.recentRepos.map(path => ({
-          kind: 'item' as const, id: path, label: basename(path), subtitle: path,
-          icon: Clock, onclick: () => openRecent(path),
-        }))
-      : [{ kind: 'item' as const, id: '__none', label: 'No recent repositories', disabled: true, onclick: () => {} }],
-  );
-
   const pluginMenuItems = $derived(
     contributionStore.forPoint('arbor:menu')
       .filter(c => !pluginStore.disabledPlugins.has(c.plugin_name)),
@@ -85,7 +68,7 @@
     { kind: 'item', id: 'clone',  label: 'Clone Repository…',           icon: Download,   action: 'clone_repo',    onclick: onClone },
     { kind: 'item', id: 'init',   label: 'Initialize Repository…',      icon: FolderPlus, action: 'init_repo',     onclick: onInit },
     { kind: 'item', id: 'browse', label: 'Browse Remote Repositories…', icon: Package,    action: 'repo_browser',  onclick: () => uiStore.openRepoBrowser() },
-    { kind: 'group', id: 'recent', label: 'Recent', collapsible: true, defaultCollapsed: true, items: recentItems },
+    { kind: 'item', id: 'recent', label: 'Recent Repositories…',        icon: Clock,      onclick: () => { recentReposOpen = true; } },
     { kind: 'separator', label: 'Tools' },
     { kind: 'item', id: 'plugins', label: 'Plugin Manager', icon: Package,    action: 'plugins',     onclick: () => uiStore.setPanel('plugins') },
     { kind: 'item', id: 'plogs',   label: 'Plugin Logs',    icon: ScrollText, action: 'plugin_logs', onclick: () => uiStore.setActiveBottomSection('plugin-logs') },
@@ -223,6 +206,10 @@
 
 {#if profileManagerOpen}
   <ProfileManagerModal onClose={() => profileManagerOpen = false} />
+{/if}
+
+{#if recentReposOpen}
+  <RecentReposModal onClose={() => recentReposOpen = false} />
 {/if}
 
 <!-- Plugin-contributed title-bar item (same pill shape on the left + right). -->

@@ -14,6 +14,10 @@ export const getActiveProfile = () => invoke<string>('get_active_profile');
 export const createProfile = (name: string) =>
   invoke<void>('create_profile', { name });
 
+/** Clone a profile: recursively copy `src`'s config into a fresh `newName`. */
+export const cloneProfile = (src: string, newName: string) =>
+  invoke<void>('clone_profile', { src, new: newName });
+
 /** Rename a profile; if it was active, the pointer follows it. */
 export const renameProfile = (oldName: string, newName: string) =>
   invoke<void>('rename_profile', { old: oldName, new: newName });

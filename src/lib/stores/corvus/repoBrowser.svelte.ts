@@ -6,6 +6,7 @@ import {
   rbListAccounts, rbListRepos, rbBrowseTree,
   rbGetFileContent, rbDownloadFile
 } from '$lib/ipc/corvus/repoBrowser';
+import { SvelteSet } from 'svelte/reactivity';
 import { cacheStore } from '../cache.svelte';
 
 // ---------------------------------------------------------------------------
@@ -124,7 +125,17 @@ function createRepoBrowserStore() {
   let searchQuery      = $state('');
 
   // ── Namespace groups (collapsed state persisted in memory) ───────────────
-  let expandedNs       = $state<Set<string>>(new Set());
+  //
+  // SvelteSet gives us fine-grained reactivity on `.has()` / `.add()` /
+  // `.delete()` — mutating in place is enough, no `= new Set(...)` reassign
+  // needed for `namespaceGroups` to re-derive. A plain `$state<Set>` only
+  // reacts on identity change, which made in-place collapse feel unreliable.
+  const expandedNs     = new SvelteSet<string>();
+  /** The search query that `expandedNs` was last auto-seeded for. Lets us
+   *  seed matching namespaces exactly once per query change (so the user can
+   *  still collapse a node during an active search — the old `forceExpand`
+   *  pinned every node open and swallowed the toggle click). */
+  let seededForQuery   = $state<string | null>(null);
 
   // ── Selected repo + file tree ─────────────────────────────────────────────
   let selectedRepo     = $state<RemoteRepo | null>(null);
@@ -157,8 +168,11 @@ function createRepoBrowserStore() {
   });
 
   const namespaceGroups = $derived.by((): NamespaceTreeNode[] => {
-    const forceExpand = searchQuery.trim() !== '';
-    const allNodes    = new Map<string, NamespaceTreeNode>();
+    // Expansion is driven purely by `expandedNs.has(fullPath)`, so the toggle
+    // click always wins. When a search is active, matching namespaces get
+    // auto-expanded imperatively by the `searchQuery` setter (seeded once per
+    // query) — never here, to keep this derivation side-effect free.
+    const allNodes = new Map<string, NamespaceTreeNode>();
 
     function getOrCreate(fullPath: string): NamespaceTreeNode {
       if (!allNodes.has(fullPath)) {
@@ -167,7 +181,7 @@ function createRepoBrowserStore() {
           fullPath,
           repos:    [],
           children: [],
-          expanded: forceExpand || expandedNs.has(fullPath),
+          expanded: expandedNs.has(fullPath),
         });
       }
       return allNodes.get(fullPath)!;
@@ -296,8 +310,8 @@ function createRepoBrowserStore() {
   function applyRepoList(list: RemoteRepo[]) {
     repos = list;
     if (list.length > 0 && expandedNs.size === 0) {
+      // In-place add — SvelteSet reacts without reassignment.
       expandedNs.add(list[0].namespace.split('/')[0]);
-      expandedNs = new Set(expandedNs);
     }
   }
 
@@ -314,12 +328,25 @@ function createRepoBrowserStore() {
   // ── Namespace toggle ──────────────────────────────────────────────────────
 
   function toggleNamespace(ns: string) {
+    // In-place mutation is reactive with SvelteSet — no reassignment needed.
     if (expandedNs.has(ns)) {
       expandedNs.delete(ns);
     } else {
       expandedNs.add(ns);
     }
-    expandedNs = new Set(expandedNs);
+  }
+
+  /** Expand every namespace that contains a match for the current query (and
+   *  its ancestors), so search results are visible. Called once per query
+   *  change from the `searchQuery` setter. Manual collapses afterwards stick
+   *  because the derivation reads `expandedNs.has()` directly. */
+  function seedExpandedForSearch() {
+    for (const repo of filteredRepos) {
+      const parts = repo.namespace.split('/');
+      for (let i = 1; i <= parts.length; i++) {
+        expandedNs.add(parts.slice(0, i).join('/'));
+      }
+    }
   }
 
   // ── Repo selection ────────────────────────────────────────────────────────
@@ -421,12 +448,13 @@ function createRepoBrowserStore() {
   // ── Reset ─────────────────────────────────────────────────────────────────
 
   function reset() {
-    selectedRepo  = null;
-    treeEntries   = [];
-    fileContent   = null;
-    selectedFile  = null;
-    breadcrumbs   = [];
-    searchQuery   = '';
+    selectedRepo   = null;
+    treeEntries    = [];
+    fileContent    = null;
+    selectedFile   = null;
+    breadcrumbs    = [];
+    searchQuery    = '';
+    seededForQuery = null;
   }
 
   return {
@@ -454,7 +482,16 @@ function createRepoBrowserStore() {
     get fileError()        { return fileError; },
 
     // Setters
-    set searchQuery(v: string) { searchQuery = v; },
+    set searchQuery(v: string) {
+      searchQuery = v;
+      const q = v.trim();
+      // Seed matching namespaces open exactly once per distinct query so the
+      // results are visible; a manual collapse during the search then sticks.
+      if (q !== '' && q !== seededForQuery) {
+        seedExpandedForSearch();
+      }
+      seededForQuery = q === '' ? null : q;
+    },
 
     // Actions
     loadAccounts,

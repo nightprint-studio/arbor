@@ -28,6 +28,7 @@ macro_rules! invoke_handlers {
             $crate::commands::profile_commands::list_profiles,
             $crate::commands::profile_commands::get_active_profile,
             $crate::commands::profile_commands::create_profile,
+            $crate::commands::profile_commands::clone_profile,
             $crate::commands::profile_commands::rename_profile,
             $crate::commands::profile_commands::delete_profile,
             $crate::commands::profile_commands::switch_profile,
@@ -52,6 +53,8 @@ macro_rules! invoke_handlers {
             $crate::commands::fs_commands::fs_icon,
             $crate::commands::fs_commands::fs_watch_start,
             $crate::commands::fs_commands::fs_watch_stop,
+            $crate::commands::fs_commands::fs_watch_file_start,
+            $crate::commands::fs_commands::fs_watch_file_stop,
             // File Explorer "Open in Arbor" delegation (window focus + emit)
             $crate::commands::fs_git_commands::fs_open_in_arbor,
             // Deep-link router (arbor:// URLs)

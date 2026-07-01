@@ -1,12 +1,13 @@
 <script lang="ts">
   /**
-   * Profile manager — create / rename / delete / switch the isolated
+   * Profile manager — create / clone / rename / delete / switch the isolated
    * environments under `arbor/profiles/`. Opened from the title-bar settings
    * (gear) menu. Switching reloads the window with the chosen profile's
    * settings, plugins and repos. See docs/profiles-and-product-config.md.
    */
-  import { Plus, Trash2, Pencil, Check, X as XIcon } from 'lucide-svelte';
+  import { Plus, Trash2, Pencil, Copy, Check, X as XIcon } from 'lucide-svelte';
   import Modal from './Modal.svelte';
+  import ModalHeader from './ModalHeader.svelte';
   import ConfirmModal from './ConfirmModal.svelte';
   import Button from './ui/Button.svelte';
   import Input from './ui/Input.svelte';
@@ -21,15 +22,25 @@
   let creating   = $state(false);
   let error      = $state<string | null>(null);
 
+  // A single inline-edit row drives both rename and clone: `editing` holds the
+  // source profile name, `editMode` picks the verb. Keeping one row (instead of
+  // two ad-hoc inputs) means the keyboard flow — type name → Enter to commit,
+  // Esc to cancel — is identical for both actions.
+  type EditMode = 'rename' | 'clone';
   let editing    = $state<string | null>(null);
+  let editMode   = $state<EditMode>('rename');
   let draft      = $state('');
   let busy       = $state(false);
 
   let pendingDelete = $state<string | null>(null);
 
+  const nameTaken = (name: string) =>
+    profileStore.list.some((p) => p.toLowerCase() === name.toLowerCase());
+
   async function doCreate() {
     const name = newName.trim();
     if (!name || creating) return;
+    if (nameTaken(name)) { error = `A profile named “${name}” already exists.`; return; }
     creating = true; error = null;
     try {
       await profileStore.create(name);
@@ -41,16 +52,32 @@
     }
   }
 
-  function startRename(name: string) { editing = name; draft = name; error = null; }
-  function cancelRename() { editing = null; draft = ''; }
-  async function commitRename() {
+  function startRename(name: string) {
+    editing = name; editMode = 'rename'; draft = name; error = null;
+  }
+  function startClone(name: string) {
+    editing = name; editMode = 'clone'; draft = `${name} copy`; error = null;
+  }
+  function cancelEdit() { editing = null; draft = ''; error = null; }
+
+  async function commitEdit() {
+    const src  = editing;
     const next = draft.trim();
-    if (!editing) return;
-    if (!next || next === editing) { cancelRename(); return; }
+    if (!src) return;
+    if (editMode === 'rename') {
+      if (!next || next === src) { cancelEdit(); return; }
+    } else if (!next) {
+      return;
+    }
+    if (next !== src && nameTaken(next)) {
+      error = `A profile named “${next}” already exists.`;
+      return;
+    }
     busy = true; error = null;
     try {
-      await profileStore.rename(editing, next);
-      cancelRename();
+      if (editMode === 'rename') await profileStore.rename(src, next);
+      else                       await profileStore.clone(src, next);
+      cancelEdit();
     } catch (e) {
       error = String(e);
     } finally {
@@ -83,7 +110,7 @@
 
 <Modal {onClose} width="520px" ariaLabel="Profiles">
   {#snippet header()}
-    <span class="modal-title">Profiles</span>
+    <ModalHeader title="Profiles" {onClose} />
   {/snippet}
 
   <div class="pm-body">
@@ -93,17 +120,23 @@
           {#if editing === name}
             <Input
               bind:value={draft}
-              ariaLabel="New profile name"
+              ariaLabel={editMode === 'clone' ? 'Clone profile name' : 'New profile name'}
               onkeydown={(e) => {
-                if (e.key === 'Enter') commitRename();
-                else if (e.key === 'Escape') cancelRename();
+                if (e.key === 'Enter') commitEdit();
+                else if (e.key === 'Escape') cancelEdit();
               }}
             />
             <div class="pm-actions">
-              <Button size="sm" variant="primary" onclick={commitRename} disabled={busy} title="Save">
+              <Button
+                size="sm"
+                variant="primary"
+                onclick={commitEdit}
+                disabled={busy || !draft.trim()}
+                title={editMode === 'clone' ? 'Create copy' : 'Save'}
+              >
                 <Check size={14} />
               </Button>
-              <Button size="sm" variant="secondary" onclick={cancelRename} title="Cancel">
+              <Button size="sm" variant="secondary" onclick={cancelEdit} title="Cancel">
                 <XIcon size={14} />
               </Button>
             </div>
@@ -116,6 +149,9 @@
                   Switch
                 </Button>
               {/if}
+              <Button size="sm" variant="ghost" onclick={() => startClone(name)} title="Duplicate">
+                <Copy size={14} />
+              </Button>
               {#if name !== DEFAULT}
                 <Button size="sm" variant="ghost" onclick={() => startRename(name)} title="Rename">
                   <Pencil size={14} />
@@ -151,10 +187,6 @@
       plugins and repos.
     </p>
   </div>
-
-  {#snippet footer()}
-    <Button variant="secondary" onclick={onClose}>Close</Button>
-  {/snippet}
 </Modal>
 
 {#if pendingDelete}

@@ -7,7 +7,7 @@ export interface Keybinding {
   group: string;
 }
 
-export const GROUP_ORDER = ['Navigation', 'Panels', 'Sidebar Sections', 'Git', 'Terminal'] as const;
+export const GROUP_ORDER = ['Navigation', 'Panels', 'Sidebar Sections', 'Git', 'Terminal', 'File Explorer'] as const;
 export type BindingGroup = (typeof GROUP_ORDER)[number];
 
 export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
@@ -151,6 +151,14 @@ export const DEFAULT_KEYBINDINGS: Record<string, Keybinding> = {
   // the Ctrl+Alt AltGr trap on IT/DE/FR/ES layouts, and is distinct from
   // `focus_graph` (Alt+G).
   toggle_branch_grouping:  { key: 'g', alt: true, shift: true, description: 'Toggle branch grouping (folder tree vs. flat list)', group: 'Sidebar Sections' },
+
+  // File Explorer — preview pane. Handled locally by FileExplorerModal and only
+  // active while a file preview is showing. F5 mirrors the universal "Refresh"
+  // convention (it re-reads the previewed file). Live tail uses Ctrl+Shift+T
+  // ("T for tail") — Ctrl+Shift+L is already Pull, so it's deliberately avoided;
+  // both stay clear of the Ctrl+Alt+letter AltGr trap on IT/DE/FR/ES layouts.
+  explorer_refresh_preview: { key: 'F5',                            description: 'Refresh file preview',        group: 'File Explorer' },
+  explorer_toggle_live:     { key: 't', ctrl: true, shift: true,    description: 'Toggle live tail (follow file)', group: 'File Explorer' },
 };
 
 export function matchesBinding(event: KeyboardEvent, binding: Keybinding): boolean {

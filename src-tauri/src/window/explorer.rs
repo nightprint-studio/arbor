@@ -207,6 +207,48 @@ pub async fn reveal_in_explorer(app: AppHandle, path: String, reveal: bool) {
     open_or_focus_reveal(&app, payload);
 }
 
+/// Route an app/plugin "open in file explorer" request (`arbor.ui.open_path`,
+/// the `__open_path` reverse-channel handler, and `TauriAppCtx::open_path`)
+/// through the user's OS-vs-built-in preference (`explorer.reveal_in_builtin`).
+///
+/// Regardless of target, a FILE is revealed inside its containing folder (the
+/// folder is opened with the file selected) and a FOLDER is opened as the
+/// listing — so both routes behave the same way. When `reveal_in_builtin` is
+/// on, the path lands in Arbor's built-in explorer window; otherwise it goes to
+/// the OS file manager (Explorer / Finder / xdg-open).
+///
+/// Never blocks: the built-in route hops to the main thread internally, and the
+/// OS route is a fire-and-forget opener call. Errors from the OS opener are
+/// surfaced to the caller (the built-in route is best-effort).
+pub fn reveal_path(app: &AppHandle, path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("reveal_path: path cannot be empty".to_string());
+    }
+
+    let to_builtin = crate::config::app_config::load()
+        .map(|c| c.explorer.reveal_in_builtin)
+        .unwrap_or(false);
+
+    if to_builtin {
+        // Built-in explorer: reveal (select the file / open the folder).
+        open_or_focus_reveal(app, resolve_reveal(path, true));
+        return Ok(());
+    }
+
+    // OS file manager: reveal a file inside its folder, or open a folder.
+    use tauri_plugin_opener::OpenerExt;
+    let p = std::path::Path::new(path);
+    if p.is_file() {
+        app.opener()
+            .reveal_item_in_dir(path)
+            .map_err(|e| format!("Cannot reveal: {e}"))
+    } else {
+        app.opener()
+            .open_path(path, None::<&str>)
+            .map_err(|e| format!("Cannot open: {e}"))
+    }
+}
+
 /// Drain the pending reveal for a window label (called by a freshly-opened
 /// explorer window's frontend on mount). Returns `None` when there's nothing
 /// pending (normal global-shortcut / palette opens).

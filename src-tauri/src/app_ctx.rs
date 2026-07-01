@@ -69,9 +69,10 @@ impl AppCtx for TauriAppCtx {
     }
 
     fn open_path(&self, path: &str) -> Result<(), String> {
-        use tauri_plugin_opener::OpenerExt;
-        self.handle.opener().open_path(path, None::<&str>)
-            .map_err(|e| e.to_string())
+        // Route through the user's OS-vs-built-in preference
+        // (`explorer.reveal_in_builtin`) instead of always hitting the OS
+        // opener, so `arbor.ui.open_path` honours "open in Arbor's explorer".
+        crate::window::explorer::reveal_path(&self.handle, path)
     }
 
     fn invoke_host_command(&self, id: &str, ctx_json: &str) {

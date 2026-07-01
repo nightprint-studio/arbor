@@ -379,15 +379,32 @@ fn compute_repo_status(repo: &Repository) -> RepoStatusCache {
     RepoStatusCache { files, branch, detached, ahead, behind }
 }
 
-/// Slice the repo-wide status down to one directory's children: a file directly
-/// in `dir` carries its own badge; anything deeper rolls up to the immediate
-/// child folder with the strongest descendant state.
+/// Slice the repo-wide status down to one directory's children: an entry that
+/// *is* a direct child of `dir` (a file, or a folder git itself flagged — e.g.
+/// an ignored/untracked directory reported whole) carries its own badge; a state
+/// nested deeper rolls up to the immediate child folder with the strongest
+/// descendant state.
+///
+/// Ignored is special-cased on roll-up: a folder is dimmed as "ignored" only
+/// when git flagged that folder itself (a direct child entry). A folder that
+/// merely *contains* an ignored file (e.g. a tracked `src/` holding one
+/// `src/tmp.log`) is a normal tracked folder and must NOT be dimmed — mirrors
+/// `git status --ignored`, which lists the ignored file, never its tracked
+/// parent. Without this, any tracked folder with a stray build artifact inside
+/// would render greyed-out as though the whole folder were ignored.
 fn slice_for_dir(c: &RepoStatusCache, dir_key: &str) -> HashMap<String, GitBadge> {
     let prefix = format!("{dir_key}/");
     let mut out: HashMap<String, GitBadge> = HashMap::new();
     for (path_key, badge) in &c.files {
         let Some(rest) = path_key.strip_prefix(&prefix) else { continue };
         let Some(child_seg) = rest.split('/').next().filter(|s| !s.is_empty()) else { continue };
+        // `rest == child_seg` ⇒ the entry is the direct child itself; anything
+        // longer is a deeper descendant rolled up onto `child_seg`.
+        let is_direct = rest.len() == child_seg.len();
+        // Don't let a nested Ignored descendant paint its (tracked) parent folder.
+        if !is_direct && *badge == GitBadge::Ignored {
+            continue;
+        }
         let child_key = format!("{dir_key}/{child_seg}");
         out.entry(child_key)
             .and_modify(|b| { if badge.rank() > b.rank() { *b = *badge; } })
@@ -649,6 +666,82 @@ pub fn ignore(paths: &[String]) -> Result<(), String> {
     std::fs::write(&gitignore, out).map_err(|e| e.to_string())?;
     invalidate_cache(&repo);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn norm_key_slashes_trailing_and_case() {
+        assert_eq!(norm_key(r"C:\Repo\Src\"), "c:/repo/src");
+        assert_eq!(norm_key("/home/User/Proj//"), "/home/user/proj");
+        assert_eq!(norm_key("Already/Clean"), "already/clean");
+    }
+
+    fn cache_of(files: &[(&str, GitBadge)]) -> RepoStatusCache {
+        RepoStatusCache {
+            files: files.iter().map(|(p, b)| ((*p).to_string(), *b)).collect(),
+            branch: None,
+            detached: false,
+            ahead: 0,
+            behind: 0,
+        }
+    }
+
+    #[test]
+    fn direct_child_file_keeps_its_own_badge() {
+        let c = cache_of(&[("/r/foo.txt", GitBadge::Modified)]);
+        let out = slice_for_dir(&c, "/r");
+        assert_eq!(out.get("/r/foo.txt"), Some(&GitBadge::Modified));
+    }
+
+    #[test]
+    fn ignored_directory_reported_whole_is_flagged() {
+        // git reports an ignored dir as its own entry (trailing slash stripped
+        // by norm_key), so it's a DIRECT child and must stay dimmed.
+        let c = cache_of(&[("/r/target", GitBadge::Ignored)]);
+        let out = slice_for_dir(&c, "/r");
+        assert_eq!(out.get("/r/target"), Some(&GitBadge::Ignored));
+    }
+
+    #[test]
+    fn nested_ignored_file_does_not_dim_tracked_parent() {
+        // The #16 regression: a stray ignored artifact deep inside a tracked
+        // folder must NOT paint the folder as ignored.
+        let c = cache_of(&[("/r/src/build.tmp", GitBadge::Ignored)]);
+        let out = slice_for_dir(&c, "/r");
+        assert!(out.get("/r/src").is_none(), "tracked parent wrongly flagged ignored");
+    }
+
+    #[test]
+    fn nested_non_ignored_still_rolls_up_strongest() {
+        let c = cache_of(&[
+            ("/r/src/a.rs", GitBadge::Modified),
+            ("/r/src/b.rs", GitBadge::Untracked),
+            ("/r/src/gen.tmp", GitBadge::Ignored), // ignored: skipped on roll-up
+        ]);
+        let out = slice_for_dir(&c, "/r");
+        assert_eq!(out.get("/r/src"), Some(&GitBadge::Modified));
+    }
+
+    #[test]
+    fn sibling_prefix_folders_do_not_cross_contaminate() {
+        // `/r/app2/...` must not be sliced under a view of `/r/app`.
+        let c = cache_of(&[("/r/app2/x.rs", GitBadge::Modified)]);
+        let out = slice_for_dir(&c, "/r/app");
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn conflicted_outranks_modified_on_rollup() {
+        let c = cache_of(&[
+            ("/r/src/a.rs", GitBadge::Modified),
+            ("/r/src/deep/b.rs", GitBadge::Conflicted),
+        ]);
+        let out = slice_for_dir(&c, "/r");
+        assert_eq!(out.get("/r/src"), Some(&GitBadge::Conflicted));
+    }
 }
 
 /// Switch the repo enclosing `path` to `branch` (a local branch name). Uses a

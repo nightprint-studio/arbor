@@ -17,6 +17,16 @@
   <li><strong>Activity bar</strong> — pin the icon rail to the left or right edge, or hide it (hover the edge to reveal it temporarily).</li>
   <li><strong>Minimized dialogs cap</strong> — maximum number of dialogs that can sit minimized in the status-bar panel at the same time (1–20, default 5). New minimize attempts past this cap are refused with a toast; no parked dialog is auto-closed.</li>
 </ul>
+<p>
+  Minimizing a dialog (the <strong>−</strong> button in its header) parks it in the
+  <strong>Minimized dialogs</strong> panel above the status bar, opened from the badge in
+  the status bar. Each entry carries a <strong>coloured accent stripe and a type icon</strong>
+  so dialogs of different kinds (issue, merge request, …) are easy to tell apart at a glance.
+  The panel is keyboard-driven: <kbd>↑</kbd> / <kbd>↓</kbd> move between entries and
+  <kbd>Enter</kbd> restores the highlighted one. Each row also has a <strong>Discard</strong>
+  button (styled to match your window-controls choice — the Mac dot or the Windows ✕) that
+  drops the parked dialog without restoring it.
+</p>
 
 <h3>Animations</h3>
 <p>
@@ -182,7 +192,7 @@
   <li><strong>Git awareness</strong> — master switch for TortoiseGit-style git integration while browsing: status overlays on files, repo-root markers, the staged/unstaged Changes panel, and branch switching. <em>Off by default</em> — when off the explorer issues no git checks at all, so plain file browsing never pays a per-folder status walk.</li>
   <li><strong>Global shortcut</strong> — register a system-wide hotkey (default <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>) that opens the dedicated explorer window even when Arbor isn't focused. <em>Off by default</em> (opt-in, so Arbor doesn't claim a system-wide hotkey unprompted); toggling registers / unregisters it immediately. Click the chord to <strong>rebind</strong> it to any combination — if the new combo is invalid or already claimed by another app, the change is rejected with a message and the previous one is kept.</li>
   <li><strong>Always open a new window</strong> — when on, the shortcut, the Command Palette action, and the system-tray <em>Open File Explorer</em> entry open a fresh explorer window every time; when off (default), a single window is reused and re-summoning focuses it.</li>
-  <li><strong>Open in the built-in explorer</strong> — route the app's “Open / Reveal in File Explorer” actions (worktree info, plugin folders, notification reveals…) into Arbor's own explorer window instead of the OS file manager. <em>Off by default</em> — when off those actions hand the path to the system shell as before. The explorer's own “Reveal in File Explorer” item always uses the OS, as an explicit escape hatch.</li>
+  <li><strong>Open in the built-in explorer</strong> — route the app's “Open / Reveal in File Explorer” actions (worktree info, plugin folders, notification reveals…) — including a plugin's own “open in file manager” action — into Arbor's own explorer window instead of the OS file manager. <em>Off by default</em> — when off those actions hand the path to the system shell as before. The explorer's own “Reveal in File Explorer” item always uses the OS, as an explicit escape hatch.</li>
   <li><strong>Default view</strong> — layout for not-yet-visited folders: Details, Medium, Large, or Extra-large icons. Individual folders remember their own view on top of this default.</li>
   <li><strong>Default sort</strong> &amp; <strong>direction</strong> — the column (name / date modified / size) and order new folders are sorted by.</li>
   <li><strong>On open</strong> — whether a freshly-opened explorer shows the Overview dashboard or re-opens your most recent folder.</li>

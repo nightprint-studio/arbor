@@ -51,8 +51,12 @@ impl App {
         H: FnOnce(&Arc<Mutex<PluginHost>>) -> HookDispatcher,
     {
         let host = Arc::new(Mutex::new(PluginHost::new()));
-        let app_ctx: Arc<dyn AppCtx> =
-            Arc::new(BackendAppCtx::new(self.io.sink(), self.io.runtime_handle()));
+        // Wire the reverse channel so UI capabilities the backend can't satisfy
+        // locally (`open_path`) forward to the shell's host handlers.
+        let app_ctx: Arc<dyn AppCtx> = Arc::new(
+            BackendAppCtx::new(self.io.sink(), self.io.runtime_handle())
+                .with_host_caller(self.io.host_caller()),
+        );
         {
             let mut h = host.lock().expect("arbor-be: plugin host poisoned at boot");
             h.set_app_ctx(app_ctx.clone());

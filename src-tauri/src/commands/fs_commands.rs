@@ -427,3 +427,77 @@ pub fn fs_watch_stop(window: tauri::WebviewWindow) {
         map.remove(window.label());
     }
 }
+
+// --- Single-file watcher — live-tail for the explorer's text preview ----------
+// Independent of the directory watcher above (its own per-window map) so a
+// folder listing and a live-tailed log can be watched at the same time. We
+// watch the file's PARENT directory (non-recursive) and filter events down to
+// the target path: editors and log rotators frequently replace a file via
+// atomic rename, which drops a watch placed directly on the inode; watching the
+// directory survives that. Emits the empty `arbor://fs-file-changed` signal to
+// the owning window only.
+
+fn file_watchers() -> &'static Mutex<HashMap<String, notify::RecommendedWatcher>> {
+    static SLOT: OnceLock<Mutex<HashMap<String, notify::RecommendedWatcher>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[tauri::command]
+pub fn fs_watch_file_start(
+    window: tauri::WebviewWindow,
+    path: String,
+) -> Result<(), AppError> {
+    use notify::{RecursiveMode, Watcher};
+    use tauri::{Emitter, Manager};
+
+    let target = Path::new(&path);
+    let parent = target
+        .parent()
+        .ok_or_else(|| AppError::Other("file has no parent directory".into()))?
+        .to_path_buf();
+    // Match events case-insensitively on the full normalized path (Windows FS is
+    // case-insensitive; the explorer already assumes this everywhere).
+    let target_key = path.replace('\\', "/").to_lowercase();
+
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    let emit_label = label.clone();
+    // A file being appended to (a live log) can fire many events per second;
+    // collapse bursts to at most one signal per interval. The frontend re-reads
+    // the whole file per signal, so keeping this modest avoids redundant reads.
+    let mut last_emit: Option<std::time::Instant> = None;
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let Ok(ev) = res else { return };
+        // Only react to events touching the watched file (the parent dir may see
+        // sibling churn we don't care about).
+        let hit = ev.paths.iter().any(|p| {
+            p.to_string_lossy().replace('\\', "/").to_lowercase() == target_key
+        });
+        if !hit { return; }
+        let now = std::time::Instant::now();
+        let due = last_emit.map_or(true, |t| now.duration_since(t) >= std::time::Duration::from_millis(120));
+        if !due { return; }
+        last_emit = Some(now);
+        let _ = app.emit_to(emit_label.as_str(), "arbor://fs-file-changed", ());
+    })
+    .map_err(|e| AppError::Other(format!("Cannot create file watcher: {e}")))?;
+
+    watcher
+        .watch(&parent, RecursiveMode::NonRecursive)
+        .map_err(|e| AppError::Other(format!("Cannot watch file: {e}")))?;
+
+    let live: std::collections::HashSet<String> = window.app_handle().webview_windows().into_keys().collect();
+    let mut map = file_watchers()
+        .lock()
+        .map_err(|_| AppError::Other("file-watcher map poisoned".into()))?;
+    map.retain(|k, _| live.contains(k));
+    map.insert(label, watcher);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn fs_watch_file_stop(window: tauri::WebviewWindow) {
+    if let Ok(mut map) = file_watchers().lock() {
+        map.remove(window.label());
+    }
+}

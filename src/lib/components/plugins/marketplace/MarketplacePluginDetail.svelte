@@ -111,6 +111,21 @@
             {busy ? 'Updating…' : `Update to v${p.update_available}`}
           </Button>
         </span>
+      {:else}
+        <!-- Already on the newest published version — offer a same-version
+             re-install (redownload + re-extract) for a corrupted / partially
+             wiped install, or to pull fresh files from a moving ref. -->
+        <span use:tooltip={`Reinstall v${p.installed_version ?? p.version}`}>
+          <Button
+            variant="secondary" size="md"
+            disabled={busy}
+            loading={busy}
+            onclick={() => onInstall(p)}
+          >
+            {#snippet iconStart()}<RefreshCw size={13} />{/snippet}
+            {busy ? 'Reinstalling…' : 'Reinstall'}
+          </Button>
+        </span>
       {/if}
       <Button
         variant="secondary" size="md"

@@ -12,7 +12,10 @@
   installed plugins, and its own list of repositories and workspaces — for example a
   personal setup and a work setup kept apart. Switch profiles from the title-bar <strong>gear menu → Profile</strong>:
   the submenu lists every profile (the active one is checked) and switching reloads the
-  window onto it. Pick <strong>Manage profiles…</strong> to create, rename, or delete one.
+  window onto it. Pick <strong>Manage profiles…</strong> to create, rename, delete, or
+  <strong>duplicate</strong> one. Duplicating copies an existing profile — its settings,
+  plugins and repo list — into a fresh profile under a new name, so you can fork a working
+  setup and tweak the copy without touching the original.
 </p>
 <ul>
   <li><strong>default</strong> is always present and can't be renamed or deleted.</li>

@@ -89,6 +89,13 @@
   install path (overwrites the existing folder + reloads the host). You're shown the
   permission confirmation again in case the new version asks for more.
 </p>
+<p>
+  When a plugin is already on the latest catalog version, the detail pane offers
+  <strong>Reinstall</strong> instead — it re-downloads and re-extracts the same
+  version over the existing folder, then reloads the host. Handy for recovering a
+  plugin whose files were edited, corrupted, or partially removed on disk without
+  having to uninstall and install again.
+</p>
 
 <h2>Auto-refresh scheduler</h2>
 <p>

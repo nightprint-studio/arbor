@@ -43,7 +43,7 @@
 
   <FormRow
     label="Open in the built-in explorer"
-    description="Route the app's “Open / Reveal in File Explorer” actions (worktree info, plugin folders, notification reveals…) into Arbor's own explorer window instead of the OS file manager. Off by default. The explorer's own “Reveal in File Explorer” item always uses the OS.">
+    description="Route the app's “Open / Reveal in File Explorer” actions — worktree info, plugin folders, notification reveals, and plugins' own “open in file manager” (arbor.ui.open_path) — into Arbor's own explorer window instead of the OS file manager. Off by default. The explorer's own “Reveal in File Explorer” item always uses the OS.">
     <Toggle bind:checked={revealInBuiltin} />
   </FormRow>
 </div>

@@ -60,7 +60,7 @@
   import { tick } from 'svelte';
   import { fly, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
-  import { Search, ChevronRight } from 'lucide-svelte';
+  import { Command, ChevronRight } from 'lucide-svelte';
   import Spinner from './Spinner.svelte';
   import { animStore } from '$lib/stores/animations.svelte';
   import { tooltip } from '$lib/actions/tooltip';
@@ -236,7 +236,7 @@
   >
     <!-- Input row -->
     <div class="cps-header">
-      <Search size={15} class="cps-search" />
+      <Command size={15} class="cps-search" />
 
       {#if verbChip}
         {@const VerbIcon = iconResolver(verbChip.icon)}

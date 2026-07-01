@@ -97,6 +97,53 @@ pub fn rename(old: &str, new: &str) -> Result<()> {
     Ok(())
 }
 
+/// Clone a profile: recursively copy `src`'s folder into a fresh `dst` folder,
+/// carrying over its settings/plugins/repos. The clone starts inactive; the
+/// caller switches to it explicitly. Mirrors [`create`]'s validation on the new
+/// name, and fails if `dst` already exists or `src` is missing.
+pub fn clone(src: &str, dst: &str) -> Result<()> {
+    let dst = dst.trim();
+    if !is_valid_profile_name(dst) {
+        return Err(invalid(dst));
+    }
+    let from = profile_dir_for(src);
+    // The default profile's folder may not be materialized yet — a clone of it
+    // is effectively a fresh empty profile (built-in defaults), so allow it.
+    if src != DEFAULT_PROFILE && !from.is_dir() {
+        return Err(AppError::Other(format!("no such profile: {src}")));
+    }
+    let to = profile_dir_for(dst);
+    if to.exists() {
+        return Err(AppError::Other(format!("profile already exists: {dst}")));
+    }
+    if from.is_dir() {
+        copy_dir_recursive(&from, &to).map_err(|e| AppError::Other(e.to_string()))?;
+    } else {
+        // Source folder not materialized (default before first write): create an
+        // empty clone that loads built-in defaults, matching `create`.
+        fs::create_dir_all(&to).map_err(|e| AppError::Other(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Recursively copy `src` into `dst` (both directories). Creates `dst` and any
+/// nested subdirectories; copies file contents verbatim. Pure filesystem logic,
+/// covered by the unit tests below.
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 /// Delete a profile's folder and everything in it. Guards against stranding the
 /// user: the active profile and the last remaining profile can't be deleted.
 pub fn delete(name: &str) -> Result<()> {
@@ -126,4 +173,61 @@ pub fn write_pointer(name: &str) -> Result<()> {
     }
     fs::write(&path, name).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_dir_recursive;
+    use std::fs;
+
+    /// Build a small nested tree under a unique temp dir; the caller removes it.
+    fn unique_temp() -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!("arbor-profile-test-{}", uuid_like()));
+        p
+    }
+
+    // Avoid pulling a uuid dep into a test — a monotonic-ish token is enough to
+    // keep parallel test runs from colliding on the temp path.
+    fn uuid_like() -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!("{nanos:x}")
+    }
+
+    #[test]
+    fn copies_nested_tree_verbatim() {
+        let root = unique_temp();
+        let src = root.join("src");
+        let dst = root.join("dst");
+        fs::create_dir_all(src.join("nested")).unwrap();
+        fs::write(src.join("top.txt"), b"top").unwrap();
+        fs::write(src.join("nested").join("deep.toml"), b"deep=1").unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert_eq!(fs::read(dst.join("top.txt")).unwrap(), b"top");
+        assert_eq!(
+            fs::read(dst.join("nested").join("deep.toml")).unwrap(),
+            b"deep=1"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn creates_destination_for_empty_source() {
+        let root = unique_temp();
+        let src = root.join("src");
+        let dst = root.join("dst");
+        fs::create_dir_all(&src).unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert!(dst.is_dir());
+        assert_eq!(fs::read_dir(&dst).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(&root);
+    }
 }

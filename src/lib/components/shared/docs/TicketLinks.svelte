@@ -16,7 +16,10 @@
       ticket IDs matching the configured tracker pattern (e.g. <code>ENG-123</code> for Linear,
       <code>#456</code> for GitHub / GitLab). Results are cached in memory — no re-scan on scroll.</li>
     <li><strong>Auto-detect (branch)</strong> — Branch names pointing to a commit are also scanned
-      (e.g. <code>feature/ENG-123-login-flow</code>).</li>
+      (e.g. <code>feature/ENG-123-login-flow</code>). A single branch can carry
+      <strong>several ticket IDs</strong> — including ones separated by underscores
+      (e.g. <code>feature/ABC-1_DEF-2</code> yields both <code>ABC-1</code> and <code>DEF-2</code>) —
+      and duplicates are collapsed so each ticket shows once.</li>
     <li><strong>Manual link</strong> — Right-click a commit → <em>Link to ticket…</em> to open the
       ticket picker and create a persistent association stored in the backing store.</li>
   </ul>

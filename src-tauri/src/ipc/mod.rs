@@ -580,6 +580,16 @@ fn host_dispatch(
         return Ok(serde_json::Value::Null);
     }
 
+    // `arbor.ui.open_path` from an OOP backend (corvus-be) plugin. The backend's
+    // `AppCtx` has no window/opener, so it forwards here; the shell applies the
+    // OS-vs-built-in preference (`explorer.reveal_in_builtin`) and reveals the
+    // path (file → select in folder, folder → open) in the chosen file manager.
+    if method == "__open_path" {
+        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        crate::window::explorer::reveal_path(app, path)?;
+        return Ok(serde_json::Value::Null);
+    }
+
     // Registry-orphan GC (ADR-1): corvus-be owns the repo registry + workspace
     // store, but `recent_repos` is a shell `AppConfig` slice. When corvus-be
     // forgets an orphaned repo it asks the shell to drop the matching recent-repos

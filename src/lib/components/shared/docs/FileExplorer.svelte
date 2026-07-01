@@ -26,7 +26,7 @@
 <h2>Layout</h2>
 <ul class="step-list">
   <li><strong>Sidebar</strong> — Library (Overview / Recycle Bin / Settings), Recents, Favourites, Saved searches, Devices, <strong>Linux</strong> (your installed WSL distributions, browsable via <code>\\wsl.localhost\</code> — Windows only), and Projects (your Arbor-registered repos, grouped by workspace). Sections can be <strong>reordered and hidden</strong> from the settings page, or right-click a section header to hide it. <strong>Favourites</strong> are pinnable: right-click any folder → <em>Add to Favourites</em> (remove with the × on the pinned row, or right-click it). It's fully arrow-navigable: reach it with <Kbd label="F6" />, which cycles focus across the explorer's panes — sidebar → list → right panel → right activity bar (<Kbd label="Shift+F6" /> goes back), no Tab needed. Within the sidebar, <Kbd label="Up" /> / <Kbd label="Down" /> move between headers and items, <Kbd label="Right" /> / <Kbd label="Left" /> expand / collapse a section or workspace group, <Kbd label="Enter" /> opens. Toggle the whole sidebar with <Kbd label="Ctrl+B" />.</li>
-  <li><strong>Tabs</strong> — open several locations at once; each tab keeps its own history.</li>
+  <li><strong>Tabs</strong> — open several locations at once; each tab keeps its own history. <strong>Middle-click</strong> a folder (or a navigable sidebar item) to open it in a new background-foreground tab instead of navigating in place.</li>
   <li><strong>Address bar</strong> — click it (or <Kbd label="Ctrl+L" />) to type a path, with <strong>ghost-text autocomplete</strong> (press <Kbd label="Tab" /> to complete). The breadcrumb is clickable. Shell-style shortcuts are expanded on <Kbd label="Enter" />: <code>%appdata%</code>, <code>$HOME</code>, <code>{'${XDG_CONFIG_HOME}'}</code> and a leading <code>~</code>. The virtual names <code>%appdata%</code> / <code>%localappdata%</code> / <code>%home%</code> resolve to the right OS folder on every platform.</li>
   <li><strong>Views</strong> — Details list or Medium / Large / Extra-large icon grids; the choice is remembered per folder. Large grids show image thumbnails.</li>
   <li><strong>Columns</strong> (details view) — click a column header to sort by it (the <strong>↑ / ↓</strong> arrow sits after the label and flips the direction on a second click). <strong>Drag a header</strong> to reorder columns, and <strong>right-click any header</strong> to show / hide columns or reset them. Available columns: Name (always shown, always first), Date modified, Type, Size, Date created, Extension and Git status — only the first four are on by default. The whole set is persisted to your Arbor config.</li>
@@ -47,6 +47,7 @@
     <tr><td>Jump a page</td><td><Kbd label="PageUp" /> / <Kbd label="PageDown" /></td></tr>
     <tr><td>Extend the selection</td><td>Hold <Kbd label="Shift" /> while moving the cursor</td></tr>
     <tr><td>Open folder / file</td><td><Kbd label="Enter" /> or double-click</td></tr>
+    <tr><td>Open a folder (or sidebar item) in a new tab</td><td>Middle-click</td></tr>
     <tr><td>Open the context menu</td><td><Kbd action="open_context_menu" /></td></tr>
     <tr><td>Properties (Info panel)</td><td><Kbd label="Alt+Enter" /></td></tr>
     <tr><td>Cycle panes (sidebar · list · panel · activity bar)</td><td><Kbd label="F6" /> / <Kbd label="Shift+F6" /></td></tr>
@@ -75,6 +76,11 @@
 
 <h2>Right rail: Preview, Info, Changes</h2>
 <p>The right rail renders a live <strong>Preview</strong> of the selected file (image, video, audio, or syntax-highlighted text), an <strong>Info</strong> panel with size / dates / path (and a repository section for repo folders), and a <strong>Changes</strong> panel when inside a git repo. Resize or expand the rail; toggle the preview with <Kbd label="Ctrl+Shift+B" />. <Kbd label="Alt+Enter" /> opens the Info panel for the cursor item (Windows-style Properties); from there a button opens the OS-native Properties sheet.</p>
+<p>Text previews show the <strong>whole file</strong> — no size cap or truncated slice — line-virtualized so even a multi-megabyte log scrolls fluidly. The preview header carries two controls:</p>
+<ul class="step-list">
+  <li><strong>Refresh</strong> — re-read the file from disk on demand, keeping your scroll position.</li>
+  <li><strong>Live</strong> — a toggle that <em>tails</em> the file: it re-reads as the file changes on disk and, while you're parked at the bottom, keeps the view pinned to the newest lines (scrolling up pauses the follow; scrolling back to the bottom re-arms it). Ideal for watching a log grow in real time.</li>
+</ul>
 
 <h2>Git awareness</h2>
 <p>Inside a git repository the explorer overlays each row with a status badge — <strong>modified</strong>, <strong>staged</strong>, <strong>untracked</strong>, <strong>deleted</strong>, <strong>renamed</strong>, <strong>conflicted</strong> (ignored items are dimmed) — and folders roll up to their strongest descendant state. The footer shows the current branch with ahead / behind counts.</p>
@@ -111,5 +117,5 @@
 <h2>Settings</h2>
 <p>Open the explorer's own settings page by typing <code>arbor://settings</code> in the address bar, the sidebar <strong>Settings</strong> item, or <Kbd label="Ctrl+," />. The same switches live under <strong>Settings → File Explorer</strong>. You can tune git awareness, the global shortcut (rebindable) and always-new-window behaviour, the default view / sort / on-open folder, show-hidden and recursive search, the maximum number of recent folders, and whether the address bar may open external / web links — plus <strong>Reset</strong> actions for the per-folder view memory, recent folders, sidebar / panel layout, and remembered link schemes.</p>
 <Callout variant="info" title="Be the default file explorer">
-  Turn on <strong>Open in the built-in explorer</strong> (Settings → File Explorer) and the app's “Open / Reveal in File Explorer” actions — worktree info, plugin folders, notification reveals — open here instead of the OS file manager, focusing an existing tab when that folder is already open. Off by default. The explorer's own <strong>Reveal in File Explorer</strong> item always uses the OS, as an explicit way out to the system shell.
+  Turn on <strong>Open in the built-in explorer</strong> (Settings → File Explorer) and the app's “Open / Reveal in File Explorer” actions — worktree info, plugin folders, notification reveals, and a plugin's own “open in file manager” action — open here instead of the OS file manager, focusing an existing tab when that folder is already open. Off by default. The explorer's own <strong>Reveal in File Explorer</strong> item always uses the OS, as an explicit way out to the system shell.
 </Callout>

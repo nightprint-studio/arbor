@@ -33,7 +33,7 @@
     List, LayoutGrid, Grid2x2, Grid3x3,
     Plus, Minus, Undo2, Redo2, EyeOff, GitCompare, CheckCircle2, Save,
     SquareTerminal, Code2, Check, RotateCcw,
-    CopyPlus, StarOff, Trash, Filter as FilterIcon, Bookmark,
+    CopyPlus, StarOff, Trash, Filter as FilterIcon, Bookmark, Radio,
   } from 'lucide-svelte';
   import Icon from '@iconify/svelte';
   import { getFileIcon, getFolderIcon } from '$lib/utils/file-icons';
@@ -49,7 +49,7 @@
     fsDuplicate, fsCancelOp, fsRenameMany, fsDirSize, fsPathsSize, fsOverviewStats,
     fsTrashList, fsTrashRestore, fsTrashPurge, fsTrashEmpty, onFsOpProgress,
     fsZip, fsUnzip, fsSetWallpaper, fsSearch,
-    fsReadTextFile, fsWatchStart, fsWatchStop,
+    fsReadTextFile, fsWatchStart, fsWatchStop, fsWatchFileStart, fsWatchFileStop,
     fsGitStatus, fsGitStage, fsGitUnstage, fsGitDiscard, fsGitIgnore, fsOpenInArbor, fsGitChanges,
     fsGitBranches, fsGitCheckout, fsGitRemoteUrl, takeExplorerReveal,
     explorerClipSet, explorerClipGet, explorerClipClear,
@@ -82,6 +82,7 @@
   import Button from '../shared/ui/Button.svelte';
   import Card from '../shared/ui/Card.svelte';
   import Spinner from '../shared/ui/Spinner.svelte';
+  import VirtualTextView from '../shared/ui/VirtualTextView.svelte';
   import Dropdown, { type DropdownItem } from '../shared/ui/Dropdown.svelte';
   import Tabs, { type TabItem } from '../shared/ui/Tabs.svelte';
   import ContextMenu, { type MenuItem, type MenuAction } from '../shared/ContextMenu.svelte';
@@ -684,6 +685,21 @@
   }
   function switchTab(id: string) { activeTabId = id; syncActive(); }
   function addTab() { const t = mkTab('overview', ''); tabs = [...tabs, t]; activeTabId = t.id; syncActive(); }
+  /** Browser-style middle-click: open `path` in a fresh browse tab and bring it
+   *  to the foreground. Used by folder rows and navigable sidebar items so the
+   *  wheel-click never falls through to the left-click's in-place navigate. */
+  function openPathInNewTab(path: string) {
+    if (!path) return;
+    const t = mkTab('browse', path);
+    tabs = [...tabs, t]; activeTabId = t.id; syncActive();
+  }
+  /** Attach to a navigable element's `onauxclick`: on a middle-click, open the
+   *  path in a new tab and swallow the event (blocks the WebView autoscroll). */
+  function auxOpenTab(e: MouseEvent, path: string) {
+    if (e.button !== 1 || isPicker) return;
+    e.preventDefault(); e.stopPropagation();
+    openPathInNewTab(path);
+  }
   function closeTab(id: string) {
     if (tabs.length <= 1) return;
     const idx = tabs.findIndex(t => t.id === id);
@@ -2134,6 +2150,21 @@
   }
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
+  /** True when the keyboard focus is parked inside the read-only preview pane,
+   *  OR there's a live (non-collapsed) text selection anchored in it. Used to
+   *  hand Ctrl+A / Ctrl+C back to the browser's native text copy/select instead
+   *  of the file-list clipboard ops — the preview is where the user reads and
+   *  copies file *contents*. */
+  function focusOrSelectionInPreview(target: HTMLElement): boolean {
+    if (target.closest?.('.fx-preview')) return true;
+    const sel = window.getSelection?.();
+    if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+      const node = sel.anchorNode;
+      const el = node instanceof Element ? node : node?.parentElement ?? null;
+      if (el?.closest?.('.fx-preview')) return true;
+    }
+    return false;
+  }
   function onKeydown(e: KeyboardEvent) {
     if (renamingPath || createKind || addressEditing) return;
     // A confirm dialog is open (delete / paste conflict / discard): let it own
@@ -2150,6 +2181,20 @@
       e.preventDefault(); e.stopImmediatePropagation();
       cyclePane(e.shiftKey ? -1 : 1);
       return;
+    }
+    // File-preview shortcuts — only while a file preview is showing. F5 re-reads
+    // the previewed file; Ctrl+Shift+T toggles live-tail (follow). Guarded so
+    // they never steal the key when the preview pane isn't the active target.
+    const previewActive = rightPanel === 'preview' && view === 'browse' && !!leadEntry && !leadEntry.is_dir;
+    if (previewActive && !inInput) {
+      if (matchesBinding(e, keybindingsStore.getBinding('explorer_refresh_preview'))) {
+        e.preventDefault(); e.stopImmediatePropagation(); refreshPreview(); return;
+      }
+      if (matchesBinding(e, keybindingsStore.getBinding('explorer_toggle_live'))) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (preview?.kind === 'text') void toggleLive();
+        return;
+      }
     }
     // Picker: Ctrl/⌘+Enter always submits (even from the save-name input).
     if (isPicker && mod && e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); pickerConfirm(); return; }
@@ -2185,6 +2230,15 @@
       // Select-all / clipboard. Repeat-guarded: a *held* combo (key auto-repeat)
       // must fire once — otherwise Ctrl+C spams a toast per repeat tick.
       if (k === 'a' || k === 'c' || k === 'x' || k === 'v') {
+        // Inside the read-only preview, Ctrl+C / Ctrl+A belong to the browser:
+        // let it copy / select the visible file *text*, not the file entry.
+        // Bail WITHOUT preventDefault so the native handler runs. Ctrl+X / Ctrl+V
+        // are file-clipboard ops with no meaning in a read-only pane → swallow
+        // them there so they neither cut/paste files nor do anything native.
+        if (focusOrSelectionInPreview(e.target as HTMLElement)) {
+          if (k === 'x' || k === 'v') { e.preventDefault(); e.stopImmediatePropagation(); }
+          return;
+        }
         e.preventDefault(); e.stopImmediatePropagation();
         if (e.repeat) return;
         if (k === 'a') selectAll();
@@ -2423,12 +2477,22 @@
     | { kind: 'image';  src: string }
     | { kind: 'video';  src: string }
     | { kind: 'audio';  src: string }
-    | { kind: 'text';   text: string; lang: string | null }
+    | { kind: 'text';   lines: string[]; lang: string | null; truncated: boolean }
     | { kind: 'folder'; items: FsEntry[] }
     | { kind: 'none' };
   let preview = $state<Preview | null>(null);
   let previewLoading = $state(false);
   let pvSeq = 0;
+  // Text-preview cap: read up to this many characters (BE `fs_read_text_file`
+  // returns the whole file; we bound it here so a runaway multi-MB log doesn't
+  // build an enormous line array). Well under FULL_FILE_CONTEXT (1_000_000).
+  const PREVIEW_TEXT_CAP = 1_000_000;
+  function splitTextPreview(raw: string): { lines: string[]; truncated: boolean } {
+    const truncated = raw.length > PREVIEW_TEXT_CAP;
+    const text = truncated ? raw.slice(0, PREVIEW_TEXT_CAP) : raw;
+    // Normalise CRLF so line virtualization heights stay uniform.
+    return { lines: text.replace(/\r\n/g, '\n').split('\n'), truncated };
+  }
 
   // Image extensions that the asset protocol is scoped to (tauri.conf.json) —
   // these render via convertFileSrc into a real <img>.
@@ -2463,23 +2527,110 @@
     return EXT_LANG[extOf(name)] ?? null;
   }
 
+  /** Load the preview for `entry`. `showSpinner` is suppressed on live-tail /
+   *  manual refresh reloads so the pane doesn't flash a spinner on every FS
+   *  event. Guarded by `pvSeq` so a slow read can't clobber a newer selection. */
+  async function runPreviewLoad(entry: FsEntry, showSpinner: boolean) {
+    const seq = ++pvSeq;
+    if (showSpinner) { previewLoading = true; preview = null; }
+    try {
+      let result: Preview;
+      if (entry.is_dir) result = { kind: 'folder', items: (await fsReadDir(entry.path, true)).slice(0, 300) };
+      else if (isImage(entry.name)) result = { kind: 'image', src: convertFileSrc(entry.path) };
+      else if (isVideo(entry.name)) result = { kind: 'video', src: convertFileSrc(entry.path) };
+      else if (isAudio(entry.name)) result = { kind: 'audio', src: convertFileSrc(entry.path) };
+      else if (isTextual(entry.name)) {
+        // No size gate / no 50KB slice: the whole file is shown, virtualised by
+        // line so even a multi-MB log stays fluid. `PREVIEW_TEXT_CAP` bounds the
+        // line array; `truncated` surfaces the cut in the header.
+        const { lines, truncated } = splitTextPreview(await fsReadTextFile(entry.path));
+        result = { kind: 'text', lines, lang: langFor(entry.name), truncated };
+      }
+      else result = { kind: 'none' };
+      if (seq === pvSeq) { preview = result; previewLoading = false; }
+    } catch { if (seq === pvSeq) { preview = { kind: 'none' }; previewLoading = false; } }
+  }
+
+  // Preview live-tail (log follow) — see `previewLive` / `pvFileWatching`.
+  let previewLive = $state(false);
+  let pvFollowTail = $state(true);
+  let pvWatchedPath = $state<string | null>(null);
+  let pvFileUnlisten: UnlistenFn | null = null;
+
+  // ── Text preview virtualization ─────────────────────────────────────────────
+  // The line-windowing lives in the shared <VirtualTextView>; here we only keep
+  // the ref (to scroll on tail / reset on file change), the line list, and the
+  // gutter width for the custom highlighted-line snippet. `pvFollowTail` is the
+  // widget's two-way `follow` state (auto-scroll to bottom; detaches on scroll-up).
+  let pvView = $state<VirtualTextView | undefined>();
+  const pvLines   = $derived(preview?.kind === 'text' ? preview.lines : []);
+  const pvGutterW = $derived(String(pvLines.length).length);
+  function scrollPreviewToBottom() {
+    // Defer to after the DOM reflects the new line count.
+    tick().then(() => pvView?.scrollToBottom());
+  }
+  // Reset the scroll position when the previewed text changes identity (new
+  // file). Keyed off the target path so a live re-read of the SAME file keeps
+  // the viewport where the user parked it (unless tail-follow snaps it down).
+  $effect(() => {
+    const _ = leadEntry?.path;
+    pvView?.scrollToIndex(0);
+  });
+
+  // (Re)load the preview whenever the selected entry / panel visibility changes.
   $effect(() => {
     const entry = leadEntry;
     if (rightPanel !== 'preview' || view !== 'browse' || !entry) { preview = null; previewLoading = false; return; }
-    const seq = ++pvSeq;
-    previewLoading = true; preview = null;
-    (async () => {
-      try {
-        let result: Preview;
-        if (entry.is_dir) result = { kind: 'folder', items: (await fsReadDir(entry.path, true)).slice(0, 300) };
-        else if (isImage(entry.name)) result = { kind: 'image', src: convertFileSrc(entry.path) };
-        else if (isVideo(entry.name)) result = { kind: 'video', src: convertFileSrc(entry.path) };
-        else if (isAudio(entry.name)) result = { kind: 'audio', src: convertFileSrc(entry.path) };
-        else if (isTextual(entry.name) && (entry.size ?? 0) < 2_000_000) result = { kind: 'text', text: (await fsReadTextFile(entry.path)).slice(0, 50_000), lang: langFor(entry.name) };
-        else result = { kind: 'none' };
-        if (seq === pvSeq) { preview = result; previewLoading = false; }
-      } catch { if (seq === pvSeq) { preview = { kind: 'none' }; previewLoading = false; } }
-    })();
+    void runPreviewLoad(entry, true);
+  });
+
+  /** Manual refresh button — re-read the current preview target. */
+  function refreshPreview() {
+    const entry = leadEntry;
+    if (!entry) return;
+    void runPreviewLoad(entry, false);
+  }
+
+  /** Live-tail toggle: subscribe a filesystem watch on the previewed file; on
+   *  each change re-read + auto-scroll to the bottom (tail -f). Only meaningful
+   *  for the text preview. Watch is torn down on toggle-off, target change, or
+   *  panel/modal close (see the effect + onDestroy). */
+  async function toggleLive() {
+    if (previewLive) { await stopPreviewWatch(); previewLive = false; return; }
+    previewLive = true;
+    pvFollowTail = true;
+    await startPreviewWatch();
+  }
+  async function startPreviewWatch() {
+    const entry = leadEntry;
+    if (!entry || entry.is_dir) return;
+    await stopPreviewWatch();
+    pvWatchedPath = entry.path;
+    try {
+      pvFileUnlisten = await listen('arbor://fs-file-changed', () => {
+        // Ignore stale events for a file we no longer preview.
+        const cur = leadEntry;
+        if (!cur || cur.path !== pvWatchedPath) return;
+        void runPreviewLoad(cur, false).then(() => { if (pvFollowTail) scrollPreviewToBottom(); });
+      });
+      await fsWatchFileStart(entry.path);
+    } catch { /* watcher unavailable — leave the toggle on but inert */ }
+  }
+  async function stopPreviewWatch() {
+    pvFileUnlisten?.(); pvFileUnlisten = null;
+    pvWatchedPath = null;
+    try { await fsWatchFileStop(); } catch { /* ignore */ }
+  }
+  // When Live is on and the selection changes to another file, re-point the
+  // watcher; when the preview panel closes, turn Live off entirely; when the
+  // selection is a folder / non-previewable, just drop the watch (Live re-arms
+  // if a text file is selected again).
+  $effect(() => {
+    const entry = leadEntry;
+    if (!previewLive) return;
+    if (rightPanel !== 'preview' || view !== 'browse') { void stopPreviewWatch(); untrack(() => previewLive = false); return; }
+    if (!entry || entry.is_dir) { void stopPreviewWatch(); return; }
+    if (entry.path !== pvWatchedPath) void startPreviewWatch();
   });
 
   // ── Formatting / icons ──────────────────────────────────────────────────
@@ -2607,7 +2758,7 @@
       else if (view === 'browse') listEl?.focus();
     });
   });
-  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); ideUnlisten?.(); fsOpUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); });
+  onDestroy(() => { unlisten?.(); revealUnlisten?.(); clipUnlisten?.(); dropUnlisten?.(); focusUnlisten?.(); ideUnlisten?.(); fsOpUnlisten?.(); pvFileUnlisten?.(); if (refreshTimer) clearTimeout(refreshTimer); if (rootsTimer) clearInterval(rootsTimer); fsWatchStop().catch(() => {}); fsWatchFileStop().catch(() => {}); });
 </script>
 
 {#snippet sbLabel(id: string, Ico: typeof Folder, text: string)}
@@ -2670,7 +2821,7 @@
       <div class="fx-sb-list">
         {#each recents as p (p)}
           {@const name = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p}
-          <button class="fx-sb-item" class:active={view === 'browse' && currentPath === p} onclick={() => navigate(p)} use:tooltip={sidebarCollapsed ? `${name} — ${p}` : p}>
+          <button class="fx-sb-item" class:active={view === 'browse' && currentPath === p} onclick={() => navigate(p)} onauxclick={(e) => auxOpenTab(e, p)} use:tooltip={sidebarCollapsed ? `${name} — ${p}` : p}>
             <span class="fx-sb-ico"><Folder size={14} /></span><span class="fx-sb-text">{name}</span>
           </button>
         {/each}
@@ -2686,13 +2837,14 @@
       <div class="fx-sb-list">
         {#each favourites as r (r.path)}
           {@const I = rootIcon(r.kind)}
-          <button class="fx-sb-item" class:active={view === 'browse' && currentPath === r.path} onclick={() => navigate(r.path)} use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : r.path}>
+          <button class="fx-sb-item" class:active={view === 'browse' && currentPath === r.path} onclick={() => navigate(r.path)} onauxclick={(e) => auxOpenTab(e, r.path)} use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : r.path}>
             <span class="fx-sb-ico"><I size={14} /></span><span class="fx-sb-text">{r.name}</span>
           </button>
         {/each}
         {#each pinnedFavs as r (r.path)}
           <button class="fx-sb-item fx-sb-item-pinned" class:active={view === 'browse' && currentPath === r.path}
                   onclick={() => navigate(r.path)}
+                  onauxclick={(e) => auxOpenTab(e, r.path)}
                   oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); explorerStore.unpinFavourite(r.path); }}
                   use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : { content: r.path, description: 'Right-click to remove from Favourites' }}>
             <span class="fx-sb-ico"><Star size={14} /></span><span class="fx-sb-text">{r.name}</span>
@@ -2714,7 +2866,7 @@
     {#if sectionOpen('devices')}
       <div class="fx-sb-list">
         {#each drives as r (r.path)}
-          <button class="fx-sb-item" class:active={view === 'browse' && currentPath.startsWith(r.path)} onclick={() => navigate(r.path)} use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : r.path}>
+          <button class="fx-sb-item" class:active={view === 'browse' && currentPath.startsWith(r.path)} onclick={() => navigate(r.path)} onauxclick={(e) => auxOpenTab(e, r.path)} use:tooltip={sidebarCollapsed ? `${r.name} — ${r.path}` : r.path}>
             <span class="fx-sb-ico"><HardDrive size={14} /></span><span class="fx-sb-text">{r.name}</span>
           </button>
         {/each}
@@ -2732,7 +2884,7 @@
         <div class="fx-sb-list">
           {#each projects as p (p.id)}
             {@const isActive = activeRepoPath != null && normPath(p.path) === normPath(activeRepoPath)}
-            <button class="fx-sb-item fx-sb-project" class:fx-active-repo={isActive} onclick={() => navigate(p.path)} use:tooltip={`${p.display_name}${isActive ? ' (active)' : ''} — ${p.path}`}>
+            <button class="fx-sb-item fx-sb-project" class:fx-active-repo={isActive} onclick={() => navigate(p.path)} onauxclick={(e) => auxOpenTab(e, p.path)} use:tooltip={`${p.display_name}${isActive ? ' (active)' : ''} — ${p.path}`}>
               <span class="fx-sb-ico">{#if isActive}<Box size={14} />{:else}<GitBranch size={14} />{/if}</span>
             </button>
           {/each}
@@ -2742,7 +2894,7 @@
           {@const ap = activeProject}
           {@const isCurrent = normPath(currentPath) === normPath(ap.path) || normPath(currentPath).startsWith(normPath(ap.path) + '/')}
           <div class="fx-sb-list">
-            <button class="fx-sb-item fx-sb-project fx-active-repo" class:active={view === 'browse' && isCurrent} onclick={() => navigate(ap.path)} use:tooltip={`${ap.path} — open in active tab`}>
+            <button class="fx-sb-item fx-sb-project fx-active-repo" class:active={view === 'browse' && isCurrent} onclick={() => navigate(ap.path)} onauxclick={(e) => auxOpenTab(e, ap.path)} use:tooltip={`${ap.path} — open in active tab`}>
               <span class="fx-sb-ico"><Box size={14} /></span><span class="fx-sb-text">{ap.display_name}</span><span class="fx-sb-dot" aria-hidden="true"></span>
             </button>
           </div>
@@ -2758,7 +2910,7 @@
               {#each ws.repos as p (p.id)}
                 {@const isActiveRepo = activeRepoPath != null && normPath(p.path) === normPath(activeRepoPath)}
                 {@const isCurrent = normPath(currentPath) === normPath(p.path) || normPath(currentPath).startsWith(normPath(p.path) + '/')}
-                <button class="fx-sb-item fx-sb-project" class:fx-active-repo={isActiveRepo} class:active={view === 'browse' && isCurrent} onclick={() => navigate(p.path)} use:tooltip={isActiveRepo ? `${p.path} — open in active tab` : p.path}>
+                <button class="fx-sb-item fx-sb-project" class:fx-active-repo={isActiveRepo} class:active={view === 'browse' && isCurrent} onclick={() => navigate(p.path)} onauxclick={(e) => auxOpenTab(e, p.path)} use:tooltip={isActiveRepo ? `${p.path} — open in active tab` : p.path}>
                   <span class="fx-sb-ico">{#if isActiveRepo}<Box size={14} />{:else}<GitBranch size={14} />{/if}</span>
                   <span class="fx-sb-text">{p.display_name}</span>{#if isActiveRepo}<span class="fx-sb-dot" aria-hidden="true"></span>{/if}
                 </button>
@@ -3134,8 +3286,9 @@
                        id={`fx-opt-${vsStart + i}`}
                        data-path={entry.path} data-dir={entry.is_dir}
                        class:selected={selected.has(entry.path)} class:lead={lead === entry.path} class:cut={cutSet.has(entry.path)} class:drop-target={dragOverDir === entry.path}
-                       onmousedown={(e) => startRowDrag(e, entry)}
+                       onmousedown={(e) => { if (e.button === 1) { e.preventDefault(); return; } startRowDrag(e, entry); }}
                        onclick={(ev) => clickEntry(entry, ev)} ondblclick={() => openEntry(entry)} oncontextmenu={(e) => openCtx(e, entry)}
+                       onauxclick={(e) => { if (entry.is_dir) auxOpenTab(e, entry.path); }}
                        role="option" aria-selected={selected.has(entry.path)} tabindex="-1">
                     {#if isGrid}
                       {@const showThumb = thumbsOn && !entry.is_dir && isImage(entry.name)}
@@ -3195,6 +3348,19 @@
         {/if}
         <div class="fx-pv-head">
           <span class="fx-pv-head-title">{rightPanel === 'preview' ? 'Preview' : rightPanel === 'changes' ? 'Changes' : 'Info'}</span>
+          {#if rightPanel === 'preview' && leadEntry && !leadEntry.is_dir}
+            <button class="fx-pv-expand" onclick={refreshPreview}
+                    use:tooltip={'Refresh preview'} aria-label="Refresh preview">
+              <RefreshCw size={13} />
+            </button>
+            {#if preview?.kind === 'text'}
+              <button class="fx-pv-expand" class:fx-pv-live-on={previewLive} onclick={toggleLive}
+                      use:tooltip={{ content: previewLive ? 'Live tail on' : 'Live tail off', description: 'Follow file changes (tail -f)' }}
+                      aria-label="Toggle live tail" aria-pressed={previewLive}>
+                <Radio size={13} />
+              </button>
+            {/if}
+          {/if}
           <button class="fx-pv-expand" onclick={() => previewExpanded = !previewExpanded}
                   use:tooltip={previewExpanded ? 'Restore' : 'Expand'} aria-label="Toggle expand" aria-pressed={previewExpanded}>
             {#if previewExpanded}<Minimize2 size={13} />{:else}<Maximize2 size={13} />{/if}
@@ -3243,7 +3409,34 @@
                 <audio class="fx-pv-audio-el" src={preview.src} controls preload="metadata"></audio>
               </div>
             {:else if preview?.kind === 'text'}
-              <pre class="fx-pv-code"><code>{@html highlightCode(preview.text, preview.lang)}</code></pre>
+              <!-- Line-virtualised text via the shared <VirtualTextView>: only
+                   the visible window of lines is in the DOM, so a multi-MB file /
+                   live log stays fluid. The `line` snippet renders the gutter +
+                   per-line highlight (Prism) — kept in the consumer since
+                   highlightCode is Arbor-specific. -->
+              {@const lang = preview.lang}
+              <div class="fx-pv-textwrap">
+                <VirtualTextView
+                  bind:this={pvView}
+                  lines={pvLines}
+                  lineHeight={19}
+                  overscan={20}
+                  bind:follow={pvFollowTail}
+                  class="fx-pv-code"
+                  role="log"
+                >
+                  {#snippet line({ text, index })}
+                    <div class="fx-pv-line">
+                      <span class="fx-pv-ln" style="width: {pvGutterW}ch;">{index + 1}</span>
+                      <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                      <code class="fx-pv-lc">{@html highlightCode(text, lang) || '​'}</code>
+                    </div>
+                  {/snippet}
+                </VirtualTextView>
+                {#if preview.truncated}
+                  <div class="fx-pv-trunc"><AlertCircle size={12} /> File truncated at {formatSize(PREVIEW_TEXT_CAP)} for preview</div>
+                {/if}
+              </div>
             {:else if preview?.kind === 'folder'}
               <div class="fx-pv-folder">{#each preview.items as it (it.path)}<div class="fx-pv-folder-item"><span class="fx-pv-folder-ico"><Icon icon={entryIcon(it.name, it.is_dir)} width={14} height={14} /></span><span class="fx-pv-folder-name">{it.name}</span></div>{:else}<div class="fx-pv-noprev"><span>Empty folder</span></div>{/each}</div>
             {:else}
@@ -3817,18 +4010,28 @@
   .fx-pv-resize { position: absolute; left: 0; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 5; }
   .fx-pv-resize::after { content: ''; position: absolute; left: 2px; top: 0; bottom: 0; width: 2px; border-radius: 1px; background: transparent; transition: background var(--transition-fast); }
   .fx-pv-resize:hover::after, .fx-pv-resize:active::after { background: var(--accent); }
-  .fx-pv-head { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; margin-bottom: 2px; }
-  .fx-pv-head-title { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+  .fx-pv-head { display: flex; align-items: center; gap: 2px; flex-shrink: 0; margin-bottom: 2px; }
+  .fx-pv-head-title { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin-right: auto; }
   .fx-pv-expand { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: none; background: transparent; color: var(--text-muted); cursor: pointer; border-radius: var(--radius-sm); transition: background var(--transition-fast), color var(--transition-fast); }
   .fx-pv-expand:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .fx-pv-live-on { color: var(--accent-danger, #e5484d); }
+  .fx-pv-live-on:hover { color: var(--accent-danger, #e5484d); }
   .fx-pv-view { flex: 1; min-height: 150px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; position: relative; }
   .fx-pv-loading { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text-muted); font-size: 11px; }
   .fx-pv-image { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
   .fx-pv-media { max-width: 100%; max-height: 100%; display: block; background: #000; border-radius: var(--radius-sm); }
   .fx-pv-audio { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; width: 100%; padding: 18px; box-sizing: border-box; color: var(--text-muted); }
   .fx-pv-audio-el { width: 100%; }
-  .fx-pv-code { margin: 0; width: 100%; height: 100%; overflow: auto; box-sizing: border-box; padding: 12px 14px; font-family: var(--font-code); font-size: 11px; line-height: 1.55; color: var(--text-secondary); white-space: pre; tab-size: 2; cursor: text; user-select: text; -webkit-user-select: text; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
-  .fx-pv-code code { font-family: inherit; user-select: text; -webkit-user-select: text; }
+  /* Virtualised text preview: line-windowing is handled by the shared
+     <VirtualTextView>; `.fx-pv-code` is the class it puts on its scroll
+     viewport (hence `:global`). `.fx-pv-textwrap` fills the centring
+     `.fx-pv-view` and stacks the viewport over the optional truncation banner. */
+  .fx-pv-textwrap { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
+  :global(.fx-pv-code) { padding: 12px 0; font-family: var(--font-code); font-size: 11px; color: var(--text-secondary); tab-size: 2; cursor: text; user-select: text; -webkit-user-select: text; }
+  .fx-pv-line { display: flex; align-items: flex-start; width: 100%; height: 100%; white-space: pre; }
+  .fx-pv-ln { flex-shrink: 0; text-align: right; padding: 0 10px 0 14px; color: var(--text-muted); opacity: 0.55; user-select: none; -webkit-user-select: none; }
+  .fx-pv-lc { font-family: inherit; padding-right: 14px; user-select: text; -webkit-user-select: text; }
+  .fx-pv-trunc { display: flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 10.5px; color: var(--text-muted); padding: 5px 12px; border-top: 1px solid var(--border-subtle); }
   .fx-pv-folder { width: 100%; height: 100%; overflow-y: auto; padding: 8px; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
   .fx-pv-folder-item { display: flex; align-items: center; gap: 7px; padding: 3px 6px; border-radius: var(--radius-sm); font-size: 11.5px; color: var(--text-secondary); }
   .fx-pv-folder-ico { display: inline-flex; align-items: center; flex-shrink: 0; }
