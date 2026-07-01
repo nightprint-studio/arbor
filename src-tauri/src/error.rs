@@ -139,6 +139,7 @@ impl From<arbor_fs::prelude::FsError> for AppError {
     }
 }
 
+
 /// Implements Serialize so AppError can be returned from Tauri commands directly.
 impl serde::Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

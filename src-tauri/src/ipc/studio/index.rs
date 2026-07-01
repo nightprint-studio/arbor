@@ -134,7 +134,7 @@ fn studio_scan_repo(
     kinds: Vec<StudioFileKind>,
 ) -> Result<Vec<StudioFileEntry>, AppError> {
     let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
-    scan_repo(&repo_path, &kinds)
+    scan_repo(&repo_path, &kinds).map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// Project-wide cross-reference scan. Returns every `id: "…"` /
@@ -159,7 +159,7 @@ fn studio_scan_cross_refs(
             return Ok(index::aggregate_cross_refs_for(&idx, &kinds));
         }
     }
-    scan_cross_refs_for(&repo_path, &kinds)
+    scan_cross_refs_for(&repo_path, &kinds).map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// Reverse navigation: given a top-level `id`/`name` value, find every
@@ -181,7 +181,7 @@ fn studio_find_usages(
             return Ok(index::aggregate_usages_for(&idx, &target, &kinds));
         }
     }
-    find_usages_for(&repo_path, &target, &kinds)
+    find_usages_for(&repo_path, &target, &kinds).map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// Project-wide broken-reference scan. Walks every `.ron` file in the
@@ -205,5 +205,5 @@ fn studio_scan_broken_refs(
             return Ok(index::aggregate_broken_refs_for(&idx, &kinds));
         }
     }
-    scan_broken_refs_for(&repo_path, &kinds)
+    scan_broken_refs_for(&repo_path, &kinds).map_err(|e| AppError::Other(e.to_string()))
 }

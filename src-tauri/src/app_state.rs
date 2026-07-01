@@ -403,15 +403,9 @@ impl AppState {
             git_providers:          Mutex::new(providers),
             branding:               BrandingState::default(),
             deep_link_buffer:       Arc::new(DeepLinkBuffer::default()),
-            studio_registry:        {
-                let mut reg = StudioRegistry::new();
-                reg.register(crate::ron_studio::backend_impl::backend());
-                reg.register(crate::json_studio::backend_impl::backend());
-                reg.register(crate::toml_studio::backend_impl::backend());
-                reg.register(crate::yaml_studio::backend_impl::backend());
-                reg.register(crate::properties_studio::backend_impl::backend());
-                Arc::new(reg)
-            },
+            // Fully-wired registry (all 5 backends + schema/index
+            // providers) now lives in `arbor-studio-api` (Stage 4).
+            studio_registry:        Arc::new(arbor_studio_api::studio_registry()),
             cloud_cancellations:    Arc::new(Mutex::new(HashMap::new())),
             streams:                Arc::new(crate::ipc::stream_registry::StreamRegistry::default()),
             cloud_pending_ops:      Arc::new(Mutex::new(HashMap::new())),

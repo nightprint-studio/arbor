@@ -1,0 +1,22 @@
+[package]
+name         = "arbor-studio-properties"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Studio .properties backend — lossless Java/Spring .properties editing (line-oriented RawLine model, continuation/escape/\\uXXXX, $value prefix-collision sentinel) on top of arbor-studio-core's DefaultBackend<SimpleFormat>. Key-scoped F12 rename + (empty)-sentinel F13 bulk via a custom PropertiesRefactor. Bundles the YAML↔.properties converter. Tauri-free; WASM-guest compile target for Studio-as-plugin."
+
+[dependencies]
+arbor-studio-core  = { path = "../core" }
+arbor-studio-types = { path = "../types" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Data-model projection used only by the bundled YAML↔.properties converter
+# (`codec.rs`) — the .properties line model itself is pure-Rust, no parser dep.
+serde_yaml_ng = "0.10"
+
+[dev-dependencies]
+# §6 encoding round-trip test exercises the same encode/decode the core
+# persist layer uses.
+arbor-fs = { path = "../../../foundation/fs" }

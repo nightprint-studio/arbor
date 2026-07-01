@@ -1,0 +1,36 @@
+[package]
+name         = "arbor-studio-ron"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Studio RON backend — hand-written tag-preserving recursive-descent AST (variant tags Some(...)/named struct/tuple, forced float .0), RON-special tree-diff/query/refactor, and a syn-based .rs schema loader. Calls arbor-studio-core's engines (history/persist) but stays a full hand-written StudioFormatBackend. Tauri-free; WASM-guest compile target for Studio-as-plugin."
+
+[dependencies]
+arbor-studio-core  = { path = "../core" }
+arbor-studio-types = { path = "../types" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+async-trait  = { workspace = true }
+uuid         = { workspace = true }
+tokio        = { workspace = true }
+tracing      = { workspace = true }
+# Encoding-aware on-disk read/write (FROZEN F16) + scanner file decoding.
+arbor-fs     = { path = "../../../foundation/fs" }
+# RFC 9535 JSONPath engine — drives the RON query bar over the
+# tag-preserving projection of the AST.
+serde_json_path = "0.7"
+# Rust source parser used by the "Load schema from .rs" feature — walks an
+# entire crate from its Cargo.toml, extracts struct/enum definitions,
+# resolves mod/use/aliases, computes the reachable type closure from a root.
+# `extra-traits` enables PartialEq/Eq/Hash on AST nodes.
+syn = { version = "2", features = ["full", "extra-traits", "parsing"] }
+# Pretty-printer for syn AST → readable Rust source ("View implementation").
+prettyplease = "0.2"
+quote = "1"
+# Sidecar `.arbor/studio.toml` / `.ron-studio.toml` schema-hint parsing.
+toml = "0.8"
+
+[dev-dependencies]
+arbor-fs = { path = "../../../foundation/fs" }

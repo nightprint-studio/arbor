@@ -8,6 +8,10 @@
 //! `rpc` command dispatches every handler inside one central `spawn_blocking`
 //! (see `crate::commands::rpc_commands`), so the file IO still runs off the
 //! Tauri runtime workers. Behavior (load-or-default, save, errors) is identical.
+//!
+//! The config engine moved to `arbor-studio-api` (Stage 4); these handlers
+//! own only the tab-path resolution + the Tauri/rpc seam, mapping the api's
+//! `StudioError` to `AppError` for the shared IPC error surface.
 
 use crate::error::AppError;
 use crate::ipc::studio;
@@ -20,7 +24,7 @@ use crate::AppState;
 #[studio::handler(program = "studio")]
 fn studio_get_config(state: &AppState, tab_id: String) -> Result<StudioConfig, AppError> {
     let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
-    studio_config::load(&repo_path)
+    studio_config::load(&repo_path).map_err(|e| AppError::Other(e.to_string()))
 }
 
 /// Register an external location for the active project. `path` can
@@ -39,7 +43,7 @@ fn studio_add_external(
     let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     studio_config::add_external(&mut cfg, &path, label.as_deref());
-    studio_config::save(&repo_path, &cfg)?;
+    studio_config::save(&repo_path, &cfg).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(())
 }
 
@@ -56,7 +60,7 @@ fn studio_remove_external(
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     let removed = studio_config::remove_external(&mut cfg, &path);
     if removed {
-        studio_config::save(&repo_path, &cfg)?;
+        studio_config::save(&repo_path, &cfg).map_err(|e| AppError::Other(e.to_string()))?;
     }
     Ok(removed)
 }
@@ -72,7 +76,7 @@ fn studio_toggle_exclude(
     let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     let now = studio_config::toggle_exclude(&mut cfg, &relative_path);
-    studio_config::save(&repo_path, &cfg)?;
+    studio_config::save(&repo_path, &cfg).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(now)
 }
 
@@ -94,7 +98,7 @@ fn studio_bind_schema(
     let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     studio_config::set_binding(&mut cfg, &relative_path, &rs_file, &root_type, reference_fields);
-    studio_config::save(&repo_path, &cfg)?;
+    studio_config::save(&repo_path, &cfg).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(())
 }
 
@@ -115,7 +119,7 @@ fn studio_toggle_reference_field(
     let repo_path = crate::ipc::resolve_tab_path(state, &tab_id)?;
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     let (now, _scope) = studio_config::toggle_reference_field(&mut cfg, &relative_path, &field);
-    studio_config::save(&repo_path, &cfg)?;
+    studio_config::save(&repo_path, &cfg).map_err(|e| AppError::Other(e.to_string()))?;
     Ok(now)
 }
 
@@ -131,7 +135,7 @@ fn studio_unbind_schema(
     let mut cfg = studio_config::load(&repo_path).unwrap_or_default();
     let removed = studio_config::clear_binding(&mut cfg, &relative_path);
     if removed {
-        studio_config::save(&repo_path, &cfg)?;
+        studio_config::save(&repo_path, &cfg).map_err(|e| AppError::Other(e.to_string()))?;
     }
     Ok(removed)
 }

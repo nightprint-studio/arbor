@@ -1,0 +1,23 @@
+[package]
+name         = "arbor-studio-yaml"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Studio YAML backend — lossless YAML editing via yaml_edit on top of arbor-studio-core's DefaultBackend<SimpleFormat>. Comments/anchors/quote-style/multi-doc `---` streams preserved; projects to serde_json::Value (via serde_yaml_ng) for nav/query. Tauri-free; WASM-guest compile target for Studio-as-plugin."
+
+[dependencies]
+arbor-studio-core  = { path = "../core" }
+arbor-studio-types = { path = "../types" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Lossless YAML AST (rowan-based) — preserves comments / anchors / quote style.
+yaml-edit  = "0.2"
+# Data-model projection to serde_json::Value (multi-doc aware).
+serde_yaml_ng = "0.10"
+
+[dev-dependencies]
+# §6 encoding round-trip test exercises the same encode/decode the core
+# persist layer uses.
+arbor-fs = { path = "../../../foundation/fs" }

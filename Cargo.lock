@@ -149,6 +149,8 @@ dependencies = [
  "arbor-rpc",
  "arbor-scheduler",
  "arbor-shell-common",
+ "arbor-studio-api",
+ "arbor-studio-types",
  "async-trait",
  "base64 0.22.1",
  "corvus-core",
@@ -159,24 +161,17 @@ dependencies = [
  "corvus-pipeline-core",
  "corvus-provider-descriptor",
  "dirs",
- "jsonc-parser",
  "keyring",
  "libc",
  "mlua",
  "notify",
  "openssl-sys",
  "portable-pty",
- "prettyplease",
- "quote",
  "reqwest 0.12.28",
  "semver",
  "serde",
  "serde_json",
- "serde_json_path",
- "serde_yaml_ng",
- "simd-json",
  "similar",
- "syn 2.0.117",
  "systemicons",
  "tauri",
  "tauri-build",
@@ -188,13 +183,11 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "toml_edit 0.22.27",
  "tracing",
  "tracing-subscriber",
  "trash",
  "uuid",
  "windows-sys 0.52.0",
- "yaml-edit",
  "zip",
 ]
 
@@ -432,6 +425,120 @@ dependencies = [
  "keyring",
  "thiserror 2.0.18",
  "zeroize",
+]
+
+[[package]]
+name = "arbor-studio-api"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "arbor-studio-core",
+ "arbor-studio-json",
+ "arbor-studio-properties",
+ "arbor-studio-ron",
+ "arbor-studio-toml",
+ "arbor-studio-types",
+ "arbor-studio-yaml",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
+name = "arbor-studio-core"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "arbor-studio-types",
+ "async-trait",
+ "serde_json",
+ "serde_json_path",
+ "similar",
+ "uuid",
+]
+
+[[package]]
+name = "arbor-studio-json"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "arbor-studio-core",
+ "arbor-studio-types",
+ "async-trait",
+ "jsonc-parser",
+ "serde",
+ "serde_json",
+ "simd-json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "arbor-studio-properties"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "arbor-studio-core",
+ "arbor-studio-types",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+]
+
+[[package]]
+name = "arbor-studio-ron"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "arbor-studio-core",
+ "arbor-studio-types",
+ "async-trait",
+ "prettyplease",
+ "quote",
+ "serde",
+ "serde_json",
+ "serde_json_path",
+ "syn 2.0.117",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "arbor-studio-toml"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "arbor-studio-core",
+ "arbor-studio-types",
+ "serde_json",
+ "toml_edit 0.22.27",
+]
+
+[[package]]
+name = "arbor-studio-types"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "arbor-studio-yaml"
+version = "0.3.0"
+dependencies = [
+ "arbor-fs",
+ "arbor-studio-core",
+ "arbor-studio-types",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "yaml-edit",
 ]
 
 [[package]]

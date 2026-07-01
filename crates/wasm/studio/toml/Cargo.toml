@@ -1,0 +1,20 @@
+[package]
+name         = "arbor-studio-toml"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Studio TOML backend — lossless TOML editing via toml_edit on top of arbor-studio-core's DefaultBackend<SimpleFormat>. Comments/whitespace/ordering preserved; projects to serde_json::Value for nav/query. Tauri-free; WASM-guest compile target for Studio-as-plugin."
+
+[dependencies]
+arbor-studio-core  = { path = "../core" }
+arbor-studio-types = { path = "../types" }
+serde_json = { workspace = true }
+# Lossless TOML AST — preserves comments / whitespace / inline-vs-block decor.
+toml_edit  = "0.22"
+
+[dev-dependencies]
+# §6 encoding round-trip test exercises the same encode/decode the core
+# persist layer uses.
+arbor-fs = { path = "../../../foundation/fs" }

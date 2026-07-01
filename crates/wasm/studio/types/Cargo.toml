@@ -1,0 +1,13 @@
+[package]
+name         = "arbor-studio-types"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Studio DTOs — the format-agnostic data shapes that cross the StudioFormatBackend trait / IPC boundary (ParseResult, NodeView, StudioMutation, diff/rename/bulk-edit shapes, FormatDescriptor + the schema-view DTOs) plus StudioError. Zero logic beyond derives + trivial ctors. Tauri-free; earmarked as the WASM-guest compile target for Studio-as-plugin."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }

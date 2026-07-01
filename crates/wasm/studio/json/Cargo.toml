@@ -1,0 +1,32 @@
+[package]
+name         = "arbor-studio-json"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Studio JSON backend — hand-written dual-parser editor: simd-json read path + jsonc-parser byte-splice edit path, stream mode for multi-MB files, JSONC comments/trailing-commas, AST tree-diff comparing Number.raw. Calls arbor-studio-core's engines (history/diff/query/edit_expr/refactor/persist) but stays a full hand-written StudioFormatBackend. Tauri-free; WASM-guest compile target for Studio-as-plugin."
+
+[dependencies]
+arbor-studio-core  = { path = "../core" }
+arbor-studio-types = { path = "../types" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+async-trait  = { workspace = true }
+uuid         = { workspace = true }
+tokio        = { workspace = true }
+tracing      = { workspace = true }
+# Encoding-aware on-disk read/write (FROZEN F16) + scanner file decoding.
+arbor-fs     = { path = "../../../foundation/fs" }
+# SIMD-accelerated JSON parser — the stream-mode (multi-MB, navigation-only)
+# read path. Tree mode uses jsonc-parser instead.
+simd-json    = "0.13"
+# JSONC (JSON with comments) parser with byte-range AST — the editable
+# tree-mode doc model. Strict for `.json`, lenient (comments + trailing
+# commas) for `.jsonc`. Drives position-preserving splice mutations.
+jsonc-parser = { version = "0.32", features = ["serde"] }
+
+[dev-dependencies]
+# §6 encoding round-trip test exercises the same encode/decode the core
+# persist layer uses.
+arbor-fs = { path = "../../../foundation/fs" }

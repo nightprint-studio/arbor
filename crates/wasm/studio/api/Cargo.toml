@@ -1,0 +1,25 @@
+[package]
+name         = "arbor-studio-api"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Studio orchestration facade — the StudioRegistry (keyed StudioFormatBackend lookup), the studio_registry() factory wiring all 5 format backends with their SchemaProvider routing + index providers, the format-agnostic cross-ref scanner (scan_repo / scan_cross_refs / find_usages / scan_broken_refs), the persistent project index, the repo-root studio.toml config, project-wide F12/F13 orchestration, and the dispatch() entrypoint. Tauri-free; the launcher keeps only the Tauri command/rpc seam."
+
+[dependencies]
+arbor-studio-core       = { path = "../core" }
+arbor-studio-types      = { path = "../types" }
+arbor-studio-ron        = { path = "../ron" }
+arbor-studio-json       = { path = "../json" }
+arbor-studio-toml       = { path = "../toml" }
+arbor-studio-yaml       = { path = "../yaml" }
+arbor-studio-properties = { path = "../properties" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing    = { workspace = true }
+toml       = "0.8"
+# Encoding-aware on-disk read/write is in core::persist (uses arbor-fs);
+# the api scanner walks the FS directly via std::fs.
+arbor-fs   = { path = "../../../foundation/fs" }

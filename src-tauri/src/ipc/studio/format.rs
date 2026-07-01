@@ -17,8 +17,9 @@ use crate::error::AppError;
 use crate::ipc::studio;
 use crate::studio::format::descriptor::FormatDescriptor;
 use crate::studio::format::errors::to_ipc;
-use crate::studio::format::properties_codec::{
-    self, PropertiesToYamlOptions, PropertiesToYamlOutput, YamlToPropertiesOutput,
+use arbor_studio_api::prelude::{
+    self as properties_codec, PropertiesToYamlOptions, PropertiesToYamlOutput,
+    YamlToPropertiesOutput,
 };
 use crate::studio::format::types::{
     BulkEditAction, BulkEditOpenDoc, BulkEditPreview, BulkEditResult, BulkEditScope,
@@ -28,6 +29,33 @@ use crate::studio::format::types::{
     TypeSource, UpdateResult,
 };
 use crate::AppState;
+
+/// Map a `format_id` to its `StudioFileKind` IF the format rides on
+/// `arbor_studio_core::DefaultBackend` (TOML / YAML / .properties). Those
+/// backends leave the project-wide F12/F13 + `list_files` ops `Unsupported`
+/// (they need the launcher's repo scanner / index), so the handlers below
+/// route them through `studio::project_refactor`. Formats with a full
+/// inline backend (RON / JSON) return `None` and stay on the backend.
+///
+/// `.properties` rides `DefaultBackend` for doc/history/mutation but is the
+/// SPECIAL one for F12/F13 — `is_properties` gates its hand-written
+/// key-scoped rename + `(empty)`-sentinel bulk (see `project_refactor`).
+fn default_backend_file_kind(format_id: &str) -> Option<crate::studio::StudioFileKind> {
+    match format_id {
+        "toml"       => Some(crate::studio::StudioFileKind::Toml),
+        "yaml"       => Some(crate::studio::StudioFileKind::Yaml),
+        "properties" => Some(crate::studio::StudioFileKind::Properties),
+        _            => None,
+    }
+}
+
+/// `.properties` is the SPECIAL simple format: its F12 is key-scoped and
+/// its F13 carries an `(empty)` sentinel, so its project-wide (and
+/// active-doc preview) flows route through dedicated `project_refactor`
+/// fns rather than the generic TOML/YAML helpers.
+fn is_properties(format_id: &str) -> bool {
+    format_id == "properties"
+}
 
 // ── Descriptor introspection ─────────────────────────────────────────────────
 
@@ -275,8 +303,10 @@ fn studio_source_path(
 // Cross-format codec exposed through dedicated commands rather than
 // the per-format `StudioFormatBackend` trait — the conversion is
 // neither a "YAML operation" nor a ".properties operation", it's a
-// bridge between the two. Lives in `studio::format::properties_codec`
-// so Phase 6 (.properties Studio) reuses the same engine.
+// bridge between the two. The engine moved into `arbor-studio-properties`
+// (Stage 3 of the studio extraction) — the `.properties` Studio backend's
+// natural home; this also let `serde_yaml_ng`/`yaml-edit` leave the
+// launcher.
 
 // The codec commands carry no real state, but the handler macro mandates a
 // `&Ctx` first param — `_state` satisfies it without altering the wire args
@@ -400,6 +430,17 @@ async fn studio_list_files(
     format_id: String,
     folder: String,
 ) -> Result<Vec<FileEntry>, String> {
+    // TOML + YAML moved onto `DefaultBackend`, which leaves `list_files`
+    // `Unsupported` (the scan needs the launcher's `scan_repo`). Route them
+    // through the project-refactor orchestrator instead.
+    if let Some(kind) = default_backend_file_kind(&format_id) {
+        let entries = tokio::task::spawn_blocking(move || {
+            crate::studio::project_refactor::list_files(folder, kind)
+        })
+        .await
+        .map_err(|e| format!("studio_list_files join: {e}"))?;
+        return to_ipc(entries);
+    }
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
     to_ipc(backend.list_files(folder).await)
 }
@@ -460,6 +501,39 @@ async fn studio_rename_preview(
     open_docs: Vec<RenameOpenDoc>,
 ) -> Result<RenamePreview, String> {
     let repo_path = crate::ipc::resolve_tab_path(state, &tab_id).map_err(|e| e.to_string())?;
+    // `.properties` is SPECIAL — key-scoped rename, dedicated orchestrator.
+    if is_properties(&format_id) {
+        let preview = tokio::task::spawn_blocking(move || {
+            crate::studio::project_refactor::properties_rename_preview(
+                repo_path, old_value, new_value_hint, open_docs,
+            )
+        })
+        .await
+        .map_err(|e| format!("studio_rename_preview join: {e}"))?;
+        return to_ipc(preview);
+    }
+    // TOML + YAML ride on `DefaultBackend`, whose project-wide
+    // `rename_preview` is `Unsupported` (needs the index/scan) — orchestrate
+    // it launcher-side with the per-format file kind + preview-line synth.
+    if let Some(kind) = default_backend_file_kind(&format_id) {
+        let synth: fn(&str, &str, &str) -> String = match format_id.as_str() {
+            "yaml" => crate::studio::project_refactor::yaml_synth_preview_line,
+            _      => crate::studio::project_refactor::toml_synth_preview_line,
+        };
+        let preview = tokio::task::spawn_blocking(move || {
+            crate::studio::project_refactor::rename_preview(
+                repo_path,
+                kind,
+                old_value,
+                new_value_hint,
+                open_docs,
+                synth,
+            )
+        })
+        .await
+        .map_err(|e| format!("studio_rename_preview join: {e}"))?;
+        return to_ipc(preview);
+    }
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
     to_ipc(backend.rename_preview(repo_path, old_value, new_value_hint, open_docs).await)
 }
@@ -477,9 +551,20 @@ async fn studio_rename_apply(
     sites: Vec<RenameSite>,
     open_docs: Vec<RenameOpenDoc>,
 ) -> Result<RenameResult, String> {
-    let repo_path = crate::ipc::resolve_tab_path(state, &tab_id).map_err(|e| e.to_string())?;
+    let _repo_path = crate::ipc::resolve_tab_path(state, &tab_id).map_err(|e| e.to_string())?;
+    // `.properties` is SPECIAL — key-scoped rename apply.
+    if is_properties(&format_id) {
+        let result = tokio::task::spawn_blocking(move || {
+            crate::studio::project_refactor::properties_rename_apply(
+                old_value, new_value, sites, open_docs,
+            )
+        })
+        .await
+        .map_err(|e| format!("studio_rename_apply join: {e}"))?;
+        return to_ipc(result);
+    }
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
-    to_ipc(backend.rename_apply(repo_path, old_value, new_value, sites, open_docs).await)
+    to_ipc(backend.rename_apply(_repo_path, old_value, new_value, sites, open_docs).await)
 }
 
 // ── F13 — Query-driven bulk edit ─────────────────────────────────────
@@ -506,6 +591,44 @@ async fn studio_bulk_edit_preview(
     open_docs: Vec<BulkEditOpenDoc>,
 ) -> Result<BulkEditPreview, String> {
     let repo_path = crate::ipc::resolve_tab_path(state, &tab_id).map_err(|e| e.to_string())?;
+    // `.properties` is SPECIAL — its F13 preview carries the `(empty)`
+    // sentinel + string coercion, so BOTH scopes route through the
+    // dedicated orchestrator. ActiveDoc reads the doc text off the backend
+    // (DefaultBackend caches it) and re-projects launcher-side.
+    if is_properties(&format_id) {
+        let active = if matches!(scope, BulkEditScope::ActiveDoc) {
+            let backend = to_ipc(state.studio_registry.get(&format_id))?;
+            let source_path = to_ipc(backend.source_path(&doc_id))?;
+            let text = to_ipc(backend.raw_current(&doc_id))?;
+            Some((source_path, text))
+        } else {
+            None
+        };
+        let preview = tokio::task::spawn_blocking(move || {
+            crate::studio::project_refactor::properties_bulk_preview(
+                repo_path, scope, active, query, action, value_source, open_docs,
+            )
+        })
+        .await
+        .map_err(|e| format!("studio_bulk_edit_preview join: {e}"))?;
+        return to_ipc(preview);
+    }
+    // TOML + YAML `ProjectWide` preview needs the repo scan —
+    // `DefaultBackend` leaves it `Unsupported`, so orchestrate it
+    // launcher-side. `ActiveDoc` stays on the backend (DefaultBackend
+    // implements it).
+    if matches!(scope, BulkEditScope::ProjectWide) {
+        if let Some(kind) = default_backend_file_kind(&format_id) {
+            let preview = tokio::task::spawn_blocking(move || {
+                crate::studio::project_refactor::bulk_edit_preview_pw_for(
+                    repo_path, kind, query, action, value_source, open_docs,
+                )
+            })
+            .await
+            .map_err(|e| format!("studio_bulk_edit_preview join: {e}"))?;
+            return to_ipc(preview);
+        }
+    }
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
     to_ipc(backend.bulk_edit_preview(
         repo_path, doc_id, scope, query, action, value_source, open_docs,
@@ -526,6 +649,22 @@ async fn studio_bulk_edit_apply(
     open_docs: Vec<BulkEditOpenDoc>,
 ) -> Result<BulkEditResult, String> {
     let repo_path = crate::ipc::resolve_tab_path(state, &tab_id).map_err(|e| e.to_string())?;
+    // `.properties` is SPECIAL — its `ProjectWide` apply uses the
+    // `(empty)`-sentinel string coercion, routed launcher-side. The
+    // `ActiveDoc` apply stays on `DefaultBackend`: its generic string-
+    // coercion mutate seam produces byte-identical files as one history
+    // step (only the preview rendering diverges, which is synthesised in
+    // `properties_bulk_preview`).
+    if is_properties(&format_id) && matches!(scope, BulkEditScope::ProjectWide) {
+        let result = tokio::task::spawn_blocking(move || {
+            crate::studio::project_refactor::properties_bulk_apply_pw(
+                action, value_source, sites, open_docs,
+            )
+        })
+        .await
+        .map_err(|e| format!("studio_bulk_edit_apply join: {e}"))?;
+        return to_ipc(result);
+    }
     let backend = to_ipc(state.studio_registry.get(&format_id))?;
     to_ipc(backend.bulk_edit_apply(
         repo_path, doc_id, scope, action, value_source, sites, open_docs,
