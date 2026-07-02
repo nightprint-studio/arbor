@@ -62,6 +62,16 @@ members = [
     "crates/products/sitta/be",
     "crates/products/tyto/core",
     "crates/products/tyto/be",
+    "crates/products/bennu/proto",
+    "crates/products/bennu/core",
+    "crates/products/bennu/project",
+    "crates/products/bennu/classpath",
+    "crates/products/bennu/index",
+    "crates/products/bennu/java",
+    "crates/products/bennu/jsp",
+    "crates/products/bennu/web",
+    "crates/products/bennu/intel",
+    "crates/products/bennu/be",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────

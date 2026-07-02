@@ -96,6 +96,8 @@ macro_rules! invoke_handlers {
             $crate::window::hud::get_hud_init,
             // Dedicated Corvus (git) window
             $crate::window::corvus::open_corvus_window,
+            // Dedicated Bennu (Java editor / analysis) window
+            $crate::window::bennu::open_bennu_window,
             // Launcher window (JetBrains-Toolbox-like home screen)
             $crate::window::launcher::open_launcher_window,
             // Launcher ↔ product-window lifecycle (running-state + Stop)

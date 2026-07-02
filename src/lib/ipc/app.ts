@@ -40,6 +40,12 @@ export function openCorvusWindow(): Promise<void> {
   return invoke('open_corvus_window');
 }
 
+/** Open (or focus, if already open) the dedicated Bennu window — the standalone
+ *  Java editor. */
+export function openBennuWindow(): Promise<void> {
+  return invoke('open_bennu_window');
+}
+
 /** Open (or focus, if already open) the launcher (Canopy) window. */
 export function openLauncherWindow(): Promise<void> {
   return invoke('open_launcher_window');
@@ -74,6 +80,7 @@ export const PRODUCT_WINDOW_OPENERS: Record<string, () => Promise<void>> = {
   sitta: openExplorerWindow,  // File explorer
   merula: openMerulaWindow,    // Music (merula / Merula)
   tyto: openTytoWindow,        // Screen recorder
+  bennu: openBennuWindow,      // Java editor
 };
 
 // ── Product window running-state (launcher ↔ product windows) ────────────────

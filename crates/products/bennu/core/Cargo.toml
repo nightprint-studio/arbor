@@ -1,0 +1,18 @@
+[package]
+name         = "bennu-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu backend core — the canonical headless state (`BennuState`) the `bennu-be` Java-editor process owns. Tauri-free by construction; the analysis domain handlers live in bennu-be and drive against this state."
+
+[dependencies]
+arbor-ipc  = { path = "../../../foundation/ipc" }
+# Resolves bennu's own per-profile config dir (`bennu_config_path`) for the typed
+# `BennuConfig` persistence — exactly as tyto-core uses `tyto_config_path`.
+arbor-core = { path = "../../../foundation/core" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# The typed product config (`config.toml`) is round-tripped through `toml`.
+toml       = "0.8"

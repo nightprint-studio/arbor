@@ -14,7 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
  * to a nested JSON payload).
  */
 /** The backend product labels the router dispatches to. */
-export type Program = 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto';
+export type Program = 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto' | 'bennu';
 
 export function rpc<R>(program: Program, method: string, params: Record<string, unknown> = {}): Promise<R> {
   return invoke<R>('rpc', { program, method, params });
@@ -55,3 +55,10 @@ export const sitta = <R>(method: string, params: Record<string, unknown> = {}): 
  *  then; `BackendNotRunning` when `tyto-be` isn't up. */
 export const tyto = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('tyto', method, params);
+
+/** Bound helper for the Bennu (Java editor) backend — served out-of-process by
+ *  `bennu-be`, spawned lazily when the Bennu window opens. Serves the editor's
+ *  project model + Java language services (project tree, file read, capabilities,
+ *  completion, diagnostics). */
+export const bennu = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
+  rpc<R>('bennu', method, params);

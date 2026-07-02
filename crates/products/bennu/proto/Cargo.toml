@@ -1,0 +1,12 @@
+[package]
+name         = "bennu-proto"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu IPC contract — the Phase-0 request/response types shared by bennu-be and the Bennu frontend. Pure serde, Tauri-free, no logic."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }

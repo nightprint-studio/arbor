@@ -1,0 +1,19 @@
+[package]
+name         = "bennu-classpath"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu classpath — JVM-free bytecode reading. Reads `.class` metadata (cafebabe) with a homegrown JVMS §4.7.9.1 generic-Signature decoder, behind one `ClassSource`/member-index API over dir / jar (rt.jar, JDK 8) / jimage (JDK 9+) containers. Leaf crate: no Bennu deps."
+
+[dependencies]
+# Read `.class` metadata (constant pool, methods, fields, the raw Signature
+# attribute). Primary bytecode reader; verified in Spike A on rt.jar + jimage.
+cafebabe = "0.9"
+# Open `rt.jar` (JDK 8) and dependency jars as ZIP containers.
+zip = "2"
+# Pure-Rust reader for the JDK 9+ `lib/modules` jimage container. 0.0.x /
+# mono-maintainer — flagged in docs §4 as the one genuinely risky adopt; kept behind
+# the `ClassSource` trait so it can be vendored or swapped for `ristretto` later.
+jimage-rs = "0.0.4"

@@ -1,0 +1,40 @@
+[package]
+name         = "bennu-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu backend — the headless Java-editor / analysis process for Model D. Serves the bennu domains (open_project/project_tree/read_file/capabilities/completion/diagnostics) over framed-stdio IPC; drives the leaf analysis crates, has no plugin host, no credentials, and resolves its own config/data dirs once init_active_profile() has run."
+
+[[bin]]
+name = "bennu-be"
+path = "src/main.rs"
+
+[dependencies]
+arbor-ipc  = { path = "../../../foundation/ipc" }
+arbor-rpc  = { path = "../../../foundation/rpc" }
+# The Model-D backend runtime scaffold: `BackendIo` (framed-stdio plumbing +
+# runtime) + the `App` builder (pre-serve inits, serve loop). bennu-be uses the slim
+# path — no plugin host, no API installer, no scheduler (like merula-be).
+arbor-be   = { path = "../../../foundation/be" }
+# The profile-aware config/data-path resolver: `init_active_profile()` seeds the
+# active profile FIRST in `main`, so the `bennu_*` config/data dirs resolve under the
+# launcher's profile.
+arbor-core = { path = "../../../foundation/core" }
+# The canonical bennu state: `BennuState` (event egress + reverse channel) + the typed
+# product config. The domain `#[arbor_rpc::handler]`s stay here in bennu-be and drive
+# against `bennu_core::prelude::*`. Tauri-free by construction.
+bennu-core = { path = "../core" }
+# The Phase-0 IPC contract types the handlers return.
+bennu-proto = { path = "../proto" }
+# The leaf project model: capability detection, pom parse, encoding/JDK detection, the
+# file tree, open_project / read_file orchestration.
+bennu-project = { path = "../project" }
+# The code-intel seam: the completion / diagnostics stubs route through the native
+# provider so the seam is exercised end-to-end from Phase 0.
+bennu-intel = { path = "../intel" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Drives the serve loop / async domain handlers as the index / analysis waves land.
+tokio      = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name         = "bennu-project"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu project model — LEAF crate (docs §10). Owns capability-detection (Spike D ruleset: pom dep coords + config-file presence + source patterns → Capabilities), Maven pom parsing, module list, encoding detection, per-project JDK detection, and the project file tree. The analyzers depend on THIS crate, never the reverse."
+
+[dependencies]
+# The shared contract types the detection produces (CapabilitySet / ProjectInfo /
+# JdkInfo / TreeNode / FileContents). bennu-project is the crate that fills them.
+bennu-proto = { path = "../proto" }
+serde      = { workspace = true }
+serde_json = { workspace = true }

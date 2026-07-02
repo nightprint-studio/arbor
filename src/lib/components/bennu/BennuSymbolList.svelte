@@ -1,0 +1,145 @@
+<script lang="ts">
+  /**
+   * BennuSymbolList — the shared body of the Structure (left) and Outline (right)
+   * panels: the active file's Java symbols (class / interface / method / field),
+   * grouped by kind, filterable, with jump-to-line on click. Derived from the
+   * cheap regex outline (`javaOutline`); replace that seam when a real symbol
+   * index lands. One component so both panels stay in sync (single fix surface).
+   */
+  import { Box, SquareFunction, Variable, Braces, ArrowDownAZ, MoreVertical } from 'lucide-svelte';
+  import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
+  import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
+  import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
+  import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
+  import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
+  import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { javaOutline, type JavaSymbol } from './java-outline';
+
+  let { title = 'Structure' }: { title?: string } = $props();
+
+  let filter = $state('');
+  // Sort mode: by source position (declaration order) or alphabetically by name.
+  let sortByName = $state(false);
+
+  const activeSource = $derived(projectStore.activeSource);
+  const activePath   = $derived(projectStore.activeFilePath);
+  const isJava       = $derived(!!activePath && /\.java$/i.test(activePath));
+
+  // Re-derive on source change, debounced so a burst of edits coalesces.
+  let symbols = $state<JavaSymbol[]>([]);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const src = activeSource;
+    const path = activePath;
+    if (timer) clearTimeout(timer);
+    if (!path || !isJava) { symbols = []; return; }
+    timer = setTimeout(() => { symbols = javaOutline(src); }, 180);
+    return () => { if (timer) clearTimeout(timer); };
+  });
+
+  const q = $derived(filter.trim().toLowerCase());
+  const searched = $derived(q ? symbols.filter((s) => s.name.toLowerCase().includes(q)) : symbols);
+  const filtered = $derived(
+    sortByName ? [...searched].sort((a, b) => a.name.localeCompare(b.name)) : searched,
+  );
+
+  const optionsMenu = $derived<DropdownItem[]>([
+    { kind: 'item', id: 'sort-pos',  label: 'Sort by position', icon: Braces,     active: !sortByName, onclick: () => (sortByName = false) },
+    { kind: 'item', id: 'sort-name', label: 'Sort by name',     icon: ArrowDownAZ, active: sortByName,  onclick: () => (sortByName = true) },
+  ]);
+
+  const GROUPS = [
+    { kind: 'type',   label: 'Types',   icon: Box,            color: 'var(--info)' },
+    { kind: 'method', label: 'Methods', icon: SquareFunction, color: 'var(--color-tag, #c792ea)' },
+    { kind: 'field',  label: 'Fields',  icon: Variable,       color: 'var(--success)' },
+  ] as const;
+
+  // "type" bucket folds class / interface / enum.
+  function inGroup(s: JavaSymbol, kind: string): boolean {
+    if (kind === 'type') return s.kind === 'class' || s.kind === 'interface' || s.kind === 'enum';
+    return s.kind === kind;
+  }
+
+  let open = $state<Record<string, boolean>>({});
+  const isOpen = (k: string) => open[k] ?? true;
+</script>
+
+<PanelShell {title} count={filtered.length}>
+  {#snippet icon()}<Braces size={13} />{/snippet}
+  {#snippet actions()}
+    <button
+      class="ps-btn"
+      class:ps-btn-active={sortByName}
+      type="button"
+      onclick={() => (sortByName = !sortByName)}
+      use:tooltip={sortByName ? 'Sorting by name' : 'Sort by name'}
+      aria-label="Sort by name"
+      aria-pressed={sortByName}
+    >
+      <ArrowDownAZ size={14} />
+    </button>
+    <Dropdown items={optionsMenu} position="fixed" direction="down" width="190px">
+      {#snippet trigger({ open, toggle })}
+        <button class="ps-btn" class:ps-btn-active={open} type="button" onclick={toggle} use:tooltip={'Options'} aria-label="Structure options" aria-haspopup="menu" aria-expanded={open}>
+          <MoreVertical size={14} />
+        </button>
+      {/snippet}
+    </Dropdown>
+  {/snippet}
+  {#snippet toolbar()}
+    <div class="sl-filter">
+      <SearchBar bind:query={filter} placeholder="Filter symbols…" showRegex={false} showCounter={false} />
+    </div>
+  {/snippet}
+
+  {#if !activePath}
+    <EmptyState message="Open a file to see its structure." />
+  {:else if !isJava}
+    <EmptyState message="Structure is available for Java files." />
+  {:else if symbols.length === 0}
+    <EmptyState message="No symbols found in this file." />
+  {:else if filtered.length === 0}
+    <EmptyState message={`No symbols match “${filter}”.`} />
+  {:else}
+    <div class="sl">
+      {#each GROUPS as g (g.kind)}
+        {@const items = filtered.filter((s) => inGroup(s, g.kind))}
+        {#if items.length > 0}
+          {@const Gi = g.icon}
+          <SidebarSection
+            label={g.label}
+            expanded={isOpen(g.kind)}
+            onToggle={() => (open = { ...open, [g.kind]: !isOpen(g.kind) })}
+            badge={items.length}
+            iconColor={g.color}
+          >
+            {#snippet icon()}<Gi size={13} />{/snippet}
+            {#each items as s (s.kind + ':' + s.name + ':' + s.line)}
+              <SidebarItem onclick={() => bennuUiStore.requestGoto(s.line)}>
+                {#snippet icon()}<span style="color: {g.color}; display:flex"><Gi size={12} /></span>{/snippet}
+                {s.name}
+                {#snippet badges()}
+                  {#if s.detail}<span class="sl-detail">{s.detail}</span>{/if}
+                  <span class="sl-line">:{s.line}</span>
+                {/snippet}
+              </SidebarItem>
+            {/each}
+          </SidebarSection>
+        {/if}
+      {/each}
+    </div>
+  {/if}
+</PanelShell>
+
+<style>
+  .sl { padding: 4px 0; }
+  .sl-filter { padding: 6px 8px; }
+  .sl-detail {
+    font-size: 10px; color: var(--text-disabled);
+    max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sl-line { font-size: 10px; color: var(--text-disabled); font-family: var(--font-code); }
+</style>

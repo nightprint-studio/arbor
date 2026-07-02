@@ -1,0 +1,24 @@
+[package]
+name         = "bennu-intel"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu code-intel seam (skeleton) — the `IntelProvider` trait (completion/hover/definition/references/diagnostics/rename/format/symbols) with a native-Java impl [MVP] and a PREDISPOSED LSP-client slot (rust-analyzer, no MVP impl). The FE speaks one protocol for every language."
+
+[dependencies]
+# The shared wire types the provider produces (completion / diagnostics). The seam
+# returns proto types so the be layer forwards them unchanged.
+bennu-proto = { path = "../proto" }
+# ★ the product: the mmap'd symbol index the native provider builds + serves from.
+bennu-index = { path = "../index" }
+# The Java source model: parse + symbol extraction + local type-inference. The
+# native provider builds index records from `extract_symbols` and infers the receiver
+# type at a caret with `infer_receiver_type`.
+bennu-java = { path = "../java" }
+# The classpath member index (JDK bytecode): the resolver walks JDK members live off
+# the mmap'd rt.jar / jimage, and converts them into the java seam shape.
+bennu-classpath = { path = "../classpath" }
+serde      = { workspace = true }
+serde_json = { workspace = true }

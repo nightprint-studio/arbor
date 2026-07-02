@@ -1,0 +1,104 @@
+/**
+ * Bennu (Java editor) FE types — mirror the BE↔FE contract (`bennu-proto`)
+ * field-for-field in **snake_case**. The Rust wire shape is authoritative; see
+ * `crates/products/bennu/proto/src/contract.rs`. Types only, no UI/state. The
+ * commands live in `$lib/ipc/bennu`.
+ */
+
+/** The JDK Bennu resolves classpath sources against (`ProjectInfo.jdk`). */
+export interface JdkInfo {
+  /** Java language level as declared, e.g. `1.8` / `8` / `17`. */
+  version: string;
+  /** Where it came from: `maven.compiler.source` | `…target` | `compiler-plugin` |
+   *  `toolchains` | `override` | `default`. */
+  source: string;
+}
+
+/** One piece of evidence that activated (or provisionally activated) a capability. */
+export interface CapabilityHit {
+  /** The capability field name it supports (e.g. `struts_xml_config`). */
+  capability: string;
+  /** Tier: `A` dependency coord (strongest) · `B` config file · `C` source pattern
+   *  (corroborating; C-only = provisional). */
+  tier: string;
+  /** Human-readable evidence, e.g. `dependency org.apache.struts:struts2-core`. */
+  detail: string;
+}
+
+/** The domain capabilities detected for a project (Spike-D ruleset): a flat bitset
+ *  of booleans plus the raw evidence. The FE gates panels/resolvers on these; the BE
+ *  gates which index sources it builds. */
+export interface CapabilitySet {
+  struts_xml_config: boolean;
+  struts_convention: boolean;
+  jsp_taglib_tld: boolean;
+  ognl_value_stack: boolean;
+  tiles_views: boolean;
+  spring_xml_di: boolean;
+  spring_annotation_di: boolean;
+  spring_data_repo: boolean;
+  jpa_hibernate: boolean;
+  mybatis_mapper: boolean;
+  jdbc_dao: boolean;
+  lombok: boolean;
+  entando_japs: boolean;
+  hits: CapabilityHit[];
+}
+
+/** An opened Java project (`bennu_open_project`). */
+export interface ProjectInfo {
+  /** Absolute project root folder (holds the root `pom.xml`). */
+  root: string;
+  /** Display name (pom `<name>`, else `<artifactId>`, else the folder name). */
+  name: string;
+  /** Maven modules (`<modules>`; empty for a single-module project). */
+  modules: string[];
+  /** Resolved JDK, or `null` when it can't be inferred and no override is set. */
+  jdk: JdkInfo | null;
+  /** The detected domain capabilities. */
+  capabilities: CapabilitySet;
+}
+
+/** One node of the project file tree (`bennu_project_tree`). Directories carry
+ *  `children`; files carry an empty array. `is_dir` distinguishes a not-yet-expanded
+ *  directory (empty `children`) from a file. */
+export interface TreeNode {
+  /** Display name (final path segment). */
+  name: string;
+  /** Absolute path. */
+  path: string;
+  /** `true` for a directory, `false` for a file. */
+  is_dir: boolean;
+  /** Children for a directory (empty for a file or a not-yet-expanded dir). */
+  children: TreeNode[];
+}
+
+/** Result of `bennu_read_file`: the decoded text and the encoding it was decoded
+ *  from (Cp1252 is common in the legacy target stack, so the FE is told which won). */
+export interface ReadFileResult {
+  text: string;
+  /** Encoding label, e.g. `UTF-8`, `Cp1252`. */
+  encoding: string;
+}
+
+/** One completion candidate (`bennu_completion`). Phase 0 returns `[]`. */
+export interface CompletionItem {
+  /** Text inserted on accept. */
+  label: string;
+  /** Kind tag for the icon/grouping (`method`, `field`, `class`, `keyword`, …). */
+  kind: string;
+  /** Optional signature / type detail shown right of the label. */
+  detail?: string;
+}
+
+/** Severity of a {@link Diagnostic}. */
+export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
+
+/** One diagnostic (`bennu_diagnostics`). `start`/`end` are **UTF-8 byte offsets**
+ *  into the file source (the editor maps them to CM lint spans). Phase 0 returns []. */
+export interface Diagnostic {
+  message: string;
+  severity: DiagnosticSeverity;
+  start: number;
+  end: number;
+}

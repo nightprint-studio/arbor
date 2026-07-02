@@ -13,6 +13,8 @@
 //! - [`corvus`] — the Git product window (`corvus`). Today the Git UI also
 //!   loads in `main`; this is the seed of the launcher split, where `main`
 //!   becomes the launcher and Corvus opens as a product window.
+//! - [`bennu`] — the Java-editor / analysis product window (`bennu`). Spawns its
+//!   own `bennu-be` backend lazily, exactly like Corvus.
 //! - [`launcher`] — the JetBrains-Toolbox-like launcher (`launcher`).
 //!   Scaffolding: backend lifecycle is ready; the frontend `LauncherShell`
 //!   is still to come.
@@ -24,6 +26,7 @@
 //! webview in the process (and the `main` window's `additionalBrowserArgs` in
 //! `tauri.conf.json`).
 
+pub mod bennu;
 pub mod corvus;
 pub mod events;
 pub mod explorer;
@@ -128,6 +131,8 @@ pub fn product_id_for_label(label: &str) -> Option<&'static str> {
     } else if label == tyto::TYTO_WINDOW_LABEL {
         // Tyto is a single-window product (no `tyto-N`).
         Some("tyto")
+    } else if label == bennu::BENNU_WINDOW_LABEL || label.starts_with("bennu-") {
+        Some("bennu")
     } else {
         None
     }

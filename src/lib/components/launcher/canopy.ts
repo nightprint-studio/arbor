@@ -42,6 +42,9 @@ export const BASE: Product[] = [
   { id: 'merula', name: 'Merula', bird: 'blackbird',   role: 'Music synthesizer',   accent: '#e8a857' },
   { id: 'sitta',  name: 'Sitta',  bird: 'treecreeper', role: 'File explorer',       accent: '#b58cf0' },
   { id: 'tyto',   name: 'Tyto',   bird: 'barn owl',    role: 'Screen recorder',     accent: '#f28b82' },
+  // TODO(user): confirm bird label + accent — Bennu is a mythical firebird (not a
+  // real species like the others), so `bird: 'firebird'` is a placeholder.
+  { id: 'bennu',  name: 'Bennu',  bird: 'firebird',    role: 'Java editor',         accent: '#f2c14e' },
 ];
 
 // ── Colour helpers ───────────────────────────────────────────────────────────

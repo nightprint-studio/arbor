@@ -1,0 +1,24 @@
+[package]
+name         = "bennu-java"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu Java source model — parse tree-sitter-java, symbol extraction, and ★ local type-inference (the hard, homegrown piece) for member-access completion. Phase 1: nominal type-walk over the classpath member index."
+
+[dependencies]
+# The classpath member index the type-walk resolves against (docs §10: config-graph
+# resolution first, nominal type-walk on top). Dependency direction: java → classpath.
+bennu-classpath = { path = "../classpath" }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# Java grammar for parsing + the extraction/inference walk (docs §4: adopt). Native
+# tree-sitter (NOT web-tree-sitter — that is the FE). Approved deps (docs §4).
+# tree-sitter is a `links = "tree-sitter"` native lib → the whole workspace must share
+# ONE version; pinned to 0.25 to match `merula-lang` (the other tree-sitter user).
+# tree-sitter-java 0.23 depends on the `tree-sitter-language` ABI shim, not on the
+# runtime directly, so it stays compatible across the 0.25 runtime.
+tree-sitter      = "0.25"
+tree-sitter-java = "0.23"

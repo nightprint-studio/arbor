@@ -40,6 +40,9 @@ pub const PRODUCT_SITTA: &str = "sitta";
 /// See [`PRODUCT_CORVUS`]. tyto (the screen recorder) owns its own per-profile
 /// bucket for its settings/data, served out-of-process by `tyto-be`.
 pub const PRODUCT_TYTO: &str = "tyto";
+/// See [`PRODUCT_CORVUS`]. bennu (the Java editor / analysis product) owns its own
+/// per-profile bucket for its settings, served out-of-process by `bennu-be`.
+pub const PRODUCT_BENNU: &str = "bennu";
 
 /// Process-global selected-profile name. Seeded to [`DEFAULT_PROFILE`] and
 /// overwritten at boot by [`init_active_profile`] (or a launch argument).

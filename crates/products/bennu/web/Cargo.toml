@@ -1,0 +1,15 @@
+[package]
+name         = "bennu-web"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu web-config graph (skeleton) — Struts2/XWork (struts.xml + per-classpath include graph, wildcard expansion, validation.xml), Tiles, and Spring bean-XML (id→impl). Entando-aware (fragment merge). Phase-0 skeleton: role + prelude only, no logic yet."
+
+[dependencies]
+# The index this graph feeds (config-as-symbol / edges — docs §3). Named now to fix
+# the dependency direction (web → index); used when the graph builder lands.
+bennu-index = { path = "../index" }
+serde      = { workspace = true }
+serde_json = { workspace = true }

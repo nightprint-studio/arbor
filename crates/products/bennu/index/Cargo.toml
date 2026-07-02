@@ -1,0 +1,20 @@
+[package]
+name         = "bennu-index"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu index — ★ the product. Multi-source symbol/relation schema over an mmap'd store: an fst name→offset map + a framed rkyv blob (16-byte-aligned records, bytecheck, format-version header + rebuild-on-mismatch). Query API: exact / prefix / fuzzy. Leaf crate: no Bennu deps."
+
+[dependencies]
+# fst name → u64 offset map (mmap'd). `levenshtein` feature = fuzzy query for free.
+fst = { version = "0.4", features = ["levenshtein"] }
+# Zero-copy archived records in an mmap'd blob. `bytecheck` validates a record on
+# access (a corrupt mmap = a loud validation error, never UB). Pre-1.0 → pinned +
+# guarded by the format-version header (docs §4: rkyv has no migration).
+rkyv = { version = "0.8", features = ["bytecheck"] }
+# mmap the fst + blob files at query time (low working set — docs §3).
+memmap2 = "0.9"
+serde      = { workspace = true }
+serde_json = { workspace = true }

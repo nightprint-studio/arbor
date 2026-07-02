@@ -196,6 +196,15 @@ pub fn build_router(app: &AppHandle) -> Router {
     // flips at attach/detach time.
     router.register("tyto", Arc::new(SplitBroker::pure_oop("tyto")));
 
+    // Bennu backend: the Java-editor / analysis product. Like corvus/tyto, served
+    // out-of-process by `bennu-be` — spawned lazily by [`ensure_bennu_be`] when the
+    // Bennu window opens (the launcher and the other product windows never touch Java
+    // analysis). Bennu has NO in-process handlers in this shell, so it is `pure_oop`:
+    // a `bennu` call with `bennu-be` detached reports `BackendNotRunning`, an
+    // unadvertised method reports `UnknownMethod` — no catch-all sink. Routing flips
+    // at attach/detach time.
+    router.register("bennu", Arc::new(SplitBroker::pure_oop("bennu")));
+
     router
 }
 
@@ -1901,6 +1910,99 @@ fn spawn_tyto_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)
         Ok(pair) => Some(pair),
         Err(e) => {
             tracing::warn!("failed to spawn tyto-be ({e}) — Tyto stays in preview mode");
+            None
+        }
+    }
+}
+
+/// Lazily spawn `bennu-be` and attach it to the router, **idempotently**. Called when
+/// the Bennu product window opens (`window::bennu::open_bennu_window`), off the main
+/// thread — the spawn blocks on the child's first `Hello` frame, which must not stall
+/// the UI thread. The bennu twin of [`ensure_tyto_be`] / [`ensure_corvus_be`].
+pub fn ensure_bennu_be(app: &AppHandle) {
+    // Serialize concurrent triggers (the launcher tile + the Command Palette can both
+    // fire `open_bennu_window`) so we never spawn two backends; re-check liveness
+    // inside the lock. A SEPARATE lock from the other backends' spawns so they never
+    // contend.
+    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match SPAWN_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if split_broker::is_attached("bennu") {
+        tracing::debug!("ensure_bennu_be: already attached — no-op (window re-summoned)");
+        return; // backend already up — window is just being re-summoned
+    }
+    let gen = split_broker::next_gen();
+    tracing::info!("ensure_bennu_be: spawning bennu-be (gen={gen})");
+    match spawn_bennu_be(app, gen) {
+        Some((child, methods)) => {
+            tracing::info!(
+                "bennu-be up (lazy, gen={gen}): {} method(s) served out-of-process",
+                methods.len()
+            );
+            split_broker::attach(
+                "bennu",
+                gen,
+                methods.into_iter().collect(),
+                Arc::new(child) as Arc<dyn BrokerClient>,
+            );
+            // The backend attaches AFTER the Bennu window may already have run its
+            // shell's one-shot loads (the spawn is off-thread, racing window
+            // creation). Signal "now routable" so the editor store (re)fetches its
+            // project / capabilities instead of being stuck on defaults.
+            use tauri::Emitter;
+            let _ = app.emit("arbor://bennu-be-up", ());
+        }
+        None => {
+            tracing::info!("bennu-be not available — the Bennu editor stays in preview mode");
+        }
+    }
+}
+
+fn spawn_bennu_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
+    use crate::process_ext::NoWindowExt;
+
+    let bin = match backend_binary(app, "bennu-be") {
+        Some(b) => b,
+        None => {
+            tracing::info!(
+                "bennu-be binary not found (backends/ resource or beside the launcher) — Bennu stays in preview mode"
+            );
+            return None;
+        }
+    };
+
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+
+    let app_for_events = app.clone();
+    let app_for_host = app.clone();
+    let app_for_disc = app.clone();
+    match ChildClient::spawn(
+        cmd,
+        move |topic, payload| {
+            use tauri::Emitter;
+            // Analysis push events (e.g. `bennu://indexing-progress`) land here when
+            // the index wave ships. Global emit is harmless with a single window.
+            let _ = app_for_events.emit(&topic, payload);
+        },
+        move |method, params| host_dispatch(&app_for_host, method, params),
+        move || {
+            // Fires for a genuine crash AND the intentional teardown of an OLD child
+            // after stop+respawn. `detach_if_current` acts only when gen={gen} is
+            // still attached: genuine crash → detach + down event; stale disconnect
+            // of an already-replaced child → logged no-op.
+            use tauri::Emitter;
+            tracing::warn!("bennu-be disconnect callback fired (gen={gen})");
+            if split_broker::detach_if_current("bennu", gen, "disconnect") {
+                let _ = app_for_disc.emit("arbor://bennu-be-down", ());
+            }
+        },
+    ) {
+        Ok(pair) => Some(pair),
+        Err(e) => {
+            tracing::warn!("failed to spawn bennu-be ({e}) — Bennu stays in preview mode");
             None
         }
     }

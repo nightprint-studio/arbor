@@ -28,6 +28,7 @@
     if (label === 'merula' || label.startsWith('merula-')) return import('$lib/components/merula/MerulaWindow.svelte');
     if (label === 'tyto-hud') return import('$lib/components/tyto/RecordingHud.svelte');
     if (label === 'tyto' || label.startsWith('tyto-')) return import('$lib/components/tyto/TytoWindow.svelte');
+    if (label === 'bennu' || label.startsWith('bennu-')) return import('$lib/components/bennu/BennuWindow.svelte');
     if (label === 'main' || label === 'launcher') return import('$lib/components/launcher/LauncherWindow.svelte');
     // corvus + any unknown label → the Git AppShell.
     return import('$lib/components/corvus/AppShell.svelte');

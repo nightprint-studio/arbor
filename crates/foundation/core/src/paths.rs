@@ -144,6 +144,29 @@ pub fn tyto_data_dir() -> PathBuf {
     arbor_global_data_dir().join("tyto")
 }
 
+/// `arbor/profiles/<active>/bennu` — bennu's **per-profile** config dir. Holds the
+/// Java-editor's own settings (`config.toml`: per-project JDK / encoding overrides
+/// and editor defaults) and any small per-profile state. Resolved by `bennu-be`
+/// itself after `init_active_profile()` — not pushed by the shell — mirroring
+/// [`tyto_config_dir`].
+pub fn bennu_config_dir() -> PathBuf {
+    crate::profile::product_dir(crate::profile::PRODUCT_BENNU)
+}
+
+/// Convenience: join a relative path under [`bennu_config_dir`].
+pub fn bennu_config_path<P: AsRef<Path>>(sub: P) -> PathBuf {
+    bennu_config_dir().join(sub)
+}
+
+/// `arbor/data/bennu` — the **global, shared** heavy-asset root for bennu: the
+/// mmap'd per-project symbol indices (`index/<hash-path>/`) and cached immutable
+/// bytecode sources. Rooted under [`arbor_global_data_dir`] so a heavy index built
+/// once is shared across profiles, not duplicated. Sibling of [`tyto_data_dir`].
+/// (The index deliberately lives here, out of the analyzed repo's working tree.)
+pub fn bennu_data_dir() -> PathBuf {
+    arbor_global_data_dir().join("bennu")
+}
+
 /// The legacy top-level sibling roots merula used **before** it became a
 /// profile-scoped product (`%APPDATA%\merula`, and the even older `nemus` from
 /// before the rename). Used only by the one-shot boot migration to relocate that

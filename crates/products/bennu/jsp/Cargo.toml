@@ -1,0 +1,12 @@
+[package]
+name         = "bennu-jsp"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu JSP model (skeleton) — our own JSP grammar (directive/scriptlet/expression/EL + Java+HTML injection), TLD/taglib model, and an EL/OGNL AST (resolver in a later phase). Phase-0 skeleton: role + prelude only, no logic yet."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
