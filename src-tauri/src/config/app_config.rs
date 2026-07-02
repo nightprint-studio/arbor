@@ -15,7 +15,7 @@ use crate::error::Result;
 /// `docs/profiles-and-product-config.md`.
 const GENERIC_KEYS: &[&str] = &[
     "theme", "keybindings", "appearance", "animations",
-    "whats_new", "explorer", "plugins_enabled", "marketplace", "deep_link",
+    "whats_new", "explorer", "tyto", "plugins_enabled", "marketplace", "deep_link",
     "launcher", "terminals", "activity_bar", "ide", "git", "recent_repos",
 ];
 
@@ -92,6 +92,10 @@ pub struct AppConfig {
     /// SettingsPanel and in the explorer's own in-window settings page.
     #[serde(default)]
     pub explorer: ExplorerConfig,
+    /// Tyto (screen recorder) launcher-side preferences — the opt-in OS-global
+    /// shortcut that opens the recorder window.
+    #[serde(default)]
+    pub tyto: TytoConfig,
     /// Launcher (Canopy home screen) preferences.
     #[serde(default)]
     pub launcher: LauncherConfig,
@@ -169,6 +173,36 @@ impl Default for ExplorerConfig {
             global_shortcut_accel: default_shortcut_accel(),
             always_new_window:     false,
             reveal_in_builtin:     false,
+        }
+    }
+}
+
+/// Launcher-side **Tyto** (screen recorder) settings.
+///
+/// Only the shell-owned bits live here — the opt-in OS-global shortcut that
+/// opens the recorder window (the launcher registers it at boot and reconciles
+/// it on change, like the explorer's). Tyto's capture/output preferences will be
+/// owned by its own backend once it exists; they are not here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TytoConfig {
+    /// Register the OS-global shortcut that opens the Tyto window. Off by default
+    /// (opt-in, so Arbor doesn't claim a system-wide hotkey unprompted); toggling
+    /// re-registers at runtime.
+    #[serde(default)]
+    pub global_shortcut: bool,
+    /// Accelerator string for the global shortcut (Tauri format, e.g.
+    /// `"Ctrl+Shift+R"`). Only consulted when `global_shortcut` is true.
+    #[serde(default = "default_tyto_shortcut_accel")]
+    pub global_shortcut_accel: String,
+}
+
+fn default_tyto_shortcut_accel() -> String { "Ctrl+Shift+R".into() }
+
+impl Default for TytoConfig {
+    fn default() -> Self {
+        Self {
+            global_shortcut:       false,
+            global_shortcut_accel: default_tyto_shortcut_accel(),
         }
     }
 }

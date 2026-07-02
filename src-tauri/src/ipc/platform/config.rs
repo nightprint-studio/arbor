@@ -19,7 +19,7 @@
 
 use crate::config::app_config::{
     self, ActivityBarConfig, AnimationsConfig, AppearanceConfig, ExplorerConfig, OAuthOverrides,
-    WhatsNewConfig,
+    TytoConfig, WhatsNewConfig,
 };
 use crate::error::AppError;
 use crate::ipc::platform;
@@ -153,6 +153,15 @@ fn set_appearance_config(state: &AppState, config: AppearanceConfig) -> Result<(
 fn get_explorer_config(state: &AppState) -> Result<ExplorerConfig, AppError> {
     let config = state.lock_config()?;
     Ok(config.explorer.clone())
+}
+
+/// Read the Tyto (screen recorder) launcher-side preferences (the opt-in
+/// OS-global shortcut). `set_tyto_config` is a keep-shell command (it reconciles
+/// the OS-global shortcut via `AppHandle`), so only the read lives here.
+#[platform::handler(program = "platform")]
+fn get_tyto_config(state: &AppState) -> Result<TytoConfig, AppError> {
+    let config = state.lock_config()?;
+    Ok(config.tyto.clone())
 }
 
 /// Read the current UI animations preferences (enabled + speed).

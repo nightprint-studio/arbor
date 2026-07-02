@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { corvus, platform, sitta } from './rpc';
-import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, ExplorerConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, SittaConfig, WhatsNewConfig } from '$lib/types/config';
+import type { ActivityBarConfig, AnimationsConfig, AppearanceConfig, BranchGroupingConfig, BranchesConfig, CacheConfig, CommitConfig, DiffConfig, ExplorerConfig, GraphConfig, MrConfig, OnboardingConfig, PipelinesConfig, SittaConfig, TytoConfig, WhatsNewConfig } from '$lib/types/config';
 import type { TicketLinksRepoConfig } from '$lib/types/corvus/git';
 
 export type { TicketLinksRepoConfig };
@@ -82,6 +82,18 @@ export const getExplorerConfig = () =>
 // OS-global shortcut via AppHandle), so it keeps using `invoke`.
 export const setExplorerConfig = (config: ExplorerConfig) =>
   invoke<void>('set_explorer_config', { config });
+
+// ── Tyto (screen recorder): launcher-side integration settings ───────────────
+// The opt-in OS-global shortcut that opens the recorder window. Read even when a
+// Tyto backend isn't running (the launcher registers the hotkey at boot).
+
+export const getTytoConfig = () =>
+  platform<TytoConfig>('get_tyto_config');
+
+// set_tyto_config stays a Tauri command (keep-shell: reconciles an OS-global
+// shortcut via AppHandle), so it uses `invoke` — mirrors setExplorerConfig.
+export const setTytoConfig = (config: TytoConfig) =>
+  invoke<void>('set_tyto_config', { config });
 
 // ── File explorer: sitta's own UX preferences (out-of-process) ───────────────
 // View/sort/startup, sidebar + column layout, favourites, saved searches,

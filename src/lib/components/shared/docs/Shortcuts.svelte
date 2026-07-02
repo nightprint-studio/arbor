@@ -60,6 +60,7 @@
     <tr><td><Kbd action="toggle_docs" size="sm" /></td><td>Toggle Documentation</td></tr>
     <tr><td><Kbd action="open_shortcuts" size="sm" /></td><td>Open the searchable Keyboard Shortcuts cheat-sheet</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd></td><td>Open the File Explorer in a dedicated window — registered system-wide so it works even when Arbor isn't focused. Off by default and rebindable; enable / change it in Settings → File Explorer (or the explorer's own settings page)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Open the Tyto screen recorder in a dedicated window — registered system-wide so it works even when Arbor isn't focused. Off by default and rebindable; enable / change it in Tyto's settings</td></tr>
     <tr><td><kbd>Escape</kbd></td><td>Close current panel / search / modal</td></tr>
   </tbody>
 </table>

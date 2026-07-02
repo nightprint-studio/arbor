@@ -60,6 +60,8 @@ members = [
     "crates/products/merula/be",
     "crates/products/sitta/core",
     "crates/products/sitta/be",
+    "crates/products/tyto/core",
+    "crates/products/tyto/be",
 ]
 
 # ── Shared package metadata ─────────────────────────────────────────────────

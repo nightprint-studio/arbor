@@ -8,6 +8,8 @@
 //! - [`explorer`] — the dedicated File Explorer (`explorer` / `explorer-N`),
 //!   plus its OS-global shortcut, cross-window clipboard and drag overlay.
 //! - [`merula`] — the music live-coding DAW shell (`merula`).
+//! - [`tyto`] — the screen-recorder control panel (`tyto`), plus its OS-global
+//!   shortcut.
 //! - [`corvus`] — the Git product window (`corvus`). Today the Git UI also
 //!   loads in `main`; this is the seed of the launcher split, where `main`
 //!   becomes the launcher and Corvus opens as a product window.
@@ -23,11 +25,15 @@
 //! `tauri.conf.json`).
 
 pub mod corvus;
+pub mod countdown;
 pub mod events;
 pub mod explorer;
+pub mod hud;
 pub mod launcher;
 pub mod merula;
 pub mod placement;
+pub mod region;
+pub mod tyto;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
@@ -45,6 +51,59 @@ pub fn show_and_focus(w: &WebviewWindow) {
     let _ = w.unminimize();
     let _ = w.show();
     let _ = w.set_focus();
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  Anti-white-flash window reveal — the app-wide best practice
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Every Arbor window is an OPAQUE WebView2 (a transparent one gets no input on
+// Windows — the documented trap), so during load it paints its white default page
+// for a beat before the Svelte shell mounts: a window built *visible* shows a white
+// flash. The fix, used by EVERY launcher/product window: build with `.visible(false)`
+// and reveal it only once its frontend has painted.
+//
+// Two centralized pieces make this one pattern instead of per-window copies:
+//  • [`window_ready`] — a GENERIC command each shell calls once painted. The window
+//    reveals ITSELF through the injected handle, so a single command serves them all
+//    (no `foo_ready` per window).
+//  • [`arm_ready_reveal`] — the safety net: reveal the window anyway after a short
+//    delay, so a frontend that never signals (crash, disabled JS) can't leave the
+//    window stuck hidden.
+//
+// The shell fires the signal from `src/routes/+page.svelte` after the shell mounts +
+// two frames. Overlays with deliberate visibility/focus semantics opt out there
+// (the countdown must not steal focus; the drag ghost is shown per-drag; the region
+// overlay reveals itself on the frozen screenshot's `load` so no blank frame shows).
+
+/// Delay before the ready-fallback reveals a built-hidden window even if its frontend
+/// never signalled — long enough to let a healthy shell paint first.
+const READY_FALLBACK_MS: u64 = 800;
+
+/// Arm the safety-net reveal for a window built with `.visible(false)`: after
+/// [`READY_FALLBACK_MS`] show it regardless, so a frontend that never calls
+/// [`window_ready`] can't leave the window stuck hidden. `show` is idempotent, so
+/// racing the real ready signal is harmless. Call once, right after a successful build.
+pub fn arm_ready_reveal(app: &AppHandle, label: &str) {
+    let app = app.clone();
+    let label = label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(READY_FALLBACK_MS));
+        if let Some(w) = app.get_webview_window(&label) {
+            let _ = w.show();
+        }
+    });
+}
+
+/// Reveal the calling window once its frontend has painted — the app-wide
+/// anti-white-flash reveal. Generic across every window built hidden: the window
+/// reveals ITSELF through the injected handle, so one command serves them all.
+/// Idempotent (`show`/`set_focus` on an already-visible window are effectively no-ops
+/// for our windows). The `window` arg is the caller's own window, injected by Tauri.
+#[tauri::command]
+pub fn window_ready(window: WebviewWindow) {
+    let _ = window.show();
+    let _ = window.set_focus();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -69,6 +128,9 @@ pub fn product_id_for_label(label: &str) -> Option<&'static str> {
         Some("sitta")
     } else if label == merula::MERULA_WINDOW_LABEL || label.starts_with("merula-") {
         Some("merula")
+    } else if label == tyto::TYTO_WINDOW_LABEL {
+        // Tyto is a single-window product (no `tyto-N`).
+        Some("tyto")
     } else {
         None
     }

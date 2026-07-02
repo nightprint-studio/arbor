@@ -187,6 +187,15 @@ pub fn build_router(app: &AppHandle) -> Router {
     // no catch-all sink. Routing flips at attach/detach time.
     router.register("sitta", Arc::new(SplitBroker::pure_oop("sitta")));
 
+    // Tyto backend: the screen-recorder product. Like sitta/merula, served
+    // out-of-process by `tyto-be` — spawned lazily by [`ensure_tyto_be`] when the
+    // Tyto window opens (the launcher and the other product windows never touch the
+    // recorder backend). Tyto has NO in-process handlers in this shell, so it is
+    // `pure_oop`: a `tyto` call with `tyto-be` detached reports `BackendNotRunning`,
+    // an unadvertised method reports `UnknownMethod` — no catch-all sink. Routing
+    // flips at attach/detach time.
+    router.register("tyto", Arc::new(SplitBroker::pure_oop("tyto")));
+
     router
 }
 
@@ -1789,6 +1798,109 @@ fn spawn_sitta_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>
         Ok(pair) => Some(pair),
         Err(e) => {
             tracing::warn!("failed to spawn sitta-be ({e}) — explorer stays on platform/corvus");
+            None
+        }
+    }
+}
+
+/// Lazily spawn `tyto-be` and attach it to the router, **idempotently** — the tyto
+/// twin of [`ensure_sitta_be`]. Called when the Tyto window opens
+/// (`window::tyto::open_or_focus`), off the main thread — the spawn blocks on the
+/// child's first `Hello` frame, which must not stall the UI thread.
+///
+/// First call spawns the binary, reads its advertised methods, and splices the
+/// client into the `tyto` slot of the shared OOP routing map. Subsequent calls (the
+/// window re-summoned) are a no-op while the backend is alive. **No `sync_config`**:
+/// `tyto-be` resolves its own config / data dirs once `init_active_profile()` has
+/// run. If the binary is missing / the spawn fails, the backend stays detached and
+/// every `tyto` rpc method routes to the loopback → `BackendNotRunning` (the FE
+/// shows its "backend in progress" state).
+pub fn ensure_tyto_be(app: &AppHandle) {
+    // Serialize concurrent triggers (the launcher tile, the Command Palette and the
+    // global shortcut can all fire `open_or_focus`) so we never spawn two backends;
+    // re-check liveness inside the lock. A SEPARATE lock from the other backends'
+    // spawns so they never contend.
+    static SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = match SPAWN_LOCK.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if split_broker::is_attached("tyto") {
+        tracing::debug!("ensure_tyto_be: already attached — no-op (window re-summoned)");
+        return; // backend already up — window is just being re-summoned
+    }
+    let gen = split_broker::next_gen();
+    tracing::info!("ensure_tyto_be: spawning tyto-be (gen={gen})");
+    match spawn_tyto_be(app, gen) {
+        Some((child, methods)) => {
+            tracing::info!(
+                "tyto-be up (lazy, gen={gen}): {} method(s) served out-of-process",
+                methods.len()
+            );
+            split_broker::attach(
+                "tyto",
+                gen,
+                methods.into_iter().collect(),
+                Arc::new(child) as Arc<dyn BrokerClient>,
+            );
+            // The backend attaches AFTER the Tyto window may already have run its
+            // shell's one-shot loads (the spawn is off-thread, racing window
+            // creation). Signal "now routable" so the recorder store (re)fetches its
+            // sources / config / library instead of being stuck on defaults.
+            use tauri::Emitter;
+            let _ = app.emit("arbor://tyto-be-up", ());
+        }
+        None => {
+            tracing::info!("tyto-be not available — the Tyto capture UI stays in preview mode");
+        }
+    }
+}
+
+fn spawn_tyto_be(app: &AppHandle, gen: u64) -> Option<(ChildClient, Vec<String>)> {
+    use crate::process_ext::NoWindowExt;
+
+    let bin = match backend_binary(app, "tyto-be") {
+        Some(b) => b,
+        None => {
+            tracing::info!(
+                "tyto-be binary not found (backends/ resource or beside the launcher) — Tyto stays in preview mode"
+            );
+            return None;
+        }
+    };
+
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.no_window(); // no console popup on Windows; stdio piping is unaffected
+
+    let app_for_events = app.clone();
+    let app_for_host = app.clone();
+    let app_for_disc = app.clone();
+    match ChildClient::spawn(
+        cmd,
+        move |topic, payload| {
+            use tauri::Emitter;
+            // Recorder push events (e.g. `tyto://recording-progress`) land here when
+            // the engine ships. Scope to the Tyto window rather than the global app
+            // bus once there can be multiple recorder surfaces; a single window today
+            // makes the global emit harmless.
+            let _ = app_for_events.emit(&topic, payload);
+        },
+        move |method, params| host_dispatch(&app_for_host, method, params),
+        move || {
+            // Fires for a genuine crash AND the intentional teardown of an OLD child
+            // after stop+respawn. `detach_if_current` acts only when gen={gen} is
+            // still attached: genuine crash → detach + down event; stale disconnect
+            // of an already-replaced child → logged no-op.
+            use tauri::Emitter;
+            tracing::warn!("tyto-be disconnect callback fired (gen={gen})");
+            if split_broker::detach_if_current("tyto", gen, "disconnect") {
+                let _ = app_for_disc.emit("arbor://tyto-be-down", ());
+            }
+        },
+    ) {
+        Ok(pair) => Some(pair),
+        Err(e) => {
+            tracing::warn!("failed to spawn tyto-be ({e}) — Tyto stays in preview mode");
             None
         }
     }

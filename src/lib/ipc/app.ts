@@ -28,6 +28,12 @@ export function openMerulaWindow(): Promise<void> {
   return invoke('open_merula_window');
 }
 
+/** Open (or focus, if already open) the dedicated Tyto window — the standalone
+ *  screen-recorder control panel (also summoned by the Ctrl+Shift+R shortcut). */
+export function openTytoWindow(): Promise<void> {
+  return invoke('open_tyto_window');
+}
+
 /** Open (or focus, if already open) the dedicated Corvus window — the Git
  *  product shell (today the Git UI also loads in the main/launcher window). */
 export function openCorvusWindow(): Promise<void> {
@@ -67,6 +73,7 @@ export const PRODUCT_WINDOW_OPENERS: Record<string, () => Promise<void>> = {
   corvus: openCorvusWindow,   // Git client
   sitta: openExplorerWindow,  // File explorer
   merula: openMerulaWindow,    // Music (merula / Merula)
+  tyto: openTytoWindow,        // Screen recorder
 };
 
 // ── Product window running-state (launcher ↔ product windows) ────────────────
