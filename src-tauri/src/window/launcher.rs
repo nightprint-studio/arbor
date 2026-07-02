@@ -49,13 +49,18 @@ fn build_launcher_window(app: &AppHandle) {
         .decorations(false)
         .shadow(true)
         .center()
+        // Build HIDDEN and reveal once the launcher shell has painted (window_ready) —
+        // an opaque WebView2 window would otherwise flash its white default page during
+        // load. See super::window_ready / arm_ready_reveal.
+        .visible(false)
         // Match the main window's WebView2 env (see WEBVIEW_BROWSER_ARGS) —
         // mismatched args on a second webview → HRESULT 0x8007139F.
         .additional_browser_args(WEBVIEW_BROWSER_ARGS)
         .build();
 
-    if let Err(e) = res {
-        tracing::error!("failed to open launcher window: {e}");
+    match res {
+        Ok(_) => super::arm_ready_reveal(app, LAUNCHER_WINDOW_LABEL),
+        Err(e) => tracing::error!("failed to open launcher window: {e}"),
     }
 }
 

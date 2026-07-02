@@ -198,6 +198,17 @@ export interface ExplorerConfig {
   reveal_in_builtin: boolean;
 }
 
+/** Launcher-side **Tyto** (screen recorder) settings — the shell-owned opt-in
+ *  OS-global shortcut that opens the recorder window. Tyto's capture/output
+ *  preferences will be owned by its own backend once it exists. */
+export interface TytoConfig {
+  /** Register the OS-global shortcut that opens the Tyto window. Off by default;
+   *  toggling re-registers/unregisters at runtime. */
+  global_shortcut: boolean;
+  /** Accelerator for the global shortcut (Tauri format, e.g. "Ctrl+Shift+R"). */
+  global_shortcut_accel: string;
+}
+
 /** The file-explorer's own UX preferences, owned out-of-process by `sitta-be`
  *  (`get/set_sitta_config`, the `sitta` program). The four launcher-consumed
  *  settings live in {@link ExplorerConfig} instead. */

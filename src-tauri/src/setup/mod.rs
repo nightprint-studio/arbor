@@ -67,9 +67,10 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        // OS-global shortcut (Ctrl+Shift+E) — dedicated File Explorer window.
-        // The handler only reacts on key-down for our one registered combo;
-        // the combo itself is registered in `run()` below.
+        // OS-global shortcuts — the dedicated File Explorer window (Ctrl+Shift+E)
+        // and the Tyto screen recorder (Ctrl+Shift+R). The handler reacts on
+        // key-down for whichever registered combo matched; the combos themselves
+        // are registered in `run()` below (both opt-in).
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -78,6 +79,19 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
                         if let Some(sc) = crate::window::explorer::current_explorer_shortcut() {
                             if shortcut == &sc {
                                 crate::window::explorer::open_or_focus(app);
+                            }
+                        }
+                        if let Some(sc) = crate::window::tyto::current_tyto_shortcut() {
+                            if shortcut == &sc {
+                                // Context-aware: while a recording runs the same key STOPS
+                                // it (from anywhere, without surfacing Tyto); otherwise it's
+                                // quick-capture — open straight into the in-window Snip
+                                // selector, not the full panel.
+                                if crate::window::tyto::is_recording() {
+                                    crate::window::tyto::request_stop_recording(app);
+                                } else {
+                                    crate::window::tyto::open_or_focus_snip(app);
+                                }
                             }
                         }
                     }
@@ -130,6 +144,11 @@ fn run(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // when disabled or unset). The press handler is wired on the plugin builder.
     #[cfg(desktop)]
     crate::window::explorer::register_configured(app.handle());
+
+    // Register the configured OS-global Tyto (screen recorder) shortcut (opt-in;
+    // no-op when disabled or unset). Same press handler as the explorer's above.
+    #[cfg(desktop)]
+    crate::window::tyto::register_configured(app.handle());
 
     // Register the `arbor://` URI scheme + deep-link routing (warm + cold start).
     #[cfg(all(desktop, any(not(debug_assertions), feature = "deep-link-dev")))]

@@ -24,14 +24,21 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
             // (→ `Destroyed` → emit `running:false` + teardown). The launcher
             // staying in control is what guarantees no un-killable zombie.
             if let Some(id) = super::product_id_for_label(label) {
-                let keep = crate::config::app_config::load()
-                    .ok()
-                    .and_then(|c| c.launcher.products.get(id).map(|p| p.close_to_tray))
-                    .unwrap_or(false);
-                if keep {
-                    api.prevent_close();
-                    let _ = window.hide();
-                    return;
+                // Tyto is EXEMPT from close-to-tray: closing it always terminates the
+                // recorder. A screen recorder lingering invisibly in the tray is a
+                // privacy footgun (the user thinks it's gone), so there is no
+                // "keep alive" option for it — the launcher never offers the toggle and
+                // this path never honours one even if the config somehow held it.
+                if id != "tyto" {
+                    let keep = crate::config::app_config::load()
+                        .ok()
+                        .and_then(|c| c.launcher.products.get(id).map(|p| p.close_to_tray))
+                        .unwrap_or(false);
+                    if keep {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        return;
+                    }
                 }
             }
             #[cfg(not(debug_assertions))]
@@ -78,18 +85,19 @@ pub fn handle(window: &tauri::Window, event: &WindowEvent) {
                     // (harmless); the next open re-spawns a fresh backend.
                     //
                     // Every product with a lazy OOP backend tears down here so the
-                    // headless child never lingers windowless (corvus/merula/sitta).
+                    // headless child never lingers windowless (corvus/merula/sitta/tyto).
                     // Sitta included: without it the explorer's `sitta-be` would
                     // survive its last window and a re-open would silently reuse the
                     // stale process (no respawn, no `…-up` reload) instead of a fresh
-                    // one — diverging from corvus/merula.
+                    // one — diverging from corvus/merula. Tyto included so closing the
+                    // recorder actually ends `tyto-be` (it never minimizes to tray).
                     //
                     // Safe to call inline on the UI thread: `detach` removes the
                     // routing entry under a brief lock and offloads the blocking
                     // child `kill()`+`wait()` to its own thread (it used to run that
                     // teardown under the routing lock on this very thread, freezing
                     // the launcher and every other product's IPC mid-close).
-                    if matches!(id, "corvus" | "merula" | "sitta") {
+                    if matches!(id, "corvus" | "merula" | "sitta" | "tyto") {
                         crate::ipc::split_broker::detach(id, "window-closed");
                     }
                 }

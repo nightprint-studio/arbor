@@ -21,6 +21,8 @@ macro_rules! invoke_handlers {
             $crate::commands::rpc_commands::rpc,
             // Appearance preferences (window control style, font scale, …)
             $crate::commands::config_commands::set_explorer_config,
+            // Tyto (screen recorder) preferences — opt-in OS-global shortcut
+            $crate::commands::config_commands::set_tyto_config,
             // Launcher (Canopy) preferences — per-product window close behaviour
             $crate::commands::config_commands::get_launcher_config,
             $crate::commands::config_commands::set_launcher_close_to_tray,
@@ -64,6 +66,9 @@ macro_rules! invoke_handlers {
             $crate::commands::marketplace_commands::marketplace_set_refresh_hours,
             $crate::commands::marketplace_commands::marketplace_set_poll_minutes,
             // ── Window lifecycles ────────────────────────────────────────────
+            // Anti-white-flash reveal: every launcher/product window builds hidden
+            // and the shell calls this once painted (see `window::window_ready`).
+            $crate::window::window_ready,
             // Dedicated File Explorer window + cross-window clipboard & drag
             $crate::window::explorer::open_explorer_window,
             $crate::window::explorer::reveal_in_explorer,
@@ -79,6 +84,16 @@ macro_rules! invoke_handlers {
             $crate::window::explorer::explorer_drop_dispatch,
             // Dedicated merula (music live-coding) window
             $crate::window::merula::open_merula_window,
+            // Dedicated Tyto (screen recorder) window + in-window Snip selector
+            $crate::window::tyto::open_tyto_window,
+            $crate::window::tyto::set_tyto_selection,
+            $crate::window::tyto::reset_tyto_bounds,
+            $crate::window::tyto::take_tyto_snip_intent,
+            // Tyto recording HUD (shown while recording, Tyto hidden)
+            $crate::window::hud::open_recording_hud,
+            $crate::window::hud::close_recording_hud,
+            $crate::window::hud::resize_recording_hud,
+            $crate::window::hud::get_hud_init,
             // Dedicated Corvus (git) window
             $crate::window::corvus::open_corvus_window,
             // Launcher window (JetBrains-Toolbox-like home screen)

@@ -1,6 +1,6 @@
 use tauri::State;
 use crate::error::AppError;
-use crate::config::app_config::{self, ExplorerConfig, LauncherConfig};
+use crate::config::app_config::{self, ExplorerConfig, LauncherConfig, TytoConfig};
 use crate::AppState;
 
 /// Persist updated file-explorer preferences. When the global-shortcut toggle
@@ -26,6 +26,32 @@ pub fn set_explorer_config(
     // (invalid / already-claimed combo) surfaces to the UI so it can revert.
     #[cfg(desktop)]
     crate::window::explorer::reconcile_global_shortcut(&app, &old_explorer, &new_explorer)
+        .map_err(AppError::Other)?;
+    Ok(())
+}
+
+/// Persist updated Tyto (screen recorder) preferences. When the global-shortcut
+/// toggle or accelerator changes, register/unregister the OS-global combo
+/// immediately so the change takes effect without a restart.
+///
+/// Stays a Tauri command (keep-shell): it takes an `AppHandle` and reconciles an
+/// OS-global shortcut, so it can't move to the Tauri-free platform backend.
+/// Mirrors [`set_explorer_config`].
+#[tauri::command]
+pub fn set_tyto_config(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    config: TytoConfig,
+) -> Result<(), AppError> {
+    let mut cfg = state.lock_config()?;
+    let old_tyto = cfg.tyto.clone();
+    cfg.tyto = config;
+    let new_tyto = cfg.tyto.clone();
+    let cfg_clone = cfg.clone();
+    drop(cfg);
+    app_config::save(&cfg_clone).map_err(|e| AppError::Other(e.to_string()))?;
+    #[cfg(desktop)]
+    crate::window::tyto::reconcile_global_shortcut(&app, &old_tyto, &new_tyto)
         .map_err(AppError::Other)?;
     Ok(())
 }

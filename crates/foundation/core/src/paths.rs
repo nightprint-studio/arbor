@@ -122,6 +122,28 @@ pub fn sitta_data_dir() -> PathBuf {
     arbor_global_data_dir().join("sitta")
 }
 
+/// `arbor/profiles/<active>/tyto` — tyto's **per-profile** config dir. Holds the
+/// screen-recorder's own settings (`config.toml`) and any small per-profile state.
+/// Resolved by `tyto-be` itself after `init_active_profile()` — not pushed by the
+/// shell — mirroring [`sitta_config_dir`].
+pub fn tyto_config_dir() -> PathBuf {
+    crate::profile::product_dir(crate::profile::PRODUCT_TYTO)
+}
+
+/// Convenience: join a relative path under [`tyto_config_dir`].
+pub fn tyto_config_path<P: AsRef<Path>>(sub: P) -> PathBuf {
+    tyto_config_dir().join(sub)
+}
+
+/// `arbor/data/tyto` — the **global, shared** heavy-asset root for tyto (e.g. a
+/// thumbnail cache / scratch mux dir). Rooted under [`arbor_global_data_dir`] so
+/// caches are shared across profiles, not duplicated. Sibling of [`sitta_data_dir`].
+/// (The user-chosen capture output dir is separate — it defaults to the OS
+/// Videos/Tyto folder, configured in `TytoConfig`.)
+pub fn tyto_data_dir() -> PathBuf {
+    arbor_global_data_dir().join("tyto")
+}
+
 /// The legacy top-level sibling roots merula used **before** it became a
 /// profile-scoped product (`%APPDATA%\merula`, and the even older `nemus` from
 /// before the rename). Used only by the one-shot boot migration to relocate that

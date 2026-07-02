@@ -1,0 +1,100 @@
+[package]
+name         = "tyto-be"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Tyto backend — the headless screen-recorder process for Model D. Serves the tyto domains over framed-stdio IPC; loads host-pure Lua plugins, has no credentials, and resolves its own config/data dirs once init_active_profile() has run."
+
+[[bin]]
+name = "tyto-be"
+path = "src/main.rs"
+
+[dependencies]
+arbor-ipc  = { path = "../../../foundation/ipc" }
+arbor-rpc  = { path = "../../../foundation/rpc" }
+# The Model-D backend runtime scaffold: `BackendIo` (framed-stdio plumbing +
+# runtime) + the `App` builder (pre-serve inits, serve loop).
+arbor-be   = { path = "../../../foundation/be" }
+# The profile-aware config/data-path resolver: `init_active_profile()` seeds the
+# active profile FIRST in `main`, so the `tyto_*` config/data dirs resolve under
+# the launcher's profile.
+arbor-core = { path = "../../../foundation/core" }
+# The canonical tyto state: `TytoState` (event egress + reverse channel). The
+# domain `#[arbor_rpc::handler]`s stay here in tyto-be and drive against
+# `tyto_core::prelude::*`. Tauri-free by construction.
+tyto-core = { path = "../core" }
+# Host-pure plugin host: the hook dispatcher + the base `arbor.*` installer wired
+# in `src/plugin.rs`. tyto-be loads host-pure Lua plugins (no product namespaces).
+# mlua is workspace-pinned (see root) so the installer's `&Lua` is the very same
+# type as arbor-plugin-core's — one shared mlua artifact.
+arbor-plugin-api   = { path = "../../../platform/plugin/api" }
+arbor-plugin-core  = { path = "../../../platform/plugin/core" }
+arbor-plugin-types = { path = "../../../platform/plugin/types" }
+mlua = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+# Drives the serve loop / async domain handlers as the recording engine lands.
+tokio      = { workspace = true }
+
+# ── Capture engine (recording/screenshots) — lives HERE, never in src-tauri ──
+# Native OS screen/window capture (WGC on Windows, ScreenCaptureKit on macOS,
+# PipeWire on Linux). Used for BOTH one-shot screenshots and the high-fps recording
+# producer. xcap was dropped: it capped at ~3fps (capture_image AND VideoRecorder,
+# measured) AND its Linux backend pulled a pipewire that `links`-conflicts with
+# scap's — cargo enforces `links` uniqueness across the WHOLE graph (target-gating
+# does NOT help), so only ONE capture lib may exist. scap wins on both counts.
+scap = "0.0.8"
+# Encode raw frames → H.264/mp4 + mux; manages/locates the ffmpeg binary.
+ffmpeg-sidecar = "2.0"
+# Microphone capture (cpal input stream). Same 0.15 pin as merula-audio so the
+# workspace builds ONE cpal artifact.
+cpal = "0.15"
+# PNG encode for screenshots + the region frozen-frame (from the scap RGBA buffer).
+# JPEG/WebP screenshot encoders are behind opt-in features (off by default so the
+# default build stays PNG-only): enabling `jpeg-screenshots` / `webp-screenshots`
+# forwards the matching `image` encoder feature AND compiles the encode path.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Session ids + collision-free temp filenames (reuses the workspace pin).
+uuid = { workspace = true }
+# OS clipboard image write for "copy screenshot to clipboard". Lives HERE (not the
+# Tauri shell): tyto-be has the RGBA pixels in hand at capture time, format-agnostic —
+# the Tauri clipboard plugin can't run in this headless process, and copying from the
+# shell would mean re-reading + decoding the saved file. Cross-platform (Win/mac/Linux).
+arboard = "3"
+
+# Screenshot encoders. ON by default so the user-facing PNG/JPG/WebP format setting
+# actually produces those formats (with a flag off, that format silently falls back to
+# PNG in capture/screenshot.rs). Build with `--no-default-features` for a PNG-only,
+# leaner tyto-be. Each flag pulls the matching `image` encoder feature AND compiles its
+# encode branch. NB: `image` 0.25 WebP encoding is lossless-only (larger files).
+[features]
+default = ["jpeg-screenshots", "webp-screenshots"]
+jpeg-screenshots = ["image/jpeg"]
+webp-screenshots = ["image/webp"]
+
+# Rich source enumeration on Windows: monitor resolution/primary + window title.
+# scap's own enumeration is thin (id + title only), so the picker's metadata comes
+# from windows-capture (the crate scap already uses under the hood on Windows), joined
+# to scap by the shared u32 handle id. Pinned to =1.4.3 because scap 0.0.8's win engine
+# was written for that exact API (1.5.0 changed Settings::new to 8 args → won't compile;
+# 1.3.x lacks the Context / no-padding-buffer API scap calls). This `[target.*]` table
+# must stay LAST so no plain deps accidentally land inside it.
+[target.'cfg(target_os = "windows")'.dependencies]
+# System-audio loopback (render endpoint in Direction::Capture) — what cpal can't do
+# on Windows. Windows-only; mac/linux record without system audio for now (the
+# recording still proceeds — see capture/sysaudio.rs).
+wasapi = "0.23"
+windows-capture = "=1.4.3"
+# Direct Win32 for the window→process-name helper (app grouping in the picker). 0.61
+# matches windows-capture so only one `windows` 0.61 artifact compiles.
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",         # CoCreateInstance/CoInitializeEx for UI Automation
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",   # UI Automation — the "smart" element picker
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }

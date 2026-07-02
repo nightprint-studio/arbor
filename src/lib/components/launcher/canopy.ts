@@ -41,6 +41,7 @@ export const BASE: Product[] = [
   { id: 'corvus', name: 'Corvus', bird: 'crow',        role: 'Git & CI client',     accent: '#7c9cf5' },
   { id: 'merula', name: 'Merula', bird: 'blackbird',   role: 'Music synthesizer',   accent: '#e8a857' },
   { id: 'sitta',  name: 'Sitta',  bird: 'treecreeper', role: 'File explorer',       accent: '#b58cf0' },
+  { id: 'tyto',   name: 'Tyto',   bird: 'barn owl',    role: 'Screen recorder',     accent: '#f28b82' },
 ];
 
 // ── Colour helpers ───────────────────────────────────────────────────────────

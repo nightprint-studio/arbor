@@ -37,6 +37,9 @@ pub const PRODUCT_MERULA: &str = "merula";
 /// See [`PRODUCT_CORVUS`]. sitta (the file explorer) owns its own per-profile
 /// bucket for its settings/data, served out-of-process by `sitta-be`.
 pub const PRODUCT_SITTA: &str = "sitta";
+/// See [`PRODUCT_CORVUS`]. tyto (the screen recorder) owns its own per-profile
+/// bucket for its settings/data, served out-of-process by `tyto-be`.
+pub const PRODUCT_TYTO: &str = "tyto";
 
 /// Process-global selected-profile name. Seeded to [`DEFAULT_PROFILE`] and
 /// overwritten at boot by [`init_active_profile`] (or a launch argument).

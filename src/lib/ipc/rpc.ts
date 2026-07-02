@@ -14,7 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
  * to a nested JSON payload).
  */
 /** The backend product labels the router dispatches to. */
-export type Program = 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta';
+export type Program = 'corvus' | 'platform' | 'studio' | 'merula' | 'sitta' | 'tyto';
 
 export function rpc<R>(program: Program, method: string, params: Record<string, unknown> = {}): Promise<R> {
   return invoke<R>('rpc', { program, method, params });
@@ -47,3 +47,11 @@ export const merula = <R>(method: string, params: Record<string, unknown> = {}):
  *  through `platform`. Routes to a down overlay when `sitta-be` isn't running. */
 export const sitta = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
   rpc<R>('sitta', method, params);
+
+/** Bound helper for the Tyto (screen recorder) backend — served out-of-process by
+ *  `tyto-be`, spawned lazily when the Tyto window opens. Serves the recorder
+ *  domains (config, sources, session, region, library). The capture handlers are
+ *  stubs until the recording engine lands, so calls resolve empty / reject until
+ *  then; `BackendNotRunning` when `tyto-be` isn't up. */
+export const tyto = <R>(method: string, params: Record<string, unknown> = {}): Promise<R> =>
+  rpc<R>('tyto', method, params);
