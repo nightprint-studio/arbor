@@ -23,5 +23,5 @@ export type {
   CompletionSource,
 } from './types';
 export { codeEditorTheme } from './theme';
-export { createCodeEditorExtensions, type CodeEditorExtensionsOptions } from './extensions';
+export { createCodeEditorExtensions, refTextAt, type CodeEditorExtensionsOptions } from './extensions';
 export { createHighlightPlugin, makeByteToU16, makeU16ToByte, parserReady } from './highlight';

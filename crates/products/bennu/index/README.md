@@ -35,6 +35,22 @@ The index stays a leaf crate — it treats the blob as an opaque string; only `b
 knows the shape (a serialized `bennu_java::ClassMembers`). Adding it bumped the on-disk
 `FORMAT_VERSION` to 2 (an old index is rebuilt on open, not misread).
 
+## Relation store (config-graph edges)
+
+Relations live in their **own** framed blob + fst, keyed by `from_id`, so an edge query
+slices only one node's out-edges rather than scanning the symbol table:
+
+- `RelationWriter::add(rel)` — accumulate edges grouped by `from_id`; `finish(blob, fst)`
+  writes each node's edges as one 16-byte-aligned `[u32 count][ (u32 len)(bytes) ]*` run.
+- `RelationReader::open(blob, fst)` → `out_edges(from_id)` / `out_edges_of_kind(...)` /
+  `first_out_edge(...)`.
+
+Each `Relation` carries `inferred`: a **candidate** edge (a Struts wildcard action, a
+`{1}` backref, Tiles indirection) — navigation goes to candidates and a diagnostic must
+never treat one as an exact "missing" (docs §7/§8). This edge store + `Relation::inferred`
+bumped `FORMAT_VERSION` to 3. It's the seam the config-graph (`bennu-web`) ingests onto
+and `bennu-intel` walks for `action → class` and `result → view`.
+
 ## Query
 
 `SymbolIndex` binds one fst map + one blob → typed `Symbol` reads:

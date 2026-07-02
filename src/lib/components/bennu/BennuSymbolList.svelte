@@ -17,6 +17,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { javaOutline, type JavaSymbol } from './java-outline';
+  import { detectAccessors, flagsFor } from './java-accessors';
 
   let { title = 'Structure' }: { title?: string } = $props();
 
@@ -39,6 +40,13 @@
     timer = setTimeout(() => { symbols = javaOutline(src); }, 180);
     return () => { if (timer) clearTimeout(timer); };
   });
+
+  // Which fields already have a getter / setter / with — same G/S/W markers the
+  // Generate modal shows, so Structure and Generate agree. Detected from the same
+  // source the symbols came from (pure helper in `java-accessors.ts`).
+  const accessorMap = $derived(
+    detectAccessors(activeSource, symbols.filter((s) => s.kind === 'field').map((s) => s.name)),
+  );
 
   const q = $derived(filter.trim().toLowerCase());
   const searched = $derived(q ? symbols.filter((s) => s.name.toLowerCase().includes(q)) : symbols);
@@ -122,6 +130,14 @@
                 {#snippet icon()}<span style="color: {g.color}; display:flex"><Gi size={12} /></span>{/snippet}
                 {s.name}
                 {#snippet badges()}
+                  {#if s.kind === 'field'}
+                    {@const acc = flagsFor(accessorMap, s.name)}
+                    <span class="sl-acc" aria-hidden="true">
+                      <span class="sl-acc-chip" class:on={acc.getter} use:tooltip={acc.getter ? 'Getter exists' : 'No getter'}>G</span>
+                      <span class="sl-acc-chip" class:on={acc.setter} use:tooltip={acc.setter ? 'Setter exists' : 'No setter'}>S</span>
+                      <span class="sl-acc-chip" class:on={acc.wither} use:tooltip={acc.wither ? 'With-method exists' : 'No with-method'}>W</span>
+                    </span>
+                  {/if}
                   {#if s.detail}<span class="sl-detail">{s.detail}</span>{/if}
                   <span class="sl-line">:{s.line}</span>
                 {/snippet}
@@ -142,4 +158,18 @@
     max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .sl-line { font-size: 10px; color: var(--text-disabled); font-family: var(--font-code); }
+
+  /* G / S / W accessor-presence markers on field rows. */
+  .sl-acc { display: inline-flex; align-items: center; gap: 2px; }
+  .sl-acc-chip {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 12px; height: 12px; border-radius: 3px;
+    font-size: 8px; font-weight: 700; font-family: var(--font-code);
+    color: var(--text-disabled);
+    background: var(--bg-overlay);
+  }
+  .sl-acc-chip.on {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+  }
 </style>

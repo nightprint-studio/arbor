@@ -48,7 +48,7 @@ pub enum Source {
 
 /// The kind of a [`Relation`] edge (docs §3). Java type-hierarchy edges plus the
 /// config-graph edges that make the XML a first-class language.
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[rkyv(derive(Debug))]
 pub enum RelationKind {
     Extends,
@@ -112,4 +112,8 @@ pub struct Relation {
     pub to_id: u32,
     pub kind: RelationKind,
     pub source: Source,
+    /// A **candidate** edge (a Struts wildcard action, a `{1}` backref, Tiles
+    /// indirection): navigation goes to candidates and a diagnostic must NEVER treat a
+    /// candidate as an exact "missing" verdict (docs §7/§8). Concrete edges are `false`.
+    pub inferred: bool,
 }

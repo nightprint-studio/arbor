@@ -22,9 +22,14 @@ use crate::index_service::IndexService;
 /// (or we can't infer) one. JDK 8 is the target-stack default (Struts2/Entando).
 const DEFAULT_JDK: &str = "1.8";
 
-/// How deep the initial project tree is materialised in one shot (the FE fetches
-/// deeper levels on expand — see `bennu-project::tree`).
-const TREE_DEPTH: usize = 6;
+/// How deep the project tree is materialised. Legacy Java packages nest deep
+/// (`src/main/java/<deep.pkg>/…`, easily 9+ levels), and the FE tree doesn't
+/// lazy-fetch yet (and `TreeNode` has no "expandable" flag to distinguish a
+/// truncated dir from an empty one), so a small depth cut off the `.java` leaves.
+/// Materialise effectively the whole source tree in one shot — noise dirs
+/// (`target`/`.git`/`node_modules`) are skipped in `bennu-project::tree`, so it stays
+/// a fast single fs walk.
+const TREE_DEPTH: usize = 64;
 
 /// Args for [`bennu_open_project`].
 #[derive(Deserialize)]

@@ -27,6 +27,46 @@ const METHOD_RE = /^\s*(?:public\s+|private\s+|protected\s+|abstract\s+|final\s+
 // A field: modifiers, type, name, then '=' or ';' (no parens → not a method).
 const FIELD_RE = /^\s*(?:public\s+|private\s+|protected\s+|static\s+|final\s+|transient\s+|volatile\s+)+([\w.<>\[\],\s]+?)\s+([A-Za-z_]\w*)\s*[=;]/;
 
+/**
+ * Names of fields declared `final` or annotated `@NonNull` / `@NotNull` / `@Nonnull`
+ * — the "required" fields a required-args constructor should take. Best-effort
+ * line scan: matches a `final` modifier on the declaration line, or a nullability
+ * annotation immediately preceding it (same line, or the line above). Pure helper,
+ * unit-testable; the reliable source is the BE symbol model when it lands.
+ */
+const NONNULL_RE = /@(?:NonNull|NotNull|Nonnull)\b/;
+export function requiredFieldNames(source: string): Set<string> {
+  const req = new Set<string>();
+  const lines = source.split(/\r?\n/);
+  let pendingAnnotation = false; // a nullability annotation seen on its own line
+  for (const raw of lines) {
+    const line = raw.replace(/\/\/.*$/, '');
+    const trimmed = line.trim();
+    if (!trimmed) { continue; }
+
+    const annotatedInline = NONNULL_RE.test(line);
+    const f = FIELD_RE.exec(line);
+    if (f) {
+      const head = line.slice(0, f.index + f[0].length);
+      // FIELD_RE only matches modifier-led declarations; `final` (if present) is
+      // among those leading modifiers, before the type/name.
+      const isFinal = /\bfinal\b/.test(head);
+      // static fields are class constants, never constructor params; and a field
+      // with an inline initializer is already assigned → not a required arg.
+      const isStatic = /\bstatic\b/.test(head);
+      const hasInitializer = /=/.test(line);
+      if (!isStatic && !hasInitializer && (isFinal || annotatedInline || pendingAnnotation)) {
+        req.add(f[2]);
+      }
+      pendingAnnotation = false;
+      continue;
+    }
+    // A bare `@NonNull` line preceding a field declaration.
+    pendingAnnotation = annotatedInline && /^@\w/.test(trimmed);
+  }
+  return req;
+}
+
 /** Extract a flat, ordered symbol list from Java source. Comment/blank lines and
  *  obvious control-flow lines are skipped so the list stays declaration-only. */
 export function javaOutline(source: string): JavaSymbol[] {

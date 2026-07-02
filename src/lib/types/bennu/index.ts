@@ -102,3 +102,38 @@ export interface Diagnostic {
   start: number;
   end: number;
 }
+
+// ── build / run (docs §4 "il fondo") ──────────────────────────────────────────
+
+/** A structured build diagnostic parsed from `javac`/`mvn` output (`bennu_build`).
+ *  Unlike the editor {@link Diagnostic} (byte offsets over a buffer), a compiler
+ *  reports `file:line:col` with no buffer context, so this carries the file + 1-based
+ *  line/col. The FE opens `file` and highlights `line:col`. */
+export interface BuildDiagnostic {
+  /** Offending file (as the compiler emitted it), or `null` when the line had none. */
+  file: string | null;
+  /** 1-based line, or `null`. */
+  line: number | null;
+  /** 1-based column, or `null`. */
+  col: number | null;
+  /** `error` | `warning` | `note`. */
+  severity: string;
+  message: string;
+}
+
+/** Result of `bennu_build`: the parsed diagnostics + which tool ran and whether it
+ *  succeeded. The raw log arrives as `arbor://bennu/build-output` events (not inline). */
+export interface BuildResult {
+  /** The tool that ran: `mvn` or the `javac` fallback. */
+  tool: string;
+  /** Whether the compile process exited 0. */
+  ok: boolean;
+  diagnostics: BuildDiagnostic[];
+}
+
+/** Result of `bennu_run`: the id correlating the `arbor://bennu/run-output` /
+ *  `arbor://bennu/run-exit` event stream, plus the resolved main class. */
+export interface RunHandle {
+  run_id: string;
+  main_class: string;
+}

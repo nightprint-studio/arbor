@@ -34,6 +34,49 @@ Two impl slots:
   provider can live in the multi-threaded backend state).
 - **`completion`** — the caret → candidates query.
 
+## Config-graph integration (Struts / Spring / Tiles)
+
+- **`config`** — ingests the `bennu-web` config-graph into the index and resolves the
+  load-bearing chains off it:
+  - `ingest_config_graph(&graph, index_dir)` assigns `u32` ids to the string-keyed
+    action/bean records (`Source::StrutsAction` / `SpringBean` symbols) and writes the
+    resolvable edges to the relation store, returning a `ConfigResolver`.
+  - `ConfigResolver::resolve_action_class(action)` — the **C1 chain**: action → Spring
+    bean-id → real FQCN, over the ingested `ActionToClass` edge (+ the Spring parent
+    chain for a class-less bean).
+  - `ConfigResolver::resolve_action_view(action)` — action → `<result type=tiles>` →
+    Tiles def → JSP.
+  - `ConfigResolver::diagnose_action(action)` → `ActionVerdict::{Exists, Missing,
+    Inconclusive}` — the conservative "action inesistente" check: a wildcard candidate or
+    a computed/OGNL path is **Inconclusive**, never a false **Missing** (docs §7/§8).
+  - `ConfigResolver::action_class_ref(action)` → `ActionTarget` (config fragment + class
+    FQCN + view JSP) for go-to-definition.
+
+## References + rename (docs §5 #7, #10-12)
+
+- **`refs`** — the cross-file reference index + the caret classifier both find-usages and
+  rename key off:
+  - `build_reference_index(files, resolver, project_types)` walks every use site in the
+    project (method invocation / field access / type reference), resolves each to its
+    declaring `DeclKey` (`Type` / `Method` / `Field`) via receiver inference + the
+    supertype walk, and buckets the `UsageLocation`s by declaration. Unresolved sites are
+    skipped, never fatal.
+  - `classify_caret(...)` → the `DeclKey` a caret references (declaration site or use
+    site). `classify_target(...)` is the rename superset that also recognises a **local
+    variable / parameter** (`RenameTarget::Local`), which find-usages doesn't bucket.
+- **`rename`** — best-effort, preview-first rename planning (docs §5 #10-12):
+  - `RenameEngine::for_project(index_dir, jdk, simple_names, java_sources, xml_sources)`
+    opens the persisted index, builds the resolver + the reference index, and caches the
+    source sets — one `Send + Sync` engine per project (built off-thread).
+  - `engine.plan(file, source, offset, new_name)` → a `RenamePlan` PREVIEW: per-file
+    `Edit`s tagged by `EditReason` (`Declaration` / `Reference` / `Import` / `SpringBean` /
+    `Local`) with an `inferred` flag. A **local** is scope-exact single-file; a
+    **method/field** is decl + cross-file refs (method refs `inferred` — overloads collapse
+    to one key); a **class** is decl + refs + `import`s + Spring `<bean class="FQCN">`
+    (`bennu_web::bean_class_value_spans` — a Struts `<action class="beanId">` is a bean-id,
+    not the FQCN, so it is NOT edited). `rename_apply(&plan)` flattens to the edits the FE
+    applies.
+
 ## Usage
 
 ```rust

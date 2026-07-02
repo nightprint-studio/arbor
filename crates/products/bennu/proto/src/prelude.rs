@@ -6,6 +6,7 @@
 //! canonical call-site path.
 
 pub use crate::contract::{
-    CapabilityHit, CapabilitySet, CompletionItem, Diagnostic, FileContents, JdkInfo, ProjectInfo,
+    BuildDiagnostic, BuildResult, CapabilityHit, CapabilitySet, CompletionItem, Diagnostic,
+    FileContents, JdkInfo, ProjectInfo, RenameEdit, RenameFileEdits, RenamePreview, RunHandle,
     TreeNode,
 };

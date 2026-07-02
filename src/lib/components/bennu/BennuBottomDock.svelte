@@ -9,17 +9,20 @@
    * The Problems body reuses `BennuProblemsPanel` (header hidden); the Terminal body
    * reuses the generic Corvus `TerminalInstance` via `BennuTerminalView`.
    */
-  import { AlertTriangle, TerminalSquare, Plus } from 'lucide-svelte';
+  import { AlertTriangle, TerminalSquare, Plus, Hammer, Square, Trash2 } from 'lucide-svelte';
   import BottomPanelHeader from '$lib/components/shared/ui/BottomPanelHeader.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import BennuProblemsPanel from './BennuProblemsPanel.svelte';
   import BennuTerminalView from './BennuTerminalView.svelte';
+  import BennuBuildPanel from './BennuBuildPanel.svelte';
   import { bennuUiStore, type BottomPanel } from '$lib/stores/bennu/ui.svelte';
+  import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
 
   const active = $derived(bennuUiStore.bottomPanel ?? 'problems');
 
   const tabs: TabItem[] = [
+    { id: 'build', label: 'Build', icon: Hammer, iconSize: 13 },
     { id: 'problems', label: 'Problems', icon: AlertTriangle, iconSize: 13 },
     { id: 'terminal', label: 'Terminal', icon: TerminalSquare, iconSize: 13 },
   ];
@@ -52,6 +55,28 @@
         >
           <Plus size={13} />
         </button>
+      {:else if active === 'build'}
+        {#if bennuRunStore.running}
+          <button
+            class="ps-btn"
+            type="button"
+            use:tooltip={'Stop'}
+            aria-label="Stop run"
+            onclick={() => void bennuRunStore.stop()}
+          >
+            <Square size={12} />
+          </button>
+        {/if}
+        <button
+          class="ps-btn"
+          type="button"
+          use:tooltip={'Clear'}
+          aria-label="Clear build output"
+          disabled={bennuRunStore.active}
+          onclick={() => bennuRunStore.clear()}
+        >
+          <Trash2 size={13} />
+        </button>
       {/if}
     {/snippet}
   </BottomPanelHeader>
@@ -59,6 +84,9 @@
   <div class="dock-body">
     <!-- Both sections stay mounted so a terminal session survives a tab switch;
          the inactive one is hidden, not destroyed. -->
+    <div class="dock-section" class:hidden={active !== 'build'}>
+      <BennuBuildPanel />
+    </div>
     <div class="dock-section" class:hidden={active !== 'problems'}>
       <BennuProblemsPanel hideHeader />
     </div>

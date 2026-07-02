@@ -22,9 +22,17 @@ import {
   projectTree as ipcProjectTree,
   readFile as ipcReadFile,
 } from '$lib/ipc/bennu';
+// Live re-index — kept in its own IPC file to avoid racing edits on index.ts.
+import { didChange as ipcDidChange } from '$lib/ipc/bennu/nav';
 import type { ProjectInfo, TreeNode } from '$lib/types/bennu';
 // MOCK — remove when bennu-be serves real data.
 import { DEMO_PROJECT, DEMO_TREE, DEMO_ROOT, isDemoPath, demoReadFile } from './bennu-mock';
+
+/** Debounce (ms) for the live re-index `bennu_did_change` on editor edits — long
+ *  enough that a burst of keystrokes coalesces into one BE patch, short enough that
+ *  completion/definition reflect an edit almost immediately. Never blocks typing
+ *  (the call is fire-and-forget on the BE blocking pool). */
+const REINDEX_DEBOUNCE_MS = 400;
 
 function createProjectStore() {
   let project = $state<ProjectInfo | null>(null);
@@ -42,8 +50,35 @@ function createProjectStore() {
   let activeFilePath = $state<string | null>(null);
   let openFilePaths = $state<string[]>([]);
 
+  // Live re-index — one pending debounce timer per edited path. On each edit we
+  // reset the path's timer; when it fires we hand the BE the current full text via
+  // `bennu_did_change` so it patches the index. Demo paths never fire (no BE).
+  const reindexTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
   function rememberRecent(root: string) {
     recentProjects = [root, ...recentProjects.filter((p) => p !== root)].slice(0, 10);
+  }
+
+  /** Fire `bennu_did_change` for `path` with its current cached text, patching the
+   *  BE index. Fire-and-forget: swallow errors (BE absent / not indexed yet) so a
+   *  re-index never surfaces as a failure while typing. Skips demo paths. */
+  function reindexNow(path: string) {
+    const t = reindexTimers.get(path);
+    if (t !== undefined) { clearTimeout(t); reindexTimers.delete(path); }
+    // MOCK — demo files have no backing project; never call the BE.
+    if (isDemoPath(path)) return;
+    const text = sources.get(path);
+    if (text === undefined) return;
+    void ipcDidChange(path, text).catch(() => { /* BE absent / unowned — ignore */ });
+  }
+
+  /** Debounced re-index: reset `path`'s timer so a keystroke burst coalesces into
+   *  one BE patch. Never blocks the edit that triggered it. */
+  function scheduleReindex(path: string) {
+    if (isDemoPath(path)) return; // MOCK — no BE for demo files
+    const existing = reindexTimers.get(path);
+    if (existing !== undefined) clearTimeout(existing);
+    reindexTimers.set(path, setTimeout(() => reindexNow(path), REINDEX_DEBOUNCE_MS));
   }
 
   /** Read a file's source + encoding into the cache if not already present. The
@@ -78,6 +113,9 @@ function createProjectStore() {
     openFilePaths = [];
     sources.clear();
     encodings.clear();
+    // Drop any pending re-index timers from the previous project.
+    for (const t of reindexTimers.values()) clearTimeout(t);
+    reindexTimers.clear();
   }
 
   /** MOCK — load the built-in demo project (explicit affordance + BE-down fallback). */
@@ -150,8 +188,16 @@ function createProjectStore() {
       if (openFilePaths.includes(path)) activeFilePath = path;
     },
 
-    /** Update the cached source (editor edits route here). */
-    setSource(path: string, text: string) { sources.set(path, text); },
+    /** Update the cached source (editor edits route here) and schedule a debounced
+     *  live re-index so the BE index tracks the edit without reopening the project. */
+    setSource(path: string, text: string) {
+      sources.set(path, text);
+      scheduleReindex(path);
+    },
+
+    /** Force an immediate live re-index of `path` (explicit save — flushes any
+     *  pending debounce). No-op for demo/unloaded paths. */
+    reindexNow(path: string) { reindexNow(path); },
   };
 }
 

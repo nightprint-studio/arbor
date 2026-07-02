@@ -338,4 +338,38 @@ Member-access autocomplete **reale, end-to-end**, sviluppato e provato in `dispo
 **Fase 2 (config-graph, additivo sull'indice, niente rewrite):** Struts `<action>`→classe (`StrutsAction`/`ActionToClass`), Spring `bean-id`→classe (`SpringBean`), Tiles result→JSP (`ResultToView`), JSP/OGNL/TLD contro l'indice tipi di Fase 1. Pull-forward dal backlog: `.m2` dep-jar sourcing + hook live-edit re-index.
 
 ---
+
+## 12. Fase 2 — BE config-graph (round 1) — 2026-07-02
+
+Grafo config Struts/Spring/Tiles + sourcing dep-jar `.m2`, **additivo sull'indice di Fase 1** (nessun rewrite), sviluppato e provato in `disposable` (compilato+testato) sul PortaleAppalti reale, poi portato nei crate arbor. Ogni pezzo è stato validato con un **port-check harness**: la sorgente arbor *verbatim* compila e i suoi unit test passano contro la shape reale del seam.
+
+| Crate | Esito |
+|---|---|
+| `bennu-web` **(new)** | Parser config-graph: Struts (`struts.xml` + include-graph per classpath, wildcard+backref), Spring bean-XML (`id`→FQCN), Tiles (def→JSP). `build_web_graph` + catene `resolve_action_class` (C1) / `resolve_action_view`. Record string-keyed, `RelKind::into_index()` sul seam. **10 test verdi**, zero warning. `roxmltree 0.20` (approvato). |
+| `bennu-classpath` | Aggiunto sourcing **dep-jar `.m2`**: `resolve_maven_classpath` (`mvn dependency:build-classpath` offline+cached su pom-mtime), `MavenClasspath::augment(jdk)` — dep dietro al bootclasspath JDK (core reale vince su copie shaded), stessa API `ClassSource`/`MultiSource`/`members_of` (nessun cambio di shape). **7 test verdi**. `zip` già presente, niente nuove lib. |
+| `bennu-index` | `Relation::inferred` (edge candidati wildcard) + `RelationKind: Copy`; nuovo `RelationWriter`/`RelationReader` (edge-store config keyed by `from_id`, run-per-nodo). FORMAT_VERSION **2→3** (rebuild on open). Round-trip test inline. |
+| `bennu-intel` | `ingest_config_graph` (assegna id, scrive symbol+relation store) → `ConfigResolver`: `resolve_action_class` (C1), `resolve_action_view`, `diagnose_action` (`ActionVerdict::{Exists,Missing,Inconclusive}`), `action_class_ref` (go-to-def). `IntelProvider` invariato (aggiunte additive). |
+| `bennu-be` + `project` | `web_discovery` (walk progetto → `WebInputs`), `ConfigResolver` nello `ProjectSlot` (build off-thread all'apertura), `patch_file` XML-aware (edit config → rebuild grafo, edit Java → re-index Java). IPC: `bennu_definition`, `bennu_diagnostics` arricchito, `bennu_did_change` (re-index live, handler sync su `spawn_blocking`). |
+
+**action→classe (catena C1) + action→view — funziona end-to-end.** Sul progetto live (901 action / 566 bean / 97 tiles-def / 4594 edge parsati, 1455 edge risolvibili ingeriti):
+- **action→classe: 734/739** classi di action concrete risolte via mappa Spring. Spot-check `/do/Category/viewTree → categoryAction → com.agiletec.apsadmin.category.CategoryAction`.
+- **action→view: 214** view via result→Tiles-def→JSP. Spot-check `/do/Category/viewTree → /WEB-INF/apsadmin/jsp/category/categoryTree.jsp`.
+- Conteggi allineati al design doc (901/566/97 vs 880/155). 898 `ActionToClass` + 562 `BeanIdToImpl` + 1460 `ResultToView`. 1 include irrisolto (`contentModel.xml`, jar-resident) riportato **non-fatale**.
+
+**Diagnostica "action inesistente" — resta CONSERVATIVA.** Sul progetto reale: **742 exact-resolved / 159 wildcard-inconclusive / 3 genuinely-missing**, e **0 false-missing su wildcard**. Solo un Missing genuino produce un `warning`; candidati wildcard/OGNL (`portal*`, value-stack) → `Inconclusive`, nessun rumore. Un riferimento bogus → `Missing`.
+
+**Completamento tipi da dipendenza `.m2` — funziona.** **177 jar risolti, 0 unresolved** (questo `~/.m2` era completo; offline usa solo la cache), **1 jar open-failure** (il crate `zip` rifiuta un archivio che .NET accetta — skippato, non-fatale). Resolve a freddo ~8–22s, **cache-hit 0.0001s**. Membri reali da dep: `HttpServletRequest` → 25 metodi (`getHeader`, …), XWork `ActionSupport` → 41, commons-lang `StringUtils` → 177, Spring `ApplicationContext`, commons-io `IOUtils` → 141.
+
+**Nuova superficie IPC (per il team FE da consumare)** — convenzione `{ args: {…} }` esistente, nessun wire-name cambiato:
+- `bennu_definition { file, action }` → `Option<{ config_file, class_fqcn?, view_jsp? }>` — go-to-def di un riferimento action da JSP (frammento config + FQCN classe + JSP view).
+- `bennu_diagnostics { file, actions?: [{ qualified_name, start, end }] }` → `[Diagnostic]` — action-existence conservativa (arg `actions` opzionale, retrocompatibile: solo Missing genuino → `warning`).
+- `bennu_did_change { file, text? }` → `bool` — re-index live (file Java, XML config, o delete).
+
+**Limiti Fase 2 (bounded, non sorprese):** **view-endpoint non ancora simboli** (target Tiles-def / `<action>#result` restano nel grafo parsato, non nel id-store → la catena view si risponde off-graph; id JSP/Tiles arrivano con l'ondata JSP). **Parsing JSP a carico del FE per ora** — `bennu_diagnostics`/`bennu_definition` prendono il riferimento action (+ byte-range) come argomento; estrarre `<s:form action=…>`/`<s:url>` dal buffer JSP è Fase 3. `bennu_did_change` ritorna `true` anche se nessun progetto possiede il file (patch no-op silenzioso — innocuo). **Include da jar di dipendenza** (install non-vendored) risolti solo da resource-root on-disk (riportati in `BuildReport.unresolved_includes`); **convention-plugin Struts** (`@Action`/`@Namespace`) fuori scope (progetto 100% XML esplicito); interceptor-stack, `validation.xml`, result-param oltre la view, TLD tag (`Source::TldTag` esiste ma il parsing TLD arriva con la taglib JSP) non modellati. Deps da repo privato su `~/.m2` freddo → `unresolved`, skippate (mai fatale). `mvn` su Windows è `mvn.cmd` (il port arbor prende il launcher da config).
+
+**Cosa compili/validi in arbor:** i crate `bennu-web` (+`roxmltree 0.20`), `bennu-classpath`, `bennu-index`, `bennu-intel`, `bennu-be`. Per hard rule non è stato eseguito `cargo` nel repo arbor — la validità (compile + test + run) è provata copiando la sorgente arbor *verbatim* in due port-check harness disposable (`bennu-index-mirror` per `relations.rs`; `bennu-portcheck`+`bennu-web-mirror` per `bennu-intel::config` e `bennu-be::web_discovery`), entrambi verdi. Da validare a mano: build dei 5 crate + smoke dei 3 nuovi comandi IPC. Nota minore: `serde`/`serde_json` restano dichiarati in `bennu-web/Cargo.toml` (carryover skeleton, i record non derivano ancora `Serialize`) — tenuti per l'integrazione imminente, innocui.
+
+**Fase 3 (prossima):** **risoluzione espressioni JSP/OGNL** — parse dei buffer JSP per estrarre riferimenti action + espressioni value-stack `%{…}`, `<s:property>`, `jsp:include page="%{…}"` dinamico, composizione view runtime `wp:`/showlet — così diagnostica/definition girano senza riferimenti forniti dal FE. Poi **`@Query` HQL** + **MyBatis mapper XML** per i progetti non-Entando (il capability-bitset già flagga `jpa_hibernate`/`mybatis_mapper`), **simboli TLD tag** (`Source::TldTag`) per la navigazione `JspUsesTaglib`, **convention-plugin Struts** per i progetti annotation-routed.
+
+---
 *Testa dritta.*

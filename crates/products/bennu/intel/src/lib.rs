@@ -20,9 +20,12 @@
 //! `bennu_intel::prelude::...`.
 
 pub mod completion;
+pub mod config;
 pub mod java_index;
 pub mod jdk;
 pub mod prelude;
 pub mod provider;
+pub mod refs;
+pub mod rename;
 pub mod resolver;
 pub mod typemap;

@@ -6,7 +6,7 @@
  * `merula-store` shape at a smaller scale.
  *
  * Tool-window layout (IntelliJ New UI):
- *   • LEFT rail (top)     — Project (tree), Structure (symbols).
+ *   • LEFT rail (top)     — Project (tree), Structure (symbols), Dependencies.
  *   • LEFT rail (bottom)  — the bottom-dock toggles: Terminal, Problems.
  *   • RIGHT rail          — Maven (top), Services/Run (bottom). Mock panels.
  *   • BOTTOM dock         — Problems + Terminal, tabbed. Its toggles live in the
@@ -17,13 +17,14 @@
  */
 
 import { SvelteSet } from 'svelte/reactivity';
+import type { GenerateMode } from '$lib/components/bennu/bennu-intentions';
 
 /** Left tool windows (activity bar, top group). */
-export type LeftPanel = 'project' | 'structure';
+export type LeftPanel = 'project' | 'structure' | 'dependencies';
 /** Right tool windows (activity bar) — mock tool panels for now. */
 export type RightPanel = 'maven' | 'services';
 /** Bottom dock sections (tabbed). */
-export type BottomPanel = 'problems' | 'terminal';
+export type BottomPanel = 'problems' | 'terminal' | 'build';
 
 function createBennuUiStore() {
   // Default the Project tool open so the shell shows the tree on launch.
@@ -36,6 +37,21 @@ function createBennuUiStore() {
   let paletteOpen = $state(false);
   // Find-in-project modal (Ctrl+Shift+F).
   let findOpen = $state(false);
+
+  // Per-project configuration modal (JDK / encoding / roots / modules).
+  let projectConfigOpen = $state(false);
+  // Run-configuration modal (main class for `java -cp … <mainClass>`) — there's no
+  // main-class discovery yet, so ▶ Run without a remembered class opens this.
+  let runConfigOpen = $state(false);
+  // About Bennu modal.
+  let aboutOpen = $state(false);
+  // Generate modal (constructor / getters / setters) + its preselected mode
+  // (Alt+Insert opens it fresh; an Alt+Enter "Generate…" intention preselects one).
+  let generateOpen = $state(false);
+  let generateMode = $state<GenerateMode>('getters-setters');
+  // The intentions overlay (Alt+Enter) owns its own visibility in
+  // `bennuIntentionsStore`; the window mounts it unconditionally. No flag needed
+  // here — the openers below delegate to that store.
 
   // Project-tree expansion set (controlled Tree expansion) so the toolbar can
   // Collapse-all / Expand-all and Select-opened-file can reveal a path.
@@ -66,6 +82,11 @@ function createBennuUiStore() {
     get docsOpen()     { return docsOpen; },
     get paletteOpen()  { return paletteOpen; },
     get findOpen()     { return findOpen; },
+    get projectConfigOpen() { return projectConfigOpen; },
+    get runConfigOpen() { return runConfigOpen; },
+    get aboutOpen()    { return aboutOpen; },
+    get generateOpen() { return generateOpen; },
+    get generateMode() { return generateMode; },
     get gotoTarget()   { return gotoTarget; },
     get revealNonce()  { return revealNonce; },
     get treeExpanded() { return treeExpanded; },
@@ -91,6 +112,21 @@ function createBennuUiStore() {
     closePalette()  { paletteOpen = false; },
     openFind()      { findOpen = true; },
     closeFind()     { findOpen = false; },
+
+    openProjectConfig()  { projectConfigOpen = true; },
+    closeProjectConfig() { projectConfigOpen = false; },
+    openRunConfig()      { runConfigOpen = true; },
+    closeRunConfig()     { runConfigOpen = false; },
+    openAbout()          { aboutOpen = true; },
+    closeAbout()         { aboutOpen = false; },
+    /** Open the Generate modal, optionally preselecting a mode (an Alt+Enter
+     *  "Generate…" intention routes here with the matching mode; Alt+Insert opens
+     *  it with the last/default mode). */
+    openGenerate(mode?: GenerateMode) {
+      if (mode) generateMode = mode;
+      generateOpen = true;
+    },
+    closeGenerate()      { generateOpen = false; },
 
     /** Ask the editor to scroll to a 1-based line (a panel → editor relay). */
     requestGoto(line: number) {

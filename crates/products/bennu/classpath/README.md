@@ -44,8 +44,37 @@ stack plus a homegrown Signature decoder.
   - `"9"`+ / `"21"` → the `lib/modules` jimage, probing `java.base` plus the common
     platform modules.
 
-  **Scope**: JDK bootclasspath only. Dependency-jar sourcing from `~/.m2` is out of
-  Phase 1 — those layer in later as extra `JarSource`s behind the same trait.
+- **Dependency-jar sourcing from `~/.m2`** (`maven.rs`) —
+  `resolve_maven_classpath(project_dir, &opts)` runs
+  `mvn dependency:build-classpath` for a Maven project, reads the resolved classpath,
+  and turns each existing dep jar into a `JarSource`. `MavenClasspathCache` caches the
+  result **keyed by pom mtime** (a re-resolve within a session is free until the pom
+  changes). `MavenClasspath::augment(jdk)` chains the dep jars **behind** the JDK
+  bootclasspath into one `MultiSource` — the JDK is probed first (its core wins over a
+  shaded copy in a dep), then the dep jars. So member-access completion reaches
+  framework/library types (Spring, servlet, Hibernate, Struts…), not just the JDK +
+  project sources.
+
+  Turning a project into a dep-augmented member index:
+
+  ```rust
+  use bennu_classpath::prelude::*;
+  use std::path::Path;
+
+  let jdk = resolve_jdk_classpath("1.8")?;                 // Phase-1 bootclasspath
+  let mut cache = MavenClasspathCache::new();
+  let deps = cache.get(Path::new("/path/to/project"), &MavenResolveOpts::default())?;
+  let index = SourceMemberIndex::new(deps.augment(jdk));   // JDK + dep jars
+  let members = index.members_of("javax/servlet/http/HttpServletRequest"); // Some(_)
+  ```
+
+  **Partial failure is non-fatal.** Some deps may live on a private repo and not
+  resolve; `build-classpath` can exit non-zero yet still write the classpath it
+  *could* resolve. The output file is always read: existing jars become sources,
+  non-existent entries are recorded in `MavenClasspath::unresolved`. Only a failed run
+  that wrote *no* file at all is surfaced as an error. A project with no resolvable
+  deps degrades exactly to the JDK-only behavior. `MavenResolveOpts` runs Maven
+  offline (`-o`) by default and can pin `JAVA_HOME` so the project's JDK is used.
 
 ## Risk
 

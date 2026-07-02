@@ -17,7 +17,7 @@
    */
   import {
     ChevronDown, FolderOpen, LogOut, Settings, Keyboard, FlaskConical, FileCode2,
-    Play, Bug, MoreVertical, Palette,
+    Play, Bug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
@@ -31,23 +31,44 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
 
   let pickerOpen = $state(false);
   let themeEditorOpen = $state(false);
 
-  // Run/Debug are UI stubs for now (build/run isn't implemented) — they toast a
-  // "not implemented yet" note. Disabled entirely when no project is open.
+  // Run/Build are wired to bennu-be (build.rs); Debug isn't implemented yet (a
+  // later wave — it toasts). All disabled when no project is open.
   const hasProject = $derived(!!projectStore.project);
+  const busy = $derived(bennuRunStore.active);
   function notImplemented(what: string) {
     toastStore.show(`${what} isn't implemented yet.`, 'info');
   }
+
+  /** ▶ Run — build then launch the remembered main class; if none is remembered
+   *  for this project yet, open the run-config modal to pick one. */
+  function runProject() {
+    const root = projectStore.project?.root;
+    if (!root) return;
+    const cls = bennuRunStore.mainClassFor(root);
+    if (cls) void bennuRunStore.run(root, cls);
+    else bennuUiStore.openRunConfig();
+  }
+  /** Compile the project (`mvn`/`javac`), streaming to the Build dock. */
+  function buildProject() {
+    const root = projectStore.project?.root;
+    if (root) void bennuRunStore.build(root);
+  }
+
   const runMenu = $derived<DropdownItem[]>([
-    { kind: 'item', id: 'run',     label: 'Run…',            icon: Play, onclick: () => notImplemented('Run') },
+    { kind: 'item', id: 'run',     label: 'Run',             icon: Play,   shortcut: 'Shift+F10', disabled: busy, onclick: runProject },
+    { kind: 'item', id: 'build',   label: 'Build project',   icon: Hammer, shortcut: 'Ctrl+F9',   disabled: busy, onclick: buildProject },
+    { kind: 'item', id: 'stop',    label: 'Stop',            icon: Square, disabled: !bennuRunStore.running, onclick: () => void bennuRunStore.stop() },
+    { kind: 'separator' },
     { kind: 'item', id: 'debug',   label: 'Debug…',          icon: Bug,  onclick: () => notImplemented('Debug') },
     { kind: 'separator' },
-    { kind: 'item', id: 'editcfg', label: 'Edit configurations…', onclick: () => notImplemented('Run configurations') },
+    { kind: 'item', id: 'editcfg', label: 'Edit configurations…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openRunConfig() },
   ]);
 
   // Ctrl+O (window keybinding) → open the folder picker hosted here.
@@ -73,9 +94,11 @@
   const hamburgerMenu = $derived<DropdownItem[]>([
     { kind: 'separator', label: 'Project' },
     { kind: 'item', id: 'open',  label: 'Open project…', icon: FolderOpen, shortcut: 'Ctrl+O', onclick: () => { pickerOpen = true; } },
+    { kind: 'item', id: 'projectcfg', label: 'Project Configuration…', icon: SlidersHorizontal, disabled: !hasProject, onclick: () => bennuUiStore.openProjectConfig() },
     // MOCK — remove the "Load demo project" entry when bennu-be serves real data.
     { kind: 'item', id: 'demo',  label: 'Load demo project', icon: FlaskConical, onclick: () => projectStore.loadDemo() },
     { kind: 'separator' },
+    { kind: 'item', id: 'about', label: 'About Bennu', icon: Info, onclick: () => bennuUiStore.openAbout() },
     { kind: 'item', id: 'close', label: 'Close Window', icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },
   ]);
 
@@ -156,10 +179,19 @@
   {#snippet trailing()}
     <div class="btb-run" role="group" aria-label="Run controls">
       <button
+        class="btb-run-btn"
+        onclick={buildProject}
+        disabled={!hasProject || busy}
+        use:tooltip={{ content: 'Build project', shortcut: 'Ctrl+F9' }}
+        aria-label="Build project"
+      >
+        <Hammer size={14} />
+      </button>
+      <button
         class="btb-run-btn btb-run-primary"
-        onclick={() => notImplemented('Run')}
-        disabled={!hasProject}
-        use:tooltip={'Run'}
+        onclick={runProject}
+        disabled={!hasProject || busy}
+        use:tooltip={{ content: 'Run', shortcut: 'Shift+F10' }}
         aria-label="Run"
       >
         <Play size={14} />

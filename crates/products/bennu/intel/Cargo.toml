@@ -20,5 +20,14 @@ bennu-java = { path = "../java" }
 # The classpath member index (JDK bytecode): the resolver walks JDK members live off
 # the mmap'd rt.jar / jimage, and converts them into the java seam shape.
 bennu-classpath = { path = "../classpath" }
+# The web-config graph (Struts/Spring/Tiles): the native provider ingests its
+# string-keyed records into the index (as `Source::StrutsAction`/`SpringBean` symbols +
+# edges) and resolves the C1 chain (action → bean-id → FQCN) + the view chain off it.
+bennu-web = { path = "../web" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+# Java grammar for the reference walk + the rename CST parse (find-usages / rename key off
+# the CST directly). Native tree-sitter, pinned to 0.25 like `bennu-java` (one shared
+# `links = "tree-sitter"` runtime across the workspace).
+tree-sitter      = "0.25"
+tree-sitter-java = "0.23"

@@ -31,9 +31,17 @@ bennu-proto = { path = "../proto" }
 # The leaf project model: capability detection, pom parse, encoding/JDK detection, the
 # file tree, open_project / read_file orchestration.
 bennu-project = { path = "../project" }
-# The code-intel seam: the completion / diagnostics stubs route through the native
-# provider so the seam is exercised end-to-end from Phase 0.
+# The code-intel seam: completion + the config-graph resolver (C1 chain + view chain +
+# conservative action diagnostic) the native provider ingests and serves.
 bennu-intel = { path = "../intel" }
+# The web-config graph: the be layer discovers the project's struts/spring/tiles files
+# (`WebInputs`) and drives `build_web_graph`; `bennu-intel` ingests the result.
+bennu-web = { path = "../web" }
+# The classpath resolver: `find_jdk_home` (JAVA_HOME for the build/run shell-out) + the
+# Phase-2 `.m2` Maven classpath resolver (dep jars for the run classpath).
+bennu-classpath = { path = "../classpath" }
+# `NoWindowExt` — suppress the console window on the short-lived mvn/javac/java children.
+arbor-process-ext = { path = "../../../platform/process-ext" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 # Drives the serve loop / async domain handlers as the index / analysis waves land.

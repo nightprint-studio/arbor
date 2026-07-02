@@ -34,7 +34,9 @@ pub const MAGIC: &[u8; 8] = b"BNNUIDX0";
 ///
 /// v2: added `Symbol::members_json` (the analyzer-owned resolved member surface for a
 /// type symbol) so a project type resolves from the index without a source re-parse.
-pub const FORMAT_VERSION: u64 = 2;
+/// v3: added the relation store (config-graph edges) + `Relation::inferred` (candidate
+/// edges from wildcards / Tiles indirection).
+pub const FORMAT_VERSION: u64 = 3;
 /// The header is exactly 16 bytes (8 magic + 8 version), so the first record starts
 /// 16-byte-aligned.
 pub const HEADER_LEN: usize = 16;
@@ -188,6 +190,13 @@ impl BlobReader {
         let o = offset as usize;
         let len = u32::from_le_bytes(self.mmap[o..o + 4].try_into().expect("4 bytes")) as usize;
         &self.mmap[o + 4..o + 4 + len]
+    }
+
+    /// The whole mmap. Used by the relation store's run decoder, whose frame is
+    /// `[u32 count][ (u32 len)(bytes) ]*` (a run of edges) rather than a single
+    /// `[u32 len][bytes]` symbol record.
+    pub fn raw(&self) -> &[u8] {
+        &self.mmap
     }
 }
 

@@ -19,7 +19,7 @@
   import { openSearchPanel } from '@codemirror/search';
 
   import type { LanguageDescriptor, EditorDiagnostic } from './types';
-  import { createCodeEditorExtensions } from './extensions';
+  import { createCodeEditorExtensions, refTextAt } from './extensions';
   import { makeByteToU16 } from './highlight';
 
   let {
@@ -158,6 +158,59 @@
     if (!view) return;
     const src = view.state.doc.toString();
     view.dispatch(cmSetDiagnostics(view.state, toCmDiagnostics(errors, src)));
+  }
+
+  /** The caret's viewport coordinates (bottom-left of the primary selection head),
+   *  for anchoring a caret-attached popup (intentions / usages). Null when the
+   *  editor isn't mounted or the position is off-screen. Mirrors merula's
+   *  `anchorAt`. */
+  export function coordsAtCaret(): { x: number; y: number } | null {
+    if (!view) return null;
+    const c = view.coordsAtPos(view.state.selection.main.head);
+    return c ? { x: c.left, y: c.bottom } : null;
+  }
+
+  /** The identifier under (or just before) the caret, or null. Boundary-tolerant:
+   *  the caret often sits at a word's right edge, so we scan both directions from
+   *  the head. Used to label context actions (e.g. "Add import for <word>"). */
+  export function wordAtCaret(): string | null {
+    if (!view) return null;
+    const doc = view.state.doc;
+    const head = view.state.selection.main.head;
+    const line = doc.lineAt(head);
+    const text = line.text;
+    const rel = head - line.from;
+    const isWord = (ch: string) => /[A-Za-z0-9_$]/.test(ch);
+    // Expand left/right from the caret (checking the char before too, so `foo|`
+    // resolves to `foo`).
+    let start = rel;
+    let end = rel;
+    while (start > 0 && isWord(text[start - 1])) start--;
+    while (end < text.length && isWord(text[end])) end++;
+    const word = text.slice(start, end);
+    return word.length ? word : null;
+  }
+
+  /** The reference-like token at the caret — a string-literal's contents (a JSP
+   *  `action="…"` value) or a path/identifier run (`/do/Category/viewTree`), or null.
+   *  Powers a host go-to-definition triggered by keyboard (vs the Ctrl+Click seam,
+   *  which resolves the same token at the click position via `onGoto`). */
+  export function refAtCaret(): string | null {
+    if (!view) return null;
+    return refTextAt(view.state.doc, view.state.selection.main.head);
+  }
+
+  /** Insert `text` at the caret (replacing any selection), leaving the caret right
+   *  after the inserted text. Used by generator flows (Alt+Insert → Generate).
+   *  Mirrors merula's `insertAtCursor`. */
+  export function insertAtCursor(text: string) {
+    if (!view || !text) return;
+    const sel = view.state.selection.main;
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: text },
+      selection: { anchor: sel.from + text.length },
+    });
+    view.focus();
   }
 </script>
 

@@ -155,3 +155,102 @@ pub struct Diagnostic {
     /// End byte offset (exclusive) in the file.
     pub end: usize,
 }
+
+// ── rename (docs §5 #10-12) ──────────────────────────────────────────────────
+
+/// One concrete rename edit: replace `[start, end)` in `file` with `new_text`. Byte
+/// offsets (like [`Diagnostic`]) — the FE maps them against the buffer it holds, applies
+/// the edit through CodeMirror (so undo works), and can guard on `old` still matching.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameEdit {
+    /// Absolute path (forward slashes) of the file to edit.
+    pub file: String,
+    /// Start byte offset.
+    pub start: usize,
+    /// End byte offset (exclusive).
+    pub end: usize,
+    /// The replacement text.
+    pub new_text: String,
+    /// The exact text currently at `[start, end)` — a stale-buffer guard for the FE.
+    pub old: String,
+    /// Why this edit exists: `"declaration"` | `"reference"` | `"import"` |
+    /// `"spring-bean"` | `"local"`. Drives the preview grouping.
+    pub reason: String,
+    /// True when the edit is inferred/heuristic (a method use-site where an overload could
+    /// collapse). The FE surfaces these for review, never auto-applies as if exact.
+    pub inferred: bool,
+}
+
+/// The edits for one file (the preview list the FE renders per file, in offset order).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameFileEdits {
+    /// Absolute path (forward slashes) of the file.
+    pub file: String,
+    /// The edits in this file, sorted by start offset.
+    pub edits: Vec<RenameEdit>,
+}
+
+/// Result of `bennu_rename_plan` — the PREVIEW the FE renders before the user confirms.
+/// `bennu_rename_apply` returns the same edits flattened (the FE applies them). `None` on
+/// the wire (a bare object absent) when the caret isn't renameable or the engine is still
+/// building.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenamePreview {
+    /// The old identifier under the caret.
+    pub old_name: String,
+    /// The requested new name.
+    pub new_name: String,
+    /// A short human label of the target (`"method com.x.Foo.bar()"`, `"local `x`"`, …).
+    pub target_label: String,
+    /// The edits, grouped by file.
+    pub files: Vec<RenameFileEdits>,
+    /// Total number of edit sites (across all files).
+    pub total_edits: usize,
+    /// Whether any edit is `inferred` (the FE nudges review before applying).
+    pub has_inferred: bool,
+}
+
+// ── build / run (docs §4 "il fondo") ─────────────────────────────────────────
+
+/// A structured build diagnostic parsed out of `javac` / `mvn` compiler output by
+/// `bennu_build`. Unlike the editor [`Diagnostic`] (byte offsets over a buffer the FE
+/// already holds), a build diagnostic comes from a compiler that reports `file:line:col`
+/// with no buffer context — so it carries the file path + 1-based line/col instead. The
+/// FE navigates to `file` and highlights `line:col`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildDiagnostic {
+    /// Path to the offending file (as the compiler emitted it), when the line had one.
+    pub file: Option<String>,
+    /// 1-based line number, when present.
+    pub line: Option<u32>,
+    /// 1-based column, when present.
+    pub col: Option<u32>,
+    /// `"error"` | `"warning"` | `"note"`.
+    pub severity: String,
+    /// The human-readable message.
+    pub message: String,
+}
+
+/// Result of `bennu_build` — the parsed diagnostics plus enough context for the FE to
+/// render the Build panel (which tool ran, whether it succeeded). The raw log is
+/// streamed as `arbor://bennu/build-output` events, not returned inline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildResult {
+    /// The tool that ran: `"mvn"` or `"javac"` (the fallback).
+    pub tool: String,
+    /// Whether the underlying process exited 0.
+    pub ok: bool,
+    /// Structured diagnostics parsed from the compiler output.
+    pub diagnostics: Vec<BuildDiagnostic>,
+}
+
+/// Result of `bennu_run` — the id of the launched run, used to correlate the
+/// `arbor://bennu/run-output` / `arbor://bennu/run-exit` event stream and to
+/// `bennu_cancel_run`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunHandle {
+    /// The run id (unique per launch this session).
+    pub run_id: String,
+    /// The resolved main class the run launched.
+    pub main_class: String,
+}

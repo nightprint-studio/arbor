@@ -21,8 +21,8 @@
   import Tree from '$lib/components/shared/ui/Tree.svelte';
   import type { RowSnippetCtx } from '$lib/components/shared/ui/Tree.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
-  import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import BennuFilterBar from './BennuFilterBar.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -137,11 +137,13 @@
       {/snippet}
     </Dropdown>
   {/snippet}
+  {#if projectStore.project}
+    {#snippet toolbar()}
+      <BennuFilterBar bind:query={filter} placeholder="Filter files…" />
+    {/snippet}
+  {/if}
 
   {#if projectStore.project}
-    <div class="bs-filter">
-      <SearchBar bind:query={filter} placeholder="Filter files…" showRegex={false} showCounter={false} />
-    </div>
     <div class="bs-tree" bind:this={treeBodyEl}>
       <Tree
         nodes={rootChildren}
@@ -187,8 +189,6 @@
 {/if}
 
 <style>
-  .bs-filter { padding: 6px 8px 4px; }
-
   .bs-tree {
     flex: 1; min-height: 0;
     overflow-y: auto;

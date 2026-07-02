@@ -20,13 +20,30 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { diagnostics as ipcDiagnostics } from '$lib/ipc/bennu';
+  import { definition as ipcDefinition } from '$lib/ipc/bennu/nav';
   import type { EditorDiagnostic } from '$lib/components/shared/ui/code-editor';
+  import { bennuIntentionsStore } from '$lib/stores/bennu/intentions.svelte';
+  import { collectIntentions, type GenerateMode } from './bennu-intentions';
+  import { javaOutline } from './java-outline';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
+
+  let {
+    /** Open the Generate modal in `mode` (routed to the window's BennuGenerateModal).
+     *  Passed down so the Alt+Enter "Generate…" intentions can trigger it. */
+    onGenerate,
+  }: {
+    onGenerate?: (mode: GenerateMode) => void;
+  } = $props();
 
   type EditorController = {
     focus: () => void;
     getValue: () => string;
     openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
+    coordsAtCaret: () => { x: number; y: number } | null;
+    wordAtCaret: () => string | null;
+    refAtCaret: () => string | null;
+    insertAtCursor: (text: string) => void;
   };
   let editorComp = $state<EditorController | null>(null);
 
@@ -94,6 +111,100 @@
   export function openSearch() { editorComp?.openSearch(); }
   export function focusEditor() { editorComp?.focus(); }
 
+  // ── Intentions (Alt+Enter) ────────────────────────────────────────────────────
+  /** Collect the context actions at the caret and open the intentions popup
+   *  anchored there. No-op (with a toast) when no file is open or the caret has no
+   *  anchor. The two "Generate…" items route through `onGenerate`. */
+  export function openIntentions() {
+    if (!activePath || !editorComp) return;
+    const anchor = editorComp.coordsAtCaret();
+    const items = collectIntentions(
+      {
+        src: projectStore.sourceOf(activePath),
+        wordUnderCaret: editorComp.wordAtCaret(),
+        outline: javaOutline(projectStore.sourceOf(activePath)),
+      },
+      { onGenerate: (mode) => onGenerate?.(mode) },
+    );
+    if (!items.length) {
+      toastStore.show('No context actions here', 'info');
+      return;
+    }
+    bennuIntentionsStore.openWith(items, anchor);
+  }
+
+  /** Insert text at the caret (Generate modal → editor). Mirrors merula's insert. */
+  export function insertAtCursor(text: string) { editorComp?.insertAtCursor(text); }
+
+  // ── Go to definition (Ctrl+B / Ctrl+Click) ────────────────────────────────────
+  //
+  // Resolves the JSP form/link **action reference** under the caret/click to its
+  // definition via `bennu_definition` (the config fragment the `<action>` is
+  // declared in + the class FQCN + the view JSP). We jump to the openable file
+  // target — the config fragment, falling back to the view JSP — and surface the
+  // class FQCN (a name, not a path) as info when that's all we have. Graceful:
+  // an unresolvable ref just toasts, never throws.
+
+  /** Guard against overlapping resolves (a fast double Ctrl+B): only the latest
+   *  wins, so a stale result never yanks the editor to the wrong file. */
+  let gotoDefSeq = 0;
+
+  /** Open a resolved target file and scroll to its top (the definition site). The
+   *  goto relay drives the scroll after the cross-file open settles. */
+  function openDefinitionFile(path: string) {
+    void projectStore.openFile(path).then(() => bennuUiStore.requestGoto(1));
+  }
+
+  /** Resolve + navigate to the definition of `action` (a JSP action reference).
+   *  Prefers the config fragment, then the view JSP; if only a class FQCN is known
+   *  (no openable path), reports it. No target → an info toast. */
+  async function resolveDefinition(action: string) {
+    const path = activePath;
+    if (!path) return;
+    const seq = ++gotoDefSeq;
+    let res;
+    try {
+      res = await ipcDefinition(path, action);
+    } catch {
+      if (seq === gotoDefSeq) toastStore.show('Go to definition unavailable', 'info');
+      return;
+    }
+    if (seq !== gotoDefSeq) return; // superseded by a newer request
+    if (!res) {
+      toastStore.show(`No definition for “${action}”`, 'info');
+      return;
+    }
+    // Prefer the config fragment (where the <action> is declared); fall back to the
+    // resolved view JSP. Both are file paths we can open.
+    const target = res.config_file || res.view_jsp;
+    if (target) {
+      openDefinitionFile(target);
+      return;
+    }
+    // Only a class FQCN resolved — a name, not a path we can open yet.
+    if (res.class_fqcn) {
+      toastStore.show(`Maps to ${res.class_fqcn}`, 'info');
+      return;
+    }
+    toastStore.show(`No definition for “${action}”`, 'info');
+  }
+
+  /** Go to definition of the action reference under the caret (Ctrl+B / palette).
+   *  No-op (with a toast) when nothing reference-like is under the caret. */
+  export function goToDefinition() {
+    if (!activePath || !editorComp) return;
+    const ref = editorComp.refAtCaret();
+    if (!ref) { toastStore.show('Nothing to go to here', 'info'); return; }
+    void resolveDefinition(ref);
+  }
+
+  /** Ctrl/Cmd+Click seam from the editor: the reference token at the click position
+   *  (an identifier, a string-literal's contents, or a path) → go to definition. */
+  function onEditorGoto(word: string) {
+    if (!activePath) return;
+    void resolveDefinition(word);
+  }
+
   function commitGoto() {
     const m = gotoValue.match(/(\d+)(?:\s*[:,]\s*(\d+))?/);
     if (m) {
@@ -143,6 +254,7 @@
         diagnostics={diags}
         oninput={onInput}
         oncaret={onCaret}
+        onGoto={onEditorGoto}
       />
     {/key}
   {:else}

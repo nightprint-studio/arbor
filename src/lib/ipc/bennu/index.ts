@@ -18,6 +18,7 @@
 import { bennu } from '../rpc';
 import type {
   ProjectInfo, TreeNode, ReadFileResult, CapabilitySet, CompletionItem, Diagnostic,
+  BuildResult, RunHandle,
 } from '$lib/types/bennu';
 
 /** Open a Java project folder: resolve the build model (modules / JDK) + capabilities.
@@ -56,4 +57,26 @@ export function completion(file: string, offset: number): Promise<CompletionItem
  *  — `DiagnosticsArgs { file }`. */
 export function diagnostics(file: string): Promise<Diagnostic[]> {
   return bennu('bennu_diagnostics', { args: { file } });
+}
+
+/** Compile the project: `mvn -q -o compile` (offline, project JDK) with a `javac`
+ *  fallback. The raw log streams as `arbor://bennu/build-output`; the resolved promise
+ *  carries the parsed diagnostics. A clean build re-indexes `target/classes`. Wire:
+ *  `bennu_build` — `BuildArgs { root }`. */
+export function build(root: string): Promise<BuildResult> {
+  return bennu('bennu_build', { args: { root } });
+}
+
+/** Launch `java -cp <target/classes:deps> <mainClass> <args…>`, streaming stdout/stderr
+ *  as `arbor://bennu/run-output` and ending with `arbor://bennu/run-exit`. Resolves
+ *  immediately with the run handle. `mainClass` is required (main-class discovery is a
+ *  later wave). Wire: `bennu_run` — `RunArgs { root, main_class, args? }`. */
+export function run(root: string, mainClass: string, args: string[] = []): Promise<RunHandle> {
+  return bennu('bennu_run', { args: { root, main_class: mainClass, args } });
+}
+
+/** Stop a running `bennu_run` child by id. Resolves `true` if a live run was stopped.
+ *  Wire: `bennu_cancel_run` — `CancelRunArgs { run_id }`. */
+export function cancelRun(runId: string): Promise<boolean> {
+  return bennu('bennu_cancel_run', { args: { run_id: runId } });
 }

@@ -12,6 +12,7 @@
   import SidebarSection from '$lib/components/shared/ui/SidebarSection.svelte';
   import SidebarItem from '$lib/components/shared/ui/SidebarItem.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import BennuSketchBanner from './BennuSketchBanner.svelte';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
 
@@ -49,7 +50,7 @@
   {#if !projectStore.project}
     <EmptyState message="Open a project to see its Maven goals." />
   {:else}
-    <div class="mv-mock">Sketch — goals aren't wired to a build yet.</div>
+    <BennuSketchBanner text="Sketch — goals aren't wired to a build yet." />
     <div class="mv">
       <SidebarSection
         label="Lifecycle"
@@ -86,12 +87,6 @@
 </PanelShell>
 
 <style>
-  .mv-mock {
-    padding: 6px 12px;
-    font-size: 10.5px; font-style: italic;
-    color: var(--text-disabled);
-    border-bottom: 1px solid var(--border-subtle);
-  }
   .mv { padding: 4px 0; }
   .mv-goal-ic { color: var(--success); display: flex; }
   .mv-plugin-ic { color: var(--text-muted); display: flex; }

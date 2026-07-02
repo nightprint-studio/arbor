@@ -14,9 +14,9 @@
 //! file (`JAVA_VERSION`); the first candidate whose major version matches the
 //! requested level wins.
 //!
-//! Scope: **JDK bootclasspath only.** Dependency-jar sourcing from `~/.m2` is out of
-//! Phase 1 (docs); those will layer in later as additional [`JarSource`]s behind the
-//! same trait — no change to this module's shape.
+//! Scope: **JDK bootclasspath only.** Dependency-jar sourcing from `~/.m2` lives in
+//! [`crate::maven`], which layers those dep jars in as additional [`JarSource`]s
+//! behind the same [`MultiSource`] — no change to this module's shape.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,8 +24,9 @@ use std::path::{Path, PathBuf};
 use crate::source::{ClassSource, JarSource, JimageSource};
 
 /// A [`ClassSource`] that tries several sources in order (first hit wins). Used for
-/// the JDK-8 bootclasspath (rt.jar + resources.jar + ext jars); reusable for a
-/// project classpath (project classes + dependency jars) in a later phase.
+/// the JDK-8 bootclasspath (rt.jar + resources.jar + ext jars) and, behind the same
+/// trait, for a dep-augmented project classpath — the JDK probed first, then the
+/// `~/.m2` dependency jars ([`crate::maven::MavenClasspath::augment`]).
 pub struct MultiSource {
     sources: Vec<Box<dyn ClassSource>>,
 }
@@ -110,6 +111,15 @@ fn candidate_jdks() -> Vec<PathBuf> {
 /// Find an installed JDK whose language level matches `major`.
 fn find_jdk_for(major: u32) -> Option<PathBuf> {
     candidate_jdks().into_iter().find(|home| jdk_major(home) == Some(major))
+}
+
+/// The install home (the dir to export as `JAVA_HOME`) of an installed JDK matching the
+/// language-level `version` string (`"1.8"` / `"8"` / `"17"`). `None` when the version
+/// is unparseable or no matching JDK is installed. Used by the build/run shell-out
+/// (`bennu-be`) to point `mvn` / `javac` / `java` at the project's JDK.
+pub fn find_jdk_home(version: &str) -> Option<PathBuf> {
+    let major = requested_major(version)?;
+    find_jdk_for(major)
 }
 
 /// JDK 8: rt.jar + resources.jar + every ext jar, chained. `jre/lib/*` on a JDK (the

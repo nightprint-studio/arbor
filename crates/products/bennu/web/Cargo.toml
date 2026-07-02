@@ -5,11 +5,14 @@ edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
 authors.workspace      = true
-description  = "Bennu web-config graph (skeleton) — Struts2/XWork (struts.xml + per-classpath include graph, wildcard expansion, validation.xml), Tiles, and Spring bean-XML (id→impl). Entando-aware (fragment merge). Phase-0 skeleton: role + prelude only, no logic yet."
+description  = "Bennu web-config graph — Struts2/XWork (struts.xml + per-classpath include graph, wildcard expansion), Apache Tiles (result→def→JSP), and Spring bean-XML (id→impl). Entando-aware (fragment merge). Emits string-keyed records + relations onto the bennu-index seam."
 
 [dependencies]
-# The index this graph feeds (config-as-symbol / edges — docs §3). Named now to fix
-# the dependency direction (web → index); used when the graph builder lands.
+# The index this graph feeds (config-as-symbol / edges — docs §3). The emitted records
+# map onto its Source::{StrutsAction,SpringBean} / RelationKind::{ActionToClass,…} seam.
 bennu-index = { path = "../index" }
+# Pure-Rust read-only XML DOM for the config parse (approved for this phase). Only this
+# crate uses it → pinned inline (workspace-deps holds only 2+-consumer crates for now).
+roxmltree  = "0.20"
 serde      = { workspace = true }
 serde_json = { workspace = true }

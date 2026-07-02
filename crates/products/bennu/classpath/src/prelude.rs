@@ -14,8 +14,15 @@ pub use crate::members::{
     Visibility,
 };
 
-// JDK bootclasspath resolution by language level, and the chained multi-source.
-pub use crate::jdk::{resolve_jdk_classpath, MultiSource};
+// JDK bootclasspath resolution by language level, the chained multi-source, and the
+// JDK-home locator (JAVA_HOME for the build/run shell-out).
+pub use crate::jdk::{find_jdk_home, resolve_jdk_classpath, MultiSource};
+
+// Dependency-jar sourcing from ~/.m2 via Maven's build-classpath (cached by pom
+// mtime), layered behind the JDK through the same MultiSource.
+pub use crate::maven::{
+    resolve_maven_classpath, MavenClasspath, MavenClasspathCache, MavenResolveOpts,
+};
 
 // The container abstraction + its three impls.
 pub use crate::source::{ClassSource, DirSource, JarSource, JimageSource};

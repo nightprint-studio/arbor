@@ -29,5 +29,6 @@
 pub mod builder;
 pub mod prelude;
 pub mod query;
+pub mod relations;
 pub mod schema;
 pub mod store;

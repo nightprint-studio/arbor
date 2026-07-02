@@ -23,6 +23,13 @@
 //!   [`jdk::resolve_jdk_classpath`] entry point turns a Java language level into a
 //!   ready `ClassSource` over the matching installed JDK's bootclasspath.
 //!
+//! Dependency-jar bytecode from `~/.m2` layers in behind the **same** `ClassSource` /
+//! `MultiSource` / member-index API (docs §10): [`maven::resolve_maven_classpath`]
+//! runs `mvn dependency:build-classpath` (cached by pom mtime), opens each resolved
+//! dep jar as a [`JarSource`], and [`maven::MavenClasspath::augment`] chains them
+//! behind the JDK — so completion reaches framework/library types (Spring, servlet,
+//! Hibernate…), and a project with no resolvable deps degrades to JDK-only.
+//!
 //! ## Public API: use the [`prelude`]
 //!
 //! Workspace convention: call sites reach this crate's surface through
@@ -30,6 +37,7 @@
 //! navigation, but the prelude is the canonical call-site path.
 
 pub mod jdk;
+pub mod maven;
 pub mod members;
 pub mod meta;
 pub mod prelude;

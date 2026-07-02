@@ -41,9 +41,19 @@ mod capabilities;
 // Code-intel: `bennu_completion` / `bennu_diagnostics` — completion serves from the
 // per-project index the `index_service` builds; diagnostics stay a stub for now.
 mod intel;
+// Refactor rename (docs §5 #10-12): `bennu_rename_plan` (preview) / `bennu_rename_apply`
+// (edits) — best-effort, config-aware, off the per-project rename engine.
+mod rename;
 // The per-project index lifecycle: build the symbol index off-thread on open, cache
 // the native provider, serve completion from it, and patch a single file on edit.
 mod index_service;
+// Config-graph input discovery: walk the project tree to find struts/spring/tiles files
+// (`WebInputs`) for the config-graph build.
+mod web_discovery;
+// Build/run (docs §4 "il fondo"): `bennu_build` (mvn -q -o compile / javac fallback +
+// error parser → structured diagnostics) / `bennu_run` (java -cp … streaming output) /
+// `bennu_cancel_run`. Makes the Run/Debug buttons real + re-indexes target/classes.
+mod build;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /

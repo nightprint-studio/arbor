@@ -1,0 +1,197 @@
+/**
+ * Bennu run/build store — drives the titlebar Run/Build controls and the bottom
+ * Build tool window.
+ *
+ * The backend (`bennu-be`, `build.rs`) does the real work:
+ *   • `bennu_build`  → `mvn -q -o compile` (offline, project JDK) with a `javac`
+ *     fallback; the raw log streams as `arbor://bennu/build-output`, the resolved
+ *     promise carries the parsed {@link BuildResult} (tool · ok · diagnostics). A
+ *     clean build re-indexes `target/classes` on the BE.
+ *   • `bennu_run`    → `java -cp target/classes:deps <mainClass>`; stdout/stderr
+ *     stream as `arbor://bennu/run-output`, ending with `arbor://bennu/run-exit`.
+ *   • `bennu_cancel_run` → stop a live run by id.
+ *
+ * This store owns the FE-side lifecycle: the streamed log buffer, the parsed
+ * diagnostics, the building/running flags, the last main class per project (there's
+ * no main-class discovery yet — the run-config modal supplies it), and the Tauri
+ * event subscription (attached once from the window's onMount). Rune store —
+ * private `$state`, returned getters + methods (CLAUDE.md).
+ */
+
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { SvelteMap } from 'svelte/reactivity';
+import { build as ipcBuild, run as ipcRun, cancelRun as ipcCancelRun } from '$lib/ipc/bennu';
+import type { BuildResult, BuildDiagnostic } from '$lib/types/bennu';
+import { bennuUiStore } from './ui.svelte';
+
+/** One streamed log line + which channel it came from (drives colouring). */
+export interface RunLogLine {
+  text: string;
+  /** `out` = stdout / mvn log · `err` = stderr · `meta` = our own status lines. */
+  stream: 'out' | 'err' | 'meta';
+}
+
+// Cap the retained log so a chatty build/run can't grow the buffer unbounded.
+const MAX_LINES = 3000;
+
+function createBennuRunStore() {
+  let building = $state(false);
+  let running = $state(false);
+  // The tool the last build ran with (`mvn` | `javac`) + whether it succeeded.
+  let tool = $state('');
+  let ok = $state<boolean | null>(null);
+  let diagnostics = $state<BuildDiagnostic[]>([]);
+  let lines = $state<RunLogLine[]>([]);
+
+  // The live run's correlation id (null when nothing is running). Not reactive —
+  // only the event handlers + stop() read it.
+  let runId: string | null = null;
+  // Last main class used per project root (no discovery yet — the run-config modal
+  // sets it, ▶ Run reuses it). SvelteMap so `mainClassFor` stays reactive.
+  const mainClasses = new SvelteMap<string, string>();
+
+  let attached = false;
+  let unlisteners: UnlistenFn[] = [];
+
+  function push(text: string, stream: RunLogLine['stream'] = 'out') {
+    const next = lines.length >= MAX_LINES ? lines.slice(lines.length - MAX_LINES + 1) : lines.slice();
+    next.push({ text, stream });
+    lines = next;
+  }
+
+  /** Attach the build/run event listeners. Called once from BennuWindow.onMount;
+   *  returns a detach fn for cleanup. Idempotent. */
+  async function attach(): Promise<UnlistenFn> {
+    if (attached) return detach;
+    attached = true;
+    const add = (f: UnlistenFn) => unlisteners.push(f);
+    add(
+      await listen<{ text: string }>('arbor://bennu/build-output', (e) => push(e.payload.text, 'out')),
+    );
+    add(
+      await listen<{ run_id: string; stream: string; text: string }>(
+        'arbor://bennu/run-output',
+        (e) => {
+          if (runId && e.payload.run_id !== runId) return;
+          push(e.payload.text, e.payload.stream === 'stderr' ? 'err' : 'out');
+        },
+      ),
+    );
+    add(
+      await listen<{ run_id: string; code: number | null }>('arbor://bennu/run-exit', (e) => {
+        if (runId && e.payload.run_id !== runId) return;
+        running = false;
+        runId = null;
+        const code = e.payload.code;
+        push(`Process finished with exit code ${code ?? '?'}`, code === 0 ? 'meta' : 'err');
+      }),
+    );
+    return detach;
+  }
+  function detach() {
+    for (const f of unlisteners) f();
+    unlisteners = [];
+    attached = false;
+  }
+
+  /** Compile the project. Opens the Build dock, streams the log, resolves with the
+   *  parsed result (or null on a hard failure). No-op while already building. */
+  async function build(root: string): Promise<BuildResult | null> {
+    if (building) return null;
+    building = true;
+    ok = null;
+    tool = '';
+    diagnostics = [];
+    lines = [];
+    bennuUiStore.showBottom('build');
+    push(`Compiling ${root}…`, 'meta');
+    try {
+      const res = await ipcBuild(root);
+      tool = res.tool;
+      ok = res.ok;
+      diagnostics = res.diagnostics;
+      push(
+        res.ok
+          ? `Build succeeded (${res.tool}).`
+          : `Build failed (${res.tool}) — ${res.diagnostics.length} problem(s).`,
+        res.ok ? 'meta' : 'err',
+      );
+      return res;
+    } catch (e) {
+      ok = false;
+      push(`Build error: ${e instanceof Error ? e.message : String(e)}`, 'err');
+      return null;
+    } finally {
+      building = false;
+    }
+  }
+
+  /** Build then, if the compile is clean, launch `mainClass`. Remembers the class
+   *  for this root so ▶ Run can reuse it. No-op while busy. */
+  async function run(root: string, mainClass: string): Promise<void> {
+    if (building || running) return;
+    const cls = mainClass.trim();
+    if (!cls) return;
+    mainClasses.set(root, cls);
+    const res = await build(root);
+    if (!res || !res.ok) {
+      push('Run aborted — fix the build first.', 'err');
+      return;
+    }
+    running = true;
+    push(`Running ${cls}…`, 'meta');
+    try {
+      const handle = await ipcRun(root, cls);
+      runId = handle.run_id;
+    } catch (e) {
+      running = false;
+      runId = null;
+      push(`Run error: ${e instanceof Error ? e.message : String(e)}`, 'err');
+    }
+  }
+
+  /** Stop the live run (if any). */
+  async function stop(): Promise<void> {
+    const id = runId;
+    if (id) {
+      try {
+        await ipcCancelRun(id);
+      } catch {
+        /* best-effort — the exit event still flips `running` off */
+      }
+    }
+    running = false;
+    runId = null;
+    push('Stopped.', 'meta');
+  }
+
+  return {
+    get building() { return building; },
+    get running() { return running; },
+    /** Busy = a build or run is in flight (drives disabling the ▶ button). */
+    get active() { return building || running; },
+    get tool() { return tool; },
+    get ok() { return ok; },
+    get diagnostics() { return diagnostics; },
+    get lines() { return lines; },
+
+    /** The remembered main class for `root`, or null. */
+    mainClassFor(root: string): string | null {
+      return mainClasses.get(root) ?? null;
+    },
+
+    attach,
+    build,
+    run,
+    stop,
+    /** Clear the log + last result (the Build panel's "clear" action). */
+    clear() {
+      lines = [];
+      diagnostics = [];
+      ok = null;
+      tool = '';
+    },
+  };
+}
+
+export const bennuRunStore = createBennuRunStore();

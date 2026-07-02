@@ -18,3 +18,6 @@ pub use crate::query::{serialize_symbol, SymbolIndex};
 // Builder: ingest records per source file, persist, and incrementally patch one file;
 // plus the persisted read view the completion query serves from.
 pub use crate::builder::{IndexBuilder, IndexRecord, PersistedIndex};
+
+// Relations: the config-graph / type-hierarchy edge store (write side + read side).
+pub use crate::relations::{serialize_relation, RelationReader, RelationWriter};

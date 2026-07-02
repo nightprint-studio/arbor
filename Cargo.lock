@@ -841,11 +841,14 @@ dependencies = [
  "arbor-be",
  "arbor-core",
  "arbor-ipc",
+ "arbor-process-ext",
  "arbor-rpc",
+ "bennu-classpath",
  "bennu-core",
  "bennu-intel",
  "bennu-project",
  "bennu-proto",
+ "bennu-web",
  "serde",
  "serde_json",
  "tokio",
@@ -890,8 +893,11 @@ dependencies = [
  "bennu-index",
  "bennu-java",
  "bennu-proto",
+ "bennu-web",
  "serde",
  "serde_json",
+ "tree-sitter",
+ "tree-sitter-java",
 ]
 
 [[package]]
@@ -935,6 +941,7 @@ name = "bennu-web"
 version = "0.3.0"
 dependencies = [
  "bennu-index",
+ "roxmltree",
  "serde",
  "serde_json",
 ]
@@ -6677,6 +6684,12 @@ dependencies = [
  "rustc-hash 1.1.0",
  "text-size",
 ]
+
+[[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rsa"
