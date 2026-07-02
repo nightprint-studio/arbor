@@ -37,24 +37,6 @@ pub fn capture_monitor_rgba(monitor_id: &str) -> Result<(Vec<u8>, u32, u32), Str
     capture_rect_rgba(left, top, (right - left).max(1), (bottom - top).max(1))
 }
 
-/// Capture the WHOLE virtual desktop (all monitors, union rect) via GDI →
-/// `(rgba, width, height)` in physical pixels. Border-free. The source rect comes
-/// from the `SM_*VIRTUALSCREEN` metrics; `GetDC(None)` already spans the virtual
-/// desktop so a single BitBlt from `(left, top)` grabs it all.
-pub fn capture_virtual_desktop_rgba() -> Result<(Vec<u8>, u32, u32), String> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-        SM_YVIRTUALSCREEN,
-    };
-    unsafe {
-        let left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        let top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        let w = GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1);
-        let h = GetSystemMetrics(SM_CYVIRTUALSCREEN).max(1);
-        capture_rect_rgba(left, top, w, h)
-    }
-}
-
 /// BitBlt a physical-screen rectangle (`left`/`top`/`w`/`h`) off the desktop DC into
 /// an RGBA buffer. `GetDC(None)` returns the virtual-desktop DC, so `left`/`top` may
 /// be negative (a monitor left of / above the primary). `w`/`h` must be ≥ 1.

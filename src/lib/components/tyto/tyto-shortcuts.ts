@@ -45,7 +45,7 @@ export const TYTO_SHORTCUTS: TytoShortcutGroup[] = [
     shortcuts: [
       { keys: ['Ctrl', 'Shift', 'B'], description: 'Toggle the captures library' },
       { keys: ['Ctrl', 'Shift', 'O'], description: 'Reveal the output folder' },
-      { keys: ['Ctrl', 'Shift', 'C'], description: 'Toggle compact mini toolbar' },
+      { keys: ['Ctrl', 'Shift', 'C'], description: 'Snip capture (in-window selector)' },
     ],
   },
   {

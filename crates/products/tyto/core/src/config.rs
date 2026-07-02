@@ -107,11 +107,21 @@ pub struct TytoOutputConfig {
     /// still-image captures honour this; recordings use the encoding container.
     #[serde(default = "default_screenshot_format")]
     pub screenshot_format: String,
+    /// Copy a screenshot to the OS clipboard right after it's saved (default `true`).
+    /// Screenshots only — recordings are never copied. The copy happens in `tyto-be`
+    /// (where the pixels are), not the Tauri shell.
+    #[serde(default = "default_copy_to_clipboard")]
+    pub copy_screenshot_to_clipboard: bool,
 }
 
 /// Serde default for [`TytoOutputConfig::screenshot_format`].
 fn default_screenshot_format() -> String {
     "png".to_string()
+}
+
+/// Serde default for [`TytoOutputConfig::copy_screenshot_to_clipboard`].
+fn default_copy_to_clipboard() -> bool {
+    true
 }
 
 impl Default for TytoOutputConfig {
@@ -120,6 +130,7 @@ impl Default for TytoOutputConfig {
             dir: String::new(),
             filename_template: "tyto_%Y%m%d_%H%M%S".to_string(),
             screenshot_format: default_screenshot_format(),
+            copy_screenshot_to_clipboard: default_copy_to_clipboard(),
         }
     }
 }

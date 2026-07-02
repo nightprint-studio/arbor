@@ -34,6 +34,17 @@
   );
   const previewCapture = $derived(captures.find((c) => c.id === previewId) ?? null);
 
+  // A freshly-produced capture surfaces itself: the store latches its id and the shell
+  // reveals this library; here we open its preview once (then clear the latch so closing
+  // it stays closed). Works whether this panel was already open or just mounted.
+  $effect(() => {
+    const want = recorderStore.autoPreviewId;
+    if (want && want !== previewId) {
+      previewId = want;
+      recorderStore.clearAutoPreview();
+    }
+  });
+
   function reveal(id: string) {
     void recorderStore.revealCapture(id);
   }

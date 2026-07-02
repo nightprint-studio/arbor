@@ -128,7 +128,10 @@
   }
   const settingsMenu = $derived<DropdownItem[]>([
     { kind: 'separator', label: 'Close minimizes to tray' },
-    ...tools.map(t => ({
+    // Tyto is deliberately excluded: the recorder never minimizes to tray (a hidden,
+    // still-running screen recorder is a privacy footgun), so closing it always ends
+    // the process — there's no per-product toggle to offer.
+    ...tools.filter(t => t.id !== 'tyto').map(t => ({
       kind: 'item' as const, id: `tray:${t.id}`, label: t.name,
       active: closeToTray[t.id] ?? false,
       onclick: () => toggleCloseToTray(t.id),

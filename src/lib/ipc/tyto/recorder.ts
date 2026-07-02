@@ -7,11 +7,11 @@
  * camelCase the payloads; they're forwarded verbatim inside the opaque `params`).
  *
  * Commands route through the generic Model-D `rpc` bridge to `tyto-be` via the
- * bound {@link tyto} helper. The capture handlers are **stubs** until the recording
- * engine lands: `list_*` resolve empty and the mutating session/library handlers
- * reject with "capture backend not available"; `get/set_tyto_config` are already
- * real. Availability is signalled by the shell over `listen`
- * (`arbor://tyto-be-up` / `-down`) — see {@link listenTytoBackend}.
+ * bound {@link tyto} helper. The capture handlers are **real** — recording (scap +
+ * ffmpeg), system-audio loopback + mic, screenshots (GDI) and the on-disk library
+ * all run through them. Availability is signalled by the shell over `listen`
+ * (`arbor://tyto-be-up` / `-down`) — see {@link listenTytoBackend}; the store keeps a
+ * mock fallback only for when the backend is detached.
  */
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -52,6 +52,8 @@ export interface TytoOutputConfig {
   filename_template: string;
   /** Screenshot image format: `png` | `jpg` | `webp`. */
   screenshot_format: string;
+  /** Copy a screenshot to the OS clipboard right after saving (screenshots only). */
+  copy_screenshot_to_clipboard: boolean;
 }
 /** The typed product config (`…/tyto/config.toml`). Distinct from the launcher's
  *  `TytoConfig` (the OS-global open shortcut), which lives in `types/config.ts`. */
@@ -201,35 +203,21 @@ export const freezeScreen = (monitorId?: string | null) =>
 export const enumerateUiElements = (monitorId: string) =>
   tyto<PixelRectWire[]>('enumerate_ui_elements', { monitor_id: monitorId });
 
-/** One hover-target window in the on-screen picker, in virtual-desktop CSS px.
- *  `id` = `win-<hwnd>` (matches the capture-source picker). */
-export interface WinPickRect {
+/** One window hover-target for the in-window selector, in **monitor-local CSS px**
+ *  (clipped to the frozen monitor — same space as {@link enumerateUiElements} and
+ *  `freeze_screen`). `id` = `win-<hwnd>`. */
+export interface WindowPickRectWire {
   id: string;
   x: number;
   y: number;
   w: number;
   h: number;
 }
-/** One hover-target monitor in the on-screen picker, in virtual-desktop CSS px.
- *  `id` = `mon-<hmonitor>` (matches the capture-source picker). */
-export interface MonPickRect {
-  id: string;
-  name: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 
-/** Whole-window + whole-monitor hover targets for the on-screen picker overlay, in
- *  virtual-desktop CSS px. Empty off Windows. Zero-arg handler → no params. */
-export const enumeratePickTargets = () =>
-  tyto<{ windows: WinPickRect[]; monitors: MonPickRect[] }>('enumerate_pick_targets');
-
-/** Freeze the WHOLE virtual desktop (all monitors) to a temp PNG — the backdrop for
- *  the window/display picker overlay. `monitor_id = "virtual"`; bounds are logical/CSS.
- *  Windows-only (rejects elsewhere). Zero-arg handler → no params. */
-export const freezeVirtual = () => tyto<FrozenFrame>('freeze_virtual_desktop');
+/** Windows on the given monitor as monitor-local CSS-px hover rects, for the in-window
+ *  Snip-style Window pick. Empty off Windows. */
+export const enumerateWindowRects = (monitorId: string) =>
+  tyto<WindowPickRectWire[]>('enumerate_window_rects', { monitor_id: monitorId });
 
 // ── Library ─────────────────────────────────────────────────────────────────
 

@@ -10,34 +10,78 @@
 //! OS-global shortcut** (default `Ctrl+Shift+R`) that opens / focuses the window
 //! even when Arbor isn't focused.
 //!
-//! NB: the recording/encoding **engine** does not exist yet. `tyto-be` (the
-//! product backend, spawned lazily by [`crate::ipc::ensure_tyto_be`]) is up and
-//! serves the domain seam, but its capture handlers are stubs — so the capture UI
-//! is a preview. The region selector is mocked **in-window** (an overlay inside the
-//! Tyto window, not a separate OS window) so it can never trap the user; the real
-//! opaque frozen-frame on-screen overlay returns with the capture engine.
+//! `tyto-be` (the product backend, spawned lazily by
+//! [`crate::ipc::ensure_tyto_be`]) drives the real capture engine: screen/window
+//! recording (scap), system-audio loopback + microphone, ffmpeg muxing, and GDI
+//! screenshots. The shell here owns only the OS-integration glue (window, global
+//! shortcut, recording HUD, in-window selector geometry).
+//!
+//! Tyto has two in-window presentations of the same WebView2 window (no separate
+//! overlay window — an opaque WebView2 can never trap the user): the **Snip
+//! selector** (the window grown to cover one monitor over a frozen backdrop, driven
+//! by [`set_tyto_selection`]) and the **full control panel**. The OS-global shortcut
+//! drops straight into the Snip selector via the [`SNIP_INTENT`] flag; from there the
+//! user can expand to the full panel.
 
 use std::str::FromStr;
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::Shortcut;
 
 use super::{show_and_focus, WEBVIEW_BROWSER_ARGS};
+
+/// Set when Tyto is summoned via its OS-global shortcut (the quick-capture entry
+/// point): the window should drop straight into the in-window Snip selector rather than
+/// the full control panel. Consumed by the FE via [`take_tyto_snip_intent`] on mount
+/// (fresh window) or on the `tyto://enter-snip` event (already-open window).
+static SNIP_INTENT: AtomicBool = AtomicBool::new(false);
+
+/// Event pushed to an already-open Tyto window so it enters the Snip selector (a fresh
+/// window can miss it during mount, so it uses the pull-flag [`take_tyto_snip_intent`]).
+const TYTO_ENTER_SNIP_EVENT: &str = "tyto://enter-snip";
+
+/// Event pushed to the recording HUD to stop the active recording — fired when the
+/// OS-global Tyto shortcut is pressed *while a recording is running* (so the same key
+/// that starts a capture also stops it, from anywhere, without surfacing Tyto). The HUD
+/// listens and runs its normal stop (finalize + save). See [`request_stop_recording`].
+const TYTO_GLOBAL_STOP_EVENT: &str = "tyto://global-stop";
+
+/// True while a video recording is in progress (set when the HUD opens, cleared when it
+/// closes). Read by the global-shortcut handler so a press *during* a recording stops it
+/// instead of opening a new selector. `Relaxed` is fine: single flag, no ordering deps.
+static TYTO_RECORDING: AtomicBool = AtomicBool::new(false);
+
+/// Mark the recording state (called by the HUD open/close so the global shortcut knows
+/// whether a press should stop vs. start a capture).
+pub fn set_recording(active: bool) {
+    TYTO_RECORDING.store(active, Ordering::Relaxed);
+}
+
+/// True while a recording is running (the HUD is up).
+pub fn is_recording() -> bool {
+    TYTO_RECORDING.load(Ordering::Relaxed)
+}
+
+/// Ask the running recording to stop, from anywhere: push the stop event to the HUD
+/// window (which owns the stop flow — finalize the file, tear itself down, restore Tyto).
+/// No-op if the HUD isn't around. Fired by the global-shortcut handler when pressed
+/// mid-recording.
+pub fn request_stop_recording(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(super::hud::TYTO_HUD_LABEL) {
+        let _ = w.emit(TYTO_GLOBAL_STOP_EVENT, ());
+    }
+}
 
 /// Window label for the dedicated Tyto window. The frontend reads
 /// `getCurrentWindow().label` and matches this to switch into Tyto mode.
 pub const TYTO_WINDOW_LABEL: &str = "tyto";
 
-/// Full-mode window size (the standard control panel).
+/// Full-mode window size (the standard control panel). The compact presentation is now
+/// the in-window fullscreen Snip selector (see [`set_tyto_selection`]), not a mini bar.
 const TYTO_FULL_W: f64 = 1040.0;
 const TYTO_FULL_H: f64 = 668.0;
 const TYTO_FULL_MIN_W: f64 = 820.0;
 const TYTO_FULL_MIN_H: f64 = 520.0;
-/// Compact "mini" mode: a small Snip-like quick-capture toolbar.
-const TYTO_MINI_W: f64 = 560.0;
-const TYTO_MINI_H: f64 = 56.0;
-/// Height the mini toolbar grows to while a dropdown menu is open — its popup can't
-/// paint outside the WebView2 window, so the 56px strip must expand to host it.
-const TYTO_MINI_MENU_H: f64 = 340.0;
 
 /// Parse a Tauri accelerator string (e.g. `"Ctrl+Shift+R"`) into a `Shortcut`.
 /// Returns `None` for an empty or unparseable string.
@@ -75,10 +119,9 @@ pub fn open_or_focus(app: &AppHandle) {
 /// Bring up `tyto-be` (the screen-recorder backend) off the main thread, so the
 /// spawn's blocking first-`Hello` read never stalls the UI thread. Idempotent — a
 /// no-op once the backend is attached. Called from every Tyto entry point (command,
-/// global shortcut) so the backend is coming up while the window boots; the capture
-/// handlers are stubs today, so a missing/slow backend is harmless — the window
-/// opens regardless and the FE shows its "backend in progress" state. Mirrors
-/// [`super::explorer`]'s `ensure_backend`.
+/// global shortcut) so the backend is coming up while the window boots. A missing/slow
+/// backend is harmless — the window opens regardless and the FE degrades to its mock
+/// state until the engine attaches. Mirrors [`super::explorer`]'s `ensure_backend`.
 fn ensure_backend(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || crate::ipc::ensure_tyto_be(&app));
@@ -125,6 +168,30 @@ fn build_tyto_window(app: &AppHandle) {
     }
 }
 
+/// Open/focus Tyto AND request the in-window Snip selector — the OS-global-shortcut
+/// entry point (quick capture, like Win+Shift+S). Sets a pull-flag the FE consumes on
+/// mount (fresh window) and pushes an event for an already-open window; either way the
+/// FE drops into the selector once the backend is ready. The launcher tile /
+/// Command-Palette path ([`open_tyto_window`]) does NOT call this — it opens the full
+/// control panel.
+pub fn open_or_focus_snip(app: &AppHandle) {
+    SNIP_INTENT.store(true, Ordering::Relaxed);
+    open_or_focus(app);
+    // Fresh windows aren't built yet here (creation is dispatched to the main thread),
+    // so this emit only reaches an ALREADY-open window; the fresh case uses the pull-flag.
+    if let Some(w) = app.get_webview_window(TYTO_WINDOW_LABEL) {
+        let _ = w.emit(TYTO_ENTER_SNIP_EVENT, ());
+    }
+}
+
+/// The FE pulls this on mount (and on the `tyto://enter-snip` event) to learn whether
+/// Tyto was summoned via the global shortcut and should enter the Snip selector. Take +
+/// clear, so a later normal open (launcher tile) doesn't inherit a stale intent.
+#[tauri::command]
+pub fn take_tyto_snip_intent() -> bool {
+    SNIP_INTENT.swap(false, Ordering::Relaxed)
+}
+
 /// IPC entry point so the launcher tile and the in-app Command Palette can summon
 /// the window (same window the global shortcut opens).
 ///
@@ -140,64 +207,70 @@ pub async fn open_tyto_window(app: AppHandle) {
     open_or_focus(&app);
 }
 
-/// Switch the Tyto window between its **compact** (mini Snip-like toolbar, pinned
-/// top-center + always-on-top) and **full** (standard control panel, centered)
-/// presentations. The FE paints the matching shell; this owns the window geometry so
-/// the size/placement rules live in one place. Compact drops the full-mode minimum so
-/// the window can actually shrink to the toolbar size.
+
+/// Drive the Tyto window in/out of its **in-window fullscreen selector** (the
+/// Windows-Snip-style capture picker). Unlike compact/mini this doesn't shrink the
+/// window — it grows it to *cover one monitor* so the frozen backdrop + toolbar are
+/// painted edge-to-edge on that display, then restores the full control panel on exit.
+/// The FE freezes the target monitor and passes its **physical** bounds; the shell owns
+/// the geometry so the cover/restore rules live in one place.
+///
+/// `x`/`y`/`width`/`height` are **PHYSICAL** pixels. Using physical (not logical) is what
+/// makes the monitor-SWITCH robust: `set_position(LogicalPosition)` is interpreted against
+/// the window's *current* monitor scale, so moving a window onto a display with a
+/// different DPI mis-places/mis-sizes it (the "zoom/resolution goes wrong on switch" bug).
+/// Physical coordinates are absolute across monitors; the webview then re-derives its own
+/// device-pixel-ratio on the new display so the frozen backdrop still fills exactly.
+///
+/// * `active = true` (enter): drop the minimum size, lock resizing, size+place the
+///   window to the monitor's physical bounds, pin always-on-top, focus.
+/// * `active = false` (exit): un-pin, restore the full-mode minimum + resizability,
+///   size back to the standard panel, re-center.
 #[tauri::command]
 #[allow(clippy::unused_async)]
-pub async fn set_tyto_compact(app: AppHandle, compact: bool) {
+pub async fn set_tyto_selection(app: AppHandle, active: bool, x: i32, y: i32, width: u32, height: u32) {
     let Some(w) = app.get_webview_window(TYTO_WINDOW_LABEL) else { return };
-    if compact {
-        let _ = w.set_min_size(Some(LogicalSize::new(TYTO_MINI_W, TYTO_MINI_H)));
+    if active {
+        // Drop the full-mode minimum first so the cover size (which may be smaller than
+        // TYTO_FULL_MIN_* on a low-res monitor) can actually be applied.
+        let _ = w.set_min_size(Some(PhysicalSize::new(1u32, 1u32)));
         let _ = w.set_resizable(false);
-        let _ = w.set_size(LogicalSize::new(TYTO_MINI_W, TYTO_MINI_H));
+        // PHYSICAL bounds — absolute across monitors, so a switch to a different-DPI
+        // display lands and sizes correctly (see the doc note).
+        let _ = w.set_size(PhysicalSize::new(width, height));
+        let _ = w.set_position(PhysicalPosition::new(x, y));
         let _ = w.set_always_on_top(true);
-        if let Ok(Some(mon)) = w.primary_monitor() {
-            let scale = mon.scale_factor();
-            let logical_w = mon.size().width as f64 / scale;
-            let x = ((logical_w - TYTO_MINI_W) / 2.0).max(0.0);
-            let _ = w.set_position(LogicalPosition::new(x, 12.0));
-        }
+        let _ = w.set_focus();
     } else {
-        let _ = w.set_always_on_top(false);
-        let _ = w.set_min_size(Some(LogicalSize::new(TYTO_FULL_MIN_W, TYTO_FULL_MIN_H)));
-        let _ = w.set_resizable(true);
-        let _ = w.set_size(LogicalSize::new(TYTO_FULL_W, TYTO_FULL_H));
-        let _ = w.center();
+        reset_to_full_panel(&w);
+        let _ = w.set_focus();
     }
-    let _ = w.set_focus();
 }
 
-/// Grow the compact mini toolbar tall enough to host an in-page dropdown menu (a
-/// WebView2 popup can't paint outside the window), then shrink it back on close.
-/// Gated to mini mode: a no-op unless the window is currently the compact width, so
-/// it can never shrink the full control panel. Keeps the top-center placement (only
-/// the height changes; `set_size` leaves the top-left corner put).
+/// Restore the Tyto window to its standard control-panel geometry: un-pin always-on-top,
+/// re-apply the full-mode minimum + resizability, size back to the panel, re-center.
+/// Deliberately does NOT show/focus the window, so it's safe to call while it's HIDDEN
+/// (e.g. resetting the covering "selector" bounds during a recording, before the window
+/// is shown again by the HUD teardown). `set_focus` would reveal a hidden window, so the
+/// visible-restore paths (`set_tyto_selection(false)`) add it themselves.
+pub(crate) fn reset_to_full_panel(w: &WebviewWindow) {
+    let _ = w.set_always_on_top(false);
+    let _ = w.set_min_size(Some(LogicalSize::new(TYTO_FULL_MIN_W, TYTO_FULL_MIN_H)));
+    let _ = w.set_resizable(true);
+    let _ = w.set_size(LogicalSize::new(TYTO_FULL_W, TYTO_FULL_H));
+    let _ = w.center();
+}
+
+/// Reset the Tyto window to the full control-panel geometry WITHOUT showing/focusing it.
+/// The FE calls this on the recording-start error path (the window may still be at its
+/// monitor-covering "countdown" bounds) so a subsequent `show()` reveals the normal panel,
+/// not a monitor-sized blank. The normal teardown resets bounds in `close_recording_hud`.
 #[tauri::command]
 #[allow(clippy::unused_async)]
-pub async fn set_tyto_mini_menu(app: AppHandle, open: bool, height: Option<f64>) {
-    let Some(w) = app.get_webview_window(TYTO_WINDOW_LABEL) else { return };
-    // Only act in mini mode — compare the current logical width to the mini width.
-    let is_mini = w
-        .inner_size()
-        .ok()
-        .and_then(|s| w.scale_factor().ok().map(|sf| s.width as f64 / sf))
-        .map(|lw| (lw - TYTO_MINI_W).abs() < 4.0)
-        .unwrap_or(false);
-    if !is_mini {
-        return;
+pub async fn reset_tyto_bounds(app: AppHandle) {
+    if let Some(w) = app.get_webview_window(TYTO_WINDOW_LABEL) {
+        reset_to_full_panel(&w);
     }
-    // The FE measures the menu's content and asks for the exact height, so the grown
-    // window hugs the menu with no visible empty strip below it. Clamped so a long
-    // window list can't grow past the screen.
-    let h = if open {
-        height.unwrap_or(TYTO_MINI_MENU_H).clamp(TYTO_MINI_H, 720.0)
-    } else {
-        TYTO_MINI_H
-    };
-    let _ = w.set_size(LogicalSize::new(TYTO_MINI_W, h));
 }
 
 // ───────────────────────────────────────────────────────────────────────────

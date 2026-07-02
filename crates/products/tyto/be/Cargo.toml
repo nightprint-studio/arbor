@@ -58,6 +58,11 @@ cpal = "0.15"
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Session ids + collision-free temp filenames (reuses the workspace pin).
 uuid = { workspace = true }
+# OS clipboard image write for "copy screenshot to clipboard". Lives HERE (not the
+# Tauri shell): tyto-be has the RGBA pixels in hand at capture time, format-agnostic —
+# the Tauri clipboard plugin can't run in this headless process, and copying from the
+# shell would mean re-reading + decoding the saved file. Cross-platform (Win/mac/Linux).
+arboard = "3"
 
 # Screenshot encoders. ON by default so the user-facing PNG/JPG/WebP format setting
 # actually produces those formats (with a flag off, that format silently falls back to

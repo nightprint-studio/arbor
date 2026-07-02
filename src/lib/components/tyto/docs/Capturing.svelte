@@ -13,8 +13,9 @@
 <p>
   In <b>Recording</b> mode the titlebar shows a red <b>Record</b> pill. Start with
   it or <kbd>Ctrl</kbd>+<kbd>Enter</kbd>. If a <b>countdown</b> is set, a big 3-2-1
-  appears on screen first; then the Tyto window steps aside so it isn't in the
-  capture and the recording <b>control bar</b> takes over. Options:
+  counts down over the frozen screen first (<kbd>Esc</kbd> cancels); then the Tyto
+  window steps aside so it isn't in the capture and the recording <b>control bar</b>
+  takes over. Options:
 </p>
 <ul>
   <li><b>System audio</b> — capture what you hear (game, browser, app output) via
@@ -39,8 +40,11 @@
 </ul>
 <p>
   <b>Pause/resume</b> holds the video (the elapsed clock stops with it); <b>Stop</b>
-  finalizes and saves the file. When a recording or screenshot finishes, the Tyto
-  window comes back with the fresh capture highlighted in the library.
+  finalizes and saves the file. You can also stop from anywhere with the <b>global
+  Tyto shortcut</b> — while a recording runs, the same key that starts a capture stops
+  it, so you never have to hunt for the bar. When a recording or screenshot finishes,
+  the Tyto window comes back with the fresh capture highlighted in the library and its
+  preview open.
 </p>
 
 <div class="callout">
@@ -49,18 +53,27 @@
   own and saves everything recorded up to that point, rather than freezing.
 </div>
 
-<h2>Compact mode</h2>
+<h2>Snip capture</h2>
 <p>
-  Shrink Tyto to a small, always-on-top <b>mini toolbar</b> (like Windows'
-  <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> bar) from the menu or with
-  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>. The source button opens a
-  <b>method menu</b> — Display, Window, Smart, Rectangle or Freehand — and every method
-  opens the on-screen overlay in that mode, where you pick the target directly: windows
-  and monitors highlight in blue as you hover and are picked with a click; Smart,
-  Rectangle and Freehand draw over a frozen snapshot of the desktop. The bar grows just
-  enough to show the menu, then snaps back. Mode and the capture button sit beside it. As
-  soon as you finish a capture, Tyto returns to the full window with your new capture in
-  the library; expand back any time from the bar's expand button.
+  Start a quick <b>snip</b> from the menu or with
+  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> (like Windows'
+  <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> bar). The current monitor <b>freezes</b>
+  and Tyto expands to cover it, showing a floating toolbar. Pick a <b>method</b> and draw
+  or click directly on the frozen surface:
+</p>
+<ul>
+  <li><b>Rectangle</b> — drag a box.</li>
+  <li><b>Freehand</b> — trace a shape; a screenshot is masked to it.</li>
+  <li><b>Smart</b> — hover to snap to a UI element; scroll to grow or shrink through its
+    surrounding containers, then click.</li>
+  <li><b>Window</b> — hover a window (it highlights in blue) and click to pick it.</li>
+  <li><b>Display</b> — capture the whole current monitor.</li>
+</ul>
+<p>
+  The toolbar also toggles <b>Record</b> / <b>Shot</b> so the capture button knows what to
+  do, and a <b>monitor</b> button switches the frozen backdrop between displays (one
+  screen at a time). <kbd>Enter</kbd> captures, <kbd>Esc</kbd> exits. As soon as a capture
+  finishes, Tyto returns to the full window with your new capture in the library.
 </p>
 
 <h2>Screenshots</h2>
@@ -75,6 +88,8 @@
     applies to screenshots only — recordings use the video container. A
     <b>freehand region</b> screenshot is always saved as PNG regardless, since its
     transparency needs an alpha channel.</li>
+  <li><b>Copy to clipboard</b> — when on (the default), a screenshot is also placed
+    on the system clipboard the moment it's saved, ready to paste anywhere.</li>
 </ul>
 
 <div class="callout">

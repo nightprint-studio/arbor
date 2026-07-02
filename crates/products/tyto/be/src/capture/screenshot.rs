@@ -29,17 +29,37 @@ pub fn take(
         .ok_or_else(|| "screenshot: buffer/size mismatch".to_string())?;
     std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
 
+    let cfg = tyto_core::config::load();
+
     // Freehand mask: punch everything outside the traced polygon to transparent, then
     // save as PNG (alpha is meaningless in JPEG and lossy in WebP).
     if let Some(poly) = mask.filter(|p| p.len() >= 3) {
         apply_polygon_mask(&mut img, poly);
         let (_ext, path) = save_png(&img, out_dir, &render_template(template))?;
+        maybe_copy_to_clipboard(&img, cfg.output.copy_screenshot_to_clipboard);
         return Ok(path);
     }
 
-    let fmt = tyto_core::config::load().output.screenshot_format;
-    let (_ext, path) = save_in_format(&img, out_dir, template, &fmt)?;
+    let (_ext, path) = save_in_format(&img, out_dir, template, &cfg.output.screenshot_format)?;
+    maybe_copy_to_clipboard(&img, cfg.output.copy_screenshot_to_clipboard);
     Ok(path)
+}
+
+/// Best-effort copy of the just-captured screenshot's RGBA to the OS clipboard (opt-in
+/// via the output config). The file is already saved, so a clipboard hiccup must never
+/// fail the capture — errors are swallowed. Screenshots only; recordings never copy.
+fn maybe_copy_to_clipboard(img: &image::RgbaImage, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    let data = arboard::ImageData {
+        width: img.width() as usize,
+        height: img.height() as usize,
+        bytes: std::borrow::Cow::Borrowed(img.as_raw().as_slice()),
+    };
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        let _ = cb.set_image(data);
+    }
 }
 
 /// Set alpha=0 on every pixel of `img` that falls OUTSIDE `poly` (an even-odd

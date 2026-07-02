@@ -5,18 +5,38 @@
    * recorder window (rebindable, live-reconciled by the backend). Capture/output
    * defaults will join here once the recorder backend exists.
    */
-  import { Keyboard, Info } from 'lucide-svelte';
+  import { Keyboard, FolderOpen } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
   import Toggle from '$lib/components/shared/ui/Toggle.svelte';
+  import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
   import Kbd from '$lib/components/shared/internal/Kbd.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { tytoConfigStore } from '$lib/stores/tyto/config.svelte';
+  import { recorderStore, type CaptureMode, type ScreenshotFormat } from '$lib/stores/tyto/recorder.svelte';
   import { uiStore } from '$lib/stores/ui.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
   let capturing = $state(false);
+  let folderPickerOpen = $state(false);
+
+  const modeOptions = [
+    { value: 'record',     label: 'Record' },
+    { value: 'screenshot', label: 'Screenshot' },
+  ];
+  const countdownOptions = [
+    { value: '0',  label: 'Off' },
+    { value: '3',  label: '3s' },
+    { value: '5',  label: '5s' },
+    { value: '10', label: '10s' },
+  ];
+  const formatOptions = [
+    { value: 'png',  label: 'PNG' },
+    { value: 'jpg',  label: 'JPG' },
+    { value: 'webp', label: 'WebP' },
+  ];
 
   async function toggleShortcut(on: boolean) {
     try {
@@ -65,6 +85,36 @@
 
   <div class="body">
     <section>
+      <h3 class="sec-title">General</h3>
+      <div class="row gen">
+        <div class="gen-label">Default mode</div>
+        <RadioGroup appearance="segment" size="sm" value={recorderStore.mode} options={modeOptions} onchange={(v) => recorderStore.setMode(v as CaptureMode)} />
+      </div>
+      <div class="row gen">
+        <div class="gen-label">Countdown <span class="gen-hint">before recording</span></div>
+        <RadioGroup appearance="segment" size="sm" value={String(recorderStore.countdownSecs)} options={countdownOptions} onchange={(v) => recorderStore.setCountdownSecs(Number(v))} />
+      </div>
+      <div class="row gen">
+        <div class="gen-label">Screenshot format</div>
+        <RadioGroup appearance="segment" size="sm" value={recorderStore.screenshotFormat} options={formatOptions} onchange={(v) => recorderStore.setScreenshotFormat(v as ScreenshotFormat)} />
+      </div>
+      <div class="row gen">
+        <div class="gen-label">
+          Copy screenshot to clipboard
+          <span class="gen-hint">copies the image right after it's saved</span>
+        </div>
+        <Toggle checked={recorderStore.copyToClipboard} onchange={(v) => recorderStore.setCopyToClipboard(v)} />
+      </div>
+      <div class="row gen">
+        <div class="gen-label">
+          Save to
+          <span class="gen-hint path" title={recorderStore.outputDir}>{recorderStore.outputDir}</span>
+        </div>
+        <Button variant="secondary" size="sm" onclick={() => (folderPickerOpen = true)}><FolderOpen size={13} /> Change…</Button>
+      </div>
+    </section>
+
+    <section>
       <h3 class="sec-title">Opening shortcut</h3>
       <div class="row">
         <Toggle
@@ -92,22 +142,23 @@
         </div>
       {/if}
     </section>
-
-    <div class="note">
-      <Info size={15} />
-      <div>
-        <strong>The recorder backend is still in progress.</strong>
-        The capture UI here is a preview: recordings and screenshots are simulated.
-        Source, audio, quality and output defaults will become persistent settings
-        once the backend lands.
-      </div>
-    </div>
   </div>
 
   {#snippet footer()}
     <Button variant="primary" size="sm" onclick={onClose}>Done</Button>
   {/snippet}
 </Modal>
+
+{#if folderPickerOpen}
+  <FileExplorerModal
+    mode="folder"
+    title="Choose the Tyto output folder"
+    initialPath={recorderStore.outputDir}
+    onConfirm={(path: string) => { recorderStore.setOutputDir(path); folderPickerOpen = false; }}
+    onCancel={() => (folderPickerOpen = false)}
+    onClose={() => (folderPickerOpen = false)}
+  />
+{/if}
 
 <style>
   .body { display: flex; flex-direction: column; gap: 20px; }
@@ -118,21 +169,16 @@
   }
   .row { display: flex; align-items: center; }
 
+  /* General settings row: label (+ optional hint/path) left, control right. */
+  .gen { justify-content: space-between; gap: 16px; }
+  .gen-label { font-size: 12.5px; color: var(--text-primary); min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .gen-hint { font-size: 10.5px; color: var(--text-muted); font-weight: 400; }
+  .gen-hint.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+
   .accel { justify-content: space-between; gap: 12px; padding-left: 2px; }
   .accel-left { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-primary); }
   .accel-left :global(svg) { color: var(--text-muted); }
   .accel-right { display: flex; align-items: center; gap: 10px; }
   .capturing { font-size: 12px; color: var(--accent); }
   .capturing .dim { color: var(--text-muted); }
-
-  .note {
-    display: flex; gap: 10px;
-    padding: 12px 14px;
-    background: var(--accent-subtle);
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-    border-radius: var(--radius-md);
-    font-size: 12px; line-height: 1.5; color: var(--text-secondary);
-  }
-  .note :global(svg) { flex-shrink: 0; margin-top: 1px; color: var(--accent); }
-  .note strong { color: var(--text-primary); font-weight: 600; }
 </style>

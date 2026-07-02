@@ -84,28 +84,16 @@ macro_rules! invoke_handlers {
             $crate::window::explorer::explorer_drop_dispatch,
             // Dedicated merula (music live-coding) window
             $crate::window::merula::open_merula_window,
-            // Dedicated Tyto (screen recorder) window
+            // Dedicated Tyto (screen recorder) window + in-window Snip selector
             $crate::window::tyto::open_tyto_window,
-            $crate::window::tyto::set_tyto_compact,
-            $crate::window::tyto::set_tyto_mini_menu,
-            // Tyto frozen-frame region-selection overlay
-            $crate::window::region::open_region_selector_window,
-            $crate::window::region::get_region_init,
-            $crate::window::region::region_selector_confirm,
-            $crate::window::region::region_selector_cancel,
-            $crate::window::region::region_selector_pick,
-            $crate::window::region::take_region_result,
+            $crate::window::tyto::set_tyto_selection,
+            $crate::window::tyto::reset_tyto_bounds,
+            $crate::window::tyto::take_tyto_snip_intent,
             // Tyto recording HUD (shown while recording, Tyto hidden)
             $crate::window::hud::open_recording_hud,
             $crate::window::hud::close_recording_hud,
             $crate::window::hud::resize_recording_hud,
             $crate::window::hud::get_hud_init,
-            // Tyto pre-recording countdown overlay (3-2-1 before video capture)
-            $crate::window::countdown::open_countdown_overlay,
-            $crate::window::countdown::get_countdown_init,
-            $crate::window::countdown::countdown_finished,
-            $crate::window::countdown::take_countdown_done,
-            $crate::window::countdown::close_countdown_overlay,
             // Dedicated Corvus (git) window
             $crate::window::corvus::open_corvus_window,
             // Launcher window (JetBrains-Toolbox-like home screen)

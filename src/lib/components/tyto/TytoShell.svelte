@@ -12,7 +12,10 @@
    * Every action here is reachable from the keyboard — see `onKeyDown` and the
    * canonical list in `tyto-shortcuts.ts`.
    */
+  import { onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
   import { Images } from 'lucide-svelte';
+  import { takeTytoSnipIntent } from '$lib/ipc/tyto/main-window';
   import WorkspaceShell from '$lib/components/shared/ui/WorkspaceShell.svelte';
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
@@ -24,25 +27,54 @@
   import TytoShortcutsModal from './TytoShortcutsModal.svelte';
   import TytoAboutModal from './TytoAboutModal.svelte';
   import TytoDocsPanel from './TytoDocsPanel.svelte';
-  import TytoMiniBar from './TytoMiniBar.svelte';
+  import TytoSelector from './TytoSelector.svelte';
+  import TytoCountdown from './TytoCountdown.svelte';
   import { recorderStore, type TargetKind } from '$lib/stores/tyto/recorder.svelte';
   import { tytoUiStore } from '$lib/stores/tyto/ui.svelte';
 
   let libraryWidth = $state(360);
 
+  // Opened via the OS-global shortcut (quick capture) → drop straight into the Snip
+  // selector. A fresh window pulls the intent on mount; an already-open window gets the
+  // `tyto://enter-snip` event. Either way we wait for the backend before entering (the
+  // selector needs it to freeze/enumerate), with a bounded retry so it never spins.
+  //
+  // `entryResolved`/`enteringSnip` gate the first paint: until we know whether this is a
+  // snip-open — and while entering it — we show a neutral booting screen instead of the
+  // full control panel, so a shortcut-open never flashes the full window before the
+  // selector covers it (the compact selector is Tyto's "normal" presentation).
+  let entryResolved = $state(false);
+  let enteringSnip = $state(false);
+  onMount(() => {
+    let tries = 0;
+    function enterSnip() {
+      enteringSnip = true;
+      if (recorderStore.selecting) return;
+      if (recorderStore.backendUp) { void recorderStore.enterSelection('rect'); return; }
+      if (tries++ < 50) setTimeout(enterSnip, 100); // ~5s cap while tyto-be attaches
+    }
+    void takeTytoSnipIntent()
+      .then((yes) => { if (yes) { tries = 0; enterSnip(); } })
+      .catch(() => {})
+      .finally(() => { entryResolved = true; });
+    let un: (() => void) | undefined;
+    void listen('tyto://enter-snip', () => { void takeTytoSnipIntent().catch(() => {}); tries = 0; enterSnip(); })
+      .then((f) => { un = f; });
+    return () => un?.();
+  });
+  // Once the selector is actually up, clear the booting gate so a later "expand to full"
+  // (exitSelection) shows the panel, not the booting screen.
+  $effect(() => { if (recorderStore.selecting) enteringSnip = false; });
+
   // After any capture completes the library must surface it — reveal the right rail
-  // whenever a fresh capture lands (the store bumps `captureSignal`). This is also
-  // what returns the mini toolbar to the full window: "capture from the reduced bar →
-  // the normal one opens".
+  // whenever a fresh capture lands (the store bumps `captureSignal`). The selector has
+  // already exited itself on commit, so this only needs to open the library.
   let lastCaptureSignal = 0;
   $effect(() => {
     const sig = recorderStore.captureSignal;
     if (sig !== lastCaptureSignal) {
       lastCaptureSignal = sig;
-      if (sig > 0) {
-        tytoUiStore.setLibraryOpen(true);
-        if (tytoUiStore.compact) tytoUiStore.setCompact(false);
-      }
+      if (sig > 0) tytoUiStore.setLibraryOpen(true);
     }
   });
 
@@ -75,6 +107,10 @@
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
 
+    // The in-window selector / countdown own the keyboard while up (their own Esc / Enter /
+    // method keys) — don't let the shell's shortcuts fire behind them.
+    if (recorderStore.selecting || recorderStore.countingDown) return;
+
     // Help toggles — available even with a panel open (F1 toggles docs closed).
     if (e.key === 'F1' && !e.shiftKey) { tytoUiStore.toggleDocs(); e.preventDefault(); return; }
     if (e.key === 'F1' && e.shiftKey)  { tytoUiStore.openShortcuts(); e.preventDefault(); return; }
@@ -82,20 +118,8 @@
     // Behind a modal, let the dialog own the keyboard (its own Esc, Tab, …).
     if (tytoUiStore.anyModalOpen) return;
 
-    // Compact mini toolbar: only the capture essentials + expand are live (the
-    // full-window features have no surface here).
-    if (tytoUiStore.compact) {
-      if (mod && e.shiftKey && key === 'c')          { tytoUiStore.setCompact(false); e.preventDefault(); return; }
-      if (mod && key === 'enter')                    { primaryCapture(); e.preventDefault(); return; }
-      if (mod && !e.shiftKey && key === '1')         { recorderStore.setMode('record'); e.preventDefault(); return; }
-      if (mod && !e.shiftKey && key === '2')         { recorderStore.setMode('screenshot'); e.preventDefault(); return; }
-      if (mod && e.shiftKey && e.code === 'Digit1')  { recorderStore.setTargetKind('monitor'); e.preventDefault(); return; }
-      if (mod && e.shiftKey && e.code === 'Digit2')  { recorderStore.setTargetKind('window'); e.preventDefault(); return; }
-      if (mod && e.shiftKey && e.code === 'Digit3')  { void recorderStore.openScreenRegion(); e.preventDefault(); return; }
-      return;
-    }
-
-    if (mod && e.shiftKey && key === 'c')      { tytoUiStore.setCompact(true); e.preventDefault(); return; }
+    // Ctrl+Shift+C enters the in-window Snip-style selector (frozen backdrop + toolbar).
+    if (mod && e.shiftKey && key === 'c')      { void recorderStore.enterSelection('rect'); e.preventDefault(); return; }
     if (mod && !e.shiftKey && key === ',')     { tytoUiStore.openSettings(); e.preventDefault(); return; }
     if (mod && e.shiftKey && key === 'b')      { tytoUiStore.toggleLibrary(); e.preventDefault(); return; }
     if (mod && e.shiftKey && key === 'o')      { void recorderStore.revealOutputFolder(); e.preventDefault(); return; }
@@ -115,8 +139,14 @@
 
 <svelte:window onkeydown={onKeyDown} />
 
-{#if tytoUiStore.compact}
-  <TytoMiniBar />
+{#if recorderStore.countingDown}
+  <TytoCountdown />
+{:else if recorderStore.selecting}
+  <TytoSelector />
+{:else if !entryResolved || enteringSnip}
+  <!-- Neutral booting screen: shown until we know this isn't a snip-open (and while the
+       selector is being entered), so a shortcut-open never flashes the full panel. -->
+  <div class="booting" aria-hidden="true"></div>
 {:else}
 <div class="shell">
   <TytoTitleBar />
@@ -171,6 +201,9 @@
     background: var(--bg-base);
     overflow: hidden;
   }
+  /* Booting placeholder — a plain elevated fill so the first frame of a shortcut-open
+     shows neither the full panel nor a white flash before the selector takes over. */
+  .booting { position: fixed; inset: 0; background: var(--bg-elevated); }
   .content-area { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
   .main-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden; }

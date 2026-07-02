@@ -60,7 +60,15 @@ fn enumerate_ui_elements(_state: &TytoState, monitor_id: String) -> Result<Vec<P
     Ok(crate::capture::uia::enumerate_elements(&monitor_id))
 }
 
-/// One hover-target window in the picker overlay, in **virtual-desktop CSS pixels**.
+/// Window hover-rects on ONE monitor for the in-window fullscreen selector's **window**
+/// mode, in **monitor-local CSS pixels** (same space as `freeze_screen` /
+/// `enumerate_ui_elements`). Empty off Windows. `id` = `win-<hwnd>`.
+#[arbor_rpc::handler]
+fn enumerate_window_rects(_state: &TytoState, monitor_id: String) -> Result<Vec<WindowPickRect>, String> {
+    Ok(crate::capture::winpick::enumerate_windows_on_monitor(&monitor_id))
+}
+
+/// One window hover-rect for the selector's **window** mode, in monitor-local CSS px.
 /// `id` = `win-<hwnd>` (same formula as the source picker, so the two ids match).
 #[derive(Serialize)]
 pub struct WindowPickRect {
@@ -69,37 +77,6 @@ pub struct WindowPickRect {
     pub y: i32,
     pub w: u32,
     pub h: u32,
-}
-
-/// One hover-target monitor in the picker overlay, in **virtual-desktop CSS pixels**.
-/// `id` = `mon-<hmonitor>` (same formula as the source picker).
-#[derive(Serialize)]
-pub struct MonitorPickRect {
-    pub id: String,
-    pub name: String,
-    pub x: i32,
-    pub y: i32,
-    pub w: u32,
-    pub h: u32,
-}
-
-/// All hover targets for the on-screen window/display picker overlay, in
-/// virtual-desktop CSS pixels.
-#[derive(Serialize)]
-pub struct PickTargets {
-    pub windows: Vec<WindowPickRect>,
-    pub monitors: Vec<MonitorPickRect>,
-}
-
-/// Enumerate whole-window + whole-monitor hover targets for the picker overlay, in
-/// **virtual-desktop CSS pixels** (origin-subtracted, primary-monitor scaled). Empty
-/// off Windows.
-///
-/// Assumes **uniform DPI** across monitors: every rect is converted with the primary
-/// monitor's scale. Mixed-DPI multi-monitor is a known limitation.
-#[arbor_rpc::handler]
-fn enumerate_pick_targets(_state: &TytoState) -> Result<PickTargets, String> {
-    Ok(crate::capture::winpick::enumerate_pick_targets())
 }
 
 /// A frozen desktop snapshot for the region selector: the PNG path + the target
@@ -161,45 +138,4 @@ fn freeze_screen(_state: &TytoState, monitor_id: Option<String>) -> Result<Froze
         height: (ph as f64 / scale).round() as u32,
         scale,
     })
-}
-
-/// Grab a frozen screenshot of the WHOLE virtual desktop (all monitors, union rect)
-/// to a temp PNG — the backdrop for the on-screen window/display picker overlay.
-///
-/// `monitor_id` is the sentinel `"virtual"`; `x`/`y`/`width`/`height` are the overlay's
-/// **logical** (CSS) bounds (physical ÷ primary scale) — what Tauri positions/sizes the
-/// opaque picker window with. `scale` is the primary monitor's DPI scale.
-///
-/// Assumes **uniform DPI** across monitors (primary scale for the whole conversion);
-/// mixed-DPI multi-monitor is a known limitation. Windows-only: elsewhere returns an
-/// error (the on-screen picker targets Windows first).
-#[arbor_rpc::handler]
-fn freeze_virtual_desktop(_state: &TytoState) -> Result<FrozenFrame, String> {
-    #[cfg(target_os = "windows")]
-    {
-        // Same virtual-desktop bounds + primary scale the pick-target enumeration uses,
-        // so the freeze and the hover rects share one coordinate space.
-        let geom = crate::capture::winpick::virtual_desktop_geometry();
-        let scale = geom.scale.max(0.1);
-
-        let (rgba, pw, ph) = crate::capture::gdi::capture_virtual_desktop_rgba()?;
-        let img = image::RgbaImage::from_raw(pw, ph, rgba)
-            .ok_or_else(|| "freeze: buffer/size mismatch".to_string())?;
-        let path = std::env::temp_dir().join(format!("tyto-region-{}.png", uuid::Uuid::new_v4().simple()));
-        img.save(&path).map_err(|e| e.to_string())?;
-
-        Ok(FrozenFrame {
-            path: path.to_string_lossy().to_string(),
-            monitor_id: "virtual".to_string(),
-            x: (geom.left as f64 / scale).round() as i32,
-            y: (geom.top as f64 / scale).round() as i32,
-            width: (pw as f64 / scale).round() as u32,
-            height: (ph as f64 / scale).round() as u32,
-            scale,
-        })
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        Err("freeze_virtual_desktop: Windows-only".to_string())
-    }
 }

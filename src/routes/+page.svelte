@@ -26,9 +26,7 @@
     if (label === 'drag-overlay') return import('$lib/components/shared/DragOverlay.svelte');
     if (label === 'explorer' || label.startsWith('explorer-')) return import('$lib/components/sitta/ExplorerWindow.svelte');
     if (label === 'merula' || label.startsWith('merula-')) return import('$lib/components/merula/MerulaWindow.svelte');
-    if (label === 'tyto-region') return import('$lib/components/tyto/RegionSelectorWindow.svelte');
     if (label === 'tyto-hud') return import('$lib/components/tyto/RecordingHud.svelte');
-    if (label === 'tyto-countdown') return import('$lib/components/tyto/CountdownOverlay.svelte');
     if (label === 'tyto' || label.startsWith('tyto-')) return import('$lib/components/tyto/TytoWindow.svelte');
     if (label === 'main' || label === 'launcher') return import('$lib/components/launcher/LauncherWindow.svelte');
     // corvus + any unknown label → the Git AppShell.
@@ -43,11 +41,7 @@
   // page during load otherwise. Signal readiness after the shell mounts + two frames
   // (so the first real frame is on screen). Excluded — these own their reveal timing:
   //  • drag-overlay   — shown/hidden per-drag, never a persistent reveal.
-  //  • tyto-countdown — built visible + deliberately unfocused; window_ready would
-  //    steal focus from what the user is about to record.
-  //  • tyto-region    — reveals itself on the frozen screenshot's `load`, so no blank
-  //    frame shows before the image paints.
-  const OWNS_REVEAL = label === 'drag-overlay' || label === 'tyto-countdown' || label === 'tyto-region';
+  const OWNS_REVEAL = label === 'drag-overlay';
   $effect(() => {
     if (!Shell || OWNS_REVEAL) return;
     requestAnimationFrame(() => requestAnimationFrame(() => void signalWindowReady().catch(() => {})));

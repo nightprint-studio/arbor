@@ -40,5 +40,8 @@
 <h2>Opening Tyto from anywhere</h2>
 <p>
   In <b>Settings</b> you can enable an OS-global shortcut that opens Tyto even
-  when Arbor isn't focused. It's off by default and fully rebindable.
+  when Arbor isn't focused — straight into the snip selector for a quick grab.
+  It's off by default and fully rebindable. While a recording is running, that
+  same shortcut <b>stops</b> it, so you can start and stop without ever surfacing
+  the window.
 </p>

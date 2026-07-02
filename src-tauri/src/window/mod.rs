@@ -25,14 +25,12 @@
 //! `tauri.conf.json`).
 
 pub mod corvus;
-pub mod countdown;
 pub mod events;
 pub mod explorer;
 pub mod hud;
 pub mod launcher;
 pub mod merula;
 pub mod placement;
-pub mod region;
 pub mod tyto;
 
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
@@ -72,9 +70,8 @@ pub fn show_and_focus(w: &WebviewWindow) {
 //    window stuck hidden.
 //
 // The shell fires the signal from `src/routes/+page.svelte` after the shell mounts +
-// two frames. Overlays with deliberate visibility/focus semantics opt out there
-// (the countdown must not steal focus; the drag ghost is shown per-drag; the region
-// overlay reveals itself on the frozen screenshot's `load` so no blank frame shows).
+// two frames. Overlays with deliberate visibility/focus semantics opt out there (the
+// drag ghost is shown per-drag, not on a persistent reveal).
 
 /// Delay before the ready-fallback reveals a built-hidden window even if its frontend
 /// never signalled — long enough to let a healthy shell paint first.

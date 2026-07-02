@@ -22,14 +22,15 @@ import {
   startRecording as beStart, stopRecording as beStop, takeScreenshot as beScreenshot,
   removeCapture as beRemove, renameCapture as beRename, clearCaptures as beClear,
   revealCapture as beReveal, openCapture as beOpen, revealOutput as beRevealOutput,
-  selectRegion as beSelectRegion, freezeScreen, freezeVirtual, previewSource,
-  enumerateUiElements, enumeratePickTargets,
-  type CaptureWire, type StartRecordingArgs,
+  selectRegion as beSelectRegion, freezeScreen, previewSource,
+  enumerateUiElements, enumerateWindowRects,
+  type CaptureWire, type StartRecordingArgs, type PixelRectWire, type WindowPickRectWire,
+  type FrozenFrame,
 } from '$lib/ipc/tyto/recorder';
 import { uiStore } from '$lib/stores/ui.svelte';
-import { openRegionSelectorWindow, takeRegionResult } from '$lib/ipc/tyto/region-window';
+import { setTytoSelection, resetTytoBounds } from '$lib/ipc/tyto/main-window';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { openRecordingHud, closeRecordingHud, TYTO_RECORDING_STOPPED } from '$lib/ipc/tyto/hud-window';
-import { openCountdownOverlay, takeCountdownDone, closeCountdownOverlay } from '$lib/ipc/tyto/countdown-window';
 
 // ── Domain model ─────────────────────────────────────────────────────────────
 
@@ -54,6 +55,9 @@ export interface RegionSelection {
 
 export type CaptureMode = 'record' | 'screenshot';
 export type TargetKind = 'monitor' | 'window' | 'region';
+/** The pick method active inside the in-window Snip-style selector:
+ *  `rect`/`free`/`smart` resolve to a region; `window`/`display` pick a whole target. */
+export type SelectMethod = 'rect' | 'free' | 'smart' | 'window' | 'display';
 export type Quality = 'high' | 'balanced' | 'compact';
 export type Fps = 30 | 60;
 export type ScreenshotFormat = 'png' | 'jpg' | 'webp';
@@ -114,19 +118,6 @@ const MOCK_MICS: AudioInput[] = [
 
 const QUALITY_BITRATE: Record<Quality, number> = { high: 24000, balanced: 12000, compact: 6000 };
 
-/** Poll the shell for the region-selection outcome until it's ready (safety cap far
- *  above any real selection). Reliable where a pushed event isn't: an outgoing invoke
- *  works even while the Tyto window is hidden, and the poll speeds up once the shell
- *  re-shows Tyto on confirm/cancel. */
-async function pollRegionResult() {
-  for (let i = 0; i < 3000; i++) {
-    const r = await takeRegionResult();
-    if (r) return r;
-    await new Promise((res) => setTimeout(res, 200));
-  }
-  return null;
-}
-
 // ── Store ────────────────────────────────────────────────────────────────────
 
 function createRecorderStore() {
@@ -140,6 +131,19 @@ function createRecorderStore() {
   // capture is the traced shape (transparent outside). Null = plain rectangle.
   let regionMask = $state<number[][] | null>(null);
 
+  // ── In-window Snip-style selector state ─────────────────────────────────────
+  // When `selecting`, the Tyto window covers ONE monitor showing a frozen backdrop and
+  // the user picks directly on it (no separate tyto-region window, no poll). The rects
+  // are monitor-local CSS px — same space as `freeze_screen` / `enumerate_ui_elements`.
+  let selecting = $state(false);
+  let selectMethod = $state<SelectMethod>('rect');
+  let selectFrozenUrl = $state<string | null>(null);
+  let selectMonitorId = $state<string>('');
+  let selectMonitorName = $state<string>('');
+  // Smart (UI-element) rects + window rects for the active frozen monitor.
+  let selectElements = $state<PixelRectWire[]>([]);
+  let selectWindows = $state<WindowPickRectWire[]>([]);
+
   let systemAudio = $state(true);
   let micId = $state<string | null>(MOCK_MICS[0].id);
 
@@ -148,9 +152,20 @@ function createRecorderStore() {
   // Seconds of 3-2-1 countdown before a video recording starts (0 = off).
   let countdownSecs = $state(3);
 
+  // ── In-window countdown state ───────────────────────────────────────────────
+  // The 3-2-1 is rendered INSIDE the live Tyto window (over the frozen backdrop it's
+  // already covering the monitor with) — never a separate window, so there's no webview
+  // recreation / white flash. `countingDown` shows TytoCountdown; `countdownValue` is the
+  // current digit; `cancelCountdownFn` lets Esc abort mid-count.
+  let countingDown = $state(false);
+  let countdownValue = $state(0);
+  let cancelCountdownFn: (() => void) | null = null;
+
   let outputDir = $state('C:\\Users\\user\\Videos\\Tyto');
   // Screenshot image format (still captures only; recordings use the container).
   let screenshotFormat = $state<ScreenshotFormat>('png');
+  // Copy a screenshot to the OS clipboard right after it's saved (backend, via arboard).
+  let copyToClipboard = $state(true);
 
   let recording = $state(false);
   let elapsedMs = $state(0);
@@ -168,9 +183,13 @@ function createRecorderStore() {
   let captureFlashId = $state<string | null>(null);
   let captureSignal = $state(0);
   let flashTimer: ReturnType<typeof setTimeout> | null = null;
+  // The newest capture's id, latched for the library to auto-open its preview once. The
+  // library reads + clears it (a fresh capture "shows itself" without an extra click).
+  let autoPreviewId = $state<string | null>(null);
   function flashNewest() {
     const newest = captures[0];
     captureFlashId = newest ? newest.id : null;
+    autoPreviewId = newest ? newest.id : null;
     if (flashTimer) clearTimeout(flashTimer);
     if (captureFlashId) flashTimer = setTimeout(() => { captureFlashId = null; }, 4000);
     captureSignal += 1;
@@ -261,6 +280,7 @@ function createRecorderStore() {
     if (cfg.output.dir) outputDir = cfg.output.dir;
     const fmt = cfg.output.screenshot_format;
     if (fmt === 'png' || fmt === 'jpg' || fmt === 'webp') screenshotFormat = fmt;
+    if (typeof cfg.output.copy_screenshot_to_clipboard === 'boolean') copyToClipboard = cfg.output.copy_screenshot_to_clipboard;
   }
 
   /** Seed the store from the on-disk product config, once. The active mode/target are
@@ -286,7 +306,7 @@ function createRecorderStore() {
       default_target: targetKind,
       capture:  { fps, system_audio: systemAudio, mic_id: micId ?? '', countdown_secs: countdownSecs },
       encoding: { quality, bitrate_kbps: QUALITY_BITRATE[quality], codec: 'mp4' },
-      output:   { dir: outputDir, filename_template: 'tyto_%Y%m%d_%H%M%S', screenshot_format: screenshotFormat },
+      output:   { dir: outputDir, filename_template: 'tyto_%Y%m%d_%H%M%S', screenshot_format: screenshotFormat, copy_screenshot_to_clipboard: copyToClipboard },
     };
     void setTytoConfig(cfg).catch(() => {});
   }
@@ -349,33 +369,103 @@ function createRecorderStore() {
     };
   }
 
-  /** Run the optional 3-2-1 countdown before a video recording. Hides Tyto (so the
-   *  user sees their real screen), opens the self-driven overlay window, and polls
-   *  for its completion (a pull model — reliable while Tyto is hidden). Leaves Tyto
-   *  hidden on success so the recording begins cleanly. Returns `false` (with the
-   *  error surfaced + Tyto restored) if the overlay couldn't open. */
-  async function runCountdown(): Promise<boolean> {
+  /** Run the in-window 3-2-1 countdown. Assumes the Tyto window is ALREADY covering the
+   *  target monitor with the frozen backdrop up (the selector left it that way, or
+   *  [`coverMonitor`] just set it) — so this only drives the digit + the timer; TytoCountdown
+   *  paints over the same backdrop. Resolves `true` when it reaches zero, `false` if the
+   *  user aborted it (Esc → [`cancelCountdown`]). Total wall time = `countdownSecs`s. */
+  function runCountdownTimer(): Promise<boolean> {
+    countingDown = true;
+    countdownValue = countdownSecs;
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (ok: boolean) => { if (done) return; done = true; cancelCountdownFn = null; resolve(ok); };
+      cancelCountdownFn = () => finish(false);
+      const tick = () => {
+        if (done) return;
+        if (countdownValue <= 1) { finish(true); return; }
+        countdownValue -= 1;
+        setTimeout(tick, 1000);
+      };
+      setTimeout(tick, 1000);
+    });
+  }
+
+  /** Kick off the real backend recording: hand over to the on-screen HUD (which hides
+   *  Tyto) and start the engine. On failure, surface it + restore the normal panel
+   *  (the window may still be at its monitor-covering countdown bounds). */
+  async function beginBackendRecording() {
+    try {
+      await beStart(currentArgs());
+      beSession = true;
+      recording = true;
+      elapsedMs = 0; // driven by the tyto://recording-progress event
+      void openRecordingHud(targetLabel());
+    } catch (e) {
+      lastError = String(e);
+      uiStore.showToast(`Couldn't start recording: ${e}`, 'error');
+      // The window may be at covering bounds (a countdown ran) — reset before showing so
+      // it doesn't reappear monitor-sized, then reveal it.
+      try { await resetTytoBounds(); } catch { /* ignore */ }
+      try { await getCurrentWindow().show(); } catch { /* ignore */ }
+    }
+  }
+
+  // ── In-window selector internals ─────────────────────────────────────────────
+
+  /** Hide Tyto → freeze `monitorId` (or the primary when null) → enumerate BOTH the
+   *  smart UI-element rects AND the window rects for that monitor → grow the Tyto window
+   *  to cover the frozen monitor → show it. Populates all `select*` state. Returns
+   *  `false` (with the error surfaced + Tyto restored) if the freeze/enumerate fails, so
+   *  the caller leaves selection off. Frozen backdrop = the CURRENT monitor only (never
+   *  the virtual desktop). */
+  /** Hide Tyto → freeze `monitorId` (the primary when null) → grow the window to cover
+   *  that monitor's PHYSICAL bounds → show it over the frozen backdrop. Sets
+   *  `selectMonitorId`/`selectMonitorName`/`selectFrozenUrl`. Returns the FrozenFrame, or
+   *  null (error surfaced + Tyto restored) on failure. Shared by the Snip selector and the
+   *  in-window countdown; the frozen backdrop is the CURRENT monitor only.
+   *
+   *  PHYSICAL bounds (logical × scale) are unambiguous across monitors, so switching to a
+   *  different-DPI display doesn't mis-place/mis-size the covering window. */
+  async function coverMonitor(monitorId: string | null): Promise<FrozenFrame | null> {
     const win = getCurrentWindow();
     try {
+      // Step Tyto aside BEFORE freezing so it isn't in the frozen backdrop; give the
+      // compositor a beat to actually hide it.
       await win.hide();
-      await new Promise((r) => setTimeout(r, 150));
-      await openCountdownOverlay(countdownSecs);
+      await new Promise((r) => setTimeout(r, 140));
+      const frame = await freezeScreen(monitorId);
+      selectMonitorId = frame.monitor_id;
+      selectMonitorName = monitors.find((m) => m.id === frame.monitor_id)?.name ?? 'Display';
+      selectFrozenUrl = convertFileSrc(frame.path);
+      const s = frame.scale || 1;
+      await setTytoSelection(
+        true,
+        Math.round(frame.x * s), Math.round(frame.y * s),
+        Math.round(frame.width * s), Math.round(frame.height * s),
+      );
+      await win.show();
+      return frame;
     } catch (e) {
       lastError = String(e);
       try { await win.show(); } catch { /* ignore */ }
-      return false;
+      return null;
     }
-    // Poll for the self-driven overlay to finish. Cap generously above the real
-    // duration so a stuck overlay can't hang the start forever.
-    const maxPolls = (countdownSecs + 4) * 20; // 50ms cadence
-    for (let i = 0; i < maxPolls; i++) {
-      let done = false;
-      try { done = await takeCountdownDone(); } catch { done = true; }
-      if (done) return true;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    // Timed out — tear the overlay down and proceed rather than hang.
-    try { await closeCountdownOverlay(); } catch { /* ignore */ }
+  }
+
+  /** Cover the monitor (via [`coverMonitor`]) AND enumerate its smart + window hover rects
+   *  — the full entry into the Snip selector. Returns `false` (Tyto restored) on failure. */
+  async function freezeMonitorForSelection(monitorId: string | null): Promise<boolean> {
+    const frame = await coverMonitor(monitorId);
+    if (!frame) return false;
+    // Enumerate both pick layers for this monitor (monitor-local CSS px). Smart rects are
+    // best-effort (empty off Windows / no accessibility); window rects likewise.
+    const [elements, wins] = await Promise.all([
+      enumerateUiElements(frame.monitor_id).catch(() => []),
+      enumerateWindowRects(frame.monitor_id).catch(() => []),
+    ]);
+    selectElements = elements;
+    selectWindows = wins;
     return true;
   }
 
@@ -413,6 +503,33 @@ function createRecorderStore() {
     /** True when the active target is fully specified (region needs a rectangle). */
     get targetReady() { return isTargetReady(); },
 
+    // ── In-window Snip-style selector (reads) ──
+    /** True while the Tyto window is acting as the in-window fullscreen selector. */
+    get selecting() { return selecting; },
+    /** `convertFileSrc` URL of the frozen-monitor PNG backdrop, or null when not selecting. */
+    get selectFrozenUrl() { return selectFrozenUrl; },
+    /** The active pick method within the frozen monitor. */
+    get selectMethod() { return selectMethod; },
+    /** Smart (foreground UI-element) hover rects for the frozen monitor, monitor-local CSS px. */
+    get selectElements() { return selectElements; },
+    /** Window hover rects for the frozen monitor, monitor-local CSS px (`id` = `win-<hwnd>`). */
+    get selectWindows() { return selectWindows; },
+    /** Id of the currently-frozen monitor (`mon-<hmonitor>`). */
+    get selectMonitorId() { return selectMonitorId; },
+    /** Display name of the currently-frozen monitor (for the monitor-switch button). */
+    get selectMonitorName() { return selectMonitorName; },
+
+    // ── In-window countdown + post-capture (reads) ──
+    /** True while the in-window 3-2-1 countdown is running (over the frozen backdrop). */
+    get countingDown() { return countingDown; },
+    /** The current countdown digit — drives TytoCountdown. */
+    get countdownValue() { return countdownValue; },
+    /** Id of the freshly-produced capture the library should auto-open a preview for
+     *  (read once, then cleared via [`clearAutoPreview`]). */
+    get autoPreviewId() { return autoPreviewId; },
+    /** Copy a screenshot to the OS clipboard right after it's saved. */
+    get copyToClipboard() { return copyToClipboard; },
+
     // ── mutations ──
     setMode(m: CaptureMode) { mode = m; persistConfig(); },
     setTargetKind(k: TargetKind) { targetKind = k; persistConfig(); },
@@ -424,107 +541,150 @@ function createRecorderStore() {
       if (sel) targetKind = 'region';
     },
 
-    /** Thin alias kept for the region-family modes ('rect' | 'free' | 'smart') — the
-     *  full on-screen selector lives in [`openCaptureSelector`]. */
-    async openScreenRegion(initialMode: 'rect' | 'free' | 'smart' = 'rect') {
-      return this.openCaptureSelector(initialMode);
+    /** Entry point from the shell's method buttons — opens the in-window Snip-style
+     *  selector in `initialMode` (delegates to [`enterSelection`]). */
+    async openScreenRegion(initialMode: SelectMethod = 'rect') {
+      return this.enterSelection(initialMode);
     },
 
-    /** Open the opaque on-screen capture selector in `mode`, then apply its outcome:
-     *   • 'rect' | 'free' | 'smart' → freeze the current monitor + gather UI-element
-     *     rects; the drawn rectangle resolves into a region target.
-     *   • 'window' | 'display' → freeze the WHOLE virtual desktop + enumerate every
-     *     window / monitor hover target; a click picks that window / monitor target.
-     *  Needs the backend — a no-op (with an error surfaced) when it's down. */
-    async openCaptureSelector(mode: 'rect' | 'free' | 'smart' | 'window' | 'display') {
-      const pickTarget = mode === 'window' || mode === 'display';
-      // rect/free/smart resolve into a region; set that eagerly so the source trigger
-      // reflects the pending pick. window/display keep the current target until picked.
-      if (!pickTarget) targetKind = 'region';
+    // ── In-window Snip-style selector (actions) ──
+
+    /** Change the pick method while staying on the current frozen monitor (no re-freeze
+     *  — the backdrop + enumerated rects are still valid for the same display). */
+    setSelectMethod(m: SelectMethod) { selectMethod = m; },
+
+    /** Enter the in-window fullscreen selector: freeze the active monitor (the current
+     *  `selectedMonitorId`, else the primary), enumerate its smart + window rects, grow
+     *  the Tyto window to cover it, and paint the frozen backdrop + toolbar. Needs the
+     *  backend — a no-op (with an error surfaced) when it's down. */
+    async enterSelection(method: SelectMethod) {
       if (!backendUp) { lastError = 'Recording backend not available'; return; }
-      const win = getCurrentWindow();
-      let frame;
+      const start = selectedMonitorId && monitors.some((m) => m.id === selectedMonitorId)
+        ? selectedMonitorId
+        : null;
+      const ok = await freezeMonitorForSelection(start);
+      if (!ok) return;
+      selectMethod = method;
+      selecting = true;
+    },
+
+    /** Switch the frozen backdrop to the next monitor in `monitors` (wrap-around),
+     *  re-freezing + re-enumerating and re-covering that display. Keeps the active
+     *  method. No-op with fewer than 2 monitors. */
+    async switchSelectionMonitor() {
+      if (!selecting || monitors.length < 2) return;
+      const cur = monitors.findIndex((m) => m.id === selectMonitorId);
+      const next = monitors[(cur + 1) % monitors.length];
+      await freezeMonitorForSelection(next.id);
+    },
+
+    /** Leave the selector: restore the full Tyto control panel and drop the frozen
+     *  backdrop + enumerated rects. Safe to call when not selecting. */
+    async exitSelection() {
+      selecting = false;
+      selectFrozenUrl = null;
+      selectElements = [];
+      selectWindows = [];
+      try { await setTytoSelection(false, 0, 0, 0, 0); } catch { /* ignore */ }
+    },
+
+    /** Commit a drawn region (rect/free/smart): resolve the monitor-local CSS rect into
+     *  a physical crop against the frozen monitor, set it as the region target (with the
+     *  freehand mask when `points` is given), exit the selector, then capture. */
+    async commitRegion(css: { x: number; y: number; width: number; height: number }, points: number[][] | null) {
+      const monitorId = selectMonitorId;
       try {
-        // Step Tyto aside BEFORE freezing so it isn't in the captured frame; give
-        // the compositor a moment to actually hide it.
-        await win.hide();
-        await new Promise((r) => setTimeout(r, 150));
-        if (pickTarget) {
-          // Whole-desktop backdrop + every window/monitor hover target (virtual-desktop
-          // CSS px). No smart UI-element rects in these modes.
-          frame = await freezeVirtual();
-          const { windows: winRects, monitors: monRects } = await enumeratePickTargets();
-          await openRegionSelectorWindow({
-            screenshotPath: frame.path,
-            x: frame.x, y: frame.y, width: frame.width, height: frame.height,
-            elements: [],
-            windows: winRects,
-            monitors: monRects,
-            initialMode: mode,
-          });
-        } else {
-          frame = await freezeScreen(null);
-          // Snapshot the foreground app's UI element rects for the overlay's smart pick
-          // (captured now, before the overlay covers the screen). Empty = smart disabled.
-          const elements = await enumerateUiElements(frame.monitor_id).catch(() => []);
-          await openRegionSelectorWindow({
-            screenshotPath: frame.path,
-            x: frame.x, y: frame.y, width: frame.width, height: frame.height,
-            elements,
-            windows: [],
-            monitors: [],
-            initialMode: mode,
-          });
-        }
-      } catch (e) {
-        // The backend couldn't freeze / open the overlay — surface it and make sure
-        // Tyto is visible again.
-        lastError = String(e);
-        try { await win.show(); } catch { /* ignore */ }
-        return;
-      }
-      // The overlay is up. Pull the outcome (reliable even while Tyto is hidden — no
-      // dependency on a pushed event landing as the window is re-shown). A failure
-      // resolving the rect here surfaces as an error, NOT the mock picker.
-      try {
-        const outcome = await pollRegionResult();
-        if (!outcome || !outcome.confirmed) return;
-        // Whole-window / whole-monitor pick: no rectangle, just switch the target.
-        if (outcome.window_id) {
-          this.selectWindow(outcome.window_id);
-          this.setTargetKind('window');
-          return;
-        }
-        if (outcome.monitor_id) {
-          this.selectMonitor(outcome.monitor_id);
-          this.setTargetKind('monitor');
-          return;
-        }
-        // Region rectangle (rect/free/smart): resolve CSS → physical against the monitor.
         const sel = await beSelectRegion({
-          monitor_id: frame.monitor_id,
-          css: { x: outcome.x, y: outcome.y, w: outcome.width, h: outcome.height },
+          monitor_id: monitorId,
+          css: { x: css.x, y: css.y, w: css.width, h: css.height },
         });
         region = { css: sel.css, physical: sel.physical, scaleFactor: sel.scale_factor };
-        // Freehand: convert the traced polygon (window-local CSS px) to PHYSICAL,
+        // Freehand: convert the traced polygon (monitor-local CSS px) to PHYSICAL,
         // REGION-LOCAL px — physical = css * scaleFactor, then subtract the region's
         // physical top-left so the polygon is 0-based within the crop the BE masks.
-        if (outcome.points && outcome.points.length > 2) {
+        if (points && points.length > 2) {
           const s = sel.scale_factor;
           const ox = sel.physical.x;
           const oy = sel.physical.y;
-          regionMask = outcome.points.map(([px, py]) => [
-            Math.round(px * s) - ox,
-            Math.round(py * s) - oy,
-          ]);
+          regionMask = points.map(([px, py]) => [Math.round(px * s) - ox, Math.round(py * s) - oy]);
         } else {
           regionMask = null;
         }
         targetKind = 'region';
+        persistConfig();
       } catch (e) {
         lastError = String(e);
+        await this.exitSelection();
+        return;
+      }
+      // Record → keep covering the monitor and run the in-window countdown over the same
+      // frozen backdrop (no flash), then hide + start. Screenshot → restore the full panel
+      // first, so the grab's hide/show cycle acts on the panel, not the covering selector.
+      if (mode === 'record') {
+        await this.startRecordingFromCover();
+      } else {
+        await this.exitSelection();
+        await this.takeScreenshot();
       }
     },
+
+    /** Commit a whole-window pick: select the window target, then capture (record keeps the
+     *  cover for the in-window countdown; screenshot restores the panel first). */
+    async commitWindow(id: string) {
+      selectedWindowId = id;
+      targetKind = 'window';
+      persistConfig();
+      if (mode === 'record') {
+        await this.startRecordingFromCover();
+      } else {
+        await this.exitSelection();
+        await this.takeScreenshot();
+      }
+    },
+
+    /** Commit a whole-monitor pick: select the monitor target, then capture (record keeps
+     *  the cover for the in-window countdown; screenshot restores the panel first). */
+    async commitMonitor(id: string) {
+      selectedMonitorId = id;
+      targetKind = 'monitor';
+      persistConfig();
+      if (mode === 'record') {
+        await this.startRecordingFromCover();
+      } else {
+        await this.exitSelection();
+        await this.takeScreenshot();
+      }
+    },
+
+    /** Start a recording directly from the covering selector: the window is already over
+     *  the monitor with the frozen backdrop up, so the in-window countdown runs over that
+     *  same backdrop (no re-cover, no flash). Then Tyto hides and the engine starts. On a
+     *  cancelled countdown (Esc) it restores the full panel without recording. */
+    async startRecordingFromCover() {
+      if (recording) return;
+      lastError = null;
+      // Backend down (mock): the selector never really covered — restore + mock-record.
+      if (!backendUp) { await this.exitSelection(); await this.startRecording(); return; }
+
+      if (countdownSecs > 0) {
+        // Hand the covering surface from the selector to the countdown IN THE SAME TICK
+        // (selecting→false + countingDown→true together) so the full panel never flashes.
+        selecting = false;
+        const completed = await runCountdownTimer();
+        if (!completed) { countingDown = false; await this.exitSelection(); return; } // Esc → panel
+        // countingDown stays true (TytoCountdown keeps covering) until the window is hidden.
+      }
+      // Hide the covering window BEFORE dropping the last covering flag, so TytoShell never
+      // paints the full panel over the monitor for a frame; then start via the HUD.
+      try { await getCurrentWindow().hide(); } catch { /* ignore */ }
+      selecting = false;
+      countingDown = false;
+      selectFrozenUrl = null;
+      selectElements = [];
+      selectWindows = [];
+      await beginBackendRecording();
+    },
+
     toggleSystemAudio() { systemAudio = !systemAudio; persistConfig(); },
     setMic(id: string | null) { micId = id; persistConfig(); },
     setFps(v: Fps) { fps = v; persistConfig(); },
@@ -532,30 +692,37 @@ function createRecorderStore() {
     setCountdownSecs(v: number) { countdownSecs = Math.max(0, Math.trunc(v)); persistConfig(); },
     setOutputDir(dir: string) { outputDir = dir; persistConfig(); },
     setScreenshotFormat(f: ScreenshotFormat) { screenshotFormat = f; persistConfig(); },
+    setCopyToClipboard(v: boolean) { copyToClipboard = v; persistConfig(); },
+    /** Abort a running in-window countdown (Esc) — the waiting starter restores the panel. */
+    cancelCountdown() { cancelCountdownFn?.(); },
+    /** The library calls this after opening the auto-preview, so it fires once per capture. */
+    clearAutoPreview() { autoPreviewId = null; },
 
     async startRecording() {
       if (recording || !isTargetReady()) return;
       lastError = null;
       if (backendUp) {
-        // Optional on-screen 3-2-1 before capture begins (video only). Leaves Tyto
-        // hidden on success so it isn't in the shot.
+        // Optional on-screen 3-2-1 before capture begins (video only). Rendered IN this
+        // window over a frozen backdrop (no separate window / white flash): cover the
+        // target monitor, count down, then hide Tyto so it isn't in the shot.
         if (countdownSecs > 0) {
-          const ok = await runCountdown();
-          if (!ok) return; // couldn't open the overlay — already surfaced + Tyto shown
+          const monId = targetKind === 'monitor' ? selectedMonitorId
+            : (selectedMonitorId && monitors.some((m) => m.id === selectedMonitorId) ? selectedMonitorId : null);
+          // Mark the countdown active BEFORE covering, so when coverMonitor reveals the
+          // window it paints TytoCountdown over the backdrop — never the full panel
+          // stretched to monitor size.
+          countingDown = true;
+          countdownValue = countdownSecs;
+          const frame = await coverMonitor(monId);
+          if (!frame) { countingDown = false; return; } // freeze failed — surfaced + restored
+          const completed = await runCountdownTimer();
+          if (!completed) { countingDown = false; await this.exitSelection(); return; } // Esc → panel
+          // Hide BEFORE clearing countingDown so the full panel never flashes over the monitor.
+          try { await getCurrentWindow().hide(); } catch { /* ignore */ }
+          countingDown = false;
+          selectFrozenUrl = null;
         }
-        try {
-          await beStart(currentArgs());
-          beSession = true;
-          recording = true;
-          elapsedMs = 0; // driven by the tyto://recording-progress event
-          // Hand off to the on-screen HUD and hide Tyto so it's not in the capture.
-          void openRecordingHud(targetLabel());
-        } catch (e) {
-          lastError = String(e);
-          uiStore.showToast(`Couldn't start recording: ${e}`, 'error');
-          // A countdown or the HUD may have hidden Tyto — make sure it's back.
-          try { await getCurrentWindow().show(); } catch { /* ignore */ }
-        }
+        await beginBackendRecording();
         return;
       }
       // Mock fallback (backend down): local timer + synthetic capture.

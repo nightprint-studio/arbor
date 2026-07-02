@@ -6,7 +6,7 @@
    * LABELLED, coloured pill · documentation button · settings gear (a menu with
    * Settings / Shortcuts / Theme, like Arbor & merula) · window controls.
    */
-  import { Camera, Video, Circle, Square, Settings, Keyboard, Info, Palette, LogOut, Minimize2 } from 'lucide-svelte';
+  import { Camera, Video, Circle, Square, Settings, Keyboard, Info, Palette, LogOut, Scissors } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
   import Tabs, { type TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -32,7 +32,7 @@
 
   // Hamburger — light: identity + about + close (settings live in the gear).
   const hamburgerMenu: DropdownItem[] = [
-    { kind: 'item', id: 'compact', label: 'Compact mode', icon: Minimize2, shortcut: 'Ctrl+Shift+C', onclick: () => tytoUiStore.setCompact(true) },
+    { kind: 'item', id: 'snip', label: 'Snip capture', icon: Scissors, shortcut: 'Ctrl+Shift+C', onclick: () => void recorderStore.enterSelection('rect') },
     { kind: 'item', id: 'about', label: 'About Tyto…', icon: Info, onclick: () => tytoUiStore.openAbout() },
     { kind: 'separator' },
     { kind: 'item', id: 'close', label: 'Close Window', icon: LogOut, danger: true, onclick: () => { void getCurrentWindow().close(); } },

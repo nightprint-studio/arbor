@@ -14,6 +14,7 @@
    */
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { Square, Pause, Play, Maximize2, Minimize2 } from 'lucide-svelte';
   import { listenRecordingProgress, listenRecordingError, stopRecording, pauseRecording } from '$lib/ipc/tyto/recorder';
   import { resizeRecordingHud, getHudInit } from '$lib/ipc/tyto/hud-window';
@@ -41,6 +42,9 @@
     // The capture source was lost (monitor unplugged / resolution switch): stop now so
     // the partial recording is saved instead of freezing on the last frame forever.
     void listenRecordingError(() => { if (!lost) { lost = true; void stop(); } }).then((f) => uns.push(f));
+    // OS-global Tyto shortcut pressed while recording → stop from anywhere (the shell
+    // routes the press here instead of opening a new selector).
+    void listen('tyto://global-stop', () => { void stop(); }).then((f) => uns.push(f));
     void getHudInit().then((i) => { targetLabel = i.target_label ?? ''; }).catch(() => {});
     // Reveal (anti-white-flash) is handled centrally in +page.svelte via window_ready.
     return () => { for (const u of uns) u(); };

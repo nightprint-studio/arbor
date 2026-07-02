@@ -6,9 +6,10 @@
    * launcher-config (the opt-in global shortcut), and the global Tooltip + Toast
    * hosts, then mounts TytoShell.
    *
-   * NB: the capture/encode backend does not exist yet — TytoShell is a mocked UI.
-   * Each window is its own JS context, so these stores are independent of the
-   * main window's (AppShell's onMount never runs here).
+   * The capture/encode backend (`tyto-be`) is real — recording, audio and
+   * screenshots run through it; the store falls back to a mock only while it's
+   * detached. Each window is its own JS context, so these stores are independent
+   * of the main window's (AppShell's onMount never runs here).
    */
   import { onMount } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';

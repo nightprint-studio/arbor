@@ -76,6 +76,9 @@ fn place_top_center(w: &tauri::WebviewWindow, width: f64) {
 /// Main-thread builder: an opaque, content-protected, always-on-top pill at the top
 /// center of the primary monitor (compact layout by default).
 fn build_hud_window(app: &AppHandle) {
+    // Recording is now live (the HUD is the on-screen control): let the global-shortcut
+    // handler know a press should STOP rather than open a new selector.
+    super::tyto::set_recording(true);
     if let Some(w) = app.get_webview_window(TYTO_HUD_LABEL) {
         show_and_focus(&w);
         return;
@@ -104,8 +107,10 @@ fn build_hud_window(app: &AppHandle) {
         }
         Err(e) => {
             tracing::error!("failed to open tyto recording hud: {e}");
+            super::tyto::set_recording(false);
             // Don't leave Tyto hidden if the HUD couldn't open.
             if let Some(w) = app.get_webview_window(super::tyto::TYTO_WINDOW_LABEL) {
+                super::tyto::reset_to_full_panel(&w);
                 show_and_focus(&w);
             }
         }
@@ -137,10 +142,15 @@ pub async fn close_recording_hud(app: AppHandle) {
     if let Ok(mut g) = HUD_INIT.lock() {
         *g = None;
     }
+    super::tyto::set_recording(false);
     if let Some(w) = app.get_webview_window(TYTO_HUD_LABEL) {
         let _ = w.close();
     }
     if let Some(w) = app.get_webview_window(super::tyto::TYTO_WINDOW_LABEL) {
+        // A countdown-started recording left Tyto at its monitor-covering "countdown"
+        // bounds (hidden during the recording) — restore the normal panel geometry before
+        // revealing it. Idempotent for recordings that never covered.
+        super::tyto::reset_to_full_panel(&w);
         show_and_focus(&w);
     }
     let app = app.clone();

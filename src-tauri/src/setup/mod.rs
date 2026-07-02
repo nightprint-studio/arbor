@@ -83,7 +83,15 @@ pub fn build_builder() -> tauri::Builder<tauri::Wry> {
                         }
                         if let Some(sc) = crate::window::tyto::current_tyto_shortcut() {
                             if shortcut == &sc {
-                                crate::window::tyto::open_or_focus(app);
+                                // Context-aware: while a recording runs the same key STOPS
+                                // it (from anywhere, without surfacing Tyto); otherwise it's
+                                // quick-capture — open straight into the in-window Snip
+                                // selector, not the full panel.
+                                if crate::window::tyto::is_recording() {
+                                    crate::window::tyto::request_stop_recording(app);
+                                } else {
+                                    crate::window::tyto::open_or_focus_snip(app);
+                                }
                             }
                         }
                     }

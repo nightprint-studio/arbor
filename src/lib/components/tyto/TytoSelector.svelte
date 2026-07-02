@@ -1,48 +1,38 @@
 <script lang="ts">
   /**
-   * RegionSelectorWindow — the standalone OPAQUE frozen-frame region selector.
+   * TytoSelector — the IN-WINDOW fullscreen Snip-style capture selector.
    *
-   * Mounted in its own OS window (`tyto-region`, built by `window/region.rs`), sized to
-   * cover one monitor (rect/free/smart) or the whole virtual desktop (window/display).
-   * Shows the frozen backdrop full-bleed and offers five ways to pick, from the toolbar:
+   * Unlike the old standalone `tyto-region` OS window, this is a `position:fixed`
+   * surface rendered INSIDE the Tyto window while `recorderStore.selecting`. The shell
+   * has already grown the window to cover ONE monitor (`setTytoSelection`) and painted
+   * a frozen backdrop of it; here we let the user pick directly on that surface.
+   *
+   * Five methods, chosen from the top-center toolbar:
    *  • **Rectangle** — drag a box.
-   *  • **Freehand** — trace a shape; its bounding box is captured.
-   *  • **Smart** — hover an element (UI Automation rects captured before the overlay
-   *    opened); scroll to widen/narrow through its container chain; click to capture.
+   *  • **Freehand** — trace a shape; its bounding box (+ polygon mask) is captured.
+   *  • **Smart** — hover a UI-Automation element; scroll to widen/narrow through its
+   *    container chain; click to capture.
    *  • **Window** — hover a window (blue outline), click to pick that whole window.
-   *  • **Display** — hover a monitor (blue outline + name), click to pick that monitor.
-   * Rectangle/freehand/smart confirm a CSS-pixel rect (→ physical region in Tyto);
-   * window/display route the picked id back to Tyto with no rectangle.
-   * Opaque, never transparent — a transparent WebView2 window traps input on Windows.
+   *  • **Display** — capture the WHOLE current monitor (no hover — one display at a time).
+   * Rectangle/freehand/smart resolve a monitor-local CSS rect (→ physical region);
+   * window routes the picked id; display commits the current monitor id.
+   *
+   * All geometry (frozen backdrop, `selectElements`, `selectWindows`, drawn rects and
+   * freehand points) lives in the SAME monitor-local CSS-px space. State is read/written
+   * straight on `recorderStore` — no window_ready / reveal / getRegionInit plumbing.
    */
-  import { onMount } from 'svelte';
-  import { convertFileSrc } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
-  import { Square, PenTool, MousePointer2, AppWindow, Monitor } from 'lucide-svelte';
-  import {
-    getRegionInit, regionSelectorConfirm, regionSelectorCancel, regionSelectorPick,
-    type ElemRect, type WinRect, type MonRect,
-  } from '$lib/ipc/tyto/region-window';
-  import { signalWindowReady } from '$lib/ipc/window';
-  import { themeStore } from '$lib/stores/theme.svelte';
-  import { appearanceStore } from '$lib/stores/appearance.svelte';
-  import { animStore } from '$lib/stores/animations.svelte';
+  import { Square, PenTool, MousePointer2, AppWindow, Monitor, Video, Camera, X, Maximize2 } from 'lucide-svelte';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { recorderStore, type SelectMethod } from '$lib/stores/tyto/recorder.svelte';
 
-  type SelMode = 'rect' | 'free' | 'smart' | 'window' | 'display';
   type Rect = { x: number; y: number; w: number; h: number };
+  type HoverRect = Rect & { id?: string; name?: string };
 
-  // Pushed by the shell when the (reused, hidden) overlay is re-opened for a new
-  // selection — matches `REGION_REINIT_EVENT` in `src-tauri/src/window/region.rs`.
-  const REGION_REINIT_EVENT = 'tyto://region-reinit';
+  // Active pick method — mirrors the store (setMode writes both).
+  let mode = $state<SelectMethod>(recorderStore.selectMethod);
 
-  let mode = $state<SelMode>('rect');
-  let points = $state<{ x: number; y: number }[]>([]);
-  let elements = $state<ElemRect[]>([]);
-  let windows = $state<WinRect[]>([]);
-  let monitors = $state<MonRect[]>([]);
-
-  let screenshotUrl = $state<string | null>(null);
   let root = $state<HTMLDivElement | null>(null);
+  let points = $state<{ x: number; y: number }[]>([]);
   let dragging = $state(false);
   let start = { x: 0, y: 0 };
   let cur = $state({ x: 0, y: 0 });
@@ -50,22 +40,9 @@
   // Smart mode: which container level (0 = smallest element under the cursor).
   let smartLevel = $state(0);
 
-  // The hover-pick modes (smart / window / display) all work the same way: hit-test the
-  // cursor against a list of rects, smallest-area-containing first, and highlight one.
-  // `smart` walks the container chain with the scroll wheel; window/display click-pick.
-  const isHover = $derived(mode === 'smart' || mode === 'window' || mode === 'display');
-
-  // The window is built hidden; reveal it once the frozen frame has painted (via the
-  // generic window_ready) so there's no white load flash. Excluded from the central
-  // reveal in +page.svelte precisely so it can wait for the image's `load` — a generic
-  // double-rAF could show the overlay before the PNG decodes. Idempotent + a shell-side
-  // fallback so it can never stay hidden.
-  let revealed = false;
-  function reveal() {
-    if (revealed) return;
-    revealed = true;
-    void signalWindowReady();
-  }
+  // The hover-pick modes (smart / window) hit-test the cursor against a list of rects
+  // and highlight one. Display is a whole-monitor pick (no hover rects).
+  const isHover = $derived(mode === 'smart' || mode === 'window');
 
   // Rectangle / freehand selection box (freehand → bounding box of the traced path).
   const dragRect = $derived.by<Rect>(() => {
@@ -86,19 +63,15 @@
 
   const freePath = $derived(points.map((p) => `${p.x},${p.y}`).join(' '));
 
-  // The rects the active hover mode hit-tests against (elements / windows / monitors).
-  // Windows & monitors carry an `id` (+ a `name` on monitors); elements don't — the
-  // extra fields ride along harmlessly for the shared geometry.
-  type HoverRect = Rect & { id?: string; name?: string };
+  // The rects the active hover mode hit-tests against (smart elements / windows).
   const hoverRects = $derived<HoverRect[]>(
-    mode === 'smart' ? elements
-    : mode === 'window' ? windows
-    : mode === 'display' ? monitors
+    mode === 'smart' ? recorderStore.selectElements
+    : mode === 'window' ? recorderStore.selectWindows
     : [],
   );
 
   // Rects under the cursor, smallest area first (≈ the ancestor chain / topmost window).
-  // `smartLevel` walks it (scroll wheel) in smart mode; window/display use level 0.
+  // `smartLevel` walks it (scroll wheel) in smart mode; window uses level 0.
   const hoverContaining = $derived.by<HoverRect[]>(() => {
     if (!isHover) return [];
     const { x, y } = cur;
@@ -110,98 +83,42 @@
     hoverContaining.length ? hoverContaining[Math.min(smartLevel, hoverContaining.length - 1)] : null,
   );
 
-  // In window/display mode the overlay spans the WHOLE virtual desktop, so a toolbar
-  // centered on the overlay lands BETWEEN monitors (half off-screen). Anchor it to the
-  // monitor under the cursor instead — the screen the user is actually working on —
-  // falling back to the first. rect/free/smart cover a single monitor, so their overlay
-  // is already that monitor and the CSS default (overlay-centered) is correct → null.
-  const activeMonitor = $derived.by<MonRect | null>(() => {
-    if ((mode !== 'window' && mode !== 'display') || !monitors.length) return null;
-    const { x, y } = cur;
-    return monitors.find((m) => x >= m.x && x < m.x + m.w && y >= m.y && y < m.y + m.h) ?? monitors[0];
-  });
-  // Inline toolbar placement: centered on the active monitor (window/display) or unset
-  // (CSS centers it on the single-monitor overlay for rect/free/smart).
-  const toolbarStyle = $derived(
-    activeMonitor
-      ? `top:${activeMonitor.y + 18}px; left:${activeMonitor.x + activeMonitor.w / 2}px; transform:translateX(-50%);`
-      : '',
-  );
-
   const MIN = 8;
-  // The rect that will actually be captured, per mode.
+  // The rect that will actually be captured, per mode (null in display mode — the whole
+  // monitor is the target, drawn frame-wide via a full-surface highlight instead).
   const selRect = $derived.by<Rect | null>(() => {
+    if (mode === 'display') return null;
     if (isHover) return hoverRect;
     if (!hasRect) return null;
     return dragRect.w >= MIN && dragRect.h >= MIN ? dragRect : null;
   });
-  const canConfirm = $derived(!!selRect && !dragging);
 
-  function setMode(m: SelMode) {
+  // A confirmable target exists: a rect for rect/free/smart, a hovered window for window,
+  // always in display (the current monitor).
+  const canConfirm = $derived(
+    mode === 'display' ? true : mode === 'window' ? !!hoverRect : (!!selRect && !dragging),
+  );
+
+  const captureVerb = $derived(recorderStore.mode === 'record' ? 'Record' : 'Capture');
+
+  function setMode(m: SelectMethod) {
     mode = m;
+    recorderStore.setSelectMethod(m);
     hasRect = false;
     dragging = false;
     points = [];
     smartLevel = 0;
   }
 
-  /** Load the current init (frozen frame + hover targets + starting mode) and reset the
-   *  selection state. Run on mount AND on `tyto://region-reinit` — the overlay window is
-   *  REUSED across selections (hidden, not closed, to avoid a laggy rebuild), so each new
-   *  selection re-pulls its init here rather than remounting. */
-  async function loadInit() {
-    // Clear any leftover selection from the previous use.
-    points = []; hasRect = false; dragging = false; smartLevel = 0;
-    try {
-      const init = await getRegionInit();
-      if (!init) { void regionSelectorCancel(); return; }
-      screenshotUrl = convertFileSrc(init.path);
-      elements = init.elements ?? [];
-      windows = init.windows ?? [];
-      monitors = init.monitors ?? [];
-      // Start in the mode the user picked on the mini toolbar. Hover modes fall back to
-      // rect if their target list is empty (smart → no UI elements, window/display →
-      // nothing enumerated, e.g. off Windows).
-      const m = init.initial_mode;
-      if (m === 'free') mode = 'free';
-      else if (m === 'smart') mode = elements.length ? 'smart' : 'rect';
-      else if (m === 'window') mode = windows.length ? 'window' : 'rect';
-      else if (m === 'display') mode = monitors.length ? 'display' : 'rect';
-      else mode = 'rect';
-    } catch {
-      void regionSelectorCancel();
-    }
-  }
-
-  onMount(() => {
-    // Standalone window: apply the app theme/appearance/animation config so the
-    // overlay matches the main window (else it falls back to hardcoded defaults).
-    void themeStore.init();
-    void appearanceStore.loadConfig();
-    void animStore.loadConfig();
-    void loadInit();
-    // Reused-window path: the shell hides (not closes) this overlay between selections
-    // and pushes this event on the next open. Re-arm the reveal and blank the stale
-    // frame, then reload — the new frame's `load` reveals the (still-hidden) window.
-    let un: (() => void) | undefined;
-    void listen(REGION_REINIT_EVENT, () => {
-      revealed = false;
-      screenshotUrl = null;
-      void loadInit();
-    }).then((f) => { un = f; });
-    const t = setTimeout(reveal, 700);
-    return () => { clearTimeout(t); un?.(); };
-  });
-
-  /** Window-local coords (the window origin is the monitor origin, so clientX/Y is
-   *  already monitor-logical). */
+  /** Surface-local coords (the surface fills the frozen monitor, so clientX/Y offset by
+   *  the surface origin is monitor-logical). */
   function local(e: MouseEvent): { x: number; y: number } {
     const b = root?.getBoundingClientRect();
     return { x: e.clientX - (b?.left ?? 0), y: e.clientY - (b?.top ?? 0) };
   }
 
   function onMouseDown(e: MouseEvent) {
-    if (e.button !== 0 || isHover) return; // hover modes confirm on mouse-up click
+    if (e.button !== 0 || isHover || mode === 'display') return; // hover/display click-confirm
     const p = local(e);
     if (mode === 'free') {
       points = [p];
@@ -233,37 +150,50 @@
     smartLevel = Math.max(0, Math.min(smartLevel + (e.deltaY > 0 ? 1 : -1), n - 1));
   }
 
-  function cancel() { void regionSelectorCancel(); }
+  // The selector IS Tyto's primary (compact) presentation, so dismissing it (Esc /
+  // right-click / Close) closes the whole Tyto window — like Windows' Snip. Going to the
+  // full control panel ("expand") is the explicit secondary action.
+  function closeTyto() { void getCurrentWindow().close(); }
+  function expand() { void recorderStore.exitSelection(); }
+
   function confirm() {
-    // Window / display: route the hovered target's id back to Tyto — no rectangle.
-    if (mode === 'window' || mode === 'display') {
+    if (mode === 'display') {
+      void recorderStore.commitMonitor(recorderStore.selectMonitorId);
+      return;
+    }
+    if (mode === 'window') {
       const id = hoverRect?.id;
       if (!id) return;
-      void regionSelectorPick(mode === 'window' ? 'window' : 'display', id);
+      void recorderStore.commitWindow(id);
       return;
     }
     const r = selRect;
     if (!r) return;
-    // Freehand: forward the traced polygon (window-local CSS px) so the screenshot is
+    // Freehand: forward the traced polygon (monitor-local CSS px) so the screenshot is
     // masked to the shape. Other modes send just the bounding rect (no mask).
     const poly = mode === 'free' && points.length > 2
       ? points.map((p) => [Math.round(p.x), Math.round(p.y)])
       : null;
-    void regionSelectorConfirm({ x: r.x, y: r.y, width: r.w, height: r.h, points: poly });
+    void recorderStore.commitRegion({ x: r.x, y: r.y, width: r.w, height: r.h }, poly);
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-    else if (e.key === 'Enter') { e.preventDefault(); confirm(); }
+    if (e.key === 'Escape') { e.preventDefault(); closeTyto(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (canConfirm) confirm(); }
   }
 
   const hint = $derived(
     mode === 'free' ? 'to trace a shape'
     : mode === 'smart' ? 'over an element · scroll to resize · click'
     : mode === 'window' ? 'over a window · click to pick it'
-    : mode === 'display' ? 'over a monitor · click to pick it'
+    : mode === 'display' ? 'the whole monitor — switch display or Capture'
     : 'to select a region',
   );
+  const hintLead = $derived(mode === 'display' ? 'Captures' : isHover ? 'Hover' : 'Drag');
+
+  const canSmart = $derived(recorderStore.selectElements.length > 0);
+  const canWindow = $derived(recorderStore.selectWindows.length > 0);
+  const canSwitchMonitor = $derived(recorderStore.monitors.length > 1);
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -272,20 +202,21 @@
 <div
   class="selector"
   class:smart={isHover}
+  class:display={mode === 'display'}
   bind:this={root}
   role="application"
-  aria-label="Select a capture region — Esc to cancel, Enter to confirm"
+  aria-label="Select a capture region — Esc to exit, Enter to capture"
   onmousedown={onMouseDown}
   onmousemove={onMouseMove}
   onmouseup={onMouseUp}
   onwheel={onWheel}
-  oncontextmenu={(e) => { e.preventDefault(); cancel(); }}
+  oncontextmenu={(e) => { e.preventDefault(); closeTyto(); }}
 >
-  {#if screenshotUrl}
-    <img class="frozen" src={screenshotUrl} alt="" draggable="false" onload={reveal} />
+  {#if recorderStore.selectFrozenUrl}
+    <img class="frozen" src={recorderStore.selectFrozenUrl} alt="" draggable="false" />
   {/if}
 
-  {#if !selRect && !(mode === 'free' && dragging)}
+  {#if !selRect && !(mode === 'free' && dragging) && mode !== 'display'}
     <div class="veil"></div>
   {/if}
 
@@ -295,19 +226,20 @@
     </svg>
   {/if}
 
-  {#if selRect}
+  {#if mode === 'display'}
+    <!-- Whole-monitor pick: outline the entire frozen surface + its name. -->
+    <div class="rect is-hover full">
+      <span class="mon-name">{recorderStore.selectMonitorName}</span>
+    </div>
+  {:else if selRect}
     <div class="rect" class:is-hover={isHover} style={`left:${selRect.x}px; top:${selRect.y}px; width:${selRect.w}px; height:${selRect.h}px;`}>
-      {#if mode === 'display' && hoverRect?.name}
-        <span class="mon-name">{hoverRect.name}</span>
-      {:else}
-        <span class="dims">{selRect.w} × {selRect.h}</span>
-      {/if}
+      <span class="dims">{selRect.w} × {selRect.h}</span>
     </div>
   {/if}
 
-  <div class="toolbar" role="toolbar" tabindex="-1" aria-label="Region selection" style={toolbarStyle}
+  <div class="toolbar" role="toolbar" tabindex="-1" aria-label="Capture selection"
        onmousedown={(e) => e.stopPropagation()} onmouseup={(e) => e.stopPropagation()} onwheel={(e) => e.stopPropagation()}>
-    <div class="tb-modes" role="group" aria-label="Selection shape">
+    <div class="tb-modes" role="group" aria-label="Selection method">
       <button type="button" class="tb-mode" class:on={mode === 'rect'} onclick={() => setMode('rect')} title="Rectangle" aria-pressed={mode === 'rect'}>
         <Square size={14} />
       </button>
@@ -321,40 +253,58 @@
         class="tb-mode"
         class:on={mode === 'smart'}
         onclick={() => setMode('smart')}
-        disabled={elements.length === 0}
-        title={elements.length ? 'Smart (pick an element)' : 'Smart pick — no UI elements detected here'}
+        disabled={!canSmart}
+        title={canSmart ? 'Smart (pick an element)' : 'Smart pick — no UI elements detected here'}
         aria-pressed={mode === 'smart'}
       >
         <MousePointer2 size={14} />
       </button>
-      <!-- Window / display pickers — disabled (with a reason) when nothing was
-           enumerated to hover (e.g. off Windows). -->
       <button
         type="button"
         class="tb-mode"
         class:on={mode === 'window'}
         onclick={() => setMode('window')}
-        disabled={windows.length === 0}
-        title={windows.length ? 'Window (pick a window)' : 'Window pick — no windows detected'}
+        disabled={!canWindow}
+        title={canWindow ? 'Window (pick a window)' : 'Window pick — no windows detected'}
         aria-pressed={mode === 'window'}
       >
         <AppWindow size={14} />
       </button>
-      <button
-        type="button"
-        class="tb-mode"
-        class:on={mode === 'display'}
-        onclick={() => setMode('display')}
-        disabled={monitors.length === 0}
-        title={monitors.length ? 'Display (pick a monitor)' : 'Display pick — no monitors detected'}
-        aria-pressed={mode === 'display'}
-      >
+      <button type="button" class="tb-mode" class:on={mode === 'display'} onclick={() => setMode('display')} title="Display (whole monitor)" aria-pressed={mode === 'display'}>
         <Monitor size={14} />
       </button>
     </div>
-    <span class="tb-hint"><strong>{isHover ? 'Hover' : 'Drag'}</strong> {hint}</span>
-    <button type="button" class="tb-btn confirm" disabled={!canConfirm} onclick={confirm}>Capture <span class="tb-k">Enter</span></button>
-    <button type="button" class="tb-btn cancel" onclick={cancel}>Cancel <span class="tb-k">Esc</span></button>
+
+    <span class="tb-hint"><strong>{hintLead}</strong> {hint}</span>
+
+    <!-- Record / Screenshot 2-way toggle so Capture knows what to do. -->
+    <div class="tb-cap" role="group" aria-label="Capture mode">
+      <button type="button" class="tb-cap-btn" class:on={recorderStore.mode === 'record'} onclick={() => recorderStore.setMode('record')} title="Record video" aria-pressed={recorderStore.mode === 'record'}>
+        <Video size={13} /> Record
+      </button>
+      <button type="button" class="tb-cap-btn" class:on={recorderStore.mode === 'screenshot'} onclick={() => recorderStore.setMode('screenshot')} title="Screenshot" aria-pressed={recorderStore.mode === 'screenshot'}>
+        <Camera size={13} /> Shot
+      </button>
+    </div>
+
+    <!-- Monitor switch — cycles the frozen backdrop across displays. -->
+    <button
+      type="button"
+      class="tb-btn monitor"
+      onclick={() => void recorderStore.switchSelectionMonitor()}
+      disabled={!canSwitchMonitor}
+      title={canSwitchMonitor ? 'Switch monitor' : 'Only one monitor'}
+    >
+      <Monitor size={13} /> {recorderStore.selectMonitorName}
+    </button>
+
+    <button type="button" class="tb-btn confirm" disabled={!canConfirm} onclick={confirm}>{captureVerb} <span class="tb-k">Enter</span></button>
+    <button type="button" class="tb-btn expand" onclick={expand} title="Full control panel" aria-label="Full control panel">
+      <Maximize2 size={13} />
+    </button>
+    <button type="button" class="tb-btn cancel" onclick={closeTyto} title="Close Tyto">
+      <X size={13} /> <span class="tb-k">Esc</span>
+    </button>
   </div>
 </div>
 
@@ -369,6 +319,7 @@
     background: #000;
   }
   .selector.smart { cursor: default; }
+  .selector.display { cursor: default; }
   .frozen {
     position: absolute;
     inset: 0;
@@ -394,7 +345,9 @@
     box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.35);
     pointer-events: none;
   }
-  /* Hover picks (smart / window / display) read distinctly — a bluish highlight. */
+  /* Display mode: outline the whole surface (inset so the border reads). */
+  .rect.full { inset: 0; box-shadow: none; }
+  /* Hover / whole picks (smart / window / display) read distinctly — a bluish highlight. */
   .rect.is-hover {
     border-color: #4aa3ff;
     background: rgba(74, 163, 255, 0.10);
@@ -407,6 +360,9 @@
     color: #fff; background: var(--accent, #f28b82);
     padding: 1px 6px; border-radius: 4px; white-space: nowrap;
   }
+  /* In display mode the outline hugs the surface edges, so its label can't sit above
+     the top border (off-screen) — nudge it inside. */
+  .rect.full .mon-name { top: 14px; left: 14px; }
   .mon-name { font-variant-numeric: normal; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; }
 
   .toolbar {
@@ -441,6 +397,23 @@
   .tb-hint { font-size: 12.5px; color: var(--text-secondary, #cbd5e1); }
   .tb-hint strong { color: var(--text-primary, #fff); }
 
+  /* Record / Screenshot segmented toggle. */
+  .tb-cap {
+    display: inline-flex; align-items: center; gap: 2px;
+    padding: 2px; border-radius: 999px;
+    background: var(--bg-input, #222); border: 1px solid var(--border, #333);
+  }
+  .tb-cap-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 24px; padding: 0 10px;
+    border: none; border-radius: 999px; cursor: pointer;
+    font-size: 12px; font-weight: 600;
+    background: transparent; color: var(--text-secondary, #cbd5e1);
+    transition: background var(--transition-fast, 0.12s), color var(--transition-fast, 0.12s);
+  }
+  .tb-cap-btn:hover:not(.on) { color: var(--text-primary, #fff); }
+  .tb-cap-btn.on { background: var(--accent, #f28b82); color: var(--text-on-accent, #fff); }
+
   .tb-btn {
     display: inline-flex; align-items: center; gap: 7px;
     height: 28px; padding: 0 12px;
@@ -453,6 +426,14 @@
     padding: 1px 5px; border-radius: 5px;
     background: rgba(255, 255, 255, 0.16); color: inherit;
   }
+  .tb-btn.monitor {
+    background: var(--bg-input, #222); color: var(--text-primary, #fff); border-color: var(--border, #333);
+    max-width: 220px;
+  }
+  .tb-btn.monitor:hover:not(:disabled) { background: var(--bg-hover, #262b38); }
+  .tb-btn.monitor:disabled { opacity: 0.4; cursor: default; }
+  .tb-btn.expand { background: var(--bg-input, #222); color: var(--text-secondary, #cbd5e1); border-color: var(--border, #333); padding: 0 9px; }
+  .tb-btn.expand:hover { background: var(--bg-hover, #262b38); color: var(--text-primary, #fff); }
   .tb-btn.confirm { background: var(--accent, #f28b82); color: var(--text-on-accent, #fff); border-color: var(--accent, #f28b82); }
   .tb-btn.confirm:hover:not(:disabled) { filter: brightness(1.1); }
   .tb-btn.confirm:disabled { opacity: 0.4; cursor: default; }
