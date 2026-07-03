@@ -365,9 +365,11 @@
       <span class="gen-label gen-preview-label">Preview</span>
       <div class="gen-preview">
         {#if canInsert}
-          {#key preview}
-            <CodeEditor value={preview} language={javaLanguage} readOnly />
-          {/key}
+          <!-- One editor, updated via its `value` prop — NOT re-`{#key}`ed on every
+               preview change, which would destroy + rebuild a full tree-sitter editor
+               (grammar + parser + all extensions) on each option toggle and froze the
+               modal. The read-only editor still reflects each new `preview` live. -->
+          <CodeEditor value={preview} language={javaLanguage} readOnly />
         {:else}
           <div class="gen-preview-empty">
             <EmptyState message={noneSelected ? 'Select at least one field.' : 'Nothing to generate.'} />

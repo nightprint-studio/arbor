@@ -5,12 +5,14 @@
    * Clicking a row opens the file and jumps to the line. Fetches on mount + when the
    * project changes; the dock's Refresh action calls `refresh()` via bind:this.
    */
-  import { ListTodo, ChevronRight, ChevronDown, FileCode2 } from 'lucide-svelte';
+  import { ListTodo, ChevronRight, ChevronDown, FileCode2, ArrowRight, Copy } from 'lucide-svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { todos as ipcTodos } from '$lib/ipc/bennu';
   import type { TodoItem } from '$lib/types/bennu';
 
@@ -57,6 +59,26 @@
     void projectStore.openFile(t.file).then(() => bennuUiStore.requestGoto(t.line));
   }
   function countOf(kind: string): number { return items.filter((t) => t.kind === kind).length; }
+
+  function copyText(text: string) {
+    // Best-effort — clipboard can be denied (permission / focus); swallow.
+    void navigator.clipboard?.writeText(text).catch(() => { /* clipboard denied — ignore */ });
+  }
+
+  function onRowContextMenu(t: TodoItem, e: MouseEvent) {
+    e.preventDefault();
+    // Local name avoids shadowing the module-level `items` TODO state.
+    const menuItems: MenuItem[] = [
+      { id: 'goto', label: 'Go to', icon: ArrowRight },
+      { id: 'copy-text', label: 'Copy text', icon: Copy },
+    ];
+    bennuContextMenuStore.show(e.clientX, e.clientY, menuItems, (id) => {
+      switch (id) {
+        case 'goto':      open(t); break;
+        case 'copy-text': copyText(t.text); break;
+      }
+    });
+  }
 </script>
 
 <div class="todo">
@@ -90,7 +112,7 @@
         </button>
         {#if !collapsed.has(file)}
           {#each group as t, i (i)}
-            <button class="row" type="button" onclick={() => open(t)}>
+            <button class="row" type="button" onclick={() => open(t)} oncontextmenu={(e) => onRowContextMenu(t, e)}>
               <span class="tag k-{t.kind.toLowerCase()}">{t.kind}</span>
               <span class="row-text">{t.text || '—'}</span>
               <span class="row-line">{t.line}</span>

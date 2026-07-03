@@ -210,6 +210,26 @@ mod tests {
         assert_eq!(infer(src).binary_name, "com/acme/Customer");
     }
 
+    #[test]
+    fn local_of_same_file_type_without_resolver_hint() {
+        // `Order` is declared in THIS file but the resolver has NO simple→binary hint for
+        // it (only `Customer`/JDK types are seeded). The same-file `symbols.types` fallback
+        // must bind `Order` -> its package-qualified binary name so a local of it resolves.
+        let src = r#"package com.acme;
+            class Order { int total; }
+            class Repo { void run() { Order o = new Order(); o. } }"#;
+        assert_eq!(infer(src).binary_name, "com/acme/Order");
+    }
+
+    #[test]
+    fn nested_type_local_resolves_to_qualified_fqn() {
+        // A nested type's FQN (`com.acme.Outer.Inner`) comes off the extracted symbols; a
+        // local of it must bind to the fully-qualified binary name, not a bare `Inner`.
+        let src = r#"package com.acme;
+            class Outer { class Inner { } void run() { Inner x = null; x. } }"#;
+        assert_eq!(infer(src).binary_name, "com/acme/Outer/Inner");
+    }
+
     // ---- extract_symbols structural tests ----
 
     #[test]

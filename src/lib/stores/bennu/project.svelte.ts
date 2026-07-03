@@ -235,6 +235,33 @@ function createProjectStore() {
       }
     },
 
+    /** Close every tab except `path` — it becomes the active one (so the surviving
+     *  tab is always focused, regardless of what was active before). No-op when the
+     *  path isn't open. */
+    closeOthers(path: string) {
+      if (!openFilePaths.includes(path)) return;
+      openFilePaths = [path];
+      activeFilePath = path;
+    },
+
+    /** Close all open tabs. */
+    closeAll() {
+      openFilePaths = [];
+      activeFilePath = null;
+    },
+
+    /** Close every tab to the right of `path` (keeps `path` and everything before it).
+     *  If the active tab was among those closed, `path` becomes active so focus stays
+     *  on a surviving tab. No-op when the path isn't open. */
+    closeToRight(path: string) {
+      const idx = openFilePaths.indexOf(path);
+      if (idx === -1) return;
+      const kept = openFilePaths.slice(0, idx + 1);
+      if (kept.length === openFilePaths.length) return; // nothing to the right
+      openFilePaths = kept;
+      if (activeFilePath && !kept.includes(activeFilePath)) activeFilePath = path;
+    },
+
     /** Set the active tab (must already be open). */
     setActive(path: string) {
       if (openFilePaths.includes(path)) activeFilePath = path;

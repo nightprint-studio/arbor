@@ -3,20 +3,19 @@
  * file by extension.
  *
  * Java uses the real tree-sitter descriptor ({@link javaLanguage} — semantic
- * highlight, folding, go-to, completion). Every other file type Bennu opens (XML,
- * JSP/HTML, YAML, `.properties`, JSON, Markdown, CSS/SCSS, JS, SQL, shell) uses a
- * CodeMirror built-in / legacy-mode language via the descriptor's `cmExtension` seam,
- * highlighted by the shared Lezer style. Unknown types get a plain (no-highlight)
- * descriptor so they're still fully editable.
- *
- * All languages here are already dependencies (`@codemirror/legacy-modes`,
- * `lang-json`, `lang-markdown`) — no new libraries.
+ * highlight, folding, go-to, completion). HTML + JSP use the tree-based
+ * `@codemirror/lang-html` (distinct, consistent HTML/JS/CSS highlight + tag folding),
+ * with a JSP decoration overlay for `<% … %>` / `${ … }`. Every other file type (XML,
+ * YAML, `.properties`, JSON, Markdown, CSS/SCSS, JS, SQL, shell) uses a CodeMirror
+ * built-in / legacy-mode language via the descriptor's `cmExtension` seam, highlighted
+ * by the shared Lezer style. Unknown types get a plain (no-highlight) descriptor so
+ * they're still fully editable.
  */
 
 import type { LanguageDescriptor } from '$lib/components/shared/ui/code-editor';
 import type { Extension } from '@codemirror/state';
 import { StreamLanguage, type StreamParser } from '@codemirror/language';
-import { xml, html } from '@codemirror/legacy-modes/mode/xml';
+import { xml } from '@codemirror/legacy-modes/mode/xml';
 import { css, sCSS, less } from '@codemirror/legacy-modes/mode/css';
 import { javascript } from '@codemirror/legacy-modes/mode/javascript';
 import { properties } from '@codemirror/legacy-modes/mode/properties';
@@ -25,16 +24,20 @@ import { standardSQL } from '@codemirror/legacy-modes/mode/sql';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
+import { html } from '@codemirror/lang-html';
 import { javaLanguage } from './java-lang';
-import { jsp } from './jsp-mode';
+import { jspOverlay } from './jsp-mode';
 
-/** A CM-language descriptor: no tree-sitter parser, highlight from `cmExtension`. */
-function cmLang(id: string, ext: Extension): LanguageDescriptor {
+/** A CM-language descriptor: no tree-sitter parser, highlight from `cmExtension`.
+ *  `fold` opts into the Lezer fold gutter (only for languages whose grammar carries
+ *  `foldNodeProp`, e.g. lang-html / lang-json — not the fold-less legacy modes). */
+function cmLang(id: string, ext: Extension, fold = false): LanguageDescriptor {
   return {
     id,
     createParser: () => Promise.reject(new Error(`cm-language:${id} has no tree-sitter parser`)),
     classify: () => null,
     cmExtension: ext,
+    cmFold: fold,
   };
 }
 
@@ -45,9 +48,10 @@ function streamLang(id: string, parser: StreamParser<unknown>): LanguageDescript
 
 // Module-singleton descriptors (built once).
 const xmlLang = streamLang('xml', xml);
-const htmlLang = streamLang('html', html);
-// JSP/JSPF/tag files: the HTML mode plus JSP `<% … %>` scriptlet/comment handling.
-const jspLang = streamLang('jsp', jsp);
+// HTML: the real lang-html tree (embedded JS/CSS highlight + tag folding).
+const htmlLang = cmLang('html', html(), true);
+// JSP/JSPF/tag files: lang-html + a JSP decoration overlay for `<% … %>` / `${ … }`.
+const jspLang = cmLang('jsp', [html(), jspOverlay], true);
 const cssLang = streamLang('css', css);
 const scssLang = streamLang('scss', sCSS);
 const lessLang = streamLang('less', less);

@@ -5,11 +5,13 @@
    * state). The wiring is live: it lights up for free once the backend emits real
    * diagnostics. Clicking a row jumps the editor to the diagnostic's line.
    */
-  import { AlertTriangle, CircleAlert, Info, CircleCheckBig } from 'lucide-svelte';
+  import { AlertTriangle, CircleAlert, Info, CircleCheckBig, ArrowRight, Copy } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { diagnostics as ipcDiagnostics } from '$lib/ipc/bennu';
   import type { Diagnostic } from '$lib/types/bennu';
 
@@ -45,6 +47,25 @@
   function iconFor(sev: Diagnostic['severity']) {
     return sev === 'error' ? CircleAlert : sev === 'warning' ? AlertTriangle : Info;
   }
+
+  function copyText(text: string) {
+    // Best-effort — clipboard can be denied (permission / focus); swallow.
+    void navigator.clipboard?.writeText(text).catch(() => { /* clipboard denied — ignore */ });
+  }
+
+  function onRowContextMenu(d: Diagnostic, e: MouseEvent) {
+    e.preventDefault();
+    const items: MenuItem[] = [
+      { id: 'goto', label: 'Go to', icon: ArrowRight },
+      { id: 'copy-msg', label: 'Copy message', icon: Copy },
+    ];
+    bennuContextMenuStore.show(e.clientX, e.clientY, items, (id) => {
+      switch (id) {
+        case 'goto':     bennuUiStore.requestGoto(lineOfOffset(d.start)); break;
+        case 'copy-msg': copyText(d.message); break;
+      }
+    });
+  }
 </script>
 
 <PanelShell title="Problems" count={diags.length} {hideHeader}>
@@ -59,7 +80,11 @@
     <div class="pb-list">
       {#each diags as d, i (i)}
         {@const Ic = iconFor(d.severity)}
-        <button class="pb-row" onclick={() => bennuUiStore.requestGoto(lineOfOffset(d.start))}>
+        <button
+          class="pb-row"
+          onclick={() => bennuUiStore.requestGoto(lineOfOffset(d.start))}
+          oncontextmenu={(e) => onRowContextMenu(d, e)}
+        >
           <span class="pb-icon sev-{d.severity}"><Ic size={13} /></span>
           <span class="pb-msg">{d.message}</span>
           <span class="pb-loc">@{d.start}</span>

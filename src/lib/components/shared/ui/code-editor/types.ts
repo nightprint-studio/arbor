@@ -119,6 +119,15 @@ export interface LanguageDescriptor {
   cmExtension?: Extension;
 
   /**
+   * Only for a {@link cmExtension} (Lezer) language: opt into CodeMirror's built-in
+   * fold gutter, driven by the language's own `foldNodeProp` (e.g. `@codemirror/lang-html`
+   * folds tag bodies, `lang-json` folds objects/arrays). Left off by default so legacy
+   * `StreamLanguage` modes that carry no fold info don't render an empty gutter. Ignored
+   * for tree-sitter descriptors (they fold via {@link foldNode} instead).
+   */
+  cmFold?: boolean;
+
+  /**
    * Classify a **leaf** CST node into a {@link TokenClass}, or `null` to leave it
    * unstyled. `field` is the parent's field name for this child (disambiguates a
    * bare `identifier` used as a call name vs a type vs a plain reference);

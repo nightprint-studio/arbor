@@ -19,7 +19,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - **Bennu** (Java editor): syntax highlighting for the whole legacy stack, not just Java — XML/JSP, `.properties`, YAML, JSON, Markdown, HTML, CSS/SCSS, JavaScript and SQL files now open with proper colouring.
 - **Bennu** (Java editor): **hover** a class, method or field to see its signature, declaring type and Javadoc in a card.
 - **Bennu** (Java editor): a **right-click menu** in the editor — Cut/Copy/Paste plus Go to definition, Find usages, Rename, Generate and Save — and one on the **project tree** (Open, Copy path, Copy relative path, Reveal).
-- **Bennu** (Java editor): **Find in project** now searches the whole project on the backend with **Match case**, **Whole word** and **Regex** toggles, grouping the hits by file with the match highlighted.
+- **Bennu** (Java editor): **Find in project** now searches the whole project on the backend with **Match case**, **Whole word** and **Regex** toggles, grouping the hits by file with the match highlighted. Results stream in **progressively** as the scan walks the tree, so a large legacy project fills the list incrementally instead of freezing until the end.
 - **Bennu** (Java editor): opt-in **spell-check** for declared names (split by camelCase / snake_case / kebab-case) and comments, against English + Italian dictionaries downloaded on demand. Misspellings show as hints with quick-fixes to replace with a suggestion or add the word to a project or global dictionary. Enable it per project in Project Configuration.
 - **Bennu** (Java editor): the footer now shows real **indexing progress** (with the phase) instead of a static label, and indexing surfaces as a progress card; editing no longer re-indexes the whole project on every keystroke, and Go to Class is instant after the first index.
 - **Bennu** (Java editor): an **Index inspector** (Command Palette) showing index stats — types, members, JDK, config-graph counts — and a searchable list of indexed classes.
@@ -74,6 +74,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **Bennu** (Java editor): typing a dot after a local variable, parameter or field (`order.`) now pops the member-completion list for that variable's type, including types declared in the same file. Previously no popup appeared after the dot.
 - **Bennu** (Java editor): editing a file no longer causes a per-keystroke index error or CPU spike on Windows — typing now updates code completion in memory instead of rewriting (and locking) the on-disk index, so even a small file scrolls and edits smoothly.
 - Fixed a hang that could freeze the Git window when a plugin using the Bevy Remote Protocol stopped watching a query.
 - Opening or closing a product window (Corvus, the File Explorer, the music window) could freeze the whole app — the window stayed blank and the launcher stopped responding, and afterwards no other product would open. Backends now start and stop without ever blocking the app. Closing the File Explorer window also fully stops its backend, so the next open starts it fresh like the other products.

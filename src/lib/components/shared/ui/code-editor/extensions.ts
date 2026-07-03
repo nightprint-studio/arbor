@@ -22,10 +22,10 @@ import {
 } from '@codemirror/view';
 import { EditorState, type Extension, type Text } from '@codemirror/state';
 import { history, defaultKeymap, historyKeymap, indentWithTab, deleteLine } from '@codemirror/commands';
-import { bracketMatching, indentOnInput, foldKeymap } from '@codemirror/language';
+import { bracketMatching, indentOnInput, foldKeymap, foldGutter, codeFolding } from '@codemirror/language';
 import { lintGutter, lintKeymap } from '@codemirror/lint';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
-import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap, startCompletion } from '@codemirror/autocomplete';
 
 import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
@@ -135,6 +135,24 @@ export function createCodeEditorExtensions(
     lintGutter(),
   ];
 
+  // Lezer folding for a `cmExtension` language that opts in (`cmFold`) — drives the
+  // fold gutter from the language's own `foldNodeProp` (e.g. `lang-html` folds tag
+  // bodies, `lang-json` folds objects). Tree-sitter descriptors fold via `foldNode`
+  // above; legacy StreamLanguage modes stay gutter-free (they carry no fold info).
+  if (useCm && lang.cmFold) {
+    exts.push(
+      codeFolding(),
+      foldGutter({
+        markerDOM(open) {
+          const el = document.createElement('span');
+          el.className = open ? 'cm-foldMarker cm-foldMarker-open' : 'cm-foldMarker cm-foldMarker-closed';
+          el.textContent = open ? '▾' : '▸';
+          return el;
+        },
+      }),
+    );
+  }
+
   // Optional vertical margin guide (host opt-in via `rulerColumn`).
   if (opts.rulerColumn && opts.rulerColumn > 0) exts.push(editorRuler(opts.rulerColumn));
 
@@ -144,6 +162,18 @@ export function createCodeEditorExtensions(
   const completionSource = lang.intel?.completion;
   if (completionSource && !opts.readOnly) {
     exts.push(autocompletion({ override: [completionSource], defaultKeymap: false }));
+    // Member-access trigger: CodeMirror's `activateOnTyping` only auto-opens the popup
+    // on identifier characters, so a bare `receiver.` never queries the source. Fire
+    // completion explicitly right after a `.` is typed (the source's dot branch returns
+    // an empty-prefix result → the popup opens on the members).
+    exts.push(EditorView.updateListener.of((u) => {
+      if (!u.docChanged) return;
+      let typedDot = false;
+      u.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
+        if (inserted.sliceString(0).endsWith('.')) typedDot = true;
+      });
+      if (typedDot) startCompletion(u.view);
+    }));
   }
 
   // Hover docs — a `hoverTooltip` source (e.g. a symbol signature via IPC). Installed

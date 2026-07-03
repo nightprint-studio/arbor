@@ -161,6 +161,13 @@ export const codeEditorTheme = EditorView.theme(
     '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--accent) 45%, transparent)' },
     '.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--accent) 18%, transparent)' },
 
+    // ── JSP overlay (see bennu/jsp-mode.ts) — painted over lang-html for the JSP
+    // constructs the HTML grammar doesn't model. Distinct so scriptlets/EL/comments
+    // read apart from the surrounding HTML.
+    '.cm-jsp-comment':   { color: 'var(--syntax-comment, #808080)', fontStyle: 'italic' },
+    '.cm-jsp-scriptlet': { color: 'var(--syntax-annotation, #bbb529)' },
+    '.cm-jsp-el':        { color: 'var(--syntax-field, #9876aa)' },
+
     // ── Token palette ──
     //
     // Conventional, hierarchical colouring using the standard Arbor `--syntax-*`

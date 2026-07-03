@@ -77,6 +77,78 @@
   function capLabel(field: string): string {
     return field.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   }
+
+  // ── Live preview snippets ─────────────────────────────────────────────────
+  // Tiny read-only examples that mirror the current settings so a toggle's effect
+  // is visible before it touches real code. Derived → they re-render on any change.
+
+  // One indent unit: real tabs when the indent style is tabs, else N spaces. Used
+  // by both previews so their indentation tracks the Editor settings faithfully.
+  const indentUnit = $derived(s.indentStyle === 'tabs' ? '\t' : ' '.repeat(s.tabSize));
+
+  // Java Style preview — a minimal class whose formatting reflects the Style card:
+  // final params, Lombok val locals, arrow/return switch, brace spacing, and the
+  // blank line between members.
+  const styleSnippet = $derived.by(() => {
+    const i = indentUnit;
+    const fin = s.finalParams ? 'final ' : '';
+    const localDecl = s.useLombokVal ? 'val' : 'String';
+    // Spaces-in-braces only affects single-line bodies (the getter here).
+    const openB = s.spaceInBraces ? '{ ' : '{';
+    const closeB = s.spaceInBraces ? ' }' : '}';
+    const gap = s.blankLineBetweenMembers ? '\n' : '';
+
+    const getter = `${i}public String getName() ${openB}return this.name;${closeB}`;
+
+    const label = s.switchWithReturn
+      ? [
+          `${i}public String label(${fin}int code) {`,
+          `${i}${i}return switch (code) {`,
+          `${i}${i}${i}case 0 -> "off";`,
+          `${i}${i}${i}default -> "on";`,
+          `${i}${i}};`,
+          `${i}}`,
+        ].join('\n')
+      : [
+          `${i}public String label(${fin}int code) {`,
+          `${i}${i}${localDecl} result;`,
+          `${i}${i}switch (code) {`,
+          `${i}${i}${i}case 0: result = "off"; break;`,
+          `${i}${i}${i}default: result = "on";`,
+          `${i}${i}}`,
+          `${i}${i}return result;`,
+          `${i}}`,
+        ].join('\n');
+
+    return [
+      'public class Account {',
+      `${i}private String name;`,
+      gap ? '' : null,
+      getter,
+      gap ? '' : null,
+      label,
+      '}',
+    ].filter((l) => l !== null).join('\n');
+  });
+
+  // Editor preview — a short block whose indentation, whitespace glyphs and margin
+  // guide mirror the Editor card (tabSize / indentStyle / showWhitespace / rightMargin).
+  const editorSnippet = $derived.by(() => {
+    const i = indentUnit;
+    const raw = [
+      'void demo() {',
+      `${i}int total = compute();`,
+      `${i}${i}// nested`,
+      '}',
+    ].join('\n');
+    // showWhitespace → render the same dot/arrow glyphs the editor would (spaces → ·,
+    // tabs → →). Kept preview-only so the real source text is never mutated.
+    if (!s.showWhitespace) return raw;
+    return raw.replace(/\t/g, '→').replace(/ /g, '·');
+  });
+
+  // Column ruler for the Editor preview — mirrors the right-margin guide (0 hides it).
+  const editorRuler = $derived(s.rightMargin > 0);
 </script>
 
 <Modal {onClose} width="840px" height="560px" padBody={false} ariaLabel="Bennu Settings">
@@ -127,6 +199,16 @@
             <RadioGroup value={s.indentStyle} options={indentOptions} size="sm"
                         onchange={(v) => s.setIndentStyle(v as IndentStyle)} />
           </FormRow>
+        </div>
+        <div class="card">
+          <div class="card-section-title"><TextCursorInput size={12} /> Preview</div>
+          <div class="bs-snippet-wrap">
+            {#if editorRuler}
+              <!-- Margin guide: a thin rule at the configured column, tabSize-relative -->
+              <span class="bs-snippet-ruler" style="left: calc({s.rightMargin}ch + 12px);" aria-hidden="true"></span>
+            {/if}
+            <pre class="bs-snippet" style="tab-size: {s.tabSize};" aria-label="Editor preview">{editorSnippet}</pre>
+          </div>
         </div>
 
       {:else if active === 'completion'}
@@ -194,6 +276,10 @@
           <FormRow label="Blank line between members" description="Separate each generated method with a blank line.">
             <Toggle checked={s.blankLineBetweenMembers} onchange={(v) => s.setBlankLineBetweenMembers(v)} ariaLabel="Blank line between members" />
           </FormRow>
+        </div>
+        <div class="card">
+          <div class="card-section-title"><Wand2 size={12} /> Preview</div>
+          <pre class="bs-snippet" aria-label="Java style preview">{styleSnippet}</pre>
         </div>
 
       {:else if active === 'java'}
@@ -322,4 +408,31 @@
   .bs-hit-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .bs-hit-cap { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
   .bs-hit-detail { font-size: 11.5px; color: var(--text-muted); }
+
+  /* Read-only live-preview snippets (Editor / Java Style cards). */
+  .bs-snippet {
+    margin: 10px 14px 12px;
+    padding: 10px 12px;
+    background: var(--bg-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    font-family: var(--font-code);
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    white-space: pre;
+    overflow-x: auto;
+    user-select: text;
+  }
+  /* Positioning context for the Editor preview's margin guide. */
+  .bs-snippet-wrap { position: relative; }
+  .bs-snippet-ruler {
+    position: absolute;
+    top: 10px;
+    bottom: 12px;
+    width: 1px;
+    background: var(--border-focus);
+    opacity: 0.4;
+    pointer-events: none;
+  }
 </style>

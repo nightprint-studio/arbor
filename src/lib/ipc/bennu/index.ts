@@ -18,7 +18,7 @@
 import { bennu } from '../rpc';
 import type {
   ProjectInfo, TreeNode, ReadFileResult, CapabilitySet, CompletionItem, Diagnostic,
-  BuildResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats, FindHit,
+  BuildResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats,
 } from '$lib/types/bennu';
 
 /** Open a Java project folder: resolve the build model (modules / JDK) + capabilities.
@@ -108,15 +108,22 @@ export function indexStats(root: string): Promise<IndexStats> {
   return bennu('bennu_index_stats', { args: { root } });
 }
 
-/** Recursively search the project for `query`, returning one {@link FindHit} per
- *  matched line. `regex` treats `query` as a pattern; `caseSensitive` / `wholeWord`
- *  refine plain and regex matches alike. Wire: `bennu_find_in_files` —
- *  `FindInFilesArgs { root, query, regex, case_sensitive, whole_word }`. */
+/** Start a **progressive** project-wide search for `query`. Fire-and-forget: results
+ *  stream back as `arbor://bennu/find-progress` events tagged with `searchId`
+ *  (`{ id, hits?: FindHit[], done?: boolean, capped?: boolean }`) as the scan walks the
+ *  tree, so a large legacy project fills the results list incrementally instead of
+ *  blocking until the end. `regex` treats `query` as a pattern; `caseSensitive` /
+ *  `wholeWord` refine plain and regex matches alike. The caller owns `searchId` (a fresh
+ *  one per search) and ignores events from superseded ids. Resolves once the scan has
+ *  been scheduled (not when it finishes — the terminal `done` event signals that).
+ *  Wire: `bennu_find_in_files` — `FindInFilesArgs { root, query, regex, case_sensitive,
+ *  whole_word, search_id }`. */
 export function findInFiles(
   root: string,
   query: string,
   opts: { regex: boolean; caseSensitive: boolean; wholeWord: boolean },
-): Promise<FindHit[]> {
+  searchId: string,
+): Promise<void> {
   return bennu('bennu_find_in_files', {
     args: {
       root,
@@ -124,6 +131,7 @@ export function findInFiles(
       regex: opts.regex,
       case_sensitive: opts.caseSensitive,
       whole_word: opts.wholeWord,
+      search_id: searchId,
     },
   });
 }

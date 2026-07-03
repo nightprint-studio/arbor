@@ -13,9 +13,12 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
+  import { ArrowRight, Copy } from 'lucide-svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { javaOutline, type JavaSymbol } from './java-outline';
   import { detectAccessors, flagsFor } from './java-accessors';
 
@@ -73,6 +76,30 @@
 
   let open = $state<Record<string, boolean>>({});
   const isOpen = (k: string) => open[k] ?? true;
+
+  function copyText(text: string) {
+    // Best-effort — clipboard can be denied (permission / focus); swallow.
+    void navigator.clipboard?.writeText(text).catch(() => { /* clipboard denied — ignore */ });
+  }
+
+  function onRowContextMenu(s: JavaSymbol, e: MouseEvent) {
+    e.preventDefault();
+    // `fqcn` isn't part of the regex outline today, but surface a "Copy FQCN"
+    // entry the moment a symbol carries one (real symbol index) — no fork needed.
+    const fqcn = (s as JavaSymbol & { fqcn?: string }).fqcn;
+    const items: MenuItem[] = [
+      { id: 'goto', label: 'Go to', icon: ArrowRight },
+      { id: 'copy-name', label: 'Copy name', icon: Copy },
+      ...(fqcn ? [{ id: 'copy-fqcn', label: 'Copy FQCN', icon: Copy } as MenuItem] : []),
+    ];
+    bennuContextMenuStore.show(e.clientX, e.clientY, items, (id) => {
+      switch (id) {
+        case 'goto':      bennuUiStore.requestGoto(s.line); break;
+        case 'copy-name': copyText(s.name); break;
+        case 'copy-fqcn': if (fqcn) copyText(fqcn); break;
+      }
+    });
+  }
 </script>
 
 <PanelShell {title} count={filtered.length}>
@@ -126,7 +153,10 @@
           >
             {#snippet icon()}<Gi size={13} />{/snippet}
             {#each items as s (s.kind + ':' + s.name + ':' + s.line)}
-              <SidebarItem onclick={() => bennuUiStore.requestGoto(s.line)}>
+              <SidebarItem
+                onclick={() => bennuUiStore.requestGoto(s.line)}
+                oncontextmenu={(e) => onRowContextMenu(s, e)}
+              >
                 {#snippet icon()}<span style="color: {g.color}; display:flex"><Gi size={12} /></span>{/snippet}
                 {s.name}
                 {#snippet badges()}

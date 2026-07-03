@@ -344,6 +344,13 @@ impl Ctx<'_> {
                 return imp.path.replace('.', "/");
             }
         }
+        // A type declared in THIS file (or a nested type of it) is authoritative: its FQN
+        // comes straight off the extracted symbols, so a local of a same-file type resolves
+        // even when the resolver's simple→binary hints weren't seeded for it yet (e.g. a
+        // freshly-added type before the next full reindex).
+        if let Some(td) = self.symbols.types.iter().find(|t| t.name == simple) {
+            return td.fqn.replace('.', "/");
+        }
         if let Some(bn) = self.resolver.resolve_simple_name(simple, &self.symbols.imports) {
             return bn;
         }

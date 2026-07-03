@@ -2,11 +2,13 @@
   /**
    * BennuFindInFilesModal — find-in-project as a modal (Ctrl+Shift+F, palette).
    *
-   * Calls the real backend recursive grep (`bennu_find_in_files`) via `findInFiles`,
-   * debounced (~250ms) with a seq guard so a stale response can never overwrite a
-   * newer one. Three toggles refine the query: Regex, Match case, Whole word. When
-   * the BE is absent (demo project / not attached) the call rejects and we render a
-   * graceful empty state — never a throw.
+   * Runs the backend recursive grep (`bennu_find_in_files`) **progressively**: each
+   * search gets a fresh `searchId`, and results stream back as
+   * `arbor://bennu/find-progress` events which we append as they arrive — so a big
+   * legacy project fills the list incrementally instead of freezing until the end. A
+   * `done` event ends the spinner. Events tagged with a superseded id are ignored, so a
+   * newer query never gets clobbered by a slower older scan. Debounced (~250ms). When
+   * the BE is absent the call rejects and we render a graceful empty state.
    *
    * Keyboard-first: the query input auto-focuses; ↑/↓ move the highlighted hit
    * (flattened across groups); Enter opens it (and closes the modal); Esc cancels
@@ -14,6 +16,7 @@
    * with a <mark>-like span. Replace is intentionally out of scope (no affordance).
    */
   import { Search, FileCode2 } from 'lucide-svelte';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
@@ -34,43 +37,56 @@
   let hits = $state<FindHit[]>([]);
   let loading = $state(false);
   let errored = $state(false);
+  let capped = $state(false);
   let sel = $state(0);
   let listEl = $state<HTMLDivElement | null>(null);
 
   function baseName(p: string): string { return p.split(/[\\/]/).pop() ?? p; }
 
-  // ── Debounced search with a seq guard ────────────────────────────────────────
-  // Each run bumps `seq`; a resolved response only lands if it's still the latest,
-  // so out-of-order responses to superseded queries are dropped.
+  // ── Progressive search (streamed via `arbor://bennu/find-progress`) ───────────
+  // Each run mints a fresh `currentId`; the event listener appends only the batches
+  // tagged with it, so a slower superseded scan can never clobber a newer query.
   let seq = 0;
+  let currentId = '';
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // The BE payload shape (`{ id, hits?, done?, capped? }`).
+  interface FindProgress { id: string; hits?: FindHit[]; done?: boolean; capped?: boolean }
+
+  $effect(() => {
+    let un: UnlistenFn | undefined;
+    void listen<FindProgress>('arbor://bennu/find-progress', (e) => {
+      const p = e.payload;
+      if (p.id !== currentId) return; // a superseded search — ignore
+      if (p.hits && p.hits.length) hits = [...hits, ...p.hits];
+      if (p.capped) capped = true;
+      if (p.done) loading = false;
+    }).then((fn) => { un = fn; });
+    return () => { un?.(); };
+  });
 
   function runSearch() {
     const root = projectStore.project?.root;
     const q = query.trim();
-    const mine = ++seq;
+    const id = `find-${++seq}`;
+    currentId = id;
+    hits = [];
+    sel = 0;
+    capped = false;
     if (!root || q.length < 2) {
-      hits = [];
       loading = false;
       errored = false;
       return;
     }
     loading = true;
     errored = false;
-    findInFiles(root, q, { regex, caseSensitive, wholeWord })
-      .then((res) => {
-        if (mine !== seq) return; // stale — a newer query is in flight
-        hits = res;
-        loading = false;
-        sel = 0;
-      })
-      .catch(() => {
-        if (mine !== seq) return;
-        // BE absent / rejected query (e.g. bad regex) → graceful empty state.
-        hits = [];
-        loading = false;
-        errored = true;
-      });
+    findInFiles(root, q, { regex, caseSensitive, wholeWord }, id).catch(() => {
+      if (id !== currentId) return;
+      // BE absent / rejected query (e.g. bad regex) → graceful empty state.
+      hits = [];
+      loading = false;
+      errored = true;
+    });
   }
 
   // Re-run on any input change (query text or a toggle), debounced.
@@ -209,13 +225,17 @@
       <EmptyState message="Open a project to search its files." />
     {:else if !hasQuery}
       <EmptyState message="Type at least 2 characters to search." />
-    {:else if loading}
-      <div class="ff-loading"><Spinner size="sm" label="Searching…" /></div>
     {:else if hits.length === 0}
-      <EmptyState message={errored ? 'Search is unavailable for this project.' : `No matches for “${query.trim()}”.`} />
+      {#if loading}
+        <div class="ff-loading"><Spinner size="sm" label="Searching…" /></div>
+      {:else}
+        <EmptyState message={errored ? 'Search is unavailable for this project.' : `No matches for “${query.trim()}”.`} />
+      {/if}
     {:else}
       <div class="ff-meta">
         {hits.length} match{hits.length === 1 ? '' : 'es'} in {groups.length} file{groups.length === 1 ? '' : 's'}
+        {#if loading}<span class="ff-meta-live"><Spinner size={11} /> searching…</span>{/if}
+        {#if capped}<span class="ff-meta-cap">· capped</span>{/if}
       </div>
       <div class="ff-list" bind:this={listEl}>
         {#each groups as g (g.file)}
@@ -272,9 +292,12 @@
   .ff-loading { display: flex; align-items: center; justify-content: center; padding: 24px; }
 
   .ff-meta {
+    display: flex; align-items: center; gap: 6px;
     padding: 4px 14px; font-size: 10.5px; color: var(--text-muted);
     border-bottom: 1px solid var(--border-subtle); flex-shrink: 0;
   }
+  .ff-meta-live { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); }
+  .ff-meta-cap { color: var(--warning); }
   .ff-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
 
   .ff-group { padding-bottom: 2px; }

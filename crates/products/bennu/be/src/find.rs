@@ -14,14 +14,35 @@
 //!   * `whole_word` — bounds the match on `[A-Za-z0-9_]` word boundaries (so `Foo` does
 //!     not match inside `FooBar`).
 //!
-//! Emits one [`FindHit`] per matched line (first match on the line drives `col`). The walk
-//! caps at [`MAX_HITS`] results (logging to stderr when capped, never erroring).
+//! ## Streaming contract (progressive search)
+//!
+//! `bennu_find_in_files` is **fire-and-forget**: it validates the args, spawns a
+//! **background `std::thread`** to walk the tree, and returns `Ok(())` immediately, so the
+//! IPC dispatcher never blocks on a long scan of a huge legacy tree (a plain thread is the
+//! right fit — the walk does no reverse-channel round-trips, mirroring
+//! [`crate::index_service`]'s background build). The thread emits results as it finds them
+//! on the [`EVT_FIND_PROGRESS`] topic, keyed by the caller's `search_id`:
+//!
+//!   * `{ "id": <search_id>, "hits": FindHit[] }` — one or more **batches** as matches are
+//!     found. A batch is flushed per-scanned-file and whenever it reaches
+//!     [`BATCH_SIZE`] hits, so the FE list fills incrementally instead of waiting for the
+//!     whole scan.
+//!   * `{ "id": <search_id>, "done": true, "capped": <bool> }` — exactly **one** terminal
+//!     event when the scan finishes. `capped` is whether the [`MAX_HITS`] cap stopped the
+//!     walk early.
+//!
+//! One [`FindHit`] is emitted per matched line (first match on the line drives `col`). The
+//! walk caps at [`MAX_HITS`] results (reported in the terminal `capped` flag; also logged
+//! to stderr, never erroring).
 
 use std::path::Path;
+use std::sync::Arc;
 
+use arbor_ipc::prelude::EventSink;
 use bennu_core::prelude::BennuState;
 use bennu_proto::prelude::FindHit;
 use serde::Deserialize;
+use serde_json::json;
 
 /// File extensions scanned for text matches. Files with no extension are scanned too when
 /// their name starts with `.` (dotfiles like `.gitignore` / `.editorconfig`), handled in
@@ -35,11 +56,22 @@ const SCAN_EXTS: [&str; 15] = [
 const SKIP_DIRS: [&str; 4] = ["target", ".git", "node_modules", ".idea"];
 
 /// Upper bound on returned hits — a project-wide search on a huge legacy tree can match a
-/// lot; capping keeps the payload bounded. Logged (not errored) when hit.
+/// lot; capping keeps the payload bounded. Reported in the terminal event's `capped` flag
+/// (and logged, never errored) when hit.
 const MAX_HITS: usize = 5000;
 
 /// Max length of the captured `preview` per hit (chars, not bytes).
 const MAX_PREVIEW_LEN: usize = 300;
+
+/// Flush a `find-progress` batch once this many hits have accumulated (a batch is also
+/// flushed at each file boundary), so results appear promptly on the FE rather than in one
+/// end-of-scan dump. Small on purpose — the FE appends batches as they arrive.
+const BATCH_SIZE: usize = 40;
+
+/// The BE→FE find-progress topic. Payloads (keyed by the caller's `search_id`):
+/// `{ "id": <string>, "hits": FindHit[] }` for each result batch, then exactly one terminal
+/// `{ "id": <string>, "done": true, "capped": <bool> }` when the scan finishes.
+const EVT_FIND_PROGRESS: &str = "arbor://bennu/find-progress";
 
 /// Args for [`bennu_find_in_files`].
 #[derive(Deserialize)]
@@ -59,6 +91,10 @@ pub struct FindInFilesArgs {
     /// Bound the match on `[A-Za-z0-9_]` word boundaries.
     #[serde(default)]
     pub whole_word: bool,
+    /// The FE-minted id correlating this search's `find-progress` events. Every batch and
+    /// the terminal `done` carry it under `"id"`, so the FE ignores events from a
+    /// superseded (older) scan.
+    pub search_id: String,
 }
 
 /// The compiled matching policy for one search (derived once from the args, applied per
@@ -134,35 +170,121 @@ fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Project-wide text search: scan `root`'s text files for `query` and return the hits.
+/// Project-wide text search (progressive). Validates the args, then spawns a background
+/// thread that walks `root`'s text files for `query` and streams matches back as
+/// `find-progress` batches keyed by `search_id`, ending with one terminal `done` event.
+/// Returns `Ok(())` immediately — the IPC dispatcher never blocks on the scan.
 #[arbor_rpc::handler]
-fn bennu_find_in_files(_ctx: &BennuState, args: FindInFilesArgs) -> Result<Vec<FindHit>, String> {
+fn bennu_find_in_files(ctx: &BennuState, args: FindInFilesArgs) -> Result<(), String> {
+    let sink = ctx.event_sink();
+    // An empty query never matches: emit an immediate terminal `done` (uncapped) so the FE
+    // spinner ends cleanly, without spinning up a thread for nothing.
+    if args.query.is_empty() {
+        emit_done(&sink, &args.search_id, false);
+        return Ok(());
+    }
+
     let matcher = Matcher::new(&args);
-    let mut out = Vec::new();
-    let mut capped = false;
-    if !args.query.is_empty() {
-        scan_dir(Path::new(&args.root), &matcher, &mut out, &mut capped);
+    let root = args.root.clone();
+    let search_id = args.search_id.clone();
+    let query = args.query.clone();
+
+    // A plain background std thread (not a tokio worker): the scan does no reverse-channel
+    // round-trips, so this mirrors `index_service`'s background build — it just walks the
+    // tree and emits on the cloned sink.
+    std::thread::Builder::new()
+        .name(format!("bennu-find-{search_id}"))
+        .spawn(move || {
+            let mut batch = BatchSink::new(sink.clone(), search_id.clone());
+            scan_dir(Path::new(&root), &matcher, &mut batch);
+            let capped = batch.capped;
+            batch.finish(); // flush any trailing hits before the terminal event
+            if capped {
+                eprintln!(
+                    "bennu-be: bennu_find_in_files capped at {MAX_HITS} hits for {root} (query {query:?})"
+                );
+            }
+            emit_done(&sink, &search_id, capped);
+        })
+        .map_err(|e| format!("spawn find thread: {e}"))?;
+
+    Ok(())
+}
+
+/// Emit the terminal `{ id, done: true, capped }` event for `search_id`.
+fn emit_done(sink: &Arc<dyn EventSink>, search_id: &str, capped: bool) {
+    sink.emit(EVT_FIND_PROGRESS, json!({ "id": search_id, "done": true, "capped": capped }));
+}
+
+/// Accumulates hits and flushes them as `find-progress` batches, tracking the `MAX_HITS`
+/// cap. The walk pushes hits and calls [`flush_file`](Self::flush_file) at each file
+/// boundary; a batch is also auto-flushed once it reaches [`BATCH_SIZE`]. `finish` flushes
+/// the trailing partial batch (the terminal `done` is emitted by the handler thread).
+struct BatchSink {
+    sink: Arc<dyn EventSink>,
+    search_id: String,
+    /// Pending hits not yet emitted.
+    buf: Vec<FindHit>,
+    /// Total hits seen so far (across all flushed batches + `buf`), gating the cap.
+    total: usize,
+    /// Whether the `MAX_HITS` cap stopped the walk.
+    capped: bool,
+}
+
+impl BatchSink {
+    fn new(sink: Arc<dyn EventSink>, search_id: String) -> Self {
+        Self { sink, search_id, buf: Vec::new(), total: 0, capped: false }
     }
-    if capped {
-        eprintln!(
-            "bennu-be: bennu_find_in_files capped at {MAX_HITS} hits for {} (query {:?})",
-            args.root, args.query
-        );
+
+    /// Whether the cap has been reached (the walk should stop and mark `capped`).
+    fn is_full(&mut self) -> bool {
+        if self.total >= MAX_HITS {
+            self.capped = true;
+            return true;
+        }
+        false
     }
-    Ok(out)
+
+    /// Record one hit, auto-flushing when the batch reaches [`BATCH_SIZE`].
+    fn push(&mut self, hit: FindHit) {
+        self.buf.push(hit);
+        self.total += 1;
+        if self.buf.len() >= BATCH_SIZE {
+            self.flush();
+        }
+    }
+
+    /// Flush the pending batch at a file boundary (so a file's matches land together and
+    /// promptly, even if it produced fewer than [`BATCH_SIZE`] hits).
+    fn flush_file(&mut self) {
+        self.flush();
+    }
+
+    /// Emit any pending hits as one batch (no-op when empty).
+    fn flush(&mut self) {
+        if self.buf.is_empty() {
+            return;
+        }
+        let hits = std::mem::take(&mut self.buf);
+        self.sink.emit(EVT_FIND_PROGRESS, json!({ "id": self.search_id, "hits": hits }));
+    }
+
+    /// Flush the trailing partial batch. Called once the walk is done, before the handler
+    /// emits the terminal `done`.
+    fn finish(&mut self) {
+        self.flush();
+    }
 }
 
 /// Recursively walk `dir`, scanning eligible files. Stops once `MAX_HITS` is reached
-/// (setting `capped`). Mirrors [`crate::todos::scan_dir`].
-fn scan_dir(dir: &Path, matcher: &Matcher, out: &mut Vec<FindHit>, capped: &mut bool) {
-    if out.len() >= MAX_HITS {
-        *capped = true;
+/// (marking `sink.capped`). Mirrors [`crate::todos::scan_dir`].
+fn scan_dir(dir: &Path, matcher: &Matcher, sink: &mut BatchSink) {
+    if sink.is_full() {
         return;
     }
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for entry in rd.flatten() {
-        if out.len() >= MAX_HITS {
-            *capped = true;
+        if sink.is_full() {
             return;
         }
         let path = entry.path();
@@ -171,9 +293,9 @@ fn scan_dir(dir: &Path, matcher: &Matcher, out: &mut Vec<FindHit>, capped: &mut 
             if SKIP_DIRS.contains(&name) {
                 continue;
             }
-            scan_dir(&path, matcher, out, capped);
+            scan_dir(&path, matcher, sink);
         } else if is_scannable(&path) {
-            scan_file(&path, matcher, out, capped);
+            scan_file(&path, matcher, sink);
         }
     }
 }
@@ -191,15 +313,16 @@ fn is_scannable(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Scan one file line-by-line for the matcher's needle.
-fn scan_file(path: &Path, matcher: &Matcher, out: &mut Vec<FindHit>, capped: &mut bool) {
+/// Scan one file line-by-line for the matcher's needle, pushing each match into `sink` and
+/// flushing the batch at the end of the file (so its matches stream out together).
+fn scan_file(path: &Path, matcher: &Matcher, sink: &mut BatchSink) {
     let Ok(source) = std::fs::read_to_string(path) else {
         return; // unreadable / non-UTF-8 — skip
     };
     let file = path.to_string_lossy().replace('\\', "/");
     for (idx, line) in source.lines().enumerate() {
-        if out.len() >= MAX_HITS {
-            *capped = true;
+        if sink.is_full() {
+            sink.flush_file();
             return;
         }
         if let Some(byte_col) = matcher.find(line) {
@@ -207,9 +330,12 @@ fn scan_file(path: &Path, matcher: &Matcher, out: &mut Vec<FindHit>, capped: &mu
             // multi-byte chars reports a caret-friendly column).
             let col = line[..byte_col].chars().count() + 1;
             let preview: String = line.trim().chars().take(MAX_PREVIEW_LEN).collect();
-            out.push(FindHit { file: file.clone(), line: idx + 1, col, preview });
+            sink.push(FindHit { file: file.clone(), line: idx + 1, col, preview });
         }
     }
+    // Flush this file's matches promptly (a partial batch < BATCH_SIZE otherwise waits for
+    // the next file to fill it).
+    sink.flush_file();
 }
 
 #[cfg(test)]
@@ -223,6 +349,7 @@ mod tests {
             regex,
             case_sensitive,
             whole_word,
+            search_id: "test".to_string(),
         }
     }
 
@@ -275,5 +402,134 @@ mod tests {
         assert!(is_scannable(Path::new("/p/.gitignore")));
         assert!(!is_scannable(Path::new("/p/image.png")));
         assert!(!is_scannable(Path::new("/p/Makefile")));
+    }
+
+    // ── streaming walk (BatchSink flushing + capping) ────────────────────────────
+
+    use std::sync::Mutex;
+
+    /// A test [`EventSink`] that records every emitted `(topic, payload)`.
+    #[derive(Default)]
+    struct RecordingSink {
+        events: Mutex<Vec<(String, serde_json::Value)>>,
+    }
+
+    impl EventSink for RecordingSink {
+        fn emit(&self, topic: &str, payload: serde_json::Value) {
+            self.events.lock().unwrap().push((topic.to_string(), payload));
+        }
+    }
+
+    /// A unique temp dir for a fixture tree, cleaned up by the caller.
+    fn temp_tree(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "bennu-find-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// Count the total hits across all `{ hits: [...] }` batch events on the topic.
+    fn total_hits(events: &[(String, serde_json::Value)]) -> usize {
+        events
+            .iter()
+            .filter_map(|(_, p)| p.get("hits").and_then(|h| h.as_array()).map(|a| a.len()))
+            .sum()
+    }
+
+    #[test]
+    fn walk_streams_batches_then_one_terminal_done() {
+        let dir = temp_tree("stream");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        // Two scannable files with matches, one skipped dir, one non-scannable file.
+        std::fs::write(dir.join("A.java"), "class Foo {}\n// no match\nFoo again\n").unwrap();
+        std::fs::write(dir.join("sub").join("B.xml"), "<Foo/>\n").unwrap();
+        std::fs::create_dir_all(dir.join("target")).unwrap();
+        std::fs::write(dir.join("target").join("C.java"), "Foo skipped\n").unwrap();
+        std::fs::write(dir.join("image.png"), "Foo binary skipped\n").unwrap();
+
+        let rec = Arc::new(RecordingSink::default());
+        let sink: Arc<dyn EventSink> = rec.clone();
+        let matcher = Matcher::new(&args("foo", false, false, false));
+
+        let mut batch = BatchSink::new(sink, "s1".to_string());
+        scan_dir(&dir, &matcher, &mut batch);
+        let capped = batch.capped;
+        batch.finish();
+        emit_done(&batch.sink, "s1", capped);
+
+        let events = rec.events.lock().unwrap();
+        // Every event is on the find-progress topic and carries our id.
+        for (topic, p) in events.iter() {
+            assert_eq!(topic, EVT_FIND_PROGRESS);
+            assert_eq!(p.get("id").and_then(|v| v.as_str()), Some("s1"));
+        }
+        // 3 hits total: A.java lines 1 & 3, B.xml line 1 (target/ + png skipped).
+        assert_eq!(total_hits(&events), 3, "events: {events:?}");
+        // Exactly one terminal done, uncapped, and it's LAST.
+        let done: Vec<_> =
+            events.iter().filter(|(_, p)| p.get("done").is_some()).collect();
+        assert_eq!(done.len(), 1, "exactly one terminal done");
+        assert_eq!(done[0].1.get("capped").and_then(|v| v.as_bool()), Some(false));
+        assert!(events.last().unwrap().1.get("done").is_some(), "done is terminal");
+        // At least one hit batch was emitted before the done (progressive).
+        assert!(events.len() >= 2, "a batch + a done at minimum");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn walk_caps_and_reports_capped_in_terminal() {
+        let dir = temp_tree("cap");
+        // Build a file with well over MAX_HITS matching lines so the cap trips.
+        let mut body = String::new();
+        for _ in 0..(MAX_HITS + 50) {
+            body.push_str("foo\n");
+        }
+        std::fs::write(dir.join("Big.java"), body).unwrap();
+
+        let rec = Arc::new(RecordingSink::default());
+        let sink: Arc<dyn EventSink> = rec.clone();
+        let matcher = Matcher::new(&args("foo", false, false, false));
+
+        let mut batch = BatchSink::new(sink, "s2".to_string());
+        scan_dir(&dir, &matcher, &mut batch);
+        let capped = batch.capped;
+        batch.finish();
+        emit_done(&batch.sink, "s2", capped);
+
+        let events = rec.events.lock().unwrap();
+        // Never emits more than the cap.
+        assert_eq!(total_hits(&events), MAX_HITS, "hits are capped at MAX_HITS");
+        let done = events.iter().rev().find(|(_, p)| p.get("done").is_some()).unwrap();
+        assert_eq!(done.1.get("capped").and_then(|v| v.as_bool()), Some(true));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn batch_flushes_at_batch_size_boundary() {
+        // Pushing 2*BATCH_SIZE + a few hits yields >= 2 auto-flushed batches before finish.
+        let rec = Arc::new(RecordingSink::default());
+        let sink: Arc<dyn EventSink> = rec.clone();
+        let mut batch = BatchSink::new(sink, "s3".to_string());
+        for i in 0..(BATCH_SIZE * 2 + 3) {
+            batch.push(FindHit {
+                file: "f".into(),
+                line: i + 1,
+                col: 1,
+                preview: "foo".into(),
+            });
+        }
+        // Before finish: exactly two full batches auto-flushed (the remainder is pending).
+        assert_eq!(rec.events.lock().unwrap().len(), 2, "two auto-flushed batches");
+        batch.finish();
+        // finish flushes the trailing partial batch → 3 batch events, all with our id.
+        let events = rec.events.lock().unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(total_hits(&events), BATCH_SIZE * 2 + 3);
     }
 }

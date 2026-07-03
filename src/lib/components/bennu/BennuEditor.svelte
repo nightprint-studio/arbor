@@ -12,7 +12,7 @@
    */
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
-    PenLine, Wand2, Save, Eye,
+    PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -477,6 +477,43 @@
     }
   }
 
+  // ── Tab-strip context menu (right-click a tab) ────────────────────────────────
+  /** Right-click on a tab: the actions all target `path` (the clicked tab), NOT the
+   *  active one — closeOthers/closeToRight are relative to what you clicked. */
+  function onTabContextMenu(path: string, _item: TabItem, e: MouseEvent) {
+    e.preventDefault();
+    const idx = openPaths.indexOf(path);
+    const hasOthers = openPaths.length > 1;
+    const hasRight = idx >= 0 && idx < openPaths.length - 1;
+    const items: MenuItem[] = [
+      { id: 'close',        label: 'Close',            icon: X },
+      { id: 'close-others', label: 'Close Others',     icon: X, disabled: !hasOthers },
+      { id: 'close-all',    label: 'Close All',        icon: X },
+      { id: 'close-right',  label: 'Close to the Right', icon: ArrowRightToLine, disabled: !hasRight },
+      { id: 's1', label: '', separator: true },
+      { id: 'copy-path',    label: 'Copy Path',        icon: Copy },
+      { id: 'reveal',       label: 'Reveal in Project', icon: LocateFixed },
+    ];
+    bennuContextMenuStore.show(e.clientX, e.clientY, items, (id) => onTabMenuSelect(id, path));
+  }
+  function onTabMenuSelect(id: string, path: string) {
+    switch (id) {
+      case 'close':        projectStore.closeFile(path); break;
+      case 'close-others': projectStore.closeOthers(path); break;
+      case 'close-all':    projectStore.closeAll(); break;
+      case 'close-right':  projectStore.closeToRight(path); break;
+      case 'copy-path':
+        void navigator.clipboard?.writeText(path).catch(() => { /* clipboard denied — ignore */ });
+        break;
+      case 'reveal':
+        // Reveal targets the *active* file (the sidebar relay), so make the clicked
+        // tab active first, then bump the relay.
+        projectStore.setActive(path);
+        bennuUiStore.revealActiveInTree();
+        break;
+    }
+  }
+
   function commitGoto() {
     const m = gotoValue.match(/(\d+)(?:\s*[:,]\s*(\d+))?/);
     if (m) {
@@ -504,6 +541,7 @@
         overflow
         onSelect={(id) => projectStore.setActive(id)}
         onClose={(id) => projectStore.closeFile(id)}
+        onContextMenu={onTabContextMenu}
       />
     </div>
 

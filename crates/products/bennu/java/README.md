@@ -52,8 +52,10 @@ Handled (nominal walks, per Spike B):
   Substitution is a shallow one-hop heuristic on single-uppercase-letter type
   variables (`E`/`T`/`K`/`V`).
 - **Casts** `(Foo) x`, **parenthesised** expressions, and **`new Foo(...)`**.
-- Simple type names resolve to binary names via imports → `TypeResolver` →
-  `java.lang` fallback.
+- Simple type names resolve to binary names via imports → **types declared in the
+  same file** (their extracted FQN is authoritative, so a local of a same-file /
+  freshly-added type resolves even before the resolver is seeded) → `TypeResolver`
+  → `java.lang` fallback.
 - **Inherited members**: the walk follows `superclass` + `interfaces` from
   `ClassMembers`.
 
