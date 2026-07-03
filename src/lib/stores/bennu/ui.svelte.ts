@@ -56,6 +56,8 @@ function createBennuUiStore() {
   // (Alt+Insert opens it fresh; an Alt+Enter "Generate…" intention preselects one).
   let generateOpen = $state(false);
   let generateMode = $state<GenerateMode>('getters-setters');
+  // "New validator" modal (opened from the Struts-validation-file editor toolbar).
+  let validationCreatorOpen = $state(false);
   // The intentions overlay (Alt+Enter) owns its own visibility in
   // `bennuIntentionsStore`; the window mounts it unconditionally. No flag needed
   // here — the openers below delegate to that store.
@@ -98,6 +100,7 @@ function createBennuUiStore() {
     get aboutOpen()    { return aboutOpen; },
     get generateOpen() { return generateOpen; },
     get generateMode() { return generateMode; },
+    get validationCreatorOpen() { return validationCreatorOpen; },
     get gotoTarget()   { return gotoTarget; },
     get revealNonce()  { return revealNonce; },
     get treeExpanded() { return treeExpanded; },
@@ -145,6 +148,9 @@ function createBennuUiStore() {
       generateOpen = true;
     },
     closeGenerate()      { generateOpen = false; },
+    /** Open the "New validator" modal (from the validation-file editor toolbar). */
+    openValidationCreator()  { validationCreatorOpen = true; },
+    closeValidationCreator() { validationCreatorOpen = false; },
 
     /** Ask the editor to scroll to a 1-based line (a panel → editor relay). */
     requestGoto(line: number) {

@@ -18,6 +18,7 @@
 import type { Parser, Tree, Node } from 'web-tree-sitter';
 import type { CompletionSource } from '@codemirror/autocomplete';
 import type { Extension } from '@codemirror/state';
+import type { StreamParser } from '@codemirror/language';
 import type { EditorView, Tooltip } from '@codemirror/view';
 
 /** The generic highlight-class vocabulary. A language's {@link LanguageDescriptor.classify}
@@ -156,6 +157,15 @@ export interface LanguageDescriptor {
    * comments, tag bodies, etc. Omit → no fold gutter is installed.
    */
   foldNode?: (node: Node) => { from: number; to: number } | null;
+
+  /**
+   * Optional embedded-language highlighting: map a **leaf** CST node type to a CodeMirror
+   * {@link StreamParser} whose tokens colour that node's raw text (e.g. a JSP `<script>`
+   * body → JavaScript, `<style>` → CSS). The highlighter tokenizes the node's text with the
+   * parser and emits `cm-tok-*` marks — no nested tree-sitter grammar / extra wasm needed.
+   * Highlighting only (no completion) unless the grammar/host adds it separately.
+   */
+  injections?: Record<string, StreamParser<unknown>>;
 
   /** Optional language-intelligence hooks (autocomplete / hover / …). A product
    *  fills this in to grow completions without a core change; the core installs

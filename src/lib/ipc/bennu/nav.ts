@@ -211,6 +211,15 @@ export function references(
   return bennu('bennu_references', { args: { file, source, offset } });
 }
 
+/** Find-usages for a Struts **action** reference (a JSP `action="…"` value under the
+ *  caret): every JSP across the project that references `action`. `file` is any file in
+ *  the owning project. Absolute action names only (a relative ref isn't resolvable). The
+ *  usages share the {@link UsageHit} shape, so the same results popover renders them.
+ *  Wire: `bennu_action_usages` — `{ file, action }`. */
+export function actionUsages(file: string, action: string): Promise<UsagesResult> {
+  return bennu('bennu_action_usages', { args: { file, action } });
+}
+
 // ── hover (docs §5) ─────────────────────────────────────────────────────────────
 
 /** Hover card for the symbol under the caret — mirrors the BE `HoverInfo`. */

@@ -36,7 +36,11 @@ pub const MAGIC: &[u8; 8] = b"BNNUIDX0";
 /// type symbol) so a project type resolves from the index without a source re-parse.
 /// v3: added the relation store (config-graph edges) + `Relation::inferred` (candidate
 /// edges from wildcards / Tiles indirection).
-pub const FORMAT_VERSION: u64 = 3;
+/// v4: added the Struts interceptor + validation config sources (`StrutsInterceptor` /
+/// `StrutsValidation`) and their edges (`InterceptorRefToDef` / `InterceptorToClass`).
+/// v5: added the MyBatis mapper config source (`MyBatisMapper`) and its edge
+/// (`MethodToStatement`).
+pub const FORMAT_VERSION: u64 = 5;
 /// The header is exactly 16 bytes (8 magic + 8 version), so the first record starts
 /// 16-byte-aligned.
 pub const HEADER_LEN: usize = 16;

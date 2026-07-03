@@ -1,0 +1,6 @@
+{
+  "name": "tree-sitter-jsp",
+  "private": true,
+  "type": "commonjs",
+  "description": "Tree-sitter grammar for JSP — Bennu Java-editor highlighter (FE-only, compiled to static/bennu/tree-sitter-jsp.wasm). No Rust crate."
+}

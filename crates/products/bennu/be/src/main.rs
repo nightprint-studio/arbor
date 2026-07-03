@@ -57,6 +57,13 @@ mod declaration;
 // the members inherited from a type's superclass + interfaces (each tagged declaring-type +
 // visibility + a project source when resolvable), off the same engine.
 mod inherited;
+// Validation-file modal context: `bennu_validation_context` — the action class + its
+// writable bean properties + already-validated fields for a `<Action>-validation.xml`.
+mod validation;
+// Form analysis (form → action → fields inspector): `bennu_form_analysis` — for a JSP, each
+// `<form>` correlated with its resolved action class's writable properties + validation rules
+// (which fields bind, which are validated).
+mod forms;
 // Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
 // + config counts, JDK level, build-ready flag) for an inspector panel.
 mod index_stats;

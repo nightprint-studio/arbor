@@ -13,8 +13,9 @@
    * are mapped onto CodeMirror's UTF-16 lint spans against the live buffer.
    */
   import { onDestroy } from 'svelte';
-  import { EditorState } from '@codemirror/state';
+  import { EditorState, Compartment, type Extension } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
+  import { indentUnit as cmIndentUnit } from '@codemirror/language';
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
   import { openSearchPanel } from '@codemirror/search';
 
@@ -28,6 +29,8 @@
     readOnly = false,
     diagnostics = [],
     rulerColumn,
+    tabSize,
+    indentUnit,
     initialState,
     oninput,
     oncaret,
@@ -42,6 +45,12 @@
     diagnostics?: EditorDiagnostic[];
     /** Draw a vertical margin guide at this 1-based column (IntelliJ-style). Omit for none. */
     rulerColumn?: number;
+    /** Tab width in columns. Omit to keep CodeMirror's default (an editor that never sets
+     *  indentation is unchanged). Applied live via a compartment. */
+    tabSize?: number;
+    /** The whitespace inserted for one indent level — `'\t'` for tabs, `'    '` for N
+     *  spaces. Omit to keep CodeMirror's default. Applied live via a compartment. */
+    indentUnit?: string;
     /** Cursor + scroll to restore at mount (e.g. the tab's last-known position). */
     initialState?: EditorViewSnapshot;
     oninput?: (text: string) => void;
@@ -57,7 +66,19 @@
 
   let hostEl: HTMLDivElement | undefined = $state();
   let view: EditorView | undefined;
+  // Indentation lives in its own compartment so a footer change (tab size / tabs-vs-spaces)
+  // reconfigures the OPEN buffer live, without a remount.
+  const indentCompartment = new Compartment();
   let suppressEmit = false;
+
+  /** The `EditorState.tabSize` + `indentUnit` facets for the current props — empty when the
+   *  host sets neither (so non-indent-aware editors keep CodeMirror's defaults untouched). */
+  function indentExtensions(): Extension[] {
+    const e: Extension[] = [];
+    if (tabSize !== undefined) e.push(EditorState.tabSize.of(tabSize));
+    if (indentUnit !== undefined) e.push(cmIndentUnit.of(indentUnit));
+    return e;
+  }
   let lastEmitted: string | null = null;
   // Scroll-listener teardown (emits `onViewState` so the host can persist scroll too).
   let detachScroll: (() => void) | null = null;
@@ -116,7 +137,7 @@
 
     const state = EditorState.create({
       doc: value,
-      extensions: [extensions, updateListener],
+      extensions: [extensions, indentCompartment.of(indentExtensions()), updateListener],
     });
     view = new EditorView({ state, parent: target });
     pushDiagnostics();
@@ -152,6 +173,15 @@
   }
 
   $effect(() => { if (hostEl && !view) mount(hostEl); });
+
+  // Live indentation reconfigure — a footer change to tab size / tabs-vs-spaces applies to
+  // the already-open buffer without a remount. Reads the props so it re-runs on change.
+  $effect(() => {
+    const ts = tabSize, iu = indentUnit; // tracked deps
+    void ts; void iu;
+    view?.dispatch({ effects: indentCompartment.reconfigure(indentExtensions()) });
+  });
+
   onDestroy(() => {
     if (scrollRaf) cancelAnimationFrame(scrollRaf);
     detachScroll?.();

@@ -44,6 +44,16 @@ pub enum Source {
     TldTag,
     /// A Spring bean id (`<bean id=…>`).
     SpringBean,
+    /// A Struts `<interceptor>` or `<interceptor-stack>` definition (config-as-symbol),
+    /// keyed by its name.
+    StrutsInterceptor,
+    /// A Struts validation ruleset (`<Action>-validation.xml`), keyed by the validated
+    /// action's class simple-name.
+    StrutsValidation,
+    /// A MyBatis mapper `<select|insert|update|delete>` statement (config-as-symbol),
+    /// keyed by `<interface FQCN>#<statement id>`. Resolved graph-only (no fst symbol,
+    /// like [`Self::StrutsInterceptor`]) — the tag exists for source-parity + edge labels.
+    MyBatisMapper,
 }
 
 /// The kind of a [`Relation`] edge (docs §3). Java type-hierarchy edges plus the
@@ -61,6 +71,17 @@ pub enum RelationKind {
     JspInclude,
     JspUsesTaglib,
     BeanIdToImpl,
+    /// An `<interceptor-ref name="x">` → the `<interceptor>`/`<interceptor-stack>` def it
+    /// names (the go-to / find-usages edge for interceptor wiring).
+    InterceptorRefToDef,
+    /// An `<interceptor name="x" class="FQCN">` → its impl class (like [`Self::BeanIdToImpl`],
+    /// the FQCN lives on the interceptor symbol, `to_id` is `u32::MAX`).
+    InterceptorToClass,
+    /// A mapper interface method (`<FQCN>#<method>`) → the MyBatis `<select|...>` statement
+    /// with the matching `id` (go-to XML ↔ find-usages Java). Graph-resolved by name like
+    /// the interceptor edges; no global fst symbol, so it is dropped at ingest — both
+    /// directions are graph queries (statement ids aren't globally-unique fst keys).
+    MethodToStatement,
 }
 
 /// One symbol record. Serialized independently into the framed blob; its

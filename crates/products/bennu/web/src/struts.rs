@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use roxmltree::Node;
 
+use crate::interceptors::{self, InterceptorParse};
 use crate::model::{ActionRecord, RelKind, Relation, ResultRecord};
 use crate::xml;
 
@@ -21,6 +22,9 @@ pub struct StrutsParse {
     pub actions: Vec<ActionRecord>,
     pub results: Vec<ResultRecord>,
     pub relations: Vec<Relation>,
+    /// Interceptor defs + ref-uses collected in the same include-graph pass (one read per
+    /// fragment — interceptors live in the struts fragments, not a separate file).
+    pub interceptors: InterceptorParse,
     /// Include targets that could not be resolved on disk (would come from a dependency
     /// jar on a non-vendored install) — reported, never fatal (docs §8 #3, §8 lesson 10).
     pub unresolved_includes: Vec<String>,
@@ -64,6 +68,9 @@ fn parse_file(
             parse_action(&action, &namespace, &source_file, out);
         }
     }
+
+    // Interceptors live in these same fragments — collect them in this one pass.
+    interceptors::collect_from_root(&root, &source_file, &mut out.interceptors);
 
     // Follow includes (they can appear at <struts> top level).
     for inc in root.children().filter(|n| n.has_tag_name("include")) {

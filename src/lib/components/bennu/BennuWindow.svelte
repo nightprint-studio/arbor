@@ -21,7 +21,7 @@
   import {
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
-    Library, Target, Play, ListTodo, Box, RotateCw,
+    Library, Target, Play, ListTodo, Box, RotateCw, IndentIncrease, ShieldCheck,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -54,6 +54,7 @@
   import BennuProjectConfigModal from './BennuProjectConfigModal.svelte';
   import BennuAboutModal from './BennuAboutModal.svelte';
   import BennuGenerateModal from './BennuGenerateModal.svelte';
+  import BennuValidationModal from './BennuValidationModal.svelte';
   import BennuIntentionsOverlay from './BennuIntentionsOverlay.svelte';
   import BennuRunConfigModal from './BennuRunConfigModal.svelte';
   import BennuRenameModal from './BennuRenameModal.svelte';
@@ -66,6 +67,7 @@
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
@@ -196,6 +198,8 @@
     'sliders': SlidersHorizontal as unknown as IconComponent,
     'info': Info as unknown as IconComponent,
     'refresh-cw': RotateCw as unknown as IconComponent,
+    'indent': IndentIncrease as unknown as IconComponent,
+    'shield': ShieldCheck as unknown as IconComponent,
   };
   function iconResolver(name: string): IconComponent { return ICONS[name] ?? ICONS.command; }
 
@@ -230,6 +234,23 @@
         action: () => run(() => bennuUiStore.openGenerate()), when: !!projectStore.activeFilePath },
       { id: 'intentions', title: 'Show intentions', icon: 'bulb', shortcut: 'Alt+Enter',
         action: () => run(() => editor?.openIntentions()), when: !!projectStore.activeFilePath },
+      { id: 'newvalidator', title: 'New Struts validator…', icon: 'shield',
+        action: () => run(() => bennuUiStore.openValidationCreator()),
+        when: projectStore.activeFilePath?.toLowerCase().endsWith('-validation.xml') ?? false },
+      // Indentation — mirrors the footer control (BennuIndentStatus). Gated to the
+      // alternatives only (the active style / width is hidden), so at most 3 entries show.
+      { id: 'indent-spaces', title: 'Indent using spaces', icon: 'indent',
+        action: () => run(() => bennuSettingsStore.setIndentStyle('spaces')),
+        when: bennuSettingsStore.indentStyle !== 'spaces' },
+      { id: 'indent-tabs', title: 'Indent using tabs', icon: 'indent',
+        action: () => run(() => bennuSettingsStore.setIndentStyle('tabs')),
+        when: bennuSettingsStore.indentStyle !== 'tabs' },
+      { id: 'tabwidth-2', title: 'Tab width: 2', icon: 'indent',
+        action: () => run(() => bennuSettingsStore.setTabSize(2)), when: bennuSettingsStore.tabSize !== 2 },
+      { id: 'tabwidth-4', title: 'Tab width: 4', icon: 'indent',
+        action: () => run(() => bennuSettingsStore.setTabSize(4)), when: bennuSettingsStore.tabSize !== 4 },
+      { id: 'tabwidth-8', title: 'Tab width: 8', icon: 'indent',
+        action: () => run(() => bennuSettingsStore.setTabSize(8)), when: bennuSettingsStore.tabSize !== 8 },
     ];
     const viewItems = [
       { id: 'project',   title: 'Toggle Project',   icon: 'folder-tree', shortcut: 'Alt+1', action: () => run(() => bennuUiStore.toggleLeft('project')), when: true },
@@ -464,6 +485,13 @@
   <BennuGenerateModal
     mode={bennuUiStore.generateMode}
     onClose={() => bennuUiStore.closeGenerate()}
+    onInsert={(text) => { editor?.insertAtCursor(text); editor?.focusEditor(); }}
+  />
+{/if}
+
+{#if bennuUiStore.validationCreatorOpen}
+  <BennuValidationModal
+    onClose={() => bennuUiStore.closeValidationCreator()}
     onInsert={(text) => { editor?.insertAtCursor(text); editor?.focusEditor(); }}
   />
 {/if}

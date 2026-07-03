@@ -3,9 +3,10 @@
  * file by extension.
  *
  * Java uses the real tree-sitter descriptor ({@link javaLanguage} — semantic
- * highlight, folding, go-to, completion). HTML + JSP use the tree-based
- * `@codemirror/lang-html` (distinct, consistent HTML/JS/CSS highlight + tag folding),
- * with a JSP decoration overlay for `<% … %>` / `${ … }`. Every other file type (XML,
+ * highlight, folding, go-to, completion). JSP uses its own tree-sitter grammar
+ * ({@link jspLanguage} — namespaced taglibs, scriptlets, EL/OGNL). HTML uses the
+ * tree-based `@codemirror/lang-html` (HTML/JS/CSS highlight + tag folding). Every other
+ * file type (XML,
  * YAML, `.properties`, JSON, Markdown, CSS/SCSS, JS, SQL, shell) uses a CodeMirror
  * built-in / legacy-mode language via the descriptor's `cmExtension` seam, highlighted
  * by the shared Lezer style. Unknown types get a plain (no-highlight) descriptor so
@@ -26,7 +27,7 @@ import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { html } from '@codemirror/lang-html';
 import { javaLanguage } from './java-lang';
-import { jspOverlay } from './jsp-mode';
+import { jspLanguage } from './jsp-lang';
 
 /** A CM-language descriptor: no tree-sitter parser, highlight from `cmExtension`.
  *  `fold` opts into the Lezer fold gutter (only for languages whose grammar carries
@@ -50,8 +51,8 @@ function streamLang(id: string, parser: StreamParser<unknown>): LanguageDescript
 const xmlLang = streamLang('xml', xml);
 // HTML: the real lang-html tree (embedded JS/CSS highlight + tag folding).
 const htmlLang = cmLang('html', html(), true);
-// JSP/JSPF/tag files: lang-html + a JSP decoration overlay for `<% … %>` / `${ … }`.
-const jspLang = cmLang('jsp', [html(), jspOverlay], true);
+// JSP/JSPF/tag files use the custom tree-sitter-jsp grammar (jsp-lang.ts) — namespaced
+// taglib tags, scriptlets, EL/OGNL all parse + colour natively.
 const cssLang = streamLang('css', css);
 const scssLang = streamLang('scss', sCSS);
 const lessLang = streamLang('less', less);
@@ -79,7 +80,7 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'java': return javaLanguage;
     case 'xml': case 'xsd': case 'wsdl': case 'xsl': case 'xslt': case 'tld':
     case 'pom': case 'iml': case 'fxml': case 'svg': return xmlLang;
-    case 'jsp': case 'jspf': case 'tag': case 'tagx': return jspLang;
+    case 'jsp': case 'jspf': case 'tag': case 'tagx': return jspLanguage;
     case 'html': case 'htm': case 'xhtml': return htmlLang;
     case 'css': return cssLang;
     case 'scss': return scssLang;

@@ -23,6 +23,14 @@ onto the [`bennu-index`](../index) seam for the integration to ingest and resolv
   so resolution prefers `template=`, else the `body` JSP, else walks `extends` up to the
   parent layout (docs §8 #2).
 
+- **JSP forms** (`forms` module) — a linear (non-XML) scan of a `.jsp` for `<form>`s
+  (HTML `<form>`, Struts `<s:form>`, legacy `<html:form>`) + their input fields
+  (`<input|textarea|select>` / `<s:textfield>` / `<html:text>` …). Each form carries its
+  normalized `action` key + the field names, so the integration can correlate a field
+  against the resolved action class's writable properties (setters) and validation rules
+  ("form → action → fields, which bind, which are validated"). Shares `jsp`'s comment /
+  scriptlet masking + attribute scan.
+
 ## Wildcards & Tiles → candidate edges (never a false "missing")
 
 Wildcard action names (`*`) and `{1}` backref methods/results are pervasive (155 + 128

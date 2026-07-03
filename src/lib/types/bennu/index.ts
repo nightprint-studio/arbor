@@ -57,6 +57,10 @@ export interface ProjectInfo {
   jdk: JdkInfo | null;
   /** The detected domain capabilities. */
   capabilities: CapabilitySet;
+  /** The project's declared source encoding — the pom `sourceEncoding`, else the config
+   *  default (e.g. `UTF-8`, `Cp1252`). Shown in the app status bar; an individual file's
+   *  decoded encoding (which can differ) rides on the read result / editor footer. */
+  source_encoding: string;
 }
 
 /** One node of the project file tree (`bennu_project_tree`). Directories carry

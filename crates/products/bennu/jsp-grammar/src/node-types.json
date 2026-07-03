@@ -1,0 +1,366 @@
+[
+  {
+    "type": "attribute",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "attribute_name",
+          "named": true
+        },
+        {
+          "type": "quoted_value_double",
+          "named": true
+        },
+        {
+          "type": "quoted_value_single",
+          "named": true
+        },
+        {
+          "type": "unquoted_value",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "document",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "cdata",
+          "named": true
+        },
+        {
+          "type": "doctype",
+          "named": true
+        },
+        {
+          "type": "el_expression",
+          "named": true
+        },
+        {
+          "type": "end_tag",
+          "named": true
+        },
+        {
+          "type": "html_comment",
+          "named": true
+        },
+        {
+          "type": "jsp_comment",
+          "named": true
+        },
+        {
+          "type": "jsp_declaration",
+          "named": true
+        },
+        {
+          "type": "jsp_directive",
+          "named": true
+        },
+        {
+          "type": "jsp_expression",
+          "named": true
+        },
+        {
+          "type": "jsp_scriptlet",
+          "named": true
+        },
+        {
+          "type": "ognl_expression",
+          "named": true
+        },
+        {
+          "type": "script_element",
+          "named": true
+        },
+        {
+          "type": "self_closing_tag",
+          "named": true
+        },
+        {
+          "type": "start_tag",
+          "named": true
+        },
+        {
+          "type": "stray",
+          "named": true
+        },
+        {
+          "type": "style_element",
+          "named": true
+        },
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "end_tag",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "tag_name",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "quoted_value_double",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "attribute_fragment",
+          "named": true
+        },
+        {
+          "type": "el_expression",
+          "named": true
+        },
+        {
+          "type": "ognl_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "quoted_value_single",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "attribute_fragment_sq",
+          "named": true
+        },
+        {
+          "type": "el_expression",
+          "named": true
+        },
+        {
+          "type": "ognl_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "script_element",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "attribute",
+          "named": true
+        },
+        {
+          "type": "script_content",
+          "named": true
+        },
+        {
+          "type": "script_tag",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "self_closing_tag",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "attribute",
+          "named": true
+        },
+        {
+          "type": "tag_name",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "start_tag",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "attribute",
+          "named": true
+        },
+        {
+          "type": "tag_name",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "style_element",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "attribute",
+          "named": true
+        },
+        {
+          "type": "style_content",
+          "named": true
+        },
+        {
+          "type": "style_tag",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "\"",
+    "named": false
+  },
+  {
+    "type": "'",
+    "named": false
+  },
+  {
+    "type": "/>",
+    "named": false
+  },
+  {
+    "type": "<",
+    "named": false
+  },
+  {
+    "type": "</",
+    "named": false
+  },
+  {
+    "type": "=",
+    "named": false
+  },
+  {
+    "type": ">",
+    "named": false
+  },
+  {
+    "type": "attribute_fragment",
+    "named": true
+  },
+  {
+    "type": "attribute_fragment_sq",
+    "named": true
+  },
+  {
+    "type": "attribute_name",
+    "named": true
+  },
+  {
+    "type": "cdata",
+    "named": true
+  },
+  {
+    "type": "doctype",
+    "named": true
+  },
+  {
+    "type": "el_expression",
+    "named": true
+  },
+  {
+    "type": "html_comment",
+    "named": true
+  },
+  {
+    "type": "jsp_comment",
+    "named": true
+  },
+  {
+    "type": "jsp_declaration",
+    "named": true
+  },
+  {
+    "type": "jsp_directive",
+    "named": true
+  },
+  {
+    "type": "jsp_expression",
+    "named": true
+  },
+  {
+    "type": "jsp_scriptlet",
+    "named": true
+  },
+  {
+    "type": "ognl_expression",
+    "named": true
+  },
+  {
+    "type": "script_content",
+    "named": true
+  },
+  {
+    "type": "script_tag",
+    "named": true
+  },
+  {
+    "type": "stray",
+    "named": true
+  },
+  {
+    "type": "style_content",
+    "named": true
+  },
+  {
+    "type": "style_tag",
+    "named": true
+  },
+  {
+    "type": "tag_name",
+    "named": true
+  },
+  {
+    "type": "text",
+    "named": true
+  },
+  {
+    "type": "unquoted_value",
+    "named": true
+  }
+]

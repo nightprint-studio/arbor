@@ -151,6 +151,38 @@
   and <kbd>Ctrl</kbd> + <kbd>Enter</kbd> inserts it at the caret.
 </p>
 
+<h2>Indentation</h2>
+<p>
+  The footer shows the active indentation as <em>Spaces: N</em> or <em>Tab Size: N</em>. Click it (or
+  focus it and press <kbd>↑</kbd>/<kbd>↓</kbd>) to switch between <strong>spaces and tabs</strong> and
+  pick the <strong>tab width</strong> (2 / 4 / 8). The change applies to the open editor immediately.
+</p>
+
+<h2>JSP &amp; Struts navigation</h2>
+<p>
+  JSP files are highlighted by a dedicated grammar — namespaced taglib tags (<code>&lt;s:iterator&gt;</code>,
+  <code>&lt;c:if&gt;</code>), scriptlets, EL <code>$&lbrace;…&rbrace;</code> and OGNL <code>%&lbrace;…&rbrace;</code> all colour
+  correctly, and the <strong>inside</strong> of an EL/OGNL expression is tokenized too —
+  identifiers, property accesses, strings, numbers, operators and keywords each get their own
+  colour instead of one flat block. <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) on an
+  <code>action="…"</code> reference jumps to the Struts <code>&lt;action&gt;</code> config, its view
+  JSP, or the action class. <kbd>Alt</kbd> + <kbd>F7</kbd> on an action reference lists every JSP
+  that uses it. An absolute action reference that resolves to nothing gets a
+  <strong>warning squiggle</strong> — a wildcard or runtime (<code>$&lbrace;…&rbrace;</code>/<code>%&lbrace;…&rbrace;</code>)
+  reference never does. Inline <code>&lt;script&gt;</code> and <code>&lt;style&gt;</code> blocks
+  are highlighted as JavaScript and CSS.
+</p>
+
+<h2>Struts validation files</h2>
+<p>
+  Open a <code>&lt;Action&gt;-validation.xml</code> and the editor grows a toolbar with a
+  <strong>New validator</strong> button (also in the Command Palette). It opens a builder — pick a
+  field (the action's writable properties are offered as chips), a validator type from the bundled
+  Struts catalog, fill its parameters and message, and the generated
+  <code>&lt;field&gt;&lt;field-validator&gt;</code> block is inserted at the caret. Place the caret
+  inside <code>&lt;validators&gt;</code> first.
+</p>
+
 <h2>The index</h2>
 <p>
   Completion, go-to-definition, find-usages, rename, hover and Go-to-Class all answer from a

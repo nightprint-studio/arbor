@@ -16,6 +16,8 @@
 import { EditorView, ViewPlugin, Decoration } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import { EditorState, StateEffect, RangeSetBuilder } from '@codemirror/state';
+import { StringStream } from '@codemirror/language';
+import type { StreamParser } from '@codemirror/language';
 
 import type { LanguageDescriptor, TokenClass, Tree, Node, Parser } from './types';
 
@@ -114,8 +116,16 @@ class TreeSitterHighlighter {
     if (!this.tree) return Decoration.none;
     const builder = new RangeSetBuilder<Decoration>();
     const classify = this.lang.classify;
+    const injections = this.lang.injections;
     const visit = (node: Node, parentType: string | null, field: string | null) => {
       if (node.childCount === 0) {
+        // Embedded language (e.g. JS in a JSP `<script>` body): tokenize the leaf's raw
+        // text with the injected StreamParser instead of a single `classify` colour.
+        const inj = injections?.[node.type];
+        if (inj && node.endIndex > node.startIndex) {
+          addInjectedTokens(builder, inj, node.text, node.startIndex);
+          return;
+        }
         const cls = classify(node, node.isNamed, field, parentType);
         if (cls && node.endIndex > node.startIndex) {
           builder.add(node.startIndex, node.endIndex, tokenMark(cls));
@@ -129,6 +139,65 @@ class TreeSitterHighlighter {
     };
     visit(this.tree.rootNode, null, null);
     return builder.finish();
+  }
+}
+
+// ── Embedded-language injection (CodeMirror StreamParser) ───────────────────────
+//
+// Run a legacy-mode StreamParser over a raw-text region (a JSP `<script>`/`<style>`
+// body) and emit `cm-tok-*` marks for its tokens, so JS/CSS colours inside JSP without a
+// nested tree-sitter grammar. Tokens are added in ascending order within the region, so
+// the single global RangeSetBuilder stays sorted.
+
+/** Map a legacy-mode (CM5-style) token type onto our {@link TokenClass}. */
+function mapStreamToken(type: string): TokenClass | null {
+  switch (type.split(' ')[0]) {
+    case 'keyword': return 'keyword';
+    case 'number': case 'unit': return 'number';
+    case 'comment': return 'comment';
+    case 'string': case 'string-2': return 'string';
+    case 'atom': return 'constant';
+    case 'def': return 'declaration';
+    case 'variable-3': case 'type': case 'builtin': case 'qualifier': return 'type';
+    case 'variable': case 'variable-2': return 'ident';
+    case 'property': return 'field';
+    case 'operator': return 'operator';
+    case 'meta': return 'annotation';
+    case 'tag': return 'keyword';
+    case 'attribute': return 'field';
+    case 'bracket': case 'punctuation': return 'punctuation';
+    default: return null;
+  }
+}
+
+function addInjectedTokens(
+  builder: RangeSetBuilder<Decoration>,
+  parser: StreamParser<unknown>,
+  text: string,
+  base: number,
+): void {
+  let state: unknown;
+  try { state = parser.startState ? parser.startState(2) : {}; } catch { return; }
+  let pos = 0; // UTF-16 offset of the current line's start within `text`
+  for (const line of text.split('\n')) {
+    if (line.length === 0) {
+      try { parser.blankLine?.(state, 2); } catch { /* ignore */ }
+      pos += 1;
+      continue;
+    }
+    const stream = new StringStream(line, 2, 2);
+    let guard = 0;
+    while (!stream.eol() && guard++ < 20000) {
+      const start = stream.pos;
+      let tok: string | null = null;
+      try { tok = parser.token(stream, state); } catch { break; }
+      if (stream.pos <= start) { stream.pos = start + 1; continue; } // no-progress guard
+      if (tok) {
+        const cls = mapStreamToken(tok);
+        if (cls) builder.add(base + pos + start, base + pos + stream.pos, tokenMark(cls));
+      }
+    }
+    pos += line.length + 1; // +1 for the consumed `\n`
   }
 }
 

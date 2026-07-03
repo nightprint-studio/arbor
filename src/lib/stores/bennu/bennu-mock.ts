@@ -524,6 +524,8 @@ export const DEMO_PROJECT: ProjectInfo = {
   // Maven `<modules>` — the parent reactor's child module names.
   modules: ['core', 'web', 'batch'],
   jdk: { version: '1.8', source: 'maven.compiler.source' },
+  // Legacy target stack: pom-declared Cp1252 source encoding.
+  source_encoding: 'Cp1252',
   capabilities: {
     struts_xml_config: true,
     struts_convention: true,

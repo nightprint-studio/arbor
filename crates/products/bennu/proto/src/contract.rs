@@ -84,6 +84,11 @@ pub struct ProjectInfo {
     pub jdk: Option<JdkInfo>,
     /// The detected domain capabilities (Spike D ruleset).
     pub capabilities: CapabilitySet,
+    /// The project's declared source encoding — the pom `project.build.sourceEncoding`,
+    /// else the config default (e.g. `UTF-8`, `Cp1252`). This is the *project* label the
+    /// status bar shows; an individual file's decoded encoding (which can differ via a
+    /// per-file override or a recovered mislabel) rides on the per-file read result.
+    pub source_encoding: String,
 }
 
 /// The JDK Bennu will resolve classpath sources against.
@@ -332,6 +337,26 @@ pub struct InheritedSource {
     pub line: i64,
 }
 
+// ── validation context (the "New validator" modal) ──────────────────────────
+
+/// Result of `bennu_validation_context` — everything the "New validator" modal needs for a
+/// `<Action>-validation.xml`: the action class it binds to (by the file-name convention),
+/// that class's bean properties (the `<field name>` candidates), and the fields already
+/// validated in the file (to suggest / avoid duplicates). Never errors: an unresolvable
+/// action (class not indexed yet) just yields empty lists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValidationContext {
+    /// The action class simple-name derived from the file name (`FooAction`).
+    pub action_simple: String,
+    /// The resolved action class FQCN, when the project index knows it.
+    pub action_fqcn: Option<String>,
+    /// The action's bean properties (from its `get`/`is`/`set` accessors) — the field-name
+    /// candidates the modal offers. Best-effort; empty when the class isn't resolved.
+    pub properties: Vec<String>,
+    /// Field names already carrying a validator in this file (dedupe / reuse hints).
+    pub existing_fields: Vec<String>,
+}
+
 // ── index stats (index inspector) ─────────────────────────────────────────────
 
 /// Result of `bennu_index_stats` — a cheap snapshot of the per-project index for the
@@ -433,6 +458,65 @@ pub struct ClassEntry {
     pub file: String,
     /// 1-based line of the type declaration.
     pub line: usize,
+}
+
+// ── form analysis (form → action → fields inspector) ─────────────────────────
+
+/// One input field of a JSP `<form>`, correlated against its action class — the wire view
+/// of a [`bennu_web`](https://docs.rs/bennu-web) `JspFormField` after the be-layer join.
+/// Returned by `bennu_form_analysis`. The FE shows the field name, its control kind, and
+/// two badges: whether the name **binds** (a writable property of the action class) and
+/// whether it is **validated** (has a rule in the action's validation ruleset).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormFieldInfo {
+    /// The raw form-field name (the `name=` / legacy `property=` attribute value).
+    pub name: String,
+    /// The control kind label (`text` / `password` / `hidden` / … — `FormControl::as_str`).
+    pub control: String,
+    /// True when `name` is a writable property (a `setXxx`) of the resolved action class —
+    /// i.e. the field actually binds onto the action. False when unresolved / not a setter.
+    pub bound: bool,
+    /// True when `name` carries a validation rule for the resolved action class.
+    pub validated: bool,
+    /// Start byte offset of the field name value inside the quotes (editor round-trip).
+    pub start: usize,
+    /// End byte offset (exclusive).
+    pub end: usize,
+}
+
+/// One JSP `<form>` correlated with its action — returned by `bennu_form_analysis`. Carries
+/// the resolved action target (class FQCN + declaring config fragment, both openable go-to
+/// sites) and the per-field bind/validate correlation. A form whose action doesn't resolve
+/// is still listed (all fields `bound = false` / `validated = false`, `action_class = None`)
+/// so the FE always shows every form.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormInfo {
+    /// The normalized action reference of the form (`None` when the form has no `action=`
+    /// or it is a computed OGNL expression).
+    pub action: Option<String>,
+    /// The resolved implementation class FQCN (the C1 chain), if resolvable.
+    pub action_class: Option<String>,
+    /// The struts config fragment the `<action>` is declared in (an openable go-to site),
+    /// if the action resolved.
+    pub config_file: Option<String>,
+    /// The form's `method=` (raw-lowercased: `get`/`post`), if present.
+    pub method: Option<String>,
+    /// Start byte offset of the `<form>` open tag.
+    pub start: usize,
+    /// End byte offset (exclusive): past the matching close, or the open tag's `>` when the
+    /// close is missing.
+    pub end: usize,
+    /// The form's input fields, each correlated against the action class.
+    pub fields: Vec<FormFieldInfo>,
+}
+
+/// The result of `bennu_form_analysis` for one JSP: every `<form>` in the file, correlated.
+/// Empty (`forms = []`) for a non-JSP file, a file with no project, or a file with no forms
+/// — never an error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormAnalysis {
+    /// Every `<form>` found in the JSP, in source order.
+    pub forms: Vec<FormInfo>,
 }
 
 // ── TODO scan (TODO tool window) ─────────────────────────────────────────────

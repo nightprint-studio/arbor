@@ -18,6 +18,9 @@ pub use bennu_proto::prelude::{CompletionItem, Diagnostic};
 pub use crate::config::{
     action_qname, ingest_config_graph, ActionTarget, ActionVerdict, ConfigResolver,
 };
+// MyBatis go-to / outline wire types, re-exported so the be-layer maps them without
+// depending on `bennu_web` directly.
+pub use bennu_web::prelude::{StatementKind, StatementRecord, StatementTarget};
 
 // Cross-file references / find-usages + the caret classifier (docs §5 #7).
 pub use crate::refs::{

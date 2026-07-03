@@ -43,7 +43,7 @@ use bennu_intel::prelude::{
 use bennu_project::prelude::source_encoding_label;
 use bennu_proto::prelude::{
     ClassEntry, DeclarationTarget, EncodingIssue, HoverInfo, IndexEntry, IndexStats,
-    InheritedMember, InheritedSource, JdkStatus,
+    InheritedMember, InheritedSource, JdkStatus, UsageHit, ValidationContext,
 };
 use serde_json::json;
 
@@ -436,6 +436,26 @@ impl IndexService {
         })
     }
 
+    /// Resolve a MyBatis mapper interface **method** to the `<select|insert|update|
+    /// delete id=…>` statement with the matching id (go-to XML). `file` is any file inside
+    /// the owning project (to pick the project's config); `interface_fqcn` is the mapper
+    /// interface FQCN, `method` the invoked method name. Returns `None` when no project owns
+    /// the file, its config isn't built yet, or the interface has no such statement.
+    pub fn definition_mapper(
+        &self,
+        file: &str,
+        interface_fqcn: &str,
+        method: &str,
+    ) -> Option<MapperDefinition> {
+        let cfg = self.config_for_file(file)?;
+        let target = cfg.statement_for_method(interface_fqcn, method)?;
+        Some(MapperDefinition {
+            config_file: target.file.to_string(),
+            offset: target.offset,
+            kind: target.kind.as_str().to_string(),
+        })
+    }
+
     /// The conservative "action inesistente" verdict for a JSP action reference.
     /// Returns `Inconclusive` (never `Missing`) whenever the config isn't built yet, so
     /// the FE never shows a false "missing" while the index is still loading.
@@ -444,6 +464,114 @@ impl IndexService {
             Some(cfg) => cfg.diagnose_action(action_qname),
             None => ActionVerdict::Inconclusive { reason: "config not built".into() },
         }
+    }
+
+    /// Everything the "New validator" modal needs for a `<Action>-validation.xml`: the
+    /// bound action class (by the file-name convention), that class's writable bean
+    /// properties (the `<field name>` candidates), and the fields already validated in the
+    /// file. Never errors — an unresolved action just yields empty lists.
+    pub fn validation_context(&self, file: &str) -> ValidationContext {
+        let (action_simple, _alias) =
+            bennu_web::prelude::split_validation_filename(Path::new(file)).unwrap_or_default();
+
+        // Fields already carrying a validator in this file (parsed off disk).
+        let existing_fields = bennu_web::prelude::parse_validation(Path::new(file))
+            .map(|r| r.fields.into_iter().map(|f| f.name).collect())
+            .unwrap_or_default();
+
+        // Resolve the action class via the owning project's class index (simple-name match).
+        let entry = self.slot_for_file(file).and_then(|slot| {
+            let root = slot.root.to_string_lossy().to_string();
+            self.class_index(&root)?.into_iter().find(|c| c.simple == action_simple)
+        });
+        let (action_fqcn, action_file) = match entry {
+            Some(c) => (Some(c.fqcn), Some(c.file)),
+            None => (None, None),
+        };
+
+        // Writable bean properties = the `setXxx(` setters of the action source (a form
+        // binds + validates writable properties). Name-only scan, so a lossy read is fine.
+        let properties = action_file
+            .as_deref()
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .map(|src| scan_setter_properties(&src))
+            .unwrap_or_default();
+
+        ValidationContext { action_simple, action_fqcn, properties, existing_fields }
+    }
+
+    /// The correlation context for ONE form action, for `bennu_form_analysis`: the resolved
+    /// action class FQCN, the struts config fragment it's declared in, the class's **writable
+    /// properties** (its `setXxx` setters — what a form binds), and the field names its
+    /// validation ruleset covers. `file` is any file inside the owning project (to pick the
+    /// project's config); `action` is the form's raw/normalized action reference.
+    ///
+    /// Every tuple element is best-effort: an unresolvable action yields
+    /// `(None, None, [], [])` (the caller still lists the form, all fields unbound). Reuses
+    /// the same private helpers as [`validation_context`](Self::validation_context)
+    /// (`config_for_file` → `action_class_ref`, `class_index` + `scan_setter_properties`,
+    /// `validations_for_class`) — no new parsing here.
+    pub fn form_action_context(
+        &self,
+        file: &str,
+        action: &str,
+    ) -> (Option<String>, Option<String>, Vec<String>, Vec<String>) {
+        let Some(cfg) = self.config_for_file(file) else {
+            return (None, None, Vec::new(), Vec::new());
+        };
+        let Some(target) = cfg.action_class_ref(action) else {
+            return (None, None, Vec::new(), Vec::new());
+        };
+        let class_fqcn = target.class_fqcn;
+        let config_file = (!target.config_file.is_empty()).then(|| target.config_file.replace('\\', "/"));
+
+        // Writable properties: find the action class source by simple name (from the FQCN)
+        // via the class index, then scan its setters. Empty when the class isn't a project
+        // source (dependency-jar action) or the index hasn't landed yet.
+        let simple = class_fqcn.as_deref().and_then(|fqcn| fqcn.rsplit('.').next());
+        let writable = simple
+            .and_then(|simple| {
+                let root = self.slot_for_file(file)?.root.to_string_lossy().to_string();
+                let entry = self.class_index(&root)?.into_iter().find(|c| c.simple == simple)?;
+                let src = std::fs::read_to_string(&entry.file).ok()?;
+                Some(scan_setter_properties(&src))
+            })
+            .unwrap_or_default();
+
+        // Validated fields: flatten the `<field name>`s across the action's validation
+        // rulesets (bound to the class by its simple name).
+        let validated = simple
+            .map(|simple| {
+                cfg.validations_for_class(simple)
+                    .iter()
+                    .flat_map(|v| v.fields.iter().map(|f| f.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        (class_fqcn, config_file, writable, validated)
+    }
+
+    /// Find-usages for a Struts action: every JSP `action="…"` reference to `action_qname`
+    /// across the project. `action_qname` is the **raw** attribute value the editor sends
+    /// verbatim (with a possible `.action`/`.do` suffix, `?query`, or namespace-less bare
+    /// name), so it's normalized to the scanner's key before matching — otherwise the needle
+    /// never equals the stored refs (the bug where find-usages silently returned nothing).
+    /// `[]` when no project owns the file. Glue over `bennu-web`'s tested `parse_jsp`;
+    /// computed (`${…}`/`%{…}`) refs are excluded.
+    pub fn action_usages(&self, file: &str, action_qname: &str) -> Vec<UsageHit> {
+        // Normalize the caret token the same way the scanner normalizes the refs it stores.
+        let Some(needle) = bennu_web::prelude::normalize_action_ref(action_qname) else {
+            return Vec::new(); // computed / empty → nothing to find
+        };
+        let Some(slot) = self.slot_for_file(file) else {
+            return Vec::new();
+        };
+        let sources: Vec<(String, String)> = crate::web_discovery::discover_jsp_files(&slot.root)
+            .into_iter()
+            .filter_map(|jsp| std::fs::read_to_string(&jsp).ok().map(|s| (norm_path(&jsp), s)))
+            .collect();
+        action_usage_hits(&sources, &needle)
     }
 
     /// Plan a rename for the symbol at `file`:`offset` → `new_name`, over the owning
@@ -809,7 +937,10 @@ fn build_config_graph(
 ) {
     emit_progress(sink, root_str, "config", "start");
     let inputs = discover_web_inputs(root);
-    if inputs.struts_roots.is_empty() && inputs.spring_files.is_empty() {
+    if inputs.struts_roots.is_empty()
+        && inputs.spring_files.is_empty()
+        && inputs.mapper_files.is_empty()
+    {
         emit_progress(sink, root_str, "config", "end");
         return; // no web config — nothing to ingest
     }
@@ -823,9 +954,11 @@ fn build_config_graph(
     match ingest_config_graph(&graph, index_dir) {
         Ok(cfg) => {
             let (a, b, r) = (cfg.action_count(), cfg.bean_count(), cfg.relation_count());
+            let (i, v) = (cfg.interceptor_count(), cfg.validation_count());
+            let (m, s) = (cfg.mapper_count(), cfg.statement_count());
             *slot.config.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(cfg));
             eprintln!(
-                "bennu-be: config graph live for {} ({a} actions, {b} beans, {r} edges)",
+                "bennu-be: config graph live for {} ({a} actions, {b} beans, {i} interceptors, {v} validations, {m} mappers, {s} statements, {r} edges)",
                 root.display()
             );
         }
@@ -1133,6 +1266,108 @@ fn config_site(source_file: &str) -> Option<String> {
     (!source_file.is_empty()).then(|| source_file.replace('\\', "/"))
 }
 
+/// Best-effort writable bean-property names from a Java source: each `setXxx(` setter's
+/// property (JavaBeans convention). Writable properties are what a Struts form binds and
+/// validates, so these are the `<field name>` candidates. A name-only text scan (no parse):
+/// finds every `set` that begins an identifier `set<Upper>…` immediately followed by `(`.
+fn scan_setter_properties(source: &str) -> Vec<String> {
+    let bytes = source.as_bytes();
+    let mut seen = std::collections::HashSet::new();
+    let mut props = Vec::new();
+    for (i, _) in source.match_indices("set") {
+        // `set` must START an identifier (not the tail of `reset`, `offset`, …).
+        if i > 0 {
+            let p = bytes[i - 1];
+            if p.is_ascii_alphanumeric() || p == b'_' || p == b'$' {
+                continue;
+            }
+        }
+        let rest = &source[i + 3..];
+        let mut it = rest.char_indices();
+        let Some((_, first)) = it.next() else { continue };
+        if !first.is_ascii_uppercase() {
+            continue; // `setUp` ok, `settings` (lowercase) is not a setter
+        }
+        let mut end = first.len_utf8();
+        for (off, c) in it {
+            if c.is_alphanumeric() || c == '_' || c == '$' {
+                end = off + c.len_utf8();
+            } else {
+                break;
+            }
+        }
+        // Must be `set<Name>(` — a method call, allowing whitespace before `(`.
+        if !rest[end..].trim_start().starts_with('(') {
+            continue;
+        }
+        let prop = bean_property_name(&rest[..end]);
+        if seen.insert(prop.clone()) {
+            props.push(prop);
+        }
+    }
+    props.sort();
+    props
+}
+
+/// Every JSP `action="…"` reference matching `needle` across `sources` (`(path, src)`
+/// pairs), as [`UsageHit`]s. `needle` is already normalized (the scanner's key shape); each
+/// scanned ref is compared with [`action_ref_matches`]. Pure over its inputs (no FS / slot),
+/// so the matching is unit-testable off in-memory fixtures.
+fn action_usage_hits(sources: &[(String, String)], needle: &str) -> Vec<UsageHit> {
+    let mut out = Vec::new();
+    for (path, src) in sources {
+        for r in bennu_web::prelude::parse_jsp(src).action_refs {
+            if r.computed || !action_ref_matches(&r.name, needle) {
+                continue;
+            }
+            let (line, col, preview) = line_col_preview(src, r.start);
+            out.push(UsageHit { file: path.clone(), start: r.start, end: r.end, line, col, preview });
+        }
+    }
+    out
+}
+
+/// Does a scanned JSP action ref `ref_name` (already normalized by `parse_jsp`) refer to the
+/// same action as the caret's normalized `needle`? An absolute needle must match exactly; a
+/// bare needle (no namespace, e.g. `edit` — the caret sits on a namespace-less `action=`)
+/// matches any ref whose trailing name segment is that name, so find-usages of a bare name
+/// still surfaces the family rather than nothing.
+fn action_ref_matches(ref_name: &str, needle: &str) -> bool {
+    if ref_name == needle {
+        return true;
+    }
+    if !needle.contains('/') {
+        return ref_name.rsplit('/').next() == Some(needle);
+    }
+    false
+}
+
+/// 1-based line + column and the trimmed line text for a byte `off` in `src` (the
+/// find-usages preview). Clamps `off` to a char boundary so a multi-byte source is safe.
+fn line_col_preview(src: &str, off: usize) -> (usize, usize, String) {
+    let mut off = off.min(src.len());
+    while off > 0 && !src.is_char_boundary(off) {
+        off -= 1;
+    }
+    let before = &src[..off];
+    let line = before.bytes().filter(|&b| b == b'\n').count() + 1;
+    let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let col = off - line_start + 1;
+    let line_end = src[off..].find('\n').map(|i| off + i).unwrap_or(src.len());
+    (line, col, src[line_start..line_end].trim().to_string())
+}
+
+/// The JavaBeans property name for an accessor suffix: lowercase the first letter, UNLESS
+/// the first two letters are both upper-case (`setURL` → `URL`, not `uRL`).
+fn bean_property_name(suffix: &str) -> String {
+    let mut chars = suffix.chars();
+    let Some(first) = chars.next() else { return String::new() };
+    if suffix.chars().nth(1).is_some_and(|c| c.is_uppercase()) {
+        return suffix.to_string();
+    }
+    first.to_lowercase().chain(chars).collect()
+}
+
 /// A human label for a config-graph relation kind (the inspector's `secondary`).
 fn rel_kind_label(kind: bennu_web::prelude::RelKind) -> &'static str {
     use bennu_web::prelude::RelKind;
@@ -1141,6 +1376,9 @@ fn rel_kind_label(kind: bennu_web::prelude::RelKind) -> &'static str {
         RelKind::ActionToResult => "action-result",
         RelKind::ResultToView => "result-view",
         RelKind::BeanIdToImpl => "bean-impl",
+        RelKind::InterceptorRefToDef => "interceptor-ref",
+        RelKind::InterceptorToClass => "interceptor-class",
+        RelKind::MethodToStatement => "method-statement",
     }
 }
 
@@ -1156,9 +1394,48 @@ pub struct ActionDefinition {
     pub view_jsp: Option<String>,
 }
 
+/// A resolved go-to-definition target for a MyBatis mapper method (the be-layer view of
+/// [`bennu_intel::prelude::StatementTarget`]): the mapper XML the `<select|…>` statement
+/// is declared in + the byte offset of its `id` attribute value + the statement kind.
+#[derive(Debug, Clone)]
+pub struct MapperDefinition {
+    /// The mapper XML the statement is declared in.
+    pub config_file: String,
+    /// Byte offset of the `id` attribute value (the go-to target).
+    pub offset: usize,
+    /// The statement kind (`select` / `insert` / `update` / `delete`).
+    pub kind: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scans_setter_properties_from_source() {
+        let src = r#"
+            package com.x;
+            public class LoginAction extends BaseAction {
+                private String username;
+                public String getUsername() { return username; }
+                public void setUsername(String u) { this.username = u; }
+                public void setPassword(String p) {}
+                public void setURL(String u) {}        // two-caps: property stays `URL`
+                protected void setInternal(int i) {}
+                public int reset() { return 0; }       // `reset` is NOT a setter
+                public void notASetter() {}
+            }
+        "#;
+        let props = scan_setter_properties(src);
+        assert_eq!(props, vec!["URL", "internal", "password", "username"]);
+    }
+
+    #[test]
+    fn bean_property_name_handles_caps() {
+        assert_eq!(bean_property_name("Username"), "username");
+        assert_eq!(bean_property_name("URL"), "URL");
+        assert_eq!(bean_property_name("X"), "x");
+    }
 
     #[test]
     fn gen_dir_is_zero_padded_subdir_of_base() {
@@ -1311,6 +1588,8 @@ mod tests {
             resource_roots: vec![],
             spring_files: vec![beans.clone()],
             tiles_files: vec![],
+            validation_files: vec![],
+            mapper_files: vec![],
         };
         let (graph, _report) = build_web_graph(&inputs);
         let cfg = ingest_config_graph(&graph, &dir).unwrap();
@@ -1375,6 +1654,43 @@ mod tests {
         // No classpath file → empty.
         let _ = std::fs::remove_dir_all(&root);
         assert!(jar_entries(&root).is_empty());
+    }
+
+    #[test]
+    fn action_ref_matches_absolute_and_bare() {
+        // Absolute needle → exact only.
+        assert!(action_ref_matches("/do/Cat/viewTree", "/do/Cat/viewTree"));
+        assert!(!action_ref_matches("/do/Other/viewTree", "/do/Cat/viewTree"));
+        // Bare needle → trailing-segment match across namespaces.
+        assert!(action_ref_matches("/do/Cat/viewTree", "viewTree"));
+        assert!(action_ref_matches("viewTree", "viewTree"));
+        assert!(!action_ref_matches("/do/Cat/viewTreeX", "viewTree"));
+    }
+
+    #[test]
+    fn action_usage_hits_finds_refs_across_sources() {
+        // Two JSPs reference the same action (one absolute, one with a `.action` suffix); a
+        // third references a different action; a computed ref is never a hit.
+        let a = (
+            "proj/a.jsp".to_string(),
+            "<s:url action=\"/do/Cat/viewTree\"/>\n<s:a action=\"/do/Cat/viewTree.action\">x</s:a>"
+                .to_string(),
+        );
+        let b = ("proj/b.jsp".to_string(), "<s:form action=\"/do/Cat/other\">y</s:form>".to_string());
+        let c = ("proj/c.jsp".to_string(), "<s:url action=\"%{bean.url}\"/>".to_string());
+        let sources = vec![a, b, c];
+
+        let hits = action_usage_hits(&sources, "/do/Cat/viewTree");
+        assert_eq!(hits.len(), 2, "both refs in a.jsp match (raw suffix included): {hits:?}");
+        assert!(hits.iter().all(|h| h.file == "proj/a.jsp"));
+        // Preview carries the source line; line/col are 1-based.
+        assert!(hits[0].line >= 1 && hits[0].col >= 1);
+        assert!(hits.iter().any(|h| h.preview.contains("viewTree")));
+
+        // A bare needle surfaces the family (trailing-segment match).
+        assert_eq!(action_usage_hits(&sources, "viewTree").len(), 2);
+        // No match → empty (not an error).
+        assert!(action_usage_hits(&sources, "/do/Cat/ghost").is_empty());
     }
 
     #[test]

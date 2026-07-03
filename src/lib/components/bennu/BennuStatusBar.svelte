@@ -11,6 +11,7 @@
    */
   import { Coffee, Boxes, Database, FileType } from 'lucide-svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
+  import BennuIndentStatus from './BennuIndentStatus.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
@@ -19,7 +20,10 @@
   let { footerExtra }: { footerExtra?: Snippet } = $props();
 
   const jdk = $derived(projectStore.project?.jdk ?? null);
-  const encoding = $derived(projectStore.activeEncoding);
+  // The PROJECT's declared source encoding (pom `sourceEncoding` → config default). The
+  // open file's own decoded encoding lives on the editor's footer (BennuEditor), which
+  // can differ (per-file override / recovered mislabel).
+  const encoding = $derived(projectStore.project?.source_encoding ?? null);
 
   // Detected capability count (the truthy boolean fields on the set).
   const capCount = $derived.by(() => {
@@ -78,13 +82,17 @@
       </span>
     {/if}
 
+    <span class="bf-sep"></span>
+    <!-- Indentation (tabs/spaces + width) — click / keyboard to change; applies live. -->
+    <BennuIndentStatus />
+
     {#if encoding}
       <span class="bf-sep"></span>
-      <span class="bf-item" use:tooltip={'File encoding'}>
+      <span class="bf-item" use:tooltip={'Project source encoding (pom sourceEncoding)'}>
         <FileType size={12} /> {encoding}
       </span>
     {/if}
-    <!-- Caret Ln/Col lives on the editor's own footer (BennuEditor); not duplicated here. -->
+    <!-- The open file's own encoding + caret Ln/Col live on the editor's footer (BennuEditor). -->
   {/if}
 
   {#if footerExtra}

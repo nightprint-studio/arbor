@@ -53,6 +53,8 @@ pub fn open_project(root: &Path, opts: &OpenOptions) -> Result<ProjectInfo, Proj
         modules: pom.modules.clone(),
         jdk,
         capabilities,
+        // The project label the status bar shows: pom `sourceEncoding` → config default.
+        source_encoding: encoding::project_encoding_label(&pom, opts.default_encoding),
     })
 }
 

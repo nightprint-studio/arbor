@@ -12,7 +12,7 @@
    */
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
-    PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed,
+    PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -26,6 +26,7 @@
   import { diagnostics as ipcDiagnostics } from '$lib/ipc/bennu';
   import {
     definition as ipcDefinition, references as ipcReferences,
+    actionUsages as ipcActionUsages,
     declaration as ipcDeclaration,
     renameApply as ipcRenameApply, type RenameEdit,
   } from '$lib/ipc/bennu/nav';
@@ -79,6 +80,8 @@
   // The editor language for the active file — Java (tree-sitter) or a CodeMirror
   // built-in / legacy mode (XML, JSP, YAML, JSON, …) picked by extension.
   const editorLanguage = $derived(languageForPath(activePath));
+  // Struts validation files get a dedicated editor toolbar (the "New validator" flow).
+  const isValidationFile = $derived(activePath?.toLowerCase().endsWith('-validation.xml') ?? false);
 
   function baseName(path: string): string {
     return path.split(/[\\/]/).pop() ?? path;
@@ -111,11 +114,13 @@
   }
 
   // ── Diagnostics (byte spans) from the backend, re-fetched per active file ─────
-  // Phase 0: bennu_diagnostics returns []; the wiring is here so it lights up for
-  // free once the backend produces real diagnostics.
+  // For a JSP the backend extracts + checks the `action="…"` refs (unknown → warning
+  // squiggle). Re-fetched when the index rebuilds too (`buildRevision`), so squiggles
+  // appear once the config graph finishes building after a fresh open.
   let diags = $state<EditorDiagnostic[]>([]);
   $effect(() => {
     const path = activePath;
+    void bennuIndexStore.buildRevision; // re-run when the index (config graph) rebuilds
     if (!path) { diags = []; return; }
     let cancelled = false;
     void ipcDiagnostics(path)
@@ -322,11 +327,25 @@
     offset: number,
     anchor: { x: number; y: number } | null,
     word: string | null,
+    ref: string | null = null,
   ) {
     if (!activePath) return;
     bennuRefactorStore.startUsages(anchor, word);
     try {
       const res = await ipcReferences(activePath, source, offset);
+      if (res && res.usages.length) {
+        bennuRefactorStore.setUsages(res.target_label, res.usages);
+        return;
+      }
+      // No Java-symbol usages — try a Struts action reference (a JSP `action="…"`): list
+      // every JSP that references it. `ref` is the reference token under the caret.
+      if (ref) {
+        const av = await ipcActionUsages(activePath, ref).catch(() => null);
+        if (av && av.usages.length) {
+          bennuRefactorStore.setUsages(av.target_label, av.usages);
+          return;
+        }
+      }
       bennuRefactorStore.setUsages(res?.target_label ?? null, res?.usages ?? []);
     } catch {
       bennuRefactorStore.setUsages(null, []);
@@ -342,6 +361,8 @@
       editorComp.caretByteOffset(),
       editorComp.coordsAtCaret(),
       editorComp.wordAtCaret(),
+      // The reference token (a JSP `action="…"` value) for the Struts-action fallback.
+      editorComp.refAtCaret(),
     );
   }
 
@@ -383,6 +404,11 @@
   async function tryGoToDeclarationBE(offset: number, word: string | null): Promise<boolean> {
     const path = activePath;
     if (!path || !editorComp) return false;
+    // Java-symbol resolution only makes sense in a `.java` buffer. On a JSP/XML the Java
+    // resolver would parse the text as Java and could mis-fire on a coincidental symbol
+    // name (e.g. the `viewTree` inside `action="viewTree"` matching a Java method), hijacking
+    // the gesture before the config-graph resolver (`bennu_definition`) gets its turn.
+    if (!path.toLowerCase().endsWith('.java')) return false;
     const source = editorComp.getValue();
     const target = await ipcDeclaration(path, source, offset).catch(() => null);
     if (!target) return false;
@@ -450,8 +476,9 @@
       openDefinitionFile(target);
       return;
     }
-    // Only a class FQCN resolved — a name, not a path we can open yet.
+    // Only a class FQCN resolved — try to open that class from the index; else report it.
     if (res.class_fqcn) {
+      if (await tryGoToClassDeclaration(res.class_fqcn)) return;
       if (!silent) toastStore.show(`Maps to ${res.class_fqcn}`, 'info');
       return;
     }
@@ -590,11 +617,24 @@
       />
     </div>
 
+    <!-- The editor toolbar: breadcrumb (left) + file-type-specific actions (right). This is
+         THE per-file action bar — new file-type tools slot into `.ed-actions`. -->
     <div class="ed-toolbar">
       <div class="ed-crumbs">
+        {#if isValidationFile}<ShieldCheck size={12} class="crumb-icon" />{/if}
         <span class="crumb last">{activePath ? baseName(activePath) : ''}</span>
       </div>
       <div class="ed-actions">
+        {#if isValidationFile}
+          <!-- Struts validation-file tools (JPA-Buddy-style). -->
+          <button class="ed-tbtn" use:tooltip={'Validation reference'} onclick={() => bennuUiStore.toggleDocs()}>
+            <BookOpen size={12} /> Reference
+          </button>
+          <button class="ed-tbtn primary" use:tooltip={'Add a field validator'} onclick={() => bennuUiStore.openValidationCreator()}>
+            <Plus size={12} /> New validator
+          </button>
+          <span class="ed-tsep"></span>
+        {/if}
         <button class="ed-tool" use:tooltip={{ content: 'Go to line', shortcut: 'Ctrl+G' }} aria-label="Go to line" onclick={openGoto}><Hash size={13} /></button>
       </div>
     </div>
@@ -610,6 +650,8 @@
           language={editorLanguage}
           diagnostics={allDiags}
           rulerColumn={bennuSettingsStore.rightMargin}
+          tabSize={bennuSettingsStore.tabSize}
+          indentUnit={bennuSettingsStore.indentStyle === 'tabs' ? '\t' : ' '.repeat(bennuSettingsStore.tabSize)}
           initialState={viewStates.get(activePath)}
           oninput={onInput}
           oncaret={onCaret}
@@ -709,6 +751,21 @@
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .ed-tool:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  /* File-type action buttons in the editor toolbar (text+icon, next to the icon tools). */
+  .crumb-icon { color: var(--accent); flex-shrink: 0; margin-right: 2px; }
+  .ed-tbtn {
+    display: flex; align-items: center; gap: 5px;
+    height: 20px; padding: 0 8px;
+    background: transparent; border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary); font-size: 11px; cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  }
+  .ed-tbtn:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .ed-tbtn.primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
+  .ed-tbtn.primary:hover { filter: brightness(1.08); }
+  .ed-tsep { width: 1px; height: 16px; background: var(--border-subtle); margin: 0 3px; }
 
   .ed-editor-wrap { flex: 1; display: flex; min-width: 0; min-height: 0; }
   .ed-editor-wrap > :global(.code-editor) { flex: 1; min-width: 0; min-height: 0; }

@@ -25,7 +25,7 @@
 
 use bennu_core::prelude::BennuState;
 use bennu_intel::prelude::{ActionVerdict, CompletionItem, IntelProvider, NativeJavaProvider};
-use bennu_proto::prelude::Diagnostic;
+use bennu_proto::prelude::{Diagnostic, UsagesResult};
 use serde::{Deserialize, Serialize};
 
 use crate::index_service::IndexService;
@@ -76,13 +76,29 @@ pub struct DiagnosticsArgs {
 /// file, the empty stub (syntactic diagnostics land with tree-sitter in a later wave).
 #[arbor_rpc::handler]
 fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Diagnostic>, String> {
-    if args.actions.is_empty() {
+    // Action refs to check: the FE's explicit list when present, else — for a JSP — the
+    // refs the BE extracts itself (reusing `bennu-web`'s scan), so squiggles work with no
+    // FE change. A plain Java file with no actions falls to the native syntactic stub.
+    let actions: Vec<ActionRef> = if !args.actions.is_empty() {
+        args.actions
+    } else if is_jsp_file(&args.file) {
+        // Only ABSOLUTE refs (`/ns/name`) are diagnosable: a relative ref needs the
+        // package namespace we don't map from a JSP path, so it stays Inconclusive
+        // (never a false "missing"). Computed (`${…}`/`%{…}`) refs are already dropped.
+        bennu_web::prelude::parse_jsp_file(std::path::Path::new(&args.file))
+            .action_refs
+            .into_iter()
+            .filter(|r| !r.computed && r.name.starts_with('/'))
+            .map(|r| ActionRef { qualified_name: r.name, start: r.start, end: r.end })
+            .collect()
+    } else {
         let provider = NativeJavaProvider::new();
         return provider.diagnostics(&args.file).map_err(|e| e.to_string());
-    }
+    };
+
     let svc = IndexService::global();
     let mut out = Vec::new();
-    for a in &args.actions {
+    for a in &actions {
         // Conservative: only a genuine `Missing` (no action, no wildcard, no OGNL) is a
         // diagnostic. `Exists` and `Inconclusive` produce nothing (docs §8).
         if let ActionVerdict::Missing = svc.diagnose_action(&args.file, &a.qualified_name) {
@@ -95,6 +111,12 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
         }
     }
     Ok(out)
+}
+
+/// True when `file` is a JSP-family file (case-insensitive extension).
+fn is_jsp_file(file: &str) -> bool {
+    let f = file.to_ascii_lowercase();
+    f.ends_with(".jsp") || f.ends_with(".jspf") || f.ends_with(".tag") || f.ends_with(".tagx")
 }
 
 /// Args for [`bennu_definition`].
@@ -132,6 +154,55 @@ fn bennu_definition(
             view_jsp: d.view_jsp,
         }
     }))
+}
+
+/// Args for [`bennu_mapper_definition`].
+#[derive(Deserialize)]
+pub struct MapperDefinitionArgs {
+    /// Absolute path to a file inside the project (to pick the owning project's config).
+    pub file: String,
+    /// The mapper interface FQCN whose method is being resolved (`com.x.FooMapper`).
+    pub interface_fqcn: String,
+    /// The invoked method name → the `<select|…>` statement `id` (`findById`).
+    pub method: String,
+}
+
+/// A resolved go-to-definition target for a MyBatis mapper method.
+#[derive(Serialize)]
+pub struct MapperDefinitionResult {
+    /// The mapper XML the `<select|…>` statement is declared in.
+    pub config_file: String,
+    /// Byte offset of the statement's `id` attribute value (the go-to target).
+    pub offset: usize,
+    /// The statement kind (`select` / `insert` / `update` / `delete`).
+    pub kind: String,
+}
+
+/// Resolve a MyBatis mapper interface method (interface FQCN + method name) to its
+/// `<select|insert|update|delete id=…>` statement in the mapper XML — go-to from a Java
+/// call site to the SQL. `None`-shaped empty result when no project owns the file, the
+/// config isn't built yet, or the interface has no such statement.
+#[arbor_rpc::handler]
+fn bennu_mapper_definition(
+    _ctx: &BennuState,
+    args: MapperDefinitionArgs,
+) -> Result<Option<MapperDefinitionResult>, String> {
+    Ok(IndexService::global()
+        .definition_mapper(&args.file, &args.interface_fqcn, &args.method)
+        .map(|d| MapperDefinitionResult {
+            config_file: d.config_file,
+            offset: d.offset,
+            kind: d.kind,
+        }))
+}
+
+/// Find-usages for a Struts action: every JSP `action="…"` reference to it across the
+/// project (absolute qnames only). Empty when no project owns the file. Reuses
+/// [`DefinitionArgs`] (`file` + `action`).
+#[arbor_rpc::handler]
+fn bennu_action_usages(_ctx: &BennuState, args: DefinitionArgs) -> Result<UsagesResult, String> {
+    let usages = IndexService::global().action_usages(&args.file, &args.action);
+    Ok(UsagesResult { target_label: format!("action {}", args.action), usages })
 }
 
 /// Args for [`bennu_did_change`].

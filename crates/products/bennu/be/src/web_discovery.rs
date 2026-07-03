@@ -9,7 +9,8 @@
 //!     Entando classpath merge);
 //!   - **resource roots**: `src/main/resources` + `src/main/webapp/WEB-INF`;
 //!   - **Spring bean files**: every `.xml` whose text has a `<beans` root, project-wide;
-//!   - **Tiles files**: `*tiles*.xml` under `src/main/webapp`.
+//!   - **Tiles files**: `*tiles*.xml` under `src/main/webapp`;
+//!   - **Validation files**: `*-validation.xml`, project-wide (next to the action class).
 
 use std::path::{Path, PathBuf};
 
@@ -34,7 +35,38 @@ pub fn discover_web_inputs(root: &Path) -> WebInputs {
 
     let tiles_files = find_files(&webapp, &|n| n.contains("tiles") && n.ends_with(".xml"));
 
-    WebInputs { struts_roots, resource_roots, spring_files, tiles_files }
+    // Validation rulesets: `<Action>-validation.xml`, project-wide (they sit next to the
+    // action class under src/main/java or mirror the package under src/main/resources).
+    let validation_files = find_files(root, &|n| n.ends_with("-validation.xml"));
+
+    // MyBatis mapper XMLs: any `.xml` whose ROOT is `<mapper namespace=…>`, project-wide
+    // (they live under src/main/resources mirroring the interface package, sometimes
+    // src/main/java). The parser doubles as the sniff — it returns `None`/empty for a
+    // non-`<mapper>` root — so there's no separate heuristic to drift.
+    let mapper_files = find_files(root, &|n| n.ends_with(".xml"))
+        .into_iter()
+        .filter(|p| {
+            bennu_web::prelude::parse_mybatis_file(p).map(|m| !m.mappers.is_empty()).unwrap_or(false)
+        })
+        .collect();
+
+    WebInputs {
+        struts_roots,
+        resource_roots,
+        spring_files,
+        tiles_files,
+        validation_files,
+        mapper_files,
+    }
+}
+
+/// Discover the project's JSP-family files (`*.jsp` / `*.jspf` / `*.tag` / `*.tagx`),
+/// project-wide. Used by action find-usages (which JSPs reference a given `<action>`).
+pub fn discover_jsp_files(root: &Path) -> Vec<PathBuf> {
+    find_files(root, &|n| {
+        let n = n.to_ascii_lowercase();
+        n.ends_with(".jsp") || n.ends_with(".jspf") || n.ends_with(".tag") || n.ends_with(".tagx")
+    })
 }
 
 /// Recursively collect files under `dir` whose file name matches `matcher`, skipping
@@ -76,12 +108,21 @@ mod tests {
         std::fs::write(res.join("foo-struts-plugin.xml"), "<struts/>").unwrap();
         std::fs::write(res.join("applicationContext.xml"), "<beans></beans>").unwrap();
         std::fs::write(res.join("not-a-bean.xml"), "<other/>").unwrap();
+        std::fs::write(res.join("LoginAction-validation.xml"), "<validators/>").unwrap();
         std::fs::write(web.join("tiles.xml"), "<tiles-definitions/>").unwrap();
+        std::fs::write(
+            res.join("FooMapper.xml"),
+            r#"<mapper namespace="com.x.FooMapper"><select id="a">x</select></mapper>"#,
+        )
+        .unwrap();
 
         let inputs = discover_web_inputs(&dir);
         assert_eq!(inputs.struts_roots.len(), 2, "struts.xml + plugin fragment");
         assert_eq!(inputs.spring_files.len(), 1, "only the <beans xml");
         assert_eq!(inputs.tiles_files.len(), 1);
+        assert_eq!(inputs.validation_files.len(), 1, "the -validation.xml file");
+        // only the `<mapper namespace=…>` root matches — not-a-bean.xml / tiles.xml don't.
+        assert_eq!(inputs.mapper_files.len(), 1, "the <mapper namespace root");
         assert!(inputs.resource_roots.iter().any(|p| p.ends_with("resources")));
 
         let _ = std::fs::remove_dir_all(&dir);

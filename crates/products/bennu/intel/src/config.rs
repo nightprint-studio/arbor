@@ -29,7 +29,10 @@ use bennu_index::prelude::{
     StoreError, Symbol, SymbolKind,
 };
 use bennu_web::prelude::{
-    join_ns, resolve_action_view, resolve_bean_map, RelKind, WebConfigGraph, WildcardPattern,
+    interceptor_usages, join_ns, methods_for_mapper, normalize_action_ref, resolve_action_view,
+    resolve_bean_map, resolve_interceptor_ref, statement_for_method, validations_for_class,
+    InterceptorDef, InterceptorRefUse, RelKind, StatementRecord, StatementTarget, ValidationRecord,
+    WebConfigGraph, WildcardPattern,
 };
 
 /// File names of the four config-index files under a project's index dir.
@@ -131,6 +134,13 @@ pub fn ingest_config_graph(
             RelKind::ActionToResult | RelKind::ResultToView => {
                 (action_ids.get(&r.from).copied(), None)
             }
+            // Interceptor + MyBatis edges are resolved off the parsed graph (like Tiles),
+            // not the id store: interceptor/stack names AND statement ids are package-scoped,
+            // so they get no global fst symbol (a statement id like `findById` isn't globally
+            // unique). `resolve_interceptor_ref` / `statement_for_method` answer over the graph.
+            RelKind::InterceptorRefToDef
+            | RelKind::InterceptorToClass
+            | RelKind::MethodToStatement => (None, None),
         };
         if let (Some(from_id), Some(to_id)) = resolved {
             let rel = Relation {
@@ -190,7 +200,8 @@ impl ConfigResolver {
     /// if the bean has no own class). `None` when the bean-id lives in a dependency jar
     /// (unknown) or the action declares no class.
     pub fn resolve_action_class(&self, action_qname: &str) -> Option<String> {
-        let action_id = *self.action_ids.get(action_qname)?;
+        let key = self.canonical_action_key(action_qname)?;
+        let action_id = *self.action_ids.get(&key)?;
         let bean_id = self
             .relations
             .iter()
@@ -207,19 +218,24 @@ impl ConfigResolver {
     /// The view chain: action → `<result type=tiles>` def → JSP. Answered off the parsed
     /// graph (the Tiles-def→JSP indirection isn't a symbol edge yet).
     pub fn resolve_action_view(&self, action_qname: &str) -> Option<String> {
-        resolve_action_view(&self.graph, action_qname)
+        let key = self.canonical_action_key(action_qname)?;
+        resolve_action_view(&self.graph, &key)
     }
 
     /// The conservative "action inesistente" diagnostic (docs §8). NEVER returns
     /// [`ActionVerdict::Missing`] when a wildcard pattern or a computed/OGNL path could
-    /// match the reference.
+    /// match the reference. Stays STRICT (no unambiguous-suffix guessing like the go-to
+    /// path): only a trailing `.action`/`.do`/query the editor may pass verbatim is stripped
+    /// before the exact check, so a genuinely-dangling absolute ref is still `Missing`.
     pub fn diagnose_action(&self, action_qname: &str) -> ActionVerdict {
-        if self.action_ids.contains_key(action_qname) {
+        // Suffix/query-normalize the raw ref (never the suffix-guess) for the exact check.
+        let norm = normalize_action_ref(action_qname).unwrap_or_else(|| action_qname.to_string());
+        if self.action_ids.contains_key(action_qname) || self.action_ids.contains_key(&norm) {
             return ActionVerdict::Exists;
         }
         // Could a wildcard action's pattern match this reference (within its namespace)?
         for (pat, ns) in &self.wildcards {
-            if let Some(candidate) = strip_ns(action_qname, ns) {
+            if let Some(candidate) = strip_ns(&norm, ns) {
                 if pat.matches(candidate) {
                     return ActionVerdict::Inconclusive {
                         reason: format!("matches wildcard `{}` in ns `{}`", pat.raw, ns),
@@ -240,18 +256,158 @@ impl ConfigResolver {
     /// fragment + the class FQCN it maps to (for go-to-definition). `None` when the
     /// action is unknown.
     pub fn action_class_ref(&self, action_qname: &str) -> Option<ActionTarget> {
-        let id = *self.action_ids.get(action_qname)?;
+        let key = self.canonical_action_key(action_qname)?;
+        let id = *self.action_ids.get(&key)?;
         let sym = self.symbols.get(&id)?;
         Some(ActionTarget {
             config_file: sym.loc_file.clone(),
-            class_fqcn: self.resolve_action_class(action_qname),
-            view_jsp: self.resolve_action_view(action_qname),
+            class_fqcn: self.resolve_action_class(&key),
+            view_jsp: self.resolve_action_view(&key),
         })
+    }
+
+    /// Canonicalize a **raw** JSP action reference (the attribute value the editor sends
+    /// verbatim) to a qualified-name key actually present in the graph, or `None`. Tolerant
+    /// in three steps, cheapest first — the fix for go-to / find-usages silently failing on
+    /// every `.action`/`.do` URL or namespace-less reference:
+    ///   1. **exact** — the ref is already a stored qname (`/do/Cat/edit`);
+    ///   2. **normalized** — strip a trailing `.action`/`.do` + `?query` (`/do/Cat/edit.action`
+    ///      → `/do/Cat/edit`), then exact-match;
+    ///   3. **unambiguous suffix** — a bare `name` (no namespace, as a JSP served under an
+    ///      unknown path emits) matched to a UNIQUE `…/name` action; ambiguous → `None`
+    ///      (never guess between two namespaces).
+    fn canonical_action_key(&self, raw: &str) -> Option<String> {
+        if self.action_ids.contains_key(raw) {
+            return Some(raw.to_string());
+        }
+        let norm = normalize_action_ref(raw)?;
+        if self.action_ids.contains_key(&norm) {
+            return Some(norm);
+        }
+        // Bare name (`viewTree`) → the namespace is unknown from a JSP; accept only a UNIQUE
+        // `…/viewTree` action so a jump is never to the wrong namespace.
+        if !norm.contains('/') {
+            let suffix = format!("/{norm}");
+            let mut hit: Option<String> = None;
+            for k in self.action_ids.keys() {
+                if k.ends_with(&suffix) {
+                    if hit.is_some() {
+                        return None; // ambiguous across namespaces
+                    }
+                    hit = Some(k.clone());
+                }
+            }
+            return hit;
+        }
+        None
+    }
+
+    // ── interceptors ──────────────────────────────────────────────────────────
+
+    /// Resolve an `<interceptor-ref name>` to its `<interceptor>` / `<interceptor-stack>`
+    /// declaration (file + offset + impl class). `None` when the name is provided only by a
+    /// framework/dependency jar (e.g. the built-in `defaultStack`).
+    pub fn resolve_interceptor(&self, name: &str) -> Option<InterceptorDef<'_>> {
+        resolve_interceptor_ref(&self.graph, name)
+    }
+
+    /// Every `<interceptor-ref>` use of `name` (in a stack, an action, or a package
+    /// default) — the find-usages set for an interceptor / stack def.
+    pub fn interceptor_usages(&self, name: &str) -> Vec<&InterceptorRefUse> {
+        interceptor_usages(&self.graph, name)
+    }
+
+    /// The conservative "interceptor inesistente" diagnostic. NEVER returns
+    /// [`ActionVerdict::Missing`]: the load-bearing built-in stacks (`defaultStack`,
+    /// `paramsPrepareParamsStack`, …) are declared in `struts-default.xml` inside a
+    /// framework jar we don't parse, so an unresolved ref is always [`Inconclusive`], not a
+    /// hard miss.
+    ///
+    /// [`Inconclusive`]: ActionVerdict::Inconclusive
+    pub fn diagnose_interceptor_ref(&self, name: &str) -> ActionVerdict {
+        if resolve_interceptor_ref(&self.graph, name).is_some() {
+            ActionVerdict::Exists
+        } else {
+            ActionVerdict::Inconclusive {
+                reason: "interceptor may be a framework/jar-provided stack (e.g. defaultStack)"
+                    .into(),
+            }
+        }
+    }
+
+    // ── validation ────────────────────────────────────────────────────────────
+
+    /// The validation rulesets bound to an action class by its **simple name** (`FooAction`)
+    /// — usually one base ruleset plus any per-alias `<Class>-<alias>-validation.xml`. The
+    /// `<field name>`s inside each name action properties (resolved to getters/setters by the
+    /// Java index at the call site).
+    pub fn validations_for_class(&self, simple_name: &str) -> Vec<&ValidationRecord> {
+        validations_for_class(&self.graph, simple_name)
+    }
+
+    // ── mybatis ───────────────────────────────────────────────────────────────
+
+    /// Go-to XML: mapper interface method → its `<select|...|delete id>` statement (file +
+    /// byte offset). `None` when the interface isn't a known mapper or has no such id.
+    pub fn statement_for_method(
+        &self,
+        interface_fqcn: &str,
+        method: &str,
+    ) -> Option<StatementTarget<'_>> {
+        statement_for_method(&self.graph, interface_fqcn, method)
+    }
+
+    /// find-usages / outline: every statement declared in a mapper interface's XML.
+    pub fn methods_for_mapper(&self, interface_fqcn: &str) -> Vec<&StatementRecord> {
+        methods_for_mapper(&self.graph, interface_fqcn)
+    }
+
+    /// Conservative "orphan statement" diagnostic: a `<select id="bar">` whose owning
+    /// interface declares no matching method `bar`. NEVER returns [`ActionVerdict::Missing`]
+    /// unless the interface is a KNOWN project type whose method set we can trust.
+    ///
+    /// `known_methods` is the interface's declared method-name set, resolved by the CALLER
+    /// from the Java index (this crate never parses Java — the same boundary
+    /// [`Self::validations_for_class`] respects). `None` = interface not a known project
+    /// type → always [`ActionVerdict::Inconclusive`].
+    pub fn diagnose_orphan_statement(
+        &self,
+        _interface_fqcn: &str,
+        statement_id: &str,
+        known_methods: Option<&std::collections::HashSet<String>>,
+    ) -> ActionVerdict {
+        match known_methods {
+            None => ActionVerdict::Inconclusive {
+                reason: "mapper interface is not a known project type".into(),
+            },
+            Some(methods) if methods.contains(statement_id) => ActionVerdict::Exists,
+            Some(_) => ActionVerdict::Missing,
+        }
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────
     pub fn action_count(&self) -> usize {
         self.action_ids.len()
+    }
+
+    /// Total interceptor + stack definitions ingested (accessor for tests / status).
+    pub fn interceptor_count(&self) -> usize {
+        self.graph.interceptors.len() + self.graph.interceptor_stacks.len()
+    }
+
+    /// Total validation rulesets ingested (accessor for tests / status).
+    pub fn validation_count(&self) -> usize {
+        self.graph.validations.len()
+    }
+
+    /// Total MyBatis mappers ingested (accessor for tests / status).
+    pub fn mapper_count(&self) -> usize {
+        self.graph.mappers.len()
+    }
+
+    /// Total MyBatis statements ingested (accessor for tests / status).
+    pub fn statement_count(&self) -> usize {
+        self.graph.statements.len()
     }
     pub fn bean_count(&self) -> usize {
         self.bean_ids.len()
@@ -357,6 +513,8 @@ mod tests {
             resource_roots: vec![],
             spring_files: vec![beans],
             tiles_files: vec![tiles],
+            validation_files: vec![],
+            mapper_files: vec![],
         };
         let (graph, _report) = build_web_graph(&inputs);
         let cfg = ingest_config_graph(&graph, &dir).unwrap();
@@ -385,6 +543,244 @@ mod tests {
         // the persisted edge store re-opens and yields the action's out-edges.
         let reader = ConfigResolver::open_edges(&dir).unwrap();
         assert!(reader.node_count() >= 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The go-to path tolerates the **raw** attribute value the editor sends verbatim: a
+    /// `.action`/`.do` suffix, a `?query`, and a namespace-less bare name all still resolve
+    /// (the bug where JSP go-to / find-usages silently failed on every real-world ref).
+    #[test]
+    fn resolves_raw_action_refs_suffix_query_and_bare_name() {
+        use bennu_web::prelude::{build_web_graph, WebInputs};
+
+        let dir = std::env::temp_dir().join(format!("bennu-cfg-raw-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let struts = dir.join("s.xml");
+        std::fs::write(
+            &struts,
+            r#"<struts>
+                <package name="cat" namespace="/do/Cat" extends="japs-default">
+                  <action name="viewTree" class="categoryAction"><result type="tiles">v</result></action>
+                </package>
+                <package name="sec" namespace="/do/Sec" extends="japs-default">
+                  <action name="edit" class="secAction"><result type="tiles">v</result></action>
+                </package>
+                <package name="usr" namespace="/do/Usr" extends="japs-default">
+                  <action name="edit" class="usrAction"><result type="tiles">v</result></action>
+                </package>
+              </struts>"#,
+        )
+        .unwrap();
+        let beans = dir.join("b.xml");
+        std::fs::write(
+            &beans,
+            r#"<beans>
+                <bean id="categoryAction" class="com.x.CategoryAction"/>
+                <bean id="secAction" class="com.x.SecAction"/>
+                <bean id="usrAction" class="com.x.UsrAction"/>
+              </beans>"#,
+        )
+        .unwrap();
+
+        let inputs = WebInputs {
+            struts_roots: vec![struts],
+            resource_roots: vec![],
+            spring_files: vec![beans],
+            tiles_files: vec![],
+            validation_files: vec![],
+            mapper_files: vec![],
+        };
+        let (graph, _report) = build_web_graph(&inputs);
+        let cfg = ingest_config_graph(&graph, &dir).unwrap();
+
+        let fqcn = |cfg: &ConfigResolver, r: &str| cfg.action_class_ref(r).and_then(|t| t.class_fqcn);
+
+        // 1. exact absolute qname (already worked).
+        assert_eq!(fqcn(&cfg, "/do/Cat/viewTree").as_deref(), Some("com.x.CategoryAction"));
+        // 2. trailing `.action` / `.do` stripped.
+        assert_eq!(fqcn(&cfg, "/do/Cat/viewTree.action").as_deref(), Some("com.x.CategoryAction"));
+        // 3. query string dropped.
+        assert_eq!(
+            fqcn(&cfg, "/do/Cat/viewTree.action?x=1&y=2").as_deref(),
+            Some("com.x.CategoryAction")
+        );
+        // 4. bare name with a UNIQUE `…/viewTree` action → resolves (namespace inferred).
+        assert_eq!(fqcn(&cfg, "viewTree").as_deref(), Some("com.x.CategoryAction"));
+        assert_eq!(fqcn(&cfg, "viewTree.action").as_deref(), Some("com.x.CategoryAction"));
+        // 5. bare name that is AMBIGUOUS (`edit` in both /do/Sec and /do/Usr) → no guess.
+        assert!(cfg.action_class_ref("edit").is_none(), "ambiguous bare name must not resolve");
+        // …but the absolute form disambiguates.
+        assert_eq!(fqcn(&cfg, "/do/Sec/edit").as_deref(), Some("com.x.SecAction"));
+        // 6. a genuinely-unknown ref stays unresolved.
+        assert!(cfg.action_class_ref("/do/Cat/ghost").is_none());
+
+        // diagnose_action stays strict but suffix-tolerant: the concrete action (with a raw
+        // `.action`) is Exists; a dangling absolute ref is Missing.
+        assert_eq!(cfg.diagnose_action("/do/Cat/viewTree.action"), ActionVerdict::Exists);
+        assert_eq!(cfg.diagnose_action("/do/Cat/ghost"), ActionVerdict::Missing);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Interceptors (defs + stacks + refs) and a validation ruleset resolve over the
+    /// ingested graph: go-to a ref → its def + class, find-usages a def → its refs, the
+    /// conservative diagnostic, and the class→ruleset binding.
+    #[test]
+    fn ingest_resolves_interceptors_and_validation() {
+        use bennu_web::prelude::{build_web_graph, WebInputs};
+
+        let dir = std::env::temp_dir().join(format!("bennu-cfg-iv-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let struts = dir.join("s.xml");
+        std::fs::write(
+            &struts,
+            r#"<struts><package name="p" namespace="/do/Sec" extends="japs-default">
+                <interceptors>
+                  <interceptor name="auth" class="com.x.AuthInterceptor"/>
+                  <interceptor-stack name="secureStack">
+                    <interceptor-ref name="defaultStack"/>
+                    <interceptor-ref name="auth"/>
+                  </interceptor-stack>
+                </interceptors>
+                <default-interceptor-ref name="secureStack"/>
+                <action name="edit" class="editAction">
+                  <interceptor-ref name="secureStack"/>
+                  <result type="tiles">x</result>
+                </action>
+              </package></struts>"#,
+        )
+        .unwrap();
+
+        let validation = dir.join("LoginAction-validation.xml");
+        std::fs::write(
+            &validation,
+            r#"<validators>
+                <field name="username"><field-validator type="requiredstring"><message>r</message></field-validator></field>
+                <field name="password"><field-validator type="requiredstring"><message>r</message></field-validator></field>
+              </validators>"#,
+        )
+        .unwrap();
+
+        let inputs = WebInputs {
+            struts_roots: vec![struts],
+            resource_roots: vec![],
+            spring_files: vec![],
+            tiles_files: vec![],
+            validation_files: vec![validation],
+            mapper_files: vec![],
+        };
+        let (graph, _report) = build_web_graph(&inputs);
+        let cfg = ingest_config_graph(&graph, &dir).unwrap();
+
+        assert_eq!(cfg.interceptor_count(), 2, "1 interceptor + 1 stack");
+        assert_eq!(cfg.validation_count(), 1);
+
+        // go-to `<interceptor-ref name="auth">` → the interceptor def + its impl class.
+        let def = cfg.resolve_interceptor("auth").expect("auth resolves");
+        assert!(!def.is_stack);
+        assert_eq!(def.class, Some("com.x.AuthInterceptor"));
+
+        // go-to a stack ref → the stack def (no class).
+        let stack = cfg.resolve_interceptor("secureStack").expect("stack resolves");
+        assert!(stack.is_stack);
+        assert_eq!(stack.class, None);
+
+        // find-usages of `secureStack`: the package default + the action ref = 2.
+        assert_eq!(cfg.interceptor_usages("secureStack").len(), 2);
+        // find-usages of `auth`: the one stack member ref.
+        assert_eq!(cfg.interceptor_usages("auth").len(), 1);
+
+        // the built-in `defaultStack` (jar-provided) is NEVER a hard miss.
+        match cfg.diagnose_interceptor_ref("defaultStack") {
+            ActionVerdict::Inconclusive { .. } => {}
+            other => panic!("jar-provided stack must be Inconclusive, got {other:?}"),
+        }
+        // a locally-declared interceptor exists.
+        assert_eq!(cfg.diagnose_interceptor_ref("auth"), ActionVerdict::Exists);
+
+        // the validation ruleset binds to the action class simple-name; its fields name
+        // action properties.
+        let vals = cfg.validations_for_class("LoginAction");
+        assert_eq!(vals.len(), 1);
+        let field_names: Vec<&str> = vals[0].fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(field_names, vec!["username", "password"]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// MyBatis mappers resolve over the ingested graph: go-to method → statement (file +
+    /// offset + kind), find-usages a mapper → its statements, and the three-way
+    /// conservative orphan-statement diagnostic (`Exists`/`Missing`/`Inconclusive`).
+    #[test]
+    fn ingest_resolves_mybatis_statements() {
+        use bennu_web::prelude::{build_web_graph, WebInputs};
+        use std::collections::HashSet;
+
+        let dir = std::env::temp_dir().join(format!("bennu-cfg-mb-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mapper = dir.join("FooMapper.xml");
+        std::fs::write(
+            &mapper,
+            r#"<mapper namespace="com.x.FooMapper">
+                <select id="findById" resultType="com.x.Foo">select * from foo where id = #{id}</select>
+                <insert id="insert">insert into foo (a) values (#{a})</insert>
+                <update id="update">update foo set a = #{a}</update>
+                <delete id="deleteById">delete from foo where id = #{id}</delete>
+              </mapper>"#,
+        )
+        .unwrap();
+
+        let inputs = WebInputs {
+            struts_roots: vec![],
+            resource_roots: vec![],
+            spring_files: vec![],
+            tiles_files: vec![],
+            validation_files: vec![],
+            mapper_files: vec![mapper],
+        };
+        let (graph, _report) = build_web_graph(&inputs);
+        let cfg = ingest_config_graph(&graph, &dir).unwrap();
+
+        assert_eq!(cfg.mapper_count(), 1);
+        assert_eq!(cfg.statement_count(), 4);
+
+        // go-to a method → its statement (file + offset + kind).
+        let target = cfg
+            .statement_for_method("com.x.FooMapper", "findById")
+            .expect("findById resolves");
+        assert_eq!(target.kind, bennu_web::prelude::StatementKind::Select);
+        assert!(target.offset > 0);
+        assert!(target.file.ends_with("FooMapper.xml"));
+        // an unknown method / unknown interface → no target.
+        assert!(cfg.statement_for_method("com.x.FooMapper", "ghost").is_none());
+        assert!(cfg.statement_for_method("com.x.Unknown", "findById").is_none());
+
+        // find-usages / outline: every statement in the mapper.
+        assert_eq!(cfg.methods_for_mapper("com.x.FooMapper").len(), 4);
+
+        // the conservative diagnostic: known project type + matching method → Exists.
+        let methods: HashSet<String> =
+            ["findById", "insert", "update", "deleteById"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            cfg.diagnose_orphan_statement("com.x.FooMapper", "findById", Some(&methods)),
+            ActionVerdict::Exists
+        );
+        // known project type but NO matching method → a genuine orphan → Missing.
+        let only_find: HashSet<String> = ["findById"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            cfg.diagnose_orphan_statement("com.x.FooMapper", "insert", Some(&only_find)),
+            ActionVerdict::Missing
+        );
+        // interface not a known project type (None) → NEVER Missing → Inconclusive.
+        match cfg.diagnose_orphan_statement("com.x.FooMapper", "anything", None) {
+            ActionVerdict::Inconclusive { .. } => {}
+            other => panic!("unknown interface must be Inconclusive, got {other:?}"),
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }
