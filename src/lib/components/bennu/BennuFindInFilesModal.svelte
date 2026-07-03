@@ -2,75 +2,132 @@
   /**
    * BennuFindInFilesModal — find-in-project as a modal (Ctrl+Shift+F, palette).
    *
-   * Replaces the old Search rail tool. Same seam as before: it scans the loaded
-   * file sources (every file the editor has opened this session; in demo mode the
-   * whole demo project is available) and lists line matches. A real recursive
-   * backend grep lands with the language service — the shape stays the same.
+   * Calls the real backend recursive grep (`bennu_find_in_files`) via `findInFiles`,
+   * debounced (~250ms) with a seq guard so a stale response can never overwrite a
+   * newer one. Three toggles refine the query: Regex, Match case, Whole word. When
+   * the BE is absent (demo project / not attached) the call rejects and we render a
+   * graceful empty state — never a throw.
    *
-   * Keyboard-first: the query input auto-focuses; ↑/↓ move the highlighted hit;
-   * Enter opens it (and closes the modal); Esc cancels (Modal owns Esc). Reuses
-   * the shared Modal + ModalHeader + SearchBar; no bespoke chrome.
+   * Keyboard-first: the query input auto-focuses; ↑/↓ move the highlighted hit
+   * (flattened across groups); Enter opens it (and closes the modal); Esc cancels
+   * (Modal owns Esc). Rows are grouped by file. The matched substring is emphasised
+   * with a <mark>-like span. Replace is intentionally out of scope (no affordance).
    */
   import { Search, FileCode2 } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
-  import SearchBar from '$lib/components/shared/ui/SearchBar.svelte';
+  import Input from '$lib/components/shared/ui/Input.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
-  import type { TreeNode } from '$lib/types/bennu';
+  import { findInFiles } from '$lib/ipc/bennu';
+  import type { FindHit } from '$lib/types/bennu';
 
   let { onClose }: { onClose: () => void } = $props();
 
-  interface Hit { path: string; name: string; line: number; text: string; }
-
   let query = $state('');
+  let regex = $state(false);
+  let caseSensitive = $state(false);
+  let wholeWord = $state(false);
+
+  let hits = $state<FindHit[]>([]);
+  let loading = $state(false);
+  let errored = $state(false);
   let sel = $state(0);
   let listEl = $state<HTMLDivElement | null>(null);
 
   function baseName(p: string): string { return p.split(/[\\/]/).pop() ?? p; }
 
-  function fileNodes(node: TreeNode | null): TreeNode[] {
-    if (!node) return [];
-    if (!node.is_dir) return [node];
-    return node.children.flatMap(fileNodes);
-  }
-  const files = $derived(fileNodes(projectStore.tree));
+  // ── Debounced search with a seq guard ────────────────────────────────────────
+  // Each run bumps `seq`; a resolved response only lands if it's still the latest,
+  // so out-of-order responses to superseded queries are dropped.
+  let seq = 0;
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // Ensure every project file's source is available so search covers all of them.
-  let ready = $state(false);
+  function runSearch() {
+    const root = projectStore.project?.root;
+    const q = query.trim();
+    const mine = ++seq;
+    if (!root || q.length < 2) {
+      hits = [];
+      loading = false;
+      errored = false;
+      return;
+    }
+    loading = true;
+    errored = false;
+    findInFiles(root, q, { regex, caseSensitive, wholeWord })
+      .then((res) => {
+        if (mine !== seq) return; // stale — a newer query is in flight
+        hits = res;
+        loading = false;
+        sel = 0;
+      })
+      .catch(() => {
+        if (mine !== seq) return;
+        // BE absent / rejected query (e.g. bad regex) → graceful empty state.
+        hits = [];
+        loading = false;
+        errored = true;
+      });
+  }
+
+  // Re-run on any input change (query text or a toggle), debounced.
   $effect(() => {
-    void projectStore.project; // re-arm on project switch
-    ready = false;
-    const active = projectStore.activeFilePath;
-    void Promise.all(files.map((f) => projectStore.openFile(f.path)))
-      .then(() => { if (active) projectStore.setActive(active); ready = true; })
-      .catch(() => { ready = true; });
+    // Touch the deps so the effect re-arms on each change.
+    void query; void regex; void caseSensitive; void wholeWord; void projectStore.project;
+    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(runSearch, 250);
+    return () => { if (debounceTimer !== undefined) clearTimeout(debounceTimer); };
   });
 
-  const hits = $derived.by<Hit[]>(() => {
-    const q = query.trim().toLowerCase();
-    if (q.length < 2 || !ready) return [];
-    const out: Hit[] = [];
-    for (const f of files) {
-      const src = projectStore.sourceOf(f.path);
-      if (!src) continue;
-      const lines = src.split(/\r?\n/);
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].toLowerCase().includes(q)) {
-          out.push({ path: f.path, name: baseName(f.path), line: i + 1, text: lines[i].trim() });
-          if (out.length >= 300) return out;
-        }
-      }
-    }
-    return out;
+  // ── Grouping (by file) + flat index for keyboard nav ─────────────────────────
+  interface Group { file: string; name: string; rows: { hit: FindHit; idx: number }[]; }
+  const groups = $derived.by<Group[]>(() => {
+    const byFile = new Map<string, Group>();
+    hits.forEach((hit, idx) => {
+      let g = byFile.get(hit.file);
+      if (!g) { g = { file: hit.file, name: baseName(hit.file), rows: [] }; byFile.set(hit.file, g); }
+      g.rows.push({ hit, idx });
+    });
+    return [...byFile.values()];
   });
 
   // Keep the selection in-range as results change.
   $effect(() => { if (sel >= hits.length) sel = Math.max(0, hits.length - 1); });
 
-  async function openHit(h: Hit) {
-    await projectStore.openFile(h.path);
+  // ── Match highlighting ───────────────────────────────────────────────────────
+  // Split the preview around the first match of the query so it can be wrapped in
+  // an emphasised span. For regex we do a lenient case-insensitive first-match; a
+  // bad pattern just yields no highlight (the row still renders plainly).
+  interface Segment { text: string; hit: boolean; }
+  function segments(preview: string): Segment[] {
+    const q = query.trim();
+    if (!q) return [{ text: preview, hit: false }];
+    let re: RegExp | null = null;
+    try {
+      const flags = caseSensitive ? '' : 'i';
+      if (regex) {
+        re = new RegExp(q, flags);
+      } else {
+        const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const body = wholeWord ? `\\b${escaped}\\b` : escaped;
+        re = new RegExp(body, flags);
+      }
+    } catch { re = null; }
+    if (!re) return [{ text: preview, hit: false }];
+    const m = re.exec(preview);
+    if (!m || m.index < 0 || m[0].length === 0) return [{ text: preview, hit: false }];
+    return [
+      { text: preview.slice(0, m.index), hit: false },
+      { text: preview.slice(m.index, m.index + m[0].length), hit: true },
+      { text: preview.slice(m.index + m[0].length), hit: false },
+    ];
+  }
+
+  async function openHit(h: FindHit) {
+    await projectStore.openFile(h.file);
     bennuUiStore.requestGoto(h.line);
     onClose();
   }
@@ -97,6 +154,8 @@
       row?.scrollIntoView({ block: 'nearest' });
     });
   }
+
+  const hasQuery = $derived(query.trim().length >= 2);
 </script>
 
 <Modal {onClose} width="640px" height="520px" padBody={false} bodyBorder>
@@ -109,32 +168,76 @@
 
   <div class="ff" onkeydown={onKey} role="presentation">
     <div class="ff-search">
-      <SearchBar bind:query placeholder="Find in project…" showRegex={false} showCounter={false} autofocus />
+      <Input
+        bind:value={query}
+        placeholder="Find in project…"
+        clearable
+        autofocus
+        ariaLabel="Find in project"
+      >
+        {#snippet iconStart()}<Search size={13} />{/snippet}
+      </Input>
+      <div class="ff-toggles">
+        <button
+          type="button"
+          class="ff-tgl"
+          class:on={caseSensitive}
+          aria-pressed={caseSensitive}
+          title="Match case"
+          onclick={() => (caseSensitive = !caseSensitive)}
+        >Aa</button>
+        <button
+          type="button"
+          class="ff-tgl"
+          class:on={wholeWord}
+          aria-pressed={wholeWord}
+          title="Whole word"
+          onclick={() => (wholeWord = !wholeWord)}
+        ><span class="ff-tgl-w">W</span></button>
+        <button
+          type="button"
+          class="ff-tgl"
+          class:on={regex}
+          aria-pressed={regex}
+          title="Regular expression"
+          onclick={() => (regex = !regex)}
+        >.*</button>
+      </div>
     </div>
 
     {#if !projectStore.project}
       <EmptyState message="Open a project to search its files." />
-    {:else if query.trim().length < 2}
+    {:else if !hasQuery}
       <EmptyState message="Type at least 2 characters to search." />
+    {:else if loading}
+      <div class="ff-loading"><Spinner size="sm" label="Searching…" /></div>
     {:else if hits.length === 0}
-      <EmptyState message={`No matches for “${query.trim()}”.`} />
+      <EmptyState message={errored ? 'Search is unavailable for this project.' : `No matches for “${query.trim()}”.`} />
     {:else}
-      <div class="ff-meta">{hits.length} match{hits.length === 1 ? '' : 'es'}</div>
+      <div class="ff-meta">
+        {hits.length} match{hits.length === 1 ? '' : 'es'} in {groups.length} file{groups.length === 1 ? '' : 's'}
+      </div>
       <div class="ff-list" bind:this={listEl}>
-        {#each hits as h, i (h.path + ':' + h.line + ':' + i)}
-          <button
-            class="ff-hit"
-            class:sel={i === sel}
-            data-idx={i}
-            onclick={() => openHit(h)}
-            onmousemove={() => (sel = i)}
-          >
-            <span class="ff-icon"><FileCode2 size={13} /></span>
-            <span class="ff-body">
-              <span class="ff-line-text">{h.text}</span>
-              <span class="ff-loc">{h.name}:{h.line}</span>
-            </span>
-          </button>
+        {#each groups as g (g.file)}
+          <div class="ff-group">
+            <div class="ff-group-head">
+              <FileCode2 size={12} />
+              <span class="ff-group-name">{g.name}</span>
+              <span class="ff-group-count">{g.rows.length}</span>
+            </div>
+            {#each g.rows as { hit, idx } (hit.file + ':' + hit.line + ':' + hit.col + ':' + idx)}
+              <button
+                class="ff-hit"
+                class:sel={idx === sel}
+                data-idx={idx}
+                onclick={() => openHit(hit)}
+                onmousemove={() => (sel = idx)}
+              >
+                <span class="ff-loc">{hit.line}:{hit.col}</span>
+                <span class="ff-line-text">{#each segments(hit.preview) as s}{#if s.hit}<mark class="ff-mark">{s.text}</mark>{:else}{s.text}{/if}{/each}</span>
+              </button>
+            {/each}
+          </div>
         {/each}
       </div>
     {/if}
@@ -143,25 +246,68 @@
 
 <style>
   .ff { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-  .ff-search { padding: 10px 12px 8px; flex-shrink: 0; }
+  .ff-search {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px 8px; flex-shrink: 0;
+  }
+  .ff-toggles { display: flex; gap: 4px; flex-shrink: 0; }
+  .ff-tgl {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 26px; height: 26px; padding: 0 5px;
+    font-size: 11px; font-weight: 600; font-family: var(--font-code);
+    color: var(--text-muted);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+  .ff-tgl:hover { border-color: var(--border); color: var(--text-secondary); }
+  .ff-tgl.on {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .ff-tgl-w { font-size: 10px; }
+
+  .ff-loading { display: flex; align-items: center; justify-content: center; padding: 24px; }
+
   .ff-meta {
     padding: 4px 14px; font-size: 10.5px; color: var(--text-muted);
     border-bottom: 1px solid var(--border-subtle); flex-shrink: 0;
   }
   .ff-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
+
+  .ff-group { padding-bottom: 2px; }
+  .ff-group-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 14px 3px; color: var(--text-secondary);
+    font-size: 11px; font-weight: 600;
+  }
+  .ff-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ff-group-count {
+    margin-left: auto; font-size: 9.5px; font-weight: 500;
+    color: var(--text-disabled);
+    background: var(--bg-elevated); border-radius: 99px; padding: 0 6px;
+  }
+
   .ff-hit {
-    display: flex; align-items: flex-start; gap: 8px;
+    display: flex; align-items: baseline; gap: 10px;
     width: 100%; text-align: left;
-    padding: 6px 14px; background: transparent; border: none; cursor: pointer;
+    padding: 4px 14px 4px 30px; background: transparent; border: none; cursor: pointer;
   }
   .ff-hit.sel { background: var(--accent-subtle); }
   .ff-hit:hover { background: var(--bg-hover); }
   .ff-hit.sel:hover { background: var(--accent-subtle); }
-  .ff-icon { display: flex; color: var(--text-muted); flex-shrink: 0; margin-top: 1px; }
-  .ff-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ff-loc {
+    font-family: var(--font-code); font-size: 10px; color: var(--text-disabled);
+    flex-shrink: 0; min-width: 44px;
+  }
   .ff-line-text {
     font-family: var(--font-code); font-size: 11.5px; color: var(--text-secondary);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
   }
-  .ff-loc { font-size: 10px; color: var(--text-disabled); }
+  .ff-mark {
+    background: var(--accent-subtle); color: var(--accent);
+    border-radius: 2px; padding: 0 1px; font-weight: 600;
+  }
 </style>

@@ -18,7 +18,7 @@
 import { bennu } from '../rpc';
 import type {
   ProjectInfo, TreeNode, ReadFileResult, CapabilitySet, CompletionItem, Diagnostic,
-  BuildResult, RunHandle,
+  BuildResult, RunHandle, WriteResult, ClassEntry, TodoItem, IndexStats, FindHit,
 } from '$lib/types/bennu';
 
 /** Open a Java project folder: resolve the build model (modules / JDK) + capabilities.
@@ -38,6 +38,14 @@ export function projectTree(root: string): Promise<TreeNode> {
  *  `bennu_read_file` — `ReadFileArgs { root, file }`. */
 export function readFile(root: string, file: string): Promise<ReadFileResult> {
   return bennu('bennu_read_file', { args: { root, file } });
+}
+
+/** Write `text` to `file` on disk, encoded with the project's resolved encoding
+ *  (round-trips `bennu_read_file`; falls back to UTF-8 when a char can't be encoded).
+ *  Returns the encoding actually used. Wire: `bennu_write_file` —
+ *  `WriteFileArgs { root, file, text }`. */
+export function writeFile(root: string, file: string, text: string): Promise<WriteResult> {
+  return bennu('bennu_write_file', { args: { root, file, text } });
 }
 
 /** Re-detect the domain capabilities (Spike-D bitset) for the open project. Wire:
@@ -79,4 +87,43 @@ export function run(root: string, mainClass: string, args: string[] = []): Promi
  *  Wire: `bennu_cancel_run` — `CancelRunArgs { run_id }`. */
 export function cancelRun(runId: string): Promise<boolean> {
   return bennu('bennu_cancel_run', { args: { run_id: runId } });
+}
+
+/** List every project class (a fresh source scan) for the Go-to-Class navigator.
+ *  Wire: `bennu_class_index` — `ClassIndexArgs { root }`. */
+export function classIndex(root: string): Promise<ClassEntry[]> {
+  return bennu('bennu_class_index', { args: { root } });
+}
+
+/** Scan the project for TODO/FIXME/XXX/HACK markers (the TODO tool window). Wire:
+ *  `bennu_todos` — `TodoScanArgs { root }`. */
+export function todos(root: string): Promise<TodoItem[]> {
+  return bennu('bennu_todos', { args: { root } });
+}
+
+/** Index statistics for the open project (the index inspector). Pass the EXACT opened
+ *  root (matched by equality, not prefix). Wire: `bennu_index_stats` —
+ *  `IndexStatsArgs { root }`. */
+export function indexStats(root: string): Promise<IndexStats> {
+  return bennu('bennu_index_stats', { args: { root } });
+}
+
+/** Recursively search the project for `query`, returning one {@link FindHit} per
+ *  matched line. `regex` treats `query` as a pattern; `caseSensitive` / `wholeWord`
+ *  refine plain and regex matches alike. Wire: `bennu_find_in_files` —
+ *  `FindInFilesArgs { root, query, regex, case_sensitive, whole_word }`. */
+export function findInFiles(
+  root: string,
+  query: string,
+  opts: { regex: boolean; caseSensitive: boolean; wholeWord: boolean },
+): Promise<FindHit[]> {
+  return bennu('bennu_find_in_files', {
+    args: {
+      root,
+      query,
+      regex: opts.regex,
+      case_sensitive: opts.caseSensitive,
+      whole_word: opts.wholeWord,
+    },
+  });
 }

@@ -28,7 +28,8 @@ use tree_sitter::{Node, Parser};
 
 use crate::jdk::JdkMemberIndex;
 use crate::refs::{
-    build_reference_index, classify_target, DeclKey, ReferenceIndex, RenameTarget, SourceFile,
+    build_reference_index, classify_caret, classify_target, references, DeclKey, ReferenceIndex,
+    ReferencesResult, RenameTarget, SourceFile,
 };
 use crate::resolver::IndexResolver;
 
@@ -259,6 +260,252 @@ impl RenameEngine {
     pub fn index(&self) -> &ReferenceIndex {
         &self.index
     }
+
+    /// Find all usages of the symbol at `file`:`offset` (byte offset), for find-usages.
+    /// Shares the engine's reference index + resolver with rename (same off-thread build).
+    /// `source` is the current (possibly-unsaved) buffer. `None` when the caret isn't on a
+    /// referenceable symbol (a local/param is scope-exact and not bucketed here).
+    pub fn find_usages(&self, file: &str, source: &str, offset: usize) -> Option<ReferencesResult> {
+        references(&self.index, file, source, offset, &self.resolver, &self.project_types)
+    }
+
+    /// Resolve the symbol at `file`:`offset` to a hover card (signature + kind + owner).
+    /// Shares the engine's classifier + resolver with rename/find-usages (same off-thread
+    /// build). `source` is the current (possibly-unsaved) buffer. `None` when the caret
+    /// isn't on a symbol we can classify (a local variable / parameter isn't keyed here).
+    pub fn hover(&self, file: &str, source: &str, offset: usize) -> Option<HoverInfo> {
+        let key = classify_caret(
+            &self.index,
+            file,
+            source,
+            offset,
+            &self.resolver,
+            &self.project_types,
+        )?;
+        let mut info = hover_for_key(&key, &self.resolver);
+        // Best-effort: attach the leading Javadoc of the PROJECT declaration this key
+        // resolves to (None for a classpath-only / JDK symbol we can't read the source of).
+        info.doc = self.project_doc_for_key(&key);
+        Some(info)
+    }
+
+    /// Extract the leading Javadoc (`/** … */`) of the project declaration `key` names, by
+    /// locating its declaration site in one of the engine's `.java` sources. `None` when
+    /// the declaration isn't in a project source (a JDK / dep-jar symbol) or carries no
+    /// Javadoc. Best-effort — a parse/lookup miss just yields `None`.
+    fn project_doc_for_key(&self, key: &DeclKey) -> Option<String> {
+        for f in &self.java_files {
+            if let Some(decl_start) = decl_site_for_key(&f.source, key) {
+                if let Some(doc) = leading_javadoc(&f.source, decl_start) {
+                    return Some(doc);
+                }
+                // The declaration is in THIS file but has no Javadoc — a same-named type in
+                // another package could still carry one, so keep scanning rather than
+                // returning early. (Rare; the extra files are already parsed cheaply.)
+            }
+        }
+        None
+    }
+}
+
+/// The byte offset where the *declaration* of `key` begins in `source` (the start of the
+/// `class`/`interface`/`enum`/method/field declaration node, NOT just its name token — so
+/// a preceding Javadoc comment can be found immediately above it). `None` when `source`
+/// doesn't declare `key`.
+fn decl_site_for_key(source: &str, key: &DeclKey) -> Option<usize> {
+    let mut parser = Parser::new();
+    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
+    let tree = parser.parse(source, None)?;
+    let bytes = source.as_bytes();
+    let root = tree.root_node();
+
+    match key {
+        DeclKey::Type { binary } => {
+            let simple = simple_of(binary);
+            find_decl_node_start(&root, bytes, &[
+                "class_declaration",
+                "interface_declaration",
+                "enum_declaration",
+            ], &simple, false)
+        }
+        DeclKey::Method { name, .. } => {
+            find_decl_node_start(&root, bytes, &["method_declaration"], name, false)
+        }
+        DeclKey::Field { name, .. } => {
+            find_decl_node_start(&root, bytes, &["variable_declarator"], name, true)
+        }
+    }
+}
+
+/// Walk `root` for a declaration node of one of `kinds` whose `name` child matches `name`,
+/// returning the node's start byte. When `want_field`, the `variable_declarator` must sit
+/// under a `field_declaration` (not a local) and the reported start is the enclosing
+/// `field_declaration` (so its leading Javadoc is found, not the declarator's).
+fn find_decl_node_start(
+    root: &Node,
+    bytes: &[u8],
+    kinds: &[&str],
+    name: &str,
+    want_field: bool,
+) -> Option<usize> {
+    let mut stack = vec![*root];
+    while let Some(n) = stack.pop() {
+        let mut cur = n.walk();
+        for c in n.named_children(&mut cur) {
+            stack.push(c);
+        }
+        if kinds.contains(&n.kind()) {
+            if want_field {
+                let is_field = n.parent().map(|p| p.kind() == "field_declaration").unwrap_or(false);
+                if !is_field {
+                    continue;
+                }
+            }
+            if let Some(nm) = n.child_by_field_name("name") {
+                if nm.utf8_text(bytes).ok() == Some(name) {
+                    // For a field, anchor on the enclosing `field_declaration` so the doc
+                    // above `private int x;` (not above the bare declarator) is captured.
+                    let anchor = if want_field {
+                        n.parent().unwrap_or(n)
+                    } else {
+                        n
+                    };
+                    return Some(anchor.start_byte());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract and clean the `/** … */` Javadoc block that ends immediately above the
+/// declaration starting at `decl_start` in `source`. Returns the joined, trimmed doc text
+/// (leading `*` and the `/**` / `*/` markers stripped, capped ~600 chars), or `None` when
+/// the lines directly above the declaration aren't a Javadoc block.
+fn leading_javadoc(source: &str, decl_start: usize) -> Option<String> {
+    // Everything above the declaration. We look only at the whitespace/comment tail here —
+    // a modifier keyword (`public`) between the comment and the node can't occur, since the
+    // declaration node start already precedes modifiers.
+    let head = &source[..decl_start];
+    let trimmed = head.trim_end();
+    if !trimmed.ends_with("*/") {
+        return None;
+    }
+    // Find the matching `/**` opening the block that this `*/` closes.
+    let open = trimmed.rfind("/**")?;
+    let close = trimmed.len() - "*/".len();
+    if open + "/**".len() > close {
+        return None; // malformed / `/**/`
+    }
+    let inner = &trimmed[open + "/**".len()..close];
+
+    let mut lines: Vec<String> = Vec::new();
+    for raw in inner.lines() {
+        let mut l = raw.trim();
+        // Strip a leading `*` (the Javadoc gutter) and one following space.
+        if let Some(rest) = l.strip_prefix('*') {
+            l = rest.strip_prefix(' ').unwrap_or(rest);
+        }
+        lines.push(l.to_string());
+    }
+    // Drop leading/trailing empty lines, then join.
+    while lines.first().map(|s| s.is_empty()).unwrap_or(false) {
+        lines.remove(0);
+    }
+    while lines.last().map(|s| s.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+    let joined = lines.join("\n");
+    let doc = joined.trim();
+    if doc.is_empty() {
+        return None;
+    }
+    Some(doc.chars().take(600).collect())
+}
+
+/// A resolved hover card for the symbol under the caret (the intel-level view the be layer
+/// maps to the wire `HoverInfo`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoverInfo {
+    /// The signature line: a member's `raw_signature` (or a synthesized `name(...)`
+    /// fallback), or a type's dotted FQCN.
+    pub signature: String,
+    /// `"method"` | `"field"` | `"class"` (types are reported as `"class"`, best-effort —
+    /// interface/enum aren't distinguished from the reference index).
+    pub kind: String,
+    /// The owning type's dotted FQCN for a member; `None` for a type.
+    pub container: Option<String>,
+    /// A best-effort leading Javadoc for a PROJECT declaration (the `/** … */` block
+    /// immediately above it, markers stripped, capped ~600 chars). `None` for a JDK /
+    /// dep-jar symbol (source not readable) or a declaration with no Javadoc.
+    pub doc: Option<String>,
+}
+
+/// Build a [`HoverInfo`] for a classified [`DeclKey`], resolving a member's signature from
+/// the resolver's [`bennu_java::prelude::ClassMembers`] (falling back to a synthesized
+/// `name(...)` when the class isn't on the resolvable classpath or carries no signature).
+fn hover_for_key(key: &DeclKey, resolver: &dyn TypeResolver) -> HoverInfo {
+    match key {
+        DeclKey::Type { binary } => HoverInfo {
+            signature: binary.replace('/', "."),
+            kind: "class".to_string(),
+            container: None,
+            doc: None,
+        },
+        DeclKey::Method { owner, name } => {
+            let signature = member_signature(resolver, owner, name, true)
+                .unwrap_or_else(|| format!("{name}(…)"));
+            HoverInfo {
+                signature,
+                kind: "method".to_string(),
+                container: Some(owner.replace('/', ".")),
+                doc: None,
+            }
+        }
+        DeclKey::Field { owner, name } => {
+            let signature =
+                member_signature(resolver, owner, name, false).unwrap_or_else(|| name.clone());
+            HoverInfo {
+                signature,
+                kind: "field".to_string(),
+                container: Some(owner.replace('/', ".")),
+                doc: None,
+            }
+        }
+    }
+}
+
+/// Look up a member's `raw_signature` on `owner` (walking supertypes, like the reference
+/// walk's `declaring_owner`). `None` when the class isn't resolvable or the member has no
+/// recorded signature (the caller then synthesizes a fallback).
+fn member_signature(
+    resolver: &dyn TypeResolver,
+    owner: &str,
+    name: &str,
+    is_method: bool,
+) -> Option<String> {
+    let mut visited = std::collections::HashSet::new();
+    let mut stack = vec![owner.to_string()];
+    while let Some(bn) = stack.pop() {
+        if !visited.insert(bn.clone()) {
+            continue;
+        }
+        let cm = resolver.members_of(&bn)?;
+        let pool = if is_method { &cm.methods } else { &cm.fields };
+        if let Some(m) = pool.iter().find(|m| m.name == name) {
+            if !m.raw_signature.is_empty() {
+                return Some(m.raw_signature.clone());
+            }
+            // No recorded signature: synthesize a minimal one from the name (+ empty
+            // param list for a method) so the hover still shows something meaningful.
+            return Some(if is_method { format!("{name}()") } else { name.to_string() });
+        }
+        if let Some(sc) = cm.superclass {
+            stack.push(sc);
+        }
+        stack.extend(cm.interfaces);
+    }
+    None
 }
 
 // ── local variable / parameter: scope-exact single-file ──────────────────────────
@@ -733,5 +980,30 @@ mod tests {
         assert_eq!(bean.new_text, "com.acme.Gadget");
         // rename_apply flattens the same set.
         assert_eq!(rename_apply(&p).len(), p.total_edits());
+    }
+
+    #[test]
+    fn leading_javadoc_extracts_type_doc() {
+        let src = "package p;\n\n/**\n * Represents an order.\n * Second line.\n */\npublic class Order { }\n";
+        let start = decl_site_for_key(src, &DeclKey::Type { binary: "p/Order".into() })
+            .expect("type decl found");
+        let doc = leading_javadoc(src, start).expect("javadoc found");
+        assert_eq!(doc, "Represents an order.\nSecond line.");
+    }
+
+    #[test]
+    fn leading_javadoc_extracts_method_doc() {
+        let src = "package p;\npublic class C {\n  /** Does the thing. */\n  public int go() { return 1; }\n}\n";
+        let start = decl_site_for_key(src, &DeclKey::Method { owner: "p/C".into(), name: "go".into() })
+            .expect("method decl found");
+        let doc = leading_javadoc(src, start).expect("javadoc found");
+        assert_eq!(doc, "Does the thing.");
+    }
+
+    #[test]
+    fn no_javadoc_yields_none() {
+        let src = "package p;\n// just a line comment\npublic class C { }\n";
+        let start = decl_site_for_key(src, &DeclKey::Type { binary: "p/C".into() }).unwrap();
+        assert!(leading_javadoc(src, start).is_none());
     }
 }

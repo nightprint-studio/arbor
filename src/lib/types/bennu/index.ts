@@ -81,6 +81,12 @@ export interface ReadFileResult {
   encoding: string;
 }
 
+/** Result of `bennu_write_file`: the encoding the text was actually encoded with
+ *  (the project encoding, or `UTF-8` if that couldn't represent a character). */
+export interface WriteResult {
+  encoding: string;
+}
+
 /** One completion candidate (`bennu_completion`). Phase 0 returns `[]`. */
 export interface CompletionItem {
   /** Text inserted on accept. */
@@ -136,4 +142,63 @@ export interface BuildResult {
 export interface RunHandle {
   run_id: string;
   main_class: string;
+}
+
+// ── navigation / tools ─────────────────────────────────────────────────────────
+
+/** One project class (`bennu_class_index`) — powers Go to Class (Ctrl+N). */
+export interface ClassEntry {
+  /** Dotted fully-qualified class name (`com.acme.Order`). */
+  fqcn: string;
+  /** Simple name (`Order`). */
+  simple: string;
+  /** Absolute path (forward slashes) of the declaring file. */
+  file: string;
+  /** 1-based line of the type declaration. */
+  line: number;
+}
+
+/** Index statistics (`bennu_index_stats`) — powers the index inspector. */
+export interface IndexStats {
+  /** Project types indexed (0 until the first build lands). */
+  types: number;
+  /** Project members (methods + fields) indexed. */
+  members: number;
+  /** Resolved JDK language level. */
+  jdk_version: string;
+  /** Dependency jars on the classpath (not tracked yet → 0). */
+  jar_count: number;
+  /** Struts actions in the config graph (0 with no web config). */
+  actions: number;
+  /** Spring beans in the config graph. */
+  beans: number;
+  /** Config-graph relations (edges). */
+  relations: number;
+  /** Whether the index/provider has finished building. */
+  ready: boolean;
+}
+
+/** One match of `bennu_find_in_files` — a single line hit in a project file,
+ *  rendered as a row in the Find-in-project modal. */
+export interface FindHit {
+  /** Absolute path (forward slashes) of the file the match is in. */
+  file: string;
+  /** 1-based line of the match. */
+  line: number;
+  /** 1-based column where the match starts (used for the goto + highlight). */
+  col: number;
+  /** The full source line (trimmed/capped by the BE), for the preview row. */
+  preview: string;
+}
+
+/** One TODO/FIXME marker (`bennu_todos`) — powers the TODO tool window. */
+export interface TodoItem {
+  /** Absolute path (forward slashes). */
+  file: string;
+  /** 1-based line. */
+  line: number;
+  /** Marker kind: `TODO` | `FIXME` | `XXX` | `HACK`. */
+  kind: string;
+  /** The comment text after the marker (trimmed, capped). */
+  text: string;
 }

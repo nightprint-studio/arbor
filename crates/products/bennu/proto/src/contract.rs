@@ -210,6 +210,175 @@ pub struct RenamePreview {
     pub has_inferred: bool,
 }
 
+// ── write_file ───────────────────────────────────────────────────────────────
+
+/// Result of `bennu_write_file` — the encoding the buffer was actually encoded in on
+/// save. Bennu writes in the project's resolved encoding (the round-trip inverse of
+/// [`FileContents::encoding`]); a char the declared encoding can't represent falls back
+/// to UTF-8, so the FE is told which encoding truly landed on disk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WriteResult {
+    /// The encoding the bytes were written in, e.g. `"UTF-8"`, `"Cp1252"`.
+    pub encoding: String,
+}
+
+// ── references / find-usages (docs §5 #7) ────────────────────────────────────
+
+/// One resolved use site returned by `bennu_references`. Byte offsets (like
+/// [`Diagnostic`] / [`RenameEdit`]) plus 1-based line/col + a trimmed source-line
+/// preview, so the FE can both navigate to the span and render a results list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsageHit {
+    /// Absolute path (forward slashes) of the file the use is in.
+    pub file: String,
+    /// Start byte offset of the referencing identifier.
+    pub start: usize,
+    /// End byte offset (exclusive).
+    pub end: usize,
+    /// 1-based line of the reference.
+    pub line: usize,
+    /// 1-based column of the reference.
+    pub col: usize,
+    /// The trimmed source line text, for the results-list preview.
+    pub preview: String,
+}
+
+/// Result of `bennu_references` — the declaration the caret resolved to (as a human
+/// label) plus its use sites across the project. `None` on the wire when no project owns
+/// the file, its index is still building, or the caret isn't on a referenceable symbol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsagesResult {
+    /// A short human label of the target (`"method com.x.Foo.bar()"`, `"type com.x.Foo"`).
+    pub target_label: String,
+    /// The resolved use sites across the project.
+    pub usages: Vec<UsageHit>,
+}
+
+// ── hover (editor hover card) ────────────────────────────────────────────────
+
+/// Result of `bennu_hover` — the hover card for the symbol under the caret. `None` on the
+/// wire (a bare object absent) when no project owns the file, its index is still building,
+/// or the caret isn't on a symbol we can classify.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HoverInfo {
+    /// The signature line: a member's raw signature (or a synthesized `name(…)` fallback),
+    /// or a type's dotted FQCN.
+    pub signature: String,
+    /// `"method"` | `"field"` | `"class"` | `"interface"` | `"enum"` (best-effort — types
+    /// are currently reported as `"class"`).
+    pub kind: String,
+    /// The owning type's dotted FQCN for a member; `None` for a type.
+    pub container: Option<String>,
+    /// A best-effort leading Javadoc for a project declaration (the `/** … */` block above
+    /// it, markers stripped, capped ~600 chars). `None` for a JDK / dep-jar symbol or a
+    /// declaration with no Javadoc.
+    pub doc: Option<String>,
+}
+
+// ── index stats (index inspector) ─────────────────────────────────────────────
+
+/// Result of `bennu_index_stats` — a cheap snapshot of the per-project index for the
+/// index-inspector panel. Never errors just because the index isn't built yet: an
+/// unbuilt project reports zeros + `ready = false`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndexStats {
+    /// Declared project types in the symbol index (0 until the build lands).
+    pub types: usize,
+    /// Declared project members (methods + fields) in the symbol index (0 until built).
+    pub members: usize,
+    /// The resolved JDK language level the project was opened at (e.g. `"1.8"`, `"17"`).
+    pub jdk_version: String,
+    /// Number of classpath jars resolved for the project. Currently always 0 (not yet
+    /// tracked in the slot).
+    pub jar_count: usize,
+    /// Struts/XWork actions in the config graph (0 when no config / not built).
+    pub actions: usize,
+    /// Spring beans in the config graph (0 when no config / not built).
+    pub beans: usize,
+    /// Config-graph relations / edges (0 when no config / not built).
+    pub relations: usize,
+    /// Whether the project's index build (provider + rename engine) has finished.
+    pub ready: bool,
+}
+
+// ── class index (Go to Class) ────────────────────────────────────────────────
+
+/// One declared Java type in the "Go to Class" navigator, produced by
+/// `bennu_class_index`. A fresh source scan (no persisted index required): each
+/// declared type (class / interface / enum, incl. nested) becomes one entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClassEntry {
+    /// Fully-qualified, dotted class name (`com.acme.Order`).
+    pub fqcn: String,
+    /// The simple (unqualified) type name (`Order`).
+    pub simple: String,
+    /// Absolute path (forward slashes) of the source file declaring the type.
+    pub file: String,
+    /// 1-based line of the type declaration.
+    pub line: usize,
+}
+
+// ── TODO scan (TODO tool window) ─────────────────────────────────────────────
+
+/// One TODO-style marker hit found by `bennu_todos`. A line-oriented scan of the
+/// project sources — one entry per matched marker line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TodoItem {
+    /// Absolute path (forward slashes) of the file the marker is in.
+    pub file: String,
+    /// 1-based line of the marker.
+    pub line: usize,
+    /// The marker word: `"TODO"` | `"FIXME"` | `"XXX"` | `"HACK"`.
+    pub kind: String,
+    /// The trimmed remainder of the line after the marker (capped ~200 chars).
+    pub text: String,
+}
+
+// ── find in files (project-wide text search) ─────────────────────────────────
+
+/// One matching line found by `bennu_find_in_files`. A line-oriented, project-wide text
+/// scan — one entry per matched line (the first match on the line drives `col`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FindHit {
+    /// Absolute path (forward slashes) of the file the match is in.
+    pub file: String,
+    /// 1-based line of the match.
+    pub line: usize,
+    /// 1-based column (char count) of the first match on the line.
+    pub col: usize,
+    /// The trimmed matching line, for the results-list preview (capped ~300 chars).
+    pub preview: String,
+}
+
+// ── spell-check (editor niceties) ────────────────────────────────────────────
+
+/// One misspelled sub-word occurrence returned by `bennu_spellcheck`. Byte offsets (like
+/// [`Diagnostic`]) into the checked `source` — the FE underlines `[start, end)` and offers
+/// `suggestions`. Only the words the user *authored* (declaration-name identifiers, split
+/// by case, + comment words) are checked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpellHit {
+    /// Start byte offset of the misspelled sub-word within the source.
+    pub start: usize,
+    /// End byte offset (exclusive).
+    pub end: usize,
+    /// The offending sub-word (as it appears in the source).
+    pub word: String,
+    /// Up to ~5 suggested corrections (empty when none available).
+    pub suggestions: Vec<String>,
+}
+
+/// The spell-check dictionary status returned by `bennu_spell_status` /
+/// `bennu_download_dictionaries` — whether any Hunspell dictionary is installed and which
+/// of `en_US` / `it_IT` are on disk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpellStatus {
+    /// True when at least one dictionary (`en_US` or `it_IT`) is present on disk.
+    pub installed: bool,
+    /// The installed languages (subset of `["en_US", "it_IT"]`).
+    pub languages: Vec<String>,
+}
+
 // ── build / run (docs §4 "il fondo") ─────────────────────────────────────────
 
 /// A structured build diagnostic parsed out of `javac` / `mvn` compiler output by

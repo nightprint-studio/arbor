@@ -44,12 +44,35 @@ mod intel;
 // Refactor rename (docs §5 #10-12): `bennu_rename_plan` (preview) / `bennu_rename_apply`
 // (edits) — best-effort, config-aware, off the per-project rename engine.
 mod rename;
+// Find-usages (docs §5 #7): `bennu_references` — the read-only twin of rename, reporting
+// every resolved use site of the symbol under the caret off the same reference index.
+mod references;
+// Hover (editor hover card): `bennu_hover` — classifies the symbol under the caret off the
+// per-project rename engine and returns its signature / kind / owning type.
+mod hover;
+// Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
+// + config counts, JDK level, build-ready flag) for an inspector panel.
+mod index_stats;
 // The per-project index lifecycle: build the symbol index off-thread on open, cache
 // the native provider, serve completion from it, and patch a single file on edit.
 mod index_service;
 // Config-graph input discovery: walk the project tree to find struts/spring/tiles files
 // (`WebInputs`) for the config-graph build.
 mod web_discovery;
+// Class index (Go to Class): `bennu_class_index` — a fresh scan of the project's `.java`
+// sources, one entry per declared type (fqcn + simple + file + decl line).
+mod class_index;
+// TODO scan (TODO tool window): `bennu_todos` — a line scan of `.java`/`.xml`/`.jsp`/
+// `.properties` for TODO/FIXME/XXX/HACK markers.
+mod todos;
+// Spell-check (editor niceties): `bennu_spellcheck` (declaration names + comments, split by
+// case, checked against en_US/it_IT Hunspell + tech allow-list + custom dicts) /
+// `bennu_dict_add` / `bennu_spell_status` / `bennu_download_dictionaries` (LibreOffice dicts).
+mod spell;
+// Find in files (project-wide text search): `bennu_find_in_files` — a fresh, line-oriented
+// scan of the project's text files for a query (plain / whole-word; regex is a
+// case-insensitive substring fallback, as the `regex` crate isn't a dependency).
+mod find;
 // Build/run (docs §4 "il fondo"): `bennu_build` (mvn -q -o compile / javac fallback +
 // error parser → structured diagnostics) / `bennu_run` (java -cp … streaming output) /
 // `bennu_cancel_run`. Makes the Run/Debug buttons real + re-indexes target/classes.

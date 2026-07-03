@@ -27,5 +27,6 @@ pub mod prelude;
 pub mod provider;
 pub mod refs;
 pub mod rename;
+pub mod spell;
 pub mod resolver;
 pub mod typemap;

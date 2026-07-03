@@ -16,6 +16,7 @@
   import {
     FolderOpen, Folder, FileCode2, FolderTree, Plus, Crosshair,
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
+    Copy, LocateFixed, ChevronDown, ChevronRight,
   } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
@@ -28,6 +29,8 @@
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import type { TreeNode } from '$lib/types/bennu';
 
   let pickerOpen = $state(false);
@@ -102,6 +105,61 @@
     if (n !== lastReveal) { lastReveal = n; revealActive(); }
   });
 
+  /** Reveal a file in the tree: open it (so it becomes the selected row), expand
+   *  its ancestor folders, and scroll the selected row into view. Reuses the same
+   *  selected-row scroll the toolbar's Select-opened-file uses. */
+  function revealPath(path: string) {
+    void projectStore.openFile(path);
+    bennuUiStore.expandTreeIds(ancestorsOf(path));
+    scrollToActive();
+  }
+
+  // ── Right-click context menu (read-only; FS mutations are a later wave) ──────
+  /** `path` relative to the project root, forward slashes. Falls back to the
+   *  absolute path when it isn't under the root. */
+  function relativePath(path: string): string {
+    const root = projectStore.project?.root;
+    const fwd = path.replace(/\\/g, '/');
+    if (!root) return fwd;
+    const rootFwd = root.replace(/\\/g, '/').replace(/\/+$/, '');
+    if (fwd === rootFwd) return '.';
+    const prefix = rootFwd + '/';
+    return fwd.startsWith(prefix) ? fwd.slice(prefix.length) : fwd;
+  }
+
+  function copyText(text: string) {
+    void navigator.clipboard?.writeText(text).catch(() => { /* clipboard denied — ignore */ });
+  }
+
+  function onRowContextMenu(node: TreeNode, e: MouseEvent) {
+    const items: MenuItem[] = node.is_dir
+      ? [
+          { id: 'copy-path',     label: 'Copy path',          icon: Copy },
+          { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
+          { separator: true, id: 'sep-dir', label: '' },
+          bennuUiStore.isExpanded(node.path)
+            ? { id: 'collapse', label: 'Collapse', icon: ChevronRight }
+            : { id: 'expand',   label: 'Expand',   icon: ChevronDown },
+        ]
+      : [
+          { id: 'open',          label: 'Open',               icon: FolderOpen },
+          { separator: true, id: 'sep-file', label: '' },
+          { id: 'copy-path',     label: 'Copy path',          icon: Copy },
+          { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
+          { id: 'reveal',        label: 'Reveal in Project',  icon: LocateFixed },
+        ];
+    bennuContextMenuStore.show(e.clientX, e.clientY, items, (id) => {
+      switch (id) {
+        case 'open':      void projectStore.openFile(node.path); break;
+        case 'copy-path': copyText(node.path); break;
+        case 'copy-rel':  copyText(relativePath(node.path)); break;
+        case 'reveal':    revealPath(node.path); break;
+        case 'expand':    bennuUiStore.setExpanded(node.path, true); break;
+        case 'collapse':  bennuUiStore.setExpanded(node.path, false); break;
+      }
+    });
+  }
+
   // ── Options kebab ────────────────────────────────────────────────────────────
   const optionsMenu: DropdownItem[] = [
     { kind: 'item', id: 'expand',   label: 'Expand all',   icon: ChevronsUpDown,   onclick: expandAll },
@@ -155,6 +213,7 @@
         {filter}
         ariaLabel="Project files"
         onSelect={onRowSelect}
+        onContextMenu={onRowContextMenu}
       >
         {#snippet row(ctx: RowSnippetCtx<TreeNode>)}
           <span class="tree-icon">

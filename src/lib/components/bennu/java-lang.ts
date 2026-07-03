@@ -33,7 +33,9 @@ import {
 import type {
   Completion, CompletionContext, CompletionResult,
 } from '@codemirror/autocomplete';
+import type { EditorView, Tooltip } from '@codemirror/view';
 import { completion as ipcCompletion } from '$lib/ipc/bennu';
+import { hover as ipcHover } from '$lib/ipc/bennu/nav';
 import { projectStore } from '$lib/stores/bennu/project.svelte';
 
 const RUNTIME_WASM = '/bennu/tree-sitter.wasm';
@@ -289,12 +291,82 @@ const javaCompletionSource: CompletionSource = async (
   return { from, options, validFor: /^[\w$]*$/ };
 };
 
+// ── Hover source (symbol signature) ─────────────────────────────────────────────
+//
+// A CodeMirror `hoverTooltip` source backed by `bennu_hover`. On a stationary hover
+// it finds the identifier word under the pointer, maps it to a UTF-8 byte offset, and
+// renders the resolved signature + kind + container (+ Javadoc when the BE provides
+// it, deferred for now). Returns null gracefully until the index is warm.
+
+const WORD = /[A-Za-z0-9_$]/;
+
+async function javaHoverSource(view: EditorView, pos: number, _side: -1 | 1): Promise<Tooltip | null> {
+  const path = projectStore.activeFilePath;
+  if (!path) return null;
+
+  // Expand the identifier word around `pos`.
+  const line = view.state.doc.lineAt(pos);
+  const text = line.text;
+  const rel = pos - line.from;
+  let s = rel;
+  let e = rel;
+  while (s > 0 && WORD.test(text[s - 1])) s--;
+  while (e < text.length && WORD.test(text[e])) e++;
+  if (s === e) return null;
+  const from = line.from + s;
+  const to = line.from + e;
+
+  // Map a position INSIDE the word (its middle) to a byte offset — the BE classifier
+  // biases left by one, so the word start could resolve the char before it.
+  const src = view.state.doc.toString();
+  const u2b = makeU16ToByte(src);
+  const byteOffset = u2b(from + Math.floor((e - s) / 2));
+
+  let info;
+  try {
+    info = await ipcHover(path, src, byteOffset);
+  } catch {
+    return null;
+  }
+  if (!info) return null;
+
+  return {
+    pos: from,
+    end: to,
+    above: true,
+    create() {
+      const dom = document.createElement('div');
+      dom.className = 'bennu-hover';
+      const sig = document.createElement('div');
+      sig.className = 'bh-sig';
+      sig.textContent = info.signature;
+      dom.appendChild(sig);
+      const meta: string[] = [];
+      if (info.container) meta.push(info.container);
+      if (info.kind) meta.push(info.kind);
+      if (meta.length) {
+        const m = document.createElement('div');
+        m.className = 'bh-meta';
+        m.textContent = meta.join('  ·  ');
+        dom.appendChild(m);
+      }
+      if (info.doc) {
+        const d = document.createElement('div');
+        d.className = 'bh-doc';
+        d.textContent = info.doc;
+        dom.appendChild(d);
+      }
+      return { dom };
+    },
+  };
+}
+
 /** The Java {@link LanguageDescriptor} handed to the shared `CodeEditor`. */
 export const javaLanguage: LanguageDescriptor = {
   id: 'java',
   createParser: createJavaParser,
   classify,
   foldNode,
-  intel: { completion: javaCompletionSource },
+  intel: { completion: javaCompletionSource, hover: javaHoverSource },
   // resolveGoto: reserved for when the symbol index / language service lands.
 };

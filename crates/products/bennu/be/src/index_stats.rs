@@ -1,0 +1,27 @@
+//! `index_stats` domain — `bennu_index_stats` (index inspector).
+//!
+//! A cheap snapshot of the per-project index for an inspector panel: symbol counts (types
+//! / members) from the last full build, the resolved JDK level, the config-graph counts
+//! (actions / beans / relations), and whether the build has finished (`ready`).
+//!
+//! Never errors just because the index isn't built yet — an unbuilt (or unknown) project
+//! reports zeros + `ready = false`, so the FE can poll it while the background build runs.
+
+use bennu_core::prelude::BennuState;
+use bennu_proto::prelude::IndexStats;
+use serde::Deserialize;
+
+use crate::index_service::IndexService;
+
+/// Args for [`bennu_index_stats`].
+#[derive(Deserialize)]
+pub struct IndexStatsArgs {
+    /// Absolute path to the project root to report on.
+    pub root: String,
+}
+
+/// Return a cheap [`IndexStats`] snapshot for the project rooted at `root`.
+#[arbor_rpc::handler]
+fn bennu_index_stats(_ctx: &BennuState, args: IndexStatsArgs) -> Result<IndexStats, String> {
+    Ok(IndexService::global().index_stats(&args.root))
+}

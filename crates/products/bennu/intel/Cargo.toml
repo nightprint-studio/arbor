@@ -31,3 +31,6 @@ serde_json = { workspace = true }
 # `links = "tree-sitter"` runtime across the workspace).
 tree-sitter      = "0.25"
 tree-sitter-java = "0.23"
+# Pure-Rust Hunspell (helix-editor/spellbook) — the spell-check engine loads en_US / it_IT
+# `.aff`/`.dic` and checks declaration-name / comment sub-words. Memory-light, no C deps.
+spellbook        = "0.4"

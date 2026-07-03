@@ -21,7 +21,7 @@
   import {
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
-    Library, Target, Play,
+    Library, Target, Play, ListTodo, Box,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -33,6 +33,7 @@
   import PanelCard from '$lib/components/shared/ui/PanelCard.svelte';
   import ActivityBar, { type ActivityRailItem } from '$lib/components/shared/ui/ActivityBar.svelte';
   import Tooltip from '$lib/components/shared/Tooltip.svelte';
+  import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
   import FeedbackHost from '$lib/feedback/FeedbackHost.svelte';
   import FeedbackStatusButtons from '$lib/feedback/FeedbackStatusButtons.svelte';
   import CommandPaletteShell, { type PaletteSection } from '$lib/components/shared/ui/CommandPaletteShell.svelte';
@@ -55,22 +56,47 @@
   import BennuGenerateModal from './BennuGenerateModal.svelte';
   import BennuIntentionsOverlay from './BennuIntentionsOverlay.svelte';
   import BennuRunConfigModal from './BennuRunConfigModal.svelte';
+  import BennuRenameModal from './BennuRenameModal.svelte';
+  import BennuUsagesPopover from './BennuUsagesPopover.svelte';
+  import BennuGotoModal from './BennuGotoModal.svelte';
+  import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
+  import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
+  import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 
   onMount(() => {
     themeStore.init();
     void appearanceStore.loadConfig();
     void animStore.loadConfig();
-    // Subscribe to the build/run event stream (build-output / run-output / run-exit)
-    // for this window; detach on unmount.
+    // Subscribe to the build/run + index-progress event streams for this window;
+    // detach on unmount.
     let detachRun: (() => void) | undefined;
+    let detachIndex: (() => void) | undefined;
+    let detachSpell: (() => void) | undefined;
     void bennuRunStore.attach().then((d) => { detachRun = d; });
+    void bennuIndexStore.attach().then((d) => { detachIndex = d; });
+    void bennuSpellStore.attach().then((d) => { detachSpell = d; });
     // Anti-white-flash: reveal this window once the first real frame is painted.
     requestAnimationFrame(() => requestAnimationFrame(() => void signalWindowReady().catch(() => {})));
-    return () => { detachRun?.(); };
+    return () => { detachRun?.(); detachIndex?.(); detachSpell?.(); bennuIndexStore.reset(); };
+  });
+
+  // When a real (non-demo) project opens, kick off the indexing status + job. The BE
+  // rebuilds the index on every open, so this fires each time the root changes.
+  let lastIndexedRoot: string | null = null;
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    const demo = projectStore.isDemo;
+    if (root && !demo && root !== lastIndexedRoot) {
+      lastIndexedRoot = root;
+      bennuIndexStore.onProjectOpen(root);
+    }
   });
 
   // ── Build / Run triggers (mirror the titlebar; shared by keybindings + palette) ─
@@ -92,8 +118,15 @@
     focusEditor: () => void;
     openIntentions: () => void;
     goToDefinition: () => void;
+    openRename: () => void;
+    findUsages: () => void;
     insertAtCursor: (text: string) => void;
   } | null>(null);
+
+  /** Ctrl+S — save the active file to disk. */
+  function saveActive() {
+    void projectStore.saveActive().then((ok) => { if (ok) toastStore.show('Saved', 'success'); });
+  }
 
   // Alt+Enter "Generate…" intention → open the Generate modal in that mode.
   function openGenerateFromIntention(mode: GenerateMode) {
@@ -112,8 +145,9 @@
   // state mirrors the dock's open tab.
   const leftBottom = $derived<ActivityRailItem[]>([
     { id: 'build',    tooltip: 'Build', shortcut: 'Alt+0',      icon: Hammer,         active: bennuUiStore.bottomPanel === 'build',    onclick: () => bennuUiStore.toggleBottom('build') },
-    { id: 'terminal', tooltip: 'Terminal', shortcut: 'Alt+F12', icon: TerminalSquare, active: bennuUiStore.bottomPanel === 'terminal', onclick: () => bennuUiStore.toggleBottom('terminal') },
     { id: 'problems', tooltip: 'Problems', shortcut: 'Alt+6',   icon: AlertTriangle,  active: bennuUiStore.bottomPanel === 'problems', onclick: () => bennuUiStore.toggleBottom('problems') },
+    { id: 'todos',    tooltip: 'TODO', shortcut: 'Alt+7',       icon: ListTodo,       active: bennuUiStore.bottomPanel === 'todos',    onclick: () => bennuUiStore.toggleBottom('todos') },
+    { id: 'terminal', tooltip: 'Terminal', shortcut: 'Alt+F12', icon: TerminalSquare, active: bennuUiStore.bottomPanel === 'terminal', onclick: () => bennuUiStore.toggleBottom('terminal') },
   ]);
   const rightTop = $derived<ActivityRailItem[]>([
     { id: 'maven', tooltip: 'Maven', shortcut: 'Alt+8', icon: Hammer, active: bennuUiStore.rightPanel === 'maven', onclick: () => bennuUiStore.toggleRight('maven') },
@@ -141,6 +175,8 @@
     'terminal': TerminalSquare as unknown as IconComponent,
     'hammer': Hammer as unknown as IconComponent,
     'play': Play as unknown as IconComponent,
+    'todo': ListTodo as unknown as IconComponent,
+    'box': Box as unknown as IconComponent,
     'server': Server as unknown as IconComponent,
     'command': Command as unknown as IconComponent,
     'wand': Wand2 as unknown as IconComponent,
@@ -159,6 +195,16 @@
         action: () => run(() => editor?.openGoto()), when: !!projectStore.activeFilePath },
       { id: 'gotodef', title: 'Go to definition', icon: 'target', shortcut: 'Ctrl+B',
         action: () => run(() => editor?.goToDefinition()), when: !!projectStore.activeFilePath },
+      { id: 'gotoclass', title: 'Go to class…', icon: 'box', shortcut: 'Ctrl+N',
+        action: () => run(() => bennuUiStore.openNav('class')), when: !!projectStore.project },
+      { id: 'gotofile', title: 'Go to file…', icon: 'file', shortcut: 'Ctrl+Shift+N',
+        action: () => run(() => bennuUiStore.openNav('file')), when: !!projectStore.project },
+      { id: 'usages', title: 'Find usages', icon: 'search', shortcut: 'Alt+F7',
+        action: () => run(() => void editor?.findUsages()), when: !!projectStore.activeFilePath },
+      { id: 'rename', title: 'Rename…', icon: 'target', shortcut: 'Shift+F6',
+        action: () => run(() => editor?.openRename()), when: !!projectStore.activeFilePath },
+      { id: 'save', title: 'Save file', icon: 'file', shortcut: 'Ctrl+S',
+        action: () => run(saveActive), when: !!projectStore.activeFilePath },
       { id: 'find', title: 'Find in file', icon: 'search', shortcut: 'Ctrl+F',
         action: () => run(() => editor?.openSearch()), when: !!projectStore.activeFilePath },
       { id: 'findproj', title: 'Find in project', icon: 'search', shortcut: 'Ctrl+Shift+F',
@@ -175,6 +221,7 @@
       { id: 'structure', title: 'Toggle Structure', icon: 'list-tree',   shortcut: 'Alt+2', action: () => run(() => bennuUiStore.toggleLeft('structure')), when: true },
       { id: 'dependencies', title: 'Dependencies',  icon: 'library',     shortcut: 'Alt+N', action: () => run(() => bennuUiStore.toggleLeft('dependencies')), when: true },
       { id: 'problems',  title: 'Toggle Problems',  icon: 'alert',       shortcut: 'Alt+6', action: () => run(() => bennuUiStore.toggleBottom('problems')), when: true },
+      { id: 'todos',     title: 'Toggle TODO',      icon: 'todo',        shortcut: 'Alt+7', action: () => run(() => bennuUiStore.toggleBottom('todos')), when: true },
       { id: 'terminal',  title: 'Toggle Terminal',  icon: 'terminal',    shortcut: 'Alt+F12', action: () => run(() => bennuUiStore.toggleBottom('terminal')), when: true },
       { id: 'maven',     title: 'Toggle Maven',     icon: 'hammer',      shortcut: 'Alt+8', action: () => run(() => bennuUiStore.toggleRight('maven')), when: true },
       { id: 'services',  title: 'Toggle Services',  icon: 'server',      shortcut: 'Alt+9', action: () => run(() => bennuUiStore.toggleRight('services')), when: true },
@@ -191,6 +238,7 @@
     ];
     const appItems = [
       { id: 'projectcfg', title: 'Project Configuration…', icon: 'sliders', action: () => run(() => bennuUiStore.openProjectConfig()), when: !!projectStore.project },
+      { id: 'indexinspector', title: 'Index inspector…', icon: 'box', action: () => run(() => bennuUiStore.openIndexInspector()), when: !!projectStore.project },
       { id: 'docs', title: 'Documentation', icon: 'command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
       { id: 'settings', title: 'Settings', icon: 'command', shortcut: 'Ctrl+,', action: () => run(() => bennuUiStore.openSettings()), when: true },
       { id: 'about', title: 'About Bennu', icon: 'info', action: () => run(() => bennuUiStore.openAbout()), when: true },
@@ -216,6 +264,25 @@
     if (e.key === 'F1') { e.preventDefault(); bennuUiStore.toggleDocs(); return; }
     if (mod && e.key === ',') { e.preventDefault(); bennuUiStore.openSettings(); return; }
 
+    // Go to Class (Ctrl+N) / Go to File (Ctrl+Shift+N) — the quick-open navigator.
+    if (mod && !e.altKey && e.key.toLowerCase() === 'n') {
+      if (!projectStore.project) return;
+      e.preventDefault();
+      bennuUiStore.openNav(e.shiftKey ? 'file' : 'class');
+      return;
+    }
+
+    // Save the active file (Ctrl/Cmd+S).
+    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+      if (!projectStore.activeFilePath) return;
+      e.preventDefault(); saveActive(); return;
+    }
+    // Rename (Shift+F6) — refactor the symbol under the caret with a preview.
+    if (e.shiftKey && !mod && !e.altKey && e.key === 'F6') {
+      if (!projectStore.activeFilePath) return;
+      e.preventDefault(); editor?.openRename(); return;
+    }
+
     // Build (Ctrl+F9) / Run (Shift+F10) — IntelliJ. Project-scoped; no-op while busy.
     if (mod && !e.shiftKey && !e.altKey && e.key === 'F9') {
       if (!projectStore.project || bennuRunStore.active) return;
@@ -234,10 +301,15 @@
     // file open, guarded inside the editor's imperative methods).
     if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       if (e.key === 'F12') { e.preventDefault(); bennuUiStore.toggleBottom('terminal'); return; }
+      if (e.key === 'F7') {
+        if (!projectStore.activeFilePath) return;
+        e.preventDefault(); void editor?.findUsages(); return;
+      }
       if (e.key === '1') { e.preventDefault(); bennuUiStore.toggleLeft('project'); return; }
       if (e.key === '2') { e.preventDefault(); bennuUiStore.toggleLeft('structure'); return; }
       if (e.key.toLowerCase() === 'n') { e.preventDefault(); bennuUiStore.toggleLeft('dependencies'); return; }
       if (e.key === '6') { e.preventDefault(); bennuUiStore.toggleBottom('problems'); return; }
+      if (e.key === '7') { e.preventDefault(); bennuUiStore.toggleBottom('todos'); return; }
       if (e.key === '0') { e.preventDefault(); bennuUiStore.toggleBottom('build'); return; }
       if (e.key === '8') { e.preventDefault(); bennuUiStore.toggleRight('maven'); return; }
       if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('services'); return; }
@@ -347,6 +419,14 @@
   <BennuRunConfigModal onClose={() => bennuUiStore.closeRunConfig()} />
 {/if}
 
+{#if bennuUiStore.navOpen}
+  <BennuGotoModal onClose={() => bennuUiStore.closeNav()} />
+{/if}
+
+{#if bennuUiStore.indexInspectorOpen}
+  <BennuIndexInspectorModal onClose={() => bennuUiStore.closeIndexInspector()} />
+{/if}
+
 {#if bennuUiStore.aboutOpen}
   <BennuAboutModal onClose={() => bennuUiStore.closeAbout()} />
 {/if}
@@ -363,11 +443,28 @@
      mounted unconditionally. On close it returns focus to the editor. -->
 <BennuIntentionsOverlay onClose={() => editor?.focusEditor()} />
 
+<!-- Alt+F7 find-usages popover — owns its visibility via bennuRefactorStore. -->
+<BennuUsagesPopover />
+
+{#if bennuRefactorStore.renameOpen}
+  <BennuRenameModal onClose={() => { bennuRefactorStore.closeRename(); editor?.focusEditor(); }} />
+{/if}
+
 {#if bennuUiStore.docsOpen}
   <BennuDocsPanel onClose={() => bennuUiStore.closeDocs()} />
 {/if}
 
 <Tooltip />
+
+{#if bennuContextMenuStore.open}
+  <ContextMenu
+    items={bennuContextMenuStore.items}
+    x={bennuContextMenuStore.x}
+    y={bennuContextMenuStore.y}
+    onSelect={(id) => bennuContextMenuStore.select(id)}
+    onClose={() => bennuContextMenuStore.close()}
+  />
+{/if}
 
 <!-- Feedback surface for the Bennu window: toasts + notifications + progress
      addressed to this window via target="bennu". -->

@@ -1,8 +1,10 @@
 <!-- Bennu docs — Editing & navigation. -->
 <h1>Editing &amp; navigation</h1>
 <p class="doc-lead">
-  The editor is a fast, syntax-highlighted view of your Java (and JSP) files with a tab strip,
+  The editor is a fast, syntax-highlighted view of your project's files with a tab strip,
   a symbol structure, code folding, completions, project-wide search and keyboard-first navigation.
+  Java gets full semantic highlighting; XML/JSP, <code>.properties</code>, YAML, JSON, Markdown,
+  HTML, CSS/SCSS, JavaScript and SQL are highlighted too, so the whole legacy stack reads cleanly.
 </p>
 
 <h2>Tabs</h2>
@@ -21,7 +23,8 @@
 <h2>Project tree</h2>
 <p>
   The <strong>Project</strong> panel header carries quick actions: create a new file, locate the open
-  file in the tree, collapse or expand the whole tree, and an options menu.
+  file in the tree, collapse or expand the whole tree, and an options menu. Right-clicking a file or
+  folder opens a context menu (Open · Copy path · Copy relative path · Reveal).
 </p>
 
 <h2>Code folding</h2>
@@ -41,8 +44,31 @@
 <h2>Find</h2>
 <p>
   <kbd>Ctrl</kbd> + <kbd>F</kbd> searches the current file. <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
-  <kbd>F</kbd> opens <strong>Find in project</strong> — a modal listing every matching line across the
-  project; ↑/↓ move the selection and <kbd>Enter</kbd> opens the hit.
+  <kbd>F</kbd> opens <strong>Find in project</strong> — a backend-powered search across the whole
+  project with <strong>Match case</strong>, <strong>Whole word</strong> and <strong>Regex</strong>
+  toggles, grouping hits by file with the match highlighted; ↑/↓ move the selection and
+  <kbd>Enter</kbd> opens the hit.
+</p>
+
+<h2>Go to class / file</h2>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>N</kbd> opens <strong>Go to Class</strong> and
+  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> opens <strong>Go to File</strong> — a filterable
+  quick-open. Type part of a name, ↑/↓ to move, <kbd>Enter</kbd> to open; a class jumps straight to
+  its declaration line.
+</p>
+
+<h2>Find usages</h2>
+<p>
+  Put the caret on a class, method or field and press <kbd>Alt</kbd> + <kbd>F7</kbd> to list every
+  place it's used across the project in a popover — pick one to jump to it. It answers once the index
+  is warm.
+</p>
+
+<h2>Save</h2>
+<p>
+  <kbd>Ctrl</kbd> + <kbd>S</kbd> writes the current file to disk in the project's encoding. Rename
+  applies and saves its edits the same way.
 </p>
 
 <h2>Go to line</h2>
@@ -59,6 +85,20 @@
   declared: the Struts config fragment, or its view JSP. If the reference resolves only to an
   implementation class the class name is shown. It relies on the project's config graph, so it
   answers once the index is warm and stays quiet when a reference can't be resolved.
+</p>
+
+<h2>Hover</h2>
+<p>
+  Rest the pointer on a class, method or field to see a card with its signature, declaring type and
+  Javadoc (when the source has one). It answers from the project index, so it appears once the index
+  is warm.
+</p>
+
+<h2>Right-click menu</h2>
+<p>
+  Right-clicking in the editor opens a context menu with the clipboard actions (Cut · Copy · Paste)
+  and the semantic ones — <strong>Go to definition</strong>, <strong>Find usages</strong>,
+  <strong>Rename</strong>, <strong>Generate</strong> and <strong>Save</strong>.
 </p>
 
 <h2>Intentions</h2>
@@ -87,6 +127,16 @@
   OGNL and JSP references are not rewritten yet.
 </p>
 
+<h2>Spelling</h2>
+<p>
+  Opt-in per project (Project Configuration → <strong>Spelling</strong>): after downloading the
+  English + Italian dictionaries, Bennu checks your <strong>declared names</strong> — split by
+  camelCase, snake_case and kebab-case — and your <strong>comments</strong>. A misspelled word is
+  underlined as a hint; <kbd>Alt</kbd> + <kbd>Enter</kbd> (or the lint action) offers to replace it
+  with a suggestion or <strong>add it to a project or global dictionary</strong>. Common programming
+  abbreviations are allow-listed, so it stays quiet on the usual jargon.
+</p>
+
 <h2>Generate</h2>
 <p>
   <kbd>Alt</kbd> + <kbd>Insert</kbd> opens the <strong>Generate</strong> dialog — build a constructor,
@@ -99,6 +149,7 @@
   Everything is reachable from the keyboard. The <strong>Command Palette</strong>
   (<kbd>Ctrl</kbd> + <kbd>K</kbd>) lists the editor and tool-window actions; the tool windows toggle
   with <kbd>Alt</kbd> + <kbd>1</kbd> / <kbd>2</kbd> (Project · Structure), <kbd>Alt</kbd> +
-  <kbd>6</kbd> / <kbd>Alt</kbd> + <kbd>F12</kbd> (Problems · Terminal), and <kbd>Alt</kbd> +
-  <kbd>8</kbd> / <kbd>9</kbd> (Maven · Services).
+  <kbd>0</kbd> / <kbd>6</kbd> / <kbd>7</kbd> / <kbd>F12</kbd> (Build · Problems · TODO · Terminal), and
+  <kbd>Alt</kbd> + <kbd>8</kbd> / <kbd>9</kbd> (Maven · Services). Build the project with
+  <kbd>Ctrl</kbd> + <kbd>F9</kbd> and run it with <kbd>Shift</kbd> + <kbd>F10</kbd>.
 </div>

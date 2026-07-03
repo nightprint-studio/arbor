@@ -17,6 +17,8 @@
 
 import type { Parser, Tree, Node } from 'web-tree-sitter';
 import type { CompletionSource } from '@codemirror/autocomplete';
+import type { Extension } from '@codemirror/state';
+import type { EditorView, Tooltip } from '@codemirror/view';
 
 /** The generic highlight-class vocabulary. A language's {@link LanguageDescriptor.classify}
  *  maps its concrete CST node types onto one of these; the highlighter then emits a
@@ -50,6 +52,14 @@ export type TokenClass =
 /** Severity of an {@link EditorDiagnostic} (maps 1:1 onto CodeMirror's lint severities). */
 export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
 
+/** A quick-fix offered on a diagnostic (CodeMirror lint action). `apply` receives the
+ *  view + the diagnostic's mapped UTF-16 range, so a "replace" action can edit in
+ *  place and an "add to dictionary" action can ignore them. */
+export interface EditorDiagnosticAction {
+  name: string;
+  apply: (view: EditorView, from: number, to: number) => void;
+}
+
 /** One located diagnostic in **UTF-8 byte offsets** into the source (the backend
  *  wire coordinate). The host maps `from`/`to` onto CodeMirror's UTF-16 offsets
  *  before pushing them into the lint gutter (see `CodeEditor.setDiagnostics`). A
@@ -61,6 +71,8 @@ export interface EditorDiagnostic {
   to: number;
   severity: DiagnosticSeverity;
   message: string;
+  /** Optional quick-fixes (e.g. spell-check "Add to dictionary" / "Replace with …"). */
+  actions?: EditorDiagnosticAction[];
 }
 
 /** A resolved go-to-declaration target within the same buffer (UTF-16 offset). A
@@ -82,8 +94,20 @@ export interface LanguageDescriptor {
   /** Create a web-tree-sitter {@link Parser} bound to this language's grammar
    *  (loads the runtime + grammar wasm). Rejecting (e.g. the grammar wasm is
    *  missing) is graceful: the highlighter stays plain-text, no crash. Parsers are
-   *  cheap; one per editor is fine, the heavy `Language` is shared internally. */
+   *  cheap; one per editor is fine, the heavy `Language` is shared internally.
+   *  Ignored when {@link cmExtension} is set. */
   createParser: () => Promise<Parser>;
+
+  /**
+   * Optional: a ready-made CodeMirror language {@link Extension} (a `LanguageSupport`
+   * or `StreamLanguage`) used for highlighting **instead of** the tree-sitter grammar.
+   * When present the core skips `createParser`/`classify` (and the tree-driven
+   * features `resolveGoto`/`foldNode` are inactive — there is no live tree). This lets
+   * a product register CodeMirror-built-in / legacy-mode languages (XML, YAML, JSON,
+   * CSS, …) alongside the tree-sitter ones without a core change. Highlighting comes
+   * from the shared Lezer highlight style (see `theme.ts`).
+   */
+  cmExtension?: Extension;
 
   /**
    * Classify a **leaf** CST node into a {@link TokenClass}, or `null` to leave it
@@ -133,6 +157,15 @@ export interface CodeEditorIntel {
    *  a `CompletionResult` (or null for "no completions here"). The product owns
    *  debouncing / async fetching / UTF-16↔byte mapping inside the source. */
   completion?: CompletionSource;
+
+  /** A CodeMirror `hoverTooltip` source — invoked when the pointer rests over a
+   *  position; returns a {@link Tooltip} (or null for "nothing here"). The core wraps
+   *  it in the `hoverTooltip` extension. The product owns the async fetch + DOM. */
+  hover?: (
+    view: EditorView,
+    pos: number,
+    side: -1 | 1,
+  ) => Tooltip | null | Promise<Tooltip | null>;
 }
 
 export type { Parser, Tree, Node };

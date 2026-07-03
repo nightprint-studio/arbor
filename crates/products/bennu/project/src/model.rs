@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use bennu_proto::prelude::{FileContents, ProjectInfo};
+use bennu_proto::prelude::{FileContents, ProjectInfo, WriteResult};
 
 use crate::error::ProjectError;
 use crate::{capability, encoding, jdk, pom};
@@ -66,21 +66,47 @@ pub fn read_file(
     encoding_override: Option<&str>,
 ) -> Result<FileContents, ProjectError> {
     let bytes = std::fs::read(file).map_err(|e| ProjectError::Io(e.to_string()))?;
-
-    // Resolve the label: explicit override → pom-declared → default.
-    let label = match encoding_override.filter(|s| !s.is_empty()) {
-        Some(l) => l.to_string(),
-        None => {
-            // Re-read the project encoding from the pom if present; cheap and keeps
-            // read_file self-contained (no cross-call state).
-            let pom_path = project_root.join("pom.xml");
-            let declared = std::fs::read_to_string(&pom_path)
-                .ok()
-                .map(|xml| encoding::project_encoding_label(&pom::parse(&xml), default_encoding));
-            declared.unwrap_or_else(|| default_encoding.to_string())
-        }
-    };
-
+    let label = resolve_encoding_label(project_root, default_encoding, encoding_override);
     let (text, applied) = encoding::decode(&bytes, &label);
     Ok(FileContents { text, encoding: applied })
+}
+
+/// Write `text` to `file`, encoded in the project's resolved encoding — the round-trip
+/// inverse of [`read_file`]. The label is resolved the same way (explicit override →
+/// pom-declared → default), then [`encoding::encode`] encodes; a char the target
+/// encoding can't represent transparently falls back to UTF-8 (never fails the save).
+/// Returns the encoding that actually applied.
+pub fn write_file(
+    project_root: &Path,
+    file: &Path,
+    text: &str,
+    default_encoding: &str,
+    encoding_override: Option<&str>,
+) -> Result<WriteResult, ProjectError> {
+    let label = resolve_encoding_label(project_root, default_encoding, encoding_override);
+    let (bytes, applied) = encoding::encode(text, &label);
+    std::fs::write(file, &bytes).map_err(|e| ProjectError::Io(e.to_string()))?;
+    Ok(WriteResult { encoding: applied })
+}
+
+/// Resolve the encoding label for a file in `project_root`: explicit `encoding_override`
+/// (per-file/per-project) → the pom's declared `sourceEncoding` → `default_encoding`.
+/// Shared by [`read_file`] and [`write_file`] so a read and its matching write agree.
+fn resolve_encoding_label(
+    project_root: &Path,
+    default_encoding: &str,
+    encoding_override: Option<&str>,
+) -> String {
+    match encoding_override.filter(|s| !s.is_empty()) {
+        Some(l) => l.to_string(),
+        None => {
+            // Re-read the project encoding from the pom if present; cheap and keeps this
+            // self-contained (no cross-call state).
+            let pom_path = project_root.join("pom.xml");
+            std::fs::read_to_string(&pom_path)
+                .ok()
+                .map(|xml| encoding::project_encoding_label(&pom::parse(&xml), default_encoding))
+                .unwrap_or_else(|| default_encoding.to_string())
+        }
+    }
 }

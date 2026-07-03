@@ -14,10 +14,11 @@
 //!   `arbor://bennu/run-exit`. Returns a [`RunHandle`] the FE uses to correlate the
 //!   stream and to `bennu_cancel_run`.
 //!
-//! Threading: build shells out via short-lived **NoWindow** children on the blocking
-//! pool (a plain sync handler is dispatched via `spawn_blocking`, so it never blocks the
-//! IPC dispatcher). Run spawns a detached-from-the-handler background thread that owns
-//! the child + the two reader threads, so the launching RPC returns immediately.
+//! Threading: build shells out via short-lived **NoWindow** children. The serve loop
+//! dispatches each request on its own thread (see `arbor_ipc::serve_stdio`), so a
+//! sync handler that blocks on a child never stalls the IPC read loop or other requests.
+//! Run spawns a detached-from-the-handler background thread that owns the child + the two
+//! reader threads, so the launching RPC returns immediately.
 //!
 //! The pure **error parser** ([`parse_diagnostics`]) is the unit-tested core; the
 //! shell-out + streaming is the glue around it.
@@ -85,8 +86,9 @@ fn bennu_build(ctx: &BennuState, args: BuildArgs) -> Result<BuildResult, String>
     }));
 
     // A clean compile means fresh `target/classes` — re-index so completion picks it up.
+    // The reindex emits `arbor://bennu/index-progress` on the same sink.
     if outcome.ok {
-        IndexService::global().reindex(&args.root);
+        IndexService::global().reindex(&args.root, ctx.event_sink());
     }
 
     Ok(BuildResult { tool: outcome.tool, ok: outcome.ok, diagnostics: outcome.diagnostics })

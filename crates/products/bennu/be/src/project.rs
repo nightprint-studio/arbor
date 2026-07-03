@@ -12,8 +12,8 @@
 use std::path::Path;
 
 use bennu_core::prelude::BennuState;
-use bennu_proto::prelude::{FileContents, ProjectInfo, TreeNode};
-use bennu_project::prelude::{build_tree, open_project, read_file, OpenOptions};
+use bennu_proto::prelude::{FileContents, ProjectInfo, TreeNode, WriteResult};
+use bennu_project::prelude::{build_tree, open_project, read_file, write_file, OpenOptions};
 use serde::Deserialize;
 
 use crate::index_service::IndexService;
@@ -42,7 +42,7 @@ pub struct OpenProjectArgs {
 /// return the [`ProjectInfo`]. The default encoding + per-project JDK override come
 /// from the backend-owned config.
 #[arbor_rpc::handler]
-fn bennu_open_project(_ctx: &BennuState, args: OpenProjectArgs) -> Result<ProjectInfo, String> {
+fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<ProjectInfo, String> {
     let cfg = bennu_core::config::load();
     let jdk_override = cfg.jdk_overrides.get(&args.root).map(|s| s.as_str());
     let opts = OpenOptions { default_encoding: &cfg.default_encoding, jdk_override };
@@ -51,10 +51,11 @@ fn bennu_open_project(_ctx: &BennuState, args: OpenProjectArgs) -> Result<Projec
     // Kick off the symbol-index build off the IPC thread (async, non-blocking). The
     // completion provider goes live when it finishes; until then `bennu_completion`
     // serves the empty list. Resolve the JDK level from the project (else the target
-    // stack's JDK 8).
+    // stack's JDK 8). The build emits `arbor://bennu/index-progress` events on the event
+    // sink so the FE can show a live "Indexing…" status.
     let jdk_version =
         info.jdk.as_ref().map(|j| j.version.clone()).unwrap_or_else(|| DEFAULT_JDK.to_string());
-    IndexService::global().open(&args.root, &jdk_version);
+    IndexService::global().open(&args.root, &jdk_version, ctx.event_sink());
 
     Ok(info)
 }
@@ -98,4 +99,39 @@ fn bennu_read_file(_ctx: &BennuState, args: ReadFileArgs) -> Result<FileContents
         .map(|s| s.as_str());
     read_file(Path::new(&args.root), Path::new(&args.file), &cfg.default_encoding, override_label)
         .map_err(Into::into)
+}
+
+/// Args for [`bennu_write_file`].
+#[derive(Deserialize)]
+pub struct WriteFileArgs {
+    /// Absolute path to the project root (used to resolve the pom-declared encoding).
+    pub root: String,
+    /// Absolute path to the file to write.
+    pub file: String,
+    /// The buffer text to save (always valid UTF-8 on the wire).
+    pub text: String,
+}
+
+/// Write a file encoded in the project's resolved encoding — the round-trip inverse of
+/// [`bennu_read_file`] (per-file/per-project override → pom-declared → config default). A
+/// char the declared encoding can't represent falls back to UTF-8 and still succeeds.
+/// Returns the encoding that actually applied.
+#[arbor_rpc::handler]
+fn bennu_write_file(_ctx: &BennuState, args: WriteFileArgs) -> Result<WriteResult, String> {
+    let cfg = bennu_core::config::load();
+    // A per-file override wins over a per-project one (both keyed by absolute path) — the
+    // same resolution `bennu_read_file` uses, so a read and its save agree on encoding.
+    let override_label = cfg
+        .encoding_overrides
+        .get(&args.file)
+        .or_else(|| cfg.encoding_overrides.get(&args.root))
+        .map(|s| s.as_str());
+    write_file(
+        Path::new(&args.root),
+        Path::new(&args.file),
+        &args.text,
+        &cfg.default_encoding,
+        override_label,
+    )
+    .map_err(Into::into)
 }

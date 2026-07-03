@@ -1,0 +1,183 @@
+/**
+ * Bennu index store — real indexing status for the footer, the Go-to-Class cache,
+ * and a progressive "Indexing…" job card in the feedback overlay.
+ *
+ * The backend builds the project index on a background thread when a project opens
+ * and emits `arbor://bennu/index-progress` events (`{ root, phase, state }`, with a
+ * terminal `phase:"ready"`). This store:
+ *   • tracks `indexing` / current `phase` so the footer shows the truth (not a
+ *     hard-coded "Indexed"),
+ *   • drives a multi-step Operation card (project → references → config) routed to
+ *     the Bennu window,
+ *   • caches the class list per root so Go-to-Class is instant (invalidated when the
+ *     index rebuilds),
+ *   • polls `bennu_index_stats` as a safety net (in case a start/ready event is
+ *     missed on a cold-start race) and to surface the live type count.
+ *
+ * Rune-store pattern: private `$state`, returned getters + methods (CLAUDE.md).
+ */
+
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { SvelteMap } from 'svelte/reactivity';
+import { operationsStore } from '$lib/feedback/stores/operations.svelte';
+import { indexStats as ipcIndexStats, classIndex as ipcClassIndex } from '$lib/ipc/bennu';
+import type { ClassEntry } from '$lib/types/bennu';
+
+const OP_ID = 'bennu-index';
+const PHASES: { key: string; label: string }[] = [
+  { key: 'project', label: 'Project sources' },
+  { key: 'references', label: 'References index' },
+  { key: 'config', label: 'Config graph' },
+];
+function phaseLabel(key: string): string {
+  return PHASES.find((p) => p.key === key)?.label ?? key;
+}
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+function createBennuIndexStore() {
+  let indexing = $state(false);
+  let phase = $state<string | null>(null);
+  let typeCount = $state(0);
+  let currentRoot: string | null = null;
+
+  // Per-root class cache (Go-to-Class). Invalidated when the index rebuilds.
+  const classCache = new SvelteMap<string, ClassEntry[]>();
+
+  let attached = false;
+  let unlisten: UnlistenFn | null = null;
+  // The active safety-net poll timer + a token so a new project open cancels the old.
+  let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  let pollToken = 0;
+  // Fallback-completion tracking: `ready` is the primary signal, but if it never flips
+  // (older BE that doesn't set it, or a root-mismatch on the stats lookup) we finish
+  // when the type count stops growing, or after a hard cap — so the footer never
+  // sticks on "Indexing".
+  let lastPollTypes = -1;
+  let stableCount = 0;
+  let pollCount = 0;
+
+  function startJob(root: string) {
+    operationsStore.start({
+      id: OP_ID,
+      title: 'Indexing project',
+      subtitle: baseName(root),
+      steps: PHASES.map((p) => ({ key: p.key, label: p.label })),
+      current: 'project',
+      target: 'bennu',
+    });
+  }
+
+  function finishJob(ok: boolean) {
+    operationsStore.finish(OP_ID, ok ? { summary: 'Index ready' } : { error: 'Indexing failed' });
+  }
+
+  /** Mark the index ready (from a `ready` event or the poll): stop the spinner, close
+   *  the job, invalidate the class cache so Go-to fetches the fresh set. Idempotent. */
+  function markReady(root: string | null) {
+    if (!indexing && phase === null) return;
+    indexing = false;
+    phase = null;
+    if (root) classCache.delete(root);
+    finishJob(true);
+    stopPoll();
+  }
+
+  function stopPoll() {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined; }
+  }
+
+  function pollOnce(root: string, token: number) {
+    void ipcIndexStats(root)
+      .then((s) => {
+        if (token !== pollToken) return;
+        typeCount = s.types;
+        if (s.ready) {
+          markReady(root);
+          return;
+        }
+        pollCount += 1;
+        // Type count stopped growing (index likely done) → treat as ready.
+        if (s.types > 0 && s.types === lastPollTypes) stableCount += 1; else stableCount = 0;
+        lastPollTypes = s.types;
+        if (stableCount >= 3 || pollCount >= 40) {
+          markReady(root);
+          return;
+        }
+        pollTimer = setTimeout(() => pollOnce(root, token), 1500);
+      })
+      .catch(() => {
+        if (token !== pollToken) return;
+        // BE absent / demo — stop showing an indefinite job.
+        indexing = false;
+        phase = null;
+        operationsStore.dismiss(OP_ID);
+      });
+  }
+
+  return {
+    get indexing() { return indexing; },
+    get phase() { return phase; },
+    get phaseLabel() { return phase ? phaseLabel(phase) : null; },
+    get typeCount() { return typeCount; },
+
+    /** Subscribe to index-progress events (once, from BennuWindow.onMount). Returns a
+     *  detach fn. */
+    async attach(): Promise<UnlistenFn> {
+      if (attached) return () => {};
+      attached = true;
+      unlisten = await listen<{ root: string; phase: string; state: string }>(
+        'arbor://bennu/index-progress',
+        (e) => {
+          const { root, phase: ph, state } = e.payload;
+          if (ph === 'ready') { markReady(root); return; }
+          indexing = true;
+          phase = ph;
+          operationsStore.update(OP_ID, { current: ph, activeDetail: phaseLabel(ph) });
+        },
+      );
+      return () => { unlisten?.(); attached = false; };
+    },
+
+    /** Called when a (non-demo) project opens: show the indexing job + start the
+     *  safety-net poll. Events refine the phase; the poll finishes it if a `ready`
+     *  event is missed. */
+    onProjectOpen(root: string) {
+      currentRoot = root;
+      classCache.delete(root);
+      indexing = true;
+      phase = 'project';
+      typeCount = 0;
+      startJob(root);
+      pollToken += 1;
+      lastPollTypes = -1;
+      stableCount = 0;
+      pollCount = 0;
+      stopPoll();
+      pollOnce(root, pollToken);
+    },
+
+    /** Project closed / window teardown — clear the job + poll. */
+    reset() {
+      stopPoll();
+      pollToken += 1;
+      indexing = false;
+      phase = null;
+      currentRoot = null;
+      operationsStore.dismiss(OP_ID);
+    },
+
+    /** The class list for Go-to-Class — cached per root (fetched once, refreshed when
+     *  the index rebuilds). */
+    async classesForRoot(root: string): Promise<ClassEntry[]> {
+      const cached = classCache.get(root);
+      if (cached) return cached;
+      const list = await ipcClassIndex(root);
+      classCache.set(root, list);
+      return list;
+    },
+  };
+}
+
+export const bennuIndexStore = createBennuIndexStore();

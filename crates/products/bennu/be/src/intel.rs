@@ -18,9 +18,10 @@
 //! Java-file diagnostics request (no `actions`) stays the empty stub for now.
 //!
 //! `bennu_did_change` is the **live-edit re-index** hook: on an editor change it
-//! re-extracts just the edited file and patches the persisted index (on the blocking
-//! pool — a plain sync handler runs on `spawn_blocking`), so completion/definition
-//! reflect the edit without reopening the project.
+//! re-extracts just the edited file and patches the persisted index. The serve loop
+//! dispatches each request on its **own thread** (see `arbor_ipc::serve_stdio`), so this
+//! runs off the IPC read loop and never blocks other requests; the patch is truly
+//! incremental (only the changed file is re-parsed — no whole-project walk).
 
 use bennu_core::prelude::BennuState;
 use bennu_intel::prelude::{ActionVerdict, CompletionItem, IntelProvider, NativeJavaProvider};
@@ -144,9 +145,10 @@ pub struct DidChangeArgs {
 }
 
 /// Live-edit re-index: patch the persisted index for the edited file so completion /
-/// definition reflect the change without reopening the project. Runs on the blocking
-/// pool (a plain sync handler is dispatched via `spawn_blocking`). Returns `true` when a
-/// project owns the file (the patch ran), `false` otherwise.
+/// definition reflect the change without reopening the project. Runs off the IPC read loop
+/// (the serve loop dispatches each request on its own thread) and is truly incremental —
+/// only the changed file is re-parsed. Returns `true` when a project owns the file (the
+/// patch ran), `false` otherwise.
 #[arbor_rpc::handler]
 fn bennu_did_change(_ctx: &BennuState, args: DidChangeArgs) -> Result<bool, String> {
     IndexService::global().patch_file(&args.file, args.text.as_deref());

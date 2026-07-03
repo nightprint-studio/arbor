@@ -9,15 +9,24 @@
   <li><kbd>Alt</kbd> + <kbd>N</kbd> — toggle <strong>Dependencies</strong> (by module)</li>
   <li><kbd>Alt</kbd> + <kbd>0</kbd> — toggle <strong>Build</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>6</kbd> — toggle <strong>Problems</strong> (bottom dock)</li>
+  <li><kbd>Alt</kbd> + <kbd>7</kbd> — toggle <strong>TODO</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>F12</kbd> — toggle <strong>Terminal</strong> (bottom dock)</li>
   <li><kbd>Alt</kbd> + <kbd>8</kbd> — toggle <strong>Maven</strong> (right rail)</li>
   <li><kbd>Alt</kbd> + <kbd>9</kbd> — toggle <strong>Services</strong> (right rail)</li>
+</ul>
+
+<h2>Navigate</h2>
+<ul>
+  <li><kbd>Ctrl</kbd> + <kbd>N</kbd> — go to <strong>class</strong> by name (project-wide)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> — go to <strong>file</strong> by name</li>
 </ul>
 
 <h2>Editor</h2>
 <ul>
   <li><kbd>Ctrl</kbd> + <kbd>G</kbd> — go to line (or line:column)</li>
   <li><kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) — go to definition of the action reference under the caret</li>
+  <li><kbd>Alt</kbd> + <kbd>F7</kbd> — <strong>find usages</strong> of the symbol under the caret (across the project)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>S</kbd> — <strong>save</strong> the current file</li>
   <li><kbd>Ctrl</kbd> + <kbd>F</kbd> — find in the current file</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — find in project</li>
   <li><kbd>Ctrl</kbd> + <kbd>Space</kbd> — completions (member access on <kbd>.</kbd>)</li>

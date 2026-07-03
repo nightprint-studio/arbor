@@ -16,7 +16,7 @@
  */
 
 import {
-  EditorView, lineNumbers, keymap,
+  EditorView, lineNumbers, keymap, hoverTooltip,
   highlightActiveLine, highlightActiveLineGutter, drawSelection,
 } from '@codemirror/view';
 import { EditorState, type Extension, type Text } from '@codemirror/state';
@@ -29,7 +29,7 @@ import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
 import { createFoldingExtension } from './folding';
-import { codeEditorTheme } from './theme';
+import { codeEditorTheme, codeEditorHighlightStyle } from './theme';
 
 /** The search keymap minus its open binding: the host owns `Ctrl+F` so it can route
  *  it to the editor (when the pane is focused) or elsewhere, and calls `openSearch()`
@@ -55,6 +55,13 @@ export function createCodeEditorExtensions(
 ): { extensions: Extension; getTree: ReturnType<typeof createHighlightPlugin>['getTree'] } {
   const { plugin: highlight, getTree } = createHighlightPlugin(lang);
 
+  // A descriptor may bring its own CodeMirror language extension (a `LanguageSupport`
+  // / `StreamLanguage` for XML, YAML, JSON, …) instead of a tree-sitter grammar. When
+  // it does, we install that (highlighted by the shared Lezer style) and skip the
+  // tree-sitter plugin entirely; `getTree` then stays inert (the plugin never mounts),
+  // so tree-driven folding/goto simply offer nothing — safe.
+  const useCm = !!lang.cmExtension;
+
   // Client-side folding — installed only when the descriptor opts in via
   // `foldNode`. It reads the same live tree the highlighter maintains (no
   // backend), so folding is free once a grammar loads.
@@ -62,6 +69,7 @@ export function createCodeEditorExtensions(
 
   const exts: Extension[] = [
     codeEditorTheme,
+    codeEditorHighlightStyle,
     lineNumbers(),
     history(),
     drawSelection(),
@@ -72,7 +80,7 @@ export function createCodeEditorExtensions(
     highlightActiveLineGutter(),
     highlightSelectionMatches(),
     search({ top: true }),
-    highlight,
+    useCm ? (lang.cmExtension as Extension) : highlight,
     lintGutter(),
   ];
 
@@ -82,6 +90,13 @@ export function createCodeEditorExtensions(
   const completionSource = lang.intel?.completion;
   if (completionSource && !opts.readOnly) {
     exts.push(autocompletion({ override: [completionSource], defaultKeymap: false }));
+  }
+
+  // Hover docs — a `hoverTooltip` source (e.g. a symbol signature via IPC). Installed
+  // whenever the descriptor supplies one; read-only editors get it too (it's inert).
+  const hoverSource = lang.intel?.hover;
+  if (hoverSource) {
+    exts.push(hoverTooltip(hoverSource, { hoverTime: 350 }));
   }
 
   exts.push(

@@ -21,12 +21,32 @@ import {
   openProject as ipcOpenProject,
   projectTree as ipcProjectTree,
   readFile as ipcReadFile,
+  writeFile as ipcWriteFile,
 } from '$lib/ipc/bennu';
 // Live re-index — kept in its own IPC file to avoid racing edits on index.ts.
 import { didChange as ipcDidChange } from '$lib/ipc/bennu/nav';
 import type { ProjectInfo, TreeNode } from '$lib/types/bennu';
+import { toastStore } from '$lib/feedback/stores/toasts.svelte';
 // MOCK — remove when bennu-be serves real data.
 import { DEMO_PROJECT, DEMO_TREE, DEMO_ROOT, isDemoPath, demoReadFile } from './bennu-mock';
+
+/** Extensions Bennu refuses to open in the text editor: opening a large binary would
+ *  make `bennu_read_file` (UTF-8 decode) choke — a `.xcf` once froze the window. The
+ *  guard is by extension (cheap, no read); a proper binary preview is a later wave. */
+const BINARY_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svgz', 'xcf', 'psd', 'ai',
+  'pdf', 'zip', 'jar', 'war', 'ear', 'class', 'exe', 'dll', 'so', 'dylib', 'bin',
+  'o', 'obj', 'a', 'lib', '7z', 'gz', 'bz2', 'xz', 'tar', 'rar', 'iso', 'dmg',
+  'mp3', 'mp4', 'm4a', 'wav', 'flac', 'ogg', 'avi', 'mov', 'mkv', 'webm',
+  'ttf', 'otf', 'woff', 'woff2', 'eot', 'db', 'sqlite', 'mdb', 'keystore', 'jks',
+]);
+
+function isBinaryPath(path: string): boolean {
+  const name = path.split(/[\\/]/).pop() ?? path;
+  const dot = name.lastIndexOf('.');
+  if (dot < 0) return false;
+  return BINARY_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
 
 /** Debounce (ms) for the live re-index `bennu_did_change` on editor edits — long
  *  enough that a burst of keystrokes coalesces into one BE patch, short enough that
@@ -123,6 +143,29 @@ function createProjectStore() {
     applyProject(DEMO_PROJECT, DEMO_TREE, true);
   }
 
+  /** Ensure `path`'s source is loaded, then return it (''), for consumers (rename
+   *  apply) that need a file's current text whether or not a tab is open. */
+  async function loadText(path: string): Promise<string> {
+    await ensureLoaded(path);
+    return sources.get(path) ?? '';
+  }
+
+  /** Write `text` to `path`: update the cache, persist to disk (`bennu_write_file`,
+   *  skipped for demo/BE-absent), and flush a live re-index. The editor's controlled
+   *  `value` re-syncs from the updated cache, so an open buffer reflects the change. */
+  async function saveText(path: string, text: string): Promise<void> {
+    sources.set(path, text);
+    if (!isDemoPath(path)) {
+      try {
+        const res = await ipcWriteFile(project?.root ?? path, path, text);
+        encodings.set(path, res.encoding);
+      } catch {
+        /* BE absent — cache updated, disk not (best-effort) */
+      }
+    }
+    reindexNow(path);
+  }
+
   return {
     get project()        { return project; },
     get tree()           { return tree; },
@@ -164,8 +207,14 @@ function createProjectStore() {
     /** MOCK — explicitly load the built-in demo project. Remove with the mock. */
     loadDemo() { loadDemoProject(); },
 
-    /** Open a file as the active editor tab (loads its source + encoding if needed). */
+    /** Open a file as the active editor tab (loads its source + encoding if needed).
+     *  Binary files are refused with a toast (opening one would choke the UTF-8 read
+     *  — a `.xcf` once froze the window). */
     async openFile(path: string) {
+      if (isBinaryPath(path)) {
+        toastStore.show(`Can't open ${path.split(/[\\/]/).pop()} — binary file`, 'info');
+        return;
+      }
       await ensureLoaded(path);
       activeFilePath = path;
       if (!openFilePaths.includes(path)) openFilePaths = [...openFilePaths, path];
@@ -198,6 +247,19 @@ function createProjectStore() {
     /** Force an immediate live re-index of `path` (explicit save — flushes any
      *  pending debounce). No-op for demo/unloaded paths. */
     reindexNow(path: string) { reindexNow(path); },
+
+    /** Ensure + return a file's current text (loads it if no tab is open). */
+    loadText,
+    /** Write `text` to a file: cache + disk + re-index. Used by save + rename apply. */
+    saveText,
+    /** Save the active file's current buffer to disk. Returns false when no file is
+     *  active. */
+    async saveActive(): Promise<boolean> {
+      const p = activeFilePath;
+      if (!p) return false;
+      await saveText(p, sources.get(p) ?? '');
+      return true;
+    },
   };
 }
 

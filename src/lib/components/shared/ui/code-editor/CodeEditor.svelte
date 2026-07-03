@@ -61,7 +61,7 @@
       from = Math.max(0, Math.min(from, len));
       to = Math.max(from, Math.min(to, len));
       if (to === from) to = Math.min(len, from + 1); // give the marker some width
-      out.push({ from, to, severity: e.severity, message: e.message });
+      out.push({ from, to, severity: e.severity, message: e.message, actions: e.actions });
     }
     return out;
   }
@@ -120,6 +120,15 @@
 
   export function getValue(): string {
     return view?.state.doc.toString() ?? value;
+  }
+
+  /** The caret head as a **UTF-8 byte offset** (what byte-offset backends want, e.g.
+   *  a rename / find-usages query). CodeMirror positions are UTF-16 code units, so we
+   *  measure the encoded length of the text before the head. 0 when unmounted. */
+  export function caretByteOffset(): number {
+    if (!view) return 0;
+    const head = view.state.selection.main.head;
+    return new TextEncoder().encode(view.state.doc.sliceString(0, head)).length;
   }
 
   /** Open CodeMirror's search panel + focus its query field (routed here from the
@@ -198,6 +207,40 @@
   export function refAtCaret(): string | null {
     if (!view) return null;
     return refTextAt(view.state.doc, view.state.selection.main.head);
+  }
+
+  /** Copy the current selection to the clipboard (no-op when nothing is selected). */
+  export function copySelection() {
+    if (!view) return;
+    const s = view.state.selection.main;
+    const text = view.state.sliceDoc(s.from, s.to);
+    if (text) void navigator.clipboard.writeText(text).catch(() => {});
+  }
+
+  /** Cut the current selection to the clipboard (no-op when nothing is selected). */
+  export function cutSelection() {
+    if (!view) return;
+    const s = view.state.selection.main;
+    const text = view.state.sliceDoc(s.from, s.to);
+    if (!text) return;
+    void navigator.clipboard.writeText(text).catch(() => {});
+    view.dispatch({ changes: { from: s.from, to: s.to, insert: '' } });
+    view.focus();
+  }
+
+  /** Paste clipboard text at the caret (replacing any selection). Best-effort — a
+   *  blocked clipboard read is swallowed. */
+  export async function pasteClipboard() {
+    if (!view) return;
+    let text = '';
+    try { text = await navigator.clipboard.readText(); } catch { return; }
+    if (!text) return;
+    const s = view.state.selection.main;
+    view.dispatch({
+      changes: { from: s.from, to: s.to, insert: text },
+      selection: { anchor: s.from + text.length },
+    });
+    view.focus();
   }
 
   /** Insert `text` at the caret (replacing any selection), leaving the caret right

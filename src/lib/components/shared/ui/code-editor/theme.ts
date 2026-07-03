@@ -9,6 +9,40 @@
  */
 
 import { EditorView } from '@codemirror/view';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { tags as t } from '@lezer/highlight';
+
+/**
+ * Lezer highlight style for CodeMirror-built-in / legacy-mode languages (the ones a
+ * {@link import('./types').LanguageDescriptor} plugs in via `cmExtension`: XML, YAML,
+ * JSON, CSS, JS, Markdown, …). It maps `@lezer/highlight` tags onto the same
+ * `--syntax-*` CSS vars the tree-sitter `cm-tok-*` classes use, so both highlighting
+ * paths read identically under any theme overlay. Harmless for the tree-sitter path
+ * (that emits mark decorations, not Lezer tags), so it can sit in the base extension
+ * set unconditionally.
+ */
+const lezerHighlightStyle = HighlightStyle.define([
+  { tag: t.comment, color: 'var(--syntax-comment, #808080)', fontStyle: 'italic' },
+  { tag: [t.string, t.special(t.string), t.attributeValue], color: 'var(--syntax-string, #6a8759)' },
+  { tag: [t.number, t.bool, t.atom], color: 'var(--syntax-number, #6897bb)' },
+  { tag: t.keyword, color: 'var(--syntax-keyword, #cc7832)', fontWeight: '600' },
+  { tag: [t.typeName, t.className, t.namespace], color: 'var(--syntax-type, #4d9be6)' },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: 'var(--syntax-function, #ffc66d)' },
+  { tag: [t.propertyName, t.attributeName], color: 'var(--syntax-field, #9876aa)' },
+  { tag: t.tagName, color: 'var(--syntax-keyword, #cc7832)' },
+  { tag: [t.meta, t.annotation, t.processingInstruction], color: 'var(--syntax-annotation, #bbb529)' },
+  { tag: t.constant(t.variableName), color: 'var(--syntax-constant, #9876aa)', fontStyle: 'italic' },
+  { tag: [t.operator, t.punctuation, t.separator, t.bracket], color: 'var(--text-secondary)' },
+  { tag: t.invalid, color: 'var(--error)' },
+  { tag: t.heading, color: 'var(--syntax-keyword, #cc7832)', fontWeight: '600' },
+  { tag: [t.link, t.url], color: 'var(--syntax-type, #4d9be6)', textDecoration: 'underline' },
+  { tag: t.emphasis, fontStyle: 'italic' },
+  { tag: t.strong, fontWeight: '700' },
+  { tag: t.quote, color: 'var(--syntax-string, #6a8759)' },
+]);
+
+/** The Lezer syntax-highlighting extension (add once to the base editor set). */
+export const codeEditorHighlightStyle = syntaxHighlighting(lezerHighlightStyle);
 
 export const codeEditorTheme = EditorView.theme(
   {
@@ -58,10 +92,14 @@ export const codeEditorTheme = EditorView.theme(
       borderLeftWidth: '2px',
     },
     '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--accent)' },
+    // Selection: a clearly-visible accent wash (the faint `--accent-subtle` was hard
+    // to see against the code). Focused selection is a touch stronger.
     '.cm-selectionBackground, .cm-content ::selection': {
-      backgroundColor: 'var(--accent-subtle) !important',
+      backgroundColor: 'color-mix(in srgb, var(--accent) 28%, transparent) !important',
     },
-    '&.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--accent-subtle) !important' },
+    '&.cm-focused .cm-selectionBackground': {
+      backgroundColor: 'color-mix(in srgb, var(--accent) 34%, transparent) !important',
+    },
     '.cm-matchingBracket': {
       outline: '1px solid var(--accent-strong, var(--accent))', borderRadius: '2px',
     },
@@ -70,6 +108,18 @@ export const codeEditorTheme = EditorView.theme(
       border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
     },
     '.cm-tooltip.cm-tooltip-lint': { padding: '2px 6px' },
+
+    // ── Hover card (a language `intel.hover` source, e.g. a symbol signature) ──
+    '.cm-tooltip .bennu-hover': { padding: '6px 9px', maxWidth: '440px' },
+    '.bennu-hover .bh-sig': {
+      fontFamily: 'var(--font-code)', fontSize: '11.5px', color: 'var(--text-primary)',
+      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+    },
+    '.bennu-hover .bh-meta': { fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '3px' },
+    '.bennu-hover .bh-doc': {
+      fontFamily: 'var(--font-ui-sans)', fontSize: '11px', color: 'var(--text-secondary)',
+      marginTop: '5px', paddingTop: '5px', borderTop: '1px solid var(--border-subtle)', whiteSpace: 'pre-wrap',
+    },
 
     // ── Search panel (Ctrl+F) — themed to match Arbor's inputs/buttons ──
     '.cm-panels': { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' },

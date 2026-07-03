@@ -127,3 +127,66 @@ export function renameApply(
 ): Promise<RenameEdit[]> {
   return bennu('bennu_rename_apply', { args: { file, source, offset, new_name: newName } });
 }
+
+// ── find usages (docs §5 #7) ──────────────────────────────────────────────────────
+
+/** One resolved use site — mirrors the BE `UsageHit` (proto contract). Byte offsets
+ *  plus a 1-based line/col and the trimmed source line for the results preview. */
+export interface UsageHit {
+  /** Absolute path (forward slashes) of the file the use is in. */
+  file: string;
+  /** Start byte offset of the referencing identifier. */
+  start: number;
+  /** End byte offset (exclusive). */
+  end: number;
+  /** 1-based line of the reference. */
+  line: number;
+  /** 1-based column of the reference. */
+  col: number;
+  /** The trimmed source line, for the results list. */
+  preview: string;
+}
+
+/** The find-usages result — mirrors the BE `UsagesResult`. `bennu_references` returns
+ *  `null` when the caret isn't on a resolvable declaration or the index is still
+ *  building. */
+export interface UsagesResult {
+  /** A short human label of the target (`"method com.x.Foo.bar()"`, …). */
+  target_label: string;
+  /** Every use site across the project (empty when the symbol has none). */
+  usages: UsageHit[];
+}
+
+/** Find all usages of the symbol at `file`:`offset` (UTF-8 byte offset). `source` is
+ *  the current (possibly-unsaved) buffer — the caret is classified against it.
+ *  Resolves to `null` gracefully when the caret isn't on a resolvable declaration or
+ *  the reference index is still building.
+ *  Wire: `bennu_references` — `ReferencesArgs { file, source, offset }`. */
+export function references(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<UsagesResult | null> {
+  return bennu('bennu_references', { args: { file, source, offset } });
+}
+
+// ── hover (docs §5) ─────────────────────────────────────────────────────────────
+
+/** Hover card for the symbol under the caret — mirrors the BE `HoverInfo`. */
+export interface HoverInfo {
+  /** The member/type signature (a `raw_signature` when known, else a synthesized one). */
+  signature: string;
+  /** `method` | `field` | `class` (types aren't distinguished into interface/enum yet). */
+  kind: string;
+  /** Owning type's dotted FQCN for a member; `null` for a type. */
+  container: string | null;
+  /** Javadoc / leading comment — `null` for now (extraction deferred on the BE). */
+  doc: string | null;
+}
+
+/** Resolve the hover info for the symbol at `file`:`offset` (UTF-8 byte offset).
+ *  `null` when the caret isn't on a resolvable symbol or the index is still building.
+ *  Wire: `bennu_hover` — `HoverArgs { file, source, offset }`. */
+export function hover(file: string, source: string, offset: number): Promise<HoverInfo | null> {
+  return bennu('bennu_hover', { args: { file, source, offset } });
+}

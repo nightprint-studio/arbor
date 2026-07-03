@@ -34,6 +34,12 @@ bennu-project = { path = "../project" }
 # The code-intel seam: completion + the config-graph resolver (C1 chain + view chain +
 # conservative action diagnostic) the native provider ingests and serves.
 bennu-intel = { path = "../intel" }
+# The mmap'd symbol index: the `IndexBuilder` the index service holds on each project slot
+# so a single-file edit patches just the changed file's records in — no whole-project walk.
+bennu-index = { path = "../index" }
+# The structural symbol extractor (`extract_symbols`) — the fresh-scan class index
+# (`bennu_class_index`) parses each `.java` source into its declared types directly.
+bennu-java = { path = "../java" }
 # The web-config graph: the be layer discovers the project's struts/spring/tiles files
 # (`WebInputs`) and drives `build_web_graph`; `bennu-intel` ingests the result.
 bennu-web = { path = "../web" }
@@ -46,3 +52,7 @@ serde      = { workspace = true }
 serde_json = { workspace = true }
 # Drives the serve loop / async domain handlers as the index / analysis waves land.
 tokio      = { workspace = true }
+# HTTP client for `bennu_download_dictionaries` (LibreOffice Hunspell `.aff`/`.dic`). Uses
+# the shared `arbor_core::prelude::client()` defaults; the workspace `reqwest` is here only
+# for the `reqwest::Client` type in the download helper signature. No new external crate.
+reqwest    = { workspace = true }

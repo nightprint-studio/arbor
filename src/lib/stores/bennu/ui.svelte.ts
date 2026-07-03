@@ -24,7 +24,7 @@ export type LeftPanel = 'project' | 'structure' | 'dependencies';
 /** Right tool windows (activity bar) — mock tool panels for now. */
 export type RightPanel = 'maven' | 'services';
 /** Bottom dock sections (tabbed). */
-export type BottomPanel = 'problems' | 'terminal' | 'build';
+export type BottomPanel = 'problems' | 'terminal' | 'build' | 'todos';
 
 function createBennuUiStore() {
   // Default the Project tool open so the shell shows the tree on launch.
@@ -43,6 +43,11 @@ function createBennuUiStore() {
   // Run-configuration modal (main class for `java -cp … <mainClass>`) — there's no
   // main-class discovery yet, so ▶ Run without a remembered class opens this.
   let runConfigOpen = $state(false);
+  // Go-to navigator (Ctrl+N = class, Ctrl+Shift+N = file) — a filterable quick-open.
+  let navOpen = $state(false);
+  let navMode = $state<'class' | 'file'>('class');
+  // Index inspector modal (debug: index stats + class list).
+  let indexInspectorOpen = $state(false);
   // About Bennu modal.
   let aboutOpen = $state(false);
   // Generate modal (constructor / getters / setters) + its preselected mode
@@ -84,6 +89,9 @@ function createBennuUiStore() {
     get findOpen()     { return findOpen; },
     get projectConfigOpen() { return projectConfigOpen; },
     get runConfigOpen() { return runConfigOpen; },
+    get navOpen()      { return navOpen; },
+    get navMode()      { return navMode; },
+    get indexInspectorOpen() { return indexInspectorOpen; },
     get aboutOpen()    { return aboutOpen; },
     get generateOpen() { return generateOpen; },
     get generateMode() { return generateMode; },
@@ -117,6 +125,11 @@ function createBennuUiStore() {
     closeProjectConfig() { projectConfigOpen = false; },
     openRunConfig()      { runConfigOpen = true; },
     closeRunConfig()     { runConfigOpen = false; },
+    /** Open the Go-to navigator in `mode` ('class' | 'file'). */
+    openNav(mode: 'class' | 'file') { navMode = mode; navOpen = true; },
+    closeNav()           { navOpen = false; },
+    openIndexInspector() { indexInspectorOpen = true; },
+    closeIndexInspector() { indexInspectorOpen = false; },
     openAbout()          { aboutOpen = true; },
     closeAbout()         { aboutOpen = false; },
     /** Open the Generate modal, optionally preselecting a mode (an Alt+Enter

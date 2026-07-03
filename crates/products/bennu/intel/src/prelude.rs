@@ -27,13 +27,22 @@ pub use crate::refs::{
 
 // RENAME planning + apply (docs §5 #10-12): best-effort, preview-first, config-aware.
 pub use crate::rename::{
-    rename_apply, rename_plan, Edit, EditReason, FileEdits, PlanFile, RenameEngine, RenamePlan,
+    rename_apply, rename_plan, Edit, EditReason, FileEdits, HoverInfo, PlanFile, RenameEngine,
+    RenamePlan,
+};
+
+// Spell-check engine (declaration names + comments): the pure tokenizer / allow-list +
+// the process-wide dictionary cache + the Java-source walk.
+pub use crate::spell::{
+    global_custom_dict_path, installed_languages, is_tech_allowed, is_trivially_skippable,
+    project_custom_dict_path, tokenize_identifier, SpellEngine, SpellHit, SubWord, TECH_ALLOWLIST,
 };
 
 // The Phase-1 completion machinery, for the be layer to build a project's provider.
 pub use crate::completion::completion;
 pub use crate::java_index::{
-    build_project_index, collect_java, file_records_from_source, project_type_map,
+    build_project_index, build_project_index_from_sources, collect_java, file_records_from_source,
+    project_type_map, read_java_sources, ClassDecl, ProjectBuild,
 };
 pub use crate::jdk::JdkMemberIndex;
 pub use crate::resolver::{convert_members, IndexResolver};

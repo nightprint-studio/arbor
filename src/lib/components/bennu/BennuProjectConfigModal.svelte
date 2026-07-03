@@ -15,7 +15,7 @@
    * Keyboard-first: first field auto-focused by <Modal>, Tab cycles fields in
    * logical order, Esc cancels (handled by <Modal>), Ctrl/Cmd+Enter applies.
    */
-  import { Settings2, Coffee, FileType, Boxes, FolderTree } from 'lucide-svelte';
+  import { Settings2, Coffee, FileType, Boxes, FolderTree, SpellCheck } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
   import ModalFooter from '$lib/components/shared/ModalFooter.svelte';
@@ -23,8 +23,10 @@
   import Select from '$lib/components/shared/ui/Select.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
   import Button from '$lib/components/shared/ui/Button.svelte';
+  import Toggle from '$lib/components/shared/ui/Toggle.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import {
     bennuProjectConfigStore,
     defaultConfig,
@@ -42,6 +44,9 @@
   const resolvedJdkSource = $derived(project?.jdk?.source ?? null);
   const resolvedEncoding = $derived(projectStore.activeEncoding ?? 'UTF-8');
   const modules = $derived(project?.modules ?? []);
+
+  // Spelling (opt-in per project). Enable is gated on dictionaries being installed.
+  const spellOn = $derived(root ? bennuSpellStore.enabledFor(root) : false);
 
   // ── Local editable draft ──────────────────────────────────────────────────
   // Seeded from the store on open; applied back on Ctrl+Enter / Apply. Editing a
@@ -139,6 +144,43 @@
         >
           <Select bind:value={draft.encodingOverride} options={encodingOptions} />
         </FormField>
+      </section>
+
+      <!-- Spelling ──────────────────────────────────────────────────────── -->
+      <section class="cfg-section">
+        <div class="sec-head">
+          <SpellCheck size={13} />
+          <h3>Spelling</h3>
+        </div>
+        <FormField
+          label="Spell-check identifiers &amp; comments"
+          hint="Checks declared names (split by camelCase / snake_case / kebab-case) and comments against English + Italian dictionaries. Misspellings show as hints with an 'Add to dictionary' quick-fix."
+        >
+          <Toggle
+            checked={spellOn}
+            disabled={!bennuSpellStore.installed || !root}
+            onchange={(v) => { if (root) bennuSpellStore.setEnabled(root, v); }}
+            label={bennuSpellStore.installed ? (spellOn ? 'On' : 'Off') : 'Download the dictionaries first'}
+          />
+        </FormField>
+        <div class="spell-dicts">
+          {#if bennuSpellStore.installed}
+            <span class="spell-status ok">Installed: {bennuSpellStore.status?.languages.join(', ')}</span>
+          {:else}
+            <span class="spell-status">No dictionaries installed yet.</span>
+          {/if}
+          <Button
+            variant="secondary"
+            size="sm"
+            onclick={() => void bennuSpellStore.download()}
+            disabled={bennuSpellStore.downloading}
+          >
+            {bennuSpellStore.downloading ? 'Downloading…' : bennuSpellStore.installed ? 'Re-download' : 'Download EN + IT'}
+          </Button>
+        </div>
+        {#if bennuSpellStore.downloading && bennuSpellStore.progress}
+          <div class="spell-prog">{bennuSpellStore.progress}</div>
+        {/if}
       </section>
 
       <!-- Source / output roots ──────────────────────────────────────────── -->
@@ -299,4 +341,14 @@
     align-items: center;
     gap: 8px;
   }
+
+  .spell-dicts {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .spell-status { font-size: 11px; color: var(--text-muted); }
+  .spell-status.ok { color: var(--success); }
+  .spell-prog { font-size: 10.5px; color: var(--text-muted); font-family: var(--font-code); }
 </style>

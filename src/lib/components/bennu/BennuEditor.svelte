@@ -10,19 +10,28 @@
    *
    * Imports only shared/ui + the shared code-editor core + bennu-local store/lang.
    */
-  import { Hash, FileCode2, MapPin } from 'lucide-svelte';
+  import {
+    Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
+    PenLine, Wand2, Save,
+  } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
-  import { javaLanguage } from './java-lang';
+  import { languageForPath } from './languages';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { diagnostics as ipcDiagnostics } from '$lib/ipc/bennu';
-  import { definition as ipcDefinition } from '$lib/ipc/bennu/nav';
+  import { definition as ipcDefinition, references as ipcReferences } from '$lib/ipc/bennu/nav';
+  import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
+  import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import type { EditorDiagnostic } from '$lib/components/shared/ui/code-editor';
+  import type { EditorView } from '@codemirror/view';
   import { bennuIntentionsStore } from '$lib/stores/bennu/intentions.svelte';
+  import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
+  import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { collectIntentions, type GenerateMode } from './bennu-intentions';
   import { javaOutline } from './java-outline';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -43,12 +52,19 @@
     coordsAtCaret: () => { x: number; y: number } | null;
     wordAtCaret: () => string | null;
     refAtCaret: () => string | null;
+    caretByteOffset: () => number;
     insertAtCursor: (text: string) => void;
+    copySelection: () => void;
+    cutSelection: () => void;
+    pasteClipboard: () => void;
   };
   let editorComp = $state<EditorController | null>(null);
 
   const activePath = $derived(projectStore.activeFilePath);
   const openPaths = $derived(projectStore.openFilePaths);
+  // The editor language for the active file — Java (tree-sitter) or a CodeMirror
+  // built-in / legacy mode (XML, JSP, YAML, JSON, …) picked by extension.
+  const editorLanguage = $derived(languageForPath(activePath));
 
   function baseName(path: string): string {
     return path.split(/[\\/]/).pop() ?? path;
@@ -97,6 +113,46 @@
     return () => { cancelled = true; };
   });
 
+  // ── Spell-check (opt-in per project) — merged into the editor as hint squiggles ──
+  // Runs against the live buffer (debounced), only when spell-check is enabled for
+  // the project and dictionaries are installed. Each misspelled word carries quick-fix
+  // actions: replace-with-suggestion + add-to-dictionary (project / global).
+  let spellDiags = $state<EditorDiagnostic[]>([]);
+  const allDiags = $derived([...diags, ...spellDiags]);
+
+  function spellDiagOf(h: SpellHit, root: string): EditorDiagnostic {
+    const actions = h.suggestions.slice(0, 4).map((s) => ({
+      name: `Replace with “${s}”`,
+      apply: (view: EditorView, from: number, to: number) =>
+        view.dispatch({ changes: { from, to, insert: s } }),
+    }));
+    actions.push({
+      name: 'Add to project dictionary',
+      apply: () => void bennuSpellStore.addToDictionary(h.word, 'project', root),
+    });
+    actions.push({
+      name: 'Add to global dictionary',
+      apply: () => void bennuSpellStore.addToDictionary(h.word, 'global', root),
+    });
+    return { from: h.start, to: h.end, severity: 'hint', message: `“${h.word}” may be misspelled`, actions };
+  }
+
+  $effect(() => {
+    const path = activePath;
+    const root = projectStore.project?.root ?? null;
+    // Re-run when the dictionaries change (download / add-word).
+    void bennuSpellStore.revision;
+    if (!path || !bennuSpellStore.activeFor(root)) { spellDiags = []; return; }
+    const src = projectStore.sourceOf(path);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void ipcSpellcheck(path, src)
+        .then((hits) => { if (!cancelled) spellDiags = hits.map((h) => spellDiagOf(h, root!)); })
+        .catch(() => { if (!cancelled) spellDiags = []; });
+    }, 450);
+    return () => { cancelled = true; clearTimeout(t); };
+  });
+
   // ── Goto-line overlay (Ctrl+G) ───────────────────────────────────────────────
   let gotoOpen = $state(false);
   let gotoValue = $state('');
@@ -135,6 +191,35 @@
 
   /** Insert text at the caret (Generate modal → editor). Mirrors merula's insert. */
   export function insertAtCursor(text: string) { editorComp?.insertAtCursor(text); }
+
+  // ── Rename (Shift+F6) / Find usages (Alt+F7) ──────────────────────────────────
+  /** Open the rename modal for the symbol under the caret (captures file · buffer ·
+   *  byte offset · initial name). No-op with no file open. */
+  export function openRename() {
+    if (!activePath || !editorComp) return;
+    bennuRefactorStore.openRename({
+      file: activePath,
+      source: editorComp.getValue(),
+      offset: editorComp.caretByteOffset(),
+      initialName: editorComp.wordAtCaret() ?? '',
+    });
+  }
+
+  /** Find usages of the symbol under the caret — opens the popover anchored there and
+   *  fills it from `bennu_references`. Graceful: an unresolvable caret shows the
+   *  empty state, never throws. */
+  export async function findUsages() {
+    if (!activePath || !editorComp) return;
+    const source = editorComp.getValue();
+    const offset = editorComp.caretByteOffset();
+    bennuRefactorStore.startUsages(editorComp.coordsAtCaret(), editorComp.wordAtCaret());
+    try {
+      const res = await ipcReferences(activePath, source, offset);
+      bennuRefactorStore.setUsages(res?.target_label ?? null, res?.usages ?? []);
+    } catch {
+      bennuRefactorStore.setUsages(null, []);
+    }
+  }
 
   // ── Go to definition (Ctrl+B / Ctrl+Click) ────────────────────────────────────
   //
@@ -205,6 +290,39 @@
     void resolveDefinition(word);
   }
 
+  // ── Editor context menu (right-click) ─────────────────────────────────────────
+  function onEditorContextMenu(e: MouseEvent) {
+    if (!activePath) return;
+    e.preventDefault();
+    const items: MenuItem[] = [
+      { id: 'cut', label: 'Cut', icon: Scissors, shortcut: 'Ctrl+X' },
+      { id: 'copy', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' },
+      { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V' },
+      { id: 's1', label: '', separator: true },
+      { id: 'gotodef', label: 'Go to definition', icon: Target, shortcut: 'Ctrl+B' },
+      { id: 'usages', label: 'Find usages', icon: SearchCode, shortcut: 'Alt+F7' },
+      { id: 'rename', label: 'Rename…', icon: PenLine, shortcut: 'Shift+F6' },
+      { id: 's2', label: '', separator: true },
+      { id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' },
+      { id: 'save', label: 'Save', icon: Save, shortcut: 'Ctrl+S' },
+    ];
+    bennuContextMenuStore.show(e.clientX, e.clientY, items, onEditorMenuSelect);
+  }
+  function onEditorMenuSelect(id: string) {
+    switch (id) {
+      case 'cut': editorComp?.cutSelection(); break;
+      case 'copy': editorComp?.copySelection(); break;
+      case 'paste': void editorComp?.pasteClipboard(); break;
+      case 'gotodef': goToDefinition(); break;
+      case 'usages': void findUsages(); break;
+      case 'rename': openRename(); break;
+      case 'generate': bennuUiStore.openGenerate(); break;
+      case 'save':
+        void projectStore.saveActive().then((ok) => { if (ok) toastStore.show('Saved', 'success'); });
+        break;
+    }
+  }
+
   function commitGoto() {
     const m = gotoValue.match(/(\d+)(?:\s*[:,]\s*(\d+))?/);
     if (m) {
@@ -246,17 +364,20 @@
   {/if}
 
   {#if activePath}
-    {#key activePath}
-      <CodeEditor
-        bind:this={editorComp}
-        value={projectStore.sourceOf(activePath)}
-        language={javaLanguage}
-        diagnostics={diags}
-        oninput={onInput}
-        oncaret={onCaret}
-        onGoto={onEditorGoto}
-      />
-    {/key}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="ed-editor-wrap" oncontextmenu={onEditorContextMenu}>
+      {#key activePath}
+        <CodeEditor
+          bind:this={editorComp}
+          value={projectStore.sourceOf(activePath)}
+          language={editorLanguage}
+          diagnostics={allDiags}
+          oninput={onInput}
+          oncaret={onCaret}
+          onGoto={onEditorGoto}
+        />
+      {/key}
+    </div>
   {:else}
     <div class="ed-empty">
       <EmptyState message="No file open. Pick a file from the project tree." />
@@ -313,6 +434,9 @@
     transition: background var(--transition-fast), color var(--transition-fast);
   }
   .ed-tool:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  .ed-editor-wrap { flex: 1; display: flex; min-width: 0; min-height: 0; }
+  .ed-editor-wrap > :global(.code-editor) { flex: 1; min-width: 0; min-height: 0; }
 
   .ed-empty { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
 

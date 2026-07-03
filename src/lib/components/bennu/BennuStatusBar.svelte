@@ -10,9 +10,11 @@
    * StatusBar. Subtle + keyboard-first (nothing here is mouse-only).
    */
   import { Coffee, Boxes, Database, FileType, MapPin } from 'lucide-svelte';
+  import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import type { Snippet } from 'svelte';
 
   let { footerExtra }: { footerExtra?: Snippet } = $props();
@@ -65,11 +67,16 @@
   <span class="bf-spacer"></span>
 
   {#if projectStore.project}
-    <!-- Indexing status — mocked as Indexed for now; the slot is here so the real
-         indexer can drive "Indexing…" without touching the footer layout. -->
-    <span class="bf-item" use:tooltip={'Project index is up to date'}>
-      <Database size={12} /> Indexed
-    </span>
+    <!-- Indexing status — driven by the real index-progress events / stats poll. -->
+    {#if bennuIndexStore.indexing}
+      <span class="bf-item bf-indexing" use:tooltip={`Building the project index${bennuIndexStore.phaseLabel ? ` · ${bennuIndexStore.phaseLabel}` : ''}`}>
+        <Spinner size={11} /> Indexing{bennuIndexStore.phaseLabel ? ` ${bennuIndexStore.phaseLabel.toLowerCase()}` : ''}…
+      </span>
+    {:else}
+      <span class="bf-item" use:tooltip={bennuIndexStore.typeCount ? `Index ready · ${bennuIndexStore.typeCount} types` : 'Project index is up to date'}>
+        <Database size={12} /> Indexed{bennuIndexStore.typeCount ? ` · ${bennuIndexStore.typeCount}` : ''}
+      </span>
+    {/if}
 
     {#if encoding}
       <span class="bf-sep"></span>
@@ -104,6 +111,8 @@
   }
   .bf-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
   .bf-item :global(svg) { color: var(--text-disabled); }
+  .bf-indexing { color: var(--accent); }
+  .bf-indexing :global(svg) { color: var(--accent); }
   .bf-muted { color: var(--text-disabled); }
   .bf-sub {
     font-size: 10px; color: var(--text-disabled);
