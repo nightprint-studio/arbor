@@ -50,15 +50,30 @@ pub fn infer_receiver_type(
     let mut parser = Parser::new();
     parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
     let tree = parser.parse(&buf, None)?;
-    let root = tree.root_node();
-    let bytes = buf.as_bytes();
-
-    let receiver = find_receiver(&root, off)?;
-
     let symbols = crate::symbols::extract_symbols(&buf);
-    let ctx = Ctx { bytes, resolver, symbols: &symbols };
+    infer_receiver_type_at(&tree.root_node(), &buf, &symbols, off, resolver)
+}
 
-    let enclosing = enclosing_type_fqn(&receiver, bytes, &symbols);
+/// Infer the receiver type at `byte_offset` reusing an ALREADY-parsed `root` and
+/// ALREADY-extracted `symbols` over `source` — the hot path for the reference-index walk.
+///
+/// The walk queries the receiver type at every `obj.method()` / `obj.field` site in a file;
+/// [`infer_receiver_type`] would re-parse the whole file AND re-extract its symbols on each
+/// call, which is quadratic per file and, on a large legacy project (tens of thousands of
+/// members), makes the reference-index build effectively never finish. This variant does
+/// neither: it walks the caller's tree + symbols. It assumes the offset sits on a real
+/// member name (no trailing-dot completion stub) — the reference walk always does.
+pub fn infer_receiver_type_at(
+    root: &Node,
+    source: &str,
+    symbols: &FileSymbols,
+    byte_offset: usize,
+    resolver: &dyn TypeResolver,
+) -> Option<TypeRef> {
+    let bytes = source.as_bytes();
+    let receiver = find_receiver(root, byte_offset)?;
+    let ctx = Ctx { bytes, resolver, symbols };
+    let enclosing = enclosing_type_fqn(&receiver, bytes, symbols);
     ctx.infer_expr(&receiver, enclosing.as_deref())
 }
 
@@ -192,10 +207,12 @@ impl Ctx<'_> {
                 if let Some(hit) = f(&cm) {
                     return Some(hit);
                 }
-                if let Some(sc) = cm.superclass {
+                // `cm` is a shared `Arc` — clone the (small) supertype links rather than
+                // moving them out.
+                if let Some(sc) = cm.superclass.clone() {
                     stack.push(sc);
                 }
-                stack.extend(cm.interfaces);
+                stack.extend(cm.interfaces.iter().cloned());
             }
         }
         None
@@ -370,26 +387,29 @@ impl Ctx<'_> {
 /// the whole `a.b()` over its inner `a`).
 fn find_receiver<'t>(root: &Node<'t>, byte_offset: usize) -> Option<Node<'t>> {
     let dot_pos = byte_offset.checked_sub(1)?;
+    // The receiver is the expression ending right before the `.` (at `dot_pos`). Its last
+    // byte is `dot_pos - 1`, so descend DIRECTLY to the smallest named node there, then climb
+    // to the LARGEST ancestor still ending at `dot_pos` (prefer the whole `a.b()` over its
+    // inner `a`). This is O(tree depth), not O(tree size): the previous full-tree scan ran
+    // once PER CALL SITE, making the reference walk quadratic per file (the dominant cost).
+    let last = dot_pos.checked_sub(1)?;
+    let start = root.named_descendant_for_byte_range(last, last)?;
 
     let mut best: Option<Node> = None;
-    let mut stack = vec![*root];
-    while let Some(n) = stack.pop() {
-        let mut cw = n.walk();
-        for c in n.named_children(&mut cw) {
-            stack.push(c);
-        }
-        if n.end_byte() == dot_pos && is_expr_kind(&n) {
-            match &best {
-                Some(b) if node_span(b) >= node_span(&n) => {}
-                _ => best = Some(n),
+    let mut cur = Some(start);
+    while let Some(n) = cur {
+        if n.end_byte() == dot_pos {
+            // Larger ancestors are visited later → the last expression match is the largest.
+            if is_expr_kind(&n) {
+                best = Some(n);
             }
+        } else if n.end_byte() > dot_pos {
+            // This node (and every further ancestor) extends past the `.` — not a receiver.
+            break;
         }
+        cur = n.parent();
     }
     best
-}
-
-fn node_span(n: &Node) -> usize {
-    n.end_byte() - n.start_byte()
 }
 
 fn is_expr_kind(n: &Node) -> bool {

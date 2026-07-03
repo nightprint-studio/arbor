@@ -13,3 +13,9 @@ description  = "Bennu project model — LEAF crate (docs §10). Owns capability-
 bennu-proto = { path = "../proto" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+# Encoding decode for reading legacy sources (Cp1252 / ISO-8859-1 / …) — the WHATWG
+# encoding set, so the project's declared `sourceEncoding` is honoured and a mislabelled
+# file is detected (replacement chars) rather than silently corrupted. Already in the
+# workspace tree (foundation/fs, corvus/git). Decode only; the round-trip save `encode`
+# stays hand-rolled (its unmappable-char fallback semantics differ from encoding_rs').
+encoding_rs = "0.8"

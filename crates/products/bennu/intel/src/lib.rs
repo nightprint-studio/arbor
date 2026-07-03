@@ -21,10 +21,12 @@
 
 pub mod completion;
 pub mod config;
+pub mod inherited;
 pub mod java_index;
 pub mod jdk;
 pub mod prelude;
 pub mod provider;
+pub mod refcache;
 pub mod refs;
 pub mod rename;
 pub mod spell;

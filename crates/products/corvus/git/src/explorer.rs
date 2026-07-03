@@ -32,7 +32,7 @@ use crate::recovery::{RecoveryKind, SnapshotPolicy};
 // ---------------------------------------------------------------------------
 
 /// A single overlay badge for a file or (rolled-up) folder.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum GitBadge {
     Conflicted,

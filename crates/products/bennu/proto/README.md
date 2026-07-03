@@ -17,6 +17,10 @@ shapes of the Phase-0 methods.
 | `bennu_capabilities`  | `CapabilitySet`   |
 | `bennu_completion`    | `Vec<CompletionItem>` (Phase-0 stub → `[]`) |
 | `bennu_diagnostics`   | `Vec<Diagnostic>`     (Phase-0 stub → `[]`) |
+| `bennu_get_run_config`| `RunConfigSet` (per-repo `[bennu.run]`; fresh repo → `{ configs: [], active_id: null }`) |
+| `bennu_set_run_config`| `()` (persists `RunConfigSet` into `<repo>/.arbor/config.toml`) |
+| `bennu_main_classes`  | `Vec<MainClassEntry>` (types declaring `public static void main(String[])`) |
+| `bennu_index_entries` | `Vec<IndexEntry>` (index-inspector per-kind list: members / jars / jdk / beans / actions / relations) |
 
 The `CapabilitySet` bitset is *produced* by `bennu-project` (the Spike D
 capability-detection ruleset); this crate only carries its serialized view.

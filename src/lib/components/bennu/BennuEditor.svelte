@@ -57,6 +57,8 @@
     openSearch: () => void;
     scrollToLineCol: (line: number, col?: number) => void;
     coordsAtCaret: () => { x: number; y: number } | null;
+    coordsAtByteOffset: (byteOffset: number) => { x: number; y: number } | null;
+    setCaretAtCoords: (x: number, y: number) => boolean;
     wordAtCaret: () => string | null;
     refAtCaret: () => string | null;
     caretByteOffset: () => number;
@@ -310,20 +312,37 @@
 
   // ── Find usages (Alt+F7) ──────────────────────────────────────────────────────
 
-  /** Find usages of the symbol under the caret — opens the popover anchored there and
-   *  fills it from `bennu_references`. Graceful: an unresolvable caret shows the
-   *  empty state, never throws. */
-  export async function findUsages() {
-    if (!activePath || !editorComp) return;
-    const source = editorComp.getValue();
-    const offset = editorComp.caretByteOffset();
-    bennuRefactorStore.startUsages(editorComp.coordsAtCaret(), editorComp.wordAtCaret());
+  /** Core find-usages: query `bennu_references` at an explicit byte `offset` and fill the
+   *  popover anchored at `anchor`, labelled `word`. Graceful: an unresolvable target shows
+   *  the empty state, never throws. Shared by the caret-driven `findUsages` (Alt+F7) and
+   *  the Ctrl+Click-on-a-declaration fallback (which passes the CLICK offset, not the
+   *  caret). */
+  async function runFindUsages(
+    source: string,
+    offset: number,
+    anchor: { x: number; y: number } | null,
+    word: string | null,
+  ) {
+    if (!activePath) return;
+    bennuRefactorStore.startUsages(anchor, word);
     try {
       const res = await ipcReferences(activePath, source, offset);
       bennuRefactorStore.setUsages(res?.target_label ?? null, res?.usages ?? []);
     } catch {
       bennuRefactorStore.setUsages(null, []);
     }
+  }
+
+  /** Find usages of the symbol under the caret (Alt+F7) — opens the popover anchored
+   *  there and fills it from `bennu_references`. */
+  export async function findUsages() {
+    if (!activePath || !editorComp) return;
+    await runFindUsages(
+      editorComp.getValue(),
+      editorComp.caretByteOffset(),
+      editorComp.coordsAtCaret(),
+      editorComp.wordAtCaret(),
+    );
   }
 
   // ── Go to definition (Ctrl+B / Ctrl+Click) ────────────────────────────────────
@@ -345,15 +364,33 @@
     void projectStore.openFile(path).then(() => bennuUiStore.requestGoto(1));
   }
 
+  /** Normalize two paths for identity comparison (forward slashes, case-fold for the
+   *  Windows FS). The BE returns forward-slash paths; the FE's `activePath` may carry
+   *  native separators. */
+  function isSamePath(a: string, b: string): boolean {
+    const n = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+    return n(a) === n(b);
+  }
+
   /** Try the BE go-to-declaration for the symbol at `offset` (any Java symbol — class,
    *  method, field, local). Resolves via `bennu_declaration` and jumps to the declaring
-   *  file + line. Returns true when it jumped; false (gracefully) when the BE isn't
-   *  attached, the symbol is JDK/dep-jar resident, or the caret isn't on a symbol. */
-  async function tryGoToDeclarationBE(offset: number): Promise<boolean> {
+   *  file + line. When the click/caret is **already on the declaration itself** (its name
+   *  token in this same file — a method signature, or a variable/class/record decl),
+   *  go-to-declaration would be a no-op, so we fall back to **find usages** at that offset
+   *  (IntelliJ's Ctrl+Click / Ctrl+B behaviour on a declaration). Returns true when it
+   *  handled the gesture; false (gracefully) when the BE isn't attached, the symbol is
+   *  JDK/dep-jar resident, or the caret isn't on a symbol. */
+  async function tryGoToDeclarationBE(offset: number, word: string | null): Promise<boolean> {
     const path = activePath;
     if (!path || !editorComp) return false;
-    const target = await ipcDeclaration(path, editorComp.getValue(), offset).catch(() => null);
+    const source = editorComp.getValue();
+    const target = await ipcDeclaration(path, source, offset).catch(() => null);
     if (!target) return false;
+    // On the declaration's own name span (same file, offset inside [start,end))? → usages.
+    if (isSamePath(target.file, path) && offset >= target.start && offset < target.end) {
+      await runFindUsages(source, offset, editorComp.coordsAtByteOffset(offset), word || null);
+      return true;
+    }
     await projectStore.openFile(target.file);
     bennuUiStore.requestGoto(target.line);
     return true;
@@ -375,20 +412,22 @@
     return true;
   }
 
-  /** Resolve + navigate to the definition of `action` (a JSP action reference).
-   *  Prefers the config fragment, then the view JSP; if only a class FQCN is known
-   *  (no openable path), reports it. No target → an info toast. */
-  async function resolveDefinition(action: string, offset?: number) {
+  /** Resolve + navigate to the declaration of the symbol / `action` under the caret/click.
+   *  Prefers the config fragment, then the view JSP; if only a class FQCN is known (no
+   *  openable path), reports it. `silent` suppresses the "nothing found" feedback — used
+   *  for **Ctrl+click**, where a click on any random token shouldn't pop a toast (IntelliJ
+   *  stays quiet there); an explicit **Ctrl+B / palette** invocation keeps the feedback. */
+  async function resolveDefinition(action: string, offset?: number, silent = false) {
     const path = activePath;
     if (!path) return;
     // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
     //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
-    if (offset != null && (await tryGoToDeclarationBE(offset))) return;
+    if (offset != null && (await tryGoToDeclarationBE(offset, action))) return;
     // 2. Instant offline class-index fallback (types) when the BE resolver is cold.
     if (action) {
       if (await tryGoToClassDeclaration(action)) return;
     } else {
-      toastStore.show('Nothing to go to here', 'info');
+      if (!silent) toastStore.show('Nothing to go to here', 'info');
       return;
     }
     const seq = ++gotoDefSeq;
@@ -396,12 +435,12 @@
     try {
       res = await ipcDefinition(path, action);
     } catch {
-      if (seq === gotoDefSeq) toastStore.show('Go to definition unavailable', 'info');
+      if (!silent && seq === gotoDefSeq) toastStore.show('Go to declaration unavailable', 'info');
       return;
     }
     if (seq !== gotoDefSeq) return; // superseded by a newer request
     if (!res) {
-      toastStore.show(`No definition for “${action}”`, 'info');
+      if (!silent) toastStore.show(`No declaration for “${action}”`, 'info');
       return;
     }
     // Prefer the config fragment (where the <action> is declared); fall back to the
@@ -413,13 +452,13 @@
     }
     // Only a class FQCN resolved — a name, not a path we can open yet.
     if (res.class_fqcn) {
-      toastStore.show(`Maps to ${res.class_fqcn}`, 'info');
+      if (!silent) toastStore.show(`Maps to ${res.class_fqcn}`, 'info');
       return;
     }
-    toastStore.show(`No definition for “${action}”`, 'info');
+    if (!silent) toastStore.show(`No declaration for “${action}”`, 'info');
   }
 
-  /** Go to definition of the action reference under the caret (Ctrl+B / palette).
+  /** Go to declaration of the symbol / action reference under the caret (Ctrl+B / palette).
    *  No-op (with a toast) when nothing reference-like is under the caret. */
   export function goToDefinition() {
     if (!activePath || !editorComp) return;
@@ -429,10 +468,11 @@
 
   /** Ctrl/Cmd+Click seam from the editor: the reference token at the click position (an
    *  identifier, a string-literal's contents, or a path) + the clicked byte offset → go
-   *  to declaration/definition. */
+   *  to declaration/definition. **Silent** on failure — a Ctrl+click that lands on nothing
+   *  resolvable just does nothing, rather than popping a toast every time. */
   function onEditorGoto(word: string, _view: EditorView, byteOffset: number) {
     if (!activePath) return;
-    void resolveDefinition(word, byteOffset);
+    void resolveDefinition(word, byteOffset, true);
   }
 
   // ── Editor context menu (right-click) ─────────────────────────────────────────
@@ -443,12 +483,17 @@
   function onEditorContextMenu(e: MouseEvent) {
     if (!activePath) return;
     e.preventDefault();
+    // Move the caret to the click position first — the semantic actions below (go to
+    // declaration / find usages / rename / generate) all classify at the caret, and a
+    // right-click doesn't move it on its own, so without this they'd target wherever the
+    // caret happened to be instead of the symbol under the pointer.
+    editorComp?.setCaretAtCoords(e.clientX, e.clientY);
     const items: MenuItem[] = [
       { id: 'cut', label: 'Cut', icon: Scissors, shortcut: 'Ctrl+X' },
       { id: 'copy', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' },
       { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V' },
       { id: 's1', label: '', separator: true },
-      { id: 'gotodef', label: 'Go to definition', icon: Target, shortcut: 'Ctrl+B' },
+      { id: 'gotodef', label: 'Go to declaration', icon: Target, shortcut: 'Ctrl+B' },
       { id: 'usages', label: 'Find usages', icon: SearchCode, shortcut: 'Alt+F7' },
       { id: 'rename', label: 'Rename…', icon: PenLine, shortcut: 'Shift+F6' },
       { id: 's2', label: '', separator: true },
@@ -582,6 +627,8 @@
   {#if activePath}
     <div class="ed-footer">
       <span class="ed-pos"><MapPin size={11} /> Ln {caretLine}, Col {caretCol}</span>
+      <span class="ed-foot-sep">·</span>
+      <span class="ed-enc" use:tooltip={'File encoding'}>{projectStore.activeEncoding}</span>
     </div>
   {/if}
 
@@ -669,7 +716,7 @@
   .ed-empty { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
 
   .ed-footer {
-    display: flex; align-items: center; justify-content: flex-end;
+    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
     height: 22px; min-height: 22px; flex-shrink: 0;
     padding: 0 10px;
     background: var(--bg-base);
@@ -679,6 +726,12 @@
   }
   .ed-pos { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .ed-pos :global(svg) { color: var(--text-disabled); }
+  .ed-foot-sep { color: var(--text-disabled); }
+  .ed-enc {
+    white-space: nowrap; cursor: default;
+    font-variant-numeric: tabular-nums; letter-spacing: 0.2px;
+  }
+  .ed-enc:hover { color: var(--text-secondary); }
 
   .ed-goto {
     position: absolute; top: 64px; right: 14px;

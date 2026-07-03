@@ -4,9 +4,10 @@
 //! `bennu_java::prelude::...`. The submodules stay `pub` for rustdoc navigation, but
 //! the prelude is the canonical call-site path.
 
-// The two entry points.
-pub use crate::infer::infer_receiver_type;
-pub use crate::symbols::extract_symbols;
+// The type-inference entry points: the one-off caret query (parses + extracts) and the
+// reuse-an-existing-tree variant for the hot reference-walk path.
+pub use crate::infer::{infer_receiver_type, infer_receiver_type_at};
+pub use crate::symbols::{extract_symbols, extract_symbols_from_root};
 
 // The structural model produced by `extract_symbols`.
 pub use crate::symbols::{FieldDecl, FileSymbols, Import, MethodDecl, ParamDecl, TypeDecl};

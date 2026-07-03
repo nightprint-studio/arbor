@@ -38,7 +38,9 @@ stack plus a homegrown Signature decoder.
 - **JDK bootclasspath resolution** (`jdk.rs`) — `resolve_jdk_classpath(version)`
   locates an installed JDK matching the language level (via `JAVA_HOME` +
   `C:/Program Files/Java/*`, matched against each candidate's `release` file) and
-  returns a ready `ClassSource`:
+  returns a ready `ClassSource`. When no exact-major JDK is installed it **falls back to
+  the newest installed JDK** (so a Java-8 project still resolves the standard library on a
+  machine that only has a modern JDK) — `Err` only when no JDK is installed at all:
   - `"1.8"` / `"8"` → `rt.jar` + `resources.jar` + `ext/*.jar` chained behind
     `MultiSource`.
   - `"9"`+ / `"21"` → the `lib/modules` jimage, probing `java.base` plus the common

@@ -8,13 +8,15 @@
 //! 2. the pom `project.build.sourceEncoding`,
 //! 3. the configured default (`"UTF-8"`).
 //!
-//! Phase-0 note: only UTF-8 and Cp1252 (Windows-1252) are *decoded* natively here —
-//! Cp1252 is the legacy target stack's encoding and UTF-8 is the modern default, so
-//! together they cover the Phase-0 corpus. The resolver still *reports* whatever
-//! label was declared, so the FE always shows the true encoding; an unsupported label
-//! decodes via a lossy UTF-8 fall-through with the true label preserved. A full
-//! encoding matrix is a later dep decision (hard rule 7 — no encoding crate on the
-//! approved list yet).
+//! Decoding runs through `encoding_rs` (the WHATWG encoding set), so the declared label —
+//! `UTF-8`, `Cp1252`, `ISO-8859-1`, `ISO-8859-15`, … — is honoured natively; an
+//! unrecognised label falls back to UTF-8 with the declared label preserved for the FE.
+//! The round-trip *save* (`encode`) stays hand-rolled for Cp1252 / UTF-8: its
+//! unmappable-char fallback (whole-file UTF-8, so nothing is corrupted) differs from
+//! `encoding_rs`' encoder (which emits numeric character references), so we don't route
+//! writes through it.
+
+use std::path::Path;
 
 use crate::pom::Pom;
 
@@ -27,69 +29,69 @@ pub fn project_encoding_label(pom: &Pom, default_label: &str) -> String {
         .unwrap_or_else(|| default_label.to_string())
 }
 
-/// Decode `bytes` using `label`. Returns the decoded UTF-8 text plus the label that
-/// actually applied. Native paths: `UTF-8` (with BOM strip) and `Cp1252` /
-/// `Windows-1252`. Any other label falls through to lossy UTF-8 while preserving the
-/// declared label (so the FE still shows e.g. `ISO-8859-1` even though Phase 0 didn't
-/// transcode it) — a non-fatal degrade, not an error.
+/// Resolve the project source encoding label straight from `root/pom.xml`
+/// (`project.build.sourceEncoding`), else `default_label`. A convenience for callers that
+/// only hold the project root (the index build / bulk scans), not a parsed pom. A missing
+/// or unreadable pom yields `default_label`.
+pub fn source_encoding_label(root: &Path, default_label: &str) -> String {
+    match std::fs::read_to_string(root.join("pom.xml")) {
+        Ok(xml) => project_encoding_label(&crate::pom::parse(&xml), default_label),
+        Err(_) => default_label.to_string(),
+    }
+}
+
+/// Look up an `encoding_rs::Encoding` for a WHATWG `label` (case/space/`-`/`_`-insensitive:
+/// `UTF-8`, `Cp1252`, `windows-1252`, `ISO-8859-1`, `ISO-8859-15`, …), defaulting to UTF-8
+/// for an empty or unrecognised label.
+fn encoding_for(label: &str) -> &'static encoding_rs::Encoding {
+    encoding_rs::Encoding::for_label(label.trim().as_bytes()).unwrap_or(encoding_rs::UTF_8)
+}
+
+/// Decode `bytes` using `label` (through `encoding_rs`). Returns the decoded text plus the
+/// label that actually applied. `UTF-8` strips a BOM; `Cp1252` / `ISO-8859-1` / … decode
+/// natively; an unrecognised label falls back to UTF-8 while preserving the declared label
+/// (so the FE still shows e.g. `ISO-8859-1`). Lossy: invalid bytes become U+FFFD, so a
+/// mislabelled file never hard-fails the open.
 pub fn decode(bytes: &[u8], label: &str) -> (String, String) {
-    let norm = label.to_ascii_lowercase().replace(['-', '_'], "");
-    match norm.as_str() {
-        "cp1252" | "windows1252" | "1252" => (decode_cp1252(bytes), label.to_string()),
-        // UTF-8 (default) + anything unrecognised → UTF-8 (lossy), true label kept.
-        _ => (decode_utf8(bytes), label.to_string()),
+    let (text, _, _had_errors) = encoding_for(label).decode(bytes);
+    (text.into_owned(), label.to_string())
+}
+
+/// Outcome of an INDEXING decode ([`decode_for_index`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexDecode {
+    /// The decoded text (always usable — the declared encoding when it fit, else a recovery
+    /// decode).
+    pub text: String,
+    /// The encoding label that produced `text`.
+    pub encoding: String,
+    /// True when the file's bytes were NOT valid in the project's *declared* encoding — a
+    /// non-compliant file (recovered here so its classes are still indexed, but flagged for
+    /// the "non-compliant files" report).
+    pub non_compliant: bool,
+}
+
+/// Decode source `bytes` for INDEXING, trying the project's declared (Maven) encoding first
+/// and recovering with `encoding_rs` when the bytes don't fit it.
+///
+/// 1. Decode with `declared_label`. If it produced no replacement characters, the file is
+///    compliant — return its text.
+/// 2. Otherwise the file isn't valid in its declared encoding: recover so the class is
+///    still indexed and flag it non-compliant. Prefer UTF-8 when it decodes cleanly (a
+///    UTF-8 file mislabelled Cp1252 is the common case), else Windows-1252 (which maps every
+///    byte, so it never fails). ASCII structure survives every path — the point is to never
+///    silently drop a class.
+pub fn decode_for_index(bytes: &[u8], declared_label: &str) -> IndexDecode {
+    let (text, _, had_errors) = encoding_for(declared_label).decode(bytes);
+    if !had_errors {
+        return IndexDecode { text: text.into_owned(), encoding: declared_label.to_string(), non_compliant: false };
     }
-}
-
-/// Decode UTF-8, stripping a leading BOM. Invalid sequences become U+FFFD (lossy),
-/// so a mislabelled file never hard-fails the open.
-fn decode_utf8(bytes: &[u8]) -> String {
-    let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
-    String::from_utf8_lossy(body).into_owned()
-}
-
-/// Decode Windows-1252 (Cp1252). Bytes 0x00–0x7F are ASCII; 0xA0–0xFF map to the
-/// matching Latin-1 code points; 0x80–0x9F use the Windows-1252 punctuation block
-/// (with the five undefined slots passed through as the raw code point). Pure table
-/// lookup — no dependency (hard rule 7).
-fn decode_cp1252(bytes: &[u8]) -> String {
-    bytes.iter().map(|&b| cp1252_char(b)).collect()
-}
-
-/// Map one Cp1252 byte to its Unicode scalar.
-fn cp1252_char(b: u8) -> char {
-    match b {
-        0x80 => '\u{20AC}', // €
-        0x82 => '\u{201A}',
-        0x83 => '\u{0192}',
-        0x84 => '\u{201E}',
-        0x85 => '\u{2026}',
-        0x86 => '\u{2020}',
-        0x87 => '\u{2021}',
-        0x88 => '\u{02C6}',
-        0x89 => '\u{2030}',
-        0x8A => '\u{0160}',
-        0x8B => '\u{2039}',
-        0x8C => '\u{0152}',
-        0x8E => '\u{017D}',
-        0x91 => '\u{2018}',
-        0x92 => '\u{2019}',
-        0x93 => '\u{201C}',
-        0x94 => '\u{201D}',
-        0x95 => '\u{2022}',
-        0x96 => '\u{2013}',
-        0x97 => '\u{2014}',
-        0x98 => '\u{02DC}',
-        0x99 => '\u{2122}',
-        0x9A => '\u{0161}',
-        0x9B => '\u{203A}',
-        0x9C => '\u{0153}',
-        0x9E => '\u{017E}',
-        0x9F => '\u{0178}',
-        // 0x81, 0x8D, 0x8F, 0x90, 0x9D are undefined → pass the raw code point
-        // through (Latin-1 identity), matching common lenient decoders.
-        other => other as char,
+    let (utf8, _, utf8_err) = encoding_rs::UTF_8.decode(bytes);
+    if !utf8_err {
+        return IndexDecode { text: utf8.into_owned(), encoding: "UTF-8".to_string(), non_compliant: true };
     }
+    let (w1252, _, _) = encoding_rs::WINDOWS_1252.decode(bytes);
+    IndexDecode { text: w1252.into_owned(), encoding: "windows-1252".to_string(), non_compliant: true }
 }
 
 /// Encode `text` using `label`, the round-trip inverse of [`decode`]. Returns the
@@ -113,7 +115,7 @@ pub fn encode(text: &str, label: &str) -> (Vec<u8>, String) {
 }
 
 /// Encode `text` as Windows-1252, or `None` if any char has no Cp1252 byte. Pure
-/// table lookup — the inverse of [`cp1252_char`] (no dependency, hard rule 7).
+/// table lookup — the inverse of the Cp1252 decode (no dependency, hard rule 7).
 fn encode_cp1252(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(text.len());
     for ch in text.chars() {
@@ -122,7 +124,7 @@ fn encode_cp1252(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Map one Unicode scalar back to its Cp1252 byte (the inverse of [`cp1252_char`]).
+/// Map one Unicode scalar back to its Cp1252 byte (the inverse of the Cp1252 decode).
 /// `None` for a scalar that Cp1252 can't represent.
 fn cp1252_byte(ch: char) -> Option<u8> {
     match ch {
@@ -195,6 +197,21 @@ mod tests {
         let (text, label) = decode(&bytes, "UTF-8");
         assert_eq!(text, "città");
         assert_eq!(label, "UTF-8");
+    }
+
+    #[test]
+    fn index_decode_recovers_and_flags_non_compliant() {
+        // Declared Cp1252 with valid Cp1252 bytes (0x80 = €) → compliant, decoded natively.
+        let ok = decode_for_index(&[0x80], "Cp1252");
+        assert!(!ok.non_compliant);
+        assert_eq!(ok.text, "€");
+        assert_eq!(ok.encoding, "Cp1252");
+
+        // Declared UTF-8 but a lone 0xE0 (invalid UTF-8, a Latin-1 'à') → the declared
+        // encoding doesn't fit, so it's flagged non-compliant and recovered (not dropped).
+        let bad = decode_for_index(&[b'x', 0xE0], "UTF-8");
+        assert!(bad.non_compliant);
+        assert!(bad.text.starts_with('x'));
     }
 
     #[test]

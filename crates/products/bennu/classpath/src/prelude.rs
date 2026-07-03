@@ -14,9 +14,12 @@ pub use crate::members::{
     Visibility,
 };
 
-// JDK bootclasspath resolution by language level, the chained multi-source, and the
-// JDK-home locator (JAVA_HOME for the build/run shell-out).
-pub use crate::jdk::{find_jdk_home, resolve_jdk_classpath, MultiSource};
+// JDK bootclasspath resolution by language level, the chained multi-source, the JDK-home
+// locator (JAVA_HOME for the build/run shell-out), the resolution-status probe (FE JDK
+// diagnostics), and the user-configured extra-JDK-homes setter.
+pub use crate::jdk::{
+    find_jdk_home, jdk_status, resolve_jdk_classpath, set_extra_jdk_homes, JdkStatus, MultiSource,
+};
 
 // Dependency-jar sourcing from ~/.m2 via Maven's build-classpath (cached by pom
 // mtime), layered behind the JDK through the same MultiSource.

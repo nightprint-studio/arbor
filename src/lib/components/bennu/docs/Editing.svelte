@@ -17,7 +17,8 @@
 <p>
   The <strong>Structure</strong> tool (left rail) lists the active file's symbols — types, methods and
   fields — grouped by kind and filterable, sortable by position or name. Click a symbol to jump the
-  editor to its declaration.
+  editor to its declaration. The header carries <strong>Collapse all</strong> / <strong>Expand
+  all</strong> chevrons to fold or unfold the whole tree at once, just like the Project panel.
 </p>
 
 <h2>Project tree</h2>
@@ -77,14 +78,18 @@
   <code>42:8</code> (line:column) and press <kbd>Enter</kbd>.
 </p>
 
-<h2>Go to definition</h2>
+<h2>Go to declaration</h2>
 <p>
-  Put the caret on a JSP form or link <strong>action reference</strong> — an
-  <code>action="…"</code> value or a path like <code>/do/Category/viewTree</code> — and press
-  <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) to jump to where the action is
-  declared: the Struts config fragment, or its view JSP. If the reference resolves only to an
-  implementation class the class name is shown. It relies on the project's config graph, so it
-  answers once the index is warm and stays quiet when a reference can't be resolved.
+  Put the caret on a Java <strong>symbol</strong> — a class, method, field or local — and press
+  <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click, or the right-click menu) to jump to its
+  declaration. If you're <strong>already on the declaration itself</strong> — a method signature, or
+  the declaration of a variable, class or record — jumping would be a no-op, so the same gesture shows
+  its <strong>usages</strong> instead (like IntelliJ). On a JSP form or link <strong>action
+  reference</strong> — an <code>action="…"</code> value or a path like
+  <code>/do/Category/viewTree</code> — it jumps to where the action is declared: the Struts config
+  fragment, or its view JSP; if it resolves only to an implementation class, the class name is shown.
+  It answers from the project index / config graph, so it works once the index is warm and stays quiet
+  when a symbol can't be resolved.
 </p>
 
 <h2>Hover</h2>
@@ -97,8 +102,9 @@
 <h2>Right-click menu</h2>
 <p>
   Right-clicking in the editor opens a context menu with the clipboard actions (Cut · Copy · Paste)
-  and the semantic ones — <strong>Go to definition</strong>, <strong>Find usages</strong>,
-  <strong>Rename</strong>, <strong>Generate</strong> and <strong>Save</strong>.
+  and the semantic ones — <strong>Go to declaration</strong>, <strong>Find usages</strong>,
+  <strong>Rename</strong>, <strong>Generate</strong> and <strong>Save</strong>. The semantic actions
+  act on the symbol <strong>under the pointer</strong> — right-clicking moves the caret there first.
 </p>
 
 <h2>Intentions</h2>
@@ -143,6 +149,21 @@
   getters, setters or both from the active class's fields. Pick a mode, tick the fields to include,
   choose fluent or plain setters and camelCase or snake_case accessors; a live preview shows the code
   and <kbd>Ctrl</kbd> + <kbd>Enter</kbd> inserts it at the caret.
+</p>
+
+<h2>The index</h2>
+<p>
+  Completion, go-to-definition, find-usages, rename, hover and Go-to-Class all answer from a
+  <strong>semantic index</strong> Bennu builds in the background when a project opens. The footer shows
+  its progress and reads <em>Indexed · N types</em> once it's warm.
+</p>
+<p>
+  The <strong>Index inspector</strong> (Command Palette → <em>Index inspector…</em>) browses what the
+  index holds — types, members, jars, JDK, beans, actions and relations — with a filter and jump-to.
+  If something looks stale or a class you know exists isn't turning up, press <strong>Rebuild</strong>
+  there (or run <em>Rebuild index</em> from the palette) to invalidate the index and recompute it from
+  scratch. This is a pure re-scan of the sources on disk — it doesn't compile the project (that's
+  <kbd>Ctrl</kbd> + <kbd>F9</kbd>).
 </p>
 
 <div class="callout">

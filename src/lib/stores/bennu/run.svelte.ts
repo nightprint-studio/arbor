@@ -23,6 +23,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import { build as ipcBuild, run as ipcRun, cancelRun as ipcCancelRun } from '$lib/ipc/bennu';
 import type { BuildResult, BuildDiagnostic } from '$lib/types/bennu';
 import { bennuUiStore } from './ui.svelte';
+import { bennuRunConfigStore, splitArgs } from './run-config.svelte';
 
 /** One streamed log line + which channel it came from (drives colouring). */
 export interface RunLogLine {
@@ -126,9 +127,14 @@ function createBennuRunStore() {
     }
   }
 
-  /** Build then, if the compile is clean, launch `mainClass`. Remembers the class
-   *  for this root so ▶ Run can reuse it. No-op while busy. */
-  async function run(root: string, mainClass: string): Promise<void> {
+  /** Build then, if the compile is clean, launch `mainClass` with optional program
+   *  `args`. Remembers the class for this root so ▶ Run can reuse it. No-op while
+   *  busy.
+   *
+   *  NOTE: VM args / working dir / env from a run config are NOT yet forwarded — the
+   *  `bennu_run` BE handler only accepts `{ root, main_class, args }` today. Passing
+   *  those through is a BE follow-up (see the run-config BE contract). */
+  async function run(root: string, mainClass: string, args: string[] = []): Promise<void> {
     if (building || running) return;
     const cls = mainClass.trim();
     if (!cls) return;
@@ -139,15 +145,26 @@ function createBennuRunStore() {
       return;
     }
     running = true;
-    push(`Running ${cls}…`, 'meta');
+    push(`Running ${cls}${args.length ? ' ' + args.join(' ') : ''}…`, 'meta');
     try {
-      const handle = await ipcRun(root, cls);
+      const handle = await ipcRun(root, cls, args);
       runId = handle.run_id;
     } catch (e) {
       running = false;
       runId = null;
       push(`Run error: ${e instanceof Error ? e.message : String(e)}`, 'err');
     }
+  }
+
+  /** Run the ACTIVE run configuration for `root` (the titlebar ▶ / Shift+F10 path).
+   *  Reads the active config from {@link bennuRunConfigStore} and launches its main
+   *  class + program args. Returns false when there's no active config to run (the
+   *  caller then opens the run-config editor to pick/create one). */
+  async function runActive(root: string): Promise<boolean> {
+    const cfg = bennuRunConfigStore.activeFor(root);
+    if (!cfg || !cfg.mainClass.trim()) return false;
+    await run(root, cfg.mainClass, splitArgs(cfg.programArgs));
+    return true;
   }
 
   /** Stop the live run (if any). */
@@ -183,6 +200,7 @@ function createBennuRunStore() {
     attach,
     build,
     run,
+    runActive,
     stop,
     /** Clear the log + last result (the Build panel's "clear" action). */
     clear() {

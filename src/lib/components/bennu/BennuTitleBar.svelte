@@ -17,7 +17,7 @@
    */
   import {
     ChevronDown, FolderOpen, LogOut, Settings, Keyboard, FlaskConical, FileCode2,
-    Play, Bug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square,
+    Play, Bug, MoreVertical, Palette, SlidersHorizontal, Info, Hammer, Square, TriangleAlert,
   } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import TitleBar from '$lib/components/shared/ui/TitleBar.svelte';
@@ -32,6 +32,7 @@
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
+  import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { themeStore } from '$lib/stores/theme.svelte';
   import ThemeEditorModal from '$lib/components/shared/ThemeEditorModal.svelte';
 
@@ -46,14 +47,14 @@
     toastStore.show(`${what} isn't implemented yet.`, 'info');
   }
 
-  /** ▶ Run — build then launch the remembered main class; if none is remembered
-   *  for this project yet, open the run-config modal to pick one. */
+  /** ▶ Run — build then launch the ACTIVE run configuration; if the project has no
+   *  active config yet, open the run-config editor to create/pick one. */
   function runProject() {
     const root = projectStore.project?.root;
     if (!root) return;
-    const cls = bennuRunStore.mainClassFor(root);
-    if (cls) void bennuRunStore.run(root, cls);
-    else bennuUiStore.openRunConfig();
+    void bennuRunStore.runActive(root).then((ran) => {
+      if (!ran) bennuUiStore.openRunConfig();
+    });
   }
   /** Compile the project (`mvn`/`javac`), streaming to the Build dock. */
   function buildProject() {
@@ -177,6 +178,17 @@
   <!-- Right cluster head: the Run / Debug / overflow run-controls, then a small
        gap before the app buttons (palette · docs · settings). -->
   {#snippet trailing()}
+    {#if bennuDiagnosticsStore.jdkMissing}
+      <button
+        class="btb-jdk-warn"
+        onclick={() => bennuUiStore.openSettings()}
+        use:tooltip={'No JDK found — completion and navigation can’t resolve the standard library. Click to set a JDK path in Settings.'}
+        aria-label="No JDK found — open Settings"
+      >
+        <TriangleAlert size={14} />
+        <span class="btb-jdk-warn-label">No JDK</span>
+      </button>
+    {/if}
     <div class="btb-run" role="group" aria-label="Run controls">
       <button
         class="btb-run-btn"
@@ -258,6 +270,21 @@
   }
   :global(.btb-project .btb-project-chev)       { color: var(--text-muted); transition: color var(--transition-fast); }
   :global(.btb-project:hover .btb-project-chev) { color: var(--text-secondary); }
+
+  /* JDK-missing warning badge (titlebar) — a click opens Settings to set a JDK path. */
+  .btb-jdk-warn {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 26px; margin-right: 6px; padding: 0 9px;
+    background: color-mix(in srgb, var(--warning) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+    border-radius: var(--radius-sm);
+    color: var(--warning); cursor: pointer;
+    font-family: var(--font-ui-sans); font-size: 11px; font-weight: 600;
+    -webkit-app-region: no-drag;
+    transition: background var(--transition-fast);
+  }
+  .btb-jdk-warn:hover { background: color-mix(in srgb, var(--warning) 26%, transparent); }
+  .btb-jdk-warn-label { white-space: nowrap; }
 
   /* ── Run controls (▷ Run · 🐛 Debug · ⋮) ─────────────────────────────────── */
   .btb-run {

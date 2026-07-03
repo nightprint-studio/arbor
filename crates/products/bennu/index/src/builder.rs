@@ -211,7 +211,16 @@ mod tests {
     }
 
     fn tmp() -> PathBuf {
-        let d = std::env::temp_dir().join(format!("bennu-idx-build-{}", std::process::id()));
+        // Unique PER TEST: cargo runs tests concurrently, each on its own thread, so keying
+        // only on the process id would share one dir across tests — they'd clobber each
+        // other's blob/fst (wrong records read back) and, on Windows, one test's live mmap
+        // would block another's rewrite (os error 1224). The thread id isolates them.
+        let d = std::env::temp_dir().join(format!(
+            "bennu-idx-build-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
     }
@@ -261,15 +270,21 @@ mod tests {
         )
         .unwrap();
 
-        let idx = PersistedIndex::open(b.blob_path(), b.fst_path()).unwrap();
-        assert!(idx.get("A").is_none(), "old symbol gone after patch");
-        assert!(idx.get("A2").is_some(), "new symbol present after patch");
-        assert!(idx.get("B").is_some(), "untouched file's symbol preserved");
+        // Scope the mmap: it must drop BEFORE the next `patch_file` rewrites the same files,
+        // or Windows refuses the rewrite (os error 1224 — a user-mapped section is open).
+        {
+            let idx = PersistedIndex::open(b.blob_path(), b.fst_path()).unwrap();
+            assert!(idx.get("A").is_none(), "old symbol gone after patch");
+            assert!(idx.get("A2").is_some(), "new symbol present after patch");
+            assert!(idx.get("B").is_some(), "untouched file's symbol preserved");
+        }
 
         // Delete B.java: its symbol must vanish.
         b.patch_file(PathBuf::from("B.java"), None).unwrap();
-        let idx = PersistedIndex::open(b.blob_path(), b.fst_path()).unwrap();
-        assert!(idx.get("B").is_none(), "deleted file's symbol gone");
+        {
+            let idx = PersistedIndex::open(b.blob_path(), b.fst_path()).unwrap();
+            assert!(idx.get("B").is_none(), "deleted file's symbol gone");
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

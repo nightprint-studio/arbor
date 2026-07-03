@@ -102,17 +102,29 @@ pub struct RunArgs {
     /// Absolute path to the project root.
     pub root: String,
     /// The fully-qualified main class to launch. Required — main-class *discovery*
-    /// (scanning for `public static void main`) is a later wave; the FE passes it.
+    /// (scanning for `public static void main`) is `bennu_main_classes`; the FE passes
+    /// the resolved class here.
     pub main_class: String,
-    /// Program arguments passed to the main class.
+    /// Program arguments passed to the main class (after the main class on the argv).
     #[serde(default)]
     pub args: Vec<String>,
+    /// JVM arguments (`-Xmx…`, `-D…`) placed BEFORE `-cp`/main class. Optional +
+    /// back-compatible — a caller passing only `{ root, main_class, args }` still works.
+    #[serde(default)]
+    pub vm_args: Option<Vec<String>>,
+    /// Working directory for the child. Empty / `None` = the project root.
+    #[serde(default)]
+    pub working_dir: Option<String>,
+    /// Extra environment variables applied to the child (merged over the inherited env).
+    #[serde(default)]
+    pub env: Option<std::collections::HashMap<String, String>>,
 }
 
-/// Launch `java -cp <target/classes:deps> <main_class> <args...>` and stream its
-/// stdout/stderr as `arbor://bennu/run-output`, ending with `arbor://bennu/run-exit`.
-/// Returns immediately with the [`RunHandle`] correlating the stream; the child runs on
-/// a background thread.
+/// Launch `java <vm_args…> -cp <target/classes:deps> <main_class> <args...>` and stream
+/// its stdout/stderr as `arbor://bennu/run-output`, ending with `arbor://bennu/run-exit`.
+/// VM args (when given) precede `-cp`; the working dir + extra env (when given) are
+/// applied to the child. Returns immediately with the [`RunHandle`] correlating the
+/// stream; the child runs on a background thread.
 #[arbor_rpc::handler]
 fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
     let root = PathBuf::from(&args.root);
@@ -120,9 +132,21 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
     let java = java_program(java_home.as_deref());
     let classpath = run_classpath(&root, java_home.as_deref());
 
+    // Working dir: an explicit non-empty override, else the project root.
+    let cwd = match args.working_dir.as_deref() {
+        Some(d) if !d.trim().is_empty() => PathBuf::from(d),
+        _ => root.clone(),
+    };
+
     let mut cmd = Command::new(&java);
-    cmd.current_dir(&root)
-        .arg("-cp")
+    cmd.current_dir(&cwd);
+    // VM args come BEFORE -cp / main class (JVM options must precede the class).
+    if let Some(vm) = &args.vm_args {
+        for a in vm {
+            cmd.arg(a);
+        }
+    }
+    cmd.arg("-cp")
         .arg(&classpath)
         .arg(&args.main_class)
         .stdout(Stdio::piped())
@@ -130,6 +154,12 @@ fn bennu_run(ctx: &BennuState, args: RunArgs) -> Result<RunHandle, String> {
         .stdin(Stdio::null());
     for a in &args.args {
         cmd.arg(a);
+    }
+    // Extra env merged over the inherited environment (later entries win by key).
+    if let Some(env) = &args.env {
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
     }
     // A run child is short-lived-ish and console-less; suppress the window on Windows.
     cmd.no_window();

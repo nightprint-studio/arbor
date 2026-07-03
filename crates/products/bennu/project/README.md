@@ -18,9 +18,12 @@ Depends only on the shared contract (`bennu-proto`) + serde.
   crate (hard rule 7 — none on the approved list); a full config-graph XML model is
   `bennu-web`'s later job.
 - **Encoding detection** (`encoding.rs`) — `project.build.sourceEncoding` → default
-  UTF-8, plus per-path override. Decodes UTF-8 (BOM-stripped) and Cp1252 natively (the
-  legacy target stack's encoding — docs §0); other labels degrade to lossy UTF-8 with
-  the true label preserved.
+  UTF-8, plus per-path override. Decoding runs through `encoding_rs` (the WHATWG set), so
+  UTF-8 / Cp1252 / ISO-8859-1 / … all decode natively; an unknown label degrades to lossy
+  UTF-8 with the true label preserved. `decode_for_index` tries the declared encoding first
+  and, when the bytes don't fit, recovers + flags the file `non_compliant` (for the index's
+  encoding report). The round-trip save `encode` stays hand-rolled (Cp1252 / UTF-8) — its
+  unmappable-char fallback semantics differ from `encoding_rs`' encoder.
 - **Per-project JDK detection** (`jdk.rs`) — `maven.compiler.source/target`, compiler
   plugin, `<toolchains>`, plus override.
 - **Project file tree** (`tree.rs`) — depth-bounded, dirs-first, noise-dirs skipped.

@@ -1,0 +1,534 @@
+//! Inherited ("super") members of a Java type — the Structure panel's lazy
+//! **"Inherited"** bucket.
+//!
+//! Given a type identified by `(file, simple_name, decl_line)` (its own declaration
+//! site — line disambiguates a nested / same-simple-named type), resolve its **binary
+//! name**, then collect the members of its SUPERCLASS + INTERFACES recursively (NOT the
+//! type's own declared members), deduping overrides by name+kind so an override shadows
+//! the super declaration it hides.
+//!
+//! This reuses the same resolution machinery as member-access completion
+//! ([`crate::completion::collect_members`] walks super + interfaces via
+//! [`TypeResolver::members_of`]) — here we start the walk one level up (the supertypes),
+//! so the type's own members are excluded.
+//!
+//! Each collected member is tagged with the `declaring_type` (the FQCN it was collected
+//! from) + its `visibility`, and — like go-to-declaration — a `source` file+line **only
+//! when that declaring type resolves to a PROJECT source** (a JDK / jar supertype's member
+//! has no openable source, so `source` is `None`).
+
+use std::collections::HashSet;
+
+use bennu_java::prelude::{Member, MemberKind, TypeRef, TypeResolver, Visibility};
+// Only the `#[cfg(test)]` `MapResolver` names `ClassMembers` directly (the walk consumes
+// members through the resolver, which now hands back `Arc<ClassMembers>`).
+#[cfg(test)]
+use bennu_java::prelude::ClassMembers;
+use tree_sitter::{Node, Parser};
+
+use crate::rename::{find_type_name_span, PlanFile};
+
+/// One inherited member (the intel-level view the be layer maps to the wire
+/// `InheritedMember` field-for-field).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InheritedMember {
+    /// `"method"` | `"field"`.
+    pub kind: String,
+    /// The member's simple name.
+    pub name: String,
+    /// A readable detail: the return type (methods) / field type. `None` when the type is
+    /// not recorded.
+    pub detail: Option<String>,
+    /// `"public"` | `"protected"` | `"private"` | `"package"`.
+    pub visibility: String,
+    /// The dotted FQCN of the class / interface that declares the member.
+    pub declaring_type: String,
+    /// The project-source declaration site (file + 1-based line), or `None` when the
+    /// declaring type is a JDK / jar type (no project source to open).
+    pub source: Option<InheritedSource>,
+}
+
+/// Where an inherited member is declared, when it resolves to PROJECT source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InheritedSource {
+    /// Absolute path (forward slashes) of the project file declaring the member's type.
+    pub file: String,
+    /// 1-based line of that type's declaration.
+    pub line: i64,
+}
+
+/// Resolve the target type by `(file, simple_name, decl_line)` and collect the members of
+/// its SUPERCLASS + INTERFACES (recursively, deduped) — the "inherited" set. Returns `[]`
+/// when the target type can't be resolved in `file` (unknown type / stale line) — a benign,
+/// non-fatal state (the FE shows an empty bucket).
+///
+/// `java_files` are the project's `.java` sources (path + text); they resolve the target's
+/// binary name and, for each inherited member, its declaring type's project source (else
+/// `None`, like go-to-declaration).
+pub fn inherited_members(
+    resolver: &dyn TypeResolver,
+    java_files: &[PlanFile],
+    file: &str,
+    type_name: &str,
+    decl_line: i64,
+) -> Vec<InheritedMember> {
+    let Some(binary) = resolve_target_binary(java_files, file, type_name, decl_line) else {
+        return Vec::new();
+    };
+    // The target's own members are EXCLUDED — start the walk from its supertypes.
+    let Some(cm) = resolver.members_of(&binary) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    visited.insert(binary);
+
+    if let Some(sc) = &cm.superclass {
+        collect_supertype(resolver, java_files, sc, &mut out, &mut seen, &mut visited);
+    }
+    for iface in &cm.interfaces {
+        collect_supertype(resolver, java_files, iface, &mut out, &mut seen, &mut visited);
+    }
+    // Deterministic order: fields then methods, alphabetical within (matches completion).
+    out.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.name.cmp(&b.name)));
+    out
+}
+
+/// Collect the members of the supertype `binary` (and, recursively, ITS supertypes),
+/// tagging each with its declaring FQCN + visibility + project source. Dedups by name+kind
+/// across the whole walk so an override higher up shadows the declaration it hides.
+fn collect_supertype(
+    resolver: &dyn TypeResolver,
+    java_files: &[PlanFile],
+    binary: &str,
+    out: &mut Vec<InheritedMember>,
+    seen: &mut HashSet<String>,
+    visited: &mut HashSet<String>,
+) {
+    if !visited.insert(binary.to_string()) {
+        return;
+    }
+    let Some(cm) = resolver.members_of(binary) else {
+        return;
+    };
+    let declaring_type = binary.replace('/', ".");
+    // Resolve the declaring type's project source ONCE per type (shared by its members).
+    let source = project_source_of(java_files, binary);
+
+    for m in cm.methods.iter().chain(cm.fields.iter()) {
+        let key = format!("{}/{}", kind_tag(m.kind), m.name);
+        if !seen.insert(key) {
+            continue; // an override lower in the hierarchy already claimed this name+kind
+        }
+        out.push(InheritedMember {
+            kind: kind_tag(m.kind).to_string(),
+            name: m.name.clone(),
+            detail: render_detail(m),
+            visibility: visibility_tag(m.visibility).to_string(),
+            declaring_type: declaring_type.clone(),
+            source: source.clone(),
+        });
+    }
+
+    if let Some(sc) = &cm.superclass {
+        collect_supertype(resolver, java_files, sc, out, seen, visited);
+    }
+    for iface in &cm.interfaces {
+        collect_supertype(resolver, java_files, iface, out, seen, visited);
+    }
+}
+
+/// Resolve the target type's JVM binary name by locating the declaration named `type_name`
+/// on 1-based `decl_line` in `file`'s project source. The line disambiguates a nested /
+/// same-simple-named type. `None` when no project source is `file`, or `file` declares no
+/// such type at that line.
+fn resolve_target_binary(
+    java_files: &[PlanFile],
+    file: &str,
+    type_name: &str,
+    decl_line: i64,
+) -> Option<String> {
+    let source = java_files.iter().find(|f| f.path == file).map(|f| f.source.as_str())?;
+    binary_of_type_at(source, type_name, decl_line)
+}
+
+/// Walk `source`'s CST for the class / interface / enum named `simple` whose declaration
+/// name token is on 1-based `line`, returning its JVM binary name (package + nesting,
+/// slash-separated). When `line <= 0` (caller couldn't pin a line), the first same-named
+/// declaration wins. `None` when no matching declaration is found.
+fn binary_of_type_at(source: &str, simple: &str, line: i64) -> Option<String> {
+    let mut parser = Parser::new();
+    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
+    let tree = parser.parse(source, None)?;
+    let bytes = source.as_bytes();
+    let root = tree.root_node();
+
+    // Package + nested-type context tracked as we descend, so `Outer.Inner` binds correctly.
+    let package = package_name(&root, bytes);
+    let mut found: Option<String> = None;
+    walk_types(&root, bytes, package.as_deref(), None, simple, line, &mut found);
+    found
+}
+
+/// Recursive type walk building each declaration's binary name; on a name+line match, set
+/// `found` (first match wins — the caller's line already disambiguated).
+#[allow(clippy::too_many_arguments)]
+fn walk_types(
+    node: &Node,
+    bytes: &[u8],
+    package: Option<&str>,
+    outer_binary: Option<&str>,
+    simple: &str,
+    line: i64,
+    found: &mut Option<String>,
+) {
+    let mut cur = node.walk();
+    for child in node.named_children(&mut cur) {
+        if matches!(
+            child.kind(),
+            "class_declaration" | "interface_declaration" | "enum_declaration"
+        ) {
+            let Some(name_node) = child.child_by_field_name("name") else { continue };
+            let Ok(name) = name_node.utf8_text(bytes) else { continue };
+            // Nested types are keyed by the index with a `/` separator (the source
+            // extractor's FQN uses `Outer.Inner`, persisted as `Outer/Inner`), so build the
+            // same slash-joined binary here — NOT the JVM `Outer$Inner` form — or
+            // `members_of` would miss the project record.
+            let binary = match outer_binary {
+                Some(o) => format!("{o}/{name}"),
+                None => match package {
+                    Some(p) => format!("{}/{name}", p.replace('.', "/")),
+                    None => name.to_string(),
+                },
+            };
+            if found.is_none() && name == simple {
+                // 1-based line of the name token.
+                let name_line = name_node.start_position().row as i64 + 1;
+                if line <= 0 || name_line == line {
+                    *found = Some(binary.clone());
+                }
+            }
+            // Descend into the body for nested types (binary uses the nested `$` form for
+            // the outer, but the resolver keys project source types by their dotted/slash
+            // FQN — nested types resolve via the same key the index built them under).
+            if let Some(body) = child.child_by_field_name("body") {
+                walk_types(&body, bytes, package, Some(&binary), simple, line, found);
+            }
+        } else {
+            // A non-type container (e.g. the compilation unit) — descend for top-level types.
+            walk_types(&child, bytes, package, outer_binary, simple, line, found);
+        }
+        if found.is_some() {
+            return;
+        }
+    }
+}
+
+/// The package name of a compilation unit, if declared.
+fn package_name(root: &Node, bytes: &[u8]) -> Option<String> {
+    let mut cur = root.walk();
+    for child in root.children(&mut cur) {
+        if child.kind() == "package_declaration" {
+            let mut pc = child.walk();
+            for n in child.named_children(&mut pc) {
+                if matches!(n.kind(), "scoped_identifier" | "identifier") {
+                    return n.utf8_text(bytes).ok().map(|s| s.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The project-source declaration of type `binary`, or `None` when no project `.java`
+/// declares it (a JDK / jar type). Mirrors go-to-declaration's project-source scan: the
+/// first source with a matching type-name span wins.
+fn project_source_of(java_files: &[PlanFile], binary: &str) -> Option<InheritedSource> {
+    let simple = binary.rsplit(['/', '$']).next().unwrap_or(binary);
+    for f in java_files {
+        if let Some((start, _end)) = find_type_name_span(&f.source, simple) {
+            let line = line_1based(&f.source, start);
+            return Some(InheritedSource { file: f.path.clone(), line });
+        }
+    }
+    None
+}
+
+/// 1-based line of byte `start` in `source` (1 + count of `'\n'` before it).
+fn line_1based(source: &str, start: usize) -> i64 {
+    let clamped = start.min(source.len());
+    1 + source.as_bytes()[..clamped].iter().filter(|&&b| b == b'\n').count() as i64
+}
+
+fn kind_tag(k: MemberKind) -> &'static str {
+    match k {
+        MemberKind::Method => "method",
+        MemberKind::Field => "field",
+    }
+}
+
+fn visibility_tag(v: Visibility) -> &'static str {
+    match v {
+        Visibility::Public => "public",
+        Visibility::Protected => "protected",
+        Visibility::Private => "private",
+        Visibility::Package => "package",
+    }
+}
+
+/// A readable detail line: the return type (methods) / field type. `None` when the type is
+/// unrecorded (an empty binary name).
+fn render_detail(m: &Member) -> Option<String> {
+    let rendered = render_type(&m.return_type);
+    if rendered.is_empty() {
+        None
+    } else {
+        Some(rendered)
+    }
+}
+
+/// Render a `TypeRef` to a readable simple form: `java/util/List<Foo>` → `List<Foo>`.
+fn render_type(t: &TypeRef) -> String {
+    if t.binary_name.is_empty() {
+        return String::new();
+    }
+    let simple = t.binary_name.rsplit('/').next().unwrap_or(&t.binary_name);
+    if t.type_args.is_empty() {
+        simple.to_string()
+    } else {
+        let args: Vec<String> = t.type_args.iter().map(render_type).collect();
+        format!("{}<{}>", simple, args.join(", "))
+    }
+}
+
+/// A trivial in-crate `TypeResolver` used by the unit tests: a fixed binary→members map,
+/// plus a simple→binary table. Mirrors the shape the real `IndexResolver` exposes.
+#[cfg(test)]
+struct MapResolver {
+    members: std::collections::HashMap<String, ClassMembers>,
+    simple: std::collections::HashMap<String, String>,
+}
+
+#[cfg(test)]
+impl TypeResolver for MapResolver {
+    fn members_of(&self, binary: &str) -> Option<std::sync::Arc<ClassMembers>> {
+        self.members.get(binary).cloned().map(std::sync::Arc::new)
+    }
+    fn resolve_simple_name(
+        &self,
+        name: &str,
+        _imports: &[bennu_java::prelude::Import],
+    ) -> Option<String> {
+        self.simple.get(name).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn method(name: &str, ret: &str, vis: Visibility) -> Member {
+        Member {
+            name: name.to_string(),
+            kind: MemberKind::Method,
+            return_type: TypeRef::simple(ret.to_string()),
+            params: Vec::new(),
+            is_static: false,
+            visibility: vis,
+            raw_signature: format!("{ret} {name}()"),
+        }
+    }
+
+    fn field(name: &str, ty: &str, vis: Visibility) -> Member {
+        Member {
+            name: name.to_string(),
+            kind: MemberKind::Field,
+            return_type: TypeRef::simple(ty.to_string()),
+            params: Vec::new(),
+            is_static: false,
+            visibility: vis,
+            raw_signature: format!("{ty} {name}"),
+        }
+    }
+
+    fn plan_file(path: &str, source: &str) -> PlanFile {
+        PlanFile { path: path.to_string(), source: source.to_string() }
+    }
+
+    #[test]
+    fn binary_of_type_at_matches_by_line() {
+        let src = "package com.acme;\npublic class Order {\n}\n";
+        // `Order` name token is on line 2.
+        assert_eq!(binary_of_type_at(src, "Order", 2).as_deref(), Some("com/acme/Order"));
+        // A wrong line yields no match.
+        assert!(binary_of_type_at(src, "Order", 99).is_none());
+        // line <= 0 → first same-named decl wins.
+        assert_eq!(binary_of_type_at(src, "Order", 0).as_deref(), Some("com/acme/Order"));
+    }
+
+    #[test]
+    fn project_subclass_inherits_project_superclass_method_with_source() {
+        // Sub extends Base; Base declares `greet()` in a PROJECT source → the inherited
+        // member carries a source pointing at Base.java, and Sub's own members are excluded.
+        let base_src = "package com.acme;\npublic class Base {\n  public String greet() { return \"hi\"; }\n}\n";
+        let sub_src = "package com.acme;\npublic class Sub extends Base {\n  public int own() { return 1; }\n}\n";
+        let java = vec![plan_file("Base.java", base_src), plan_file("Sub.java", sub_src)];
+
+        let mut members = HashMap::new();
+        members.insert(
+            "com/acme/Base".to_string(),
+            ClassMembers {
+                superclass: Some("java/lang/Object".to_string()),
+                interfaces: Vec::new(),
+                methods: vec![method("greet", "java/lang/String", Visibility::Public)],
+                fields: Vec::new(),
+            },
+        );
+        members.insert(
+            "com/acme/Sub".to_string(),
+            ClassMembers {
+                superclass: Some("com/acme/Base".to_string()),
+                interfaces: Vec::new(),
+                methods: vec![method("own", "int", Visibility::Public)],
+                fields: Vec::new(),
+            },
+        );
+        // `java/lang/Object` is a JDK type: NOT in `members` (no ClassMembers) → its members
+        // (none here) contribute nothing, and it has no project source.
+        let simple = HashMap::new();
+        let resolver = MapResolver { members, simple };
+
+        let got = inherited_members(&resolver, &java, "Sub.java", "Sub", 2);
+        // Exactly Base.greet() — Sub.own() (the type's OWN member) is excluded.
+        assert_eq!(got.len(), 1);
+        let g = &got[0];
+        assert_eq!(g.kind, "method");
+        assert_eq!(g.name, "greet");
+        assert_eq!(g.detail.as_deref(), Some("String"));
+        assert_eq!(g.visibility, "public");
+        assert_eq!(g.declaring_type, "com.acme.Base");
+        // Base is a project source → source present, pointing at Base.java line 2.
+        let src = g.source.as_ref().expect("project source");
+        assert_eq!(src.file, "Base.java");
+        assert_eq!(src.line, 2);
+    }
+
+    #[test]
+    fn jdk_supertype_member_has_null_source() {
+        // Sub extends a JDK type (java/util/AbstractList) whose member `size()` is resolvable
+        // (the JDK member index provides ClassMembers) but has NO project source → source null.
+        let sub_src = "package com.acme;\npublic class Sub {\n}\n";
+        let java = vec![plan_file("Sub.java", sub_src)];
+
+        let mut members = HashMap::new();
+        members.insert(
+            "com/acme/Sub".to_string(),
+            ClassMembers {
+                superclass: Some("java/util/AbstractList".to_string()),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+            },
+        );
+        members.insert(
+            "java/util/AbstractList".to_string(),
+            ClassMembers {
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: vec![method("size", "int", Visibility::Public)],
+                fields: Vec::new(),
+            },
+        );
+        let resolver = MapResolver { members, simple: HashMap::new() };
+
+        let got = inherited_members(&resolver, &java, "Sub.java", "Sub", 2);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].name, "size");
+        assert_eq!(got[0].declaring_type, "java.util.AbstractList");
+        // No project source declares AbstractList → source is None.
+        assert!(got[0].source.is_none(), "JDK supertype member has null source");
+    }
+
+    #[test]
+    fn override_dedups_to_lowest_declaration() {
+        // Both Base and Mid declare `run()`; the walk starts at Sub's supertype Mid, so Mid's
+        // `run` claims the name+kind and Base's is shadowed (deduped).
+        let java = vec![plan_file("Sub.java", "package com.acme;\npublic class Sub {\n}\n")];
+        let mut members = HashMap::new();
+        members.insert(
+            "com/acme/Sub".to_string(),
+            ClassMembers {
+                superclass: Some("com/acme/Mid".to_string()),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+            },
+        );
+        members.insert(
+            "com/acme/Mid".to_string(),
+            ClassMembers {
+                superclass: Some("com/acme/Base".to_string()),
+                interfaces: Vec::new(),
+                methods: vec![method("run", "void", Visibility::Protected)],
+                fields: Vec::new(),
+            },
+        );
+        members.insert(
+            "com/acme/Base".to_string(),
+            ClassMembers {
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: vec![method("run", "void", Visibility::Public)],
+                fields: Vec::new(),
+            },
+        );
+        let resolver = MapResolver { members, simple: HashMap::new() };
+        let got = inherited_members(&resolver, &java, "Sub.java", "Sub", 2);
+        // Exactly one `run` — Mid's (the nearer declaration), Base's is deduped.
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].name, "run");
+        assert_eq!(got[0].declaring_type, "com.acme.Mid");
+        assert_eq!(got[0].visibility, "protected");
+    }
+
+    #[test]
+    fn unresolved_target_returns_empty() {
+        let java = vec![plan_file("Sub.java", "package com.acme;\npublic class Sub {\n}\n")];
+        let resolver = MapResolver { members: HashMap::new(), simple: HashMap::new() };
+        // Unknown type name → empty (not a panic).
+        assert!(inherited_members(&resolver, &java, "Sub.java", "Nope", 2).is_empty());
+    }
+
+    #[test]
+    fn field_and_method_ordering_is_deterministic() {
+        let java = vec![plan_file("Sub.java", "package com.acme;\npublic class Sub {\n}\n")];
+        let mut members = HashMap::new();
+        members.insert(
+            "com/acme/Sub".to_string(),
+            ClassMembers {
+                superclass: Some("com/acme/Base".to_string()),
+                interfaces: Vec::new(),
+                methods: Vec::new(),
+                fields: Vec::new(),
+            },
+        );
+        members.insert(
+            "com/acme/Base".to_string(),
+            ClassMembers {
+                superclass: None,
+                interfaces: Vec::new(),
+                methods: vec![method("zeta", "void", Visibility::Public), method("alpha", "void", Visibility::Public)],
+                fields: vec![field("count", "int", Visibility::Protected)],
+            },
+        );
+        let resolver = MapResolver { members, simple: HashMap::new() };
+        let got = inherited_members(&resolver, &java, "Sub.java", "Sub", 2);
+        // fields before methods, alphabetical within.
+        let names: Vec<&str> = got.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, vec!["count", "alpha", "zeta"]);
+        assert_eq!(got[0].kind, "field");
+    }
+}

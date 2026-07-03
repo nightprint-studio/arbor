@@ -50,6 +50,10 @@ bennu-classpath = { path = "../classpath" }
 arbor-process-ext = { path = "../../../platform/process-ext" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
+# Per-repo run-config persistence: read/merge/write `<repo>/.arbor/config.toml`'s
+# `[bennu.run]` section (same version bennu-core already pins). Not a new external dep —
+# it's already used across the workspace (bennu-core, corvus repo_config).
+toml       = "0.8"
 # Drives the serve loop / async domain handlers as the index / analysis waves land.
 tokio      = { workspace = true }
 # HTTP client for `bennu_download_dictionaries` (LibreOffice Hunspell `.aff`/`.dic`). Uses

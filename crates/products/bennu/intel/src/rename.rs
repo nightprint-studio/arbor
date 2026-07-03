@@ -28,8 +28,9 @@ use tree_sitter::{Node, Parser};
 
 use crate::jdk::JdkMemberIndex;
 use crate::refs::{
-    build_reference_index, classify_caret, classify_target, references, DeclKey, ReferenceIndex,
-    ReferencesResult, RenameTarget, SourceFile,
+    build_reference_index_incremental, build_reference_index_with_progress, classify_caret,
+    classify_target, references, DeclKey, ReferenceIndex, ReferencesResult, RenameTarget,
+    SourceFile,
 };
 use crate::resolver::IndexResolver;
 
@@ -298,12 +299,14 @@ impl RenameEngine {
         xml_sources: Vec<(String, String)>,
         resolver: IndexResolver<JdkMemberIndex>,
         project_types: HashMap<String, String>,
+        on_progress: &(dyn Fn(usize, usize) + Sync),
     ) -> Self {
         let ref_input: Vec<SourceFile> = java_sources
             .iter()
             .map(|(p, s)| SourceFile { path: p.clone(), source: s.clone() })
             .collect();
-        let index = build_reference_index(&ref_input, &resolver, &project_types);
+        let index =
+            build_reference_index_with_progress(&ref_input, &resolver, &project_types, on_progress);
         let java_files =
             java_sources.into_iter().map(|(path, source)| PlanFile { path, source }).collect();
         let xml_files =
@@ -311,30 +314,60 @@ impl RenameEngine {
         Self { index, resolver, project_types, java_files, xml_files }
     }
 
-    /// Open the persisted project index at `index_dir`, resolve the JDK for `jdk_version`,
-    /// seed the project's simple names, then build the engine over the given source sets.
-    /// `Err` when the index can't be opened or the JDK isn't installed.
+    /// Open the persisted project index at `index_dir`, seed the project's simple names, then
+    /// build the engine over the given source sets. `Err` only when the index can't be opened.
+    ///
+    /// The engine is **project-only** — it never resolves JDK / library types — so it does NOT
+    /// open the JDK classpath (`_jdk_version` is unused): find-usages / rename only target
+    /// project symbols, and decoding JDK bytecode in the reference walk was pure waste that made
+    /// the walk crawl for minutes on a large project. This also makes both work with no JDK
+    /// installed. An empty member source stands in for the unused JDK slot.
     pub fn for_project(
         index_dir: &Path,
-        jdk_version: &str,
+        _jdk_version: &str,
         project_simple_names: &[(String, String)],
         java_sources: Vec<(String, String)>,
         xml_sources: Vec<(String, String)>,
+        on_progress: &(dyn Fn(usize, usize) + Sync),
     ) -> Result<Self, String> {
-        use bennu_classpath::prelude::resolve_jdk_classpath;
+        use bennu_classpath::prelude::MultiSource;
         use bennu_index::prelude::PersistedIndex;
 
         let blob = index_dir.join("symbols.blob");
         let fst = index_dir.join("names.fst");
         let project = PersistedIndex::open(&blob, &fst).map_err(|e| e.to_string())?;
-        let jdk = JdkMemberIndex::new(resolve_jdk_classpath(jdk_version)?);
-        let mut resolver = IndexResolver::new(project, jdk);
+        let jdk = JdkMemberIndex::new(Box::new(MultiSource::new(Vec::new())));
+        let mut resolver = IndexResolver::new(project, jdk).project_only();
         let mut project_types = HashMap::new();
         for (simple, binary) in project_simple_names {
             resolver.add_simple_hint(simple, binary);
             project_types.insert(simple.clone(), binary.clone());
         }
-        Ok(Self::new(java_sources, xml_sources, resolver, project_types))
+
+        // Incremental, persisted reference walk: reuse the on-disk cache (keyed by per-file
+        // content hash) where valid, re-walking only changed files + their dependents. The
+        // cache lives at a STABLE path under the index base (the parent of the per-build gen
+        // dir), so it survives across opens — a full walk only happens on the first open or a
+        // structural type change.
+        let cache_path = index_dir.parent().map(crate::refcache::cache_path);
+        let prior = cache_path.as_deref().and_then(crate::refcache::load);
+
+        let ref_input: Vec<SourceFile> = java_sources
+            .iter()
+            .map(|(p, s)| SourceFile { path: p.clone(), source: s.clone() })
+            .collect();
+        let built =
+            build_reference_index_incremental(&ref_input, &resolver, &project_types, prior, on_progress);
+        let index = built.index;
+        if let (Some(path), Some(cache)) = (&cache_path, &built.cache_to_save) {
+            crate::refcache::save(path, cache);
+        }
+
+        let java_files =
+            java_sources.into_iter().map(|(path, source)| PlanFile { path, source }).collect();
+        let xml_files =
+            xml_sources.into_iter().map(|(path, source)| PlanFile { path, source }).collect();
+        Ok(Self { index, resolver, project_types, java_files, xml_files })
     }
 
     /// Plan a rename at `file`:`offset` → the new name. `None` when the caret isn't on a
@@ -386,6 +419,28 @@ impl RenameEngine {
     /// referenceable symbol (a local/param is scope-exact and not bucketed here).
     pub fn find_usages(&self, file: &str, source: &str, offset: usize) -> Option<ReferencesResult> {
         references(&self.index, file, source, offset, &self.resolver, &self.project_types)
+    }
+
+    /// The inherited ("super") members of the type declared at `file`:(`type_name`,`line`) —
+    /// the Structure panel's lazy "Inherited" bucket. Resolves the type's binary name off its
+    /// declaring source, then collects the members of its SUPERCLASS + INTERFACES recursively
+    /// (NOT the type's own members), deduping overrides, tagging each with its declaring FQCN
+    /// + visibility + (for a project supertype) a source file+line. `[]` when the type can't
+    /// be resolved in `file`. Shares the engine's resolver + java sources (same off-thread
+    /// build) with completion / rename.
+    pub fn inherited_members(
+        &self,
+        file: &str,
+        type_name: &str,
+        line: i64,
+    ) -> Vec<crate::inherited::InheritedMember> {
+        crate::inherited::inherited_members(
+            &self.resolver,
+            &self.java_files,
+            file,
+            type_name,
+            line,
+        )
     }
 
     /// Resolve the symbol at `file`:`offset` to a hover card (signature + kind + owner).
@@ -619,10 +674,11 @@ fn member_signature(
             // param list for a method) so the hover still shows something meaningful.
             return Some(if is_method { format!("{name}()") } else { name.to_string() });
         }
-        if let Some(sc) = cm.superclass {
+        // `cm` is a shared `Arc` — clone the (small) supertype links, don't move.
+        if let Some(sc) = cm.superclass.clone() {
             stack.push(sc);
         }
-        stack.extend(cm.interfaces);
+        stack.extend(cm.interfaces.iter().cloned());
     }
     None
 }
@@ -746,6 +802,14 @@ pub fn find_member_name_span(source: &str, key: &DeclKey) -> Option<(usize, usiz
         DeclKey::Field { name, .. } => (name, true),
         DeclKey::Type { .. } => return None,
     };
+    // A declaration's name appears textually in the file that declares it — skip the
+    // tree-sitter parse of files that don't even contain the token. `first_hit` scans EVERY
+    // project source; without this guard go-to-declaration re-parses the whole project on the
+    // handler thread (seconds of freeze on a large project). A substring false-positive just
+    // parses one extra file that then yields no match — correct, only slightly slower.
+    if !source.contains(name.as_str()) {
+        return None;
+    }
     let mut parser = Parser::new();
     parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
     let tree = parser.parse(source, None)?;
@@ -783,6 +847,11 @@ pub fn find_member_name_span(source: &str, key: &DeclKey) -> Option<(usize, usiz
 /// sources and the first hit wins — good enough for navigation, and the type-map keying in
 /// classification already narrowed the caret to this binary name.)
 pub fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)> {
+    // See `find_member_name_span`: skip the parse when the type name isn't even in the file,
+    // so `first_hit` doesn't re-parse the whole project on the handler thread.
+    if !source.contains(simple) {
+        return None;
+    }
     let mut parser = Parser::new();
     parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
     let tree = parser.parse(source, None)?;
@@ -1047,8 +1116,8 @@ mod tests {
     }
 
     impl TypeResolver for SrcResolver {
-        fn members_of(&self, binary: &str) -> Option<ClassMembers> {
-            self.project.get(binary).cloned()
+        fn members_of(&self, binary: &str) -> Option<std::sync::Arc<ClassMembers>> {
+            self.project.get(binary).cloned().map(std::sync::Arc::new)
         }
         fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String> {
             for imp in imports {

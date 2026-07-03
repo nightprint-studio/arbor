@@ -120,8 +120,8 @@ mod tests {
     }
 
     impl TypeResolver for FakeResolver {
-        fn members_of(&self, binary_name: &str) -> Option<ClassMembers> {
-            self.classes.get(binary_name).cloned()
+        fn members_of(&self, binary_name: &str) -> Option<std::sync::Arc<ClassMembers>> {
+            self.classes.get(binary_name).cloned().map(std::sync::Arc::new)
         }
         fn resolve_simple_name(&self, name: &str, _imports: &[Import]) -> Option<String> {
             self.simple.get(name).cloned()

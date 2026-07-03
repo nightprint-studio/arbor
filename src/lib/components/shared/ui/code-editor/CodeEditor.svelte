@@ -226,6 +226,35 @@
     return c ? { x: c.left, y: c.bottom } : null;
   }
 
+  /** Move the caret to the document position under viewport coords (`x`, `y`) — used to
+   *  position the caret on a right-click before a context-menu action runs (a right-click
+   *  doesn't move the caret on its own, so caret-based actions like go-to-declaration /
+   *  rename / find-usages would otherwise target the OLD caret, not what was clicked).
+   *  Returns true when a position was found under the point. */
+  export function setCaretAtCoords(x: number, y: number): boolean {
+    if (!view) return false;
+    const pos = view.posAtCoords({ x, y });
+    if (pos == null) return false;
+    // Don't collapse a non-empty selection when the click lands INSIDE it — so a
+    // right-click-then-Copy/Cut still operates on the selection. Only move the caret when
+    // clicking outside any selection (IntelliJ / browser behaviour).
+    const sel = view.state.selection.main;
+    if (!sel.empty && pos >= sel.from && pos <= sel.to) return true;
+    view.dispatch({ selection: { anchor: pos } });
+    return true;
+  }
+
+  /** Viewport coords (bottom-left) for a **UTF-8 byte offset** rather than the caret —
+   *  for anchoring a popup at a clicked position (e.g. Ctrl+Click on a declaration that
+   *  falls back to find-usages). Null when unmounted or the position is off-screen. */
+  export function coordsAtByteOffset(byteOffset: number): { x: number; y: number } | null {
+    if (!view) return null;
+    const b2u = makeByteToU16(view.state.doc.toString());
+    const pos = Math.max(0, Math.min(b2u(byteOffset), view.state.doc.length));
+    const c = view.coordsAtPos(pos);
+    return c ? { x: c.left, y: c.bottom } : null;
+  }
+
   /** The identifier under (or just before) the caret, or null. Boundary-tolerant:
    *  the caret often sits at a word's right edge, so we scan both directions from
    *  the head. Used to label context actions (e.g. "Add import for <word>"). */

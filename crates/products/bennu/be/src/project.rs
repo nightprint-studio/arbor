@@ -55,7 +55,11 @@ fn bennu_open_project(ctx: &BennuState, args: OpenProjectArgs) -> Result<Project
     // sink so the FE can show a live "Indexing…" status.
     let jdk_version =
         info.jdk.as_ref().map(|j| j.version.clone()).unwrap_or_else(|| DEFAULT_JDK.to_string());
-    IndexService::global().open(&args.root, &jdk_version, ctx.event_sink());
+    // Index sources in the project's declared encoding (per-project override → pom
+    // `sourceEncoding` → config default) so a legacy Cp1252 tree is indexed in its real
+    // encoding; a mislabelled file is recovered + reported, not dropped.
+    let encoding_label = crate::index_service::resolve_index_encoding(&args.root);
+    IndexService::global().open(&args.root, &jdk_version, &encoding_label, ctx.event_sink());
 
     Ok(info)
 }

@@ -36,6 +36,11 @@ pub struct BennuConfig {
     pub default_encoding: String,
     /// Editor indentation width in spaces (the whitespace normalizer / display).
     pub indent_width: u32,
+    /// Extra JDK install directories to search, on top of `JAVA_HOME` +
+    /// `C:/Program Files/Java/*`. For a JDK installed somewhere non-standard (a portable
+    /// SDK, an IDE-bundled JDK, `/usr/lib/jvm/…`), so the index can still resolve the
+    /// standard library. Each is a JDK home (the dir holding `release` / `bin/java`).
+    pub jdk_paths: Vec<String>,
     /// Per-project JDK override, keyed by absolute project-root path → Java version
     /// string (e.g. `"17"`). Present entries win over the pom-detected JDK.
     pub jdk_overrides: BTreeMap<String, String>,
@@ -49,6 +54,7 @@ impl Default for BennuConfig {
         Self {
             default_encoding: "UTF-8".to_string(),
             indent_width: 4,
+            jdk_paths: Vec::new(),
             jdk_overrides: BTreeMap::new(),
             encoding_overrides: BTreeMap::new(),
         }

@@ -39,20 +39,32 @@ function upperFirst(s: string): string {
   return s.length ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
+/** A single-line method signature: modifiers, then the (bounded) return-type prefix,
+ *  the name, and the raw param list. Anchored per line with `[^(){};=]*?` — kept off
+ *  `;`/`=`/`{`/`}` so it can't wander past the signature, and applied line-by-line
+ *  against short lines only (below) so it can never span a big comment/body: the old
+ *  GLOBAL `[^;={}]*?` scan over the whole source was the Generate-modal freeze on a
+ *  large legacy `.java`. */
+const METHOD_SIG_RE =
+  /^\s*(?:(?:public|private|protected|static|final|synchronized|native|default|abstract)\s+)+[^(){};=]*?\b([A-Za-z_]\w*)\s*\(([^)]*)\)/;
+
+/** Declaration lines are short; skip long/minified lines (perf + a hard backtracking
+ *  backstop). A method signature never legitimately runs this long on one line. */
+const MAX_SIG_LINE = 400;
+
 /**
  * Scan `source` for the set of method names declared in it (best-effort). We only
- * need the method *name* and whether it takes ≥1 argument, so a light signature
- * regex is enough. Returns two sets: no-arg method names and one-or-more-arg
+ * need the method *name* and whether it takes ≥1 argument, so a light per-line
+ * signature regex is enough. Returns two sets: no-arg method names and one-or-more-arg
  * method names (a method can appear in both if overloaded).
  */
 function scanMethods(source: string): { noArg: Set<string>; withArg: Set<string> } {
   const noArg = new Set<string>();
   const withArg = new Set<string>();
-  // modifiers? returnType? name ( params ) — capture name and the raw param list.
-  const re =
-    /\b(?:public|private|protected|static|final|synchronized|native|default|abstract)\s+[^;={}]*?\b([A-Za-z_]\w*)\s*\(([^)]*)\)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) {
+  for (const raw of source.split(/\r?\n/)) {
+    if (raw.length > MAX_SIG_LINE) continue;
+    const m = METHOD_SIG_RE.exec(raw);
+    if (!m) continue;
     const name = m[1];
     const hasArg = m[2].trim().length > 0;
     if (hasArg) withArg.add(name);

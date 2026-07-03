@@ -20,12 +20,16 @@
 
 use std::collections::HashMap;
 
-use bennu_java::prelude::{extract_symbols, infer_receiver_type, FileSymbols, TypeResolver};
+use bennu_java::prelude::{
+    extract_symbols_from_root, infer_receiver_type, infer_receiver_type_at, FileSymbols,
+    TypeResolver,
+};
+use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Parser};
 
 /// What a declaration *is*: a type, or a member (method/field) owned by a type. The key
 /// the reverse map buckets usages under.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DeclKey {
     /// A type declaration, identified by its JVM binary name (`com/acme/Order`).
     Type { binary: String },
@@ -45,10 +49,22 @@ impl DeclKey {
             DeclKey::Field { owner, name } => format!("field {}.{}", owner.replace('/', "."), name),
         }
     }
+
+    /// The binary name of the TYPE this key references — the type itself, or the owner of a
+    /// member. The incremental cache keys reverse-dependencies off this: a file "depends on"
+    /// every type binary its edges resolve to, so when that type's file changes the referring
+    /// file is re-walked.
+    pub fn owner_binary(&self) -> &str {
+        match self {
+            DeclKey::Type { binary } => binary,
+            DeclKey::Method { owner, .. } => owner,
+            DeclKey::Field { owner, .. } => owner,
+        }
+    }
 }
 
 /// One resolved use site of a declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageLocation {
     /// Absolute path to the file the use is in.
     pub file: String,
@@ -104,32 +120,230 @@ pub struct SourceFile {
 }
 
 /// Build the whole-project reference index. `resolver` resolves receiver types to their
-/// declaring types (project sources + JDK), `project_types` is the project-wide
-/// simple→binary type map so a bare `Foo` type reference resolves.
+/// declaring types, `project_types` is the project-wide simple→binary type map so a bare
+/// `Foo` type reference resolves. Progress-free — see [`build_reference_index_with_progress`].
 pub fn build_reference_index(
     files: &[SourceFile],
-    resolver: &dyn TypeResolver,
+    resolver: &(dyn TypeResolver + Sync),
     project_types: &HashMap<String, String>,
 ) -> ReferenceIndex {
+    build_reference_index_with_progress(files, resolver, project_types, &|_, _| {})
+}
+
+/// [`build_reference_index`] that reports `on_progress(files_done, total)` as it walks — so
+/// the be layer can surface the walk (the O(N) phase that dominates a large-project index) as
+/// live progress in the "Indexing" operation card. A full walk is just
+/// [`build_reference_index_incremental`] with no prior cache.
+pub fn build_reference_index_with_progress(
+    files: &[SourceFile],
+    resolver: &(dyn TypeResolver + Sync),
+    project_types: &HashMap<String, String>,
+    on_progress: &(dyn Fn(usize, usize) + Sync),
+) -> ReferenceIndex {
+    build_reference_index_incremental(files, resolver, project_types, None, on_progress).index
+}
+
+/// The outcome of an incremental build: the queryable index, plus the cache to persist — or
+/// `None` when nothing was re-walked (the on-disk cache is already current, so the caller
+/// skips a pointless multi-MB rewrite).
+pub struct IncrementalBuild {
+    pub index: ReferenceIndex,
+    pub cache_to_save: Option<crate::refcache::RefCache>,
+}
+
+/// One file's contribution to the reference index: its resolved edges + parsed symbols + the
+/// resolve stats. The unit the incremental cache stores and reuses.
+struct FileContribution {
+    symbols: FileSymbols,
+    edges: Vec<(DeclKey, UsageLocation)>,
+    attempted: usize,
+    resolved: usize,
+}
+
+/// Parse + walk ONE file (parse once, reuse the tree for both the symbol map and the walk —
+/// see [`FileWalker::walk`]).
+fn walk_file(
+    path: &str,
+    source: &str,
+    resolver: &dyn TypeResolver,
+    project_types: &HashMap<String, String>,
+) -> FileContribution {
+    let mut walker = FileWalker::new(path, source, resolver, project_types);
+    let symbols = {
+        let mut parser = Parser::new();
+        if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_ok() {
+            if let Some(tree) = parser.parse(source, None) {
+                let root = tree.root_node();
+                let symbols = extract_symbols_from_root(&root, source);
+                walker.walk(&root, &symbols);
+                symbols
+            } else {
+                FileSymbols::default()
+            }
+        } else {
+            FileSymbols::default()
+        }
+    };
+    FileContribution {
+        symbols,
+        edges: walker.edges,
+        attempted: walker.attempted,
+        resolved: walker.resolved,
+    }
+}
+
+/// Fold the per-file cache map into the queryable [`ReferenceIndex`], and hand back the cache
+/// (same data) to persist. The clone is cheap next to the walk, and keeps the two owners
+/// independent (the index is queried live; the cache is written to disk).
+fn assemble(
+    files_map: HashMap<String, crate::refcache::CachedFile>,
+    tm_hash: u64,
+) -> (ReferenceIndex, crate::refcache::RefCache) {
     let mut by_decl: HashMap<DeclKey, Vec<UsageLocation>> = HashMap::new();
     let mut file_symbols: HashMap<String, FileSymbols> = HashMap::new();
     let mut attempted = 0usize;
     let mut resolved = 0usize;
-
-    for f in files {
-        let fs = extract_symbols(&f.source);
-        file_symbols.insert(f.path.clone(), fs);
-
-        let mut walker = FileWalker::new(&f.path, &f.source, resolver, project_types);
-        walker.walk();
-        attempted += walker.attempted;
-        resolved += walker.resolved;
-        for (key, usage) in walker.edges {
-            by_decl.entry(key).or_default().push(usage);
+    for (path, cf) in &files_map {
+        attempted += cf.attempted;
+        resolved += cf.resolved;
+        file_symbols.insert(path.clone(), cf.symbols.clone());
+        for (key, usage) in &cf.edges {
+            by_decl.entry(key.clone()).or_default().push(usage.clone());
         }
     }
+    let index = ReferenceIndex { by_decl, file_symbols, attempted, resolved };
+    let cache = crate::refcache::RefCache {
+        version: crate::refcache::CACHE_VERSION,
+        type_map_hash: tm_hash,
+        files: files_map,
+    };
+    (index, cache)
+}
 
-    ReferenceIndex { by_decl, file_symbols, attempted, resolved }
+/// Build the reference index, REUSING a prior on-disk cache where valid: walk only the files
+/// whose source changed, plus (dependency-aware) any file that references a type declared by a
+/// changed file. Returns the index + the refreshed cache to persist. `prior = None` (or a
+/// cache whose version / project type-set no longer matches) → a full walk. See
+/// [`crate::refcache`] for the invalidation model.
+pub fn build_reference_index_incremental(
+    files: &[SourceFile],
+    resolver: &(dyn TypeResolver + Sync),
+    project_types: &HashMap<String, String>,
+    prior: Option<crate::refcache::RefCache>,
+    on_progress: &(dyn Fn(usize, usize) + Sync),
+) -> IncrementalBuild {
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let tm_hash = crate::refcache::type_map_hash(project_types);
+    // Global type-set guard: any type added / removed / renamed / moved shifts resolution
+    // project-wide → drop the whole cache and walk fully.
+    let prior =
+        prior.filter(|c| c.version == crate::refcache::CACHE_VERSION && c.type_map_hash == tm_hash);
+    let prior_valid = prior.is_some();
+
+    let hashes: Vec<u64> = files.iter().map(|f| crate::refcache::content_hash(&f.source)).collect();
+    let cur_paths: HashSet<&str> = files.iter().map(|f| f.path.as_str()).collect();
+
+    // Which files must be (re)walked?
+    let walk_indices: Vec<usize> = match &prior {
+        None => (0..files.len()).collect(),
+        Some(prior) => {
+            // Changed: a new file, or one whose content hash no longer matches the cache.
+            let mut changed: Vec<usize> = Vec::new();
+            for (i, f) in files.iter().enumerate() {
+                match prior.files.get(&f.path) {
+                    Some(cf) if cf.hash == hashes[i] => {}
+                    _ => changed.push(i),
+                }
+            }
+            // The types declared by the changed files (their names are unchanged — the type-set
+            // guard passed — so read them off the cached symbols). Anything referencing one of
+            // these must re-resolve against the (possibly new) signatures.
+            let mut changed_types: HashSet<String> = HashSet::new();
+            for &i in &changed {
+                if let Some(cf) = prior.files.get(&files[i].path) {
+                    changed_types.extend(crate::refcache::defined_types(&cf.symbols));
+                }
+            }
+            // Dependents: unchanged files whose recorded deps name a changed type.
+            let changed_set: HashSet<usize> = changed.iter().copied().collect();
+            let mut walk = changed;
+            if !changed_types.is_empty() {
+                for (i, f) in files.iter().enumerate() {
+                    if changed_set.contains(&i) {
+                        continue;
+                    }
+                    if let Some(cf) = prior.files.get(&f.path) {
+                        let deps = crate::refcache::deps_of(&cf.edges, &cf.symbols);
+                        if deps.iter().any(|b| changed_types.contains(b)) {
+                            walk.push(i);
+                        }
+                    }
+                }
+            }
+            walk
+        }
+    };
+
+    let total = walk_indices.len();
+    let reused = files.len().saturating_sub(total);
+    eprintln!(
+        "bennu-be: reference walk starting — {total} to walk, {reused} reused (of {} files)",
+        files.len()
+    );
+    let walk_start = std::time::Instant::now();
+    on_progress(0, total);
+
+    // Walk the selected files in parallel; a shared counter drives throttled progress.
+    let walk_items: Vec<(usize, &SourceFile)> =
+        walk_indices.iter().map(|&i| (i, &files[i])).collect();
+    let done = AtomicUsize::new(0);
+    let walked: Vec<(String, u64, FileContribution)> =
+        crate::java_index::parallel_map(&walk_items, |(i, f)| {
+            let contrib = walk_file(&f.path, &f.source, resolver, project_types);
+            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            if n % 100 == 0 || n == total {
+                on_progress(n, total);
+            }
+            (f.path.clone(), hashes[*i], contrib)
+        });
+
+    // New per-file map: reuse prior entries for files we didn't walk (still present), then
+    // insert the freshly-walked ones.
+    let mut files_map: HashMap<String, crate::refcache::CachedFile> = HashMap::new();
+    if let Some(prior) = prior {
+        for (path, cf) in prior.files {
+            if cur_paths.contains(path.as_str()) {
+                files_map.insert(path, cf);
+            }
+        }
+    }
+    for (path, hash, contrib) in walked {
+        files_map.insert(
+            path,
+            crate::refcache::CachedFile {
+                hash,
+                edges: contrib.edges,
+                symbols: contrib.symbols,
+                attempted: contrib.attempted,
+                resolved: contrib.resolved,
+            },
+        );
+    }
+
+    let (index, cache) = assemble(files_map, tm_hash);
+    eprintln!(
+        "bennu-be: reference walk done in {:?} — {} decls, {} attempted, {} resolved ({total} walked, {reused} reused)",
+        walk_start.elapsed(),
+        index.by_decl.len(),
+        index.attempted,
+        index.resolved
+    );
+    // Nothing re-walked and the prior cache was valid → the on-disk copy is already current;
+    // don't rewrite it (it can be tens of MB).
+    let cache_to_save = if prior_valid && total == 0 { None } else { Some(cache) };
+    IncrementalBuild { index, cache_to_save }
 }
 
 /// The outcome of a references query.
@@ -198,30 +412,28 @@ impl<'a> FileWalker<'a> {
         }
     }
 
-    fn walk(&mut self) {
-        let mut parser = Parser::new();
-        if parser.set_language(&tree_sitter_java::LANGUAGE.into()).is_err() {
-            return;
-        }
-        let Some(tree) = parser.parse(self.source, None) else { return };
-        let root = tree.root_node();
-
-        let mut stack = vec![root];
+    /// Walk the file's CST emitting reference edges. `root`/`symbols` are the ALREADY-parsed
+    /// tree + extracted symbols for this file — the caller parses once and shares both here
+    /// and for the file-symbols map, so a file is never re-parsed per concern. Every
+    /// receiver-type inference below reuses `root` + `symbols` (via `infer_receiver_type_at`)
+    /// instead of re-parsing the whole file per call site — linear, not quadratic.
+    fn walk(&mut self, root: &Node, symbols: &FileSymbols) {
+        let mut stack = vec![*root];
         while let Some(n) = stack.pop() {
             let mut cur = n.walk();
             for c in n.named_children(&mut cur) {
                 stack.push(c);
             }
             match n.kind() {
-                "method_invocation" => self.on_method_invocation(&n),
-                "field_access" => self.on_field_access(&n),
+                "method_invocation" => self.on_method_invocation(&n, root, symbols),
+                "field_access" => self.on_field_access(&n, root, symbols),
                 "type_identifier" => self.on_type_identifier(&n),
                 _ => {}
             }
         }
     }
 
-    fn on_method_invocation(&mut self, node: &Node) {
+    fn on_method_invocation(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
         let Some(name_node) = node.child_by_field_name("name") else { return };
         let Some(name) = self.node_text(&name_node) else { return };
 
@@ -229,7 +441,7 @@ impl<'a> FileWalker<'a> {
             Some(_) => {
                 self.attempted += 1;
                 let dot_off = name_node.start_byte();
-                match self.resolve_receiver_owner(dot_off, &name, MemberSort::Method) {
+                match self.resolve_receiver_owner(dot_off, &name, MemberSort::Method, root, symbols) {
                     Some(o) => {
                         self.resolved += 1;
                         o
@@ -252,12 +464,13 @@ impl<'a> FileWalker<'a> {
         self.edges.push((DeclKey::Method { owner, name }, usage));
     }
 
-    fn on_field_access(&mut self, node: &Node) {
+    fn on_field_access(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
         let Some(field_node) = node.child_by_field_name("field") else { return };
         let Some(name) = self.node_text(&field_node) else { return };
         self.attempted += 1;
         let dot_off = field_node.start_byte();
-        let Some(owner) = self.resolve_receiver_owner(dot_off, &name, MemberSort::Field) else {
+        let Some(owner) = self.resolve_receiver_owner(dot_off, &name, MemberSort::Field, root, symbols)
+        else {
             return;
         };
         self.resolved += 1;
@@ -282,8 +495,11 @@ impl<'a> FileWalker<'a> {
         dot_off: usize,
         member: &str,
         sort: MemberSort,
+        root: &Node,
+        symbols: &FileSymbols,
     ) -> Option<String> {
-        let recv = infer_receiver_type(self.source, dot_off, self.resolver)?;
+        // Reuse the file's already-parsed tree + symbols — NOT a per-call-site re-parse.
+        let recv = infer_receiver_type_at(root, self.source, symbols, dot_off, self.resolver)?;
         self.declaring_owner(&recv.binary_name, member, sort)
     }
 
@@ -307,10 +523,11 @@ impl<'a> FileWalker<'a> {
                 if found {
                     return Some(bn);
                 }
-                if let Some(sc) = cm.superclass {
+                // `cm` is a shared `Arc` — clone the (small) supertype links, don't move.
+                if let Some(sc) = cm.superclass.clone() {
                     stack.push(sc);
                 }
-                stack.extend(cm.interfaces);
+                stack.extend(cm.interfaces.iter().cloned());
             }
         }
         Some(start_binary.to_string())
@@ -451,10 +668,20 @@ pub fn classify_caret(
         }
         _ => {
             if ident.kind() == "type_identifier" {
-                type_key(&ident_text, project_types, resolver)
-            } else {
-                None
+                return type_key(&ident_text, project_types, resolver);
             }
+            // A bare `identifier` that isn't a declaration name, a member selector
+            // (`x.foo` / `foo.bar()` — handled above), or a local/param (filtered before
+            // this in `classify_target`): resolve it as a FIELD of the enclosing type and
+            // its supertypes — a `this`-less field reference like `foo` standing for
+            // `this.foo`. Without this a bare field usage classified to nothing, so go-to
+            // silently did nothing (and the FE mis-fell-back to a same-named class).
+            if ident.kind() == "identifier" && !is_member_selector_node(&ident) {
+                let fqn = enclosing_type_binary(&ident, bytes, project_types)?;
+                let owner = declaring_owner(resolver, &fqn, &ident_text, false)?;
+                return Some(DeclKey::Field { owner, name: ident_text });
+            }
+            None
         }
     }
 }
@@ -550,10 +777,11 @@ fn declaring_owner(
             if found {
                 return Some(bn);
             }
-            if let Some(sc) = cm.superclass {
+            // `cm` is a shared `Arc` — clone the (small) supertype links, don't move.
+            if let Some(sc) = cm.superclass.clone() {
                 stack.push(sc);
             }
-            stack.extend(cm.interfaces);
+            stack.extend(cm.interfaces.iter().cloned());
         }
     }
     Some(start.to_string())
@@ -723,25 +951,39 @@ fn find_local_decl(node: &Node, bytes: &[u8], name: &str) -> Option<(usize, usiz
     None
 }
 
-/// The smallest named node whose span covers `offset` (prefers the identifier under a
-/// caret; for a caret at the very end of an identifier we bias left by one).
+/// The smallest named node the caret at `offset` sits on — the identifier to classify.
+///
+/// A name spans `[start, end)`, so a caret at a name's START byte IS covered by it, but a
+/// caret at its END byte is not — there we fall back to `offset - 1`. The identifier on
+/// either adjacent byte wins over an enclosing expression, so a click anywhere on the token
+/// resolves. (The old code biased to `offset - 1` UNCONDITIONALLY, so a click on the left
+/// edge of a short name — a one/two-char local like `i`/`id` — landed on the previous token
+/// and go-to silently missed ~half the time.) O(tree depth) via direct descent, not a full
+/// scan.
 fn smallest_named_at<'t>(root: &Node<'t>, offset: usize) -> Option<Node<'t>> {
-    let probe = if offset > 0 { offset - 1 } else { offset };
-    let mut best: Option<Node> = None;
-    let mut stack = vec![*root];
-    while let Some(n) = stack.pop() {
-        let mut cur = n.walk();
-        for c in n.named_children(&mut cur) {
-            stack.push(c);
+    // Identifier directly under the caret (name start / mid-token).
+    let on = root.named_descendant_for_byte_range(offset, offset);
+    if let Some(n) = on {
+        if is_ident_like(&n) {
+            return Some(n);
         }
-        if n.start_byte() <= probe && probe < n.end_byte() && n.is_named() {
-            match &best {
-                Some(b) if (b.end_byte() - b.start_byte()) <= (n.end_byte() - n.start_byte()) => {}
-                _ => best = Some(n),
+    }
+    // Caret at a token's end byte (or between tokens) — the identifier is one byte left.
+    if offset > 0 {
+        if let Some(n) = root.named_descendant_for_byte_range(offset - 1, offset - 1) {
+            if is_ident_like(&n) {
+                return Some(n);
             }
         }
     }
-    best
+    // Not on a name either side — hand back whatever covers the caret (the caret byte first,
+    // then one left) so type/expression classification still has a node to work with.
+    on.or_else(|| offset.checked_sub(1).and_then(|o| root.named_descendant_for_byte_range(o, o)))
+}
+
+/// A leaf the caret can "sit on" for go-to: a name token, `this`/`super`.
+fn is_ident_like(n: &Node) -> bool {
+    matches!(n.kind(), "identifier" | "type_identifier" | "this" | "super")
 }
 
 #[cfg(test)]
@@ -816,8 +1058,8 @@ mod tests {
     }
 
     impl TypeResolver for SrcResolver {
-        fn members_of(&self, binary: &str) -> Option<bennu_java::prelude::ClassMembers> {
-            self.project.get(binary).cloned()
+        fn members_of(&self, binary: &str) -> Option<std::sync::Arc<bennu_java::prelude::ClassMembers>> {
+            self.project.get(binary).cloned().map(std::sync::Arc::new)
         }
         fn resolve_simple_name(
             &self,
@@ -876,6 +1118,32 @@ mod tests {
     }
 
     #[test]
+    fn goto_local_usage_at_name_start_byte() {
+        // Caret at the START byte of a short local's USAGE — the case the old unconditional
+        // `offset - 1` bias sent to the previous token, so go-to on a one/two-char local
+        // silently missed. classify_target must resolve the local from its exact start.
+        let src = "package p; public class C { int f() { int id = 1; return id; } }";
+        let files = [("C.java", src)];
+        let (index, resolver, pt) = index_of(&files);
+        let usage = src.rfind("id").unwrap(); // the `id` in `return id`
+        let t = classify_target(&index, "C.java", src, usage, &resolver, &pt).expect("classified");
+        assert!(matches!(t, RenameTarget::Local { ref name, .. } if name == "id"));
+    }
+
+    #[test]
+    fn classify_bare_field_reference_resolves_to_field() {
+        // A `this`-less field usage (`count` standing for `this.count`) must classify to the
+        // FIELD, so go-to-declaration lands on the field decl instead of doing nothing / the
+        // FE mis-jumping to a same-named class.
+        let src = "package p; public class C { int count; int get() { return count; } }";
+        let files = [("C.java", src)];
+        let (index, resolver, pt) = index_of(&files);
+        let off = src.find("return count").unwrap() + "return ".len();
+        let key = classify_caret(&index, "C.java", src, off, &resolver, &pt).expect("classified");
+        assert!(matches!(key, DeclKey::Field { ref owner, ref name } if owner == "p/C" && name == "count"));
+    }
+
+    #[test]
     fn unresolved_receiver_never_panics() {
         let files = [("X.java", "package p; public class X { void m(Unknown u) { u.frob(); } }")];
         let (index, _r, _pt) = index_of(&files);
@@ -883,8 +1151,42 @@ mod tests {
     }
 
     #[test]
+    fn incremental_cache_reuses_unchanged_and_rewalks_changed() {
+        let key = DeclKey::Method { owner: "p/A".into(), name: "val".into() };
+        let v1 = [
+            ("A.java", "package p; public class A { public int val() { return 1; } }"),
+            ("B.java", "package p; public class B { public int use(A a) { return a.val(); } }"),
+        ];
+        let (resolver, pt) = SrcResolver::build(&v1);
+        let src1: Vec<SourceFile> =
+            v1.iter().map(|(p, s)| SourceFile { path: p.to_string(), source: s.to_string() }).collect();
+
+        // First build: no cache → full walk, one usage of A.val (in B), cache produced.
+        let b1 = build_reference_index_incremental(&src1, &resolver, &pt, None, &|_, _| {});
+        assert_eq!(b1.index.usages_of(&key).len(), 1);
+        let cache = b1.cache_to_save.expect("first build yields a cache");
+
+        // Rebuild, nothing changed → nothing re-walked, and no rewrite of the on-disk cache.
+        let b2 = build_reference_index_incremental(&src1, &resolver, &pt, Some(cache.clone()), &|_, _| {});
+        assert!(b2.cache_to_save.is_none(), "unchanged project must not rewrite the cache");
+        assert_eq!(b2.index.usages_of(&key).len(), 1);
+
+        // Change B (now calls val() twice); A untouched. Same type set → incremental path:
+        // B is re-walked, A reused, and the merged index reflects B's two usages.
+        let v2 = [
+            ("A.java", "package p; public class A { public int val() { return 1; } }"),
+            ("B.java", "package p; public class B { public int use(A a) { return a.val() + a.val(); } }"),
+        ];
+        let src2: Vec<SourceFile> =
+            v2.iter().map(|(p, s)| SourceFile { path: p.to_string(), source: s.to_string() }).collect();
+        let b3 = build_reference_index_incremental(&src2, &resolver, &pt, Some(cache), &|_, _| {});
+        assert!(b3.cache_to_save.is_some(), "a changed file must refresh the cache");
+        assert_eq!(b3.index.usages_of(&key).len(), 2);
+    }
+
+    #[test]
     fn project_type_map_seeds_classification() {
         // sanity: the java_index helper produces the same simple→binary shape the walk uses
-        let _ = project_type_map(std::path::Path::new("."));
+        let _ = project_type_map(std::path::Path::new("."), "UTF-8");
     }
 }

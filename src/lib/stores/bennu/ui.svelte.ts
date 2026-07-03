@@ -48,6 +48,8 @@ function createBennuUiStore() {
   let navMode = $state<'class' | 'file'>('class');
   // Index inspector modal (debug: index stats + class list).
   let indexInspectorOpen = $state(false);
+  // File Structure popup (Ctrl+F12) — a searchable quick-outline of the active file.
+  let fileStructureOpen = $state(false);
   // About Bennu modal.
   let aboutOpen = $state(false);
   // Generate modal (constructor / getters / setters) + its preselected mode
@@ -92,6 +94,7 @@ function createBennuUiStore() {
     get navOpen()      { return navOpen; },
     get navMode()      { return navMode; },
     get indexInspectorOpen() { return indexInspectorOpen; },
+    get fileStructureOpen() { return fileStructureOpen; },
     get aboutOpen()    { return aboutOpen; },
     get generateOpen() { return generateOpen; },
     get generateMode() { return generateMode; },
@@ -130,6 +133,8 @@ function createBennuUiStore() {
     closeNav()           { navOpen = false; },
     openIndexInspector() { indexInspectorOpen = true; },
     closeIndexInspector() { indexInspectorOpen = false; },
+    openFileStructure() { fileStructureOpen = true; },
+    closeFileStructure() { fileStructureOpen = false; },
     openAbout()          { aboutOpen = true; },
     closeAbout()         { aboutOpen = false; },
     /** Open the Generate modal, optionally preselecting a mode (an Alt+Enter

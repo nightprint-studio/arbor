@@ -21,6 +21,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { SvelteMap } from 'svelte/reactivity';
 import { operationsStore } from '$lib/feedback/stores/operations.svelte';
 import { indexStats as ipcIndexStats, classIndex as ipcClassIndex } from '$lib/ipc/bennu';
+import { reindex as ipcReindex } from '$lib/ipc/bennu/nav';
 import type { ClassEntry } from '$lib/types/bennu';
 
 const OP_ID = 'bennu-index';
@@ -40,6 +41,15 @@ function createBennuIndexStore() {
   let indexing = $state(false);
   let phase = $state<string | null>(null);
   let typeCount = $state(0);
+  // Bumped on EVERY index-progress event — including phase-end events that arrive AFTER
+  // the (poll-driven) `indexing` flag has already flipped false. The config graph
+  // (beans/actions/relations) finishes after the provider's `ready`, so a view keyed only
+  // on `indexing` would miss it; the Index inspector re-fetches on this instead.
+  let buildRevision = $state(0);
+  // Live reference-walk progress (files done / total) — drives the operation card's detail
+  // and a footer/status hint so a long walk on a big project visibly moves. Null when not
+  // in a counted phase.
+  let refProgress = $state<{ phase: string; done: number; total: number } | null>(null);
   let currentRoot: string | null = null;
   // Latched true once the current index cycle finishes (event `ready` or poll fallback).
   // Guards against a late/duplicate non-`ready` progress event — or an in-flight poll
@@ -62,6 +72,13 @@ function createBennuIndexStore() {
   let lastPollTypes = -1;
   let stableCount = 0;
   let pollCount = 0;
+  // Set once ANY index-progress event has arrived. The poll's stop heuristics (type count
+  // stopped growing / hard poll cap) are a fallback for a BE that emits no events — with a
+  // live event stream they must NOT fire, or a legitimately long references phase (the O(N)
+  // reference walk, minutes on a big project) gets cut short and its step never shows. When
+  // events flow, only a real `ready` (the terminal event, or `index_stats.ready` = fully
+  // built) finishes the card.
+  let sawEvent = false;
 
   function startJob(root: string) {
     operationsStore.start({
@@ -87,6 +104,7 @@ function createBennuIndexStore() {
     done = true;
     indexing = false;
     phase = null;
+    refProgress = null;
     pollToken += 1; // invalidate any in-flight poll response (it can't reschedule now)
     if (root) classCache.delete(root);
     finishJob(true);
@@ -100,6 +118,27 @@ function createBennuIndexStore() {
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined; }
   }
 
+  /** Arm a fresh indexing cycle for `root`: drop the class cache, show the job, reset
+   *  the poll bookkeeping, and start the safety-net poll. Shared by `onProjectOpen`
+   *  (project open) and `rebuild` (manual re-index) so both re-arm identically. */
+  function beginCycle(root: string) {
+    currentRoot = root;
+    classCache.delete(root);
+    done = false;
+    indexing = true;
+    phase = 'project';
+    typeCount = 0;
+    refProgress = null;
+    startJob(root);
+    pollToken += 1;
+    lastPollTypes = -1;
+    stableCount = 0;
+    pollCount = 0;
+    sawEvent = false;
+    stopPoll();
+    pollOnce(root, pollToken);
+  }
+
   function pollOnce(root: string, token: number) {
     void ipcIndexStats(root)
       .then((s) => {
@@ -110,10 +149,14 @@ function createBennuIndexStore() {
           return;
         }
         pollCount += 1;
-        // Type count stopped growing (index likely done) → treat as ready.
+        // Type count stopped growing (index likely done) → treat as ready. ONLY when no
+        // events are arriving: with a live event stream the References-index phase (the
+        // minutes-long reference walk) keeps the card open until its real `ready`, and the
+        // type count plateaus long before then (it's fixed at the end of the project phase),
+        // so this heuristic would otherwise close the card mid-walk.
         if (s.types > 0 && s.types === lastPollTypes) stableCount += 1; else stableCount = 0;
         lastPollTypes = s.types;
-        if (stableCount >= 3 || pollCount >= 40) {
+        if (!sawEvent && (stableCount >= 3 || pollCount >= 40)) {
           markReady(root);
           return;
         }
@@ -133,22 +176,46 @@ function createBennuIndexStore() {
     get phase() { return phase; },
     get phaseLabel() { return phase ? phaseLabel(phase) : null; },
     get typeCount() { return typeCount; },
+    get buildRevision() { return buildRevision; },
+    /** Live reference-walk progress (`{ phase, done, total }`) or null — for a footer/status
+     *  hint showing the walk moving on a big project. */
+    get refProgress() { return refProgress; },
 
     /** Subscribe to index-progress events (once, from BennuWindow.onMount). Returns a
      *  detach fn. */
     async attach(): Promise<UnlistenFn> {
       if (attached) return () => {};
       attached = true;
-      unlisten = await listen<{ root: string; phase: string; state: string }>(
+      unlisten = await listen<{
+        root: string; phase: string; state: string; done?: number; total?: number;
+      }>(
         'arbor://bennu/index-progress',
         (e) => {
-          const { root, phase: ph } = e.payload;
+          const { root, phase: ph, state, done: doneN, total } = e.payload;
+          // Events are live → disable the poll's no-event stop heuristics (see `sawEvent`),
+          // so a long references phase isn't cut short by the type-count plateau / poll cap.
+          sawEvent = true;
+          // Bump on every event, BEFORE the `done` guard — a config/references phase can
+          // still land after the poll flipped `indexing` false, and the inspector keys its
+          // refresh on this so beans/actions/relations show up once their phase completes.
+          buildRevision += 1;
           if (ph === 'ready') { markReady(root); return; }
           // A non-`ready` event after the cycle finished must not reopen the spinner.
           if (done) return;
           indexing = true;
           phase = ph;
-          operationsStore.update(OP_ID, { current: ph, activeDetail: phaseLabel(ph) });
+          // A `progress` event (the reference walk's files-done / total) refines the active
+          // step's detail so the operation card shows real movement instead of a static
+          // "References index"; other events just show the phase label.
+          const hasCount = state === 'progress' && typeof doneN === 'number' && typeof total === 'number' && total > 0;
+          refProgress = hasCount ? { phase: ph, done: doneN, total } : null;
+          // The step's own label already names the phase — so the detail is JUST the count
+          // (avoids "References index — References index · N/M"); a plain phase event has no
+          // extra detail.
+          const detail = hasCount
+            ? `${doneN.toLocaleString()} / ${total.toLocaleString()} files`
+            : null;
+          operationsStore.update(OP_ID, { current: ph, activeDetail: detail });
         },
       );
       return () => { unlisten?.(); attached = false; };
@@ -158,19 +225,24 @@ function createBennuIndexStore() {
      *  safety-net poll. Events refine the phase; the poll finishes it if a `ready`
      *  event is missed. */
     onProjectOpen(root: string) {
-      currentRoot = root;
-      classCache.delete(root);
-      done = false;
+      beginCycle(root);
+    },
+
+    /** Manually invalidate + rebuild the whole project index (BE `bennu_reindex`) — the
+     *  Index Inspector's "Rebuild" button + the "Rebuild index" palette verb. Drops the
+     *  class cache immediately (so a stale/empty Go-to-Class set can't linger), fires the
+     *  rebuild, then re-arms the indexing job + poll once the BE has swapped in the fresh
+     *  (empty, not-ready) slot — so the poll never reads the OLD slot's stale `ready`
+     *  stats and finishes early. The BE emits index-progress like an open; `ready`
+     *  refreshes everything. Safe to call with no project (BE no-ops). */
+    async rebuild(root: string): Promise<void> {
+      // Instant feedback before the round-trip; `beginCycle` re-arms the real cycle after.
       indexing = true;
       phase = 'project';
-      typeCount = 0;
-      startJob(root);
-      pollToken += 1;
-      lastPollTypes = -1;
-      stableCount = 0;
-      pollCount = 0;
-      stopPoll();
-      pollOnce(root, pollToken);
+      done = false;
+      classCache.delete(root);
+      await ipcReindex(root).catch(() => {});
+      beginCycle(root);
     },
 
     /** Project closed / window teardown — clear the job + poll. */
@@ -185,12 +257,15 @@ function createBennuIndexStore() {
     },
 
     /** The class list for Go-to-Class — cached per root (fetched once, refreshed when
-     *  the index rebuilds). */
+     *  the index rebuilds). Only a NON-EMPTY result is cached / served: an empty array
+     *  is truthy, so caching one (e.g. a transient empty scan right at open) would stick
+     *  Go-to-Class on "no classes" forever while the inspector's un-cached fetch still
+     *  shows them — so we re-fetch until classes actually come back. */
     async classesForRoot(root: string): Promise<ClassEntry[]> {
       const cached = classCache.get(root);
-      if (cached) return cached;
+      if (cached && cached.length) return cached;
       const list = await ipcClassIndex(root);
-      classCache.set(root, list);
+      if (list.length) classCache.set(root, list);
       return list;
     },
   };

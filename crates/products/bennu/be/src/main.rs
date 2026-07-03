@@ -53,9 +53,23 @@ mod hover;
 // Go-to-declaration (Ctrl+Click / Ctrl+B): `bennu_declaration` — resolves the symbol under
 // the caret to its declaration site (method / field / local / class) off the same engine.
 mod declaration;
+// Inherited members (Structure panel's lazy "Inherited" bucket): `bennu_inherited_members` —
+// the members inherited from a type's superclass + interfaces (each tagged declaring-type +
+// visibility + a project source when resolvable), off the same engine.
+mod inherited;
 // Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
 // + config counts, JDK level, build-ready flag) for an inspector panel.
 mod index_stats;
+// Encoding report: `bennu_encoding_report` — the source files whose bytes weren't valid in the
+// project's declared (Maven `sourceEncoding`) encoding (recovered + indexed, but flagged) for
+// a future "non-compliant files" UI.
+mod encoding_report;
+// JDK status: `bennu_jdk_status` — how the project's JDK resolved (exact / fallback / none),
+// for the titlebar warning (no JDK) + Problems entry (wrong-version JDK).
+mod jdk_status;
+// Index inspector entries: `bennu_index_entries` — the per-kind entry lists (members / jars
+// / jdk / beans / actions / relations) behind each headline stat, off the built index.
+mod inspect;
 // The per-project index lifecycle: build the symbol index off-thread on open, cache
 // the native provider, serve completion from it, and patch a single file on edit.
 mod index_service;
@@ -65,6 +79,10 @@ mod web_discovery;
 // Class index (Go to Class): `bennu_class_index` — a fresh scan of the project's `.java`
 // sources, one entry per declared type (fqcn + simple + file + decl line).
 mod class_index;
+// Manual index invalidation: `bennu_reindex` — drop + rebuild the whole semantic index for
+// an open project (fresh generation dir, off-thread), the escape hatch behind the Index
+// Inspector's "Rebuild" button. No compilation (that's `bennu_build`), just a re-scan.
+mod reindex;
 // TODO scan (TODO tool window): `bennu_todos` — a line scan of `.java`/`.xml`/`.jsp`/
 // `.properties` for TODO/FIXME/XXX/HACK markers.
 mod todos;
@@ -77,9 +95,17 @@ mod spell;
 // case-insensitive substring fallback, as the `regex` crate isn't a dependency).
 mod find;
 // Build/run (docs §4 "il fondo"): `bennu_build` (mvn -q -o compile / javac fallback +
-// error parser → structured diagnostics) / `bennu_run` (java -cp … streaming output) /
-// `bennu_cancel_run`. Makes the Run/Debug buttons real + re-indexes target/classes.
+// error parser → structured diagnostics) / `bennu_run` (java <vm> -cp … streaming output,
+// cwd + env) / `bennu_cancel_run`. Makes the Run/Debug buttons real + re-indexes
+// target/classes.
 mod build;
+// Run configurations (per-repo `[bennu.run]` in `<repo>/.arbor/config.toml`):
+// `bennu_get_run_config` / `bennu_set_run_config` — the IntelliJ-style named run targets
+// the FE's run-configuration editor persists (filesystem, not localStorage).
+mod run_config;
+// Main-class discovery (run-config editor's picker): `bennu_main_classes` — a fresh
+// `.java` scan for types declaring `public static void main(String[])`.
+mod main_classes;
 
 fn main() {
     // Seed the active profile FIRST — CRITICAL. Without this, `bennu_config_dir()` /
@@ -87,6 +113,12 @@ fn main() {
     // `default` profile instead of the one the launcher spawned us on, so a dev
     // launcher would read config/data from the wrong (or empty) profile.
     arbor_core::prelude::init_active_profile();
+
+    // Seed the classpath's extra JDK search directories from the settings (`jdk_paths`), so a
+    // JDK installed somewhere non-standard is found. Re-seeded on config save (`config_cmds`).
+    bennu_classpath::prelude::set_extra_jdk_homes(
+        bennu_core::config::load().jdk_paths.iter().map(std::path::PathBuf::from).collect(),
+    );
 
     // The framed-stdio plumbing (writer / sink / reverse channel / runtime), in one
     // call. No `plugin_host` / `api_installer` — bennu-be loads no plugins in Phase 0

@@ -37,7 +37,7 @@
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
   import { javaLanguage } from './java-lang';
-  import { javaOutline, requiredFieldNames } from './java-outline';
+  import { javaOutline, javaClassFields, requiredFieldNames } from './java-outline';
   import { detectAccessors, flagsFor } from './java-accessors';
   import {
     generateMembers,
@@ -115,14 +115,15 @@
       ?? 'Example',
   );
 
+  // Real class fields only (not `final` locals inside methods, which the flat outline
+  // also matches) and deduped by name — so the keyed `{#each fields}` can never get a
+  // duplicate key (that crashed the modal to a black page).
   const derivedFields = $derived<JavaField[]>(
-    outlineSymbols
-      .filter((s) => s.kind === 'field')
-      .map((s) => ({
-        name: s.name,
-        type: (s.detail ?? 'Object').trim() || 'Object',
-        required: requiredNames.has(s.name),
-      })),
+    javaClassFields(activeSource).map((s) => ({
+      name: s.name,
+      type: (s.detail ?? 'Object').trim() || 'Object',
+      required: requiredNames.has(s.name),
+    })),
   );
 
   /** True when we fell back to the mock trio (surfaced in the UI as a hint). */
@@ -580,11 +581,13 @@
   .gen-preview {
     flex: 1;
     min-height: 0;
+    display: flex; /* so the flex:1 CodeEditor host gets a bounded height and scrolls */
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     overflow: hidden;
     background: var(--bg-base);
   }
+  .gen-preview > :global(.code-editor) { flex: 1; min-width: 0; min-height: 0; }
   .gen-preview :global(.cm-editor) { height: 100%; }
   .gen-preview-empty {
     height: 100%;

@@ -21,7 +21,7 @@
   import {
     Command, FolderTree, ListTree, Search, Hash, FileCode2, AlertTriangle,
     TerminalSquare, Hammer, Server, Wand2, Lightbulb, SlidersHorizontal, Info,
-    Library, Target, Play, ListTodo, Box,
+    Library, Target, Play, ListTodo, Box, RotateCw,
   } from 'lucide-svelte';
 
   import { themeStore } from '$lib/stores/theme.svelte';
@@ -60,11 +60,13 @@
   import BennuUsagesPopover from './BennuUsagesPopover.svelte';
   import BennuGotoModal from './BennuGotoModal.svelte';
   import BennuIndexInspectorModal from './BennuIndexInspectorModal.svelte';
+  import BennuFileStructureModal from './BennuFileStructureModal.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
+  import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
@@ -99,6 +101,16 @@
     }
   });
 
+  // Project-level diagnostics (JDK status + wrong-encoding files) for the titlebar badge +
+  // the Problems panel. Re-fetch when the project changes or the index (re)builds — the
+  // encoding report lands after the project phase, `buildRevision` catches each phase.
+  $effect(() => {
+    const root = projectStore.project?.root ?? null;
+    void bennuIndexStore.buildRevision; // re-run as the (re)build progresses
+    if (root && !projectStore.isDemo) void bennuDiagnosticsStore.refresh(root);
+    else bennuDiagnosticsStore.reset();
+  });
+
   // ── Build / Run triggers (mirror the titlebar; shared by keybindings + palette) ─
   function triggerBuild() {
     const root = projectStore.project?.root;
@@ -107,9 +119,9 @@
   function triggerRun() {
     const root = projectStore.project?.root;
     if (!root) return;
-    const cls = bennuRunStore.mainClassFor(root);
-    if (cls) void bennuRunStore.run(root, cls);
-    else bennuUiStore.openRunConfig();
+    // Honor the ACTIVE run configuration (main class + program args); open the editor
+    // when nothing is configured yet.
+    void bennuRunStore.runActive(root).then((ran) => { if (!ran) bennuUiStore.openRunConfig(); });
   }
 
   let editor = $state<{
@@ -183,6 +195,7 @@
     'bulb': Lightbulb as unknown as IconComponent,
     'sliders': SlidersHorizontal as unknown as IconComponent,
     'info': Info as unknown as IconComponent,
+    'refresh-cw': RotateCw as unknown as IconComponent,
   };
   function iconResolver(name: string): IconComponent { return ICONS[name] ?? ICONS.command; }
 
@@ -193,12 +206,14 @@
     const editorItems = [
       { id: 'goto', title: 'Go to line', icon: 'hash', shortcut: 'Ctrl+G',
         action: () => run(() => editor?.openGoto()), when: !!projectStore.activeFilePath },
-      { id: 'gotodef', title: 'Go to definition', icon: 'target', shortcut: 'Ctrl+B',
+      { id: 'gotodef', title: 'Go to declaration', icon: 'target', shortcut: 'Ctrl+B',
         action: () => run(() => editor?.goToDefinition()), when: !!projectStore.activeFilePath },
       { id: 'gotoclass', title: 'Go to class…', icon: 'box', shortcut: 'Ctrl+N',
         action: () => run(() => bennuUiStore.openNav('class')), when: !!projectStore.project },
       { id: 'gotofile', title: 'Go to file…', icon: 'file', shortcut: 'Ctrl+Shift+N',
         action: () => run(() => bennuUiStore.openNav('file')), when: !!projectStore.project },
+      { id: 'filestructure', title: 'File structure…', icon: 'list-tree', shortcut: 'Ctrl+F12',
+        action: () => run(() => bennuUiStore.openFileStructure()), when: !!projectStore.activeFilePath },
       { id: 'usages', title: 'Find usages', icon: 'search', shortcut: 'Alt+F7',
         action: () => run(() => void editor?.findUsages()), when: !!projectStore.activeFilePath },
       { id: 'rename', title: 'Rename…', icon: 'target', shortcut: 'Shift+F6',
@@ -239,6 +254,9 @@
     const appItems = [
       { id: 'projectcfg', title: 'Project Configuration…', icon: 'sliders', action: () => run(() => bennuUiStore.openProjectConfig()), when: !!projectStore.project },
       { id: 'indexinspector', title: 'Index inspector…', icon: 'box', action: () => run(() => bennuUiStore.openIndexInspector()), when: !!projectStore.project },
+      { id: 'reindex', title: 'Rebuild index', icon: 'refresh-cw',
+        action: () => run(() => { const r = projectStore.project?.root; if (r) void bennuIndexStore.rebuild(r); }),
+        when: !!projectStore.project && !bennuIndexStore.indexing },
       { id: 'docs', title: 'Documentation', icon: 'command', shortcut: 'F1', action: () => run(() => bennuUiStore.toggleDocs()), when: true },
       { id: 'settings', title: 'Settings', icon: 'command', shortcut: 'Ctrl+,', action: () => run(() => bennuUiStore.openSettings()), when: true },
       { id: 'about', title: 'About Bennu', icon: 'info', action: () => run(() => bennuUiStore.openAbout()), when: true },
@@ -295,6 +313,13 @@
 
     // Find in project (Ctrl+Shift+F) — a modal, replacing the old Search rail.
     if (mod && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); bennuUiStore.openFind(); return; }
+
+    // File Structure popup (Ctrl+F12, IntelliJ) — a searchable quick-outline of the
+    // active file (methods/fields for Java, element names for XML/JSP/HTML).
+    if (mod && !e.shiftKey && !e.altKey && e.key === 'F12') {
+      if (!projectStore.activeFilePath) return;
+      e.preventDefault(); bennuUiStore.openFileStructure(); return;
+    }
 
     // Terminal (Alt+F12, IntelliJ). Alt+digit tool toggles. Alt+Enter intentions,
     // Alt+Insert generate — both IntelliJ-consistent, editor-scoped (no-op with no
@@ -421,6 +446,10 @@
 
 {#if bennuUiStore.navOpen}
   <BennuGotoModal onClose={() => bennuUiStore.closeNav()} />
+{/if}
+
+{#if bennuUiStore.fileStructureOpen}
+  <BennuFileStructureModal onClose={() => bennuUiStore.closeFileStructure()} />
 {/if}
 
 {#if bennuUiStore.indexInspectorOpen}

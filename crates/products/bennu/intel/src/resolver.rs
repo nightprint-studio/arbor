@@ -12,10 +12,10 @@
 //!   2. the JDK member index (rt.jar / jimage) — immutable, resolved live.
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
-use bennu_index::prelude::{PersistedIndex, Symbol};
+use bennu_index::prelude::{PersistedIndex, Symbol, SymbolKind};
 use bennu_java::prelude::{
     ClassMembers as JClassMembers, Import, Member as JMember, MemberKind as JMemberKind,
     TypeRef as JTypeRef, TypeResolver, Visibility as JVisibility,
@@ -34,6 +34,19 @@ pub struct IndexResolver<M: CpMemberIndex> {
     /// The in-memory patch overlay for files edited since the last full build
     /// (interior-mutable so a patch mutates the live, `Arc`-shared provider in place).
     overlay: RwLock<Overlay>,
+    /// Memoized `members_of` results (incl. negative — `None` — hits). The reference-index
+    /// walk resolves the same types (`String`, `List`, project base classes, …) tens of
+    /// thousands of times; without this each call re-parses the members JSON or re-reads the
+    /// class bytecode, which made the walk take many minutes on a large project. Cleared when
+    /// the overlay changes ([`apply_file_patch`](Self::apply_file_patch)), since an edit can
+    /// change a type's members.
+    members_cache: RwLock<HashMap<String, Option<Arc<JClassMembers>>>>,
+    /// When set, `members_of` resolves ONLY project types — it never decodes JDK / library
+    /// bytecode. Used by the reference / rename engine: a use site on a JDK member is never
+    /// queried by find-usages / rename (you can't rename it), so decoding the JDK for it is
+    /// pure waste that made the whole reference walk crawl. The provider (completion) keeps
+    /// full JDK resolution (a separate resolver instance).
+    project_only: bool,
 }
 
 /// The edited-file overlay: a binary→members-JSON lookup for the resolver, plus a
@@ -58,7 +71,23 @@ impl<M: CpMemberIndex> IndexResolver<M> {
         for (s, b) in COMMON_SIMPLE {
             simple_hints.insert((*s).to_string(), (*b).to_string());
         }
-        Self { project, jdk, simple_hints, overlay: RwLock::new(Overlay::default()) }
+        Self {
+            project,
+            jdk,
+            simple_hints,
+            overlay: RwLock::new(Overlay::default()),
+            members_cache: RwLock::new(HashMap::new()),
+            project_only: false,
+        }
+    }
+
+    /// Restrict this resolver to PROJECT types only — `members_of` returns `None` for a JDK /
+    /// library type instead of decoding its bytecode. For the reference / rename engine, where
+    /// resolving JDK receivers is wasted work (their edges are never queried). The provider
+    /// (completion) does NOT call this, so it keeps full JDK resolution.
+    pub fn project_only(mut self) -> Self {
+        self.project_only = true;
+        self
     }
 
     /// Seed a simple→binary hint (e.g. the project's own declared types).
@@ -71,6 +100,21 @@ impl<M: CpMemberIndex> IndexResolver<M> {
         &self.project
     }
 
+    /// Every project member (`Method` / `Field`) symbol in the persisted index, deduped
+    /// by symbol id (a member is reachable under one fst key, but this stays robust to a
+    /// future alias). For the index inspector's members list — a read-only enumeration of
+    /// the already-built index, no source re-parse. The overlay (unsaved edits) is NOT
+    /// consulted: the inspector reflects the last full build, like the symbol counts.
+    pub fn member_symbols(&self) -> Vec<Symbol> {
+        let mut seen = std::collections::HashSet::new();
+        self.project
+            .prefix("")
+            .into_iter()
+            .filter(|s| matches!(s.kind, SymbolKind::Method | SymbolKind::Field))
+            .filter(|s| seen.insert(s.id))
+            .collect()
+    }
+
     /// Apply one edited `file`'s freshly-extracted [`Symbol`] records to the in-memory
     /// overlay — **no disk write**. The overlay shadows the persisted mmap so completion
     /// on the edited file reflects the edit immediately, while the (memory-mapped)
@@ -81,6 +125,10 @@ impl<M: CpMemberIndex> IndexResolver<M> {
     /// first, so a renamed/removed type doesn't leave a stale entry. An empty `records`
     /// (a deleted / cleared file) just drops the file's prior overlay.
     pub fn apply_file_patch(&self, file: &str, records: &[Symbol]) {
+        // An edit can change any type's members → drop the memoized resolutions. Patches are
+        // rare (debounced per keystroke) and the walk is done, so a full clear is fine; it
+        // repopulates lazily on the next resolution.
+        self.members_cache.write().unwrap_or_else(|p| p.into_inner()).clear();
         let mut ov = self.overlay.write().unwrap_or_else(|p| p.into_inner());
         // Drop this file's previous contributions (rename/remove correctness).
         if let Some(prev) = ov.by_file.remove(file) {
@@ -110,8 +158,11 @@ impl<M: CpMemberIndex> IndexResolver<M> {
     }
 }
 
-impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
-    fn members_of(&self, binary_name: &str) -> Option<JClassMembers> {
+impl<M: CpMemberIndex> IndexResolver<M> {
+    /// Resolve a type's members from the overlay → persisted project index → JDK bytecode,
+    /// WITHOUT the memo cache. The uncached core [`members_of`](TypeResolver::members_of)
+    /// wraps for hot re-resolution of the same types.
+    fn compute_members(&self, binary_name: &str) -> Option<JClassMembers> {
         // 0) in-memory overlay for a file edited since the last full build — wins over
         //    the persisted mmap so a keystroke's fresh members are visible without a
         //    re-persist of the memory-mapped index files.
@@ -131,9 +182,34 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
                 }
             }
         }
-        // 2) JDK bytecode type (converted from the classpath seam).
+        // 2) JDK bytecode type (converted from the classpath seam) — skipped entirely for a
+        //    project-only resolver (the reference/rename engine), which never needs it.
+        if self.project_only {
+            return None;
+        }
         let cp = self.jdk.members_of(binary_name)?;
         Some(convert_members(&cp))
+    }
+}
+
+impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
+    fn members_of(&self, binary_name: &str) -> Option<Arc<JClassMembers>> {
+        // Memo hit (incl. a cached negative) — skips the JSON parse / bytecode read AND the
+        // deep clone: on a hit we hand back a clone of the shared `Arc` (a refcount bump),
+        // not a copy of every method/field. This is what makes the reference walk tractable.
+        {
+            let cache = self.members_cache.read().unwrap_or_else(|p| p.into_inner());
+            if let Some(hit) = cache.get(binary_name) {
+                return hit.clone();
+            }
+        }
+        // Miss — resolve once, then memoize (the walk re-asks for the same types constantly).
+        let computed = self.compute_members(binary_name).map(Arc::new);
+        self.members_cache
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(binary_name.to_string(), computed.clone());
+        computed
     }
 
     fn resolve_simple_name(&self, name: &str, imports: &[Import]) -> Option<String> {
@@ -328,6 +404,77 @@ mod tests {
         assert_eq!(r.resolve_simple_name("Invoice", &[]).as_deref(), Some("com/acme/Invoice"));
         let inv = r.members_of("com/acme/Invoice").expect("renamed type in overlay");
         assert_eq!(inv.fields[0].name, "g");
+    }
+
+    /// A member `Symbol` (method or field) keyed by its simple name, mirroring what the
+    /// java-index build emits for the search-everywhere axis.
+    fn member_symbol(id: u32, kind: SymbolKind, name: &str, owner_binary: &str, sig: &str) -> Symbol {
+        Symbol {
+            id,
+            kind,
+            simple_name: name.to_string(),
+            fqn: owner_binary.to_string(),
+            owner_id: 0,
+            source: Source::ProjectSource,
+            signature: sig.to_string(),
+            modifiers: String::new(),
+            loc_file: "Order.java".to_string(),
+            loc_start: 0,
+            loc_end: 0,
+            loc_container: String::new(),
+            loc_class: String::new(),
+            members_json: String::new(),
+        }
+    }
+
+    /// `member_symbols()` enumerates only Method/Field records (not the Class type record),
+    /// deduped by id — the members-list source for the index inspector.
+    #[test]
+    fn member_symbols_lists_methods_and_fields_only() {
+        let dir = std::env::temp_dir().join(format!(
+            "bennu-members-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut b = IndexBuilder::new(&dir);
+        b.set_file(
+            PathBuf::from("Order.java"),
+            vec![
+                // The type record (Class) — must NOT appear in member_symbols().
+                IndexRecord::new(
+                    class_symbol("Order", "com/acme/Order", "{}"),
+                    "Order".to_string(),
+                )
+                .with_key("com/acme/Order".to_string()),
+                // A method + a field record.
+                IndexRecord::new(
+                    member_symbol(1, SymbolKind::Method, "getId", "com/acme/Order", "long getId()"),
+                    "getId".to_string(),
+                ),
+                IndexRecord::new(
+                    member_symbol(2, SymbolKind::Field, "id", "com/acme/Order", "long id"),
+                    "id".to_string(),
+                ),
+            ],
+        );
+        b.persist().unwrap();
+        let project = PersistedIndex::open(b.blob_path(), b.fst_path()).unwrap();
+        let r = IndexResolver::new(project, NoJdk);
+
+        let mut members = r.member_symbols();
+        members.sort_by(|a, b| a.simple_name.cmp(&b.simple_name));
+        assert_eq!(members.len(), 2, "only the method + field, not the Class type");
+        assert_eq!(members[0].simple_name, "getId");
+        assert!(matches!(members[0].kind, SymbolKind::Method));
+        assert_eq!(members[0].fqn, "com/acme/Order");
+        assert_eq!(members[0].signature, "long getId()");
+        assert_eq!(members[1].simple_name, "id");
+        assert!(matches!(members[1].kind, SymbolKind::Field));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

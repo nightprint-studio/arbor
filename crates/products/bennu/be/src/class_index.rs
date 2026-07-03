@@ -13,12 +13,15 @@
 //! `extract_symbols`' [`TypeDecl`] carries no byte offset / line, so the declaration
 //! line is recovered here by locating the `class`/`interface`/`enum <Name>` token in
 //! the source and counting newlines up to it; a type that can't be located that way
-//! falls back to line 1. Files that fail to read are skipped (a fresh, robust scan).
+//! falls back to line 1. Sources are decoded in the project's declared encoding (Maven
+//! `sourceEncoding`) via `read_source_for_index`, recovering a mislabelled file rather than
+//! dropping it, so a non-UTF-8 file still surfaces its classes; only a genuine IO error skips
+//! a file (and that's logged, not silent).
 
 use std::path::Path;
 
 use bennu_core::prelude::BennuState;
-use bennu_intel::prelude::collect_java;
+use bennu_intel::prelude::{collect_java, read_source_for_index};
 use bennu_java::prelude::extract_symbols;
 use bennu_proto::prelude::ClassEntry;
 use serde::Deserialize;
@@ -45,11 +48,17 @@ fn bennu_class_index(_ctx: &BennuState, args: ClassIndexArgs) -> Result<Vec<Clas
     let mut paths = Vec::new();
     collect_java(Path::new(&args.root), &mut paths);
 
+    // Decode in the project's declared encoding (Maven `sourceEncoding`), recovering a
+    // mislabelled file rather than dropping it — same policy as the open-project build.
+    let encoding_label = crate::index_service::resolve_index_encoding(&args.root);
     let mut out = Vec::new();
     for path in paths {
-        let Ok(source) = std::fs::read_to_string(&path) else {
-            continue; // unreadable / non-UTF-8 file — skip, keep the scan robust
+        // Only a true IO error skips (logged inside the helper); a non-UTF-8 source is
+        // decoded + recovered so its classes still surface.
+        let Some(decoded) = read_source_for_index(&path, &encoding_label) else {
+            continue;
         };
+        let source = decoded.text;
         let file = path.to_string_lossy().replace('\\', "/");
         let symbols = extract_symbols(&source);
         for td in &symbols.types {

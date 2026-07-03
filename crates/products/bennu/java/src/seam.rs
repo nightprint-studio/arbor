@@ -8,6 +8,8 @@
 //! local, minimal copy here so `bennu-java` depends only on the [`TypeResolver`]
 //! trait, not on any concrete member-index implementation.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 /// A resolved type reference carrying its generic arguments (seam caveat C2:
@@ -76,7 +78,12 @@ pub struct ClassMembers {
 pub trait TypeResolver {
     /// Members of a class by binary name (`java/util/ArrayList`). `None` when the
     /// class isn't on the resolvable classpath (a normal, non-fatal state).
-    fn members_of(&self, binary_name: &str) -> Option<ClassMembers>;
+    ///
+    /// Returns an `Arc` so a memoizing resolver can hand back a shared handle on a cache
+    /// hit — the whole-project reference walk asks for the same hot types (services, DTOs)
+    /// tens of thousands of times, and deep-cloning their member lists on each hit is the
+    /// dominant cost of the walk; an `Arc` clone is a refcount bump.
+    fn members_of(&self, binary_name: &str) -> Option<Arc<ClassMembers>>;
 
     /// Resolve a simple type name (`ArrayList`) to a binary name, using the file's
     /// imports for disambiguation. `None` when unresolvable.

@@ -71,7 +71,7 @@ pub struct TypeDecl {
 }
 
 /// The extracted symbols of one `.java` file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileSymbols {
     pub package: Option<String>,
     pub imports: Vec<Import>,
@@ -89,7 +89,14 @@ pub fn extract_symbols(source: &str) -> FileSymbols {
     let Some(tree) = parser.parse(source, None) else {
         return FileSymbols { package: None, imports: Vec::new(), types: Vec::new() };
     };
-    let root = tree.root_node();
+    extract_symbols_from_root(&tree.root_node(), source)
+}
+
+/// [`extract_symbols`] over an ALREADY-parsed tree — for callers that also need the CST
+/// (e.g. the reference-index walk), so the file is parsed once and both the symbols and the
+/// walk reuse the same tree instead of re-parsing per concern. `root` must be the root node
+/// of a tree parsed over `source`.
+pub fn extract_symbols_from_root(root: &Node, source: &str) -> FileSymbols {
     let bytes = source.as_bytes();
 
     let mut package = None;

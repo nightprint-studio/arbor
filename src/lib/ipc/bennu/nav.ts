@@ -79,6 +79,16 @@ export function didChange(file: string, text: string | null): Promise<boolean> {
   return bennu('bennu_did_change', { args: { file, text } });
 }
 
+/** Invalidate + rebuild the whole semantic index for the project at `root` (BE
+ *  `bennu_reindex`): drops the class cache / symbol index / config resolver / rename engine
+ *  / completion provider and rebuilds them from a fresh source scan off-thread, emitting
+ *  `arbor://bennu/index-progress` like an open. No compilation happens (that's
+ *  `bennu_build`). A no-op on the BE when no open project owns `root`.
+ *  Wire: `bennu_reindex` — `ReindexArgs { root }`. */
+export function reindex(root: string): Promise<void> {
+  return bennu('bennu_reindex', { args: { root } });
+}
+
 // ── rename (docs §5 #10-12) ─────────────────────────────────────────────────────
 
 /** Reason an edit was planned — drives the preview grouping + the review nudge.

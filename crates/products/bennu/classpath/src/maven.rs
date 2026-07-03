@@ -324,6 +324,7 @@ impl MavenClasspathCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::members::MemberIndex;
 
     // ── Pure classpath-splitting (no mvn / no deps needed) ───────────────────
 

@@ -179,7 +179,9 @@ fn parse_worktree_porcelain(git: &GitCli, input: &str, current_path: &Path) -> R
         }
 
         if is_bare {
-            is_first = false;
+            // A bare repo's leading `bare` block has no working tree — skip it WITHOUT
+            // consuming the "first block" flag, so the first *non-bare* worktree still
+            // becomes the main one.
             continue;
         }
 

@@ -24,6 +24,11 @@ bennu-classpath = { path = "../classpath" }
 # string-keyed records into the index (as `Source::StrutsAction`/`SpringBean` symbols +
 # edges) and resolves the C1 chain (action → bean-id → FQCN) + the view chain off it.
 bennu-web = { path = "../web" }
+# The project model (LEAF): its `encoding::decode_for_index` decodes each source in the
+# project's declared (Maven `sourceEncoding`) encoding, recovering + flagging a file whose
+# bytes don't fit rather than dropping it. Depending on the leaf is the intended direction
+# (analyzers depend on bennu-project, never the reverse).
+bennu-project = { path = "../project" }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 # Java grammar for the reference walk + the rename CST parse (find-usages / rename key off

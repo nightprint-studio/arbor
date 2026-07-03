@@ -300,6 +300,38 @@ pub struct HoverInfo {
     pub doc: Option<String>,
 }
 
+// ── inherited members (Structure panel's "Inherited" bucket) ─────────────────
+
+/// One inherited ("super") member returned by `bennu_inherited_members` — a method or field
+/// declared on a SUPERCLASS / INTERFACE of the queried type (not the type's own members).
+/// Feeds the Structure panel's lazy "Inherited" bucket.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InheritedMember {
+    /// `"method"` | `"field"`.
+    pub kind: String,
+    /// The member's simple name.
+    pub name: String,
+    /// A readable detail: the return type (methods) / the field type. `None` when unrecorded.
+    pub detail: Option<String>,
+    /// `"public"` | `"protected"` | `"private"` | `"package"`.
+    pub visibility: String,
+    /// The dotted FQCN of the class / interface that declares the member.
+    pub declaring_type: String,
+    /// The project-source declaration site (file + 1-based line), or `None` when the
+    /// declaring type is a JDK / jar type (no project source to open) — like
+    /// go-to-declaration for a JDK symbol.
+    pub source: Option<InheritedSource>,
+}
+
+/// Where an inherited member's declaring type lives, when it resolves to PROJECT source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InheritedSource {
+    /// Absolute path (forward slashes) of the project file declaring the member's type.
+    pub file_path: String,
+    /// 1-based line of that type's declaration.
+    pub line: i64,
+}
+
 // ── index stats (index inspector) ─────────────────────────────────────────────
 
 /// Result of `bennu_index_stats` — a cheap snapshot of the per-project index for the
@@ -324,6 +356,66 @@ pub struct IndexStats {
     pub relations: usize,
     /// Whether the project's index build (provider + rename engine) has finished.
     pub ready: bool,
+}
+
+// ── encoding report (non-compliant source files) ─────────────────────────────
+
+/// One source file whose bytes were NOT valid in the project's declared (Maven
+/// `sourceEncoding`) encoding, produced by `bennu_encoding_report`. Bennu recovered + indexed
+/// it anyway (so its classes aren't lost), but records it here so a future UI can list the
+/// files that need their real encoding sorted out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncodingIssue {
+    /// Absolute path (forward slashes) of the non-compliant source.
+    pub file: String,
+    /// The encoding the project declared (and that didn't fit the bytes), e.g. `"Cp1252"`.
+    pub declared_encoding: String,
+    /// The encoding actually used to recover the text (`"UTF-8"` / `"windows-1252"`).
+    pub decoded_as: String,
+}
+
+// ── JDK status (titlebar / Problems diagnostics) ─────────────────────────────
+
+/// How the project's JDK resolved, produced by `bennu_jdk_status`. Drives the FE's JDK
+/// diagnostics: a titlebar warning when no JDK is installed at all, and a Problems entry
+/// when a fallback JDK was used (the exact language level the project targets isn't
+/// installed, so the standard library is resolved against a different JDK).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JdkStatus {
+    /// The Java language level the project targets (`None` if the version was unparseable).
+    pub requested_major: Option<u32>,
+    /// Absolute path of the JDK home that would be used (exact match or fallback), or `None`
+    /// when no JDK is installed.
+    pub resolved_home: Option<String>,
+    /// The language level of the resolved JDK, if any.
+    pub resolved_major: Option<u32>,
+    /// True when a JDK of the exact requested level was found (no fallback).
+    pub exact: bool,
+    /// True when at least one JDK is installed (an exact match or a fallback candidate).
+    pub any_installed: bool,
+}
+
+// ── index entries (index inspector per-kind lists) ───────────────────────────
+
+/// One row in the index inspector's per-kind entry list, produced by
+/// `bennu_index_entries` for every non-`types` kind (`members` / `jars` / `jdk` /
+/// `beans` / `actions` / `relations`; `types` is served by `bennu_class_index`). A
+/// deliberately generic shape so a single virtualized+filterable FE list renders every
+/// kind: a `primary` label + `secondary` detail (both searched), plus an OPTIONAL
+/// openable source site (`file` + 1-based `line`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndexEntry {
+    /// Primary label — the entry's name (member simple name / jar filename / bean id /
+    /// action qualified name / edge label / JDK label). Searched.
+    pub primary: String,
+    /// Secondary detail — owning FQCN + signature / abs path / bean class / resolved
+    /// class / relation kind / JDK version. Also searched. May be empty.
+    pub secondary: String,
+    /// Absolute path (forward slashes) of an openable source site, or `None` when the
+    /// entry has no navigable location (a jar, a JDK module, a member with no source).
+    pub file: Option<String>,
+    /// 1-based line to jump to when `file` is `Some`; `None` otherwise.
+    pub line: Option<i64>,
 }
 
 // ── class index (Go to Class) ────────────────────────────────────────────────
@@ -447,4 +539,70 @@ pub struct RunHandle {
     pub run_id: String,
     /// The resolved main class the run launched.
     pub main_class: String,
+}
+
+// ── run configurations (per-repo `[bennu.run]`, IntelliJ-style run targets) ───
+
+/// One `key=value` environment-variable entry of a [`RunConfig`]. Serialized as a
+/// TOML array-of-tables row (`[[bennu.run.configs.env]]`) so the whole set round-trips
+/// through `<repo>/.arbor/config.toml` losslessly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvVar {
+    /// The variable name.
+    pub key: String,
+    /// The variable value (verbatim).
+    pub value: String,
+}
+
+/// A single NAMED run configuration — the IntelliJ-style run target the FE's
+/// run-configuration editor edits and the `▶ Run` / `Shift+F10` path launches. Maps
+/// 1:1 to a `[[bennu.run.configs]]` TOML entry (`env` as an array-of-tables, args as
+/// raw single-line strings the FE splits into an argv at launch).
+///
+/// `id` is STABLE across restarts — the FE generates it and it is persisted verbatim;
+/// the backend never re-assigns it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunConfig {
+    /// Stable id (FE-generated, persisted verbatim — the map/selection key).
+    pub id: String,
+    /// Display name of the configuration.
+    pub name: String,
+    /// The fully-qualified main class to launch.
+    pub main_class: String,
+    /// Program arguments (passed after the main class), a raw single-line string.
+    pub program_args: String,
+    /// JVM arguments (`-Xmx…`, `-D…`), a raw single-line string.
+    pub vm_args: String,
+    /// Working directory; empty = the project root.
+    pub working_dir: String,
+    /// Environment-variable entries applied to the launched process.
+    pub env: Vec<EnvVar>,
+}
+
+/// Result of `bennu_get_run_config` — the per-repo run-config bundle (the ordered list
+/// plus which one is active). A fresh repo (no `[bennu.run]` section) yields
+/// `{ configs: [], active_id: null }`. The payload `bennu_set_run_config` persists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct RunConfigSet {
+    /// The ordered run configurations for the repo.
+    pub configs: Vec<RunConfig>,
+    /// Id of the active config (what `▶ Run` launches), or `None` when none/empty.
+    pub active_id: Option<String>,
+}
+
+// ── main-class discovery (`bennu_main_classes`) ──────────────────────────────
+
+/// One class declaring a `public static void main(String[])` entry point, found by
+/// `bennu_main_classes` scanning the project sources. Feeds the run-config editor's
+/// main-class picker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MainClassEntry {
+    /// Fully-qualified, dotted class name of the enclosing type (`com.acme.App`).
+    pub fqcn: String,
+    /// Absolute path (forward slashes) of the source file declaring it, when known.
+    pub source_file: Option<String>,
+    /// The Maven module the source lives in (relative to the project root), when the
+    /// project is multi-module; `None` for a single-module project.
+    pub module: Option<String>,
 }

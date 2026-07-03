@@ -20,6 +20,7 @@ use bennu_java::prelude::{
     extract_symbols, ClassMembers, FileSymbols, Import, Member, MemberKind, MethodDecl, TypeDecl,
     Visibility,
 };
+use bennu_project::prelude::{decode_for_index, source_encoding_label, IndexDecode};
 
 use crate::typemap::type_text_to_ref;
 
@@ -28,14 +29,16 @@ use crate::typemap::type_text_to_ref;
 /// later [`patch`](IndexBuilder::patch_file) single files, plus `(type_count,
 /// member_count)` for logging.
 ///
-/// Reads each `.java` off disk once. When the caller has already read the sources (the be
+/// Reads each `.java` off disk once, in the project's declared encoding (resolved from the
+/// pom's `sourceEncoding`, else UTF-8). When the caller has already read the sources (the be
 /// layer reads them once and shares the text with the rename engine — no second disk pass),
 /// prefer [`build_project_index_from_sources`].
 pub fn build_project_index(
     root: &Path,
     index_dir: &Path,
 ) -> (IndexBuilder, usize, usize) {
-    let sources = read_java_sources(root);
+    let label = source_encoding_label(root, "UTF-8");
+    let ProjectSources { sources, .. } = read_java_sources(root, &label);
     let built = build_project_index_from_sources(&sources, index_dir);
     (built.builder, built.type_count, built.member_count)
 }
@@ -118,22 +121,79 @@ pub fn build_project_index_from_sources(
     ProjectBuild { builder, type_count, member_count, classes, type_map: project_types }
 }
 
-/// Read every project `.java` source once, in parallel — the single disk pass the be
-/// layer shares between the symbol index build and the rename-engine build. Paths are
-/// normalized on read; an unreadable / non-UTF-8 file is skipped (robust scan).
-pub fn read_java_sources(root: &Path) -> Vec<(PathBuf, String)> {
+/// A source file whose bytes weren't valid in the project's declared (Maven) encoding — it
+/// was recovered + indexed anyway, and flagged here for the "non-compliant files" report the
+/// be layer surfaces (a future UI). See [`read_java_sources`] / `decode_for_index`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonCompliantSource {
+    /// Absolute path of the offending source.
+    pub file: PathBuf,
+    /// The encoding the project declared (and that didn't fit the bytes).
+    pub declared_encoding: String,
+    /// The encoding actually used to recover the text (`UTF-8` / `windows-1252`).
+    pub decoded_as: String,
+}
+
+/// The read + decoded project sources, plus the files that weren't valid in the declared
+/// encoding (recovered, not dropped). Returned by [`read_java_sources`].
+pub struct ProjectSources {
+    /// One `(path, decoded text)` per readable `.java` source, in walk order.
+    pub sources: Vec<(PathBuf, String)>,
+    /// The non-compliant subset (a diagnostic list; the sources above still include them).
+    pub non_compliant: Vec<NonCompliantSource>,
+}
+
+/// Read every project `.java` source once, in parallel — the single disk pass the be layer
+/// shares between the symbol index build and the rename-engine build. Each is decoded in the
+/// project's declared `encoding_label` (the Maven `sourceEncoding`); a file whose bytes don't
+/// fit is recovered and reported (never silently dropped), and only a genuinely unreadable
+/// file (IO error) is skipped (and logged).
+pub fn read_java_sources(root: &Path, encoding_label: &str) -> ProjectSources {
     let mut paths = Vec::new();
     collect_java(root, &mut paths);
-    read_sources_parallel(&paths)
+    read_sources_parallel(&paths, encoding_label)
 }
 
 /// Read `paths` off disk in parallel across a bounded std-thread pool, preserving order.
-/// Unreadable / non-UTF-8 files are dropped. (No rayon: not a workspace dependency.)
-fn read_sources_parallel(paths: &[PathBuf]) -> Vec<(PathBuf, String)> {
-    parallel_map(paths, |p| std::fs::read_to_string(p).ok().map(|s| (p.clone(), s)))
-        .into_iter()
-        .flatten()
-        .collect()
+/// Each is decoded via [`read_source_for_index`] in `encoding_label`; non-compliant files are
+/// collected, IO-unreadable files dropped (and logged). (No rayon: not a workspace dep.)
+fn read_sources_parallel(paths: &[PathBuf], encoding_label: &str) -> ProjectSources {
+    let decoded = parallel_map(paths, |p| {
+        read_source_for_index(p, encoding_label).map(|d| (p.clone(), d))
+    });
+    let mut sources = Vec::with_capacity(decoded.len());
+    let mut non_compliant = Vec::new();
+    for (p, d) in decoded.into_iter().flatten() {
+        if d.non_compliant {
+            non_compliant.push(NonCompliantSource {
+                file: p.clone(),
+                declared_encoding: encoding_label.to_string(),
+                decoded_as: d.encoding.clone(),
+            });
+        }
+        sources.push((p, d.text));
+    }
+    ProjectSources { sources, non_compliant }
+}
+
+/// Read a `.java` file for INDEXING, decoded in the project's declared `encoding_label`.
+///
+/// The whole index build hangs off this: Java's structure (keywords, identifiers, braces) is
+/// ASCII, so a source that isn't valid UTF-8 — Cp1252 / ISO-8859-1, the norm in legacy
+/// Struts/Entando trees — MUST still be indexed, or its classes vanish silently from
+/// completion, Go-to-Class and navigation. Decoding goes through `bennu-project`'s
+/// `decode_for_index`: it tries the declared (Maven) encoding first, and recovers via
+/// `encoding_rs` (UTF-8, else Windows-1252) when the bytes don't fit — flagging the file
+/// non-compliant rather than dropping it. Returns `None` only on a genuine IO error, which is
+/// logged, so the sole remaining skip is visible rather than silent.
+pub fn read_source_for_index(path: &Path, encoding_label: &str) -> Option<IndexDecode> {
+    match std::fs::read(path) {
+        Ok(bytes) => Some(decode_for_index(&bytes, encoding_label)),
+        Err(e) => {
+            eprintln!("bennu-intel: skipping unreadable source {}: {e}", path.display());
+            None
+        }
+    }
 }
 
 /// Parse `sources` in parallel across a bounded std-thread pool, preserving order.
@@ -142,43 +202,55 @@ fn parse_sources_parallel(sources: &[(PathBuf, String)]) -> Vec<(PathBuf, FileSy
 }
 
 /// Map `f` over `items` across at most `available_parallelism` worker threads, returning
-/// the results in input order. A tiny, dependency-free work-stealing-by-chunks split: each
-/// worker owns a contiguous slice, so no per-item synchronization. Falls back to a serial
-/// map for a small input (the thread spawn isn't worth it) or a single core.
-fn parallel_map<T, R, F>(items: &[T], f: F) -> Vec<R>
+/// the results in input order. Dependency-free **work-stealing**: workers pull the next free
+/// index off a shared atomic cursor, so a few heavy items (a big / deeply-generic source
+/// file costs 20×+ a small one) can't strand a whole static chunk of light items behind them
+/// on one straggler thread while the others sit idle. Falls back to a serial map for a small
+/// input (the thread spawn isn't worth it) or a single core.
+///
+/// `pub(crate)` so the reference-index walk ([`crate::refs`]) can parallelize over files too.
+pub(crate) fn parallel_map<T, R, F>(items: &[T], f: F) -> Vec<R>
 where
     T: Sync,
     R: Send,
     F: Fn(&T) -> R + Sync,
 {
     let n = items.len();
-    let workers = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
+    let cores = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1);
+    // Leave ~2 cores for the foreground: this runs on the background index thread, and
+    // saturating every core starves bennu-be's RPC thread (go-to / completion stall) and the
+    // UI shell — the walk must stay a background citizen, not peg the machine.
+    let workers = cores.saturating_sub(2).max(1);
     // Serial for a small project / single core — the parse of a handful of files is faster
     // than spinning threads up.
     if workers <= 1 || n <= 32 {
         return items.iter().map(&f).collect();
     }
-    let chunks = workers.min(n);
-    let chunk_size = n.div_ceil(chunks);
+    let next = std::sync::atomic::AtomicUsize::new(0);
     let f = &f;
+    let next = &next;
     let mut out: Vec<Option<R>> = (0..n).map(|_| None).collect();
 
     std::thread::scope(|scope| {
         let mut handles = Vec::new();
-        for (ci, item_chunk) in items.chunks(chunk_size).enumerate() {
-            let base = ci * chunk_size;
+        for _ in 0..workers.min(n) {
             handles.push(scope.spawn(move || {
-                let mut local = Vec::with_capacity(item_chunk.len());
-                for it in item_chunk {
-                    local.push(f(it));
+                // Grab the next unclaimed index until the queue drains. `local` keeps each
+                // result paired with its index so input order is restored on merge.
+                let mut local: Vec<(usize, R)> = Vec::new();
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if i >= n {
+                        break;
+                    }
+                    local.push((i, f(&items[i])));
                 }
-                (base, local)
+                local
             }));
         }
         for h in handles {
-            let (base, local) = h.join().expect("parse worker panicked");
-            for (i, r) in local.into_iter().enumerate() {
-                out[base + i] = Some(r);
+            for (i, r) in h.join().expect("parse worker panicked") {
+                out[i] = Some(r);
             }
         }
     });
@@ -411,14 +483,15 @@ fn member_symbol(
 }
 
 /// The project-wide simple→binary type map for a set of `.java` files (used to seed a
-/// patch so cross-file references still resolve). Cheap re-scan of just the type decls.
-pub fn project_type_map(root: &Path) -> BTreeMap<String, String> {
+/// patch so cross-file references still resolve). Cheap re-scan of just the type decls,
+/// decoded in the project's declared `encoding_label` so a non-UTF-8 file's types still seed.
+pub fn project_type_map(root: &Path, encoding_label: &str) -> BTreeMap<String, String> {
     let mut paths = Vec::new();
     collect_java(root, &mut paths);
     let mut map = BTreeMap::new();
     for p in paths {
-        if let Ok(src) = std::fs::read_to_string(&p) {
-            for td in extract_symbols(&src).types {
+        if let Some(decoded) = read_source_for_index(&p, encoding_label) {
+            for td in extract_symbols(&decoded.text).types {
                 map.insert(td.name, td.fqn.replace('.', "/"));
             }
         }
@@ -428,7 +501,15 @@ pub fn project_type_map(root: &Path) -> BTreeMap<String, String> {
 
 /// Recursively collect `.java` files under `dir`, skipping `target` / hidden dirs.
 pub fn collect_java(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) => {
+            // A directory we can't read (permissions) would otherwise drop its whole
+            // subtree of classes silently — log it so the gap is visible.
+            eprintln!("bennu-intel: skipping unreadable directory {}: {e}", dir.display());
+            return;
+        }
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -455,6 +536,24 @@ mod tests {
         // `Foo` must not match the declaration of `FooBar`.
         assert_eq!(decl_line("class FooBar {}\n", "Foo"), None);
         assert_eq!(decl_line("class FooBar {}\n", "FooBar"), Some(1));
+    }
+
+    #[test]
+    fn read_source_for_index_recovers_non_utf8_and_flags_it() {
+        let dir = std::env::temp_dir().join(format!("bennu-jidx-enc-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+
+        // A file declared UTF-8 but written with a lone 0xE0 (Latin-1 'à') in a comment: not
+        // valid UTF-8, so a plain `read_to_string` would drop it and hide `class Foo`. The
+        // decode recovers it and flags it non-compliant — the class stays discoverable.
+        let bad = dir.join("Foo.java");
+        std::fs::write(&bad, b"// caff\xE0\nclass Foo {}\n").expect("write");
+        let decoded = read_source_for_index(&bad, "UTF-8").expect("readable");
+        assert!(decoded.non_compliant);
+        assert_eq!(decl_line(&decoded.text, "Foo"), Some(2));
+
+        let _ = std::fs::remove_file(&bad);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

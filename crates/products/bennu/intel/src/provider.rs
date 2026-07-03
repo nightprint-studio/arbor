@@ -7,10 +7,29 @@
 
 use std::path::Path;
 
+use bennu_index::prelude::SymbolKind;
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
 
 use crate::jdk::JdkMemberIndex;
 use crate::resolver::IndexResolver;
+
+/// One project member (method / field) enumerated from the built symbol index, for the
+/// index inspector's "members" list. A be-agnostic view: the be layer maps this onto its
+/// wire `IndexEntry` (and resolves the declaring type's line off its own class cache).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectMember {
+    /// The member's simple name (`getOrder`, `count`).
+    pub name: String,
+    /// The owning type's binary name (slash form, `com/acme/Order`).
+    pub owner_binary: String,
+    /// The rendered member signature (`Order getOrder(long id)` / `int count`).
+    pub signature: String,
+    /// Absolute path (forward slashes) of the project source file declaring the member,
+    /// or empty when the member carries no source location.
+    pub file: String,
+    /// `true` for a method, `false` for a field.
+    pub is_method: bool,
+}
 
 /// A location in a file — byte offset, matching the wire diagnostics (docs §3: byte
 /// ranges, the FE maps them). Used by definition / references results.
@@ -177,6 +196,27 @@ impl NativeJavaProvider {
             resolver.apply_file_patch(file, records);
         }
     }
+
+    /// Enumerate the project's members (methods + fields) from the built index, for the
+    /// index inspector's members list. A read-only view of the persisted index (the
+    /// analyzer owns how a member symbol maps to a [`ProjectMember`]). An empty vec on the
+    /// pre-index (empty) provider — the FE shows the "building" state.
+    pub fn project_members(&self) -> Vec<ProjectMember> {
+        let Some(resolver) = &self.resolver else {
+            return Vec::new();
+        };
+        resolver
+            .member_symbols()
+            .into_iter()
+            .map(|s| ProjectMember {
+                name: s.simple_name,
+                owner_binary: s.fqn,
+                signature: s.signature,
+                file: s.loc_file,
+                is_method: matches!(s.kind, SymbolKind::Method),
+            })
+            .collect()
+    }
 }
 
 impl IntelProvider for NativeJavaProvider {
@@ -185,12 +225,16 @@ impl IntelProvider for NativeJavaProvider {
         let Some(resolver) = &self.resolver else {
             return Ok(Vec::new());
         };
-        // Read the file the caret is in; a read failure is a benign empty answer (the
-        // FE already has the buffer and shows nothing gracefully).
-        let Ok(source) = std::fs::read_to_string(&at.file) else {
+        // Read the file the caret is in, decoded tolerantly so completion still works in a
+        // non-UTF-8 legacy source; a true IO error is a benign empty answer (the FE already
+        // has the buffer). This is the live caret file with no project label to hand, so the
+        // best-effort UTF-8-first decode (recovering via Windows-1252) is enough here.
+        let Some(decoded) =
+            crate::java_index::read_source_for_index(std::path::Path::new(&at.file), "UTF-8")
+        else {
             return Ok(Vec::new());
         };
-        Ok(crate::completion::completion(&source, at.offset, resolver))
+        Ok(crate::completion::completion(&decoded.text, at.offset, resolver))
     }
 
     fn hover(&self, _at: &Position) -> Result<Option<String>, IntelError> {

@@ -36,10 +36,15 @@ use bennu_index::prelude::Symbol;
 use bennu_intel::prelude::{
     build_project_index_from_sources, file_records_from_source, ingest_config_graph,
     read_java_sources, ActionVerdict, CompletionItem, ConfigResolver, DeclarationLocation,
-    HoverInfo as IntelHoverInfo, IntelProvider, NativeJavaProvider, Position, ReferencesResult,
+    HoverInfo as IntelHoverInfo, InheritedMember as IntelInheritedMember, IntelProvider,
+    NativeJavaProvider, NonCompliantSource, Position, ProjectSources, ReferencesResult,
     RenameEngine, RenamePlan,
 };
-use bennu_proto::prelude::{ClassEntry, DeclarationTarget, HoverInfo, IndexStats};
+use bennu_project::prelude::source_encoding_label;
+use bennu_proto::prelude::{
+    ClassEntry, DeclarationTarget, EncodingIssue, HoverInfo, IndexEntry, IndexStats,
+    InheritedMember, InheritedSource, JdkStatus,
+};
 use serde_json::json;
 
 use crate::web_discovery::discover_web_inputs;
@@ -131,6 +136,14 @@ struct ProjectSlot {
     /// touch disk (it updates the in-memory overlay), so this only moves on a full build.
     index_dir: RwLock<PathBuf>,
     jdk_version: String,
+    /// The project's declared source encoding (Maven `sourceEncoding`, else the config
+    /// default) — every source is decoded in this for indexing, and a file whose bytes don't
+    /// fit lands in `non_compliant`. Held so `reindex` re-uses it.
+    encoding_label: String,
+    /// Source files whose bytes weren't valid in `encoding_label` (recovered + indexed, but
+    /// flagged) — captured on each full build, served by `bennu_encoding_report` for a future
+    /// "non-compliant files" UI.
+    non_compliant: RwLock<Vec<EncodingIssue>>,
     /// simple name → binary name for the project's own declared types (seeds the
     /// resolver so bare project-type names resolve). Rebuilt on patch.
     simple_names: Mutex<BTreeMap<String, String>>,
@@ -155,13 +168,29 @@ struct ProjectSlot {
     /// surfaced by `bennu_index_stats` without re-walking the project.
     types: AtomicUsize,
     members: AtomicUsize,
-    /// Whether the last build's provider swap-in completed (drives the `ready` flag).
+    /// Whether the last build FULLY completed — provider + reference walk + config graph all
+    /// swapped in. Set only at the end of the build thread (NOT when completion first goes
+    /// live), so `index_stats.ready` — which the FE's "Indexing" card finishes on — stays
+    /// false through the O(N) reference walk and the References-index step remains visible.
     ready: AtomicBool,
 }
 
 /// The process-wide index service (one per `bennu-be`).
 pub struct IndexService {
     slots: Mutex<HashMap<PathBuf, Arc<ProjectSlot>>>,
+}
+
+/// Resolve the source encoding label to index a project at `root` in: a per-project config
+/// override wins, else the pom's declared `sourceEncoding`, else the config default. Shared by
+/// project-open and the fresh-scan handlers (`bennu_class_index` / `bennu_main_classes`) so a
+/// legacy tree is decoded identically everywhere.
+pub fn resolve_index_encoding(root: &str) -> String {
+    let cfg = bennu_core::config::load();
+    cfg.encoding_overrides
+        .get(root)
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .unwrap_or_else(|| source_encoding_label(Path::new(root), &cfg.default_encoding))
 }
 
 static SERVICE: OnceLock<IndexService> = OnceLock::new();
@@ -172,11 +201,18 @@ impl IndexService {
         SERVICE.get_or_init(|| IndexService { slots: Mutex::new(HashMap::new()) })
     }
 
-    /// Kick off (or restart) the index build for `root` at JDK `jdk_version`, on a
-    /// background thread. Returns immediately; the provider goes live when the build
-    /// finishes. Idempotent per root — a re-open rebuilds. `sink` is the BE→FE event
-    /// egress the background build emits `index-progress` events on.
-    pub fn open(&'static self, root: &str, jdk_version: &str, sink: Arc<dyn EventSink>) {
+    /// Kick off (or restart) the index build for `root` at JDK `jdk_version`, decoding sources
+    /// in `encoding_label` (the project's Maven `sourceEncoding`), on a background thread.
+    /// Returns immediately; the provider goes live when the build finishes. Idempotent per
+    /// root — a re-open rebuilds. `sink` is the BE→FE event egress the background build emits
+    /// `index-progress` events on.
+    pub fn open(
+        &'static self,
+        root: &str,
+        jdk_version: &str,
+        encoding_label: &str,
+        sink: Arc<dyn EventSink>,
+    ) {
         let root_path = PathBuf::from(root);
         let index_base = index_base_for(root);
         // A fresh generation dir for THIS build so its files are never the ones a prior
@@ -188,6 +224,8 @@ impl IndexService {
             index_base: index_base.clone(),
             index_dir: RwLock::new(index_dir.clone()),
             jdk_version: jdk_version.to_string(),
+            encoding_label: encoding_label.to_string(),
+            non_compliant: RwLock::new(Vec::new()),
             simple_names: Mutex::new(BTreeMap::new()),
             classes: RwLock::new(Vec::new()),
             provider: RwLock::new(Arc::new(NativeJavaProvider::new())),
@@ -200,6 +238,7 @@ impl IndexService {
         self.slots.lock().unwrap_or_else(|p| p.into_inner()).insert(root_path.clone(), slot.clone());
 
         let jdk_version = jdk_version.to_string();
+        let encoding_label = encoding_label.to_string();
         let root_str = root.to_string();
         std::thread::spawn(move || {
             if let Err(e) = std::fs::create_dir_all(&index_dir) {
@@ -212,7 +251,20 @@ impl IndexService {
             // below — no second disk pass, and the class navigator + type map fall out of
             // the same parse (no separate whole-project scan).
             emit_progress(&sink, &root_str, "project", "start");
-            let sources = read_java_sources(&root_path);
+            let ProjectSources { sources, non_compliant } =
+                read_java_sources(&root_path, &encoding_label);
+            // Record the files that weren't valid in the declared encoding (recovered, not
+            // dropped) for the encoding report — visible, never a silent skip.
+            if !non_compliant.is_empty() {
+                eprintln!(
+                    "bennu-be: {} source file(s) not valid in declared encoding {} for {}",
+                    non_compliant.len(),
+                    encoding_label,
+                    root_path.display()
+                );
+            }
+            *slot.non_compliant.write().unwrap_or_else(|p| p.into_inner()) =
+                non_compliant.iter().map(encoding_issue_of).collect();
             let built = build_project_index_from_sources(&sources, &index_dir);
             if let Err(e) = built.builder.persist() {
                 // A persist failure is logged ONCE and the build thread exits cleanly,
@@ -243,7 +295,10 @@ impl IndexService {
             match NativeJavaProvider::for_project(&index_dir, &jdk_version, &pairs) {
                 Ok(p) => {
                     *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
-                    slot.ready.store(true, Ordering::Relaxed);
+                    // NB: completion is live here, but the index is NOT fully built yet — the
+                    // O(N) reference walk still runs below. `slot.ready` (→ `index_stats.ready`,
+                    // which the FE poll finishes the "Indexing" card on) is set only at the very
+                    // end, so the References-index step stays visibly active through the walk.
                     eprintln!("bennu-be: completion live for {}", root_path.display());
                 }
                 Err(e) => eprintln!("bennu-be: provider build failed ({}): {e}", root_path.display()),
@@ -268,7 +323,7 @@ impl IndexService {
             // the symbol build — no second disk read). The O(N) walk runs here so
             // `bennu_rename_plan` is cheap. Non-fatal.
             emit_progress(&sink, &root_str, "references", "start");
-            build_rename_engine(&slot, &root_path, &index_dir, &jdk_version, &pairs, &sources);
+            build_rename_engine(&slot, &root_path, &index_dir, &jdk_version, &pairs, &sources, &sink, &root_str);
             emit_progress(&sink, &root_str, "references", "end");
 
             let _ = config_handle.join();
@@ -279,8 +334,15 @@ impl IndexService {
             // still-mapped dir is left for the next open's GC (non-fatal on Windows).
             gc_old_gens(&index_base, gen);
 
-            // Provider is live + engines built → the terminal "ready" event.
+            // Provider is live + engines built → the index is fully built. Flip `ready`
+            // (drives `index_stats.ready` → the FE poll's safety-net finish) THEN emit the
+            // terminal "ready" event.
+            slot.ready.store(true, Ordering::Relaxed);
             emit_progress(&sink, &root_str, "ready", "end");
+            // Diagnostic (idle-CPU investigation): confirms the build thread reaches its end
+            // and exits. If bennu-be still burns CPU after this line logs, the spinner is NOT
+            // this thread (look to a dependency / a thread it left behind).
+            eprintln!("bennu-be: index build thread exiting for {}", root_path.display());
         });
     }
 
@@ -290,12 +352,19 @@ impl IndexService {
     /// the build picked up) are reflected in completion. Returns immediately; the
     /// rebuild runs on the same background thread `open` uses.
     pub fn reindex(&'static self, root: &str, sink: Arc<dyn EventSink>) {
-        let jdk = {
+        let opened_with = {
             let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
-            slots.get(&PathBuf::from(root)).map(|s| s.jdk_version.clone())
+            slots
+                .get(&PathBuf::from(root))
+                .map(|s| (s.jdk_version.clone(), s.encoding_label.clone()))
         };
-        if let Some(jdk) = jdk {
-            self.open(root, &jdk, sink);
+        if let Some((jdk, encoding_label)) = opened_with {
+            // A manual rebuild is authoritative: drop the incremental reference cache so the
+            // reopen re-walks every file from scratch (not just the changed ones).
+            bennu_intel::prelude::clear_ref_cache(&bennu_intel::prelude::ref_cache_path(
+                &index_base_for(root),
+            ));
+            self.open(root, &jdk, &encoding_label, sink);
         }
     }
 
@@ -310,6 +379,31 @@ impl IndexService {
             return None; // build not landed yet → let the caller do a fresh scan
         }
         Some(cache.clone())
+    }
+
+    /// The source files that weren't valid in the project's declared encoding (recovered +
+    /// indexed, but flagged) for the project rooted at `root`. Empty when no slot owns `root`,
+    /// the build hasn't landed, or every file was compliant. Served by `bennu_encoding_report`.
+    pub fn encoding_issues(&self, root: &str) -> Vec<EncodingIssue> {
+        let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(slot) = slots.get(&PathBuf::from(root)) else {
+            return Vec::new();
+        };
+        // Bind to a local so the RwLockReadGuard temporary drops here (`;`), before `slots`
+        // does — otherwise the guard would outlive the borrow it holds into `slots`.
+        let issues = slot.non_compliant.read().unwrap_or_else(|p| p.into_inner()).clone();
+        issues
+    }
+
+    /// How the JDK resolved for the project at `root` — the exact-vs-fallback / none status
+    /// the FE surfaces as a titlebar warning or a Problems entry. `None` when no slot owns
+    /// `root`. The FS probe runs AFTER the slots lock is released (never holds it across IO).
+    pub fn jdk_report(&self, root: &str) -> Option<JdkStatus> {
+        let jdk_version = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots.get(&PathBuf::from(root)).map(|s| s.jdk_version.clone())
+        }?;
+        Some(jdk_status_of(bennu_classpath::prelude::jdk_status(&jdk_version)))
     }
 
     /// Serve completion at `file`:`offset` from the owning project's provider (matched
@@ -400,6 +494,26 @@ impl IndexService {
         engine.declaration(file, source, offset).map(declaration_target_of)
     }
 
+    /// The inherited ("super") members of the type declared at `file`:(`type_name`,`line`),
+    /// over the owning project's rename engine (which shares the whole-project resolver +
+    /// source sets, built off-thread on open). `line` is the 1-based declaration line, to
+    /// disambiguate a nested / same-simple-named type. Returns `[]` when no project owns the
+    /// file, the engine is still building, or the type can't be resolved. Mirrors
+    /// [`declaration`](Self::declaration).
+    pub fn inherited_members(&self, file: &str, type_name: &str, line: i64) -> Vec<InheritedMember> {
+        let Some(slot) = self.slot_for_file(file) else {
+            return Vec::new();
+        };
+        let engine = {
+            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
+            g.as_ref().map(Arc::clone)
+        };
+        let Some(engine) = engine else {
+            return Vec::new();
+        };
+        engine.inherited_members(file, type_name, line).into_iter().map(inherited_member_of).collect()
+    }
+
     /// Resolve the symbol at `file`:`offset` to a hover card, over the owning project's
     /// rename engine (which shares the whole-project reference index + resolver, built
     /// off-thread on open). `source` is the current (possibly-unsaved) buffer. Returns
@@ -462,6 +576,61 @@ impl IndexService {
             relations,
             ready: slot.ready.load(Ordering::Relaxed),
         }
+    }
+
+    /// The per-kind entry list for the index inspector, read off the already-built
+    /// structures for the project rooted at `root` (no re-walk / re-parse). `kind` is one
+    /// of `"members"` / `"jars"` / `"jdk"` / `"beans"` / `"actions"` / `"relations"`
+    /// (`"types"` is served by `bennu_class_index`). Returns `[]` for an unknown root, an
+    /// unrecognised kind, or a kind whose source isn't available yet (still building / no
+    /// config) — the FE degrades gracefully.
+    pub fn index_entries(&self, root: &str, kind: &str) -> Vec<IndexEntry> {
+        let slot = {
+            let slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+            slots.get(&PathBuf::from(root)).map(Arc::clone)
+        };
+        let Some(slot) = slot else {
+            return Vec::new();
+        };
+        match kind {
+            "members" => self.member_entries(&slot),
+            "jars" => jar_entries(&slot.root),
+            "jdk" => jdk_entries(&slot),
+            "beans" | "actions" | "relations" => config_entries(&slot, kind),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The project's members (methods + fields) from the built index, one [`IndexEntry`]
+    /// each: primary = simple name, secondary = owning FQCN (dotted) + signature, file =
+    /// the declaring source, line = the declaring type's line (from the class cache — the
+    /// index has no per-member line). `[]` while the index is still building.
+    fn member_entries(&self, slot: &Arc<ProjectSlot>) -> Vec<IndexEntry> {
+        let provider = {
+            let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+            Arc::clone(&g)
+        };
+        // fqcn (dotted) → declaring type's 1-based line, from the class navigator cache.
+        let line_of: HashMap<String, i64> = {
+            let classes = slot.classes.read().unwrap_or_else(|p| p.into_inner());
+            classes.iter().map(|c| (c.fqcn.clone(), c.line as i64)).collect()
+        };
+        provider
+            .project_members()
+            .into_iter()
+            .map(|m| {
+                let owner_dotted = m.owner_binary.replace('/', ".");
+                let secondary = if m.signature.is_empty() {
+                    owner_dotted.clone()
+                } else {
+                    format!("{owner_dotted} · {}", m.signature)
+                };
+                let file = (!m.file.is_empty()).then(|| m.file.clone());
+                // Line only when we have an openable file AND a known declaring-type line.
+                let line = file.as_ref().and(line_of.get(&owner_dotted).copied());
+                IndexEntry { primary: m.name, secondary, file, line }
+            })
+            .collect()
     }
 
     /// The config resolver of the project owning `file`, if built.
@@ -580,6 +749,7 @@ impl IndexService {
 /// fragments (the only XML that can carry `<bean class=>`), then build the whole-project
 /// reference index + resolver. Non-fatal on failure (rename then just returns "still
 /// building"). Runs on the index background thread.
+#[allow(clippy::too_many_arguments)]
 fn build_rename_engine(
     slot: &Arc<ProjectSlot>,
     root: &Path,
@@ -587,6 +757,8 @@ fn build_rename_engine(
     jdk_version: &str,
     simple_names: &[(String, String)],
     sources: &[(PathBuf, String)],
+    sink: &Arc<dyn EventSink>,
+    root_str: &str,
 ) {
     // Reuse the shared sources (path normalized to forward slashes to match FE file keys) —
     // this is the second consumer of the single disk read done in `open`.
@@ -595,13 +767,27 @@ fn build_rename_engine(
 
     // Spring bean XML fragments (any `.xml` with a `<beans` root) — the class-rename
     // config-aware edit target set.
+    eprintln!("bennu-be: rename engine — gathering Spring XML for {}", root.display());
     let xml: Vec<(String, String)> = discover_web_inputs(root)
         .spring_files
         .iter()
         .filter_map(|p| std::fs::read_to_string(p).ok().map(|s| (norm_path(p), s)))
         .collect();
 
-    match RenameEngine::for_project(index_dir, jdk_version, simple_names, java, xml) {
+    eprintln!(
+        "bennu-be: rename engine — building ({} java files, {} spring xml)",
+        java.len(),
+        xml.len()
+    );
+    // Surface the O(N) reference walk as live progress in the "Indexing" operation card:
+    // emit a `references` progress event (files done / total) as the walk advances.
+    let on_progress = |done: usize, total: usize| {
+        sink.emit(
+            EVT_INDEX_PROGRESS,
+            json!({ "root": root_str, "phase": "references", "state": "progress", "done": done, "total": total }),
+        );
+    };
+    match RenameEngine::for_project(index_dir, jdk_version, simple_names, java, xml, &on_progress) {
         Ok(engine) => {
             *slot.rename.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(engine));
             eprintln!("bennu-be: rename engine live for {}", root.display());
@@ -785,6 +971,42 @@ fn declaration_target_of(d: DeclarationLocation) -> DeclarationTarget {
     }
 }
 
+/// Map an intel [`IntelInheritedMember`] onto the wire [`InheritedMember`] (field-for-field,
+/// lifting the optional project source). Kept in the be layer so the wire mapping lives at
+/// the process boundary (like `references` / `declaration`).
+fn inherited_member_of(m: IntelInheritedMember) -> InheritedMember {
+    InheritedMember {
+        kind: m.kind,
+        name: m.name,
+        detail: m.detail,
+        visibility: m.visibility,
+        declaring_type: m.declaring_type,
+        source: m.source.map(|s| InheritedSource { file_path: s.file, line: s.line }),
+    }
+}
+
+/// Map the classpath [`bennu_classpath::prelude::JdkStatus`] onto the wire [`JdkStatus`]
+/// (home path lossily stringified with forward slashes).
+fn jdk_status_of(s: bennu_classpath::prelude::JdkStatus) -> JdkStatus {
+    JdkStatus {
+        requested_major: s.requested_major,
+        resolved_home: s.resolved_home.map(|p| p.to_string_lossy().replace('\\', "/")),
+        resolved_major: s.resolved_major,
+        exact: s.exact,
+        any_installed: s.any_installed,
+    }
+}
+
+/// Map an intel [`NonCompliantSource`] onto the wire [`EncodingIssue`] (forward-slash path,
+/// declared vs. recovered encoding), for the encoding report.
+fn encoding_issue_of(s: &NonCompliantSource) -> EncodingIssue {
+    EncodingIssue {
+        file: norm_path(&s.file),
+        declared_encoding: s.declared_encoding.clone(),
+        decoded_as: s.decoded_as.clone(),
+    }
+}
+
 /// Normalize a path to forward slashes (the FE keys files by forward-slash paths).
 fn norm_path(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
@@ -799,6 +1021,127 @@ fn is_java(file: &str) -> bool {
 /// config graph on save rather than mis-parsing it as Java).
 fn is_xml_config(file: &str) -> bool {
     Path::new(file).extension().and_then(|e| e.to_str()) == Some("xml")
+}
+
+/// The classpath jar entries for the index inspector, read cheaply from the cached
+/// `target/bennu-classpath.txt` (the same file [`cached_jar_count`] counts). One
+/// [`IndexEntry`] per existing `.jar`: primary = filename, secondary = its abs path
+/// (forward slashes); no openable source site (a jar isn't a project file). `[]` when the
+/// classpath file is absent (no build/run has resolved it yet).
+fn jar_entries(root: &Path) -> Vec<IndexEntry> {
+    let cp_file = root.join("target").join("bennu-classpath.txt");
+    let Ok(raw) = std::fs::read_to_string(&cp_file) else {
+        return Vec::new();
+    };
+    split_classpath_entries(&raw)
+        .into_iter()
+        .filter_map(|e| {
+            let p = Path::new(&e);
+            if !e.to_ascii_lowercase().ends_with(".jar") || !p.is_file() {
+                return None;
+            }
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or(&e).to_string();
+            Some(IndexEntry {
+                primary: name,
+                secondary: e.replace('\\', "/"),
+                file: None,
+                line: None,
+            })
+        })
+        .collect()
+}
+
+/// The resolved-JDK summary for the index inspector: a single [`IndexEntry`] naming the
+/// project's resolved Java language level. The index has no enumerable JDK module list
+/// (the JDK is resolved live off rt.jar / jimage, never persisted), so this reports the
+/// one cheap datum the slot holds — the language level the project was opened at. `[]`
+/// when the slot carries no version.
+fn jdk_entries(slot: &Arc<ProjectSlot>) -> Vec<IndexEntry> {
+    if slot.jdk_version.is_empty() {
+        return Vec::new();
+    }
+    vec![IndexEntry {
+        primary: format!("Java {}", slot.jdk_version),
+        secondary: "resolved language level".to_string(),
+        file: None,
+        line: None,
+    }]
+}
+
+/// The config-graph entries for `kind` (`"beans"` / `"actions"` / `"relations"`), read off
+/// the slot's live [`ConfigResolver`]. `[]` when the project has no config graph (not built
+/// / no web config).
+fn config_entries(slot: &Arc<ProjectSlot>, kind: &str) -> Vec<IndexEntry> {
+    let cfg = {
+        let g = slot.config.read().unwrap_or_else(|p| p.into_inner());
+        match g.as_ref() {
+            Some(cfg) => Arc::clone(cfg),
+            None => return Vec::new(),
+        }
+    };
+    config_entries_of(&cfg, kind)
+}
+
+/// Map a [`ConfigResolver`]'s parsed graph onto the inspector entries for `kind` — the pure
+/// core of [`config_entries`], factored out so it's unit-testable off a fixture graph.
+fn config_entries_of(cfg: &ConfigResolver, kind: &str) -> Vec<IndexEntry> {
+    let graph = cfg.graph();
+    match kind {
+        // Spring beans: primary = bean id, secondary = impl class FQCN, file = the config
+        // fragment (the bean's declaration site). No per-bean line is parsed.
+        "beans" => graph
+            .beans
+            .iter()
+            .map(|b| IndexEntry {
+                primary: b.id.clone(),
+                secondary: b.class.clone(),
+                file: config_site(&b.source_file),
+                line: None,
+            })
+            .collect(),
+        // Struts actions: primary = qualified name, secondary = resolved class FQCN (the C1
+        // chain), file = the `<action>` config fragment. No per-action line is parsed.
+        "actions" => graph
+            .actions
+            .iter()
+            .map(|a| IndexEntry {
+                primary: a.qualified_name.clone(),
+                secondary: cfg.resolve_action_class(&a.qualified_name).unwrap_or_default(),
+                file: config_site(&a.source_file),
+                line: None,
+            })
+            .collect(),
+        // Config edges: primary = the edge label (`from → to`), secondary = the relation
+        // kind. Edges carry no source site.
+        "relations" => graph
+            .relations
+            .iter()
+            .map(|r| IndexEntry {
+                primary: format!("{} → {}", r.from, r.to),
+                secondary: rel_kind_label(r.kind).to_string(),
+                file: None,
+                line: None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// A config fragment path → an openable, forward-slash source site, or `None` when the
+/// record carries no source file.
+fn config_site(source_file: &str) -> Option<String> {
+    (!source_file.is_empty()).then(|| source_file.replace('\\', "/"))
+}
+
+/// A human label for a config-graph relation kind (the inspector's `secondary`).
+fn rel_kind_label(kind: bennu_web::prelude::RelKind) -> &'static str {
+    use bennu_web::prelude::RelKind;
+    match kind {
+        RelKind::ActionToClass => "action-class",
+        RelKind::ActionToResult => "action-result",
+        RelKind::ResultToView => "result-view",
+        RelKind::BeanIdToImpl => "bean-impl",
+    }
 }
 
 /// A resolved go-to-definition target for a JSP action reference (the be-layer view of
@@ -927,6 +1270,111 @@ mod tests {
         // `Foo` must not match `FooBar`'s declaration — falls back to 1.
         assert_eq!(decl_line_of("class FooBar {}\n", "Foo"), 1);
         assert_eq!(decl_line_of("class FooBar {}\n", "FooBar"), 1);
+    }
+
+    /// Build a small Struts/Spring config graph, ingest it, and prove the beans / actions
+    /// / relations inspector mappings (primary/secondary/file) over the resulting resolver.
+    #[test]
+    fn config_entries_map_beans_actions_relations() {
+        use bennu_intel::prelude::ingest_config_graph;
+        use bennu_web::prelude::{build_web_graph, WebInputs};
+
+        let dir = std::env::temp_dir().join(format!(
+            "bennu-cfgentries-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let struts = dir.join("s.xml");
+        std::fs::write(
+            &struts,
+            r#"<struts><package name="p" namespace="/do/Cat" extends="japs-default">
+                <action name="viewTree" class="categoryAction">
+                  <result type="tiles">admin.Cat.viewTree</result>
+                </action>
+              </package></struts>"#,
+        )
+        .unwrap();
+        let beans = dir.join("b.xml");
+        std::fs::write(
+            &beans,
+            r#"<beans>
+                <bean id="categoryAction" class="com.x.CategoryAction"/>
+              </beans>"#,
+        )
+        .unwrap();
+
+        let inputs = WebInputs {
+            struts_roots: vec![struts.clone()],
+            resource_roots: vec![],
+            spring_files: vec![beans.clone()],
+            tiles_files: vec![],
+        };
+        let (graph, _report) = build_web_graph(&inputs);
+        let cfg = ingest_config_graph(&graph, &dir).unwrap();
+
+        // beans: primary = id, secondary = class FQCN, file = the config fragment.
+        let beans_e = config_entries_of(&cfg, "beans");
+        assert_eq!(beans_e.len(), 1);
+        assert_eq!(beans_e[0].primary, "categoryAction");
+        assert_eq!(beans_e[0].secondary, "com.x.CategoryAction");
+        assert_eq!(beans_e[0].file.as_deref(), Some(beans.to_string_lossy().replace('\\', "/").as_str()));
+        assert_eq!(beans_e[0].line, None);
+
+        // actions: primary = qualified name, secondary = resolved class (C1 chain), file =
+        // the <action> fragment.
+        let actions_e = config_entries_of(&cfg, "actions");
+        assert_eq!(actions_e.len(), 1);
+        assert_eq!(actions_e[0].primary, "/do/Cat/viewTree");
+        assert_eq!(actions_e[0].secondary, "com.x.CategoryAction");
+        assert_eq!(
+            actions_e[0].file.as_deref(),
+            Some(struts.to_string_lossy().replace('\\', "/").as_str())
+        );
+
+        // relations: at least the action→class edge, labelled `from → to` + a kind.
+        let rel_e = config_entries_of(&cfg, "relations");
+        assert!(rel_e.iter().any(|r| r.primary == "/do/Cat/viewTree → categoryAction"
+            && r.secondary == "action-class"
+            && r.file.is_none()));
+
+        // an unrecognised kind → empty.
+        assert!(config_entries_of(&cfg, "nope").is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn jar_entries_lists_existing_jars_by_filename() {
+        let root = std::env::temp_dir().join(format!(
+            "bennu-jarentries-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let target = root.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        // Two real jar files + one non-existent path — only the existing `.jar`s count.
+        let a = target.join("struts2-core-2.5.30.jar");
+        let b = target.join("spring-beans-5.3.jar");
+        std::fs::write(&a, b"jar").unwrap();
+        std::fs::write(&b, b"jar").unwrap();
+        let missing = target.join("gone.jar");
+        let raw = format!("{};{};{}", a.display(), b.display(), missing.display());
+        std::fs::write(target.join("bennu-classpath.txt"), raw).unwrap();
+
+        let entries = jar_entries(&root);
+        assert_eq!(entries.len(), 2, "only the two existing jars are listed");
+        assert!(entries.iter().any(|e| e.primary == "struts2-core-2.5.30.jar"
+            && e.secondary == a.to_string_lossy().replace('\\', "/")
+            && e.file.is_none()));
+        assert!(entries.iter().any(|e| e.primary == "spring-beans-5.3.jar"));
+
+        // No classpath file → empty.
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(jar_entries(&root).is_empty());
     }
 
     #[test]

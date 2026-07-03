@@ -15,7 +15,7 @@
    */
   import {
     Settings, Coffee, Boxes, FileType, TextCursorInput, ListTree,
-    FoldVertical, Braces, RotateCcw, Wand2,
+    FoldVertical, Braces, RotateCcw, Wand2, Plus, Trash2, TriangleAlert, FolderOpen,
   } from 'lucide-svelte';
   import Modal from '$lib/components/shared/Modal.svelte';
   import ModalHeader from '$lib/components/shared/ModalHeader.svelte';
@@ -30,10 +30,40 @@
   import RadioGroup from '$lib/components/shared/ui/RadioGroup.svelte';
   import NumberStepper from '$lib/components/shared/ui/NumberStepper.svelte';
   import Input from '$lib/components/shared/ui/Input.svelte';
+  import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuSettingsStore, SOURCE_ENCODINGS, type IndentStyle, type SourceEncoding } from '$lib/stores/bennu/settings.svelte';
+  import { bennuDiagnosticsStore } from '$lib/stores/bennu/diagnostics.svelte';
+  import { getBennuConfig, setBennuConfig, type BennuConfig } from '$lib/ipc/bennu/config';
 
   let { onClose }: { onClose: () => void } = $props();
+
+  // ── JDK search paths (real bennu config, not the mock settings store) ─────────
+  // Loaded once on mount; edits persist through `set_bennu_config`, which also re-seeds
+  // the backend's classpath search so the change applies on the next index build.
+  let cfg = $state<BennuConfig | null>(null);
+  let jdkPickerOpen = $state(false);
+  $effect(() => { void getBennuConfig().then((c) => { cfg = c; }).catch(() => {}); });
+
+  const jdkPaths = $derived(cfg?.jdk_paths ?? []);
+  const jdkReport = $derived(bennuDiagnosticsStore.jdk);
+
+  async function commitJdkPaths(paths: string[]) {
+    if (!cfg) return;
+    cfg = { ...cfg, jdk_paths: paths };
+    await setBennuConfig(cfg).catch(() => {});
+    // Re-fetch the JDK status so the titlebar / Problems / this card reflect the new paths.
+    const root = projectStore.project?.root;
+    if (root) void bennuDiagnosticsStore.refresh(root);
+  }
+  function onPickJdk(dir: string) {
+    jdkPickerOpen = false;
+    const paths = [...(cfg?.jdk_paths ?? [])];
+    if (!paths.includes(dir)) void commitJdkPaths([...paths, dir]);
+  }
+  function removeJdkPath(p: string) {
+    void commitJdkPaths((cfg?.jdk_paths ?? []).filter((x) => x !== p));
+  }
 
   const groups: SettingsNavGroup[] = [
     { label: 'Editor', items: [
@@ -317,16 +347,47 @@
       {:else if active === 'jdk'}
         <div class="section-header">
           <h2>JDK</h2>
-          <p>The Java language level Bennu resolves the classpath against.</p>
+          <p>The JDK Bennu resolves the standard library against for completion and navigation.</p>
         </div>
         <div class="card">
           <div class="card-section-title"><Coffee size={12} /> Resolved JDK</div>
           {#if jdk}
-            <div class="bs-kv"><span class="bs-k">Version</span><span class="bs-v">{jdk.version}</span></div>
-            <div class="bs-kv"><span class="bs-k">Source</span><span class="bs-v"><code>{jdk.source}</code></span></div>
+            <div class="bs-kv"><span class="bs-k">Project targets</span><span class="bs-v">Java {jdk.version} <span class="bs-muted">({jdk.source})</span></span></div>
           {:else}
-            <p class="bs-none">Not inferred — set a compiler source/target in the pom, or an override.</p>
+            <p class="bs-none">No language level inferred from the pom — defaulting to Java 8.</p>
           {/if}
+          {#if jdkReport}
+            {#if !jdkReport.any_installed}
+              <div class="bs-warn bs-warn-error"><TriangleAlert size={13} /> No JDK found — completion and navigation can’t resolve the standard library. Add a JDK directory below.</div>
+            {:else if !jdkReport.exact}
+              <div class="bs-warn"><TriangleAlert size={13} /> No JDK for the exact level installed — using Java {jdkReport.resolved_major} as a fallback.</div>
+              {#if jdkReport.resolved_home}<div class="bs-kv"><span class="bs-k">Using</span><span class="bs-v"><code>{jdkReport.resolved_home}</code></span></div>{/if}
+            {:else if jdkReport.resolved_home}
+              <div class="bs-kv"><span class="bs-k">Using</span><span class="bs-v"><code>{jdkReport.resolved_home}</code></span></div>
+            {/if}
+          {/if}
+        </div>
+        <div class="card">
+          <div class="card-section-title"><FolderOpen size={12} /> Search paths</div>
+          <p class="bs-hint">Extra JDK install directories, searched on top of <code>JAVA_HOME</code> and the standard install roots — for a JDK installed somewhere non-standard.</p>
+          {#if jdkPaths.length}
+            <div class="bs-paths">
+              {#each jdkPaths as p (p)}
+                <div class="bs-path">
+                  <span class="bs-path-txt" title={p}>{p}</span>
+                  <button class="bs-path-del" type="button" onclick={() => removeJdkPath(p)} aria-label="Remove JDK path"><Trash2 size={13} /></button>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <p class="bs-none">No extra paths — only JAVA_HOME and the standard roots are searched.</p>
+          {/if}
+          <div class="bs-path-add">
+            <Button variant="ghost" size="sm" onclick={() => (jdkPickerOpen = true)}>
+              {#snippet iconStart()}<Plus size={13} />{/snippet}
+              Add JDK directory…
+            </Button>
+          </div>
         </div>
       {:else if active === 'capabilities'}
         <div class="section-header">
@@ -388,8 +449,48 @@
   {/snippet}
 </Modal>
 
+{#if jdkPickerOpen}
+  <FileExplorerModal
+    mode="folder"
+    title="Select a JDK install directory"
+    onConfirm={onPickJdk}
+    onCancel={() => (jdkPickerOpen = false)}
+    onClose={() => (jdkPickerOpen = false)}
+  />
+{/if}
+
 <style>
   .modal-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .bs-muted { color: var(--text-muted); }
+  .bs-hint { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; padding: 4px 2px 8px; }
+  .bs-warn {
+    display: flex; align-items: center; gap: 7px; margin: 8px 2px 2px;
+    padding: 7px 10px; font-size: 12px; line-height: 1.4;
+    color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent); border-radius: var(--radius-md);
+  }
+  .bs-warn :global(svg) { flex-shrink: 0; }
+  .bs-warn-error {
+    color: var(--error); background: color-mix(in srgb, var(--error) 12%, transparent);
+    border-color: color-mix(in srgb, var(--error) 30%, transparent);
+  }
+  .bs-paths { display: flex; flex-direction: column; gap: 4px; padding: 4px 2px; }
+  .bs-path {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px; background: var(--bg-base);
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  }
+  .bs-path-txt {
+    flex: 1; min-width: 0; font-family: var(--font-code); font-size: 11.5px; color: var(--text-primary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+  }
+  .bs-path-del {
+    display: flex; flex-shrink: 0; padding: 3px; background: transparent; border: none;
+    color: var(--text-muted); cursor: pointer; border-radius: var(--radius-sm);
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .bs-path-del:hover { color: var(--error); background: var(--bg-hover); }
+  .bs-path-add { padding: 6px 2px 2px; }
   .bs-kv { display: flex; align-items: center; gap: 10px; padding: 6px 2px; font-size: 12.5px; }
   .bs-k { width: 110px; flex-shrink: 0; color: var(--text-muted); }
   .bs-v { color: var(--text-primary); }

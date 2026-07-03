@@ -17,6 +17,8 @@ Two impl slots:
   and prefix-filters into `CompletionItem`s. Constructed empty via `new()` (before a
   project is open / while the index is still building), it answers completion with the
   benign empty list. Hover / definition / references / rename / format stay stubbed.
+  `project_members()` enumerates the built index's members (methods + fields) as
+  `ProjectMember`s for the index inspector's members list.
 - **`LspClientProvider`** — the **predisposed** rust-analyzer slot. Documented and
   present, **not implemented in the MVP** (tower-lsp deferred — docs §4); its methods
   return `IntelError::Unimplemented`. Later LSP wiring is a fill-in of these bodies,
@@ -25,7 +27,12 @@ Two impl slots:
 ## Phase-1 completion machinery
 
 - **`java_index`** — turns a project's `.java` sources into `bennu-index` `IndexRecord`s
-  (each type a `Class` symbol whose `members_json` is its resolved member surface).
+  (each type a `Class` symbol whose `members_json` is its resolved member surface). Sources
+  are read through `read_source_for_index`, which decodes in the project's declared (Maven
+  `sourceEncoding`) encoding via `bennu-project`'s `decode_for_index` — recovering + flagging a
+  file whose bytes don't fit (through `encoding_rs`) rather than silently dropping it. So a
+  non-UTF-8 legacy file (Cp1252 / ISO-8859-1) is still indexed; `read_java_sources` returns the
+  non-compliant subset alongside the sources, and only a genuine IO error skips a file (logged).
 - **`resolver`** — `IndexResolver`, the `bennu-java` `TypeResolver` over the persisted
   project index + JDK member index. Converts `bennu-classpath`'s member shape into the
   `bennu-java` seam shape at the boundary (`convert_members`).
@@ -64,6 +71,16 @@ Two impl slots:
   - `classify_caret(...)` → the `DeclKey` a caret references (declaration site or use
     site). `classify_target(...)` is the rename superset that also recognises a **local
     variable / parameter** (`RenameTarget::Local`), which find-usages doesn't bucket.
+  - `build_reference_index_incremental(files, resolver, project_types, prior, on_progress)`
+    is the persisted, incremental path (a full walk is just `prior = None`). The walk is a
+    merge of independent per-file contributions, so it caches: see **`refcache`**.
+- **`refcache`** — the persisted, incremental reference-index cache (JSON at a stable path
+  under the index base, surviving per-build gen dirs). On reopen it re-walks only the files
+  whose source hash changed **plus** (dependency-aware) any file whose recorded deps name a
+  type declared by a changed file; a global type-set guard (`type_map_hash`) forces a full
+  walk on any structural type change. So the first open pays the O(N) walk once and later
+  opens are near-instant. The manual "Rebuild index" deletes the cache (`clear`) for a clean
+  full walk.
 - **go-to-declaration** (Ctrl+Click / Ctrl+B) — `resolve_declaration(...)` (and
   `RenameEngine::declaration(file, source, offset)`) reuse the same caret classifier +
   decl-site name-span finders (`find_member_name_span` / `find_type_name_span`) to return a
@@ -71,10 +88,20 @@ Two impl slots:
   label). A local/param resolves to its declarator in the current buffer; a method/field to
   its name token on the owner type; a class/interface/enum to its type-declaration name.
   A JDK / dep-jar declaration (no project source) yields `None` — nothing to open.
+- **`inherited`** — the inherited ("super") members of a type, for the Structure panel's
+  lazy "Inherited" bucket. `inherited_members(resolver, java_files, file, type_name, line)`
+  (and `RenameEngine::inherited_members(file, type_name, line)`) resolve the type by its
+  declaring `(file, simple_name, decl_line)` — line disambiguates a nested / same-named type
+  — then collect the members of its SUPERCLASS + INTERFACES recursively (one level up from
+  the type's own members, reusing the same `members_of` supertype walk as completion),
+  deduping overrides by name+kind and tagging each with its declaring FQCN + visibility + a
+  `source` file+line **only** when the declaring type is project source (a JDK / jar member's
+  `source` is `None`, like go-to-declaration).
 - **`rename`** — best-effort, preview-first rename planning (docs §5 #10-12):
   - `RenameEngine::for_project(index_dir, jdk, simple_names, java_sources, xml_sources)`
-    opens the persisted index, builds the resolver + the reference index, and caches the
-    source sets — one `Send + Sync` engine per project (built off-thread).
+    opens the persisted index, builds the resolver + the reference index (via the
+    incremental `refcache` — only changed files + their dependents are re-walked on reopen),
+    and caches the source sets — one `Send + Sync` engine per project (built off-thread).
   - `engine.plan(file, source, offset, new_name)` → a `RenamePlan` PREVIEW: per-file
     `Edit`s tagged by `EditReason` (`Declaration` / `Reference` / `Import` / `SpringBean` /
     `Local`) with an `inferred` flag. A **local** is scope-exact single-file; a
