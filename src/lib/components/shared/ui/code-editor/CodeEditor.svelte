@@ -139,6 +139,16 @@
     };
     view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
     detachScroll = () => view?.scrollDOM.removeEventListener('scroll', onScroll);
+
+    // WebView2/Windows: a freshly-created EditorView in a just-shown container (the editor
+    // remounts via `{#key activePath}` on every tab switch / go-to navigation) can paint BLANK
+    // until an event forces a re-measure — the reported "black tab until you click it". Force a
+    // measure once layout exists. Double rAF: one frame for the container to lay out, one to
+    // paint. `requestMeasure` is idempotent, so this is harmless if the view already painted.
+    requestAnimationFrame(() => {
+      view?.requestMeasure();
+      requestAnimationFrame(() => view?.requestMeasure());
+    });
   }
 
   $effect(() => { if (hostEl && !view) mount(hostEl); });

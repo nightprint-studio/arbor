@@ -22,8 +22,8 @@ pub use crate::config::{
 // Cross-file references / find-usages + the caret classifier (docs §5 #7).
 pub use crate::refs::{
     build_reference_index, build_reference_index_incremental, classify_caret, classify_target,
-    references, DeclKey, IncrementalBuild, ReferenceIndex, ReferencesResult, RenameTarget,
-    SourceFile, UsageLocation,
+    references, DeclKey, IncrementalBuild, LangLevel, ReferenceIndex, ReferencesResult,
+    RenameTarget, SourceFile, UsageLocation,
 };
 
 // Persisted, incremental reference-index cache: the be layer clears it on a manual "Rebuild

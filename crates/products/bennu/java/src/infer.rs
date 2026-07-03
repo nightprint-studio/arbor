@@ -92,6 +92,9 @@ impl Ctx<'_> {
             "identifier" => self.infer_identifier(node, enclosing),
             // `this`
             "this" => enclosing.map(|fqn| TypeRef::simple(to_binary(fqn))),
+            // `super` — the enclosing type's SUPERCLASS, so `super.m()` / `super.f` resolve to
+            // the parent's member (not the enclosing type's override of the same name).
+            "super" => enclosing.and_then(|fqn| self.superclass_type(fqn)),
             // `a.b` — field access (possibly `this.b`)
             "field_access" => self.infer_field_access(node, enclosing),
             // `a.foo(...)` or `foo(...)`
@@ -252,6 +255,15 @@ impl Ctx<'_> {
         self.resolve_type_text(&fd.type_text)
     }
 
+    /// The resolved superclass type of the source type `fqn` (for `super.member`). `None` when
+    /// the type has no `extends` clause (implicit `Object`, which the project-only engine won't
+    /// decode anyway) or its declaration isn't in this file's symbols.
+    fn superclass_type(&self, fqn: &str) -> Option<TypeRef> {
+        let td = self.symbols.types.iter().find(|t| t.fqn == fqn || t.name == fqn)?;
+        let ext = td.extends.as_ref()?;
+        self.resolve_type_text(ext)
+    }
+
     /// Look up a method return on a source-declared type by its FQN (or bare name).
     fn method_return_of_source_type(&self, fqn: &str, method_name: &str) -> Option<TypeRef> {
         let td = self.symbols.types.iter().find(|t| t.fqn == fqn || t.name == fqn)?;
@@ -386,44 +398,37 @@ impl Ctx<'_> {
 /// caret. Among all expression nodes ending there we keep the LARGEST span (prefer
 /// the whole `a.b()` over its inner `a`).
 fn find_receiver<'t>(root: &Node<'t>, byte_offset: usize) -> Option<Node<'t>> {
-    let dot_pos = byte_offset.checked_sub(1)?;
-    // The receiver is the expression ending right before the `.` (at `dot_pos`). Its last
-    // byte is `dot_pos - 1`, so descend DIRECTLY to the smallest named node there, then climb
-    // to the LARGEST ancestor still ending at `dot_pos` (prefer the whole `a.b()` over its
-    // inner `a`). This is O(tree depth), not O(tree size): the previous full-tree scan ran
-    // once PER CALL SITE, making the reference walk quadratic per file (the dominant cost).
-    let last = dot_pos.checked_sub(1)?;
-    let start = root.named_descendant_for_byte_range(last, last)?;
-
-    let mut best: Option<Node> = None;
-    let mut cur = Some(start);
+    // `byte_offset` sits on (the start of) the member NAME in `receiver.member`. Resolve the
+    // receiver through the CST `object`/`field` structure — NOT by assuming the receiver ends
+    // right before the `.`. Real code (and reformatters) split the call onto its own line
+    //     stepper
+    //         .add_step(...)
+    // so the receiver ends well before the dot; offset math got `None` there and go-to /
+    // find-usages / completion silently failed. Climb from the point node to the enclosing
+    // member access whose name/field contains the caret, and take its object. O(tree depth).
+    let node = root.named_descendant_for_byte_range(byte_offset, byte_offset)?;
+    let mut cur = Some(node);
     while let Some(n) = cur {
-        if n.end_byte() == dot_pos {
-            // Larger ancestors are visited later → the last expression match is the largest.
-            if is_expr_kind(&n) {
-                best = Some(n);
+        match n.kind() {
+            "method_invocation" => {
+                if let Some(name) = n.child_by_field_name("name") {
+                    if name.start_byte() <= byte_offset && byte_offset <= name.end_byte() {
+                        return n.child_by_field_name("object");
+                    }
+                }
             }
-        } else if n.end_byte() > dot_pos {
-            // This node (and every further ancestor) extends past the `.` — not a receiver.
-            break;
+            "field_access" => {
+                if let Some(field) = n.child_by_field_name("field") {
+                    if field.start_byte() <= byte_offset && byte_offset <= field.end_byte() {
+                        return n.child_by_field_name("object");
+                    }
+                }
+            }
+            _ => {}
         }
         cur = n.parent();
     }
-    best
-}
-
-fn is_expr_kind(n: &Node) -> bool {
-    matches!(
-        n.kind(),
-        "identifier"
-            | "this"
-            | "field_access"
-            | "method_invocation"
-            | "cast_expression"
-            | "parenthesized_expression"
-            | "object_creation_expression"
-            | "array_access"
-    )
+    None
 }
 
 /// The FQN of the type enclosing a node (for `this` / field / local resolution).

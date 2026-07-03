@@ -21,11 +21,54 @@
 use std::collections::HashMap;
 
 use bennu_java::prelude::{
-    extract_symbols_from_root, infer_receiver_type, infer_receiver_type_at, FileSymbols,
+    extract_symbols_from_root, infer_receiver_type_at, FileSymbols,
     TypeResolver,
 };
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Parser};
+
+/// The project's Java language level — gates recognition of version-specific binding forms
+/// (a Java-8 project has no records or pattern variables). Level `0` means "unknown" (the
+/// project JDK wasn't detected) and ENABLES every construct, so go-to never silently breaks
+/// on valid source just because the level couldn't be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LangLevel(pub u32);
+
+impl LangLevel {
+    /// Parse a Maven/JDK version (`"1.8"`, `"8"`, `"11"`, `"17.0.2"`, `"21-ea"`) to its Java
+    /// feature number (8, 11, 17, 21). Unparseable / empty → `0` ("unknown", all enabled).
+    pub fn from_version(v: &str) -> Self {
+        let major = v
+            .trim()
+            .trim_start_matches("1.") // "1.8" → "8"; "17" is untouched
+            .split(['.', '-', '_'])
+            .next()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0);
+        LangLevel(major)
+    }
+
+    /// Whether the level is at least `min` (an unknown level `0` counts as "yes" — never gate
+    /// OUT a construct when the level wasn't detected).
+    fn at_least(self, min: u32) -> bool {
+        self.0 == 0 || self.0 >= min
+    }
+
+    /// Lambda inferred parameters `(x, y) -> …` — Java 8.
+    fn lambda_inferred(self) -> bool {
+        self.at_least(8)
+    }
+
+    /// `record` components (readable in the compact constructor) — Java 16.
+    fn records(self) -> bool {
+        self.at_least(16)
+    }
+
+    /// `instanceof` / `switch` pattern variables (`o instanceof String s`) — Java 16.
+    fn patterns(self) -> bool {
+        self.at_least(16)
+    }
+}
 
 /// What a declaration *is*: a type, or a member (method/field) owned by a type. The key
 /// the reverse map buckets usages under.
@@ -105,6 +148,18 @@ impl ReferenceIndex {
     /// The parsed symbols of a file (for the caret classifier). `None` if not indexed.
     pub fn symbols(&self, file: &str) -> Option<&FileSymbols> {
         self.file_symbols.get(file)
+    }
+
+    /// The project file that DECLARES the type with JVM binary name `type_binary`
+    /// (`it/acme/Foo`, or `it/acme/Outer.Inner` for a nested type). `None` when no indexed
+    /// project source declares it. Go-to keys the member/type declaration lookup off this so a
+    /// same-named member in a *different* class can't hijack the jump.
+    pub fn file_declaring(&self, type_binary: &str) -> Option<&str> {
+        let dotted = type_binary.replace('/', ".");
+        self.file_symbols
+            .iter()
+            .find(|(_, fs)| fs.types.iter().any(|t| t.fqn == dotted))
+            .map(|(path, _)| path.as_str())
     }
 
     /// Iterate every `(declaration, usages)` bucket (for ranking / reporting).
@@ -365,6 +420,9 @@ pub fn references(
     resolver: &dyn TypeResolver,
     project_types: &HashMap<String, String>,
 ) -> Option<ReferencesResult> {
+    // A local variable / parameter is scope-exact and not reference-bucketed: `classify_caret`
+    // now returns `None` for a local (so a local shadowing a field never reports the field's
+    // uses), so no separate guard is needed here.
     let key = classify_caret(index, file, source, offset, resolver, project_types)?;
     let usages = index.usages_of(&key).to_vec();
     Some(ReferencesResult { target: key, usages })
@@ -438,10 +496,10 @@ impl<'a> FileWalker<'a> {
         let Some(name) = self.node_text(&name_node) else { return };
 
         let owner = match node.child_by_field_name("object") {
-            Some(_) => {
+            Some(obj) => {
                 self.attempted += 1;
                 let dot_off = name_node.start_byte();
-                match self.resolve_receiver_owner(dot_off, &name, MemberSort::Method, root, symbols) {
+                match self.resolve_receiver_owner(&obj, dot_off, &name, MemberSort::Method, root, symbols) {
                     Some(o) => {
                         self.resolved += 1;
                         o
@@ -467,9 +525,10 @@ impl<'a> FileWalker<'a> {
     fn on_field_access(&mut self, node: &Node, root: &Node, symbols: &FileSymbols) {
         let Some(field_node) = node.child_by_field_name("field") else { return };
         let Some(name) = self.node_text(&field_node) else { return };
+        let Some(obj) = node.child_by_field_name("object") else { return };
         self.attempted += 1;
         let dot_off = field_node.start_byte();
-        let Some(owner) = self.resolve_receiver_owner(dot_off, &name, MemberSort::Field, root, symbols)
+        let Some(owner) = self.resolve_receiver_owner(&obj, dot_off, &name, MemberSort::Field, root, symbols)
         else {
             return;
         };
@@ -492,6 +551,7 @@ impl<'a> FileWalker<'a> {
 
     fn resolve_receiver_owner(
         &self,
+        obj: &Node,
         dot_off: usize,
         member: &str,
         sort: MemberSort,
@@ -499,8 +559,19 @@ impl<'a> FileWalker<'a> {
         symbols: &FileSymbols,
     ) -> Option<String> {
         // Reuse the file's already-parsed tree + symbols — NOT a per-call-site re-parse.
-        let recv = infer_receiver_type_at(root, self.source, symbols, dot_off, self.resolver)?;
-        self.declaring_owner(&recv.binary_name, member, sort)
+        if let Some(recv) = infer_receiver_type_at(root, self.source, symbols, dot_off, self.resolver) {
+            if let Some(owner) = self.declaring_owner(&recv.binary_name, member, sort) {
+                return Some(owner);
+            }
+        }
+        // Static access via a TYPE name (`Util.create()`, `Config.CONST`): the receiver is a
+        // type, not a value, so `infer` can't type it. Resolve the object text as a type and
+        // look the member up there — otherwise static call/field USE SITES are never indexed and
+        // find-usages / rename on a static member silently report nothing. The interactive query
+        // path (`receiver_owner`) already has this fallback, so the two MUST agree.
+        let obj_text = self.node_text(obj)?;
+        let binary = self.resolve_type_simple(&obj_text)?;
+        self.declaring_owner(&binary, member, sort)
     }
 
     fn enclosing_owner(&self, node: &Node, member: &str, sort: MemberSort) -> Option<String> {
@@ -623,11 +694,41 @@ pub fn classify_caret(
     let mut parser = Parser::new();
     parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
     let tree = parser.parse(source, None)?;
-    let root = tree.root_node();
+    classify_caret_at(index, file, source, &tree.root_node(), offset, resolver, project_types)
+}
+
+/// The core of [`classify_caret`] over an ALREADY-PARSED `root`, so a caller that has already
+/// parsed `source` (rename's [`classify_target`]) doesn't re-parse it, and the receiver-type
+/// inference reuses the same tree + a single symbol extraction (via [`infer_receiver_type_at`])
+/// instead of re-parsing AND re-extracting the whole file per query. This is the interactive
+/// go-to / find-usages / hover HOT PATH: the old per-query re-parse of a large legacy file cost
+/// hundreds of ms and read to the user as a UI freeze.
+#[allow(clippy::too_many_arguments)]
+fn classify_caret_at(
+    index: &ReferenceIndex,
+    file: &str,
+    source: &str,
+    root: &Node,
+    offset: usize,
+    resolver: &dyn TypeResolver,
+    project_types: &HashMap<String, String>,
+) -> Option<DeclKey> {
     let bytes = source.as_bytes();
 
-    let ident = smallest_named_at(&root, offset)?;
+    let ident = smallest_named_at(root, offset)?;
     let ident_text = ident.utf8_text(bytes).ok()?.to_string();
+
+    // A local variable / parameter is scope-exact and NOT a bucketed `DeclKey` — never classify
+    // it to a same-named field (the bare-identifier fallback below would otherwise resolve a
+    // local that shadows a field to that field). Callers that navigate locals use
+    // `classify_target` (which has a `Local` variant); every `classify_caret` consumer
+    // (find-usages, hover) wants nothing for a local. Reuses the already-parsed node.
+    if ident.kind() == "identifier"
+        && !is_member_selector_node(&ident)
+        && find_local_binding(&ident, bytes, &ident_text, LangLevel(0)).is_some()
+    {
+        return None;
+    }
 
     if let Some(key) = decl_name_key(&ident, bytes, file, index, project_types) {
         return Some(key);
@@ -641,16 +742,28 @@ pub fn classify_caret(
                 return receiver_side_key(&ident, &ident_text, source, resolver, project_types);
             }
             let owner = match parent.child_by_field_name("object") {
-                Some(_) => {
-                    let dot_off = name_node.start_byte();
-                    let recv = infer_receiver_type(source, dot_off, resolver)?;
-                    declaring_owner(resolver, &recv.binary_name, &ident_text, true)
+                Some(obj) => {
+                    // Extract symbols from the SHARED tree once (only when a receiver is present)
+                    // — no re-parse, no re-extract per query.
+                    let symbols = extract_symbols_from_root(root, source);
+                    receiver_owner(
+                        &obj,
+                        name_node.start_byte(),
+                        &ident_text,
+                        true,
+                        source,
+                        bytes,
+                        root,
+                        &symbols,
+                        resolver,
+                        project_types,
+                    )?
                 }
                 None => {
                     let fqn = enclosing_type_binary(&parent, bytes, project_types)?;
-                    declaring_owner(resolver, &fqn, &ident_text, true)
+                    declaring_owner(resolver, &fqn, &ident_text, true)?
                 }
-            }?;
+            };
             Some(DeclKey::Method { owner, name: ident_text })
         }
         "field_access" => {
@@ -658,13 +771,28 @@ pub fn classify_caret(
             if field_node.id() != ident.id() {
                 return receiver_side_key(&ident, &ident_text, source, resolver, project_types);
             }
-            let dot_off = field_node.start_byte();
-            let recv = infer_receiver_type(source, dot_off, resolver)?;
-            let owner = declaring_owner(resolver, &recv.binary_name, &ident_text, false)?;
+            let obj = parent.child_by_field_name("object")?;
+            let symbols = extract_symbols_from_root(root, source);
+            let owner = receiver_owner(
+                &obj,
+                field_node.start_byte(),
+                &ident_text,
+                false,
+                source,
+                bytes,
+                root,
+                &symbols,
+                resolver,
+                project_types,
+            )?;
             Some(DeclKey::Field { owner, name: ident_text })
         }
         "type_identifier" | "scoped_type_identifier" | "generic_type" => {
-            type_key(&ident_text, project_types, resolver)
+            // Use the FULL type expression (the parent), not just the clicked segment, so a
+            // fully-qualified `alpha.Widget` resolves by its package (never the ambiguous bare
+            // `Widget` shared with another package). `type_key` strips generics.
+            let text = parent.utf8_text(bytes).map(str::to_string).unwrap_or_else(|_| ident_text.clone());
+            type_key(&text, project_types, resolver)
         }
         _ => {
             if ident.kind() == "type_identifier" {
@@ -697,7 +825,11 @@ fn decl_name_key(
     let parent = node.parent()?;
     let name = node.utf8_text(bytes).ok()?.to_string();
     match parent.kind() {
-        "class_declaration" | "interface_declaration" | "enum_declaration" => {
+        "class_declaration"
+        | "interface_declaration"
+        | "enum_declaration"
+        | "record_declaration"
+        | "annotation_type_declaration" => {
             if parent.child_by_field_name("name")?.id() != node.id() {
                 return None;
             }
@@ -737,8 +869,49 @@ fn receiver_side_key(
     resolver: &dyn TypeResolver,
     project_types: &HashMap<String, String>,
 ) -> Option<DeclKey> {
-    let _ = (ident, source, resolver);
+    // The receiver of a member access (`obj` in `obj.foo()` / `obj.field`) is usually a
+    // VARIABLE, not a type. Resolve it as a FIELD of the enclosing type first — a `this`-less
+    // field like `stepper` for `this.stepper` — so go-to lands on the FIELD's declaration
+    // instead of collapsing the variable onto the enclosing class. (Locals are already
+    // resolved by `classify_target` before this.) Only when it isn't a field do we treat it
+    // as a bare TYPE name, e.g. the static receiver in `Foo.staticMethod()`.
+    let bytes = source.as_bytes();
+    if let Some(fqn) = enclosing_type_binary(ident, bytes, project_types) {
+        if let Some(owner) = declaring_owner(resolver, &fqn, ident_text, false) {
+            return Some(DeclKey::Field { owner, name: ident_text.to_string() });
+        }
+    }
     type_key(ident_text, project_types, resolver)
+}
+
+/// The owner type of `member` accessed on `obj` in `obj.member` (`obj.foo()` / `obj.field`).
+/// First infers `obj`'s VALUE type and finds the member there (walking supertypes); if that
+/// fails, treats `obj` as a TYPE name — a STATIC access `Type.member` (`Util.helper()`,
+/// `Config.CONST`, `Registry.size`) whose receiver is a type, not a value. `None` otherwise.
+#[allow(clippy::too_many_arguments)]
+fn receiver_owner(
+    obj: &Node,
+    dot_off: usize,
+    member: &str,
+    is_method: bool,
+    source: &str,
+    bytes: &[u8],
+    root: &Node,
+    symbols: &FileSymbols,
+    resolver: &dyn TypeResolver,
+    project_types: &HashMap<String, String>,
+) -> Option<String> {
+    // Reuse the caret's already-parsed tree + once-extracted symbols (NOT a per-call re-parse).
+    if let Some(recv) = infer_receiver_type_at(root, source, symbols, dot_off, resolver) {
+        if let Some(owner) = declaring_owner(resolver, &recv.binary_name, member, is_method) {
+            return Some(owner);
+        }
+    }
+    let obj_text = obj.utf8_text(bytes).ok()?;
+    if let Some(DeclKey::Type { binary }) = type_key(obj_text, project_types, resolver) {
+        return declaring_owner(resolver, &binary, member, is_method);
+    }
+    None
 }
 
 fn type_key(
@@ -748,6 +921,19 @@ fn type_key(
 ) -> Option<DeclKey> {
     let base = simple.split('<').next().unwrap_or(simple).trim();
     if base.contains('.') {
+        // A dotted type expression is EITHER a nested-type reference (`Outer.Inner`) OR a
+        // package-qualified FQN (`alpha.Widget`). If the FIRST segment is a known project TYPE
+        // it's nested → resolve the trailing simple name (nested types are indexed by it).
+        // Otherwise the prefix is a PACKAGE → the binary is the dotted path itself, which
+        // disambiguates two same-simple-name types in different packages (`alpha.Widget` vs
+        // `beta.Widget`) that the simple→binary map alone cannot.
+        let first = base.split('.').next().unwrap_or(base);
+        if project_types.contains_key(first) {
+            let last = base.rsplit('.').next().unwrap_or(base);
+            if let Some(b) = project_types.get(last) {
+                return Some(DeclKey::Type { binary: b.clone() });
+            }
+        }
         return Some(DeclKey::Type { binary: base.replace('.', "/") });
     }
     if let Some(b) = project_types.get(base) {
@@ -834,6 +1020,7 @@ pub fn classify_target(
     offset: usize,
     resolver: &dyn TypeResolver,
     project_types: &HashMap<String, String>,
+    level: LangLevel,
 ) -> Option<RenameTarget> {
     let mut parser = Parser::new();
     parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
@@ -844,12 +1031,13 @@ pub fn classify_target(
     let ident = smallest_named_at(&root, offset)?;
     if ident.kind() == "identifier" && !is_member_selector_node(&ident) {
         let name = ident.utf8_text(bytes).ok()?.to_string();
-        if let Some((ds, de)) = find_local_binding(&ident, bytes, &name) {
+        if let Some((ds, de)) = find_local_binding(&ident, bytes, &name, level) {
             return Some(RenameTarget::Local { name, def_start: ds, def_end: de });
         }
     }
 
-    let key = classify_caret(index, file, source, offset, resolver, project_types)?;
+    // Reuse the tree this function already parsed — no second parse on the go-to hot path.
+    let key = classify_caret_at(index, file, source, &root, offset, resolver, project_types)?;
     match &key {
         DeclKey::Type { binary } => {
             Some(RenameTarget::Type { key: key.clone(), binary: binary.clone() })
@@ -876,28 +1064,57 @@ pub(crate) fn is_member_selector_node(node: &Node) -> bool {
 /// Find the declarator NAME span of the local variable / parameter `name` in scope at
 /// `ident`. `None` when `name` is not a local/param binding (a field, or unresolved) — so
 /// the caller falls back to member/type classification.
-fn find_local_binding(ident: &Node, bytes: &[u8], name: &str) -> Option<(usize, usize)> {
+fn find_local_binding(
+    ident: &Node,
+    bytes: &[u8],
+    name: &str,
+    level: LangLevel,
+) -> Option<(usize, usize)> {
     let mut cur = ident.parent();
     while let Some(n) = cur {
         if matches!(
             n.kind(),
-            "method_declaration" | "constructor_declaration" | "lambda_expression"
+            "method_declaration"
+                | "constructor_declaration"
+                | "compact_constructor_declaration"
+                | "lambda_expression"
         ) {
-            if let Some(p) = find_param_decl(&n, bytes, name) {
+            if let Some(p) = find_param_decl(&n, bytes, name, level) {
                 return Some(p);
             }
         }
+        // Any body/statement scope that can bind a local. NB: a method body is a `block` but a
+        // CONSTRUCTOR body is a `constructor_body`; `for`/enhanced-`for`/`catch`/try-with-
+        // resources bind their own variables; static/instance initializers are `block`. Deeper
+        // nested locals are reached because `find_local_decl` descends the scanned scope.
         if matches!(
             n.kind(),
-            "block" | "for_statement" | "enhanced_for_statement" | "catch_clause"
+            "block"
+                | "constructor_body"
+                | "for_statement"
+                | "enhanced_for_statement"
+                | "catch_clause"
+                | "try_with_resources_statement"
         ) {
-            if let Some(d) = find_local_decl(&n, bytes, name) {
+            if let Some(d) = find_local_decl(&n, bytes, name, level) {
                 return Some(d);
             }
         }
+        // A `record`'s components (its header `formal_parameters`) are in scope in the record's
+        // members and its compact constructor. Java 16+ — gated so a same-named field can't be
+        // mistaken for a "component" in an older project. Then STOP (a type boundary).
+        if n.kind() == "record_declaration" {
+            if level.records() {
+                if let Some(p) = find_param_decl(&n, bytes, name, level) {
+                    return Some(p);
+                }
+            }
+            break;
+        }
+        // Stop at the enclosing TYPE boundary — a field of the type is NOT a local.
         if matches!(
             n.kind(),
-            "class_declaration" | "interface_declaration" | "enum_declaration"
+            "class_declaration" | "interface_declaration" | "enum_declaration" | "annotation_type_declaration"
         ) {
             break;
         }
@@ -906,8 +1123,26 @@ fn find_local_binding(ident: &Node, bytes: &[u8], name: &str) -> Option<(usize, 
     None
 }
 
-fn find_param_decl(node: &Node, bytes: &[u8], name: &str) -> Option<(usize, usize)> {
+fn find_param_decl(node: &Node, bytes: &[u8], name: &str, level: LangLevel) -> Option<(usize, usize)> {
     let params = node.child_by_field_name("parameters")?;
+    // Lambda with INFERRED parameters — `(x, y) -> …` (`inferred_parameters` of bare
+    // identifiers) or a single unparenthesized `x -> …` (the `parameters` field IS the
+    // identifier). Java 8+ — gated. Typed lambda params `(int x) -> …` fall through to the
+    // `formal_parameter` loop below.
+    if node.kind() == "lambda_expression" && level.lambda_inferred() {
+        if params.kind() == "identifier" {
+            if params.utf8_text(bytes).ok() == Some(name) {
+                return Some((params.start_byte(), params.end_byte()));
+            }
+        } else {
+            let mut cw = params.walk();
+            for c in params.named_children(&mut cw) {
+                if c.kind() == "identifier" && c.utf8_text(bytes).ok() == Some(name) {
+                    return Some((c.start_byte(), c.end_byte()));
+                }
+            }
+        }
+    }
     let mut cw = params.walk();
     for p in params.named_children(&mut cw) {
         if matches!(p.kind(), "formal_parameter" | "spread_parameter") {
@@ -921,30 +1156,60 @@ fn find_param_decl(node: &Node, bytes: &[u8], name: &str) -> Option<(usize, usiz
     None
 }
 
-fn find_local_decl(node: &Node, bytes: &[u8], name: &str) -> Option<(usize, usize)> {
+fn find_local_decl(node: &Node, bytes: &[u8], name: &str, level: LangLevel) -> Option<(usize, usize)> {
     let mut stack: Vec<Node> = vec![*node];
     while let Some(n) = stack.pop() {
         let mut cw = n.walk();
         for c in n.named_children(&mut cw) {
+            // Don't descend into a nested TYPE or CALLABLE: its bindings (a nested class's
+            // field, a lambda's own parameter) belong to a different scope and must not match.
             if c.id() != node.id()
                 && matches!(
                     c.kind(),
-                    "class_declaration" | "method_declaration" | "constructor_declaration"
+                    "class_declaration"
+                        | "interface_declaration"
+                        | "enum_declaration"
+                        | "record_declaration"
+                        | "annotation_type_declaration"
+                        | "method_declaration"
+                        | "constructor_declaration"
+                        | "compact_constructor_declaration"
+                        | "lambda_expression"
                 )
             {
                 continue;
             }
             stack.push(c);
         }
-        if n.kind() == "variable_declarator" {
-            let parent_kind = n.parent().map(|p| p.kind().to_string()).unwrap_or_default();
-            if parent_kind == "field_declaration" {
-                continue;
-            }
-            if let Some(nm) = n.child_by_field_name("name") {
-                if nm.utf8_text(bytes).ok() == Some(name) {
-                    return Some((nm.start_byte(), nm.end_byte()));
+        // Every shape that BINDS a simple name in a body scope. A `variable_declarator` under a
+        // `field_declaration` is a field (not a local); every other shape exposes its binding
+        // through a `name` field: `for (X x : …)` (enhanced-for), `catch (E e)`, a
+        // try-with-resources `resource`, a stray formal/spread parameter, and — Java 16+,
+        // gated — an `instanceof` / `switch` pattern variable (`o instanceof String s`).
+        let bound = match n.kind() {
+            "variable_declarator" => {
+                if n.parent().map(|p| p.kind()) == Some("field_declaration") {
+                    None
+                } else {
+                    n.child_by_field_name("name")
                 }
+            }
+            "enhanced_for_statement"
+            | "catch_formal_parameter"
+            | "resource"
+            | "formal_parameter"
+            | "spread_parameter" => n.child_by_field_name("name"),
+            // A pattern variable is a `type_pattern` in some grammar versions and a `name`
+            // field on the `instanceof_expression` in others — accept both. (No `name` field
+            // when there's no binding, e.g. a plain `o instanceof String`, so this is inert.)
+            "type_pattern" | "instanceof_expression" if level.patterns() => {
+                n.child_by_field_name("name")
+            }
+            _ => None,
+        };
+        if let Some(nm) = bound {
+            if nm.utf8_text(bytes).ok() == Some(name) {
+                return Some((nm.start_byte(), nm.end_byte()));
             }
         }
     }
@@ -1113,7 +1378,7 @@ mod tests {
         let (index, resolver, pt) = index_of(&files);
         // caret on the local `x` in `int x = 1`
         let off = src.find("int x = 1").unwrap() + "int ".len() + 0;
-        let t = classify_target(&index, "C.java", src, off, &resolver, &pt).expect("classified");
+        let t = classify_target(&index, "C.java", src, off, &resolver, &pt, LangLevel(0)).expect("classified");
         assert!(matches!(t, RenameTarget::Local { ref name, .. } if name == "x"));
     }
 
@@ -1126,7 +1391,7 @@ mod tests {
         let files = [("C.java", src)];
         let (index, resolver, pt) = index_of(&files);
         let usage = src.rfind("id").unwrap(); // the `id` in `return id`
-        let t = classify_target(&index, "C.java", src, usage, &resolver, &pt).expect("classified");
+        let t = classify_target(&index, "C.java", src, usage, &resolver, &pt, LangLevel(0)).expect("classified");
         assert!(matches!(t, RenameTarget::Local { ref name, .. } if name == "id"));
     }
 
@@ -1141,6 +1406,89 @@ mod tests {
         let off = src.find("return count").unwrap() + "return ".len();
         let key = classify_caret(&index, "C.java", src, off, &resolver, &pt).expect("classified");
         assert!(matches!(key, DeclKey::Field { ref owner, ref name } if owner == "p/C" && name == "count"));
+    }
+
+    #[test]
+    fn goto_local_in_constructor_body_shadows_field() {
+        // A CONSTRUCTOR body is a `constructor_body`, not a `block`. A local declared there
+        // must resolve as a LOCAL (and shadow a same-named field) — the missing scope kind
+        // made go-to fall through to the field for every constructor-local.
+        let src = "package p; public class C { int ctx; C() { int ctx = 1; foo(ctx); } void foo(int x){} }";
+        let files = [("C.java", src)];
+        let (index, resolver, pt) = index_of(&files);
+        let usage = src.rfind("ctx)").unwrap(); // the `ctx` in `foo(ctx)`
+        let t = classify_target(&index, "C.java", src, usage, &resolver, &pt, LangLevel(0)).expect("classified");
+        assert!(matches!(t, RenameTarget::Local { ref name, .. } if name == "ctx"));
+    }
+
+    #[test]
+    fn goto_resolves_locals_in_all_body_scopes() {
+        // enhanced-for, catch, and try-with-resources each bind a local through a `name` field
+        // (NOT a `variable_declarator`) — all must still resolve as a local, like a plain block
+        // local. (Also validates the tree-sitter node names for these shapes.)
+        fn assert_local(src: &str, needle: &str, want: &str) {
+            let files = [("C.java", src)];
+            let (index, resolver, pt) = index_of(&files);
+            let off = src.rfind(needle).unwrap();
+            let t = classify_target(&index, "C.java", src, off, &resolver, &pt, LangLevel(0))
+                .unwrap_or_else(|| panic!("not classified: {want}"));
+            assert!(
+                matches!(t, RenameTarget::Local { ref name, .. } if name == want),
+                "want local {want}, got {t:?}"
+            );
+        }
+        // enhanced-for variable
+        assert_local(
+            "package p; public class C { void m() { for (String s : x()) { echo(s); } } String[] x(){return null;} void echo(String a){} }",
+            "s)",
+            "s",
+        );
+        // catch parameter
+        assert_local(
+            "package p; public class C { void m() { try { r(); } catch (Exception e) { echo(e); } } void r(){} void echo(Object a){} }",
+            "e)",
+            "e",
+        );
+        // try-with-resources variable
+        assert_local(
+            "package p; public class C { void m() { try (java.io.Reader rd = o()) { echo(rd); } catch (Exception e) {} } java.io.Reader o(){return null;} void echo(Object a){} }",
+            "rd)",
+            "rd",
+        );
+    }
+
+    #[test]
+    fn goto_version_gated_bindings() {
+        // Lambda inferred params, instanceof pattern variables, and record components resolve
+        // as locals ONLY at the JDK level that introduced them (a lower level falls through —
+        // e.g. so a same-named field can't be mistaken for a "component" in a Java-8 project).
+        fn local_at(src: &str, needle: &str, level: LangLevel) -> Option<String> {
+            let files = [("C.java", src)];
+            let (index, resolver, pt) = index_of(&files);
+            let off = src.rfind(needle).unwrap();
+            match classify_target(&index, "C.java", src, off, &resolver, &pt, level) {
+                Some(RenameTarget::Local { name, .. }) => Some(name),
+                _ => None,
+            }
+        }
+
+        // Lambda inferred parameter `(a, b) -> …` — Java 8+.
+        let lam = "package p; public class C { java.util.function.BiFunction<Integer,Integer,Integer> f = (a, b) -> a + b; }";
+        assert_eq!(local_at(lam, "a +", LangLevel(8)).as_deref(), Some("a"));
+        assert_eq!(local_at(lam, "a +", LangLevel(7)), None);
+
+        // instanceof pattern variable `o instanceof String s` — Java 16+.
+        let pat = "package p; public class C { void m(Object o) { if (o instanceof String s) { echo(s); } } void echo(Object a){} }";
+        assert_eq!(local_at(pat, "s)", LangLevel(17)).as_deref(), Some("s"));
+        assert_eq!(local_at(pat, "s)", LangLevel(11)), None);
+
+        // Record component used in the compact constructor — Java 16+.
+        let rec = "package p; public record R(int x) { R { echo(x); } static void echo(int a){} }";
+        assert_eq!(local_at(rec, "x)", LangLevel(17)).as_deref(), Some("x"));
+        assert_eq!(local_at(rec, "x)", LangLevel(11)), None);
+
+        // Unknown level (0) enables everything — never break go-to when the JDK wasn't detected.
+        assert_eq!(local_at(pat, "s)", LangLevel(0)).as_deref(), Some("s"));
     }
 
     #[test]

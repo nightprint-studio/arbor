@@ -8,6 +8,8 @@
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Parser};
 
+use crate::seam::Visibility;
+
 /// A single import. `star` marks `import a.b.*;`; `static_` marks `import static`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Import {
@@ -37,6 +39,12 @@ pub struct FieldDecl {
     /// The declared type text, e.g. `Map<String, Object>` or `HttpServletRequest`.
     pub type_text: String,
     pub is_static: bool,
+    /// `true` for a `final` field (Lombok generates no setter for one).
+    pub is_final: bool,
+    /// The declared access level (`public`/`protected`/`private`, else package-private).
+    pub visibility: Visibility,
+    /// Simple names of the field's annotations (`Getter`, `Setter`, …) — for Lombok synthesis.
+    pub annotations: Vec<String>,
 }
 
 /// A parameter of a method.
@@ -54,6 +62,8 @@ pub struct MethodDecl {
     pub return_type_text: String,
     pub params: Vec<ParamDecl>,
     pub is_static: bool,
+    /// The declared access level (`public`/`protected`/`private`, else package-private).
+    pub visibility: Visibility,
 }
 
 /// A type declaration (class / interface / enum).
@@ -68,6 +78,9 @@ pub struct TypeDecl {
     pub extends: Option<String>,
     /// The `implements` clause type texts (interface `extends` folded in here too).
     pub implements: Vec<String>,
+    /// Simple names of the type's annotations (`Getter`, `Data`, `Slf4j`, …) — the input to
+    /// Lombok generated-member synthesis. Empty for a type with no annotations.
+    pub annotations: Vec<String>,
 }
 
 /// The extracted symbols of one `.java` file.
@@ -117,7 +130,11 @@ pub fn extract_symbols_from_root(root: &Node, source: &str) -> FileSymbols {
                     imports.push(imp);
                 }
             }
-            "class_declaration" | "interface_declaration" | "enum_declaration" => {
+            "class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "record_declaration"
+            | "annotation_type_declaration" => {
                 collect_type(&child, bytes, package.as_deref(), None, &mut types);
             }
             _ => {}
@@ -189,10 +206,17 @@ fn collect_type(
                         methods.push(md);
                     }
                 }
-                "field_declaration" => {
+                // `constant_declaration` is an interface's `int MAX = 100;` — same shape as a
+                // field (type + declarators), just a different node kind, so index it as a field
+                // so a bare / qualified constant reference resolves like any other field.
+                "field_declaration" | "constant_declaration" => {
                     parse_field(&m, bytes, &mut fields);
                 }
-                "class_declaration" | "interface_declaration" | "enum_declaration" => {
+                "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "annotation_type_declaration" => {
                     collect_type(&m, bytes, package, Some(&fqn), out);
                 }
                 _ => {}
@@ -200,7 +224,31 @@ fn collect_type(
         }
     }
 
-    out.push(TypeDecl { name, fqn, methods, fields, extends, implements });
+    let annotations = collect_annotations(node, bytes);
+    out.push(TypeDecl { name, fqn, methods, fields, extends, implements, annotations });
+}
+
+/// Collect the simple names of a declaration's annotations from its `modifiers` node. A
+/// `marker_annotation` (`@Getter`) or `annotation` (`@Getter(...)`) contributes its name's LAST
+/// segment (`lombok.Getter` → `Getter`). Empty when the node has no annotations.
+fn collect_annotations(node: &Node, bytes: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cw = node.walk();
+    for c in node.children(&mut cw) {
+        if c.kind() != "modifiers" {
+            continue;
+        }
+        let mut mw = c.walk();
+        for a in c.children(&mut mw) {
+            if matches!(a.kind(), "marker_annotation" | "annotation") {
+                if let Some(name) = a.child_by_field_name("name").and_then(|n| node_text(&n, bytes)) {
+                    let simple = name.rsplit('.').next().unwrap_or(&name).to_string();
+                    out.push(simple);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Extract a method_declaration.
@@ -211,6 +259,7 @@ fn parse_method(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         .and_then(|n| node_text(&n, bytes))
         .unwrap_or_else(|| "void".to_string());
     let is_static = has_modifier(node, bytes, "static");
+    let visibility = parse_visibility(node, bytes);
 
     let mut params = Vec::new();
     if let Some(pl) = node.child_by_field_name("parameters") {
@@ -230,7 +279,7 @@ fn parse_method(node: &Node, bytes: &[u8]) -> Option<MethodDecl> {
         }
     }
 
-    Some(MethodDecl { name, return_type_text, params, is_static })
+    Some(MethodDecl { name, return_type_text, params, is_static, visibility })
 }
 
 /// Extract the (possibly multiple) fields of a field_declaration (`int a, b, c;`).
@@ -240,13 +289,38 @@ fn parse_field(node: &Node, bytes: &[u8], out: &mut Vec<FieldDecl>) {
         return;
     };
     let is_static = has_modifier(node, bytes, "static");
+    let is_final = has_modifier(node, bytes, "final");
+    let visibility = parse_visibility(node, bytes);
+    let annotations = collect_annotations(node, bytes);
     let mut cw = node.walk();
     for c in node.named_children(&mut cw) {
         if c.kind() == "variable_declarator" {
             if let Some(name) = c.child_by_field_name("name").and_then(|n| node_text(&n, bytes)) {
-                out.push(FieldDecl { name, type_text: type_text.clone(), is_static });
+                out.push(FieldDecl {
+                    name,
+                    type_text: type_text.clone(),
+                    is_static,
+                    is_final,
+                    visibility,
+                    annotations: annotations.clone(),
+                });
             }
         }
+    }
+}
+
+/// The declared access level of a member from its `modifiers` node. Java's default (no explicit
+/// `public`/`protected`/`private`) is package-private. (Interface members are implicitly public;
+/// we do not special-case that here — the enclosing-kind context isn't threaded to this helper.)
+fn parse_visibility(node: &Node, bytes: &[u8]) -> Visibility {
+    if has_modifier(node, bytes, "public") {
+        Visibility::Public
+    } else if has_modifier(node, bytes, "protected") {
+        Visibility::Protected
+    } else if has_modifier(node, bytes, "private") {
+        Visibility::Private
+    } else {
+        Visibility::Package
     }
 }
 

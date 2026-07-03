@@ -23,6 +23,9 @@ pub mod completion;
 pub mod config;
 pub mod inherited;
 pub mod java_index;
+// Internal: Lombok generated-member synthesis, an implementation detail of index-building
+// (java_index). Not part of the public surface, so it stays a private module (no prelude entry).
+mod lombok;
 pub mod jdk;
 pub mod prelude;
 pub mod provider;

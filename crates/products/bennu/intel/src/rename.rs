@@ -29,8 +29,8 @@ use tree_sitter::{Node, Parser};
 use crate::jdk::JdkMemberIndex;
 use crate::refs::{
     build_reference_index_incremental, build_reference_index_with_progress, classify_caret,
-    classify_target, references, DeclKey, ReferenceIndex, ReferencesResult, RenameTarget,
-    SourceFile,
+    classify_target, references, DeclKey, LangLevel, ReferenceIndex, ReferencesResult,
+    RenameTarget, SourceFile,
 };
 use crate::resolver::IndexResolver;
 
@@ -141,8 +141,9 @@ pub fn rename_plan(
     project_types: &HashMap<String, String>,
     java_files: &[PlanFile],
     xml_files: &[PlanFile],
+    level: LangLevel,
 ) -> Option<RenamePlan> {
-    let target = classify_target(index, file, source, offset, resolver, project_types)?;
+    let target = classify_target(index, file, source, offset, resolver, project_types, level)?;
 
     let (old_name, label, edits) = match &target {
         RenameTarget::Local { name, def_start, def_end } => {
@@ -150,7 +151,14 @@ pub fn rename_plan(
             (name.clone(), format!("local `{name}`"), edits)
         }
         RenameTarget::Member { key } => {
-            let edits = plan_member(index, file, source, key, new_name);
+            // The declaration lives in the file that DECLARES the member's owner (walked up the
+            // hierarchy), which is not necessarily the caret's file. Renaming from a use site in
+            // another file must still rewrite the declaration — otherwise the plan renamed the
+            // call sites but left `int foo()` untouched. Fall back to the caret file only when
+            // the declaring file isn't a known project source (a JDK/dep owner).
+            let decl_file = index.file_declaring(key.owner_binary()).unwrap_or(file);
+            let decl_source = project_source(java_files, decl_file).unwrap_or(source);
+            let edits = plan_member(index, decl_file, decl_source, key, new_name);
             (member_name(key), key.label(), edits)
         }
         RenameTarget::Type { binary, .. } => {
@@ -211,8 +219,9 @@ pub fn resolve_declaration(
     resolver: &dyn TypeResolver,
     project_types: &HashMap<String, String>,
     java_files: &[PlanFile],
+    level: LangLevel,
 ) -> Option<DeclarationLocation> {
-    let target = classify_target(index, file, source, offset, resolver, project_types)?;
+    let target = classify_target(index, file, source, offset, resolver, project_types, level)?;
     match target {
         RenameTarget::Local { name, def_start, def_end } => {
             // A local/param declaration is in the CURRENT buffer (scope-exact).
@@ -227,19 +236,50 @@ pub fn resolve_declaration(
             })
         }
         RenameTarget::Member { key } => {
-            // The declaration lives on the OWNER type. Scan project sources for its name
-            // span; no project source declaring it ⇒ a JDK/dep symbol ⇒ None.
-            let (decl_file, s, e) =
-                first_hit(java_files, |src| find_member_name_span(src, &key))?;
+            // Resolve the member in the file that DECLARES ITS OWNER — `declaring_owner`
+            // already walked the hierarchy to the type that actually declares it. Scanning
+            // every file for a same-named member (the old behaviour) jumped to a random other
+            // class. `None` when the owner isn't project source (a JDK/dep type) or the span
+            // isn't found there.
+            let decl_file = index.file_declaring(key.owner_binary())?.to_string();
             let decl_src = project_source(java_files, &decl_file)?;
-            let (line, col) = line_col_1based(decl_src, s);
-            Some(DeclarationLocation { file: decl_file, start: s, end: e, line, col, label: key.label() })
+            if let Some((s, e)) = find_member_name_span(decl_src, &key) {
+                let (line, col) = line_col_1based(decl_src, s);
+                return Some(DeclarationLocation {
+                    file: decl_file,
+                    start: s,
+                    end: e,
+                    line,
+                    col,
+                    label: key.label(),
+                });
+            }
+            // No source method with that name: a Lombok-generated accessor (`getId`/`setId`/
+            // `isShipped`) has no name token to open — redirect to the BACKING FIELD it wraps,
+            // when that field actually exists in the declaring type.
+            if let DeclKey::Method { owner, name } = &key {
+                let field = crate::lombok::backing_field_name(name)?;
+                let field_key = DeclKey::Field { owner: owner.clone(), name: field };
+                let (s, e) = find_member_name_span(decl_src, &field_key)?;
+                let (line, col) = line_col_1based(decl_src, s);
+                return Some(DeclarationLocation {
+                    file: decl_file,
+                    start: s,
+                    end: e,
+                    line,
+                    col,
+                    label: field_key.label(),
+                });
+            }
+            None
         }
         RenameTarget::Type { binary, .. } => {
-            let simple = simple_of(&binary);
-            let (decl_file, s, e) =
-                first_hit(java_files, |src| find_type_name_span(src, &simple))?;
+            // The declaring file is the one whose symbols carry this exact binary — not merely
+            // a file with a same-simple-named type in another package.
+            let decl_file = index.file_declaring(&binary)?.to_string();
             let decl_src = project_source(java_files, &decl_file)?;
+            let simple = simple_of(&binary);
+            let (s, e) = find_type_name_span(decl_src, &simple)?;
             let (line, col) = line_col_1based(decl_src, s);
             Some(DeclarationLocation {
                 file: decl_file,
@@ -251,20 +291,6 @@ pub fn resolve_declaration(
             })
         }
     }
-}
-
-/// Scan `java_files` for the first source whose `find` yields a span, returning
-/// `(file_path, start, end)`. `None` when no project source matches (a JDK / dep symbol).
-fn first_hit(
-    java_files: &[PlanFile],
-    find: impl Fn(&str) -> Option<(usize, usize)>,
-) -> Option<(String, usize, usize)> {
-    for f in java_files {
-        if let Some((s, e)) = find(&f.source) {
-            return Some((f.path.clone(), s, e));
-        }
-    }
-    None
 }
 
 /// The cached source text of a project java file by its (forward-slash) path.
@@ -287,6 +313,9 @@ pub struct RenameEngine {
     project_types: HashMap<String, String>,
     java_files: Vec<PlanFile>,
     xml_files: Vec<PlanFile>,
+    /// The project's Java language level — gates recognition of version-specific binding forms
+    /// (records, pattern variables, lambda inferred params) during caret classification.
+    lang_level: LangLevel,
 }
 
 impl RenameEngine {
@@ -311,20 +340,24 @@ impl RenameEngine {
             java_sources.into_iter().map(|(path, source)| PlanFile { path, source }).collect();
         let xml_files =
             xml_sources.into_iter().map(|(path, source)| PlanFile { path, source }).collect();
-        Self { index, resolver, project_types, java_files, xml_files }
+        // No project version here (the test/plain constructor) → unknown level enables all
+        // binding forms.
+        Self { index, resolver, project_types, java_files, xml_files, lang_level: LangLevel(0) }
     }
 
     /// Open the persisted project index at `index_dir`, seed the project's simple names, then
     /// build the engine over the given source sets. `Err` only when the index can't be opened.
     ///
     /// The engine is **project-only** — it never resolves JDK / library types — so it does NOT
-    /// open the JDK classpath (`_jdk_version` is unused): find-usages / rename only target
-    /// project symbols, and decoding JDK bytecode in the reference walk was pure waste that made
-    /// the walk crawl for minutes on a large project. This also makes both work with no JDK
-    /// installed. An empty member source stands in for the unused JDK slot.
+    /// open the JDK classpath for member resolution: find-usages / rename only target project
+    /// symbols, and decoding JDK bytecode in the reference walk was pure waste that made the
+    /// walk crawl for minutes on a large project. This also makes both work with no JDK
+    /// installed. An empty member source stands in for the unused JDK slot. `jdk_version` is
+    /// still read — as the project's Java **language level** — to gate version-specific binding
+    /// forms (records, pattern variables, lambda inferred params) during classification.
     pub fn for_project(
         index_dir: &Path,
-        _jdk_version: &str,
+        jdk_version: &str,
         project_simple_names: &[(String, String)],
         java_sources: Vec<(String, String)>,
         xml_sources: Vec<(String, String)>,
@@ -367,7 +400,14 @@ impl RenameEngine {
             java_sources.into_iter().map(|(path, source)| PlanFile { path, source }).collect();
         let xml_files =
             xml_sources.into_iter().map(|(path, source)| PlanFile { path, source }).collect();
-        Ok(Self { index, resolver, project_types, java_files, xml_files })
+        Ok(Self {
+            index,
+            resolver,
+            project_types,
+            java_files,
+            xml_files,
+            lang_level: LangLevel::from_version(jdk_version),
+        })
     }
 
     /// Plan a rename at `file`:`offset` → the new name. `None` when the caret isn't on a
@@ -383,6 +423,7 @@ impl RenameEngine {
             &self.project_types,
             &self.java_files,
             &self.xml_files,
+            self.lang_level,
         )
     }
 
@@ -410,6 +451,7 @@ impl RenameEngine {
             &self.resolver,
             &self.project_types,
             &self.java_files,
+            self.lang_level,
         )
     }
 
@@ -803,10 +845,9 @@ pub fn find_member_name_span(source: &str, key: &DeclKey) -> Option<(usize, usiz
         DeclKey::Type { .. } => return None,
     };
     // A declaration's name appears textually in the file that declares it — skip the
-    // tree-sitter parse of files that don't even contain the token. `first_hit` scans EVERY
-    // project source; without this guard go-to-declaration re-parses the whole project on the
-    // handler thread (seconds of freeze on a large project). A substring false-positive just
-    // parses one extra file that then yields no match — correct, only slightly slower.
+    // tree-sitter parse when the token isn't even present (a cheap early-out for callers that
+    // probe more than one file, e.g. rename's edit-site search). A substring false-positive
+    // just parses one file that then yields no match — correct, only slightly slower.
     if !source.contains(name.as_str()) {
         return None;
     }
@@ -825,8 +866,12 @@ pub fn find_member_name_span(source: &str, key: &DeclKey) -> Option<(usize, usiz
         let hit = match n.kind() {
             "method_declaration" if !want_field => n.child_by_field_name("name"),
             "variable_declarator" if want_field => {
-                let is_field =
-                    n.parent().map(|p| p.kind() == "field_declaration").unwrap_or(false);
+                // A declarator under a `field_declaration` (a class field) OR a
+                // `constant_declaration` (an interface's `int MAX = …;`) is the field decl.
+                let is_field = n
+                    .parent()
+                    .map(|p| matches!(p.kind(), "field_declaration" | "constant_declaration"))
+                    .unwrap_or(false);
                 if is_field { n.child_by_field_name("name") } else { None }
             }
             _ => None,
@@ -847,8 +892,7 @@ pub fn find_member_name_span(source: &str, key: &DeclKey) -> Option<(usize, usiz
 /// sources and the first hit wins — good enough for navigation, and the type-map keying in
 /// classification already narrowed the caret to this binary name.)
 pub fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)> {
-    // See `find_member_name_span`: skip the parse when the type name isn't even in the file,
-    // so `first_hit` doesn't re-parse the whole project on the handler thread.
+    // See `find_member_name_span`: skip the parse when the type name isn't even in the file.
     if !source.contains(simple) {
         return None;
     }
@@ -866,7 +910,11 @@ pub fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)>
         }
         if matches!(
             n.kind(),
-            "class_declaration" | "interface_declaration" | "enum_declaration"
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "annotation_type_declaration"
         ) {
             if let Some(nm) = n.child_by_field_name("name") {
                 if nm.utf8_text(bytes).ok() == Some(simple) {
@@ -1157,6 +1205,7 @@ mod tests {
             &project_types,
             &java_files,
             &xml_files,
+            LangLevel(0),
         )
     }
 
@@ -1170,7 +1219,16 @@ mod tests {
         let java_files: Vec<PlanFile> =
             files.iter().map(|(p, s)| PlanFile { path: p.to_string(), source: s.to_string() }).collect();
         let source = files.iter().find(|(p, _)| *p == target_file).unwrap().1;
-        resolve_declaration(&index, target_file, source, offset, &resolver, &project_types, &java_files)
+        resolve_declaration(
+            &index,
+            target_file,
+            source,
+            offset,
+            &resolver,
+            &project_types,
+            &java_files,
+            LangLevel(0),
+        )
     }
 
     #[test]

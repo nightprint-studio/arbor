@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 use bennu_index::prelude::{IndexBuilder, IndexRecord, Source, Symbol, SymbolKind};
 use bennu_java::prelude::{
     extract_symbols, ClassMembers, FileSymbols, Import, Member, MemberKind, MethodDecl, TypeDecl,
-    Visibility,
 };
 use bennu_project::prelude::{decode_for_index, source_encoding_label, IndexDecode};
 
@@ -391,7 +390,7 @@ fn build_class_members(
     let interfaces =
         td.implements.iter().map(|i| resolve_binary(i, imports, project_types)).collect();
 
-    let methods = td
+    let mut methods: Vec<Member> = td
         .methods
         .iter()
         .map(|m| Member {
@@ -404,12 +403,12 @@ fn build_class_members(
                 .map(|p| type_text_to_ref(&p.type_text, imports, project_types))
                 .collect(),
             is_static: m.is_static,
-            visibility: Visibility::Public,
+            visibility: m.visibility,
             raw_signature: render_method(m),
         })
         .collect();
 
-    let fields = td
+    let mut fields: Vec<Member> = td
         .fields
         .iter()
         .map(|f| Member {
@@ -418,10 +417,19 @@ fn build_class_members(
             return_type: type_text_to_ref(&f.type_text, imports, project_types),
             params: Vec::new(),
             is_static: f.is_static,
-            visibility: Visibility::Public,
+            visibility: f.visibility,
             raw_signature: format!("{} {}", f.type_text, f.name),
         })
         .collect();
+
+    // Lombok generated members: append the getters/setters/`log` its annotations would generate,
+    // so they resolve like real declarations. A user-declared method of the same name suppresses
+    // the synthetic one (the synth checks against the names already collected above).
+    let existing_methods: std::collections::HashSet<String> =
+        methods.iter().map(|m| m.name.clone()).collect();
+    let synth = crate::lombok::synthesize(td, imports, project_types, &existing_methods);
+    methods.extend(synth.methods);
+    fields.extend(synth.fields);
 
     ClassMembers { superclass, interfaces, methods, fields }
 }
