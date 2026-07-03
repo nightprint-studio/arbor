@@ -88,14 +88,26 @@
     }));
   });
 
-  /** Rank an already-lowercased haystack against an already-lowercased query. */
-  function scoreLower(h: string, q: string): number {
-    const i = h.indexOf(q);
-    if (i === 0) return 3;
-    if (i > 0) return 2;
+  /** True when every char of `q` appears in order in `h` (camelCase-ish fuzzy). */
+  function subseq(h: string, q: string): boolean {
     let qi = 0;
     for (let k = 0; k < h.length && qi < q.length; k++) if (h[k] === q[qi]) qi++;
-    return qi === q.length ? 1 : 0;
+    return qi === q.length;
+  }
+
+  /** Rank an entry against a lowercased query. Matching is anchored on the **name**
+   *  (`k1`): a name prefix/substring ranks highest, a path/fqcn (`k2`) substring next,
+   *  and a subsequence match is allowed ONLY on the name — never on the full path, which
+   *  is what used to flood the list with unrelated files (`stepCategori` subsequence-
+   *  matching half the tree). Returns 0 (filtered out) when the name neither contains
+   *  nor loosely spells the query and the path doesn't contain it verbatim. */
+  function scoreEntry(e: Entry, q: string): number {
+    const ni = e.k1.indexOf(q);
+    if (ni === 0) return 5; // name prefix
+    if (ni > 0) return 4;   // name substring
+    if (e.k2.indexOf(q) >= 0) return 3; // path / fqcn substring
+    if (subseq(e.k1, q)) return 2;      // fuzzy — name only
+    return 0;
   }
 
   const rows = $derived.by<Row[]>(() => {
@@ -105,18 +117,52 @@
       for (const e of entries) scored.push({ e, s: 1 });
     } else {
       for (const e of entries) {
-        const s = scoreLower(e.k1, q) || scoreLower(e.k2, q);
+        const s = scoreEntry(e, q);
         if (s > 0) scored.push({ e, s });
       }
     }
     scored.sort((a, b) => b.s - a.s || (a.e.k1 < b.e.k1 ? -1 : a.e.k1 > b.e.k1 ? 1 : 0));
     return scored
-      .slice(0, 300)
+      .slice(0, 5000)
       .map((x) => ({ primary: x.e.primary, secondary: x.e.secondary, file: x.e.file, line: x.e.line, cls: x.e.cls }));
   });
 
-  // Keep the highlight in range as the filter changes.
-  $effect(() => { void rows.length; if (active >= rows.length) active = 0; });
+  // ── Virtualized rendering ────────────────────────────────────────────────────
+  // A big legacy project has thousands of files/classes; rendering every matched row
+  // to the DOM on each keystroke is what made typing lag. We render only the rows in
+  // (and just around) the viewport, with spacer divs standing in for the rest.
+  const ROW_H = 30; // px — fixed row height (must match the .row height in CSS)
+  const OVERSCAN = 8;
+  let listEl = $state<HTMLDivElement | null>(null);
+  let scrollTop = $state(0);
+  let viewportH = $state(0);
+
+  const startIdx = $derived(Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN));
+  const endIdx = $derived(Math.min(rows.length, Math.ceil((scrollTop + viewportH) / ROW_H) + OVERSCAN));
+  const visibleRows = $derived(rows.slice(startIdx, endIdx));
+  const padTop = $derived(startIdx * ROW_H);
+  const padBottom = $derived(Math.max(0, (rows.length - endIdx) * ROW_H));
+
+  function onListScroll(e: Event) { scrollTop = (e.currentTarget as HTMLDivElement).scrollTop; }
+
+  /** Keep the keyboard-highlighted row inside the viewport (called on ↑/↓ only, so a
+   *  mouse hover never yanks the scroll). */
+  function scrollActiveIntoView() {
+    const el = listEl;
+    if (!el) return;
+    const top = active * ROW_H;
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (top + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_H - el.clientHeight;
+  }
+
+  // Reset the highlight + scroll to the top whenever the filtered set changes (depends
+  // on `rows` only — NOT on `active` — so hovering a row never resets the scroll).
+  $effect(() => {
+    void rows;
+    active = 0;
+    scrollTop = 0;
+    if (listEl) listEl.scrollTop = 0;
+  });
 
   function pick(r: Row | undefined) {
     if (!r) return;
@@ -126,8 +172,8 @@
 
   function onKeydown(e: KeyboardEvent) {
     const n = rows.length;
-    if (e.key === 'ArrowDown') { e.preventDefault(); if (n) active = (active + 1) % n; }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); if (n) active = (active - 1 + n) % n; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (n) { active = (active + 1) % n; scrollActiveIntoView(); } }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (n) { active = (active - 1 + n) % n; scrollActiveIntoView(); } }
     else if (e.key === 'Enter') { e.preventDefault(); pick(rows[active]); }
   }
 </script>
@@ -153,15 +199,26 @@
     {:else if rows.length === 0}
       <div class="state muted">{query ? 'No matches.' : (mode === 'class' ? 'No classes indexed.' : 'No files.')}</div>
     {:else}
-      <div class="list" role="listbox" tabindex="-1" aria-label={title}>
-        {#each rows as r, i (r.file + ':' + i)}
+      <div
+        class="list"
+        role="listbox"
+        tabindex="-1"
+        aria-label={title}
+        bind:this={listEl}
+        bind:clientHeight={viewportH}
+        onscroll={onListScroll}
+      >
+        <div style="height:{padTop}px" aria-hidden="true"></div>
+        {#each visibleRows as r, i (startIdx + i)}
+          {@const gi = startIdx + i}
           <button
             class="row"
-            class:active={i === active}
+            class:active={gi === active}
             type="button"
             role="option"
-            aria-selected={i === active}
-            onmousemove={() => (active = i)}
+            aria-selected={gi === active}
+            style="height:{ROW_H}px"
+            onmousemove={() => (active = gi)}
             onclick={() => pick(r)}
             title={r.secondary}
           >
@@ -170,6 +227,7 @@
             <span class="r-secondary">{r.secondary}</span>
           </button>
         {/each}
+        <div style="height:{padBottom}px" aria-hidden="true"></div>
       </div>
     {/if}
   </div>
@@ -187,7 +245,7 @@
   .list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 6px 8px; }
   .row {
     display: flex; align-items: center; gap: 9px;
-    width: 100%; text-align: left;
+    width: 100%; text-align: left; box-sizing: border-box; flex-shrink: 0;
     padding: 5px 8px; background: transparent; border: none; border-radius: var(--radius-sm);
     cursor: pointer; font-family: var(--font-ui-sans);
   }

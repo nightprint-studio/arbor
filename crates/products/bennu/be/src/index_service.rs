@@ -17,9 +17,13 @@
 //! events per phase so the FE can show a live "Indexing…" status. The class-navigator
 //! entries fall out of the same parse and are cached on the slot (Go-to-Class is instant).
 //!
-//! A single-file edit re-extracts **just that file** and patches its records into the
-//! builder held on the slot ([`IndexService::patch_file`]), re-persists, and reopens the
-//! (cheap) provider handle — NO whole-project re-walk / re-parse on a keystroke.
+//! A single-file edit re-extracts **just that file** and applies its records to the live
+//! provider's in-memory overlay ([`IndexService::patch_file`]) — NO disk write, NO
+//! provider rebuild, NO JDK re-resolve, NO whole-project re-walk on a keystroke. The
+//! persisted `symbols.blob` / `names.fst` (which the provider **memory-maps** for its
+//! lifetime) are only rewritten on a full build / reindex, and each such build persists
+//! into a fresh **generation** subdir (`<base>/g<NNN>/`) then swaps the provider `Arc`, so
+//! it never overwrites a file a live mmap still holds (Windows os error 1224).
 
 use std::collections::HashMap;
 use std::collections::BTreeMap;
@@ -28,13 +32,14 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use arbor_ipc::prelude::EventSink;
-use bennu_index::prelude::IndexBuilder;
+use bennu_index::prelude::Symbol;
 use bennu_intel::prelude::{
     build_project_index_from_sources, file_records_from_source, ingest_config_graph,
-    read_java_sources, ActionVerdict, CompletionItem, ConfigResolver, HoverInfo as IntelHoverInfo,
-    IntelProvider, NativeJavaProvider, Position, ReferencesResult, RenameEngine, RenamePlan,
+    read_java_sources, ActionVerdict, CompletionItem, ConfigResolver, DeclarationLocation,
+    HoverInfo as IntelHoverInfo, IntelProvider, NativeJavaProvider, Position, ReferencesResult,
+    RenameEngine, RenamePlan,
 };
-use bennu_proto::prelude::{ClassEntry, HoverInfo, IndexStats};
+use bennu_proto::prelude::{ClassEntry, DeclarationTarget, HoverInfo, IndexStats};
 use serde_json::json;
 
 use crate::web_discovery::discover_web_inputs;
@@ -50,8 +55,11 @@ fn emit_progress(sink: &Arc<dyn EventSink>, root: &str, phase: &str, state: &str
     sink.emit(EVT_INDEX_PROGRESS, json!({ "root": root, "phase": phase, "state": state }));
 }
 
-/// Where each project's index files live: `bennu_data_dir()/index/<hash-of-root>/`.
-fn index_dir_for(root: &str) -> PathBuf {
+/// The stable per-root **base** directory: `bennu_data_dir()/index/<hash-of-root>/`. The
+/// actual index files live in a per-build **generation** subdir under this (see
+/// [`gen_dir`]) so a rebuild never overwrites a file the live provider still has mmapped
+/// (Windows os error 1224 — "user-mapped section open").
+fn index_base_for(root: &str) -> PathBuf {
     // A stable, filesystem-safe per-root directory name. A simple FNV-1a hash of the
     // absolute root keeps it short and collision-resistant enough for a local cache.
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -62,19 +70,70 @@ fn index_dir_for(root: &str) -> PathBuf {
     arbor_core::prelude::bennu_data_dir().join("index").join(format!("{hash:016x}"))
 }
 
+/// The generation subdir `<base>/g<NNN>` (zero-padded) that build number `gen` persists
+/// into. A fresh `gen` per full build means the new `symbols.blob` / `names.fst` are
+/// written to files NO live provider has mapped — the swap-then-drop-old ordering releases
+/// the previous mmap before those old files are (best-effort) deleted.
+fn gen_dir(base: &Path, gen: u64) -> PathBuf {
+    base.join(format!("g{gen:03}"))
+}
+
+/// The `g<NNN>` gen number of an existing gen subdir name, if it parses. Used to pick the
+/// next free number on open and to GC stale gens.
+fn parse_gen(name: &str) -> Option<u64> {
+    name.strip_prefix('g').and_then(|d| d.parse::<u64>().ok())
+}
+
+/// The next free generation number under `base`: one past the highest existing `g<NNN>`
+/// (0 when none / the base doesn't exist yet). Keeps the counter monotonic across a
+/// process restart, since a prior run's mapped files may still be on disk.
+fn next_gen(base: &Path) -> u64 {
+    let mut max: Option<u64> = None;
+    if let Ok(rd) = std::fs::read_dir(base) {
+        for e in rd.flatten() {
+            if let Some(n) = e.file_name().to_str().and_then(parse_gen) {
+                max = Some(max.map_or(n, |m| m.max(n)));
+            }
+        }
+    }
+    max.map_or(0, |m| m + 1)
+}
+
+/// Best-effort delete every gen subdir under `base` except `keep`. A delete that fails
+/// because the OS still has the file mapped (another live provider, or a not-yet-dropped
+/// `Arc` on this process) is non-fatal — the dir is left for the next open's GC. Logged
+/// once per stuck dir (debug-level) so a persistent leak is visible without spamming.
+fn gc_old_gens(base: &Path, keep: u64) {
+    let Ok(rd) = std::fs::read_dir(base) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let Some(n) = name.to_str().and_then(parse_gen) else { continue };
+        if n == keep {
+            continue;
+        }
+        let p = e.path();
+        if std::fs::remove_dir_all(&p).is_err() {
+            // Still mapped elsewhere (expected on Windows for the just-swapped-out gen if
+            // its Arc lingers) — leave it; the next open cleans it up.
+        }
+    }
+}
+
 /// One project's slot in the cache: the paths + JDK level it was opened with, plus the
 /// hot-swappable provider the completion query reads.
 struct ProjectSlot {
     root: PathBuf,
-    index_dir: PathBuf,
+    /// The stable per-root base dir; each full build persists into a fresh `g<NNN>` subdir
+    /// of this (never overwriting a mapped file — Windows os error 1224).
+    index_base: PathBuf,
+    /// The **current** generation dir the live provider/rename engine mmap from
+    /// (`<index_base>/g<NNN>`). Updated on each full build; a per-keystroke patch does NOT
+    /// touch disk (it updates the in-memory overlay), so this only moves on a full build.
+    index_dir: RwLock<PathBuf>,
     jdk_version: String,
     /// simple name → binary name for the project's own declared types (seeds the
     /// resolver so bare project-type names resolve). Rebuilt on patch.
     simple_names: Mutex<BTreeMap<String, String>>,
-    /// The persistable index builder from the last full build, held here so a single-file
-    /// edit patches JUST the changed file's records into it and re-persists — no
-    /// whole-project re-walk / re-parse on every keystroke. `None` until the build lands.
-    builder: Mutex<Option<IndexBuilder>>,
     /// The "Go to Class" navigator entries, captured during the full build (same parse as
     /// the symbol index — no separate whole-project scan). Served by `bennu_class_index`
     /// instantly after the first index. Empty until the build lands; refreshed best-effort
@@ -119,13 +178,17 @@ impl IndexService {
     /// egress the background build emits `index-progress` events on.
     pub fn open(&'static self, root: &str, jdk_version: &str, sink: Arc<dyn EventSink>) {
         let root_path = PathBuf::from(root);
-        let index_dir = index_dir_for(root);
+        let index_base = index_base_for(root);
+        // A fresh generation dir for THIS build so its files are never the ones a prior
+        // live provider still has mmapped (Windows os error 1224 on overwrite/truncate).
+        let gen = next_gen(&index_base);
+        let index_dir = gen_dir(&index_base, gen);
         let slot = Arc::new(ProjectSlot {
             root: root_path.clone(),
-            index_dir: index_dir.clone(),
+            index_base: index_base.clone(),
+            index_dir: RwLock::new(index_dir.clone()),
             jdk_version: jdk_version.to_string(),
             simple_names: Mutex::new(BTreeMap::new()),
-            builder: Mutex::new(None),
             classes: RwLock::new(Vec::new()),
             provider: RwLock::new(Arc::new(NativeJavaProvider::new())),
             config: RwLock::new(None),
@@ -152,6 +215,9 @@ impl IndexService {
             let sources = read_java_sources(&root_path);
             let built = build_project_index_from_sources(&sources, &index_dir);
             if let Err(e) = built.builder.persist() {
+                // A persist failure is logged ONCE and the build thread exits cleanly,
+                // leaving the previous good provider (on the prior slot/gen) in place — no
+                // retry loop, no corrupted slot.
                 eprintln!("bennu-be: index persist failed: {e}");
                 emit_progress(&sink, &root_str, "project", "end");
                 return;
@@ -167,8 +233,6 @@ impl IndexService {
             let pairs: Vec<(String, String)> =
                 simple.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
             *slot.simple_names.lock().unwrap_or_else(|p| p.into_inner()) = simple;
-            // Keep the builder for cheap single-file patches (no re-walk on edit).
-            *slot.builder.lock().unwrap_or_else(|p| p.into_inner()) = Some(built.builder);
             eprintln!(
                 "bennu-be: index built for {} ({types} types, {members} members)",
                 root_path.display()
@@ -208,6 +272,12 @@ impl IndexService {
             emit_progress(&sink, &root_str, "references", "end");
 
             let _ = config_handle.join();
+
+            // Everything for this gen is now swapped in (provider + rename + config all
+            // point at `index_dir`). Best-effort GC of older gens: the previous gen's
+            // files are only deletable once their provider/rename `Arc`s have dropped; a
+            // still-mapped dir is left for the next open's GC (non-fatal on Windows).
+            gc_old_gens(&index_base, gen);
 
             // Provider is live + engines built → the terminal "ready" event.
             emit_progress(&sink, &root_str, "ready", "end");
@@ -315,6 +385,21 @@ impl IndexService {
         engine.find_usages(file, source, offset)
     }
 
+    /// Resolve the symbol at `file`:`offset` to its DECLARATION site (go-to-declaration),
+    /// over the owning project's rename engine (which shares the whole-project reference
+    /// index + resolver + source sets, built off-thread on open). `source` is the current
+    /// (possibly-unsaved) buffer. Returns `None` when no project owns the file, the engine
+    /// is still building, the caret isn't on a resolvable symbol, or the declaration lives
+    /// in a JDK / dep-jar (no project source to open). Mirrors [`find_usages`](Self::find_usages).
+    pub fn declaration(&self, file: &str, source: &str, offset: usize) -> Option<DeclarationTarget> {
+        let slot = self.slot_for_file(file)?;
+        let engine = {
+            let g = slot.rename.read().unwrap_or_else(|p| p.into_inner());
+            g.as_ref().map(Arc::clone)
+        }?;
+        engine.declaration(file, source, offset).map(declaration_target_of)
+    }
+
     /// Resolve the symbol at `file`:`offset` to a hover card, over the owning project's
     /// rename engine (which shares the whole-project reference index + resolver, built
     /// off-thread on open). `source` is the current (possibly-unsaved) buffer. Returns
@@ -386,19 +471,23 @@ impl IndexService {
         g.as_ref().map(Arc::clone)
     }
 
-    /// Incrementally patch one file after an edit: re-extract JUST that file, patch its
-    /// records into the cached builder, and rebuild the (cheap) provider handle.
-    /// `source == None` means the file was deleted. Runs synchronously off the IPC read
-    /// loop (the serve loop dispatches each request on its own thread), triggered by the
-    /// debounced `bennu_did_change { file, text }` handler.
+    /// Incrementally patch one file after an edit: re-extract JUST that file and apply its
+    /// records to the live provider's **in-memory overlay** — NO disk write, NO provider
+    /// rebuild, NO JDK re-resolve. `source == None` means the file was deleted. Runs
+    /// synchronously off the IPC read loop (the serve loop dispatches each request on its
+    /// own thread), triggered by the debounced `bennu_did_change { file, text }` handler.
     ///
-    /// Truly incremental: it does NOT walk / parse the whole project. The builder held on
-    /// the slot from the last full build already carries every OTHER file's records; only
-    /// the edited file's records are re-extracted and swapped in, then the fst+blob store is
-    /// re-persisted (a couple ms) and the provider re-opens the mmap. The rename engine is
-    /// NOT rebuilt here (its O(N) reference walk stays a full-build / reindex cost) — an
-    /// unsaved edit's find-usages/rename runs against the current buffer over the last
-    /// engine, which is the documented preview-first behavior.
+    /// Why memory-only: the persisted `symbols.blob` / `names.fst` are **memory-mapped** by
+    /// the live provider for its whole lifetime. Overwriting/truncating them here — as a
+    /// re-persist would — fails on Windows with os error 1224 ("user-mapped section open")
+    /// on every keystroke, and re-resolving the JDK classpath (reopening rt.jar's ZIP dir)
+    /// pegs the CPU. Instead the resolver keeps an interior-mutable overlay: this patch
+    /// updates the edited file's types in that overlay so completion reflects the edit
+    /// immediately, while the mmap'd files stay untouched until the next full build /
+    /// reindex (which persists into a fresh generation dir and swaps in a new provider,
+    /// clearing the overlay). The rename engine is NOT rebuilt here (its O(N) reference
+    /// walk stays a full-build cost) — an unsaved edit's find-usages/rename runs against
+    /// the current buffer over the last engine, the documented preview-first behavior.
     pub fn patch_file(&self, file: &str, source: Option<&str>) {
         let Some(slot) = self.slot_for_file(file) else { return };
 
@@ -425,35 +514,30 @@ impl IndexService {
             guard.clone()
         };
 
-        // Re-extract only this file's records and patch them into the cached builder. Fall
-        // back to a full rebuild only if the builder isn't present yet (build still in
-        // flight) — that path is rare and self-heals once the full build lands.
-        let records = source.map(|src| {
-            file_records_from_source(&file_path, src, &simple, u32::MAX / 2)
-        });
+        // Re-extract only this file's records (its `Symbol`s carry the resolved members)
+        // and apply them to the live provider's in-memory overlay — no disk, no rebuild.
+        // A delete (`source == None`) applies an empty record set, which drops the file's
+        // prior overlay entries. Keyed by the FE `file` string so the overlay's per-file
+        // rename/remove bookkeeping matches on the next edit.
+        let symbols: Vec<Symbol> = source
+            .map(|src| {
+                file_records_from_source(&file_path, src, &simple, u32::MAX / 2)
+                    .into_iter()
+                    .map(|r| r.symbol)
+                    .collect()
+            })
+            .unwrap_or_default();
         {
-            let mut guard = slot.builder.lock().unwrap_or_else(|p| p.into_inner());
-            match guard.as_mut() {
-                Some(builder) => {
-                    if let Err(e) = builder.patch_file(file_path.clone(), records) {
-                        eprintln!("bennu-be: index patch failed: {e}");
-                        return;
-                    }
-                }
-                None => return, // build not landed yet; it will pick up the file on save/reopen
-            }
+            let provider = {
+                let g = slot.provider.read().unwrap_or_else(|p| p.into_inner());
+                Arc::clone(&g)
+            };
+            provider.apply_file_patch(file, &symbols);
         }
 
         // Refresh the class navigator cache for THIS file (best-effort): drop its old
         // entries and re-add from the fresh parse, so Go-to-Class reflects a rename.
         refresh_class_cache_for_file(&slot, &file_path, source);
-
-        // Reopen the provider over the freshly-persisted mmap so new members resolve.
-        let pairs: Vec<(String, String)> =
-            simple.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        if let Ok(p) = NativeJavaProvider::for_project(&slot.index_dir, &slot.jdk_version, &pairs) {
-            *slot.provider.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(p);
-        }
     }
 
     /// Re-parse + re-ingest the project's config graph (after a struts/spring/tiles XML
@@ -464,7 +548,10 @@ impl IndexService {
             return;
         }
         let (graph, _report) = bennu_web::prelude::build_web_graph(&inputs);
-        match ingest_config_graph(&graph, &slot.index_dir) {
+        // Config `config-*` files are read back into OWNED memory (no lingering mmap), so
+        // re-ingesting into the current gen dir is safe to overwrite. Snapshot the path.
+        let index_dir = slot.index_dir.read().unwrap_or_else(|p| p.into_inner()).clone();
+        match ingest_config_graph(&graph, &index_dir) {
             Ok(cfg) => {
                 *slot.config.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(cfg));
             }
@@ -685,6 +772,19 @@ fn hover_info_of(h: IntelHoverInfo) -> HoverInfo {
     HoverInfo { signature: h.signature, kind: h.kind, container: h.container, doc: h.doc }
 }
 
+/// Map an intel [`DeclarationLocation`] onto the wire [`DeclarationTarget`] (field-for-field).
+/// Kept in the be layer so the wire mapping lives at the process boundary (like `references`).
+fn declaration_target_of(d: DeclarationLocation) -> DeclarationTarget {
+    DeclarationTarget {
+        file: d.file,
+        start: d.start,
+        end: d.end,
+        line: d.line,
+        col: d.col,
+        label: d.label,
+    }
+}
+
 /// Normalize a path to forward slashes (the FE keys files by forward-slash paths).
 fn norm_path(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
@@ -716,6 +816,60 @@ pub struct ActionDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gen_dir_is_zero_padded_subdir_of_base() {
+        let base = Path::new("/data/index/abc");
+        assert_eq!(gen_dir(base, 0), base.join("g000"));
+        assert_eq!(gen_dir(base, 7), base.join("g007"));
+        assert_eq!(gen_dir(base, 42), base.join("g042"));
+        // Above 3 digits still formats (no truncation) so the counter never collides.
+        assert_eq!(gen_dir(base, 1234), base.join("g1234"));
+    }
+
+    #[test]
+    fn parse_gen_round_trips_and_rejects_non_gen() {
+        assert_eq!(parse_gen("g000"), Some(0));
+        assert_eq!(parse_gen("g007"), Some(7));
+        assert_eq!(parse_gen("g1234"), Some(1234));
+        assert_eq!(parse_gen("gabc"), None);
+        assert_eq!(parse_gen("000"), None); // no `g` prefix
+        assert_eq!(parse_gen("symbols.blob"), None);
+        assert_eq!(parse_gen(""), None);
+    }
+
+    #[test]
+    fn next_gen_is_one_past_highest_existing() {
+        let base = std::env::temp_dir()
+            .join(format!("bennu-nextgen-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // No base dir yet → gen 0.
+        assert_eq!(next_gen(&base), 0);
+        // Create g000 + g003 (+ a non-gen sibling that must be ignored) → next is 4.
+        std::fs::create_dir_all(gen_dir(&base, 0)).unwrap();
+        std::fs::create_dir_all(gen_dir(&base, 3)).unwrap();
+        std::fs::create_dir_all(base.join("not-a-gen")).unwrap();
+        assert_eq!(next_gen(&base), 4);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn gc_old_gens_keeps_current_and_removes_others() {
+        let base = std::env::temp_dir()
+            .join(format!("bennu-gcgen-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&base);
+        for g in [0u64, 1, 2] {
+            std::fs::create_dir_all(gen_dir(&base, g)).unwrap();
+        }
+        // A non-gen sibling must be left untouched (only `g<NNN>` dirs are GC candidates).
+        std::fs::create_dir_all(base.join("keepme")).unwrap();
+        gc_old_gens(&base, 2);
+        assert!(!gen_dir(&base, 0).exists(), "g000 removed");
+        assert!(!gen_dir(&base, 1).exists(), "g001 removed");
+        assert!(gen_dir(&base, 2).exists(), "current gen kept");
+        assert!(base.join("keepme").exists(), "non-gen sibling untouched");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn splits_windows_classpath_keeping_drive_letters() {

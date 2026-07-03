@@ -7,7 +7,7 @@
 
 pub use crate::contract::{
     BuildDiagnostic, BuildResult, CapabilityHit, CapabilitySet, ClassEntry, CompletionItem,
-    Diagnostic, FileContents, FindHit, HoverInfo, IndexStats, JdkInfo, ProjectInfo, RenameEdit,
-    RenameFileEdits, RenamePreview, RunHandle, SpellHit, SpellStatus, TodoItem, TreeNode, UsageHit,
-    UsagesResult, WriteResult,
+    DeclarationTarget, Diagnostic, FileContents, FindHit, HoverInfo, IndexStats, JdkInfo,
+    ProjectInfo, RenameEdit, RenameFileEdits, RenamePreview, RunHandle, SpellHit, SpellStatus,
+    TodoItem, TreeNode, UsageHit, UsagesResult, WriteResult,
 };

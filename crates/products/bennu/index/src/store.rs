@@ -160,6 +160,7 @@ impl BlobWriter {
 /// The mmap'd blob. Validates the format header on open (rebuild-on-mismatch), then
 /// slices records zero-copy by offset. The caller accesses the rkyv payload via
 /// `rkyv::access::<Archived…>` with `bytecheck` (see the `query` module).
+#[derive(Debug)]
 pub struct BlobReader {
     mmap: Mmap,
 }

@@ -18,7 +18,7 @@
   import { setDiagnostics as cmSetDiagnostics, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
   import { openSearchPanel } from '@codemirror/search';
 
-  import type { LanguageDescriptor, EditorDiagnostic } from './types';
+  import type { LanguageDescriptor, EditorDiagnostic, EditorViewSnapshot } from './types';
   import { createCodeEditorExtensions, refTextAt } from './extensions';
   import { makeByteToU16 } from './highlight';
 
@@ -27,8 +27,11 @@
     language,
     readOnly = false,
     diagnostics = [],
+    rulerColumn,
+    initialState,
     oninput,
     oncaret,
+    onViewState,
     onfocus,
     onGoto,
   }: {
@@ -37,18 +40,35 @@
     readOnly?: boolean;
     /** Diagnostics in UTF-8 byte offsets — mapped to CM lint spans against the buffer. */
     diagnostics?: EditorDiagnostic[];
+    /** Draw a vertical margin guide at this 1-based column (IntelliJ-style). Omit for none. */
+    rulerColumn?: number;
+    /** Cursor + scroll to restore at mount (e.g. the tab's last-known position). */
+    initialState?: EditorViewSnapshot;
     oninput?: (text: string) => void;
     /** Live caret position (1-based line/col) — drives a host footer Ln/Col. */
     oncaret?: (line: number, col: number) => void;
+    /** Cursor + scroll changed — the host can persist it for a later {@link initialState}. */
+    onViewState?: (s: EditorViewSnapshot) => void;
     onfocus?: () => void;
-    /** Ctrl/Cmd+Click on an identifier the descriptor didn't resolve locally. */
-    onGoto?: (word: string, view: EditorView) => void;
+    /** Ctrl/Cmd+Click on an identifier the descriptor didn't resolve locally — the word
+     *  plus the clicked position as a UTF-8 byte offset (for a BE go-to-declaration). */
+    onGoto?: (word: string, view: EditorView, byteOffset: number) => void;
   } = $props();
 
   let hostEl: HTMLDivElement | undefined = $state();
   let view: EditorView | undefined;
   let suppressEmit = false;
   let lastEmitted: string | null = null;
+  // Scroll-listener teardown (emits `onViewState` so the host can persist scroll too).
+  let detachScroll: (() => void) | null = null;
+  let scrollRaf = 0;
+
+  /** Report the current cursor + scroll to the host (for per-tab restore). */
+  function emitViewState() {
+    if (!view || !onViewState) return;
+    const sel = view.state.selection.main;
+    onViewState({ anchor: sel.anchor, head: sel.head, scrollTop: view.scrollDOM.scrollTop });
+  }
 
   // ── Byte-span diagnostics → CM lint markers ───────────────────────────────────
   function toCmDiagnostics(errors: EditorDiagnostic[], src: string): CmDiagnostic[] {
@@ -75,7 +95,7 @@
   $effect(() => { void diagnostics; pushDiagnostics(); });
 
   function mount(target: HTMLDivElement) {
-    const { extensions } = createCodeEditorExtensions(language, { readOnly, onGoto });
+    const { extensions } = createCodeEditorExtensions(language, { readOnly, onGoto, rulerColumn });
 
     const updateListener = EditorView.updateListener.of((u) => {
       if (u.docChanged && !suppressEmit) {
@@ -84,10 +104,13 @@
         oninput?.(text);
       }
       if (u.focusChanged && u.view.hasFocus) onfocus?.();
-      if (oncaret && (u.selectionSet || u.docChanged)) {
-        const head = u.state.selection.main.head;
-        const line = u.state.doc.lineAt(head);
-        oncaret(line.number, head - line.from + 1);
+      if (u.selectionSet || u.docChanged) {
+        if (oncaret) {
+          const head = u.state.selection.main.head;
+          const line = u.state.doc.lineAt(head);
+          oncaret(line.number, head - line.from + 1);
+        }
+        emitViewState();
       }
     });
 
@@ -97,10 +120,34 @@
     });
     view = new EditorView({ state, parent: target });
     pushDiagnostics();
+
+    // Restore the host-provided cursor + scroll (per-tab position). The scroll is set
+    // after a frame so the layout the offset refers to exists.
+    if (initialState) {
+      const len = view.state.doc.length;
+      const anchor = Math.min(Math.max(0, initialState.anchor), len);
+      const head = Math.min(Math.max(0, initialState.head), len);
+      view.dispatch({ selection: { anchor, head } });
+      const top = initialState.scrollTop;
+      requestAnimationFrame(() => { if (view) view.scrollDOM.scrollTop = top; });
+    }
+
+    // Persist scroll changes too (selection changes come through the update listener).
+    const onScroll = () => {
+      if (scrollRaf) return;
+      scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; emitViewState(); });
+    };
+    view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
+    detachScroll = () => view?.scrollDOM.removeEventListener('scroll', onScroll);
   }
 
   $effect(() => { if (hostEl && !view) mount(hostEl); });
-  onDestroy(() => { view?.destroy(); view = undefined; });
+  onDestroy(() => {
+    if (scrollRaf) cancelAnimationFrame(scrollRaf);
+    detachScroll?.();
+    view?.destroy();
+    view = undefined;
+  });
 
   // ── value (controlled) → editor ───────────────────────────────────────────────
   $effect(() => {

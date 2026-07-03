@@ -18,6 +18,7 @@
 import {
   EditorView, lineNumbers, keymap, hoverTooltip,
   highlightActiveLine, highlightActiveLineGutter, drawSelection,
+  ViewPlugin, type PluginValue, type ViewUpdate,
 } from '@codemirror/view';
 import { EditorState, type Extension, type Text } from '@codemirror/state';
 import { history, defaultKeymap, historyKeymap, indentWithTab, deleteLine } from '@codemirror/commands';
@@ -31,17 +32,67 @@ import { createHighlightPlugin } from './highlight';
 import { createFoldingExtension } from './folding';
 import { codeEditorTheme, codeEditorHighlightStyle } from './theme';
 
-/** The search keymap minus its open binding: the host owns `Ctrl+F` so it can route
- *  it to the editor (when the pane is focused) or elsewhere, and calls `openSearch()`
- *  imperatively. The in-panel navigation stays so search is keyboard-complete. */
-const searchKeymapNoOpen = searchKeymap.filter((b) => b.key !== 'Mod-f');
+/** The search keymap minus the bindings the host owns. The host routes `Ctrl+F` to the
+ *  focused editor via `openSearch()` (so it removes `Mod-f`), and owns `Ctrl+G` as a
+ *  Go-to-line overlay — leaving CM's `Mod-g` (find-next) / `Mod-Alt-g` (goto-line) bound
+ *  here would make Ctrl+G *also* pop the search panel and fight the overlay for focus.
+ *  In-panel navigation (F3 next/prev, Enter, Esc close, replace) stays, so search is
+ *  fully keyboard-driven once opened. */
+const HOST_OWNED_SEARCH_KEYS = new Set(['Mod-f', 'Mod-g', 'Mod-Alt-g']);
+const searchKeymapNoOpen = searchKeymap.filter((b) => !b.key || !HOST_OWNED_SEARCH_KEYS.has(b.key));
+
+/** A vertical margin guide (IntelliJ's "hard-wrap" ruler) at `column`. Rendered as a
+ *  1px line inside the scroller so it scrolls with the content on both axes and paints
+ *  above the active-line background. `column` is measured in default-font characters
+ *  from the first glyph (the line-number gutter is excluded). */
+export function editorRuler(column: number) {
+  return ViewPlugin.fromClass(
+    class implements PluginValue {
+      readonly el: HTMLElement;
+      constructor(view: EditorView) {
+        this.el = document.createElement('div');
+        this.el.className = 'cm-ruler';
+        view.scrollDOM.appendChild(this.el);
+        this.reposition(view);
+      }
+      update(u: ViewUpdate) {
+        // Gutter width (doc length crossing 10/100/…), font metrics, resize, and the
+        // content height (which our explicit height tracks so the line spans the whole
+        // scrolled document).
+        if (u.docChanged || u.geometryChanged || u.viewportChanged) this.reposition(u.view);
+      }
+      reposition(view: EditorView) {
+        // Batched read→write so we never force a synchronous reflow mid-update. The
+        // content sits right of the gutter; `.cm-line` adds a 12px left pad (theme). The
+        // height is the full document height so the guide scrolls with the content
+        // instead of sticking to the visible box.
+        view.requestMeasure({
+          read: (v) => ({
+            left: v.contentDOM.offsetLeft + 12 + v.defaultCharacterWidth * column,
+            height: v.contentHeight,
+          }),
+          write: ({ left, height }) => {
+            this.el.style.left = `${left}px`;
+            this.el.style.height = `${height}px`;
+          },
+        });
+      }
+      destroy() { this.el.remove(); }
+    },
+  );
+}
 
 export interface CodeEditorExtensionsOptions {
   readOnly?: boolean;
+  /** Draw a vertical margin guide at this 1-based character column (IntelliJ-style).
+   *  Omitted / ≤ 0 → no ruler. */
+  rulerColumn?: number;
   /** Ctrl/Cmd+Click on an identifier — the host resolves + jumps (go-to-decl). The
    *  descriptor's `resolveGoto` (when present) is tried first for a local jump; when
-   *  it returns null (or is absent), the bare word is handed to `onGoto`. */
-  onGoto?: (word: string, view: EditorView) => void;
+   *  it returns null (or is absent), the bare word is handed to `onGoto`, along with the
+   *  clicked position as a **UTF-8 byte offset** so the host can classify it (a BE
+   *  go-to-declaration needs the offset, not just the name). */
+  onGoto?: (word: string, view: EditorView, byteOffset: number) => void;
   /** Language-intelligence hook bag (reserved; opaque to the core today). */
   intel?: unknown;
 }
@@ -84,6 +135,9 @@ export function createCodeEditorExtensions(
     lintGutter(),
   ];
 
+  // Optional vertical margin guide (host opt-in via `rulerColumn`).
+  if (opts.rulerColumn && opts.rulerColumn > 0) exts.push(editorRuler(opts.rulerColumn));
+
   // Language intelligence (autocomplete) — only when the descriptor supplies a
   // completion source and the editor is editable. Added before the base keymap
   // so its completion keymap (Enter / ↑↓ / Esc while the popup is open) wins.
@@ -120,6 +174,8 @@ export function createCodeEditorExtensions(
         if (!(event.ctrlKey || event.metaKey)) return false;
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
         if (pos == null) return false;
+        // The clicked position as a UTF-8 byte offset (what a BE classifier wants).
+        const byteOffset = new TextEncoder().encode(view.state.doc.sliceString(0, pos)).length;
         // Tree-driven paths (local jump + identifier) need the live tree; the
         // string/path fallback below works on line text, so it stays available
         // even before the grammar wasm has loaded.
@@ -142,7 +198,7 @@ export function createCodeEditorExtensions(
           const word = identifierTextAt(tree, pos);
           if (word) {
             event.preventDefault();
-            onGoto(word, view);
+            onGoto(word, view, byteOffset);
             return true;
           }
         }
@@ -152,7 +208,7 @@ export function createCodeEditorExtensions(
         const ref = refTextAt(view.state.doc, pos);
         if (ref) {
           event.preventDefault();
-          onGoto(ref, view);
+          onGoto(ref, view, byteOffset);
           return true;
         }
         return false;

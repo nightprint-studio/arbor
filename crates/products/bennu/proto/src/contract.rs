@@ -254,6 +254,31 @@ pub struct UsagesResult {
     pub usages: Vec<UsageHit>,
 }
 
+// ── go-to-declaration (Ctrl+Click / Ctrl+B) ──────────────────────────────────
+
+/// Result of `bennu_declaration` — the declaration site the symbol under the caret resolves
+/// to (methods / fields / locals / classes), for the FE's go-to-declaration. `None` on the
+/// wire (a bare object absent) when no project owns the file, the index is still building,
+/// the caret isn't on a resolvable symbol, or the declaration lives in a JDK / dep-jar (no
+/// project source to open).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclarationTarget {
+    /// Absolute path (forward slashes) of the file declaring the symbol — reported the same
+    /// way [`UsageHit::file`] is (the FE keys files by forward-slash paths).
+    pub file: String,
+    /// Start byte offset of the declaration NAME token in `file`.
+    pub start: usize,
+    /// End byte offset (exclusive).
+    pub end: usize,
+    /// 1-based line of the declaration name in `file`.
+    pub line: u32,
+    /// 1-based column of the declaration name in `file`.
+    pub col: u32,
+    /// A short human label of the target (`"method com.x.Foo.bar()"`, `"field count"`,
+    /// `"class com.x.Order"`, `"local `x`"`).
+    pub label: String,
+}
+
 // ── hover (editor hover card) ────────────────────────────────────────────────
 
 /// Result of `bennu_hover` — the hover card for the symbol under the caret. `None` on the

@@ -37,6 +37,8 @@ export interface BennuSettingsSnapshot {
   showWhitespace: boolean;
   highlightCurrentLine: boolean;
   showLineNumbers: boolean;
+  /** Vertical margin guide column (IntelliJ's hard-wrap ruler). 0 = hidden. */
+  rightMargin: number;
   // Completion
   autoPopup: boolean;
   popupDelayMs: number;
@@ -67,6 +69,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   showWhitespace: false,
   highlightCurrentLine: true,
   showLineNumbers: true,
+  rightMargin: 120,
   autoPopup: true,
   popupDelayMs: 150,
   caseSensitive: false,
@@ -92,6 +95,7 @@ function createSettingsStore() {
   let showWhitespace = $state(DEFAULTS.showWhitespace);
   let highlightCurrentLine = $state(DEFAULTS.highlightCurrentLine);
   let showLineNumbers = $state(DEFAULTS.showLineNumbers);
+  let rightMargin = $state(DEFAULTS.rightMargin);
   // Completion
   let autoPopup = $state(DEFAULTS.autoPopup);
   let popupDelayMs = $state(DEFAULTS.popupDelayMs);
@@ -115,7 +119,7 @@ function createSettingsStore() {
   function snapshot(): BennuSettingsSnapshot {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
-      highlightCurrentLine, showLineNumbers,
+      highlightCurrentLine, showLineNumbers, rightMargin,
       autoPopup, popupDelayMs, caseSensitive, autoImport,
       foldingEnabled, foldBlockComments,
       finalParams, useLombokVal, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
@@ -154,6 +158,8 @@ function createSettingsStore() {
     setHighlightCurrentLine(v: boolean) { highlightCurrentLine = v; persist(); },
     get showLineNumbers() { return showLineNumbers; },
     setShowLineNumbers(v: boolean) { showLineNumbers = v; persist(); },
+    get rightMargin() { return rightMargin; },
+    setRightMargin(v: number) { rightMargin = v; persist(); },
 
     // ── Completion ────────────────────────────────────────────────────────
     get autoPopup() { return autoPopup; },
@@ -205,6 +211,7 @@ function createSettingsStore() {
       showWhitespace = DEFAULTS.showWhitespace;
       highlightCurrentLine = DEFAULTS.highlightCurrentLine;
       showLineNumbers = DEFAULTS.showLineNumbers;
+      rightMargin = DEFAULTS.rightMargin;
       autoPopup = DEFAULTS.autoPopup;
       popupDelayMs = DEFAULTS.popupDelayMs;
       caseSensitive = DEFAULTS.caseSensitive;

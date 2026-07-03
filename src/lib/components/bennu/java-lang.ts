@@ -248,6 +248,41 @@ function kindToType(kind: string): string {
 
 let completionSeq = 0;
 
+// Java keyword/primitive/constant labels offered as completion fallback (identifier-
+// shaped only — `non-sealed` & co. are dropped). Built once.
+const KEYWORD_COMPLETION_LABELS: string[] = [...new Set([...KEYWORDS, ...PRIMITIVES, ...CONSTANTS])]
+  .filter((k) => /^[A-Za-z][A-Za-z0-9_$]*$/.test(k))
+  .sort();
+
+const BUFFER_WORD_RE = /[A-Za-z_$][A-Za-z0-9_$]{2,}/g;
+const MAX_FALLBACK = 400;
+
+/** Enrich `out` with Java keywords + identifiers already present in the buffer that
+ *  match `prefix` — the FE fallback so completion is useful even when the BE (member-
+ *  access only, for now) returns nothing. Dedupes against `seen` (the BE labels). */
+function appendFallbackCompletions(
+  ctx: CompletionContext, prefix: string, seen: Set<string>, out: Completion[],
+): void {
+  const pl = prefix.toLowerCase();
+  for (const k of KEYWORD_COMPLETION_LABELS) {
+    if (seen.has(k) || (pl && !k.startsWith(pl))) continue;
+    seen.add(k);
+    out.push({ label: k, type: 'keyword' });
+  }
+  const src = ctx.state.doc.toString();
+  BUFFER_WORD_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  let scanned = 0;
+  while ((m = BUFFER_WORD_RE.exec(src)) !== null) {
+    if (++scanned > 20000 || out.length >= MAX_FALLBACK) break;
+    const w = m[0];
+    if (seen.has(w) || w.toLowerCase() === pl) continue;
+    if (pl && !w.toLowerCase().startsWith(pl)) continue;
+    seen.add(w);
+    out.push({ label: w, type: 'variable' });
+  }
+}
+
 const javaCompletionSource: CompletionSource = async (
   ctx: CompletionContext,
 ): Promise<CompletionResult | null> => {
@@ -277,17 +312,25 @@ const javaCompletionSource: CompletionSource = async (
   try {
     items = await ipcCompletion(path, byteOffset);
   } catch {
-    return null; // BE absent / not indexed yet — no completions, no crash.
+    items = []; // BE absent / not indexed yet — fall back to keywords + buffer words.
   }
   if (seq !== completionSeq) return null; // superseded by a newer keystroke
-  if (!items || items.length === 0) return null;
 
-  const options: Completion[] = items.map((it) => ({
+  const options: Completion[] = (items ?? []).map((it) => ({
     label: it.label,
     detail: it.detail,
     type: kindToType(it.kind),
   }));
 
+  // After a `.` only the BE's member list makes sense; elsewhere (identifier typing or
+  // explicit Ctrl+Space) enrich with Java keywords + buffer identifiers so completion
+  // is useful even while the BE member-access index is cold or the caret isn't after a
+  // dot.
+  if (!dotTrigger) {
+    appendFallbackCompletions(ctx, word ? word.text : '', new Set(options.map((o) => o.label)), options);
+  }
+
+  if (options.length === 0) return null;
   return { from, options, validFor: /^[\w$]*$/ };
 };
 

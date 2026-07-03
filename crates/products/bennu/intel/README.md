@@ -64,6 +64,13 @@ Two impl slots:
   - `classify_caret(...)` → the `DeclKey` a caret references (declaration site or use
     site). `classify_target(...)` is the rename superset that also recognises a **local
     variable / parameter** (`RenameTarget::Local`), which find-usages doesn't bucket.
+- **go-to-declaration** (Ctrl+Click / Ctrl+B) — `resolve_declaration(...)` (and
+  `RenameEngine::declaration(file, source, offset)`) reuse the same caret classifier +
+  decl-site name-span finders (`find_member_name_span` / `find_type_name_span`) to return a
+  `DeclarationLocation` (owning project file + declaration NAME span + 1-based line/col +
+  label). A local/param resolves to its declarator in the current buffer; a method/field to
+  its name token on the owner type; a class/interface/enum to its type-declaration name.
+  A JDK / dep-jar declaration (no project source) yields `None` — nothing to open.
 - **`rename`** — best-effort, preview-first rename planning (docs §5 #10-12):
   - `RenameEngine::for_project(index_dir, jdk, simple_names, java_sources, xml_sources)`
     opens the persisted index, builds the resolver + the reference index, and caches the

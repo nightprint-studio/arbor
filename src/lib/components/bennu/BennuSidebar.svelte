@@ -18,6 +18,7 @@
     ChevronsDownUp, ChevronsUpDown, MoreVertical,
     Copy, LocateFixed, ChevronDown, ChevronRight,
   } from 'lucide-svelte';
+  import { tick } from 'svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import Tree from '$lib/components/shared/ui/Tree.svelte';
   import type { RowSnippetCtx } from '$lib/components/shared/ui/Tree.svelte';
@@ -35,7 +36,9 @@
 
   let pickerOpen = $state(false);
   let filter = $state('');
-  let treeBodyEl = $state<HTMLDivElement | null>(null);
+  // The Tree instance — for its imperative `scrollToId` (the tree is virtualized, so a
+  // DOM `scrollIntoView` on the selected row can't work when it's off-screen).
+  let treeRef = $state<{ scrollToId: (id: string, block?: 'center' | 'nearest') => void } | null>(null);
 
   // The store's tree root is a single dir node; render its children as the top level
   // so the project folder itself isn't an extra nesting level.
@@ -84,34 +87,31 @@
     return out;
   }
 
-  function revealActive() {
+  /** Select-opened-file: expand the active file's ancestor folders, then scroll its
+   *  row into view. `await tick()` lets the newly-expanded rows land in the Tree's
+   *  flat list before `scrollToId` computes the row index. */
+  async function revealActive() {
     const path = projectStore.activeFilePath;
     if (!path) return;
     bennuUiStore.expandTreeIds(ancestorsOf(path));
-    scrollToActive();
-  }
-
-  function scrollToActive() {
-    queueMicrotask(() => {
-      const row = treeBodyEl?.querySelector<HTMLElement>('.tree-row-selected');
-      row?.scrollIntoView({ block: 'center' });
-    });
+    await tick();
+    treeRef?.scrollToId(path);
   }
 
   // The toolbar's Select-opened-file + the palette both bump this relay.
   let lastReveal = 0;
   $effect(() => {
     const n = bennuUiStore.revealNonce;
-    if (n !== lastReveal) { lastReveal = n; revealActive(); }
+    if (n !== lastReveal) { lastReveal = n; void revealActive(); }
   });
 
-  /** Reveal a file in the tree: open it (so it becomes the selected row), expand
-   *  its ancestor folders, and scroll the selected row into view. Reuses the same
-   *  selected-row scroll the toolbar's Select-opened-file uses. */
-  function revealPath(path: string) {
-    void projectStore.openFile(path);
+  /** Reveal a file in the tree: open it (so it becomes the selected row), expand its
+   *  ancestor folders, and scroll the selected row into view. */
+  async function revealPath(path: string) {
+    await projectStore.openFile(path);
     bennuUiStore.expandTreeIds(ancestorsOf(path));
-    scrollToActive();
+    await tick();
+    treeRef?.scrollToId(path);
   }
 
   // ── Right-click context menu (read-only; FS mutations are a later wave) ──────
@@ -153,7 +153,7 @@
         case 'open':      void projectStore.openFile(node.path); break;
         case 'copy-path': copyText(node.path); break;
         case 'copy-rel':  copyText(relativePath(node.path)); break;
-        case 'reveal':    revealPath(node.path); break;
+        case 'reveal':    void revealPath(node.path); break;
         case 'expand':    bennuUiStore.setExpanded(node.path, true); break;
         case 'collapse':  bennuUiStore.setExpanded(node.path, false); break;
       }
@@ -202,8 +202,9 @@
   {/if}
 
   {#if projectStore.project}
-    <div class="bs-tree" bind:this={treeBodyEl}>
+    <div class="bs-tree">
       <Tree
+        bind:this={treeRef}
         nodes={rootChildren}
         getId={(n) => n.path}
         getChildren={(n) => (n.is_dir ? n.children : undefined)}

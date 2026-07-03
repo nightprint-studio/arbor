@@ -12,21 +12,43 @@
 //!   2. the JDK member index (rt.jar / jimage) — immutable, resolved live.
 
 use std::collections::HashMap;
+use std::sync::RwLock;
 
 use bennu_classpath::prelude::MemberIndex as CpMemberIndex;
-use bennu_index::prelude::PersistedIndex;
+use bennu_index::prelude::{PersistedIndex, Symbol};
 use bennu_java::prelude::{
     ClassMembers as JClassMembers, Import, Member as JMember, MemberKind as JMemberKind,
     TypeRef as JTypeRef, TypeResolver, Visibility as JVisibility,
 };
 
-/// A [`TypeResolver`] composing the persisted project index and a JDK `MemberIndex`.
+/// A [`TypeResolver`] composing the persisted project index and a JDK `MemberIndex`,
+/// with an **in-memory overlay** for files edited since the last full build. The overlay
+/// is consulted before the persisted mmap so a keystroke's fresh members are visible to
+/// completion without re-persisting the (memory-mapped) index files.
 pub struct IndexResolver<M: CpMemberIndex> {
     project: PersistedIndex,
     jdk: M,
     /// Simple-name → binary-name hints (the project's own types + common JDK names),
     /// so `resolve_simple_name` works even without an explicit import.
     simple_hints: HashMap<String, String>,
+    /// The in-memory patch overlay for files edited since the last full build
+    /// (interior-mutable so a patch mutates the live, `Arc`-shared provider in place).
+    overlay: RwLock<Overlay>,
+}
+
+/// The edited-file overlay: a binary→members-JSON lookup for the resolver, plus a
+/// simple→binary hint map, plus a per-file record of what each file contributed (so a
+/// re-patch of the same file drops that file's stale entries — rename/remove correctness).
+#[derive(Default)]
+struct Overlay {
+    /// binary-name → resolved members JSON. `Some` overrides the persisted record; an
+    /// absent key falls through to the mmap.
+    members: HashMap<String, String>,
+    /// simple-name → binary-name for edited-file types (a renamed/added type).
+    simple: HashMap<String, String>,
+    /// file key → the (binary, simple) names that file currently contributes, so the next
+    /// patch of the same file drops exactly its prior overlay entries.
+    by_file: HashMap<String, Vec<(String, String)>>,
 }
 
 impl<M: CpMemberIndex> IndexResolver<M> {
@@ -36,7 +58,7 @@ impl<M: CpMemberIndex> IndexResolver<M> {
         for (s, b) in COMMON_SIMPLE {
             simple_hints.insert((*s).to_string(), (*b).to_string());
         }
-        Self { project, jdk, simple_hints }
+        Self { project, jdk, simple_hints, overlay: RwLock::new(Overlay::default()) }
     }
 
     /// Seed a simple→binary hint (e.g. the project's own declared types).
@@ -48,10 +70,59 @@ impl<M: CpMemberIndex> IndexResolver<M> {
     pub fn project(&self) -> &PersistedIndex {
         &self.project
     }
+
+    /// Apply one edited `file`'s freshly-extracted [`Symbol`] records to the in-memory
+    /// overlay — **no disk write**. The overlay shadows the persisted mmap so completion
+    /// on the edited file reflects the edit immediately, while the (memory-mapped)
+    /// `symbols.blob` / `names.fst` are left untouched until the next full build (which
+    /// swaps in a brand-new provider and clears the overlay).
+    ///
+    /// The file's PRIOR overlay entries (tracked internally, keyed by `file`) are dropped
+    /// first, so a renamed/removed type doesn't leave a stale entry. An empty `records`
+    /// (a deleted / cleared file) just drops the file's prior overlay.
+    pub fn apply_file_patch(&self, file: &str, records: &[Symbol]) {
+        let mut ov = self.overlay.write().unwrap_or_else(|p| p.into_inner());
+        // Drop this file's previous contributions (rename/remove correctness).
+        if let Some(prev) = ov.by_file.remove(file) {
+            for (binary, simple) in prev {
+                ov.members.remove(&binary);
+                // Only clear the simple hint if it still points at this file's type.
+                if ov.simple.get(&simple).map(String::as_str) == Some(binary.as_str()) {
+                    ov.simple.remove(&simple);
+                }
+            }
+        }
+        // Add the fresh type records (only Class symbols carry members_json).
+        let mut contributed = Vec::new();
+        for sym in records {
+            if sym.members_json.is_empty() {
+                continue;
+            }
+            ov.members.insert(sym.fqn.clone(), sym.members_json.clone());
+            if !sym.simple_name.is_empty() {
+                ov.simple.insert(sym.simple_name.clone(), sym.fqn.clone());
+            }
+            contributed.push((sym.fqn.clone(), sym.simple_name.clone()));
+        }
+        if !contributed.is_empty() {
+            ov.by_file.insert(file.to_string(), contributed);
+        }
+    }
 }
 
 impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
     fn members_of(&self, binary_name: &str) -> Option<JClassMembers> {
+        // 0) in-memory overlay for a file edited since the last full build — wins over
+        //    the persisted mmap so a keystroke's fresh members are visible without a
+        //    re-persist of the memory-mapped index files.
+        {
+            let ov = self.overlay.read().unwrap_or_else(|p| p.into_inner());
+            if let Some(json) = ov.members.get(binary_name) {
+                if let Ok(cm) = serde_json::from_str::<JClassMembers>(json) {
+                    return Some(cm);
+                }
+            }
+        }
         // 1) project source type — its resolved members are baked into the record.
         if let Some(sym) = self.project.get(binary_name) {
             if !sym.members_json.is_empty() {
@@ -70,6 +141,13 @@ impl<M: CpMemberIndex> TypeResolver for IndexResolver<M> {
         for imp in imports {
             if imp.simple_name() == Some(name) {
                 return Some(imp.path.replace('.', "/"));
+            }
+        }
+        // An edited file's own (possibly renamed/added) type overrides the stale mmap.
+        {
+            let ov = self.overlay.read().unwrap_or_else(|p| p.into_inner());
+            if let Some(binary) = ov.simple.get(name) {
+                return Some(binary.clone());
             }
         }
         // Then a project type of that simple name, then the common-JDK table.
@@ -139,3 +217,129 @@ const COMMON_SIMPLE: &[(&str, &str)] = &[
     ("Iterator", "java/util/Iterator"),
     ("Optional", "java/util/Optional"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bennu_classpath::prelude::ClassMembers as CpClassMembers;
+    use bennu_index::prelude::{IndexBuilder, IndexRecord, Source, SymbolKind};
+    use std::path::PathBuf;
+
+    /// A JDK stub that resolves nothing — the overlay/persisted-index precedence under
+    /// test never needs the JDK fall-through, so this keeps the test free of a live JDK.
+    struct NoJdk;
+    impl CpMemberIndex for NoJdk {
+        fn members_of(&self, _binary_name: &str) -> Option<CpClassMembers> {
+            None
+        }
+    }
+
+    /// A class `Symbol` carrying a members-JSON, reachable under its binary name.
+    fn class_symbol(simple: &str, binary: &str, members_json: &str) -> Symbol {
+        Symbol {
+            id: 0,
+            kind: SymbolKind::Class,
+            simple_name: simple.to_string(),
+            fqn: binary.to_string(),
+            owner_id: u32::MAX,
+            source: Source::ProjectSource,
+            signature: format!("class {simple}"),
+            modifiers: String::new(),
+            loc_file: format!("{simple}.java"),
+            loc_start: 0,
+            loc_end: 0,
+            loc_container: String::new(),
+            loc_class: String::new(),
+            members_json: members_json.to_string(),
+        }
+    }
+
+    /// A members-JSON blob with a single field of the given name, so `members_of` returns
+    /// a distinguishable `ClassMembers`.
+    fn members_json_with_field(field: &str) -> String {
+        serde_json::to_string(&JClassMembers {
+            superclass: None,
+            interfaces: Vec::new(),
+            methods: Vec::new(),
+            fields: vec![JMember {
+                name: field.to_string(),
+                kind: JMemberKind::Field,
+                return_type: JTypeRef { binary_name: "int".into(), type_args: Vec::new() },
+                params: Vec::new(),
+                is_static: false,
+                visibility: JVisibility::Public,
+                raw_signature: format!("int {field}"),
+            }],
+        })
+        .unwrap()
+    }
+
+    /// Build a persisted index with one class type, then a resolver over it + `NoJdk`.
+    fn resolver_with(binary: &str, simple: &str, members_json: &str) -> IndexResolver<NoJdk> {
+        let dir = std::env::temp_dir().join(format!(
+            "bennu-overlay-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut b = IndexBuilder::new(&dir);
+        b.set_file(
+            PathBuf::from("Order.java"),
+            vec![IndexRecord::new(class_symbol(simple, binary, members_json), simple.to_string())
+                .with_key(binary.to_string())],
+        );
+        b.persist().unwrap();
+        let project = PersistedIndex::open(b.blob_path(), b.fst_path()).unwrap();
+        IndexResolver::new(project, NoJdk)
+    }
+
+    #[test]
+    fn overlay_shadows_persisted_members() {
+        // Persisted index says `com/acme/Order` has field `oldField`.
+        let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("oldField"));
+        let before = r.members_of("com/acme/Order").expect("persisted members");
+        assert_eq!(before.fields[0].name, "oldField");
+
+        // A keystroke adds `newField` to Order (a new members-JSON) via the overlay.
+        let patched = class_symbol("Order", "com/acme/Order", &members_json_with_field("newField"));
+        r.apply_file_patch("src/Order.java", &[patched]);
+        let after = r.members_of("com/acme/Order").expect("overlay members");
+        assert_eq!(after.fields[0].name, "newField", "overlay wins over the mmap");
+    }
+
+    #[test]
+    fn overlay_rename_drops_stale_entry() {
+        let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("f"));
+        // First patch registers Order under the file.
+        r.apply_file_patch(
+            "src/Order.java",
+            &[class_symbol("Order", "com/acme/Order", &members_json_with_field("f"))],
+        );
+        assert!(r.members_of("com/acme/Order").is_some());
+        // Second patch of the SAME file renames the type to Invoice → Order's overlay
+        // entry must be dropped (it now falls back to the persisted record, still present),
+        // and the new binary resolves from the overlay.
+        r.apply_file_patch(
+            "src/Order.java",
+            &[class_symbol("Invoice", "com/acme/Invoice", &members_json_with_field("g"))],
+        );
+        // Invoice resolves via overlay simple-name hint.
+        assert_eq!(r.resolve_simple_name("Invoice", &[]).as_deref(), Some("com/acme/Invoice"));
+        let inv = r.members_of("com/acme/Invoice").expect("renamed type in overlay");
+        assert_eq!(inv.fields[0].name, "g");
+    }
+
+    #[test]
+    fn overlay_delete_clears_file_entries() {
+        let r = resolver_with("com/acme/Order", "Order", &members_json_with_field("f"));
+        r.apply_file_patch(
+            "src/Order.java",
+            &[class_symbol("Order2", "com/acme/Order2", &members_json_with_field("h"))],
+        );
+        assert!(r.members_of("com/acme/Order2").is_some());
+        // Delete (empty records) drops the file's overlay contributions.
+        r.apply_file_patch("src/Order.java", &[]);
+        assert!(r.members_of("com/acme/Order2").is_none(), "deleted file's overlay cleared");
+    }
+}

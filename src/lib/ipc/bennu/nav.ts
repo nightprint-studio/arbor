@@ -38,6 +38,37 @@ export function definition(file: string, action: string): Promise<DefinitionResu
   return bennu('bennu_definition', { args: { file, action } });
 }
 
+/** A resolved go-to-declaration target for a Java symbol under the caret — mirrors the
+ *  BE `DeclarationTarget`. Byte offsets of the declaration NAME token, plus a 1-based
+ *  line/col (computed BE-side so the FE just opens `file` and jumps to `line`). */
+export interface DeclarationTarget {
+  /** Absolute path (forward slashes) of the declaring `.java` file. */
+  file: string;
+  /** Start byte offset of the declaration name token. */
+  start: number;
+  /** End byte offset (exclusive). */
+  end: number;
+  /** 1-based line of the declaration. */
+  line: number;
+  /** 1-based column of the declaration name. */
+  col: number;
+  /** Human label of the target (`"method com.x.Foo.bar()"`, `"field count"`, …). */
+  label: string;
+}
+
+/** Resolve the Java symbol at `file`:`offset` (UTF-8 byte offset) to its declaration
+ *  site. `source` is the current (possibly-unsaved) buffer — the caret is classified
+ *  against it. Resolves to `null` gracefully when the caret isn't on a resolvable symbol,
+ *  the declaration lives in a JDK / dependency jar (no project source), or the index is
+ *  still building. Wire: `bennu_declaration` — `DeclarationArgs { file, source, offset }`. */
+export function declaration(
+  file: string,
+  source: string,
+  offset: number,
+): Promise<DeclarationTarget | null> {
+  return bennu('bennu_declaration', { args: { file, source, offset } });
+}
+
 /** Live-edit re-index: hand the BE the edited file's full text so it patches the
  *  persisted index (completion / definition then reflect the edit without reopening
  *  the project). `text === null` signals the file was deleted. Returns `true` when a

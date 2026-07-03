@@ -398,6 +398,31 @@
   );
   const visible  = $derived(flat.slice(startIdx, endIdx));
 
+  /** Scroll the row for `id` into view. Since the Tree is virtualized (an off-screen
+   *  row isn't in the DOM, so `scrollIntoView` on it is impossible), we compute the
+   *  row's position from its flat index × `rowHeight` and drive the scroll ancestor
+   *  directly. `id` must already be in the flat list (expand its ancestors first).
+   *  `center` puts it mid-viewport; `nearest` only scrolls if it's off-screen. */
+  export function scrollToId(id: string, block: 'center' | 'nearest' = 'center') {
+    if (!scrollParent) return;
+    const idx = flat.findIndex((r) => r.id === id);
+    if (idx < 0) return;
+    const rowTop = idx * rowHeight;
+    let target: number;
+    if (block === 'nearest') {
+      if (rowTop < viewportTop) target = rowTop;
+      else if (rowTop + rowHeight > viewportTop + viewportH) target = rowTop + rowHeight - viewportH;
+      else return; // already fully visible
+    } else {
+      target = rowTop - Math.max(0, viewportH - rowHeight) / 2;
+    }
+    // `viewportTop` moves 1:1 with the scroll ancestor's scrollTop (once past the
+    // Tree's own top), so this delta lands the row where we want it; the browser
+    // clamps at the ends.
+    (scrollParent as Element).scrollTop += target - viewportTop;
+    scheduleRecompute();
+  }
+
   // ── Click handlers ──────────────────────────────────────────────────
   function handleClick(node: T, hasKids: boolean, e: MouseEvent) {
     e.stopPropagation();

@@ -26,6 +26,7 @@ import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { json as jsonLang } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { javaLanguage } from './java-lang';
+import { jsp } from './jsp-mode';
 
 /** A CM-language descriptor: no tree-sitter parser, highlight from `cmExtension`. */
 function cmLang(id: string, ext: Extension): LanguageDescriptor {
@@ -45,6 +46,8 @@ function streamLang(id: string, parser: StreamParser<unknown>): LanguageDescript
 // Module-singleton descriptors (built once).
 const xmlLang = streamLang('xml', xml);
 const htmlLang = streamLang('html', html);
+// JSP/JSPF/tag files: the HTML mode plus JSP `<% … %>` scriptlet/comment handling.
+const jspLang = streamLang('jsp', jsp);
 const cssLang = streamLang('css', css);
 const scssLang = streamLang('scss', sCSS);
 const lessLang = streamLang('less', less);
@@ -72,7 +75,7 @@ export function languageForPath(path: string | null): LanguageDescriptor {
     case 'java': return javaLanguage;
     case 'xml': case 'xsd': case 'wsdl': case 'xsl': case 'xslt': case 'tld':
     case 'pom': case 'iml': case 'fxml': case 'svg': return xmlLang;
-    case 'jsp': case 'jspf': case 'tag': case 'tagx':
+    case 'jsp': case 'jspf': case 'tag': case 'tagx': return jspLang;
     case 'html': case 'htm': case 'xhtml': return htmlLang;
     case 'css': return cssLang;
     case 'scss': return scssLang;

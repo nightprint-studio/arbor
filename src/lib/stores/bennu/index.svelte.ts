@@ -41,6 +41,11 @@ function createBennuIndexStore() {
   let phase = $state<string | null>(null);
   let typeCount = $state(0);
   let currentRoot: string | null = null;
+  // Latched true once the current index cycle finishes (event `ready` or poll fallback).
+  // Guards against a late/duplicate non-`ready` progress event — or an in-flight poll
+  // response landing after `ready` — re-arming the spinner and sticking the footer on
+  // "Indexing". Cleared by the next `onProjectOpen` / `reset`.
+  let done = false;
 
   // Per-root class cache (Go-to-Class). Invalidated when the index rebuilds.
   const classCache = new SvelteMap<string, ClassEntry[]>();
@@ -74,14 +79,21 @@ function createBennuIndexStore() {
   }
 
   /** Mark the index ready (from a `ready` event or the poll): stop the spinner, close
-   *  the job, invalidate the class cache so Go-to fetches the fresh set. Idempotent. */
+   *  the job, invalidate the class cache so Go-to fetches the fresh set. Latches `done`
+   *  so late signals can't reopen it, and bumps `pollToken` so an in-flight poll can't
+   *  reschedule itself past the finish. Idempotent. */
   function markReady(root: string | null) {
-    if (!indexing && phase === null) return;
+    if (done) return;
+    done = true;
     indexing = false;
     phase = null;
+    pollToken += 1; // invalidate any in-flight poll response (it can't reschedule now)
     if (root) classCache.delete(root);
     finishJob(true);
     stopPoll();
+    // A `ready` event can land before any poll returned a count → grab the final type
+    // count once so the footer reads "Indexed · N". Best-effort, no token gate.
+    if (root) void ipcIndexStats(root).then((s) => { typeCount = s.types; }).catch(() => {});
   }
 
   function stopPoll() {
@@ -130,8 +142,10 @@ function createBennuIndexStore() {
       unlisten = await listen<{ root: string; phase: string; state: string }>(
         'arbor://bennu/index-progress',
         (e) => {
-          const { root, phase: ph, state } = e.payload;
+          const { root, phase: ph } = e.payload;
           if (ph === 'ready') { markReady(root); return; }
+          // A non-`ready` event after the cycle finished must not reopen the spinner.
+          if (done) return;
           indexing = true;
           phase = ph;
           operationsStore.update(OP_ID, { current: ph, activeDetail: phaseLabel(ph) });
@@ -146,6 +160,7 @@ function createBennuIndexStore() {
     onProjectOpen(root: string) {
       currentRoot = root;
       classCache.delete(root);
+      done = false;
       indexing = true;
       phase = 'project';
       typeCount = 0;
@@ -162,6 +177,7 @@ function createBennuIndexStore() {
     reset() {
       stopPoll();
       pollToken += 1;
+      done = false;
       indexing = false;
       phase = null;
       currentRoot = null;

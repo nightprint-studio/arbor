@@ -98,6 +98,26 @@ impl RenamePlan {
     }
 }
 
+/// A resolved go-to-declaration target: the declaration NAME span in the owning **project**
+/// file, plus 1-based line/col (computed from that file's source) and a human label. The be
+/// layer maps this onto the wire `DeclarationTarget` field-for-field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclarationLocation {
+    /// Absolute path (forward slashes) of the project file declaring the symbol.
+    pub file: String,
+    /// Start byte offset of the declaration NAME token in `file`.
+    pub start: usize,
+    /// End byte offset (exclusive).
+    pub end: usize,
+    /// 1-based line of the declaration name in `file`.
+    pub line: u32,
+    /// 1-based column of the declaration name in `file`.
+    pub col: u32,
+    /// A short human label of the target (`"method com.x.Foo.bar()"`, `"class com.x.Order"`,
+    /// `"local `x`"`) — the same style [`crate::refs::DeclKey::label`] uses.
+    pub label: String,
+}
+
 /// A source file available to the planner (path + text). The planner needs every project
 /// `.java` file (for `import` rewrites + local-scope walks) and every config `.xml` file
 /// (for Spring bean edits).
@@ -172,6 +192,83 @@ pub fn rename_plan(
 /// applies. Sorted per file already.
 pub fn rename_apply(plan: &RenamePlan) -> Vec<Edit> {
     plan.files.iter().flat_map(|f| f.edits.iter().cloned()).collect()
+}
+
+/// Resolve the caret at `file`:`offset` to its DECLARATION site (go-to-declaration). Runs
+/// the same caret classification find-usages / rename share, then returns the declaration
+/// NAME span + owning project file (+ 1-based line/col from the declaring file's source).
+/// The free-function core [`RenameEngine::declaration`] wraps — kept separate so it's
+/// testable with an in-memory resolver (no live JDK), like [`rename_plan`] / [`references`].
+///
+/// `None` when the caret isn't on a resolvable symbol, or the declaration lives in a JDK /
+/// dep-jar (no project source in `java_files` declares it → nothing to open).
+pub fn resolve_declaration(
+    index: &ReferenceIndex,
+    file: &str,
+    source: &str,
+    offset: usize,
+    resolver: &dyn TypeResolver,
+    project_types: &HashMap<String, String>,
+    java_files: &[PlanFile],
+) -> Option<DeclarationLocation> {
+    let target = classify_target(index, file, source, offset, resolver, project_types)?;
+    match target {
+        RenameTarget::Local { name, def_start, def_end } => {
+            // A local/param declaration is in the CURRENT buffer (scope-exact).
+            let (line, col) = line_col_1based(source, def_start);
+            Some(DeclarationLocation {
+                file: file.to_string(),
+                start: def_start,
+                end: def_end,
+                line,
+                col,
+                label: format!("local `{name}`"),
+            })
+        }
+        RenameTarget::Member { key } => {
+            // The declaration lives on the OWNER type. Scan project sources for its name
+            // span; no project source declaring it ⇒ a JDK/dep symbol ⇒ None.
+            let (decl_file, s, e) =
+                first_hit(java_files, |src| find_member_name_span(src, &key))?;
+            let decl_src = project_source(java_files, &decl_file)?;
+            let (line, col) = line_col_1based(decl_src, s);
+            Some(DeclarationLocation { file: decl_file, start: s, end: e, line, col, label: key.label() })
+        }
+        RenameTarget::Type { binary, .. } => {
+            let simple = simple_of(&binary);
+            let (decl_file, s, e) =
+                first_hit(java_files, |src| find_type_name_span(src, &simple))?;
+            let decl_src = project_source(java_files, &decl_file)?;
+            let (line, col) = line_col_1based(decl_src, s);
+            Some(DeclarationLocation {
+                file: decl_file,
+                start: s,
+                end: e,
+                line,
+                col,
+                label: format!("class {}", binary.replace('/', ".")),
+            })
+        }
+    }
+}
+
+/// Scan `java_files` for the first source whose `find` yields a span, returning
+/// `(file_path, start, end)`. `None` when no project source matches (a JDK / dep symbol).
+fn first_hit(
+    java_files: &[PlanFile],
+    find: impl Fn(&str) -> Option<(usize, usize)>,
+) -> Option<(String, usize, usize)> {
+    for f in java_files {
+        if let Some((s, e)) = find(&f.source) {
+            return Some((f.path.clone(), s, e));
+        }
+    }
+    None
+}
+
+/// The cached source text of a project java file by its (forward-slash) path.
+fn project_source<'a>(java_files: &'a [PlanFile], file: &str) -> Option<&'a str> {
+    java_files.iter().find(|f| f.path == file).map(|f| f.source.as_str())
 }
 
 // ── the cached rename engine (built once per project, on the index thread) ────────
@@ -259,6 +356,28 @@ impl RenameEngine {
     /// The reference index (for a find-usages query sharing the same build).
     pub fn index(&self) -> &ReferenceIndex {
         &self.index
+    }
+
+    /// Resolve the symbol at `file`:`offset` to its DECLARATION site (go-to-declaration).
+    /// Runs the same caret classification find-usages / rename share, then returns the
+    /// declaration NAME span + the owning **project** file (with 1-based line/col computed
+    /// from the declaring file's source). `source` is the current (possibly-unsaved) buffer.
+    ///
+    /// `None` (never an error) when the caret isn't on a resolvable symbol, or when the
+    /// declaration lives in a JDK / dep-jar (no project source declares it → nothing to
+    /// open). A **local variable / parameter** resolves to its declarator in the CURRENT
+    /// file (scope-exact); a **method / field** to its name token on the owner type's
+    /// declaration; a **class / interface / enum** to its type-declaration name token.
+    pub fn declaration(&self, file: &str, source: &str, offset: usize) -> Option<DeclarationLocation> {
+        resolve_declaration(
+            &self.index,
+            file,
+            source,
+            offset,
+            &self.resolver,
+            &self.project_types,
+            &self.java_files,
+        )
     }
 
     /// Find all usages of the symbol at `file`:`offset` (byte offset), for find-usages.
@@ -590,7 +709,7 @@ fn plan_member(
     let name = member_name(key);
     let mut edits = Vec::new();
 
-    if let Some((ds, de)) = find_member_decl(decl_source, key) {
+    if let Some((ds, de)) = find_member_name_span(decl_source, key) {
         edits.push(Edit {
             file: decl_file.to_string(),
             start: ds,
@@ -617,8 +736,11 @@ fn plan_member(
     edits
 }
 
-/// Find the byte span of a member declaration's NAME token in its source file.
-fn find_member_decl(source: &str, key: &DeclKey) -> Option<(usize, usize)> {
+/// Find the byte span of a member declaration's NAME token in `source`. Shared by rename
+/// (the declaration edit site) and go-to-declaration (the navigation target). `None` for a
+/// [`DeclKey::Type`] (use [`find_type_name_span`]) or when `source` doesn't declare the
+/// member.
+pub fn find_member_name_span(source: &str, key: &DeclKey) -> Option<(usize, usize)> {
     let (name, want_field) = match key {
         DeclKey::Method { name, .. } => (name, false),
         DeclKey::Field { name, .. } => (name, true),
@@ -652,6 +774,53 @@ fn find_member_decl(source: &str, key: &DeclKey) -> Option<(usize, usize)> {
         }
     }
     None
+}
+
+/// Find the byte span of a type declaration's NAME token in `source` (class / interface /
+/// enum matching `simple`). The go-to-declaration counterpart of [`find_member_name_span`]
+/// for a [`DeclKey::Type`]. `None` when `source` doesn't declare a type with that simple
+/// name. (A same-named type in another package could match; the caller scans the project's
+/// sources and the first hit wins — good enough for navigation, and the type-map keying in
+/// classification already narrowed the caret to this binary name.)
+pub fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)> {
+    let mut parser = Parser::new();
+    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
+    let tree = parser.parse(source, None)?;
+    let bytes = source.as_bytes();
+    let root = tree.root_node();
+
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        let mut cur = n.walk();
+        for c in n.named_children(&mut cur) {
+            stack.push(c);
+        }
+        if matches!(
+            n.kind(),
+            "class_declaration" | "interface_declaration" | "enum_declaration"
+        ) {
+            if let Some(nm) = n.child_by_field_name("name") {
+                if nm.utf8_text(bytes).ok() == Some(simple) {
+                    return Some((nm.start_byte(), nm.end_byte()));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 1-based `(line, col)` of byte `start` in `source`: line = 1 + count of `'\n'` before
+/// `start`; col = 1 + bytes since the last `'\n'` (or from the start of the file). Byte
+/// columns (not char columns) — the FE maps against the same byte buffer.
+fn line_col_1based(source: &str, start: usize) -> (u32, u32) {
+    let clamped = start.min(source.len());
+    let head = &source.as_bytes()[..clamped];
+    let line = 1 + head.iter().filter(|&&b| b == b'\n').count() as u32;
+    let col = match head.iter().rposition(|&b| b == b'\n') {
+        Some(i) => (clamped - (i + 1)) as u32 + 1,
+        None => clamped as u32 + 1,
+    };
+    (line, col)
 }
 
 // ── class / interface: decl + refs + imports + Spring bean XML ────────────────────
@@ -920,6 +1089,110 @@ mod tests {
             &java_files,
             &xml_files,
         )
+    }
+
+    fn decl(files: &[(&str, &str)], target_file: &str, offset: usize) -> Option<DeclarationLocation> {
+        let (resolver, project_types) = build_resolver(files);
+        let src: Vec<SourceFile> = files
+            .iter()
+            .map(|(p, s)| SourceFile { path: p.to_string(), source: s.to_string() })
+            .collect();
+        let index = build_reference_index(&src, &resolver, &project_types);
+        let java_files: Vec<PlanFile> =
+            files.iter().map(|(p, s)| PlanFile { path: p.to_string(), source: s.to_string() }).collect();
+        let source = files.iter().find(|(p, _)| *p == target_file).unwrap().1;
+        resolve_declaration(&index, target_file, source, offset, &resolver, &project_types, &java_files)
+    }
+
+    #[test]
+    fn declaration_method_from_call_resolves_to_decl_name() {
+        // A bare call inside the SAME class keys to its enclosing owner (p/A) — no receiver
+        // inference needed, so this exercises the member-decl path deterministically.
+        let src =
+            "package p; public class A { int compute() { return 1; } int caller() { return compute(); } }";
+        let files = [("A.java", src)];
+        let off = src.rfind("compute()").unwrap() + 2; // caret inside the CALL
+        let d = decl(&files, "A.java", off).expect("resolved");
+        assert_eq!(d.file, "A.java");
+        let decl_off = src.find("compute()").unwrap(); // the DECLARATION name
+        assert_eq!((d.start, d.end), (decl_off, decl_off + "compute".len()));
+        assert_eq!(d.label, "method p.A.compute()");
+    }
+
+    #[test]
+    fn declaration_field_from_decl_name() {
+        // Field with an initializer so the `variable_declarator` span exceeds the name span
+        // and the classifier lands on the name identifier (the bare `int x;` tie is an
+        // upstream classifier edge, not this feature's concern).
+        let src = "package p; public class A { int count = 0; int m() { return count; } }";
+        let files = [("A.java", src)];
+        let off = src.find("count").unwrap() + 2; // caret on the field DECL name
+        let d = decl(&files, "A.java", off).expect("resolved");
+        assert_eq!(d.file, "A.java");
+        let decl_off = src.find("count").unwrap();
+        assert_eq!((d.start, d.end), (decl_off, decl_off + "count".len()));
+        assert_eq!(d.label, "field p.A.count");
+    }
+
+    #[test]
+    fn declaration_local_var_is_current_file() {
+        let src = "package p; public class C { int f() { int x = 1; return x + x; } }";
+        let files = [("C.java", src)];
+        let off = src.rfind("x + x").unwrap() + 1; // caret on a USE of `x`
+        let d = decl(&files, "C.java", off).expect("resolved");
+        assert_eq!(d.file, "C.java");
+        let decl_off = src.find("x = 1").unwrap(); // the declarator name
+        assert_eq!((d.start, d.end), (decl_off, decl_off + 1));
+        assert_eq!(d.label, "local `x`");
+    }
+
+    #[test]
+    fn declaration_param_resolves_to_param_name() {
+        let src = "package p; public class C { int f(int y) { return y * 2; } }";
+        let files = [("C.java", src)];
+        let off = src.rfind("y * 2").unwrap() + 1;
+        let d = decl(&files, "C.java", off).expect("resolved");
+        let decl_off = src.find("int y)").unwrap() + "int ".len();
+        assert_eq!((d.start, d.end), (decl_off, decl_off + 1));
+        assert_eq!(d.label, "local `y`");
+    }
+
+    #[test]
+    fn declaration_type_from_cross_file_reference() {
+        let widget = ("Widget.java", "package com.acme; public class Widget { }");
+        let consumer = (
+            "Consumer.java",
+            "package com.app; import com.acme.Widget; public class Consumer { Widget w; }",
+        );
+        let files = [widget, consumer];
+        let src = consumer.1;
+        let off = src.rfind("Widget w").unwrap() + 1; // caret on the type USE
+        let d = decl(&files, "Consumer.java", off).expect("resolved");
+        assert_eq!(d.file, "Widget.java");
+        let wsrc = widget.1;
+        let decl_off = wsrc.find("Widget {").unwrap();
+        assert_eq!((d.start, d.end), (decl_off, decl_off + "Widget".len()));
+        assert_eq!(d.label, "class com.acme.Widget");
+    }
+
+    #[test]
+    fn declaration_jdk_symbol_is_none() {
+        // `String` isn't a project type — no project source declares it → None (not an
+        // error): the FE simply doesn't navigate into an unopenable JDK class.
+        let src = "package p; public class C { String s; }";
+        let files = [("C.java", src)];
+        let off = src.find("String s").unwrap() + 1;
+        assert!(decl(&files, "C.java", off).is_none());
+    }
+
+    #[test]
+    fn line_col_1based_counts_lines_and_bytes() {
+        let src = "line1\nline2\nabcXdef";
+        let start = src.find('X').unwrap();
+        assert_eq!(line_col_1based(src, start), (3, 4));
+        assert_eq!(line_col_1based("first", 0), (1, 1));
+        // Clamps an out-of-range offset to the source length rather than panicking.
+        assert_eq!(line_col_1based("ab", 999), (1, 3));
     }
 
     #[test]

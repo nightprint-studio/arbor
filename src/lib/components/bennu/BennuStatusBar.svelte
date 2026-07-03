@@ -9,11 +9,10 @@
    * bg-elevated strip (flows from the titlebar) — mirrors MerulaFooter / Corvus
    * StatusBar. Subtle + keyboard-first (nothing here is mouse-only).
    */
-  import { Coffee, Boxes, Database, FileType, MapPin } from 'lucide-svelte';
+  import { Coffee, Boxes, Database, FileType } from 'lucide-svelte';
   import Spinner from '$lib/components/shared/ui/Spinner.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
-  import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import type { Snippet } from 'svelte';
 
@@ -84,13 +83,7 @@
         <FileType size={12} /> {encoding}
       </span>
     {/if}
-
-    {#if projectStore.activeFilePath}
-      <span class="bf-sep"></span>
-      <span class="bf-item bf-pos" use:tooltip={'Caret position'}>
-        <MapPin size={11} /> Ln {bennuUiStore.caretLine}, Col {bennuUiStore.caretCol}
-      </span>
-    {/if}
+    <!-- Caret Ln/Col lives on the editor's own footer (BennuEditor); not duplicated here. -->
   {/if}
 
   {#if footerExtra}
@@ -118,7 +111,6 @@
     font-size: 10px; color: var(--text-disabled);
     padding-left: 2px; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
   }
-  .bf-pos { font-variant-numeric: tabular-nums; }
   .bf-spacer { flex: 1; }
   .bf-sep { width: 1px; height: 12px; background: var(--border-subtle); flex-shrink: 0; }
 </style>

@@ -26,9 +26,11 @@ pub use crate::refs::{
 };
 
 // RENAME planning + apply (docs §5 #10-12): best-effort, preview-first, config-aware.
+// Plus go-to-declaration (`resolve_declaration` + `DeclarationLocation`), which reuses the
+// same caret classifier + decl-site name-span finders.
 pub use crate::rename::{
-    rename_apply, rename_plan, Edit, EditReason, FileEdits, HoverInfo, PlanFile, RenameEngine,
-    RenamePlan,
+    find_member_name_span, find_type_name_span, rename_apply, rename_plan, resolve_declaration,
+    DeclarationLocation, Edit, EditReason, FileEdits, HoverInfo, PlanFile, RenameEngine, RenamePlan,
 };
 
 // Spell-check engine (declaration names + comments): the pure tokenizer / allow-list +

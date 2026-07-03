@@ -50,6 +50,9 @@ mod references;
 // Hover (editor hover card): `bennu_hover` — classifies the symbol under the caret off the
 // per-project rename engine and returns its signature / kind / owning type.
 mod hover;
+// Go-to-declaration (Ctrl+Click / Ctrl+B): `bennu_declaration` — resolves the symbol under
+// the caret to its declaration site (method / field / local / class) off the same engine.
+mod declaration;
 // Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
 // + config counts, JDK level, build-ready flag) for an inspector panel.
 mod index_stats;

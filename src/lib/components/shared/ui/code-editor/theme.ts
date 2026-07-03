@@ -54,7 +54,18 @@ export const codeEditorTheme = EditorView.theme(
       fontSize: '12.5px',
     },
     '&.cm-focused': { outline: 'none' },
-    '.cm-scroller': { fontFamily: 'var(--font-code)', lineHeight: '1.55', overflow: 'auto' },
+    // `position: relative` makes the scroller the containing block for the ruler guide
+    // (an absolutely-positioned child that must scroll with the content on both axes).
+    '.cm-scroller': { fontFamily: 'var(--font-code)', lineHeight: '1.55', overflow: 'auto', position: 'relative' },
+    // Vertical margin guide (see `editorRuler`): a faint line at a column. `top:0` +
+    // an explicit `height` (set to the full content height by the plugin) makes it span
+    // the whole document and scroll with it — a `bottom:0` here would instead size it to
+    // the *visible* box, so it wouldn't follow a vertical scroll.
+    '.cm-ruler': {
+      position: 'absolute', top: '0', width: '0',
+      borderLeft: '1px solid var(--border-subtle)',
+      pointerEvents: 'none',
+    },
     '.cm-content': { padding: '6px 0', caretColor: 'var(--text-primary)' },
     '.cm-line': { padding: '0 12px' },
     '.cm-gutters': {

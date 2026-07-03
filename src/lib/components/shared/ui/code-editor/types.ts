@@ -83,6 +83,15 @@ export interface GotoTarget {
   offset: number;
 }
 
+/** A snapshot of the editor's cursor + scroll, so a host can persist and restore it
+ *  across a remount (e.g. per-tab, so returning to a tab lands the caret and scroll
+ *  exactly where they were left). Offsets are UTF-16 document positions. */
+export interface EditorViewSnapshot {
+  anchor: number;
+  head: number;
+  scrollTop: number;
+}
+
 /**
  * Everything a language needs to plug into the generic editor. Products author one
  * of these (e.g. `bennu/java-lang.ts`) and hand it to {@link import('./CodeEditor.svelte')}.

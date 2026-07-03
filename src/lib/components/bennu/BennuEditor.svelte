@@ -12,7 +12,7 @@
    */
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
-    PenLine, Wand2, Save,
+    PenLine, Wand2, Save, Eye,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -22,11 +22,18 @@
   import { languageForPath } from './languages';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
+  import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
   import { diagnostics as ipcDiagnostics } from '$lib/ipc/bennu';
-  import { definition as ipcDefinition, references as ipcReferences } from '$lib/ipc/bennu/nav';
+  import {
+    definition as ipcDefinition, references as ipcReferences,
+    declaration as ipcDeclaration,
+    renameApply as ipcRenameApply, type RenameEdit,
+  } from '$lib/ipc/bennu/nav';
+  import { applyByteEdits } from './rename-apply';
+  import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
-  import type { EditorDiagnostic } from '$lib/components/shared/ui/code-editor';
+  import type { EditorDiagnostic, EditorViewSnapshot } from '$lib/components/shared/ui/code-editor';
   import type { EditorView } from '@codemirror/view';
   import { bennuIntentionsStore } from '$lib/stores/bennu/intentions.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
@@ -62,6 +69,11 @@
 
   const activePath = $derived(projectStore.activeFilePath);
   const openPaths = $derived(projectStore.openFilePaths);
+
+  // Per-tab cursor + scroll, so switching away and back restores where you left off.
+  // The editor remounts on tab switch ({#key activePath}); it emits `onViewState` while
+  // a tab is active and reads `initialState` for the returning tab from this map.
+  const viewStates = new Map<string, EditorViewSnapshot>();
   // The editor language for the active file — Java (tree-sitter) or a CodeMirror
   // built-in / legacy mode (XML, JSP, YAML, JSON, …) picked by extension.
   const editorLanguage = $derived(languageForPath(activePath));
@@ -192,18 +204,111 @@
   /** Insert text at the caret (Generate modal → editor). Mirrors merula's insert. */
   export function insertAtCursor(text: string) { editorComp?.insertAtCursor(text); }
 
-  // ── Rename (Shift+F6) / Find usages (Alt+F7) ──────────────────────────────────
-  /** Open the rename modal for the symbol under the caret (captures file · buffer ·
-   *  byte offset · initial name). No-op with no file open. */
+  // ── Rename (Shift+F6) — inline ────────────────────────────────────────────────
+  // An IntelliJ-style in-place rename: a small field anchored at the caret, pre-filled
+  // with the symbol, that only accepts Java-identifier characters. Enter applies the
+  // rename across the project (via `bennu_rename_apply`); Shift+Enter escalates to the
+  // full preview modal; Esc cancels. The modal (BennuRenameModal) stays as that
+  // preview surface.
+  interface InlineRenameCtx { file: string; source: string; offset: number; initialName: string; }
+  let renameOpen = $state(false);
+  let renameName = $state('');
+  let renameCtx = $state<InlineRenameCtx | null>(null);
+  let renameAnchor = $state<{ x: number; y: number } | null>(null);
+  let renameBusy = $state(false);
+  let renameInputEl = $state<HTMLInputElement | null>(null);
+  let renameBoxEl = $state<HTMLDivElement | null>(null);
+
+  const JAVA_IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+  const renameValid = $derived(
+    !!renameCtx && JAVA_IDENT.test(renameName) && renameName !== renameCtx.initialName,
+  );
+
+  /** Open the inline rename for the symbol under the caret. No-op (with a toast) when
+   *  the caret isn't on an identifier. */
   export function openRename() {
     if (!activePath || !editorComp) return;
-    bennuRefactorStore.openRename({
+    const initial = editorComp.wordAtCaret() ?? '';
+    if (!initial) { toastStore.show('Place the caret on a symbol to rename', 'info'); return; }
+    renameCtx = {
       file: activePath,
       source: editorComp.getValue(),
       offset: editorComp.caretByteOffset(),
-      initialName: editorComp.wordAtCaret() ?? '',
-    });
+      initialName: initial,
+    };
+    renameAnchor = editorComp.coordsAtCaret();
+    renameName = initial;
+    renameOpen = true;
+    queueMicrotask(() => renameInputEl?.select());
   }
+
+  function closeInlineRename(refocus = true) {
+    renameOpen = false;
+    renameCtx = null;
+    renameAnchor = null;
+    if (refocus) editorComp?.focus();
+  }
+
+  /** Strip anything that can't appear in a Java identifier as it's typed (spaces, `.`,
+   *  `(`, …) so an invalid name can never be entered — a leading digit is still caught
+   *  by `renameValid` (the commit stays disabled). */
+  function onRenameInput() {
+    const cleaned = renameName.replace(/[^A-Za-z0-9_$]/g, '');
+    if (cleaned !== renameName) renameName = cleaned;
+  }
+
+  async function commitInlineRename() {
+    const ctx = renameCtx;
+    if (!ctx || !renameValid || renameBusy) return;
+    const target = renameName;
+    renameBusy = true;
+    try {
+      const edits = await ipcRenameApply(ctx.file, ctx.source, ctx.offset, target);
+      if (!edits.length) { toastStore.show('Nothing to rename here', 'info'); closeInlineRename(); return; }
+      // Group by file, then splice each file's byte edits and persist.
+      const byFile = new Map<string, RenameEdit[]>();
+      for (const e of edits) {
+        const list = byFile.get(e.file);
+        if (list) list.push(e); else byFile.set(e.file, [e]);
+      }
+      for (const [file, fileEdits] of byFile) {
+        const current = await projectStore.loadText(file);
+        await projectStore.saveText(file, applyByteEdits(current, fileEdits));
+      }
+      toastStore.show(
+        `Renamed to “${target}” · ${edits.length} edit(s) in ${byFile.size} file(s)`,
+        'success',
+      );
+      closeInlineRename();
+    } catch {
+      toastStore.show('Rename failed', 'error');
+    } finally {
+      renameBusy = false;
+    }
+  }
+
+  /** Escalate to the full preview modal (BennuRenameModal), carrying the caret context. */
+  function openRenamePreview() {
+    const ctx = renameCtx;
+    closeInlineRename(false);
+    if (ctx) bennuRefactorStore.openRename(ctx);
+  }
+
+  function onRenameKey(e: KeyboardEvent) {
+    if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); e.stopPropagation(); openRenamePreview(); }
+    else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); void commitInlineRename(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeInlineRename(); }
+  }
+
+  /** Close the inline field when focus leaves it (unless it moves to the Preview
+   *  button inside the same box). */
+  function onRenameBlur(e: FocusEvent) {
+    const box = renameBoxEl;
+    if (box && e.relatedTarget instanceof Node && box.contains(e.relatedTarget)) return;
+    closeInlineRename(false);
+  }
+
+  // ── Find usages (Alt+F7) ──────────────────────────────────────────────────────
 
   /** Find usages of the symbol under the caret — opens the popover anchored there and
    *  fills it from `bennu_references`. Graceful: an unresolvable caret shows the
@@ -240,12 +345,52 @@
     void projectStore.openFile(path).then(() => bennuUiStore.requestGoto(1));
   }
 
+  /** Try the BE go-to-declaration for the symbol at `offset` (any Java symbol — class,
+   *  method, field, local). Resolves via `bennu_declaration` and jumps to the declaring
+   *  file + line. Returns true when it jumped; false (gracefully) when the BE isn't
+   *  attached, the symbol is JDK/dep-jar resident, or the caret isn't on a symbol. */
+  async function tryGoToDeclarationBE(offset: number): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp) return false;
+    const target = await ipcDeclaration(path, editorComp.getValue(), offset).catch(() => null);
+    if (!target) return false;
+    await projectStore.openFile(target.file);
+    bennuUiStore.requestGoto(target.line);
+    return true;
+  }
+
+  /** Try to resolve `word` to a project CLASS declaration — an instant, offline fallback
+   *  (from the FE class index) used when the BE resolver is cold. Matches by exact simple
+   *  name, then by an FQCN ending in `.word`, and jumps to the declaring file + line.
+   *  Returns true when it jumped. */
+  async function tryGoToClassDeclaration(word: string): Promise<boolean> {
+    const root = projectStore.project?.root;
+    if (!root || !word || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(word)) return false;
+    const classes = await bennuIndexStore.classesForRoot(root).catch(() => null);
+    if (!classes) return false;
+    const hit = classes.find((c) => c.simple === word) ?? classes.find((c) => c.fqcn.endsWith('.' + word));
+    if (!hit) return false;
+    await projectStore.openFile(hit.file);
+    bennuUiStore.requestGoto(hit.line);
+    return true;
+  }
+
   /** Resolve + navigate to the definition of `action` (a JSP action reference).
    *  Prefers the config fragment, then the view JSP; if only a class FQCN is known
    *  (no openable path), reports it. No target → an info toast. */
-  async function resolveDefinition(action: string) {
+  async function resolveDefinition(action: string, offset?: number) {
     const path = activePath;
     if (!path) return;
+    // 1. BE go-to-declaration — any Java symbol (class/method/field/local) — when we have
+    //    a byte offset to classify at. Authoritative + precise (jumps to the exact line).
+    if (offset != null && (await tryGoToDeclarationBE(offset))) return;
+    // 2. Instant offline class-index fallback (types) when the BE resolver is cold.
+    if (action) {
+      if (await tryGoToClassDeclaration(action)) return;
+    } else {
+      toastStore.show('Nothing to go to here', 'info');
+      return;
+    }
     const seq = ++gotoDefSeq;
     let res;
     try {
@@ -278,19 +423,23 @@
    *  No-op (with a toast) when nothing reference-like is under the caret. */
   export function goToDefinition() {
     if (!activePath || !editorComp) return;
-    const ref = editorComp.refAtCaret();
-    if (!ref) { toastStore.show('Nothing to go to here', 'info'); return; }
-    void resolveDefinition(ref);
+    const ref = editorComp.refAtCaret() ?? editorComp.wordAtCaret() ?? '';
+    void resolveDefinition(ref, editorComp.caretByteOffset());
   }
 
-  /** Ctrl/Cmd+Click seam from the editor: the reference token at the click position
-   *  (an identifier, a string-literal's contents, or a path) → go to definition. */
-  function onEditorGoto(word: string) {
+  /** Ctrl/Cmd+Click seam from the editor: the reference token at the click position (an
+   *  identifier, a string-literal's contents, or a path) + the clicked byte offset → go
+   *  to declaration/definition. */
+  function onEditorGoto(word: string, _view: EditorView, byteOffset: number) {
     if (!activePath) return;
-    void resolveDefinition(word);
+    void resolveDefinition(word, byteOffset);
   }
 
   // ── Editor context menu (right-click) ─────────────────────────────────────────
+  /** Generate (constructors/getters/setters) is Java-only — its source scan is a Java
+   *  outline, meaningless (and historically a freeze risk) on a `.jsp`/XML file. */
+  const isJavaFile = $derived(!!activePath && activePath.toLowerCase().endsWith('.java'));
+
   function onEditorContextMenu(e: MouseEvent) {
     if (!activePath) return;
     e.preventDefault();
@@ -303,7 +452,9 @@
       { id: 'usages', label: 'Find usages', icon: SearchCode, shortcut: 'Alt+F7' },
       { id: 'rename', label: 'Rename…', icon: PenLine, shortcut: 'Shift+F6' },
       { id: 's2', label: '', separator: true },
-      { id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' },
+      ...(isJavaFile
+        ? [{ id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' } as MenuItem]
+        : []),
       { id: 'save', label: 'Save', icon: Save, shortcut: 'Ctrl+S' },
     ];
     bennuContextMenuStore.show(e.clientX, e.clientY, items, onEditorMenuSelect);
@@ -316,7 +467,10 @@
       case 'gotodef': goToDefinition(); break;
       case 'usages': void findUsages(); break;
       case 'rename': openRename(); break;
-      case 'generate': bennuUiStore.openGenerate(); break;
+      case 'generate':
+        if (isJavaFile) bennuUiStore.openGenerate();
+        else toastStore.show('Generate works on Java files', 'info');
+        break;
       case 'save':
         void projectStore.saveActive().then((ok) => { if (ok) toastStore.show('Saved', 'success'); });
         break;
@@ -372,8 +526,11 @@
           value={projectStore.sourceOf(activePath)}
           language={editorLanguage}
           diagnostics={allDiags}
+          rulerColumn={bennuSettingsStore.rightMargin}
+          initialState={viewStates.get(activePath)}
           oninput={onInput}
           oncaret={onCaret}
+          onViewState={(s) => { if (activePath) viewStates.set(activePath, s); }}
           onGoto={onEditorGoto}
         />
       {/key}
@@ -394,6 +551,39 @@
     <div class="ed-goto" role="dialog" aria-label="Go to line" tabindex="-1">
       <Hash size={13} />
       <input bind:this={gotoInputEl} bind:value={gotoValue} onkeydown={onGotoKey} onblur={() => (gotoOpen = false)} placeholder="Line or line:col…" inputmode="numeric" />
+    </div>
+  {/if}
+
+  {#if renameOpen && renameAnchor}
+    <div
+      class="ed-rename"
+      class:invalid={!renameValid && renameName.length > 0}
+      role="dialog"
+      aria-label="Rename symbol"
+      tabindex="-1"
+      bind:this={renameBoxEl}
+      style="left:{renameAnchor.x}px; top:{renameAnchor.y}px;"
+    >
+      <PenLine size={13} />
+      <input
+        bind:this={renameInputEl}
+        bind:value={renameName}
+        oninput={onRenameInput}
+        onkeydown={onRenameKey}
+        onblur={onRenameBlur}
+        spellcheck="false"
+        autocomplete="off"
+        aria-label="New name"
+      />
+      <button
+        class="ed-rename-preview"
+        type="button"
+        onclick={openRenamePreview}
+        use:tooltip={{ content: 'Preview all changes', shortcut: 'Shift+Enter' }}
+        aria-label="Preview rename"
+      >
+        <Eye size={13} />
+      </button>
     </div>
   {/if}
 </div>
@@ -465,4 +655,29 @@
     font-size: 12px; width: 140px;
   }
   .ed-goto input::placeholder { color: var(--text-disabled); }
+
+  /* Inline rename — a small field anchored at the caret (fixed to the viewport). */
+  .ed-rename {
+    position: fixed;
+    display: flex; align-items: center; gap: 6px;
+    background: var(--bg-elevated); border: 1px solid var(--border-focus, var(--accent));
+    border-radius: var(--radius-md); box-shadow: var(--shadow-popup);
+    padding: 4px 5px 4px 8px; color: var(--text-muted); z-index: 30;
+    transform: translateY(4px);
+  }
+  .ed-rename.invalid { border-color: var(--error); }
+  .ed-rename input {
+    background: transparent; border: none; outline: none;
+    color: var(--text-primary); font-family: var(--font-code);
+    font-size: 12.5px; width: 160px;
+  }
+  .ed-rename.invalid input { color: var(--error); }
+  .ed-rename-preview {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 20px; flex-shrink: 0;
+    background: transparent; border: none; border-radius: var(--radius-sm);
+    color: var(--text-muted); cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+  .ed-rename-preview:hover { background: var(--bg-hover); color: var(--text-primary); }
 </style>

@@ -192,10 +192,13 @@ function createProjectStore() {
     async openProject(dir: string) {
       try {
         const info = await ipcOpenProject(dir);
-        let nextTree: TreeNode | null = null;
-        try { nextTree = await ipcProjectTree(info.root); }
-        catch { nextTree = null; }
-        applyProject(info, nextTree, false);
+        // Show the project shell immediately, then load the (potentially large,
+        // fully-recursive) file tree in the background — awaiting it here is what made
+        // opening lag. A stale tree from a superseded open is dropped by the root guard.
+        applyProject(info, null, false);
+        void ipcProjectTree(info.root)
+          .then((t) => { if (project?.root === info.root) tree = t; })
+          .catch(() => { /* leave the tree empty — the project still opened */ });
       } catch (err) {
         // MOCK — bennu-be not attached: fall back to the demo so opening the
         // window still shows a populated tree. Remove when the BE serves data.

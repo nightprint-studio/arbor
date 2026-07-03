@@ -11,6 +11,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - **Bennu** (Java editor): **Rename refactoring** with a preview — rename a local variable or parameter (scope-exact, single file), a method or field (declaration plus every cross-file use), or a class (declaration, references, `import` statements, and the matching Spring `<bean class="…">` entries). A preview shows every edit grouped by file before you confirm; edits that can't be resolved precisely (e.g. an overloaded method's call sites) are flagged for review. OGNL and JSP references are not rewritten yet.
 - **Bennu** (Java editor): **Build** and **Run** — Build compiles the project (Maven offline, with a `javac` fallback) and turns compiler errors into clickable diagnostics that jump to the offending line; Run launches the chosen main class with the project classpath and streams its output live. A clean build refreshes code completion with the freshly-compiled classes.
+- **Bennu** (Java editor): **Go to declaration** (**Ctrl+Click** / **Ctrl+B**) — jump from a class, method, field, local variable or parameter straight to where it's declared; symbols that resolve into the JDK or a dependency jar (no project source) simply don't navigate.
 - **Bennu** (Java editor): **Find usages** (**Alt+F7**) — a caret-anchored list of every place a class, method or field is used across the project; pick one to jump straight to it.
 - **Bennu** (Java editor): **Save** (**Ctrl+S**) — edits are now written to disk in the project's encoding, so rename and everyday editing persist.
 - **Bennu** (Java editor): **Go to Class** (**Ctrl+N**) and **Go to File** (**Ctrl+Shift+N**) — a filterable quick-open navigator that jumps straight to a class declaration or opens a file by name.
@@ -73,6 +74,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- **Bennu** (Java editor): editing a file no longer causes a per-keystroke index error or CPU spike on Windows — typing now updates code completion in memory instead of rewriting (and locking) the on-disk index, so even a small file scrolls and edits smoothly.
 - Fixed a hang that could freeze the Git window when a plugin using the Bevy Remote Protocol stopped watching a query.
 - Opening or closing a product window (Corvus, the File Explorer, the music window) could freeze the whole app — the window stayed blank and the launcher stopped responding, and afterwards no other product would open. Backends now start and stop without ever blocking the app. Closing the File Explorer window also fully stops its backend, so the next open starts it fresh like the other products.
 - **Deep links** (`arbor://…`) now open and focus the Corvus window and run the action there, instead of bringing the launcher forward where nothing happened.

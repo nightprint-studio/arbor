@@ -21,11 +21,30 @@ export interface JavaSymbol {
   line: number;
 }
 
-const TYPE_RE = /^\s*(?:public\s+|private\s+|protected\s+|abstract\s+|final\s+|static\s+|sealed\s+|non-sealed\s+)*(class|interface|enum)\s+([A-Za-z_]\w*)/;
-// A method: modifiers, optional generics/return type, name, '(' … ')' then '{' or ';'.
-const METHOD_RE = /^\s*(?:public\s+|private\s+|protected\s+|abstract\s+|final\s+|static\s+|synchronized\s+|native\s+|default\s+)+(?:<[^>]+>\s*)?([\w.<>\[\],\s]+?\s+)?([A-Za-z_]\w*)\s*\([^;{]*\)\s*(?:throws [\w.,\s]+)?\s*[{;]/;
-// A field: modifiers, type, name, then '=' or ';' (no parens → not a method).
-const FIELD_RE = /^\s*(?:public\s+|private\s+|protected\s+|static\s+|final\s+|transient\s+|volatile\s+)+([\w.<>\[\],\s]+?)\s+([A-Za-z_]\w*)\s*[=;]/;
+// A single type token: dotted name + optional `<…>` generics + optional `[]` arrays.
+// No top-level whitespace inside it (generic-internal spaces live inside the `<…>`), so
+// the patterns below never nest a whitespace-matching quantifier against a trailing
+// `\s+` — the ambiguity that made the old expressions backtrack catastrophically on
+// long non-Java lines (e.g. a JSP scriptlet), which froze the UI when Generate/Outline
+// ran on a `.jsp`.
+const TYPE_TOK = String.raw`[\w.$]+(?:<[^>]*>)?(?:\[\])*`;
+const TYPE_RE = /^\s*(?:(?:public|private|protected|abstract|final|static|sealed|non-sealed)\s+)*(class|interface|enum)\s+([A-Za-z_]\w*)/;
+// A method: modifiers, optional generics, optional return type (one token), name,
+// '(' … ')' then '{' or ';'.
+const METHOD_RE = new RegExp(
+  String.raw`^\s*(?:(?:public|private|protected|abstract|final|static|synchronized|native|default)\s+)+` +
+  String.raw`(?:<[^>]*>\s*)?(?:(${TYPE_TOK})\s+)?([A-Za-z_$]\w*)\s*\([^;{]*\)\s*(?:throws [\w.,\s]+)?\s*[{;]`,
+);
+// A field: modifiers, type (one token), name, then '=' or ';' (no parens → not a method).
+const FIELD_RE = new RegExp(
+  String.raw`^\s*(?:(?:public|private|protected|static|final|transient|volatile)\s+)+` +
+  String.raw`(${TYPE_TOK})\s+([A-Za-z_$]\w*)\s*[=;]`,
+);
+
+/** Declaration lines are short; a very long line is a body / minified / JSP line that
+ *  can't hold a single declaration we care about. Skipping it is both a perf win and a
+ *  hard backstop against pathological regex input. */
+const MAX_DECL_LINE = 400;
 
 /**
  * Names of fields declared `final` or annotated `@NonNull` / `@NotNull` / `@Nonnull`
@@ -40,6 +59,7 @@ export function requiredFieldNames(source: string): Set<string> {
   const lines = source.split(/\r?\n/);
   let pendingAnnotation = false; // a nullability annotation seen on its own line
   for (const raw of lines) {
+    if (raw.length > MAX_DECL_LINE) { continue; }
     const line = raw.replace(/\/\/.*$/, '');
     const trimmed = line.trim();
     if (!trimmed) { continue; }
@@ -74,6 +94,7 @@ export function javaOutline(source: string): JavaSymbol[] {
   const lines = source.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
+    if (raw.length > MAX_DECL_LINE) continue;
     const line = raw.replace(/\/\/.*$/, '');
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('*') || trimmed.startsWith('/*') || trimmed.startsWith('//')) continue;

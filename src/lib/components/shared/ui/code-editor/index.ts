@@ -16,6 +16,7 @@ export type {
   TokenClass,
   DiagnosticSeverity,
   EditorDiagnostic,
+  EditorViewSnapshot,
   GotoTarget,
   Parser,
   Tree,

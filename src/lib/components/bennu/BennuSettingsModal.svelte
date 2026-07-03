@@ -112,6 +112,10 @@
           <FormRow label="Show whitespace" description="Render dots and arrows for spaces and tabs.">
             <Toggle checked={s.showWhitespace} onchange={(v) => s.setShowWhitespace(v)} ariaLabel="Show whitespace" />
           </FormRow>
+          <FormRow label="Right margin" description="Column for the vertical margin guide (0 hides it). Applies on the next file opened.">
+            <NumberStepper value={s.rightMargin} min={0} max={240} step={10} narrow suffix="col"
+                           onchange={(v) => s.setRightMargin(v)} ariaLabel="Right margin column" />
+          </FormRow>
         </div>
         <div class="card">
           <div class="card-section-title"><TextCursorInput size={12} /> Indentation</div>

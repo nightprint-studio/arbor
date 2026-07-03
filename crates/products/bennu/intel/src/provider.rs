@@ -163,6 +163,20 @@ impl NativeJavaProvider {
         }
         Ok(Self::with_resolver(resolver))
     }
+
+    /// Apply one edited `file`'s freshly-extracted [`Symbol`](bennu_index::prelude::Symbol)
+    /// records to the resolver's **in-memory overlay** — no disk write, no JDK re-resolve,
+    /// no new provider. Completion on the edited file reflects the edit immediately while
+    /// the memory-mapped index files stay untouched (they're only rewritten on a full
+    /// build, which swaps in a brand-new provider). A no-op on the empty (pre-index)
+    /// provider. The overlay tracks each file's prior contributions internally (keyed by
+    /// `file`), so a rename/remove drops the stale entries; an empty `records` (a deleted
+    /// file) just clears the file's overlay.
+    pub fn apply_file_patch(&self, file: &str, records: &[bennu_index::prelude::Symbol]) {
+        if let Some(resolver) = &self.resolver {
+            resolver.apply_file_patch(file, records);
+        }
+    }
 }
 
 impl IntelProvider for NativeJavaProvider {
