@@ -42,6 +42,7 @@
   import { bennuIntentionsStore } from '$lib/stores/bennu/intentions.svelte';
   import { bennuRefactorStore } from '$lib/stores/bennu/refactor.svelte';
   import { bennuContextMenuStore } from '$lib/stores/bennu/contextmenu.svelte';
+  import { bennuNavStore } from '$lib/stores/bennu/nav-history.svelte';
   import type { MenuItem } from '$lib/components/shared/ContextMenu.svelte';
   import { collectIntentions, type GenerateMode } from './bennu-intentions';
   import { javaOutline } from './java-outline';
@@ -98,10 +99,50 @@
   // ── Caret position (footer, via the UI store) ────────────────────────────────
   let caretLine = $state(1);
   let caretCol = $state(1);
+
+  // ── Navigation history (Alt+←/→) ──────────────────────────────────────────────
+  // Record a "place" when the caret makes a real JUMP — a different file, or a big
+  // in-file hop (a go-to / structure / find click) — not on every arrow keystroke. A
+  // programmatic back/forward jump sets `suppressNav` so it doesn't record itself as a
+  // fresh place (which would break the ring).
+  let lastNav: { file: string; line: number } | null = null;
+  let suppressNav = false;
+  const NAV_JUMP_LINES = 3; // an in-file move larger than this counts as a jump
+
   function onCaret(line: number, col: number) {
     caretLine = line; caretCol = col;
     bennuUiStore.setCaret(line, col);
+
+    const path = activePath;
+    if (!path) return;
+    if (suppressNav) {
+      // This caret event is the landing of a Back/Forward jump — remember it, don't record.
+      suppressNav = false;
+      lastNav = { file: path, line };
+      return;
+    }
+    const jumped = !lastNav || lastNav.file !== path || Math.abs(lastNav.line - line) > NAV_JUMP_LINES;
+    if (jumped) bennuNavStore.record({ file: path, line, col });
+    lastNav = { file: path, line };
   }
+
+  /** Navigate to a recorded place (cross-file via the goto relay so the remounted editor
+   *  picks it up on mount; same-file directly). `suppressNav` keeps the resulting caret
+   *  event from recording a new place. */
+  async function navGo(place: { file: string; line: number; col: number } | null) {
+    if (!place) return;
+    suppressNav = true;
+    if (place.file !== projectStore.activeFilePath) {
+      await projectStore.openFile(place.file);
+      bennuUiStore.requestGoto(place.line);
+    } else {
+      editorComp?.scrollToLineCol(place.line, place.col);
+    }
+  }
+  /** Alt+← — jump back to the previous place in the navigation history. */
+  export function navBack() { void navGo(bennuNavStore.back()); }
+  /** Alt+→ — jump forward again after a Back. */
+  export function navForward() { void navGo(bennuNavStore.forward()); }
 
   // ── Goto relay: Structure / Outline / Problems request a jump; scroll there. ──
   $effect(() => {

@@ -115,6 +115,9 @@ export const jspLanguage: LanguageDescriptor = {
   createParser: createJspParser,
   classify,
   foldNode,
+  // JSP comments (`<%-- … --%>`) are the safe universal toggle: unlike an HTML comment
+  // they're stripped server-side, so commenting a line never ships markup to the client.
+  commentTokens: { block: { open: '<%--', close: '--%>' } },
   // Embedded highlighting via legacy-mode stream parsers (highlight only, no autocomplete):
   //  - `<script>` body → JavaScript, `<style>` body → CSS;
   //  - EL `${…}` / `#{…}` and OGNL `%{…}` bodies → a small EL/OGNL lexer, so identifiers,

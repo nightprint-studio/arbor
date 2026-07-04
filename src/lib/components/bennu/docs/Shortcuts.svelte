@@ -20,6 +20,7 @@
 <ul>
   <li><kbd>Ctrl</kbd> + <kbd>N</kbd> — go to <strong>class</strong> by name (project-wide)</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>N</kbd> — go to <strong>file</strong> by name</li>
+  <li><kbd>Alt</kbd> + <kbd>←</kbd> / <kbd>Alt</kbd> + <kbd>→</kbd> — navigate <strong>back</strong> / <strong>forward</strong> through your recent jumps (across files)</li>
 </ul>
 
 <h2>Editor</h2>
@@ -31,6 +32,8 @@
   <li><kbd>Ctrl</kbd> + <kbd>F</kbd> — find in the current file</li>
   <li><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> — find in project</li>
   <li><kbd>Ctrl</kbd> + <kbd>Space</kbd> — completions (member access on <kbd>.</kbd>)</li>
+  <li><kbd>Ctrl</kbd> + <kbd>/</kbd> — toggle line / block <strong>comment</strong> on the selection (Java <code>//</code>, JSP <code>&lt;%-- --%&gt;</code>, XML <code>&lt;!-- --&gt;</code>)</li>
+  <li>Auto-close brackets and quotes — typing <kbd>(</kbd> <kbd>[</kbd> <kbd>&#123;</kbd> <kbd>"</kbd> <kbd>'</kbd> inserts the matching closer; <kbd>Backspace</kbd> on an empty pair removes both</li>
   <li><kbd>Alt</kbd> + <kbd>Enter</kbd> — show <strong>intentions</strong> (context actions) at the caret</li>
   <li><kbd>Shift</kbd> + <kbd>F6</kbd> — <strong>rename</strong> the symbol under the caret (with a per-file preview)</li>
   <li><kbd>Alt</kbd> + <kbd>Insert</kbd> — <strong>generate</strong> constructor, getters or setters</li>

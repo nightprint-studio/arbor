@@ -197,7 +197,7 @@
         use:tooltip={{ content: 'Build project', shortcut: 'Ctrl+F9' }}
         aria-label="Build project"
       >
-        <Hammer size={14} />
+        <Hammer size={16} />
       </button>
       <button
         class="btb-run-btn btb-run-primary"
@@ -206,7 +206,7 @@
         use:tooltip={{ content: 'Run', shortcut: 'Shift+F10' }}
         aria-label="Run"
       >
-        <Play size={14} />
+        <Play size={16} />
       </button>
       <button
         class="btb-run-btn"
@@ -215,7 +215,7 @@
         use:tooltip={'Debug'}
         aria-label="Debug"
       >
-        <Bug size={14} />
+        <Bug size={16} />
       </button>
       <Dropdown items={runMenu} position="fixed" direction="down" width="220px">
         {#snippet trigger({ open, toggle })}
@@ -296,7 +296,7 @@
   .btb-run-gap { width: 72px; flex-shrink: 0; }
   .btb-run-btn {
     display: flex; align-items: center; justify-content: center;
-    width: 26px; height: 26px;
+    width: 30px; height: 28px;
     background: transparent; border: none; border-radius: var(--radius-sm);
     color: var(--text-secondary); cursor: pointer;
     transition: background var(--transition-fast), color var(--transition-fast);

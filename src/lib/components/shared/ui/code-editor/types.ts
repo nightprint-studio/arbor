@@ -167,6 +167,17 @@ export interface LanguageDescriptor {
    */
   injections?: Record<string, StreamParser<unknown>>;
 
+  /**
+   * Optional comment syntax for the toggle-comment command (`Ctrl+/`). Shaped exactly
+   * like CodeMirror's `commentTokens` language-data so the core surfaces it via the
+   * `EditorState.languageData` facet; `@codemirror/commands`' `toggleComment` (already
+   * bound to `Mod-/` in the default keymap) then works even for a **tree-sitter**
+   * descriptor, which bypasses CodeMirror's `Language` and so carries no built-in comment
+   * data. A `cmExtension` (Lezer / legacy-mode) language already provides its own comment
+   * tokens, so it leaves this unset.
+   */
+  commentTokens?: { line?: string; block?: { open: string; close: string } };
+
   /** Optional language-intelligence hooks (autocomplete / hover / …). A product
    *  fills this in to grow completions without a core change; the core installs
    *  the matching CodeMirror extensions when present (see

@@ -6,7 +6,13 @@ import {
   type NormalizedTooltipOptions,
 } from '$lib/stores/tooltip.svelte';
 
-function withPlacement(input: TooltipInput, placement: TooltipPlacement): TooltipInput {
+/** What a call site may pass. `null` / `undefined` are accepted (and normalized to an
+ *  inert, content-less tooltip) so a conditional `use:tooltip={cond ? '…' : undefined}`
+ *  type-checks — `normalizeOptions` already handles the empty case at runtime. */
+export type TooltipArg = TooltipInput | null | undefined;
+
+function withPlacement(input: TooltipArg, placement: TooltipPlacement): TooltipInput {
+  if (input == null) return { content: '', placement };
   if (typeof input === 'string') return { content: input, placement };
   return { ...input, placement };
 }
@@ -49,7 +55,7 @@ function sameOpts(a: NormalizedTooltipOptions, b: NormalizedTooltipOptions): boo
  *  - Closes on mousedown (so tooltips don't linger over the click target), mouseleave, blur, Escape.
  *  - Stays in sync if the props change while it's open.
  */
-export function tooltip(node: HTMLElement, input: TooltipInput) {
+export function tooltip(node: HTMLElement, input: TooltipArg) {
   let opts = normalizeOptions(input);
   let openTimer: number | null = null;
 
@@ -114,7 +120,7 @@ export function tooltip(node: HTMLElement, input: TooltipInput) {
   node.addEventListener('blur', onBlur, true);
 
   return {
-    update(next: TooltipInput) {
+    update(next: TooltipArg) {
       const nextOpts = normalizeOptions(next);
       // Cheap structural skip: if nothing meaningful changed, don't churn the store.
       if (sameOpts(opts, nextOpts)) return;
@@ -158,10 +164,10 @@ export function tooltip(node: HTMLElement, input: TooltipInput) {
  *   import { tooltipRight as tooltip } from '$lib/actions/tooltip';
  */
 function makeForcedPlacement(placement: TooltipPlacement) {
-  return function (node: HTMLElement, input: TooltipInput) {
+  return function (node: HTMLElement, input: TooltipArg) {
     const inner = tooltip(node, withPlacement(input, placement));
     return {
-      update(next: TooltipInput) {
+      update(next: TooltipArg) {
         inner.update(withPlacement(next, placement));
       },
       destroy() {

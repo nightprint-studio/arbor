@@ -25,7 +25,10 @@ import { history, defaultKeymap, historyKeymap, indentWithTab, deleteLine } from
 import { bracketMatching, indentOnInput, foldKeymap, foldGutter, codeFolding } from '@codemirror/language';
 import { lintGutter, lintKeymap } from '@codemirror/lint';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
-import { autocompletion, completionKeymap, startCompletion } from '@codemirror/autocomplete';
+import {
+  autocompletion, completionKeymap, startCompletion,
+  closeBrackets, closeBracketsKeymap,
+} from '@codemirror/autocomplete';
 
 import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
@@ -126,6 +129,11 @@ export function createCodeEditorExtensions(
     drawSelection(),
     indentOnInput(),
     bracketMatching(),
+    // Auto-close paired delimiters — `(`/`[`/`{`/`"`/`'` insert their match, typing the
+    // closer over an auto-inserted one skips it, and Backspace on an empty pair deletes
+    // both (via `closeBracketsKeymap`). Language-aware: the pairs come from the language
+    // data (`closeBrackets`), so a JSP/XML descriptor won't try to close a `'` inside text.
+    closeBrackets(),
     folding,
     highlightActiveLine(),
     highlightActiveLineGutter(),
@@ -134,6 +142,15 @@ export function createCodeEditorExtensions(
     useCm ? (lang.cmExtension as Extension) : highlight,
     lintGutter(),
   ];
+
+  // Comment syntax for `Ctrl+/` (`toggleComment`, already in the default keymap). A
+  // tree-sitter descriptor bypasses CodeMirror's `Language`, so it carries no comment
+  // data — surface the descriptor's `commentTokens` via the languageData facet. A
+  // `cmExtension` language brings its own, so this stays unset there.
+  if (lang.commentTokens) {
+    const ct = lang.commentTokens;
+    exts.push(EditorState.languageData.of(() => [{ commentTokens: ct }]));
+  }
 
   // Lezer folding for a `cmExtension` language that opts in (`cmFold`) — drives the
   // fold gutter from the language's own `foldNodeProp` (e.g. `lang-html` folds tag
@@ -188,6 +205,8 @@ export function createCodeEditorExtensions(
       // IntelliJ: Ctrl+Y deletes the current line. First in the list so it wins over
       // the Windows redo binding (Mod-y) that historyKeymap also maps to Ctrl-y.
       { key: 'Ctrl-y', run: deleteLine, preventDefault: true },
+      // Before the default keymap so Backspace deletes an empty auto-inserted pair.
+      ...closeBracketsKeymap,
       ...defaultKeymap, ...historyKeymap, ...lintKeymap, ...foldKeymap,
       ...(completionSource && !opts.readOnly ? completionKeymap : []),
       ...searchKeymapNoOpen, indentWithTab,
@@ -245,8 +264,10 @@ export function createCodeEditorExtensions(
       },
     }));
     // The Ctrl/Cmd-hover affordance: underline + pointer-cursor the token a click would
-    // navigate, so the user sees WHERE go-to will land (IntelliJ / VS Code).
-    exts.push(...ctrlHoverLink());
+    // navigate, so the user sees WHERE go-to will land (IntelliJ / VS Code). Pushed as a
+    // single nested Extension (CodeMirror flattens) rather than spread — an `Extension`
+    // isn't statically iterable.
+    exts.push(ctrlHoverLink());
   }
 
   return { extensions: exts, getTree };

@@ -136,6 +136,8 @@
     openRename: () => void;
     findUsages: () => void;
     insertAtCursor: (text: string) => void;
+    navBack: () => void;
+    navForward: () => void;
   } | null>(null);
 
   /** Ctrl+S — save the active file to disk. */
@@ -180,6 +182,15 @@
 
   // ── Command palette ────────────────────────────────────────────────────────
   let paletteQuery = $state('');
+
+  // Reset the query every time the palette OPENS, so reopening never re-shows the
+  // previous command's text (the query survives a close otherwise — it's `bind:`-ed).
+  let paletteWasOpen = false;
+  $effect(() => {
+    const open = bennuUiStore.paletteOpen;
+    if (open && !paletteWasOpen) paletteQuery = '';
+    paletteWasOpen = open;
+  });
 
   const ICONS: Record<string, IconComponent> = {
     'folder-tree': FolderTree as unknown as IconComponent,
@@ -352,6 +363,10 @@
     // Alt+Insert generate — both IntelliJ-consistent, editor-scoped (no-op with no
     // file open, guarded inside the editor's imperative methods).
     if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      // Navigation history — IntelliJ's Ctrl+Alt+←/→ collides with the Intel/NVIDIA
+      // screen-rotation hotkeys on Windows, so we use the browser-standard Alt+←/→.
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); editor?.navBack(); return; }
+      if (e.key === 'ArrowRight') { e.preventDefault(); editor?.navForward(); return; }
       if (e.key === 'F12') { e.preventDefault(); bennuUiStore.toggleBottom('terminal'); return; }
       if (e.key === 'F7') {
         if (!projectStore.activeFilePath) return;

@@ -308,7 +308,7 @@ const javaCompletionSource: CompletionSource = async (
   // Debounce: only the latest request resolves into a popup (a stale earlier
   // response is dropped). CM already coalesces, but the async IPC can race.
   const seq = ++completionSeq;
-  let items;
+  let items: Awaited<ReturnType<typeof ipcCompletion>>;
   try {
     items = await ipcCompletion(path, byteOffset);
   } catch {
@@ -410,6 +410,7 @@ export const javaLanguage: LanguageDescriptor = {
   createParser: createJavaParser,
   classify,
   foldNode,
+  commentTokens: { line: '//', block: { open: '/*', close: '*/' } },
   intel: { completion: javaCompletionSource, hover: javaHoverSource },
   // resolveGoto: reserved for when the symbol index / language service lands.
 };
