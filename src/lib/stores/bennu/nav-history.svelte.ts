@@ -3,9 +3,8 @@
  *
  * The editor records a "place" (file + line) whenever the caret makes a real jump
  * (a different file, or a large in-file hop from a go-to / structure / find click),
- * and the window steps through them with the browser-standard <kbd>Alt+←</kbd> /
- * <kbd>Alt+→</kbd> (IntelliJ's own chord, <kbd>Ctrl+Alt+←/→</kbd>, collides with the
- * Intel/NVIDIA screen-rotation hotkeys on Windows, so we mirror the browser instead).
+ * and the window steps through them with IntelliJ's <kbd>Ctrl+Alt+←</kbd> /
+ * <kbd>Ctrl+Alt+→</kbd>.
  *
  * Rune store (CLAUDE.md): private `$state`, exposed via getters + methods. Holds pure
  * session state — no persistence.

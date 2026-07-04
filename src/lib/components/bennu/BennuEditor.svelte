@@ -20,6 +20,7 @@
   import { CodeEditor } from '$lib/components/shared/ui/code-editor';
   import { tooltip } from '$lib/actions/tooltip';
   import { languageForPath } from './languages';
+  import { isJavaFile as isJavaFileOf, supportsCodeNav } from './file-kind';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuSettingsStore } from '$lib/stores/bennu/settings.svelte';
@@ -31,6 +32,7 @@
     jspNav as ipcJspNav,
     jspIncludeTarget as ipcJspIncludeTarget,
     beanClass as ipcBeanClass,
+    mybatisNav as ipcMybatisNav,
     renameApply as ipcRenameApply, type RenameEdit,
   } from '$lib/ipc/bennu/nav';
   import { applyByteEdits } from './rename-apply';
@@ -100,7 +102,7 @@
   let caretLine = $state(1);
   let caretCol = $state(1);
 
-  // ── Navigation history (Alt+←/→) ──────────────────────────────────────────────
+  // ── Navigation history (Ctrl+Alt+←/→) ─────────────────────────────────────────
   // Record a "place" when the caret makes a real JUMP — a different file, or a big
   // in-file hop (a go-to / structure / find click) — not on every arrow keystroke. A
   // programmatic back/forward jump sets `suppressNav` so it doesn't record itself as a
@@ -139,9 +141,9 @@
       editorComp?.scrollToLineCol(place.line, place.col);
     }
   }
-  /** Alt+← — jump back to the previous place in the navigation history. */
+  /** Ctrl+Alt+← — jump back to the previous place in the navigation history. */
   export function navBack() { void navGo(bennuNavStore.back()); }
-  /** Alt+→ — jump forward again after a Back. */
+  /** Ctrl+Alt+→ — jump forward again after a Back. */
   export function navForward() { void navGo(bennuNavStore.forward()); }
 
   // ── Goto relay: Structure / Outline / Problems request a jump; scroll there. ──
@@ -568,6 +570,30 @@
     return false;
   }
 
+  /** Try **MyBatis mapper-XML** navigation for the caret at `offset` — a statement `id` → the
+   *  Java interface method (XML→Java), the mapper `namespace` → the interface type, an
+   *  `<include refid>` → its `<sql>` fragment, a statement `resultMap="…"` → its `<resultMap>`.
+   *  Resolves via `bennu_mybatis_nav`, which classifies purely by offset (no ref token needed).
+   *  Intra-file targets move the caret here; a Java target opens the `.java` and jumps to the
+   *  method/type line. Only meaningful in a mapper `.xml` (a non-mapper XML resolves to null →
+   *  false, so the struts/spring `class=` resolver gets its turn). Returns true when it jumped. */
+  async function tryGoToMybatis(offset: number): Promise<boolean> {
+    const path = activePath;
+    if (!path || !editorComp || !path.toLowerCase().endsWith('.xml')) return false;
+    const t = await ipcMybatisNav(path, editorComp.getValue(), offset).catch(() => null);
+    if (!t) return false;
+    if (!isSamePath(t.file, path)) {
+      await projectStore.openFile(t.file);
+      if (t.offset > 0) bennuUiStore.requestGotoOffset(t.offset);
+      else bennuUiStore.requestGoto(t.line);
+    } else if (t.offset > 0) {
+      editorComp?.scrollToByteOffset(t.offset);
+    } else if (t.line > 0) {
+      editorComp?.scrollToLineCol(t.line, 1);
+    }
+    return true;
+  }
+
   /** Resolve + navigate to the declaration of the symbol / `action` under the caret/click.
    *  Prefers the config fragment, then the view JSP; if only a class FQCN is known (no
    *  openable path), reports it. `silent` suppresses the "nothing found" feedback — used
@@ -586,6 +612,10 @@
     //     `<s:include value>` path under the caret) — a `.jsp`/`.jspf` path is unambiguous, so
     //     resolve it before the Struts-action ref (they're disjoint). Non-`.java` files only.
     if (action && (await tryGoToJspInclude(action))) return;
+    // 1c-bis. MyBatis mapper XML: a statement `id` → the Java interface method, `namespace` →
+    //     the interface, an `<include refid>` → its `<sql>`, a `resultMap="…"` → its
+    //     `<resultMap>`. Offset-classified (needs no ref token); a non-mapper XML is a no-op.
+    if (offset != null && (await tryGoToMybatis(offset))) return;
     // 1d. Config XML (`struts.xml`/`spring-*.xml`/`tiles.xml`): a `class="…"` value — an FQCN
     //     or a Spring bean id — go to the Java class it names.
     if (action && (await tryGoToXmlClass(action))) return;
@@ -649,7 +679,11 @@
   // ── Editor context menu (right-click) ─────────────────────────────────────────
   /** Generate (constructors/getters/setters) is Java-only — its source scan is a Java
    *  outline, meaningless (and historically a freeze risk) on a `.jsp`/XML file. */
-  const isJavaFile = $derived(!!activePath && activePath.toLowerCase().endsWith('.java'));
+  const isJavaFile = $derived(isJavaFileOf(activePath));
+  /** Files that support semantic navigation (go-to declaration / find usages / rename).
+   *  On anything else (plain text, markdown, properties, …) those actions are hidden from
+   *  the context menu AND their shortcuts no-op — not offered where they can't resolve. */
+  const supportsNav = $derived(supportsCodeNav(activePath));
 
   function onEditorContextMenu(e: MouseEvent) {
     if (!activePath) return;
@@ -659,14 +693,21 @@
     // right-click doesn't move it on its own, so without this they'd target wherever the
     // caret happened to be instead of the symbol under the pointer.
     editorComp?.setCaretAtCoords(e.clientX, e.clientY);
+    // Navigation actions (go-to / usages / rename) only where they can resolve; Generate
+    // only on Java. On a plain-text/markdown/properties file the menu is just edit + save.
+    const navItems: MenuItem[] = supportsNav
+      ? [
+          { id: 's1', label: '', separator: true },
+          { id: 'gotodef', label: 'Go to declaration', icon: Target, shortcut: 'Ctrl+B' },
+          { id: 'usages', label: 'Find usages', icon: SearchCode, shortcut: 'Alt+F7' },
+          { id: 'rename', label: 'Rename…', icon: PenLine, shortcut: 'Shift+F6' },
+        ]
+      : [];
     const items: MenuItem[] = [
       { id: 'cut', label: 'Cut', icon: Scissors, shortcut: 'Ctrl+X' },
       { id: 'copy', label: 'Copy', icon: Copy, shortcut: 'Ctrl+C' },
       { id: 'paste', label: 'Paste', icon: ClipboardPaste, shortcut: 'Ctrl+V' },
-      { id: 's1', label: '', separator: true },
-      { id: 'gotodef', label: 'Go to declaration', icon: Target, shortcut: 'Ctrl+B' },
-      { id: 'usages', label: 'Find usages', icon: SearchCode, shortcut: 'Alt+F7' },
-      { id: 'rename', label: 'Rename…', icon: PenLine, shortcut: 'Shift+F6' },
+      ...navItems,
       { id: 's2', label: '', separator: true },
       ...(isJavaFile
         ? [{ id: 'generate', label: 'Generate…', icon: Wand2, shortcut: 'Alt+Insert' } as MenuItem]

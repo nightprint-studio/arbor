@@ -178,8 +178,21 @@
   <code>&lt;s:include value="…"&gt;</code> — opens the referenced JSP.
   An absolute action reference that resolves to nothing gets a
   <strong>warning squiggle</strong> — a wildcard or runtime (<code>$&lbrace;…&rbrace;</code>/<code>%&lbrace;…&rbrace;</code>)
-  reference never does. Inline <code>&lt;script&gt;</code> and <code>&lt;style&gt;</code> blocks
-  are highlighted as JavaScript and CSS.
+  reference never does. A static <strong>include</strong> whose target file doesn't exist
+  (<code>&lt;%@ include file="…"&gt;</code>, <code>&lt;jsp:include page="…"&gt;</code>,
+  <code>&lt;s:include value="…"&gt;</code>, <code>&lt;c:import url="…"&gt;</code>) is flagged the
+  same way — a computed or <code>http(s)://</code> reference never is. Inline
+  <code>&lt;script&gt;</code> and <code>&lt;style&gt;</code> blocks are highlighted as JavaScript and CSS.
+</p>
+
+<h2>MyBatis mappers</h2>
+<p>
+  Inside a mapper <code>.xml</code>, <kbd>Ctrl</kbd> + <kbd>B</kbd> (or <kbd>Ctrl</kbd> + click) follows
+  the piece under the caret: a statement <code>id="…"</code> jumps to the matching method on the
+  mapper interface (<code>.java</code>); the mapper <code>namespace="…"</code> opens that interface;
+  an <code>&lt;include refid="…"&gt;</code> jumps to the <code>&lt;sql&gt;</code> fragment it pulls in;
+  and a statement's <code>resultMap="…"</code> jumps to the <code>&lt;resultMap&gt;</code> it uses.
+  Fragment references within the same file resolve instantly (no index needed).
 </p>
 
 <h2>Struts validation files</h2>

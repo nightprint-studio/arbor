@@ -31,7 +31,8 @@ pub use crate::jsp::{
 // JSP include / view-reference scan + path resolution (go-to on `<%@ include %>`,
 // `<jsp:include>`, `<s:include>`, `<c:import>` → the referenced on-disk JSP).
 pub use crate::jsp_includes::{
-    parse_jsp_includes, parse_jsp_includes_file, resolve_include_target, JspInclude,
+    parse_jsp_includes, parse_jsp_includes_file, resolve_include_target, unresolved_includes,
+    unresolved_includes_file, JspInclude,
 };
 
 // JSP include GRAPH (project-wide forward+reverse include edges) + a cycle-safe transitive
@@ -75,3 +76,7 @@ pub use crate::tiles::{index as index_tiles, resolve_view as resolve_tiles_view}
 
 // MyBatis mapper-XML parsing (mapper namespace + statement records; graph-only by name).
 pub use crate::mybatis::{parse_mybatis, parse_mybatis_file, MyBatisParse};
+
+// MyBatis mapper-XML navigation: resolve the token under the caret (statement id → Java
+// method, namespace → interface, include/resultMap → their fragment, intra- or cross-file).
+pub use crate::mybatis_nav::{resolve_mybatis_ref, FragmentKind, MybatisRef};

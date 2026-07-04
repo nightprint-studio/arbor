@@ -53,6 +53,7 @@ pub mod jsp_includes;
 pub mod jsp_vars;
 pub mod model;
 pub mod mybatis;
+pub mod mybatis_nav;
 pub mod prelude;
 pub mod spring;
 pub mod struts;

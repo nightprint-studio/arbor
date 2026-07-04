@@ -7,6 +7,9 @@
 
   interface Props {
     value: string | number | null | undefined;
+    /** Bind the underlying `<input>` element, so a parent can focus / select it
+     *  imperatively (e.g. focus the field when a form section opens). */
+    element?: HTMLInputElement;
     type?: 'text' | 'number' | 'password' | 'email' | 'search' | 'url' | 'tel';
     placeholder?: string;
     disabled?: boolean;
@@ -49,6 +52,7 @@
 
   let {
     value = $bindable(),
+    element = $bindable<HTMLInputElement | undefined>(),
     type        = 'text',
     placeholder,
     disabled    = false,
@@ -69,8 +73,7 @@
 
   const showClear = $derived(clearable && !disabled && !readonly && value !== '' && value != null);
 
-  let inputEl: HTMLInputElement | undefined = $state();
-  $effect(() => { if (autofocus) inputEl?.focus(); });
+  $effect(() => { if (autofocus) element?.focus(); });
 
   function handleClear() {
     value = '';
@@ -109,7 +112,7 @@
     {step}
     {name}
     {id}
-    bind:this={inputEl}
+    bind:this={element}
     aria-label={ariaLabel}
     aria-invalid={error ? true : undefined}
     onchange={(e) => onchange?.((e.target as HTMLInputElement).value)}

@@ -65,6 +65,7 @@
   import BennuFileStructureModal from './BennuFileStructureModal.svelte';
   import type { GenerateMode } from './bennu-intentions';
   import { projectStore } from '$lib/stores/bennu/project.svelte';
+  import { isJavaFile, supportsCodeNav } from './file-kind';
   import { bennuUiStore } from '$lib/stores/bennu/ui.svelte';
   import { bennuRunStore } from '$lib/stores/bennu/run.svelte';
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
@@ -223,21 +224,26 @@
 
   const paletteSections = $derived.by<PaletteSection[]>(() => {
     const q = paletteQuery.trim().toLowerCase();
+    // File-kind gates — hide actions that don't apply to the open file (no Generate /
+    // Java intentions off a `.java`, no go-to / rename / usages off a navigable file).
+    const path = projectStore.activeFilePath;
+    const canNav = supportsCodeNav(path);
+    const isJava = isJavaFile(path);
     const editorItems = [
       { id: 'goto', title: 'Go to line', icon: 'hash', shortcut: 'Ctrl+G',
         action: () => run(() => editor?.openGoto()), when: !!projectStore.activeFilePath },
       { id: 'gotodef', title: 'Go to declaration', icon: 'target', shortcut: 'Ctrl+B',
-        action: () => run(() => editor?.goToDefinition()), when: !!projectStore.activeFilePath },
+        action: () => run(() => editor?.goToDefinition()), when: canNav },
       { id: 'gotoclass', title: 'Go to class…', icon: 'box', shortcut: 'Ctrl+N',
         action: () => run(() => bennuUiStore.openNav('class')), when: !!projectStore.project },
       { id: 'gotofile', title: 'Go to file…', icon: 'file', shortcut: 'Ctrl+Shift+N',
         action: () => run(() => bennuUiStore.openNav('file')), when: !!projectStore.project },
       { id: 'filestructure', title: 'File structure…', icon: 'list-tree', shortcut: 'Ctrl+F12',
-        action: () => run(() => bennuUiStore.openFileStructure()), when: !!projectStore.activeFilePath },
+        action: () => run(() => bennuUiStore.openFileStructure()), when: canNav },
       { id: 'usages', title: 'Find usages', icon: 'search', shortcut: 'Alt+F7',
-        action: () => run(() => void editor?.findUsages()), when: !!projectStore.activeFilePath },
+        action: () => run(() => void editor?.findUsages()), when: canNav },
       { id: 'rename', title: 'Rename…', icon: 'target', shortcut: 'Shift+F6',
-        action: () => run(() => editor?.openRename()), when: !!projectStore.activeFilePath },
+        action: () => run(() => editor?.openRename()), when: canNav },
       { id: 'save', title: 'Save file', icon: 'file', shortcut: 'Ctrl+S',
         action: () => run(saveActive), when: !!projectStore.activeFilePath },
       { id: 'find', title: 'Find in file', icon: 'search', shortcut: 'Ctrl+F',
@@ -247,9 +253,9 @@
       { id: 'reveal', title: 'Select opened file in tree', icon: 'folder-tree',
         action: () => run(() => bennuUiStore.revealActiveInTree()), when: !!projectStore.activeFilePath },
       { id: 'generate', title: 'Generate…', icon: 'wand', shortcut: 'Alt+Insert',
-        action: () => run(() => bennuUiStore.openGenerate()), when: !!projectStore.activeFilePath },
+        action: () => run(() => bennuUiStore.openGenerate()), when: isJava },
       { id: 'intentions', title: 'Show intentions', icon: 'bulb', shortcut: 'Alt+Enter',
-        action: () => run(() => editor?.openIntentions()), when: !!projectStore.activeFilePath },
+        action: () => run(() => editor?.openIntentions()), when: isJava },
       { id: 'newvalidator', title: 'New Struts validator…', icon: 'shield',
         action: () => run(() => bennuUiStore.openValidationCreator()),
         when: projectStore.activeFilePath?.toLowerCase().endsWith('-validation.xml') ?? false },
@@ -335,7 +341,7 @@
     }
     // Rename (Shift+F6) — refactor the symbol under the caret with a preview.
     if (e.shiftKey && !mod && !e.altKey && e.key === 'F6') {
-      if (!projectStore.activeFilePath) return;
+      if (!supportsCodeNav(projectStore.activeFilePath)) return;
       e.preventDefault(); editor?.openRename(); return;
     }
 
@@ -355,21 +361,23 @@
     // File Structure popup (Ctrl+F12, IntelliJ) — a searchable quick-outline of the
     // active file (methods/fields for Java, element names for XML/JSP/HTML).
     if (mod && !e.shiftKey && !e.altKey && e.key === 'F12') {
-      if (!projectStore.activeFilePath) return;
+      if (!supportsCodeNav(projectStore.activeFilePath)) return;
       e.preventDefault(); bennuUiStore.openFileStructure(); return;
     }
 
     // Terminal (Alt+F12, IntelliJ). Alt+digit tool toggles. Alt+Enter intentions,
     // Alt+Insert generate — both IntelliJ-consistent, editor-scoped (no-op with no
     // file open, guarded inside the editor's imperative methods).
-    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-      // Navigation history — IntelliJ's Ctrl+Alt+←/→ collides with the Intel/NVIDIA
-      // screen-rotation hotkeys on Windows, so we use the browser-standard Alt+←/→.
+    // Navigation history — IntelliJ's Ctrl+Alt+←/→ (back / forward through recent jumps).
+    if (e.ctrlKey && e.altKey && !e.shiftKey) {
       if (e.key === 'ArrowLeft')  { e.preventDefault(); editor?.navBack(); return; }
       if (e.key === 'ArrowRight') { e.preventDefault(); editor?.navForward(); return; }
+    }
+
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       if (e.key === 'F12') { e.preventDefault(); bennuUiStore.toggleBottom('terminal'); return; }
       if (e.key === 'F7') {
-        if (!projectStore.activeFilePath) return;
+        if (!supportsCodeNav(projectStore.activeFilePath)) return;
         e.preventDefault(); void editor?.findUsages(); return;
       }
       if (e.key === '1') { e.preventDefault(); bennuUiStore.toggleLeft('project'); return; }
@@ -382,11 +390,11 @@
       if (e.key === '8') { e.preventDefault(); bennuUiStore.toggleRight('maven'); return; }
       if (e.key === '9') { e.preventDefault(); bennuUiStore.toggleRight('services'); return; }
       if (e.key === 'Enter') {
-        if (!projectStore.activeFilePath) return;
+        if (!isJavaFile(projectStore.activeFilePath)) return;
         e.preventDefault(); editor?.openIntentions(); return;
       }
       if (e.key === 'Insert') {
-        if (!projectStore.activeFilePath) return;
+        if (!isJavaFile(projectStore.activeFilePath)) return;
         e.preventDefault(); bennuUiStore.openGenerate(); return;
       }
     }
@@ -395,7 +403,7 @@
     // Go to definition (Ctrl/Cmd+B, IntelliJ) — resolves the action reference under
     // the caret to its config/class/view. Editor-scoped; no-op with no file open.
     if (mod && !e.shiftKey && e.key.toLowerCase() === 'b') {
-      if (!projectStore.activeFilePath) return;
+      if (!supportsCodeNav(projectStore.activeFilePath)) return;
       e.preventDefault(); editor?.goToDefinition(); return;
     }
     if (mod && e.key.toLowerCase() === 'f') { e.preventDefault(); editor?.openSearch(); return; }

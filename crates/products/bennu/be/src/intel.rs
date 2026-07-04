@@ -110,6 +110,21 @@ fn bennu_diagnostics(_ctx: &BennuState, args: DiagnosticsArgs) -> Result<Vec<Dia
             });
         }
     }
+
+    // Include-existence linting (JSP only): a static `<%@ include file>` / `<jsp:include page>`
+    // / `<s:include value>` / `<c:import url>` pointing at a file that doesn't exist on disk
+    // gets a warning. Computed (`${…}`/`%{…}`) and external (`http(s)://`) references are never
+    // flagged — same conservative stance as the action check.
+    if is_jsp_file(&args.file) {
+        for inc in bennu_web::prelude::unresolved_includes_file(std::path::Path::new(&args.file)) {
+            out.push(Diagnostic {
+                message: format!("Included file `{}` was not found", inc.raw),
+                severity: "warning".to_string(),
+                start: inc.start,
+                end: inc.end,
+            });
+        }
+    }
     Ok(out)
 }
 

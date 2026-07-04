@@ -68,6 +68,10 @@ mod forms;
 // JSP variable navigation: `bennu_jsp_nav` — go-to-declaration + find-usages for a page-scoped
 // JSP variable (`<c:set var>` / `<s:set var>` / … + `${var}` / `%{var}` references), single-file.
 mod jsp_nav;
+// MyBatis mapper-XML navigation: `bennu_mybatis_nav` — go-to from inside a mapper (a statement
+// id → the Java interface method, `namespace` → the interface, `<include refid>` → its `<sql>`,
+// a `resultMap="…"` → its `<resultMap>`).
+mod mybatis_nav;
 // Index inspector: `bennu_index_stats` — a cheap snapshot of the per-project index (symbol
 // + config counts, JDK level, build-ready flag) for an inspector panel.
 mod index_stats;

@@ -132,6 +132,32 @@ pub fn resolve_include_target(jsp_path: &Path, raw: &str) -> Option<PathBuf> {
     resolved.is_file().then_some(resolved)
 }
 
+/// Every **static** include in `source` whose target doesn't resolve to a file on disk — the
+/// input to the "included file not found" diagnostic. Computed (`${…}` / `%{…}` / `<%= … %>`)
+/// and external (`http(s)://`) references (and empty values) are skipped, so a runtime or
+/// remote include is never a false positive. `jsp_path` is the including JSP (the resolution
+/// base). Each returned [`JspInclude`] carries the raw value + its byte span for the squiggle.
+pub fn unresolved_includes(jsp_path: &Path, source: &str) -> Vec<JspInclude> {
+    parse_jsp_includes(source)
+        .into_iter()
+        .filter(|inc| {
+            let raw = inc.raw.trim();
+            !inc.computed
+                && !raw.is_empty()
+                && !is_external_url(raw)
+                && resolve_include_target(jsp_path, &inc.raw).is_none()
+        })
+        .collect()
+}
+
+/// [`unresolved_includes`] reading `jsp_path` from disk. Empty when the file can't be read.
+pub fn unresolved_includes_file(jsp_path: &Path) -> Vec<JspInclude> {
+    match std::fs::read_to_string(jsp_path) {
+        Ok(text) => unresolved_includes(jsp_path, &text),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// The web application root for a JSP: the nearest ancestor directory that contains a
 /// `WEB-INF` child dir. If the JSP itself sits under a `.../WEB-INF/...` path (fragments
 /// commonly do), the webapp root is the parent of the top-most `WEB-INF` on its path.
@@ -261,6 +287,26 @@ fn push_include(out: &mut Vec<JspInclude>, raw: String, start: usize, end: usize
 mod tests {
     use super::*;
     use crate::test_support::tmp_dir;
+
+    #[test]
+    fn unresolved_includes_flags_only_the_missing_static_one() {
+        let dir = tmp_dir("inc-lint");
+        std::fs::write(dir.join("header.jspf"), "<div/>").unwrap();
+        let jsp = dir.join("page.jsp");
+        let body = concat!(
+            "<%@ include file=\"header.jspf\" %>\n",      // exists → OK
+            "<jsp:include page=\"missing.jspf\"/>\n",       // missing → flagged
+            "<c:import url=\"http://example.com/x\"/>\n",   // external → skipped
+            "<jsp:include page=\"${dynamic}\"/>\n",         // computed → skipped
+        );
+        std::fs::write(&jsp, body).unwrap();
+
+        let missing = unresolved_includes_file(&jsp);
+        assert_eq!(missing.len(), 1, "only missing.jspf should be flagged");
+        assert_eq!(missing[0].raw, "missing.jspf");
+        // The span must cover exactly the raw value, so the FE underlines the right text.
+        assert_eq!(&body[missing[0].start..missing[0].end], "missing.jspf");
+    }
 
     const FIXTURE: &str = r#"<%@ taglib prefix="s" uri="/struts-tags" %>
 <%@ include file="/WEB-INF/inc/h.jspf" %>

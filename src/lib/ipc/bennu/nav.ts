@@ -269,6 +269,30 @@ export function jspIncludeTarget(file: string, path: string): Promise<string | n
   return bennu('bennu_jsp_include_target', { args: { file, path } });
 }
 
+// ── MyBatis mapper-XML navigation ─────────────────────────────────────────────────
+
+/** A resolved go-to target from inside a mapper XML — mirrors the BE `MybatisNavResult`.
+ *  Either an intra-file byte `offset` (a `<sql>`/`<resultMap>` in the same mapper) or a
+ *  cross-file `line` in a `.java` (the interface method/type); the unused one is `0`. */
+export interface MybatisNav {
+  /** Absolute path (forward slashes) of the file to open. */
+  file: string;
+  /** Byte offset to jump to (intra-file); `0` when `line` is used instead. */
+  offset: number;
+  /** 1-based line to jump to (cross-file into a `.java`); `0` when `offset` is used. */
+  line: number;
+}
+
+/** Resolve the mapper-XML token at `file`:`offset` — a statement `id` → its Java interface
+ *  method, `namespace` → the interface, `<include refid>` → its `<sql>`, a `resultMap="…"`
+ *  → its `<resultMap>`. `source` is the current (possibly-unsaved) buffer, so the offset is
+ *  classified against what the user sees. `null` when the caret isn't on a navigable
+ *  reference or it can't be resolved (no index yet, an as-yet-unsupported cross-namespace
+ *  fragment). Wire: `bennu_mybatis_nav` — `MybatisNavArgs { file, source, offset }`. */
+export function mybatisNav(file: string, source: string, offset: number): Promise<MybatisNav | null> {
+  return bennu('bennu_mybatis_nav', { args: { file, source, offset } });
+}
+
 // ── hover (docs §5) ─────────────────────────────────────────────────────────────
 
 /** Hover card for the symbol under the caret — mirrors the BE `HoverInfo`. */
