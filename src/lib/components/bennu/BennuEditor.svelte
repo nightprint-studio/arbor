@@ -13,7 +13,7 @@
   import {
     Hash, FileCode2, MapPin, Scissors, Copy, ClipboardPaste, Target, SearchCode,
     PenLine, Wand2, Save, Eye, X, ArrowRightToLine, LocateFixed, ShieldCheck, Plus, BookOpen,
-    Braces,
+    Braces, ArrowLeftRight,
   } from 'lucide-svelte';
   import Tabs from '$lib/components/shared/ui/Tabs.svelte';
   import type { TabItem } from '$lib/components/shared/ui/Tabs.svelte';
@@ -40,7 +40,8 @@
   import { bennuIndexStore } from '$lib/stores/bennu/index.svelte';
   import { spellcheck as ipcSpellcheck, type SpellHit } from '$lib/ipc/bennu/spell';
   import { mojibakeCheck as ipcMojibakeCheck } from '$lib/ipc/bennu/mojibake';
-  import { logParam as ipcLogParam } from '$lib/ipc/bennu/log-param';
+  import { intentionsAt as ipcIntentionsAt } from '$lib/ipc/bennu/intentions';
+  import { validationTarget as ipcValidationTarget } from '$lib/ipc/bennu/validation';
   import { bennuSpellStore } from '$lib/stores/bennu/spell.svelte';
   import type { EditorDiagnostic, EditorViewSnapshot } from '$lib/components/shared/ui/code-editor';
   import type { EditorView } from '@codemirror/view';
@@ -94,6 +95,8 @@
   const editorLanguage = $derived(languageForPath(activePath));
   // Struts validation files get a dedicated editor toolbar (the "New validator" flow).
   const isValidationFile = $derived(activePath?.toLowerCase().endsWith('-validation.xml') ?? false);
+  // Emmet Tab-expansion is markup-only: JSP + HTML (where the abbreviations pay off).
+  const emmetEnabled = $derived(!!activePath && /\.(jsp|jspf|tag|html?|xhtml)$/i.test(activePath));
 
   function baseName(path: string): string {
     return path.split(/[\\/]/).pop() ?? path;
@@ -280,6 +283,23 @@
    *  seed Find-in-project / Go-to navigator fields from what the user highlighted. */
   export function getSelectedText(): string { return editorComp?.getSelectionText() ?? ''; }
 
+  /** Toolbar action on a Java action class: resolve its `<Class>-validation.xml` (naming
+   *  convention), create it from a skeleton if missing, open it, and pop the validator chain
+   *  builder so the user can add rules straight away. No-op (with a toast) off a Java file. */
+  export async function createValidationFile() {
+    const file = activePath;
+    if (!file) return;
+    let target;
+    try { target = await ipcValidationTarget(file); } catch { target = null; }
+    if (!target) { toastStore.show('Not a Java action class', 'info'); return; }
+    if (!target.exists) {
+      await projectStore.saveText(target.path, target.content); // write the fresh skeleton
+      toastStore.show('Created validation file', 'success');
+    }
+    await projectStore.openFile(target.path);
+    bennuUiStore.openValidationCreator();
+  }
+
   /** Palette "Check file for mojibake": scan the active buffer for UTF-8-as-Cp1252 corruption
    *  (`Ã©` → `é`, `â€™` → `'`) and surface each hit as a warning squiggle with a one-click
    *  replace, plus a summary toast. One-shot (recomputed each run); cleared on file switch. */
@@ -313,27 +333,35 @@
   /** Collect the context actions at the caret and open the intentions popup
    *  anchored there. No-op (with a toast) when no file is open or the caret has no
    *  anchor. The two "Generate…" items route through `onGenerate`. */
+  /** Pick the Alt+Enter list icon for an intention offer by its stable id. */
+  function intentionIcon(id: string) {
+    if (id === 'log-parameterize') return Braces;
+    if (id === 'np-equals') return ArrowLeftRight;
+    return Wand2; // the simplification family (isEmpty / boolean / negated comparison)
+  }
+
   export async function openIntentions() {
     if (!activePath || !editorComp) return;
     const path = activePath;
     const anchor = editorComp.coordsAtCaret();
-    // Context-aware BE intention (first real one): if the caret is inside a logging call whose
-    // message is built by string concatenation, offer "parameterize" — a single Rust-backed edit.
+    // Context-aware, Rust-backed intentions resolved by bennu-be in one round-trip: the pure
+    // `bennu-intentions` catalog returns every quick-fix applicable at the caret (parameterize
+    // logging, NP-safe equals, isEmpty()/boolean/negated-comparison simplifications).
     const dynamic: IntentionItem[] = [];
     if (isJavaFileOf(path)) {
       const src = editorComp.getValue();
       const offset = editorComp.caretByteOffset();
-      try {
-        const lp = await ipcLogParam(path, src, offset);
-        if (lp && projectStore.activeFilePath === path) {
+      const offers = await ipcIntentionsAt(path, src, offset).catch(() => []);
+      if (projectStore.activeFilePath === path) {
+        for (const o of offers) {
           dynamic.push({
-            id: 'log-parameterize',
-            label: 'Replace concatenation with parameterized logging',
-            icon: Braces,
-            run: () => editorComp?.replaceByteRange(lp.start, lp.end, lp.replacement),
+            id: o.id,
+            label: o.label,
+            icon: intentionIcon(o.id),
+            run: () => editorComp?.replaceByteRange(o.start, o.end, o.replacement),
           });
         }
-      } catch { /* BE absent — skip the dynamic intention */ }
+      }
     }
     const items = [
       ...dynamic,
@@ -904,8 +932,14 @@
           <button class="ed-tbtn" use:tooltip={'Validation reference'} onclick={() => bennuUiStore.toggleDocs()}>
             <BookOpen size={12} /> Reference
           </button>
-          <button class="ed-tbtn primary" use:tooltip={'Add a field validator'} onclick={() => bennuUiStore.openValidationCreator()}>
-            <Plus size={12} /> New validator
+          <button class="ed-tbtn primary" use:tooltip={'Add a validator chain to a field'} onclick={() => bennuUiStore.openValidationCreator()}>
+            <Plus size={12} /> Validators
+          </button>
+          <span class="ed-tsep"></span>
+        {:else if isJavaFile}
+          <!-- On a Java action class: create (or open) its `<Class>-validation.xml`. -->
+          <button class="ed-tbtn" use:tooltip={'Create or open the Struts validation file for this action class'} onclick={createValidationFile}>
+            <ShieldCheck size={12} /> Validation
           </button>
           <span class="ed-tsep"></span>
         {/if}
@@ -924,6 +958,8 @@
           language={editorLanguage}
           diagnostics={allDiags}
           rulerColumn={bennuSettingsStore.rightMargin}
+          minimap={bennuSettingsStore.minimap}
+          emmet={emmetEnabled}
           tabSize={bennuSettingsStore.tabSize}
           indentUnit={bennuSettingsStore.indentStyle === 'tabs' ? '\t' : ' '.repeat(bennuSettingsStore.tabSize)}
           initialState={viewStates.get(activePath)}

@@ -37,6 +37,8 @@ export interface BennuSettingsSnapshot {
   showWhitespace: boolean;
   highlightCurrentLine: boolean;
   showLineNumbers: boolean;
+  /** Show the right-gutter minimap overview. */
+  minimap: boolean;
   /** Vertical margin guide column (IntelliJ's hard-wrap ruler). 0 = hidden. */
   rightMargin: number;
   // Completion
@@ -69,6 +71,7 @@ const DEFAULTS: BennuSettingsSnapshot = {
   showWhitespace: false,
   highlightCurrentLine: true,
   showLineNumbers: true,
+  minimap: true,
   rightMargin: 120,
   autoPopup: true,
   popupDelayMs: 150,
@@ -95,6 +98,7 @@ function createSettingsStore() {
   let showWhitespace = $state(DEFAULTS.showWhitespace);
   let highlightCurrentLine = $state(DEFAULTS.highlightCurrentLine);
   let showLineNumbers = $state(DEFAULTS.showLineNumbers);
+  let minimap = $state(DEFAULTS.minimap);
   let rightMargin = $state(DEFAULTS.rightMargin);
   // Completion
   let autoPopup = $state(DEFAULTS.autoPopup);
@@ -119,7 +123,7 @@ function createSettingsStore() {
   function snapshot(): BennuSettingsSnapshot {
     return {
       fontSize, tabSize, indentStyle, wordWrap, showWhitespace,
-      highlightCurrentLine, showLineNumbers, rightMargin,
+      highlightCurrentLine, showLineNumbers, minimap, rightMargin,
       autoPopup, popupDelayMs, caseSensitive, autoImport,
       foldingEnabled, foldBlockComments,
       finalParams, useLombokVal, switchWithReturn, spaceInBraces, blankLineBetweenMembers,
@@ -158,6 +162,8 @@ function createSettingsStore() {
     setHighlightCurrentLine(v: boolean) { highlightCurrentLine = v; persist(); },
     get showLineNumbers() { return showLineNumbers; },
     setShowLineNumbers(v: boolean) { showLineNumbers = v; persist(); },
+    get minimap() { return minimap; },
+    setMinimap(v: boolean) { minimap = v; persist(); },
     get rightMargin() { return rightMargin; },
     setRightMargin(v: number) { rightMargin = v; persist(); },
 
@@ -211,6 +217,7 @@ function createSettingsStore() {
       showWhitespace = DEFAULTS.showWhitespace;
       highlightCurrentLine = DEFAULTS.highlightCurrentLine;
       showLineNumbers = DEFAULTS.showLineNumbers;
+      minimap = DEFAULTS.minimap;
       rightMargin = DEFAULTS.rightMargin;
       autoPopup = DEFAULTS.autoPopup;
       popupDelayMs = DEFAULTS.popupDelayMs;

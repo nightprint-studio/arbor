@@ -41,9 +41,13 @@ pub use crate::refcache::{cache_path as ref_cache_path, clear as clear_ref_cache
 // Plus go-to-declaration (`resolve_declaration` + `DeclarationLocation`), which reuses the
 // same caret classifier + decl-site name-span finders.
 pub use crate::rename::{
-    find_member_name_span, find_type_name_span, rename_apply, rename_plan, resolve_declaration,
-    DeclarationLocation, Edit, EditReason, FileEdits, HoverInfo, PlanFile, RenameEngine, RenamePlan,
+    find_member_name_span, rename_apply, rename_plan, resolve_declaration, DeclarationLocation,
+    Edit, EditReason, FileEdits, HoverInfo, RenameEngine, RenamePlan,
 };
+// The rename planner's project-source input unit + the type-declaration name-span finder now live
+// in the base crates (`bennu-query` / `bennu-java`); re-surfaced here as part of the rename API.
+pub use bennu_java::prelude::find_type_name_span;
+pub use bennu_query::prelude::PlanFile;
 
 // Spell-check engine (declaration names + comments): the pure tokenizer / allow-list +
 // the process-wide dictionary cache + the Java-source walk.
@@ -52,17 +56,11 @@ pub use crate::spell::{
     project_custom_dict_path, tokenize_identifier, SpellEngine, SpellHit, SubWord, TECH_ALLOWLIST,
 };
 
-// Inherited ("super") members of a type — the Structure panel's lazy "Inherited" bucket.
-// Reuses the resolver's supertype walk (superclass + interfaces), one level up from the
-// type's own members.
-pub use crate::inherited::{inherited_members, InheritedMember, InheritedSource};
-
-// The Phase-1 completion machinery, for the be layer to build a project's provider.
-pub use crate::completion::completion;
+// Inherited ("super") members + the resolver + member-access completion live in `bennu-query`;
+// consumers (provider / be / tests) import them from `bennu_query::prelude` directly (clean cut,
+// no facade re-export).
 pub use crate::java_index::{
     build_project_index, build_project_index_from_sources, collect_java, file_records_from_source,
     project_type_map, read_java_sources, read_source_for_index, ClassDecl, NonCompliantSource,
     ProjectBuild, ProjectSources,
 };
-pub use crate::jdk::JdkMemberIndex;
-pub use crate::resolver::{convert_members, IndexResolver};

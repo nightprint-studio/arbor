@@ -18,9 +18,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bennu_classpath::prelude::{ClassMembers as CpClassMembers, MemberIndex as CpMemberIndex};
 use bennu_index::prelude::PersistedIndex;
 use bennu_intel::prelude::{
-    build_project_index_from_sources, completion, rename_apply, CompletionItem, DeclarationLocation,
-    Edit, HoverInfo, IndexResolver, InheritedMember, ReferencesResult, RenameEngine, RenamePlan,
+    build_project_index_from_sources, rename_apply, CompletionItem, DeclarationLocation,
+    Edit, HoverInfo, ReferencesResult, RenameEngine, RenamePlan,
 };
+use bennu_query::prelude::{completion, IndexResolver, InheritedMember};
 
 /// A JDK member source that resolves nothing. The completion resolver is generic over a
 /// `MemberIndex`; feeding it this stub keeps the whole suite free of a live JDK install —

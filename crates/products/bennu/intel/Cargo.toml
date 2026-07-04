@@ -17,9 +17,12 @@ bennu-index = { path = "../index" }
 # native provider builds index records from `extract_symbols` and infers the receiver
 # type at a caret with `infer_receiver_type`.
 bennu-java = { path = "../java" }
-# The classpath member index (JDK bytecode): the resolver walks JDK members live off
-# the mmap'd rt.jar / jimage, and converts them into the java seam shape.
+# The classpath member index (JDK bytecode): still used directly by the reference walk /
+# provider for JDK-type lookups outside the resolver.
 bennu-classpath = { path = "../classpath" }
+# The code-intel query engine (extracted): `IndexResolver` + member-access `completion`. intel's
+# provider / rename / hover / find-usages all resolve against it (one-way dependency).
+bennu-query = { path = "../query" }
 # The web-config graph (Struts/Spring/Tiles): the native provider ingests its
 # string-keyed records into the index (as `Source::StrutsAction`/`SpringBean` symbols +
 # edges) and resolves the C1 chain (action → bean-id → FQCN) + the view chain off it.

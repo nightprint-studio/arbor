@@ -25,6 +25,7 @@
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
   import Dropdown, { type DropdownItem } from '$lib/components/shared/ui/Dropdown.svelte';
   import BennuFilterBar from './BennuFilterBar.svelte';
+  import BennuNewFileModal from './BennuNewFileModal.svelte';
   import FileExplorerModal from '$lib/components/sitta/FileExplorerModal.svelte';
   import { tooltip } from '$lib/actions/tooltip';
   import { toastStore } from '$lib/feedback/stores/toasts.svelte';
@@ -132,8 +133,12 @@
   }
 
   function onRowContextMenu(node: TreeNode, e: MouseEvent) {
+    // "New file…" creates in this directory (dir node) or the file's directory (file node).
+    const newDir = node.is_dir ? node.path : parentDir(node.path);
     const items: MenuItem[] = node.is_dir
       ? [
+          { id: 'new',           label: 'New file…',          icon: Plus },
+          { separator: true, id: 'sep-new', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
           { separator: true, id: 'sep-dir', label: '' },
@@ -143,6 +148,7 @@
         ]
       : [
           { id: 'open',          label: 'Open',               icon: FolderOpen },
+          { id: 'new',           label: 'New file…',          icon: Plus },
           { separator: true, id: 'sep-file', label: '' },
           { id: 'copy-path',     label: 'Copy path',          icon: Copy },
           { id: 'copy-rel',      label: 'Copy relative path', icon: Copy },
@@ -150,6 +156,7 @@
         ];
     bennuContextMenuStore.show(e.clientX, e.clientY, items, (id) => {
       switch (id) {
+        case 'new':       newFileDir = newDir; break;
         case 'open':      void projectStore.openFile(node.path); break;
         case 'copy-path': copyText(node.path); break;
         case 'copy-rel':  copyText(relativePath(node.path)); break;
@@ -160,6 +167,20 @@
     });
   }
 
+  /** Parent directory of a path (forward-slash aware). */
+  function parentDir(p: string): string {
+    return p.replace(/[\\/][^\\/]*$/, '') || p;
+  }
+
+  /** Where the header / kebab "New file…" creates: the active file's directory, else the root. */
+  function defaultNewDir(): string {
+    const active = projectStore.activeFilePath;
+    return active ? parentDir(active) : (projectStore.project?.root ?? '');
+  }
+
+  // The directory a New-file modal is open for (null = closed).
+  let newFileDir = $state<string | null>(null);
+
   // ── Options kebab ────────────────────────────────────────────────────────────
   const optionsMenu: DropdownItem[] = [
     { kind: 'item', id: 'expand',   label: 'Expand all',   icon: ChevronsUpDown,   onclick: expandAll },
@@ -168,14 +189,14 @@
     { kind: 'item', id: 'reveal',   label: 'Select opened file', icon: Crosshair, onclick: revealActive },
     { kind: 'separator' },
     { kind: 'item', id: 'newfile',  label: 'New file…', icon: Plus,
-      onclick: () => toastStore.show("Creating files isn't implemented yet.", 'info') },
+      onclick: () => { newFileDir = defaultNewDir(); } },
   ];
 </script>
 
 <PanelShell title="Project">
   {#snippet icon()}<FolderTree size={13} />{/snippet}
   {#snippet actions()}
-    <button class="ps-btn" type="button" onclick={() => toastStore.show("Creating files isn't implemented yet.", 'info')} use:tooltip={'New file'} aria-label="New file">
+    <button class="ps-btn" type="button" onclick={() => { newFileDir = defaultNewDir(); }} disabled={!projectStore.project} use:tooltip={'New file'} aria-label="New file">
       <Plus size={14} />
     </button>
     <button class="ps-btn" type="button" onclick={revealActive} disabled={!projectStore.activeFilePath} use:tooltip={'Select opened file'} aria-label="Select opened file">
@@ -246,6 +267,10 @@
     onCancel={() => (pickerOpen = false)}
     onClose={() => (pickerOpen = false)}
   />
+{/if}
+
+{#if newFileDir !== null}
+  <BennuNewFileModal dir={newFileDir} onClose={() => (newFileDir = null)} />
 {/if}
 
 <style>

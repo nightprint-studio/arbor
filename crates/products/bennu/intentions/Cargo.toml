@@ -1,0 +1,10 @@
+[package]
+name         = "bennu-intentions"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu Alt+Enter intentions — pure, tree-sitter-free Java source transforms (parameterize logging, NP-safe equals, …). String-in / edit-out, so each is exhaustively unit-tested."
+
+[dependencies]

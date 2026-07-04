@@ -1,50 +1,54 @@
-//! Inherited ("super") members of a Java type — the Structure panel's lazy
-//! **"Inherited"** bucket.
+//! Inherited ("super") members of a Java type — the Structure panel's lazy **"Inherited"** bucket.
 //!
-//! Given a type identified by `(file, simple_name, decl_line)` (its own declaration
-//! site — line disambiguates a nested / same-simple-named type), resolve its **binary
-//! name**, then collect the members of its SUPERCLASS + INTERFACES recursively (NOT the
-//! type's own declared members), deduping overrides by name+kind so an override shadows
-//! the super declaration it hides.
+//! Given a type identified by `(file, simple_name, decl_line)` (its own declaration site — line
+//! disambiguates a nested / same-simple-named type), resolve its **binary name**, then collect the
+//! members of its SUPERCLASS + INTERFACES recursively (NOT the type's own declared members),
+//! deduping overrides by name+kind so an override shadows the super declaration it hides.
 //!
-//! This reuses the same resolution machinery as member-access completion
-//! ([`crate::completion::collect_members`] walks super + interfaces via
-//! [`TypeResolver::members_of`]) — here we start the walk one level up (the supertypes),
-//! so the type's own members are excluded.
+//! This reuses the same resolution machinery as member-access completion (the member walk over
+//! super + interfaces via [`TypeResolver::members_of`]) — here we start the walk one level up (the
+//! supertypes), so the type's own members are excluded.
 //!
-//! Each collected member is tagged with the `declaring_type` (the FQCN it was collected
-//! from) + its `visibility`, and — like go-to-declaration — a `source` file+line **only
-//! when that declaring type resolves to a PROJECT source** (a JDK / jar supertype's member
-//! has no openable source, so `source` is `None`).
+//! Each collected member is tagged with the `declaring_type` (the FQCN it was collected from) + its
+//! `visibility`, and — like go-to-declaration — a `source` file+line **only when that declaring
+//! type resolves to a PROJECT source** (a JDK / jar supertype's member has no openable source, so
+//! `source` is `None`).
+//!
+//! The tree-sitter CST scans this needs — resolving the target's binary name by `(simple, line)`
+//! and locating a supertype's project source — live in [`bennu_java::prelude`]
+//! ([`binary_of_type_at`](bennu_java::prelude::binary_of_type_at) /
+//! [`find_type_name_span`](bennu_java::prelude::find_type_name_span)), so this crate stays
+//! parser-free (a pure resolver walk).
 
 use std::collections::HashSet;
 
-use bennu_java::prelude::{Member, MemberKind, TypeRef, TypeResolver, Visibility};
-// Only the `#[cfg(test)]` `MapResolver` names `ClassMembers` directly (the walk consumes
-// members through the resolver, which now hands back `Arc<ClassMembers>`).
+use bennu_java::prelude::{
+    binary_of_type_at, find_type_name_span, Member, MemberKind, TypeRef, TypeResolver, Visibility,
+};
+// Only the `#[cfg(test)]` `MapResolver` names `ClassMembers` directly (the walk consumes members
+// through the resolver, which hands back `Arc<ClassMembers>`).
 #[cfg(test)]
 use bennu_java::prelude::ClassMembers;
-use tree_sitter::{Node, Parser};
 
-use crate::rename::{find_type_name_span, PlanFile};
+use crate::source::PlanFile;
 
-/// One inherited member (the intel-level view the be layer maps to the wire
-/// `InheritedMember` field-for-field).
+/// One inherited member (the query-level view the be layer maps to the wire `InheritedMember`
+/// field-for-field).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InheritedMember {
     /// `"method"` | `"field"`.
     pub kind: String,
     /// The member's simple name.
     pub name: String,
-    /// A readable detail: the return type (methods) / field type. `None` when the type is
-    /// not recorded.
+    /// A readable detail: the return type (methods) / field type. `None` when the type is not
+    /// recorded.
     pub detail: Option<String>,
     /// `"public"` | `"protected"` | `"private"` | `"package"`.
     pub visibility: String,
     /// The dotted FQCN of the class / interface that declares the member.
     pub declaring_type: String,
-    /// The project-source declaration site (file + 1-based line), or `None` when the
-    /// declaring type is a JDK / jar type (no project source to open).
+    /// The project-source declaration site (file + 1-based line), or `None` when the declaring type
+    /// is a JDK / jar type (no project source to open).
     pub source: Option<InheritedSource>,
 }
 
@@ -57,14 +61,14 @@ pub struct InheritedSource {
     pub line: i64,
 }
 
-/// Resolve the target type by `(file, simple_name, decl_line)` and collect the members of
-/// its SUPERCLASS + INTERFACES (recursively, deduped) — the "inherited" set. Returns `[]`
-/// when the target type can't be resolved in `file` (unknown type / stale line) — a benign,
-/// non-fatal state (the FE shows an empty bucket).
+/// Resolve the target type by `(file, simple_name, decl_line)` and collect the members of its
+/// SUPERCLASS + INTERFACES (recursively, deduped) — the "inherited" set. Returns `[]` when the
+/// target type can't be resolved in `file` (unknown type / stale line) — a benign, non-fatal state
+/// (the FE shows an empty bucket).
 ///
-/// `java_files` are the project's `.java` sources (path + text); they resolve the target's
-/// binary name and, for each inherited member, its declaring type's project source (else
-/// `None`, like go-to-declaration).
+/// `java_files` are the project's `.java` sources (path + text); they resolve the target's binary
+/// name and, for each inherited member, its declaring type's project source (else `None`, like
+/// go-to-declaration).
 pub fn inherited_members(
     resolver: &dyn TypeResolver,
     java_files: &[PlanFile],
@@ -96,9 +100,9 @@ pub fn inherited_members(
     out
 }
 
-/// Collect the members of the supertype `binary` (and, recursively, ITS supertypes),
-/// tagging each with its declaring FQCN + visibility + project source. Dedups by name+kind
-/// across the whole walk so an override higher up shadows the declaration it hides.
+/// Collect the members of the supertype `binary` (and, recursively, ITS supertypes), tagging each
+/// with its declaring FQCN + visibility + project source. Dedups by name+kind across the whole walk
+/// so an override higher up shadows the declaration it hides.
 fn collect_supertype(
     resolver: &dyn TypeResolver,
     java_files: &[PlanFile],
@@ -140,10 +144,10 @@ fn collect_supertype(
     }
 }
 
-/// Resolve the target type's JVM binary name by locating the declaration named `type_name`
-/// on 1-based `decl_line` in `file`'s project source. The line disambiguates a nested /
-/// same-simple-named type. `None` when no project source is `file`, or `file` declares no
-/// such type at that line.
+/// Resolve the target type's JVM binary name by locating the declaration named `type_name` on
+/// 1-based `decl_line` in `file`'s project source. The line disambiguates a nested /
+/// same-simple-named type. `None` when no project source is `file`, or `file` declares no such type
+/// at that line.
 fn resolve_target_binary(
     java_files: &[PlanFile],
     file: &str,
@@ -154,97 +158,9 @@ fn resolve_target_binary(
     binary_of_type_at(source, type_name, decl_line)
 }
 
-/// Walk `source`'s CST for the class / interface / enum named `simple` whose declaration
-/// name token is on 1-based `line`, returning its JVM binary name (package + nesting,
-/// slash-separated). When `line <= 0` (caller couldn't pin a line), the first same-named
-/// declaration wins. `None` when no matching declaration is found.
-fn binary_of_type_at(source: &str, simple: &str, line: i64) -> Option<String> {
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
-    let bytes = source.as_bytes();
-    let root = tree.root_node();
-
-    // Package + nested-type context tracked as we descend, so `Outer.Inner` binds correctly.
-    let package = package_name(&root, bytes);
-    let mut found: Option<String> = None;
-    walk_types(&root, bytes, package.as_deref(), None, simple, line, &mut found);
-    found
-}
-
-/// Recursive type walk building each declaration's binary name; on a name+line match, set
-/// `found` (first match wins — the caller's line already disambiguated).
-#[allow(clippy::too_many_arguments)]
-fn walk_types(
-    node: &Node,
-    bytes: &[u8],
-    package: Option<&str>,
-    outer_binary: Option<&str>,
-    simple: &str,
-    line: i64,
-    found: &mut Option<String>,
-) {
-    let mut cur = node.walk();
-    for child in node.named_children(&mut cur) {
-        if matches!(
-            child.kind(),
-            "class_declaration" | "interface_declaration" | "enum_declaration"
-        ) {
-            let Some(name_node) = child.child_by_field_name("name") else { continue };
-            let Ok(name) = name_node.utf8_text(bytes) else { continue };
-            // Nested types are keyed by the index with a `/` separator (the source
-            // extractor's FQN uses `Outer.Inner`, persisted as `Outer/Inner`), so build the
-            // same slash-joined binary here — NOT the JVM `Outer$Inner` form — or
-            // `members_of` would miss the project record.
-            let binary = match outer_binary {
-                Some(o) => format!("{o}/{name}"),
-                None => match package {
-                    Some(p) => format!("{}/{name}", p.replace('.', "/")),
-                    None => name.to_string(),
-                },
-            };
-            if found.is_none() && name == simple {
-                // 1-based line of the name token.
-                let name_line = name_node.start_position().row as i64 + 1;
-                if line <= 0 || name_line == line {
-                    *found = Some(binary.clone());
-                }
-            }
-            // Descend into the body for nested types (binary uses the nested `$` form for
-            // the outer, but the resolver keys project source types by their dotted/slash
-            // FQN — nested types resolve via the same key the index built them under).
-            if let Some(body) = child.child_by_field_name("body") {
-                walk_types(&body, bytes, package, Some(&binary), simple, line, found);
-            }
-        } else {
-            // A non-type container (e.g. the compilation unit) — descend for top-level types.
-            walk_types(&child, bytes, package, outer_binary, simple, line, found);
-        }
-        if found.is_some() {
-            return;
-        }
-    }
-}
-
-/// The package name of a compilation unit, if declared.
-fn package_name(root: &Node, bytes: &[u8]) -> Option<String> {
-    let mut cur = root.walk();
-    for child in root.children(&mut cur) {
-        if child.kind() == "package_declaration" {
-            let mut pc = child.walk();
-            for n in child.named_children(&mut pc) {
-                if matches!(n.kind(), "scoped_identifier" | "identifier") {
-                    return n.utf8_text(bytes).ok().map(|s| s.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-/// The project-source declaration of type `binary`, or `None` when no project `.java`
-/// declares it (a JDK / jar type). Mirrors go-to-declaration's project-source scan: the
-/// first source with a matching type-name span wins.
+/// The project-source declaration of type `binary`, or `None` when no project `.java` declares it
+/// (a JDK / jar type). Mirrors go-to-declaration's project-source scan: the first source with a
+/// matching type-name span wins.
 fn project_source_of(java_files: &[PlanFile], binary: &str) -> Option<InheritedSource> {
     let simple = binary.rsplit(['/', '$']).next().unwrap_or(binary);
     for f in java_files {
@@ -303,8 +219,8 @@ fn render_type(t: &TypeRef) -> String {
     }
 }
 
-/// A trivial in-crate `TypeResolver` used by the unit tests: a fixed binary→members map,
-/// plus a simple→binary table. Mirrors the shape the real `IndexResolver` exposes.
+/// A trivial in-crate `TypeResolver` used by the unit tests: a fixed binary→members map, plus a
+/// simple→binary table. Mirrors the shape the real `IndexResolver` exposes.
 #[cfg(test)]
 struct MapResolver {
     members: std::collections::HashMap<String, ClassMembers>,
@@ -359,20 +275,9 @@ mod tests {
     }
 
     #[test]
-    fn binary_of_type_at_matches_by_line() {
-        let src = "package com.acme;\npublic class Order {\n}\n";
-        // `Order` name token is on line 2.
-        assert_eq!(binary_of_type_at(src, "Order", 2).as_deref(), Some("com/acme/Order"));
-        // A wrong line yields no match.
-        assert!(binary_of_type_at(src, "Order", 99).is_none());
-        // line <= 0 → first same-named decl wins.
-        assert_eq!(binary_of_type_at(src, "Order", 0).as_deref(), Some("com/acme/Order"));
-    }
-
-    #[test]
     fn project_subclass_inherits_project_superclass_method_with_source() {
-        // Sub extends Base; Base declares `greet()` in a PROJECT source → the inherited
-        // member carries a source pointing at Base.java, and Sub's own members are excluded.
+        // Sub extends Base; Base declares `greet()` in a PROJECT source → the inherited member
+        // carries a source pointing at Base.java, and Sub's own members are excluded.
         let base_src = "package com.acme;\npublic class Base {\n  public String greet() { return \"hi\"; }\n}\n";
         let sub_src = "package com.acme;\npublic class Sub extends Base {\n  public int own() { return 1; }\n}\n";
         let java = vec![plan_file("Base.java", base_src), plan_file("Sub.java", sub_src)];
@@ -418,8 +323,8 @@ mod tests {
 
     #[test]
     fn jdk_supertype_member_has_null_source() {
-        // Sub extends a JDK type (java/util/AbstractList) whose member `size()` is resolvable
-        // (the JDK member index provides ClassMembers) but has NO project source → source null.
+        // Sub extends a JDK type (java/util/AbstractList) whose member `size()` is resolvable (the
+        // JDK member index provides ClassMembers) but has NO project source → source null.
         let sub_src = "package com.acme;\npublic class Sub {\n}\n";
         let java = vec![plan_file("Sub.java", sub_src)];
 
@@ -454,8 +359,8 @@ mod tests {
 
     #[test]
     fn override_dedups_to_lowest_declaration() {
-        // Both Base and Mid declare `run()`; the walk starts at Sub's supertype Mid, so Mid's
-        // `run` claims the name+kind and Base's is shadowed (deduped).
+        // Both Base and Mid declare `run()`; the walk starts at Sub's supertype Mid, so Mid's `run`
+        // claims the name+kind and Base's is shadowed (deduped).
         let java = vec![plan_file("Sub.java", "package com.acme;\npublic class Sub {\n}\n")];
         let mut members = HashMap::new();
         members.insert(

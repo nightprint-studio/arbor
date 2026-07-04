@@ -21,6 +21,7 @@
 
   import type { LanguageDescriptor, EditorDiagnostic, EditorViewSnapshot } from './types';
   import { createCodeEditorExtensions, refTextAt } from './extensions';
+  import { minimapExtension } from './minimap';
   import { makeByteToU16 } from './highlight';
 
   let {
@@ -29,6 +30,8 @@
     readOnly = false,
     diagnostics = [],
     rulerColumn,
+    minimap = false,
+    emmet = false,
     tabSize,
     indentUnit,
     initialState,
@@ -45,6 +48,10 @@
     diagnostics?: EditorDiagnostic[];
     /** Draw a vertical margin guide at this 1-based column (IntelliJ-style). Omit for none. */
     rulerColumn?: number;
+    /** Show the right-gutter minimap overview. Toggled live via a compartment. */
+    minimap?: boolean;
+    /** Enable Emmet abbreviation expansion on Tab (markup buffers). Static at mount. */
+    emmet?: boolean;
     /** Tab width in columns. Omit to keep CodeMirror's default (an editor that never sets
      *  indentation is unchanged). Applied live via a compartment. */
     tabSize?: number;
@@ -69,6 +76,8 @@
   // Indentation lives in its own compartment so a footer change (tab size / tabs-vs-spaces)
   // reconfigures the OPEN buffer live, without a remount.
   const indentCompartment = new Compartment();
+  // Minimap in its own compartment so the setting toggle reconfigures the OPEN buffer live.
+  const minimapCompartment = new Compartment();
   let suppressEmit = false;
 
   /** The `EditorState.tabSize` + `indentUnit` facets for the current props — empty when the
@@ -116,7 +125,7 @@
   $effect(() => { void diagnostics; pushDiagnostics(); });
 
   function mount(target: HTMLDivElement) {
-    const { extensions } = createCodeEditorExtensions(language, { readOnly, onGoto, rulerColumn });
+    const { extensions } = createCodeEditorExtensions(language, { readOnly, onGoto, rulerColumn, emmet });
 
     const updateListener = EditorView.updateListener.of((u) => {
       if (u.docChanged && !suppressEmit) {
@@ -137,7 +146,12 @@
 
     const state = EditorState.create({
       doc: value,
-      extensions: [extensions, indentCompartment.of(indentExtensions()), updateListener],
+      extensions: [
+        extensions,
+        indentCompartment.of(indentExtensions()),
+        minimapCompartment.of(minimap ? minimapExtension() : []),
+        updateListener,
+      ],
     });
     view = new EditorView({ state, parent: target });
     pushDiagnostics();
@@ -180,6 +194,12 @@
     const ts = tabSize, iu = indentUnit; // tracked deps
     void ts; void iu;
     view?.dispatch({ effects: indentCompartment.reconfigure(indentExtensions()) });
+  });
+
+  // Live minimap toggle — reconfigure the open buffer when the setting flips (no remount).
+  $effect(() => {
+    const on = minimap; // tracked dep
+    view?.dispatch({ effects: minimapCompartment.reconfigure(on ? minimapExtension() : []) });
   });
 
   onDestroy(() => {

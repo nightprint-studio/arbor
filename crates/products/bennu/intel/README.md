@@ -93,20 +93,16 @@ Two impl slots:
   full walk.
 - **go-to-declaration** (Ctrl+Click / Ctrl+B) — `resolve_declaration(...)` (and
   `RenameEngine::declaration(file, source, offset)`) reuse the same caret classifier +
-  decl-site name-span finders (`find_member_name_span` / `find_type_name_span`) to return a
-  `DeclarationLocation` (owning project file + declaration NAME span + 1-based line/col +
+  decl-site name-span finders (`find_member_name_span` here; the type-name finder
+  `find_type_name_span` now lives in `bennu-java`, re-surfaced through this prelude) to return
+  a `DeclarationLocation` (owning project file + declaration NAME span + 1-based line/col +
   label). A local/param resolves to its declarator in the current buffer; a method/field to
   its name token on the owner type; a class/interface/enum to its type-declaration name.
   A JDK / dep-jar declaration (no project source) yields `None` — nothing to open.
-- **`inherited`** — the inherited ("super") members of a type, for the Structure panel's
-  lazy "Inherited" bucket. `inherited_members(resolver, java_files, file, type_name, line)`
-  (and `RenameEngine::inherited_members(file, type_name, line)`) resolve the type by its
-  declaring `(file, simple_name, decl_line)` — line disambiguates a nested / same-named type
-  — then collect the members of its SUPERCLASS + INTERFACES recursively (one level up from
-  the type's own members, reusing the same `members_of` supertype walk as completion),
-  deduping overrides by name+kind and tagging each with its declaring FQCN + visibility + a
-  `source` file+line **only** when the declaring type is project source (a JDK / jar member's
-  `source` is `None`, like go-to-declaration).
+- **inherited members** — the inherited ("super") members of a type (Structure panel's lazy
+  "Inherited" bucket) now live in `bennu-query` (`inherited_members(...)`, a pure resolver
+  walk). `RenameEngine::inherited_members(file, type_name, line)` is the thin engine-scoped
+  entry that forwards the engine's resolver + java sources to it.
 - **`rename`** — best-effort, preview-first rename planning (docs §5 #10-12):
   - `RenameEngine::for_project(index_dir, jdk, simple_names, java_sources, xml_sources)`
     opens the persisted index, builds the resolver + the reference index (via the

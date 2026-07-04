@@ -208,6 +208,9 @@
           <FormRow label="Highlight current line" description="Tint the line the caret sits on.">
             <Toggle checked={s.highlightCurrentLine} onchange={(v) => s.setHighlightCurrentLine(v)} ariaLabel="Highlight current line" />
           </FormRow>
+          <FormRow label="Minimap" description="A scrollable overview of the whole file in the right gutter.">
+            <Toggle checked={s.minimap} onchange={(v) => s.setMinimap(v)} ariaLabel="Show minimap" />
+          </FormRow>
           <FormRow label="Word wrap" description="Wrap long lines to the viewport instead of scrolling horizontally.">
             <Toggle checked={s.wordWrap} onchange={(v) => s.setWordWrap(v)} ariaLabel="Word wrap" />
           </FormRow>

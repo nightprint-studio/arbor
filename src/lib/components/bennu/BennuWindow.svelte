@@ -145,6 +145,7 @@
     insertAtCursor: (text: string) => void;
     getSelectedText: () => string;
     checkMojibake: () => void;
+    createValidationFile: () => void;
     navBack: () => void;
     navForward: () => void;
   } | null>(null);
@@ -266,9 +267,11 @@
         action: () => run(() => editor?.openIntentions()), when: isJava },
       { id: 'mojibake', title: 'Check file for mojibake', icon: 'shield',
         action: () => run(() => void editor?.checkMojibake()), when: !!path },
-      { id: 'newvalidator', title: 'New Struts validator…', icon: 'shield',
+      { id: 'newvalidator', title: 'Add Struts validators…', icon: 'shield',
         action: () => run(() => bennuUiStore.openValidationCreator()),
         when: projectStore.activeFilePath?.toLowerCase().endsWith('-validation.xml') ?? false },
+      { id: 'createvalidation', title: 'Create Struts validation file', icon: 'shield',
+        action: () => run(() => void editor?.createValidationFile()), when: isJava },
       // Indentation — mirrors the footer control (BennuIndentStatus). Gated to the
       // alternatives only (the active style / width is hidden), so at most 3 entries show.
       { id: 'indent-spaces', title: 'Indent using spaces', icon: 'indent',
@@ -305,13 +308,22 @@
       { id: 'runcfg', title: 'Edit run configuration…', icon: 'sliders',
         action: () => run(() => bennuUiStore.openRunConfig()), when: !!projectStore.project },
     ];
-    // Workspace switch entries — one per non-active workspace (keyboard-first switching), only
-    // when there's more than one. Manage / New live in the Application group below.
+    // Switch project — one entry per other project in the ACTIVE workspace (keyboard-first).
+    const projectSwitchItems = projectStore.hasWorkspace
+      ? projectStore.workspaceProjects
+          .filter((p) => p.root !== projectStore.project?.root)
+          .map((p) => ({
+            id: `psw:${p.root}`, title: `Switch to project ${p.name}`, icon: 'folder-tree',
+            shortcut: undefined as string | undefined,
+            action: () => run(() => void projectStore.switchProject(p.root)), when: true,
+          }))
+      : [];
+    // Switch workspace — one entry per non-active workspace. Manage / New live in Application below.
     const workspaceItems = workspacesStore.hasMany
       ? workspacesStore.workspaces
           .filter((w) => w.id !== workspacesStore.activeId)
           .map((w) => ({
-            id: `wss:${w.id}`, title: `Switch to ${w.name || 'Workspace'}`, icon: 'folder-tree',
+            id: `wss:${w.id}`, title: `Switch to workspace ${w.name || 'Workspace'}`, icon: 'folder-tree',
             shortcut: undefined as string | undefined,
             action: () => run(() => void workspacesStore.switchTo(w.id)), when: true,
           }))
@@ -336,7 +348,8 @@
     const ed = pack(editorItems); if (ed.length) out.push({ id: 'editor', label: 'Editor', items: ed });
     const rn = pack(runItems);    if (rn.length) out.push({ id: 'run', label: 'Run', items: rn });
     const vw = pack(viewItems);   if (vw.length) out.push({ id: 'view', label: 'View', items: vw });
-    const ws = pack(workspaceItems); if (ws.length) out.push({ id: 'workspaces', label: 'Workspaces', items: ws });
+    const ps = pack(projectSwitchItems); if (ps.length) out.push({ id: 'switch-project', label: 'Switch project', items: ps });
+    const ws = pack(workspaceItems); if (ws.length) out.push({ id: 'switch-workspace', label: 'Switch workspace', items: ws });
     const ap = pack(appItems);    if (ap.length) out.push({ id: 'app', label: 'Application', items: ap });
     return out;
   });
@@ -549,10 +562,7 @@
 {/if}
 
 {#if bennuUiStore.validationCreatorOpen}
-  <BennuValidationModal
-    onClose={() => bennuUiStore.closeValidationCreator()}
-    onInsert={(text) => { editor?.insertAtCursor(text); editor?.focusEditor(); }}
-  />
+  <BennuValidationModal onClose={() => bennuUiStore.closeValidationCreator()} />
 {/if}
 
 {#if bennuUiStore.workspaceManagerOpen}

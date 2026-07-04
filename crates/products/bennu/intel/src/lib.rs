@@ -19,21 +19,17 @@
 //! Workspace convention: call sites reach this crate's surface through
 //! `bennu_intel::prelude::...`.
 
-pub mod completion;
 pub mod config;
-pub mod inherited;
 pub mod java_index;
 // Internal: Lombok generated-member synthesis, an implementation detail of index-building
 // (java_index). Not part of the public surface, so it stays a private module (no prelude entry).
 mod lombok;
-pub mod jdk;
 pub mod prelude;
 pub mod provider;
 pub mod refcache;
 pub mod refs;
 pub mod rename;
 pub mod spell;
-pub mod resolver;
 // Spring stereotype-bean policy: reads bennu-java's generic annotations and derives the
 // annotation-declared beans (`@Service`/`@Component`/…) the config resolver consults as a
 // fallback in the C1 chain. Mirrors `lombok` (annotation policy on the java model), but public

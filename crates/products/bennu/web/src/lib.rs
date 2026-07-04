@@ -59,6 +59,8 @@ pub mod spring;
 pub mod struts;
 pub mod tiles;
 pub mod validation;
+pub mod validation_author;
+pub mod validator_catalog;
 pub mod xml;
 
 /// Tiny filesystem helpers for the module unit tests (write inline XML fixtures to a

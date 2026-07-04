@@ -34,6 +34,9 @@ export interface JavaSymbol {
   line: number;
   /** Access level parsed from the leading modifiers (defaults to package). */
   visibility: JavaVisibility;
+  /** A method carrying an `@Override` annotation (overrides / implements a supertype
+   *  member). Only ever set on `method` symbols. */
+  overrides?: boolean;
 }
 
 /** Node kinds in the hierarchical structure view. `group` is a synthetic bucket
@@ -50,6 +53,8 @@ export interface JavaNode {
    *  click still lands somewhere sensible; the panel only jumps on real members. */
   line: number;
   visibility?: JavaVisibility;
+  /** A method annotated `@Override` (mirrors {@link JavaSymbol.overrides}). */
+  overrides?: boolean;
   children?: JavaNode[];
 }
 
@@ -77,6 +82,15 @@ const FIELD_RE = new RegExp(
  *  can't hold a single declaration we care about. Skipping it is both a perf win and a
  *  hard backstop against pathological regex input. */
 const MAX_DECL_LINE = 400;
+
+// A leading run of annotations on a declaration line (`@Override`, `@SuppressWarnings("x")`,
+// `@com.foo.Bar(1)`). Peeled off before the type/method/field regexes so an inline
+// `@Override public void f()` is still recognised, and so the override marker is detected
+// uniformly whether the annotation is inline or on its own line. Single-line arg matching
+// only (`\([^)]*\)`) — a rare multi-line / nested-paren annotation just yields a partial
+// strip and the decl regex declines that line, exactly as an unparseable line does today.
+const ANNO_LEAD_RE = /^\s*(?:@[\w.]+(?:\s*\([^)]*\))?\s*)+/;
+const OVERRIDE_ANNO_RE = /@Override\b/;
 
 /** Parse the access level from the head of a (short) declaration line. Java's default
  *  (no modifier) is package-private, so absence maps to `package`. */
@@ -154,6 +168,11 @@ function scanDeclarations(source: string): RawDecl[] {
   const out: RawDecl[] = [];
   const lines = source.split(/\r?\n/);
   let depth = 0;
+  // Whether an `@Override` seen on a preceding annotation / blank / comment line is still
+  // waiting to be attached to the method it annotates. Reset the moment a real declaration
+  // or statement is consumed. Annotated to break the CFA inference cycle (it's reassigned
+  // from an expression that itself reads this variable).
+  let pendingOverride: boolean = false;
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     // Depth to attribute to a declaration on this line is the depth *before* the
@@ -163,38 +182,60 @@ function scanDeclarations(source: string): RawDecl[] {
 
     if (raw.length <= MAX_DECL_LINE) {
       const line = raw.replace(/\/\/.*$/, '');
-      const trimmed = line.trim();
+      const trimmedFull = line.trim();
+
+      // Peel leading annotations, remembering whether @Override was among them.
+      const annoLead = ANNO_LEAD_RE.exec(line);
+      const hasOverrideHere = !!annoLead && OVERRIDE_ANNO_RE.test(annoLead[0]);
+      const body = annoLead ? line.slice(annoLead[0].length) : line;
+      const trimmed = body.trim();
+      const overridePending: boolean = pendingOverride || hasOverrideHere;
+
       const skip =
         !trimmed || trimmed.startsWith('*') || trimmed.startsWith('/*') || trimmed.startsWith('//') ||
-        trimmed.startsWith('@') || trimmed.startsWith('import ') || trimmed.startsWith('package ');
+        trimmed.startsWith('import ') || trimmed.startsWith('package ');
 
-      if (!skip) {
-        const t = TYPE_RE.exec(line);
+      if (skip) {
+        // Carry the override flag across annotation-only / blank / comment lines between
+        // `@Override` and the method it annotates; a `package`/`import` line breaks the run.
+        const isCarrier =
+          !trimmedFull || trimmedFull.startsWith('@') ||
+          trimmedFull.startsWith('*') || trimmedFull.startsWith('/*') || trimmedFull.startsWith('//');
+        pendingOverride = overridePending && isCarrier;
+      } else {
+        const t = TYPE_RE.exec(body);
         if (t) {
           out.push({
-            symbol: { kind: t[1] as JavaSymbolKind, name: t[2], line: i + 1, visibility: visibilityOf(line) },
+            symbol: { kind: t[1] as JavaSymbolKind, name: t[2], line: i + 1, visibility: visibilityOf(body) },
             depth: lineDepth,
             isType: true,
           });
+          pendingOverride = false;
         } else if (!/^\s*(if|for|while|switch|catch|synchronized|return|new)\b/.test(trimmed)) {
-          const m = METHOD_RE.exec(line);
+          const m = METHOD_RE.exec(body);
           if (m) {
             const ret = (m[1] ?? '').trim();
             out.push({
-              symbol: { kind: 'method', name: m[2], detail: ret || undefined, line: i + 1, visibility: visibilityOf(line) },
+              symbol: {
+                kind: 'method', name: m[2], detail: ret || undefined, line: i + 1,
+                visibility: visibilityOf(body), overrides: overridePending || undefined,
+              },
               depth: lineDepth,
               isType: false,
             });
           } else {
-            const f = FIELD_RE.exec(line);
+            const f = FIELD_RE.exec(body);
             if (f) {
               out.push({
-                symbol: { kind: 'field', name: f[2], detail: f[1].trim(), line: i + 1, visibility: visibilityOf(line) },
+                symbol: { kind: 'field', name: f[2], detail: f[1].trim(), line: i + 1, visibility: visibilityOf(body) },
                 depth: lineDepth,
                 isType: false,
               });
             }
           }
+          pendingOverride = false; // a method/field/other statement consumed the flag
+        } else {
+          pendingOverride = false; // a control-flow statement
         }
       }
     }
@@ -300,6 +341,7 @@ export function javaStructure(source: string): JavaNode[] {
       detail: s.detail,
       line: s.line,
       visibility: s.visibility,
+      overrides: s.overrides,
     };
 
     const parent = d.depth > 0 ? openTypes[d.depth - 1] : undefined;

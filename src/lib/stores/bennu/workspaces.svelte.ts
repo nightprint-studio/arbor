@@ -135,6 +135,13 @@ function createWorkspacesStore() {
       return id;
     },
 
+    /** Switch to workspace `id` (if needed) and make project `root` its active project — the
+     *  tree switcher's "click a project under a workspace" action. */
+    async switchToProject(id: string, root: string) {
+      if (id !== activeId) await this.switchTo(id);
+      await projectStore.switchProject(root);
+    },
+
     /** Add a project (folder `dir`) to workspace `id`, switching to it first so the add always
      *  goes through projectStore's live path (opens the manifest, indexes, badges foreign tabs). */
     async addProjectTo(id: string, dir: string) {

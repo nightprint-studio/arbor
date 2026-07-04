@@ -68,8 +68,10 @@ members = [
     "crates/products/bennu/classpath",
     "crates/products/bennu/index",
     "crates/products/bennu/java",
+    "crates/products/bennu/intentions",
     "crates/products/bennu/jsp",
     "crates/products/bennu/web",
+    "crates/products/bennu/query",
     "crates/products/bennu/intel",
     "crates/products/bennu/be",
 ]

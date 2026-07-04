@@ -8,7 +8,7 @@
 
 mod common;
 use common::*;
-use bennu_intel::prelude::InheritedMember;
+use bennu_query::prelude::InheritedMember;
 
 fn zoo() -> Project {
     Project::new(&[

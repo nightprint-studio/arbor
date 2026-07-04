@@ -1,0 +1,20 @@
+[package]
+name         = "bennu-query"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+description  = "Bennu code-intel query engine — the read-only resolver + member-access completion. Unifies the persisted symbol index (bennu-index) and the JDK/library bytecode index (bennu-classpath) behind bennu-java's TypeResolver seam. The layer five editor features (completion, find-usages, rename, hover, inherited) resolve against; depends only on the base crates."
+
+[dependencies]
+# The mmap'd project symbol index the resolver reads source-declared types from.
+bennu-index = { path = "../index" }
+# The bytecode member index (JDK / library jars) the resolver falls through to.
+bennu-classpath = { path = "../classpath" }
+# The inference + the TypeResolver seam trait the resolver implements + completion consumes.
+bennu-java = { path = "../java" }
+# The wire CompletionItem the completion query returns.
+bennu-proto = { path = "../proto" }
+serde      = { workspace = true }
+serde_json = { workspace = true }

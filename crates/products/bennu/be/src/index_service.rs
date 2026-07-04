@@ -37,10 +37,10 @@ use bennu_index::prelude::Symbol;
 use bennu_intel::prelude::{
     build_project_index_from_sources, collect_annotation_beans, file_records_from_source,
     ingest_config_graph, read_java_sources, ActionVerdict, CompletionItem, ConfigResolver,
-    DeclarationLocation, HoverInfo as IntelHoverInfo, InheritedMember as IntelInheritedMember,
-    IntelProvider, NativeJavaProvider, NonCompliantSource, Position, ProjectSources,
-    ReferencesResult, RenameEngine, RenamePlan,
+    DeclarationLocation, HoverInfo as IntelHoverInfo, IntelProvider, NativeJavaProvider,
+    NonCompliantSource, Position, ProjectSources, ReferencesResult, RenameEngine, RenamePlan,
 };
+use bennu_query::prelude::InheritedMember as IntelInheritedMember;
 use bennu_project::prelude::source_encoding_label;
 use bennu_proto::prelude::{
     ClassEntry, DeclarationTarget, EncodingIssue, HoverInfo, IndexEntry, IndexStats,

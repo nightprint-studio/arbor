@@ -108,15 +108,50 @@ pub struct ValidationRecord {
     pub source_file: String,
 }
 
-/// One `<field name=>` in a validation ruleset + the validator types applied to it.
+/// One `<field name=>` in a validation ruleset + the ordered validator **chain** applied to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationField {
     /// The property name (`username`) — resolves to `getUsername`/`setUsername`.
     pub name: String,
-    /// The `<field-validator type=>` types applied (e.g. `requiredstring`, `email`).
-    pub validators: Vec<String>,
+    /// The `<field-validator>` chain, in document order (order + short-circuit are load-bearing:
+    /// Struts runs the chain top-to-bottom and a short-circuiting failure stops the rest).
+    pub validators: Vec<FieldValidator>,
     /// Byte offset of the `name` attribute value in the file (go-to / precise diagnostic).
     pub name_offset: usize,
+}
+
+/// One `<field-validator type=…>` inside a field's chain — its type, ordered params, message and
+/// short-circuit flag. Mirrors the Struts2 validator element faithfully so a parsed ruleset can be
+/// re-authored without losing params or message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldValidator {
+    /// Validator type (`requiredstring`, `stringlength`, `regex`, …).
+    pub type_name: String,
+    /// Ordered `<param name=>value</param>` pairs — **document order is preserved** (round-trip).
+    pub params: Vec<ValidatorParam>,
+    /// The `<message>` element, if present.
+    pub message: Option<ValidatorMessage>,
+    /// The `short-circuit="true"` attribute (default false).
+    pub short_circuit: bool,
+    /// Byte offset of the `type` attribute value in the file (go-to / precise diagnostic).
+    pub type_offset: usize,
+}
+
+/// A `<param name="x">value</param>` on a validator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatorParam {
+    pub name: String,
+    pub value: String,
+}
+
+/// A validator's `<message key="…">default body</message>`. `key` is the i18n bundle key (wins at
+/// runtime); `text` is the inline default/body (fallback). Either may be empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatorMessage {
+    /// `key=` attribute (i18n bundle key), if present.
+    pub key: Option<String>,
+    /// The element body (default message), trimmed. May be empty.
+    pub text: String,
 }
 
 /// The kind of a MyBatis mapper statement element (`<select|insert|update|delete>`).

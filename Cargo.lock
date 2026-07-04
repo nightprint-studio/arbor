@@ -847,9 +847,11 @@ dependencies = [
  "bennu-core",
  "bennu-index",
  "bennu-intel",
+ "bennu-intentions",
  "bennu-java",
  "bennu-project",
  "bennu-proto",
+ "bennu-query",
  "bennu-web",
  "reqwest 0.12.28",
  "serde",
@@ -898,6 +900,7 @@ dependencies = [
  "bennu-java",
  "bennu-project",
  "bennu-proto",
+ "bennu-query",
  "bennu-web",
  "serde",
  "serde_json",
@@ -905,6 +908,10 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-java",
 ]
+
+[[package]]
+name = "bennu-intentions"
+version = "0.3.0"
 
 [[package]]
 name = "bennu-java"
@@ -939,6 +946,18 @@ dependencies = [
 name = "bennu-proto"
 version = "0.3.0"
 dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bennu-query"
+version = "0.3.0"
+dependencies = [
+ "bennu-classpath",
+ "bennu-index",
+ "bennu-java",
+ "bennu-proto",
  "serde",
  "serde_json",
 ]

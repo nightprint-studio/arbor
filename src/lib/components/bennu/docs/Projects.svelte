@@ -14,12 +14,14 @@
   reopens exactly where you left off.
 </p>
 <p>
-  The <strong>project dropdown</strong> in the titlebar drives everything: at the top it switches
-  between the projects inside the current workspace; below, the <strong>Workspaces</strong> section
-  switches between workspaces; and <strong>Add project to workspace…</strong> pulls another project
-  into the current one. Every project keeps its tabs, tree and index in memory, so switching — a
-  project or a whole workspace — never reopens anything. A file opened from a different project of
-  the workspace stays in the current tab strip, <strong>badged with its owning project</strong>.
+  The <strong>switcher</strong> in the titlebar is a tree: every workspace is a row, its member
+  projects nested underneath. Click a <strong>workspace</strong> to switch to it, or a
+  <strong>project</strong> to jump straight into it (switching workspace first if needed). Every
+  project keeps its tabs, tree and index in memory, so switching — a project or a whole workspace —
+  never reopens anything. A file opened from a different project of the workspace stays in the
+  current tab strip, <strong>badged with its owning project</strong>. From the command palette,
+  <strong>Switch project</strong> and <strong>Switch workspace</strong> do the same from the
+  keyboard.
 </p>
 <p>
   The <strong>workspace manager</strong> (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd>, or
@@ -28,6 +30,16 @@
   (<kbd>Ctrl</kbd> + <kbd>O</kbd>) resets the active workspace to a single project; the whole set is
   remembered and reopened on the next launch. <strong>Find in project</strong> gains a scope toggle
   to search the active project only or the <strong>entire workspace</strong>.
+</p>
+
+<h2>New files</h2>
+<p>
+  The Project tree's <strong>＋</strong> button — or <strong>New file…</strong> from a right-click
+  (or the tool-window menu) — scaffolds a file in the chosen directory: a Java
+  <strong>class / interface / enum / record / annotation</strong> (the <code>package</code> is
+  <strong>inferred</strong> from the directory, following <code>src/main/java</code> and friends), a
+  <strong>JSP</strong> or <strong>XML</strong> file with the right header, or a plain file. It opens
+  the new file and reveals it in the tree; it never overwrites an existing one.
 </p>
 
 <h2>The JDK</h2>

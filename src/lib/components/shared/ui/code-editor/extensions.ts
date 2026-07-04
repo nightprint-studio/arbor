@@ -33,6 +33,7 @@ import {
 import type { LanguageDescriptor, Tree, Node } from './types';
 import { createHighlightPlugin } from './highlight';
 import { createFoldingExtension } from './folding';
+import { emmetKeymap } from './emmet';
 import { codeEditorTheme, codeEditorHighlightStyle } from './theme';
 
 /** The search keymap minus the bindings the host owns. The host routes `Ctrl+F` to the
@@ -96,6 +97,10 @@ export interface CodeEditorExtensionsOptions {
    *  clicked position as a **UTF-8 byte offset** so the host can classify it (a BE
    *  go-to-declaration needs the offset, not just the name). */
   onGoto?: (word: string, view: EditorView, byteOffset: number) => void;
+  /** Enable Emmet abbreviation expansion on Tab (markup buffers). Off by default — the host
+   *  opts in per markup file (HTML / JSP); the binding no-ops (falls through to indent) when the
+   *  caret isn't on a valid abbreviation. */
+  emmet?: boolean;
   /** Language-intelligence hook bag (reserved; opaque to the core today). */
   intel?: unknown;
 }
@@ -199,6 +204,10 @@ export function createCodeEditorExtensions(
   if (hoverSource) {
     exts.push(hoverTooltip(hoverSource, { hoverTime: 350 }));
   }
+
+  // Emmet Tab expansion (markup buffers). Pushed BEFORE the base keymap so its Tab binding is
+  // tried first; on no abbreviation it returns false and Tab falls through to `indentWithTab`.
+  if (opts.emmet) exts.push(emmetKeymap());
 
   exts.push(
     keymap.of([

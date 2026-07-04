@@ -399,6 +399,13 @@ function createProjectStore() {
     /** MOCK — explicitly load the built-in demo project. Remove with the mock. */
     loadDemo() { loadDemoProject(); },
 
+    /** Re-fetch the active project's file tree (e.g. after creating a new file on disk, so it
+     *  appears in the Project tool). No-op when no project is open / on the demo. */
+    refreshTree() {
+      const r = project?.root;
+      if (r && !isDemo) loadTreeInto(r);
+    },
+
     /** The active workspace's session snapshot (open tabs per member project). The workspace store
      *  calls this to flush the live state into a workspace before switching to another. */
     snapshotSession,

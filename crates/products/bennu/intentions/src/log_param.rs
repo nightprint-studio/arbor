@@ -21,6 +21,11 @@
 //! message is left as-is (SLF4J escaping is a rare legacy case); the transform is offered as a
 //! caret intention, never applied automatically.
 
+use crate::scan::{
+    block_comment_end, is_ident_part, is_ident_start, line_comment_end, matching_paren,
+    pure_string_literal, string_end,
+};
+
 /// Known logging-level method names. Requiring one of these (plus a `.` receiver) is the gate that
 /// keeps the transform from firing on arbitrary `foo("a" + b)` calls.
 const LOG_LEVELS: &[&str] = &[
@@ -129,21 +134,6 @@ fn rewrite_call(source: &str, args_start: usize, args_end: usize) -> Option<LogP
     })
 }
 
-/// If `op` is *exactly* one string literal, return its inner content (between the quotes, escapes
-/// preserved). `"a"` → `Some("a")`; `"a".trim()` / `x` / `'c'` → `None`.
-fn pure_string_literal(op: &str) -> Option<&str> {
-    let b = op.as_bytes();
-    if b.first() != Some(&b'"') {
-        return None;
-    }
-    let end = string_end(b, 0); // index just past the closing quote
-    if end == b.len() {
-        Some(&op[1..end - 1])
-    } else {
-        None
-    }
-}
-
 /// Split `s` at top-level occurrences of `sep` (depth 0, outside strings/chars/comments). Returns
 /// the raw segments (not trimmed). When `plus` is set, `sep` is `+` and `++` sequences are skipped
 /// so an increment inside an operand doesn't split it.
@@ -190,74 +180,6 @@ fn split_top_level(s: &str, sep: u8, plus: bool) -> Vec<String> {
     out
 }
 
-/// Index just past the closing quote of the string/char literal starting at `open` (`"`/`'`).
-/// Handles `\`-escapes; runs to end-of-slice on an unterminated literal.
-fn string_end(b: &[u8], open: usize) -> usize {
-    let quote = b[open];
-    let mut i = open + 1;
-    while i < b.len() {
-        match b[i] {
-            b'\\' => i += 2,
-            c if c == quote => return i + 1,
-            _ => i += 1,
-        }
-    }
-    b.len()
-}
-
-/// Index of the newline ending the `//` line comment at `i` (or end-of-slice).
-fn line_comment_end(b: &[u8], i: usize) -> usize {
-    let mut k = i + 2;
-    while k < b.len() && b[k] != b'\n' {
-        k += 1;
-    }
-    k
-}
-
-/// Index just past the `*/` closing the block comment at `i` (or end-of-slice).
-fn block_comment_end(b: &[u8], i: usize) -> usize {
-    let mut k = i + 2;
-    while k + 1 < b.len() {
-        if b[k] == b'*' && b[k + 1] == b'/' {
-            return k + 2;
-        }
-        k += 1;
-    }
-    b.len()
-}
-
-/// The `)` matching the `(` at `open`, respecting nested parens, strings and comments.
-fn matching_paren(b: &[u8], open: usize) -> Option<usize> {
-    let mut depth = 0i32;
-    let mut i = open;
-    while i < b.len() {
-        match b[i] {
-            b'"' | b'\'' => {
-                i = string_end(b, i);
-                continue;
-            }
-            b'/' if i + 1 < b.len() && b[i + 1] == b'/' => {
-                i = line_comment_end(b, i);
-                continue;
-            }
-            b'/' if i + 1 < b.len() && b[i + 1] == b'*' => {
-                i = block_comment_end(b, i);
-                continue;
-            }
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
 /// True when the identifier at `start` is immediately preceded (skipping spaces) by a `.` — i.e.
 /// it's a method call on a receiver (`logger.info`), not a bare name.
 fn preceded_by_dot(b: &[u8], start: usize) -> bool {
@@ -274,13 +196,6 @@ fn preceded_by_dot(b: &[u8], start: usize) -> bool {
 
 fn is_level(name: &str) -> bool {
     LOG_LEVELS.contains(&name)
-}
-
-fn is_ident_start(c: u8) -> bool {
-    c.is_ascii_alphabetic() || c == b'_' || c == b'$'
-}
-fn is_ident_part(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_' || c == b'$'
 }
 
 #[cfg(test)]

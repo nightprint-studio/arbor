@@ -25,7 +25,7 @@
    */
   import {
     Box, SquareFunction, Variable, Braces, ArrowDownAZ, MoreVertical,
-    FileCode2, Code2, ArrowRight, Copy, ChevronsDownUp, ChevronsUpDown,
+    FileCode2, Code2, ArrowRight, Copy, ChevronsDownUp, ChevronsUpDown, ArrowUp,
   } from 'lucide-svelte';
   import PanelShell from '$lib/components/shared/ui/PanelShell.svelte';
   import EmptyState from '$lib/components/shared/ui/EmptyState.svelte';
@@ -326,6 +326,11 @@
           {/if}
           <span class="tree-icon" style="color: {meta.color}"><Icon size={13} /></span>
           <span class="tree-label">{node.name}</span>
+          {#if node.flavour === 'java' && node.kind === 'method' && node.overrides}
+            <span class="sl-override" use:tooltip={'Overrides / implements a supertype member'} aria-label="overrides a supertype member">
+              <ArrowUp size={11} />
+            </span>
+          {/if}
           {#if node.flavour === 'java' && node.kind === 'field'}
             {@const acc = flagsFor(accessorMap, node.name)}
             <span class="sl-acc" aria-hidden="true">
@@ -365,6 +370,13 @@
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-base) 60%, transparent);
   }
   .sl-vis-none { background: transparent; box-shadow: none; }
+
+  /* @Override marker on method rows — a small accent arrow, IntelliJ's "overrides" cue. */
+  .sl-override {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0; color: var(--info);
+    opacity: 0.85;
+  }
 
   /* G / S / W accessor-presence markers on field rows. */
   .sl-acc { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }

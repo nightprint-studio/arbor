@@ -19,7 +19,18 @@ fn extract_symbols(source: &str) -> FileSymbols
 // Static type of the expression immediately LEFT of the `.` at `byte_offset`.
 fn infer_receiver_type(source: &str, byte_offset: usize, resolver: &dyn TypeResolver)
     -> Option<TypeRef>
+
+// New-file scaffolding: infer a Java package from a target dir + render initial content.
+fn infer_package(dir: &Path) -> Option<String>          // ".../src/main/java/com/x" -> "com.x"
+fn scaffold_new_file(kind: NewFileKind, dir: &Path, name: &str) -> ScaffoldResult
+
+// Declaration-site CST scans (go-to-declaration / rename / inherited-members consume these).
+fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)>   // NAME token of a type decl
+fn binary_of_type_at(source: &str, simple: &str, line: i64) -> Option<String>  // JVM binary name by (name, line)
 ```
+
+> The Alt+Enter **intention** transforms (parameterize logging, NP-safe equals) used to live here;
+> they now have their own zero-dep crate, [`bennu-intentions`](../intentions).
 
 `TypeResolver` is the seam the walk consumes (the caller backs it with
 `bennu-classpath` + the project source index):

@@ -17,8 +17,10 @@
 <p>
   The <strong>Structure</strong> tool (left rail) lists the active file's symbols — types, methods and
   fields — grouped by kind and filterable, sortable by position or name. Click a symbol to jump the
-  editor to its declaration. The header carries <strong>Collapse all</strong> / <strong>Expand
-  all</strong> chevrons to fold or unfold the whole tree at once, just like the Project panel.
+  editor to its declaration. Methods carrying an <code>@Override</code> annotation show an
+  <strong>override marker</strong> (an up arrow), so the members that specialise a supertype stand
+  out at a glance. The header carries <strong>Collapse all</strong> / <strong>Expand all</strong>
+  chevrons to fold or unfold the whole tree at once, just like the Project panel.
 </p>
 
 <h2>Project tree</h2>
@@ -32,6 +34,20 @@
 <p>
   Braced blocks (classes, methods, blocks) and block comments fold from the gutter chevrons; the head
   line stays visible. Folding is computed live from the syntax tree — no indexing needed.
+</p>
+
+<h2>Minimap</h2>
+<p>
+  A scrollable <strong>minimap</strong> in the right gutter gives a bird's-eye overview of the whole
+  file — drag or click it to jump. Toggle it in <strong>Settings → Editor → Minimap</strong>.
+</p>
+
+<h2>Emmet</h2>
+<p>
+  In JSP and HTML files, type an <strong>Emmet abbreviation</strong> and press <kbd>Tab</kbd> to
+  expand it into markup — <code>ul>li.item*3</code> becomes a list, <code>div#app</code> a div with
+  an id, <code>a[href]</code> a link. When the caret isn't on a valid abbreviation, <kbd>Tab</kbd>
+  just indents as usual.
 </p>
 
 <h2>Completions</h2>
@@ -125,11 +141,15 @@
   language service grows, to quick-fixes like adding a missing import or surrounding a block.
 </p>
 <p>
-  One quick-fix already lives here: with the caret inside a logging call whose message is built by
+  Two quick-fixes already live here. With the caret inside a logging call whose message is built by
   string concatenation — <code>logger.info("user " + id + " logged in")</code> — the popup offers
   <strong>Replace concatenation with parameterized logging</strong>, rewriting it to the form the
-  logging APIs prefer: <code>logger.info("user &lbrace;&rbrace; logged in", id)</code>. A trailing
-  exception argument is kept last.
+  logging APIs prefer: <code>logger.info("user &lbrace;&rbrace; logged in", id)</code> (a trailing
+  exception argument is kept last). On a <code>x.equals("literal")</code> call it offers
+  <strong>Flip to null-safe equals</strong> — <code>"literal".equals(x)</code>, which never throws
+  when <code>x</code> is null. And a family of one-click <strong>simplifications</strong>:
+  <code>list.size() == 0</code> → <code>list.isEmpty()</code>, <code>flag == true</code> →
+  <code>flag</code>, <code>!(a == b)</code> → <code>a != b</code>.
 </p>
 
 <h2>Rename</h2>
@@ -214,12 +234,20 @@
 
 <h2>Struts validation files</h2>
 <p>
-  Open a <code>&lt;Action&gt;-validation.xml</code> and the editor grows a toolbar with a
-  <strong>New validator</strong> button (also in the Command Palette). It opens a builder — pick a
-  field (the action's writable properties are offered as chips), a validator type from the bundled
-  Struts catalog, fill its parameters and message, and the generated
-  <code>&lt;field&gt;&lt;field-validator&gt;</code> block is inserted at the caret. Place the caret
-  inside <code>&lt;validators&gt;</code> first.
+  From a Java <strong>action class</strong> the toolbar shows a <strong>Validation</strong> button
+  (also in the Command Palette): it creates the class's <code>&lt;Class&gt;-validation.xml</code>
+  next to it — following the Struts naming convention — from a proper DTD-headed skeleton if it
+  doesn't exist yet, then opens it. If it already exists, it just opens it.
+</p>
+<p>
+  On a <code>&lt;Action&gt;-validation.xml</code> the toolbar shows <strong>Validators</strong>,
+  which opens the <strong>chain builder</strong>. Pick a field (the action's writable properties are
+  offered as chips) and stack an ordered <strong>chain</strong> of validators on it — add, remove
+  and reorder them, each with its own parameters, message and <strong>short-circuit</strong> flag
+  (stop the chain on first failure). Validator types and their parameters come from the built-in
+  Struts catalog; a live preview shows the exact XML. <strong>Add to file</strong> appends the chain
+  into the document — creating the <code>&lt;field&gt;</code> or growing an existing one — so you
+  never place a caret by hand.
 </p>
 
 <h2>The index</h2>

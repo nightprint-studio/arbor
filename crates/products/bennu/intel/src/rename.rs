@@ -22,17 +22,19 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use bennu_java::prelude::TypeResolver;
+use bennu_java::prelude::{find_type_name_span, TypeResolver};
 use bennu_web::prelude::bean_class_value_spans;
 use tree_sitter::{Node, Parser};
 
-use crate::jdk::JdkMemberIndex;
+use bennu_query::prelude::{
+    inherited_members, IndexResolver, InheritedMember, JdkMemberIndex, PlanFile,
+};
+
 use crate::refs::{
     build_reference_index_incremental, build_reference_index_with_progress, classify_caret,
     classify_target, references, DeclKey, LangLevel, ReferenceIndex, ReferencesResult,
     RenameTarget, SourceFile,
 };
-use crate::resolver::IndexResolver;
 
 /// Why an edit was planned (drives the preview grouping + the honest-limits surfacing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,14 +119,6 @@ pub struct DeclarationLocation {
     /// A short human label of the target (`"method com.x.Foo.bar()"`, `"class com.x.Order"`,
     /// `"local `x`"`) — the same style [`crate::refs::DeclKey::label`] uses.
     pub label: String,
-}
-
-/// A source file available to the planner (path + text). The planner needs every project
-/// `.java` file (for `import` rewrites + local-scope walks) and every config `.xml` file
-/// (for Spring bean edits).
-pub struct PlanFile {
-    pub path: String,
-    pub source: String,
 }
 
 /// Compute the rename plan for the symbol at `file`:`offset`. `java_files` are all the
@@ -475,14 +469,8 @@ impl RenameEngine {
         file: &str,
         type_name: &str,
         line: i64,
-    ) -> Vec<crate::inherited::InheritedMember> {
-        crate::inherited::inherited_members(
-            &self.resolver,
-            &self.java_files,
-            file,
-            type_name,
-            line,
-        )
+    ) -> Vec<InheritedMember> {
+        inherited_members(&self.resolver, &self.java_files, file, type_name, line)
     }
 
     /// Resolve the symbol at `file`:`offset` to a hover card (signature + kind + owner).
@@ -836,8 +824,8 @@ fn plan_member(
 
 /// Find the byte span of a member declaration's NAME token in `source`. Shared by rename
 /// (the declaration edit site) and go-to-declaration (the navigation target). `None` for a
-/// [`DeclKey::Type`] (use [`find_type_name_span`]) or when `source` doesn't declare the
-/// member.
+/// [`DeclKey::Type`] (use [`bennu_java::prelude::find_type_name_span`]) or when `source` doesn't
+/// declare the member.
 pub fn find_member_name_span(source: &str, key: &DeclKey) -> Option<(usize, usize)> {
     let (name, want_field) = match key {
         DeclKey::Method { name, .. } => (name, false),
@@ -879,47 +867,6 @@ pub fn find_member_name_span(source: &str, key: &DeclKey) -> Option<(usize, usiz
         if let Some(nm) = hit {
             if nm.utf8_text(bytes).ok() == Some(name.as_str()) {
                 return Some((nm.start_byte(), nm.end_byte()));
-            }
-        }
-    }
-    None
-}
-
-/// Find the byte span of a type declaration's NAME token in `source` (class / interface /
-/// enum matching `simple`). The go-to-declaration counterpart of [`find_member_name_span`]
-/// for a [`DeclKey::Type`]. `None` when `source` doesn't declare a type with that simple
-/// name. (A same-named type in another package could match; the caller scans the project's
-/// sources and the first hit wins — good enough for navigation, and the type-map keying in
-/// classification already narrowed the caret to this binary name.)
-pub fn find_type_name_span(source: &str, simple: &str) -> Option<(usize, usize)> {
-    // See `find_member_name_span`: skip the parse when the type name isn't even in the file.
-    if !source.contains(simple) {
-        return None;
-    }
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_java::LANGUAGE.into()).ok()?;
-    let tree = parser.parse(source, None)?;
-    let bytes = source.as_bytes();
-    let root = tree.root_node();
-
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let mut cur = n.walk();
-        for c in n.named_children(&mut cur) {
-            stack.push(c);
-        }
-        if matches!(
-            n.kind(),
-            "class_declaration"
-                | "interface_declaration"
-                | "enum_declaration"
-                | "record_declaration"
-                | "annotation_type_declaration"
-        ) {
-            if let Some(nm) = n.child_by_field_name("name") {
-                if nm.utf8_text(bytes).ok() == Some(simple) {
-                    return Some((nm.start_byte(), nm.end_byte()));
-                }
             }
         }
     }

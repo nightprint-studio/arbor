@@ -6,9 +6,10 @@
 
 // The emitted records + relations (the ingestion seam onto `bennu-index`).
 pub use crate::model::{
-    action_source, bean_source, ActionRecord, BeanRecord, InterceptorRecord, InterceptorRefUse,
-    InterceptorStackRecord, MapperRecord, RelKind, Relation, ResultRecord, StatementKind,
-    StatementRecord, TilesDefRecord, ValidationField, ValidationRecord, WebConfigGraph,
+    action_source, bean_source, ActionRecord, BeanRecord, FieldValidator, InterceptorRecord,
+    InterceptorRefUse, InterceptorStackRecord, MapperRecord, RelKind, Relation, ResultRecord,
+    StatementKind, StatementRecord, TilesDefRecord, ValidationField, ValidationRecord,
+    ValidatorMessage, ValidatorParam, WebConfigGraph,
 };
 
 // The graph builder + the load-bearing resolution chains (docs §10 C1).
@@ -21,7 +22,17 @@ pub use crate::graph::{
 // Struts interceptor + validation parsing (standalone entry points; the project build
 // folds interceptors into the struts include-graph walk).
 pub use crate::interceptors::{parse_file as parse_interceptors, InterceptorParse};
-pub use crate::validation::{parse_file as parse_validation, split_validation_filename};
+pub use crate::validation::{
+    parse_file as parse_validation, split_validation_filename, validation_file_for_class,
+};
+
+// Pure authoring of `*-validation.xml` (create skeleton / a `<field>` chain / append) + the
+// validator vocabulary registry — the write side of the validation feature.
+pub use crate::validation_author::{
+    append_validator, author_field_block, author_field_validator, author_validation_skeleton,
+    AuthoredMessage, AuthoredValidator,
+};
+pub use crate::validator_catalog::{all_validators, validator_def, ParamDef, ParamKind, ValidatorDef};
 
 // JSP action-reference + taglib scan (feeds the unknown-action squiggle + find-usages).
 pub use crate::jsp::{

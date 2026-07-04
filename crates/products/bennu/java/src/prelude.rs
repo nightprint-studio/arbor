@@ -17,5 +17,8 @@ pub use crate::symbols::{
 // The resolver seam the type-walk consumes + the member shapes it resolves against.
 pub use crate::seam::{ClassMembers, Member, MemberKind, TypeRef, TypeResolver, Visibility};
 
-// The "parameterize a logging call" quick-fix transform (Alt+Enter intention).
-pub use crate::log_param::{parameterize_log_call, LogParamRewrite};
+// New-file scaffolding: infer a Java package from a dir + render initial file content.
+pub use crate::scaffold::{infer_package, java_template, scaffold_new_file, NewFileKind, ScaffoldResult};
+
+// Declaration-site name-span + binary-name CST scans (go-to-declaration / rename / inherited).
+pub use crate::spans::{binary_of_type_at, find_type_name_span};

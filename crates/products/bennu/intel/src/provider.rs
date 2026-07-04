@@ -10,8 +10,7 @@ use std::path::Path;
 use bennu_index::prelude::SymbolKind;
 use bennu_proto::prelude::{CompletionItem, Diagnostic};
 
-use crate::jdk::JdkMemberIndex;
-use crate::resolver::IndexResolver;
+use bennu_query::prelude::{IndexResolver, JdkMemberIndex};
 
 /// One project member (method / field) enumerated from the built symbol index, for the
 /// index inspector's "members" list. A be-agnostic view: the be layer maps this onto its
@@ -234,7 +233,7 @@ impl IntelProvider for NativeJavaProvider {
         else {
             return Ok(Vec::new());
         };
-        Ok(crate::completion::completion(&decoded.text, at.offset, resolver))
+        Ok(bennu_query::prelude::completion(&decoded.text, at.offset, resolver))
     }
 
     fn hover(&self, _at: &Position) -> Result<Option<String>, IntelError> {
